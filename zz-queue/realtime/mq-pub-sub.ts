@@ -1,16 +1,4 @@
-// import { createWorkerMainFunction } from "zz-queue/microworkers/worker-creator";
-// import Replicate from "replicate";
-// import {
-//   GenericRecordType,
-//   QueueName,
-// } from "zz-queue/microworkers/workerCommon";
-// import { Knex } from "knex";
-// import { WorkerOptions } from "bullmq";
-// import { IStorageProvider } from "zz-queue/storage/cloudStorage";
-// import Queue from "bull";
 import Redis from "ioredis";
-
-// TODO: make truely global solution
 
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
@@ -182,47 +170,3 @@ function customParse(json: string): any {
   }
   return JSON.parse(json, reviver);
 }
-
-// export function createLongRunningPubSubWorker<
-//   TJobData extends object,
-//   TJobResult,
-//   QueueNameDef extends GenericRecordType
-// >({
-//   queueName,
-//   queueNamesDef,
-//   projectId,
-//   db,
-//   workerOptions,
-//   storageProvider,
-//   processor,
-// }: {
-//   queueName: QueueName<QueueNameDef>;
-//   queueNamesDef: QueueNameDef;
-//   projectId: string;
-//   db: Knex;
-//   workerOptions: WorkerOptions;
-//   storageProvider?: IStorageProvider;
-//   processor: Parameters<
-//     typeof createWorkerMainFunction<TJobData, TJobResult, QueueNameDef>
-//   >[0]["processor"] & {
-//     sub: (message: object) => Promise<void>;
-//   }; // TODO: typing
-// }) {
-//   return createWorkerMainFunction<
-//     TJobData,
-//     { replicateResult: TJobResult },
-//     QueueNameDef
-//   >({
-//     queueName,
-//     queueNamesDef,
-//     projectId,
-//     db,
-//     workerOptions,
-//     processor: async (params) => {
-//       const { job } = params;
-
-//       return await processor({ ...params, pub });
-//     },
-//     storageProvider,
-//   });
-// }
