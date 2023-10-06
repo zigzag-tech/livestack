@@ -130,55 +130,6 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
             fs.writeFileSync(path.join(workingDir, relativePath), data);
           };
 
-          const convertLargeValueToRefAndSaveToCloud = async ({
-            obj,
-            path = "",
-          }: {
-            obj: any;
-            path?: string;
-          }): Promise<any> => {
-            if (obj === null || typeof obj !== "object") {
-              return obj;
-            }
-            const newObj = { ...obj };
-
-            for (const [key, value] of Object.entries(newObj)) {
-              const currentPath = path ? `${path}/${key}` : key;
-              if (
-                typeof value === "string" &&
-                value.length > LARGE_VALUE_THRESHOLD
-              ) {
-                if (!storageBucketName) {
-                  throw new Error(
-                    `storageBucketName is not defined and the path ${key} is too big to store in database.`
-                  );
-                }
-                // Save large string to storage and replace with reference hash
-                await putToStorage(
-                  storageBucketName,
-                  currentPath,
-                  Buffer.from(value)
-                );
-                newObj[key] = `__zz_obj_ref__`;
-              } else if (isBinaryLikeObject(value)) {
-                // Save buffer/binary to storage and replace with reference hash
-                await putToStorage(
-                  storageBucketName!,
-                  currentPath,
-                  value as Buffer | string | File | Blob | ArrayBuffer
-                );
-                newObj[key] = OBJ_REF_VALUE;
-              } else if (typeof value === "object") {
-                // Recursively process nested objects
-                newObj[key] = await convertLargeValueToRefAndSaveToCloud({
-                  obj: value,
-                  path: currentPath,
-                });
-              }
-            }
-            return newObj;
-          };
-
           const update = async ({
             incrementalData,
           }: {
