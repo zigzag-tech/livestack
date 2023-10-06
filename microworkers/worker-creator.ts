@@ -19,7 +19,7 @@ import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
 import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
-import { getGoogleCloudStorageProvider } from "../storage/cloudStorage";
+import { IStorageProvider } from "../storage/cloudStorage";
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
 
@@ -31,7 +31,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
   db,
   workerOptions,
   color,
-  storageBucketName,
+  storageProvider,
 }: {
   queueName: QueueName<T>;
   queueNamesDef: T;
@@ -39,7 +39,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
   db: Knex;
   color?: string;
   workerOptions: WorkerOptions;
-  storageBucketName?: string;
+  storageProvider?: IStorageProvider;
   processor: (p: {
     job: ArgumentTypes<Processor<D, R>>[0];
     token: ArgumentTypes<Processor<D, R>>[1];
@@ -105,10 +105,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
             try {
               fs.accessSync(filePath);
             } catch (error) {
-              if (storageBucketName) {
-                const storageProvider = await getGoogleCloudStorageProvider({
-                  bucketName: storageBucketName,
-                });
+              if (storageProvider) {
                 ensurePathExists(filePath);
                 const gcsFileName = filePath
                   .split(`${TEMP_DIR}/`)[1]
@@ -141,15 +138,12 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
           }) => {
             let jobData: any;
 
-            if (storageBucketName) {
+            if (storageProvider) {
               const { newObj, largeFilesToSave } = identifyLargeFiles(
                 incrementalData,
                 `${projectId}/jobs/${job.id!}/large-values`
               );
-              await saveLargeFilesToStorage(
-                largeFilesToSave,
-                storageBucketName
-              );
+              await saveLargeFilesToStorage(largeFilesToSave, storageProvider);
               jobData = newObj;
             } else {
               jobData = incrementalData;
@@ -289,13 +283,9 @@ const identifyLargeFiles = (
 
 const saveLargeFilesToStorage = async (
   largeFilesToSave: { path: string; value: any }[],
-  storageBucketName: string
+  storageProvider: IStorageProvider
 ): Promise<void> => {
-  const provider = getGoogleCloudStorageProvider({
-    bucketName: storageBucketName,
-  });
-
   for (const { path, value } of largeFilesToSave) {
-    await provider.putToStorage(path, value);
+    await storageProvider.putToStorage(path, value);
   }
 };

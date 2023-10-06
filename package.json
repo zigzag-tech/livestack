@@ -6,7 +6,6 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "peerDependencies": {
-    "@google-cloud/storage": "^7.x",
     "bullmq": "^4.x",
     "dotenv": "^16.x",
     "knex": "^2.x",
@@ -22,6 +21,7 @@
     "typescript": "5.2.2"
   },
   "optionalDependencies": {
-    "replicate": "^0.21.x"
+    "replicate": "^0.21.x",
+    "@google-cloud/storage": "^7.x"
   }
 }

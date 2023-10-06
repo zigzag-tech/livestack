@@ -2,6 +2,7 @@ import { createWorkerMainFunction } from "../microworkers/worker-creator";
 import { GenericRecordType, QueueName } from "../microworkers/workerCommon";
 import { Knex } from "knex";
 import { WorkerOptions } from "bullmq";
+import { IStorageProvider } from "../storage/cloudStorage";
 
 if (!process.env.REPLICATE_API_TOKEN) {
   throw new Error("REPLICATE_API_TOKEN not found");
@@ -19,7 +20,7 @@ export function createRunpodRunnerWorker<
   db,
   workerOptions,
   runpodApiKey,
-  storageBucketName,
+  storageProvider,
 }: {
   queueName: QueueName<QueueNameDef>;
   queueNamesDef: QueueNameDef;
@@ -28,7 +29,7 @@ export function createRunpodRunnerWorker<
   db: Knex;
   workerOptions: WorkerOptions;
   runpodApiKey: string;
-  storageBucketName: string;
+  storageProvider: IStorageProvider;
 }) {
   return createWorkerMainFunction<
     TJobData,
@@ -127,7 +128,7 @@ export function createRunpodRunnerWorker<
 
       return { runpodResult: runpodResult.output };
     },
-    storageBucketName,
+    storageProvider,
   });
 }
 

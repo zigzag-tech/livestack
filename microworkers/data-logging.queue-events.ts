@@ -5,7 +5,7 @@ import { GenericRecordType, QueueName } from "./workerCommon";
 import { ConnectionOptions, QueueEvents } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
-import { getGoogleCloudStorageProvider } from "../storage/cloudStorage";
+import { IStorageProvider } from "../storage/cloudStorage";
 
 const logger = getLogger("data-logging");
 const OS_TEMP_DIR = os.tmpdir();
@@ -15,28 +15,19 @@ export const initializeAndLogQueueEvents = <T extends GenericRecordType>({
   projectId,
   db,
   redisConn,
-  bucketName,
+  storageProvider,
 }: {
   queueName: QueueName<T>;
   projectId: string;
   db: Knex;
   redisConn: ConnectionOptions;
   bucketName: string;
+  storageProvider: IStorageProvider;
 }) => {
   const queueEvents = new QueueEvents(queueName, {
     connection: redisConn,
   });
   queueEvents.on("completed", async ({ jobId, returnvalue: data }) => {
-    // await db("jobs_log")
-    //   .insert({
-    //     project_id: projectId,
-    //     job_type: queueName,
-    //     job_id: jobId,
-    //     job_data: JSON.stringify(data || {}),
-    //   })
-    //   .onConflict(["job_id", "job_type", "project_id"])
-    //   .ignore();
-
     await saveAllWorkingFilesToCloudStorage(jobId);
   });
 
@@ -53,9 +44,6 @@ export const initializeAndLogQueueEvents = <T extends GenericRecordType>({
     if (fs.existsSync(jobTmpDir)) {
       const jobFiles = fs.readdirSync(jobTmpDir);
 
-      const storageProvider = getGoogleCloudStorageProvider({
-        bucketName,
-      });
       await Promise.all(
         jobFiles.map(async (f) => {
           const p = path.join(jobTmpDir, f);
