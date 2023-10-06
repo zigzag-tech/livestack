@@ -29,12 +29,12 @@ const LARGE_VALUE_THRESHOLD = 1024 * 10;
 const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs = ReturnType<typeof getMicroworkerQueueByName>;
 
-export abstract class ZZWorker<D, R> implements IWorkerUtilFuncs {
+export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
   protected queueName: string;
   protected readonly db: Knex;
   protected readonly workerOptions: WorkerOptions;
   protected readonly storageProvider?: IStorageProvider;
-  public readonly bullMQWorker: Worker<D, R>;
+  public readonly bullMQWorker: Worker<I, O>;
   protected color?: string;
 
   public readonly addJob: IWorkerUtilFuncs["addJob"];
@@ -235,7 +235,7 @@ export abstract class ZZWorker<D, R> implements IWorkerUtilFuncs {
               });
             }
 
-            const aliveLoop = async (retVal: R) => {
+            const aliveLoop = async (retVal: O) => {
               const redis = new Redis();
 
               let lastTimeJobAlive = Date.now();
@@ -252,6 +252,8 @@ export abstract class ZZWorker<D, R> implements IWorkerUtilFuncs {
               return retVal;
             };
 
+            const nextInput = () => {};
+
             const processedR = await this.processor({
               job,
               token,
@@ -263,6 +265,7 @@ export abstract class ZZWorker<D, R> implements IWorkerUtilFuncs {
               spawnChildJobsToWaitOn,
               getLargeValueCdnUrl,
               update,
+              nextInput,
             });
             // await job.updateProgress(processedR as object);
             await _upsertAndMergeJobLogByIdAndType({
@@ -317,7 +320,7 @@ export abstract class ZZWorker<D, R> implements IWorkerUtilFuncs {
       (job: Job, progress: number | object) => {}
     );
 
-    this.bullMQWorker.on("completed", async (job: Job, result: R) => {
+    this.bullMQWorker.on("completed", async (job: Job, result: O) => {
       logger.info(`JOB COMPLETED: ${job.id}`);
     });
 
@@ -327,14 +330,15 @@ export abstract class ZZWorker<D, R> implements IWorkerUtilFuncs {
   }
 
   protected abstract processor(p: {
-    job: Parameters<Processor<D, R>>[0];
-    token: Parameters<Processor<D, R>>[1];
+    job: Parameters<Processor<I, O>>[0];
+    token: Parameters<Processor<I, O>>[1];
     logger: ReturnType<typeof getLogger>;
-    aliveLoop: (retVal: R) => Promise<R>;
+    aliveLoop: (retVal: O) => Promise<O>;
+    nextInput: () => Promise<I>;
     spawnChildJobsToWaitOn: (job: FlowJob | FlowJob[]) => Promise<void>;
     workingDirToBeUploadedToCloudStorage: string;
     update: (p: {
-      incrementalData?: Partial<D>;
+      incrementalData?: Partial<I>;
       progressPercentage?: number;
     }) => Promise<void>;
     saveToTextFile: (p: {
@@ -343,7 +347,7 @@ export abstract class ZZWorker<D, R> implements IWorkerUtilFuncs {
     }) => Promise<void>;
     ensureLocalSourceFileExists: (filePath: string) => Promise<void>;
     getLargeValueCdnUrl: <T extends object>(key: keyof T, obj: T) => string;
-  }): ReturnType<Processor<D, R>>;
+  }): ReturnType<Processor<I, O>>;
 }
 
 export const identifyLargeFiles = (

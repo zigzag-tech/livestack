@@ -1,4 +1,9 @@
-import { QueueEvents, QueueEventsOptions, WorkerOptions } from "bullmq";
+import {
+  JobsOptions,
+  QueueEvents,
+  QueueEventsOptions,
+  WorkerOptions,
+} from "bullmq";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import { Queue, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
@@ -57,13 +62,22 @@ function createAndReturnQueue<
   workerOptions?: WorkerOptions;
   db: Knex;
 }) {
-  const queue = new Queue<JobDataType, JobReturnType>(queueName, workerOptions);
+  const queue = new Queue<{ firstInput: JobDataType }, JobReturnType>(
+    queueName,
+    workerOptions
+  );
   const logger = getLogger(`wkr:${queueName}`);
 
   // return queue as Queue<JobDataType, JobReturnType>;
-  const addJob: typeof queue.add = async (name, data, opts) => {
+  const addJob = async ({
+    jobId,
+    firstInput,
+  }: {
+    jobId: string;
+    firstInput: JobDataType;
+  }) => {
     // force job id to be the same as name
-    const j = await queue.add(name, data, { ...opts, jobId: name });
+    const j = await queue.add(jobId, { firstInput }, { jobId: jobId });
     logger.info(
       `Added job with ID: ${j.id}, ${j.queueName} ` +
         `${JSON.stringify(j.data, longStringTruncator)}`
@@ -80,9 +94,7 @@ function createAndReturnQueue<
     return j;
   };
 
-  const getJob = async (
-    jobId: string
-  ): Promise<Pick<Job<JobDataType, JobReturnType>, "id" | "data"> | null> => {
+  const getJob = async (jobId: string) => {
     const j = await queue.getJob(jobId);
     if (!j) {
       const dbJ = await getJobLogByIdAndType({
@@ -94,7 +106,7 @@ function createAndReturnQueue<
       if (dbJ) {
         return {
           id: dbJ.job_id,
-          data: dbJ.job_data,
+          firstInput: dbJ.job_data as { firstInput: JobReturnType },
         };
       }
     }
@@ -102,7 +114,7 @@ function createAndReturnQueue<
   };
 
   const enqueueJobAndGetResult = async ({
-    jobName,
+    jobName: jobId,
     initJobData,
     queueEventsOptions,
   }: {
@@ -110,22 +122,23 @@ function createAndReturnQueue<
     initJobData: JobDataType;
     queueEventsOptions?: QueueEventsOptions;
   }): Promise<JobReturnType> => {
-    if (!jobName) {
-      jobName = `${queueName}-${v4()}`;
+    if (!jobId) {
+      jobId = `${queueName}-${v4()}`;
     }
 
-    console.info(`Enqueueing job ${jobName} with data:`, initJobData);
+    console.info(`Enqueueing job ${jobId} with data:`, initJobData);
     const queueEvents = new QueueEvents(queueName, {
       ...queueEventsOptions,
     });
 
-    const job = await addJob(jobName, initJobData, {
-      jobId: jobName,
+    const job = await addJob({
+      jobId,
+      firstInput: initJobData,
     });
 
     try {
       await job.waitUntilFinished(queueEvents);
-      const result = await Job.fromId(queue, jobName);
+      const result = await Job.fromId(queue, jobId);
       return result!.returnvalue as JobReturnType;
     } finally {
       await queueEvents.close();
