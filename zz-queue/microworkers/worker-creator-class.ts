@@ -61,7 +61,7 @@ export abstract class ZZWorker<D, R> implements IWorkerUtilFuncs {
   }) {
     this.queueName = queueName;
     this.db = db;
-    this.workerOptions = workerOptions;
+    this.workerOptions = { autorun: false, ...workerOptions };
     this.storageProvider = storageProvider;
     this.color = color;
 
@@ -322,6 +322,7 @@ export abstract class ZZWorker<D, R> implements IWorkerUtilFuncs {
     });
 
     this.bullMQWorker.run();
+
     logger.info(`${this.queueName} worker started.`);
   }
 
