@@ -184,15 +184,26 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
           }: {
             incrementalData?: any;
           }) => {
-            const processedData = await convertLargeValueToRefAndSaveToCloud({
-              obj: incrementalData,
-              path: `${projectId}/jobs/${job.id!}/large-values/`,
-            });
+            let jobData: any;
+
+            if (storageBucketName) {
+              const { newObj, largeFilesToSave } = identifyLargeFiles(
+                incrementalData,
+                `${projectId}/jobs/${job.id!}/large-values`
+              );
+              await saveLargeFilesToStorage(
+                largeFilesToSave,
+                storageBucketName
+              );
+              jobData = newObj;
+            } else {
+              jobData = incrementalData;
+            }
             await _upsertAndMergeJobLogByIdAndType({
               projectId,
               jobType: queueName,
               jobId: job.id!,
-              jobData: processedData,
+              jobData,
               dbConn: db,
             });
           };
@@ -292,4 +303,40 @@ type ArgumentTypes<F extends Function> = F extends (...args: infer A) => any
   ? A
   : never;
 
-  
+const identifyLargeFiles = (
+  obj: any,
+  path = ""
+): { newObj: any; largeFilesToSave: { path: string; value: any }[] } => {
+  if (obj === null || typeof obj !== "object") {
+    return { newObj: obj, largeFilesToSave: [] };
+  }
+  const newObj: any = Array.isArray(obj) ? [] : {};
+  const largeFilesToSave: { path: string; value: any }[] = [];
+
+  for (const [key, value] of Object.entries(obj)) {
+    const currentPath = path ? `${path}/${key}` : key;
+    if (typeof value === "string" && value.length > LARGE_VALUE_THRESHOLD) {
+      largeFilesToSave.push({ path: currentPath, value });
+      newObj[key] = OBJ_REF_VALUE;
+    } else if (isBinaryLikeObject(value)) {
+      largeFilesToSave.push({ path: currentPath, value });
+      newObj[key] = OBJ_REF_VALUE;
+    } else if (typeof value === "object") {
+      const result = identifyLargeFiles(value, currentPath);
+      newObj[key] = result.newObj;
+      largeFilesToSave.push(...result.largeFilesToSave);
+    } else {
+      newObj[key] = value;
+    }
+  }
+  return { newObj, largeFilesToSave };
+};
+
+const saveLargeFilesToStorage = async (
+  largeFilesToSave: { path: string; value: any }[],
+  storageBucketName: string
+): Promise<void> => {
+  for (const { path, value } of largeFilesToSave) {
+    await putToStorage(storageBucketName, path, value);
+  }
+};

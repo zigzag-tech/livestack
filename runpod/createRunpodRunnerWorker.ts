@@ -19,6 +19,7 @@ export function createRunpodRunnerWorker<
   db,
   workerOptions,
   runpodApiKey,
+  storageBucketName,
 }: {
   queueName: QueueName<QueueNameDef>;
   queueNamesDef: QueueNameDef;
@@ -27,6 +28,7 @@ export function createRunpodRunnerWorker<
   db: Knex;
   workerOptions: WorkerOptions;
   runpodApiKey: string;
+  storageBucketName: string;
 }) {
   return createWorkerMainFunction<
     TJobData,
@@ -125,7 +127,7 @@ export function createRunpodRunnerWorker<
 
       return { runpodResult: runpodResult.output };
     },
-    storageBucketName: "",
+    storageBucketName,
   });
 }
 
