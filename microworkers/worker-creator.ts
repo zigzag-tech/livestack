@@ -7,6 +7,7 @@ import {
   Processor,
   FlowProducer,
   WaitingChildrenError,
+  FlowJob,
 } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { getMicroworkerQueueByName, longStringTruncator } from "./queues";
@@ -38,8 +39,8 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
   processor: (p: {
     job: ArgumentTypes<Processor<D, R>>[0];
     token: ArgumentTypes<Processor<D, R>>[1];
-    flowProducer: FlowProducer;
     logger: ReturnType<typeof getLogger>;
+    spawnChildJobsToWaitOn: (job: FlowJob | FlowJob[]) => Promise<void>;
     workingDirToBeUploadedToCloudStorage: string;
     update: (p: {
       incrementalData?: any;
@@ -65,6 +66,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
     const mergedWorkerOptions = _.merge({}, workerOptions, args);
 
     const flowProducer = new FlowProducer(mergedWorkerOptions);
+ 
 
     const worker = new Worker(
       queueName,
@@ -138,15 +140,37 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
               dbConn: db,
             });
           };
+
+          const spawnChildJobsToWaitOn = async (job_: FlowJob | FlowJob[]) => {
+            if(!Array.isArray(job_)) {
+              await _spawn(job_);
+            } else {
+              for(const j of job_) {
+                await _spawn(j);
+              }
+            }
+          };
+
+          const _spawn = async (job_: FlowJob) => {
+            job_.opts = {
+              ...job_.opts,
+              parent: {
+                id: job.id!,
+                queue: job.queueQualifiedName,
+              },
+            };
+            await flowProducer.add(job_);
+          }
+
           try {
             const processedR = await processor({
               job,
               token,
-              flowProducer,
               logger,
               workingDirToBeUploadedToCloudStorage: workingDir,
               ensureLocalSourceFileExists,
               saveToTextFile,
+              spawnChildJobsToWaitOn,
               update,
             });
             // await job.updateProgress(processedR as object);
