@@ -128,10 +128,20 @@ function createAndReturnQueue<
       await queueEvents.close();
     }
   };
+
+  const cancelJob = async (jobId: string) => {
+    const job = await queue.getJob(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found!`);
+    }
+    await job.remove();
+  };
+
   const funcs = {
     addJob,
     enqueueJobAndGetResult,
     getJob,
+    cancelJob,
     _rawQueue: queue,
   };
 
