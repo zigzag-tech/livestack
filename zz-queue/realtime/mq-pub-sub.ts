@@ -101,7 +101,7 @@ const _sub = async <T>({
   projectId,
 }: {
   queueId: string;
-  processor: (message: T) => Promise<void>;
+  processor: (message: T) => void;
   hoseType: "input" | "output";
   projectId: string;
 }) => {
@@ -133,7 +133,7 @@ export const subForJobInput = async <T>({
   projectId,
 }: {
   queueId: string;
-  processor: (message: T) => Promise<void>;
+  processor: (message: T) => void;
   projectId: string;
 }) => {
   return await _sub({ projectId, queueId, processor, hoseType: "input" });
@@ -145,7 +145,7 @@ export const subForJobOutput = async <T>({
   projectId,
 }: {
   queueId: string;
-  processor: (message: T) => Promise<void>;
+  processor: (message: T) => void;
   projectId: string;
 }) => {
   return await _sub({ projectId, queueId, processor, hoseType: "output" });
