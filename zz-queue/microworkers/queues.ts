@@ -9,6 +9,7 @@ import {
 } from "../db/knexConn";
 import { Knex } from "knex";
 import { v4 } from "uuid";
+import Redis from "ioredis";
 
 const queueMap = new Map<
   QueueName<GenericRecordType>,
@@ -60,7 +61,8 @@ function createAndReturnQueue<
 
   // return queue as Queue<JobDataType, JobReturnType>;
   const addJob: typeof queue.add = async (name, data, opts) => {
-    const j = await queue.add(name, data, opts);
+    // force job id to be the same as name
+    const j = await queue.add(name, data, { ...opts, jobId: name });
     logger.info(
       `Added job with ID: ${j.id}, ${j.queueName} ` +
         `${JSON.stringify(j.data, longStringTruncator)}`
@@ -134,7 +136,11 @@ function createAndReturnQueue<
     if (!job) {
       throw new Error(`Job ${jobId} not found!`);
     }
-    await job.remove();
+
+    // signal to worker to cancel
+    const redis = new Redis();
+    redis.set(`cancel-job-${jobId}`, "1");
+    
   };
 
   const funcs = {
