@@ -3,9 +3,9 @@ import os from "os";
 import path from "path";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import { ConnectionOptions, QueueEvents } from "bullmq";
-import { getStorageBucket } from "../storage/cloudStorage";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
+import { getGoogleCloudStorageProvider } from "../storage/cloudStorage";
 
 const logger = getLogger("data-logging");
 const OS_TEMP_DIR = os.tmpdir();
@@ -53,7 +53,9 @@ export const initializeAndLogQueueEvents = <T extends GenericRecordType>({
     if (fs.existsSync(jobTmpDir)) {
       const jobFiles = fs.readdirSync(jobTmpDir);
 
-      const storageBucket = getStorageBucket(bucketName);
+      const storageProvider = getGoogleCloudStorageProvider({
+        bucketName,
+      });
       await Promise.all(
         jobFiles.map(async (f) => {
           const p = path.join(jobTmpDir, f);
@@ -61,7 +63,10 @@ export const initializeAndLogQueueEvents = <T extends GenericRecordType>({
             const destination = p
               .split(`${OS_TEMP_DIR}/`)[1]
               .replace(/_/g, "/");
-            await storageBucket.upload(p, { destination });
+            await storageProvider.uploadFromLocalPath({
+              localPath: p,
+              destination,
+            });
           } catch (error) {
             logger.error(
               `Failed to upload file ${p}. Job ID: ${jobId}, ${JSON.stringify(

@@ -7,10 +7,11 @@ export interface IStorageProvider {
     path: string,
     data: Buffer | string | Stream | File | Blob | ArrayBuffer
   ) => Promise<void>;
-  downloadFromStorage: ({
-    filePath,
-    destination,
-  }: {
+  uploadFromLocalPath: (p: {
+    localPath: string;
+    destination: string;
+  }) => Promise<void>;
+  downloadFromStorage: (p: {
     filePath: string;
     destination: string;
   }) => Promise<void>;
@@ -32,9 +33,17 @@ export function getGoogleCloudStorageProvider({
   }) => {
     await bucket.file(filePath).download({ destination });
   };
+
+  const uploadFromLocalPath: IStorageProvider["uploadFromLocalPath"] = async ({
+    localPath,
+    destination,
+  }) => {
+    await bucket.upload(localPath, { destination });
+  };
   return {
     putToStorage,
     downloadFromStorage,
+    uploadFromLocalPath,
   };
 }
 
