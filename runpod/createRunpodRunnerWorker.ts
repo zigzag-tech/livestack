@@ -113,7 +113,6 @@ export function createRunpodRunnerWorker<
         throw new Error(`Runpod job ${runpodResult.id} was cancelled`);
       } else if (runpodResult.status === "FAILED") {
         throw new Error(`Runpod job ${runpodResult.id} failed`);
-      } else {
       }
 
       await update({
