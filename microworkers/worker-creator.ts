@@ -1,4 +1,7 @@
-import { _upsertAndMergeJobLogByIdAndType } from "../db/knexConn";
+import {
+  _upsertAndMergeJobLogByIdAndType,
+  ensureJobDependencies,
+} from "../db/knexConn";
 import fs from "fs";
 import _ from "lodash";
 import {
@@ -167,18 +170,34 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
             }
           };
 
-          const _spawn = async (job_: FlowJob) => {
-            job_.opts = {
-              ...job_.opts,
+          const _spawn = async (childJob_: FlowJob) => {
+            childJob_.opts = {
+              ...childJob_.opts,
               parent: {
                 id: job.id!,
                 queue: job.queueQualifiedName,
               },
             };
-            await flowProducer.add(job_);
+
+            const childJ = await flowProducer.add(childJob_);
           };
 
           try {
+            await _upsertAndMergeJobLogByIdAndType({
+              projectId,
+              jobType: queueName,
+              jobId: job.id!,
+              dbConn: db,
+              jobStatus: "active",
+            });
+            if (job.opts.parent?.id) {
+              await ensureJobDependencies({
+                parentJobId: job.opts.parent.id,
+                childJobId: job.id!,
+                dbConn: db,
+                projectId,
+              });
+            }
             const processedR = await processor({
               job,
               token,

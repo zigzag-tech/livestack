@@ -4,6 +4,7 @@ import { Queue, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
   _upsertAndMergeJobLogByIdAndType,
+  ensureJobDependencies,
   getJobLogByIdAndType,
 } from "../db/knexConn";
 import { Knex } from "knex";
@@ -72,6 +73,7 @@ function createAndReturnQueue<
       jobData: j.data,
       dbConn: db,
     });
+
     return j;
   };
 

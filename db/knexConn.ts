@@ -110,25 +110,6 @@ export async function ensureJobDependencies({
   dbConn: Knex;
   projectId: string;
 }) {
-  const parentJob = await getJobLogByIdAndType({
-    projectId,
-    jobType: parentJobId,
-    jobId: parentJobId,
-    dbConn,
-  });
-  if (!parentJob) {
-    throw new Error(`Parent job ${parentJobId} not found.`);
-  }
-  const childJob = await getJobLogByIdAndType({
-    projectId,
-    jobType: childJobId,
-    jobId: childJobId,
-    dbConn,
-  });
-  if (!childJob) {
-    throw new Error(`Child job ${childJobId} not found.`);
-  }
-
   await dbConn.raw(
     `
     INSERT INTO "job_deps" ("project_id", "parent_job_id", "child_job_id")
