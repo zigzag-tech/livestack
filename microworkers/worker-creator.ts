@@ -17,7 +17,7 @@ import { WorkerOptions } from "bullmq";
 import { Knex } from "knex";
 import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import { ensurePathExists } from "../storage/ensurePathExists";
-import { getStorageBucket } from "../db/cloudStorage";
+import { getStorageBucket } from "../storage/cloudStorage";
 import path from "path";
 export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
   queueName,
@@ -66,7 +66,6 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
     const mergedWorkerOptions = _.merge({}, workerOptions, args);
 
     const flowProducer = new FlowProducer(mergedWorkerOptions);
- 
 
     const worker = new Worker(
       queueName,
@@ -142,10 +141,10 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
           };
 
           const spawnChildJobsToWaitOn = async (job_: FlowJob | FlowJob[]) => {
-            if(!Array.isArray(job_)) {
+            if (!Array.isArray(job_)) {
               await _spawn(job_);
             } else {
-              for(const j of job_) {
+              for (const j of job_) {
                 await _spawn(j);
               }
             }
@@ -160,7 +159,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
               },
             };
             await flowProducer.add(job_);
-          }
+          };
 
           try {
             const processedR = await processor({

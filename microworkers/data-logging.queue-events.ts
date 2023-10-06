@@ -3,7 +3,7 @@ import os from "os";
 import path from "path";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import { ConnectionOptions, QueueEvents } from "bullmq";
-import { getStorageBucket } from "../db/cloudStorage";
+import { getStorageBucket } from "../storage/cloudStorage";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
 
