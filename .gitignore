@@ -4,3 +4,4 @@
 node_modules
 .gcloud
 knexfile.js
+.aider*
