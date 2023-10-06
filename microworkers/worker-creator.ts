@@ -291,3 +291,5 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
 type ArgumentTypes<F extends Function> = F extends (...args: infer A) => any
   ? A
   : never;
+
+  
