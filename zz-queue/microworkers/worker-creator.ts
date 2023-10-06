@@ -50,7 +50,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
     spawnChildJobsToWaitOn: (job: FlowJob | FlowJob[]) => Promise<void>;
     workingDirToBeUploadedToCloudStorage: string;
     update: (p: {
-      incrementalData?: any;
+      incrementalData?: Partial<D>;
       progressPercentage?: number;
     }) => Promise<void>;
     saveToTextFile: (p: {

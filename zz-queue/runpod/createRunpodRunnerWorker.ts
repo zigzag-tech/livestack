@@ -32,7 +32,7 @@ export function createRunpodRunnerWorker<
   storageProvider: IStorageProvider;
 }) {
   return createWorkerMainFunction<
-    TJobData,
+    TJobData & { status: "FINISH"; runpodResult: TJobResult },
     { runpodResult: TJobResult },
     QueueNameDef
   >({
@@ -122,8 +122,7 @@ export function createRunpodRunnerWorker<
         incrementalData: {
           runpodResult: runpodResult.output,
           status: "FINISH",
-          updateTime: Date.now(),
-        },
+        } as Partial<TJobData & { status: "FINISH"; runpodResult: TJobResult }>,
       });
 
       return { runpodResult: runpodResult.output };

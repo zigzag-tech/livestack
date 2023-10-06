@@ -34,7 +34,7 @@ export function createReplicateRunnerWorker<
   storageProvider?: IStorageProvider;
 }) {
   return createWorkerMainFunction<
-    TJobData,
+    TJobData & { status: "FINISH"; replicateResult: TJobResult },
     { replicateResult: TJobResult },
     QueueNameDef
   >({
@@ -53,9 +53,9 @@ export function createReplicateRunnerWorker<
         incrementalData: {
           replicateResult: result,
           status: "FINISH",
-
-          updateTime: Date.now(),
-        },
+        } as Partial<
+          TJobData & { status: "FINISH"; replicateResult: TJobResult }
+        >,
       });
 
       return { replicateResult: result };
