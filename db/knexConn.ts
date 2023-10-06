@@ -98,3 +98,36 @@ export async function _upsertAndMergeJobLogByIdAndType<
   });
   // return upsertR;
 }
+
+export async function ensureJobDependencies({
+  parentJobId,
+  childJobId,
+  dbConn,
+  projectId,
+}: {
+  parentJobId: string;
+  childJobId: string;
+  dbConn: Knex;
+  projectId: string;
+}) {
+  const parentJob = await getJobLogByIdAndType({
+    projectId,
+    jobType: parentJobId,
+    jobId: parentJobId,
+    dbConn,
+  });
+  if (!parentJob) {
+    throw new Error(`Parent job ${parentJobId} not found.`);
+  }
+  const childJob = await getJobLogByIdAndType({
+    projectId,
+    jobType: childJobId,
+    jobId: childJobId,
+    dbConn,
+  });
+  if (!childJob) {
+    throw new Error(`Child job ${childJobId} not found.`);
+  }
+
+  // TODO
+}
