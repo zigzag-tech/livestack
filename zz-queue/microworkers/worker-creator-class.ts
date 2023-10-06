@@ -252,7 +252,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
               return retVal;
             };
 
-            const nextInput = () => {};
+            // const nextInput = () => {};
 
             const processedR = await this.processor({
               job,
@@ -265,7 +265,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
               spawnChildJobsToWaitOn,
               getLargeValueCdnUrl,
               update,
-              nextInput,
+              // nextInput,
             });
             // await job.updateProgress(processedR as object);
             await _upsertAndMergeJobLogByIdAndType({
@@ -334,7 +334,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
     token: Parameters<Processor<I, O>>[1];
     logger: ReturnType<typeof getLogger>;
     aliveLoop: (retVal: O) => Promise<O>;
-    nextInput: () => Promise<I>;
+    // nextInput: () => Promise<I>;
     spawnChildJobsToWaitOn: (job: FlowJob | FlowJob[]) => Promise<void>;
     workingDirToBeUploadedToCloudStorage: string;
     update: (p: {
