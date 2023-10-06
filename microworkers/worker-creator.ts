@@ -17,8 +17,10 @@ import { WorkerOptions } from "bullmq";
 import { Knex } from "knex";
 import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import { ensurePathExists } from "../storage/ensurePathExists";
-import { getStorageBucket } from "../storage/cloudStorage";
+import { getStorageBucket, putToStorage } from "../storage/cloudStorage";
 import path from "path";
+const OBJ_REF_VALUE = `__zz_obj_ref__`;
+const LARGE_VALUE_THRESHOLD = 1024 * 10;
 export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
   queueName,
   queueNamesDef,
@@ -96,6 +98,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
               longStringTruncator
             )}`
           );
+
           const ensureLocalSourceFileExists = async (filePath: string) => {
             try {
               fs.accessSync(filePath);
@@ -126,16 +129,69 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
             fs.writeFileSync(path.join(workingDir, relativePath), data);
           };
 
+          const convertLargeValueToRefAndSaveToCloud = async ({
+            obj,
+            path = "",
+          }: {
+            obj: any;
+            path?: string;
+          }): Promise<any> => {
+            if (obj === null || typeof obj !== "object") {
+              return obj;
+            }
+            const newObj = { ...obj };
+
+            for (const [key, value] of Object.entries(newObj)) {
+              const currentPath = path ? `${path}/${key}` : key;
+              if (
+                typeof value === "string" &&
+                value.length > LARGE_VALUE_THRESHOLD
+              ) {
+                if (!storageBucketName) {
+                  throw new Error(
+                    `storageBucketName is not defined and the path ${key} is too big to store in database.`
+                  );
+                }
+                // Save large string to storage and replace with reference hash
+                await putToStorage(
+                  storageBucketName,
+                  currentPath,
+                  Buffer.from(value)
+                );
+                newObj[key] = `__zz_obj_ref__`;
+              } else if (isBinaryLikeObject(value)) {
+                // Save buffer/binary to storage and replace with reference hash
+                await putToStorage(
+                  storageBucketName!,
+                  currentPath,
+                  value as Buffer | string | File | Blob | ArrayBuffer
+                );
+                newObj[key] = OBJ_REF_VALUE;
+              } else if (typeof value === "object") {
+                // Recursively process nested objects
+                newObj[key] = await convertLargeValueToRefAndSaveToCloud({
+                  obj: value,
+                  path: currentPath,
+                });
+              }
+            }
+            return newObj;
+          };
+
           const update = async ({
             incrementalData,
           }: {
             incrementalData?: any;
           }) => {
+            const processedData = await convertLargeValueToRefAndSaveToCloud({
+              obj: incrementalData,
+              path: `${projectId}/jobs/${job.id!}/large-values/`,
+            });
             await _upsertAndMergeJobLogByIdAndType({
               projectId,
               jobType: queueName,
               jobId: job.id!,
-              jobData: incrementalData,
+              jobData: processedData,
               dbConn: db,
             });
           };
@@ -234,3 +290,19 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
 type ArgumentTypes<F extends Function> = F extends (...args: infer A) => any
   ? A
   : never;
+
+const isBinaryLikeObject = (obj: any): boolean => {
+  if (obj instanceof ArrayBuffer) {
+    return true;
+  }
+  if (typeof Blob !== "undefined" && obj instanceof Blob) {
+    return true;
+  }
+  if (typeof File !== "undefined" && obj instanceof File) {
+    return true;
+  }
+  if (typeof Buffer !== "undefined" && Buffer.isBuffer(obj)) {
+    return true;
+  }
+  return false;
+};
