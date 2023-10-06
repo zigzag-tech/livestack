@@ -1,5 +1,4 @@
 import { createWorkerMainFunction } from "../microworkers/worker-creator";
-import Replicate from "replicate";
 import { GenericRecordType, QueueName } from "../microworkers/workerCommon";
 import { Knex } from "knex";
 import { WorkerOptions } from "bullmq";
@@ -7,16 +6,13 @@ import { WorkerOptions } from "bullmq";
 if (!process.env.REPLICATE_API_TOKEN) {
   throw new Error("REPLICATE_API_TOKEN not found");
 }
-const replicate = new Replicate({
-  auth: process.env.REPLICATE_API_TOKEN,
-});
 
 export function createRunpodRunnerWorker<
   TJobData extends object,
   TJobResult,
   QueueNameDef extends GenericRecordType
 >({
-  endpoint,
+  endpointId,
   queueName,
   queueNamesDef,
   projectId,
@@ -26,7 +22,7 @@ export function createRunpodRunnerWorker<
 }: {
   queueName: QueueName<QueueNameDef>;
   queueNamesDef: QueueNameDef;
-  endpoint: `${string}/${string}:${string}`;
+  endpointId: string;
   projectId: string;
   db: Knex;
   workerOptions: WorkerOptions;
@@ -45,7 +41,9 @@ export function createRunpodRunnerWorker<
     processor: async ({ job, logger, update }) => {
       const input = job.data;
 
-      const respP = await fetch(endpoint, {
+      const runUrl = `https://api.runpod.ai/v2/${endpointId}/run`;
+
+      const respP = await fetch(runUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -58,20 +56,80 @@ export function createRunpodRunnerWorker<
 
       if (!respP.ok) {
         const errorBody = await respP.text();
-        throw new Error(`Fetch to ${endpoint} failed with status ${respP.status}: ${errorBody}`);
+        throw new Error(
+          `Fetch to runpod serverless endpoint ${endpointId} failed with status ${respP.status}: ${errorBody}`
+        );
       }
-      const result = await respP.json() as TJobResult;
+      type RunpodResult = { id: string; delayTime: number } & (
+        | {
+            status: "IN_PROGRESS";
+          }
+        | {
+            status: "IN_QUEUE";
+          }
+        | {
+            status: "CANCELLED";
+          }
+        | {
+            status: "FAILED";
+          }
+        | {
+            status: "COMPLETED";
+            executionTime: number;
+            output: TJobResult;
+          }
+      );
+
+      let runpodResult = (await respP.json()) as RunpodResult;
+
+      const statusUrl = `https://api.runpod.ai/v2/${endpointId}/status/${runpodResult.id}`;
+      while (
+        runpodResult.status === "IN_PROGRESS" ||
+        runpodResult.status === "IN_QUEUE"
+      ) {
+        await sleep(1500);
+        logger.info(`Checking status for job ${runpodResult.id}...`);
+        const respP = await fetch(statusUrl, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${runpodApiKey}`,
+          },
+        });
+
+        if (!respP.ok) {
+          const errorBody = await respP.text();
+          throw new Error(
+            `Fetch to runpod serverless endpoint ${endpointId} failed with status ${respP.status}: ${errorBody}`
+          );
+        }
+
+        runpodResult = await respP.json();
+        logger.info(
+          `Status for job ${runpodResult.id}: ${runpodResult.status}`
+        );
+      }
+
+      if (runpodResult.status === "CANCELLED") {
+        throw new Error(`Runpod job ${runpodResult.id} was cancelled`);
+      } else if (runpodResult.status === "FAILED") {
+        throw new Error(`Runpod job ${runpodResult.id} failed`);
+      } else {
+      }
 
       await update({
         incrementalData: {
-          runpodResult: result,
+          runpodResult: runpodResult.output,
           status: "FINISH",
           updateTime: Date.now(),
         },
       });
 
-      return { runpodResult: result };
+      return { runpodResult: runpodResult.output };
     },
     storageBucketName: "",
   });
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
