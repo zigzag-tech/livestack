@@ -13,4 +13,5 @@ export interface IStorageProvider {
     filePath: string;
     destination: string;
   }) => Promise<void>;
+  getPublicUrl?: (path: string) => string;
 }

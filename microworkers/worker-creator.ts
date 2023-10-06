@@ -58,6 +58,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
       data: string;
     }) => Promise<void>;
     ensureLocalSourceFileExists: (filePath: string) => Promise<void>;
+    getLargeValueCdnUrl: (key: string, obj: any) => string;
   }) => ReturnType<Processor<D, R>>;
 }) {
   const mainFn = (args?: Partial<WorkerOptions>) => {
@@ -198,6 +199,23 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
                 projectId,
               });
             }
+
+            const getLargeValueCdnUrl = (key: string, obj: any) => {
+              if (!storageProvider) {
+                throw new Error("storageProvider is not provided");
+              }
+              if (!storageProvider.getPublicUrl) {
+                throw new Error("storageProvider.getPublicUrl is not provided");
+              }
+              const { largeFilesToSave } = identifyLargeFiles(obj);
+              const found = largeFilesToSave.find((x) => x.path === key);
+              if (!found) {
+                throw new Error(`Cannot find ${key} in largeFilesToSave`);
+              } else {
+                return storageProvider.getPublicUrl(found.path);
+              }
+            };
+
             const processedR = await processor({
               job,
               token,
@@ -206,6 +224,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
               ensureLocalSourceFileExists,
               saveToTextFile,
               spawnChildJobsToWaitOn,
+              getLargeValueCdnUrl,
               update,
             });
             // await job.updateProgress(processedR as object);
