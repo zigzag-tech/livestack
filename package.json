@@ -1,9 +1,7 @@
 {
   "name": "zz-queue",
   "version": "1.0.0",
-  "description": "job orchestration",
-  "main": "index.ts",
-  "private": true,
+  "description": "job orchestrator.",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
