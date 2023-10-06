@@ -16,7 +16,6 @@ import {
 } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { getMicroworkerQueueByName, longStringTruncator } from "./queues";
-import { GenericRecordType, QueueName } from "./workerCommon";
 import { Knex } from "knex";
 import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import { ensurePathExists } from "../storage/ensurePathExists";
@@ -29,10 +28,9 @@ const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
 const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs = ReturnType<typeof getMicroworkerQueueByName>;
-export abstract class ZZWorker<D, R, T extends GenericRecordType>
-  implements IWorkerUtilFuncs
-{
-  protected queueName: QueueName<T>;
+
+export abstract class ZZWorker<D, R> implements IWorkerUtilFuncs {
+  protected queueName: string;
   protected readonly db: Knex;
   protected readonly workerOptions: WorkerOptions;
   protected readonly storageProvider?: IStorageProvider;
@@ -48,15 +46,13 @@ export abstract class ZZWorker<D, R, T extends GenericRecordType>
 
   constructor({
     queueName,
-    queueNamesDef,
     projectId,
     db,
     workerOptions,
     color,
     storageProvider,
   }: {
-    queueName: QueueName<T>;
-    queueNamesDef: T;
+    queueName: string;
     projectId: string;
     db: Knex;
     color?: string;
@@ -70,7 +66,6 @@ export abstract class ZZWorker<D, R, T extends GenericRecordType>
     this.color = color;
 
     const queueFuncs = getMicroworkerQueueByName({
-      queueNamesDef,
       queueName: this.queueName,
       workerOptions: this.workerOptions,
       db: this.db,

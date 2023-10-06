@@ -4,7 +4,6 @@ import { Queue, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
   _upsertAndMergeJobLogByIdAndType,
-  ensureJobDependencies,
   getJobLogByIdAndType,
 } from "../db/knexConn";
 import { Knex } from "knex";
@@ -21,16 +20,18 @@ export const getMicroworkerQueueByName = <
   JobReturnType,
   T extends GenericRecordType
 >(
-  p: Parameters<
-    typeof createAndReturnQueue<JobDataType, JobReturnType, T>
-  >[0] & {
-    queueNamesDef: T;
-  }
+  p: Parameters<typeof createAndReturnQueue<JobDataType, JobReturnType, T>>[0]
+  // & {
+  //   queueNamesDef: T;
+  // }
 ): ReturnType<typeof createAndReturnQueue<JobDataType, JobReturnType, T>> => {
-  const { queueNamesDef, queueName } = p;
-  if (!Object.values(queueNamesDef).includes(queueName)) {
-    throw new Error(`Can not handle queueName ${queueName}!`);
-  }
+  const {
+    // queueNamesDef,
+    queueName,
+  } = p;
+  // if (!Object.values(queueNamesDef).includes(queueName)) {
+  //   throw new Error(`Can not handle queueName ${queueName}!`);
+  // }
   const existing = queueMap.get(queueName) as ReturnType<
     typeof createAndReturnQueue<JobDataType, JobReturnType, T>
   >;
