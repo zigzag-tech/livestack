@@ -2,7 +2,7 @@ import { Stream } from "stream";
 
 export interface IStorageProvider {
   putToStorage: (
-    path: string,
+    destination: string,
     data: Buffer | string | Stream | File | Blob | ArrayBuffer
   ) => Promise<void>;
   uploadFromLocalPath: (p: {
