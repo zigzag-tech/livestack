@@ -129,5 +129,12 @@ export async function ensureJobDependencies({
     throw new Error(`Child job ${childJobId} not found.`);
   }
 
-  // TODO
+  await dbConn.raw(
+    `
+    INSERT INTO "job_deps" ("project_id", "parent_job_id", "child_job_id")
+    VALUES (?, ?, ?)
+    ON CONFLICT ("project_id", "parent_job_id", "child_job_id") DO NOTHING
+    `,
+    [projectId, parentJobId, childJobId]
+  );
 }
