@@ -121,6 +121,27 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
               }
             }
           };
+          const getLargeValueCdnUrl = <T extends object>(
+            key: keyof T,
+            obj: T
+          ) => {
+            if (!storageProvider) {
+              throw new Error("storageProvider is not provided");
+            }
+            if (!storageProvider.getPublicUrl) {
+              throw new Error("storageProvider.getPublicUrl is not provided");
+            }
+            const { largeFilesToSave } = identifyLargeFiles(obj);
+            const found = largeFilesToSave.find((x) => x.path === key);
+            if (!found) {
+              throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
+            } else {
+              const fullPath = `/${projectId}/jobs/${job.id!}/large-values/${String(
+                key
+              )}`;
+              return storageProvider.getPublicUrl(fullPath);
+            }
+          };
 
           const workingDir = getTempPathByJobId(job.id!);
 
@@ -244,22 +265,6 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
       },
       mergedWorkerOptions
     );
-
-    const getLargeValueCdnUrl = <T extends object>(key: keyof T, obj: T) => {
-      if (!storageProvider) {
-        throw new Error("storageProvider is not provided");
-      }
-      if (!storageProvider.getPublicUrl) {
-        throw new Error("storageProvider.getPublicUrl is not provided");
-      }
-      const { largeFilesToSave } = identifyLargeFiles(obj);
-      const found = largeFilesToSave.find((x) => x.path === key);
-      if (!found) {
-        throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
-      } else {
-        return storageProvider.getPublicUrl(found.path);
-      }
-    };
 
     worker.on("active", (job: Job) => {});
 
