@@ -24,7 +24,10 @@ import path from "path";
 import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
 import { IStorageProvider } from "../storage/cloudStorage";
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
+import Redis from "ioredis";
+
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
+const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
 export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
   queueName,
@@ -47,6 +50,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
     job: ArgumentTypes<Processor<D, R>>[0];
     token: ArgumentTypes<Processor<D, R>>[1];
     logger: ReturnType<typeof getLogger>;
+    aliveLoop: (retVal: R) => Promise<R>;
     spawnChildJobsToWaitOn: (job: FlowJob | FlowJob[]) => Promise<void>;
     workingDirToBeUploadedToCloudStorage: string;
     update: (p: {
@@ -232,10 +236,26 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
               });
             }
 
+            const aliveLoop = async (retVal: R) => {
+              const redis = new Redis();
+
+              let lastTimeJobAlive = Date.now();
+              while (Date.now() - lastTimeJobAlive < JOB_ALIVE_TIMEOUT) {
+                lastTimeJobAlive = parseInt(
+                  (await redis.get(`last-time-job-alive-${job.id}`)) || "0"
+                );
+                await sleep(1000 * 60);
+              } 
+              logger.info("Job expired. Marking as complete.");
+              await job.moveToCompleted(retVal, token!);
+              return retVal;
+            };
+
             const processedR = await processor({
               job,
               token,
               logger,
+              aliveLoop,
               workingDirToBeUploadedToCloudStorage: workingDir,
               ensureLocalSourceFileExists,
               saveToTextFile,
@@ -363,4 +383,9 @@ export function getPublicCdnUrl({
   }
   const fullPath = `/${projectId}/jobs/${jobId}/large-values/${key}`;
   return storageProvider.getPublicUrl(fullPath);
+}
+export async function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

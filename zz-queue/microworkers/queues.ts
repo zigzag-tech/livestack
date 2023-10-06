@@ -139,8 +139,12 @@ function createAndReturnQueue<
 
     // signal to worker to cancel
     const redis = new Redis();
-    redis.set(`cancel-job-${jobId}`, "1");
-    
+    redis.del(`last-time-job-alive-${jobId}`);
+  };
+
+  const pingAlive = async (jobId: string) => {
+    const redis = new Redis();
+    await redis.set(`last-time-job-alive-${jobId}`, Date.now());
   };
 
   const funcs = {
@@ -148,6 +152,7 @@ function createAndReturnQueue<
     enqueueJobAndGetResult,
     getJob,
     cancelJob,
+    pingAlive,
     _rawQueue: queue,
   };
 
