@@ -34,7 +34,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
   db,
   workerOptions,
   color,
-  storageProvider,
+  storageProvider: classLevelStorageProvider,
 }: {
   queueName: QueueName<T>;
   queueNamesDef: T;
@@ -61,7 +61,13 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
     getLargeValueCdnUrl: <T extends object>(key: keyof T, obj: T) => string;
   }) => ReturnType<Processor<D, R>>;
 }) {
-  const mainFn = (args?: Partial<WorkerOptions>) => {
+  const mainFn = (
+    args?: Partial<
+      WorkerOptions & {
+        storageProvider: IStorageProvider;
+      }
+    >
+  ) => {
     const queueFuncs = getMicroworkerQueueByName({
       queueNamesDef,
       queueName,
@@ -78,6 +84,8 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
     const worker = new Worker(
       queueName,
       async (job, token) => {
+        const storageProvider =
+          mergedWorkerOptions.storageProvider || classLevelStorageProvider;
         const savedResult = await getJobLogByIdAndType({
           jobType: queueName,
           jobId: job.id!,
