@@ -1,7 +1,7 @@
 {
   "name": "zz-queue",
-  "version": "1.0.0",
-  "description": "job orchestrator.",
+  "version": "0.1.0",
+  "description": "Orchestrator.",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
