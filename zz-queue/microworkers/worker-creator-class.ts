@@ -24,26 +24,27 @@ import path from "path";
 import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
 import { IStorageProvider } from "../storage/cloudStorage";
 import Redis from "ioredis";
-import {
-  getPublicCdnUrl,
-  identifyLargeFiles,
-  saveLargeFilesToStorage,
-  sleep,
-} from "./worker-creator";
 
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
 const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
-
-export abstract class ZZWorker<D, R, T extends GenericRecordType> {
+type IWorkerUtilFuncs = ReturnType<typeof getMicroworkerQueueByName>;
+export abstract class ZZWorker<D, R, T extends GenericRecordType>
+  implements IWorkerUtilFuncs
+{
   protected queueName: QueueName<T>;
   protected readonly db: Knex;
-  protected readonly workerOptions: WorkerOptions & {
-    storageProvider: IStorageProvider;
-  };
+  protected readonly workerOptions: WorkerOptions;
   protected readonly storageProvider?: IStorageProvider;
-  protected worker: Worker<D, R>;
+  public readonly bullMQWorker: Worker<D, R>;
   protected color?: string;
+
+  public readonly addJob: IWorkerUtilFuncs["addJob"];
+  public readonly getJob: IWorkerUtilFuncs["getJob"];
+  public readonly cancelJob: IWorkerUtilFuncs["cancelJob"];
+  public readonly pingAlive: IWorkerUtilFuncs["pingAlive"];
+  public readonly enqueueJobAndGetResult: IWorkerUtilFuncs["enqueueJobAndGetResult"];
+  public readonly _rawQueue: IWorkerUtilFuncs["_rawQueue"];
 
   constructor({
     queueName,
@@ -59,9 +60,7 @@ export abstract class ZZWorker<D, R, T extends GenericRecordType> {
     projectId: string;
     db: Knex;
     color?: string;
-    workerOptions: WorkerOptions & {
-      storageProvider: IStorageProvider;
-    };
+    workerOptions: WorkerOptions;
     storageProvider?: IStorageProvider;
   }) {
     this.queueName = queueName;
@@ -77,15 +76,21 @@ export abstract class ZZWorker<D, R, T extends GenericRecordType> {
       db: this.db,
       projectId,
     });
+
+    this.addJob = queueFuncs.addJob;
+    this.cancelJob = queueFuncs.cancelJob;
+    this.pingAlive = queueFuncs.pingAlive;
+    this.enqueueJobAndGetResult = queueFuncs.enqueueJobAndGetResult;
+    this._rawQueue = queueFuncs._rawQueue;
+    this.getJob = queueFuncs.getJob;
+
     const logger = getLogger(`wkr:${this.queueName}`, this.color);
     const mergedWorkerOptions = _.merge({}, this.workerOptions);
     const flowProducer = new FlowProducer(mergedWorkerOptions);
 
-    this.worker = new Worker(
+    this.bullMQWorker = new Worker(
       this.queueName,
       async (job, token) => {
-        const storageProvider =
-          mergedWorkerOptions.storageProvider || this.storageProvider;
         const savedResult = await getJobLogByIdAndType({
           jobType: this.queueName,
           jobId: job.id!,
@@ -117,12 +122,12 @@ export abstract class ZZWorker<D, R, T extends GenericRecordType> {
             try {
               fs.accessSync(filePath);
             } catch (error) {
-              if (storageProvider) {
+              if (this.storageProvider) {
                 ensurePathExists(filePath);
                 const gcsFileName = filePath
                   .split(`${TEMP_DIR}/`)[1]
                   .replace(/_/g, "/");
-                await storageProvider.downloadFromStorage({
+                await this.storageProvider.downloadFromStorage({
                   filePath: gcsFileName,
                   destination: filePath,
                 });
@@ -133,10 +138,10 @@ export abstract class ZZWorker<D, R, T extends GenericRecordType> {
             key: keyof T,
             obj: T
           ) => {
-            if (!storageProvider) {
+            if (!this.storageProvider) {
               throw new Error("storageProvider is not provided");
             }
-            if (!storageProvider.getPublicUrl) {
+            if (!this.storageProvider.getPublicUrl) {
               throw new Error("storageProvider.getPublicUrl is not provided");
             }
             const { largeFilesToSave } = identifyLargeFiles(obj);
@@ -149,7 +154,7 @@ export abstract class ZZWorker<D, R, T extends GenericRecordType> {
                 projectId,
                 jobId: job.id!,
                 key: String(key),
-                storageProvider,
+                storageProvider: this.storageProvider,
               });
             }
           };
@@ -174,12 +179,15 @@ export abstract class ZZWorker<D, R, T extends GenericRecordType> {
           }) => {
             let jobData: any;
 
-            if (storageProvider) {
+            if (this.storageProvider) {
               const { newObj, largeFilesToSave } = identifyLargeFiles(
                 incrementalData,
                 `${projectId}/jobs/${job.id!}/large-values`
               );
-              await saveLargeFilesToStorage(largeFilesToSave, storageProvider);
+              await saveLargeFilesToStorage(
+                largeFilesToSave,
+                this.storageProvider
+              );
               jobData = newObj;
             } else {
               jobData = incrementalData;
@@ -296,26 +304,29 @@ export abstract class ZZWorker<D, R, T extends GenericRecordType> {
     );
 
     // Setup event listeners
-    this.worker.on("active", (job: Job) => {});
+    this.bullMQWorker.on("active", (job: Job) => {});
 
-    this.worker.on("failed", async (job, error: Error) => {
+    this.bullMQWorker.on("failed", async (job, error: Error) => {
       logger.error(`JOB FAILED: ${job?.id}, ${error}`);
     });
 
-    this.worker.on("error", (err) => {
+    this.bullMQWorker.on("error", (err) => {
       const errStr = String(err);
       if (!errStr.includes("Missing lock for job")) {
         logger.error(`ERROR: ${err}`);
       }
     });
 
-    this.worker.on("progress", (job: Job, progress: number | object) => {});
+    this.bullMQWorker.on(
+      "progress",
+      (job: Job, progress: number | object) => {}
+    );
 
-    this.worker.on("completed", async (job: Job, result: R) => {
+    this.bullMQWorker.on("completed", async (job: Job, result: R) => {
       logger.info(`JOB COMPLETED: ${job.id}`);
     });
 
-    this.worker.run();
+    this.bullMQWorker.run();
     logger.info(`${this.queueName} worker started.`);
   }
 
@@ -337,4 +348,65 @@ export abstract class ZZWorker<D, R, T extends GenericRecordType> {
     ensureLocalSourceFileExists: (filePath: string) => Promise<void>;
     getLargeValueCdnUrl: <T extends object>(key: keyof T, obj: T) => string;
   }): ReturnType<Processor<D, R>>;
+}
+
+export const identifyLargeFiles = (
+  obj: any,
+  path = ""
+): { newObj: any; largeFilesToSave: { path: string; value: any }[] } => {
+  if (obj === null || typeof obj !== "object") {
+    return { newObj: obj, largeFilesToSave: [] };
+  }
+  const newObj: any = Array.isArray(obj) ? [] : {};
+  const largeFilesToSave: { path: string; value: any }[] = [];
+
+  for (const [key, value] of Object.entries(obj)) {
+    const currentPath = path ? `${path}/${key}` : key;
+    if (typeof value === "string" && value.length > LARGE_VALUE_THRESHOLD) {
+      largeFilesToSave.push({ path: currentPath, value });
+      newObj[key] = OBJ_REF_VALUE;
+    } else if (isBinaryLikeObject(value)) {
+      largeFilesToSave.push({ path: currentPath, value });
+      newObj[key] = OBJ_REF_VALUE;
+    } else if (typeof value === "object") {
+      const result = identifyLargeFiles(value, currentPath);
+      newObj[key] = result.newObj;
+      largeFilesToSave.push(...result.largeFilesToSave);
+    } else {
+      newObj[key] = value;
+    }
+  }
+  return { newObj, largeFilesToSave };
+};
+
+export const saveLargeFilesToStorage = async (
+  largeFilesToSave: { path: string; value: any }[],
+  storageProvider: IStorageProvider
+): Promise<void> => {
+  for (const { path, value } of largeFilesToSave) {
+    await storageProvider.putToStorage(path, value);
+  }
+};
+
+export function getPublicCdnUrl({
+  projectId,
+  jobId,
+  key,
+  storageProvider,
+}: {
+  projectId: string;
+  jobId: string;
+  key: string;
+  storageProvider: IStorageProvider;
+}) {
+  if (!storageProvider.getPublicUrl) {
+    throw new Error("storageProvider.getPublicUrl is not provided");
+  }
+  const fullPath = `/${projectId}/jobs/${jobId}/large-values/${key}`;
+  return storageProvider.getPublicUrl(fullPath);
+}
+export async function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
