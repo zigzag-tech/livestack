@@ -1,4 +1,3 @@
-import { PROJECT_ID } from "./../../../config";
 import {
   _upsertAndMergeJobLogByIdAndType,
   ensureJobDependencies,
@@ -22,7 +21,11 @@ import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
 import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
-import { IStorageProvider } from "../storage/cloudStorage";
+import {
+  IStorageProvider,
+  getPublicCdnUrl,
+  saveLargeFilesToStorage,
+} from "../storage/cloudStorage";
 import Redis, { RedisOptions } from "ioredis";
 import {
   PubSubFactory,
@@ -94,7 +97,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
 
     this.pubSubFactory = new PubSubFactory(
       {
-        projectId: PROJECT_ID,
+        projectId,
       },
       redisConfig,
       queueName
@@ -414,32 +417,6 @@ export const identifyLargeFiles = (
   return { newObj, largeFilesToSave };
 };
 
-export const saveLargeFilesToStorage = async (
-  largeFilesToSave: { path: string; value: any }[],
-  storageProvider: IStorageProvider
-): Promise<void> => {
-  for (const { path, value } of largeFilesToSave) {
-    await storageProvider.putToStorage(path, value);
-  }
-};
-
-export function getPublicCdnUrl({
-  projectId,
-  jobId,
-  key,
-  storageProvider,
-}: {
-  projectId: string;
-  jobId: string;
-  key: string;
-  storageProvider: IStorageProvider;
-}) {
-  if (!storageProvider.getPublicUrl) {
-    throw new Error("storageProvider.getPublicUrl is not provided");
-  }
-  const fullPath = `/${projectId}/jobs/${jobId}/large-values/${key}`;
-  return storageProvider.getPublicUrl(fullPath);
-}
 export async function sleep(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);

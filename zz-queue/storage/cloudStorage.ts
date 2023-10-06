@@ -15,3 +15,30 @@ export interface IStorageProvider {
   }) => Promise<void>;
   getPublicUrl?: (path: string) => string;
 }
+
+export const saveLargeFilesToStorage = async (
+  largeFilesToSave: { path: string; value: any }[],
+  storageProvider: IStorageProvider
+): Promise<void> => {
+  for (const { path, value } of largeFilesToSave) {
+    await storageProvider.putToStorage(path, value);
+  }
+};
+
+export function getPublicCdnUrl({
+  projectId,
+  jobId,
+  key,
+  storageProvider,
+}: {
+  projectId: string;
+  jobId: string;
+  key: string;
+  storageProvider: IStorageProvider;
+}) {
+  if (!storageProvider.getPublicUrl) {
+    throw new Error("storageProvider.getPublicUrl is not provided");
+  }
+  const fullPath = `/${projectId}/jobs/${jobId}/large-values/${key}`;
+  return storageProvider.getPublicUrl(fullPath);
+}
