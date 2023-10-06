@@ -1,100 +1,96 @@
 import {
   _upsertAndMergeJobLogByIdAndType,
   ensureJobDependencies,
+  getJobLogByIdAndType,
 } from "../db/knexConn";
 import fs from "fs";
 import _ from "lodash";
 import {
   Worker,
   Job,
-  Processor,
   FlowProducer,
   WaitingChildrenError,
   FlowJob,
+  WorkerOptions,
+  Processor,
 } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { getMicroworkerQueueByName, longStringTruncator } from "./queues";
 import { GenericRecordType, QueueName } from "./workerCommon";
-import { getJobLogByIdAndType } from "../db/knexConn";
-import { WorkerOptions } from "bullmq";
 import { Knex } from "knex";
 import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
 import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
 import { IStorageProvider } from "../storage/cloudStorage";
-const OBJ_REF_VALUE = `__zz_obj_ref__`;
 import Redis from "ioredis";
+import {
+  getPublicCdnUrl,
+  identifyLargeFiles,
+  saveLargeFilesToStorage,
+  sleep,
+} from "./worker-creator";
 
+const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
 const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
-export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
-  queueName,
-  queueNamesDef,
-  projectId,
-  processor,
-  db,
-  workerOptions,
-  color,
-  storageProvider: classLevelStorageProvider,
-}: {
-  queueName: QueueName<T>;
-  queueNamesDef: T;
-  projectId: string;
-  db: Knex;
-  color?: string;
-  workerOptions: WorkerOptions;
-  storageProvider?: IStorageProvider;
-  processor: (p: {
-    job: Parameters<Processor<D, R>>[0];
-    token: Parameters<Processor<D, R>>[1];
-    logger: ReturnType<typeof getLogger>;
-    aliveLoop: (retVal: R) => Promise<R>;
-    spawnChildJobsToWaitOn: (job: FlowJob | FlowJob[]) => Promise<void>;
-    workingDirToBeUploadedToCloudStorage: string;
-    update: (p: {
-      incrementalData?: Partial<D>;
-      progressPercentage?: number;
-    }) => Promise<void>;
-    saveToTextFile: (p: {
-      relativePath: string;
-      data: string;
-    }) => Promise<void>;
-    ensureLocalSourceFileExists: (filePath: string) => Promise<void>;
-    getLargeValueCdnUrl: <T extends object>(key: keyof T, obj: T) => string;
-  }) => ReturnType<Processor<D, R>>;
-}) {
-  const mainFn = (
-    args?: Partial<
-      WorkerOptions & {
-        storageProvider: IStorageProvider;
-      }
-    >
-  ) => {
+export abstract class ZZWorker<D, R, T extends GenericRecordType> {
+  protected queueName: QueueName<T>;
+  protected readonly db: Knex;
+  protected readonly workerOptions: WorkerOptions & {
+    storageProvider: IStorageProvider;
+  };
+  protected readonly storageProvider?: IStorageProvider;
+  protected worker: Worker<D, R>;
+  protected color?: string;
+
+  constructor({
+    queueName,
+    queueNamesDef,
+    projectId,
+    db,
+    workerOptions,
+    color,
+    storageProvider,
+  }: {
+    queueName: QueueName<T>;
+    queueNamesDef: T;
+    projectId: string;
+    db: Knex;
+    color?: string;
+    workerOptions: WorkerOptions & {
+      storageProvider: IStorageProvider;
+    };
+    storageProvider?: IStorageProvider;
+  }) {
+    this.queueName = queueName;
+    this.db = db;
+    this.workerOptions = workerOptions;
+    this.storageProvider = storageProvider;
+    this.color = color;
+
     const queueFuncs = getMicroworkerQueueByName({
       queueNamesDef,
-      queueName,
-      workerOptions,
-      db,
+      queueName: this.queueName,
+      workerOptions: this.workerOptions,
+      db: this.db,
       projectId,
     });
-    const logger = getLogger(`wkr:${queueName}`, color);
-
-    const mergedWorkerOptions = _.merge({}, workerOptions, args);
-
+    const logger = getLogger(`wkr:${this.queueName}`, this.color);
+    const mergedWorkerOptions = _.merge({}, this.workerOptions);
     const flowProducer = new FlowProducer(mergedWorkerOptions);
 
-    const worker = new Worker(
-      queueName,
+    this.worker = new Worker(
+      this.queueName,
       async (job, token) => {
         const storageProvider =
-          mergedWorkerOptions.storageProvider || classLevelStorageProvider;
+          mergedWorkerOptions.storageProvider || this.storageProvider;
         const savedResult = await getJobLogByIdAndType({
-          jobType: queueName,
+          jobType: this.queueName,
           jobId: job.id!,
           projectId,
-          dbConn: db,
+          dbConn: this.db,
           jobStatus: "completed",
         });
         if (savedResult) {
@@ -190,10 +186,10 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
             }
             await _upsertAndMergeJobLogByIdAndType({
               projectId,
-              jobType: queueName,
+              jobType: this.queueName,
               jobId: job.id!,
               jobData,
-              dbConn: db,
+              dbConn: this.db,
             });
           };
 
@@ -222,16 +218,16 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
           try {
             await _upsertAndMergeJobLogByIdAndType({
               projectId,
-              jobType: queueName,
+              jobType: this.queueName,
               jobId: job.id!,
-              dbConn: db,
+              dbConn: this.db,
               jobStatus: "active",
             });
             if (job.opts.parent?.id) {
               await ensureJobDependencies({
                 parentJobId: job.opts.parent.id,
                 childJobId: job.id!,
-                dbConn: db,
+                dbConn: this.db,
                 projectId,
               });
             }
@@ -253,7 +249,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
               return retVal;
             };
 
-            const processedR = await processor({
+            const processedR = await this.processor({
               job,
               token,
               logger,
@@ -268,9 +264,9 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
             // await job.updateProgress(processedR as object);
             await _upsertAndMergeJobLogByIdAndType({
               projectId,
-              jobType: queueName,
+              jobType: this.queueName,
               jobId: job.id!,
-              dbConn: db,
+              dbConn: this.db,
               jobStatus: "completed",
             });
             return processedR;
@@ -278,17 +274,17 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
             if (e instanceof WaitingChildrenError) {
               await _upsertAndMergeJobLogByIdAndType({
                 projectId,
-                jobType: queueName,
+                jobType: this.queueName,
                 jobId: job.id!,
-                dbConn: db,
+                dbConn: this.db,
                 jobStatus: "waiting_children",
               });
             } else {
               await _upsertAndMergeJobLogByIdAndType({
                 projectId,
-                jobType: queueName,
+                jobType: this.queueName,
                 jobId: job.id!,
-                dbConn: db,
+                dbConn: this.db,
                 jobStatus: "failed",
               });
               throw e;
@@ -299,91 +295,46 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
       mergedWorkerOptions
     );
 
-    worker.on("active", (job: Job) => {});
+    // Setup event listeners
+    this.worker.on("active", (job: Job) => {});
 
-    worker.on("failed", async (job, error: Error) => {
+    this.worker.on("failed", async (job, error: Error) => {
       logger.error(`JOB FAILED: ${job?.id}, ${error}`);
     });
 
-    worker.on("error", (err) => {
+    this.worker.on("error", (err) => {
       const errStr = String(err);
       if (!errStr.includes("Missing lock for job")) {
         logger.error(`ERROR: ${err}`);
       }
     });
 
-    worker.on("progress", (job: Job, progress: number | object) => {});
+    this.worker.on("progress", (job: Job, progress: number | object) => {});
 
-    worker.on("completed", async (job: Job, result: R) => {
+    this.worker.on("completed", async (job: Job, result: R) => {
       logger.info(`JOB COMPLETED: ${job.id}`);
     });
 
-    worker.run();
-    logger.info(`${queueName} worker started.`);
-
-    return { worker, ...queueFuncs };
-  };
-
-  return { mainFn };
-}
-
-export const identifyLargeFiles = (
-  obj: any,
-  path = ""
-): { newObj: any; largeFilesToSave: { path: string; value: any }[] } => {
-  if (obj === null || typeof obj !== "object") {
-    return { newObj: obj, largeFilesToSave: [] };
+    this.worker.run();
+    logger.info(`${this.queueName} worker started.`);
   }
-  const newObj: any = Array.isArray(obj) ? [] : {};
-  const largeFilesToSave: { path: string; value: any }[] = [];
 
-  for (const [key, value] of Object.entries(obj)) {
-    const currentPath = path ? `${path}/${key}` : key;
-    if (typeof value === "string" && value.length > LARGE_VALUE_THRESHOLD) {
-      largeFilesToSave.push({ path: currentPath, value });
-      newObj[key] = OBJ_REF_VALUE;
-    } else if (isBinaryLikeObject(value)) {
-      largeFilesToSave.push({ path: currentPath, value });
-      newObj[key] = OBJ_REF_VALUE;
-    } else if (typeof value === "object") {
-      const result = identifyLargeFiles(value, currentPath);
-      newObj[key] = result.newObj;
-      largeFilesToSave.push(...result.largeFilesToSave);
-    } else {
-      newObj[key] = value;
-    }
-  }
-  return { newObj, largeFilesToSave };
-};
-
-export const saveLargeFilesToStorage = async (
-  largeFilesToSave: { path: string; value: any }[],
-  storageProvider: IStorageProvider
-): Promise<void> => {
-  for (const { path, value } of largeFilesToSave) {
-    await storageProvider.putToStorage(path, value);
-  }
-};
-
-export function getPublicCdnUrl({
-  projectId,
-  jobId,
-  key,
-  storageProvider,
-}: {
-  projectId: string;
-  jobId: string;
-  key: string;
-  storageProvider: IStorageProvider;
-}) {
-  if (!storageProvider.getPublicUrl) {
-    throw new Error("storageProvider.getPublicUrl is not provided");
-  }
-  const fullPath = `/${projectId}/jobs/${jobId}/large-values/${key}`;
-  return storageProvider.getPublicUrl(fullPath);
-}
-export async function sleep(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+  protected abstract processor(p: {
+    job: Parameters<Processor<D, R>>[0];
+    token: Parameters<Processor<D, R>>[1];
+    logger: ReturnType<typeof getLogger>;
+    aliveLoop: (retVal: R) => Promise<R>;
+    spawnChildJobsToWaitOn: (job: FlowJob | FlowJob[]) => Promise<void>;
+    workingDirToBeUploadedToCloudStorage: string;
+    update: (p: {
+      incrementalData?: Partial<D>;
+      progressPercentage?: number;
+    }) => Promise<void>;
+    saveToTextFile: (p: {
+      relativePath: string;
+      data: string;
+    }) => Promise<void>;
+    ensureLocalSourceFileExists: (filePath: string) => Promise<void>;
+    getLargeValueCdnUrl: <T extends object>(key: keyof T, obj: T) => string;
+  }): ReturnType<Processor<D, R>>;
 }
