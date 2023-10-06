@@ -1,7 +1,6 @@
 import { Storage } from "@google-cloud/storage";
 import fs from "fs";
 import { Stream } from "stream";
-
 export const getStorageBucket = (bucketName: string) =>
   new Storage().bucket(bucketName);
 
@@ -24,14 +23,6 @@ export async function putToStorage(
     ) {
       // If data is a file path, create a read stream and upload
       await file.save(fs.createReadStream(data));
-    } else if (data instanceof File) {
-      // If data is a File, upload using bucket.upload
-      await bucket.upload(path, {
-        destination: path,
-        metadata: {
-          contentType: data.type,
-        },
-      });
     } else if (data instanceof Blob) {
       // If data is a Blob, convert to buffer and upload
       const buffer = await data.arrayBuffer();
