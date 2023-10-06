@@ -19,6 +19,7 @@ import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import { ensurePathExists } from "../storage/ensurePathExists";
 import { getStorageBucket, putToStorage } from "../storage/cloudStorage";
 import path from "path";
+import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
 export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
@@ -290,19 +291,3 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
 type ArgumentTypes<F extends Function> = F extends (...args: infer A) => any
   ? A
   : never;
-
-const isBinaryLikeObject = (obj: any): boolean => {
-  if (obj instanceof ArrayBuffer) {
-    return true;
-  }
-  if (typeof Blob !== "undefined" && obj instanceof Blob) {
-    return true;
-  }
-  if (typeof File !== "undefined" && obj instanceof File) {
-    return true;
-  }
-  if (typeof Buffer !== "undefined" && Buffer.isBuffer(obj)) {
-    return true;
-  }
-  return false;
-};
