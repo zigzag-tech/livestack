@@ -58,7 +58,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
       data: string;
     }) => Promise<void>;
     ensureLocalSourceFileExists: (filePath: string) => Promise<void>;
-    getLargeValueCdnUrl: (key: string, obj: any) => string;
+    getLargeValueCdnUrl: <T extends object>(key: keyof T, obj: T) => string;
   }) => ReturnType<Processor<D, R>>;
 }) {
   const mainFn = (args?: Partial<WorkerOptions>) => {
@@ -200,22 +200,6 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
               });
             }
 
-            const getLargeValueCdnUrl = (key: string, obj: any) => {
-              if (!storageProvider) {
-                throw new Error("storageProvider is not provided");
-              }
-              if (!storageProvider.getPublicUrl) {
-                throw new Error("storageProvider.getPublicUrl is not provided");
-              }
-              const { largeFilesToSave } = identifyLargeFiles(obj);
-              const found = largeFilesToSave.find((x) => x.path === key);
-              if (!found) {
-                throw new Error(`Cannot find ${key} in largeFilesToSave`);
-              } else {
-                return storageProvider.getPublicUrl(found.path);
-              }
-            };
-
             const processedR = await processor({
               job,
               token,
@@ -260,6 +244,22 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
       },
       mergedWorkerOptions
     );
+
+    const getLargeValueCdnUrl = <T extends object>(key: keyof T, obj: T) => {
+      if (!storageProvider) {
+        throw new Error("storageProvider is not provided");
+      }
+      if (!storageProvider.getPublicUrl) {
+        throw new Error("storageProvider.getPublicUrl is not provided");
+      }
+      const { largeFilesToSave } = identifyLargeFiles(obj);
+      const found = largeFilesToSave.find((x) => x.path === key);
+      if (!found) {
+        throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
+      } else {
+        return storageProvider.getPublicUrl(found.path);
+      }
+    };
 
     worker.on("active", (job: Job) => {});
 
