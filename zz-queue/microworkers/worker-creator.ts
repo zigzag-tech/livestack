@@ -246,7 +246,7 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
                 );
                 await sleep(1000 * 60);
               } 
-              logger.info("Job expired. Marking as complete.");
+              logger.info(`Job with ${job.id} id expired. Marking as complete.`);
               await job.moveToCompleted(retVal, token!);
               return retVal;
             };
