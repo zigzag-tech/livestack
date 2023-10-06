@@ -56,7 +56,11 @@ export function createRunpodRunnerWorker<
         }),
       });
 
-      const result = (await respP).json() as TJobResult;
+      if (!respP.ok) {
+        const errorBody = await respP.text();
+        throw new Error(`Fetch to ${endpoint} failed with status ${respP.status}: ${errorBody}`);
+      }
+      const result = await respP.json() as TJobResult;
 
       await update({
         incrementalData: {
