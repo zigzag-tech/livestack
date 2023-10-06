@@ -17,11 +17,12 @@ import { WorkerOptions } from "bullmq";
 import { Knex } from "knex";
 import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import { ensurePathExists } from "../storage/ensurePathExists";
-import { getStorageBucket, putToStorage } from "../storage/cloudStorage";
 import path from "path";
 import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
+import { getGoogleCloudStorageProvider } from "../storage/cloudStorage";
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
+
 export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
   queueName,
   queueNamesDef,
@@ -105,14 +106,17 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
               fs.accessSync(filePath);
             } catch (error) {
               if (storageBucketName) {
-                const storageBucket = getStorageBucket(storageBucketName);
+                const storageProvider = await getGoogleCloudStorageProvider({
+                  bucketName: storageBucketName,
+                });
                 ensurePathExists(filePath);
                 const gcsFileName = filePath
                   .split(`${TEMP_DIR}/`)[1]
                   .replace(/_/g, "/");
-                await storageBucket
-                  .file(gcsFileName)
-                  .download({ destination: filePath });
+                await storageProvider.downloadFromStorage({
+                  filePath: gcsFileName,
+                  destination: filePath,
+                });
               }
             }
           };
@@ -287,7 +291,11 @@ const saveLargeFilesToStorage = async (
   largeFilesToSave: { path: string; value: any }[],
   storageBucketName: string
 ): Promise<void> => {
+  const provider = getGoogleCloudStorageProvider({
+    bucketName: storageBucketName,
+  });
+
   for (const { path, value } of largeFilesToSave) {
-    await putToStorage(storageBucketName, path, value);
+    await provider.putToStorage(path, value);
   }
 };

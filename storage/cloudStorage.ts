@@ -1,10 +1,47 @@
 import { Storage } from "@google-cloud/storage";
 import fs from "fs";
 import { Stream } from "stream";
-export const getStorageBucket = (bucketName: string) =>
+
+export interface IStorageProvider {
+  putToStorage: (
+    path: string,
+    data: Buffer | string | Stream | File | Blob | ArrayBuffer
+  ) => Promise<void>;
+  downloadFromStorage: ({
+    filePath,
+    destination,
+  }: {
+    filePath: string;
+    destination: string;
+  }) => Promise<void>;
+}
+
+export function getGoogleCloudStorageProvider({
+  bucketName,
+}: {
+  bucketName: string;
+}): IStorageProvider {
+  const bucket = getStorageBucket(bucketName);
+  const putToStorage: IStorageProvider["putToStorage"] = (path, data) => {
+    return putToGoogleCloudStorage(bucketName, path, data);
+  };
+
+  const downloadFromStorage: IStorageProvider["downloadFromStorage"] = async ({
+    filePath,
+    destination,
+  }) => {
+    await bucket.file(filePath).download({ destination });
+  };
+  return {
+    putToStorage,
+    downloadFromStorage,
+  };
+}
+
+const getStorageBucket = (bucketName: string) =>
   new Storage().bucket(bucketName);
 
-export async function putToStorage(
+async function putToGoogleCloudStorage(
   storageBucketName: string,
   path: string,
   data: Buffer | string | Stream | File | Blob | ArrayBuffer
