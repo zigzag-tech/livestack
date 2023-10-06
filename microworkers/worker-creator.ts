@@ -125,13 +125,25 @@ export function createWorkerMainFunction<D, R, T extends GenericRecordType>({
             key: keyof T,
             obj: T
           ) => {
-            return getLargeValueCdnUrlGlobal({
-              key,
-              obj,
-              storageProvider,
-              projectId,
-              jobId: job.id!,
-            });
+            if (!storageProvider) {
+              throw new Error("storageProvider is not provided");
+            }
+            if (!storageProvider.getPublicUrl) {
+              throw new Error("storageProvider.getPublicUrl is not provided");
+            }
+            const { largeFilesToSave } = identifyLargeFiles(obj);
+            const found = largeFilesToSave.find((x) => x.path === key);
+            if (!found) {
+              console.error("Available keys: ", Object.keys(obj));
+              throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
+            } else {
+              return getPublicCdnUrl({
+                projectId,
+                jobId: job.id!,
+                key: String(key),
+                storageProvider,
+              });
+            }
           };
 
           const workingDir = getTempPathByJobId(job.id!);
@@ -327,31 +339,20 @@ const saveLargeFilesToStorage = async (
   }
 };
 
-export const getLargeValueCdnUrlGlobal = <T extends object>({
-  key,
-  obj,
-  storageProvider,
+export function getPublicCdnUrl({
   projectId,
   jobId,
+  key,
+  storageProvider,
 }: {
-  key: keyof T;
-  obj: T;
-  storageProvider?: IStorageProvider;
   projectId: string;
   jobId: string;
-}) => {
-  if (!storageProvider) {
-    throw new Error("storageProvider is not provided");
-  }
+  key: string;
+  storageProvider: IStorageProvider;
+}) {
   if (!storageProvider.getPublicUrl) {
     throw new Error("storageProvider.getPublicUrl is not provided");
   }
-  const { largeFilesToSave } = identifyLargeFiles(obj);
-  const found = largeFilesToSave.find((x) => x.path === key);
-  if (!found) {
-    throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
-  } else {
-    const fullPath = `/${projectId}/jobs/${jobId}/large-values/${String(key)}`;
-    return storageProvider.getPublicUrl(fullPath);
-  }
-};
+  const fullPath = `/${projectId}/jobs/${jobId}/large-values/${key}`;
+  return storageProvider.getPublicUrl(fullPath);
+}
