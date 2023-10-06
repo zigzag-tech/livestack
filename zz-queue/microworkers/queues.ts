@@ -14,6 +14,7 @@ import {
 import { Knex } from "knex";
 import { v4 } from "uuid";
 import Redis from "ioredis";
+import { first } from "lodash";
 
 const queueMap = new Map<
   QueueName<GenericRecordType>,
@@ -72,12 +73,18 @@ function createAndReturnQueue<
   const addJob = async ({
     jobId,
     firstInput,
+    bullMQJobsOpts,
   }: {
     jobId: string;
     firstInput: JobDataType;
+    bullMQJobsOpts?: JobsOptions;
   }) => {
     // force job id to be the same as name
-    const j = await queue.add(jobId, { firstInput }, { jobId: jobId });
+    const j = await queue.add(
+      jobId,
+      { firstInput },
+      { ...bullMQJobsOpts, jobId: jobId }
+    );
     logger.info(
       `Added job with ID: ${j.id}, ${j.queueName} ` +
         `${JSON.stringify(j.data, longStringTruncator)}`
@@ -87,7 +94,7 @@ function createAndReturnQueue<
       projectId,
       jobType: queueName,
       jobId: j.id!,
-      jobData: j.data,
+      jobData: { firstInput },
       dbConn: db,
     });
 

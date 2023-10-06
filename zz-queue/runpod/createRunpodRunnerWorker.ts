@@ -1,134 +1,143 @@
-import { createWorkerMainFunction } from "../microworkers/worker-creator";
-import { GenericRecordType, QueueName } from "../microworkers/workerCommon";
+import { ZZWorker } from "../microworkers/worker-creator-class";
 import { Knex } from "knex";
-import { WorkerOptions } from "bullmq";
 import { IStorageProvider } from "../storage/cloudStorage";
+import { RedisOptions } from "ioredis";
 
-if (!process.env.REPLICATE_API_TOKEN) {
-  throw new Error("REPLICATE_API_TOKEN not found");
-}
-
-export function createRunpodRunnerWorker<
+export class RunpodRunnerWorker<
   TJobData extends object,
-  TJobResult,
-  QueueNameDef extends GenericRecordType
->({
-  endpointId,
-  queueName,
-  queueNamesDef,
-  projectId,
-  db,
-  workerOptions,
-  runpodApiKey,
-  storageProvider,
-}: {
-  queueName: QueueName<QueueNameDef>;
-  queueNamesDef: QueueNameDef;
-  endpointId: string;
-  projectId: string;
-  db: Knex;
-  workerOptions: WorkerOptions;
-  runpodApiKey: string;
-  storageProvider: IStorageProvider;
-}) {
-  return createWorkerMainFunction<
-    TJobData & { status: "FINISH"; runpodResult: TJobResult },
-    { runpodResult: TJobResult },
-    QueueNameDef
-  >({
+  TJobResult
+> extends ZZWorker<
+  TJobData,
+  {
+    runpodResult: TJobResult;
+  }
+> {
+  protected _endpointId: string;
+  protected _runpodApiKey: string;
+
+  constructor({
+    endpointId,
     queueName,
-    queueNamesDef,
     projectId,
     db,
-    workerOptions,
-    processor: async ({ job, logger, update }) => {
-      const input = job.data;
+    redisConfig,
+    storageProvider,
+    runpodApiKey,
+  }: {
+    queueName: string;
+    endpointId: string;
+    runpodApiKey: string;
+    projectId: string;
+    db: Knex;
+    redisConfig: RedisOptions;
+    storageProvider?: IStorageProvider;
+  }) {
+    super({
+      db,
+      redisConfig,
+      storageProvider,
+      projectId,
+      queueName,
+    });
+    this._endpointId = endpointId;
+    this._runpodApiKey = runpodApiKey;
+  }
 
-      const runUrl = `https://api.runpod.ai/v2/${endpointId}/run`;
+  protected async processor({
+    job,
+    logger,
+    update,
+  }: Parameters<
+    ZZWorker<
+      TJobData,
+      {
+        runpodResult: TJobResult;
+      }
+    >["processor"]
+  >[0]) {
+    const input = job.data;
 
-      const respP = await fetch(runUrl, {
-        method: "POST",
+    const runUrl = `https://api.runpod.ai/v2/${this._endpointId}/run`;
+
+    const respP = await fetch(runUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this._runpodApiKey}`,
+      },
+      body: JSON.stringify({
+        input: input,
+      }),
+    });
+
+    if (!respP.ok) {
+      const errorBody = await respP.text();
+      throw new Error(
+        `Fetch to runpod serverless endpoint ${this._endpointId} failed with status ${respP.status}: ${errorBody}`
+      );
+    }
+    type RunpodResult = { id: string; delayTime: number } & (
+      | {
+          status: "IN_PROGRESS";
+        }
+      | {
+          status: "IN_QUEUE";
+        }
+      | {
+          status: "CANCELLED";
+        }
+      | {
+          status: "FAILED";
+        }
+      | {
+          status: "COMPLETED";
+          executionTime: number;
+          output: TJobResult;
+        }
+    );
+
+    let runpodResult = (await respP.json()) as RunpodResult;
+
+    const statusUrl = `https://api.runpod.ai/v2/${this._endpointId}/status/${runpodResult.id}`;
+    while (
+      runpodResult.status === "IN_PROGRESS" ||
+      runpodResult.status === "IN_QUEUE"
+    ) {
+      await sleep(1500);
+      logger.info(`Checking status for job ${runpodResult.id}...`);
+      const respP = await fetch(statusUrl, {
+        method: "GET",
         headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${runpodApiKey}`,
+          Authorization: `Bearer ${this._runpodApiKey}`,
         },
-        body: JSON.stringify({
-          input: input,
-        }),
       });
 
       if (!respP.ok) {
         const errorBody = await respP.text();
         throw new Error(
-          `Fetch to runpod serverless endpoint ${endpointId} failed with status ${respP.status}: ${errorBody}`
-        );
-      }
-      type RunpodResult = { id: string; delayTime: number } & (
-        | {
-            status: "IN_PROGRESS";
-          }
-        | {
-            status: "IN_QUEUE";
-          }
-        | {
-            status: "CANCELLED";
-          }
-        | {
-            status: "FAILED";
-          }
-        | {
-            status: "COMPLETED";
-            executionTime: number;
-            output: TJobResult;
-          }
-      );
-
-      let runpodResult = (await respP.json()) as RunpodResult;
-
-      const statusUrl = `https://api.runpod.ai/v2/${endpointId}/status/${runpodResult.id}`;
-      while (
-        runpodResult.status === "IN_PROGRESS" ||
-        runpodResult.status === "IN_QUEUE"
-      ) {
-        await sleep(1500);
-        logger.info(`Checking status for job ${runpodResult.id}...`);
-        const respP = await fetch(statusUrl, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${runpodApiKey}`,
-          },
-        });
-
-        if (!respP.ok) {
-          const errorBody = await respP.text();
-          throw new Error(
-            `Fetch to runpod serverless endpoint ${endpointId} failed with status ${respP.status}: ${errorBody}`
-          );
-        }
-
-        runpodResult = await respP.json();
-        logger.info(
-          `Status for job ${runpodResult.id}: ${runpodResult.status}`
+          `Fetch to runpod serverless endpoint ${this._endpointId} failed with status ${respP.status}: ${errorBody}`
         );
       }
 
-      if (runpodResult.status === "CANCELLED") {
-        throw new Error(`Runpod job ${runpodResult.id} was cancelled`);
-      } else if (runpodResult.status === "FAILED") {
-        throw new Error(`Runpod job ${runpodResult.id} failed`);
-      }
+      runpodResult = await respP.json();
+      logger.info(`Status for job ${runpodResult.id}: ${runpodResult.status}`);
+    }
 
-      await update({
-        incrementalData: {
-          runpodResult: runpodResult.output,
-          status: "FINISH",
-        } as Partial<TJobData & { status: "FINISH"; runpodResult: TJobResult }>,
-      });
+    if (runpodResult.status === "CANCELLED") {
+      throw new Error(`Runpod job ${runpodResult.id} was cancelled`);
+    } else if (runpodResult.status === "FAILED") {
+      throw new Error(`Runpod job ${runpodResult.id} failed`);
+    }
 
-      return { runpodResult: runpodResult.output };
-    },
-    storageProvider,
-  });
+    await update({
+      incrementalData: {
+        runpodResult: runpodResult.output,
+        status: "FINISH",
+      } as Partial<TJobData & { status: "FINISH"; runpodResult: TJobResult }>,
+    });
+
+    return { runpodResult: runpodResult.output };
+  }
 }
 
 function sleep(ms: number) {

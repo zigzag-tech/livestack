@@ -8,10 +8,13 @@
   "peerDependencies": {
     "bullmq": "^4.x",
     "dotenv": "^16.x",
+    "inversify": "^6",
+    "ioredis": "^5",
     "knex": "^2.x",
     "pg": "^8.x",
+    "reflect-metadata": "^0",
     "winston": "^3.x",
-    "ioredis": "^5"
+    "rxjs": "^7"
   },
   "devDependencies": {
     "@babel/preset-typescript": "^7.22.5",
@@ -22,7 +25,8 @@
     "typescript": "5.2.2"
   },
   "optionalDependencies": {
-    "replicate": "^0.21.x",
-    "@google-cloud/storage": "^7.x"
+    "@google-cloud/storage": "^7.x",
+    "replicate": "^0.21.x"
   }
+ 
 }

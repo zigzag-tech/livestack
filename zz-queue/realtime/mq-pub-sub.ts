@@ -1,155 +1,146 @@
-import Redis from "ioredis";
-
+import Redis, { RedisOptions } from "ioredis";
+import { injectable, inject } from "inversify";
+import { IOC_TYPES } from "../ioc/ioc-types";
+import { ProjectConfig } from "../config-factory/config-defs";
+import { Observable } from "rxjs";
+import { v4 } from "uuid";
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
-const getPubSubClientsById = async ({
-  queueId,
-  projectId,
-  hoseType,
-}: {
-  queueId: string;
-  projectId: string;
-  hoseType: "input" | "output";
-}) => {
-  const id = `msgq:${hoseType}:${projectId}--${queueId!}`;
-  if (!PUBSUB_BY_ID[id]) {
-    const sub = new Redis();
-    await sub.subscribe(id, (err, count) => {
-      if (err) {
-        console.error("Failed to subscribe: %s", err.message);
-      } else {
-        // console.info(
-        //   `getPubSubClientsById: subscribed successfully! This client is currently subscribed to ${count} channels.`
-        // );
-      }
-    });
-    const pub = new Redis();
-    PUBSUB_BY_ID[id] = { sub, pub };
+export class PubSubFactory {
+  private _projectConfig: ProjectConfig;
+  private _redisConfig: RedisOptions;
+  private _queueId: string;
+
+  constructor(
+    projectConfig: ProjectConfig,
+    redisConfig: RedisOptions,
+    queueId: string
+  ) {
+    this._projectConfig = projectConfig;
+    this._redisConfig = redisConfig;
+    this._queueId = queueId;
   }
-  return { channelId: id, clients: PUBSUB_BY_ID[id] };
-};
 
-const _pub = async <T extends object>({
-  message,
-  queueId,
-  messageId,
-  hoseType,
-  projectId,
-}: {
-  message: T;
-  queueId: string;
-  messageId: string;
-  hoseType: "input" | "output";
-  projectId: string;
-}) => {
-  const { channelId, clients } = await getPubSubClientsById({
-    queueId,
-    projectId,
-    hoseType,
-  });
-  const addedMsg = await clients.pub.publish(
-    channelId,
-    customStringify({ message, messageId })
-  );
-  return addedMsg;
-};
-
-export const pubToJobInput = async <T extends object>({
-  message,
-  queueId,
-  messageId,
-  projectId,
-}: {
-  message: T;
-  queueId: string;
-  messageId: string;
-  projectId: string;
-}) => {
-  return await _pub({
+  public async pubToJobInput<T extends object>({
     message,
-    projectId,
-    queueId,
     messageId,
-    hoseType: "input",
-  });
-};
+  }: {
+    message: T;
+    messageId: string;
+  }) {
+    return await this._pub({
+      message,
+      messageId,
+      hoseType: "input",
+    });
+  }
 
-export const pubToJobOutput = async <T extends object>({
-  message,
-  queueId,
-  messageId,
-  projectId,
-}: {
-  message: T;
-  queueId: string;
-  messageId: string;
-  projectId: string;
-}) => {
-  return await _pub({
-    projectId,
+  public async pubToJobOutput<T>({
     message,
-    queueId,
     messageId,
-    hoseType: "output",
-  });
-};
+  }: {
+    message: T;
+    messageId: string;
+  }) {
+    return await this._pub({
+      message,
+      messageId,
+      hoseType: "output",
+    });
+  }
 
-const _sub = async <T>({
-  queueId,
-  processor,
-  hoseType,
-  projectId,
-}: {
-  queueId: string;
-  processor: (message: T) => void;
-  hoseType: "input" | "output";
-  projectId: string;
-}) => {
-  const { clients } = await getPubSubClientsById({
+  public subForJobInput<T>({ processor }: { processor: (message: T) => void }) {
+    return this._sub({
+      processor,
+      hoseType: "input",
+    });
+  }
+
+  public async subForJobOutput<T>({
+    processor,
+  }: {
+    processor: (message: T) => void;
+  }) {
+    return await this._sub({
+      processor,
+      hoseType: "output",
+    });
+  }
+
+  private getPubSubClientsById({
     queueId,
-    projectId,
     hoseType,
-  });
+  }: {
+    queueId: string;
+    hoseType: "input" | "output";
+  }) {
+    const id = `msgq:${hoseType}:${this._projectConfig.projectId}--${queueId!}`;
+    if (!PUBSUB_BY_ID[id]) {
+      const sub = new Redis(this._redisConfig);
+      sub.subscribe(id, (err, count) => {
+        if (err) {
+          console.error("Failed to subscribe: %s", err.message);
+        } else {
+          // console.info(
+          //   `getPubSubClientsById: subscribed successfully! This client is currently subscribed to ${count} channels.`
+          // );
+        }
+      });
+      const pub = new Redis(this._redisConfig);
+      PUBSUB_BY_ID[id] = { sub, pub };
+    }
+    return { channelId: id, clients: PUBSUB_BY_ID[id] };
+  }
 
-  clients.sub.on("message", async (channel, message) => {
-    const { message: msg, messageId } = customParse(message);
-    // console.log(`Received ${messageId} from ${channel}`);
-    await processor(msg);
-  });
+  private async _pub<T>({
+    message,
+    messageId,
+    hoseType,
+  }: {
+    message: T;
+    messageId: string;
+    hoseType: "input" | "output";
+  }) {
+    const { channelId, clients } = await this.getPubSubClientsById({
+      queueId: this._queueId,
+      hoseType,
+    });
+    const addedMsg = await clients.pub.publish(
+      channelId,
+      customStringify({ message, messageId })
+    );
+    return addedMsg;
+  }
 
-  const unsub = async () => {
-    await clients.sub.unsubscribe();
-  };
+  private _sub<T>({
+    processor,
+    hoseType,
+  }: {
+    processor: (message: T) => void;
+    hoseType: "input" | "output";
+  }) {
+    const { clients } = this.getPubSubClientsById({
+      queueId: this._queueId,
+      hoseType,
+    });
 
-  return {
-    unsub,
-  };
-};
+    clients.sub.on("message", async (channel, message) => {
+      const { message: msg, messageId } = customParse(message);
+      // console.log(`Received ${messageId} from ${channel}`);
+      await processor(msg);
+    });
+
+    const unsub = async () => {
+      await clients.sub.unsubscribe();
+    };
+
+    return {
+      unsub,
+    };
+  }
+}
 
 // TODO: make internal
-export const subForJobInput = async <T>({
-  queueId,
-  processor,
-  projectId,
-}: {
-  queueId: string;
-  processor: (message: T) => void;
-  projectId: string;
-}) => {
-  return await _sub({ projectId, queueId, processor, hoseType: "input" });
-};
-
-export const subForJobOutput = async <T>({
-  queueId,
-  processor,
-  projectId,
-}: {
-  queueId: string;
-  processor: (message: T) => void;
-  projectId: string;
-}) => {
-  return await _sub({ projectId, queueId, processor, hoseType: "output" });
-};
 
 function customStringify(obj: any): string {
   function replacer(key: string, value: any): any {
@@ -169,4 +160,84 @@ function customParse(json: string): any {
     return value;
   }
   return JSON.parse(json, reviver);
+}
+
+export function sequentialInputFactory<I>({
+  pubSubFactory,
+}: {
+  pubSubFactory: PubSubFactory;
+}) {
+  let inputGenerator: ReturnType<typeof generateInputs>;
+  let inputSubObservable: Observable<I>;
+  const nextInput = async () => {
+    if (!inputSubObservable) {
+      inputSubObservable = new Observable<I>((subscriber) => {
+        const { unsub } = pubSubFactory.subForJobInput<I>({
+          processor: async (v) => {
+            subscriber.next(v);
+          },
+        });
+        return {
+          unsubscribe: () => {
+            unsub();
+          },
+        };
+      });
+    }
+
+    const { value, done } = await inputGenerator.next();
+    if (done) {
+      throw new Error("Observable completed");
+    }
+    return value;
+  };
+
+  const generateInputs = async function* (): AsyncGenerator<I, void, unknown> {
+    let resolve: ((value: I) => void) | null = null;
+    const promiseQueue: I[] = [];
+
+    const subscription = inputSubObservable.subscribe({
+      next(value: I) {
+        if (resolve) {
+          resolve(value);
+          resolve = null;
+        } else {
+          promiseQueue.push(value);
+        }
+      },
+      error(err) {
+        throw err;
+      },
+    });
+
+    try {
+      while (true) {
+        if (promiseQueue.length > 0) {
+          yield promiseQueue.shift()!;
+        } else {
+          yield new Promise<I>((res) => {
+            resolve = res;
+          });
+        }
+      }
+    } finally {
+      subscription.unsubscribe();
+    }
+  };
+
+  return { nextInput };
+}
+
+export function sequentialOutputFactory<O>({
+  pubSubFactory,
+}: {
+  pubSubFactory: PubSubFactory;
+}) {
+  const emitOutput = async (o: O) => {
+    pubSubFactory.pubToJobOutput({
+      message: o,
+      messageId: v4(),
+    });
+  };
+  return { emitOutput };
 }

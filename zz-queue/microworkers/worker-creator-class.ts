@@ -1,3 +1,4 @@
+import { PROJECT_ID } from "./../../../config";
 import {
   _upsertAndMergeJobLogByIdAndType,
   ensureJobDependencies,
@@ -22,7 +23,12 @@ import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
 import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
 import { IStorageProvider } from "../storage/cloudStorage";
-import Redis from "ioredis";
+import Redis, { RedisOptions } from "ioredis";
+import {
+  PubSubFactory,
+  sequentialInputFactory,
+  sequentialOutputFactory,
+} from "../realtime/mq-pub-sub";
 
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
@@ -34,7 +40,14 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
   protected readonly db: Knex;
   protected readonly workerOptions: WorkerOptions;
   protected readonly storageProvider?: IStorageProvider;
-  public readonly bullMQWorker: Worker<I, O>;
+  protected readonly pubSubFactory: PubSubFactory;
+
+  public readonly bullMQWorker: Worker<
+    {
+      firstInput: I;
+    },
+    O
+  >;
   protected color?: string;
 
   public readonly addJob: IWorkerUtilFuncs["addJob"];
@@ -48,7 +61,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
     queueName,
     projectId,
     db,
-    workerOptions,
+    redisConfig,
     color,
     storageProvider,
   }: {
@@ -56,12 +69,12 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
     projectId: string;
     db: Knex;
     color?: string;
-    workerOptions: WorkerOptions;
+    redisConfig: RedisOptions;
     storageProvider?: IStorageProvider;
   }) {
     this.queueName = queueName;
     this.db = db;
-    this.workerOptions = { autorun: false, ...workerOptions };
+    this.workerOptions = { autorun: false, connection: redisConfig };
     this.storageProvider = storageProvider;
     this.color = color;
 
@@ -78,6 +91,14 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
     this.enqueueJobAndGetResult = queueFuncs.enqueueJobAndGetResult;
     this._rawQueue = queueFuncs._rawQueue;
     this.getJob = queueFuncs.getJob;
+
+    this.pubSubFactory = new PubSubFactory(
+      {
+        projectId: PROJECT_ID,
+      },
+      redisConfig,
+      queueName
+    );
 
     const logger = getLogger(`wkr:${this.queueName}`, this.color);
     const mergedWorkerOptions = _.merge({}, this.workerOptions);
@@ -215,6 +236,10 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
               },
             };
 
+            childJob_.data = {
+              firstInput: childJob_.data,
+            };
+
             const childJ = await flowProducer.add(childJob_);
           };
 
@@ -252,7 +277,13 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
               return retVal;
             };
 
-            // const nextInput = () => {};
+            const { nextInput } = sequentialInputFactory<I>({
+              pubSubFactory: this.pubSubFactory,
+            });
+
+            const { emitOutput } = sequentialOutputFactory<O>({
+              pubSubFactory: this.pubSubFactory,
+            });
 
             const processedR = await this.processor({
               job,
@@ -265,7 +296,9 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
               spawnChildJobsToWaitOn,
               getLargeValueCdnUrl,
               update,
-              // nextInput,
+              firstInput: job.data.firstInput,
+              nextInput,
+              emitOutput,
             });
             // await job.updateProgress(processedR as object);
             await _upsertAndMergeJobLogByIdAndType({
@@ -330,11 +363,13 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
   }
 
   protected abstract processor(p: {
-    job: Parameters<Processor<I, O>>[0];
-    token: Parameters<Processor<I, O>>[1];
+    job: Job<{ firstInput: I }, O>;
+    token?: string;
+    firstInput: I;
     logger: ReturnType<typeof getLogger>;
     aliveLoop: (retVal: O) => Promise<O>;
-    // nextInput: () => Promise<I>;
+    nextInput: () => Promise<I>;
+    emitOutput: (o: O) => Promise<void>;
     spawnChildJobsToWaitOn: (job: FlowJob | FlowJob[]) => Promise<void>;
     workingDirToBeUploadedToCloudStorage: string;
     update: (p: {

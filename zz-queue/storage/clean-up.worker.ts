@@ -1,28 +1,36 @@
 import fs from "fs";
 import { getTempPathByJobId } from "./temp-dirs";
 import { getMicroworkerQueueByName } from "../microworkers/queues";
-import { createWorkerMainFunction } from "../microworkers/worker-creator";
+import { ZZWorker } from "../microworkers/worker-creator-class";
 import { WorkerOptions } from "bullmq";
 import { Knex } from "knex";
+import { RedisOptions } from "ioredis";
 
 const repeatInterval = 60 * 60 * 1000;
 
 export const createCleanUpWorker = ({
   projectId,
   db,
-  workerOptions,
+  redisConfig,
 }: {
   projectId: string;
   db: Knex;
-  workerOptions: WorkerOptions;
+  redisConfig: RedisOptions;
 }) => {
-  const { mainFn: cleanUpWorkerMain } = createWorkerMainFunction({
-    queueName: "clean-up",
-    queueNamesDef: ZZ_INTERNAL_QUEUE_NAMES,
-    projectId,
-    db,
-    workerOptions,
-    processor: async ({ logger }) => {
+  class CleanUpWorker extends ZZWorker<any, any> {
+    constructor() {
+      super({
+        redisConfig,
+        projectId,
+        db,
+        color: "magenta",
+        queueName: ZZ_INTERNAL_QUEUE_NAMES.CLEAN_UP,
+      });
+    }
+
+    protected async processor({
+      logger,
+    }: Parameters<ZZWorker<any, any>["processor"]>[0]) {
       // Get records created over 24 hours ago
       const interval = 24 * 60 * 60 * 1000;
       const cutoffTime = new Date(Date.now() - interval);
@@ -43,27 +51,27 @@ export const createCleanUpWorker = ({
           logger.info(`Error deleting directory ${dirPath}: ${error.message}`);
         }
       }
-    },
-    color: "magenta",
-  });
+    }
+  }
 
   const addRepeatCleanUpJob = async (workerOptions: WorkerOptions) => {
     const { addJob } = getMicroworkerQueueByName({
-      queueNamesDef: ZZ_INTERNAL_QUEUE_NAMES,
       queueName: ZZ_INTERNAL_QUEUE_NAMES.CLEAN_UP,
       workerOptions,
       db,
       projectId,
     });
-    await addJob(
-      "clean-up-tmp-dir",
-      { repeatPattern: `every ${repeatInterval / 1000} seconds` },
-      {
+    await addJob({
+      jobId: "clean-up-tmp-dir",
+      firstInput: { repeatPattern: `every ${repeatInterval / 1000} seconds` },
+      bullMQJobsOpts: {
         repeat: { every: repeatInterval },
-      }
-    );
+      },
+    });
   };
-  return { ...cleanUpWorkerMain(), addRepeatCleanUpJob };
+
+  const cleanUpWorker = new CleanUpWorker();
+  return { ...cleanUpWorker, addRepeatCleanUpJob };
 };
 
 const ZZ_INTERNAL_QUEUE_NAMES = {

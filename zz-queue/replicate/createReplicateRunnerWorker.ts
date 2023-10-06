@@ -1,9 +1,8 @@
-import { createWorkerMainFunction } from "../microworkers/worker-creator";
+import { ZZWorker } from "../microworkers/worker-creator-class";
 import Replicate from "replicate";
-import { GenericRecordType, QueueName } from "../microworkers/workerCommon";
 import { Knex } from "knex";
-import { WorkerOptions } from "bullmq";
 import { IStorageProvider } from "../storage/cloudStorage";
+import { RedisOptions } from "ioredis";
 
 if (!process.env.REPLICATE_API_TOKEN) {
   throw new Error("REPLICATE_API_TOKEN not found");
@@ -12,54 +11,67 @@ const replicate = new Replicate({
   auth: process.env.REPLICATE_API_TOKEN,
 });
 
-export function createReplicateRunnerWorker<
+export class ReplicateRunnerWorker<
   TJobData extends object,
-  TJobResult,
-  QueueNameDef extends GenericRecordType
->({
-  endpoint,
-  queueName,
-  queueNamesDef,
-  projectId,
-  db,
-  workerOptions,
-  storageProvider,
-}: {
-  queueName: QueueName<QueueNameDef>;
-  queueNamesDef: QueueNameDef;
-  endpoint: `${string}/${string}:${string}`;
-  projectId: string;
-  db: Knex;
-  workerOptions: WorkerOptions;
-  storageProvider?: IStorageProvider;
-}) {
-  return createWorkerMainFunction<
-    TJobData & { status: "FINISH"; replicateResult: TJobResult },
-    { replicateResult: TJobResult },
-    QueueNameDef
-  >({
+  TJobResult
+> extends ZZWorker<
+  TJobData,
+  {
+    replicateResult: TJobResult;
+  }
+> {
+  protected _endpoint: `${string}/${string}:${string}`;
+  constructor({
+    endpoint,
     queueName,
-    queueNamesDef,
     projectId,
     db,
-    workerOptions,
-    processor: async ({ job, logger, update }) => {
-      const input = job.data;
-      const result = (await replicate.run(endpoint, {
-        input: input,
-      })) as unknown as TJobResult;
-
-      await update({
-        incrementalData: {
-          replicateResult: result,
-          status: "FINISH",
-        } as Partial<
-          TJobData & { status: "FINISH"; replicateResult: TJobResult }
-        >,
-      });
-
-      return { replicateResult: result };
-    },
+    redisConfig,
     storageProvider,
-  });
+  }: {
+    queueName: string;
+    endpoint: `${string}/${string}:${string}`;
+    projectId: string;
+    db: Knex;
+    redisConfig: RedisOptions;
+    storageProvider?: IStorageProvider;
+  }) {
+    super({
+      db,
+      redisConfig,
+      storageProvider,
+      projectId,
+      queueName,
+    });
+    this._endpoint = endpoint;
+  }
+
+  protected async processor({
+    job,
+    logger,
+    update,
+  }: Parameters<
+    ZZWorker<
+      TJobData,
+      {
+        replicateResult: TJobResult;
+      }
+    >["processor"]
+  >[0]) {
+    const input = job.data;
+    const result = (await replicate.run(this._endpoint, {
+      input: input,
+    })) as unknown as TJobResult;
+
+    await update({
+      incrementalData: {
+        replicateResult: result,
+        status: "FINISH",
+      } as Partial<
+        TJobData & { status: "FINISH"; replicateResult: TJobResult }
+      >,
+    });
+
+    return { replicateResult: result };
+  }
 }
