@@ -2,7 +2,7 @@
   "include": ["missing-modules.d.ts", "**/*.ts", "**/*.tsx", "*.ts", "*.tsx"],
   "compilerOptions": {
     "module": "CommonJS",
-    "types": ["reflect-metadata"],
+    // "types": ["reflect-metadata"],
     "outDir": "dist",
     "target": "ES5",
     "pretty": true,
@@ -21,9 +21,9 @@
     "strictNullChecks": true,
     "downlevelIteration": true,
     "jsx": "react",
-    "noImplicitAny": true,
-    "emitDecoratorMetadata": true,
-    "experimentalDecorators": true
+    "noImplicitAny": true
+    // "emitDecoratorMetadata": true,
+    // "experimentalDecorators": true
   },
   "exclude": ["node_modules", "dist", "*.mp3", "*.mp4"]
 }

@@ -8,11 +8,9 @@
   "peerDependencies": {
     "bullmq": "^4.x",
     "dotenv": "^16.x",
-    "inversify": "^6",
     "ioredis": "^5",
     "knex": "^2.x",
     "pg": "^8.x",
-    "reflect-metadata": "^0",
     "winston": "^3.x",
     "rxjs": "^7"
   },

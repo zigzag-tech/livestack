@@ -1,6 +1,4 @@
 import Redis, { RedisOptions } from "ioredis";
-import { injectable, inject } from "inversify";
-import { IOC_TYPES } from "../ioc/ioc-types";
 import { ProjectConfig } from "../config-factory/config-defs";
 import { Observable } from "rxjs";
 import { v4 } from "uuid";
