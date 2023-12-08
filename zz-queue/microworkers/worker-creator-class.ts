@@ -232,7 +232,11 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
             queueName + "::" + job.id!
           );
 
-          const spawnJob = async <CI, CO>(newJob_: FlowJob) => {
+          const spawnJob = async <CI, CO>(
+            newJob_: FlowJob & {
+              data: CI;
+            }
+          ) => {
             newJob_.data = {
               firstInput: newJob_.data,
             };
@@ -255,7 +259,11 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
             };
           };
 
-          const spawnChildJobsToWaitOn = async <CI, CO>(childJob_: FlowJob) => {
+          const spawnChildJobsToWaitOn = async <CI, CO>(
+            childJob_: FlowJob & {
+              data: CI;
+            }
+          ) => {
             childJob_.opts = {
               ...childJob_.opts,
               parent: {
@@ -264,7 +272,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
               },
             };
 
-            return spawnJob(childJob_);
+            return spawnJob<CI, CO>(childJob_);
           };
 
           try {
@@ -396,10 +404,14 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
     nextInput: () => Promise<I>;
     emitOutput: (o: O) => Promise<void>;
     spawnChildJobsToWaitOn: <CI, CO>(
-      job: FlowJob
+      job: FlowJob & {
+        data: CI;
+      }
     ) => Promise<{ subToOutput: PubSubFactory<CI, CO>["subForJobOutput"] }>;
     spawnJob: <CI, CO>(
-      job: FlowJob
+      job: FlowJob & {
+        data: CI;
+      }
     ) => Promise<{ subToOutput: PubSubFactory<CI, CO>["subForJobOutput"] }>;
     workingDirToBeUploadedToCloudStorage: string;
     update: (p: {
