@@ -2,6 +2,7 @@ import { ZZWorker } from "../microworkers/worker-creator-class";
 import { Knex } from "knex";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { RedisOptions } from "ioredis";
+import { first } from "lodash";
 
 export class RunpodRunnerWorker<
   TJobData extends object,
@@ -44,7 +45,7 @@ export class RunpodRunnerWorker<
   }
 
   protected async processor({
-    job,
+    firstInput,
     logger,
     update,
   }: Parameters<
@@ -55,8 +56,6 @@ export class RunpodRunnerWorker<
       }
     >["processor"]
   >[0]) {
-    const input = job.data;
-
     const runUrl = `https://api.runpod.ai/v2/${this._endpointId}/run`;
 
     const respP = await fetch(runUrl, {
@@ -66,7 +65,7 @@ export class RunpodRunnerWorker<
         Authorization: `Bearer ${this._runpodApiKey}`,
       },
       body: JSON.stringify({
-        input: input,
+        input: firstInput,
       }),
     });
 

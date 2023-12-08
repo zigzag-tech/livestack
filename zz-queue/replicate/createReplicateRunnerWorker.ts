@@ -1,3 +1,4 @@
+import { first } from "lodash";
 import { ZZWorker } from "../microworkers/worker-creator-class";
 import Replicate from "replicate";
 import { Knex } from "knex";
@@ -47,7 +48,7 @@ export class ReplicateRunnerWorker<
   }
 
   protected async processor({
-    job,
+    firstInput,
     logger,
     update,
   }: Parameters<
@@ -58,9 +59,8 @@ export class ReplicateRunnerWorker<
       }
     >["processor"]
   >[0]) {
-    const input = job.data;
     const result = (await replicate.run(this._endpoint, {
-      input: input,
+      input: firstInput,
     })) as unknown as TJobResult;
 
     await update({

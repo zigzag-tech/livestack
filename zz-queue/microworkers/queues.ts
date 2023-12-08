@@ -123,11 +123,10 @@ function createAndReturnQueue<
   const enqueueJobAndGetResult = async ({
     jobName: jobId,
     initJobData,
-    queueEventsOptions,
-  }: {
+  }: // queueEventsOptions,
+  {
     jobName?: string;
     initJobData: JobDataType;
-    queueEventsOptions?: QueueEventsOptions;
   }): Promise<JobReturnType> => {
     if (!jobId) {
       jobId = `${queueName}-${v4()}`;
@@ -135,7 +134,7 @@ function createAndReturnQueue<
 
     console.info(`Enqueueing job ${jobId} with data:`, initJobData);
     const queueEvents = new QueueEvents(queueName, {
-      ...queueEventsOptions,
+      connection: workerOptions?.connection,
     });
 
     const job = await addJob({
