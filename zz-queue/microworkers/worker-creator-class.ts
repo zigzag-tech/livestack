@@ -32,13 +32,16 @@ import {
   sequentialInputFactory,
   sequentialOutputFactory,
 } from "../realtime/mq-pub-sub";
+import { GenericRecordType } from "./workerCommon";
 
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
 const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
-type IWorkerUtilFuncs = ReturnType<typeof getMicroworkerQueueByName>;
+type IWorkerUtilFuncs<I, O> = ReturnType<
+  typeof getMicroworkerQueueByName<I, O, any>
+>;
 
-export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
+export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
   protected queueName: string;
   protected readonly db: Knex;
   protected readonly workerOptions: WorkerOptions;
@@ -53,12 +56,15 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
   >;
   protected color?: string;
 
-  public readonly addJob: IWorkerUtilFuncs["addJob"];
-  public readonly getJob: IWorkerUtilFuncs["getJob"];
-  public readonly cancelJob: IWorkerUtilFuncs["cancelJob"];
-  public readonly pingAlive: IWorkerUtilFuncs["pingAlive"];
-  public readonly enqueueJobAndGetResult: IWorkerUtilFuncs["enqueueJobAndGetResult"];
-  public readonly _rawQueue: IWorkerUtilFuncs["_rawQueue"];
+  public readonly addJob: IWorkerUtilFuncs<I, O>["addJob"];
+  public readonly getJob: IWorkerUtilFuncs<I, O>["getJob"];
+  public readonly cancelJob: IWorkerUtilFuncs<I, O>["cancelJob"];
+  public readonly pingAlive: IWorkerUtilFuncs<I, O>["pingAlive"];
+  public readonly enqueueJobAndGetResult: IWorkerUtilFuncs<
+    I,
+    O
+  >["enqueueJobAndGetResult"];
+  public readonly _rawQueue: IWorkerUtilFuncs<I, O>["_rawQueue"];
 
   constructor({
     queueName,
@@ -81,7 +87,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs {
     this.storageProvider = storageProvider;
     this.color = color;
 
-    const queueFuncs = getMicroworkerQueueByName({
+    const queueFuncs = getMicroworkerQueueByName<I, O, any>({
       queueName: this.queueName,
       workerOptions: this.workerOptions,
       db: this.db,
