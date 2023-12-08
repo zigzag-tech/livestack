@@ -128,12 +128,12 @@ export class RunpodRunnerWorker<
       throw new Error(`Runpod job ${runpodResult.id} failed`);
     }
 
-    await update({
-      incrementalData: {
-        runpodResult: runpodResult.output,
-        status: "FINISH",
-      } as Partial<TJobData & { status: "FINISH"; runpodResult: TJobResult }>,
-    });
+    // await update({
+    //   incrementalData: {
+    //     runpodResult: runpodResult.output,
+    //     status: "FINISH",
+    //   } as Partial<TJobData & { status: "FINISH"; runpodResult: TJobResult }>,
+    // });
 
     return { runpodResult: runpodResult.output };
   }

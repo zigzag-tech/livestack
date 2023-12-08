@@ -6,6 +6,7 @@ import { ConnectionOptions, QueueEvents } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
 import { IStorageProvider } from "../storage/cloudStorage";
+import { longStringTruncator } from "./queues";
 
 const logger = getLogger("data-logging");
 const OS_TEMP_DIR = os.tmpdir();
@@ -58,7 +59,8 @@ export const initializeAndLogQueueEvents = <T extends GenericRecordType>({
           } catch (error) {
             logger.error(
               `Failed to upload file ${p}. Job ID: ${jobId}, ${JSON.stringify(
-                error
+                error,
+                longStringTruncator
               )}`
             );
           }
