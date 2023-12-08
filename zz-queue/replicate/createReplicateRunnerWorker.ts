@@ -12,6 +12,8 @@ const replicate = new Replicate({
   auth: process.env.REPLICATE_API_TOKEN,
 });
 
+const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
+
 export class ReplicateRunnerWorker<
   TJobData extends object,
   TJobResult
@@ -59,9 +61,16 @@ export class ReplicateRunnerWorker<
       }
     >["processor"]
   >[0]) {
-    const result = (await replicate.run(this._endpoint, {
+    const P = (replicate.run(this._endpoint, {
       input: firstInput,
-    })) as unknown as TJobResult;
+    })) as Promise<unknown> as Promise<TJobResult>;
+
+    const result = await Promise.race([P, timeout(TIMEOUT_IN_SECONDS * 1000)]);
+
+    if (!result) {
+      throw new Error(`no result returned from replicate endpoint: ${this._endpoint}`);
+    }
+    // const result = sampleResult as any;
 
     await update({
       incrementalData: {
@@ -75,3 +84,75 @@ export class ReplicateRunnerWorker<
     return { replicateResult: result };
   }
 }
+
+function timeout(timeoutInMilliseconds: number) {
+  return new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("Timeout")), timeoutInMilliseconds)
+  );
+}
+
+const sampleResult = {
+  json_data: {
+    mask: [
+      { label: "background", value: 0 },
+      {
+        box: [
+          4.59039306640625, 4.681396484375, 762.9484252929688,
+          1018.3617553710938,
+        ],
+        label: "alphabet",
+        logit: 0.39,
+        value: 1,
+      },
+      {
+        box: [
+          304.52850341796875, 539.1644897460938, 503.0081481933594,
+          1020.618408203125,
+        ],
+        label: "crayon",
+        logit: 0.37,
+        value: 2,
+      },
+      {
+        box: [
+          30.5687255859375, 635.8360595703125, 656.815673828125,
+          1021.2097778320312,
+        ],
+        label: "child",
+        logit: 0.35,
+        value: 3,
+      },
+      {
+        box: [
+          29.861785888671875, 636.03564453125, 330.3247375488281,
+          1021.3016357421875,
+        ],
+        label: "child",
+        logit: 0.29,
+        value: 4,
+      },
+      {
+        box: [
+          2.1947174072265625, 6.9219207763671875, 284.86163330078125,
+          269.14691162109375,
+        ],
+        label: "alphabet",
+        logit: 0.26,
+        value: 5,
+      },
+      {
+        box: [
+          315.8265686035156, 203.28353881835938, 498.3658447265625,
+          513.41845703125,
+        ],
+        label: "crayon",
+        logit: 0.25,
+        value: 6,
+      },
+    ],
+    tags: "alphabet, art, child, crayon, draw, drawing, mark, writing",
+  },
+  masked_img: null,
+  rounding_box_img: null,
+  tags: "alphabet, art, child, crayon, draw, drawing, mark, writing",
+};
