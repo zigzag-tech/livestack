@@ -4,7 +4,7 @@ import { Observable } from "rxjs";
 import { v4 } from "uuid";
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
-export class PubSubFactory {
+export class PubSubFactory<I, O> {
   private _projectConfig: ProjectConfig;
   private _redisConfig: RedisOptions;
   private _queueId: string;
@@ -19,11 +19,11 @@ export class PubSubFactory {
     this._queueId = queueId;
   }
 
-  public async pubToJobInput<T extends object>({
+  public async pubToJobInput({
     message,
     messageId,
   }: {
-    message: T;
+    message: I;
     messageId: string;
   }) {
     return await this._pub({
@@ -33,11 +33,11 @@ export class PubSubFactory {
     });
   }
 
-  public async pubToJobOutput<T>({
+  public async pubToJobOutput({
     message,
     messageId,
   }: {
-    message: T;
+    message: O;
     messageId: string;
   }) {
     return await this._pub({
@@ -47,17 +47,17 @@ export class PubSubFactory {
     });
   }
 
-  public subForJobInput<T>({ processor }: { processor: (message: T) => void }) {
+  public subForJobInput({ processor }: { processor: (message: I) => void }) {
     return this._sub({
       processor,
       hoseType: "input",
     });
   }
 
-  public async subForJobOutput<T>({
+  public async subForJobOutput({
     processor,
   }: {
-    processor: (message: T) => void;
+    processor: (message: O) => void;
   }) {
     return await this._sub({
       processor,
@@ -103,6 +103,7 @@ export class PubSubFactory {
       queueId: this._queueId,
       hoseType,
     });
+
     const addedMsg = await clients.pub.publish(
       channelId,
       customStringify({ message, messageId })
@@ -117,10 +118,12 @@ export class PubSubFactory {
     processor: (message: T) => void;
     hoseType: "input" | "output";
   }) {
-    const { clients } = this.getPubSubClientsById({
+    const { clients, channelId } = this.getPubSubClientsById({
       queueId: this._queueId,
       hoseType,
     });
+
+    // console.log("sub to", channelId);
 
     clients.sub.on("message", async (channel, message) => {
       const { message: msg, messageId } = customParse(message);
@@ -163,14 +166,14 @@ function customParse(json: string): any {
 export function sequentialInputFactory<I>({
   pubSubFactory,
 }: {
-  pubSubFactory: PubSubFactory;
+  pubSubFactory: PubSubFactory<I, unknown>;
 }) {
   let inputGenerator: ReturnType<typeof generateInputs>;
   let inputSubObservable: Observable<I>;
   const nextInput = async () => {
     if (!inputSubObservable) {
       inputSubObservable = new Observable<I>((subscriber) => {
-        const { unsub } = pubSubFactory.subForJobInput<I>({
+        const { unsub } = pubSubFactory.subForJobInput({
           processor: async (v) => {
             subscriber.next(v);
           },
@@ -229,7 +232,7 @@ export function sequentialInputFactory<I>({
 export function sequentialOutputFactory<O>({
   pubSubFactory,
 }: {
-  pubSubFactory: PubSubFactory;
+  pubSubFactory: PubSubFactory<unknown, O>;
 }) {
   const emitOutput = async (o: O) => {
     pubSubFactory.pubToJobOutput({

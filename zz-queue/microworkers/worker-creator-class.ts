@@ -13,6 +13,7 @@ import {
   FlowJob,
   WorkerOptions,
   Processor,
+  JobNode,
 } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { getMicroworkerQueueByName, longStringTruncator } from "./queues";
@@ -32,7 +33,6 @@ import {
   sequentialInputFactory,
   sequentialOutputFactory,
 } from "../realtime/mq-pub-sub";
-import { GenericRecordType } from "./workerCommon";
 
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
@@ -46,7 +46,6 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
   protected readonly db: Knex;
   protected readonly workerOptions: WorkerOptions;
   protected readonly storageProvider?: IStorageProvider;
-  protected readonly pubSubFactory: PubSubFactory;
 
   public readonly bullMQWorker: Worker<
     {
@@ -60,6 +59,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
   public readonly getJob: IWorkerUtilFuncs<I, O>["getJob"];
   public readonly cancelJob: IWorkerUtilFuncs<I, O>["cancelJob"];
   public readonly pingAlive: IWorkerUtilFuncs<I, O>["pingAlive"];
+  public readonly getJobData: IWorkerUtilFuncs<I, O>["getJobData"];
   public readonly enqueueJobAndGetResult: IWorkerUtilFuncs<
     I,
     O
@@ -73,6 +73,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
     redisConfig,
     color,
     storageProvider,
+    concurrency = 1,
   }: {
     queueName: string;
     projectId: string;
@@ -80,10 +81,15 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
     color?: string;
     redisConfig: RedisOptions;
     storageProvider?: IStorageProvider;
+    concurrency?: number;
   }) {
     this.queueName = queueName;
     this.db = db;
-    this.workerOptions = { autorun: false, connection: redisConfig };
+    this.workerOptions = {
+      autorun: false,
+      concurrency,
+      connection: redisConfig,
+    };
     this.storageProvider = storageProvider;
     this.color = color;
 
@@ -100,14 +106,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
     this.enqueueJobAndGetResult = queueFuncs.enqueueJobAndGetResult;
     this._rawQueue = queueFuncs._rawQueue;
     this.getJob = queueFuncs.getJob;
-
-    this.pubSubFactory = new PubSubFactory(
-      {
-        projectId,
-      },
-      redisConfig,
-      queueName
-    );
+    this.getJobData = queueFuncs.getJobData;
 
     const logger = getLogger(`wkr:${this.queueName}`, this.color);
     const mergedWorkerOptions = _.merge({}, this.workerOptions);
@@ -225,18 +224,38 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
               dbConn: this.db,
             });
           };
+          const pubSubFactory = new PubSubFactory<I, O>(
+            {
+              projectId,
+            },
+            redisConfig,
+            queueName + "::" + job.id!
+          );
 
-          const spawnChildJobsToWaitOn = async (job_: FlowJob | FlowJob[]) => {
-            if (!Array.isArray(job_)) {
-              await _spawn(job_);
-            } else {
-              for (const j of job_) {
-                await _spawn(j);
-              }
-            }
+          const spawnJob = async <CI, CO>(newJob_: FlowJob) => {
+            newJob_.data = {
+              firstInput: newJob_.data,
+            };
+
+            newJob_.opts = {
+              ...newJob_.opts,
+              jobId: newJob_.name,
+            };
+
+            const pubsubForChild = new PubSubFactory<CI, CO>(
+              {
+                projectId,
+              },
+              redisConfig,
+              newJob_.queueName + "::" + newJob_.name
+            );
+            await flowProducer.add(newJob_);
+            return {
+              subToOutput: pubsubForChild.subForJobOutput.bind(pubsubForChild),
+            };
           };
 
-          const _spawn = async (childJob_: FlowJob) => {
+          const spawnChildJobsToWaitOn = async <CI, CO>(childJob_: FlowJob) => {
             childJob_.opts = {
               ...childJob_.opts,
               parent: {
@@ -245,11 +264,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
               },
             };
 
-            childJob_.data = {
-              firstInput: childJob_.data,
-            };
-
-            const childJ = await flowProducer.add(childJob_);
+            return spawnJob(childJob_);
           };
 
           try {
@@ -287,11 +302,11 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
             };
 
             const { nextInput } = sequentialInputFactory<I>({
-              pubSubFactory: this.pubSubFactory,
+              pubSubFactory: pubSubFactory,
             });
 
             const { emitOutput } = sequentialOutputFactory<O>({
-              pubSubFactory: this.pubSubFactory,
+              pubSubFactory: pubSubFactory,
             });
 
             const processedR = await this.processor({
@@ -303,6 +318,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
               ensureLocalSourceFileExists,
               saveToTextFile,
               spawnChildJobsToWaitOn,
+              spawnJob,
               getLargeValueCdnUrl,
               update,
               firstInput: job.data.firstInput,
@@ -379,7 +395,12 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
     aliveLoop: (retVal: O) => Promise<O>;
     nextInput: () => Promise<I>;
     emitOutput: (o: O) => Promise<void>;
-    spawnChildJobsToWaitOn: (job: FlowJob | FlowJob[]) => Promise<void>;
+    spawnChildJobsToWaitOn: <CI, CO>(
+      job: FlowJob
+    ) => Promise<{ subToOutput: PubSubFactory<CI, CO>["subForJobOutput"] }>;
+    spawnJob: <CI, CO>(
+      job: FlowJob
+    ) => Promise<{ subToOutput: PubSubFactory<CI, CO>["subForJobOutput"] }>;
     workingDirToBeUploadedToCloudStorage: string;
     update: (p: {
       incrementalData?: Partial<I>;

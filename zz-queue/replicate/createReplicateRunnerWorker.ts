@@ -31,6 +31,7 @@ export class ReplicateRunnerWorker<
     db,
     redisConfig,
     storageProvider,
+    concurrency = 1,
   }: {
     queueName: string;
     endpoint: `${string}/${string}:${string}`;
@@ -38,6 +39,7 @@ export class ReplicateRunnerWorker<
     db: Knex;
     redisConfig: RedisOptions;
     storageProvider?: IStorageProvider;
+    concurrency?: number;
   }) {
     super({
       db,
@@ -45,6 +47,7 @@ export class ReplicateRunnerWorker<
       storageProvider,
       projectId,
       queueName,
+      concurrency,
     });
     this._endpoint = endpoint;
   }
@@ -53,6 +56,7 @@ export class ReplicateRunnerWorker<
     firstInput,
     logger,
     update,
+    emitOutput,
   }: Parameters<
     ZZWorker<
       TJobData,
@@ -79,6 +83,10 @@ export class ReplicateRunnerWorker<
       } as Partial<
         TJobData & { status: "FINISH"; replicateResult: TJobResult }
       >,
+    });
+
+    await emitOutput({
+      replicateResult: result,
     });
 
     return { replicateResult: result };

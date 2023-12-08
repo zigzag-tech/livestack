@@ -14,7 +14,6 @@ import {
 import { Knex } from "knex";
 import { v4 } from "uuid";
 import Redis from "ioredis";
-import { first } from "lodash";
 
 const queueMap = new Map<
   QueueName<GenericRecordType>,
@@ -101,7 +100,7 @@ function createAndReturnQueue<
     return j;
   };
 
-  const getJob = async (jobId: string) => {
+  const getJobData = async (jobId: string) => {
     const j = await queue.getJob(jobId);
     if (!j) {
       const dbJ = await getJobLogByIdAndType({
@@ -113,10 +112,19 @@ function createAndReturnQueue<
       if (dbJ) {
         return {
           id: dbJ.job_id,
-          firstInput: dbJ.job_data as { firstInput: JobReturnType },
+          firstInput: dbJ.job_data as { firstInput: JobDataType },
         };
       }
+    } else {
+      return {
+        id: j.id,
+        firstInput: j.data.firstInput,
+      };
     }
+  };
+
+  const getJob = async (jobId: string) => {
+    const j = await queue.getJob(jobId);
     return j || null;
   };
 
@@ -171,6 +179,7 @@ function createAndReturnQueue<
     addJob,
     enqueueJobAndGetResult,
     getJob,
+    getJobData,
     cancelJob,
     pingAlive,
     _rawQueue: queue,
