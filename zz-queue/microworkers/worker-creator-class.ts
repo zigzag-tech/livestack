@@ -73,7 +73,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
     redisConfig,
     color,
     storageProvider,
-    concurrency = 1,
+    concurrency = 3,
   }: {
     queueName: string;
     projectId: string;

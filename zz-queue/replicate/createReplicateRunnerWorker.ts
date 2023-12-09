@@ -31,7 +31,7 @@ export class ReplicateRunnerWorker<
     db,
     redisConfig,
     storageProvider,
-    concurrency = 1,
+    concurrency = 3,
   }: {
     queueName: string;
     endpoint: `${string}/${string}:${string}`;
@@ -65,14 +65,16 @@ export class ReplicateRunnerWorker<
       }
     >["processor"]
   >[0]) {
-    const P = (replicate.run(this._endpoint, {
+    const P = replicate.run(this._endpoint, {
       input: firstInput,
-    })) as Promise<unknown> as Promise<TJobResult>;
+    }) as Promise<unknown> as Promise<TJobResult>;
 
     const result = await Promise.race([P, timeout(TIMEOUT_IN_SECONDS * 1000)]);
 
     if (!result) {
-      throw new Error(`no result returned from replicate endpoint: ${this._endpoint}`);
+      throw new Error(
+        `no result returned from replicate endpoint: ${this._endpoint}`
+      );
     }
     // const result = sampleResult as any;
 
