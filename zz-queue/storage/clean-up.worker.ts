@@ -1,7 +1,7 @@
 import fs from "fs";
 import { getTempPathByJobId } from "./temp-dirs";
 import { getMicroworkerQueueByName } from "../microworkers/queues";
-import { ZZWorker } from "../microworkers/worker-creator-class";
+import { ZZWorker } from "../microworkers/ZZWorker";
 import { WorkerOptions } from "bullmq";
 import { Knex } from "knex";
 import { RedisOptions } from "ioredis";

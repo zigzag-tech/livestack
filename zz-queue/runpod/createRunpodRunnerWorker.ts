@@ -1,4 +1,4 @@
-import { ZZWorker } from "../microworkers/worker-creator-class";
+import { ZZWorker } from "../microworkers/ZZWorker";
 import { Knex } from "knex";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { RedisOptions } from "ioredis";

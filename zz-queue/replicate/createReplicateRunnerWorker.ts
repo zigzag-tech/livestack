@@ -1,5 +1,5 @@
 import { first } from "lodash";
-import { ZZWorker } from "../microworkers/worker-creator-class";
+import { ZZWorker } from "../microworkers/ZZWorker";
 import Replicate from "replicate";
 import { Knex } from "knex";
 import { IStorageProvider } from "../storage/cloudStorage";
