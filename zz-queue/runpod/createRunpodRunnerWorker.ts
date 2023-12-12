@@ -45,7 +45,7 @@ export class RunpodRunnerWorker<
   }
 
   protected async processor({
-    firstInput,
+    params,
     logger,
     update,
   }: Parameters<
@@ -65,7 +65,7 @@ export class RunpodRunnerWorker<
         Authorization: `Bearer ${this._runpodApiKey}`,
       },
       body: JSON.stringify({
-        input: firstInput,
+        input: params,
       }),
     });
 

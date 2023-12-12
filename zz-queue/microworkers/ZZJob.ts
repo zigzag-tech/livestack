@@ -75,7 +75,7 @@ export class ZZJob<P, O, StreamI = never> {
   processor: (p: ZZJob<P, O, StreamI>) => Promise<O>;
 
   constructor(p: {
-    bullMQJob: Job<{ params: P }, O>;
+    bullMQJob: Job<{ params: P }, O, string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
     params: P;
@@ -86,6 +86,7 @@ export class ZZJob<P, O, StreamI = never> {
     storageProvider?: IStorageProvider;
     db: Knex;
     processor: (
+      this: ZZJob<P, O, StreamI>,
       p: ZZJob<P, O, StreamI>
     ) => ReturnType<ZZProcessor<P, O, StreamI>>;
   }) {
@@ -126,8 +127,8 @@ export class ZZJob<P, O, StreamI = never> {
     this.emitOutput = emitOutput;
   }
 
-  public async beginProcessing() {
-    const savedResult = await getJobLogByIdAndType({
+  public async beginProcessing(): Promise<O> {
+    const savedResult = await getJobLogByIdAndType<O>({
       jobType: this.queueName,
       jobId: this.bullMQJob.id!,
       projectId: this.projectId,
@@ -179,6 +180,7 @@ export class ZZJob<P, O, StreamI = never> {
           dbConn: this.db,
           jobStatus: "completed",
         });
+        return processedR;
       } catch (e: any) {
         if (e instanceof WaitingChildrenError) {
           await _upsertAndMergeJobLogByIdAndType({
@@ -196,8 +198,8 @@ export class ZZJob<P, O, StreamI = never> {
             dbConn: this.db,
             jobStatus: "failed",
           });
-          throw e;
         }
+        throw e;
       }
     }
   }

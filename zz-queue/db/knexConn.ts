@@ -27,17 +27,20 @@ export const getDatabaseInstance = ({
     useNullAsDefault: true,
   });
 
-export type JobLog<T extends GenericRecordType> = {
+export type JobLog<O, T extends GenericRecordType> = {
   project_id: string;
   job_type: QueueName<T>;
   job_id: string;
-  job_data: any; // JSONB type
+  job_data: O; // JSONB type
   job_status: keyof WorkerListener | "waiting_children";
   time_created: Date;
   time_updated: Date;
 };
 
-export async function getJobLogByIdAndType<T extends GenericRecordType>({
+export async function getJobLogByIdAndType<
+  O,
+  T extends GenericRecordType = GenericRecordType
+>({
   projectId,
   jobType,
   jobId,
@@ -53,7 +56,7 @@ export async function getJobLogByIdAndType<T extends GenericRecordType>({
   const r = (await dbConn("jobs_log")
     .select("*")
     .where({ job_type: jobType, job_id: jobId, project_id: projectId })
-    .first()) as JobLog<T> | null;
+    .first()) as JobLog<O, T> | null;
   if (jobStatus && r?.job_status === jobStatus) {
     return r;
   } else {

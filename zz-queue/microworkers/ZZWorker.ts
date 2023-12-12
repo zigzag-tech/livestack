@@ -88,7 +88,7 @@ export abstract class ZZWorker<P, O, StreamI = never>
     const mergedWorkerOptions = _.merge({}, this.workerOptions);
     const flowProducer = new FlowProducer(mergedWorkerOptions);
 
-    this.bullMQWorker = new Worker(
+    this.bullMQWorker = new Worker<{ params: P }, O, string>(
       this.queueName,
       async (job, token) => {
         const zzJ = new ZZJob<P, O, StreamI>({

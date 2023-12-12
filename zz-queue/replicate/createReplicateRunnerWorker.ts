@@ -53,7 +53,7 @@ export class ReplicateRunnerWorker<
   }
 
   protected async processor({
-    firstInput,
+    params,
     logger,
     update,
     emitOutput,
@@ -66,7 +66,7 @@ export class ReplicateRunnerWorker<
     >["processor"]
   >[0]) {
     const P = replicate.run(this._endpoint, {
-      input: firstInput,
+      input: params,
     }) as Promise<unknown> as Promise<TJobResult>;
 
     const result = await Promise.race([P, timeout(TIMEOUT_IN_SECONDS * 1000)]);

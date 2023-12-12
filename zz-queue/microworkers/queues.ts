@@ -62,7 +62,7 @@ function createAndReturnQueue<
   workerOptions?: WorkerOptions;
   db: Knex;
 }) {
-  const queue = new Queue<{ firstInput: JobDataType }, JobReturnType>(
+  const queue = new Queue<{ params: JobDataType }, JobReturnType>(
     queueName,
     workerOptions
   );
@@ -71,17 +71,17 @@ function createAndReturnQueue<
   // return queue as Queue<JobDataType, JobReturnType>;
   const addJob = async ({
     jobId,
-    firstInput,
+    params,
     bullMQJobsOpts,
   }: {
     jobId: string;
-    firstInput: JobDataType;
+    params: JobDataType;
     bullMQJobsOpts?: JobsOptions;
   }) => {
     // force job id to be the same as name
     const j = await queue.add(
       jobId,
-      { firstInput },
+      { params },
       { ...bullMQJobsOpts, jobId: jobId }
     );
     logger.info(
@@ -93,7 +93,7 @@ function createAndReturnQueue<
       projectId,
       jobType: queueName,
       jobId: j.id!,
-      jobData: { firstInput },
+      jobData: { params },
       dbConn: db,
     });
 
@@ -112,13 +112,13 @@ function createAndReturnQueue<
       if (dbJ) {
         return {
           id: dbJ.job_id,
-          firstInput: dbJ.job_data as { firstInput: JobDataType },
+          params: dbJ.job_data as { params: JobDataType },
         };
       }
     } else {
       return {
         id: j.id,
-        firstInput: j.data.firstInput,
+        params: j.data.params,
       };
     }
   };
@@ -147,7 +147,7 @@ function createAndReturnQueue<
 
     const job = await addJob({
       jobId,
-      firstInput: initJobData,
+      params: initJobData,
     });
 
     try {

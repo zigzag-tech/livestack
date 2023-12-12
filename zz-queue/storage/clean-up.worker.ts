@@ -25,32 +25,33 @@ export const createCleanUpWorker = ({
         db,
         color: "magenta",
         queueName: ZZ_INTERNAL_QUEUE_NAMES.CLEAN_UP,
+        processor: async ({ logger }) => {
+          // Get records created over 24 hours ago
+          const interval = 24 * 60 * 60 * 1000;
+          const cutoffTime = new Date(Date.now() - interval);
+          const prevCutoffTime = new Date(
+            Date.now() - interval - repeatInterval
+          );
+
+          const rs = (await db("jobs_log")
+            .distinct("job_id")
+            .where("time_created", "<", cutoffTime)
+            .andWhere("time_created", ">=", prevCutoffTime)
+            .andWhereLike("job_id", `job_%`)) as { job_id: string }[];
+
+          for (const { job_id: jobId } of rs) {
+            const dirPath = getTempPathByJobId(jobId);
+            try {
+              fs.rmSync(dirPath, { recursive: true });
+              logger.info(`Deleted directory ${dirPath}`);
+            } catch (error: any) {
+              logger.info(
+                `Error deleting directory ${dirPath}: ${error.message}`
+              );
+            }
+          }
+        },
       });
-    }
-
-    protected async processor({
-      logger,
-    }: Parameters<ZZWorker<any, any>["processor"]>[0]) {
-      // Get records created over 24 hours ago
-      const interval = 24 * 60 * 60 * 1000;
-      const cutoffTime = new Date(Date.now() - interval);
-      const prevCutoffTime = new Date(Date.now() - interval - repeatInterval);
-
-      const rs = (await db("jobs_log")
-        .distinct("job_id")
-        .where("time_created", "<", cutoffTime)
-        .andWhere("time_created", ">=", prevCutoffTime)
-        .andWhereLike("job_id", `job_%`)) as { job_id: string }[];
-
-      for (const { job_id: jobId } of rs) {
-        const dirPath = getTempPathByJobId(jobId);
-        try {
-          fs.rmSync(dirPath, { recursive: true });
-          logger.info(`Deleted directory ${dirPath}`);
-        } catch (error: any) {
-          logger.info(`Error deleting directory ${dirPath}: ${error.message}`);
-        }
-      }
     }
   }
 
@@ -63,7 +64,7 @@ export const createCleanUpWorker = ({
     });
     await addJob({
       jobId: "clean-up-tmp-dir",
-      firstInput: { repeatPattern: `every ${repeatInterval / 1000} seconds` },
+      params: { repeatPattern: `every ${repeatInterval / 1000} seconds` },
       bullMQJobsOpts: {
         repeat: { every: repeatInterval },
       },
