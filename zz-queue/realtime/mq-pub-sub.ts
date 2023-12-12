@@ -169,10 +169,10 @@ export function sequentialInputFactory<I>({
   pubSubFactory: PubSubFactory<I, unknown>;
 }) {
   let inputGenerator: ReturnType<typeof generateInputs>;
-  let inputSubObservable: Observable<I>;
-  const nextInput = async () => {
-    if (!inputSubObservable) {
-      inputSubObservable = new Observable<I>((subscriber) => {
+  let _inputObservable: Observable<I>;
+  const ensureInputObservable = () => {
+    if (!_inputObservable) {
+      _inputObservable = new Observable<I>((subscriber) => {
         const { unsub } = pubSubFactory.subForJobInput({
           processor: async (v) => {
             subscriber.next(v);
@@ -185,6 +185,10 @@ export function sequentialInputFactory<I>({
         };
       });
     }
+    return _inputObservable;
+  };
+  const nextInput = async () => {
+    ensureInputObservable();
 
     const { value, done } = await inputGenerator.next();
     if (done) {
@@ -197,7 +201,7 @@ export function sequentialInputFactory<I>({
     let resolve: ((value: I) => void) | null = null;
     const promiseQueue: I[] = [];
 
-    const subscription = inputSubObservable.subscribe({
+    const subscription = ensureInputObservable().subscribe({
       next(value: I) {
         if (resolve) {
           resolve(value);
@@ -226,7 +230,12 @@ export function sequentialInputFactory<I>({
     }
   };
 
-  return { nextInput };
+  return {
+    nextInput,
+    get inputObservable() {
+      return ensureInputObservable();
+    },
+  };
 }
 
 export function sequentialOutputFactory<O>({

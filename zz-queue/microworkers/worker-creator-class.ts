@@ -13,7 +13,6 @@ import {
   FlowJob,
   WorkerOptions,
   Processor,
-  JobNode,
 } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { getMicroworkerQueueByName, longStringTruncator } from "./queues";
@@ -33,6 +32,7 @@ import {
   sequentialInputFactory,
   sequentialOutputFactory,
 } from "../realtime/mq-pub-sub";
+import { Observable } from "rxjs";
 
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
@@ -40,6 +40,10 @@ const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
 >;
+
+export type ZZProcessor<I, O> = ZZWorker<I, O>["processor"];
+export type ZZProcessorParams<I, O> = Parameters<ZZProcessor<I, O>>[0];
+export type ZZProcessorReturn<I, O> = ReturnType<ZZProcessor<I, O>>;
 
 export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
   protected queueName: string;
@@ -309,7 +313,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
               return retVal;
             };
 
-            const { nextInput } = sequentialInputFactory<I>({
+            const { nextInput, inputObservable } = sequentialInputFactory<I>({
               pubSubFactory: pubSubFactory,
             });
 
@@ -321,6 +325,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
               job,
               token,
               logger,
+              inputObservable,
               aliveLoop,
               workingDirToBeUploadedToCloudStorage: workingDir,
               ensureLocalSourceFileExists,
@@ -399,6 +404,7 @@ export abstract class ZZWorker<I, O> implements IWorkerUtilFuncs<I, O> {
     job: Job<{ firstInput: I }, O>;
     token?: string;
     firstInput: I;
+    inputObservable: Observable<I>;
     logger: ReturnType<typeof getLogger>;
     aliveLoop: (retVal: O) => Promise<O>;
     nextInput: () => Promise<I>;
