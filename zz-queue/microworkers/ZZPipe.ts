@@ -7,10 +7,7 @@ import { ZZWorker } from "./ZZWorker";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
 
-import {
-  _upsertAndMergeJobLogByIdAndType,
-  getJobLogByIdAndType,
-} from "../db/knexConn";
+import { getJobLogByIdAndType } from "../db/knexConn";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import { PipeDef, ZZEnv } from "./PipeRegistry";

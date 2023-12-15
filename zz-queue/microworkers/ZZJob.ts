@@ -18,11 +18,7 @@ import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import fs from "fs";
 import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
-import {
-  _upsertAndMergeJobLogByIdAndType,
-  ensureJobDependencies,
-  getJobLogByIdAndType,
-} from "../db/knexConn";
+import { ensureJobDependencies, getJobLogByIdAndType } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
 import { ZZPipe } from "./ZZPipe";
 import { PipeDef, ZZEnv } from "./PipeRegistry";

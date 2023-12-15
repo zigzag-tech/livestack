@@ -64,44 +64,6 @@ export async function getJobLogByIdAndType<
   }
 }
 
-export async function _upsertAndMergeJobLogByIdAndType<
-  T extends GenericRecordType
->({
-  projectId,
-  jobType,
-  jobId,
-  jobData: newJobData,
-  dbConn,
-  jobStatus,
-}: {
-  projectId: string;
-  jobType: QueueName<T>;
-  jobId: string;
-  jobData?: any;
-  dbConn: Knex;
-  jobStatus?: keyof WorkerListener | "waiting_children";
-}) {
-  const upsertR = await dbConn.transaction(async (trx) => {
-    const updateR = await trx.raw(
-      `
-  INSERT INTO "jobs_log" ("job_type", "job_id", "project_id", "job_data", "job_status")
-  VALUES (?, ?, ?, ?::jsonb, ?)
-  ON CONFLICT ("job_type", "job_id", "project_id") DO UPDATE
-  SET "job_data" = "jobs_log"."job_data" || EXCLUDED."job_data",
-      "job_status" = COALESCE(EXCLUDED."job_status", "jobs_log"."job_status")
-`,
-      [
-        jobType,
-        jobId,
-        projectId,
-        JSON.stringify({ ...newJobData }),
-        jobStatus || "active",
-      ]
-    );
-  });
-  // return upsertR;
-}
-
 export async function ensureJobDependencies({
   parentJobId,
   childJobId,

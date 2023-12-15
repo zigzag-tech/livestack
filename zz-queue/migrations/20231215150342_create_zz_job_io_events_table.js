@@ -11,6 +11,7 @@ exports.up = function (knex) {
     table.string("job_id").notNullable();
     table.string("io_type").notNullable();
     table.string("job_data_id").notNullable();
+    table.timestamp("time_created").defaultTo(knex.fn.now());
 
     // add foreign key for primary key
     table
