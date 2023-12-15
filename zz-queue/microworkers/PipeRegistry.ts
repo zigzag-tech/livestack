@@ -27,7 +27,7 @@ export class PipeDef<P, O, StreamI> {
 }
 
 export class ZZEnv {
-  public readonly storageProvider: IStorageProvider;
+  public readonly storageProvider?: IStorageProvider;
   public readonly projectId: string;
   public readonly db: Knex;
   public readonly redisConfig: RedisOptions;
@@ -38,7 +38,7 @@ export class ZZEnv {
     db,
     redisConfig,
   }: {
-    storageProvider: IStorageProvider;
+    storageProvider?: IStorageProvider;
     projectId: string;
     db: Knex;
     redisConfig: RedisOptions;
