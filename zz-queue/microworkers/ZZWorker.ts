@@ -1,25 +1,19 @@
 import _ from "lodash";
-import { Worker, Job, FlowProducer, WorkerOptions } from "bullmq";
+import { Worker, Job, FlowProducer } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import { getMicroworkerQueueByName } from "./queues";
-import { Knex } from "knex";
-
 import { IStorageProvider } from "../storage/cloudStorage";
-import { RedisOptions } from "ioredis";
 import { ZZJob, ZZProcessor } from "./ZZJob";
+import { ZZPipe, getMicroworkerQueueByName } from "./ZZPipe";
+import { PipeDef, ZZEnv } from "./PipeRegistry";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
 >;
 
-export abstract class ZZWorker<P, O, StreamI = never>
-  implements IWorkerUtilFuncs<P, O>
-{
-  protected queueName: string;
-  protected readonly db: Knex;
-  protected readonly workerOptions: WorkerOptions;
-  protected readonly storageProvider?: IStorageProvider;
+export class ZZWorker<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
+  public readonly pipe: ZZPipe<P, O, StreamI>;
+  protected readonly zzEnv: ZZEnv;
 
   public readonly bullMQWorker: Worker<
     {
@@ -31,7 +25,10 @@ export abstract class ZZWorker<P, O, StreamI = never>
 
   public readonly addJob: IWorkerUtilFuncs<P, O>["addJob"];
   public readonly getJob: IWorkerUtilFuncs<P, O>["getJob"];
-  public readonly cancelJob: IWorkerUtilFuncs<P, O>["cancelJob"];
+  public readonly cancelLongRunningJob: IWorkerUtilFuncs<
+    P,
+    O
+  >["cancelLongRunningJob"];
   public readonly pingAlive: IWorkerUtilFuncs<P, O>["pingAlive"];
   public readonly getJobData: IWorkerUtilFuncs<P, O>["getJobData"];
   public readonly enqueueJobAndGetResult: IWorkerUtilFuncs<
@@ -39,69 +36,62 @@ export abstract class ZZWorker<P, O, StreamI = never>
     O
   >["enqueueJobAndGetResult"];
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
+  public readonly def: PipeDef<P, O, StreamI>;
 
   constructor({
-    queueName,
-    projectId,
-    db,
-    redisConfig,
+    pipe,
+    zzEnv,
     color,
-    storageProvider,
     concurrency = 3,
     processor,
   }: {
-    queueName: string;
-    projectId: string;
-    db: Knex;
+    zzEnv: ZZEnv;
     color?: string;
-    redisConfig: RedisOptions;
     storageProvider?: IStorageProvider;
     concurrency?: number;
+    pipe: ZZPipe<P, O, StreamI>;
     processor: ZZProcessor<P, O, StreamI>;
   }) {
-    this.queueName = queueName;
-    this.db = db;
-    this.workerOptions = {
+    this.pipe = pipe;
+    this.zzEnv = zzEnv;
+    this.def = pipe.def;
+
+    const workerOptions = {
       autorun: false,
       concurrency,
-      connection: redisConfig,
+      connection: this.zzEnv.redisConfig,
     };
-    this.storageProvider = storageProvider;
     this.color = color;
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
-      queueName: this.queueName,
-      workerOptions: this.workerOptions,
-      db: this.db,
-      projectId,
+      queueName: this.def.name,
+      workerOptions: workerOptions,
+      db: this.zzEnv.db,
+      projectId: this.zzEnv.projectId,
     });
 
     this.addJob = queueFuncs.addJob;
-    this.cancelJob = queueFuncs.cancelJob;
+    this.cancelLongRunningJob = queueFuncs.cancelLongRunningJob;
     this.pingAlive = queueFuncs.pingAlive;
     this.enqueueJobAndGetResult = queueFuncs.enqueueJobAndGetResult;
     this._rawQueue = queueFuncs._rawQueue;
     this.getJob = queueFuncs.getJob;
     this.getJobData = queueFuncs.getJobData;
 
-    const logger = getLogger(`wkr:${this.queueName}`, this.color);
-    const mergedWorkerOptions = _.merge({}, this.workerOptions);
+    const logger = getLogger(`wkr:${this.def.name}`, this.color);
+    const mergedWorkerOptions = _.merge({}, workerOptions);
     const flowProducer = new FlowProducer(mergedWorkerOptions);
 
     this.bullMQWorker = new Worker<{ params: P }, O, string>(
-      this.queueName,
+      this.def.name,
       async (job, token) => {
         const zzJ = new ZZJob<P, O, StreamI>({
           bullMQJob: job,
           bullMQToken: token,
           logger,
           flowProducer,
-          projectId,
-          queueName: this.queueName,
-          storageProvider: this.storageProvider,
-          redisConfig,
-          processor,
-          db,
+          pipe: this.pipe,
+          processor: processor,
           params: job.data.params,
         });
 
@@ -135,7 +125,7 @@ export abstract class ZZWorker<P, O, StreamI = never>
 
     this.bullMQWorker.run();
 
-    logger.info(`${this.queueName} worker started.`);
+    logger.info(`${this.def.name} worker started.`);
   }
 }
 

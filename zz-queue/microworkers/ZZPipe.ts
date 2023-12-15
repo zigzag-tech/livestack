@@ -1,24 +1,112 @@
-import {
-  JobsOptions,
-  QueueEvents,
-  QueueEventsOptions,
-  WorkerOptions,
-} from "bullmq";
-import { GenericRecordType, QueueName } from "./workerCommon";
-import { Queue, Job } from "bullmq";
+import { Job, JobsOptions, Queue, WorkerOptions, QueueEvents } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
+import { Knex } from "knex";
+import { IStorageProvider } from "../storage/cloudStorage";
+import { ZZProcessor } from "./ZZJob";
+import { ZZWorker } from "./ZZWorker";
+import { GenericRecordType, QueueName } from "./workerCommon";
+import Redis from "ioredis";
+
 import {
   _upsertAndMergeJobLogByIdAndType,
   getJobLogByIdAndType,
 } from "../db/knexConn";
-import { Knex } from "knex";
 import { v4 } from "uuid";
-import Redis from "ioredis";
+import longStringTruncator from "../utils/longStringTruncator";
+import { PipeDef, ZZEnv } from "./PipeRegistry";
+
+export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
+type IWorkerUtilFuncs<I, O> = ReturnType<
+  typeof getMicroworkerQueueByName<I, O, any>
+>;
 
 const queueMap = new Map<
   QueueName<GenericRecordType>,
   ReturnType<typeof createAndReturnQueue>
 >();
+
+export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
+  public def: PipeDef<P, O, StreamI>;
+  public readonly zzEnv: ZZEnv;
+  protected readonly workerOptions: WorkerOptions;
+  protected readonly storageProvider?: IStorageProvider;
+
+  public readonly workers: ZZWorker<P, O, StreamI>[] = [];
+  protected color?: string;
+
+  public readonly addJob: IWorkerUtilFuncs<P, O>["addJob"];
+  public readonly getJob: IWorkerUtilFuncs<P, O>["getJob"];
+  public readonly cancelLongRunningJob: IWorkerUtilFuncs<
+    P,
+    O
+  >["cancelLongRunningJob"];
+  public readonly pingAlive: IWorkerUtilFuncs<P, O>["pingAlive"];
+  public readonly getJobData: IWorkerUtilFuncs<P, O>["getJobData"];
+  public readonly enqueueJobAndGetResult: IWorkerUtilFuncs<
+    P,
+    O
+  >["enqueueJobAndGetResult"];
+  public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
+  // dummy processor
+  private processor: ZZProcessor<P, O, StreamI> = async (job) => {
+    throw new Error(`Processor not set!`);
+  };
+
+  public async startWorker({ concurrency }: { concurrency?: number }) {
+    const worker = new ZZWorker<P, O, StreamI>({
+      zzEnv: this.zzEnv,
+      processor: this.processor,
+      color: this.color,
+      pipe: this,
+      concurrency,
+    });
+    this.workers.push(worker);
+    return worker;
+  }
+
+  constructor({
+    zzEnv,
+    def,
+    color,
+    processor,
+  }: {
+    zzEnv: ZZEnv;
+    def: PipeDef<P, O, StreamI>;
+    color?: string;
+    concurrency?: number;
+    processor?: ZZProcessor<P, O, StreamI>;
+  }) {
+    this.def = def;
+    this.processor = processor || this.processor;
+    this.workerOptions = {
+      autorun: false,
+      connection: zzEnv.redisConfig,
+    };
+    this.zzEnv = zzEnv;
+    this.color = color;
+
+    const queueFuncs = getMicroworkerQueueByName<P, O, any>({
+      queueName: this.def.name,
+      workerOptions: this.workerOptions,
+      db: this.zzEnv.db,
+      projectId: this.zzEnv.projectId,
+    });
+
+    this.addJob = queueFuncs.addJob;
+    this.cancelLongRunningJob = queueFuncs.cancelLongRunningJob;
+    this.pingAlive = queueFuncs.pingAlive;
+    this.enqueueJobAndGetResult = queueFuncs.enqueueJobAndGetResult;
+    this._rawQueue = queueFuncs._rawQueue;
+    this.getJob = queueFuncs.getJob;
+    this.getJobData = queueFuncs.getJobData;
+  }
+}
+
+export async function sleep(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 export const getMicroworkerQueueByName = <
   JobDataType,
@@ -66,6 +154,7 @@ function createAndReturnQueue<
     queueName,
     workerOptions
   );
+
   const logger = getLogger(`wkr:${queueName}`);
 
   // return queue as Queue<JobDataType, JobReturnType>;
@@ -159,7 +248,7 @@ function createAndReturnQueue<
     }
   };
 
-  const cancelJob = async (jobId: string) => {
+  const cancelLongRunningJob = async (jobId: string) => {
     const job = await queue.getJob(jobId);
     if (!job) {
       throw new Error(`Job ${jobId} not found!`);
@@ -180,7 +269,7 @@ function createAndReturnQueue<
     enqueueJobAndGetResult,
     getJob,
     getJobData,
-    cancelJob,
+    cancelLongRunningJob,
     pingAlive,
     _rawQueue: queue,
   };
@@ -190,11 +279,3 @@ function createAndReturnQueue<
 
   return funcs;
 }
-
-export const longStringTruncator = (k: string, v: unknown) => {
-  // truncate long strings
-  if (typeof v === "string" && v.length > 100) {
-    return `${v.slice(0, 100)}...`;
-  }
-  return v;
-};

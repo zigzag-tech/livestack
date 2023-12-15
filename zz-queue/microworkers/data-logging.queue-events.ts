@@ -6,7 +6,7 @@ import { ConnectionOptions, QueueEvents } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
 import { IStorageProvider } from "../storage/cloudStorage";
-import { longStringTruncator } from "./queues";
+import { longStringTruncator } from "../utils/longStringTruncator";
 
 const logger = getLogger("data-logging");
 const OS_TEMP_DIR = os.tmpdir();

@@ -48,50 +48,40 @@ export class ReplicateRunnerWorker<
       projectId,
       queueName,
       concurrency,
+      processor: async ({ params, logger, update, emitOutput }) => {
+        const P = replicate.run(this._endpoint, {
+          input: params,
+        }) as Promise<unknown> as Promise<TJobResult>;
+
+        const result = await Promise.race([
+          P,
+          timeout(TIMEOUT_IN_SECONDS * 1000),
+        ]);
+
+        if (!result) {
+          throw new Error(
+            `no result returned from replicate endpoint: ${this._endpoint}`
+          );
+        }
+        // const result = sampleResult as any;
+
+        await update({
+          incrementalData: {
+            replicateResult: result,
+            status: "FINISH",
+          } as Partial<
+            TJobData & { status: "FINISH"; replicateResult: TJobResult }
+          >,
+        });
+
+        await emitOutput({
+          replicateResult: result,
+        });
+
+        return { replicateResult: result };
+      },
     });
     this._endpoint = endpoint;
-  }
-
-  protected async processor({
-    params,
-    logger,
-    update,
-    emitOutput,
-  }: Parameters<
-    ZZWorker<
-      TJobData,
-      {
-        replicateResult: TJobResult;
-      }
-    >["processor"]
-  >[0]) {
-    const P = replicate.run(this._endpoint, {
-      input: params,
-    }) as Promise<unknown> as Promise<TJobResult>;
-
-    const result = await Promise.race([P, timeout(TIMEOUT_IN_SECONDS * 1000)]);
-
-    if (!result) {
-      throw new Error(
-        `no result returned from replicate endpoint: ${this._endpoint}`
-      );
-    }
-    // const result = sampleResult as any;
-
-    await update({
-      incrementalData: {
-        replicateResult: result,
-        status: "FINISH",
-      } as Partial<
-        TJobData & { status: "FINISH"; replicateResult: TJobResult }
-      >,
-    });
-
-    await emitOutput({
-      replicateResult: result,
-    });
-
-    return { replicateResult: result };
   }
 }
 

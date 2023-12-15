@@ -12,7 +12,8 @@
     "knex": "^2.x",
     "pg": "^8.x",
     "winston": "^3.x",
-    "rxjs": "^7"
+    "rxjs": "^7",
+    "zod":"^3"
   },
   "devDependencies": {
     "@babel/preset-typescript": "^7.22.5",

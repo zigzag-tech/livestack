@@ -1,6 +1,6 @@
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import Redis, { RedisOptions } from "ioredis";
+import Redis from "ioredis";
 import {
   PubSubFactory,
   sequentialInputFactory,
@@ -23,8 +23,9 @@ import {
   ensureJobDependencies,
   getJobLogByIdAndType,
 } from "../db/knexConn";
-import { Knex } from "knex";
-import { longStringTruncator } from "./queues";
+import longStringTruncator from "../utils/longStringTruncator";
+import { ZZPipe } from "./ZZPipe";
+import { PipeDef, ZZEnv } from "./PipeRegistry";
 
 export type ZZProcessor<P, O, StreamI = never> = ZZJob<
   P,
@@ -63,44 +64,35 @@ export class ZZJob<P, O, StreamI = never> {
   nextInput: () => Promise<StreamI>;
   emitOutput: (o: O) => Promise<void>;
 
-  projectId: string;
-  redisConfig: RedisOptions;
-
   workingDirToBeUploadedToCloudStorage: string;
 
   storageProvider?: IStorageProvider;
   flowProducer: FlowProducer;
-  queueName: string;
-  db: Knex;
-  processor: (p: ZZJob<P, O, StreamI>) => Promise<O>;
+  processor: (j: ZZJob<P, O, StreamI>) => Promise<O>;
+  pipe: ZZPipe<P, O, StreamI>;
+  readonly def: PipeDef<P, O, StreamI>;
+  readonly zzEnv: ZZEnv;
 
   constructor(p: {
     bullMQJob: Job<{ params: P }, O, string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
     params: P;
-    projectId: string;
-    redisConfig: RedisOptions;
-    queueName: string;
     flowProducer: FlowProducer;
     storageProvider?: IStorageProvider;
-    db: Knex;
-    processor: (
-      this: ZZJob<P, O, StreamI>,
-      p: ZZJob<P, O, StreamI>
-    ) => ReturnType<ZZProcessor<P, O, StreamI>>;
+    pipe: ZZPipe<P, O, StreamI>;
+    processor: ZZJob<P, O, StreamI>["processor"];
   }) {
     this.bullMQJob = p.bullMQJob;
     this._bullMQToken = p.bullMQToken;
     this.params = p.params;
     this.logger = p.logger;
-    this.projectId = p.projectId;
-    this.redisConfig = p.redisConfig;
     this.flowProducer = p.flowProducer;
     this.storageProvider = p.storageProvider;
-    this.queueName = p.queueName;
-    this.db = p.db;
-    this.processor = p.processor.bind(this);
+    this.def = p.pipe.def;
+    this.zzEnv = p.pipe.zzEnv;
+    this.pipe = p.pipe;
+    this.processor = p.processor;
 
     const workingDir = getTempPathByJobId(this.bullMQJob.id!);
 
@@ -108,10 +100,10 @@ export class ZZJob<P, O, StreamI = never> {
 
     const pubSubFactory = new PubSubFactory<StreamI, O>(
       {
-        projectId: p.projectId,
+        projectId: this.zzEnv.projectId,
       },
-      p.redisConfig,
-      p.queueName + "::" + this.bullMQJob.id!
+      this.zzEnv.redisConfig,
+      this.def.name + "::" + this.bullMQJob.id!
     );
 
     const { nextInput, inputObservable } = sequentialInputFactory<StreamI>({
@@ -129,15 +121,15 @@ export class ZZJob<P, O, StreamI = never> {
 
   public async beginProcessing(): Promise<O> {
     const savedResult = await getJobLogByIdAndType<O>({
-      jobType: this.queueName,
+      jobType: this.def.name,
       jobId: this.bullMQJob.id!,
-      projectId: this.projectId,
-      dbConn: this.db,
+      projectId: this.zzEnv.projectId,
+      dbConn: this.zzEnv.db,
       jobStatus: "completed",
     });
     const job = this.bullMQJob;
     const logger = this.logger;
-    const projectId = this.projectId;
+    const projectId = this.zzEnv.projectId;
 
     if (savedResult) {
       this.logger.info(
@@ -156,16 +148,16 @@ export class ZZJob<P, O, StreamI = never> {
       try {
         await _upsertAndMergeJobLogByIdAndType({
           projectId,
-          jobType: this.queueName,
+          jobType: this.def.name,
           jobId: job.id!,
-          dbConn: this.db,
+          dbConn: this.zzEnv.db,
           jobStatus: "active",
         });
         if (job.opts.parent?.id) {
           await ensureJobDependencies({
             parentJobId: job.opts.parent.id,
             childJobId: job.id!,
-            dbConn: this.db,
+            dbConn: this.zzEnv.db,
             projectId,
           });
         }
@@ -175,9 +167,9 @@ export class ZZJob<P, O, StreamI = never> {
         // await job.updateProgress(processedR as object);
         await _upsertAndMergeJobLogByIdAndType({
           projectId,
-          jobType: this.queueName,
+          jobType: this.def.name,
           jobId: job.id!,
-          dbConn: this.db,
+          dbConn: this.zzEnv.db,
           jobStatus: "completed",
         });
         return processedR;
@@ -185,17 +177,17 @@ export class ZZJob<P, O, StreamI = never> {
         if (e instanceof WaitingChildrenError) {
           await _upsertAndMergeJobLogByIdAndType({
             projectId,
-            jobType: this.queueName,
+            jobType: this.def.name,
             jobId: job.id!,
-            dbConn: this.db,
+            dbConn: this.zzEnv.db,
             jobStatus: "waiting_children",
           });
         } else {
           await _upsertAndMergeJobLogByIdAndType({
             projectId,
-            jobType: this.queueName,
+            jobType: this.def.name,
             jobId: job.id!,
-            dbConn: this.db,
+            dbConn: this.zzEnv.db,
             jobStatus: "failed",
           });
         }
@@ -236,9 +228,9 @@ export class ZZJob<P, O, StreamI = never> {
 
     const pubsubForChild = new PubSubFactory<CI, CO>(
       {
-        projectId: this.projectId,
+        projectId: this.zzEnv.projectId,
       },
-      this.redisConfig,
+      this.zzEnv.redisConfig,
       newJob_.queueName + "::" + newJob_.name
     );
     await this.flowProducer.add(newJob_);
@@ -267,7 +259,7 @@ export class ZZJob<P, O, StreamI = never> {
     if (this.storageProvider) {
       const { newObj, largeFilesToSave } = identifyLargeFiles(
         incrementalData,
-        `${this.projectId}/jobs/${this.bullMQJob.id!}/large-values`
+        `${this.zzEnv.projectId}/jobs/${this.bullMQJob.id!}/large-values`
       );
       await saveLargeFilesToStorage(largeFilesToSave, this.storageProvider);
       jobData = newObj;
@@ -275,11 +267,11 @@ export class ZZJob<P, O, StreamI = never> {
       jobData = incrementalData;
     }
     await _upsertAndMergeJobLogByIdAndType({
-      projectId: this.projectId,
-      jobType: this.queueName,
+      projectId: this.zzEnv.projectId,
+      jobType: this.def.name,
       jobId: this.bullMQJob.id!,
       jobData,
-      dbConn: this.db,
+      dbConn: this.zzEnv.db,
     });
   }
 
@@ -297,7 +289,7 @@ export class ZZJob<P, O, StreamI = never> {
       throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
     } else {
       return getPublicCdnUrl({
-        projectId: this.projectId,
+        projectId: this.zzEnv.projectId,
         jobId: this.bullMQJob.id!,
         key: String(key),
         storageProvider: this.storageProvider,
