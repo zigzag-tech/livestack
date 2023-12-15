@@ -14,15 +14,23 @@ export interface ZZJobData<IO> {
 
 // multi-phase spawn job
 
-export interface ZZJobIOEvent {
+export type ZZJobIOEvent = {
   io_event_id: string;
   project_id: string;
   op_name: string;
   job_id: string;
-  io_type: "input" | "output";
   job_data_id: string;
   time_created: Date;
-}
+} & (
+  | {
+      io_type: "spawn_output";
+      spawn_phase_id: string; // Nullable column
+    }
+  | {
+      io_type: "input" | "output";
+      spawn_phase_id: null;
+    }
+);
 
 export interface ZZJobDep {
   project_id: string;
