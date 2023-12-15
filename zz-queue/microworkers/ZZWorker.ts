@@ -65,7 +65,7 @@ export class ZZWorker<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
       queueName: this.def.name,
-      workerOptions: workerOptions,
+      queueOptions: workerOptions,
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
     });

@@ -28,7 +28,7 @@ const queueMap = new Map<
 export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
   public def: PipeDef<P, O, StreamI>;
   public readonly zzEnv: ZZEnv;
-  protected readonly workerOptions: WorkerOptions;
+  protected readonly queueOptions: WorkerOptions;
   protected readonly storageProvider?: IStorageProvider;
 
   public readonly workers: ZZWorker<P, O, StreamI>[] = [];
@@ -78,8 +78,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
   }) {
     this.def = def;
     this.processor = processor || this.processor;
-    this.workerOptions = {
-      autorun: false,
+    this.queueOptions = {
       connection: zzEnv.redisConfig,
     };
     this.zzEnv = zzEnv;
@@ -87,7 +86,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
       queueName: this.def.name,
-      workerOptions: this.workerOptions,
+      queueOptions: this.queueOptions,
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
     });
@@ -142,17 +141,17 @@ function createAndReturnQueue<
 >({
   projectId,
   queueName,
-  workerOptions,
+  queueOptions,
   db,
 }: {
   projectId: string;
   queueName: QueueName<T>;
-  workerOptions?: WorkerOptions;
+  queueOptions?: WorkerOptions;
   db: Knex;
 }) {
   const queue = new Queue<{ params: JobDataType }, JobReturnType>(
     queueName,
-    workerOptions
+    queueOptions
   );
 
   const logger = getLogger(`wkr:${queueName}`);
@@ -231,7 +230,7 @@ function createAndReturnQueue<
 
     console.info(`Enqueueing job ${jobId} with data:`, initJobData);
     const queueEvents = new QueueEvents(queueName, {
-      connection: workerOptions?.connection,
+      connection: queueOptions?.connection,
     });
 
     const job = await addJob({
