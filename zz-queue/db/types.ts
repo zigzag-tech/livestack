@@ -20,17 +20,10 @@ export type ZZJobIOEvent = {
   op_name: string;
   job_id: string;
   job_data_id: string;
+  io_type: "in" | "out";
+  spawn_phase_id: string | null;
   time_created: Date;
-} & (
-  | {
-      io_type: "spawn_output";
-      spawn_phase_id: string; // Nullable column
-    }
-  | {
-      io_type: "input" | "output";
-      spawn_phase_id: null;
-    }
-);
+};
 
 export interface ZZJobDep {
   project_id: string;
