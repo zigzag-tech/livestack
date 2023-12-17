@@ -1,35 +1,35 @@
-export interface ZZJob<P> {
-  project_id: string;
-  op_name: string;
-  job_id: string;
-  init_params: P | null; // JSONB column, replace 'any' with a more specific type if known
-  time_created: Date;
-}
+import { z } from 'zod';
 
-export interface ZZJobData<IO> {
-  job_data_id: string;
-  job_data: IO; // JSONB column, replace 'any' with a more specific type if known
-  time_created: Date;
-}
+export const ZZJob = <P>(initParamsSchema: z.ZodType<P, any, any>) => z.object({
+  project_id: z.string(),
+  op_name: z.string(),
+  job_id: z.string(),
+  init_params: initParamsSchema.optional(),
+  time_created: z.date(),
+});
 
-// multi-phase spawn job
+export const ZZJobData = <IO>(jobDataSchema: z.ZodType<IO, any, any>) => z.object({
+  job_data_id: z.string(),
+  job_data: jobDataSchema,
+  time_created: z.date(),
+});
 
-export type ZZJobIOEvent = {
-  io_event_id: string;
-  project_id: string;
-  op_name: string;
-  job_id: string;
-  job_data_id: string;
-  io_type: "in" | "out";
-  spawn_phase_id: string | null;
-  time_created: Date;
-};
+export const ZZJobIOEvent = z.object({
+  io_event_id: z.string(),
+  project_id: z.string(),
+  op_name: z.string(),
+  job_id: z.string(),
+  job_data_id: z.string(),
+  io_type: z.enum(["in", "out"]),
+  spawn_phase_id: z.string().optional().nullable(),
+  time_created: z.date(),
+});
 
-export interface ZZJobDep {
-  project_id: string;
-  parent_job_id: string;
-  parent_op_name: string;
-  child_job_id: string;
-  child_op_name: string;
-  io_event_id: string | null; // Nullable column
-}
+export const ZZJobDep = z.object({
+  project_id: z.string(),
+  parent_job_id: z.string(),
+  parent_op_name: z.string(),
+  child_job_id: z.string(),
+  child_op_name: z.string(),
+  io_event_id: z.string().optional().nullable(),
+});
