@@ -7,7 +7,7 @@ import { ZZWorker } from "./ZZWorker";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
 
-import { getJobLogByIdAndType } from "../db/knexConn";
+import { getJobRec } from "../db/knexConn";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
@@ -188,7 +188,7 @@ function createAndReturnQueue<
   const getJobData = async (jobId: string) => {
     const j = await queue.getJob(jobId);
     if (!j) {
-      const dbJ = await getJobLogByIdAndType({
+      const dbJ = await getJobRec({
         jobType: queueName,
         jobId,
         projectId,

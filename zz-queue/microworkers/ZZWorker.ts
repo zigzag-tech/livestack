@@ -19,7 +19,7 @@ export class ZZWorker<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     {
       params: P;
     },
-    O
+    O[]
   >;
   protected color?: string;
 
@@ -82,7 +82,7 @@ export class ZZWorker<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     const mergedWorkerOptions = _.merge({}, workerOptions);
     const flowProducer = new FlowProducer(mergedWorkerOptions);
 
-    this.bullMQWorker = new Worker<{ params: P }, O, string>(
+    this.bullMQWorker = new Worker<{ params: P }, O[], string>(
       this.def.name,
       async (job, token) => {
         const zzJ = new ZZJob<P, O, StreamI>({
@@ -119,7 +119,7 @@ export class ZZWorker<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
       (job: Job, progress: number | object) => {}
     );
 
-    this.bullMQWorker.on("completed", async (job: Job, result: O) => {
+    this.bullMQWorker.on("completed", async (job: Job) => {
       logger.info(`JOB COMPLETED: ${job.id}`);
     });
 

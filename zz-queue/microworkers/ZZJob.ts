@@ -6,7 +6,7 @@ import {
   sequentialInputFactory,
   sequentialOutputFactory,
 } from "../realtime/mq-pub-sub";
-import { Observable } from "rxjs";
+import { Observable, takeUntil } from "rxjs";
 import { JOB_ALIVE_TIMEOUT, sleep } from "./ZZWorker";
 import {
   IStorageProvider,
@@ -18,7 +18,14 @@ import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import fs from "fs";
 import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
-import { ensureJobDependencies, getJobLogByIdAndType } from "../db/knexConn";
+import {
+  addJobDataAndIOEvent,
+  addJobRec,
+  ensureJobDependencies,
+  getJobData,
+  getJobRec,
+  updateJobStatus,
+} from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
 import { ZZPipe } from "./ZZPipe";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
@@ -31,32 +38,31 @@ export type ZZProcessor<P, O, StreamI = never> = ZZJob<
 export type ZZProcessorParams<P, O, StreamI = never> = Parameters<
   ZZProcessor<P, O, StreamI>
 >[0];
-export type ZZProcessorReturn<P, O, StreamI = never> = ReturnType<
-  ZZProcessor<P, O, StreamI>
->;
+
 export class ZZJob<P, O, StreamI = never> {
-  public readonly bullMQJob: Job<{ params: P }, O>;
+  public readonly bullMQJob: Job<{ params: P }, O[]>;
   public readonly _bullMQToken?: string;
   params: P;
   inputObservable: Observable<StreamI>;
   logger: ReturnType<typeof getLogger>;
 
-  public async aliveLoop(retVal: O) {
-    const redis = new Redis();
+  // public async aliveLoop(retVal: O) {
+  //   const redis = new Redis();
 
-    let lastTimeJobAlive = Date.now();
-    while (Date.now() - lastTimeJobAlive < JOB_ALIVE_TIMEOUT) {
-      lastTimeJobAlive = parseInt(
-        (await redis.get(`last-time-job-alive-${this.bullMQJob.id}`)) || "0"
-      );
-      await sleep(1000 * 60);
-    }
-    this.logger.info(
-      `Job with ${this.bullMQJob.id} id expired. Marking as complete.`
-    );
-    await this.bullMQJob.moveToCompleted(retVal, this._bullMQToken!);
-    return retVal;
-  }
+  //   let lastTimeJobAlive = Date.now();
+  //   while (Date.now() - lastTimeJobAlive < JOB_ALIVE_TIMEOUT) {
+  //     lastTimeJobAlive = parseInt(
+  //       (await redis.get(`last-time-job-alive-${this.bullMQJob.id}`)) || "0"
+  //     );
+  //     await sleep(1000 * 60);
+  //   }
+  //   this.logger.info(
+  //     `Job with ${this.bullMQJob.id} id expired. Marking as complete.`
+  //   );
+
+  //   await this.bullMQJob.moveToCompleted(retVal, this._bullMQToken!);
+  //   return retVal;
+  // }
   nextInput: () => Promise<StreamI>;
   emitOutput: (o: O) => Promise<void>;
 
@@ -64,13 +70,13 @@ export class ZZJob<P, O, StreamI = never> {
 
   storageProvider?: IStorageProvider;
   flowProducer: FlowProducer;
-  processor: (j: ZZJob<P, O, StreamI>) => Promise<O>;
+  processor: (j: ZZJob<P, O, StreamI>) => Promise<O[]>;
   pipe: ZZPipe<P, O, StreamI>;
   readonly def: PipeDef<P, O, StreamI>;
   readonly zzEnv: ZZEnv;
 
   constructor(p: {
-    bullMQJob: Job<{ params: P }, O, string>;
+    bullMQJob: Job<{ params: P }, O[], string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
     params: P;
@@ -94,7 +100,13 @@ export class ZZJob<P, O, StreamI = never> {
 
     this.workingDirToBeUploadedToCloudStorage = workingDir;
 
-    const pubSubFactory = new PubSubFactory<StreamI, O>(
+    const pubSubFactory = new PubSubFactory<
+      StreamI,
+      {
+        o: O;
+        __zz_job_data_id__: string;
+      }
+    >(
       {
         projectId: this.zzEnv.projectId,
       },
@@ -105,21 +117,45 @@ export class ZZJob<P, O, StreamI = never> {
     const { nextInput, inputObservable } = sequentialInputFactory<StreamI>({
       pubSubFactory: pubSubFactory,
     });
-    this.nextInput = nextInput;
-    this.inputObservable = inputObservable;
 
-    const { emitOutput } = sequentialOutputFactory<O>({
+    this.nextInput = nextInput;
+    this.inputObservable = inputObservable.pipe();
+
+    const { emitOutput } = sequentialOutputFactory<{
+      o: O;
+      __zz_job_data_id__: string;
+    }>({
       pubSubFactory: pubSubFactory,
     });
 
-    this.emitOutput = emitOutput;
+    this.emitOutput = async (o: O) => {
+      if (this.storageProvider) {
+        const { largeFilesToSave } = identifyLargeFiles(o);
+        await saveLargeFilesToStorage(largeFilesToSave, this.storageProvider);
+      }
+      const { jobDataId } = await addJobDataAndIOEvent({
+        projectId: this.zzEnv.projectId,
+        opName: this.def.name,
+        jobId: this.bullMQJob.id!,
+        dbConn: this.zzEnv.db,
+        ioType: "out",
+        jobData: o,
+      });
+      await emitOutput({
+        o,
+        __zz_job_data_id__: jobDataId,
+      });
+    };
   }
 
-  public async beginProcessing(): Promise<O> {
-    const savedResult = await getJobLogByIdAndType<O>({
-      jobType: this.def.name,
+  public async beginProcessing(): Promise<O[]> {
+    const jId = {
+      opName: this.def.name,
       jobId: this.bullMQJob.id!,
       projectId: this.zzEnv.projectId,
+    };
+    const savedResult = await getJobRec<O>({
+      ...jId,
       dbConn: this.zzEnv.db,
       jobStatus: "completed",
     });
@@ -128,12 +164,17 @@ export class ZZJob<P, O, StreamI = never> {
     const projectId = this.zzEnv.projectId;
 
     if (savedResult) {
+      const jobData = await getJobData<O>({
+        ...jId,
+        dbConn: this.zzEnv.db,
+        ioType: "out",
+      });
       this.logger.info(
-        `Skipping job with ID: ${job.id}, ${this.bullMQJob.queueName} ` +
+        `Job already marked as complete; skipping: ${job.id}, ${this.bullMQJob.queueName} ` +
           `${JSON.stringify(this.bullMQJob.data, longStringTruncator)}`,
         +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
       );
-      return savedResult.job_data;
+      return jobData.map((x) => x.job_data) as O[];
     } else {
       logger.info(
         `Picked up job with ID: ${job.id}, ${job.queueName} ` +
@@ -142,28 +183,18 @@ export class ZZJob<P, O, StreamI = never> {
       );
 
       try {
-        await _upsertAndMergeJobLogByIdAndType({
-          projectId,
-          jobType: this.def.name,
-          jobId: job.id!,
+        await updateJobStatus({
+          ...jId,
           dbConn: this.zzEnv.db,
-          jobStatus: "active",
+          jobStatus: "running",
         });
-        if (job.opts.parent?.id) {
-          await ensureJobDependencies({
-            parentJobId: job.opts.parent.id,
-            childJobId: job.id!,
-            dbConn: this.zzEnv.db,
-            projectId,
-          });
-        }
 
         const processedR = await this.processor(this);
 
         // await job.updateProgress(processedR as object);
-        await _upsertAndMergeJobLogByIdAndType({
+        await updateJobStatus({
           projectId,
-          jobType: this.def.name,
+          opName: this.def.name,
           jobId: job.id!,
           dbConn: this.zzEnv.db,
           jobStatus: "completed",
@@ -171,17 +202,17 @@ export class ZZJob<P, O, StreamI = never> {
         return processedR;
       } catch (e: any) {
         if (e instanceof WaitingChildrenError) {
-          await _upsertAndMergeJobLogByIdAndType({
+          await updateJobStatus({
             projectId,
-            jobType: this.def.name,
+            opName: this.def.name,
             jobId: job.id!,
             dbConn: this.zzEnv.db,
             jobStatus: "waiting_children",
           });
         } else {
-          await _upsertAndMergeJobLogByIdAndType({
+          await updateJobStatus({
             projectId,
-            jobType: this.def.name,
+            opName: this.def.name,
             jobId: job.id!,
             dbConn: this.zzEnv.db,
             jobStatus: "failed",
@@ -194,7 +225,7 @@ export class ZZJob<P, O, StreamI = never> {
 
   public async spawnChildJobsToWaitOn<CI, CO>(
     childJob_: FlowJob & {
-      data: CI;
+      initParams: CI;
     }
   ) {
     childJob_.opts = {
@@ -205,24 +236,36 @@ export class ZZJob<P, O, StreamI = never> {
       },
     };
 
-    return this.spawnJob<CI, CO>(childJob_);
+    const spawnR = await this.spawnJob<CI, CO>(childJob_);
+
+    await ensureJobDependencies({
+      projectId: this.zzEnv.projectId,
+      parentJobId: this.bullMQJob.id!,
+      parentOpName: this.def.name,
+      childJobId: childJob_.opts.jobId!,
+      childOpName: childJob_.name,
+      dbConn: this.zzEnv.db,
+      io_event_id: spawnR.ioEventId,
+    });
+
+    return spawnR;
   }
 
-  public async spawnJob<CI, CO>(
+  public async spawnJob<I, O>(
     newJob_: FlowJob & {
-      data: CI;
+      initParams: I;
     }
   ) {
-    newJob_.data = {
-      params: newJob_.data,
-    };
+    // newJob_.data = {
+    //   params: newJob_.data as I,
+    // };
 
     newJob_.opts = {
       ...newJob_.opts,
       jobId: newJob_.name,
     };
 
-    const pubsubForChild = new PubSubFactory<CI, CO>(
+    const pubsubForChild = new PubSubFactory<I, O>(
       {
         projectId: this.zzEnv.projectId,
       },
@@ -230,8 +273,17 @@ export class ZZJob<P, O, StreamI = never> {
       newJob_.queueName + "::" + newJob_.name
     );
     await this.flowProducer.add(newJob_);
+
+    const rec = await addJobRec({
+      projectId: this.zzEnv.projectId,
+      opName: this.def.name,
+      jobId: this.bullMQJob.id!,
+      dbConn: this.zzEnv.db,
+      initParams: newJob_.initParams,
+    });
     return {
       subToOutput: pubsubForChild.subForJobOutput.bind(pubsubForChild),
+      ...rec,
     };
   }
 
@@ -249,27 +301,27 @@ export class ZZJob<P, O, StreamI = never> {
     );
   }
 
-  public async update({ incrementalData }: { incrementalData?: any }) {
-    let jobData: any;
+  // public async update({ incrementalData }: { incrementalData?: any }) {
+  //   let jobData: any;
 
-    if (this.storageProvider) {
-      const { newObj, largeFilesToSave } = identifyLargeFiles(
-        incrementalData,
-        `${this.zzEnv.projectId}/jobs/${this.bullMQJob.id!}/large-values`
-      );
-      await saveLargeFilesToStorage(largeFilesToSave, this.storageProvider);
-      jobData = newObj;
-    } else {
-      jobData = incrementalData;
-    }
-    await _upsertAndMergeJobLogByIdAndType({
-      projectId: this.zzEnv.projectId,
-      jobType: this.def.name,
-      jobId: this.bullMQJob.id!,
-      jobData,
-      dbConn: this.zzEnv.db,
-    });
-  }
+  //   if (this.storageProvider) {
+  //     const { newObj, largeFilesToSave } = identifyLargeFiles(
+  //       incrementalData,
+  //       `${this.zzEnv.projectId}/jobs/${this.bullMQJob.id!}/large-values`
+  //     );
+  //     await saveLargeFilesToStorage(largeFilesToSave, this.storageProvider);
+  //     jobData = newObj;
+  //   } else {
+  //     jobData = incrementalData;
+  //   }
+  //   await _upsertAndMergeJobLogByIdAndType({
+  //     projectId: this.zzEnv.projectId,
+  //     jobType: this.def.name,
+  //     jobId: this.bullMQJob.id!,
+  //     jobData,
+  //     dbConn: this.zzEnv.db,
+  //   });
+  // }
 
   private getLargeValueCdnUrl<T extends object>(key: keyof T, obj: T) {
     if (!this.storageProvider) {
