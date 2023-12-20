@@ -7,7 +7,7 @@ import { ZZWorker } from "./ZZWorker";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
 
-import { getJobRec } from "../db/knexConn";
+import { addJobRec, getJobRec } from "../db/knexConn";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
@@ -38,7 +38,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     O
   >["cancelLongRunningJob"];
   public readonly pingAlive: IWorkerUtilFuncs<P, O>["pingAlive"];
-  public readonly getJobData: IWorkerUtilFuncs<P, O>["getJobData"];
+  // public readonly getJobData: IWorkerUtilFuncs<P, O>["getJobData"];
   public readonly enqueueJobAndGetResult: IWorkerUtilFuncs<
     P,
     O
@@ -94,7 +94,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     this.enqueueJobAndGetResult = queueFuncs.enqueueJobAndGetResult;
     this._rawQueue = queueFuncs._rawQueue;
     this.getJob = queueFuncs.getJob;
-    this.getJobData = queueFuncs.getJobData;
+    // this.getJobData = queueFuncs.getJobData;
   }
 }
 
@@ -174,39 +174,39 @@ function createAndReturnQueue<
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
-    await _upsertAndMergeJobLogByIdAndType({
+    await addJobRec({
       projectId,
-      jobType: queueName,
+      opName: queueName,
       jobId: j.id!,
-      jobData: { params },
       dbConn: db,
+      initParams: params,
     });
 
     return j;
   };
 
-  const getJobData = async (jobId: string) => {
-    const j = await queue.getJob(jobId);
-    if (!j) {
-      const dbJ = await getJobRec({
-        jobType: queueName,
-        jobId,
-        projectId,
-        dbConn: db,
-      });
-      if (dbJ) {
-        return {
-          id: dbJ.job_id,
-          params: dbJ.job_data as { params: JobDataType },
-        };
-      }
-    } else {
-      return {
-        id: j.id,
-        params: j.data.params,
-      };
-    }
-  };
+  // const getJobData = async (jobId: string) => {
+  //   const j = await queue.getJob(jobId);
+  //   if (!j) {
+  //     const dbJ = await getJobRec({
+  //       opName: queueName,
+  //       jobId,
+  //       projectId,
+  //       dbConn: db,
+  //     });
+  //     if (dbJ) {
+  //       return {
+  //         id: dbJ.job_id,
+  //         params: dbJ.job_data as { params: JobDataType },
+  //       };
+  //     }
+  //   } else {
+  //     return {
+  //       id: j.id,
+  //       params: j.data.params,
+  //     };
+  //   }
+  // };
 
   const getJob = async (jobId: string) => {
     const j = await queue.getJob(jobId);
@@ -264,7 +264,7 @@ function createAndReturnQueue<
     addJob,
     enqueueJobAndGetResult,
     getJob,
-    getJobData,
+    // getJobData,
     cancelLongRunningJob,
     pingAlive,
     _rawQueue: queue,

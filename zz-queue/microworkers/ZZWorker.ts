@@ -30,7 +30,7 @@ export class ZZWorker<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     O
   >["cancelLongRunningJob"];
   public readonly pingAlive: IWorkerUtilFuncs<P, O>["pingAlive"];
-  public readonly getJobData: IWorkerUtilFuncs<P, O>["getJobData"];
+  // public readonly getJobData: IWorkerUtilFuncs<P, O>["getJobData"];
   public readonly enqueueJobAndGetResult: IWorkerUtilFuncs<
     P,
     O
@@ -76,7 +76,7 @@ export class ZZWorker<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     this.enqueueJobAndGetResult = queueFuncs.enqueueJobAndGetResult;
     this._rawQueue = queueFuncs._rawQueue;
     this.getJob = queueFuncs.getJob;
-    this.getJobData = queueFuncs.getJobData;
+    // this.getJobData = queueFuncs.getJobData;
 
     const logger = getLogger(`wkr:${this.def.name}`, this.color);
     const mergedWorkerOptions = _.merge({}, workerOptions);
