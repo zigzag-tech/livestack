@@ -11,6 +11,7 @@ import { addJobRec, getJobRec } from "../db/knexConn";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
+import { PubSubFactory } from "../realtime/mq-pub-sub";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
@@ -32,17 +33,8 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
   protected color?: string;
 
   public readonly addJob: IWorkerUtilFuncs<P, O>["addJob"];
-  public readonly getJob: IWorkerUtilFuncs<P, O>["getJob"];
-  public readonly cancelLongRunningJob: IWorkerUtilFuncs<
-    P,
-    O
-  >["cancelLongRunningJob"];
-  public readonly pingAlive: IWorkerUtilFuncs<P, O>["pingAlive"];
   // public readonly getJobData: IWorkerUtilFuncs<P, O>["getJobData"];
-  public readonly enqueueJobAndGetResult: IWorkerUtilFuncs<
-    P,
-    O
-  >["enqueueJobAndGetResult"];
+
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
   // dummy processor
   private processor: ZZProcessor<P, O, StreamI> = async (job) => {
@@ -59,6 +51,30 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     });
     this.workers.push(worker);
     return worker;
+  }
+
+  private pubSubCache = new Map<
+    string,
+    PubSubFactory<WrapTerminatorAndDataId<StreamI>, WrapTerminatorAndDataId<O>>
+  >();
+
+  public pubSubFactoryForJob(jobId: string) {
+    if (this.pubSubCache.has(jobId)) {
+      return this.pubSubCache.get(jobId)!;
+    } else {
+      const pubSub = new PubSubFactory<
+        WrapTerminatorAndDataId<StreamI>,
+        WrapTerminatorAndDataId<O>
+      >(
+        {
+          projectId: this.zzEnv.projectId,
+        },
+        this.zzEnv.redisConfig,
+        this.def.name + "::" + jobId
+      );
+      this.pubSubCache.set(jobId, pubSub);
+      return pubSub;
+    }
   }
 
   constructor({
@@ -89,12 +105,84 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     });
 
     this.addJob = queueFuncs.addJob;
-    this.cancelLongRunningJob = queueFuncs.cancelLongRunningJob;
-    this.pingAlive = queueFuncs.pingAlive;
-    this.enqueueJobAndGetResult = queueFuncs.enqueueJobAndGetResult;
     this._rawQueue = queueFuncs._rawQueue;
-    this.getJob = queueFuncs.getJob;
     // this.getJobData = queueFuncs.getJobData;
+  }
+
+  public async getJob(jobId: string) {
+    const j = await this._rawQueue.getJob(jobId);
+    return j || null;
+  }
+
+  public async enqueueJobAndGetResult({
+    jobName: jobId,
+    initJobData,
+  }: // queueEventsOptions,
+  {
+    jobName?: string;
+    initJobData: P;
+  }): Promise<O> {
+    if (!jobId) {
+      jobId = `${this.def.name}-${v4()}`;
+    }
+
+    console.info(`Enqueueing job ${jobId} with data:`, initJobData);
+    const queueEvents = new QueueEvents(this.def.name, {
+      connection: this.zzEnv.redisConfig,
+    });
+
+    const job = await this.addJob({
+      jobId,
+      params: initJobData,
+    });
+
+    try {
+      await job.waitUntilFinished(queueEvents);
+      const result = await Job.fromId(this._rawQueue, jobId);
+      return result!.returnvalue as O;
+    } finally {
+      await queueEvents.close();
+    }
+  }
+
+  public async cancelLongRunningJob(jobId: string) {
+    const job = await this._rawQueue.getJob(jobId);
+    if (!job) {
+      throw new Error(`Job ${jobId} not found!`);
+    }
+
+    // signal to worker to cancel
+    const redis = new Redis();
+    redis.del(`last-time-job-alive-${jobId}`);
+  }
+
+  public async pingAlive(jobId: string) {
+    const redis = new Redis();
+    await redis.set(`last-time-job-alive-${jobId}`, Date.now());
+  }
+
+  public async sendInput({
+    jobId,
+    data,
+  }: {
+    jobId?: string;
+    data: StreamI;
+  }) {
+    if(!jobId) {
+      jobId = `${this.def.name}-${v4()}`;
+    }
+    const pubSub = this.pubSubFactoryForJob(jobId);
+    const messageId = v4();
+    await pubSub.pubToJobInput({
+      messageId,
+
+     message: {
+        data,
+        terminate: false,
+        __zz_job_data_id__: messageId,
+      },
+     })
+    
   }
 }
 
@@ -208,65 +296,8 @@ function createAndReturnQueue<
   //   }
   // };
 
-  const getJob = async (jobId: string) => {
-    const j = await queue.getJob(jobId);
-    return j || null;
-  };
-
-  const enqueueJobAndGetResult = async ({
-    jobName: jobId,
-    initJobData,
-  }: // queueEventsOptions,
-  {
-    jobName?: string;
-    initJobData: JobDataType;
-  }): Promise<JobReturnType> => {
-    if (!jobId) {
-      jobId = `${queueName}-${v4()}`;
-    }
-
-    console.info(`Enqueueing job ${jobId} with data:`, initJobData);
-    const queueEvents = new QueueEvents(queueName, {
-      connection: queueOptions?.connection,
-    });
-
-    const job = await addJob({
-      jobId,
-      params: initJobData,
-    });
-
-    try {
-      await job.waitUntilFinished(queueEvents);
-      const result = await Job.fromId(queue, jobId);
-      return result!.returnvalue as JobReturnType;
-    } finally {
-      await queueEvents.close();
-    }
-  };
-
-  const cancelLongRunningJob = async (jobId: string) => {
-    const job = await queue.getJob(jobId);
-    if (!job) {
-      throw new Error(`Job ${jobId} not found!`);
-    }
-
-    // signal to worker to cancel
-    const redis = new Redis();
-    redis.del(`last-time-job-alive-${jobId}`);
-  };
-
-  const pingAlive = async (jobId: string) => {
-    const redis = new Redis();
-    await redis.set(`last-time-job-alive-${jobId}`, Date.now());
-  };
-
   const funcs = {
     addJob,
-    enqueueJobAndGetResult,
-    getJob,
-    // getJobData,
-    cancelLongRunningJob,
-    pingAlive,
     _rawQueue: queue,
   };
 
@@ -275,3 +306,13 @@ function createAndReturnQueue<
 
   return funcs;
 }
+
+export type WrapTerminatorAndDataId<T> =
+  | {
+      data: T;
+      __zz_job_data_id__: string;
+      terminate: false;
+    }
+  | {
+      terminate: true;
+    };

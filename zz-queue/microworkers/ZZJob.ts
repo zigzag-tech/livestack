@@ -1,13 +1,11 @@
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import Redis from "ioredis";
 import {
   PubSubFactory,
   sequentialInputFactory,
   sequentialOutputFactory,
 } from "../realtime/mq-pub-sub";
-import { Observable, takeUntil } from "rxjs";
-import { JOB_ALIVE_TIMEOUT, sleep } from "./ZZWorker";
+import { Observable, Subject, map, takeUntil, takeWhile, tap } from "rxjs";
 import {
   IStorageProvider,
   getPublicCdnUrl,
@@ -27,8 +25,9 @@ import {
   updateJobStatus,
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { ZZPipe } from "./ZZPipe";
+import { WrapTerminatorAndDataId, ZZPipe } from "./ZZPipe";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
+import { z } from "zod";
 
 export type ZZProcessor<P, O, StreamI = never> = ZZJob<
   P,
@@ -40,11 +39,14 @@ export type ZZProcessorParams<P, O, StreamI = never> = Parameters<
 >[0];
 
 export class ZZJob<P, O, StreamI = never> {
-  public readonly bullMQJob: Job<{ params: P }, O[]>;
+  public readonly bullMQJob: Job<{ params: P }, O | undefined>;
   public readonly _bullMQToken?: string;
   params: P;
   inputObservable: Observable<StreamI>;
   logger: ReturnType<typeof getLogger>;
+  // New properties for subscriber tracking
+  private inputSubscriberCount = 0;
+  private inputSubscriberCountChanged = new Subject<number>();
 
   // public async aliveLoop(retVal: O) {
   //   const redis = new Redis();
@@ -63,20 +65,20 @@ export class ZZJob<P, O, StreamI = never> {
   //   await this.bullMQJob.moveToCompleted(retVal, this._bullMQToken!);
   //   return retVal;
   // }
-  nextInput: () => Promise<StreamI>;
+  nextInput: () => Promise<StreamI | null>;
   emitOutput: (o: O) => Promise<void>;
 
   workingDirToBeUploadedToCloudStorage: string;
 
   storageProvider?: IStorageProvider;
   flowProducer: FlowProducer;
-  processor: (j: ZZJob<P, O, StreamI>) => Promise<O[]>;
+  processor: (j: ZZJob<P, O, StreamI>) => Promise<O | undefined>;
   pipe: ZZPipe<P, O, StreamI>;
   readonly def: PipeDef<P, O, StreamI>;
   readonly zzEnv: ZZEnv;
 
   constructor(p: {
-    bullMQJob: Job<{ params: P }, O[], string>;
+    bullMQJob: Job<{ params: P }, O | undefined, string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
     params: P;
@@ -100,31 +102,63 @@ export class ZZJob<P, O, StreamI = never> {
 
     this.workingDirToBeUploadedToCloudStorage = workingDir;
 
-    const pubSubFactory = new PubSubFactory<
-      StreamI,
-      {
-        o: O;
-        __zz_job_data_id__: string;
-      }
-    >(
-      {
-        projectId: this.zzEnv.projectId,
-      },
-      this.zzEnv.redisConfig,
-      this.def.name + "::" + this.bullMQJob.id!
-    );
+    const pubSubFactory = this.pipe.pubSubFactoryForJob(this.bullMQJob.id!);
 
-    const { nextInput, inputObservable } = sequentialInputFactory<StreamI>({
+    // const pubSubFactory = new PubSubFactory<
+    //   StreamI,
+    //   {
+    //     o: O;
+    //     __zz_job_data_id__: string;
+    //   }
+    // >(
+    //   {
+    //     projectId: this.zzEnv.projectId,
+    //   },
+    //   this.zzEnv.redisConfig,
+    //   this.def.name + "::" + this.bullMQJob.id!
+    // );
+
+    const { nextInput, inputObservable } = sequentialInputFactory<
+      WrapTerminatorAndDataId<StreamI>
+    >({
       pubSubFactory: pubSubFactory,
     });
 
-    this.nextInput = nextInput;
-    this.inputObservable = inputObservable.pipe();
+    this.nextInput = async () => {
+      const r = await nextInput();
+      if (r.terminate) {
+        return null;
+      } else {
+        return r.data;
+      }
+    };
+    this.inputObservable = inputObservable
+      .pipe(takeWhile((r) => r.terminate === false))
+      .pipe(
+        map(
+          (r) =>
+            (
+              r as {
+                data: StreamI;
+                terminate: false;
+              }
+            ).data
+        )
+      )
+      .pipe(
+        tap({
+          subscribe: () => {
+            this.inputSubscriberCount++;
+            this.inputSubscriberCountChanged.next(this.inputSubscriberCount);
+          },
+          unsubscribe: () => {
+            this.inputSubscriberCount--;
+            this.inputSubscriberCountChanged.next(this.inputSubscriberCount);
+          },
+        })
+      );
 
-    const { emitOutput } = sequentialOutputFactory<{
-      o: O;
-      __zz_job_data_id__: string;
-    }>({
+    const { emitOutput } = sequentialOutputFactory<WrapTerminatorAndDataId<O>>({
       pubSubFactory: pubSubFactory,
     });
 
@@ -142,13 +176,14 @@ export class ZZJob<P, O, StreamI = never> {
         jobData: o,
       });
       await emitOutput({
-        o,
+        data: o,
         __zz_job_data_id__: jobDataId,
+        terminate: false,
       });
     };
   }
 
-  public async beginProcessing(): Promise<O[]> {
+  public async beginProcessing(): Promise<O | undefined> {
     const jId = {
       opName: this.def.name,
       jobId: this.bullMQJob.id!,
@@ -174,7 +209,9 @@ export class ZZJob<P, O, StreamI = never> {
           `${JSON.stringify(this.bullMQJob.data, longStringTruncator)}`,
         +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
       );
-      return jobData.map((x) => x.job_data) as O[];
+
+      // return last job data
+      return jobData[jobData.length - 1]?.job_data || undefined;
     } else {
       logger.info(
         `Picked up job with ID: ${job.id}, ${job.queueName} ` +
@@ -193,13 +230,27 @@ export class ZZJob<P, O, StreamI = never> {
 
         // await job.updateProgress(processedR as object);
         await updateJobStatus({
-          projectId,
-          opName: this.def.name,
-          jobId: job.id!,
+          ...jId,
           dbConn: this.zzEnv.db,
           jobStatus: "completed",
         });
-        return processedR;
+
+        // wait when there are still subscribers
+        await new Promise<void>((resolve) => {
+          const sub = this.inputSubscriberCountChanged
+            .pipe(takeUntil(this.inputObservable))
+            .subscribe((count) => {
+              if (count === 0) {
+                sub.unsubscribe();
+                resolve();
+              }
+            });
+        });
+
+        if (processedR) {
+          await this.emitOutput(processedR);
+          return processedR;
+        }
       } catch (e: any) {
         if (e instanceof WaitingChildrenError) {
           await updateJobStatus({

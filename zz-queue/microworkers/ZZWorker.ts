@@ -11,7 +11,7 @@ type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
 >;
 
-export class ZZWorker<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
+export class ZZWorker<P, O, StreamI = never> {
   public readonly pipe: ZZPipe<P, O, StreamI>;
   protected readonly zzEnv: ZZEnv;
 
@@ -19,16 +19,10 @@ export class ZZWorker<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     {
       params: P;
     },
-    O[]
+    O | undefined
   >;
   protected color?: string;
 
-  public readonly addJob: IWorkerUtilFuncs<P, O>["addJob"];
-  public readonly getJob: IWorkerUtilFuncs<P, O>["getJob"];
-  public readonly cancelLongRunningJob: IWorkerUtilFuncs<
-    P,
-    O
-  >["cancelLongRunningJob"];
   public readonly pingAlive: IWorkerUtilFuncs<P, O>["pingAlive"];
   // public readonly getJobData: IWorkerUtilFuncs<P, O>["getJobData"];
   public readonly enqueueJobAndGetResult: IWorkerUtilFuncs<
@@ -70,19 +64,16 @@ export class ZZWorker<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
       projectId: this.zzEnv.projectId,
     });
 
-    this.addJob = queueFuncs.addJob;
-    this.cancelLongRunningJob = queueFuncs.cancelLongRunningJob;
     this.pingAlive = queueFuncs.pingAlive;
     this.enqueueJobAndGetResult = queueFuncs.enqueueJobAndGetResult;
     this._rawQueue = queueFuncs._rawQueue;
-    this.getJob = queueFuncs.getJob;
     // this.getJobData = queueFuncs.getJobData;
 
     const logger = getLogger(`wkr:${this.def.name}`, this.color);
     const mergedWorkerOptions = _.merge({}, workerOptions);
     const flowProducer = new FlowProducer(mergedWorkerOptions);
 
-    this.bullMQWorker = new Worker<{ params: P }, O[], string>(
+    this.bullMQWorker = new Worker<{ params: P }, O | undefined, string>(
       this.def.name,
       async (job, token) => {
         const zzJ = new ZZJob<P, O, StreamI>({
