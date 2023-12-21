@@ -42,7 +42,7 @@ export class ZZJob<P, O, StreamI = never> {
   public readonly bullMQJob: Job<{ params: P }, O | undefined>;
   public readonly _bullMQToken?: string;
   params: P;
-  inputObservable: Observable<StreamI>;
+  inputObservable: Observable<StreamI | null>;
   logger: ReturnType<typeof getLogger>;
   // New properties for subscriber tracking
   private inputSubscriberCount = 0;
@@ -72,7 +72,7 @@ export class ZZJob<P, O, StreamI = never> {
 
   storageProvider?: IStorageProvider;
   flowProducer: FlowProducer;
-  processor: (j: ZZJob<P, O, StreamI>) => Promise<O | undefined>;
+  processor: (j: ZZJob<P, O, StreamI>) => Promise<O | void>;
   pipe: ZZPipe<P, O, StreamI>;
   readonly def: PipeDef<P, O, StreamI>;
   readonly zzEnv: ZZEnv;
@@ -133,18 +133,7 @@ export class ZZJob<P, O, StreamI = never> {
       }
     };
     this.inputObservable = inputObservable
-      .pipe(takeWhile((r) => r.terminate === false))
-      .pipe(
-        map(
-          (r) =>
-            (
-              r as {
-                data: StreamI;
-                terminate: false;
-              }
-            ).data
-        )
-      )
+      .pipe(map((r) => (r.terminate ? null : r.data)))
       .pipe(
         tap({
           subscribe: () => {
