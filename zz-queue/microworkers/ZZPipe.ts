@@ -29,7 +29,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
   protected readonly queueOptions: WorkerOptions;
   protected readonly storageProvider?: IStorageProvider;
 
-  public readonly workers: ZZWorker<P, O, StreamI>[] = [];
+  // public readonly workers: ZZWorker<P, O, StreamI>[] = [];
   protected color?: string;
   protected logger: ReturnType<typeof getLogger>;
 
@@ -47,7 +47,8 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
       pipe: this,
       concurrency,
     });
-    this.workers.push(worker);
+    // this.workers.push(worker);
+    await worker.bullMQWorker.waitUntilReady();
     return worker;
   }
 
@@ -208,7 +209,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     });
   }
 
-  public async terminateInput(jobId: string) {
+  public async terminateJobInput(jobId: string) {
     const pubSub = this.pubSubFactoryForJob(jobId);
     const messageId = v4();
     await pubSub.pubToJobInput({
@@ -265,6 +266,10 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     bullMQJobsOpts?: JobsOptions;
   }) {
     // force job id to be the same as name
+    const workers = await this._rawQueue.getWorkers();
+    if (workers.length === 0) {
+      this.logger.warn(`No worker for queue ${this.def.name}.`);
+    }
     const j = await this._rawQueue.add(
       jobId,
       { initParams },
@@ -306,11 +311,12 @@ export const getMicroworkerQueueByName = <
   const {
     // queueNamesDef,
     queueName,
+    projectId,
   } = p;
   // if (!Object.values(queueNamesDef).includes(queueName)) {
   //   throw new Error(`Can not handle queueName ${queueName}!`);
   // }
-  const existing = queueMap.get(queueName) as ReturnType<
+  const existing = queueMap.get(`${projectId}/${queueName}`) as ReturnType<
     typeof createAndReturnQueue<JobDataType, JobReturnType, T>
   >;
   if (existing) {
