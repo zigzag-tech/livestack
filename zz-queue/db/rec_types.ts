@@ -29,7 +29,7 @@ export type ZZJobStatus = z.infer<typeof ZZJobStatus>;
 
 export const ZZJobStatusRec = ZZJobUniqueId.and(
   z.object({
-    job_status: ZZJobStatus,
+    status: ZZJobStatus,
     time_created: z.date(),
   })
 );

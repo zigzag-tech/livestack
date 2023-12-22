@@ -50,22 +50,20 @@ export async function getJobRec<O>({
   jobStatus?: ZZJobStatus;
 }) {
   const r = (await dbConn("zz_jobs")
-    .select("*")
+    .select(["zz_jobs.*", "zz_job_status.status"])
     .leftJoin("zz_job_status", function () {
       this.on("zz_jobs.job_id", "=", "zz_job_status.job_id");
       this.on("zz_jobs.project_id", "=", "zz_job_status.project_id");
       this.on("zz_jobs.op_name", "=", "zz_job_status.op_name");
     })
-    .where({
-      op_name: opName,
-      job_id: jobId,
-      project_id: projectId,
-    })
-    .orderBy("zz_job_status.created_at", "desc")
-    .first()) as (ZZJobRec<O> & ZZJobStatusRec) | null;
+    .where("zz_jobs.project_id", "=", projectId)
+    .andWhere("zz_jobs.op_name", "=", opName)
+    .andWhere("zz_jobs.job_id", "=", jobId)
+    .orderBy("zz_job_status.time_created", "desc")
+    .first()) as (ZZJobRec<O> & Pick<ZZJobStatusRec, "status">) | null;
 
   // check if job status is what we want
-  if (jobStatus && r?.job_status !== jobStatus) {
+  if (jobStatus && r?.status !== jobStatus) {
     return null;
   }
 
@@ -96,16 +94,17 @@ export async function getJobData<T>({
     }
     return [job.init_params as T];
   } else {
-    const r = (await dbConn("zz_job_data")
-      .where({
-        op_name: jId.opName,
-        job_id: jId.jobId,
-        project_id: jId.projectId,
-        io_type: ioType,
+    const r = await dbConn<ZZJobIOEventRec>("zz_job_io_events")
+      .join<ZZJobDataRec<T>>("zz_job_data", function () {
+        this.on("zz_job_data.job_data_id", "=", "zz_job_io_events.job_data_id");
       })
-      .orderBy("created_at", order)
+      .where("zz_job_io_events.project_id", "=", jId.projectId)
+      .andWhere("zz_job_io_events.op_name", "=", jId.opName)
+      .andWhere("zz_job_io_events.job_id", "=", jId.jobId)
+      .andWhere("zz_job_io_events.io_type", "=", ioType)
+      .orderBy("zz_job_io_events.time_created", order)
       .limit(limit)
-      .select("*")) as ZZJobDataRec<T>[];
+      .select("*");
 
     return r.map((rec) => rec.job_data);
   }
@@ -163,11 +162,19 @@ export async function updateJobStatus({
   dbConn: Knex;
   jobStatus: ZZJobStatus;
 }) {
-  await dbConn("zz_job_status").insert({
+  console.log({
+    status_id: v4(),
     project_id: projectId,
     op_name: opName,
     job_id: jobId,
-    job_status: jobStatus,
+    status: jobStatus,
+  });
+  await dbConn("zz_job_status").insert<ZZJobStatusRec>({
+    status_id: v4(),
+    project_id: projectId,
+    op_name: opName,
+    job_id: jobId,
+    status: jobStatus,
   });
 }
 
@@ -187,7 +194,13 @@ export async function addJobRec<T>({
     project_id: projectId,
     op_name: opName,
     job_id: jobId,
-    job_status: jobStatus,
+  });
+  await updateJobStatus({
+    projectId,
+    opName,
+    jobId,
+    dbConn,
+    jobStatus,
   });
 
   const jobDataSuffix = "init_input";

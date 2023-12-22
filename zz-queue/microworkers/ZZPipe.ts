@@ -294,7 +294,7 @@ function createAndReturnQueue<
     await addJobRec({
       projectId,
       opName: queueName,
-      jobId: j.id!,
+      jobId,
       dbConn: db,
       initParams: params,
     });

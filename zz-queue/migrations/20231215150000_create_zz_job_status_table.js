@@ -9,7 +9,7 @@ exports.up = function (knex) {
     table.string("project_id").notNullable();
     table.string("op_name").notNullable();
     table.string("job_id").notNullable();
-    table.jsonb("status").notNullable();
+    table.string("status").notNullable();
     table.timestamp("time_created").defaultTo(knex.fn.now());
 
     // add foreign key for primary key

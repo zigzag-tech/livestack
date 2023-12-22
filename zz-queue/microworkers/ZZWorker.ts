@@ -23,12 +23,6 @@ export class ZZWorker<P, O, StreamI = never> {
   >;
   protected color?: string;
 
-  public readonly pingAlive: IWorkerUtilFuncs<P, O>["pingAlive"];
-  // public readonly getJobData: IWorkerUtilFuncs<P, O>["getJobData"];
-  public readonly enqueueJobAndGetResult: IWorkerUtilFuncs<
-    P,
-    O
-  >["enqueueJobAndGetResult"];
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
   public readonly def: PipeDef<P, O, StreamI>;
 
@@ -64,8 +58,6 @@ export class ZZWorker<P, O, StreamI = never> {
       projectId: this.zzEnv.projectId,
     });
 
-    this.pingAlive = queueFuncs.pingAlive;
-    this.enqueueJobAndGetResult = queueFuncs.enqueueJobAndGetResult;
     this._rawQueue = queueFuncs._rawQueue;
     // this.getJobData = queueFuncs.getJobData;
 
