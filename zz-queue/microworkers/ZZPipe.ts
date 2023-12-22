@@ -149,7 +149,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
       jobId = `${this.def.name}-${v4()}`;
     }
 
-    console.info(`Enqueueing job ${jobId} with data:`, initJobData);
+    this.logger.info(`Enqueueing job ${jobId} with data:`, initJobData);
     const queueEvents = new QueueEvents(this.def.name, {
       connection: this.zzEnv.redisConfig,
     });
@@ -184,10 +184,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     await redis.set(`last-time-job-alive-${jobId}`, Date.now());
   }
 
-  public async sendInput({ jobId, data }: { jobId?: string; data: StreamI }) {
-    if (!jobId) {
-      jobId = `${this.def.name}-${v4()}`;
-    }
+  public async sendInput({ jobId, data }: { jobId: string; data: StreamI }) {
     const pubSub = this.pubSubFactoryForJob(jobId);
     const messageId = v4();
     await pubSub.pubToJobInput({
@@ -209,6 +206,39 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
       message: {
         terminate: true,
       },
+    });
+  }
+
+  public subscribeToJobOutputTillTermination({
+    jobId,
+    onMessage,
+  }: {
+    jobId: string;
+    onMessage: (
+      m:
+        | { terminate: false; data: O; messageId: string }
+        | {
+            terminate: true;
+          }
+    ) => void;
+  }) {
+    const pubSub = this.pubSubFactoryForJob(jobId);
+    return new Promise<void>((resolve, reject) => {
+      const sub = pubSub.subForJobOutput({
+        processor: (msg) => {
+          if (msg.terminate) {
+            sub.unsub();
+            onMessage(msg);
+            resolve();
+          } else {
+            onMessage({
+              data: msg.data,
+              terminate: false,
+              messageId: msg.__zz_job_data_id__,
+            });
+          }
+        },
+      });
     });
   }
 

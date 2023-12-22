@@ -76,6 +76,7 @@ export class ZZJob<P, O, StreamI = never> {
   pipe: ZZPipe<P, O, StreamI>;
   readonly def: PipeDef<P, O, StreamI>;
   readonly zzEnv: ZZEnv;
+  private _dummyProgressCount = 0;
 
   constructor(p: {
     bullMQJob: Job<{ params: P }, O | undefined, string>;
@@ -164,6 +165,8 @@ export class ZZJob<P, O, StreamI = never> {
         ioType: "out",
         jobData: o,
       });
+      // update progress to prevent job from being stalling
+      this.bullMQJob.updateProgress(this._dummyProgressCount++);
       await emitOutput({
         data: o,
         __zz_job_data_id__: jobDataId,

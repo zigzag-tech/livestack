@@ -54,12 +54,8 @@ export class PubSubFactory<I, O> {
     });
   }
 
-  public async subForJobOutput({
-    processor,
-  }: {
-    processor: (message: O) => void;
-  }) {
-    return await this._sub({
+  public subForJobOutput({ processor }: { processor: (message: O) => void }) {
+    return this._sub({
       processor,
       hoseType: "output",
     });
