@@ -60,6 +60,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     if (this.pubSubCache.has(jobId)) {
       return this.pubSubCache.get(jobId)!;
     } else {
+      const queueId = this.def.name + "::" + jobId;
       const pubSub = new PubSubFactory<
         WrapTerminatorAndDataId<StreamI>,
         WrapTerminatorAndDataId<O>
@@ -68,7 +69,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
           projectId: this.zzEnv.projectId,
         },
         this.zzEnv.redisConfig,
-        this.def.name + "::" + jobId
+        queueId
       );
       this.pubSubCache.set(jobId, pubSub);
       return pubSub;
@@ -150,9 +151,12 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     }
 
     this.logger.info(`Enqueueing job ${jobId} with data:`, initJobData);
-    const queueEvents = new QueueEvents(this.def.name, {
-      connection: this.zzEnv.redisConfig,
-    });
+    const queueEvents = new QueueEvents(
+      `${this.zzEnv.projectId}/${this.def.name}`,
+      {
+        connection: this.zzEnv.redisConfig,
+      }
+    );
 
     const job = await this.addJob({
       jobId,
@@ -187,9 +191,9 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
   public async sendInput({ jobId, data }: { jobId: string; data: StreamI }) {
     const pubSub = this.pubSubFactoryForJob(jobId);
     const messageId = v4();
+
     await pubSub.pubToJobInput({
       messageId,
-
       message: {
         data,
         terminate: false,
@@ -222,6 +226,8 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
           }
     ) => void;
   }) {
+    // console.log("pubSubFactoryForJobt", jobId);
+
     const pubSub = this.pubSubFactoryForJob(jobId);
     return new Promise<void>((resolve, reject) => {
       const sub = pubSub.subForJobOutput({
@@ -324,7 +330,7 @@ function createAndReturnQueue<
   db: Knex;
 }) {
   const queue = new Queue<{ params: JobDataType }, JobReturnType>(
-    queueName,
+    `${projectId}/${queueName}`,
     queueOptions
   );
 

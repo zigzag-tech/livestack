@@ -100,9 +100,8 @@ export class ZZJob<P, O, StreamI = never> {
     this.processor = p.processor;
 
     const workingDir = getTempPathByJobId(this.bullMQJob.id!);
-
     this.workingDirToBeUploadedToCloudStorage = workingDir;
-
+    // console.log("pubSubFactoryForJobj", this.bullMQJob.id!);
     const pubSubFactory = this.pipe.pubSubFactoryForJob(this.bullMQJob.id!);
 
     // const pubSubFactory = new PubSubFactory<
@@ -122,7 +121,7 @@ export class ZZJob<P, O, StreamI = never> {
     const { nextInput, inputObservable } = sequentialInputFactory<
       WrapTerminatorAndDataId<StreamI>
     >({
-      pubSubFactory: pubSubFactory,
+      pubSubFactory,
     });
 
     this.nextInput = async () => {
@@ -149,7 +148,7 @@ export class ZZJob<P, O, StreamI = never> {
       );
 
     const { emitOutput } = sequentialOutputFactory<WrapTerminatorAndDataId<O>>({
-      pubSubFactory: pubSubFactory,
+      pubSubFactory,
     });
 
     this.emitOutput = async (o: O) => {
@@ -307,7 +306,7 @@ export class ZZJob<P, O, StreamI = never> {
       ...newJob_.opts,
       jobId: newJob_.name,
     };
-
+    // console.log("queueIda", newJob_.queueName + "::" + newJob_.name);
     const pubsubForChild = new PubSubFactory<I, O>(
       {
         projectId: this.zzEnv.projectId,

@@ -197,9 +197,9 @@ export function sequentialInputFactory<I>({
   const generateInputs = async function* (): AsyncGenerator<I, void, unknown> {
     let resolve: ((value: I) => void) | null = null;
     const promiseQueue: I[] = [];
-
     const subscription = ensureInputObservable().subscribe({
       next(value: I) {
+        console.log("vvvvvvalue", value);
         if (resolve) {
           resolve(value);
           resolve = null;
