@@ -105,7 +105,9 @@ export async function getJobData<T>({
       .orderBy("zz_job_io_events.time_created", order)
       .limit(limit)
       .select("*");
-
+      if(r.length === 0) {
+        throw new Error(`Job data for ${jId.jobId} not found!`);
+      }
     return r.map((rec) => rec.job_data);
   }
 }

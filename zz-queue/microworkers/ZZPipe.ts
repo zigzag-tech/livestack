@@ -31,9 +31,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
 
   public readonly workers: ZZWorker<P, O, StreamI>[] = [];
   protected color?: string;
-
-  public readonly addJob: IWorkerUtilFuncs<P, O>["addJob"];
-  // public readonly getJobData: IWorkerUtilFuncs<P, O>["getJobData"];
+  protected logger: ReturnType<typeof getLogger>;
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
   // dummy processor
@@ -96,6 +94,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     };
     this.zzEnv = zzEnv;
     this.color = color;
+    this.logger = getLogger(`wkr:${this.def.name}`, this.color);
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
       queueName: this.def.name,
@@ -104,7 +103,6 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
       projectId: this.zzEnv.projectId,
     });
 
-    this.addJob = queueFuncs.addJob;
     this._rawQueue = queueFuncs._rawQueue;
     // this.getJobData = queueFuncs.getJobData;
   }
@@ -213,6 +211,38 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
       },
     });
   }
+
+  // return queue as Queue<JobDataType, JobReturnType>;
+  public async addJob({
+    jobId,
+    params,
+    bullMQJobsOpts,
+  }: {
+    jobId: string;
+    params: P;
+    bullMQJobsOpts?: JobsOptions;
+  }) {
+    // force job id to be the same as name
+    const j = await this._rawQueue.add(
+      jobId,
+      { params },
+      { ...bullMQJobsOpts, jobId: jobId }
+    );
+    this.logger.info(
+      `Added job with ID: ${j.id}, ${j.queueName} ` +
+        `${JSON.stringify(j.data, longStringTruncator)}`
+    );
+
+    await addJobRec({
+      projectId: this.zzEnv.projectId,
+      opName: this.def.name,
+      jobId,
+      dbConn: this.zzEnv.db,
+      initParams: params,
+    });
+
+    return j;
+  }
 }
 
 export async function sleep(ms: number) {
@@ -268,65 +298,7 @@ function createAndReturnQueue<
     queueOptions
   );
 
-  const logger = getLogger(`wkr:${queueName}`);
-
-  // return queue as Queue<JobDataType, JobReturnType>;
-  const addJob = async ({
-    jobId,
-    params,
-    bullMQJobsOpts,
-  }: {
-    jobId: string;
-    params: JobDataType;
-    bullMQJobsOpts?: JobsOptions;
-  }) => {
-    // force job id to be the same as name
-    const j = await queue.add(
-      jobId,
-      { params },
-      { ...bullMQJobsOpts, jobId: jobId }
-    );
-    logger.info(
-      `Added job with ID: ${j.id}, ${j.queueName} ` +
-        `${JSON.stringify(j.data, longStringTruncator)}`
-    );
-
-    await addJobRec({
-      projectId,
-      opName: queueName,
-      jobId,
-      dbConn: db,
-      initParams: params,
-    });
-
-    return j;
-  };
-
-  // const getJobData = async (jobId: string) => {
-  //   const j = await queue.getJob(jobId);
-  //   if (!j) {
-  //     const dbJ = await getJobRec({
-  //       opName: queueName,
-  //       jobId,
-  //       projectId,
-  //       dbConn: db,
-  //     });
-  //     if (dbJ) {
-  //       return {
-  //         id: dbJ.job_id,
-  //         params: dbJ.job_data as { params: JobDataType },
-  //       };
-  //     }
-  //   } else {
-  //     return {
-  //       id: j.id,
-  //       params: j.data.params,
-  //     };
-  //   }
-  // };
-
   const funcs = {
-    addJob,
     _rawQueue: queue,
   };
 
