@@ -54,19 +54,28 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
 
   private pubSubCache = new Map<string, PubSubFactory<unknown>>();
 
-  public pubSubFactoryForJob<T>(jobId: string) {
-    if (this.pubSubCache.has(jobId)) {
-      return this.pubSubCache.get(jobId)!;
+  public pubSubFactoryForJob<T>({
+    jobId,
+    type,
+  }: {
+    jobId: string;
+    type: "input" | "output";
+  }) {
+    if (this.pubSubCache.has(`${jobId}/${type}`)) {
+      return this.pubSubCache.get(`${jobId}/${type}`)! as PubSubFactory<
+        WrapTerminatorAndDataId<T>
+      >;
     } else {
       const queueId = this.def.name + "::" + jobId;
       const pubSub = new PubSubFactory<WrapTerminatorAndDataId<T>>(
+        type,
         {
           projectId: this.zzEnv.projectId,
         },
         this.zzEnv.redisConfig,
         queueId
       );
-      this.pubSubCache.set(jobId, pubSub);
+      this.pubSubCache.set(`${jobId}/${type}`, pubSub);
       return pubSub;
     }
   }
@@ -190,11 +199,10 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     jobId: string;
     data: StreamI;
   }) {
-    const pubSub = this.pubSubFactoryForJob<StreamI>(jobId);
+    const pubSub = this.pubSubFactoryForJob<StreamI>({ jobId, type: "input" });
     const messageId = v4();
 
     await pubSub.pubToJob({
-      type: "input",
       messageId,
       message: {
         data,
@@ -205,10 +213,9 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
   }
 
   public async terminateJobInput(jobId: string) {
-    const pubSub = this.pubSubFactoryForJob(jobId);
+    const pubSub = this.pubSubFactoryForJob({ jobId, type: "input" });
     const messageId = v4();
     await pubSub.pubToJob({
-      type: "input",
       messageId,
       message: {
         terminate: true,
@@ -255,11 +262,11 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
           }
     ) => void;
   }) {
-    const pubSub = this.pubSubFactoryForJob(jobId) as PubSubFactory<
-      WrapTerminatorAndDataId<O>
-    >;
-    return await pubSub.subForJob({
+    const pubSub = this.pubSubFactoryForJob<O>({
+      jobId,
       type: "output",
+    });
+    return await pubSub.subForJob({
       processor: (msg) => {
         if (msg.terminate) {
           onMessage(msg);
@@ -272,6 +279,22 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
         }
       },
     });
+  }
+
+  public async nextOutputForJob(jobId: string) {
+    const pubSub = this.pubSubFactoryForJob({
+      jobId,
+      type: "output",
+    }) as PubSubFactory<WrapTerminatorAndDataId<O>>;
+    const v = await pubSub.nextValue();
+    if (v.terminate) {
+      return v;
+    } else {
+      return {
+        data: v.data,
+        messageId: v.__zz_job_data_id__,
+      };
+    }
   }
 
   // return queue as Queue<JobDataType, JobReturnType>;

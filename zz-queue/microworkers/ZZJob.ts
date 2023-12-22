@@ -1,6 +1,7 @@
+import { Stream } from "stream";
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import { PubSubFactory, sequentialFactory } from "../realtime/mq-pub-sub";
+import { PubSubFactory } from "../realtime/mq-pub-sub";
 import { Observable, Subject, map, takeUntil, takeWhile, tap } from "rxjs";
 import {
   IStorageProvider,
@@ -93,36 +94,24 @@ export class ZZJob<P, O, StreamI = never> {
     const workingDir = getTempPathByJobId(this.bullMQJob.id!);
     this.workingDirToBeUploadedToCloudStorage = workingDir;
     // console.log("pubSubFactoryForJobj", this.bullMQJob.id!);
-    const pubSubFactory = this.pipe.pubSubFactoryForJob(this.bullMQJob.id!);
-
-    // const pubSubFactory = new PubSubFactory<
-    //   StreamI,
-    //   {
-    //     o: O;
-    //     __zz_job_data_id__: string;
-    //   }
-    // >(
-    //   {
-    //     projectId: this.zzEnv.projectId,
-    //   },
-    //   this.zzEnv.redisConfig,
-    //   this.def.name + "::" + this.bullMQJob.id!
-    // );
-
-    const { nextValue: nextInput, valueObsrvable: inputObservable } =
-      sequentialFactory<WrapTerminatorAndDataId<StreamI>>({
-        pubSubFactory,
-      });
+    const inputPubSubFactory = this.pipe.pubSubFactoryForJob<StreamI>({
+      jobId: this.bullMQJob.id!,
+      type: "input",
+    });
+    const outputPubSubFactory = this.pipe.pubSubFactoryForJob<O>({
+      jobId: this.bullMQJob.id!,
+      type: "output",
+    });
 
     this.nextInput = async () => {
-      const r = await nextInput();
+      const r = await inputPubSubFactory.nextValue();
       if (r.terminate) {
         return null;
       } else {
         return r.data;
       }
     };
-    this.inputObservable = inputObservable
+    this.inputObservable = inputPubSubFactory.valueObsrvable
       .pipe(map((r) => (r.terminate ? null : r.data)))
       .pipe(
         tap({
@@ -136,10 +125,6 @@ export class ZZJob<P, O, StreamI = never> {
           },
         })
       );
-
-    const { emit: emitOutput } = sequentialFactory<WrapTerminatorAndDataId<O>>({
-      pubSubFactory,
-    });
 
     this.emitOutput = async (o: O) => {
       if (this.storageProvider) {
@@ -156,7 +141,7 @@ export class ZZJob<P, O, StreamI = never> {
       });
       // update progress to prevent job from being stalling
       this.bullMQJob.updateProgress(this._dummyProgressCount++);
-      await emitOutput({
+      await outputPubSubFactory.emitValue({
         data: o,
         __zz_job_data_id__: jobDataId,
         terminate: false,
@@ -300,11 +285,12 @@ export class ZZJob<P, O, StreamI = never> {
     };
     // console.log("queueIda", newJob_.queueName + "::" + newJob_.name);
     const pubsubForChild = new PubSubFactory<O>(
+      "output",
       {
         projectId: this.zzEnv.projectId,
       },
       this.zzEnv.redisConfig,
-      newJob_.queueName + "::" + newJob_.name
+      newJob_.queueName + "::" + newJob_.name 
     );
     await this.flowProducer.add(newJob_);
 
@@ -318,7 +304,6 @@ export class ZZJob<P, O, StreamI = never> {
     return {
       subToOutput: (processor: (message: O) => void) => {
         pubsubForChild.subForJob({
-          type: "output",
           processor,
         });
       },

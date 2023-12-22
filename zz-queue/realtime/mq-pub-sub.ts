@@ -8,8 +8,87 @@ export class PubSubFactory<T> {
   private _projectConfig: ProjectConfig;
   private _redisConfig: RedisOptions;
   private _queueId: string;
+  private _valueGenerator: AsyncGenerator<T, unknown, unknown> | null = null;
+  private _valueObservable: Observable<T> | null = null;
+  private _type: "input" | "output";
+
+  private ensureValueObservable() {
+    if (!this._valueObservable) {
+      this._valueObservable = new Observable<T>((subscriber) => {
+        const { unsub } = this.subForJob({
+          processor: async (v) => {
+            subscriber.next(v);
+          },
+        });
+        return {
+          unsubscribe: () => {
+            unsub();
+          },
+        };
+      });
+      this._valueGenerator = generateValues(this._valueObservable);
+    }
+
+    async function* generateValues(
+      valueObservable: Observable<T>
+    ): AsyncGenerator<T, void, unknown> {
+      let resolve: ((value: T) => void) | null = null;
+      const promiseQueue: T[] = [];
+      const subscription = valueObservable.subscribe({
+        next(value: T) {
+          // console.log("vvvvvvalue", value);
+          if (resolve) {
+            resolve(value);
+            resolve = null;
+          } else {
+            promiseQueue.push(value);
+          }
+        },
+        error(err) {
+          throw err;
+        },
+      });
+
+      try {
+        while (true) {
+          if (promiseQueue.length > 0) {
+            yield promiseQueue.shift()!;
+          } else {
+            yield new Promise<T>((res) => {
+              resolve = res;
+            });
+          }
+        }
+      } finally {
+        subscription.unsubscribe();
+      }
+    }
+    return this._valueObservable;
+  }
+
+  public async emitValue(o: T) {
+    this.pubToJob({
+      message: o,
+      messageId: v4(),
+    });
+  }
+
+  public async nextValue() {
+    this.ensureValueObservable();
+
+    const { value, done } = await this._valueGenerator!.next();
+    if (done) {
+      throw new Error("Observable completed");
+    }
+    return value;
+  }
+
+  get valueObsrvable() {
+    return this.ensureValueObservable();
+  }
 
   constructor(
+    type: "input" | "output",
     projectConfig: ProjectConfig,
     redisConfig: RedisOptions,
     queueId: string
@@ -17,27 +96,12 @@ export class PubSubFactory<T> {
     this._projectConfig = projectConfig;
     this._redisConfig = redisConfig;
     this._queueId = queueId;
+    this._type = type;
   }
 
   public async pubToJob({
     message,
     messageId,
-    type,
-  }: {
-    message: T;
-    messageId: string;
-    type: "input" | "output";
-  }) {
-    return await this._pub({
-      message,
-      messageId,
-      hoseType: type,
-    });
-  }
-
-  public async pubToJobOutput({
-    message,
-    messageId,
   }: {
     message: T;
     messageId: string;
@@ -45,31 +109,19 @@ export class PubSubFactory<T> {
     return await this._pub({
       message,
       messageId,
-      hoseType: "output",
     });
   }
 
-  public subForJob({
-    processor,
-    type,
-  }: {
-    type: "input" | "output";
-    processor: (message: T) => void;
-  }) {
+  public subForJob({ processor }: { processor: (message: T) => void }) {
     return this._sub({
       processor,
-      hoseType: type,
     });
   }
 
-  private getPubSubClientsById({
-    queueId,
-    hoseType,
-  }: {
-    queueId: string;
-    hoseType: "input" | "output";
-  }) {
-    const id = `msgq:${hoseType}:${this._projectConfig.projectId}--${queueId!}`;
+  private getPubSubClientsById({ queueId }: { queueId: string }) {
+    const id = `msgq:${this._projectConfig.projectId}--${queueId!}/${
+      this._type
+    }`;
     if (!PUBSUB_BY_ID[id]) {
       const sub = new Redis(this._redisConfig);
       sub.subscribe(id, (err, count) => {
@@ -90,15 +142,12 @@ export class PubSubFactory<T> {
   private async _pub<T>({
     message,
     messageId,
-    hoseType,
   }: {
     message: T;
     messageId: string;
-    hoseType: "input" | "output";
   }) {
     const { channelId, clients } = await this.getPubSubClientsById({
       queueId: this._queueId,
-      hoseType,
     });
 
     // console.log("pubbing", channelId);
@@ -110,16 +159,9 @@ export class PubSubFactory<T> {
     return addedMsg;
   }
 
-  private _sub<T>({
-    processor,
-    hoseType,
-  }: {
-    processor: (message: T) => void;
-    hoseType: "input" | "output";
-  }) {
+  private _sub<T>({ processor }: { processor: (message: T) => void }) {
     const { clients, channelId } = this.getPubSubClientsById({
       queueId: this._queueId,
-      hoseType,
     });
 
     // console.log("sub to", channelId);
@@ -160,89 +202,4 @@ function customParse(json: string): any {
     return value;
   }
   return JSON.parse(json, reviver);
-}
-
-export function sequentialFactory<T>({
-  pubSubFactory,
-}: {
-  pubSubFactory: PubSubFactory<T>;
-}) {
-  let valueGenerator: ReturnType<typeof generateValues>;
-  let _valueObservable: Observable<T>;
-  const ensureValueObservable = () => {
-    if (!_valueObservable) {
-      _valueObservable = new Observable<T>((subscriber) => {
-        const { unsub } = pubSubFactory.subForJob({
-          type: "input",
-          processor: async (v) => {
-            subscriber.next(v);
-          },
-        });
-        return {
-          unsubscribe: () => {
-            unsub();
-          },
-        };
-      });
-      valueGenerator = generateValues();
-    }
-    return _valueObservable;
-  };
-  const nextValue = async () => {
-    ensureValueObservable();
-
-    const { value, done } = await valueGenerator.next();
-    if (done) {
-      throw new Error("Observable completed");
-    }
-    return value;
-  };
-
-  const generateValues = async function* (): AsyncGenerator<T, void, unknown> {
-    let resolve: ((value: T) => void) | null = null;
-    const promiseQueue: T[] = [];
-    const subscription = ensureValueObservable().subscribe({
-      next(value: T) {
-        // console.log("vvvvvvalue", value);
-        if (resolve) {
-          resolve(value);
-          resolve = null;
-        } else {
-          promiseQueue.push(value);
-        }
-      },
-      error(err) {
-        throw err;
-      },
-    });
-
-    try {
-      while (true) {
-        if (promiseQueue.length > 0) {
-          yield promiseQueue.shift()!;
-        } else {
-          yield new Promise<T>((res) => {
-            resolve = res;
-          });
-        }
-      }
-    } finally {
-      subscription.unsubscribe();
-    }
-  };
-
-  const emit = async (o: T) => {
-    pubSubFactory.pubToJobOutput({
-      message: o,
-      messageId: v4(),
-    });
-  };
-
-  return {
-    nextValue,
-    emit,
-    get valueObsrvable() {
-      return ensureValueObservable();
-    },
-  };
 }
