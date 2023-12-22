@@ -200,7 +200,7 @@ export class ZZJob<P, O, StreamI = never> {
       );
 
       // return last job data
-      return jobData[jobData.length - 1]?.job_data || undefined;
+      return jobData[jobData.length - 1] || undefined;
     } else {
       logger.info(
         `Picked up job with ID: ${job.id}, ${job.queueName} ` +
@@ -224,7 +224,7 @@ export class ZZJob<P, O, StreamI = never> {
           jobStatus: "completed",
         });
 
-        // wait when there are still subscribers
+        // wait as long as there are still subscribers
         await new Promise<void>((resolve) => {
           const sub = this.inputSubscriberCountChanged
             .pipe(takeUntil(this.inputObservable))

@@ -72,20 +72,43 @@ export async function getJobRec<O>({
   return r;
 }
 
-export async function getJobData<T>(
-  jId: JobUniqueId & { dbConn: Knex; ioType: "in" | "out" }
-) {
-  const r = (await jId
-    .dbConn("zz_job_data")
-    .where({
-      op_name: jId.opName,
-      job_id: jId.jobId,
-      project_id: jId.projectId,
-      io_type: "out",
-    })
-    .orderBy("created_at", "desc")
-    .select("*")) as ZZJobDataRec<T>[];
-  return r;
+export async function getJobData<T>({
+  limit = 100,
+  ioType,
+  order = "desc",
+  dbConn,
+  ...jId
+}: JobUniqueId & {
+  dbConn: Knex;
+  ioType: "in" | "out" | "init-params";
+  order?: "asc" | "desc";
+  limit?: number;
+}) {
+  if (ioType === "init-params") {
+    const job = await getJobRec<T>({
+      opName: jId.opName,
+      projectId: jId.projectId,
+      jobId: jId.jobId,
+      dbConn,
+    });
+    if (!job) {
+      throw new Error(`Job ${jId.jobId} not found!`);
+    }
+    return [job.init_params as T];
+  } else {
+    const r = (await dbConn("zz_job_data")
+      .where({
+        op_name: jId.opName,
+        job_id: jId.jobId,
+        project_id: jId.projectId,
+        io_type: ioType,
+      })
+      .orderBy("created_at", order)
+      .limit(limit)
+      .select("*")) as ZZJobDataRec<T>[];
+
+    return r.map((rec) => rec.job_data);
+  }
 }
 
 export async function addJobDataAndIOEvent<T>({

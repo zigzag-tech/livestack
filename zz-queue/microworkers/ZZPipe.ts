@@ -7,7 +7,7 @@ import { ZZWorker } from "./ZZWorker";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
 
-import { addJobRec, getJobRec } from "../db/knexConn";
+import { addJobRec, getJobData, getJobRec } from "../db/knexConn";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
@@ -109,9 +109,34 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     // this.getJobData = queueFuncs.getJobData;
   }
 
-  public async getJob(jobId: string) {
-    const j = await this._rawQueue.getJob(jobId);
-    return j || null;
+  // public async getJob(jobId: string) {
+  //   const j = await this._rawQueue.getJob(jobId);
+  //   return j || null;
+  // }
+
+  public async getJobData<
+    T extends "in" | "out" | "init-params",
+    U = T extends "in" ? StreamI : T extends "out" ? O : P
+  >({
+    jobId,
+    ioType,
+    order,
+    limit,
+  }: {
+    jobId: string;
+    ioType: T;
+    order?: "asc" | "desc";
+    limit?: number;
+  }) {
+    return await getJobData<U>({
+      opName: this.def.name,
+      projectId: this.zzEnv.projectId,
+      jobId,
+      dbConn: this.zzEnv.db,
+      ioType,
+      order,
+      limit,
+    });
   }
 
   public async enqueueJobAndGetResult({
