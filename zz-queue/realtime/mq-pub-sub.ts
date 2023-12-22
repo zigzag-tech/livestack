@@ -180,6 +180,7 @@ export function sequentialInputFactory<I>({
           },
         };
       });
+      inputGenerator = generateInputs();
     }
     return _inputObservable;
   };

@@ -164,13 +164,7 @@ export async function updateJobStatus({
   dbConn: Knex;
   jobStatus: ZZJobStatus;
 }) {
-  console.log({
-    status_id: v4(),
-    project_id: projectId,
-    op_name: opName,
-    job_id: jobId,
-    status: jobStatus,
-  });
+
   await dbConn("zz_job_status").insert<ZZJobStatusRec>({
     status_id: v4(),
     project_id: projectId,
