@@ -100,6 +100,8 @@ export class PubSubFactory<I, O> {
       hoseType,
     });
 
+    // console.log("pubbing", channelId);
+
     const addedMsg = await clients.pub.publish(
       channelId,
       customStringify({ message, messageId })
@@ -199,7 +201,7 @@ export function sequentialInputFactory<I>({
     const promiseQueue: I[] = [];
     const subscription = ensureInputObservable().subscribe({
       next(value: I) {
-        console.log("vvvvvvalue", value);
+        // console.log("vvvvvvalue", value);
         if (resolve) {
           resolve(value);
           resolve = null;
