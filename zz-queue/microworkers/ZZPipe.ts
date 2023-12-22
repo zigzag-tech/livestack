@@ -76,6 +76,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
         queueId
       );
       this.pubSubCache.set(`${jobId}/${type}`, pubSub);
+
       return pubSub;
     }
   }
@@ -124,6 +125,11 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
       jobId,
       dbConn: this.zzEnv.db,
     });
+  }
+
+  public async getJobStatus(jobId:string) {
+    const job = await this.getJobRec(jobId);
+    return job?.status || null;
   }
 
   public async getJobData<

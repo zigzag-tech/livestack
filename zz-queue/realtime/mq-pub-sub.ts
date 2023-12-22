@@ -26,15 +26,10 @@ export class PubSubFactory<T> {
           },
         };
       });
-      this._valueGenerator = generateValues(this._valueObservable);
-    }
-
-    async function* generateValues(
-      valueObservable: Observable<T>
-    ): AsyncGenerator<T, void, unknown> {
       let resolve: ((value: T) => void) | null = null;
       const promiseQueue: T[] = [];
-      const subscription = valueObservable.subscribe({
+
+      const subscription = this._valueObservable.subscribe({
         next(value: T) {
           // console.log("vvvvvvalue", value);
           if (resolve) {
@@ -49,20 +44,31 @@ export class PubSubFactory<T> {
         },
       });
 
-      try {
-        while (true) {
-          if (promiseQueue.length > 0) {
-            yield promiseQueue.shift()!;
-          } else {
-            yield new Promise<T>((res) => {
-              resolve = res;
-            });
+      console.log("z");
+
+      const generateValues = async function* (): AsyncGenerator<
+        T,
+        void,
+        unknown
+      > {
+        try {
+          while (true) {
+            if (promiseQueue.length > 0) {
+              yield promiseQueue.shift()!;
+            } else {
+              yield new Promise<T>((res) => {
+                resolve = res;
+              });
+            }
           }
+        } finally {
+          subscription.unsubscribe();
         }
-      } finally {
-        subscription.unsubscribe();
-      }
+      };
+
+      this._valueGenerator = generateValues();
     }
+
     return this._valueObservable;
   }
 
@@ -97,6 +103,8 @@ export class PubSubFactory<T> {
     this._redisConfig = redisConfig;
     this._queueId = queueId;
     this._type = type;
+
+    this.ensureValueObservable();
   }
 
   public async pubToJob({

@@ -94,6 +94,7 @@ export class ZZJob<P, O, StreamI = never> {
     const workingDir = getTempPathByJobId(this.bullMQJob.id!);
     this.workingDirToBeUploadedToCloudStorage = workingDir;
     // console.log("pubSubFactoryForJobj", this.bullMQJob.id!);
+
     const inputPubSubFactory = this.pipe.pubSubFactoryForJob<StreamI>({
       jobId: this.bullMQJob.id!,
       type: "input",
