@@ -6,22 +6,22 @@ import { RedisOptions } from "ioredis";
 export class PipeDef<P, O, StreamI> {
   name: string;
   jobParams: z.ZodType<P>;
-  jobReturnData: z.ZodType<O>;
+  output: z.ZodType<O>;
   streamInput: z.ZodType<StreamI>;
   constructor({
     name,
     jobParams,
-    jobReturnData,
+    output,
     streamInput,
   }: {
     name: string;
     jobParams: z.ZodType<P>;
-    jobReturnData: z.ZodType<O>;
+    output: z.ZodType<O>;
     streamInput: z.ZodType<StreamI>;
   }) {
     this.name = name;
     this.jobParams = jobParams;
-    this.jobReturnData = jobReturnData;
+    this.output = output;
     this.streamInput = streamInput;
   }
 }
