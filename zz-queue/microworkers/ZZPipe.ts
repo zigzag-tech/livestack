@@ -288,12 +288,9 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     }) as PubSubFactory<WrapTerminatorAndDataId<O>>;
     const v = await pubSub.nextValue();
     if (v.terminate) {
-      return v;
+      return null;
     } else {
-      return {
-        data: v.data,
-        messageId: v.__zz_job_data_id__,
-      };
+      return v.data;
     }
   }
 

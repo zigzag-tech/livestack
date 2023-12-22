@@ -168,7 +168,6 @@ export class PubSubFactory<T> {
 
     clients.sub.on("message", async (channel, message) => {
       const { message: msg, messageId } = customParse(message);
-      // console.log(`Received ${messageId} from ${channel}`);
       await processor(msg);
     });
 

@@ -275,22 +275,17 @@ export class ZZJob<P, O, StreamI = never> {
       initParams: I;
     }
   ) {
-    // newJob_.data = {
-    //   params: newJob_.data as I,
-    // };
-
     newJob_.opts = {
       ...newJob_.opts,
       jobId: newJob_.name,
     };
-    // console.log("queueIda", newJob_.queueName + "::" + newJob_.name);
     const pubsubForChild = new PubSubFactory<O>(
       "output",
       {
         projectId: this.zzEnv.projectId,
       },
       this.zzEnv.redisConfig,
-      newJob_.queueName + "::" + newJob_.name 
+      newJob_.queueName + "::" + newJob_.name
     );
     await this.flowProducer.add(newJob_);
 
