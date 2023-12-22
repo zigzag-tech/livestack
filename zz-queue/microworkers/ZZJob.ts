@@ -1,10 +1,6 @@
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import {
-  PubSubFactory,
-  sequentialInputFactory,
-  sequentialOutputFactory,
-} from "../realtime/mq-pub-sub";
+import { PubSubFactory, sequentialFactory } from "../realtime/mq-pub-sub";
 import { Observable, Subject, map, takeUntil, takeWhile, tap } from "rxjs";
 import {
   IStorageProvider,
@@ -29,17 +25,15 @@ import { WrapTerminatorAndDataId, ZZPipe } from "./ZZPipe";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
 import { z } from "zod";
 
-export type ZZProcessor<P, O, StreamI = never> = ZZJob<
-  P,
-  O,
-  StreamI
->["processor"];
+export type ZZProcessor<P, O, StreamI = never> = Parameters<
+  ZZJob<P, O, StreamI>["beginProcessing"]
+>[0];
 export type ZZProcessorParams<P, O, StreamI = never> = Parameters<
   ZZProcessor<P, O, StreamI>
 >[0];
 
 export class ZZJob<P, O, StreamI = never> {
-  public readonly bullMQJob: Job<{ params: P }, O | undefined>;
+  private readonly bullMQJob: Job<{ params: P }, O | void>;
   public readonly _bullMQToken?: string;
   params: P;
   inputObservable: Observable<StreamI | null>;
@@ -72,7 +66,6 @@ export class ZZJob<P, O, StreamI = never> {
 
   storageProvider?: IStorageProvider;
   flowProducer: FlowProducer;
-  processor: (j: ZZJob<P, O, StreamI>) => Promise<O | void>;
   pipe: ZZPipe<P, O, StreamI>;
   readonly def: PipeDef<P, O, StreamI>;
   readonly zzEnv: ZZEnv;
@@ -86,7 +79,6 @@ export class ZZJob<P, O, StreamI = never> {
     flowProducer: FlowProducer;
     storageProvider?: IStorageProvider;
     pipe: ZZPipe<P, O, StreamI>;
-    processor: ZZJob<P, O, StreamI>["processor"];
   }) {
     this.bullMQJob = p.bullMQJob;
     this._bullMQToken = p.bullMQToken;
@@ -97,7 +89,6 @@ export class ZZJob<P, O, StreamI = never> {
     this.def = p.pipe.def;
     this.zzEnv = p.pipe.zzEnv;
     this.pipe = p.pipe;
-    this.processor = p.processor;
 
     const workingDir = getTempPathByJobId(this.bullMQJob.id!);
     this.workingDirToBeUploadedToCloudStorage = workingDir;
@@ -118,11 +109,10 @@ export class ZZJob<P, O, StreamI = never> {
     //   this.def.name + "::" + this.bullMQJob.id!
     // );
 
-    const { nextInput, inputObservable } = sequentialInputFactory<
-      WrapTerminatorAndDataId<StreamI>
-    >({
-      pubSubFactory,
-    });
+    const { nextValue: nextInput, valueObsrvable: inputObservable } =
+      sequentialFactory<WrapTerminatorAndDataId<StreamI>>({
+        pubSubFactory,
+      });
 
     this.nextInput = async () => {
       const r = await nextInput();
@@ -147,7 +137,7 @@ export class ZZJob<P, O, StreamI = never> {
         })
       );
 
-    const { emitOutput } = sequentialOutputFactory<WrapTerminatorAndDataId<O>>({
+    const { emit: emitOutput } = sequentialFactory<WrapTerminatorAndDataId<O>>({
       pubSubFactory,
     });
 
@@ -174,7 +164,9 @@ export class ZZJob<P, O, StreamI = never> {
     };
   }
 
-  public async beginProcessing(): Promise<O | undefined> {
+  public async beginProcessing(
+    processor: (j: ZZJob<P, O, StreamI>) => Promise<O | void>
+  ): Promise<O | undefined> {
     const jId = {
       opName: this.def.name,
       jobId: this.bullMQJob.id!,
@@ -217,7 +209,7 @@ export class ZZJob<P, O, StreamI = never> {
           jobStatus: "running",
         });
 
-        const processedR = await this.processor(this);
+        const processedR = await processor(this);
 
         // await job.updateProgress(processedR as object);
         await updateJobStatus({
@@ -307,7 +299,7 @@ export class ZZJob<P, O, StreamI = never> {
       jobId: newJob_.name,
     };
     // console.log("queueIda", newJob_.queueName + "::" + newJob_.name);
-    const pubsubForChild = new PubSubFactory<I, O>(
+    const pubsubForChild = new PubSubFactory<O>(
       {
         projectId: this.zzEnv.projectId,
       },
@@ -324,7 +316,12 @@ export class ZZJob<P, O, StreamI = never> {
       initParams: newJob_.initParams,
     });
     return {
-      subToOutput: pubsubForChild.subForJobOutput.bind(pubsubForChild),
+      subToOutput: (processor: (message: O) => void) => {
+        pubsubForChild.subForJob({
+          type: "output",
+          processor,
+        });
+      },
       ...rec,
     };
   }

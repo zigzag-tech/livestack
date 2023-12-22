@@ -52,20 +52,14 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     return worker;
   }
 
-  private pubSubCache = new Map<
-    string,
-    PubSubFactory<WrapTerminatorAndDataId<StreamI>, WrapTerminatorAndDataId<O>>
-  >();
+  private pubSubCache = new Map<string, PubSubFactory<unknown>>();
 
-  public pubSubFactoryForJob(jobId: string) {
+  public pubSubFactoryForJob<T>(jobId: string) {
     if (this.pubSubCache.has(jobId)) {
       return this.pubSubCache.get(jobId)!;
     } else {
       const queueId = this.def.name + "::" + jobId;
-      const pubSub = new PubSubFactory<
-        WrapTerminatorAndDataId<StreamI>,
-        WrapTerminatorAndDataId<O>
-      >(
+      const pubSub = new PubSubFactory<WrapTerminatorAndDataId<T>>(
         {
           projectId: this.zzEnv.projectId,
         },
@@ -196,10 +190,11 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     jobId: string;
     data: StreamI;
   }) {
-    const pubSub = this.pubSubFactoryForJob(jobId);
+    const pubSub = this.pubSubFactoryForJob<StreamI>(jobId);
     const messageId = v4();
 
-    await pubSub.pubToJobInput({
+    await pubSub.pubToJob({
+      type: "input",
       messageId,
       message: {
         data,
@@ -212,7 +207,8 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
   public async terminateJobInput(jobId: string) {
     const pubSub = this.pubSubFactoryForJob(jobId);
     const messageId = v4();
-    await pubSub.pubToJobInput({
+    await pubSub.pubToJob({
+      type: "input",
       messageId,
       message: {
         terminate: true,
@@ -233,25 +229,48 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
           }
     ) => void;
   }) {
-    // console.log("pubSubFactoryForJobt", jobId);
-
-    const pubSub = this.pubSubFactoryForJob(jobId);
     return new Promise<void>((resolve, reject) => {
-      const sub = pubSub.subForJobOutput({
-        processor: (msg) => {
+      this.subForJobOutput({
+        jobId,
+        onMessage: (msg) => {
           if (msg.terminate) {
-            sub.unsub();
-            onMessage(msg);
             resolve();
-          } else {
-            onMessage({
-              data: msg.data,
-              terminate: false,
-              messageId: msg.__zz_job_data_id__,
-            });
           }
+          onMessage(msg);
         },
       });
+    });
+  }
+
+  public async subForJobOutput({
+    jobId,
+    onMessage,
+  }: {
+    jobId: string;
+    onMessage: (
+      m:
+        | { terminate: false; data: O; messageId: string }
+        | {
+            terminate: true;
+          }
+    ) => void;
+  }) {
+    const pubSub = this.pubSubFactoryForJob(jobId) as PubSubFactory<
+      WrapTerminatorAndDataId<O>
+    >;
+    return await pubSub.subForJob({
+      type: "output",
+      processor: (msg) => {
+        if (msg.terminate) {
+          onMessage(msg);
+        } else {
+          onMessage({
+            data: msg.data,
+            terminate: false,
+            messageId: msg.__zz_job_data_id__,
+          });
+        }
+      },
     });
   }
 

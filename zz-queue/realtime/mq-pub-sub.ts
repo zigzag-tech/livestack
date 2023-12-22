@@ -4,7 +4,7 @@ import { Observable } from "rxjs";
 import { v4 } from "uuid";
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
-export class PubSubFactory<I, O> {
+export class PubSubFactory<T> {
   private _projectConfig: ProjectConfig;
   private _redisConfig: RedisOptions;
   private _queueId: string;
@@ -19,17 +19,19 @@ export class PubSubFactory<I, O> {
     this._queueId = queueId;
   }
 
-  public async pubToJobInput({
+  public async pubToJob({
     message,
     messageId,
+    type,
   }: {
-    message: I;
+    message: T;
     messageId: string;
+    type: "input" | "output";
   }) {
     return await this._pub({
       message,
       messageId,
-      hoseType: "input",
+      hoseType: type,
     });
   }
 
@@ -37,7 +39,7 @@ export class PubSubFactory<I, O> {
     message,
     messageId,
   }: {
-    message: O;
+    message: T;
     messageId: string;
   }) {
     return await this._pub({
@@ -47,17 +49,16 @@ export class PubSubFactory<I, O> {
     });
   }
 
-  public subForJobInput({ processor }: { processor: (message: I) => void }) {
+  public subForJob({
+    processor,
+    type,
+  }: {
+    type: "input" | "output";
+    processor: (message: T) => void;
+  }) {
     return this._sub({
       processor,
-      hoseType: "input",
-    });
-  }
-
-  public subForJobOutput({ processor }: { processor: (message: O) => void }) {
-    return this._sub({
-      processor,
-      hoseType: "output",
+      hoseType: type,
     });
   }
 
@@ -161,17 +162,18 @@ function customParse(json: string): any {
   return JSON.parse(json, reviver);
 }
 
-export function sequentialInputFactory<I>({
+export function sequentialFactory<T>({
   pubSubFactory,
 }: {
-  pubSubFactory: PubSubFactory<I, unknown>;
+  pubSubFactory: PubSubFactory<T>;
 }) {
-  let inputGenerator: ReturnType<typeof generateInputs>;
-  let _inputObservable: Observable<I>;
-  const ensureInputObservable = () => {
-    if (!_inputObservable) {
-      _inputObservable = new Observable<I>((subscriber) => {
-        const { unsub } = pubSubFactory.subForJobInput({
+  let valueGenerator: ReturnType<typeof generateValues>;
+  let _valueObservable: Observable<T>;
+  const ensureValueObservable = () => {
+    if (!_valueObservable) {
+      _valueObservable = new Observable<T>((subscriber) => {
+        const { unsub } = pubSubFactory.subForJob({
+          type: "input",
           processor: async (v) => {
             subscriber.next(v);
           },
@@ -182,25 +184,25 @@ export function sequentialInputFactory<I>({
           },
         };
       });
-      inputGenerator = generateInputs();
+      valueGenerator = generateValues();
     }
-    return _inputObservable;
+    return _valueObservable;
   };
-  const nextInput = async () => {
-    ensureInputObservable();
+  const nextValue = async () => {
+    ensureValueObservable();
 
-    const { value, done } = await inputGenerator.next();
+    const { value, done } = await valueGenerator.next();
     if (done) {
       throw new Error("Observable completed");
     }
     return value;
   };
 
-  const generateInputs = async function* (): AsyncGenerator<I, void, unknown> {
-    let resolve: ((value: I) => void) | null = null;
-    const promiseQueue: I[] = [];
-    const subscription = ensureInputObservable().subscribe({
-      next(value: I) {
+  const generateValues = async function* (): AsyncGenerator<T, void, unknown> {
+    let resolve: ((value: T) => void) | null = null;
+    const promiseQueue: T[] = [];
+    const subscription = ensureValueObservable().subscribe({
+      next(value: T) {
         // console.log("vvvvvvalue", value);
         if (resolve) {
           resolve(value);
@@ -219,7 +221,7 @@ export function sequentialInputFactory<I>({
         if (promiseQueue.length > 0) {
           yield promiseQueue.shift()!;
         } else {
-          yield new Promise<I>((res) => {
+          yield new Promise<T>((res) => {
             resolve = res;
           });
         }
@@ -229,24 +231,18 @@ export function sequentialInputFactory<I>({
     }
   };
 
-  return {
-    nextInput,
-    get inputObservable() {
-      return ensureInputObservable();
-    },
-  };
-}
-
-export function sequentialOutputFactory<O>({
-  pubSubFactory,
-}: {
-  pubSubFactory: PubSubFactory<unknown, O>;
-}) {
-  const emitOutput = async (o: O) => {
+  const emit = async (o: T) => {
     pubSubFactory.pubToJobOutput({
       message: o,
       messageId: v4(),
     });
   };
-  return { emitOutput };
+
+  return {
+    nextValue,
+    emit,
+    get valueObsrvable() {
+      return ensureValueObservable();
+    },
+  };
 }

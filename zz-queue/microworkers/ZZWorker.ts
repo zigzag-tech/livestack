@@ -74,11 +74,10 @@ export class ZZWorker<P, O, StreamI = never> {
           logger,
           flowProducer,
           pipe: this.pipe,
-          processor: processor,
           params: job.data.params,
         });
 
-        return await zzJ.beginProcessing();
+        return await zzJ.beginProcessing(processor.bind(zzJ));
       },
       mergedWorkerOptions
     );
