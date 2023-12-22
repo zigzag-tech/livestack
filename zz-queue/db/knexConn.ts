@@ -186,10 +186,11 @@ export async function addJobRec<T>({
   jobStatus?: ZZJobStatus;
   initParams: T;
 }) {
-  await dbConn("zz_jobs").insert({
+  await dbConn("zz_jobs").insert<ZZJobRec<T>>({
     project_id: projectId,
     op_name: opName,
     job_id: jobId,
+    init_params: initParams,
   });
   await updateJobStatus({
     projectId,
