@@ -117,6 +117,15 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
   //   return j || null;
   // }
 
+  public async getJobRec(jobId: string) {
+    return await getJobRec({
+      opName: this.def.name,
+      projectId: this.zzEnv.projectId,
+      jobId,
+      dbConn: this.zzEnv.db,
+    });
+  }
+
   public async getJobData<
     T extends "in" | "out" | "init-params",
     U = T extends "in" ? StreamI : T extends "out" ? O : P
@@ -282,10 +291,10 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
   }
 
   public async nextOutputForJob(jobId: string) {
-    const pubSub = this.pubSubFactoryForJob({
+    const pubSub = this.pubSubFactoryForJob<O>({
       jobId,
       type: "output",
-    }) as PubSubFactory<WrapTerminatorAndDataId<O>>;
+    });
     const v = await pubSub.nextValue();
     if (v.terminate) {
       return null;
@@ -294,7 +303,6 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     }
   }
 
-  // return queue as Queue<JobDataType, JobReturnType>;
   public async addJob({
     jobId,
     initParams,

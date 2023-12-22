@@ -111,6 +111,7 @@ export class ZZJob<P, O, StreamI = never> {
         return r.data;
       }
     };
+
     this.inputObservable = inputPubSubFactory.valueObsrvable
       .pipe(map((r) => (r.terminate ? null : r.data)))
       .pipe(
