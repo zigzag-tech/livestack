@@ -160,7 +160,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
 
     const job = await this.addJob({
       jobId,
-      params: initJobData,
+      initParams: initJobData,
     });
 
     try {
@@ -251,17 +251,17 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
   // return queue as Queue<JobDataType, JobReturnType>;
   public async addJob({
     jobId,
-    params,
+    initParams,
     bullMQJobsOpts,
   }: {
     jobId: string;
-    params: P;
+    initParams: P;
     bullMQJobsOpts?: JobsOptions;
   }) {
     // force job id to be the same as name
     const j = await this._rawQueue.add(
       jobId,
-      { params },
+      { initParams },
       { ...bullMQJobsOpts, jobId: jobId }
     );
     this.logger.info(
@@ -274,7 +274,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
       opName: this.def.name,
       jobId,
       dbConn: this.zzEnv.db,
-      initParams: params,
+      initParams: initParams,
     });
 
     return j;
@@ -329,7 +329,7 @@ function createAndReturnQueue<
   queueOptions?: WorkerOptions;
   db: Knex;
 }) {
-  const queue = new Queue<{ params: JobDataType }, JobReturnType>(
+  const queue = new Queue<{ initParams: JobDataType }, JobReturnType>(
     `${projectId}/${queueName}`,
     queueOptions
   );
