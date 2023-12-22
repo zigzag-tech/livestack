@@ -188,7 +188,13 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     await redis.set(`last-time-job-alive-${jobId}`, Date.now());
   }
 
-  public async sendInput({ jobId, data }: { jobId: string; data: StreamI }) {
+  public async sendInputToJob({
+    jobId,
+    data,
+  }: {
+    jobId: string;
+    data: StreamI;
+  }) {
     const pubSub = this.pubSubFactoryForJob(jobId);
     const messageId = v4();
 
