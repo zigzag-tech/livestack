@@ -2,18 +2,25 @@ import { z } from "zod";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Knex } from "knex";
 import { RedisOptions } from "ioredis";
-interface PipeParams<P, O, StreamI, S> {
+interface PipeParams<P, O, WP, StreamI, S> {
   name: string;
   jobParams: z.ZodType<P>;
+  workerInstanceParams?: z.ZodType<WP>;
   output: z.ZodType<O>;
   streamInput?: z.ZodType<StreamI>;
   status?: z.ZodType<S>;
 }
-export class PipeDef<P, O, StreamI = never, S = never>
-  implements PipeParams<P, O, StreamI, S>
+export class PipeDef<
+  P,
+  O,
+  WP extends object = never,
+  StreamI = never,
+  S = never
+> implements PipeParams<P, O, WP, StreamI, S>
 {
   name: string;
   jobParams: z.ZodType<P>;
+  workerInstanceParams?: z.ZodType<WP>;
   output: z.ZodType<O>;
   streamInput: z.ZodType<StreamI>;
   status: z.ZodType<S>;
@@ -24,16 +31,18 @@ export class PipeDef<P, O, StreamI = never, S = never>
     output,
     streamInput,
     status,
-  }: PipeParams<P, O, StreamI, S>) {
+    workerInstanceParams,
+  }: PipeParams<P, O, WP, StreamI, S>) {
     this.name = name;
     this.jobParams = jobParams;
     this.output = output;
     this.streamInput = streamInput || z.never();
     this.status = status || z.never();
+    this.workerInstanceParams = workerInstanceParams;
   }
 
-  public derive<NewP, NewO, NewStreamI, newS>(
-    newP: Partial<PipeParams<NewP, NewO, NewStreamI, newS>>
+  public derive<NewP, NewO, newWP, NewStreamI, newS>(
+    newP: Partial<PipeParams<NewP, NewO, newWP, NewStreamI, newS>>
   ) {
     return new PipeDef({
       ...this,

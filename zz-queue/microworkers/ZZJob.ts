@@ -32,17 +32,28 @@ import { ZZPipe } from "./ZZPipe";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
 import { z } from "zod";
 
-export type ZZProcessor<P, O, StreamI = never, Status = never> = Parameters<
-  ZZJob<P, O, StreamI, Status>["beginProcessing"]
->[0];
+export type ZZProcessor<
+  P,
+  O,
+  WP extends object = never,
+  StreamI = never,
+  Status = never
+> = Parameters<ZZJob<P, O, WP, StreamI, Status>["beginProcessing"]>[0];
 export type ZZProcessorParams<
   P,
   O,
+  WP extends object = never,
   StreamI = never,
   Status = never
-> = Parameters<ZZProcessor<P, O, StreamI, Status>>[0];
+> = Parameters<ZZProcessor<P, O, WP, StreamI, Status>>[0];
 
-export class ZZJob<P, O, StreamI = never, Status = never> {
+export class ZZJob<
+  P,
+  O,
+  WP extends object = never,
+  StreamI = never,
+  Status = never
+> {
   private readonly bullMQJob: Job<{ initParams: P }, O | void>;
   public readonly _bullMQToken?: string;
   initParams: P;
@@ -76,8 +87,8 @@ export class ZZJob<P, O, StreamI = never, Status = never> {
 
   storageProvider?: IStorageProvider;
   flowProducer: FlowProducer;
-  pipe: ZZPipe<P, O, StreamI, Status>;
-  readonly def: PipeDef<P, O, StreamI, Status>;
+  pipe: ZZPipe<P, O, WP, StreamI, Status>;
+  readonly def: PipeDef<P, O, WP, StreamI, Status>;
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
 
@@ -88,7 +99,7 @@ export class ZZJob<P, O, StreamI = never, Status = never> {
     initParams: P;
     flowProducer: FlowProducer;
     storageProvider?: IStorageProvider;
-    pipe: ZZPipe<P, O, StreamI, Status>;
+    pipe: ZZPipe<P, O, WP, StreamI, Status>;
   }) {
     this.bullMQJob = p.bullMQJob;
     this._bullMQToken = p.bullMQToken;
@@ -161,7 +172,7 @@ export class ZZJob<P, O, StreamI = never, Status = never> {
   }
 
   public async beginProcessing(
-    processor: (j: ZZJob<P, O, StreamI, Status>) => Promise<O | void>
+    processor: (j: ZZJob<P, O, WP, StreamI, Status>) => Promise<O | void>
   ): Promise<O | undefined> {
     const jId = {
       opName: this.def.name,
