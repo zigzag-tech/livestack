@@ -44,7 +44,6 @@ export class PubSubFactory<T> {
         },
       });
 
-      console.log("z");
 
       const generateValues = async function* (): AsyncGenerator<
         T,
