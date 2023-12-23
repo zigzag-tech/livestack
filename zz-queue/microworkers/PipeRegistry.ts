@@ -2,50 +2,61 @@ import { z } from "zod";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Knex } from "knex";
 import { RedisOptions } from "ioredis";
-
-export class PipeDef<P, O, StreamI> {
+interface PipeParams<P, O, StreamI> {
   name: string;
   jobParams: z.ZodType<P>;
   output: z.ZodType<O>;
-  streamInput: z.ZodType<StreamI>;
+  streamInput?: z.ZodType<StreamI>;
+}
+export class PipeDef<P, O, StreamI> implements PipeParams<P, O, StreamI> {
+  name: string;
+  jobParams: z.ZodType<P>;
+  output: z.ZodType<O>;
+  streamInput?: z.ZodType<StreamI>;
   constructor({
     name,
     jobParams,
     output,
     streamInput,
-  }: {
-    name: string;
-    jobParams: z.ZodType<P>;
-    output: z.ZodType<O>;
-    streamInput: z.ZodType<StreamI>;
-  }) {
+  }: PipeParams<P, O, StreamI>) {
     this.name = name;
     this.jobParams = jobParams;
     this.output = output;
     this.streamInput = streamInput;
   }
+
+  public derive(newP: Partial<PipeParams<P, O, StreamI>>) {
+    return new PipeDef({
+      ...this,
+      ...newP,
+    });
+  }
 }
 
-export class ZZEnv {
+interface EnvParams {
+  readonly storageProvider?: IStorageProvider;
+  readonly projectId: string;
+  readonly db: Knex;
+  readonly redisConfig: RedisOptions;
+}
+
+export class ZZEnv implements EnvParams {
   public readonly storageProvider?: IStorageProvider;
   public readonly projectId: string;
   public readonly db: Knex;
   public readonly redisConfig: RedisOptions;
 
-  constructor({
-    storageProvider,
-    projectId,
-    db,
-    redisConfig,
-  }: {
-    storageProvider?: IStorageProvider;
-    projectId: string;
-    db: Knex;
-    redisConfig: RedisOptions;
-  }) {
+  constructor({ storageProvider, projectId, db, redisConfig }: EnvParams) {
     this.storageProvider = storageProvider;
     this.projectId = projectId;
     this.db = db;
     this.redisConfig = redisConfig;
+  }
+
+  public derive(newP: Partial<EnvParams>) {
+    return new ZZEnv({
+      ...this,
+      ...newP,
+    });
   }
 }
