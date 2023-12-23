@@ -14,7 +14,7 @@ export class PipeDef<P, O, StreamI = never>
   name: string;
   jobParams: z.ZodType<P>;
   output: z.ZodType<O>;
-  streamInput?: z.ZodType<StreamI>;
+  streamInput: z.ZodType<StreamI>;
   constructor({
     name,
     jobParams,
@@ -24,7 +24,7 @@ export class PipeDef<P, O, StreamI = never>
     this.name = name;
     this.jobParams = jobParams;
     this.output = output;
-    this.streamInput = streamInput;
+    this.streamInput = streamInput || z.never();
   }
 
   public derive<NewP, NewO, NewStreamI>(
