@@ -32,23 +32,23 @@ import { identifyLargeFiles } from "../files/file-ops";
 export type ZZProcessor<
   P,
   O,
-  WP extends object = never,
   StreamI = never,
+  WP extends object = never,
   TProgress = never
-> = Parameters<ZZJob<P, O, WP, StreamI, TProgress>["beginProcessing"]>[0];
+> = Parameters<ZZJob<P, O, StreamI, WP, TProgress>["beginProcessing"]>[0];
 export type ZZProcessorParams<
   P,
   O,
-  WP extends object = never,
   StreamI = never,
+  WP extends object = never,
   TProgress = never
-> = Parameters<ZZProcessor<P, O, WP, StreamI, TProgress>>[0];
+> = Parameters<ZZProcessor<P, O, StreamI, WP, TProgress>>[0];
 
 export class ZZJob<
   P,
   O,
-  WP extends object = never,
   StreamI = never,
+  WP extends object = never,
   Progress = never
 > {
   private readonly bullMQJob: Job<{ initParams: P }, O | void>;
@@ -82,8 +82,8 @@ export class ZZJob<
 
   storageProvider?: IStorageProvider;
   flowProducer: FlowProducer;
-  pipe: ZZPipe<P, O, WP, StreamI, Progress>;
-  readonly def: PipeDef<P, O, WP, StreamI, Progress>;
+  pipe: ZZPipe<P, O, StreamI, WP, Progress>;
+  readonly def: PipeDef<P, O, StreamI, WP, Progress>;
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
 
@@ -94,7 +94,7 @@ export class ZZJob<
     initParams: P;
     flowProducer: FlowProducer;
     storageProvider?: IStorageProvider;
-    pipe: ZZPipe<P, O, WP, StreamI, Progress>;
+    pipe: ZZPipe<P, O, StreamI, WP, Progress>;
   }) {
     this.bullMQJob = p.bullMQJob;
     this._bullMQToken = p.bullMQToken;
@@ -166,7 +166,7 @@ export class ZZJob<
   }
 
   public async beginProcessing(
-    processor: (j: ZZJob<P, O, WP, StreamI, Progress>) => Promise<O | void>
+    processor: (j: ZZJob<P, O, StreamI, WP, Progress>) => Promise<O | void>
   ): Promise<O | undefined> {
     const jId = {
       opName: this.def.name,

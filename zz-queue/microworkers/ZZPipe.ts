@@ -26,12 +26,12 @@ const queueMap = new Map<
 export class ZZPipe<
   P,
   O,
-  WP extends object = never,
   StreamI = never,
+  WP extends object = never,
   TProgress = never
 > implements IWorkerUtilFuncs<P, O>
 {
-  public def: PipeDef<P, O, WP, StreamI, TProgress>;
+  public def: PipeDef<P, O, StreamI, WP, TProgress>;
   public readonly zzEnv: ZZEnv;
   protected readonly queueOptions: WorkerOptions;
   protected readonly storageProvider?: IStorageProvider;
@@ -41,7 +41,7 @@ export class ZZPipe<
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
   // dummy processor
-  private processor: ZZProcessor<P, O, WP, StreamI, TProgress> = async (
+  private processor: ZZProcessor<P, O, StreamI, WP, TProgress> = async (
     job
   ) => {
     throw new Error(`Processor not set!`);
@@ -54,7 +54,7 @@ export class ZZPipe<
     concurrency?: number;
     instanceParams: WP;
   }) {
-    const worker = new ZZWorker<P, O, WP, StreamI, TProgress>({
+    const worker = new ZZWorker<P, O, StreamI, WP, TProgress>({
       zzEnv: this.zzEnv,
       processor: this.processor,
       color: this.color,
@@ -103,10 +103,10 @@ export class ZZPipe<
     processor,
   }: {
     zzEnv: ZZEnv;
-    def: PipeDef<P, O, WP, StreamI, TProgress>;
+    def: PipeDef<P, O, StreamI, WP, TProgress>;
     color?: string;
     concurrency?: number;
-    processor: ZZProcessor<P, O, WP, StreamI, TProgress>;
+    processor: ZZProcessor<P, O, StreamI, WP, TProgress>;
   }) {
     this.def = def;
     this.processor = processor;
