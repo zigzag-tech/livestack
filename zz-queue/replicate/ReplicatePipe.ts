@@ -38,12 +38,12 @@ export class ReplicatePipe<P extends object, O> extends ZZPipe<
       }),
       concurrency,
       zzEnv,
-      processor: async ({ params }) => {
+      processor: async ({ initParams }) => {
         const replicate = new Replicate({
           auth: process.env.REPLICATE_API_TOKEN,
         });
         const repR = replicate.run(this._endpoint, {
-          input: params,
+          input: initParams,
         }) as Promise<unknown> as Promise<O>;
 
         const result = await Promise.race([
