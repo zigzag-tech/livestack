@@ -2,33 +2,38 @@ import { z } from "zod";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Knex } from "knex";
 import { RedisOptions } from "ioredis";
-interface PipeParams<P, O, StreamI> {
+interface PipeParams<P, O, StreamI, S> {
   name: string;
   jobParams: z.ZodType<P>;
   output: z.ZodType<O>;
   streamInput?: z.ZodType<StreamI>;
+  status?: z.ZodType<S>;
 }
-export class PipeDef<P, O, StreamI = never>
-  implements PipeParams<P, O, StreamI>
+export class PipeDef<P, O, StreamI = never, S = never>
+  implements PipeParams<P, O, StreamI, S>
 {
   name: string;
   jobParams: z.ZodType<P>;
   output: z.ZodType<O>;
   streamInput: z.ZodType<StreamI>;
+  status: z.ZodType<S>;
+
   constructor({
     name,
     jobParams,
     output,
     streamInput,
-  }: PipeParams<P, O, StreamI>) {
+    status,
+  }: PipeParams<P, O, StreamI, S>) {
     this.name = name;
     this.jobParams = jobParams;
     this.output = output;
     this.streamInput = streamInput || z.never();
+    this.status = status || z.never();
   }
 
-  public derive<NewP, NewO, NewStreamI>(
-    newP: Partial<PipeParams<NewP, NewO, NewStreamI>>
+  public derive<NewP, NewO, NewStreamI, newS>(
+    newP: Partial<PipeParams<NewP, NewO, NewStreamI, newS>>
   ) {
     return new PipeDef({
       ...this,
