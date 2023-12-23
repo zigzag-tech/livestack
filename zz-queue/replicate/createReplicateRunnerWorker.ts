@@ -56,7 +56,7 @@ export class ReplicatePipe<P extends object, O> extends ZZPipe<
           );
         }
 
-        return { replicateResult: result };
+        return { replicateResult: result! };
       },
     });
     this._endpoint = endpoint;
