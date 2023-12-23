@@ -8,7 +8,9 @@ interface PipeParams<P, O, StreamI> {
   output: z.ZodType<O>;
   streamInput?: z.ZodType<StreamI>;
 }
-export class PipeDef<P, O, StreamI> implements PipeParams<P, O, StreamI> {
+export class PipeDef<P, O, StreamI = never>
+  implements PipeParams<P, O, StreamI>
+{
   name: string;
   jobParams: z.ZodType<P>;
   output: z.ZodType<O>;
