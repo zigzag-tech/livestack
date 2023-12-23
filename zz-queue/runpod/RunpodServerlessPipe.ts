@@ -2,7 +2,7 @@ import { ZZPipe } from "../microworkers/ZZPipe";
 import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
 import { z } from "zod";
 
-export class RunpodPipe<P extends object, O> extends ZZPipe<
+export class RunpodServerlessPipe<P extends object, O> extends ZZPipe<
   P,
   {
     runpodResult: O;
@@ -12,12 +12,12 @@ export class RunpodPipe<P extends object, O> extends ZZPipe<
   protected _runpodApiKey: string;
 
   constructor({
-    endpointId,
+    serverlessEndpointId,
     runpodApiKey,
     def,
     zzEnv,
   }: {
-    endpointId: string;
+    serverlessEndpointId: string;
     runpodApiKey: string;
     def: PipeDef<P, O>;
     zzEnv: ZZEnv;
@@ -114,7 +114,7 @@ export class RunpodPipe<P extends object, O> extends ZZPipe<
         return { runpodResult: runpodResult.output };
       },
     });
-    this._endpointId = endpointId;
+    this._endpointId = serverlessEndpointId;
     this._runpodApiKey = runpodApiKey;
   }
 }
