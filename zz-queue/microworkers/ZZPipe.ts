@@ -91,10 +91,10 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     def: PipeDef<P, O, StreamI>;
     color?: string;
     concurrency?: number;
-    processor?: ZZProcessor<P, O, StreamI>;
+    processor: ZZProcessor<P, O, StreamI>;
   }) {
     this.def = def;
-    this.processor = processor || this.processor;
+    this.processor = processor;
     this.queueOptions = {
       connection: zzEnv.redisConfig,
     };
@@ -127,7 +127,7 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     });
   }
 
-  public async getJobStatus(jobId:string) {
+  public async getJobStatus(jobId: string) {
     const job = await this.getJobRec(jobId);
     return job?.status || null;
   }
