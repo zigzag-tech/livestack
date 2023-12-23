@@ -1,14 +1,11 @@
 import { Stream } from "stream";
-import {
-  Job,
-  FlowJob,
-  FlowProducer,
-  WaitingChildrenError,
-  FlowOpts,
-} from "bullmq";
+import { FlowOpts } from "bullmq";
+import { takeWhile } from "rxjs";
+import { z } from "zod";
+import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { PubSubFactory } from "../realtime/mq-pub-sub";
-import { Observable, Subject, map, takeUntil, takeWhile, tap } from "rxjs";
+import { Observable, Subject, map, takeUntil, tap } from "rxjs";
 import {
   IStorageProvider,
   getPublicCdnUrl,
@@ -28,9 +25,9 @@ import {
   updateJobStatus,
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { ZZPipe } from "./ZZPipe";
-import { PipeDef, ZZEnv } from "./PipeRegistry";
-import { z } from "zod";
+import { ZZPipe } from "../microworkers/ZZPipe";
+import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
+import { identifyLargeFiles } from "../files/file-ops";
 
 export type ZZProcessor<
   P,
@@ -65,7 +62,6 @@ export class ZZJob<
 
   // public async aliveLoop(retVal: O) {
   //   const redis = new Redis();
-
   //   let lastTimeJobAlive = Date.now();
   //   while (Date.now() - lastTimeJobAlive < JOB_ALIVE_TIMEOUT) {
   //     lastTimeJobAlive = parseInt(
@@ -76,7 +72,6 @@ export class ZZJob<
   //   this.logger.info(
   //     `Job with ${this.bullMQJob.id} id expired. Marking as complete.`
   //   );
-
   //   await this.bullMQJob.moveToCompleted(retVal, this._bullMQToken!);
   //   return retVal;
   // }
@@ -114,7 +109,6 @@ export class ZZJob<
     const workingDir = getTempPathByJobId(this.bullMQJob.id!);
     this.workingDirToBeUploadedToCloudStorage = workingDir;
     // console.log("pubSubFactoryForJobj", this.bullMQJob.id!);
-
     const inputPubSubFactory = this.pipe.pubSubFactoryForJob<StreamI>({
       jobId: this.bullMQJob.id!,
       type: "input",
@@ -364,28 +358,6 @@ export class ZZJob<
     );
   }
 
-  // public async update({ incrementalData }: { incrementalData?: any }) {
-  //   let jobData: any;
-
-  //   if (this.storageProvider) {
-  //     const { newObj, largeFilesToSave } = identifyLargeFiles(
-  //       incrementalData,
-  //       `${this.zzEnv.projectId}/jobs/${this.bullMQJob.id!}/large-values`
-  //     );
-  //     await saveLargeFilesToStorage(largeFilesToSave, this.storageProvider);
-  //     jobData = newObj;
-  //   } else {
-  //     jobData = incrementalData;
-  //   }
-  //   await _upsertAndMergeJobLogByIdAndType({
-  //     projectId: this.zzEnv.projectId,
-  //     jobType: this.def.name,
-  //     jobId: this.bullMQJob.id!,
-  //     jobData,
-  //     dbConn: this.zzEnv.db,
-  //   });
-  // }
-
   private getLargeValueCdnUrl<T extends object>(key: keyof T, obj: T) {
     if (!this.storageProvider) {
       throw new Error("storageProvider is not provided");
@@ -407,53 +379,4 @@ export class ZZJob<
       });
     }
   }
-
-  private async ensureLocalSourceFileExists(filePath: string) {
-    try {
-      fs.accessSync(filePath);
-    } catch (error) {
-      if (this.storageProvider) {
-        ensurePathExists(filePath);
-        const gcsFileName = filePath
-          .split(`${TEMP_DIR}/`)[1]
-          .replace(/_/g, "/");
-        await this.storageProvider.downloadFromStorage({
-          filePath: gcsFileName,
-          destination: filePath,
-        });
-      }
-    }
-  }
 }
-
-const OBJ_REF_VALUE = `__zz_obj_ref__`;
-const LARGE_VALUE_THRESHOLD = 1024 * 10;
-
-export const identifyLargeFiles = (
-  obj: any,
-  path = ""
-): { newObj: any; largeFilesToSave: { path: string; value: any }[] } => {
-  if (obj === null || typeof obj !== "object") {
-    return { newObj: obj, largeFilesToSave: [] };
-  }
-  const newObj: any = Array.isArray(obj) ? [] : {};
-  const largeFilesToSave: { path: string; value: any }[] = [];
-
-  for (const [key, value] of Object.entries(obj)) {
-    const currentPath = path ? `${path}/${key}` : key;
-    if (typeof value === "string" && value.length > LARGE_VALUE_THRESHOLD) {
-      largeFilesToSave.push({ path: currentPath, value });
-      newObj[key] = OBJ_REF_VALUE;
-    } else if (isBinaryLikeObject(value)) {
-      largeFilesToSave.push({ path: currentPath, value });
-      newObj[key] = OBJ_REF_VALUE;
-    } else if (typeof value === "object") {
-      const result = identifyLargeFiles(value, currentPath);
-      newObj[key] = result.newObj;
-      largeFilesToSave.push(...result.largeFilesToSave);
-    } else {
-      newObj[key] = value;
-    }
-  }
-  return { newObj, largeFilesToSave };
-};

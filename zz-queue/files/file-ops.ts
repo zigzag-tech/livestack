@@ -1,0 +1,75 @@
+import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
+import { getLogger } from "../utils/createWorkerLogger";
+import { PubSubFactory } from "../realtime/mq-pub-sub";
+import { Observable, Subject, map, takeUntil, tap } from "rxjs";
+import {
+  IStorageProvider,
+  getPublicCdnUrl,
+  saveLargeFilesToStorage,
+} from "../storage/cloudStorage";
+import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
+import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
+import fs from "fs";
+import { ensurePathExists } from "../storage/ensurePathExists";
+import path from "path";
+import {
+  addJobDataAndIOEvent,
+  addJobRec,
+  ensureJobDependencies,
+  getJobData,
+  getJobRec,
+  updateJobStatus,
+} from "../db/knexConn";
+import longStringTruncator from "../utils/longStringTruncator";
+import { ZZPipe } from "../microworkers/ZZPipe";
+import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
+
+const OBJ_REF_VALUE = `__zz_obj_ref__`;
+const LARGE_VALUE_THRESHOLD = 1024 * 10;
+
+export const identifyLargeFiles = (
+  obj: any,
+  path = ""
+): { newObj: any; largeFilesToSave: { path: string; value: any }[] } => {
+  if (obj === null || typeof obj !== "object") {
+    return { newObj: obj, largeFilesToSave: [] };
+  }
+  const newObj: any = Array.isArray(obj) ? [] : {};
+  const largeFilesToSave: { path: string; value: any }[] = [];
+
+  for (const [key, value] of Object.entries(obj)) {
+    const currentPath = path ? `${path}/${key}` : key;
+    if (typeof value === "string" && value.length > LARGE_VALUE_THRESHOLD) {
+      largeFilesToSave.push({ path: currentPath, value });
+      newObj[key] = OBJ_REF_VALUE;
+    } else if (isBinaryLikeObject(value)) {
+      largeFilesToSave.push({ path: currentPath, value });
+      newObj[key] = OBJ_REF_VALUE;
+    } else if (typeof value === "object") {
+      const result = identifyLargeFiles(value, currentPath);
+      newObj[key] = result.newObj;
+      largeFilesToSave.push(...result.largeFilesToSave);
+    } else {
+      newObj[key] = value;
+    }
+  }
+  return { newObj, largeFilesToSave };
+};
+
+export async function ensureLocalSourceFileExists(
+  storageProvider: IStorageProvider,
+  filePath: string
+) {
+  try {
+    fs.accessSync(filePath);
+  } catch (error) {
+    if (storageProvider) {
+      ensurePathExists(filePath);
+      const gcsFileName = filePath.split(`${TEMP_DIR}/`)[1].replace(/_/g, "/");
+      await storageProvider.downloadFromStorage({
+        filePath: gcsFileName,
+        destination: filePath,
+      });
+    }
+  }
+}
