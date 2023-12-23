@@ -26,14 +26,17 @@ import { WrapTerminatorAndDataId, ZZPipe } from "./ZZPipe";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
 import { z } from "zod";
 
-export type ZZProcessor<P, O, StreamI = never> = Parameters<
-  ZZJob<P, O, StreamI>["beginProcessing"]
+export type ZZProcessor<P, O, StreamI = never, Status = never> = Parameters<
+  ZZJob<P, O, StreamI, Status>["beginProcessing"]
 >[0];
-export type ZZProcessorParams<P, O, StreamI = never> = Parameters<
-  ZZProcessor<P, O, StreamI>
->[0];
+export type ZZProcessorParams<
+  P,
+  O,
+  StreamI = never,
+  Status = never
+> = Parameters<ZZProcessor<P, O, StreamI, Status>>[0];
 
-export class ZZJob<P, O, StreamI = never> {
+export class ZZJob<P, O, StreamI = never, Status = never> {
   private readonly bullMQJob: Job<{ params: P }, O | void>;
   public readonly _bullMQToken?: string;
   params: P;
@@ -67,8 +70,8 @@ export class ZZJob<P, O, StreamI = never> {
 
   storageProvider?: IStorageProvider;
   flowProducer: FlowProducer;
-  pipe: ZZPipe<P, O, StreamI>;
-  readonly def: PipeDef<P, O, StreamI>;
+  pipe: ZZPipe<P, O, StreamI, Status>;
+  readonly def: PipeDef<P, O, StreamI, Status>;
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
 
@@ -79,7 +82,7 @@ export class ZZJob<P, O, StreamI = never> {
     params: P;
     flowProducer: FlowProducer;
     storageProvider?: IStorageProvider;
-    pipe: ZZPipe<P, O, StreamI>;
+    pipe: ZZPipe<P, O, StreamI, Status>;
   }) {
     this.bullMQJob = p.bullMQJob;
     this._bullMQToken = p.bullMQToken;
@@ -152,7 +155,7 @@ export class ZZJob<P, O, StreamI = never> {
   }
 
   public async beginProcessing(
-    processor: (j: ZZJob<P, O, StreamI>) => Promise<O | void>
+    processor: (j: ZZJob<P, O, StreamI, Status>) => Promise<O | void>
   ): Promise<O | undefined> {
     const jId = {
       opName: this.def.name,

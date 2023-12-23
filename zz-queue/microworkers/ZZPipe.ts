@@ -23,24 +23,25 @@ const queueMap = new Map<
   ReturnType<typeof createAndReturnQueue>
 >();
 
-export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
-  public def: PipeDef<P, O, StreamI>;
+export class ZZPipe<P, O, StreamI = never, Status = never>
+  implements IWorkerUtilFuncs<P, O>
+{
+  public def: PipeDef<P, O, StreamI, Status>;
   public readonly zzEnv: ZZEnv;
   protected readonly queueOptions: WorkerOptions;
   protected readonly storageProvider?: IStorageProvider;
 
-  // public readonly workers: ZZWorker<P, O, StreamI>[] = [];
   protected color?: string;
   protected logger: ReturnType<typeof getLogger>;
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
   // dummy processor
-  private processor: ZZProcessor<P, O, StreamI> = async (job) => {
+  private processor: ZZProcessor<P, O, StreamI, Status> = async (job) => {
     throw new Error(`Processor not set!`);
   };
 
   public async startWorker({ concurrency }: { concurrency?: number }) {
-    const worker = new ZZWorker<P, O, StreamI>({
+    const worker = new ZZWorker<P, O, StreamI, Status>({
       zzEnv: this.zzEnv,
       processor: this.processor,
       color: this.color,
@@ -88,10 +89,10 @@ export class ZZPipe<P, O, StreamI = never> implements IWorkerUtilFuncs<P, O> {
     processor,
   }: {
     zzEnv: ZZEnv;
-    def: PipeDef<P, O, StreamI>;
+    def: PipeDef<P, O, StreamI, Status>;
     color?: string;
     concurrency?: number;
-    processor: ZZProcessor<P, O, StreamI>;
+    processor: ZZProcessor<P, O, StreamI, Status>;
   }) {
     this.def = def;
     this.processor = processor;
