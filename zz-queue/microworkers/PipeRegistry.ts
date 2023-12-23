@@ -27,7 +27,9 @@ export class PipeDef<P, O, StreamI = never>
     this.streamInput = streamInput;
   }
 
-  public derive(newP: Partial<PipeParams<P, O, StreamI>>) {
+  public derive<NewP, NewO, NewStreamI>(
+    newP: Partial<PipeParams<NewP, NewO, NewStreamI>>
+  ) {
     return new PipeDef({
       ...this,
       ...newP,

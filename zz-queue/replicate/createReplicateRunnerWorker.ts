@@ -26,15 +26,16 @@ export class ReplicatePipe<P extends object, O> extends ZZPipe<
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
     zzEnv: ZZEnv;
-    def: PipeDef<
-      P,
-      {
-        replicateResult: O;
-      }
-    >;
+    def: PipeDef<P, O>;
   }) {
     super({
-      def,
+      def: def.derive({
+        output: z.object({
+          replicateResult: def.output,
+
+          // TODO: fix any
+        }) as any,
+      }),
       concurrency,
       zzEnv,
       processor: async ({ params }) => {
