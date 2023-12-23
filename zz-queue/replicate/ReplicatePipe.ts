@@ -1,5 +1,5 @@
 import Replicate from "replicate";
-import { ZZEnv } from "zz-queue/microworkers/PipeRegistry";
+import { ZZEnv } from "../microworkers/PipeRegistry";
 import { PipeDef } from "../microworkers/PipeRegistry";
 import { ZZPipe } from "../microworkers/ZZPipe";
 import { z } from "zod";
