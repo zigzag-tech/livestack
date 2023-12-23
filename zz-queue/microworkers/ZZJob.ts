@@ -81,6 +81,7 @@ export class ZZJob<
   readonly def: PipeDef<P, O, StreamI, WP, Progress>;
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
+  public workerInstanceParams: WP | {};
 
   constructor(p: {
     bullMQJob: Job<{ initParams: P }, O | undefined, string>;
@@ -90,10 +91,13 @@ export class ZZJob<
     flowProducer: FlowProducer;
     storageProvider?: IStorageProvider;
     pipe: ZZPipe<P, O, StreamI, WP, Progress>;
+    workerInstanceParams?: WP;
   }) {
     this.bullMQJob = p.bullMQJob;
     this._bullMQToken = p.bullMQToken;
-    this.initParams = p.initParams;
+    this.initParams = p.pipe.def.jobParams.parse(p.initParams);
+    this.workerInstanceParams =
+      p.pipe.def.workerInstanceParams?.parse(p.workerInstanceParams) || {};
     this.logger = p.logger;
     this.flowProducer = p.flowProducer;
     this.storageProvider = p.storageProvider;
@@ -138,6 +142,7 @@ export class ZZJob<
       );
 
     this.emitOutput = async (o: O) => {
+      o = this.pipe.def.output.parse(o);
       if (this.storageProvider) {
         const { largeFilesToSave } = identifyLargeFiles(o);
         await saveLargeFilesToStorage(largeFilesToSave, this.storageProvider);

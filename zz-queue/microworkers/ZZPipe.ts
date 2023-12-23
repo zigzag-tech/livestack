@@ -229,6 +229,7 @@ export class ZZPipe<
     jobId: string;
     data: StreamI;
   }) {
+    data = this.def.streamInput.parse(data);
     const pubSub = this.pubSubFactoryForJob<StreamI>({ jobId, type: "input" });
     const messageId = v4();
 

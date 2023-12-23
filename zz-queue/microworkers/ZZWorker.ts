@@ -31,6 +31,7 @@ export class ZZWorker<
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
   public readonly def: PipeDef<P, O, StreamI, WP, TProgress>;
+  private readonly instanceParams?: WP;
 
   constructor({
     pipe,
@@ -51,6 +52,7 @@ export class ZZWorker<
     this.pipe = pipe;
     this.zzEnv = zzEnv;
     this.def = pipe.def;
+    this.instanceParams = instanceParams;
 
     const workerOptions = {
       autorun: false,
@@ -83,6 +85,7 @@ export class ZZWorker<
           flowProducer,
           pipe: this.pipe,
           initParams: job.data.initParams,
+          workerInstanceParams: this.workerInstanceParams,
         });
 
         return await zzJ.beginProcessing(processor.bind(zzJ));
