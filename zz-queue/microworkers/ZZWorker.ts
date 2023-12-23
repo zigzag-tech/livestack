@@ -16,9 +16,9 @@ export class ZZWorker<
   O,
   WP extends object = never,
   StreamI = never,
-  Status = never
+  TProgress = never
 > {
-  public readonly pipe: ZZPipe<P, O, WP, StreamI, Status>;
+  public readonly pipe: ZZPipe<P, O, WP, StreamI, TProgress>;
   protected readonly zzEnv: ZZEnv;
 
   public readonly bullMQWorker: Worker<
@@ -30,7 +30,7 @@ export class ZZWorker<
   protected color?: string;
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
-  public readonly def: PipeDef<P, O, WP, StreamI, Status>;
+  public readonly def: PipeDef<P, O, WP, StreamI, TProgress>;
 
   constructor({
     pipe,
@@ -44,8 +44,8 @@ export class ZZWorker<
     color?: string;
     storageProvider?: IStorageProvider;
     concurrency?: number;
-    pipe: ZZPipe<P, O, WP, StreamI, Status>;
-    processor: ZZProcessor<P, O, WP, StreamI, Status>;
+    pipe: ZZPipe<P, O, WP, StreamI, TProgress>;
+    processor: ZZProcessor<P, O, WP, StreamI, TProgress>;
     instanceParams?: WP;
   }) {
     this.pipe = pipe;
@@ -76,7 +76,7 @@ export class ZZWorker<
     this.bullMQWorker = new Worker<{ initParams: P }, O | undefined, string>(
       `${this.zzEnv.projectId}/${this.def.name}`,
       async (job, token) => {
-        const zzJ = new ZZJob<P, O, WP, StreamI, Status>({
+        const zzJ = new ZZJob<P, O, WP, StreamI, TProgress>({
           bullMQJob: job,
           bullMQToken: token,
           logger,
