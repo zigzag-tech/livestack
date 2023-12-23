@@ -64,7 +64,7 @@ export const createCleanUpWorker = ({
     });
     await addJob({
       jobId: "clean-up-tmp-dir",
-      params: { repeatPattern: `every ${repeatInterval / 1000} seconds` },
+      initParams: { repeatPattern: `every ${repeatInterval / 1000} seconds` },
       bullMQJobsOpts: {
         repeat: { every: repeatInterval },
       },

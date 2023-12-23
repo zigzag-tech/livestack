@@ -1,5 +1,11 @@
 import { Stream } from "stream";
-import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
+import {
+  Job,
+  FlowJob,
+  FlowProducer,
+  WaitingChildrenError,
+  FlowOpts,
+} from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { PubSubFactory } from "../realtime/mq-pub-sub";
 import { Observable, Subject, map, takeUntil, takeWhile, tap } from "rxjs";
@@ -22,7 +28,7 @@ import {
   updateJobStatus,
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { WrapTerminatorAndDataId, ZZPipe } from "./ZZPipe";
+import { ZZPipe } from "./ZZPipe";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
 import { z } from "zod";
 
@@ -37,9 +43,9 @@ export type ZZProcessorParams<
 > = Parameters<ZZProcessor<P, O, StreamI, Status>>[0];
 
 export class ZZJob<P, O, StreamI = never, Status = never> {
-  private readonly bullMQJob: Job<{ params: P }, O | void>;
+  private readonly bullMQJob: Job<{ initParams: P }, O | void>;
   public readonly _bullMQToken?: string;
-  params: P;
+  initParams: P;
   inputObservable: Observable<StreamI | null>;
   logger: ReturnType<typeof getLogger>;
   // New properties for subscriber tracking
@@ -76,17 +82,17 @@ export class ZZJob<P, O, StreamI = never, Status = never> {
   private _dummyProgressCount = 0;
 
   constructor(p: {
-    bullMQJob: Job<{ params: P }, O | undefined, string>;
+    bullMQJob: Job<{ initParams: P }, O | undefined, string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
-    params: P;
+    initParams: P;
     flowProducer: FlowProducer;
     storageProvider?: IStorageProvider;
     pipe: ZZPipe<P, O, StreamI, Status>;
   }) {
     this.bullMQJob = p.bullMQJob;
     this._bullMQToken = p.bullMQToken;
-    this.params = p.params;
+    this.initParams = p.initParams;
     this.logger = p.logger;
     this.flowProducer = p.flowProducer;
     this.storageProvider = p.storageProvider;
@@ -247,27 +253,27 @@ export class ZZJob<P, O, StreamI = never, Status = never> {
     }
   }
 
-  public async spawnChildJobsToWaitOn<CI, CO>(
-    childJob_: FlowJob & {
-      initParams: CI;
-    }
-  ) {
-    childJob_.opts = {
-      ...childJob_.opts,
-      parent: {
-        id: this.bullMQJob.id!,
-        queue: this.bullMQJob.queueQualifiedName,
+  public async spawnChildJobsToWaitOn<CI, CO>(p: {
+    def: PipeDef<P, O>;
+    jobId: string;
+    initParams: P;
+  }) {
+    const spawnR = await this._spawnJob({
+      ...p,
+      flowProducerOpts: {
+        parent: {
+          id: this.bullMQJob.id!,
+          queue: this.bullMQJob.queueQualifiedName,
+        },
       },
-    };
-
-    const spawnR = await this.spawnJob<CI, CO>(childJob_);
+    });
 
     await ensureJobDependencies({
       projectId: this.zzEnv.projectId,
       parentJobId: this.bullMQJob.id!,
       parentOpName: this.def.name,
-      childJobId: childJob_.opts.jobId!,
-      childOpName: childJob_.name,
+      childJobId: p.jobId,
+      childOpName: p.def.name,
       dbConn: this.zzEnv.db,
       io_event_id: spawnR.ioEventId,
     });
@@ -275,32 +281,54 @@ export class ZZJob<P, O, StreamI = never, Status = never> {
     return spawnR;
   }
 
-  public async spawnJob<I, O>(
-    newJob_: FlowJob & {
-      initParams: I;
-    }
-  ) {
-    newJob_.opts = {
-      ...newJob_.opts,
-      jobId: newJob_.name,
-    };
+  public async spawnJob<P, O>(p: {
+    def: PipeDef<P, O>;
+    jobId: string;
+    initParams: P;
+  }) {
+    return await this._spawnJob(p);
+  }
+
+  private async _spawnJob<P, O>({
+    def,
+    jobId,
+    initParams,
+    flowProducerOpts,
+  }: {
+    def: PipeDef<P, O>;
+    jobId: string;
+    initParams: P;
+    flowProducerOpts?: FlowJob["opts"];
+  }) {
     const pubsubForChild = new PubSubFactory<O>(
       "output",
       {
         projectId: this.zzEnv.projectId,
       },
       this.zzEnv.redisConfig,
-      newJob_.queueName + "::" + newJob_.name
+      def.name + "::" + jobId
     );
-    await this.flowProducer.add(newJob_);
+
+    await this.flowProducer.add({
+      name: jobId,
+      data: {
+        initParams,
+      },
+      queueName: def.name,
+      opts: {
+        jobId: jobId,
+        ...flowProducerOpts,
+      },
+    });
 
     const rec = await addJobRec({
       projectId: this.zzEnv.projectId,
       opName: this.def.name,
       jobId: this.bullMQJob.id!,
       dbConn: this.zzEnv.db,
-      initParams: newJob_.initParams,
+      initParams,
     });
+
     return {
       subToOutput: (processor: (message: O) => void) => {
         pubsubForChild.subForJob({
