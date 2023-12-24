@@ -97,7 +97,7 @@ export class ZZJob<
     this._bullMQToken = p.bullMQToken;
     this.initParams = p.pipe.def.jobParams.parse(p.initParams);
     this.workerInstanceParams =
-      p.pipe.def.workerInstanceParams?.parse(p.workerInstanceParams) || {};
+      p.pipe.def.workerInstanceParams?.optional().parse(p.workerInstanceParams) || {};
     this.logger = p.logger;
     this.flowProducer = p.flowProducer;
     this.storageProvider = p.storageProvider;
