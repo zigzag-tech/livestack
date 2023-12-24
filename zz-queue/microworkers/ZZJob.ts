@@ -43,7 +43,7 @@ export class ZZJob<
   P,
   O,
   StreamI = never,
-  WP extends object = never,
+  WP extends object = {},
   Progress = never
 > {
   private readonly bullMQJob: Job<{ initParams: P }, O | void>;
@@ -81,7 +81,7 @@ export class ZZJob<
   readonly def: PipeDef<P, O, StreamI, WP, Progress>;
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
-  public workerInstanceParams: WP | {};
+  public workerInstanceParams: WP;
 
   constructor(p: {
     bullMQJob: Job<{ initParams: P }, O | undefined, string>;
@@ -97,7 +97,8 @@ export class ZZJob<
     this._bullMQToken = p.bullMQToken;
     this.initParams = p.pipe.def.jobParams.parse(p.initParams);
     this.workerInstanceParams =
-      p.pipe.def.workerInstanceParams?.optional().parse(p.workerInstanceParams) || {};
+      p.pipe.def.workerInstanceParams?.parse(p.workerInstanceParams) ||
+      ({} as WP);
     this.logger = p.logger;
     this.flowProducer = p.flowProducer;
     this.storageProvider = p.storageProvider;
