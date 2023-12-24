@@ -52,7 +52,7 @@ export class ZZPipe<
     instanceParams,
   }: {
     concurrency?: number;
-    instanceParams: WP;
+    instanceParams?: WP;
   }) {
     const worker = new ZZWorker<P, O, StreamI, WP, TProgress>({
       zzEnv: this.zzEnv,
