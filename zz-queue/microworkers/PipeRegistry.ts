@@ -47,7 +47,7 @@ export class PipeDef<
     return new PipeDef({
       ...this,
       ...newP,
-    } as PipeParams<NewP extends {} ? NewP : P, NewO extends {} ? NewO : O, NewStreamI extends {} ? NewStreamI : StreamI, NewWP extends {} ? NewWP : WP, NewTP extends {} ? NewTP : TProgress>);
+    } as PipeParams<NewP extends {} ? NewP : P, NewO extends {} ? NewO : O, NewStreamI extends {} ? NewStreamI : StreamI, NewWP extends {} ? NewWP : WP, NewTP extends {} ? NewTP : NewTP extends string ? NewTP : NewTP extends number ? NewTP : TProgress>);
   }
 }
 
