@@ -85,7 +85,7 @@ export class ZZWorker<
           flowProducer,
           pipe: this.pipe,
           initParams: job.data.initParams,
-          workerInstanceParams: this.workerInstanceParams,
+          workerInstanceParams: this.instanceParams,
         });
 
         return await zzJ.beginProcessing(processor.bind(zzJ));
