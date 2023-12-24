@@ -34,7 +34,9 @@ export class ReplicatePipe<P extends object, O> extends ZZPipe<
           replicateResult: def.output,
 
           // TODO: fix any
-        }) as any,
+        }) as z.ZodType<{
+          replicateResult: O;
+        }>,
       }),
       concurrency,
       zzEnv,
