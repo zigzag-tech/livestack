@@ -23,7 +23,7 @@ import longStringTruncator from "../utils/longStringTruncator";
 import { ZZPipe } from "../microworkers/ZZPipe";
 import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
 import { identifyLargeFiles } from "../files/file-ops";
-
+import { z } from "zod";
 export type ZZProcessor<
   P,
   O,
@@ -81,7 +81,7 @@ export class ZZJob<
   readonly def: PipeDef<P, O, StreamI, WP, Progress>;
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
-  public workerInstanceParams: WP;
+  public workerInstanceParams: WP = {} as WP;
 
   constructor(p: {
     bullMQJob: Job<{ initParams: P }, O | undefined, string>;
@@ -96,10 +96,20 @@ export class ZZJob<
     this.bullMQJob = p.bullMQJob;
     this._bullMQToken = p.bullMQToken;
     this.initParams = p.pipe.def.jobParams.parse(p.initParams);
-    this.workerInstanceParams =
-      p.pipe.def.workerInstanceParams?.parse(p.workerInstanceParams) ||
-      ({} as WP);
+
     this.logger = p.logger;
+    try {
+      this.workerInstanceParams =
+        p.pipe.def.workerInstanceParams?.parse(p.workerInstanceParams) ||
+        ({} as WP);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        this.logger.error(
+          `workerInstanceParams error: data provided is invalid: ${err.message}`
+        );
+        throw err;
+      }
+    }
     this.flowProducer = p.flowProducer;
     this.storageProvider = p.storageProvider;
     this.def = p.pipe.def;
@@ -143,7 +153,16 @@ export class ZZJob<
       );
 
     this.emitOutput = async (o: O) => {
-      o = this.pipe.def.output.parse(o);
+      try {
+        o = this.pipe.def.output.parse(o);
+      } catch (err) {
+        if (err instanceof z.ZodError) {
+          this.logger.error(
+            `EmitOutput error: data provided is invalid: ${err.message}`
+          );
+          throw err;
+        }
+      }
 
       if (this.storageProvider) {
         let { largeFilesToSave, newObj } = identifyLargeFiles(o);

@@ -12,7 +12,7 @@ import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
 import { PubSubFactory } from "../realtime/mq-pub-sub";
-
+import { z } from "zod";
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
@@ -228,7 +228,14 @@ export class ZZPipe<
     jobId: string;
     data: StreamI;
   }) {
-    data = this.def.streamInput.parse(data);
+    try {
+      data = this.def.streamInput.parse(data);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        this.logger.error(`StreamInput data is invalid: ${err.message}`);
+        throw err;
+      }
+    }
     const pubSub = this.pubSubFactoryForJob<StreamI>({ jobId, type: "input" });
     const messageId = v4();
 
