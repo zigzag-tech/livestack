@@ -347,7 +347,9 @@ export class ZZPipe<
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
     if (workers.length === 0) {
-      this.logger.warn(`No worker for queue ${this.def.name}.`);
+      this.logger.warn(
+        `No worker for queue ${this.zzEnv.projectId}/${this.def.name}.`
+      );
     }
     const j = await this._rawQueue.add(
       jobId,
@@ -355,7 +357,7 @@ export class ZZPipe<
       { ...bullMQJobsOpts, jobId: jobId }
     );
     this.logger.info(
-      `Added job with ID: ${j.id}, ${j.queueName} ` +
+      `Added job with ID ${j.id} to  ${j.queueName}` +
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
