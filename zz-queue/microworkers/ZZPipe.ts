@@ -7,7 +7,11 @@ import { ZZWorker } from "./ZZWorker";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
 
-import { addJobRec, getJobData, getJobRec } from "../db/knexConn";
+import {
+  ensureJobRecAndInitStatus,
+  getJobData,
+  getJobRec,
+} from "../db/knexConn";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
@@ -359,7 +363,7 @@ export class ZZPipe<
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
-    await addJobRec({
+    await ensureJobRecAndInitStatus({
       projectId: this.zzEnv.projectId,
       opName: this.def.name,
       jobId,

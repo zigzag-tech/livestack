@@ -22,14 +22,14 @@ import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
 import {
   addJobDataAndIOEvent,
-  addJobRec,
+  ensureJobAndInitStatusRec,
   ensureJobDependencies,
   getJobData,
   getJobRec,
   updateJobStatus,
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { ZZPipe } from "../microworkers/ZZPipe";
+import { WrapTerminatorAndDataId, ZZPipe } from "../microworkers/ZZPipe";
 import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
@@ -358,7 +358,7 @@ export class ZZJob<
 
   private async _spawnJob<P, O>({
     def,
-    jobId,
+    jobId: childJobId,
     initParams,
     flowProducerOpts,
   }: {
@@ -367,27 +367,53 @@ export class ZZJob<
     initParams: P;
     flowProducerOpts?: FlowJob["opts"];
   }) {
+    const outputPubSubForChild = new PubSubFactory<O>(
+      "output",
+      {
+        projectId: this.zzEnv.projectId,
+      },
+      this.zzEnv.redisConfig,
+      def.name + "::" + childJobId
+    );
+
     await this.flowProducer.add({
-      name: jobId,
+      name: childJobId,
       data: {
         initParams,
       },
       queueName: def.name,
       opts: {
-        jobId: jobId,
+        jobId: childJobId,
         ...flowProducerOpts,
       },
     });
 
-    const rec = await addJobRec({
+    const rec = await ensureJobAndInitStatusRec({
       projectId: this.zzEnv.projectId,
-      opName: this.def.name,
-      jobId: this.jobId,
       dbConn: this.zzEnv.db,
+      opName: def.name,
+      jobId: childJobId,
       initParams,
     });
 
+    const jobThat = this;
+
+    let _outputSubFactory: PubSubFactory<WrapTerminatorAndDataId<O>> | null =
+      null;
+
     return {
+      get outputObservable() {
+        if (!_outputSubFactory) {
+          _outputSubFactory = jobThat.pipe.pubSubFactoryForJob<O>({
+            jobId: jobThat.jobId,
+            type: "output",
+          });
+        }
+
+        return _outputSubFactory.valueObsrvable.pipe(
+          map((x) => (x.terminate ? null : x.data))
+        );
+      },
       ...rec,
     };
   }

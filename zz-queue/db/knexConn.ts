@@ -174,30 +174,32 @@ export async function updateJobStatus({
   });
 }
 
-export async function addJobRec<T>({
+export async function ensureJobAndInitStatusRec<T>({
   projectId,
   opName,
   jobId,
   dbConn,
-  jobStatus = "waiting",
   initParams,
 }: JobUniqueId & {
   dbConn: Knex;
-  jobStatus?: ZZJobStatus;
   initParams: T;
 }) {
-  await dbConn("zz_jobs").insert<ZZJobRec<T>>({
-    project_id: projectId,
-    op_name: opName,
-    job_id: jobId,
-    init_params: initParams,
-  });
+  await dbConn("zz_jobs")
+    .insert<ZZJobRec<T>>({
+      project_id: projectId,
+      op_name: opName,
+      job_id: jobId,
+      init_params: initParams,
+    })
+    .onConflict(["project_id", "op_name", "job_id"])
+    .ignore();
+
   await updateJobStatus({
     projectId,
     opName,
     jobId,
     dbConn,
-    jobStatus,
+    jobStatus: "waiting",
   });
 
   const jobDataSuffix = "init_input";
