@@ -2,20 +2,14 @@ import { PipeDef, ZZEnv } from "./PipeRegistry";
 import { ZZPipe } from "./ZZPipe";
 import { z } from "zod";
 
-export interface AttemptDef<
-  ParentDef extends PipeDef<ParentP, ParentO>,
-  P,
-  O,
-  ParentP,
-  ParentO
-> {
+export interface AttemptDef<ParentP, ParentO, P, O> {
   def: PipeDef<P, O>;
   timeout: number;
-  transformInput: (params: ParentP) => P;
-  transformOutput: (output: O) => ParentO;
+  transformInput: (params: ParentP) => z.infer<this["def"]["jobParams"]>;
+  transformOutput: (output: z.infer<this["def"]["output"]>) => ParentO;
 }
 export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
-  attempts: AttemptDef<PipeDef<P, O>, unknown, unknown, P, O>[];
+  attempts: AttemptDef<P, O, unknown, unknown>[];
   constructor({
     zzEnv,
     def,
@@ -24,7 +18,7 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
   }: {
     zzEnv: ZZEnv;
     def: PipeDef<P, O>;
-    attempts: AttemptDef<PipeDef<P, O>, unknown, unknown, P, O>[];
+    attempts: AttemptDef<P, O, any, any>[];
     ultimateFallback?: () => Promise<O>;
   }) {
     super({
@@ -35,7 +29,7 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
           def,
           transformInput,
           transformOutput,
-        }: AttemptDef<PipeDef<P, O>, NewP, NewO, P, O>) => {
+        }: AttemptDef<P, O, NewP, NewO>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${def.name}`;
 
