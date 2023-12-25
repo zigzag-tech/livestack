@@ -14,16 +14,18 @@ export interface RetryDef<
   transformInput: (params: ParentP) => P;
   transformOutput: (output: O) => ParentO;
 }
-export class ZZProgressiveTryPipe<P, O> extends ZZPipe<P, O> {
+export class ZZConcurrentAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
   retryDefs: RetryDef<PipeDef<P, O>, unknown, unknown, P, O>[];
   constructor({
     zzEnv,
     def,
     retryDefs,
+    ultimateFallback,
   }: {
     zzEnv: ZZEnv;
     def: PipeDef<P, O>;
     retryDefs: RetryDef<PipeDef<P, O>, unknown, unknown, P, O>[];
+    ultimateFallback?: () => Promise<O>;
   }) {
     super({
       zzEnv,
@@ -99,7 +101,11 @@ export class ZZProgressiveTryPipe<P, O> extends ZZPipe<P, O> {
           }
         }
 
-        throw new Error("All retries failed.");
+        if (ultimateFallback) {
+          return await ultimateFallback();
+        } else {
+          throw new Error("All retries failed.");
+        }
       },
     });
 
