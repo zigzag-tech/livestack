@@ -1,14 +1,21 @@
 import { PipeDef, ZZEnv } from "./PipeRegistry";
 import { ZZPipe } from "./ZZPipe";
+import { z } from "zod";
 
-type RetryDef<P, O, NewP, NewO> = {
+export interface RetryDef<
+  ParentDef extends PipeDef<ParentP, ParentO>,
+  P,
+  O,
+  ParentP,
+  ParentO
+> {
   def: PipeDef<P, O>;
   timeout: number;
-  transformInput: (params: P) => NewP;
-  transformOutput: (output: NewO) => O;
-};
+  transformInput: (params: ParentP) => P;
+  transformOutput: (output: O) => ParentO;
+}
 export class ZZProgressiveTryPipe<P, O> extends ZZPipe<P, O> {
-  retryDefs: RetryDef<P, O, unknown, unknown>[];
+  retryDefs: RetryDef<PipeDef<P, O>, unknown, unknown, P, O>[];
   constructor({
     zzEnv,
     def,
@@ -16,26 +23,17 @@ export class ZZProgressiveTryPipe<P, O> extends ZZPipe<P, O> {
   }: {
     zzEnv: ZZEnv;
     def: PipeDef<P, O>;
-    retryDefs: {
-      def: PipeDef<any, any, never, never, never>;
-      timeout: number;
-      transformInput: (params: any) => any;
-      transformOutput: (output: any) => any;
-    }[];
+    retryDefs: RetryDef<PipeDef<P, O>, unknown, unknown, P, O>[];
   }) {
     super({
       zzEnv,
       def,
       processor: async ({ logger, initParams, spawnJob, jobId }) => {
-        const genRetryFunction = ({
+        const genRetryFunction = <NewP, NewO>({
           def,
           transformInput,
           transformOutput,
-        }: {
-          def: PipeDef<any, any, never, never, never>;
-          transformInput: (params: any) => any;
-          transformOutput: (output: any) => any;
-        }) => {
+        }: RetryDef<PipeDef<P, O>, NewP, NewO, P, O>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${def.name}`;
 
@@ -101,7 +99,7 @@ export class ZZProgressiveTryPipe<P, O> extends ZZPipe<P, O> {
           }
         }
 
-        return { parsedCaption: "masterpiece", engine: "none" as const };
+        throw new Error("All retries failed.");
       },
     });
 
