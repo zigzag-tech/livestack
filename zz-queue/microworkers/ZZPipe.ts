@@ -51,13 +51,9 @@ export class ZZPipe<
     throw new Error(`Processor not set!`);
   };
 
-  public async startWorker({
-    concurrency,
-    instanceParams,
-  }: {
-    concurrency?: number;
-    instanceParams?: WP;
-  }) {
+  public async startWorker(p?: { concurrency?: number; instanceParams?: WP }) {
+    const { concurrency, instanceParams } = p || {};
+
     const worker = new ZZWorker<P, O, StreamI, WP, TProgress>({
       zzEnv: this.zzEnv,
       processor: this.processor,
