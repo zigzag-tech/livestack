@@ -367,15 +367,6 @@ export class ZZJob<
     initParams: P;
     flowProducerOpts?: FlowJob["opts"];
   }) {
-    const pubsubForChild = new PubSubFactory<O>(
-      "output",
-      {
-        projectId: this.zzEnv.projectId,
-      },
-      this.zzEnv.redisConfig,
-      def.name + "::" + jobId
-    );
-
     await this.flowProducer.add({
       name: jobId,
       data: {
@@ -397,11 +388,6 @@ export class ZZJob<
     });
 
     return {
-      subToOutput: (processor: (message: O) => void) => {
-        pubsubForChild.subForJob({
-          processor,
-        });
-      },
       ...rec,
     };
   }
