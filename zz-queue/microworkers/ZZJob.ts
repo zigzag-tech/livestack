@@ -61,7 +61,6 @@ export class ZZJob<
   inputObservable: Observable<StreamI | null>;
   logger: ReturnType<typeof getLogger>;
   // New properties for subscriber tracking
-  private inputSubscriberCountChanged = new Subject<number>();
   private inputSubscriberCountObservable: Observable<number>;
 
   // public async aliveLoop(retVal: O) {
@@ -227,9 +226,9 @@ export class ZZJob<
     };
   }
 
-  public async beginProcessing(
+  public beginProcessing = async (
     processor: (j: ZZJob<P, O, StreamI, WP, Progress>) => Promise<O | void>
-  ): Promise<O | undefined> {
+  ): Promise<O | undefined> => {
     const jId = {
       opName: this.def.name,
       jobId: this.jobId,
@@ -320,13 +319,13 @@ export class ZZJob<
         throw e;
       }
     }
-  }
+  };
 
-  public async spawnChildJobsToWaitOn<CI, CO>(p: {
+  public spawnChildJobsToWaitOn = async <CI, CO>(p: {
     def: PipeDef<P, O>;
     jobId: string;
     initParams: P;
-  }) {
+  }) => {
     const spawnR = await this._spawnJob({
       ...p,
       flowProducerOpts: {
@@ -348,17 +347,17 @@ export class ZZJob<
     });
 
     return spawnR;
-  }
+  };
 
-  public async spawnJob<P, O>(p: {
+  public spawnJob = async <P, O>(p: {
     def: PipeDef<P, O>;
     jobId: string;
     initParams: P;
-  }) {
+  }) => {
     return await this._spawnJob(p);
-  }
+  };
 
-  private async _spawnJob<P, O>({
+  private _spawnJob = async <P, O>({
     def,
     jobId: childJobId,
     initParams,
@@ -368,16 +367,7 @@ export class ZZJob<
     jobId: string;
     initParams: P;
     flowProducerOpts?: FlowJob["opts"];
-  }) {
-    const outputPubSubForChild = new PubSubFactory<O>(
-      "output",
-      {
-        projectId: this.zzEnv.projectId,
-      },
-      this.zzEnv.redisConfig,
-      def.name + "::" + childJobId
-    );
-
+  }) => {
     await this.flowProducer.add({
       name: childJobId,
       data: {
@@ -418,23 +408,23 @@ export class ZZJob<
       },
       ...rec,
     };
-  }
+  };
 
-  public async saveToTextFile({
+  public saveToTextFile = async ({
     relativePath,
     data,
   }: {
     relativePath: string;
     data: string;
-  }) {
+  }) => {
     await ensurePathExists(this.dedicatedTempWorkingDir);
     fs.writeFileSync(
       path.join(this.dedicatedTempWorkingDir, relativePath),
       data
     );
-  }
+  };
 
-  private getLargeValueCdnUrl<T extends object>(key: keyof T, obj: T) {
+  getLargeValueCdnUrl = async <T extends object>(key: keyof T, obj: T) => {
     if (!this.storageProvider) {
       throw new Error("storageProvider is not provided");
     }
@@ -454,7 +444,7 @@ export class ZZJob<
         storageProvider: this.storageProvider,
       });
     }
-  }
+  };
 }
 
 function createTrackedObservable<T>(observable: Observable<T>) {
