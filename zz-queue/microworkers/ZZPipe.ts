@@ -70,32 +70,34 @@ export class ZZPipe<
 
   private pubSubCache = new Map<string, PubSubFactory<unknown>>();
 
-  public pubSubFactoryForJob<T>({
+  public pubSubFactoryForJob = <T>({
     jobId,
     type,
   }: {
     jobId: string;
     type: "input" | "output";
-  }) {
+  }) => {
     if (this.pubSubCache.has(`${jobId}/${type}`)) {
       return this.pubSubCache.get(`${jobId}/${type}`)! as PubSubFactory<
         WrapTerminatorAndDataId<T>
       >;
     } else {
-      const queueId = this.def.name + "::" + jobId;
       const pubSub = new PubSubFactory<WrapTerminatorAndDataId<T>>(
         type,
         {
           projectId: this.zzEnv.projectId,
         },
         this.zzEnv.redisConfig,
-        queueId
+        getPubSubQueueId({
+          def: this.def,
+          jobId,
+        })
       );
       this.pubSubCache.set(`${jobId}/${type}`, pubSub);
 
       return pubSub;
     }
-  }
+  };
 
   constructor({
     zzEnv,
@@ -450,3 +452,14 @@ export type WrapTerminatorAndDataId<T> =
   | {
       terminate: true;
     };
+
+export function getPubSubQueueId({
+  def,
+  jobId,
+}: {
+  def: PipeDef<unknown, unknown, unknown, any, unknown>;
+  jobId: string;
+}) {
+  const queueId = def.name + "::" + jobId;
+  return queueId;
+}

@@ -29,7 +29,11 @@ import {
   updateJobStatus,
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { WrapTerminatorAndDataId, ZZPipe } from "../microworkers/ZZPipe";
+import {
+  WrapTerminatorAndDataId,
+  ZZPipe,
+  getPubSubQueueId,
+} from "../microworkers/ZZPipe";
 import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
@@ -358,7 +362,7 @@ export class ZZJob<
   };
 
   private _spawnJob = async <P, O>({
-    def,
+    def: childJobDef,
     jobId: childJobId,
     initParams,
     flowProducerOpts,
@@ -373,7 +377,7 @@ export class ZZJob<
       data: {
         initParams,
       },
-      queueName: `${this.zzEnv.projectId}/${def.name}`,
+      queueName: `${this.zzEnv.projectId}/${childJobDef.name}`,
       opts: {
         jobId: childJobId,
         ...flowProducerOpts,
@@ -383,7 +387,7 @@ export class ZZJob<
     const rec = await ensureJobAndInitStatusRec({
       projectId: this.zzEnv.projectId,
       dbConn: this.zzEnv.db,
-      opName: def.name,
+      opName: childJobDef.name,
       jobId: childJobId,
       initParams,
     });
@@ -396,10 +400,17 @@ export class ZZJob<
     return {
       get outputObservable() {
         if (!_outputSubFactory) {
-          _outputSubFactory = jobThat.pipe.pubSubFactoryForJob<O>({
-            jobId: childJobId,
-            type: "output",
-          });
+          _outputSubFactory = new PubSubFactory<WrapTerminatorAndDataId<O>>(
+            "output",
+            {
+              projectId: jobThat.zzEnv.projectId,
+            },
+            jobThat.zzEnv.redisConfig,
+            getPubSubQueueId({
+              def: childJobDef,
+              jobId: childJobId,
+            })
+          );
         }
 
         return _outputSubFactory.valueObsrvable.pipe(
