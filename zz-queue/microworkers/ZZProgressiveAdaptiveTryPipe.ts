@@ -15,16 +15,16 @@ export interface AttemptDef<
   transformOutput: (output: O) => ParentO;
 }
 export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
-  attemptDefs: AttemptDef<PipeDef<P, O>, unknown, unknown, P, O>[];
+  attempts: AttemptDef<PipeDef<P, O>, unknown, unknown, P, O>[];
   constructor({
     zzEnv,
     def,
-    attemptDefs,
+    attempts,
     ultimateFallback,
   }: {
     zzEnv: ZZEnv;
     def: PipeDef<P, O>;
-    attemptDefs: AttemptDef<PipeDef<P, O>, unknown, unknown, P, O>[];
+    attempts: AttemptDef<PipeDef<P, O>, unknown, unknown, P, O>[];
     ultimateFallback?: () => Promise<O>;
   }) {
     super({
@@ -62,7 +62,7 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
           return fn;
         };
 
-        const restToTry = attemptDefs.map((a) => ({
+        const restToTry = attempts.map((a) => ({
           fn: genRetryFunction(a),
           timeout: a.timeout,
           name: a.def.name,
@@ -109,7 +109,7 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
       },
     });
 
-    this.attemptDefs = attemptDefs;
+    this.attempts = attempts;
   }
 }
 
