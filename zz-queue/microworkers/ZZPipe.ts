@@ -174,21 +174,23 @@ export class ZZPipe<
 
   public async enqueueJobAndGetResult({
     jobName: jobId,
-    initJobData,
+    initJobParams: initParams,
   }: // queueEventsOptions,
   {
     jobName?: string;
-    initJobData: P;
+    initJobParams: P;
   }): Promise<O[]> {
     if (!jobId) {
       jobId = `${this.def.name}-${v4()}`;
     }
 
-    this.logger.info(`Enqueueing job ${jobId} with data:`, initJobData);
+    this.logger.info(
+      `Enqueueing job ${jobId} with data: ${JSON.stringify(initParams)}`
+    );
 
-    const job = await this.addJob({
+    await this.addJob({
       jobId,
-      initParams: initJobData,
+      initParams,
     });
 
     while (true) {

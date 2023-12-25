@@ -5,7 +5,7 @@ import { RedisOptions } from "ioredis";
 interface PipeParams<P, O, StreamI, WP, TProgress> {
   name: string;
   jobParams: z.ZodType<P>;
-  workerInstanceParams?: z.ZodType<WP>;
+  workerInstanceParams?: z.ZodType<WP | {}>;
   output: z.ZodType<O>;
   streamInput?: z.ZodType<StreamI>;
   progress?: z.ZodType<TProgress>;
@@ -20,7 +20,7 @@ export class PipeDef<
 {
   name: string;
   jobParams: z.ZodType<P>;
-  workerInstanceParams?: z.ZodType<WP>;
+  workerInstanceParams?: z.ZodType<WP | {}>;
   output: z.ZodType<O>;
   streamInput: z.ZodType<StreamI>;
   progress: z.ZodType<TProgress>;
@@ -38,7 +38,7 @@ export class PipeDef<
     this.output = output;
     this.streamInput = streamInput || z.never();
     this.progress = progress || z.never();
-    this.workerInstanceParams = workerInstanceParams || z.never();
+    this.workerInstanceParams = workerInstanceParams || z.object({});
   }
 
   public derive<NewP, NewO, NewStreamI, NewWP, NewTP>(

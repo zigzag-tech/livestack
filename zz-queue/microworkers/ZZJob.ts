@@ -81,7 +81,7 @@ export class ZZJob<
   readonly def: PipeDef<P, O, StreamI, WP, Progress>;
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
-  public workerInstanceParams: WP = {} as WP;
+  public workerInstanceParams: WP | {} = {};
 
   constructor(p: {
     bullMQJob: Job<{ initParams: P }, O | undefined, string>;
@@ -143,10 +143,12 @@ export class ZZJob<
         tap({
           subscribe: () => {
             this.inputSubscriberCount++;
+            console.log("++++++");
             this.inputSubscriberCountChanged.next(this.inputSubscriberCount);
           },
           unsubscribe: () => {
             this.inputSubscriberCount--;
+            console.log("------");
             this.inputSubscriberCountChanged.next(this.inputSubscriberCount);
           },
         })
@@ -256,6 +258,7 @@ export class ZZJob<
         const processedR = await processor(this);
 
         // wait as long as there are still subscribers
+        console.log("zzzzz");
         await new Promise<void>((resolve) => {
           const sub = this.inputSubscriberCountChanged
             .pipe(takeUntil(this.inputObservable))
@@ -266,6 +269,8 @@ export class ZZJob<
               }
             });
         });
+
+        console.log("bbb");
 
         if (processedR) {
           await this.emitOutput(processedR);
