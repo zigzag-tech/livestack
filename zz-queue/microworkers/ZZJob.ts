@@ -396,26 +396,36 @@ export class ZZJob<
 
     let _outputSubFactory: PubSubFactory<WrapTerminatorAndDataId<O>> | null =
       null;
+    const _getOrCreateOutputPubSubFactory = () => {
+      if (!_outputSubFactory) {
+        _outputSubFactory = new PubSubFactory<WrapTerminatorAndDataId<O>>(
+          "output",
+          {
+            projectId: jobThat.zzEnv.projectId,
+          },
+          jobThat.zzEnv.redisConfig,
+          getPubSubQueueId({
+            def: childJobDef,
+            jobId: childJobId,
+          })
+        );
+      }
+      return _outputSubFactory;
+    };
 
     return {
       get outputObservable() {
-        if (!_outputSubFactory) {
-          _outputSubFactory = new PubSubFactory<WrapTerminatorAndDataId<O>>(
-            "output",
-            {
-              projectId: jobThat.zzEnv.projectId,
-            },
-            jobThat.zzEnv.redisConfig,
-            getPubSubQueueId({
-              def: childJobDef,
-              jobId: childJobId,
-            })
-          );
-        }
-
-        return _outputSubFactory.valueObsrvable.pipe(
+        return _getOrCreateOutputPubSubFactory().valueObsrvable.pipe(
           map((x) => (x.terminate ? null : x.data))
         );
+      },
+      nextOutput: async () => {
+        const r = await _getOrCreateOutputPubSubFactory().nextValue();
+        if (r.terminate) {
+          return null;
+        } else {
+          return r.data;
+        }
       },
       ...rec,
     };
