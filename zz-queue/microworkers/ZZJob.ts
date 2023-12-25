@@ -1,7 +1,16 @@
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { PubSubFactory } from "../realtime/mq-pub-sub";
-import { Observable, Subject, map, takeUntil, tap } from "rxjs";
+import {
+  BehaviorSubject,
+  Observable,
+  Subject,
+  Subscriber,
+  Subscription,
+  map,
+  takeUntil,
+  tap,
+} from "rxjs";
 import {
   IStorageProvider,
   getPublicCdnUrl,
@@ -52,8 +61,8 @@ export class ZZJob<
   inputObservable: Observable<StreamI | null>;
   logger: ReturnType<typeof getLogger>;
   // New properties for subscriber tracking
-  private inputSubscriberCount = 0;
   private inputSubscriberCountChanged = new Subject<number>();
+  private inputSubscriberCountObservable: Observable<number>;
 
   // public async aliveLoop(retVal: O) {
   //   const redis = new Redis();
@@ -82,6 +91,7 @@ export class ZZJob<
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
   public workerInstanceParams: WP | {} = {};
+  private inputObservableUntracked: Observable<StreamI | null>;
 
   constructor(p: {
     bullMQJob: Job<{ initParams: P }, O | undefined, string>;
@@ -137,22 +147,15 @@ export class ZZJob<
       }
     };
 
-    this.inputObservable = inputPubSubFactory.valueObsrvable
-      .pipe(map((r) => (r.terminate ? null : r.data)))
-      .pipe(
-        tap({
-          subscribe: () => {
-            this.inputSubscriberCount++;
-            console.log("++++++");
-            this.inputSubscriberCountChanged.next(this.inputSubscriberCount);
-          },
-          unsubscribe: () => {
-            this.inputSubscriberCount--;
-            console.log("------");
-            this.inputSubscriberCountChanged.next(this.inputSubscriberCount);
-          },
-        })
-      );
+    this.inputObservableUntracked = inputPubSubFactory.valueObsrvable.pipe(
+      map((x) => (x.terminate ? null : x.data))
+    );
+
+    const { trackedObservable, subscriberCountObservable } =
+      createTrackedObservable(this.inputObservableUntracked);
+
+    this.inputObservable = trackedObservable;
+    this.inputSubscriberCountObservable = subscriberCountObservable;
 
     this.emitOutput = async (o: O) => {
       try {
@@ -258,19 +261,15 @@ export class ZZJob<
         const processedR = await processor(this);
 
         // wait as long as there are still subscribers
-        console.log("zzzzz");
         await new Promise<void>((resolve) => {
-          const sub = this.inputSubscriberCountChanged
-            .pipe(takeUntil(this.inputObservable))
+          this.inputSubscriberCountObservable
+            .pipe(takeUntil(this.inputObservableUntracked))
             .subscribe((count) => {
               if (count === 0) {
-                sub.unsubscribe();
                 resolve();
               }
             });
         });
-
-        console.log("bbb");
 
         if (processedR) {
           await this.emitOutput(processedR);
@@ -430,4 +429,38 @@ export class ZZJob<
       });
     }
   }
+}
+
+function createTrackedObservable<T>(observable: Observable<T>) {
+  let subscriberCount = 0;
+  const subscriberCountSubject = new BehaviorSubject<number>(subscriberCount);
+
+  const trackedObservable = new Observable<T>((subscriber: Subscriber<T>) => {
+    // Increment subscriber count
+    subscriberCount++;
+    subscriberCountSubject.next(subscriberCount);
+    // console.log(`Subscribers: ${subscriberCount}`);
+
+    // Subscribe to the original observable
+    const subscription: Subscription = observable.subscribe({
+      next: (value: T) => subscriber.next(value),
+      error: (err: any) => subscriber.error(err),
+      complete: () => subscriber.complete(),
+    });
+
+    // Return the teardown logic
+    return () => {
+      // Decrement subscriber count
+      subscriberCount--;
+      subscriberCountSubject.next(subscriberCount);
+      // console.log(`Subscribers: ${subscriberCount}`);
+
+      // Unsubscribe from the original observable
+      subscription.unsubscribe();
+    };
+  });
+
+  const subscriberCountObservable = subscriberCountSubject.asObservable();
+
+  return { trackedObservable, subscriberCountObservable };
 }
