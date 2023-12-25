@@ -203,6 +203,8 @@ export class ZZPipe<
           limit: 1000,
         });
         return results as O[];
+      } else if (status === "failed") {
+        throw new Error(`Job ${jobId} failed!`);
       }
     }
   }
