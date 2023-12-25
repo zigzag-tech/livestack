@@ -61,7 +61,7 @@ export class ZZWorker<
     this.color = color;
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
-      queueName: this.def.name,
+      queueName: `${this.zzEnv.projectId}/${this.def.name}`,
       queueOptions: workerOptions,
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,

@@ -373,7 +373,7 @@ export class ZZJob<
       data: {
         initParams,
       },
-      queueName: def.name,
+      queueName: `${this.zzEnv.projectId}/${def.name}`,
       opts: {
         jobId: childJobId,
         ...flowProducerOpts,

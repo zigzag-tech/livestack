@@ -118,7 +118,7 @@ export class ZZPipe<
     this.logger = getLogger(`wkr:${this.def.name}`, this.color);
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
-      queueName: this.def.name,
+      queueName: `${this.zzEnv.projectId}/${this.def.name}`,
       queueOptions: this.queueOptions,
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
