@@ -8,7 +8,7 @@ import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
 
 import {
-  ensureJobRecAndInitStatus,
+  ensureJobAndInitStatusRec,
   getJobData,
   getJobRec,
 } from "../db/knexConn";
@@ -363,7 +363,7 @@ export class ZZPipe<
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
-    await ensureJobRecAndInitStatus({
+    await ensureJobAndInitStatusRec({
       projectId: this.zzEnv.projectId,
       opName: this.def.name,
       jobId,
