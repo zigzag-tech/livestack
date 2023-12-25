@@ -61,7 +61,7 @@ export class ZZWorker<
     this.color = color;
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
-      queueName: `${this.zzEnv.projectId}/${this.def.name}`,
+      queueNameOnly: `${this.def.name}`,
       queueOptions: workerOptions,
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
@@ -117,7 +117,6 @@ export class ZZWorker<
     });
 
     this.bullMQWorker.run();
-    logger.info(`${this.bullMQWorker.name} worker started.`);
   }
 }
 

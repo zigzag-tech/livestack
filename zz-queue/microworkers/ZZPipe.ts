@@ -22,7 +22,7 @@ type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
 >;
 
-const queueMap = new Map<
+const queueMapByProjectIdAndQueueName = new Map<
   QueueName<GenericRecordType>,
   ReturnType<typeof createAndReturnQueue>
 >();
@@ -64,6 +64,7 @@ export class ZZPipe<
     });
     // this.workers.push(worker);
     await worker.bullMQWorker.waitUntilReady();
+    this.logger.info(`${worker.bullMQWorker.name} worker started.`);
     return worker;
   }
 
@@ -118,7 +119,7 @@ export class ZZPipe<
     this.logger = getLogger(`wkr:${this.def.name}`, this.color);
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
-      queueName: `${this.zzEnv.projectId}/${this.def.name}`,
+      queueNameOnly: `${this.def.name}`,
       queueOptions: this.queueOptions,
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
@@ -348,7 +349,7 @@ export class ZZPipe<
     const workers = await this._rawQueue.getWorkers();
     if (workers.length === 0) {
       this.logger.warn(
-        `No worker for queue ${this.zzEnv.projectId}/${this.def.name}.`
+        `No worker for queue ${this._rawQueue.name}; job ${jobId} might be be stuck.`
       );
     }
     const j = await this._rawQueue.add(
@@ -391,15 +392,15 @@ export const getMicroworkerQueueByName = <
 ): ReturnType<typeof createAndReturnQueue<JobDataType, JobReturnType, T>> => {
   const {
     // queueNamesDef,
-    queueName,
+    queueNameOnly: queueName,
     projectId,
   } = p;
   // if (!Object.values(queueNamesDef).includes(queueName)) {
   //   throw new Error(`Can not handle queueName ${queueName}!`);
   // }
-  const existing = queueMap.get(`${projectId}/${queueName}`) as ReturnType<
-    typeof createAndReturnQueue<JobDataType, JobReturnType, T>
-  >;
+  const existing = queueMapByProjectIdAndQueueName.get(
+    `${projectId}/${queueName}`
+  ) as ReturnType<typeof createAndReturnQueue<JobDataType, JobReturnType, T>>;
   if (existing) {
     return existing;
   } else {
@@ -413,17 +414,17 @@ function createAndReturnQueue<
   T extends GenericRecordType = GenericRecordType
 >({
   projectId,
-  queueName,
+  queueNameOnly,
   queueOptions,
   db,
 }: {
   projectId: string;
-  queueName: QueueName<T>;
+  queueNameOnly: QueueName<T>;
   queueOptions?: WorkerOptions;
   db: Knex;
 }) {
   const queue = new Queue<{ initParams: JobDataType }, JobReturnType>(
-    `${projectId}/${queueName}`,
+    `${projectId}/${queueNameOnly}`,
     queueOptions
   );
 
@@ -432,7 +433,10 @@ function createAndReturnQueue<
   };
 
   // todo: fix typing
-  queueMap.set(queueName, funcs as any);
+  queueMapByProjectIdAndQueueName.set(
+    `${projectId}/${queueNameOnly}`,
+    funcs as any
+  );
 
   return funcs;
 }
