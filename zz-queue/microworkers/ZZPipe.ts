@@ -179,30 +179,29 @@ export class ZZPipe<
   {
     jobName?: string;
     initJobData: P;
-  }): Promise<O> {
+  }): Promise<O[]> {
     if (!jobId) {
       jobId = `${this.def.name}-${v4()}`;
     }
 
     this.logger.info(`Enqueueing job ${jobId} with data:`, initJobData);
-    const queueEvents = new QueueEvents(
-      `${this.zzEnv.projectId}/${this.def.name}`,
-      {
-        connection: this.zzEnv.redisConfig,
-      }
-    );
 
     const job = await this.addJob({
       jobId,
       initParams: initJobData,
     });
 
-    try {
-      await job.waitUntilFinished(queueEvents);
-      const result = await Job.fromId(this._rawQueue, jobId);
-      return result!.returnvalue as O;
-    } finally {
-      await queueEvents.close();
+    while (true) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const status = await this.getJobStatus(jobId);
+      if (status === "completed") {
+        const results = await this.getJobData({
+          jobId,
+          ioType: "out",
+          limit: 1000,
+        });
+        return results as O[];
+      }
     }
   }
 
