@@ -131,11 +131,14 @@ export async function addJobDataAndIOEvent<T>({
 }) {
   const jobDataId = `${projectId}:${opName}:${jobId}:${jobDataSuffix || v4()}`;
 
-  await dbConn<ZZJobDataRec<T>>("zz_job_data").insert({
-    job_data_id: jobDataId,
-    job_data: jobData,
-    time_created: new Date(),
-  });
+  await dbConn<ZZJobDataRec<T>>("zz_job_data")
+    .insert({
+      job_data_id: jobDataId,
+      job_data: jobData,
+      time_created: new Date(),
+    })
+    .onConflict(["job_data_id"])
+    .ignore();
 
   const ioEventId = `${projectId}:${opName}:${jobId}:${jobDataSuffix || v4()}`;
   // insert input event rec
