@@ -138,7 +138,7 @@ export async function addJobDataAndIOEvent<T>({
       time_created: new Date(),
     })
     .onConflict(["job_data_id"])
-    .ignore();
+    .merge();
 
   const ioEventId = `${projectId}:${opName}:${jobId}:${jobDataSuffix || v4()}`;
   // insert input event rec
