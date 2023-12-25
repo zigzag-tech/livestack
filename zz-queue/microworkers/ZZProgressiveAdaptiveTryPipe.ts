@@ -14,7 +14,7 @@ export interface RetryDef<
   transformInput: (params: ParentP) => P;
   transformOutput: (output: O) => ParentO;
 }
-export class ZZConcurrentAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
+export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
   retryDefs: RetryDef<PipeDef<P, O>, unknown, unknown, P, O>[];
   constructor({
     zzEnv,
