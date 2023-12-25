@@ -2,27 +2,11 @@ import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { PubSubFactory } from "../realtime/mq-pub-sub";
 import { Observable, Subject, map, takeUntil, tap } from "rxjs";
-import {
-  IStorageProvider,
-  getPublicCdnUrl,
-  saveLargeFilesToStorage,
-} from "../storage/cloudStorage";
+import { IStorageProvider, getPublicCdnUrl } from "../storage/cloudStorage";
 import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
 import { TEMP_DIR, getTempPathByJobId } from "../storage/temp-dirs";
 import fs from "fs";
 import { ensurePathExists } from "../storage/ensurePathExists";
-import path from "path";
-import {
-  addJobDataAndIOEvent,
-  addJobRec,
-  ensureJobDependencies,
-  getJobData,
-  getJobRec,
-  updateJobStatus,
-} from "../db/knexConn";
-import longStringTruncator from "../utils/longStringTruncator";
-import { ZZPipe } from "../microworkers/ZZPipe";
-import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
 
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
