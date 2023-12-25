@@ -78,3 +78,7 @@ export class ZZEnv implements EnvParams {
     });
   }
 }
+
+export const fileOrBufferSchema = z.custom<Buffer>((data) => {
+  return data instanceof Buffer;
+}, "Data is not an instance of a Buffer.");
