@@ -14,7 +14,7 @@ export function getLocalTempFileStorageProvider(
     data
   ) => {
     const fullPath = `${pathPrefix}/${destination}`;
-    await ensurePathExists(fullPath);
+    await ensurePathExists(path.dirname(fullPath));
     if (data instanceof Stream) {
       const writeStream = fs.createWriteStream(fullPath);
       data.pipe(writeStream);
@@ -33,7 +33,7 @@ export function getLocalTempFileStorageProvider(
     destination,
   }) => {
     const fullPath = `${pathPrefix}/${destination}`;
-    await ensurePathExists(fullPath);
+    await ensurePathExists(path.dirname(fullPath));
     await fs.promises.copyFile(localPath, fullPath);
   };
 
@@ -42,7 +42,7 @@ export function getLocalTempFileStorageProvider(
     destination,
   }) => {
     const fullPath = `${pathPrefix}/${filePath}`;
-    await ensurePathExists(destination);
+    await ensurePathExists(path.dirname(fullPath));
     await fs.promises.copyFile(fullPath, destination);
   };
 

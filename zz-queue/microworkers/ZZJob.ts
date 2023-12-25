@@ -169,31 +169,23 @@ export class ZZJob<
           throw err;
         }
       }
+      let { largeFilesToSave, newObj } = identifyLargeFiles(o);
 
       if (this.storageProvider) {
-        let { largeFilesToSave, newObj } = identifyLargeFiles(o);
         o = newObj;
+        this.logger.info(`Saving large files: ${JSON.stringify(o)}`);
         await saveLargeFilesToStorage(largeFilesToSave, this.storageProvider);
+      } else {
+        if (largeFilesToSave.length > 0) {
+          throw new Error(
+            "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
+          );
+        }
       }
 
       this.logger.info(
         `Emitting output: ${this.bullMQJob.id}, ${this.bullMQJob.queueName} ` +
-          `${JSON.stringify(this.bullMQJob.data, longStringTruncator)}`,
-        +`${JSON.stringify(
-          await this.bullMQJob.getChildrenValues(),
-          longStringTruncator
-        )}` +
-          JSON.stringify(
-            {
-              projectId: this.zzEnv.projectId,
-              opName: this.def.name,
-              jobId: this.bullMQJob.id!,
-              dbConn: this.zzEnv.db,
-              ioType: "out",
-              jobData: o,
-            },
-            longStringTruncator
-          )
+          JSON.stringify(o, longStringTruncator)
       );
 
       const { jobDataId } = await addJobDataAndIOEvent({

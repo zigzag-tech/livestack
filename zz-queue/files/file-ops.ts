@@ -23,6 +23,7 @@ export const identifyLargeFiles = (
 
   for (const [key, value] of Object.entries(obj)) {
     const currentPath = path ? `${path}/${key}` : key;
+
     if (typeof value === "string" && value.length > LARGE_VALUE_THRESHOLD) {
       largeFilesToSave.push({ path: currentPath, value });
       newObj[key] = OBJ_REF_VALUE;

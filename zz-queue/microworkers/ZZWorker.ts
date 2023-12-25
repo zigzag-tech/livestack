@@ -43,7 +43,6 @@ export class ZZWorker<
   }: {
     zzEnv: ZZEnv;
     color?: string;
-    storageProvider?: IStorageProvider;
     concurrency?: number;
     pipe: ZZPipe<P, O, StreamI, WP, TProgress>;
     processor: ZZProcessor<P, O, StreamI, WP, TProgress>;
@@ -86,6 +85,7 @@ export class ZZWorker<
           pipe: this.pipe,
           initParams: job.data.initParams,
           workerInstanceParams: this.instanceParams,
+          storageProvider: this.zzEnv.storageProvider,
         });
 
         return await zzJ.beginProcessing(processor.bind(zzJ));
