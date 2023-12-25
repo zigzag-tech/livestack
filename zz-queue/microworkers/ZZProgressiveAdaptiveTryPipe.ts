@@ -72,7 +72,9 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
 
         while (restToTry.length > 0) {
           const m = restToTry.shift()!;
-          logger.info(`Trying ${m.name}...`);
+          logger.info(
+            `Trying ${m.name}(${restToTry.length} more to attempt)...`
+          );
           promises.push({
             promise: m.fn().catch((e) => {
               console.log(e);
@@ -92,6 +94,8 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
           ]);
           if (!r.timeout && !r.error) {
             return r.result;
+          } else if (r.timeout) {
+            logger.info(`Timeout for ${m.name}. Moving on...`);
           }
         }
 
