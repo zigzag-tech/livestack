@@ -144,10 +144,13 @@ export class ZZJob<
 
     this.emitOutput = async (o: O) => {
       o = this.pipe.def.output.parse(o);
+
       if (this.storageProvider) {
-        const { largeFilesToSave } = identifyLargeFiles(o);
+        let { largeFilesToSave, newObj } = identifyLargeFiles(o);
+        o = newObj;
         await saveLargeFilesToStorage(largeFilesToSave, this.storageProvider);
       }
+
       const { jobDataId } = await addJobDataAndIOEvent({
         projectId: this.zzEnv.projectId,
         opName: this.def.name,
