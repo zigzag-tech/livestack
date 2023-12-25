@@ -31,7 +31,7 @@ export class ZZWorker<
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
   public readonly def: PipeDef<P, O, StreamI, WP, TProgress>;
-  private readonly instanceParams?: WP;
+  private readonly instanceParams: WP;
 
   constructor({
     pipe,
@@ -47,7 +47,7 @@ export class ZZWorker<
     concurrency?: number;
     pipe: ZZPipe<P, O, StreamI, WP, TProgress>;
     processor: ZZProcessor<P, O, StreamI, WP, TProgress>;
-    instanceParams?: WP;
+    instanceParams: WP;
   }) {
     this.pipe = pipe;
     this.zzEnv = zzEnv;

@@ -27,7 +27,7 @@ export class ZZPipe<
   P,
   O,
   StreamI = never,
-  WP extends object = never,
+  WP extends object = {},
   TProgress = never
 > implements IWorkerUtilFuncs<P, O>
 {
@@ -60,7 +60,7 @@ export class ZZPipe<
       color: this.color,
       pipe: this,
       concurrency,
-      instanceParams,
+      instanceParams: instanceParams || ({} as WP),
     });
     // this.workers.push(worker);
     await worker.bullMQWorker.waitUntilReady();
