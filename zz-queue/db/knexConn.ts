@@ -39,7 +39,7 @@ type JobUniqueId = {
   jobId: string;
 };
 
-export async function getJobRec<O>({
+export async function getJobRec<T>({
   projectId,
   opName,
   jobId,
@@ -60,14 +60,29 @@ export async function getJobRec<O>({
     .andWhere("zz_jobs.op_name", "=", opName)
     .andWhere("zz_jobs.job_id", "=", jobId)
     .orderBy("zz_job_status.time_created", "desc")
-    .first()) as (ZZJobRec<O> & Pick<ZZJobStatusRec, "status">) | null;
+    .first()) as
+    | (ZZJobRec<
+        | T
+        | {
+            __primitive__: T;
+          }
+      > &
+        Pick<ZZJobStatusRec, "status">)
+    | null;
 
   // check if job status is what we want
   if (jobStatus && r?.status !== jobStatus) {
     return null;
   }
 
-  return r;
+  if (!r) {
+    return null;
+  }
+
+  return {
+    ...r,
+    init_params: convertMaybePrimtiveBack(r.init_params),
+  };
 }
 
 export async function getJobData<T>({
@@ -83,7 +98,12 @@ export async function getJobData<T>({
   limit?: number;
 }) {
   if (ioType === "init-params") {
-    const job = await getJobRec<T>({
+    const job = await getJobRec<
+      | T
+      | {
+          __primitive__: T;
+        }
+    >({
       opName: jId.opName,
       projectId: jId.projectId,
       jobId: jId.jobId,
@@ -92,10 +112,17 @@ export async function getJobData<T>({
     if (!job) {
       throw new Error(`Job ${jId.jobId} not found!`);
     }
-    return [job.init_params as T];
+    return [convertMaybePrimtiveBack(job.init_params) as T];
   } else {
     const r = await dbConn<ZZJobIOEventRec>("zz_job_io_events")
-      .join<ZZJobDataRec<T>>("zz_job_data", function () {
+      .join<
+        ZZJobDataRec<
+          | T
+          | {
+              __primitive__: T;
+            }
+        >
+      >("zz_job_data", function () {
         this.on("zz_job_data.job_data_id", "=", "zz_job_io_events.job_data_id");
       })
       .where("zz_job_io_events.project_id", "=", jId.projectId)
@@ -109,7 +136,7 @@ export async function getJobData<T>({
       console.error("Job data not found", jId, ioType);
       throw new Error(`Job data for ${jId.jobId} not found!`);
     }
-    return r.map((rec) => rec.job_data);
+    return r.map((rec) => convertMaybePrimtiveBack(rec.job_data));
   }
 }
 
@@ -131,10 +158,17 @@ export async function addJobDataAndIOEvent<T>({
 }) {
   const jobDataId = `${projectId}:${opName}:${jobId}:${jobDataSuffix || v4()}`;
 
-  await dbConn<ZZJobDataRec<T>>("zz_job_data")
+  await dbConn<
+    ZZJobDataRec<
+      | T
+      | {
+          __primitive__: T;
+        }
+    >
+  >("zz_job_data")
     .insert({
       job_data_id: jobDataId,
-      job_data: jobData,
+      job_data: handlePrimitive(jobData),
       time_created: new Date(),
     })
     .onConflict(["job_data_id"])
@@ -156,6 +190,33 @@ export async function addJobDataAndIOEvent<T>({
   );
 
   return { ioEventId, jobDataId };
+}
+
+function handlePrimitive<T>(d: T) {
+  // stringify if jobData is primitive
+  let jobDataT: T | { __primitive__: T };
+  if (typeof d !== "object" || d === null) {
+    jobDataT = {
+      __primitive__: d,
+    };
+  } else {
+    jobDataT = d;
+  }
+  return jobDataT;
+}
+
+function convertMaybePrimtiveBack<T>(
+  p:
+    | T
+    | {
+        __primitive__: T;
+      }
+): T {
+  if (typeof p === "object" && p !== null && "__primitive__" in p) {
+    return p.__primitive__;
+  } else {
+    return p;
+  }
 }
 
 export async function updateJobStatus({
@@ -192,7 +253,7 @@ export async function ensureJobAndInitStatusRec<T>({
       project_id: projectId,
       op_name: opName,
       job_id: jobId,
-      init_params: initParams,
+      init_params: handlePrimitive(initParams),
     })
     .onConflict(["project_id", "op_name", "job_id"])
     .ignore();
