@@ -188,7 +188,7 @@ export class ZZPipe<
       `Enqueueing job ${jobId} with data: ${JSON.stringify(initParams)}`
     );
 
-    await this.addJob({
+    await this.enqueueJob({
       jobId,
       initParams,
     });
@@ -333,7 +333,7 @@ export class ZZPipe<
     }
   }
 
-  public async addJob({
+  public async enqueueJob({
     jobId,
     initParams,
     bullMQJobsOpts,
