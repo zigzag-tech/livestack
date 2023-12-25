@@ -2,19 +2,13 @@ import Replicate from "replicate";
 import { ZZEnv } from "../microworkers/PipeRegistry";
 import { PipeDef } from "../microworkers/PipeRegistry";
 import { ZZPipe } from "../microworkers/ZZPipe";
-import { z } from "zod";
 if (!process.env.REPLICATE_API_TOKEN) {
   throw new Error("REPLICATE_API_TOKEN not found");
 }
 
 const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
 
-export class ReplicatePipe<P extends object, O> extends ZZPipe<
-  P,
-  {
-    replicateResult: O;
-  }
-> {
+export class ReplicatePipe<P extends object, O> extends ZZPipe<P, O> {
   protected _endpoint: `${string}/${string}:${string}`;
 
   constructor({
@@ -29,15 +23,7 @@ export class ReplicatePipe<P extends object, O> extends ZZPipe<
     def: PipeDef<P, O>;
   }) {
     super({
-      def: def.derive({
-        output: z.object({
-          replicateResult: def.output,
-
-          // TODO: fix any
-        }) as z.ZodType<{
-          replicateResult: O;
-        }>,
-      }),
+      def,
       concurrency,
       zzEnv,
       processor: async ({ initParams }) => {
@@ -59,7 +45,7 @@ export class ReplicatePipe<P extends object, O> extends ZZPipe<
           );
         }
 
-        return { replicateResult: result! };
+        return result;
       },
     });
     this._endpoint = endpoint;
