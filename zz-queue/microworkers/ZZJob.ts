@@ -52,7 +52,7 @@ export class ZZJob<
   P,
   O,
   StreamI = never,
-  WP extends object = {},
+  WP extends object = never,
   Progress = never
 > {
   private readonly bullMQJob: Job<{ initParams: P }, O | void>;
@@ -90,7 +90,8 @@ export class ZZJob<
   readonly def: PipeDef<P, O, StreamI, WP, Progress>;
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
-  public workerInstanceParams: WP | {} = {};
+  public workerInstanceParams: WP extends object ? WP : null =
+    null as WP extends object ? WP : null;
   private inputObservableUntracked: Observable<StreamI | null>;
 
   constructor(p: {
@@ -109,8 +110,9 @@ export class ZZJob<
 
     this.logger = p.logger;
     try {
-      this.workerInstanceParams =
-        p.pipe.def.workerInstanceParams?.parse(p.workerInstanceParams) || {};
+      this.workerInstanceParams = (p.pipe.def.workerInstanceParams?.parse(
+        p.workerInstanceParams
+      ) || null) as WP extends object ? WP : null;
     } catch (err) {
       if (err instanceof z.ZodError) {
         this.logger.error(
