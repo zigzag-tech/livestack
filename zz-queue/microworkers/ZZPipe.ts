@@ -238,10 +238,8 @@ export class ZZPipe<
     try {
       data = this.def.streamInput.parse(data);
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        this.logger.error(`StreamInput data is invalid: ${err.message}`);
-        throw err;
-      }
+      this.logger.error(`StreamInput data is invalid: ${JSON.stringify(err)}`);
+      throw err;
     }
     const pubSub = this.pubSubFactoryForJob<StreamI>({ jobId, type: "input" });
     const messageId = v4();

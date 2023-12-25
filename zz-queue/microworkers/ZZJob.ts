@@ -112,20 +112,32 @@ export class ZZJob<
     this.bullMQJob = p.bullMQJob;
     this.jobId = this.bullMQJob.id!;
     this._bullMQToken = p.bullMQToken;
-    this.initParams = p.pipe.def.jobParams.parse(p.initParams);
-
     this.logger = p.logger;
+
+    try {
+      this.initParams = p.pipe.def.jobParams.parse(p.initParams);
+    } catch (err) {
+      this.logger.error(
+        `initParams error: initParams provided is invalid: ${JSON.stringify(
+          err,
+          null,
+          2
+        )}`
+      );
+      throw err;
+    }
+
     try {
       this.workerInstanceParams = (p.pipe.def.workerInstanceParams?.parse(
         p.workerInstanceParams
       ) || null) as WP extends object ? WP : null;
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        this.logger.error(
-          `workerInstanceParams error: data provided is invalid: ${err.message}`
-        );
-        throw err;
-      }
+      this.logger.error(
+        `workerInstanceParams error: data provided is invalid: ${JSON.stringify(
+          err
+        )}`
+      );
+      throw err;
     }
     this.flowProducer = p.flowProducer;
     this.storageProvider = p.storageProvider;
@@ -172,12 +184,11 @@ export class ZZJob<
       try {
         o = this.pipe.def.output.parse(o);
       } catch (err) {
-        if (err instanceof z.ZodError) {
-          this.logger.error(
-            `EmitOutput error: data provided is invalid: ${err.message}`
-          );
-          throw err;
-        }
+        console.error("errornous output: ", o);
+        this.logger.error(
+          `EmitOutput error: data provided is invalid: ${JSON.stringify(err)}`
+        );
+        throw err;
       }
       let { largeFilesToSave, newObj } = identifyLargeFiles(o);
 
