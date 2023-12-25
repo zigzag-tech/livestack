@@ -82,7 +82,8 @@ export class ZZJob<
   nextInput: () => Promise<StreamI | null>;
   emitOutput: (o: O) => Promise<void>;
 
-  workingDirToBeUploadedToCloudStorage: string;
+  dedicatedTempWorkingDir: string;
+  baseWorkingRelativePath: string;
 
   storageProvider?: IStorageProvider;
   flowProducer: FlowProducer;
@@ -126,9 +127,14 @@ export class ZZJob<
     this.def = p.pipe.def;
     this.zzEnv = p.pipe.zzEnv;
     this.pipe = p.pipe;
+    this.baseWorkingRelativePath = path.join(
+      this.zzEnv.projectId,
+      this.def.name,
+      this.bullMQJob.id!
+    );
 
-    const workingDir = getTempPathByJobId(this.bullMQJob.id!);
-    this.workingDirToBeUploadedToCloudStorage = workingDir;
+    const tempWorkingDir = getTempPathByJobId(this.baseWorkingRelativePath);
+    this.dedicatedTempWorkingDir = tempWorkingDir;
     // console.log("pubSubFactoryForJobj", this.bullMQJob.id!);
     const inputPubSubFactory = this.pipe.pubSubFactoryForJob<StreamI>({
       jobId: this.bullMQJob.id!,
@@ -173,8 +179,20 @@ export class ZZJob<
 
       if (this.storageProvider) {
         o = newObj;
-        this.logger.info(`Saving large files: ${JSON.stringify(o)}`);
-        await saveLargeFilesToStorage(largeFilesToSave, this.storageProvider);
+        const fullPathLargeFilesToSave = largeFilesToSave.map((x) => ({
+          ...x,
+          path: path.join(this.baseWorkingRelativePath, x.path),
+        }));
+        this.logger.info(
+          `Saving large files to storage: ${fullPathLargeFilesToSave
+            .map((x) => x.path)
+            .join(", ")}`
+        );
+
+        await saveLargeFilesToStorage(
+          fullPathLargeFilesToSave,
+          this.storageProvider
+        );
       } else {
         if (largeFilesToSave.length > 0) {
           throw new Error(
@@ -394,9 +412,9 @@ export class ZZJob<
     relativePath: string;
     data: string;
   }) {
-    await ensurePathExists(this.workingDirToBeUploadedToCloudStorage);
+    await ensurePathExists(this.dedicatedTempWorkingDir);
     fs.writeFileSync(
-      path.join(this.workingDirToBeUploadedToCloudStorage, relativePath),
+      path.join(this.dedicatedTempWorkingDir, relativePath),
       data
     );
   }

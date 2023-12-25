@@ -14,6 +14,7 @@ export function getLocalTempFileStorageProvider(
     data
   ) => {
     const fullPath = `${pathPrefix}/${destination}`;
+    // console.debug("saving to", fullPath);
     await ensurePathExists(path.dirname(fullPath));
     if (data instanceof Stream) {
       const writeStream = fs.createWriteStream(fullPath);
