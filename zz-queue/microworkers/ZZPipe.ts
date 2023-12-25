@@ -173,12 +173,12 @@ export class ZZPipe<
   }
 
   public async enqueueJobAndGetResult({
-    jobName: jobId,
-    initJobParams: initParams,
+    jobId: jobId,
+    initParams: initParams,
   }: // queueEventsOptions,
   {
-    jobName?: string;
-    initJobParams: P;
+    jobId?: string;
+    initParams: P;
   }): Promise<O[]> {
     if (!jobId) {
       jobId = `${this.def.name}-${v4()}`;
