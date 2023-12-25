@@ -184,16 +184,18 @@ export class ZZJob<
           ...x,
           path: path.join(this.baseWorkingRelativePath, x.path),
         }));
-        this.logger.info(
-          `Saving large files to storage: ${fullPathLargeFilesToSave
-            .map((x) => x.path)
-            .join(", ")}`
-        );
 
-        await saveLargeFilesToStorage(
-          fullPathLargeFilesToSave,
-          this.storageProvider
-        );
+        if (fullPathLargeFilesToSave.length > 0) {
+          this.logger.info(
+            `Saving large files to storage: ${fullPathLargeFilesToSave
+              .map((x) => x.path)
+              .join(", ")}`
+          );
+          await saveLargeFilesToStorage(
+            fullPathLargeFilesToSave,
+            this.storageProvider
+          );
+        }
       } else {
         if (largeFilesToSave.length > 0) {
           throw new Error(
