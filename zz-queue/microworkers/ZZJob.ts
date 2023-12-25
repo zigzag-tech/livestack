@@ -397,7 +397,7 @@ export class ZZJob<
       get outputObservable() {
         if (!_outputSubFactory) {
           _outputSubFactory = jobThat.pipe.pubSubFactoryForJob<O>({
-            jobId: jobThat.jobId,
+            jobId: childJobId,
             type: "output",
           });
         }
