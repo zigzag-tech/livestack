@@ -74,7 +74,7 @@ export class ZZJob<
   //     await sleep(1000 * 60);
   //   }
   //   this.logger.info(
-  //     `Job with ${this.bullMQJob.id} id expired. Marking as complete.`
+  //     `Job with ${this.jobId} id expired. Marking as complete.`
   //   );
   //   await this.bullMQJob.moveToCompleted(retVal, this._bullMQToken!);
   //   return retVal;
@@ -94,6 +94,7 @@ export class ZZJob<
   public workerInstanceParams: WP extends object ? WP : null =
     null as WP extends object ? WP : null;
   private inputObservableUntracked: Observable<StreamI | null>;
+  public jobId: string;
 
   constructor(p: {
     bullMQJob: Job<{ initParams: P }, O | undefined, string>;
@@ -106,6 +107,7 @@ export class ZZJob<
     workerInstanceParams?: WP;
   }) {
     this.bullMQJob = p.bullMQJob;
+    this.jobId = this.bullMQJob.id!;
     this._bullMQToken = p.bullMQToken;
     this.initParams = p.pipe.def.jobParams.parse(p.initParams);
 
@@ -130,18 +132,17 @@ export class ZZJob<
     this.baseWorkingRelativePath = path.join(
       this.zzEnv.projectId,
       this.def.name,
-      this.bullMQJob.id!
+      this.jobId!
     );
 
     const tempWorkingDir = getTempPathByJobId(this.baseWorkingRelativePath);
     this.dedicatedTempWorkingDir = tempWorkingDir;
-    // console.log("pubSubFactoryForJobj", this.bullMQJob.id!);
     const inputPubSubFactory = this.pipe.pubSubFactoryForJob<StreamI>({
-      jobId: this.bullMQJob.id!,
+      jobId: this.jobId,
       type: "input",
     });
     const outputPubSubFactory = this.pipe.pubSubFactoryForJob<O>({
-      jobId: this.bullMQJob.id!,
+      jobId: this.jobId,
       type: "output",
     });
 
@@ -202,14 +203,14 @@ export class ZZJob<
       }
 
       this.logger.info(
-        `Emitting output: ${this.bullMQJob.id}, ${this.bullMQJob.queueName} ` +
+        `Emitting output: ${this.jobId}, ${this.def.name} ` +
           JSON.stringify(o, longStringTruncator)
       );
 
       const { jobDataId } = await addJobDataAndIOEvent({
         projectId: this.zzEnv.projectId,
         opName: this.def.name,
-        jobId: this.bullMQJob.id!,
+        jobId: this.jobId,
         dbConn: this.zzEnv.db,
         ioType: "out",
         jobData: o,
@@ -229,7 +230,7 @@ export class ZZJob<
   ): Promise<O | undefined> {
     const jId = {
       opName: this.def.name,
-      jobId: this.bullMQJob.id!,
+      jobId: this.jobId,
       projectId: this.zzEnv.projectId,
     };
     const savedResult = await getJobRec<O>({
@@ -328,7 +329,7 @@ export class ZZJob<
       ...p,
       flowProducerOpts: {
         parent: {
-          id: this.bullMQJob.id!,
+          id: this.jobId,
           queue: this.bullMQJob.queueQualifiedName,
         },
       },
@@ -336,7 +337,7 @@ export class ZZJob<
 
     await ensureJobDependencies({
       projectId: this.zzEnv.projectId,
-      parentJobId: this.bullMQJob.id!,
+      parentJobId: this.jobId,
       parentOpName: this.def.name,
       childJobId: p.jobId,
       childOpName: p.def.name,
@@ -390,7 +391,7 @@ export class ZZJob<
     const rec = await addJobRec({
       projectId: this.zzEnv.projectId,
       opName: this.def.name,
-      jobId: this.bullMQJob.id!,
+      jobId: this.jobId,
       dbConn: this.zzEnv.db,
       initParams,
     });
@@ -434,7 +435,7 @@ export class ZZJob<
     } else {
       return getPublicCdnUrl({
         projectId: this.zzEnv.projectId,
-        jobId: this.bullMQJob.id!,
+        jobId: this.jobId,
         key: String(key),
         storageProvider: this.storageProvider,
       });
