@@ -110,8 +110,7 @@ export class ZZJob<
     this.logger = p.logger;
     try {
       this.workerInstanceParams =
-        p.pipe.def.workerInstanceParams?.parse(p.workerInstanceParams) ||
-        ({} as WP);
+        p.pipe.def.workerInstanceParams?.parse(p.workerInstanceParams) || {};
     } catch (err) {
       if (err instanceof z.ZodError) {
         this.logger.error(
