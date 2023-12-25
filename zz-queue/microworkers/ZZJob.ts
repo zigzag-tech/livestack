@@ -170,6 +170,26 @@ export class ZZJob<
         await saveLargeFilesToStorage(largeFilesToSave, this.storageProvider);
       }
 
+      this.logger.info(
+        `Emitting output: ${this.bullMQJob.id}, ${this.bullMQJob.queueName} ` +
+          `${JSON.stringify(this.bullMQJob.data, longStringTruncator)}`,
+        +`${JSON.stringify(
+          await this.bullMQJob.getChildrenValues(),
+          longStringTruncator
+        )}` +
+          JSON.stringify(
+            {
+              projectId: this.zzEnv.projectId,
+              opName: this.def.name,
+              jobId: this.bullMQJob.id!,
+              dbConn: this.zzEnv.db,
+              ioType: "out",
+              jobData: o,
+            },
+            longStringTruncator
+          )
+      );
+
       const { jobDataId } = await addJobDataAndIOEvent({
         projectId: this.zzEnv.projectId,
         opName: this.def.name,
@@ -235,13 +255,6 @@ export class ZZJob<
 
         const processedR = await processor(this);
 
-        // await job.updateProgress(processedR as object);
-        await updateJobStatus({
-          ...jId,
-          dbConn: this.zzEnv.db,
-          jobStatus: "completed",
-        });
-
         // wait as long as there are still subscribers
         await new Promise<void>((resolve) => {
           const sub = this.inputSubscriberCountChanged
@@ -256,6 +269,16 @@ export class ZZJob<
 
         if (processedR) {
           await this.emitOutput(processedR);
+        }
+
+        // await job.updateProgress(processedR as object);
+        await updateJobStatus({
+          ...jId,
+          dbConn: this.zzEnv.db,
+          jobStatus: "completed",
+        });
+
+        if (processedR) {
           return processedR;
         }
       } catch (e: any) {

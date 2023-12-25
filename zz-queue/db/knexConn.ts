@@ -106,6 +106,7 @@ export async function getJobData<T>({
       .limit(limit)
       .select("*");
     if (r.length === 0) {
+      console.error("Job data not found", jId, ioType);
       throw new Error(`Job data for ${jId.jobId} not found!`);
     }
     return r.map((rec) => rec.job_data);
