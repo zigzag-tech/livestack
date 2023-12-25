@@ -2,7 +2,7 @@ import { PipeDef, ZZEnv } from "./PipeRegistry";
 import { ZZPipe } from "./ZZPipe";
 import { z } from "zod";
 
-export interface RetryDef<
+export interface AttemptDef<
   ParentDef extends PipeDef<ParentP, ParentO>,
   P,
   O,
@@ -15,16 +15,16 @@ export interface RetryDef<
   transformOutput: (output: O) => ParentO;
 }
 export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
-  retryDefs: RetryDef<PipeDef<P, O>, unknown, unknown, P, O>[];
+  attemptDefs: AttemptDef<PipeDef<P, O>, unknown, unknown, P, O>[];
   constructor({
     zzEnv,
     def,
-    retryDefs,
+    attemptDefs,
     ultimateFallback,
   }: {
     zzEnv: ZZEnv;
     def: PipeDef<P, O>;
-    retryDefs: RetryDef<PipeDef<P, O>, unknown, unknown, P, O>[];
+    attemptDefs: AttemptDef<PipeDef<P, O>, unknown, unknown, P, O>[];
     ultimateFallback?: () => Promise<O>;
   }) {
     super({
@@ -35,7 +35,7 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
           def,
           transformInput,
           transformOutput,
-        }: RetryDef<PipeDef<P, O>, NewP, NewO, P, O>) => {
+        }: AttemptDef<PipeDef<P, O>, NewP, NewO, P, O>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${def.name}`;
 
@@ -62,10 +62,10 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
           return fn;
         };
 
-        const restToTry = retryDefs.map((d) => ({
-          fn: genRetryFunction(d),
-          timeout: d.timeout,
-          name: d.def.name,
+        const restToTry = attemptDefs.map((a) => ({
+          fn: genRetryFunction(a),
+          timeout: a.timeout,
+          name: a.def.name,
         }));
 
         let promises: {
@@ -109,7 +109,7 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
       },
     });
 
-    this.retryDefs = retryDefs;
+    this.attemptDefs = attemptDefs;
   }
 }
 
