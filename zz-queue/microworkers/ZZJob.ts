@@ -281,7 +281,7 @@ export class ZZJob<
       return jobData[jobData.length - 1]?.data || undefined;
     } else {
       logger.info(
-        `Picked up job with ID: ${job.id}, ${job.queueName} ` +
+        `Picked up job: ${job.id}, ${job.queueName} ` +
           `${JSON.stringify(job.data, longStringTruncator)}`,
         +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
       );
