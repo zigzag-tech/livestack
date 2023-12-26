@@ -2,6 +2,7 @@ import { z } from "zod";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Knex } from "knex";
 import { RedisOptions } from "ioredis";
+import { Stream } from "stream";
 
 interface PipeParams<P, O, StreamI, WP, TProgress> {
   name: string;
@@ -80,6 +81,6 @@ export class ZZEnv implements EnvParams {
   }
 }
 
-export const fileOrBufferSchema = z.custom<Buffer>((data) => {
-  return data instanceof Buffer;
-}, "Data is not an instance of a Buffer.");
+export const fileOrBufferSchema = z.custom<Buffer | Stream>((data) => {
+  return data instanceof Buffer || data instanceof Stream;
+}, "Data is not an instance of a Buffer or a Stream.");
