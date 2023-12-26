@@ -11,7 +11,7 @@ type TriggerCheckContext = {
   }[];
 };
 
-export interface AttemptDef<ParentP, ParentO, P, O> {
+export interface ParallelAttempt<ParentP, ParentO, P, O> {
   def: PipeDef<P, O, any, any, any>;
   triggerCondition: (c: TriggerCheckContext) => boolean;
   transformInput: (
@@ -31,7 +31,7 @@ export class ZZParallelAttemptsPipe<
   WP extends {},
   TP
 > extends ZZPipe<P, O, StreamI, WP, TP> {
-  attempts: AttemptDef<P, O, unknown, unknown>[];
+  attempts: ParallelAttempt<P, O, unknown, unknown>[];
 
   constructor({
     zzEnv,
@@ -42,7 +42,7 @@ export class ZZParallelAttemptsPipe<
   }: {
     zzEnv: ZZEnv;
     def: PipeDef<P, O>;
-    attempts: AttemptDef<P, O, any, any>[];
+    attempts: ParallelAttempt<P, O, any, any>[];
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {
@@ -61,7 +61,7 @@ export class ZZParallelAttemptsPipe<
           def: attemptDef,
           transformInput,
           transformOutput,
-        }: AttemptDef<P, O, NewP, NewO>) => {
+        }: ParallelAttempt<P, O, NewP, NewO>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${attemptDef.name}`;
             const { nextOutput } = await spawnJob({
@@ -121,6 +121,7 @@ export class ZZParallelAttemptsPipe<
         do {
           // check head and see if is met for the first one
           let nextAttempt = restAttempts[0];
+          cont = genCtx();
           if (!nextAttempt) {
             continue;
           }
@@ -147,27 +148,35 @@ export class ZZParallelAttemptsPipe<
               getResult: () => result,
             });
           }
+
           await sleep(100);
-          cont = genCtx();
-        } while (restAttempts.length > 0 || !globalTimeoutCondition(cont));
+        } while (restAttempts.length > 0);
 
         await Promise.all(running.map((r) => r.promise));
 
+        // const raws = running.map((r) => {
+        //   if (r.isResolved()) {
+        //     return {
+        //       result: r.getResult(),
+        //       timedout: false,
+        //       error: false,
+        //       name: r.name,
+        //     };
+        //   } else {
+        //     return {
+        //       timedout: true,
+        //       error: false,
+        //       name: r.name,
+        //     };
+        //   }
+        // });
         const raws = running.map((r) => {
-          if (r.isResolved()) {
-            return {
-              result: r.getResult(),
-              timedout: false,
-              error: false,
-              name: r.name,
-            };
-          } else {
-            return {
-              timedout: true,
-              error: false,
-              name: r.name,
-            };
-          }
+          return {
+            result: r.getResult(),
+            timedout: false,
+            error: false,
+            name: r.name,
+          };
         });
 
         return await transformCombinedOutput(raws);

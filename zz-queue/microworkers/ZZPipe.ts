@@ -120,7 +120,7 @@ export class ZZPipe<
     };
     this.zzEnv = zzEnv;
     this.color = color;
-    this.logger = getLogger(`wkr:${this.def.name}`, this.color);
+    this.logger = getLogger(`pipe:${this.def.name}`, this.color);
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
       queueNameOnly: `${this.def.name}`,
@@ -361,7 +361,7 @@ export class ZZPipe<
       { ...bullMQJobsOpts, jobId: jobId }
     );
     this.logger.info(
-      `Added job with ID ${j.id} to  ${j.queueName}` +
+      `Added job with ID ${j.id} to ${j.queueName} ` +
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
