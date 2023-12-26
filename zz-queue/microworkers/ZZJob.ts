@@ -84,7 +84,7 @@ export class ZZJob<
   // }
   nextInput: () => Promise<StreamI | null>;
   emitOutput: (o: O) => Promise<void>;
-  terminateOutput: () => Promise<void>;
+  signalOutputEnd: () => Promise<void>;
 
   dedicatedTempWorkingDir: string;
   baseWorkingRelativePath: string;
@@ -181,7 +181,7 @@ export class ZZJob<
     this.inputObservable = trackedObservable;
     this.inputSubscriberCountObservable = subscriberCountObservable;
 
-    this.terminateOutput = async () => {
+    this.signalOutputEnd = async () => {
       await outputPubSubFactory.emitValue({
         terminate: true,
       });
@@ -317,7 +317,7 @@ export class ZZJob<
           jobStatus: "completed",
         });
 
-        await this.terminateOutput();
+        await this.signalOutputEnd();
 
         if (processedR) {
           return processedR;
