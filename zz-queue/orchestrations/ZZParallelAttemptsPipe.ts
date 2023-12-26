@@ -121,21 +121,21 @@ export class ZZParallelAttemptsPipe<
         do {
           // check head and see if is met for the first one
           let nextAttempt = restAttempts[0];
-          cont = genCtx();
           if (!nextAttempt) {
             continue;
           }
           cont = genCtx();
           if (nextAttempt.triggerCondition(cont)) {
             nextAttempt = restAttempts.shift()!;
-            let resolved = false;
+            const { setResolved, isResolved } = genResolvedTracker();
+
             let result: O | undefined = undefined;
             const fn = genRetryFunction(nextAttempt);
             this.logger.info(`Started attempt ${nextAttempt.def.name}.`);
             running.push({
               promise: fn()
                 .then((r) => {
-                  resolved = true;
+                  setResolved();
                   result = r.result;
                   return r;
                 })
@@ -144,12 +144,12 @@ export class ZZParallelAttemptsPipe<
                 }),
               name: nextAttempt.def.name,
               timeStarted: Date.now(),
-              isResolved: () => resolved,
+              isResolved: () => isResolved(),
               getResult: () => result,
             });
           }
 
-          await sleep(100);
+          await sleep(500);
         } while (restAttempts.length > 0);
 
         await Promise.all(running.map((r) => r.promise));
@@ -186,6 +186,16 @@ export class ZZParallelAttemptsPipe<
     this.attempts = attempts;
   }
 }
+
+const genResolvedTracker = () => {
+  let resolved = false;
+  return {
+    setResolved: () => {
+      resolved = true;
+    },
+    isResolved: () => resolved,
+  };
+};
 
 export const genTimeoutPromise = async (timeout: number) => {
   const timeoutPromise = new Promise<void>((resolve) => {
