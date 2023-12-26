@@ -9,7 +9,7 @@ import Redis from "ioredis";
 
 import {
   ensureJobAndInitStatusRec,
-  getJobData,
+  getJobDataAndIoEvents,
   getJobRec,
 } from "../db/knexConn";
 import { v4 } from "uuid";
@@ -48,7 +48,7 @@ export class ZZPipe<
   private processor: ZZProcessor<P, O, StreamI, WP, TProgress> = async (
     job
   ) => {
-    throw new Error(`Processor not set!`);
+    throw new Error(`Processor for pipe ${this.def.name} not set!`);
   };
 
   public async startWorker(p?: { concurrency?: number; instanceParams?: WP }) {
@@ -109,10 +109,12 @@ export class ZZPipe<
     def: PipeDef<P, O, StreamI, WP, TProgress>;
     color?: string;
     concurrency?: number;
-    processor: ZZProcessor<P, O, StreamI, WP, TProgress>;
+    processor?: ZZProcessor<P, O, StreamI, WP, TProgress>;
   }) {
     this.def = def;
-    this.processor = processor;
+    if (processor) {
+      this.processor = processor;
+    }
     this.queueOptions = {
       connection: zzEnv.redisConfig,
     };
@@ -164,7 +166,7 @@ export class ZZPipe<
     order?: "asc" | "desc";
     limit?: number;
   }) {
-    return await getJobData<U>({
+    const rec = await getJobDataAndIoEvents<U>({
       opName: this.def.name,
       projectId: this.zzEnv.projectId,
       jobId,
@@ -173,6 +175,7 @@ export class ZZPipe<
       order,
       limit,
     });
+    return rec.map((r) => r.data);
   }
 
   public async enqueueJobAndGetResult({

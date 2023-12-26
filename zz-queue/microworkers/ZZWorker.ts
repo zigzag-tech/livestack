@@ -68,7 +68,6 @@ export class ZZWorker<
     });
 
     this._rawQueue = queueFuncs._rawQueue;
-    // this.getJobData = queueFuncs.getJobData;
 
     const logger = getLogger(`wkr:${this.def.name}`, this.color);
     const mergedWorkerOptions = _.merge({}, workerOptions);

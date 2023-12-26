@@ -85,7 +85,7 @@ export async function getJobRec<T>({
   };
 }
 
-export async function getJobData<T>({
+export async function getJobDataAndIoEvents<T>({
   limit = 100,
   ioType,
   order = "desc",
@@ -97,47 +97,32 @@ export async function getJobData<T>({
   order?: "asc" | "desc";
   limit?: number;
 }) {
-  if (ioType === "init-params") {
-    const job = await getJobRec<
-      | T
-      | {
-          __primitive__: T;
-        }
-    >({
-      opName: jId.opName,
-      projectId: jId.projectId,
-      jobId: jId.jobId,
-      dbConn,
-    });
-    if (!job) {
-      throw new Error(`Job ${jId.jobId} not found!`);
-    }
-    return [convertMaybePrimtiveBack(job.init_params) as T];
-  } else {
-    const r = await dbConn<ZZJobIOEventRec>("zz_job_io_events")
-      .join<
-        ZZJobDataRec<
-          | T
-          | {
-              __primitive__: T;
-            }
-        >
-      >("zz_job_data", function () {
-        this.on("zz_job_data.job_data_id", "=", "zz_job_io_events.job_data_id");
-      })
-      .where("zz_job_io_events.project_id", "=", jId.projectId)
-      .andWhere("zz_job_io_events.op_name", "=", jId.opName)
-      .andWhere("zz_job_io_events.job_id", "=", jId.jobId)
-      .andWhere("zz_job_io_events.io_type", "=", ioType)
-      .orderBy("zz_job_io_events.time_created", order)
-      .limit(limit)
-      .select("*");
-    if (r.length === 0) {
-      console.error("Job data not found", jId, ioType);
-      throw new Error(`Job data for ${jId.jobId} not found!`);
-    }
-    return r.map((rec) => convertMaybePrimtiveBack(rec.job_data));
+  const r = await dbConn<ZZJobIOEventRec>("zz_job_io_events")
+    .join<
+      ZZJobDataRec<
+        | T
+        | {
+            __primitive__: T;
+          }
+      >
+    >("zz_job_data", function () {
+      this.on("zz_job_data.job_data_id", "=", "zz_job_io_events.job_data_id");
+    })
+    .where("zz_job_io_events.project_id", "=", jId.projectId)
+    .andWhere("zz_job_io_events.op_name", "=", jId.opName)
+    .andWhere("zz_job_io_events.job_id", "=", jId.jobId)
+    .andWhere("zz_job_io_events.io_type", "=", ioType)
+    .orderBy("zz_job_io_events.time_created", order)
+    .limit(limit)
+    .select("*");
+  if (r.length === 0) {
+    console.error("Job data not found", jId, ioType);
+    throw new Error(`Job data for ${jId.jobId} not found!`);
   }
+  return r.map((rec) => ({
+    ioEventId: rec.io_event_id,
+    data: convertMaybePrimtiveBack(rec.job_data),
+  }));
 }
 
 export async function addJobDataAndIOEvent<T>({
@@ -151,7 +136,7 @@ export async function addJobDataAndIOEvent<T>({
   jobDataSuffix,
 }: JobUniqueId & {
   dbConn: Knex;
-  ioType: "in" | "out";
+  ioType: "in" | "out" | "init-params";
   jobData: T;
   spawnPhaseId?: string;
   jobDataSuffix?: string;
@@ -176,18 +161,21 @@ export async function addJobDataAndIOEvent<T>({
 
   const ioEventId = `${projectId}:${opName}:${jobId}:${jobDataSuffix || v4()}`;
   // insert input event rec
-  await dbConn<ZZJobIOEventRec>("zz_job_io_events").insert(
-    {
-      project_id: projectId,
-      op_name: opName,
-      job_id: jobId,
-      io_type: ioType,
-      io_event_id: ioEventId,
-      job_data_id: jobDataId,
-      spawn_phase_id: spawnPhaseId || null,
-    },
-    ["io_event_id"]
-  );
+  await dbConn<ZZJobIOEventRec>("zz_job_io_events")
+    .insert(
+      {
+        project_id: projectId,
+        op_name: opName,
+        job_id: jobId,
+        io_type: ioType,
+        io_event_id: ioEventId,
+        job_data_id: jobDataId,
+        spawn_phase_id: spawnPhaseId || null,
+      },
+      ["io_event_id"]
+    )
+    .onConflict(["io_event_id"])
+    .merge();
 
   return { ioEventId, jobDataId };
 }
@@ -273,7 +261,7 @@ export async function ensureJobAndInitStatusRec<T>({
     opName,
     jobId,
     dbConn,
-    ioType: "in",
+    ioType: "init-params",
     jobData: initParams,
     jobDataSuffix,
   });

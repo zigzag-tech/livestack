@@ -54,7 +54,7 @@ export const ZZJobIOEventRec = ZZJobUniqueId.and(
   z.object({
     io_event_id: z.string(),
     job_data_id: z.string(),
-    io_type: z.enum(["in", "out"]),
+    io_type: z.enum(["in", "out", "init-params"]),
     spawn_phase_id: z.string().optional().nullable(),
     time_created: z.date(),
   })

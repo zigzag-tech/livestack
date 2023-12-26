@@ -24,7 +24,7 @@ import {
   addJobDataAndIOEvent,
   ensureJobAndInitStatusRec,
   ensureJobDependencies,
-  getJobData,
+  getJobDataAndIoEvents,
   getJobRec,
   updateJobStatus,
 } from "../db/knexConn";
@@ -259,7 +259,7 @@ export class ZZJob<
     const projectId = this.zzEnv.projectId;
 
     if (savedResult) {
-      const jobData = await getJobData<O>({
+      const jobData = await getJobDataAndIoEvents<O>({
         ...jId,
         dbConn: this.zzEnv.db,
         ioType: "out",
@@ -271,7 +271,7 @@ export class ZZJob<
       );
 
       // return last job data
-      return jobData[jobData.length - 1] || undefined;
+      return jobData[jobData.length - 1]?.data || undefined;
     } else {
       logger.info(
         `Picked up job with ID: ${job.id}, ${job.queueName} ` +
@@ -365,7 +365,7 @@ export class ZZJob<
   };
 
   public spawnJob = async <P, O>(p: {
-    def: PipeDef<P, O>;
+    def: PipeDef<P, O, any, any, any>;
     jobId: string;
     initParams: P;
   }) => {
@@ -378,11 +378,28 @@ export class ZZJob<
     initParams,
     flowProducerOpts,
   }: {
-    def: PipeDef<P, O>;
+    def: PipeDef<P, O, any, any, any>;
     jobId: string;
     initParams: P;
     flowProducerOpts?: FlowJob["opts"];
   }) => {
+    // const tempPipe = new ZZPipe({
+    //   def: childJobDef,
+    //   zzEnv: this.zzEnv,
+    // });
+    // await tempPipe.enqueueJob({
+    //   jobId: childJobId,
+    //   initParams,
+    //   bullMQJobsOpts: flowProducerOpts,
+    // });
+    // const [rec] = await getJobDataAndIoEvents({
+    //   projectId: this.zzEnv.projectId,
+    //   opName: childJobDef.name,
+    //   jobId: childJobId,
+    //   dbConn: this.zzEnv.db,
+    //   ioType: "init-params",
+    // });
+
     await this.flowProducer.add({
       name: childJobId,
       data: {
