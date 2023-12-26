@@ -1,0 +1,171 @@
+import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
+import { ZZPipe, sleep } from "../microworkers/ZZPipe";
+import { z } from "zod";
+
+type TriggerCheckContext = {
+  totalTimeElapsed: number;
+  attemptStats: { name: string; attemptTimeElapsed: number }[];
+};
+
+export interface AttemptDef<ParentP, ParentO, P, O> {
+  def: PipeDef<P, O>;
+  triggerCondition: (c: TriggerCheckContext) => boolean;
+  transformInput: (
+    params: ParentP
+  ) =>
+    | Promise<z.infer<this["def"]["jobParams"]>>
+    | z.infer<this["def"]["jobParams"]>;
+  transformOutput: (
+    output: z.infer<this["def"]["output"]>
+  ) => Promise<ParentO> | ParentO;
+}
+
+export class ZZParallelAttemptsPipe<P, O> extends ZZPipe<
+  P,
+  {
+    result?: O;
+    timedout: boolean;
+    error: boolean;
+  }[]
+> {
+  attempts: AttemptDef<P, O, unknown, unknown>[];
+  constructor({
+    zzEnv,
+    def,
+    attempts,
+    globalTimeoutCondition,
+  }: {
+    zzEnv: ZZEnv;
+    def: PipeDef<P, O>;
+    attempts: AttemptDef<P, O, any, any>[];
+    globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
+  }) {
+    super({
+      zzEnv,
+      def: def.derive({
+        output: z.array(
+          z.object({
+            result: def.output,
+            timedout: z.boolean(),
+            error: z.boolean(),
+          })
+        ),
+      }),
+      processor: async ({ logger, initParams, spawnJob, jobId }) => {
+        const genRetryFunction = <NewP, NewO>({
+          def,
+          transformInput,
+          transformOutput,
+        }: AttemptDef<P, O, NewP, NewO>) => {
+          const fn = async () => {
+            const childJobId = `${jobId}/${def.name}`;
+
+            const { nextOutput } = await spawnJob({
+              jobId: childJobId,
+              def: def,
+              initParams: await transformInput(initParams),
+            });
+
+            const o = await nextOutput();
+            if (!o) {
+              throw new Error("no output");
+            }
+
+            const result = await transformOutput(o);
+
+            return {
+              resolved: true as const,
+              error: false as const,
+              result,
+            };
+          };
+          return fn;
+        };
+
+        const contexts: TriggerCheckContext[] = [];
+        const restAttempts = [...attempts];
+        const running: {
+          promise: ReturnType<ReturnType<typeof genRetryFunction>>;
+          name: string;
+          timeStarted: number;
+          isResolved: () => boolean;
+          getResult: () => O | undefined;
+        }[] = [];
+
+        const time = Date.now();
+        const genCtx = () => {
+          const ctx: TriggerCheckContext = {
+            totalTimeElapsed: Date.now() - time,
+            attemptStats: running.map((r) => ({
+              name: r.name,
+              attemptTimeElapsed: Date.now() - r.timeStarted,
+            })),
+          };
+          contexts.push(ctx);
+          return ctx;
+        };
+
+        if (!globalTimeoutCondition) {
+          globalTimeoutCondition = (c) => {
+            return c.totalTimeElapsed > 1000 * 60 * 15; // 15 minutes by default
+          };
+        }
+
+        while (restAttempts.length > 0 || !globalTimeoutCondition(genCtx())) {
+          // check head and see if is met for the first one
+          let nextAttempt = restAttempts[0];
+          const cont = genCtx();
+          if (nextAttempt.triggerCondition(cont)) {
+            nextAttempt = restAttempts.shift()!;
+            let resolved = false;
+            let result: O | undefined = undefined;
+            const fn = genRetryFunction(nextAttempt);
+            running.push({
+              promise: fn()
+                .then((r) => {
+                  resolved = true;
+                  result = r.result;
+                  return r;
+                })
+                .catch((e) => {
+                  throw e;
+                }),
+              name: nextAttempt.def.name,
+              timeStarted: Date.now(),
+              isResolved: () => resolved,
+              getResult: () => result,
+            });
+          }
+          await sleep(50);
+        }
+
+        return running.map((r) => {
+          if (r.isResolved()) {
+            return {
+              result: r.getResult(),
+              timedout: false,
+              error: false,
+            };
+          } else {
+            return {
+              timedout: true,
+              error: false,
+            };
+          }
+        });
+      },
+    });
+
+    this.attempts = attempts;
+  }
+}
+
+export const genTimeoutPromise = async (timeout: number) => {
+  const timeoutPromise = new Promise<void>((resolve) => {
+    setTimeout(() => {
+      resolve();
+    }, timeout);
+  });
+  await timeoutPromise;
+  return { timeout: true as const, error: false as const };
+};

@@ -1,12 +1,18 @@
-import { PipeDef, ZZEnv } from "./PipeRegistry";
-import { ZZPipe } from "./ZZPipe";
+import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
+import { ZZPipe } from "../microworkers/ZZPipe";
 import { z } from "zod";
 
 export interface AttemptDef<ParentP, ParentO, P, O> {
   def: PipeDef<P, O>;
   timeout: number;
-  transformInput: (params: ParentP) => z.infer<this["def"]["jobParams"]>;
-  transformOutput: (output: z.infer<this["def"]["output"]>) => ParentO;
+  transformInput: (
+    params: ParentP
+  ) =>
+    | Promise<z.infer<this["def"]["jobParams"]>>
+    | z.infer<this["def"]["jobParams"]>;
+  transformOutput: (
+    output: z.infer<this["def"]["output"]>
+  ) => Promise<ParentO> | ParentO;
 }
 export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
   attempts: AttemptDef<P, O, unknown, unknown>[];
@@ -36,7 +42,7 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
               def: def,
-              initParams: transformInput(initParams),
+              initParams: await transformInput(initParams),
             });
 
             const o = await nextOutput();
@@ -44,13 +50,12 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
               throw new Error("no output");
             }
 
-            const result = transformOutput(o);
+            const result = await transformOutput(o);
 
             return {
               timeout: false as const,
               error: false as const,
               result,
-              engine: "coglvm" as const,
             };
           };
           return fn;
