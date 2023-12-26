@@ -11,17 +11,41 @@ type TriggerCheckContext = {
   }[];
 };
 
-export interface ParallelAttempt<ParentP, ParentO, P, O> {
-  def: PipeDef<P, O, any, any, any>;
+type InferPipeDef<T extends PipeDef<any, any, any, any, any>> =
+  T extends PipeDef<infer P, infer O, any, any, any>
+    ? PipeDef<P, O, any, any, any>
+    : never;
+
+export interface ParallelAttempt<
+  AttemptDef extends PipeDef<any, any, any, any, any>,
+  ParentDef extends PipeDef<any, any, any, any, any>
+> {
+  def: AttemptDef;
   triggerCondition: (c: TriggerCheckContext) => boolean;
   transformInput: (
-    params: ParentP
+    params: z.infer<InferPipeDef<ParentDef>["jobParams"]>
   ) =>
-    | Promise<z.infer<this["def"]["jobParams"]>>
-    | z.infer<this["def"]["jobParams"]>;
+    | Promise<z.infer<InferPipeDef<AttemptDef>["jobParams"]>>
+    | z.infer<InferPipeDef<AttemptDef>["jobParams"]>;
   transformOutput: (
-    output: z.infer<this["def"]["output"]>
-  ) => Promise<ParentO> | ParentO;
+    output: z.infer<InferPipeDef<AttemptDef>["output"]>
+  ) =>
+    | Promise<z.infer<InferPipeDef<ParentDef>["output"]>>
+    | z.infer<InferPipeDef<ParentDef>["output"]>;
+}
+
+export function genParallelAttempt<
+  AttemptDef extends PipeDef<any, any, any, any, any>,
+  ParentDef extends PipeDef<any, any, any, any, any>
+>(
+  def: AttemptDef,
+  parentDef: ParentDef,
+  config: Omit<ParallelAttempt<AttemptDef, ParentDef>, "def">
+): ParallelAttempt<AttemptDef, ParentDef> {
+  return {
+    def,
+    ...config,
+  };
 }
 
 export class ZZParallelAttemptsPipe<
@@ -31,7 +55,10 @@ export class ZZParallelAttemptsPipe<
   WP extends {},
   TP
 > extends ZZPipe<P, O, StreamI, WP, TP> {
-  attempts: ParallelAttempt<P, O, unknown, unknown>[];
+  attempts: ParallelAttempt<
+    PipeDef<P, O, any, any, any>,
+    PipeDef<any, any, any, any, any>
+  >[];
 
   constructor({
     zzEnv,
@@ -41,8 +68,11 @@ export class ZZParallelAttemptsPipe<
     transformCombinedOutput,
   }: {
     zzEnv: ZZEnv;
-    def: PipeDef<P, O>;
-    attempts: ParallelAttempt<P, O, any, any>[];
+    def: PipeDef<P, O, any, any, any>;
+    attempts: ParallelAttempt<
+      PipeDef<any, any, any, any, any>,
+      PipeDef<P, O, any, any, any>
+    >[];
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {
@@ -61,7 +91,10 @@ export class ZZParallelAttemptsPipe<
           def: attemptDef,
           transformInput,
           transformOutput,
-        }: ParallelAttempt<P, O, NewP, NewO>) => {
+        }: ParallelAttempt<
+          PipeDef<NewP, NewO, any, any, any>,
+          PipeDef<P, O, any, any, any>
+        >) => {
           const fn = async () => {
             const childJobId = `${jobId}/${attemptDef.name}`;
             const { nextOutput } = await spawnJob({
@@ -149,27 +182,11 @@ export class ZZParallelAttemptsPipe<
             });
           }
 
-          await sleep(500);
+          await sleep(200);
         } while (restAttempts.length > 0);
 
         await Promise.all(running.map((r) => r.promise));
 
-        // const raws = running.map((r) => {
-        //   if (r.isResolved()) {
-        //     return {
-        //       result: r.getResult(),
-        //       timedout: false,
-        //       error: false,
-        //       name: r.name,
-        //     };
-        //   } else {
-        //     return {
-        //       timedout: true,
-        //       error: false,
-        //       name: r.name,
-        //     };
-        //   }
-        // });
         const raws = running.map((r) => {
           return {
             result: r.getResult(),
