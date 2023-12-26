@@ -361,7 +361,7 @@ export class ZZPipe<
       { ...bullMQJobsOpts, jobId: jobId }
     );
     this.logger.info(
-      `Added job with ID ${j.id} to ${j.queueName} ` +
+      `Added job with ID ${j.id} to pipe: ` +
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
