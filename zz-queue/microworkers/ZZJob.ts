@@ -392,42 +392,42 @@ export class ZZJob<
     initParams: P;
     flowProducerOpts?: FlowJob["opts"];
   }) => {
-    // const tempPipe = new ZZPipe({
-    //   def: childJobDef,
-    //   zzEnv: this.zzEnv,
-    // });
-    // await tempPipe.enqueueJob({
-    //   jobId: childJobId,
-    //   initParams,
-    //   bullMQJobsOpts: flowProducerOpts,
-    // });
-    // const [rec] = await getJobDataAndIoEvents({
-    //   projectId: this.zzEnv.projectId,
-    //   opName: childJobDef.name,
-    //   jobId: childJobId,
-    //   dbConn: this.zzEnv.db,
-    //   ioType: "init-params",
-    // });
-
-    await this.flowProducer.add({
-      name: childJobId,
-      data: {
-        initParams,
-      },
-      queueName: `${this.zzEnv.projectId}/${childJobDef.name}`,
-      opts: {
-        jobId: childJobId,
-        ...flowProducerOpts,
-      },
+    const tempPipe = new ZZPipe({
+      def: childJobDef,
+      zzEnv: this.zzEnv,
     });
-
-    const rec = await ensureJobAndInitStatusRec({
-      projectId: this.zzEnv.projectId,
-      dbConn: this.zzEnv.db,
-      opName: childJobDef.name,
+    await tempPipe.enqueueJob({
       jobId: childJobId,
       initParams,
+      bullMQJobsOpts: flowProducerOpts,
     });
+    const [rec] = await getJobDataAndIoEvents({
+      projectId: this.zzEnv.projectId,
+      opName: childJobDef.name,
+      jobId: childJobId,
+      dbConn: this.zzEnv.db,
+      ioType: "init-params",
+    });
+
+    // await this.flowProducer.add({
+    //   name: childJobId,
+    //   data: {
+    //     initParams,
+    //   },
+    //   queueName: `${this.zzEnv.projectId}/${childJobDef.name}`,
+    //   opts: {
+    //     jobId: childJobId,
+    //     ...flowProducerOpts,
+    //   },
+    // });
+
+    // const rec = await ensureJobAndInitStatusRec({
+    //   projectId: this.zzEnv.projectId,
+    //   dbConn: this.zzEnv.db,
+    //   opName: childJobDef.name,
+    //   jobId: childJobId,
+    //   initParams,
+    // });
 
     const jobThat = this;
 
