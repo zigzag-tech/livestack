@@ -4,11 +4,15 @@ import { z } from "zod";
 
 type TriggerCheckContext = {
   totalTimeElapsed: number;
-  attemptStats: { name: string; attemptTimeElapsed: number }[];
+  attemptStats: {
+    name: string;
+    attemptTimeElapsed: number;
+    resolved: boolean;
+  }[];
 };
 
 export interface AttemptDef<ParentP, ParentO, P, O> {
-  def: PipeDef<P, O>;
+  def: PipeDef<P, O, any, any, any>;
   triggerCondition: (c: TriggerCheckContext) => boolean;
   transformInput: (
     params: ParentP
@@ -20,49 +24,49 @@ export interface AttemptDef<ParentP, ParentO, P, O> {
   ) => Promise<ParentO> | ParentO;
 }
 
-export class ZZParallelAttemptsPipe<P, O> extends ZZPipe<
+export class ZZParallelAttemptsPipe<
   P,
-  {
-    result?: O;
-    timedout: boolean;
-    error: boolean;
-  }[]
-> {
+  O,
+  StreamI,
+  WP extends {},
+  TP
+> extends ZZPipe<P, O, StreamI, WP, TP> {
   attempts: AttemptDef<P, O, unknown, unknown>[];
+
   constructor({
     zzEnv,
     def,
     attempts,
     globalTimeoutCondition,
+    transformCombinedOutput,
   }: {
     zzEnv: ZZEnv;
     def: PipeDef<P, O>;
     attempts: AttemptDef<P, O, any, any>[];
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
+    transformCombinedOutput: (
+      results: {
+        result?: any;
+        timedout: boolean;
+        error: boolean;
+        name: string;
+      }[]
+    ) => Promise<O> | O;
   }) {
     super({
       zzEnv,
-      def: def.derive({
-        output: z.array(
-          z.object({
-            result: def.output,
-            timedout: z.boolean(),
-            error: z.boolean(),
-          })
-        ),
-      }),
+      def,
       processor: async ({ logger, initParams, spawnJob, jobId }) => {
         const genRetryFunction = <NewP, NewO>({
-          def,
+          def: attemptDef,
           transformInput,
           transformOutput,
         }: AttemptDef<P, O, NewP, NewO>) => {
           const fn = async () => {
-            const childJobId = `${jobId}/${def.name}`;
-
+            const childJobId = `${jobId}/${attemptDef.name}`;
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
-              def: def,
+              def: attemptDef,
               initParams: await transformInput(initParams),
             });
 
@@ -99,6 +103,7 @@ export class ZZParallelAttemptsPipe<P, O> extends ZZPipe<
             attemptStats: running.map((r) => ({
               name: r.name,
               attemptTimeElapsed: Date.now() - r.timeStarted,
+              resolved: r.isResolved(),
             })),
           };
           contexts.push(ctx);
@@ -114,12 +119,16 @@ export class ZZParallelAttemptsPipe<P, O> extends ZZPipe<
         while (restAttempts.length > 0 || !globalTimeoutCondition(genCtx())) {
           // check head and see if is met for the first one
           let nextAttempt = restAttempts[0];
+          if (!nextAttempt) {
+            continue;
+          }
           const cont = genCtx();
           if (nextAttempt.triggerCondition(cont)) {
             nextAttempt = restAttempts.shift()!;
             let resolved = false;
             let result: O | undefined = undefined;
             const fn = genRetryFunction(nextAttempt);
+            this.logger.info(`Started attempt ${nextAttempt.def.name}.`);
             running.push({
               promise: fn()
                 .then((r) => {
@@ -136,23 +145,27 @@ export class ZZParallelAttemptsPipe<P, O> extends ZZPipe<
               getResult: () => result,
             });
           }
-          await sleep(50);
+          await sleep(100);
         }
 
-        return running.map((r) => {
+        const raws = running.map((r) => {
           if (r.isResolved()) {
             return {
               result: r.getResult(),
               timedout: false,
               error: false,
+              name: r.name,
             };
           } else {
             return {
               timedout: true,
               error: false,
+              name: r.name,
             };
           }
         });
+
+        return await transformCombinedOutput(raws);
       },
     });
 
