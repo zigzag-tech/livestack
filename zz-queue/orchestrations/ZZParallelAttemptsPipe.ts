@@ -116,13 +116,15 @@ export class ZZParallelAttemptsPipe<
           };
         }
 
-        while (restAttempts.length > 0 || !globalTimeoutCondition(genCtx())) {
+        let cont = genCtx();
+
+        do {
           // check head and see if is met for the first one
           let nextAttempt = restAttempts[0];
           if (!nextAttempt) {
             continue;
           }
-          const cont = genCtx();
+          cont = genCtx();
           if (nextAttempt.triggerCondition(cont)) {
             nextAttempt = restAttempts.shift()!;
             let resolved = false;
@@ -146,7 +148,10 @@ export class ZZParallelAttemptsPipe<
             });
           }
           await sleep(100);
-        }
+          cont = genCtx();
+        } while (restAttempts.length > 0 || !globalTimeoutCondition(cont));
+
+        await Promise.all(running.map((r) => r.promise));
 
         const raws = running.map((r) => {
           if (r.isResolved()) {
