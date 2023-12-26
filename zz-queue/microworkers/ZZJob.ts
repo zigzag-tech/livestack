@@ -200,7 +200,6 @@ export class ZZJob<
       let { largeFilesToSave, newObj } = identifyLargeFiles(o);
 
       if (this.storageProvider) {
-        o = newObj;
         const fullPathLargeFilesToSave = largeFilesToSave.map((x) => ({
           ...x,
           path: path.join(this.baseWorkingRelativePath, x.path),
@@ -216,6 +215,7 @@ export class ZZJob<
             fullPathLargeFilesToSave,
             this.storageProvider
           );
+          o = newObj;
         }
       } else {
         if (largeFilesToSave.length > 0) {

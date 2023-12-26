@@ -1,5 +1,9 @@
+import { Stream } from "stream";
 export const isBinaryLikeObject = (obj: any): boolean => {
   if (obj instanceof ArrayBuffer) {
+    return true;
+  }
+  if (obj instanceof Stream) {
     return true;
   }
   if (typeof Blob !== "undefined" && obj instanceof Blob) {
