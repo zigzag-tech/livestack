@@ -1,9 +1,8 @@
-import { zzEnv } from "./../../../workers/zz-env";
 import { z } from "zod";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Knex } from "knex";
 import { RedisOptions } from "ioredis";
-import { ZZPipe } from "./ZZPipe";
+
 interface PipeParams<P, O, StreamI, WP, TProgress> {
   name: string;
   jobParams: z.ZodType<P>;

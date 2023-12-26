@@ -84,6 +84,7 @@ export class ZZJob<
   // }
   nextInput: () => Promise<StreamI | null>;
   emitOutput: (o: O) => Promise<void>;
+  terminateOutput: () => Promise<void>;
 
   dedicatedTempWorkingDir: string;
   baseWorkingRelativePath: string;
@@ -180,6 +181,12 @@ export class ZZJob<
     this.inputObservable = trackedObservable;
     this.inputSubscriberCountObservable = subscriberCountObservable;
 
+    this.terminateOutput = async () => {
+      await outputPubSubFactory.emitValue({
+        terminate: true,
+      });
+    };
+
     this.emitOutput = async (o: O) => {
       try {
         o = this.pipe.def.output.parse(o);
@@ -218,10 +225,10 @@ export class ZZJob<
         }
       }
 
-      this.logger.info(
-        `Emitting output: ${this.jobId}, ${this.def.name} ` +
-          JSON.stringify(o, longStringTruncator)
-      );
+      // this.logger.info(
+      //   `Emitting output: ${this.jobId}, ${this.def.name} ` +
+      //     JSON.stringify(o, longStringTruncator)
+      // );
 
       const { jobDataId } = await addJobDataAndIOEvent({
         projectId: this.zzEnv.projectId,
@@ -309,6 +316,8 @@ export class ZZJob<
           dbConn: this.zzEnv.db,
           jobStatus: "completed",
         });
+
+        await this.terminateOutput();
 
         if (processedR) {
           return processedR;
