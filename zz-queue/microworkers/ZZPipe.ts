@@ -15,7 +15,7 @@ import {
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import { PipeDef, ZZEnv } from "./PipeRegistry";
-import { PubSubFactory } from "../realtime/mq-pub-sub";
+import { PubSubFactoryWithNextValueGenerator } from "../realtime/mq-pub-sub";
 import { z } from "zod";
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
@@ -68,7 +68,10 @@ export class ZZPipe<
     return worker;
   }
 
-  private pubSubCache = new Map<string, PubSubFactory<unknown>>();
+  private pubSubCache = new Map<
+    string,
+    PubSubFactoryWithNextValueGenerator<unknown>
+  >();
 
   public pubSubFactoryForJob = <T>({
     jobId,
@@ -78,11 +81,13 @@ export class ZZPipe<
     type: "input" | "output";
   }) => {
     if (this.pubSubCache.has(`${jobId}/${type}`)) {
-      return this.pubSubCache.get(`${jobId}/${type}`)! as PubSubFactory<
-        WrapTerminatorAndDataId<T>
-      >;
+      return this.pubSubCache.get(
+        `${jobId}/${type}`
+      )! as PubSubFactoryWithNextValueGenerator<WrapTerminatorAndDataId<T>>;
     } else {
-      const pubSub = new PubSubFactory<WrapTerminatorAndDataId<T>>(
+      const pubSub = new PubSubFactoryWithNextValueGenerator<
+        WrapTerminatorAndDataId<T>
+      >(
         type,
         {
           projectId: this.zzEnv.projectId,

@@ -1,6 +1,10 @@
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import { PubSubFactory } from "../realtime/mq-pub-sub";
+import {
+  PubSubFactory,
+  createLazyNextValueGenerator,
+  createTrackedObservable,
+} from "../realtime/mq-pub-sub";
 import {
   BehaviorSubject,
   Observable,
@@ -164,15 +168,6 @@ export class ZZJob<
       type: "output",
     });
 
-    this.nextInput = async () => {
-      const r = await inputPubSubFactory.nextValue();
-      if (r.terminate) {
-        return null;
-      } else {
-        return r.data;
-      }
-    };
-
     this.inputObservableUntracked = inputPubSubFactory.valueObsrvable.pipe(
       map((x) => (x.terminate ? null : x.data))
     );
@@ -180,16 +175,18 @@ export class ZZJob<
     const { trackedObservable, subscriberCountObservable } =
       createTrackedObservable(this.inputObservableUntracked);
 
+    const { nextValue } = createLazyNextValueGenerator(trackedObservable);
+
+    this.nextInput = nextValue;
     this.inputObservable = trackedObservable;
     this.inputSubscriberCountObservable = subscriberCountObservable;
 
-    this.inputSubscriberCountObservable
-      .subscribe((count) => {
-        console.log("count", count)
-        if (count > 0) {
-          setJobReadyForInputsInRedis(this.jobId, true);
-        }
-      });
+    this.inputSubscriberCountObservable.subscribe((count) => {
+      console.log("count", count);
+      if (count > 0) {
+        setJobReadyForInputsInRedis(this.jobId, true);
+      }
+    });
 
     this.signalOutputEnd = async () => {
       await outputPubSubFactory.emitValue({
@@ -441,11 +438,13 @@ export class ZZJob<
 
     const jobThat = this;
 
-    let _outputSubFactory: PubSubFactory<WrapTerminatorAndDataId<O>> | null =
-      null;
+    let _outFactoriesAndFns: {
+      factory: PubSubFactory<WrapTerminatorAndDataId<O>>;
+      nextValue: any;
+    } | null = null;
     const _getOrCreateOutputPubSubFactory = () => {
-      if (!_outputSubFactory) {
-        _outputSubFactory = new PubSubFactory<WrapTerminatorAndDataId<O>>(
+      if (!_outFactoriesAndFns) {
+        const factory = new PubSubFactory<WrapTerminatorAndDataId<O>>(
           "output",
           {
             projectId: jobThat.zzEnv.projectId,
@@ -456,13 +455,21 @@ export class ZZJob<
             jobId: childJobId,
           })
         );
+        const { nextValue } = createLazyNextValueGenerator(
+          factory.valueObsrvable
+        );
+        _outFactoriesAndFns = {
+          factory,
+          nextValue,
+        };
       }
-      return _outputSubFactory;
+
+      return _outFactoriesAndFns;
     };
 
     return {
       get outputObservable() {
-        return _getOrCreateOutputPubSubFactory().valueObsrvable.pipe(
+        return _getOrCreateOutputPubSubFactory().factory.valueObsrvable.pipe(
           map((x) => (x.terminate ? null : x.data))
         );
       },
@@ -513,40 +520,6 @@ export class ZZJob<
       });
     }
   };
-}
-
-function createTrackedObservable<T>(observable: Observable<T>) {
-  let subscriberCount = 0;
-  const subscriberCountSubject = new BehaviorSubject<number>(subscriberCount);
-
-  const trackedObservable = new Observable<T>((subscriber: Subscriber<T>) => {
-    // Increment subscriber count
-    subscriberCount++;
-    subscriberCountSubject.next(subscriberCount);
-    // console.log(`Subscribers: ${subscriberCount}`);
-
-    // Subscribe to the original observable
-    const subscription: Subscription = observable.subscribe({
-      next: (value: T) => subscriber.next(value),
-      error: (err: any) => subscriber.error(err),
-      complete: () => subscriber.complete(),
-    });
-
-    // Return the teardown logic
-    return () => {
-      // Decrement subscriber count
-      subscriberCount--;
-      subscriberCountSubject.next(subscriberCount);
-      // console.log(`Subscribers: ${subscriberCount}`);
-
-      // Unsubscribe from the original observable
-      subscription.unsubscribe();
-    };
-  });
-
-  const subscriberCountObservable = subscriberCountSubject.asObservable();
-
-  return { trackedObservable, subscriberCountObservable };
 }
 
 export async function setJobReadyForInputsInRedis(
