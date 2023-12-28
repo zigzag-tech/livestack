@@ -231,13 +231,7 @@ export class ZZPipe<
     await redis.set(`last-time-job-alive-${jobId}`, Date.now());
   }
 
-  public async sendInputToJob({
-    jobId,
-    data,
-  }: {
-    jobId: string;
-    data: StreamI;
-  }) {
+  async sendInputToJob({ jobId, data }: { jobId: string; data: StreamI }) {
     try {
       data = this.def.streamInput.parse(data);
     } catch (err) {
@@ -257,7 +251,7 @@ export class ZZPipe<
     });
   }
 
-  public async terminateJobInput(jobId: string) {
+  async terminateJobInput(jobId: string) {
     const pubSub = this.pubSubFactoryForJob({ jobId, type: "input" });
     const messageId = v4();
     await pubSub.pubToJob({
@@ -266,6 +260,21 @@ export class ZZPipe<
         terminate: true,
       },
     });
+  }
+
+  public async waitForJobReadyForInputs(jobId: string) {
+    let isReady = await getJobReadyForInputsInRedis(jobId);
+    while (!isReady) {
+      await sleep(100);
+      isReady = await getJobReadyForInputsInRedis(jobId);
+      console.log(isReady);
+    }
+
+    return {
+      sendInputToJob: ({ data }: { data: StreamI }) =>
+        this.sendInputToJob({ jobId, data }),
+      terminateJobInput: () => this.terminateJobInput(jobId),
+    };
   }
 
   public subscribeToJobOutputTillTermination({
@@ -463,4 +472,14 @@ export function getPubSubQueueId({
 }) {
   const queueId = def.name + "::" + jobId;
   return queueId;
+}
+
+export async function getJobReadyForInputsInRedis(jobId: string) {
+  try {
+    const redis = new Redis();
+    const isReady = await redis.get(`ready_status__${jobId}`);
+    return isReady === "true";
+  } catch (error) {
+    console.error("Error getJobReadyForInputsInRedis:", error);
+  }
 }

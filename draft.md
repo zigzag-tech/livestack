@@ -21,3 +21,11 @@ Robust test case where audio chunk files come in, each file gets sent to whisper
 parallel condition guaranteeing original input order
 
 4. minor bug assistant clean up
+
+Legacy server => use server (OR use openai whisper API)
+sendInput, wait, emitOutput
+(long running worker)
+phrase complete?
+
+const {sendInput} = pipe.waitForJobToOpenForBusiness(jobId)
+setOpenForBusinessInRedis(true)

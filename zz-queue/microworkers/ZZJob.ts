@@ -37,6 +37,8 @@ import {
 import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
+import Redis from "ioredis";
+
 export type ZZProcessor<
   P,
   O,
@@ -180,6 +182,14 @@ export class ZZJob<
 
     this.inputObservable = trackedObservable;
     this.inputSubscriberCountObservable = subscriberCountObservable;
+
+    this.inputSubscriberCountObservable
+      .subscribe((count) => {
+        console.log("count", count)
+        if (count > 0) {
+          setJobReadyForInputsInRedis(this.jobId, true);
+        }
+      });
 
     this.signalOutputEnd = async () => {
       await outputPubSubFactory.emitValue({
@@ -537,4 +547,16 @@ function createTrackedObservable<T>(observable: Observable<T>) {
   const subscriberCountObservable = subscriberCountSubject.asObservable();
 
   return { trackedObservable, subscriberCountObservable };
+}
+
+export async function setJobReadyForInputsInRedis(
+  jobId: string,
+  isReady: boolean
+) {
+  try {
+    const redis = new Redis();
+    await redis.set(`ready_status__${jobId}`, isReady ? "true" : "false");
+  } catch (error) {
+    console.error("Error setJobReadyForInputsInRedis:", error);
+  }
 }
