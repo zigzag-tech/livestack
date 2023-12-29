@@ -23,7 +23,7 @@ export class ZZWorker<
 
   public readonly bullMQWorker: Worker<
     {
-      initParams: P;
+      jobParams: P;
     },
     O | undefined
   >;
@@ -73,7 +73,7 @@ export class ZZWorker<
     const mergedWorkerOptions = _.merge({}, workerOptions);
     const flowProducer = new FlowProducer(mergedWorkerOptions);
 
-    this.bullMQWorker = new Worker<{ initParams: P }, O | undefined, string>(
+    this.bullMQWorker = new Worker<{ jobParams: P }, O | undefined, string>(
       `${this.zzEnv.projectId}/${this.def.name}`,
       async (job, token) => {
         const zzJ = new ZZJob<P, O, StreamI, WP, TProgress>({
@@ -82,7 +82,7 @@ export class ZZWorker<
           logger,
           flowProducer,
           pipe: this.pipe,
-          initParams: job.data.initParams,
+          jobParams: job.data.jobParams,
           workerInstanceParams: this.instanceParams,
           storageProvider: this.zzEnv.storageProvider,
         });

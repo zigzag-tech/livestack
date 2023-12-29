@@ -183,25 +183,25 @@ export class ZZPipe<
     return rec.map((r) => r.data);
   }
 
-  public async enqueueJobAndGetResult({
+  public async requestJobAndWaitOnResult({
     jobId: jobId,
-    initParams: initParams,
+    jobParams: jobParams,
   }: // queueEventsOptions,
   {
     jobId?: string;
-    initParams: P;
+    jobParams: P;
   }): Promise<O[]> {
     if (!jobId) {
       jobId = `${this.def.name}-${v4()}`;
     }
 
     this.logger.info(
-      `Enqueueing job ${jobId} with data: ${JSON.stringify(initParams)}`
+      `Enqueueing job ${jobId} with data: ${JSON.stringify(jobParams)}`
     );
 
-    await this.enqueueJob({
+    await this.requestJob({
       jobId,
-      initParams,
+      jobParams,
     });
 
     while (true) {
@@ -353,13 +353,13 @@ export class ZZPipe<
     }
   }
 
-  public async enqueueJob({
+  public async requestJob({
     jobId,
-    initParams,
+    jobParams,
     bullMQJobsOpts,
   }: {
     jobId: string;
-    initParams: P;
+    jobParams: P;
     bullMQJobsOpts?: JobsOptions;
   }) {
     // force job id to be the same as name
@@ -371,7 +371,7 @@ export class ZZPipe<
     }
     const j = await this._rawQueue.add(
       jobId,
-      { initParams },
+      { jobParams },
       { ...bullMQJobsOpts, jobId: jobId }
     );
     this.logger.info(
@@ -384,7 +384,7 @@ export class ZZPipe<
       opName: this.def.name,
       jobId,
       dbConn: this.zzEnv.db,
-      initParams: initParams,
+      jobParams: jobParams,
     });
 
     return j;
@@ -440,7 +440,7 @@ function createAndReturnQueue<
   queueOptions?: WorkerOptions;
   db: Knex;
 }) {
-  const queue = new Queue<{ initParams: JobDataType }, JobReturnType>(
+  const queue = new Queue<{ jobParams: JobDataType }, JobReturnType>(
     `${projectId}/${queueNameOnly}`,
     queueOptions
   );

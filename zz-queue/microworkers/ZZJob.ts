@@ -65,9 +65,9 @@ export class ZZJob<
   WP extends object = never,
   Progress = never
 > {
-  private readonly bullMQJob: Job<{ initParams: P }, O | void>;
+  private readonly bullMQJob: Job<{ jobParams: P }, O | void>;
   public readonly _bullMQToken?: string;
-  initParams: P;
+  jobParams: P;
   inputObservable: Observable<StreamI | null>;
   logger: ReturnType<typeof getLogger>;
   // New properties for subscriber tracking
@@ -107,10 +107,10 @@ export class ZZJob<
   public jobId: string;
 
   constructor(p: {
-    bullMQJob: Job<{ initParams: P }, O | undefined, string>;
+    bullMQJob: Job<{ jobParams: P }, O | undefined, string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
-    initParams: P;
+    jobParams: P;
     flowProducer: FlowProducer;
     storageProvider?: IStorageProvider;
     pipe: ZZPipe<P, O, StreamI, WP, Progress>;
@@ -122,10 +122,10 @@ export class ZZJob<
     this.logger = p.logger;
 
     try {
-      this.initParams = p.pipe.def.jobParams.parse(p.initParams);
+      this.jobParams = p.pipe.def.jobParams.parse(p.jobParams);
     } catch (err) {
       this.logger.error(
-        `initParams error: initParams provided is invalid: ${JSON.stringify(
+        `jobParams error: jobParams provided is invalid: ${JSON.stringify(
           err,
           null,
           2
@@ -355,7 +355,7 @@ export class ZZJob<
   public spawnChildJobsToWaitOn = async <CI, CO>(p: {
     def: PipeDef<P, O>;
     jobId: string;
-    initParams: P;
+    jobParams: P;
   }) => {
     const spawnR = await this._spawnJob({
       ...p,
@@ -383,7 +383,7 @@ export class ZZJob<
   public spawnJob = async <P, O>(p: {
     def: PipeDef<P, O, any, any, any>;
     jobId: string;
-    initParams: P;
+    jobParams: P;
   }) => {
     return await this._spawnJob(p);
   };
@@ -391,21 +391,21 @@ export class ZZJob<
   private _spawnJob = async <P, O>({
     def: childJobDef,
     jobId: childJobId,
-    initParams,
+    jobParams,
     flowProducerOpts,
   }: {
     def: PipeDef<P, O, any, any, any>;
     jobId: string;
-    initParams: P;
+    jobParams: P;
     flowProducerOpts?: FlowJob["opts"];
   }) => {
     const tempPipe = new ZZPipe({
       def: childJobDef,
       zzEnv: this.zzEnv,
     });
-    await tempPipe.enqueueJob({
+    await tempPipe.requestJob({
       jobId: childJobId,
-      initParams,
+      jobParams,
       bullMQJobsOpts: flowProducerOpts,
     });
     const [rec] = await getJobDataAndIoEvents({
@@ -419,7 +419,7 @@ export class ZZJob<
     // await this.flowProducer.add({
     //   name: childJobId,
     //   data: {
-    //     initParams,
+    //     jobParams,
     //   },
     //   queueName: `${this.zzEnv.projectId}/${childJobDef.name}`,
     //   opts: {
@@ -433,7 +433,7 @@ export class ZZJob<
     //   dbConn: this.zzEnv.db,
     //   opName: childJobDef.name,
     //   jobId: childJobId,
-    //   initParams,
+    //   jobParams,
     // });
 
     const jobThat = this;

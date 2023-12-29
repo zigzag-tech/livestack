@@ -86,7 +86,7 @@ export class ZZParallelAttemptsPipe<
     super({
       zzEnv,
       def,
-      processor: async ({ logger, initParams, spawnJob, jobId }) => {
+      processor: async ({ logger, jobParams, spawnJob, jobId }) => {
         const genRetryFunction = <NewP, NewO>({
           def: attemptDef,
           transformInput,
@@ -100,7 +100,7 @@ export class ZZParallelAttemptsPipe<
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
               def: attemptDef,
-              initParams: await transformInput(initParams),
+              jobParams: await transformInput(jobParams),
             });
 
             const o = await nextOutput();

@@ -231,17 +231,17 @@ export async function ensureJobAndInitStatusRec<T>({
   opName,
   jobId,
   dbConn,
-  initParams,
+  jobParams,
 }: JobUniqueId & {
   dbConn: Knex;
-  initParams: T;
+  jobParams: T;
 }) {
   await dbConn("zz_jobs")
     .insert<ZZJobRec<T>>({
       project_id: projectId,
       op_name: opName,
       job_id: jobId,
-      init_params: handlePrimitive(initParams),
+      init_params: handlePrimitive(jobParams),
     })
     .onConflict(["project_id", "op_name", "job_id"])
     .ignore();
@@ -262,7 +262,7 @@ export async function ensureJobAndInitStatusRec<T>({
     jobId,
     dbConn,
     ioType: "init-params",
-    jobData: initParams,
+    jobData: jobParams,
     jobDataSuffix,
   });
 

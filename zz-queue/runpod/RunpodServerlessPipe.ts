@@ -29,7 +29,7 @@ export class RunpodServerlessPipe<P extends object, O> extends ZZPipe<
         }) as any,
       }),
       zzEnv,
-      processor: async ({ initParams, logger }) => {
+      processor: async ({ jobParams, logger }) => {
         const runUrl = `https://api.runpod.ai/v2/${this._endpointId}/run`;
 
         const respP = await fetch(runUrl, {
@@ -39,7 +39,7 @@ export class RunpodServerlessPipe<P extends object, O> extends ZZPipe<
             Authorization: `Bearer ${this._runpodApiKey}`,
           },
           body: JSON.stringify({
-            input: initParams,
+            input: jobParams,
           }),
         });
 
