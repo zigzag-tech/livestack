@@ -1,5 +1,5 @@
 {
-  "name": "@zz/queue",
+  "name": "@zzstack/queue",
   "version": "0.0.1",
   "description": "Orchestration, in real-time.",
   "scripts": {
@@ -13,7 +13,7 @@
     "pg": "^8.x",
     "winston": "^3.x",
     "rxjs": "^7",
-    "zod":"^3"
+    "zod": "^3"
   },
   "devDependencies": {
     "@babel/preset-typescript": "^7.22.5",
@@ -26,6 +26,7 @@
   "optionalDependencies": {
     "@google-cloud/storage": "^7.x",
     "replicate": "^0.21.x"
-  }
- 
+  },
+  "main": "./dist/index.js",
+  "author": ""
 }
