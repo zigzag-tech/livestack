@@ -1,5 +1,5 @@
 {
-  "name": "zz-queue",
+  "name": "@zz/queue",
   "version": "0.1.0",
   "description": "Orchestrator.",
   "scripts": {
