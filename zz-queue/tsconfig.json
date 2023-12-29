@@ -20,6 +20,7 @@
     "strict": true,
     "strictNullChecks": true,
     "downlevelIteration": true,
+    "declaration": true,
     "jsx": "react",
     "noImplicitAny": true
     // "emitDecoratorMetadata": true,

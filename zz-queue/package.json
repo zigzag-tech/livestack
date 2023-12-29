@@ -1,10 +1,13 @@
 {
   "name": "@zzstack/queue",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Orchestration, in real-time.",
   "scripts": {
     "build": "tsc"
   },
+  "files": [
+    "dist/**/*"
+  ],
   "dependencies": {
     "bullmq": "^4.x",
     "dotenv": "^16.x",
@@ -15,6 +18,7 @@
     "rxjs": "^7",
     "zod": "^3"
   },
+  "types": "dist/index.d.ts",
   "devDependencies": {
     "@babel/preset-typescript": "^7.22.5",
     "@types/lodash": "^4.14.201",
