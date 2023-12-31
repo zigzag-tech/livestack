@@ -61,10 +61,10 @@ export class ZZParallelAttemptsPipe<
     transformCombinedOutput,
   }: {
     zzEnv: ZZEnv;
-    def: PipeDef<P, O, any, any>;
+    def: PipeDef<P, O, any, any, any>;
     attempts: ParallelAttempt<
       PipeDef<any, any, any, any, any>,
-      PipeDef<P, O, any, any>
+      PipeDef<P, O, any, any, any>
     >[];
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
@@ -85,8 +85,8 @@ export class ZZParallelAttemptsPipe<
           transformInput,
           transformOutput,
         }: ParallelAttempt<
-          PipeDef<NewP, NewO, any, any>,
-          PipeDef<P, O, any, any>
+          PipeDef<NewP, NewO, any, any, any>,
+          PipeDef<P, O, any, any, any>
         >) => {
           const fn = async () => {
             const childJobId = `${jobId}/${attemptDef.name}`;

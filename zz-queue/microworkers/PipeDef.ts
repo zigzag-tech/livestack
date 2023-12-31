@@ -1,12 +1,18 @@
 import { z } from "zod";
 
 export type InferPipeDef<T extends PipeDef<any, any, any, any, any>> =
-  T extends PipeDef<infer P, infer O, infer StreamI, infer TProgress>
-    ? PipeDef<P, O, StreamI, TProgress>
+  T extends PipeDef<
+    infer P,
+    infer O,
+    infer StreamIMap,
+    infer StreamI,
+    infer TProgress
+  >
+    ? PipeDef<P, O, StreamIMap, StreamI, TProgress>
     : never;
 
 export type InferPipeInputsDef<T extends PipeDef<any, any, any, any, any>> =
-  InferPipeDef<T> extends PipeDef<any, any, infer StreamIMap, any>
+  InferPipeDef<T> extends PipeDef<any, any, infer StreamIMap, any, any>
     ? StreamIMap extends Record<string | number | symbol, any>
       ? {
           [K in keyof StreamIMap]: StreamIMap[K];
@@ -15,7 +21,7 @@ export type InferPipeInputsDef<T extends PipeDef<any, any, any, any, any>> =
     : never;
 
 export type InferPipeInputDef<T extends PipeDef<any, any, any, any, any>> =
-  InferPipeDef<T> extends PipeDef<any, any, infer StreamI, any>
+  InferPipeDef<T> extends PipeDef<any, any, any, infer StreamI, any>
     ? StreamI
     : never;
 

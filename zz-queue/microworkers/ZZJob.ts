@@ -359,7 +359,7 @@ export class ZZJob<
           jobStatus: "running",
         });
 
-        const processedR = await processor(this);
+        const processedR = await processor(this as any);
 
         // wait as long as there are still subscribers
 
@@ -418,7 +418,7 @@ export class ZZJob<
   };
 
   public spawnChildJobsToWaitOn = async <CI, CO>(p: {
-    def: PipeDef<P, O, StreamIMap, TProgress>;
+    def: PipeDef<P, O, StreamIMap, StreamI, TProgress>;
     jobId: string;
     jobParams: P;
   }) => {
@@ -446,7 +446,7 @@ export class ZZJob<
   };
 
   public spawnJob = async <P, O>(p: {
-    def: PipeDef<P, O, StreamIMap, TProgress>;
+    def: PipeDef<P, O, StreamIMap, StreamI, TProgress>;
     jobId: string;
     jobParams: P;
   }) => {
@@ -459,7 +459,7 @@ export class ZZJob<
     jobParams,
     flowProducerOpts,
   }: {
-    def: PipeDef<P, O, StreamIMap, TProgress>;
+    def: PipeDef<P, O, StreamIMap, StreamI, TProgress>;
     jobId: string;
     jobParams: P;
     flowProducerOpts?: FlowJob["opts"];
