@@ -240,17 +240,25 @@ export class ZZPipe<
     });
   }
 
-  public async waitForJobReadyForInputs(jobId: string) {
-    let isReady = await getJobReadyForInputsInRedis(
-      this.zzEnv.redisConfig,
-      jobId
-    );
+  public async waitForJobReadyForInputs({
+    key,
+    jobId,
+  }: {
+    key?: keyof StreamIMap;
+    jobId: string;
+  }) {
+    let isReady = await getJobReadyForInputsInRedis({
+      redisConfig: this.zzEnv.redisConfig,
+      jobId,
+      key: key ? String(key) : "default",
+    });
     while (!isReady) {
       await sleep(100);
-      isReady = await getJobReadyForInputsInRedis(
-        this.zzEnv.redisConfig,
-        jobId
-      );
+      isReady = await getJobReadyForInputsInRedis({
+        redisConfig: this.zzEnv.redisConfig,
+        jobId,
+        key: key ? String(key) : "default",
+      });
       console.log("isReady", isReady);
     }
 
@@ -505,13 +513,18 @@ export function getPubSubQueueId({
   return queueId;
 }
 
-export async function getJobReadyForInputsInRedis(
-  redisConfig: RedisOptions,
-  jobId: string
-) {
+export async function getJobReadyForInputsInRedis({
+  redisConfig,
+  jobId,
+  key,
+}: {
+  redisConfig: RedisOptions;
+  jobId: string;
+  key: string;
+}) {
   try {
     const redis = new Redis(redisConfig);
-    const isReady = await redis.get(`ready_status__${jobId}`);
+    const isReady = await redis.get(`ready_status__${jobId}/${key}`);
     return isReady === "true";
   } catch (error) {
     console.error("Error getJobReadyForInputsInRedis:", error);

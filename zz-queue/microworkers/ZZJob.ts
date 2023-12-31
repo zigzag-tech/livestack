@@ -86,6 +86,12 @@ export class ZZJob<
   emitOutput: (o: O) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
   nextInput = async (key?: keyof StreamIMap) => {
+    setJobReadyForInputsInRedis({
+      redisConfig: this.zzEnv.redisConfig,
+      jobId: this.jobId,
+      isReady: true,
+      key: String(key) || "default",
+    });
     return await this._ensureInputStreamFn(key).nextValue();
   };
 
@@ -284,9 +290,14 @@ export class ZZJob<
       const { nextValue } = createLazyNextValueGenerator(trackedObservable);
 
       subscriberCountObservable.subscribe((count) => {
-        console.log("count", count);
+        // console.log("count", count);
         if (count > 0) {
-          setJobReadyForInputsInRedis(this.zzEnv.redisConfig, this.jobId, true);
+          setJobReadyForInputsInRedis({
+            redisConfig: this.zzEnv.redisConfig,
+            jobId: this.jobId,
+            isReady: true,
+            key: String(key) || "default",
+          });
         }
       });
 
@@ -376,7 +387,6 @@ export class ZZJob<
           dbConn: this.zzEnv.db,
           jobStatus: "completed",
         });
-
         await this.signalOutputEnd();
 
         if (processedR) {
@@ -552,28 +562,24 @@ export class ZZJob<
   };
 }
 
-export async function setJobReadyForInputsInRedis(
-  redisConfig: RedisOptions,
-  jobId: string,
-  isReady: boolean
-) {
+export async function setJobReadyForInputsInRedis({
+  redisConfig,
+  jobId,
+  key,
+  isReady,
+}: {
+  redisConfig: RedisOptions;
+  jobId: string;
+  key: string;
+  isReady: boolean;
+}) {
   try {
     const redis = new Redis(redisConfig);
-    await redis.set(`ready_status__${jobId}`, isReady ? "true" : "false");
+    await redis.set(
+      `ready_status__${jobId}/${key}`,
+      isReady ? "true" : "false"
+    );
   } catch (error) {
     console.error("Error setJobReadyForInputsInRedis:", error);
   }
-}
-
-type StringKeysOnly<T> = {
-  [K in keyof T]: T[K];
-};
-
-function transformValues<T extends Record<string, any>, R>(
-  obj: T,
-  transformFn: <K extends keyof T>(k: K, value: T[K]) => R
-) {
-  return Object.fromEntries(
-    Object.entries(obj).map(([key, value]) => [key, transformFn(key, value)])
-  ) as { [K in keyof T]: R };
 }
