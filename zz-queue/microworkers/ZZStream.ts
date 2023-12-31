@@ -2,19 +2,20 @@ import { ZodType } from "zod";
 import Redis from "ioredis";
 import { ProjectConfig } from "../config-factory/config-defs";
 import { Observable } from "rxjs";
-import { v4 } from "uuid";
 import { ZZEnv } from "./ZZEnv";
-import { WrapTerminatorAndDataId,wrapTerminatorAndDataId } from "./ZZPipe";
+
+import { createHash } from "crypto";
+import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
 export type InferStreamDef<T> = T extends ZZStream<infer P> ? P : never;
 
 export class ZZStream<T> {
-  public readonly wrappedDef: ZodType<WrapTerminatorAndDataId<T>>;
   public readonly def: ZodType<T>;
   public readonly uniqueName: string;
   private static _projectConfig: ProjectConfig;
   private static _zzEnv: ZZEnv;
+  public readonly hash: string;
 
   public static get zzEnv() {
     return ZZStream._zzEnv;
@@ -63,8 +64,10 @@ export class ZZStream<T> {
     def: ZodType<T>;
   }) {
     this.def = def;
-    this.wrappedDef = wrapTerminatorAndDataId(def);
     this.uniqueName = uniqueName;
+    // use sha hash on def to get the unique hash
+    const str = JSON.stringify(this.def);
+    this.hash = createHash("sha256").update(str).digest("hex");
   }
 
   private ensureValueObservable() {

@@ -7,7 +7,6 @@ import { InferPipeDef, PipeDef } from "./PipeDef";
 import { ZZEnv } from "./ZZEnv";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { ZodType, z } from "zod";
-import { InferStreamDef } from "./ZZStream";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
@@ -55,9 +54,8 @@ export class ZZWorker<
   MaPipeDef extends PipeDef<any, any, any, any>,
   WP extends object,
   P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
-  O extends InferStreamDef<InferPipeDef<MaPipeDef>["output"]> = InferStreamDef<
-    InferPipeDef<MaPipeDef>["output"]
-  >
+  O extends z.infer<MaPipeDef["outputDef"]>
+   = z.infer<MaPipeDef["outputDef"]>
 > {
   public readonly pipe: ZZPipe<MaPipeDef>;
   protected readonly zzEnv: ZZEnv;

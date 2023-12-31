@@ -1,4 +1,5 @@
-import { PipeDef, ZZEnv } from "../microworkers/PipeDef";
+import { PipeDef } from "../microworkers/PipeDef";
+import { ZZEnv } from "../microworkers/ZZEnv";
 import { ZZPipe } from "../microworkers/ZZPipe";
 import { z } from "zod";
 
@@ -11,7 +12,7 @@ export interface AttemptDef<ParentP, ParentO, P, O> {
     | Promise<z.infer<this["def"]["jobParams"]>>
     | z.infer<this["def"]["jobParams"]>;
   transformOutput: (
-    output: z.infer<this["def"]["output"]>
+    output: z.infer<this["def"]["outputDef"]>
   ) => Promise<ParentO> | ParentO;
 }
 export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {

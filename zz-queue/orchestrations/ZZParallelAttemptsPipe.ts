@@ -1,7 +1,6 @@
 import { InferPipeDef, PipeDef } from "../microworkers/PipeDef";
 import { ZZPipe, sleep } from "../microworkers/ZZPipe";
 import { z } from "zod";
-import { InferStreamDef } from "../microworkers/ZZStream";
 import { ZZEnv } from "../microworkers/ZZEnv";
 
 type TriggerCheckContext = {
@@ -25,10 +24,10 @@ export interface ParallelAttempt<
     | Promise<z.infer<InferPipeDef<AttemptDef>["jobParamsDef"]>>
     | z.infer<InferPipeDef<AttemptDef>["jobParamsDef"]>;
   transformOutput: (
-    output: InferStreamDef<AttemptDef["output"]>
+    output: z.infer<AttemptDef["outputDef"]>
   ) =>
-    | Promise<InferStreamDef<AttemptDef["output"]>>
-    | InferStreamDef<AttemptDef["output"]>;
+    | Promise<z.infer<AttemptDef["outputDef"]>>
+    | z.infer<AttemptDef["outputDef"]>;
 }
 
 export function genParallelAttempt<
@@ -48,8 +47,8 @@ export function genParallelAttempt<
 export class ZZParallelAttemptsPipe<
   MaPipeDef extends PipeDef<any, any, any, any>,
   P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
-  O extends InferStreamDef<InferPipeDef<MaPipeDef>["output"]> = InferStreamDef<
-    InferPipeDef<MaPipeDef>["output"]
+  O extends z.infer<InferPipeDef<MaPipeDef>["outputDef"]> = z.infer<
+    InferPipeDef<MaPipeDef>["outputDef"]
   >
 > extends ZZPipe<MaPipeDef> {
   attempts: ParallelAttempt<MaPipeDef, PipeDef<any, any, any, any>>[];

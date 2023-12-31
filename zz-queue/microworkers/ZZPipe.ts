@@ -1,10 +1,8 @@
-import { queue } from "./../../../node_modules/rxjs/src/internal/scheduler/queue";
-import { Job, JobsOptions, Queue, WorkerOptions } from "bullmq";
+import {  JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
-import { ZZWorkerDef } from "./ZZWorker";
 
 import {
   ensureJobAndInitStatusRec,
@@ -22,7 +20,7 @@ import {
 import { PubSubFactoryWithNextValueGenerator } from "../realtime/PubSubFactory";
 import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
-import { InferStreamDef } from "./ZZStream";
+import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
@@ -36,9 +34,7 @@ const queueMapByProjectIdAndQueueName = new Map<
 export class ZZPipe<
     MaPipeDef extends PipeDef<any, any, any, any>,
     P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
-    O extends InferStreamDef<
-      InferPipeDef<MaPipeDef>["output"]
-    > = InferStreamDef<InferPipeDef<MaPipeDef>["output"]>,
+    O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
     StreamI extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
     TProgress = z.infer<InferPipeDef<MaPipeDef>["progressDef"]>
   >
@@ -61,9 +57,9 @@ export class ZZPipe<
     zzEnv,
     name,
     jobParamsDef,
-    output,
-    inputs,
-    input,
+    outputDef,
+    inputDefs,
+    inputDef,
     progressDef,
   }: {
     zzEnv: ZZEnv;
@@ -72,9 +68,9 @@ export class ZZPipe<
     super({
       name,
       jobParamsDef,
-      output,
-      inputs,
-      input,
+      outputDef,
+      inputDefs,
+      inputDef,
       progressDef,
     });
 
@@ -204,15 +200,15 @@ export class ZZPipe<
     key?: string;
   }) {
     try {
-      data = this.inputs[key].def.parse(data);
+      data = this.inputDefs[key].parse(data);
     } catch (err) {
       this.logger.error(`StreamInput data is invalid: ${JSON.stringify(err)}`);
       throw err;
     }
-    const pubSub = this.inputs[key];
+    const stream = this.getJobStream({ jobId, key, type: "stream-in" });
     const messageId = v4();
 
-    await pubSub.pubToJob({
+    await stream.pubToJob({
       data,
       terminate: false,
       __zz_datapoint_id__: messageId,
@@ -220,9 +216,9 @@ export class ZZPipe<
   }
 
   async terminateJobInput(jobId: string) {
-    const pubSub = this.inputs["default"];
+    const stream = this.getJobStream({ jobId, type: "stream-out" });
     const messageId = v4();
-    await pubSub.pubToJob({
+    await stream.pubToJob({
       terminate: true,
       __zz_datapoint_id__: messageId,
     });
@@ -269,16 +265,16 @@ export class ZZPipe<
     });
   }
 
-  public pubSubFactoryForJob = <T>(
+  public getJobStream = <T>(
     p: {
       jobId: string;
     } & (
       | {
-          type: "input";
-          key?: string;
+          type: "stream-in";
+          key?: keyof StreamI;
         }
       | {
-          type: "output";
+          type: "stream-out";
         }
     )
   ) => {
@@ -287,29 +283,30 @@ export class ZZPipe<
       def: this,
       jobId,
     });
-    const queueId =
-      type === "input"
-        ? `${queueIdPrefix}::${type}/${p.key || "default"}`
-        : `${queueIdPrefix}::${type}`;
+    let queueId: string;
+    let def: z.ZodType<WrapTerminatorAndDataId<unknown>>;
 
-    let def;
-
-    if (type === "input") {
-      def = this.inputs[p.key || "default"].def;
+    if (type === "stream-in") {
+      queueId = `${queueIdPrefix}::${type}/${String(p.key || "default")}`;
+      def = wrapTerminatorAndDataId(this.inputDefs[p.key || "default"]);
+    } else if (type === "stream-out") {
+      queueId = `${queueIdPrefix}::${type}`;
+      def = wrapTerminatorAndDataId(this.outputDef);
     } else {
-      def = this.output.def;
+      throw new Error(`Invalid type ${type}`);
     }
+
     if (this.pubSubCache.has(`${jobId}/${type}`)) {
       return this.pubSubCache.get(
         queueId
       )! as PubSubFactoryWithNextValueGenerator<WrapTerminatorAndDataId<T>>;
     } else {
-      const pubSub = new PubSubFactoryWithNextValueGenerator<
-        WrapTerminatorAndDataId<T>
-      >({ queueId, def });
-      this.pubSubCache.set(`${jobId}/${type}`, pubSub);
+      const stream = new PubSubFactoryWithNextValueGenerator({ queueId, def });
+      this.pubSubCache.set(`${jobId}/${type}`, stream);
 
-      return pubSub;
+      return stream as PubSubFactoryWithNextValueGenerator<WrapTerminatorAndDataId<
+        T
+        >>;
     }
   };
 
@@ -326,11 +323,11 @@ export class ZZPipe<
           }
     ) => void;
   }) {
-    const pubSub = this.pubSubFactoryForJob<O>({
+    const stream = this.getJobStream<O>({
       jobId,
-      type: "output",
+      type: "stream-out",
     });
-    return await pubSub.subForJob({
+    return await stream.subForJob({
       processor: (msg) => {
         if (msg.terminate) {
           onMessage(msg);
@@ -346,9 +343,9 @@ export class ZZPipe<
   }
 
   public async nextOutputForJob(jobId: string) {
-    const pubSub = this.pubSubFactoryForJob<O>({
+    const pubSub = this.getJobStream<O>({
       jobId,
-      type: "output",
+      type: "stream-out",
     });
     const v = await pubSub.nextValue();
     if (v.terminate) {
@@ -461,32 +458,6 @@ function createAndReturnQueue<
   );
 
   return funcs;
-}
-
-export type WrapTerminatorAndDataId<T> = {
-  __zz_datapoint_id__: string;
-} & (
-  | {
-      data: T;
-      __zz_datapoint_id__: string;
-      terminate: false;
-    }
-  | {
-      terminate: true;
-    }
-);
-
-export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
-  return z.union([
-    z.object({
-      data: t,
-      __zz_datapoint_id__: z.string(),
-      terminate: z.literal(false),
-    }),
-    z.object({
-      terminate: z.literal(true),
-    }),
-  ]) as z.ZodType<WrapTerminatorAndDataId<T>>;
 }
 
 export function getPubSubQueueId({

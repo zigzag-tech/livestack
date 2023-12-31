@@ -1,5 +1,6 @@
+import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 import { v4 } from "uuid";
-import { InferStreamDef, ZZStream } from "./ZZStream";
+import {  ZZStream } from "./ZZStream";
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
@@ -34,11 +35,7 @@ import {
   updateJobStatus,
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import {
-  WrapTerminatorAndDataId,
-  ZZPipe,
-  getPubSubQueueId,
-} from "../microworkers/ZZPipe";
+import { ZZPipe, getPubSubQueueId } from "../microworkers/ZZPipe";
 import { InferPipeDef, InferPipeInputsDef, PipeDef } from "./PipeDef";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
@@ -51,17 +48,15 @@ export type ZZProcessor<
 > = Parameters<ZZJob<MaPipeDef, WP>["beginProcessing"]>[0];
 
 export type ZZProcessorParams<
-  Pipe extends ZZPipe<any, any, any, any>,
+  MaDef extends PipeDef<any, any, any, any>,
   WP extends object
-> = Parameters<ZZProcessor<Pipe, WP>>[0];
+> = Parameters<ZZProcessor<MaDef, WP>>[0];
 
 export class ZZJob<
   MaPipeDef extends PipeDef<any, any, any, any>,
   WP extends object,
   P = z.infer<MaPipeDef["jobParamsDef"]>,
-  O extends InferStreamDef<InferPipeDef<MaPipeDef>["output"]> = InferStreamDef<
-    InferPipeDef<MaPipeDef>["output"]
-  >,
+  O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
   StreamI extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
   TProgress = z.infer<MaPipeDef["progressDef"]>
 > {
@@ -88,8 +83,8 @@ export class ZZJob<
   // }
   emitOutput: (o: O) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
-  nextInput =  async (key: keyof StreamI = "default") => {
-    return await this.pubSubRelatedByKey[key].nextValue();
+  nextInput = async (key: keyof StreamI = "default") => {
+    return await this._ensureInputStreamFn(key).nextValue();
   };
 
   dedicatedTempWorkingDir: string;
@@ -103,15 +98,15 @@ export class ZZJob<
     null as WP extends object ? WP : null;
   public jobId: string;
   private readonly workerName;
-  private readonly pubSubRelatedByKey: {
+  private readonly inputStreamFnsByKey: Partial<{
     [K in keyof StreamI]: {
       nextValue: () => Promise<StreamI[K] | null>;
-      inputPubSubFactory: ZZStream<StreamI[K]>;
-      inputObservableUntracked: Observable<StreamI[K] | null>;
-      trackedObservable: Observable<StreamI[K] | null>;
+      inputPubSubFactory: ZZStream<WrapTerminatorAndDataId<StreamI[K]>>;
+      inputObservableUntracked: Observable<WrapTerminatorAndDataId<StreamI[K]> | null>;
+      trackedObservable: Observable<WrapTerminatorAndDataId<StreamI[K]> | null>;
       subscriberCountObservable: Observable<number>;
     };
-  };
+  }>;
 
   constructor(p: {
     bullMQJob: Job<{ jobParams: P }, O | undefined, string>;
@@ -166,39 +161,11 @@ export class ZZJob<
 
     const tempWorkingDir = getTempPathByJobId(this.baseWorkingRelativePath);
     this.dedicatedTempWorkingDir = tempWorkingDir;
-    this.pubSubRelatedByKey = {} as any;
-    for (const key of Object.keys(this.pipe.inputs) as (keyof StreamI)[]) {
-      const stream = (this.pipe.inputs as any)[key] as ZZStream<
-        StreamI[keyof StreamI]
-      >;
-      const inputObservableUntracked = stream.valueObsrvable.pipe(
-        map((x) => (x.terminate ? null : x.data))
-      );
+    this.inputStreamFnsByKey = {};
 
-      const { trackedObservable, subscriberCountObservable } =
-        createTrackedObservable(inputObservableUntracked);
-
-      const { nextValue } = createLazyNextValueGenerator(trackedObservable);
-
-      subscriberCountObservable.subscribe((count) => {
-        console.log("count", count);
-        if (count > 0) {
-          setJobReadyForInputsInRedis(this.jobId, true);
-        }
-      });
-
-      this.pubSubRelatedByKey[key] = {
-        nextValue,
-        inputPubSubFactory: stream,
-        inputObservableUntracked,
-        trackedObservable,
-        subscriberCountObservable,
-      };
-    }
-
-    const outputPubSubFactory = this.pipe.pubSubFactoryForJob<O>({
+    const outputPubSubFactory = this.pipe.getJobStream<O>({
       jobId: this.jobId,
-      type: "output",
+      type: "stream-out",
     });
 
     this.signalOutputEnd = async () => {
@@ -210,7 +177,7 @@ export class ZZJob<
 
     this.emitOutput = async (o: O) => {
       try {
-        o = this.pipe.output.def.parse(o);
+        o = this.pipe.outputDef.parse(o);
       } catch (err) {
         console.error("errornous output: ", o);
         this.logger.error(
@@ -269,6 +236,40 @@ export class ZZJob<
     };
   }
 
+  private _ensureInputStreamFn<K extends keyof StreamI >(key: keyof StreamI) {
+    if (!this.inputStreamFnsByKey[key]) {
+      const stream = this.pipe.getJobStream({
+        jobId: this.jobId,
+        type: "stream-in",
+        key,
+      }) as ZZStream<WrapTerminatorAndDataId<StreamI[K]>>; 
+      const inputObservableUntracked = stream.valueObsrvable.pipe(
+        map((x) => (x.terminate ? null : x.data))
+      );
+
+      const { trackedObservable, subscriberCountObservable } =
+        createTrackedObservable(inputObservableUntracked);
+
+      const { nextValue } = createLazyNextValueGenerator(trackedObservable);
+
+      subscriberCountObservable.subscribe((count) => {
+        console.log("count", count);
+        if (count > 0) {
+          setJobReadyForInputsInRedis(this.jobId, true);
+        }
+      });
+
+      this.inputStreamFnsByKey[key] = {
+        nextValue,
+        inputPubSubFactory: stream,
+        inputObservableUntracked,
+        trackedObservable,
+        subscriberCountObservable,
+      };
+    }
+    return this.inputStreamFnsByKey[key]!;
+  }
+
   public beginProcessing = async (
     processor: (j: ZZJob<MaPipeDef, WP>) => Promise<O | void>
   ): Promise<O | undefined> => {
@@ -319,11 +320,11 @@ export class ZZJob<
         // wait as long as there are still subscribers
 
         await Promise.all(
-          Object.values(this.pubSubRelatedByKey).map(
-            async (x: (typeof this.pubSubRelatedByKey)[keyof StreamI]) => {
+          Object.values(this.inputStreamFnsByKey).map(
+            async (x: (typeof this.inputStreamFnsByKey)[keyof StreamI]) => {
               await new Promise<void>((resolve) => {
-                x.subscriberCountObservable
-                  .pipe(takeUntil(x.inputObservableUntracked))
+                x!.subscriberCountObservable
+                  .pipe(takeUntil(x!.inputObservableUntracked))
                   .subscribe((count) => {
                     if (count === 0) {
                       resolve();
@@ -372,8 +373,6 @@ export class ZZJob<
       }
     }
   };
-
-  
 
   public spawnChildJobsToWaitOn = async <CI, CO>(p: {
     def: PipeDef<P, O, StreamI, TProgress>;
@@ -452,7 +451,7 @@ export class ZZJob<
             def: childJobDef,
             jobId: childJobId,
           })}/output`,
-          def: childJobDef.output.wrappedDef,
+          def: wrapTerminatorAndDataId(childJobDef.outputDef),
         });
 
         const { nextValue } = createLazyNextValueGenerator(

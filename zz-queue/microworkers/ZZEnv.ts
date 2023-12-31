@@ -1,4 +1,3 @@
-import { zzEnv } from "./../../../express-server/src/zzEnv";
 import { Knex } from "knex";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { RedisOptions } from "ioredis";
