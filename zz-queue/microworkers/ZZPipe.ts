@@ -33,7 +33,13 @@ const queueMapByProjectIdAndQueueName = new Map<
 >();
 
 export class ZZPipe<
-    MaPipeDef extends PipeDef<any, any, any, any, any> = PipeDef<any, any, any, any, any>,
+    MaPipeDef extends PipeDef<any, any, any, any, any> = PipeDef<
+      any,
+      any,
+      any,
+      any,
+      any
+    >,
     P = z.infer<MaPipeDef["jobParamsDef"]>,
     O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
     StreamIMap extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
@@ -219,8 +225,14 @@ export class ZZPipe<
     });
   }
 
-  async terminateJobInput(jobId: string) {
-    const stream = this.getJobStream({ jobId, type: "stream-out" });
+  async terminateJobInput({
+    jobId,
+    key,
+  }: {
+    jobId: string;
+    key?: keyof StreamIMap;
+  }) {
+    const stream = this.getJobStream({ jobId, type: "stream-in", key });
     const messageId = v4();
     await stream.pubToJob({
       terminate: true,
@@ -248,7 +260,11 @@ export class ZZPipe<
       }: {
         data: StreamI | StreamIMap[keyof StreamIMap];
       }) => this.sendInputToJob({ jobId, data }),
-      terminateJobInput: () => this.terminateJobInput(jobId),
+      terminateJobInput: (p?: { key?: keyof StreamIMap }) =>
+        this.terminateJobInput({
+          jobId,
+          key: p?.key,
+        }),
     };
   }
 
