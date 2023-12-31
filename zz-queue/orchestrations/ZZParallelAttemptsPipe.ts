@@ -85,8 +85,8 @@ export class ZZParallelAttemptsPipe<
           transformInput,
           transformOutput,
         }: ParallelAttempt<
-          PipeDef<NewP, NewO, any, any, any>,
-          PipeDef<P, O, any, any, any>
+          PipeDef<NewP, NewO, any, any>,
+          PipeDef<P, O, any, any>
         >) => {
           const fn = async () => {
             const childJobId = `${jobId}/${attemptDef.name}`;

@@ -3,20 +3,24 @@ import { ZZEnv } from "../microworkers/ZZEnv";
 import { ZZPipe } from "../microworkers/ZZPipe";
 import { z } from "zod";
 
-export interface AttemptDef<ParentP, ParentO, P, O> {
-  def: PipeDef<P, O>;
+export interface AttemptDef<
+  ParentPipeDef extends PipeDef<any, any, any, any>,
+  ParentP = z.infer<ParentPipeDef["jobParamsDef"]>,
+  ParentO = z.infer<ParentPipeDef["outputDef"]>
+> {
+  def: ParentPipeDef;
   timeout: number;
-  transformInput: (
-    params: ParentP
-  ) =>
-    | Promise<z.infer<this["def"]["jobParams"]>>
-    | z.infer<this["def"]["jobParams"]>;
+  transformInput: (params: ParentP) => Promise<ParentP> | ParentP;
   transformOutput: (
     output: z.infer<this["def"]["outputDef"]>
   ) => Promise<ParentO> | ParentO;
 }
-export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
-  attempts: AttemptDef<P, O, unknown, unknown>[];
+export class ZZProgressiveAdaptiveTryPipe<
+  ParentPipeDef extends PipeDef<any, any, any, any>,
+  ParentP = z.infer<ParentPipeDef["jobParamsDef"]>,
+  ParentO = z.infer<ParentPipeDef["outputDef"]>
+> extends ZZPipe<ParentPipeDef> {
+  attempts: AttemptDef<ParentPipeDef>[];
   constructor({
     zzEnv,
     def,
@@ -24,9 +28,9 @@ export class ZZProgressiveAdaptiveTryPipe<P, O> extends ZZPipe<P, O> {
     ultimateFallback,
   }: {
     zzEnv: ZZEnv;
-    def: PipeDef<P, O>;
-    attempts: AttemptDef<P, O, any, any>[];
-    ultimateFallback?: () => Promise<O>;
+    def: ParentPipeDef;
+    attempts: AttemptDef<ParentPipeDef>[];
+    ultimateFallback?: () => Promise<ParentO>;
   }) {
     super({
       zzEnv,
