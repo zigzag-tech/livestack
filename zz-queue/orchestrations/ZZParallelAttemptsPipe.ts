@@ -1,6 +1,8 @@
-import { PipeDef } from "../microworkers/PipeDef";
+import { InferPipeDef, PipeDef } from "../microworkers/PipeDef";
 import { ZZPipe, sleep } from "../microworkers/ZZPipe";
 import { z } from "zod";
+import { InferStreamDef } from "../microworkers/ZZStream";
+import { ZZEnv } from "../microworkers/ZZEnv";
 
 type TriggerCheckContext = {
   totalTimeElapsed: number;
@@ -11,32 +13,27 @@ type TriggerCheckContext = {
   }[];
 };
 
-type InferPipeDef<T extends PipeDef<any, any, any, any, any>> =
-  T extends PipeDef<infer P, infer O, any, any, any>
-    ? PipeDef<P, O, any, any, any>
-    : never;
-
 export interface ParallelAttempt<
-  AttemptDef extends PipeDef<any, any, any, any, any>,
-  ParentDef extends PipeDef<any, any, any, any, any>
+  AttemptDef extends PipeDef<any, any, any, any>,
+  ParentDef extends PipeDef<any, any, any, any>
 > {
   def: AttemptDef;
   triggerCondition: (c: TriggerCheckContext) => boolean;
   transformInput: (
-    params: z.infer<InferPipeDef<ParentDef>["jobParams"]>
+    params: z.infer<InferPipeDef<ParentDef>["jobParamsDef"]>
   ) =>
-    | Promise<z.infer<InferPipeDef<AttemptDef>["jobParams"]>>
-    | z.infer<InferPipeDef<AttemptDef>["jobParams"]>;
+    | Promise<z.infer<InferPipeDef<AttemptDef>["jobParamsDef"]>>
+    | z.infer<InferPipeDef<AttemptDef>["jobParamsDef"]>;
   transformOutput: (
-    output: z.infer<InferPipeDef<AttemptDef>["output"]>
+    output: InferStreamDef<AttemptDef["output"]>
   ) =>
-    | Promise<z.infer<InferPipeDef<ParentDef>["output"]>>
-    | z.infer<InferPipeDef<ParentDef>["output"]>;
+    | Promise<InferStreamDef<AttemptDef["output"]>>
+    | InferStreamDef<AttemptDef["output"]>;
 }
 
 export function genParallelAttempt<
-  AttemptDef extends PipeDef<any, any, any, any, any>,
-  ParentDef extends PipeDef<any, any, any, any, any>
+  AttemptDef extends PipeDef<any, any, any, any>,
+  ParentDef extends PipeDef<any, any, any, any>
 >(
   def: AttemptDef,
   parentDef: ParentDef,
@@ -49,16 +46,13 @@ export function genParallelAttempt<
 }
 
 export class ZZParallelAttemptsPipe<
-  P,
-  O,
-  StreamI,
-  WP extends {},
-  TP
-> extends ZZPipe<P, O, StreamI, WP, TP> {
-  attempts: ParallelAttempt<
-    PipeDef<P, O, any, any, any>,
-    PipeDef<any, any, any, any, any>
-  >[];
+  MaPipeDef extends PipeDef<any, any, any, any>,
+  P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
+  O extends InferStreamDef<InferPipeDef<MaPipeDef>["output"]> = InferStreamDef<
+    InferPipeDef<MaPipeDef>["output"]
+  >
+> extends ZZPipe<MaPipeDef> {
+  attempts: ParallelAttempt<MaPipeDef, PipeDef<any, any, any, any>>[];
 
   constructor({
     zzEnv,
@@ -68,10 +62,10 @@ export class ZZParallelAttemptsPipe<
     transformCombinedOutput,
   }: {
     zzEnv: ZZEnv;
-    def: PipeDef<P, O, any, any, any>;
+    def: PipeDef<P, O, any, any>;
     attempts: ParallelAttempt<
-      PipeDef<any, any, any, any, any>,
-      PipeDef<P, O, any, any, any>
+      PipeDef<any, any, any, any>,
+      PipeDef<P, O, any, any>
     >[];
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (

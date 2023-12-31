@@ -62,7 +62,7 @@ export class PipeDef<
       };
     } else if (input) {
       this.inputs = {
-        input: this.ensureStream("in", input),
+        default: this.ensureStream("in", input),
       } as {
         [K in keyof StreamI]: ZZStream<StreamI[K]>;
       };

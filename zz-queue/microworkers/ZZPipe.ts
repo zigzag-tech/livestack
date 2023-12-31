@@ -249,9 +249,9 @@ export class ZZPipe<
     await redis.set(`last-time-job-alive-${jobId}`, Date.now());
   }
 
-  async sendInputToJob({ jobId, data }: { jobId: string; data: StreamI }) {
+  async sendInputToJob({ jobId, data, key = "default" }: { jobId: string; data: StreamI, key?:string }) {
     try {
-      data = this.streamInput.parse(data);
+      data = this.inputs[key].def.parse(data);
     } catch (err) {
       this.logger.error(`StreamInput data is invalid: ${JSON.stringify(err)}`);
       throw err;
