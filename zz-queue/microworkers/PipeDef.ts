@@ -1,11 +1,11 @@
 import { z } from "zod";
 
-export type InferPipeDef<T extends PipeDef<any, any, any, any>> =
+export type InferPipeDef<T extends PipeDef<any, any, any, any, any>> =
   T extends PipeDef<infer P, infer O, infer StreamI, infer TProgress>
     ? PipeDef<P, O, StreamI, TProgress>
     : never;
 
-export type InferPipeInputsDef<T extends PipeDef<any, any, any, any>> =
+export type InferPipeInputsDef<T extends PipeDef<any, any, any, any, any>> =
   InferPipeDef<T> extends PipeDef<any, any, infer StreamIMap, any>
     ? StreamIMap extends Record<string | number | symbol, any>
       ? {
@@ -14,7 +14,7 @@ export type InferPipeInputsDef<T extends PipeDef<any, any, any, any>> =
       : never
     : never;
 
-    export type InferPipeInputDef<T extends PipeDef<any, any, any, any>> =
+export type InferPipeInputDef<T extends PipeDef<any, any, any, any, any>> =
   InferPipeDef<T> extends PipeDef<any, any, infer StreamI, any>
     ? StreamI
     : never;

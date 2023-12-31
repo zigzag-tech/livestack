@@ -13,8 +13,8 @@ type TriggerCheckContext = {
 };
 
 export interface ParallelAttempt<
-  AttemptDef extends PipeDef<any, any, any, any>,
-  ParentDef extends PipeDef<any, any, any, any>
+  AttemptDef extends PipeDef<any, any, any, any, any>,
+  ParentDef extends PipeDef<any, any, any, any, any>
 > {
   def: AttemptDef;
   triggerCondition: (c: TriggerCheckContext) => boolean;
@@ -31,8 +31,8 @@ export interface ParallelAttempt<
 }
 
 export function genParallelAttempt<
-  AttemptDef extends PipeDef<any, any, any, any>,
-  ParentDef extends PipeDef<any, any, any, any>
+  AttemptDef extends PipeDef<any, any, any, any, any>,
+  ParentDef extends PipeDef<any, any, any, any, any>
 >(
   def: AttemptDef,
   parentDef: ParentDef,
@@ -45,13 +45,13 @@ export function genParallelAttempt<
 }
 
 export class ZZParallelAttemptsPipe<
-  MaPipeDef extends PipeDef<any, any, any, any>,
+  MaPipeDef extends PipeDef<any, any, any, any, any>,
   P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
   O extends z.infer<InferPipeDef<MaPipeDef>["outputDef"]> = z.infer<
     InferPipeDef<MaPipeDef>["outputDef"]
   >
 > extends ZZPipe<MaPipeDef> {
-  attempts: ParallelAttempt<MaPipeDef, PipeDef<any, any, any, any>>[];
+  attempts: ParallelAttempt<MaPipeDef, PipeDef<any, any, any, any, any>>[];
 
   constructor({
     zzEnv,
@@ -63,7 +63,7 @@ export class ZZParallelAttemptsPipe<
     zzEnv: ZZEnv;
     def: PipeDef<P, O, any, any>;
     attempts: ParallelAttempt<
-      PipeDef<any, any, any, any>,
+      PipeDef<any, any, any, any, any>,
       PipeDef<P, O, any, any>
     >[];
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;

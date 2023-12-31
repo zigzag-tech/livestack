@@ -33,12 +33,12 @@ const queueMapByProjectIdAndQueueName = new Map<
 >();
 
 export class ZZPipe<
-    MaPipeDef extends PipeDef<any, any, any, any> = any,
-    P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
+    MaPipeDef extends PipeDef<any, any, any, any, any> = PipeDef<any, any, any, any, any>,
+    P = z.infer<MaPipeDef["jobParamsDef"]>,
     O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
     StreamIMap extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
     StreamI = InferPipeInputDef<MaPipeDef>,
-    TProgress = z.infer<InferPipeDef<MaPipeDef>["progressDef"]>
+    TProgress = z.infer<MaPipeDef["progressDef"]>
   >
   extends PipeDef<P, O, StreamIMap, StreamI, TProgress>
   implements IWorkerUtilFuncs<P, O>

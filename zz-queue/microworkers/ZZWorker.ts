@@ -14,7 +14,7 @@ type IWorkerUtilFuncs<I, O> = ReturnType<
 >;
 
 export class ZZWorkerDef<
-  MaPipeDef extends PipeDef<any, any, any, any>,
+  MaPipeDef extends PipeDef<any, any, any, any, any>,
   WP extends object = {}
 > {
   public readonly pipe: ZZPipe<MaPipeDef>;
@@ -51,11 +51,10 @@ export class ZZWorkerDef<
 }
 
 export class ZZWorker<
-  MaPipeDef extends PipeDef<any, any, any, any>,
+  MaPipeDef extends PipeDef<any, any, any, any, any>,
   WP extends object,
-  P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
-  O extends z.infer<MaPipeDef["outputDef"]>
-   = z.infer<MaPipeDef["outputDef"]>
+  P = z.infer<MaPipeDef["jobParamsDef"]>,
+  O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>
 > {
   public readonly pipe: ZZPipe<MaPipeDef>;
   protected readonly zzEnv: ZZEnv;
@@ -104,7 +103,8 @@ export class ZZWorker<
     });
 
     this._rawQueue = queueFuncs._rawQueue;
-    this.workerName = workerName || "wkr:" + `${this.zzEnv.projectId}/${workerName}`;
+    this.workerName =
+      workerName || "wkr:" + `${this.zzEnv.projectId}/${workerName}`;
     this.logger = getLogger(`wkr:${this.workerName}`);
 
     const logger = getLogger(`wkr:${this.workerName}`);

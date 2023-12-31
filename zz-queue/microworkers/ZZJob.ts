@@ -36,35 +36,36 @@ import {
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
 import { ZZPipe, getPubSubQueueId } from "../microworkers/ZZPipe";
-import { InferPipeDef, InferPipeInputsDef, PipeDef } from "./PipeDef";
+import { InferPipeInputDef, InferPipeInputsDef, PipeDef } from "./PipeDef";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 
 export type ZZProcessor<
-  MaPipeDef extends PipeDef<any, any, any, any>,
+  MaPipeDef extends PipeDef<any, any, any, any, any>,
   WP extends object = {}
 > = Parameters<ZZJob<MaPipeDef, WP>["beginProcessing"]>[0];
 
 export type ZZProcessorParams<
-  MaDef extends PipeDef<any, any, any, any>,
+  MaDef extends PipeDef<any, any, any, any, any>,
   WP extends object
 > = Parameters<ZZProcessor<MaDef, WP>>[0];
 
 export class ZZJob<
-  MaPipeDef extends PipeDef<any, any, any, any>,
+  MaPipeDef extends PipeDef<any, any, any, any, any>,
   WP extends object,
   P = z.infer<MaPipeDef["jobParamsDef"]>,
   O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
-  StreamI extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
+  StreamIMap extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
+  StreamI extends InferPipeInputDef<MaPipeDef> = InferPipeInputDef<MaPipeDef>,
   TProgress = z.infer<MaPipeDef["progressDef"]>
 > {
   private readonly bullMQJob: Job<{ jobParams: P }, O | void>;
   public readonly _bullMQToken?: string;
-  jobParams: P;
-  logger: ReturnType<typeof getLogger>;
-  pipe: ZZPipe<MaPipeDef>;
+  readonly jobParams: P;
+  readonly logger: ReturnType<typeof getLogger>;
+  readonly pipe: ZZPipe<MaPipeDef>;
   // New properties for subscriber tracking
 
   // public async aliveLoop(retVal: O) {
@@ -84,11 +85,11 @@ export class ZZJob<
   // }
   emitOutput: (o: O) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
-  nextInput = async (key?: keyof StreamI) => {
+  nextInput = async (key?: keyof StreamIMap) => {
     return await this._ensureInputStreamFn(key).nextValue();
   };
 
-  inputObservableFor = (key?: keyof StreamI) => {
+  inputObservableFor = (key?: keyof StreamIMap) => {
     return this._ensureInputStreamFn(key).trackedObservable;
   };
 
@@ -107,13 +108,15 @@ export class ZZJob<
   public jobId: string;
   private readonly workerName;
   private readonly inputStreamFnsByKey: Partial<{
-    [K in keyof StreamI]: {
-      nextValue: () => Promise<StreamI[K] | null>;
-      inputPubSubFactory: ZZStream<WrapTerminatorAndDataId<StreamI[K]>>;
+    [K in keyof StreamIMap]: {
+      nextValue: () => Promise<StreamIMap[K] | null>;
+      inputStream: ZZStream<WrapTerminatorAndDataId<StreamIMap[K]>>;
       inputObservableUntracked: Observable<WrapTerminatorAndDataId<
-        StreamI[K]
+        StreamIMap[K]
       > | null>;
-      trackedObservable: Observable<WrapTerminatorAndDataId<StreamI[K]> | null>;
+      trackedObservable: Observable<WrapTerminatorAndDataId<
+        StreamIMap[K]
+      > | null>;
       subscriberCountObservable: Observable<number>;
     };
   }>;
@@ -247,7 +250,9 @@ export class ZZJob<
     };
   }
 
-  private _ensureInputStreamFn<K extends keyof StreamI>(key?: keyof StreamI) {
+  private _ensureInputStreamFn<K extends keyof StreamIMap>(
+    key?: keyof StreamIMap
+  ) {
     if (this.pipe.inputDefs.isSingle) {
       if (key) {
         throw new Error(
@@ -268,7 +273,7 @@ export class ZZJob<
         jobId: this.jobId,
         type: "stream-in",
         key,
-      }) as ZZStream<WrapTerminatorAndDataId<StreamI[K]>>;
+      }) as ZZStream<WrapTerminatorAndDataId<StreamIMap[K]>>;
       const inputObservableUntracked = stream.valueObsrvable.pipe(
         map((x) => (x.terminate ? null : x.data))
       );
@@ -287,7 +292,7 @@ export class ZZJob<
 
       this.inputStreamFnsByKey[key] = {
         nextValue,
-        inputPubSubFactory: stream,
+        inputStream: stream,
         inputObservableUntracked,
         trackedObservable,
         subscriberCountObservable,
@@ -347,7 +352,7 @@ export class ZZJob<
 
         await Promise.all(
           Object.values(this.inputStreamFnsByKey).map(
-            async (x: (typeof this.inputStreamFnsByKey)[keyof StreamI]) => {
+            async (x: (typeof this.inputStreamFnsByKey)[keyof StreamIMap]) => {
               await new Promise<void>((resolve) => {
                 x!.subscriberCountObservable
                   .pipe(takeUntil(x!.inputObservableUntracked))
@@ -401,7 +406,7 @@ export class ZZJob<
   };
 
   public spawnChildJobsToWaitOn = async <CI, CO>(p: {
-    def: PipeDef<P, O, StreamI, TProgress>;
+    def: PipeDef<P, O, StreamIMap, TProgress>;
     jobId: string;
     jobParams: P;
   }) => {
@@ -429,7 +434,7 @@ export class ZZJob<
   };
 
   public spawnJob = async <P, O>(p: {
-    def: PipeDef<P, O, StreamI, TProgress>;
+    def: PipeDef<P, O, StreamIMap, TProgress>;
     jobId: string;
     jobParams: P;
   }) => {
@@ -442,7 +447,7 @@ export class ZZJob<
     jobParams,
     flowProducerOpts,
   }: {
-    def: PipeDef<P, O, StreamI, TProgress>;
+    def: PipeDef<P, O, StreamIMap, TProgress>;
     jobId: string;
     jobParams: P;
     flowProducerOpts?: FlowJob["opts"];
@@ -466,37 +471,40 @@ export class ZZJob<
 
     const jobThat = this;
 
-    let _outFactoriesAndFns: {
-      factory: ZZStream<WrapTerminatorAndDataId<O>>;
+    let _outStreamAndFns: {
+      stream: ZZStream<WrapTerminatorAndDataId<O>>;
       nextValue: any;
     } | null = null;
-    const _getOrCreateOutputPubSubFactory = () => {
-      if (!_outFactoriesAndFns) {
-        const stream = this.pipe.getJobStream<O>({
-          jobId: childJobId,
-          type: "stream-out",
+    const _getOrCreateOutputStream = () => {
+      if (!_outStreamAndFns) {
+        const stream = ZZStream.get({
+          uniqueName: `${getPubSubQueueId({
+            def: childJobDef,
+            jobId: childJobId,
+          })}/output`,
+          def: wrapTerminatorAndDataId(childJobDef.outputDef),
         });
 
         const { nextValue } = createLazyNextValueGenerator(
           stream.valueObsrvable
         );
-        _outFactoriesAndFns = {
-          factory: stream,
+        _outStreamAndFns = {
+          stream: stream,
           nextValue,
         };
       }
 
-      return _outFactoriesAndFns;
+      return _outStreamAndFns;
     };
 
     return {
       get outputObservable() {
-        return _getOrCreateOutputPubSubFactory().factory.valueObsrvable.pipe(
+        return _getOrCreateOutputStream().stream.valueObsrvable.pipe(
           map((x) => (x.terminate ? null : x.data))
         );
       },
       nextOutput: async () => {
-        const r = await _getOrCreateOutputPubSubFactory().nextValue();
+        const r = await _getOrCreateOutputStream().nextValue();
         if (r.terminate) {
           return null;
         } else {
