@@ -1,5 +1,5 @@
 import _ from "lodash";
-import { Worker, Job, FlowProducer } from "bullmq";
+import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { ZZJob, ZZProcessor } from "./ZZJob";
 import { ZZPipe, getMicroworkerQueueByName } from "./ZZPipe";
@@ -111,7 +111,6 @@ export class ZZWorker<
 
     const logger = getLogger(`wkr:${this.workerName}`);
     const mergedWorkerOptions = _.merge({}, workerOptions);
-    const flowProducer = new FlowProducer(mergedWorkerOptions);
 
     this.bullMQWorker = new Worker<{ jobParams: P }, O | undefined, string>(
       `${this.zzEnv.projectId}/${this.workerName}`,
@@ -120,7 +119,6 @@ export class ZZWorker<
           bullMQJob: job,
           bullMQToken: token,
           logger,
-          flowProducer,
           pipe: this.pipe,
           jobParams: job.data.jobParams,
           workerInstanceParams: this.instanceParams,

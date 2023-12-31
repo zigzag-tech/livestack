@@ -1,8 +1,10 @@
+import { zzEnv } from "./../../../express-server/src/zzEnv";
 import { Knex } from "knex";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { RedisOptions } from "ioredis";
 import { Stream } from "stream";
 import { z } from "zod";
+import { ZZStream } from "./ZZStream";
 
 interface EnvParams {
   readonly storageProvider?: IStorageProvider;
@@ -16,6 +18,16 @@ export class ZZEnv implements EnvParams {
   public readonly projectId: string;
   public readonly db: Knex;
   public readonly redisConfig: RedisOptions;
+  private static _zzEnv: ZZEnv;
+
+  static get zzEnv() {
+    return ZZEnv._zzEnv;
+  }
+
+  static applyEnv(env: ZZEnv) {
+    ZZEnv._zzEnv = env;
+    ZZStream.zzEnv = env;
+  }
 
   constructor({ storageProvider, projectId, db, redisConfig }: EnvParams) {
     this.storageProvider = storageProvider;

@@ -1,6 +1,6 @@
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import { PubSubFactory } from "../realtime/mq-pub-sub";
+import { PubSubFactory } from "../realtime/PubSubFactory";
 import { Observable, Subject, map, takeUntil, tap } from "rxjs";
 import { IStorageProvider, getPublicCdnUrl } from "../storage/cloudStorage";
 import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";

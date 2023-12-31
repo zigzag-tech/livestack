@@ -8,9 +8,11 @@ export type InferPipeDef<T extends PipeDef<any, any, any, any>> =
 
 export type InferPipeInputsDef<T extends PipeDef<any, any, any, any>> =
   InferPipeDef<T> extends PipeDef<any, any, infer StreamI, any>
-    ? {
-        [K in keyof StreamI]: StreamI[K];
-      }
+    ? StreamI extends Record<string | number | symbol, any>
+      ? {
+          [K in keyof StreamI]: StreamI[K];
+        }
+      : never
     : never;
 
 export interface PipeDefParams<

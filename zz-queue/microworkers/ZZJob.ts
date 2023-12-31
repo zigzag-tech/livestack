@@ -1,11 +1,10 @@
-import { InferStreamDef } from "./ZZStream";
+import { InferStreamDef, ZZStream } from "./ZZStream";
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
-  PubSubFactory,
   createLazyNextValueGenerator,
   createTrackedObservable,
-} from "../realtime/mq-pub-sub";
+} from "../realtime/PubSubFactory";
 import {
   BehaviorSubject,
   Observable,
@@ -68,10 +67,8 @@ export class ZZJob<
   private readonly bullMQJob: Job<{ jobParams: P }, O | void>;
   public readonly _bullMQToken?: string;
   jobParams: P;
-  inputObservable: Observable<StreamI | null>;
   logger: ReturnType<typeof getLogger>;
   // New properties for subscriber tracking
-  private inputSubscriberCountObservable: Observable<number>;
 
   // public async aliveLoop(retVal: O) {
   //   const redis = new Redis();
@@ -88,7 +85,6 @@ export class ZZJob<
   //   await this.bullMQJob.moveToCompleted(retVal, this._bullMQToken!);
   //   return retVal;
   // }
-  nextInput: <K extends string>() => Promise<StreamI[K] | null>;
   emitOutput: (o: O) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
 
@@ -96,22 +92,28 @@ export class ZZJob<
   baseWorkingRelativePath: string;
 
   storageProvider?: IStorageProvider;
-  flowProducer: FlowProducer;
   pipe: ZZPipe<MaPipeDef>;
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
   public workerInstanceParams: WP extends object ? WP : null =
     null as WP extends object ? WP : null;
-  private inputObservableUntracked: Observable<StreamI | null>;
   public jobId: string;
   private readonly workerName;
+  private readonly pubSubRelatedByKey: {
+    [K in keyof StreamI]: {
+      nextInput: () => Promise<StreamI[K] | null>;
+      inputPubSubFactory: ZZStream<StreamI[K]>;
+      inputObservableUntracked: Observable<StreamI[K] | null>;
+      trackedObservable: Observable<StreamI[K] | null>;
+      subscriberCountObservable: Observable<number>;
+    };
+  };
 
   constructor(p: {
     bullMQJob: Job<{ jobParams: P }, O | undefined, string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
     jobParams: P;
-    flowProducer: FlowProducer;
     storageProvider?: IStorageProvider;
     pipe: ZZPipe<MaPipeDef>;
     workerInstanceParams?: WP;
@@ -149,7 +151,6 @@ export class ZZJob<
       );
       throw err;
     }
-    this.flowProducer = p.flowProducer;
     this.storageProvider = p.storageProvider;
     this.zzEnv = p.pipe.zzEnv;
     this.pipe = p.pipe;
@@ -161,33 +162,40 @@ export class ZZJob<
 
     const tempWorkingDir = getTempPathByJobId(this.baseWorkingRelativePath);
     this.dedicatedTempWorkingDir = tempWorkingDir;
-    const inputPubSubFactory = this.pipe.pubSubFactoryForJob<StreamI>({
-      jobId: this.jobId,
-      type: "input",
-    });
+    this.pubSubRelatedByKey = {} as any;
+    for (const key of Object.keys(this.pipe.inputs) as (keyof StreamI)[]) {
+      const stream = (this.pipe.inputs as any)[key] as ZZStream<
+        StreamI[keyof StreamI]
+      >;
+      const inputObservableUntracked = stream.valueObsrvable.pipe(
+        map((x) => (x.terminate ? null : x.data))
+      );
+
+      const { trackedObservable, subscriberCountObservable } =
+        createTrackedObservable(inputObservableUntracked);
+
+      const { nextValue: nextInput } =
+        createLazyNextValueGenerator(trackedObservable);
+
+      subscriberCountObservable.subscribe((count) => {
+        console.log("count", count);
+        if (count > 0) {
+          setJobReadyForInputsInRedis(this.jobId, true);
+        }
+      });
+
+      this.pubSubRelatedByKey[key] = {
+        nextInput,
+        inputPubSubFactory: stream,
+        inputObservableUntracked,
+        trackedObservable,
+        subscriberCountObservable,
+      };
+    }
+
     const outputPubSubFactory = this.pipe.pubSubFactoryForJob<O>({
       jobId: this.jobId,
       type: "output",
-    });
-
-    this.inputObservableUntracked = inputPubSubFactory.valueObsrvable.pipe(
-      map((x) => (x.terminate ? null : x.data))
-    );
-
-    const { trackedObservable, subscriberCountObservable } =
-      createTrackedObservable(this.inputObservableUntracked);
-
-    const { nextValue } = createLazyNextValueGenerator(trackedObservable);
-
-    this.nextInput = nextValue;
-    this.inputObservable = trackedObservable;
-    this.inputSubscriberCountObservable = subscriberCountObservable;
-
-    this.inputSubscriberCountObservable.subscribe((count) => {
-      console.log("count", count);
-      if (count > 0) {
-        setJobReadyForInputsInRedis(this.jobId, true);
-      }
     });
 
     this.signalOutputEnd = async () => {
@@ -305,15 +313,22 @@ export class ZZJob<
         const processedR = await processor(this);
 
         // wait as long as there are still subscribers
-        await new Promise<void>((resolve) => {
-          this.inputSubscriberCountObservable
-            .pipe(takeUntil(this.inputObservableUntracked))
-            .subscribe((count) => {
-              if (count === 0) {
-                resolve();
-              }
-            });
-        });
+
+        await Promise.all(
+          Object.values(this.pubSubRelatedByKey).map(
+            async (x: (typeof this.pubSubRelatedByKey)[keyof StreamI]) => {
+              await new Promise<void>((resolve) => {
+                x.subscriberCountObservable
+                  .pipe(takeUntil(x.inputObservableUntracked))
+                  .subscribe((count) => {
+                    if (count === 0) {
+                      resolve();
+                    }
+                  });
+              });
+            }
+          )
+        );
 
         if (processedR) {
           await this.emitOutput(processedR);
@@ -418,45 +433,22 @@ export class ZZJob<
       ioType: "init-params",
     });
 
-    // await this.flowProducer.add({
-    //   name: childJobId,
-    //   data: {
-    //     jobParams,
-    //   },
-    //   queueName: `${this.zzEnv.projectId}/${childJobDef.name}`,
-    //   opts: {
-    //     jobId: childJobId,
-    //     ...flowProducerOpts,
-    //   },
-    // });
-
-    // const rec = await ensureJobAndInitStatusRec({
-    //   projectId: this.zzEnv.projectId,
-    //   dbConn: this.zzEnv.db,
-    //   opName: childJobDef.name,
-    //   jobId: childJobId,
-    //   jobParams,
-    // });
-
     const jobThat = this;
 
     let _outFactoriesAndFns: {
-      factory: PubSubFactory<WrapTerminatorAndDataId<O>>;
+      factory: ZZStream<WrapTerminatorAndDataId<O>>;
       nextValue: any;
     } | null = null;
     const _getOrCreateOutputPubSubFactory = () => {
       if (!_outFactoriesAndFns) {
-        const factory = new PubSubFactory<WrapTerminatorAndDataId<O>>(
-          "output",
-          {
-            projectId: jobThat.zzEnv.projectId,
-          },
-          jobThat.zzEnv.redisConfig,
-          getPubSubQueueId({
+        const factory = ZZStream.get({
+          uniqueName: `${getPubSubQueueId({
             def: childJobDef,
             jobId: childJobId,
-          })
-        );
+          })}/output`,
+          def: childJobDef.output.def,
+        });
+
         const { nextValue } = createLazyNextValueGenerator(
           factory.valueObsrvable
         );
@@ -534,4 +526,17 @@ export async function setJobReadyForInputsInRedis(
   } catch (error) {
     console.error("Error setJobReadyForInputsInRedis:", error);
   }
+}
+
+type StringKeysOnly<T> = {
+  [K in keyof T]: T[K];
+};
+
+function transformValues<T extends Record<string, any>, R>(
+  obj: T,
+  transformFn: <K extends keyof T>(k: K, value: T[K]) => R
+) {
+  return Object.fromEntries(
+    Object.entries(obj).map(([key, value]) => [key, transformFn(key, value)])
+  ) as { [K in keyof T]: R };
 }

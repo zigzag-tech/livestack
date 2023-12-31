@@ -3,7 +3,7 @@ import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
-import {ZZWorkerDef} from './ZZWorker';
+import { ZZWorkerDef } from "./ZZWorker";
 
 import {
   ensureJobAndInitStatusRec,
@@ -18,7 +18,7 @@ import {
   PipeDef,
   PipeDefParams,
 } from "./PipeDef";
-import { PubSubFactoryWithNextValueGenerator } from "../realtime/mq-pub-sub";
+import { PubSubFactoryWithNextValueGenerator } from "../realtime/PubSubFactory";
 import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import { InferStreamDef } from "./ZZStream";
