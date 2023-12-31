@@ -86,11 +86,11 @@ export class ZZJob<
   emitOutput: (o: O) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
   nextInput = async (key?: keyof StreamIMap) => {
-    setJobReadyForInputsInRedis({
+    await setJobReadyForInputsInRedis({
       redisConfig: this.zzEnv.redisConfig,
       jobId: this.jobId,
       isReady: true,
-      key: String(key) || "default",
+      key: key ? String(key) : "default",
     });
     return await this._ensureInputStreamFn(key).nextValue();
   };
@@ -287,7 +287,9 @@ export class ZZJob<
       const { trackedObservable, subscriberCountObservable } =
         createTrackedObservable(inputObservableUntracked);
 
-      const { nextValue } = createLazyNextValueGenerator(trackedObservable);
+      const { nextValue } = createLazyNextValueGenerator(
+        inputObservableUntracked
+      );
 
       subscriberCountObservable.subscribe((count) => {
         // console.log("count", count);
@@ -573,6 +575,9 @@ export async function setJobReadyForInputsInRedis({
   key: string;
   isReady: boolean;
 }) {
+  if (!key) {
+    throw new Error("key is required");
+  }
   try {
     const redis = new Redis(redisConfig);
     await redis.set(
