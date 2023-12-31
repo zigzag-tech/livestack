@@ -1,14 +1,16 @@
-import { ZodType, z } from "zod";
+import { ZodType } from "zod";
 import Redis from "ioredis";
 import { ProjectConfig } from "../config-factory/config-defs";
 import { Observable } from "rxjs";
 import { v4 } from "uuid";
 import { ZZEnv } from "./ZZEnv";
+import { WrapTerminatorAndDataId,wrapTerminatorAndDataId } from "./ZZPipe";
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
 export type InferStreamDef<T> = T extends ZZStream<infer P> ? P : never;
 
 export class ZZStream<T> {
+  public readonly wrappedDef: ZodType<WrapTerminatorAndDataId<T>>;
   public readonly def: ZodType<T>;
   public readonly uniqueName: string;
   private static _projectConfig: ProjectConfig;
@@ -39,7 +41,6 @@ export class ZZStream<T> {
   }): ZZStream<T> {
     if (ZZStream.globalRegistry[uniqueName]) {
       const existing = ZZStream.globalRegistry[uniqueName];
-      z.coerce;
       // check if types match
       if (existing.def !== def) {
         throw new Error(
@@ -62,6 +63,7 @@ export class ZZStream<T> {
     def: ZodType<T>;
   }) {
     this.def = def;
+    this.wrappedDef = wrapTerminatorAndDataId(def);
     this.uniqueName = uniqueName;
   }
 
@@ -84,28 +86,16 @@ export class ZZStream<T> {
     return this._valueObservable;
   }
 
-  public async emitValue(o: T) {
-    this.pubToJob({
-      message: o,
-      messageId: v4(),
-    });
+  public async emitValue(o: WrapTerminatorAndDataId<T>) {
+    this.pubToJob(o);
   }
 
   get valueObsrvable() {
     return this.ensureValueObservable();
   }
 
-  public async pubToJob({
-    message,
-    messageId,
-  }: {
-    message: T;
-    messageId: string;
-  }) {
-    return await this._pub({
-      message,
-      messageId,
-    });
+  public async pubToJob<T>(m: WrapTerminatorAndDataId<T>) {
+    return await this._pub(m);
   }
 
   public subForJob({ processor }: { processor: (message: T) => void }) {
@@ -133,23 +123,14 @@ export class ZZStream<T> {
     return { channelId: id, clients: PUBSUB_BY_ID[id] };
   }
 
-  private async _pub<T>({
-    message,
-    messageId,
-  }: {
-    message: T;
-    messageId: string;
-  }) {
+  private async _pub<T>(msg: WrapTerminatorAndDataId<T>) {
     const { channelId, clients } = await this.getPubSubClientsById({
       queueId: this.uniqueName,
     });
 
     // console.log("pubbing", channelId);
 
-    const addedMsg = await clients.pub.publish(
-      channelId,
-      customStringify({ message, messageId })
-    );
+    const addedMsg = await clients.pub.publish(channelId, customStringify(msg));
     return addedMsg;
   }
 

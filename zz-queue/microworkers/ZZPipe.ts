@@ -1,3 +1,4 @@
+import { queue } from "./../../../node_modules/rxjs/src/internal/scheduler/queue";
 import { Job, JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
@@ -55,37 +56,6 @@ export class ZZPipe<
     string,
     PubSubFactoryWithNextValueGenerator<unknown>
   >();
-
-  public pubSubFactoryForJob = <T>({
-    jobId,
-    type,
-  }: {
-    jobId: string;
-    type: "input" | "output";
-  }) => {
-    if (this.pubSubCache.has(`${jobId}/${type}`)) {
-      return this.pubSubCache.get(
-        `${jobId}/${type}`
-      )! as PubSubFactoryWithNextValueGenerator<WrapTerminatorAndDataId<T>>;
-    } else {
-      const pubSub = new PubSubFactoryWithNextValueGenerator<
-        WrapTerminatorAndDataId<T>
-      >(
-        type,
-        {
-          projectId: this.zzEnv.projectId,
-        },
-        this.zzEnv.redisConfig,
-        getPubSubQueueId({
-          def: this,
-          jobId,
-        })
-      );
-      this.pubSubCache.set(`${jobId}/${type}`, pubSub);
-
-      return pubSub;
-    }
-  };
 
   constructor({
     zzEnv,
@@ -239,27 +209,22 @@ export class ZZPipe<
       this.logger.error(`StreamInput data is invalid: ${JSON.stringify(err)}`);
       throw err;
     }
-    const pubSub = this.pubSubFactoryForJob<StreamI>({ jobId, type: "input" });
+    const pubSub = this.inputs[key];
     const messageId = v4();
 
     await pubSub.pubToJob({
-      messageId,
-      message: {
-        data,
-        terminate: false,
-        __zz_job_data_id__: messageId,
-      },
+      data,
+      terminate: false,
+      __zz_datapoint_id__: messageId,
     });
   }
 
   async terminateJobInput(jobId: string) {
-    const pubSub = this.pubSubFactoryForJob({ jobId, type: "input" });
+    const pubSub = this.inputs["default"];
     const messageId = v4();
     await pubSub.pubToJob({
-      messageId,
-      message: {
-        terminate: true,
-      },
+      terminate: true,
+      __zz_datapoint_id__: messageId,
     });
   }
 
@@ -304,6 +269,50 @@ export class ZZPipe<
     });
   }
 
+  public pubSubFactoryForJob = <T>(
+    p: {
+      jobId: string;
+    } & (
+      | {
+          type: "input";
+          key?: string;
+        }
+      | {
+          type: "output";
+        }
+    )
+  ) => {
+    const { jobId, type } = p;
+    const queueIdPrefix = getPubSubQueueId({
+      def: this,
+      jobId,
+    });
+    const queueId =
+      type === "input"
+        ? `${queueIdPrefix}::${type}/${p.key || "default"}`
+        : `${queueIdPrefix}::${type}`;
+
+    let def;
+
+    if (type === "input") {
+      def = this.inputs[p.key || "default"].def;
+    } else {
+      def = this.output.def;
+    }
+    if (this.pubSubCache.has(`${jobId}/${type}`)) {
+      return this.pubSubCache.get(
+        queueId
+      )! as PubSubFactoryWithNextValueGenerator<WrapTerminatorAndDataId<T>>;
+    } else {
+      const pubSub = new PubSubFactoryWithNextValueGenerator<
+        WrapTerminatorAndDataId<T>
+      >({ queueId, def });
+      this.pubSubCache.set(`${jobId}/${type}`, pubSub);
+
+      return pubSub;
+    }
+  };
+
   public async subForJobOutput({
     jobId,
     onMessage,
@@ -329,7 +338,7 @@ export class ZZPipe<
           onMessage({
             data: msg.data,
             terminate: false,
-            messageId: msg.__zz_job_data_id__,
+            messageId: msg.__zz_datapoint_id__,
           });
         }
       },
@@ -454,15 +463,31 @@ function createAndReturnQueue<
   return funcs;
 }
 
-export type WrapTerminatorAndDataId<T> =
+export type WrapTerminatorAndDataId<T> = {
+  __zz_datapoint_id__: string;
+} & (
   | {
       data: T;
-      __zz_job_data_id__: string;
+      __zz_datapoint_id__: string;
       terminate: false;
     }
   | {
       terminate: true;
-    };
+    }
+);
+
+export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
+  return z.union([
+    z.object({
+      data: t,
+      __zz_datapoint_id__: z.string(),
+      terminate: z.literal(false),
+    }),
+    z.object({
+      terminate: z.literal(true),
+    }),
+  ]) as z.ZodType<WrapTerminatorAndDataId<T>>;
+}
 
 export function getPubSubQueueId({
   def,

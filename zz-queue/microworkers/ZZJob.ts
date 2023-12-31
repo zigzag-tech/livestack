@@ -1,3 +1,4 @@
+import { v4 } from "uuid";
 import { InferStreamDef, ZZStream } from "./ZZStream";
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
@@ -87,6 +88,9 @@ export class ZZJob<
   // }
   emitOutput: (o: O) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
+  nextInput =  async (key: keyof StreamI = "default") => {
+    return await this.pubSubRelatedByKey[key].nextValue();
+  };
 
   dedicatedTempWorkingDir: string;
   baseWorkingRelativePath: string;
@@ -101,7 +105,7 @@ export class ZZJob<
   private readonly workerName;
   private readonly pubSubRelatedByKey: {
     [K in keyof StreamI]: {
-      nextInput: () => Promise<StreamI[K] | null>;
+      nextValue: () => Promise<StreamI[K] | null>;
       inputPubSubFactory: ZZStream<StreamI[K]>;
       inputObservableUntracked: Observable<StreamI[K] | null>;
       trackedObservable: Observable<StreamI[K] | null>;
@@ -174,8 +178,7 @@ export class ZZJob<
       const { trackedObservable, subscriberCountObservable } =
         createTrackedObservable(inputObservableUntracked);
 
-      const { nextValue: nextInput } =
-        createLazyNextValueGenerator(trackedObservable);
+      const { nextValue } = createLazyNextValueGenerator(trackedObservable);
 
       subscriberCountObservable.subscribe((count) => {
         console.log("count", count);
@@ -185,7 +188,7 @@ export class ZZJob<
       });
 
       this.pubSubRelatedByKey[key] = {
-        nextInput,
+        nextValue,
         inputPubSubFactory: stream,
         inputObservableUntracked,
         trackedObservable,
@@ -200,6 +203,7 @@ export class ZZJob<
 
     this.signalOutputEnd = async () => {
       await outputPubSubFactory.emitValue({
+        __zz_datapoint_id__: v4(),
         terminate: true,
       });
     };
@@ -259,7 +263,7 @@ export class ZZJob<
       this.bullMQJob.updateProgress(this._dummyProgressCount++);
       await outputPubSubFactory.emitValue({
         data: o,
-        __zz_job_data_id__: jobDataId,
+        __zz_datapoint_id__: jobDataId,
         terminate: false,
       });
     };
@@ -369,6 +373,8 @@ export class ZZJob<
     }
   };
 
+  
+
   public spawnChildJobsToWaitOn = async <CI, CO>(p: {
     def: PipeDef<P, O, StreamI, TProgress>;
     jobId: string;
@@ -446,7 +452,7 @@ export class ZZJob<
             def: childJobDef,
             jobId: childJobId,
           })}/output`,
-          def: childJobDef.output.def,
+          def: childJobDef.output.wrappedDef,
         });
 
         const { nextValue } = createLazyNextValueGenerator(
