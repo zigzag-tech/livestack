@@ -174,13 +174,13 @@ export class ZZJob<
     this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
 
-    const outputPubSubFactory = this.pipe.getJobStream<O>({
+    const outputStream = this.pipe.getJobStream<O>({
       jobId: this.jobId,
       type: "stream-out",
     });
 
     this.signalOutputEnd = async () => {
-      await outputPubSubFactory.emitValue({
+      await outputStream.emitValue({
         __zz_datapoint_id__: v4(),
         terminate: true,
       });
@@ -239,7 +239,7 @@ export class ZZJob<
       });
       // update progress to prevent job from being stalling
       this.bullMQJob.updateProgress(this._dummyProgressCount++);
-      await outputPubSubFactory.emitValue({
+      await outputStream.emitValue({
         data: o,
         __zz_datapoint_id__: jobDataId,
         terminate: false,
@@ -472,19 +472,16 @@ export class ZZJob<
     } | null = null;
     const _getOrCreateOutputPubSubFactory = () => {
       if (!_outFactoriesAndFns) {
-        const factory = ZZStream.get({
-          uniqueName: `${getPubSubQueueId({
-            def: childJobDef,
-            jobId: childJobId,
-          })}/output`,
-          def: wrapTerminatorAndDataId(childJobDef.outputDef),
+        const stream = this.pipe.getJobStream<O>({
+          jobId: childJobId,
+          type: "stream-out",
         });
 
         const { nextValue } = createLazyNextValueGenerator(
-          factory.valueObsrvable
+          stream.valueObsrvable
         );
         _outFactoriesAndFns = {
-          factory,
+          factory: stream,
           nextValue,
         };
       }

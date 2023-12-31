@@ -73,7 +73,7 @@ export class ZZStream<T> {
   private ensureValueObservable() {
     if (!this._valueObservable) {
       this._valueObservable = new Observable<T>((subscriber) => {
-        const { unsub } = this.subForJob({
+        const { unsub } = this.sub({
           processor: async (v) => {
             subscriber.next(v);
           },
@@ -99,12 +99,6 @@ export class ZZStream<T> {
 
   public async pubToJob<T>(m: WrapTerminatorAndDataId<T>) {
     return await this._pub(m);
-  }
-
-  public subForJob({ processor }: { processor: (message: T) => void }) {
-    return this._sub({
-      processor,
-    });
   }
 
   private getPubSubClientsById({ queueId }: { queueId: string }) {
@@ -137,7 +131,7 @@ export class ZZStream<T> {
     return addedMsg;
   }
 
-  private _sub<T>({ processor }: { processor: (message: T) => void }) {
+  public sub({ processor }: { processor: (message: T) => void }) {
     const { clients, channelId } = this.getPubSubClientsById({
       queueId: this.uniqueName,
     });
@@ -145,7 +139,7 @@ export class ZZStream<T> {
     // console.log("sub to", channelId);
 
     clients.sub.on("message", async (channel, message) => {
-      const { message: msg, messageId } = customParse(message);
+      const msg = customParse(message);
       await processor(msg);
     });
 
@@ -175,8 +169,9 @@ function customParse(json: string): any {
   function reviver(key: string, value: any): any {
     if (value && value.type === "Buffer") {
       return Buffer.from(value.data, "base64");
+    } else {
+      return value;
     }
-    return value;
   }
   return JSON.parse(json, reviver);
 }

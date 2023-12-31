@@ -239,12 +239,15 @@ export class ZZPipe<
         this.zzEnv.redisConfig,
         jobId
       );
-      console.log(isReady);
+      console.log("isReady", isReady);
     }
 
     return {
-      sendInputToJob: ({ data }: { data: StreamIMap }) =>
-        this.sendInputToJob({ jobId, data }),
+      sendInputToJob: ({
+        data,
+      }: {
+        data: StreamI | StreamIMap[keyof StreamIMap];
+      }) => this.sendInputToJob({ jobId, data }),
       terminateJobInput: () => this.terminateJobInput(jobId),
     };
   }
@@ -316,7 +319,7 @@ export class ZZPipe<
       )! as PubSubFactoryWithNextValueGenerator<WrapTerminatorAndDataId<T>>;
     } else {
       const stream = new PubSubFactoryWithNextValueGenerator({ queueId, def });
-      this.pubSubCache.set(`${jobId}/${type}`, stream);
+      this.pubSubCache.set(queueId, stream);
 
       return stream as PubSubFactoryWithNextValueGenerator<
         WrapTerminatorAndDataId<T>
@@ -341,7 +344,7 @@ export class ZZPipe<
       jobId,
       type: "stream-out",
     });
-    return await stream.subForJob({
+    return await stream.sub({
       processor: (msg) => {
         if (msg.terminate) {
           onMessage(msg);
