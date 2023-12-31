@@ -44,7 +44,7 @@ import { ZZEnv } from "./ZZEnv";
 
 export type ZZProcessor<
   MaPipeDef extends PipeDef<any, any, any, any>,
-  WP extends object
+  WP extends object = {}
 > = Parameters<ZZJob<MaPipeDef, WP>["beginProcessing"]>[0];
 
 export type ZZProcessorParams<

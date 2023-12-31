@@ -310,7 +310,7 @@ export class ZZPipe<
       throw new Error(`Invalid type ${type}`);
     }
 
-    if (this.pubSubCache.has(`${jobId}/${type}`)) {
+    if (this.pubSubCache.has(queueId)) {
       return this.pubSubCache.get(
         queueId
       )! as PubSubFactoryWithNextValueGenerator<WrapTerminatorAndDataId<T>>;
