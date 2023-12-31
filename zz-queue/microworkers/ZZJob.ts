@@ -1,6 +1,6 @@
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 import { v4 } from "uuid";
-import {  ZZStream } from "./ZZStream";
+import { ZZStream } from "./ZZStream";
 import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
@@ -64,6 +64,7 @@ export class ZZJob<
   public readonly _bullMQToken?: string;
   jobParams: P;
   logger: ReturnType<typeof getLogger>;
+  pipe: ZZPipe<MaPipeDef>;
   // New properties for subscriber tracking
 
   // public async aliveLoop(retVal: O) {
@@ -83,15 +84,40 @@ export class ZZJob<
   // }
   emitOutput: (o: O) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
-  nextInput = async (key: keyof StreamI = "default") => {
+  nextInput = async (key?: keyof StreamI) => {
+    if (!key) {
+      if (!this.pipe.inputDefs["default"]) {
+        throw new Error(
+          " input key is provided. There are multiple input streams. Please provide a key."
+        );
+      } else {
+        key = "default";
+      }
+    }
     return await this._ensureInputStreamFn(key).nextValue();
   };
+
+   inputObservableFor = (key?: keyof StreamI) => {
+    if (!key) {
+      if (!this.pipe.inputDefs["default"]) {
+        throw new Error(
+          " input key is provided. There are multiple input streams. Please provide a key."
+        );
+      } else {
+        key = "default";
+      }
+    }
+    return this._ensureInputStreamFn(key).trackedObservable;
+  }
+
+  get inputObservable() {
+    return this.inputObservableFor();
+  }
 
   dedicatedTempWorkingDir: string;
   baseWorkingRelativePath: string;
 
   storageProvider?: IStorageProvider;
-  pipe: ZZPipe<MaPipeDef>;
   readonly zzEnv: ZZEnv;
   private _dummyProgressCount = 0;
   public workerInstanceParams: WP extends object ? WP : null =
@@ -102,7 +128,9 @@ export class ZZJob<
     [K in keyof StreamI]: {
       nextValue: () => Promise<StreamI[K] | null>;
       inputPubSubFactory: ZZStream<WrapTerminatorAndDataId<StreamI[K]>>;
-      inputObservableUntracked: Observable<WrapTerminatorAndDataId<StreamI[K]> | null>;
+      inputObservableUntracked: Observable<WrapTerminatorAndDataId<
+        StreamI[K]
+      > | null>;
       trackedObservable: Observable<WrapTerminatorAndDataId<StreamI[K]> | null>;
       subscriberCountObservable: Observable<number>;
     };
@@ -124,6 +152,7 @@ export class ZZJob<
     this._bullMQToken = p.bullMQToken;
     this.logger = p.logger;
     this.workerName = p.workerName;
+    this.pipe = p.pipe;
 
     try {
       this.jobParams = p.pipe.jobParamsDef.parse(p.jobParams);
@@ -236,13 +265,13 @@ export class ZZJob<
     };
   }
 
-  private _ensureInputStreamFn<K extends keyof StreamI >(key: keyof StreamI) {
+  private _ensureInputStreamFn<K extends keyof StreamI>(key: keyof StreamI) {
     if (!this.inputStreamFnsByKey[key]) {
       const stream = this.pipe.getJobStream({
         jobId: this.jobId,
         type: "stream-in",
         key,
-      }) as ZZStream<WrapTerminatorAndDataId<StreamI[K]>>; 
+      }) as ZZStream<WrapTerminatorAndDataId<StreamI[K]>>;
       const inputObservableUntracked = stream.valueObsrvable.pipe(
         map((x) => (x.terminate ? null : x.data))
       );
