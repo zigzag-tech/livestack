@@ -1,5 +1,5 @@
 import { ZZPipe } from "../microworkers/ZZPipe";
-import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
+import { PipeDef, ZZEnv } from "../microworkers/PipeDef";
 import { z } from "zod";
 
 export class RunpodServerlessPipe<P extends object, O> extends ZZPipe<

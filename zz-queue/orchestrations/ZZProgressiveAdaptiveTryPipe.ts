@@ -1,4 +1,4 @@
-import { PipeDef, ZZEnv } from "../microworkers/PipeRegistry";
+import { PipeDef, ZZEnv } from "../microworkers/PipeDef";
 import { ZZPipe } from "../microworkers/ZZPipe";
 import { z } from "zod";
 

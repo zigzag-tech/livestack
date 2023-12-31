@@ -1,10 +1,13 @@
 import _ from "lodash";
 import { Worker, Job, FlowProducer } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import { IStorageProvider } from "../storage/cloudStorage";
 import { ZZJob, ZZProcessor } from "./ZZJob";
 import { ZZPipe, getMicroworkerQueueByName } from "./ZZPipe";
-import { PipeDef, ZZEnv } from "./PipeRegistry";
+import { InferPipeDef, PipeDef } from "./PipeDef";
+import { ZZEnv } from "./ZZEnv";
+import { IStorageProvider } from "../storage/cloudStorage";
+import { z } from "zod";
+import { InferStreamDef } from "./ZZStream";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
@@ -12,14 +15,16 @@ type IWorkerUtilFuncs<I, O> = ReturnType<
 >;
 
 export class ZZWorker<
-  P,
-  O,
-  StreamI = never,
-  WP extends object = never,
-  TProgress = never
+  MaPipeDef extends PipeDef<any, any, any, any>,
+  WP extends object,
+  P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
+  O extends InferStreamDef<InferPipeDef<MaPipeDef>["output"]> = InferStreamDef<
+    InferPipeDef<MaPipeDef>["output"]
+  >
 > {
-  public readonly pipe: ZZPipe<P, O, StreamI, WP, TProgress>;
+  public readonly pipe: ZZPipe<MaPipeDef>;
   protected readonly zzEnv: ZZEnv;
+  protected readonly storageProvider?: IStorageProvider;
 
   public readonly bullMQWorker: Worker<
     {
@@ -30,8 +35,8 @@ export class ZZWorker<
   protected color?: string;
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
-  public readonly def: PipeDef<P, O, StreamI, WP, TProgress>;
-  private readonly instanceParams: WP;
+  public readonly instanceParams: WP;
+  public readonly workerName: string;
 
   constructor({
     pipe,
@@ -40,17 +45,18 @@ export class ZZWorker<
     concurrency = 3,
     processor,
     instanceParams,
+    workerName,
   }: {
     zzEnv: ZZEnv;
     color?: string;
     concurrency?: number;
-    pipe: ZZPipe<P, O, StreamI, WP, TProgress>;
-    processor: ZZProcessor<P, O, StreamI, WP, TProgress>;
+    pipe: ZZPipe<MaPipeDef>;
+    processor: ZZProcessor<MaPipeDef, WP>;
     instanceParams: WP;
+    workerName?: string;
   }) {
     this.pipe = pipe;
     this.zzEnv = zzEnv;
-    this.def = pipe.def;
     this.instanceParams = instanceParams;
 
     const workerOptions = {
@@ -61,22 +67,23 @@ export class ZZWorker<
     this.color = color;
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
-      queueNameOnly: `${this.def.name}`,
+      queueNameOnly: `${this.pipe.name}`,
       queueOptions: workerOptions,
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
     });
 
     this._rawQueue = queueFuncs._rawQueue;
+    this.workerName = workerName || "wkr:" + this.pipe.name;
 
-    const logger = getLogger(`wkr:${this.def.name}`, this.color);
+    const logger = getLogger(`wkr:${this.workerName}`, this.color);
     const mergedWorkerOptions = _.merge({}, workerOptions);
     const flowProducer = new FlowProducer(mergedWorkerOptions);
 
     this.bullMQWorker = new Worker<{ jobParams: P }, O | undefined, string>(
-      `${this.zzEnv.projectId}/${this.def.name}`,
+      `${this.zzEnv.projectId}/${this.workerName}`,
       async (job, token) => {
-        const zzJ = new ZZJob<P, O, StreamI, WP, TProgress>({
+        const zzJ = new ZZJob<MaPipeDef, WP>({
           bullMQJob: job,
           bullMQToken: token,
           logger,
@@ -85,6 +92,7 @@ export class ZZWorker<
           jobParams: job.data.jobParams,
           workerInstanceParams: this.instanceParams,
           storageProvider: this.zzEnv.storageProvider,
+          workerName: this.workerName,
         });
 
         return await zzJ.beginProcessing(processor.bind(zzJ));

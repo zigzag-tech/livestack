@@ -1,8 +1,6 @@
 import { Job, JobsOptions, Queue, WorkerOptions, QueueEvents } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
-import { IStorageProvider } from "../storage/cloudStorage";
-import { ZZProcessor } from "./ZZJob";
 import { ZZWorker } from "./ZZWorker";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
@@ -14,9 +12,17 @@ import {
 } from "../db/knexConn";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
-import { PipeDef, ZZEnv } from "./PipeRegistry";
+import {
+  InferPipeDef,
+  InferPipeInputsDef,
+  PipeDef,
+  PipeDefParams,
+} from "./PipeDef";
 import { PubSubFactoryWithNextValueGenerator } from "../realtime/mq-pub-sub";
 import { z } from "zod";
+import { ZZEnv } from "./ZZEnv";
+import { InferStreamDef } from "./ZZStream";
+import { ZZProcessor } from "./ZZJob";
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
@@ -28,35 +34,35 @@ const queueMapByProjectIdAndQueueName = new Map<
 >();
 
 export class ZZPipe<
-  P,
-  O,
-  StreamI = never,
-  WP extends object = {},
-  TProgress = never
-> implements IWorkerUtilFuncs<P, O>
+    MaPipeDef extends PipeDef<any, any, any, any>,
+    P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
+    O extends InferStreamDef<
+      InferPipeDef<MaPipeDef>["output"]
+    > = InferStreamDef<InferPipeDef<MaPipeDef>["output"]>,
+    StreamI extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
+    TProgress = z.infer<InferPipeDef<MaPipeDef>["progressDef"]>
+  >
+  extends PipeDef<P, O, StreamI, TProgress>
+  implements IWorkerUtilFuncs<P, O>
 {
-  public def: PipeDef<P, O, StreamI, WP, TProgress>;
   public readonly zzEnv: ZZEnv;
   protected readonly queueOptions: WorkerOptions;
-  protected readonly storageProvider?: IStorageProvider;
 
   protected color?: string;
   protected logger: ReturnType<typeof getLogger>;
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
-  // dummy processor
-  private processor: ZZProcessor<P, O, StreamI, WP, TProgress> = async (
-    job
-  ) => {
-    throw new Error(`Processor for pipe ${this.def.name} not set!`);
-  };
 
-  public async startWorker(p?: { concurrency?: number; instanceParams?: WP }) {
+  public async startWorker<WP extends object>(p: {
+    concurrency?: number;
+    instanceParams?: WP;
+    processor: ZZProcessor<MaPipeDef, WP>;
+  }) {
     const { concurrency, instanceParams } = p || {};
 
-    const worker = new ZZWorker<P, O, StreamI, WP, TProgress>({
+    const worker = new ZZWorker<MaPipeDef, WP>({
       zzEnv: this.zzEnv,
-      processor: this.processor,
+      processor: p?.processor,
       color: this.color,
       pipe: this,
       concurrency,
@@ -94,7 +100,7 @@ export class ZZPipe<
         },
         this.zzEnv.redisConfig,
         getPubSubQueueId({
-          def: this.def,
+          def: this,
           jobId,
         })
       );
@@ -106,29 +112,36 @@ export class ZZPipe<
 
   constructor({
     zzEnv,
-    def,
+    name,
+    jobParamsDef,
+    output,
+    inputs,
+    input,
+    progressDef,
     color,
-    processor,
   }: {
     zzEnv: ZZEnv;
-    def: PipeDef<P, O, StreamI, WP, TProgress>;
     color?: string;
     concurrency?: number;
-    processor?: ZZProcessor<P, O, StreamI, WP, TProgress>;
-  }) {
-    this.def = def;
-    if (processor) {
-      this.processor = processor;
-    }
+  } & PipeDefParams<P, O, StreamI, TProgress>) {
+    super({
+      name,
+      jobParamsDef,
+      output,
+      inputs,
+      input,
+      progressDef,
+    });
+
     this.queueOptions = {
       connection: zzEnv.redisConfig,
     };
     this.zzEnv = zzEnv;
     this.color = color;
-    this.logger = getLogger(`pipe:${this.def.name}`, this.color);
+    this.logger = getLogger(`pipe:${this.name}`, this.color);
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
-      queueNameOnly: `${this.def.name}`,
+      queueNameOnly: `${this.name}`,
       queueOptions: this.queueOptions,
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
@@ -145,7 +158,7 @@ export class ZZPipe<
 
   public async getJobRec(jobId: string) {
     return await getJobRec({
-      opName: this.def.name,
+      opName: this.name,
       projectId: this.zzEnv.projectId,
       jobId,
       dbConn: this.zzEnv.db,
@@ -172,7 +185,7 @@ export class ZZPipe<
     limit?: number;
   }) {
     const rec = await getJobDataAndIoEvents<U>({
-      opName: this.def.name,
+      opName: this.name,
       projectId: this.zzEnv.projectId,
       jobId,
       dbConn: this.zzEnv.db,
@@ -192,7 +205,7 @@ export class ZZPipe<
     jobParams: P;
   }): Promise<O[]> {
     if (!jobId) {
-      jobId = `${this.def.name}-${v4()}`;
+      jobId = `${this.name}-${v4()}`;
     }
 
     this.logger.info(
@@ -238,7 +251,7 @@ export class ZZPipe<
 
   async sendInputToJob({ jobId, data }: { jobId: string; data: StreamI }) {
     try {
-      data = this.def.streamInput.parse(data);
+      data = this.streamInput.parse(data);
     } catch (err) {
       this.logger.error(`StreamInput data is invalid: ${JSON.stringify(err)}`);
       throw err;
@@ -381,7 +394,7 @@ export class ZZPipe<
 
     await ensureJobAndInitStatusRec({
       projectId: this.zzEnv.projectId,
-      opName: this.def.name,
+      opName: this.name,
       jobId,
       dbConn: this.zzEnv.db,
       jobParams: jobParams,
@@ -472,7 +485,7 @@ export function getPubSubQueueId({
   def,
   jobId,
 }: {
-  def: PipeDef<unknown, unknown, unknown, any, unknown>;
+  def: PipeDef<unknown, unknown, any, unknown>;
   jobId: string;
 }) {
   const queueId = def.name + "::" + jobId;

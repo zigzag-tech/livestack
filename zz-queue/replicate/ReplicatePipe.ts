@@ -1,6 +1,6 @@
 import Replicate from "replicate";
-import { ZZEnv } from "../microworkers/PipeRegistry";
-import { PipeDef } from "../microworkers/PipeRegistry";
+import { ZZEnv } from "../microworkers/PipeDef";
+import { PipeDef } from "../microworkers/PipeDef";
 import { ZZPipe } from "../microworkers/ZZPipe";
 if (!process.env.REPLICATE_API_TOKEN) {
   throw new Error("REPLICATE_API_TOKEN not found");
