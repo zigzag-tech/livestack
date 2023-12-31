@@ -6,41 +6,55 @@ export type InferPipeDef<T extends PipeDef<any, any, any, any>> =
     : never;
 
 export type InferPipeInputsDef<T extends PipeDef<any, any, any, any>> =
-  InferPipeDef<T> extends PipeDef<any, any, infer StreamI, any>
-    ? StreamI extends Record<string | number | symbol, any>
+  InferPipeDef<T> extends PipeDef<any, any, infer StreamIMap, any>
+    ? StreamIMap extends Record<string | number | symbol, any>
       ? {
-          [K in keyof StreamI]: StreamI[K];
+          [K in keyof StreamIMap]: StreamIMap[K];
         }
       : never
+    : never;
+
+    export type InferPipeInputDef<T extends PipeDef<any, any, any, any>> =
+  InferPipeDef<T> extends PipeDef<any, any, infer StreamI, any>
+    ? StreamI
     : never;
 
 export interface PipeDefParams<
   P,
   O,
-  StreamI extends Record<string | number | symbol, any>,
+  StreamIMap extends Record<string | number | symbol, any>,
+  StreamI,
   TProgress
 > {
   name: string;
   jobParamsDef: z.ZodType<P>;
   outputDef: z.ZodType<O>;
-  inputDefs?: {
-    [K in keyof StreamI]: z.ZodType<StreamI[K]>;
-  };
-  inputDef?: z.ZodType<StreamI[keyof StreamI]>;
+  inputDefs?: StreamIMap;
+  inputDef?: z.ZodType<StreamI>;
   progressDef?: z.ZodType<TProgress>;
 }
 
 export class PipeDef<
   P,
   O,
-  StreamI extends Record<string | number | symbol, any> = never,
+  StreamIMap extends Record<string | number | symbol, any> = never,
+  StreamI = never,
   TProgress = never
 > {
   readonly name: string;
   readonly jobParamsDef: z.ZodType<P>;
-  readonly inputDefs: {
-    [K in keyof StreamI]: z.ZodType<StreamI[K]>;
-  };
+  public readonly inputDefs:
+    | {
+        isSingle: true;
+        def: z.ZodType<StreamI>;
+      }
+    | {
+        isSingle: false;
+        defs: {
+          [key in keyof StreamIMap]: z.ZodType<StreamIMap[key]>;
+        };
+      };
+
   readonly outputDef: z.ZodType<O>;
 
   // readonly output: ZZStream<O>;
@@ -56,17 +70,19 @@ export class PipeDef<
     inputDefs,
     inputDef,
     progressDef,
-  }: PipeDefParams<P, O, StreamI, TProgress>) {
+  }: PipeDefParams<P, O, StreamIMap, StreamI, TProgress>) {
     this.name = name;
     this.jobParamsDef = jobParamsDef;
     this.outputDef = outputDef;
-    if (inputDefs) {
-      this.inputDefs = inputDefs;
-    } else if (inputDef) {
+    if (inputDef) {
       this.inputDefs = {
-        default: inputDef,
-      } as {
-        [K in keyof StreamI]: z.ZodType<StreamI[K]>;
+        isSingle: true,
+        def: inputDef,
+      };
+    } else if (inputDefs) {
+      this.inputDefs = {
+        isSingle: false,
+        defs: inputDefs,
       };
     } else {
       throw new Error(

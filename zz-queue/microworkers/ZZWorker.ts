@@ -104,14 +104,14 @@ export class ZZWorker<
     });
 
     this._rawQueue = queueFuncs._rawQueue;
-    this.workerName = workerName || "wkr:" + this.pipe.name;
+    this.workerName = workerName || "wkr:" + `${this.zzEnv.projectId}/${workerName}`;
     this.logger = getLogger(`wkr:${this.workerName}`);
 
     const logger = getLogger(`wkr:${this.workerName}`);
     const mergedWorkerOptions = _.merge({}, workerOptions);
 
     this.bullMQWorker = new Worker<{ jobParams: P }, O | undefined, string>(
-      `${this.zzEnv.projectId}/${this.workerName}`,
+      `${this.zzEnv.projectId}/${this.pipe.name}`,
       async (job, token) => {
         const zzJ = new ZZJob<MaPipeDef, WP>({
           bullMQJob: job,
@@ -154,7 +154,7 @@ export class ZZWorker<
 
     this.bullMQWorker.run();
     this.bullMQWorker.waitUntilReady().then(() => {
-      this.logger.info(`${this.bullMQWorker.name} worker started.`);
+      this.logger.info(`${this.bullMQWorker.name} zzzworker started.`);
     });
   }
 }

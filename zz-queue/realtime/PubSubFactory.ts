@@ -1,20 +1,10 @@
 import { ZodType } from "zod";
-import Redis, { RedisOptions } from "ioredis";
-import { ProjectConfig } from "../config-factory/config-defs";
 import { BehaviorSubject, Observable, Subscriber, Subscription } from "rxjs";
-import { v4 } from "uuid";
 import { ZZStream } from "../microworkers/ZZStream";
 
 export class PubSubFactoryWithNextValueGenerator<T> extends ZZStream<T> {
   nextValue: () => Promise<T>;
-  constructor({
-    queueId,
-    def,
-  }: {
-    // redisConfig: RedisOptions;
-    queueId: string;
-    def: ZodType<T>;
-  }) {
+  constructor({ queueId, def }: { queueId: string; def: ZodType<T> }) {
     super({
       uniqueName: queueId,
       def,

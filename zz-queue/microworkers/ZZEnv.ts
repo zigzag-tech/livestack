@@ -33,6 +33,11 @@ export class ZZEnv implements EnvParams {
     this.projectId = projectId;
     this.db = db;
     this.redisConfig = redisConfig;
+    ZZStream.setProjectConfig({
+      projectId,
+    });
+    ZZStream.zzEnv = this;
+    
   }
 
   public derive(newP: Partial<EnvParams>) {

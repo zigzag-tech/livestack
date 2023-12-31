@@ -39,7 +39,7 @@ import { ZZPipe, getPubSubQueueId } from "../microworkers/ZZPipe";
 import { InferPipeDef, InferPipeInputsDef, PipeDef } from "./PipeDef";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
-import Redis from "ioredis";
+import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 
 export type ZZProcessor<
@@ -85,30 +85,12 @@ export class ZZJob<
   emitOutput: (o: O) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
   nextInput = async (key?: keyof StreamI) => {
-    if (!key) {
-      if (!this.pipe.inputDefs["default"]) {
-        throw new Error(
-          " input key is provided. There are multiple input streams. Please provide a key."
-        );
-      } else {
-        key = "default";
-      }
-    }
     return await this._ensureInputStreamFn(key).nextValue();
   };
 
-   inputObservableFor = (key?: keyof StreamI) => {
-    if (!key) {
-      if (!this.pipe.inputDefs["default"]) {
-        throw new Error(
-          " input key is provided. There are multiple input streams. Please provide a key."
-        );
-      } else {
-        key = "default";
-      }
-    }
+  inputObservableFor = (key?: keyof StreamI) => {
     return this._ensureInputStreamFn(key).trackedObservable;
-  }
+  };
 
   get inputObservable() {
     return this.inputObservableFor();
@@ -265,8 +247,23 @@ export class ZZJob<
     };
   }
 
-  private _ensureInputStreamFn<K extends keyof StreamI>(key: keyof StreamI) {
-    if (!this.inputStreamFnsByKey[key]) {
+  private _ensureInputStreamFn<K extends keyof StreamI>(key?: keyof StreamI) {
+    if (this.pipe.inputDefs.isSingle) {
+      if (key) {
+        throw new Error(
+          `inputDefs is single stream, but key is provided: ${String(key)}`
+        );
+      }
+      key = "default";
+    } else {
+      if (!key) {
+        throw new Error(
+          `inputDefs is multiple streams, but key is not provided`
+        );
+      }
+    }
+
+    if (!this.inputStreamFnsByKey[key!]) {
       const stream = this.pipe.getJobStream({
         jobId: this.jobId,
         type: "stream-in",
@@ -284,7 +281,7 @@ export class ZZJob<
       subscriberCountObservable.subscribe((count) => {
         console.log("count", count);
         if (count > 0) {
-          setJobReadyForInputsInRedis(this.jobId, true);
+          setJobReadyForInputsInRedis(this.zzEnv.redisConfig, this.jobId, true);
         }
       });
 
@@ -551,11 +548,12 @@ export class ZZJob<
 }
 
 export async function setJobReadyForInputsInRedis(
+  redisConfig: RedisOptions,
   jobId: string,
   isReady: boolean
 ) {
   try {
-    const redis = new Redis();
+    const redis = new Redis(redisConfig);
     await redis.set(`ready_status__${jobId}`, isReady ? "true" : "false");
   } catch (error) {
     console.error("Error setJobReadyForInputsInRedis:", error);

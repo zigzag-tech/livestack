@@ -1,8 +1,8 @@
-import {  JobsOptions, Queue, WorkerOptions } from "bullmq";
+import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
 import { GenericRecordType, QueueName } from "./workerCommon";
-import Redis from "ioredis";
+import Redis, { RedisOptions } from "ioredis";
 
 import {
   ensureJobAndInitStatusRec,
@@ -13,6 +13,7 @@ import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import {
   InferPipeDef,
+  InferPipeInputDef,
   InferPipeInputsDef,
   PipeDef,
   PipeDefParams,
@@ -32,13 +33,14 @@ const queueMapByProjectIdAndQueueName = new Map<
 >();
 
 export class ZZPipe<
-    MaPipeDef extends PipeDef<any, any, any, any>,
+    MaPipeDef extends PipeDef<any, any, any, any> = any,
     P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
     O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
-    StreamI extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
+    StreamIMap extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
+    StreamI = InferPipeInputDef<MaPipeDef>,
     TProgress = z.infer<InferPipeDef<MaPipeDef>["progressDef"]>
   >
-  extends PipeDef<P, O, StreamI, TProgress>
+  extends PipeDef<P, O, StreamIMap, StreamI, TProgress>
   implements IWorkerUtilFuncs<P, O>
 {
   public readonly zzEnv: ZZEnv;
@@ -64,7 +66,7 @@ export class ZZPipe<
   }: {
     zzEnv: ZZEnv;
     concurrency?: number;
-  } & PipeDefParams<P, O, StreamI, TProgress>) {
+  } & PipeDefParams<P, O, StreamIMap, StreamI, TProgress>) {
     super({
       name,
       jobParamsDef,
@@ -113,7 +115,7 @@ export class ZZPipe<
 
   public async getJobData<
     T extends "in" | "out" | "init-params",
-    U = T extends "in" ? StreamI : T extends "out" ? O : P
+    U = T extends "in" ? StreamIMap : T extends "out" ? O : P
   >({
     jobId,
     ioType,
@@ -150,7 +152,7 @@ export class ZZPipe<
     }
 
     this.logger.info(
-      `Enqueueing job ${jobId} with data: ${JSON.stringify(jobParams)}`
+      `Enqueueing job ${jobId} with data: ${JSON.stringify(jobParams)}.`
     );
 
     await this.requestJob({
@@ -181,26 +183,28 @@ export class ZZPipe<
     }
 
     // signal to worker to cancel
-    const redis = new Redis();
+    const redis = new Redis(this.zzEnv.redisConfig);
     redis.del(`last-time-job-alive-${jobId}`);
   }
 
   public async pingAlive(jobId: string) {
-    const redis = new Redis();
+    const redis = new Redis(this.zzEnv.redisConfig);
     await redis.set(`last-time-job-alive-${jobId}`, Date.now());
   }
 
   async sendInputToJob({
     jobId,
     data,
-    key = "default",
+    key,
   }: {
     jobId: string;
-    data: StreamI;
-    key?: string;
+    data: StreamIMap[keyof StreamIMap] | StreamI;
+    key?: keyof StreamIMap;
   }) {
     try {
-      data = this.inputDefs[key].parse(data);
+      data = this.inputDefs.isSingle
+        ? this.inputDefs.def.parse(data)
+        : this.inputDefs.defs[key!].parse(data);
     } catch (err) {
       this.logger.error(`StreamInput data is invalid: ${JSON.stringify(err)}`);
       throw err;
@@ -225,15 +229,21 @@ export class ZZPipe<
   }
 
   public async waitForJobReadyForInputs(jobId: string) {
-    let isReady = await getJobReadyForInputsInRedis(jobId);
+    let isReady = await getJobReadyForInputsInRedis(
+      this.zzEnv.redisConfig,
+      jobId
+    );
     while (!isReady) {
       await sleep(100);
-      isReady = await getJobReadyForInputsInRedis(jobId);
+      isReady = await getJobReadyForInputsInRedis(
+        this.zzEnv.redisConfig,
+        jobId
+      );
       console.log(isReady);
     }
 
     return {
-      sendInputToJob: ({ data }: { data: StreamI }) =>
+      sendInputToJob: ({ data }: { data: StreamIMap }) =>
         this.sendInputToJob({ jobId, data }),
       terminateJobInput: () => this.terminateJobInput(jobId),
     };
@@ -271,7 +281,7 @@ export class ZZPipe<
     } & (
       | {
           type: "stream-in";
-          key?: keyof StreamI;
+          key?: keyof StreamIMap;
         }
       | {
           type: "stream-out";
@@ -287,8 +297,12 @@ export class ZZPipe<
     let def: z.ZodType<WrapTerminatorAndDataId<unknown>>;
 
     if (type === "stream-in") {
+      const origDef = this.inputDefs.isSingle
+        ? this.inputDefs.def
+        : this.inputDefs.defs[p.key!];
+
       queueId = `${queueIdPrefix}::${type}/${String(p.key || "default")}`;
-      def = wrapTerminatorAndDataId(this.inputDefs[p.key || "default"]);
+      def = wrapTerminatorAndDataId(origDef);
     } else if (type === "stream-out") {
       queueId = `${queueIdPrefix}::${type}`;
       def = wrapTerminatorAndDataId(this.outputDef);
@@ -304,9 +318,9 @@ export class ZZPipe<
       const stream = new PubSubFactoryWithNextValueGenerator({ queueId, def });
       this.pubSubCache.set(`${jobId}/${type}`, stream);
 
-      return stream as PubSubFactoryWithNextValueGenerator<WrapTerminatorAndDataId<
-        T
-        >>;
+      return stream as PubSubFactoryWithNextValueGenerator<
+        WrapTerminatorAndDataId<T>
+      >;
     }
   };
 
@@ -371,6 +385,7 @@ export class ZZPipe<
         `No worker for queue ${this._rawQueue.name}; job ${jobId} might be be stuck.`
       );
     }
+
     const j = await this._rawQueue.add(
       jobId,
       { jobParams },
@@ -464,16 +479,19 @@ export function getPubSubQueueId({
   def,
   jobId,
 }: {
-  def: PipeDef<unknown, unknown, any, unknown>;
+  def: PipeDef<unknown, unknown, any, any, unknown>;
   jobId: string;
 }) {
   const queueId = def.name + "::" + jobId;
   return queueId;
 }
 
-export async function getJobReadyForInputsInRedis(jobId: string) {
+export async function getJobReadyForInputsInRedis(
+  redisConfig: RedisOptions,
+  jobId: string
+) {
   try {
-    const redis = new Redis();
+    const redis = new Redis(redisConfig);
     const isReady = await redis.get(`ready_status__${jobId}`);
     return isReady === "true";
   } catch (error) {
