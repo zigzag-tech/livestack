@@ -88,7 +88,7 @@ export class ZZJob<
   //   await this.bullMQJob.moveToCompleted(retVal, this._bullMQToken!);
   //   return retVal;
   // }
-  nextInput: () => Promise<StreamI | null>;
+  nextInput: <K extends string>() => Promise<StreamI[K] | null>;
   emitOutput: (o: O) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
 

@@ -1,9 +1,9 @@
-import { Job, JobsOptions, Queue, WorkerOptions, QueueEvents } from "bullmq";
+import { Job, JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
-import { ZZWorker } from "./ZZWorker";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
+import {ZZWorkerDef} from './ZZWorker';
 
 import {
   ensureJobAndInitStatusRec,
@@ -22,7 +22,6 @@ import { PubSubFactoryWithNextValueGenerator } from "../realtime/mq-pub-sub";
 import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import { InferStreamDef } from "./ZZStream";
-import { ZZProcessor } from "./ZZJob";
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
@@ -46,33 +45,11 @@ export class ZZPipe<
   implements IWorkerUtilFuncs<P, O>
 {
   public readonly zzEnv: ZZEnv;
-  protected readonly queueOptions: WorkerOptions;
+  readonly queueOptions: WorkerOptions;
 
-  protected color?: string;
   protected logger: ReturnType<typeof getLogger>;
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
-
-  public async startWorker<WP extends object>(p: {
-    concurrency?: number;
-    instanceParams?: WP;
-    processor: ZZProcessor<MaPipeDef, WP>;
-  }) {
-    const { concurrency, instanceParams } = p || {};
-
-    const worker = new ZZWorker<MaPipeDef, WP>({
-      zzEnv: this.zzEnv,
-      processor: p?.processor,
-      color: this.color,
-      pipe: this,
-      concurrency,
-      instanceParams: instanceParams || ({} as WP),
-    });
-    // this.workers.push(worker);
-    await worker.bullMQWorker.waitUntilReady();
-    this.logger.info(`${worker.bullMQWorker.name} worker started.`);
-    return worker;
-  }
 
   private pubSubCache = new Map<
     string,
@@ -118,10 +95,8 @@ export class ZZPipe<
     inputs,
     input,
     progressDef,
-    color,
   }: {
     zzEnv: ZZEnv;
-    color?: string;
     concurrency?: number;
   } & PipeDefParams<P, O, StreamI, TProgress>) {
     super({
@@ -136,9 +111,9 @@ export class ZZPipe<
     this.queueOptions = {
       connection: zzEnv.redisConfig,
     };
+
     this.zzEnv = zzEnv;
-    this.color = color;
-    this.logger = getLogger(`pipe:${this.name}`, this.color);
+    this.logger = getLogger(`pipe:${this.name}`);
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
       queueNameOnly: `${this.name}`,
@@ -249,7 +224,15 @@ export class ZZPipe<
     await redis.set(`last-time-job-alive-${jobId}`, Date.now());
   }
 
-  async sendInputToJob({ jobId, data, key = "default" }: { jobId: string; data: StreamI, key?:string }) {
+  async sendInputToJob({
+    jobId,
+    data,
+    key = "default",
+  }: {
+    jobId: string;
+    data: StreamI;
+    key?: string;
+  }) {
     try {
       data = this.inputs[key].def.parse(data);
     } catch (err) {
