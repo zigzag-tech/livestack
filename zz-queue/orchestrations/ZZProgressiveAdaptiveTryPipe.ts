@@ -2,63 +2,62 @@ import { PipeDef } from "../microworkers/PipeDef";
 import { ZZEnv } from "../microworkers/ZZEnv";
 import { ZZPipe } from "../microworkers/ZZPipe";
 import { z } from "zod";
+import { ZZWorkerDef } from "../microworkers/ZZWorker";
 
 export interface AttemptDef<
-  ParentPipeDef extends PipeDef<
+  MaPipeDef extends PipeDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
     unknown,
     unknown
   >,
-  ParentP = z.infer<ParentPipeDef["jobParamsDef"]>,
-  ParentO = z.infer<ParentPipeDef["outputDef"]>
+  ParentP = z.infer<MaPipeDef["jobParamsDef"]>,
+  ParentO = z.infer<MaPipeDef["outputDef"]>
 > {
-  def: ParentPipeDef;
+  def: MaPipeDef;
   timeout: number;
   transformInput: (params: ParentP) => Promise<ParentP> | ParentP;
   transformOutput: (
     output: z.infer<this["def"]["outputDef"]>
   ) => Promise<ParentO> | ParentO;
 }
-export class ZZProgressiveAdaptiveTryPipe<
-  ParentPipeDef extends PipeDef<
+export class ZZProgressiveAdaptiveTryWorkerDef<
+  MaPipeDef extends PipeDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
     unknown,
     unknown
   >,
-  ParentO = z.infer<ParentPipeDef["outputDef"]>
-> extends ZZPipe<ParentPipeDef> {
-  attempts: AttemptDef<ParentPipeDef>[];
+  P = z.infer<MaPipeDef["jobParamsDef"]>,
+  O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>
+> extends ZZWorkerDef<MaPipeDef, {}> {
+  attempts: AttemptDef<MaPipeDef>[];
   constructor({
-    zzEnv,
-    def,
     attempts,
     ultimateFallback,
+    pipe,
   }: {
-    zzEnv: ZZEnv;
-    def: ParentPipeDef;
-    attempts: AttemptDef<ParentPipeDef>[];
-    ultimateFallback?: () => Promise<ParentO>;
+    pipe: ZZPipe<MaPipeDef>;
+    attempts: AttemptDef<MaPipeDef>[];
+    ultimateFallback?: () => Promise<O>;
   }) {
     super({
-      zzEnv,
-      def,
+      pipe,
       processor: async ({ logger, jobParams, spawnJob, jobId }) => {
-        const genRetryFunction = <NewP, NewO>({
+        const genRetryFunction = ({
           def,
           transformInput,
           transformOutput,
-        }: AttemptDef<P, O, NewP, NewO>) => {
+        }: AttemptDef<MaPipeDef>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${def.name}`;
 
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
-              def: def,
-              jobParams: await transformInput(jobParams),
+              def: def as PipeDef<P, O, any, any, any>,
+              jobParams: (await transformInput(jobParams)) as P,
             });
 
             const o = await nextOutput();

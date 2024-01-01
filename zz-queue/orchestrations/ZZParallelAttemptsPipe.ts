@@ -45,33 +45,6 @@ export function genParallelAttempt<
   };
 }
 
-class ZZParallelAttemptsPipe<
-  MaPipeDef extends PipeDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >
-> extends ZZPipe<MaPipeDef> {
-  constructor({
-    name,
-    zzEnv,
-    pipeDef,
-  }: {
-    zzEnv: ZZEnv;
-    pipeDef: MaPipeDef;
-    name: string;
-  }) {
-    super({
-      zzEnv,
-      name,
-      jobParamsDef: pipeDef.jobParamsDef,
-      outputDef: pipeDef.outputDef,
-    });
-  }
-}
-
 export class ZZParallelAttemptWorkerDef<
   MaPipeDef extends PipeDef<
     unknown,
@@ -88,11 +61,9 @@ export class ZZParallelAttemptWorkerDef<
     attempts,
     globalTimeoutCondition,
     transformCombinedOutput,
-    zzEnv,
-    pipeDef,
+    pipe,
   }: {
-    zzEnv: ZZEnv;
-    pipeDef: MaPipeDef;
+    pipe: ZZPipe<MaPipeDef>;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {
@@ -104,11 +75,6 @@ export class ZZParallelAttemptWorkerDef<
     ) => Promise<O> | O;
     attempts: ParallelAttempt<MaPipeDef>[];
   }) {
-    const pipe = new ZZParallelAttemptsPipe({
-      name: "parallel-attempt-pipe",
-      zzEnv,
-      pipeDef,
-    });
     super({
       pipe,
       processor: async ({ logger, jobParams, spawnJob, jobId }) => {
