@@ -1,23 +1,5 @@
 import { z } from "zod";
 
-export type InferPipeDef<
-  T extends PipeDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >
-> = T extends PipeDef<
-  infer P,
-  infer O,
-  infer StreamIMap,
-  infer StreamI,
-  infer TProgress
->
-  ? PipeDef<P, O, StreamIMap, StreamI, TProgress>
-  : never;
-
 export type InferPipeInputsDef<
   T extends PipeDef<
     unknown,
@@ -26,13 +8,7 @@ export type InferPipeInputsDef<
     unknown,
     unknown
   >
-> = InferPipeDef<T> extends PipeDef<
-  unknown,
-  unknown,
-  infer StreamIMap,
-  unknown,
-  unknown
->
+> = T extends PipeDef<unknown, unknown, infer StreamIMap, unknown, unknown>
   ? StreamIMap extends Record<string | number | symbol, unknown>
     ? {
         [K in keyof StreamIMap]: StreamIMap[K];
@@ -48,7 +24,7 @@ export type InferPipeInputDef<
     unknown,
     unknown
   >
-> = InferPipeDef<T> extends PipeDef<
+> = T extends PipeDef<
   unknown,
   unknown,
   Record<string | number | symbol, unknown>,
@@ -132,32 +108,4 @@ export class PipeDef<
     }
     this.progressDef = progressDef || z.never();
   }
-
-  // private ensureStream<T>(
-  //   type: "in" | "out",
-  //   stream: ZZStream<T> | z.ZodType<T>,
-  //   key?: string
-  // ): ZZStream<T> {
-  //   if (stream instanceof ZZStream) {
-  //     return stream;
-  //   } else {
-  //     let uniqueName = `${this.name}::${type}`;
-  //     if (key !== undefined) {
-  //       uniqueName += `/${key}`;
-  //     }
-  //     return ZZStream.get({
-  //       uniqueName,
-  //       def: stream,
-  //     });
-  //   }
-  // }
-
-  // public derive<NewP, NewO, NewStreamI extends any[], NewWP, NewTP>(
-  //   newP: Partial<PipeParams<NewP, NewO, NewStreamI, NewWP, NewTP>>
-  // ) {
-  //   return new PipeDef({
-  //     ...this,
-  //     ...newP,
-  //   } as PipeParams<NewP extends {} ? NewP : P, NewO extends {} ? NewO : O, NewStreamI extends any[] ? NewStreamI : StreamI, NewWP extends {} ? NewWP : WP, NewTP extends {} ? NewTP : TProgress>);
-  // }
 }

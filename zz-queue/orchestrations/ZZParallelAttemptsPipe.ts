@@ -61,9 +61,7 @@ class ZZParallelAttemptsPipe<
 
 export class ZZParallelAttemptWorkerDef<
   MaPipeDef extends PipeDef<any, any, any, any, any>,
-  O extends z.infer<InferPipeDef<MaPipeDef>["outputDef"]> = z.infer<
-    InferPipeDef<MaPipeDef>["outputDef"]
-  >
+  O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>
 > extends ZZWorkerDef<MaPipeDef, {}> {
   constructor({
     attempts,
