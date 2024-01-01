@@ -485,8 +485,6 @@ export class ZZJob<
       ioType: "init-params",
     });
 
-    const jobThat = this;
-
     let _outStreamAndFns: {
       stream: ZZStream<WrapTerminatorAndDataId<O>>;
       nextValue: any;
