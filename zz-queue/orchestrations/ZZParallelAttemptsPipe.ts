@@ -1,8 +1,6 @@
-import { Stream } from "stream";
 import { InferPipeInputDef, PipeDef } from "../microworkers/PipeDef";
 import { ZZPipe, sleep } from "../microworkers/ZZPipe";
 import { z } from "zod";
-import { ZZEnv } from "../microworkers/ZZEnv";
 import { ZZWorkerDef } from "../microworkers/ZZWorker";
 
 type TriggerCheckContext = {
