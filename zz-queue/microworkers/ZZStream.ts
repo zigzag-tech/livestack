@@ -101,7 +101,7 @@ export class ZZStream<T> {
   }
 
   private getPubSubClientsById({ queueId }: { queueId: string }) {
-    const id = `msgq:${ZZStream._projectConfig.projectId}--${queueId!}`;
+    const id = `zzmsgq:${ZZStream._projectConfig.projectId}--${queueId!}`;
     if (!PUBSUB_BY_ID[id]) {
       const sub = new Redis(ZZStream._zzEnv.redisConfig);
       sub.subscribe(id, (err, count) => {
