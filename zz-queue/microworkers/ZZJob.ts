@@ -6,7 +6,7 @@ import { getLogger } from "../utils/createWorkerLogger";
 import {
   createLazyNextValueGenerator,
   createTrackedObservable,
-} from "../realtime/PubSubFactory";
+} from "../realtime/pubsub";
 import { Observable, map, takeUntil } from "rxjs";
 import {
   IStorageProvider,
@@ -493,7 +493,7 @@ export class ZZJob<
     } | null = null;
     const _getOrCreateOutputStream = () => {
       if (!_outStreamAndFns) {
-        const stream = ZZStream.get({
+        const stream = ZZStream.getOrCreate({
           uniqueName: `${getPubSubQueueId({
             def: childJobDef,
             jobId: childJobId,

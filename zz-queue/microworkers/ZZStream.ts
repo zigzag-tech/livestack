@@ -5,6 +5,7 @@ import { Observable } from "rxjs";
 import { ZZEnv } from "./ZZEnv";
 
 import { createHash } from "crypto";
+import { createLazyNextValueGenerator } from "../realtime/pubsub";
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
 export type InferStreamDef<T> = T extends ZZStream<infer P> ? P : never;
@@ -23,16 +24,17 @@ export class ZZStream<T> {
   public static set zzEnv(env: ZZEnv) {
     ZZStream._zzEnv = env;
   }
+  nextValue: () => Promise<T>;
 
   private _valueObservable: Observable<T> | null = null;
 
-  static globalRegistry: { [key: string]: ZZStream<any> } = {};
+  protected static globalRegistry: { [key: string]: ZZStream<any> } = {};
 
   public static setProjectConfig(projectConfig: ProjectConfig) {
     ZZStream._projectConfig = projectConfig;
   }
 
-  public static get<T>({
+  public static getOrCreate<T>({
     uniqueName,
     def,
   }: {
@@ -67,6 +69,8 @@ export class ZZStream<T> {
     // use sha hash on def to get the unique hash
     const str = JSON.stringify(this.def);
     this.hash = createHash("sha256").update(str).digest("hex");
+    const { nextValue } = createLazyNextValueGenerator(this.valueObsrvable);
+    this.nextValue = nextValue;
   }
 
   private ensureValueObservable() {

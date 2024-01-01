@@ -12,16 +12,15 @@ import {
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import {
-  InferPipeDef,
   InferPipeInputDef,
   InferPipeInputsDef,
   PipeDef,
   PipeDefParams,
 } from "./PipeDef";
-import { PubSubFactoryWithNextValueGenerator } from "../realtime/PubSubFactory";
 import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
+import { ZZStream } from "./ZZStream";
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
@@ -56,10 +55,7 @@ export class ZZPipe<
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
 
-  private pubSubCache = new Map<
-    string,
-    PubSubFactoryWithNextValueGenerator<unknown>
-  >();
+  private pubSubCache = new Map<string, ZZStream<unknown>>();
 
   constructor({
     zzEnv,
@@ -340,16 +336,14 @@ export class ZZPipe<
     }
 
     if (this.pubSubCache.has(queueId)) {
-      return this.pubSubCache.get(
-        queueId
-      )! as PubSubFactoryWithNextValueGenerator<WrapTerminatorAndDataId<T>>;
-    } else {
-      const stream = new PubSubFactoryWithNextValueGenerator({ queueId, def });
-      this.pubSubCache.set(queueId, stream);
-
-      return stream as PubSubFactoryWithNextValueGenerator<
+      return this.pubSubCache.get(queueId)! as ZZStream<
         WrapTerminatorAndDataId<T>
       >;
+    } else {
+      const stream = ZZStream.getOrCreate({ uniqueName: queueId, def });
+      this.pubSubCache.set(queueId, stream);
+
+      return stream as ZZStream<WrapTerminatorAndDataId<T>>;
     }
   };
 

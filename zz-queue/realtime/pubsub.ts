@@ -1,18 +1,4 @@
-import { ZodType } from "zod";
 import { BehaviorSubject, Observable, Subscriber, Subscription } from "rxjs";
-import { ZZStream } from "../microworkers/ZZStream";
-
-export class PubSubFactoryWithNextValueGenerator<T> extends ZZStream<T> {
-  nextValue: () => Promise<T>;
-  constructor({ queueId, def }: { queueId: string; def: ZodType<T> }) {
-    super({
-      uniqueName: queueId,
-      def,
-    });
-    const { nextValue } = createLazyNextValueGenerator(this.valueObsrvable);
-    this.nextValue = nextValue;
-  }
-}
 
 export function createLazyNextValueGenerator<T>(observable: Observable<T>) {
   let resolve: ((value: T) => void) | null = null;
