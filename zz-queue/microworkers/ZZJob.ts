@@ -107,12 +107,8 @@ export class ZZJob<
     [K in keyof StreamIMap]: {
       nextValue: () => Promise<StreamIMap[K] | null>;
       inputStream: ZZStream<WrapTerminatorAndDataId<StreamIMap[K]>>;
-      inputObservableUntracked: Observable<WrapTerminatorAndDataId<
-        StreamIMap[K]
-      > | null>;
-      trackedObservable: Observable<WrapTerminatorAndDataId<
-        StreamIMap[K]
-      > | null>;
+      inputObservableUntracked: Observable<StreamIMap[K] | null>;
+      trackedObservable: Observable<StreamIMap[K] | null>;
       subscriberCountObservable: Observable<number>;
     };
   }>;

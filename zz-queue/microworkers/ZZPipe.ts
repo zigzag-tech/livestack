@@ -324,9 +324,11 @@ export class ZZPipe<
     let def: z.ZodType<WrapTerminatorAndDataId<unknown>>;
 
     if (type === "stream-in") {
-      const origDef = this.inputDefs.isSingle
-        ? this.inputDefs.def
-        : this.inputDefs.defs[p.key!];
+      const origDef = (
+        this.inputDefs.isSingle
+          ? this.inputDefs.def
+          : this.inputDefs.defs[p.key!]
+      ) as z.ZodType<WrapTerminatorAndDataId<unknown>>;
 
       queueId = `${queueIdPrefix}::${type}/${String(p.key || "default")}`;
       def = wrapTerminatorAndDataId(origDef);

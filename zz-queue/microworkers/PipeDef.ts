@@ -1,34 +1,67 @@
 import { z } from "zod";
 
-export type InferPipeDef<T extends PipeDef<any, any, any, any, any>> =
+export type InferPipeDef<
   T extends PipeDef<
-    infer P,
-    infer O,
-    infer StreamIMap,
-    infer StreamI,
-    infer TProgress
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
   >
-    ? PipeDef<P, O, StreamIMap, StreamI, TProgress>
-    : never;
+> = T extends PipeDef<
+  infer P,
+  infer O,
+  infer StreamIMap,
+  infer StreamI,
+  infer TProgress
+>
+  ? PipeDef<P, O, StreamIMap, StreamI, TProgress>
+  : never;
 
-export type InferPipeInputsDef<T extends PipeDef<any, any, any, any, any>> =
-  InferPipeDef<T> extends PipeDef<any, any, infer StreamIMap, any, any>
-    ? StreamIMap extends Record<string | number | symbol, any>
-      ? {
-          [K in keyof StreamIMap]: StreamIMap[K];
-        }
-      : never
-    : never;
+export type InferPipeInputsDef<
+  T extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >
+> = InferPipeDef<T> extends PipeDef<
+  unknown,
+  unknown,
+  infer StreamIMap,
+  unknown,
+  unknown
+>
+  ? StreamIMap extends Record<string | number | symbol, unknown>
+    ? {
+        [K in keyof StreamIMap]: StreamIMap[K];
+      }
+    : never
+  : never;
 
-export type InferPipeInputDef<T extends PipeDef<any, any, any, any, any>> =
-  InferPipeDef<T> extends PipeDef<any, any, any, infer StreamI, any>
-    ? StreamI
-    : never;
+export type InferPipeInputDef<
+  T extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >
+> = InferPipeDef<T> extends PipeDef<
+  unknown,
+  unknown,
+  Record<string | number | symbol, unknown>,
+  infer StreamI,
+  unknown
+>
+  ? StreamI
+  : never;
 
 export interface PipeDefParams<
   P,
   O,
-  StreamIMap extends Record<string | number | symbol, any>,
+  StreamIMap extends Record<string | number | symbol, unknown>,
   StreamI,
   TProgress
 > {
@@ -43,7 +76,7 @@ export interface PipeDefParams<
 export class PipeDef<
   P,
   O,
-  StreamIMap extends Record<string | number | symbol, any> = never,
+  StreamIMap extends Record<string | number | symbol, unknown> = never,
   StreamI = never,
   TProgress = never
 > {
@@ -88,7 +121,9 @@ export class PipeDef<
     } else if (inputDefs) {
       this.inputDefs = {
         isSingle: false,
-        defs: inputDefs,
+        defs: inputDefs as {
+          [K in keyof StreamIMap]: z.ZodType<StreamIMap[K]>;
+        },
       };
     } else {
       throw new Error(

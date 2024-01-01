@@ -13,7 +13,15 @@ type TriggerCheckContext = {
   }[];
 };
 
-interface ParallelAttempt<ParentDef extends PipeDef<any, any, any, any, any>> {
+interface ParallelAttempt<
+  ParentDef extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >
+> {
   def: ParentDef;
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
