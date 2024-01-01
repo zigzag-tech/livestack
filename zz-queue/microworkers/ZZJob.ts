@@ -7,16 +7,7 @@ import {
   createLazyNextValueGenerator,
   createTrackedObservable,
 } from "../realtime/PubSubFactory";
-import {
-  BehaviorSubject,
-  Observable,
-  Subject,
-  Subscriber,
-  Subscription,
-  map,
-  takeUntil,
-  tap,
-} from "rxjs";
+import { Observable, map, takeUntil } from "rxjs";
 import {
   IStorageProvider,
   getPublicCdnUrl,
@@ -28,7 +19,6 @@ import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
 import {
   addJobDataAndIOEvent,
-  ensureJobAndInitStatusRec,
   ensureJobDependencies,
   getJobDataAndIoEvents,
   getJobRec,

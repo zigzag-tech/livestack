@@ -1,7 +1,8 @@
-import { InferPipeDef, PipeDef } from "../microworkers/PipeDef";
+import { InferPipeDef, PipeDef, PipeDefParams } from "../microworkers/PipeDef";
 import { ZZPipe, sleep } from "../microworkers/ZZPipe";
 import { z } from "zod";
 import { ZZEnv } from "../microworkers/ZZEnv";
+import { ZZWorkerDef } from "../microworkers/ZZWorker";
 
 type TriggerCheckContext = {
   totalTimeElapsed: number;
@@ -12,60 +13,59 @@ type TriggerCheckContext = {
   }[];
 };
 
-export interface ParallelAttempt<
-  AttemptDef extends PipeDef<any, any, any, any, any>,
-  ParentDef extends PipeDef<any, any, any, any, any>
-> {
-  def: AttemptDef;
+interface ParallelAttempt<ParentDef extends PipeDef<any, any, any, any, any>> {
+  def: ParentDef;
   triggerCondition: (c: TriggerCheckContext) => boolean;
-  transformInput: (
-    params: z.infer<InferPipeDef<ParentDef>["jobParamsDef"]>
-  ) =>
-    | Promise<z.infer<InferPipeDef<AttemptDef>["jobParamsDef"]>>
-    | z.infer<InferPipeDef<AttemptDef>["jobParamsDef"]>;
-  transformOutput: (
-    output: z.infer<AttemptDef["outputDef"]>
-  ) =>
-    | Promise<z.infer<AttemptDef["outputDef"]>>
-    | z.infer<AttemptDef["outputDef"]>;
 }
 
 export function genParallelAttempt<
-  AttemptDef extends PipeDef<any, any, any, any, any>,
   ParentDef extends PipeDef<any, any, any, any, any>
 >(
-  def: AttemptDef,
-  parentDef: ParentDef,
-  config: Omit<ParallelAttempt<AttemptDef, ParentDef>, "def">
-): ParallelAttempt<AttemptDef, ParentDef> {
+  def: ParentDef,
+  config: Omit<ParallelAttempt<ParentDef>, "def">
+): ParallelAttempt<ParentDef> {
   return {
     def,
     ...config,
   };
 }
 
-export class ZZParallelAttemptsPipe<
+class ZZParallelAttemptsPipe<
+  MaPipeDef extends PipeDef<any, any, any, any, any>
+> extends ZZPipe<MaPipeDef> {
+  constructor({
+    name,
+    zzEnv,
+    pipeDef,
+  }: {
+    zzEnv: ZZEnv;
+    pipeDef: MaPipeDef;
+    name: string;
+  }) {
+    super({
+      zzEnv,
+      name,
+      jobParamsDef: pipeDef.jobParamsDef,
+      outputDef: pipeDef.outputDef,
+    });
+  }
+}
+
+export class ZZParallelAttemptWorkerDef<
   MaPipeDef extends PipeDef<any, any, any, any, any>,
-  P = z.infer<InferPipeDef<MaPipeDef>["jobParamsDef"]>,
   O extends z.infer<InferPipeDef<MaPipeDef>["outputDef"]> = z.infer<
     InferPipeDef<MaPipeDef>["outputDef"]
   >
-> extends ZZPipe<MaPipeDef> {
-  attempts: ParallelAttempt<MaPipeDef, PipeDef<any, any, any, any, any>>[];
-
+> extends ZZWorkerDef<MaPipeDef, {}> {
   constructor({
-    zzEnv,
-    def,
     attempts,
     globalTimeoutCondition,
     transformCombinedOutput,
+    zzEnv,
+    pipeDef,
   }: {
     zzEnv: ZZEnv;
-    def: PipeDef<P, O, any, any, any>;
-    attempts: ParallelAttempt<
-      PipeDef<any, any, any, any, any>,
-      PipeDef<P, O, any, any, any>
-    >[];
+    pipeDef: MaPipeDef;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {
@@ -75,25 +75,25 @@ export class ZZParallelAttemptsPipe<
         name: string;
       }[]
     ) => Promise<O> | O;
+    attempts: ParallelAttempt<MaPipeDef>[];
   }) {
-    super({
+    const pipe = new ZZParallelAttemptsPipe({
+      name: "parallel-attempt-pipe",
       zzEnv,
-      def,
+      pipeDef,
+    });
+    super({
+      pipe,
       processor: async ({ logger, jobParams, spawnJob, jobId }) => {
         const genRetryFunction = <NewP, NewO>({
           def: attemptDef,
-          transformInput,
-          transformOutput,
-        }: ParallelAttempt<
-          PipeDef<NewP, NewO, any, any, any>,
-          PipeDef<P, O, any, any, any>
-        >) => {
+        }: ParallelAttempt<MaPipeDef>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${attemptDef.name}`;
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
               def: attemptDef,
-              jobParams: await transformInput(jobParams),
+              jobParams,
             });
 
             const o = await nextOutput();
@@ -101,7 +101,7 @@ export class ZZParallelAttemptsPipe<
               throw new Error("no output");
             }
 
-            const result = await transformOutput(o);
+            const result = o;
 
             return {
               resolved: true as const,
@@ -157,7 +157,7 @@ export class ZZParallelAttemptsPipe<
 
             let result: O | undefined = undefined;
             const fn = genRetryFunction(nextAttempt);
-            this.logger.info(`Started attempt ${nextAttempt.def.name}.`);
+            logger.info(`Started attempt ${nextAttempt.def.name}.`);
             running.push({
               promise: fn()
                 .then((r) => {
@@ -192,8 +192,6 @@ export class ZZParallelAttemptsPipe<
         return await transformCombinedOutput(raws);
       },
     });
-
-    this.attempts = attempts;
   }
 }
 
