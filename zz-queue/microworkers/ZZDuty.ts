@@ -12,11 +12,11 @@ import {
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 import {
-  InferPipeInputDef,
-  InferPipeInputsDef,
-  PipeDef,
-  PipeDefParams,
-} from "./PipeDef";
+  InferDutyInputDef,
+  InferDutyInputsDef,
+  DutyDef,
+  DutyDefParams,
+} from "./DutyDef";
 import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
@@ -31,21 +31,21 @@ const queueMapByProjectIdAndQueueName = new Map<
   ReturnType<typeof createAndReturnQueue>
 >();
 
-export class ZZPipe<
-    MaPipeDef extends PipeDef<
+export class ZZDuty<
+    MaDutyDef extends DutyDef<
       unknown,
       unknown,
       Record<string | number | symbol, unknown>,
       unknown,
       unknown
-    > = PipeDef<any, any, any, any, any>,
-    P = z.infer<MaPipeDef["jobParamsDef"]>,
-    O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
-    StreamIMap extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
-    StreamI = InferPipeInputDef<MaPipeDef>,
-    TProgress = z.infer<MaPipeDef["progressDef"]>
+    > = DutyDef<any, any, any, any, any>,
+    P = z.infer<MaDutyDef["jobParamsDef"]>,
+    O extends z.infer<MaDutyDef["outputDef"]> = z.infer<MaDutyDef["outputDef"]>,
+    StreamIMap extends InferDutyInputsDef<MaDutyDef> = InferDutyInputsDef<MaDutyDef>,
+    StreamI = InferDutyInputDef<MaDutyDef>,
+    TProgress = z.infer<MaDutyDef["progressDef"]>
   >
-  extends PipeDef<P, O, StreamIMap, StreamI, TProgress>
+  extends DutyDef<P, O, StreamIMap, StreamI, TProgress>
   implements IWorkerUtilFuncs<P, O>
 {
   public readonly zzEnv: ZZEnv;
@@ -66,7 +66,7 @@ export class ZZPipe<
   }: {
     zzEnv: ZZEnv;
     concurrency?: number;
-  } & PipeDefParams<P, O, StreamIMap, StreamI, TProgress>) {
+  } & DutyDefParams<P, O, StreamIMap, StreamI, TProgress>) {
     super({
       name,
       jobParamsDef,
@@ -81,7 +81,7 @@ export class ZZPipe<
     };
 
     this.zzEnv = zzEnv;
-    this.logger = getLogger(`pipe:${this.name}`);
+    this.logger = getLogger(`duty:${this.name}`);
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
       queueNameOnly: `${this.name}`,
@@ -405,7 +405,7 @@ export class ZZPipe<
       { ...bullMQJobsOpts, jobId: jobId }
     );
     this.logger.info(
-      `Added job with ID ${j.id} to pipe: ` +
+      `Added job with ID ${j.id} to duty: ` +
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
@@ -492,7 +492,7 @@ export function getPubSubQueueId({
   def,
   jobId,
 }: {
-  def: PipeDef<unknown, unknown, any, any, unknown>;
+  def: DutyDef<unknown, unknown, any, any, unknown>;
   jobId: string;
 }) {
   const queueId = def.name + "::" + jobId;

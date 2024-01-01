@@ -1,14 +1,14 @@
 import { z } from "zod";
 
-export type InferPipeInputsDef<
-  T extends PipeDef<
+export type InferDutyInputsDef<
+  T extends DutyDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
     unknown,
     unknown
   >
-> = T extends PipeDef<unknown, unknown, infer StreamIMap, unknown, unknown>
+> = T extends DutyDef<unknown, unknown, infer StreamIMap, unknown, unknown>
   ? StreamIMap extends Record<string | number | symbol, unknown>
     ? {
         [K in keyof StreamIMap]: StreamIMap[K];
@@ -16,15 +16,15 @@ export type InferPipeInputsDef<
     : never
   : never;
 
-export type InferPipeInputDef<
-  T extends PipeDef<
+export type InferDutyInputDef<
+  T extends DutyDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
     unknown,
     unknown
   >
-> = T extends PipeDef<
+> = T extends DutyDef<
   unknown,
   unknown,
   Record<string | number | symbol, unknown>,
@@ -34,7 +34,7 @@ export type InferPipeInputDef<
   ? StreamI
   : never;
 
-export interface PipeDefParams<
+export interface DutyDefParams<
   P,
   O,
   StreamIMap extends Record<string | number | symbol, unknown>,
@@ -49,7 +49,7 @@ export interface PipeDefParams<
   progressDef?: z.ZodType<TProgress>;
 }
 
-export class PipeDef<
+export class DutyDef<
   P,
   O,
   StreamIMap extends Record<string | number | symbol, unknown> = never,
@@ -85,7 +85,7 @@ export class PipeDef<
     inputDefs,
     inputDef,
     progressDef,
-  }: PipeDefParams<P, O, StreamIMap, StreamI, TProgress>) {
+  }: DutyDefParams<P, O, StreamIMap, StreamI, TProgress>) {
     this.name = name;
     this.jobParamsDef = jobParamsDef;
     this.outputDef = outputDef;
@@ -103,7 +103,7 @@ export class PipeDef<
       };
     } else {
       throw new Error(
-        `Either "input" (single stream) or "inputs" (multiple streams, as a key-value object) must be specified to define a pipe.`
+        `Either "input" (single stream) or "inputs" (multiple streams, as a key-value object) must be specified to define a duty.`
       );
     }
     this.progressDef = progressDef || z.never();

@@ -1,16 +1,16 @@
-import { InferPipeInputDef, InferPipeInputsDef, PipeDef } from "./PipeDef";
-import { ZZPipe } from "./ZZPipe";
+import { InferDutyInputDef, InferDutyInputsDef, DutyDef } from "./DutyDef";
+import { ZZDuty } from "./ZZDuty";
 import { z } from "zod";
 
 export async function addJobChain<
-  UpstreamDef extends PipeDef<
+  UpstreamDef extends DutyDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
     unknown,
     unknown
   >,
-  DownstreamDef extends PipeDef<
+  DownstreamDef extends DutyDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
@@ -18,19 +18,19 @@ export async function addJobChain<
     unknown
   >,
   UpstreamOutput = z.infer<UpstreamDef["outputDef"]>,
-  DownstreamInputs = InferPipeInputsDef<DownstreamDef>,
-  DownstreamInput = InferPipeInputDef<DownstreamDef>
+  DownstreamInputs = InferDutyInputsDef<DownstreamDef>,
+  DownstreamInput = InferDutyInputDef<DownstreamDef>
 >({
-  upstream: { pipe: upstreamPipe, jobId: upstreamJobId },
-  downstream: { inputKey, pipe: downstreamPipe, jobId: downstreamJobId },
+  upstream: { duty: upstreamDuty, jobId: upstreamJobId },
+  downstream: { inputKey, duty: downstreamDuty, jobId: downstreamJobId },
 }: {
   upstream: {
-    pipe: ZZPipe<UpstreamDef>;
+    duty: ZZDuty<UpstreamDef>;
     jobId: string;
   };
   downstream: {
     inputKey?: keyof DownstreamInputs;
-    pipe: ZZPipe<DownstreamDef>;
+    duty: ZZDuty<DownstreamDef>;
     jobId: string;
   };
 }): Promise<void> {

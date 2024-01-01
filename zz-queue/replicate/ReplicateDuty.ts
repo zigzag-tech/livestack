@@ -1,14 +1,14 @@
 import Replicate from "replicate";
-import { ZZEnv } from "../microworkers/PipeDef";
-import { PipeDef } from "../microworkers/PipeDef";
-import { ZZPipe } from "../microworkers/ZZPipe";
+import { ZZEnv } from "../microworkers/DutyDef";
+import { DutyDef } from "../microworkers/DutyDef";
+import { ZZDuty } from "../microworkers/ZZDuty";
 if (!process.env.REPLICATE_API_TOKEN) {
   throw new Error("REPLICATE_API_TOKEN not found");
 }
 
 const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
 
-export class ReplicatePipe<P extends object, O> extends ZZPipe<P, O> {
+export class ReplicateDuty<P extends object, O> extends ZZDuty<P, O> {
   protected _endpoint: `${string}/${string}:${string}`;
 
   constructor({
@@ -20,7 +20,7 @@ export class ReplicatePipe<P extends object, O> extends ZZPipe<P, O> {
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
     zzEnv: ZZEnv;
-    def: PipeDef<P, O>;
+    def: DutyDef<P, O>;
   }) {
     super({
       def,

@@ -25,15 +25,15 @@ import {
   updateJobStatus,
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { ZZPipe, getPubSubQueueId } from "../microworkers/ZZPipe";
-import { InferPipeInputDef, InferPipeInputsDef, PipeDef } from "./PipeDef";
+import { ZZDuty, getPubSubQueueId } from "../microworkers/ZZDuty";
+import { InferDutyInputDef, InferDutyInputsDef, DutyDef } from "./DutyDef";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 
 export type ZZProcessor<
-  MaPipeDef extends PipeDef<
+  MaDutyDef extends DutyDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
@@ -41,10 +41,10 @@ export type ZZProcessor<
     unknown
   >,
   WP extends object = {}
-> = Parameters<ZZJob<MaPipeDef, WP>["beginProcessing"]>[0];
+> = Parameters<ZZJob<MaDutyDef, WP>["beginProcessing"]>[0];
 
 export type ZZProcessorParams<
-  MaDef extends PipeDef<
+  MaDef extends DutyDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
@@ -55,7 +55,7 @@ export type ZZProcessorParams<
 > = Parameters<ZZProcessor<MaDef, WP>>[0];
 
 export class ZZJob<
-  MaPipeDef extends PipeDef<
+  MaDutyDef extends DutyDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
@@ -63,17 +63,17 @@ export class ZZJob<
     unknown
   >,
   WP extends object,
-  P = z.infer<MaPipeDef["jobParamsDef"]>,
-  O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
-  StreamIMap extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
-  StreamI extends InferPipeInputDef<MaPipeDef> = InferPipeInputDef<MaPipeDef>,
-  TProgress = z.infer<MaPipeDef["progressDef"]>
+  P = z.infer<MaDutyDef["jobParamsDef"]>,
+  O extends z.infer<MaDutyDef["outputDef"]> = z.infer<MaDutyDef["outputDef"]>,
+  StreamIMap extends InferDutyInputsDef<MaDutyDef> = InferDutyInputsDef<MaDutyDef>,
+  StreamI extends InferDutyInputDef<MaDutyDef> = InferDutyInputDef<MaDutyDef>,
+  TProgress = z.infer<MaDutyDef["progressDef"]>
 > {
   private readonly bullMQJob: Job<{ jobParams: P }, O | void>;
   public readonly _bullMQToken?: string;
   readonly jobParams: P;
   readonly logger: ReturnType<typeof getLogger>;
-  readonly pipe: ZZPipe<MaPipeDef>;
+  readonly duty: ZZDuty<MaDutyDef>;
   // New properties for subscriber tracking
 
   // public async aliveLoop(retVal: O) {
@@ -137,7 +137,7 @@ export class ZZJob<
     logger: ReturnType<typeof getLogger>;
     jobParams: P;
     storageProvider?: IStorageProvider;
-    pipe: ZZPipe<MaPipeDef>;
+    duty: ZZDuty<MaDutyDef>;
     workerInstanceParams?: WP;
     workerInstanceParamsSchema?: z.ZodType<WP>;
     workerName: string;
@@ -147,10 +147,10 @@ export class ZZJob<
     this._bullMQToken = p.bullMQToken;
     this.logger = p.logger;
     this.workerName = p.workerName;
-    this.pipe = p.pipe;
+    this.duty = p.duty;
 
     try {
-      this.jobParams = p.pipe.jobParamsDef.parse(p.jobParams) as P;
+      this.jobParams = p.duty.jobParamsDef.parse(p.jobParams) as P;
     } catch (err) {
       this.logger.error(
         `jobParams error: jobParams provided is invalid: ${JSON.stringify(
@@ -175,8 +175,8 @@ export class ZZJob<
       throw err;
     }
     this.storageProvider = p.storageProvider;
-    this.zzEnv = p.pipe.zzEnv;
-    this.pipe = p.pipe;
+    this.zzEnv = p.duty.zzEnv;
+    this.duty = p.duty;
     this.baseWorkingRelativePath = path.join(
       this.zzEnv.projectId,
       this.workerName,
@@ -187,7 +187,7 @@ export class ZZJob<
     this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
 
-    const outputStream = this.pipe.getJobStream<O>({
+    const outputStream = this.duty.getJobStream<O>({
       jobId: this.jobId,
       type: "stream-out",
     });
@@ -201,7 +201,7 @@ export class ZZJob<
 
     this.emitOutput = async (o: O) => {
       try {
-        o = this.pipe.outputDef.parse(o) as O;
+        o = this.duty.outputDef.parse(o) as O;
       } catch (err) {
         console.error("errornous output: ", o);
         this.logger.error(
@@ -244,7 +244,7 @@ export class ZZJob<
 
       const { jobDataId } = await addJobDataAndIOEvent({
         projectId: this.zzEnv.projectId,
-        opName: this.pipe.name,
+        opName: this.duty.name,
         jobId: this.jobId,
         dbConn: this.zzEnv.db,
         ioType: "out",
@@ -263,7 +263,7 @@ export class ZZJob<
   private _ensureInputStreamFn<K extends keyof StreamIMap>(
     key?: keyof StreamIMap
   ) {
-    if (this.pipe.inputDefs.isSingle) {
+    if (this.duty.inputDefs.isSingle) {
       if (key) {
         throw new Error(
           `inputDefs is single stream, but key is provided: ${String(key)}`
@@ -279,7 +279,7 @@ export class ZZJob<
     }
 
     if (!this.inputStreamFnsByKey[key!]) {
-      const stream = this.pipe.getJobStream({
+      const stream = this.duty.getJobStream({
         jobId: this.jobId,
         type: "stream-in",
         key,
@@ -319,10 +319,10 @@ export class ZZJob<
   }
 
   public beginProcessing = async (
-    processor: (j: ZZJob<MaPipeDef, WP>) => Promise<O | void>
+    processor: (j: ZZJob<MaDutyDef, WP>) => Promise<O | void>
   ): Promise<O | undefined> => {
     const jId = {
-      opName: this.pipe.name,
+      opName: this.duty.name,
       jobId: this.jobId,
       projectId: this.zzEnv.projectId,
     };
@@ -402,7 +402,7 @@ export class ZZJob<
         if (e instanceof WaitingChildrenError) {
           await updateJobStatus({
             projectId,
-            opName: this.pipe.name,
+            opName: this.duty.name,
             jobId: job.id!,
             dbConn: this.zzEnv.db,
             jobStatus: "waiting_children",
@@ -410,7 +410,7 @@ export class ZZJob<
         } else {
           await updateJobStatus({
             projectId,
-            opName: this.pipe.name,
+            opName: this.duty.name,
             jobId: job.id!,
             dbConn: this.zzEnv.db,
             jobStatus: "failed",
@@ -422,7 +422,7 @@ export class ZZJob<
   };
 
   public spawnChildJobsToWaitOn = async <CI, CO>(p: {
-    def: PipeDef<P, O, StreamIMap, StreamI, TProgress>;
+    def: DutyDef<P, O, StreamIMap, StreamI, TProgress>;
     jobId: string;
     jobParams: P;
   }) => {
@@ -439,7 +439,7 @@ export class ZZJob<
     await ensureJobDependencies({
       projectId: this.zzEnv.projectId,
       parentJobId: this.jobId,
-      parentOpName: this.pipe.name,
+      parentOpName: this.duty.name,
       childJobId: p.jobId,
       childOpName: p.def.name,
       dbConn: this.zzEnv.db,
@@ -450,7 +450,7 @@ export class ZZJob<
   };
 
   public spawnJob = async <P, O>(p: {
-    def: PipeDef<P, O, StreamIMap, StreamI, TProgress>;
+    def: DutyDef<P, O, StreamIMap, StreamI, TProgress>;
     jobId: string;
     jobParams: P;
   }) => {
@@ -463,16 +463,16 @@ export class ZZJob<
     jobParams,
     flowProducerOpts,
   }: {
-    def: PipeDef<P, O, StreamIMap, StreamI, TProgress>;
+    def: DutyDef<P, O, StreamIMap, StreamI, TProgress>;
     jobId: string;
     jobParams: P;
     flowProducerOpts?: FlowJob["opts"];
   }) => {
-    const tempPipe = new ZZPipe({
+    const tempDuty = new ZZDuty({
       ...childJobDef,
       zzEnv: this.zzEnv,
     });
-    await tempPipe.requestJob({
+    await tempDuty.requestJob({
       jobId: childJobId,
       jobParams,
       bullMQJobsOpts: flowProducerOpts,

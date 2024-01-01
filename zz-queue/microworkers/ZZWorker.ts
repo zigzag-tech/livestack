@@ -2,8 +2,8 @@ import _ from "lodash";
 import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { ZZJob, ZZProcessor } from "./ZZJob";
-import { ZZPipe, getMicroworkerQueueByName } from "./ZZPipe";
-import { PipeDef } from "./PipeDef";
+import { ZZDuty, getMicroworkerQueueByName } from "./ZZDuty";
+import { DutyDef } from "./DutyDef";
 import { ZZEnv } from "./ZZEnv";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { ZodType, z } from "zod";
@@ -14,7 +14,7 @@ type IWorkerUtilFuncs<I, O> = ReturnType<
 >;
 
 export class ZZWorkerDef<
-  MaPipeDef extends PipeDef<
+  MaDutyDef extends DutyDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
@@ -23,21 +23,21 @@ export class ZZWorkerDef<
   >,
   WP extends object = {}
 > {
-  public readonly pipe: ZZPipe<MaPipeDef>;
+  public readonly duty: ZZDuty<MaDutyDef>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
-  public readonly processor: ZZProcessor<MaPipeDef, WP>;
+  public readonly processor: ZZProcessor<MaDutyDef, WP>;
 
   constructor({
-    pipe,
+    duty,
     processor,
     instanceParamsDef,
   }: {
     concurrency?: number;
-    pipe: ZZPipe<MaPipeDef>;
-    processor: ZZProcessor<MaPipeDef, WP>;
+    duty: ZZDuty<MaDutyDef>;
+    processor: ZZProcessor<MaDutyDef, WP>;
     instanceParamsDef?: z.ZodType<WP>;
   }) {
-    this.pipe = pipe;
+    this.duty = duty;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
   }
@@ -45,7 +45,7 @@ export class ZZWorkerDef<
   public async startWorker(p: { concurrency?: number; instanceParams?: WP }) {
     const { concurrency, instanceParams } = p || {};
 
-    const worker = new ZZWorker<MaPipeDef, WP>({
+    const worker = new ZZWorker<MaDutyDef, WP>({
       def: this,
       concurrency,
       instanceParams: instanceParams || ({} as WP),
@@ -57,7 +57,7 @@ export class ZZWorkerDef<
 }
 
 export class ZZWorker<
-  MaPipeDef extends PipeDef<
+  MaDutyDef extends DutyDef<
     any,
     any,
     Record<string | number | symbol, unknown>,
@@ -65,10 +65,10 @@ export class ZZWorker<
     unknown
   >,
   WP extends object,
-  P = z.infer<MaPipeDef["jobParamsDef"]>,
-  O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>
+  P = z.infer<MaDutyDef["jobParamsDef"]>,
+  O extends z.infer<MaDutyDef["outputDef"]> = z.infer<MaDutyDef["outputDef"]>
 > {
-  public readonly pipe: ZZPipe<MaPipeDef>;
+  public readonly duty: ZZDuty<MaDutyDef>;
   protected readonly zzEnv: ZZEnv;
   protected readonly storageProvider?: IStorageProvider;
 
@@ -82,7 +82,7 @@ export class ZZWorker<
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
   public readonly instanceParams?: WP;
   public readonly workerName: string;
-  public readonly def: ZZWorkerDef<MaPipeDef, WP>;
+  public readonly def: ZZWorkerDef<MaDutyDef, WP>;
   protected readonly logger: ReturnType<typeof getLogger>;
 
   constructor({
@@ -91,13 +91,13 @@ export class ZZWorker<
     workerName,
     concurrency = 3,
   }: {
-    def: ZZWorkerDef<MaPipeDef, WP>;
+    def: ZZWorkerDef<MaDutyDef, WP>;
     instanceParams?: WP;
     workerName?: string;
     concurrency?: number;
   }) {
-    this.pipe = def.pipe;
-    this.zzEnv = def.pipe.zzEnv;
+    this.duty = def.duty;
+    this.zzEnv = def.duty.zzEnv;
     this.instanceParams = instanceParams;
     this.def = def;
 
@@ -108,7 +108,7 @@ export class ZZWorker<
     };
 
     const queueFuncs = getMicroworkerQueueByName<P, O, any>({
-      queueNameOnly: `${this.pipe.name}`,
+      queueNameOnly: `${this.duty.name}`,
       queueOptions: workerOptions,
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
@@ -123,13 +123,13 @@ export class ZZWorker<
     const mergedWorkerOptions = _.merge({}, workerOptions);
 
     this.bullMQWorker = new Worker<{ jobParams: P }, O | undefined, string>(
-      `${this.zzEnv.projectId}/${this.pipe.name}`,
+      `${this.zzEnv.projectId}/${this.duty.name}`,
       async (job, token) => {
-        const zzJ = new ZZJob<MaPipeDef, WP>({
+        const zzJ = new ZZJob<MaDutyDef, WP>({
           bullMQJob: job,
           bullMQToken: token,
           logger,
-          pipe: this.pipe,
+          duty: this.duty,
           jobParams: job.data.jobParams,
           workerInstanceParams: this.instanceParams,
           storageProvider: this.zzEnv.storageProvider,
