@@ -3,7 +3,7 @@ import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { ZZJob, ZZProcessor } from "./ZZJob";
 import { ZZPipe, getMicroworkerQueueByName } from "./ZZPipe";
-import { InferPipeDef, PipeDef } from "./PipeDef";
+import { PipeDef } from "./PipeDef";
 import { ZZEnv } from "./ZZEnv";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { ZodType, z } from "zod";
@@ -14,7 +14,13 @@ type IWorkerUtilFuncs<I, O> = ReturnType<
 >;
 
 export class ZZWorkerDef<
-  MaPipeDef extends PipeDef<any, any, any, any, any>,
+  MaPipeDef extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >,
   WP extends object = {}
 > {
   public readonly pipe: ZZPipe<MaPipeDef>;
@@ -51,7 +57,13 @@ export class ZZWorkerDef<
 }
 
 export class ZZWorker<
-  MaPipeDef extends PipeDef<any, any, any, any, any>,
+  MaPipeDef extends PipeDef<
+    any,
+    any,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >,
   WP extends object,
   P = z.infer<MaPipeDef["jobParamsDef"]>,
   O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>

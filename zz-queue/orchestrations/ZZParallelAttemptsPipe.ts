@@ -1,4 +1,5 @@
-import { InferPipeDef, PipeDef, PipeDefParams } from "../microworkers/PipeDef";
+import { Stream } from "stream";
+import { InferPipeInputDef, PipeDef } from "../microworkers/PipeDef";
 import { ZZPipe, sleep } from "../microworkers/ZZPipe";
 import { z } from "zod";
 import { ZZEnv } from "../microworkers/ZZEnv";
@@ -27,7 +28,13 @@ interface ParallelAttempt<
 }
 
 export function genParallelAttempt<
-  ParentDef extends PipeDef<any, any, any, any, any>
+  ParentDef extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >
 >(
   def: ParentDef,
   config: Omit<ParallelAttempt<ParentDef>, "def">
@@ -39,7 +46,13 @@ export function genParallelAttempt<
 }
 
 class ZZParallelAttemptsPipe<
-  MaPipeDef extends PipeDef<any, any, any, any, any>
+  MaPipeDef extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >
 > extends ZZPipe<MaPipeDef> {
   constructor({
     name,
@@ -60,8 +73,16 @@ class ZZParallelAttemptsPipe<
 }
 
 export class ZZParallelAttemptWorkerDef<
-  MaPipeDef extends PipeDef<any, any, any, any, any>,
-  O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>
+  MaPipeDef extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >,
+  P = z.infer<MaPipeDef["jobParamsDef"]>,
+  O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
+  StreamI extends InferPipeInputDef<MaPipeDef> = InferPipeInputDef<MaPipeDef>
 > extends ZZWorkerDef<MaPipeDef, {}> {
   constructor({
     attempts,
@@ -91,15 +112,15 @@ export class ZZParallelAttemptWorkerDef<
     super({
       pipe,
       processor: async ({ logger, jobParams, spawnJob, jobId }) => {
-        const genRetryFunction = <NewP, NewO>({
+        const genRetryFunction = ({
           def: attemptDef,
         }: ParallelAttempt<MaPipeDef>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${attemptDef.name}`;
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
-              def: attemptDef,
-              jobParams,
+              def: attemptDef as PipeDef<P, O, any, StreamI, any>,
+              jobParams: jobParams as P,
             });
 
             const o = await nextOutput();

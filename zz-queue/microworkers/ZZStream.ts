@@ -5,7 +5,6 @@ import { Observable } from "rxjs";
 import { ZZEnv } from "./ZZEnv";
 
 import { createHash } from "crypto";
-import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
 export type InferStreamDef<T> = T extends ZZStream<infer P> ? P : never;
@@ -89,7 +88,7 @@ export class ZZStream<T> {
     return this._valueObservable;
   }
 
-  public async emitValue(o: WrapTerminatorAndDataId<T>) {
+  public async emitValue(o: T) {
     this.pubToJob(o);
   }
 
@@ -97,7 +96,7 @@ export class ZZStream<T> {
     return this.ensureValueObservable();
   }
 
-  public async pubToJob<T>(m: WrapTerminatorAndDataId<T>) {
+  public async pubToJob<T>(m: T) {
     return await this._pub(m);
   }
 
@@ -120,7 +119,7 @@ export class ZZStream<T> {
     return { channelId: id, clients: PUBSUB_BY_ID[id] };
   }
 
-  private async _pub<T>(msg: WrapTerminatorAndDataId<T>) {
+  private async _pub<T>(msg: T) {
     const { channelId, clients } = await this.getPubSubClientsById({
       queueId: this.uniqueName,
     });

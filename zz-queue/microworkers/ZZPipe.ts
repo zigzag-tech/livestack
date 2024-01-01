@@ -33,13 +33,13 @@ const queueMapByProjectIdAndQueueName = new Map<
 >();
 
 export class ZZPipe<
-    MaPipeDef extends PipeDef<any, any, any, any, any> = PipeDef<
-      any,
-      any,
-      any,
-      any,
-      any
-    >,
+    MaPipeDef extends PipeDef<
+      unknown,
+      unknown,
+      Record<string | number | symbol, unknown>,
+      unknown,
+      unknown
+    > = PipeDef<any, any, any, any, any>,
     P = z.infer<MaPipeDef["jobParamsDef"]>,
     O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
     StreamIMap extends InferPipeInputsDef<MaPipeDef> = InferPipeInputsDef<MaPipeDef>,
@@ -328,7 +328,7 @@ export class ZZPipe<
         this.inputDefs.isSingle
           ? this.inputDefs.def
           : this.inputDefs.defs[p.key!]
-      ) as z.ZodType<WrapTerminatorAndDataId<unknown>>;
+      ) as z.ZodType<unknown>;
 
       queueId = `${queueIdPrefix}::${type}/${String(p.key || "default")}`;
       def = wrapTerminatorAndDataId(origDef);

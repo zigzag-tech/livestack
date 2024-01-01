@@ -33,17 +33,35 @@ import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 
 export type ZZProcessor<
-  MaPipeDef extends PipeDef<any, any, any, any, any>,
+  MaPipeDef extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >,
   WP extends object = {}
 > = Parameters<ZZJob<MaPipeDef, WP>["beginProcessing"]>[0];
 
 export type ZZProcessorParams<
-  MaDef extends PipeDef<any, any, any, any, any>,
+  MaDef extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >,
   WP extends object
 > = Parameters<ZZProcessor<MaDef, WP>>[0];
 
 export class ZZJob<
-  MaPipeDef extends PipeDef<any, any, any, any, any>,
+  MaPipeDef extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >,
   WP extends object,
   P = z.infer<MaPipeDef["jobParamsDef"]>,
   O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
@@ -132,7 +150,7 @@ export class ZZJob<
     this.pipe = p.pipe;
 
     try {
-      this.jobParams = p.pipe.jobParamsDef.parse(p.jobParams);
+      this.jobParams = p.pipe.jobParamsDef.parse(p.jobParams) as P;
     } catch (err) {
       this.logger.error(
         `jobParams error: jobParams provided is invalid: ${JSON.stringify(
@@ -183,7 +201,7 @@ export class ZZJob<
 
     this.emitOutput = async (o: O) => {
       try {
-        o = this.pipe.outputDef.parse(o);
+        o = this.pipe.outputDef.parse(o) as O;
       } catch (err) {
         console.error("errornous output: ", o);
         this.logger.error(
@@ -459,7 +477,7 @@ export class ZZJob<
       jobParams,
       bullMQJobsOpts: flowProducerOpts,
     });
-    const [rec] = await getJobDataAndIoEvents({
+    const [rec] = await getJobDataAndIoEvents<P>({
       projectId: this.zzEnv.projectId,
       opName: childJobDef.name,
       jobId: childJobId,

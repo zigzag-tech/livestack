@@ -4,7 +4,13 @@ import { ZZPipe } from "../microworkers/ZZPipe";
 import { z } from "zod";
 
 export interface AttemptDef<
-  ParentPipeDef extends PipeDef<any, any, any, any, any>,
+  ParentPipeDef extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >,
   ParentP = z.infer<ParentPipeDef["jobParamsDef"]>,
   ParentO = z.infer<ParentPipeDef["outputDef"]>
 > {
@@ -16,8 +22,13 @@ export interface AttemptDef<
   ) => Promise<ParentO> | ParentO;
 }
 export class ZZProgressiveAdaptiveTryPipe<
-  ParentPipeDef extends PipeDef<any, any, any, any, any>,
-  ParentP = z.infer<ParentPipeDef["jobParamsDef"]>,
+  ParentPipeDef extends PipeDef<
+    unknown,
+    unknown,
+    Record<string | number | symbol, unknown>,
+    unknown,
+    unknown
+  >,
   ParentO = z.infer<ParentPipeDef["outputDef"]>
 > extends ZZPipe<ParentPipeDef> {
   attempts: AttemptDef<ParentPipeDef>[];
