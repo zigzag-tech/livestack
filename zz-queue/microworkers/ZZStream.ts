@@ -28,7 +28,7 @@ export class ZZStream<T> {
 
   private _valueObservable: Observable<T> | null = null;
 
-  protected static globalRegistry: { [key: string]: ZZStream<any> } = {};
+  protected static globalRegistry: { [key: string]: ZZStream<unknown> } = {};
 
   public static setProjectConfig(projectConfig: ProjectConfig) {
     ZZStream._projectConfig = projectConfig;
@@ -44,12 +44,13 @@ export class ZZStream<T> {
     if (ZZStream.globalRegistry[uniqueName]) {
       const existing = ZZStream.globalRegistry[uniqueName];
       // check if types match
-      if (existing.def !== def) {
+      // TODO: use a more robust way to check if types match
+      if (existing.hash !== hashDef(def)) {
         throw new Error(
-          `ZZStream ${uniqueName} already exists with different type`
+          `ZZStream ${uniqueName} already exists with different type, and the new type provided is not compatible with the existing type.`
         );
       }
-      return existing;
+      return existing as ZZStream<T>;
     } else {
       const stream = new ZZStream({ uniqueName, def });
       ZZStream.globalRegistry[uniqueName] = stream;
@@ -66,9 +67,7 @@ export class ZZStream<T> {
   }) {
     this.def = def;
     this.uniqueName = uniqueName;
-    // use sha hash on def to get the unique hash
-    const str = JSON.stringify(this.def);
-    this.hash = createHash("sha256").update(str).digest("hex");
+    this.hash = hashDef(this.def);
     const { nextValue } = createLazyNextValueGenerator(this.valueObsrvable);
     this.nextValue = nextValue;
   }
@@ -177,4 +176,10 @@ function customParse(json: string): any {
     }
   }
   return JSON.parse(json, reviver);
+}
+import { z } from "zod";
+const ss = z.object({});
+function hashDef(def: ZodType<unknown>) {
+  const str = JSON.stringify(def);
+  return createHash("sha256").update(str).digest("hex");
 }

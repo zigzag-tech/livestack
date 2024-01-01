@@ -55,8 +55,6 @@ export class ZZPipe<
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
 
-  private pubSubCache = new Map<string, ZZStream<unknown>>();
-
   constructor({
     zzEnv,
     name,
@@ -335,16 +333,8 @@ export class ZZPipe<
       throw new Error(`Invalid type ${type}`);
     }
 
-    if (this.pubSubCache.has(queueId)) {
-      return this.pubSubCache.get(queueId)! as ZZStream<
-        WrapTerminatorAndDataId<T>
-      >;
-    } else {
-      const stream = ZZStream.getOrCreate({ uniqueName: queueId, def });
-      this.pubSubCache.set(queueId, stream);
-
-      return stream as ZZStream<WrapTerminatorAndDataId<T>>;
-    }
+    const stream = ZZStream.getOrCreate({ uniqueName: queueId, def });
+    return stream as ZZStream<WrapTerminatorAndDataId<T>>;
   };
 
   public async subForJobOutput({
