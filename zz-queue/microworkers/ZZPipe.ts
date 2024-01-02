@@ -435,27 +435,35 @@ export class ZZPipe<
   }
 
   public static async requestComplexJob<
-    Ps extends any[],
-    IMaps extends Record<string | number | symbol, any>[keyof Ps],
-    OMaps extends Record<string | number | symbol, any>[keyof Ps],
-    TProgresses extends { [K in keyof Ps]: any }[]
+
+    Ps extends {
+      [K in number]: any;
+    },
+    IMaps extends {
+      [K in keyof Ps]: Record<any, unknown>;
+    },
+    OMaps extends {
+      [K in keyof Ps]: Record<any, unknown>;
+    },
+    TProgresses extends { [K in keyof Ps]: any }
   >({
     jobGroupId,
     pipes,
   }: {
     jobGroupId: string;
     pipes: {
-      [K in keyof Ps]: PipeAndJobParams<Ps[K], IMaps[K], OMaps[K]>;
+      [K in keyof Ps]: PipeAndJobParams<Ps[K], IMaps[K], OMaps[K], TProgresses[K]>;
     };
   }) {}
 }
 
 type PipeAndJobParams<
   P,
-  IMap extends Record<string | number | symbol, unknown>,
-  OMap extends Record<string | number | symbol, unknown>
+  IMap extends UnknownTMap,
+  OMap extends UnknownTMap,
+  TProgress
 > = {
-  pipe: ZZPipe<P, IMap, OMap>;
+  pipe: ZZPipe<P, IMap, OMap, TProgress>;
   jobParams: P;
   outputKey?: keyof ZZPipe<P, IMap, OMap>["outputDefSet"];
 };
