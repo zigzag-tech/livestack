@@ -1,7 +1,7 @@
-import { InferPipeInputDef, PipeDef } from "../microworkers/PipeDef";
 import { ZZPipe, sleep } from "../microworkers/ZZPipe";
 import { z } from "zod";
 import { ZZWorkerDef } from "../microworkers/ZZWorker";
+import { UnknownTMap } from "../microworkers/StreamDefSet";
 
 type TriggerCheckContext = {
   totalTimeElapsed: number;
@@ -13,26 +13,14 @@ type TriggerCheckContext = {
 };
 
 interface ParallelAttempt<
-  ParentDef extends PipeDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >
+  ParentDef extends ZZPipe<unknown, UnknownTMap, UnknownTMap, unknown>
 > {
   def: ParentDef;
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
 
 export function genParallelAttempt<
-  ParentDef extends PipeDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >
+  ParentDef extends ZZPipe<unknown, UnknownTMap, UnknownTMap, unknown>
 >(
   def: ParentDef,
   config: Omit<ParallelAttempt<ParentDef>, "def">
@@ -44,16 +32,8 @@ export function genParallelAttempt<
 }
 
 export class ZZParallelAttemptWorkerDef<
-  MaPipeDef extends PipeDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >,
-  P = z.infer<MaPipeDef["jobParamsDef"]>,
-  O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
-  StreamI extends InferPipeInputDef<MaPipeDef> = InferPipeInputDef<MaPipeDef>
+  MaPipeDef extends ZZPipe<unknown, UnknownTMap, UnknownTMap, unknown>,
+  P = z.infer<MaPipeDef["jobParamsDef"]>
 > extends ZZWorkerDef<MaPipeDef, {}> {
   constructor({
     attempts,
