@@ -11,16 +11,13 @@ import {
 } from "../db/knexConn";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
-import {
-  InferDutyInputDef,
-  InferDutyInputsDef,
-  DutyDef,
-  DutyDefParams,
-} from "./DutyDef";
+
 import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 import { ZZStream } from "./ZZStream";
+import { StreamDefSet, UnknownTMap } from "./StreamDefSet";
+import { ZZProcessor } from "./ZZJob";
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
@@ -31,61 +28,66 @@ const queueMapByProjectIdAndQueueName = new Map<
   ReturnType<typeof createAndReturnQueue>
 >();
 
+type InferZodTypeMap<TMap extends UnknownTMap> = {
+  [K in keyof TMap]: z.ZodType<TMap[K]>;
+};
+
+export type UnknownDuty = ZZDuty<unknown, UnknownTMap, UnknownTMap, unknown>;
+
 export class ZZDuty<
-    MaDutyDef extends DutyDef<
-      unknown,
-      unknown,
-      Record<string | number | symbol, unknown>,
-      unknown,
-      unknown
-    > = DutyDef<any, any, any, any, any>,
-    P = z.infer<MaDutyDef["jobParamsDef"]>,
-    O extends z.infer<MaDutyDef["outputDef"]> = z.infer<MaDutyDef["outputDef"]>,
-    StreamIMap extends InferDutyInputsDef<MaDutyDef> = InferDutyInputsDef<MaDutyDef>,
-    StreamI = InferDutyInputDef<MaDutyDef>,
-    TProgress = z.infer<MaDutyDef["progressDef"]>
-  >
-  extends DutyDef<P, O, StreamIMap, StreamI, TProgress>
-  implements IWorkerUtilFuncs<P, O>
+  P,
+  IMap extends UnknownTMap = UnknownTMap,
+  OMap extends UnknownTMap = UnknownTMap,
+  TProgress = never
+> implements IWorkerUtilFuncs<P, OMap[keyof OMap]>
 {
   public readonly zzEnv: ZZEnv;
-  readonly queueOptions: WorkerOptions;
 
   protected logger: ReturnType<typeof getLogger>;
+  public readonly _rawQueue: IWorkerUtilFuncs<P, OMap[keyof OMap]>["_rawQueue"];
 
-  public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
+  readonly name: string;
+  readonly jobParamsDef: z.ZodType<P>;
+  public readonly inputDefSet: StreamDefSet<IMap>;
+  public readonly outputDefSet: StreamDefSet<OMap>;
+  readonly progressDef: z.ZodType<TProgress>;
 
   constructor({
     zzEnv,
     name,
     jobParamsDef,
-    outputDef,
-    inputDefs,
-    inputDef,
+    output,
+    input,
     progressDef,
   }: {
-    zzEnv: ZZEnv;
+    name: string;
+    jobParamsDef: z.ZodType<P>;
+    input: InferZodTypeMap<IMap>;
+    output: InferZodTypeMap<OMap>;
+    progressDef?: z.ZodType<TProgress>;
+    zzEnv?: ZZEnv;
     concurrency?: number;
-  } & DutyDefParams<P, O, StreamIMap, StreamI, TProgress>) {
-    super({
-      name,
-      jobParamsDef,
-      outputDef,
-      inputDefs,
-      inputDef,
-      progressDef,
-    });
+  }) {
+    this.name = name;
+    this.jobParamsDef = jobParamsDef;
+    this.progressDef = progressDef || z.never();
 
-    this.queueOptions = {
-      connection: zzEnv.redisConfig,
-    };
-
-    this.zzEnv = zzEnv;
+    this.zzEnv = zzEnv || ZZEnv.global();
     this.logger = getLogger(`duty:${this.name}`);
 
-    const queueFuncs = getMicroworkerQueueByName<P, O, any>({
+    this.inputDefSet = new StreamDefSet({
+      defs: input,
+    });
+
+    this.outputDefSet = new StreamDefSet({
+      defs: output,
+    });
+
+    const queueFuncs = getMicroworkerQueueByName<P, OMap[keyof OMap], any>({
       queueNameOnly: `${this.name}`,
-      queueOptions: this.queueOptions,
+      queueOptions: {
+        connection: this.zzEnv.redisConfig,
+      },
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
     });
@@ -115,7 +117,7 @@ export class ZZDuty<
 
   public async getJobData<
     T extends "in" | "out" | "init-params",
-    U = T extends "in" ? StreamIMap : T extends "out" ? O : P
+    U = T extends "in" ? IMap : T extends "out" ? OMap[keyof OMap] : P
   >({
     jobId,
     ioType,
@@ -146,7 +148,7 @@ export class ZZDuty<
   {
     jobId?: string;
     jobParams: P;
-  }): Promise<O[]> {
+  }): Promise<OMap[keyof OMap][]> {
     if (!jobId) {
       jobId = `${this.name}-${v4()}`;
     }
@@ -169,7 +171,7 @@ export class ZZDuty<
           ioType: "out",
           limit: 1000,
         });
-        return results as O[];
+        return results as OMap[keyof OMap][];
       } else if (status === "failed") {
         throw new Error(`Job ${jobId} failed!`);
       }
@@ -198,13 +200,12 @@ export class ZZDuty<
     key,
   }: {
     jobId: string;
-    data: StreamIMap[keyof StreamIMap] | StreamI;
-    key?: keyof StreamIMap;
+    data: IMap[keyof IMap];
+    key?: keyof IMap;
   }) {
     try {
-      data = this.inputDefs.isSingle
-        ? this.inputDefs.def.parse(data)
-        : this.inputDefs.defs[key!].parse(data);
+      const def = this.inputDefSet.getDef(key);
+      data = def.parse(data);
     } catch (err) {
       this.logger.error(`StreamInput data is invalid: ${JSON.stringify(err)}`);
       throw err;
@@ -219,13 +220,7 @@ export class ZZDuty<
     });
   }
 
-  async terminateJobInput({
-    jobId,
-    key,
-  }: {
-    jobId: string;
-    key?: keyof StreamIMap;
-  }) {
+  async terminateJobInput({ jobId, key }: { jobId: string; key?: keyof IMap }) {
     const stream = this.getJobStream({ jobId, type: "stream-in", key });
     const messageId = v4();
     await stream.pubToJob({
@@ -238,7 +233,7 @@ export class ZZDuty<
     key,
     jobId,
   }: {
-    key?: keyof StreamIMap;
+    key?: keyof IMap;
     jobId: string;
   }) {
     let isReady = await getJobReadyForInputsInRedis({
@@ -257,12 +252,9 @@ export class ZZDuty<
     }
 
     return {
-      sendInputToJob: ({
-        data,
-      }: {
-        data: StreamI | StreamIMap[keyof StreamIMap];
-      }) => this.sendInputToJob({ jobId, data }),
-      terminateJobInput: (p?: { key?: keyof StreamIMap }) =>
+      sendInputToJob: ({ data }: { data: IMap[keyof IMap] }) =>
+        this.sendInputToJob({ jobId, data }),
+      terminateJobInput: (p?: { key?: keyof IMap }) =>
         this.terminateJobInput({
           jobId,
           key: p?.key,
@@ -277,7 +269,7 @@ export class ZZDuty<
     jobId: string;
     onMessage: (
       m:
-        | { terminate: false; data: O; messageId: string }
+        | { terminate: false; data: OMap[keyof OMap]; messageId: string }
         | {
             terminate: true;
           }
@@ -296,44 +288,52 @@ export class ZZDuty<
     });
   }
 
+  public getPubSubQueueId({ jobId }: { jobId: string }) {
+    const queueId = this.name + "::" + jobId;
+    return queueId;
+  }
+
   public getJobStream = <T>(
     p: {
       jobId: string;
     } & (
       | {
           type: "stream-in";
-          key?: keyof StreamIMap;
+          key?: keyof IMap | "default";
         }
       | {
           type: "stream-out";
+          key?: keyof OMap | "default";
         }
     )
   ) => {
     const { jobId, type } = p;
-    const queueIdPrefix = getPubSubQueueId({
-      def: this,
+    const queueIdPrefix = this.getPubSubQueueId({
       jobId,
     });
     let queueId: string;
     let def: z.ZodType<WrapTerminatorAndDataId<unknown>>;
 
     if (type === "stream-in") {
-      const origDef = (
-        this.inputDefs.isSingle
-          ? this.inputDefs.def
-          : this.inputDefs.defs[p.key!]
-      ) as z.ZodType<unknown>;
+      const origDef = this.inputDefSet.getDef(p.key) as z.ZodType<unknown>;
 
       queueId = `${queueIdPrefix}::${type}/${String(p.key || "default")}`;
       def = wrapTerminatorAndDataId(origDef);
     } else if (type === "stream-out") {
       queueId = `${queueIdPrefix}::${type}`;
-      def = wrapTerminatorAndDataId(this.outputDef);
+      def = wrapTerminatorAndDataId(
+        this.outputDefSet.getDef(p.key) as z.ZodType<unknown>
+      );
     } else {
       throw new Error(`Invalid type ${type}`);
     }
 
-    const stream = ZZStream.getOrCreate({ uniqueName: queueId, def });
+    const stream = ZZStream.getOrCreate({
+      uniqueName: queueId,
+      def,
+      logger: this.logger,
+      zzEnv: this.zzEnv,
+    });
     return stream as ZZStream<WrapTerminatorAndDataId<T>>;
   };
 
@@ -344,13 +344,13 @@ export class ZZDuty<
     jobId: string;
     onMessage: (
       m:
-        | { terminate: false; data: O; messageId: string }
+        | { terminate: false; data: OMap[keyof OMap]; messageId: string }
         | {
             terminate: true;
           }
     ) => void;
   }) {
-    const stream = this.getJobStream<O>({
+    const stream = this.getJobStream<OMap[keyof OMap]>({
       jobId,
       type: "stream-out",
     });
@@ -370,7 +370,7 @@ export class ZZDuty<
   }
 
   public async nextOutputForJob(jobId: string) {
-    const pubSub = this.getJobStream<O>({
+    const pubSub = this.getJobStream<OMap[keyof OMap]>({
       jobId,
       type: "stream-out",
     });
@@ -486,17 +486,6 @@ function createAndReturnQueue<
   );
 
   return funcs;
-}
-
-export function getPubSubQueueId({
-  def,
-  jobId,
-}: {
-  def: DutyDef<unknown, unknown, any, any, unknown>;
-  jobId: string;
-}) {
-  const queueId = def.name + "::" + jobId;
-  return queueId;
 }
 
 export async function getJobReadyForInputsInRedis({

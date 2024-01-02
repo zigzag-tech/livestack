@@ -1,9 +1,12 @@
+import { UnknownTMap } from './StreamDefSet';
+import { CheckExtendsDuty } from './ZZJob';
+import { InferStreamDef } from './ZZStream';
+import { UnknownDuty } from './ZZDuty';
 import _ from "lodash";
 import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { ZZJob, ZZProcessor } from "./ZZJob";
 import { ZZDuty, getMicroworkerQueueByName } from "./ZZDuty";
-import { DutyDef } from "./DutyDef";
 import { ZZEnv } from "./ZZEnv";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { ZodType, z } from "zod";
@@ -13,19 +16,15 @@ type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
 >;
 
-export class ZZWorkerDef<
-  MaDutyDef extends DutyDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >,
-  WP extends object = {}
+export class ZZWorkerDef<P,
+IMap extends UnknownTMap = UnknownTMap,
+OMap extends UnknownTMap = UnknownTMap,
+TProgress = never,
+WP extends object = {},
 > {
-  public readonly duty: ZZDuty<MaDutyDef>;
+  public readonly duty: ZZDuty<P, IMap, OMap, TProgress>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
-  public readonly processor: ZZProcessor<MaDutyDef, WP>;
+  public readonly processor: ZZProcessor<ZZDuty<P, IMap,OMap, TProgress>, WP>;
 
   constructor({
     duty,
@@ -33,8 +32,8 @@ export class ZZWorkerDef<
     instanceParamsDef,
   }: {
     concurrency?: number;
-    duty: ZZDuty<MaDutyDef>;
-    processor: ZZProcessor<MaDutyDef, WP>;
+    duty: ZZDuty<P, IMap, OMap, TProgress>;
+    processor: ZZProcessor<ZZDuty<P, IMap,OMap, TProgress>, WP>;
     instanceParamsDef?: z.ZodType<WP>;
   }) {
     this.duty = duty;
@@ -45,7 +44,7 @@ export class ZZWorkerDef<
   public async startWorker(p: { concurrency?: number; instanceParams?: WP }) {
     const { concurrency, instanceParams } = p || {};
 
-    const worker = new ZZWorker<MaDutyDef, WP>({
+    const worker = new ZZWorker<P, IMap, OMap, TProgress, WP>({
       def: this,
       concurrency,
       instanceParams: instanceParams || ({} as WP),
@@ -57,18 +56,13 @@ export class ZZWorkerDef<
 }
 
 export class ZZWorker<
-  MaDutyDef extends DutyDef<
-    any,
-    any,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >,
-  WP extends object,
-  P = z.infer<MaDutyDef["jobParamsDef"]>,
-  O extends z.infer<MaDutyDef["outputDef"]> = z.infer<MaDutyDef["outputDef"]>
+P,
+IMap extends UnknownTMap = UnknownTMap,
+OMap extends UnknownTMap = UnknownTMap,
+TProgress = never,
+WP extends object = {},
 > {
-  public readonly duty: ZZDuty<MaDutyDef>;
+  public readonly duty:  ZZDuty<P, IMap, OMap, TProgress>;
   protected readonly zzEnv: ZZEnv;
   protected readonly storageProvider?: IStorageProvider;
 
@@ -76,13 +70,13 @@ export class ZZWorker<
     {
       jobParams: P;
     },
-    O | undefined
+    OMap[keyof OMap] | undefined
   >;
 
-  public readonly _rawQueue: IWorkerUtilFuncs<P, O>["_rawQueue"];
+  public readonly _rawQueue: IWorkerUtilFuncs<P,  OMap[keyof OMap]>["_rawQueue"];
   public readonly instanceParams?: WP;
   public readonly workerName: string;
-  public readonly def: ZZWorkerDef<MaDutyDef, WP>;
+  public readonly def: ZZWorkerDef<P, IMap, OMap, TProgress, WP>;
   protected readonly logger: ReturnType<typeof getLogger>;
 
   constructor({
@@ -91,11 +85,13 @@ export class ZZWorker<
     workerName,
     concurrency = 3,
   }: {
-    def: ZZWorkerDef<MaDutyDef, WP>;
+    def: ZZWorkerDef<P, IMap, OMap, TProgress, WP>;
     instanceParams?: WP;
     workerName?: string;
     concurrency?: number;
   }) {
+    // if worker name is not provided, use random string
+
     this.duty = def.duty;
     this.zzEnv = def.duty.zzEnv;
     this.instanceParams = instanceParams;
@@ -107,7 +103,7 @@ export class ZZWorker<
       connection: this.zzEnv.redisConfig,
     };
 
-    const queueFuncs = getMicroworkerQueueByName<P, O, any>({
+    const queueFuncs = getMicroworkerQueueByName<P,  OMap[keyof OMap], any>({
       queueNameOnly: `${this.duty.name}`,
       queueOptions: workerOptions,
       db: this.zzEnv.db,
@@ -116,19 +112,18 @@ export class ZZWorker<
 
     this._rawQueue = queueFuncs._rawQueue;
     this.workerName =
-      workerName || "wkr:" + `${this.zzEnv.projectId}/${workerName}`;
+      workerName || "wkr:" + `${this.zzEnv.projectId}/${this.def.duty.name}`;
     this.logger = getLogger(`wkr:${this.workerName}`);
 
-    const logger = getLogger(`wkr:${this.workerName}`);
     const mergedWorkerOptions = _.merge({}, workerOptions);
 
-    this.bullMQWorker = new Worker<{ jobParams: P }, O | undefined, string>(
+    this.bullMQWorker = new Worker<{ jobParams: P },  OMap[keyof OMap] | undefined, string>(
       `${this.zzEnv.projectId}/${this.duty.name}`,
       async (job, token) => {
-        const zzJ = new ZZJob<MaDutyDef, WP>({
+        const zzJ = new ZZJob({
           bullMQJob: job,
           bullMQToken: token,
-          logger,
+          logger: this.logger,
           duty: this.duty,
           jobParams: job.data.jobParams,
           workerInstanceParams: this.instanceParams,
@@ -136,7 +131,7 @@ export class ZZWorker<
           workerName: this.workerName,
         });
 
-        return await zzJ.beginProcessing(this.def.processor.bind(zzJ));
+        return await zzJ.beginProcessing(this.def.processor.bind(zzJ) as any);
       },
       mergedWorkerOptions
     );
@@ -145,13 +140,13 @@ export class ZZWorker<
     this.bullMQWorker.on("active", (job: Job) => {});
 
     this.bullMQWorker.on("failed", async (job, error: Error) => {
-      logger.error(`JOB FAILED: ${job?.id}, ${error}`);
+      this.logger.error(`JOB FAILED: ${job?.id}, ${error}`);
     });
 
     this.bullMQWorker.on("error", (err) => {
       const errStr = String(err);
       if (!errStr.includes("Missing lock for job")) {
-        logger.error(`ERROR: ${err}`);
+        this.logger.error(`ERROR: ${err}`);
       }
     });
 
@@ -161,7 +156,7 @@ export class ZZWorker<
     );
 
     this.bullMQWorker.on("completed", async (job: Job) => {
-      logger.info(`JOB COMPLETED: ${job.id}`);
+      this.logger.info(`JOB COMPLETED: ${job.id}`);
     });
 
     this.bullMQWorker.run();

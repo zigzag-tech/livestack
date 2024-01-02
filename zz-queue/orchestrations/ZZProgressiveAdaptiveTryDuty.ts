@@ -1,17 +1,9 @@
-import { DutyDef } from "../microworkers/DutyDef";
-import { ZZEnv } from "../microworkers/ZZEnv";
-import { ZZDuty } from "../microworkers/ZZDuty";
+import { UnknownDuty, ZZDuty } from "../microworkers/ZZDuty";
 import { z } from "zod";
 import { ZZWorkerDef } from "../microworkers/ZZWorker";
 
 export interface AttemptDef<
-  MaDutyDef extends DutyDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >,
+  MaDutyDef extends UnknownDuty,
   ParentP = z.infer<MaDutyDef["jobParamsDef"]>,
   ParentO = z.infer<MaDutyDef["outputDef"]>
 > {
@@ -23,24 +15,18 @@ export interface AttemptDef<
   ) => Promise<ParentO> | ParentO;
 }
 export class ZZProgressiveAdaptiveTryWorkerDef<
-  MaDutyDef extends DutyDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >,
-  P = z.infer<MaDutyDef["jobParamsDef"]>,
-  O extends z.infer<MaDutyDef["outputDef"]> = z.infer<MaDutyDef["outputDef"]>
-> extends ZZWorkerDef<MaDutyDef, {}> {
-  attempts: AttemptDef<MaDutyDef>[];
+  MaDuty extends UnknownDuty,
+  P = z.infer<MaDuty["jobParamsDef"]>,
+  O extends z.infer<MaDuty["outputDef"]> = z.infer<MaDuty["outputDef"]>
+> extends ZZWorkerDef<MaDuty, {}> {
+  attempts: AttemptDef<MaDuty>[];
   constructor({
     attempts,
     ultimateFallback,
     duty,
   }: {
-    duty: ZZDuty<MaDutyDef>;
-    attempts: AttemptDef<MaDutyDef>[];
+    duty: ZZDuty<MaDuty>;
+    attempts: AttemptDef<MaDuty>[];
     ultimateFallback?: () => Promise<O>;
   }) {
     super({
@@ -50,13 +36,13 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
           def,
           transformInput,
           transformOutput,
-        }: AttemptDef<MaDutyDef>) => {
+        }: AttemptDef<MaDuty>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${def.name}`;
 
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
-              def: def as DutyDef<P, O, any, any, any>,
+              def: def as ZZDuty<P, I, O, any, any, any>,
               jobParams: (await transformInput(jobParams)) as P,
             });
 

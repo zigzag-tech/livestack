@@ -3,7 +3,6 @@ import { IStorageProvider } from "../storage/cloudStorage";
 import { RedisOptions } from "ioredis";
 import { Stream } from "stream";
 import { z } from "zod";
-import { ZZStream } from "./ZZStream";
 
 interface EnvParams {
   readonly storageProvider?: IStorageProvider;
@@ -19,13 +18,13 @@ export class ZZEnv implements EnvParams {
   public readonly redisConfig: RedisOptions;
   private static _zzEnv: ZZEnv;
 
-  static get zzEnv() {
+  static global() {
+    if (!ZZEnv._zzEnv) throw new Error("ZZEnv has not been set");
     return ZZEnv._zzEnv;
   }
 
-  static applyEnv(env: ZZEnv) {
+  static setGlobal(env: ZZEnv) {
     ZZEnv._zzEnv = env;
-    ZZStream.zzEnv = env;
   }
 
   constructor({ storageProvider, projectId, db, redisConfig }: EnvParams) {
@@ -33,11 +32,6 @@ export class ZZEnv implements EnvParams {
     this.projectId = projectId;
     this.db = db;
     this.redisConfig = redisConfig;
-    ZZStream.setProjectConfig({
-      projectId,
-    });
-    ZZStream.zzEnv = this;
-    
   }
 
   public derive(newP: Partial<EnvParams>) {

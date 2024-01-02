@@ -1,7 +1,7 @@
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 import { v4 } from "uuid";
 import { ZZStream } from "./ZZStream";
-import { Job, FlowJob, FlowProducer, WaitingChildrenError } from "bullmq";
+import { Job, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
   createLazyNextValueGenerator,
@@ -10,70 +10,53 @@ import {
 import { Observable, map, takeUntil } from "rxjs";
 import {
   IStorageProvider,
-  getPublicCdnUrl,
   saveLargeFilesToStorage,
 } from "../storage/cloudStorage";
 import { getTempPathByJobId } from "../storage/temp-dirs";
-import fs from "fs";
-import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
 import {
   addJobDataAndIOEvent,
-  ensureJobDependencies,
   getJobDataAndIoEvents,
   getJobRec,
   updateJobStatus,
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { ZZDuty, getPubSubQueueId } from "../microworkers/ZZDuty";
-import { InferDutyInputDef, InferDutyInputsDef, DutyDef } from "./DutyDef";
+import { UnknownDuty, ZZDuty } from "../microworkers/ZZDuty";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
+import { InferStreamSetType } from "./StreamDefSet";
+import { UnknownTMap } from "./StreamDefSet";
 
 export type ZZProcessor<
-  MaDutyDef extends DutyDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >,
-  WP extends object = {}
-> = Parameters<ZZJob<MaDutyDef, WP>["beginProcessing"]>[0];
+MaDuty,
+WP extends object = {},
+P = z.infer<CheckExtendsDuty<MaDuty>["jobParamsDef"]>,
+IMap extends UnknownTMap = InferStreamSetType<CheckExtendsDuty<MaDuty>["inputDefSet"]>,
+OMap extends UnknownTMap = InferStreamSetType<CheckExtendsDuty<MaDuty>["outputDefSet"]>,
+TProgress = z.infer<CheckExtendsDuty<MaDuty>["progressDef"]>
+> = (j:ZZJob<P, IMap, OMap, TProgress, WP>) => Promise<OMap[keyof OMap] | void>
 
-export type ZZProcessorParams<
-  MaDef extends DutyDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >,
-  WP extends object
-> = Parameters<ZZProcessor<MaDef, WP>>[0];
+export type CheckExtendsDuty<T> = T extends ZZDuty<infer P, infer I, infer O, infer T>
+  ? ZZDuty< P,  I,  O,  T> :
+   T extends ZZDuty<infer P, infer I, infer O> ?  ZZDuty< P,  I,  O> :
+   T extends UnknownDuty ?
+  UnknownDuty: never;
+  
 
 export class ZZJob<
-  MaDutyDef extends DutyDef<
-    unknown,
-    unknown,
-    Record<string | number | symbol, unknown>,
-    unknown,
-    unknown
-  >,
-  WP extends object,
-  P = z.infer<MaDutyDef["jobParamsDef"]>,
-  O extends z.infer<MaDutyDef["outputDef"]> = z.infer<MaDutyDef["outputDef"]>,
-  StreamIMap extends InferDutyInputsDef<MaDutyDef> = InferDutyInputsDef<MaDutyDef>,
-  StreamI extends InferDutyInputDef<MaDutyDef> = InferDutyInputDef<MaDutyDef>,
-  TProgress = z.infer<MaDutyDef["progressDef"]>
+P,
+IMap extends UnknownTMap = UnknownTMap,
+OMap extends UnknownTMap = UnknownTMap,
+TProgress = never,
+WP extends object = {},
 > {
-  private readonly bullMQJob: Job<{ jobParams: P }, O | void>;
+  private readonly bullMQJob: Job<{ jobParams: P }, OMap[keyof OMap] | void>;
   public readonly _bullMQToken?: string;
   readonly jobParams: P;
   readonly logger: ReturnType<typeof getLogger>;
-  readonly duty: ZZDuty<MaDutyDef>;
+  readonly duty: ZZDuty<P, IMap, OMap, TProgress>;
   // New properties for subscriber tracking
 
   // public async aliveLoop(retVal: O) {
@@ -91,19 +74,20 @@ export class ZZJob<
   //   await this.bullMQJob.moveToCompleted(retVal, this._bullMQToken!);
   //   return retVal;
   // }
-  emitOutput: (o: O) => Promise<void>;
+
+  emitOutput: (o: OMap[keyof OMap]) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
-  nextInput = async (key?: keyof StreamIMap) => {
+  nextInput = async<K extends keyof IMap> (key?:K) => {
     await setJobReadyForInputsInRedis({
       redisConfig: this.zzEnv.redisConfig,
       jobId: this.jobId,
       isReady: true,
       key: key ? String(key) : "default",
     });
-    return await this._ensureInputStreamFn(key).nextValue();
+    return await this._ensureInputStreamFn(key).nextValue() as IMap[K];
   };
 
-  inputObservableFor = (key?: keyof StreamIMap) => {
+  inputObservableFor = (key?: keyof IMap) => {
     return this._ensureInputStreamFn(key).trackedObservable;
   };
 
@@ -122,22 +106,22 @@ export class ZZJob<
   public jobId: string;
   private readonly workerName;
   private readonly inputStreamFnsByKey: Partial<{
-    [K in keyof StreamIMap]: {
-      nextValue: () => Promise<StreamIMap[K] | null>;
-      inputStream: ZZStream<WrapTerminatorAndDataId<StreamIMap[K]>>;
-      inputObservableUntracked: Observable<StreamIMap[K] | null>;
-      trackedObservable: Observable<StreamIMap[K] | null>;
+    [K in keyof IMap]: {
+      nextValue: () => Promise<IMap[K] | null>;
+      inputStream: ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
+      inputObservableUntracked: Observable<IMap[K] | null>;
+      trackedObservable: Observable<IMap[K] | null>;
       subscriberCountObservable: Observable<number>;
     };
   }>;
 
   constructor(p: {
-    bullMQJob: Job<{ jobParams: P }, O | undefined, string>;
+    bullMQJob: Job<{ jobParams: P }, OMap[keyof OMap] | undefined, string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
     jobParams: P;
     storageProvider?: IStorageProvider;
-    duty: ZZDuty<MaDutyDef>;
+    duty: ZZDuty<P, IMap, OMap, TProgress>;
     workerInstanceParams?: WP;
     workerInstanceParamsSchema?: z.ZodType<WP>;
     workerName: string;
@@ -187,7 +171,7 @@ export class ZZJob<
     this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
 
-    const outputStream = this.duty.getJobStream<O>({
+    const outputStream = this.duty.getJobStream<OMap[keyof OMap]>({
       jobId: this.jobId,
       type: "stream-out",
     });
@@ -199,16 +183,7 @@ export class ZZJob<
       });
     };
 
-    this.emitOutput = async (o: O) => {
-      try {
-        o = this.duty.outputDef.parse(o) as O;
-      } catch (err) {
-        console.error("errornous output: ", o);
-        this.logger.error(
-          `EmitOutput error: data provided is invalid: ${JSON.stringify(err)}`
-        );
-        throw err;
-      }
+    this.emitOutput = async (o: OMap[keyof OMap]) => {
       let { largeFilesToSave, newObj } = identifyLargeFiles(o);
 
       if (this.storageProvider) {
@@ -260,16 +235,16 @@ export class ZZJob<
     };
   }
 
-  private _ensureInputStreamFn<K extends keyof StreamIMap>(
-    key?: keyof StreamIMap
+  private _ensureInputStreamFn<K extends keyof IMap>(
+    key?: keyof IMap | "default"
   ) {
-    if (this.duty.inputDefs.isSingle) {
-      if (key) {
+    if (this.duty.inputDefSet.isSingle) {
+      if (key && key !== "default") {
         throw new Error(
           `inputDefs is single stream, but key is provided: ${String(key)}`
         );
       }
-      key = "default";
+      key = "default" as const;
     } else {
       if (!key) {
         throw new Error(
@@ -278,12 +253,12 @@ export class ZZJob<
       }
     }
 
-    if (!this.inputStreamFnsByKey[key!]) {
+    if (!this.inputStreamFnsByKey[key! as keyof IMap]) {
       const stream = this.duty.getJobStream({
         jobId: this.jobId,
         type: "stream-in",
         key,
-      }) as ZZStream<WrapTerminatorAndDataId<StreamIMap[K]>>;
+      }) as ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
       const inputObservableUntracked = stream.valueObsrvable.pipe(
         map((x) => (x.terminate ? null : x.data))
       );
@@ -307,7 +282,7 @@ export class ZZJob<
         }
       });
 
-      this.inputStreamFnsByKey[key] = {
+      this.inputStreamFnsByKey[key as keyof IMap] = {
         nextValue,
         inputStream: stream,
         inputObservableUntracked,
@@ -315,18 +290,18 @@ export class ZZJob<
         subscriberCountObservable,
       };
     }
-    return this.inputStreamFnsByKey[key]!;
+    return this.inputStreamFnsByKey[key as keyof IMap]!;
   }
 
   public beginProcessing = async (
-    processor: (j: ZZJob<MaDutyDef, WP>) => Promise<O | void>
-  ): Promise<O | undefined> => {
+    processor: (j: ZZJob<P, IMap, OMap, TProgress>) => Promise<OMap[keyof OMap] | void>
+  ): Promise<OMap[keyof OMap] | undefined> => {
     const jId = {
       opName: this.duty.name,
       jobId: this.jobId,
       projectId: this.zzEnv.projectId,
     };
-    const savedResult = await getJobRec<O>({
+    const savedResult = await getJobRec<OMap[keyof OMap]>({
       ...jId,
       dbConn: this.zzEnv.db,
       jobStatus: "completed",
@@ -336,7 +311,7 @@ export class ZZJob<
     const projectId = this.zzEnv.projectId;
 
     if (savedResult) {
-      const jobData = await getJobDataAndIoEvents<O>({
+      const jobData = await getJobDataAndIoEvents<OMap[keyof OMap]>({
         ...jId,
         dbConn: this.zzEnv.db,
         ioType: "out",
@@ -368,8 +343,8 @@ export class ZZJob<
         // wait as long as there are still subscribers
 
         await Promise.all(
-          Object.values(this.inputStreamFnsByKey).map(
-            async (x: (typeof this.inputStreamFnsByKey)[keyof StreamIMap]) => {
+          (Object.values(this.inputStreamFnsByKey) as any).map(
+            async (x: (typeof this.inputStreamFnsByKey)[keyof IMap]) => {
               await new Promise<void>((resolve) => {
                 x!.subscriberCountObservable
                   .pipe(takeUntil(x!.inputObservableUntracked))
@@ -421,149 +396,149 @@ export class ZZJob<
     }
   };
 
-  public spawnChildJobsToWaitOn = async <CI, CO>(p: {
-    def: DutyDef<P, O, StreamIMap, StreamI, TProgress>;
-    jobId: string;
-    jobParams: P;
-  }) => {
-    const spawnR = await this._spawnJob({
-      ...p,
-      flowProducerOpts: {
-        parent: {
-          id: this.jobId,
-          queue: this.bullMQJob.queueQualifiedName,
-        },
-      },
-    });
+  // public spawnChildJobsToWaitOn = async <CI, CO>(p: {
+  //   def: DutyDef<P, O, StreamIMap, StreamI, TProgress>;
+  //   jobId: string;
+  //   jobParams: P;
+  // }) => {
+  //   const spawnR = await this._spawnJob({
+  //     ...p,
+  //     flowProducerOpts: {
+  //       parent: {
+  //         id: this.jobId,
+  //         queue: this.bullMQJob.queueQualifiedName,
+  //       },
+  //     },
+  //   });
 
-    await ensureJobDependencies({
-      projectId: this.zzEnv.projectId,
-      parentJobId: this.jobId,
-      parentOpName: this.duty.name,
-      childJobId: p.jobId,
-      childOpName: p.def.name,
-      dbConn: this.zzEnv.db,
-      io_event_id: spawnR.ioEventId,
-    });
+  //   await ensureJobDependencies({
+  //     projectId: this.zzEnv.projectId,
+  //     parentJobId: this.jobId,
+  //     parentOpName: this.duty.name,
+  //     childJobId: p.jobId,
+  //     childOpName: p.def.name,
+  //     dbConn: this.zzEnv.db,
+  //     io_event_id: spawnR.ioEventId,
+  //   });
 
-    return spawnR;
-  };
+  //   return spawnR;
+  // };
 
-  public spawnJob = async <P, O>(p: {
-    def: DutyDef<P, O, StreamIMap, StreamI, TProgress>;
-    jobId: string;
-    jobParams: P;
-  }) => {
-    return await this._spawnJob(p);
-  };
+  // public spawnJob = async <P, O>(p: {
+  //   def: DutyDef<P, O, StreamIMap, StreamI, TProgress>;
+  //   jobId: string;
+  //   jobParams: P;
+  // }) => {
+  //   return await this._spawnJob(p);
+  // };
 
-  private _spawnJob = async <P, O>({
-    def: childJobDef,
-    jobId: childJobId,
-    jobParams,
-    flowProducerOpts,
-  }: {
-    def: DutyDef<P, O, StreamIMap, StreamI, TProgress>;
-    jobId: string;
-    jobParams: P;
-    flowProducerOpts?: FlowJob["opts"];
-  }) => {
-    const tempDuty = new ZZDuty({
-      ...childJobDef,
-      zzEnv: this.zzEnv,
-    });
-    await tempDuty.requestJob({
-      jobId: childJobId,
-      jobParams,
-      bullMQJobsOpts: flowProducerOpts,
-    });
-    const [rec] = await getJobDataAndIoEvents<P>({
-      projectId: this.zzEnv.projectId,
-      opName: childJobDef.name,
-      jobId: childJobId,
-      dbConn: this.zzEnv.db,
-      ioType: "init-params",
-    });
+  // private _spawnJob = async <P, O>({
+  //   def: childJobDef,
+  //   jobId: childJobId,
+  //   jobParams,
+  //   flowProducerOpts,
+  // }: {
+  //   def: DutyDef<P, O, StreamIMap, StreamI, TProgress>;
+  //   jobId: string;
+  //   jobParams: P;
+  //   flowProducerOpts?: FlowJob["opts"];
+  // }) => {
+  //   const tempDuty = new ZZDuty({
+  //     ...childJobDef,
+  //     zzEnv: this.zzEnv,
+  //   });
+  //   await tempDuty.requestJob({
+  //     jobId: childJobId,
+  //     jobParams,
+  //     bullMQJobsOpts: flowProducerOpts,
+  //   });
+  //   const [rec] = await getJobDataAndIoEvents<P>({
+  //     projectId: this.zzEnv.projectId,
+  //     opName: childJobDef.name,
+  //     jobId: childJobId,
+  //     dbConn: this.zzEnv.db,
+  //     ioType: "init-params",
+  //   });
 
-    let _outStreamAndFns: {
-      stream: ZZStream<WrapTerminatorAndDataId<O>>;
-      nextValue: any;
-    } | null = null;
-    const _getOrCreateOutputStream = () => {
-      if (!_outStreamAndFns) {
-        const stream = ZZStream.getOrCreate({
-          uniqueName: `${getPubSubQueueId({
-            def: childJobDef,
-            jobId: childJobId,
-          })}/output`,
-          def: wrapTerminatorAndDataId(childJobDef.outputDef),
-        });
+  //   let _outStreamAndFns: {
+  //     stream: ZZStream<WrapTerminatorAndDataId<O>>;
+  //     nextValue: any;
+  //   } | null = null;
+  //   const _getOrCreateOutputStream = () => {
+  //     if (!_outStreamAndFns) {
+  //       const stream = ZZStream.getOrCreate({
+  //         uniqueName: `${getPubSubQueueId({
+  //           def: childJobDef,
+  //           jobId: childJobId,
+  //         })}/output`,
+  //         def: wrapTerminatorAndDataId(childJobDef.outputDef),
+  //       });
 
-        const { nextValue } = createLazyNextValueGenerator(
-          stream.valueObsrvable
-        );
-        _outStreamAndFns = {
-          stream: stream,
-          nextValue,
-        };
-      }
+  //       const { nextValue } = createLazyNextValueGenerator(
+  //         stream.valueObsrvable
+  //       );
+  //       _outStreamAndFns = {
+  //         stream: stream,
+  //         nextValue,
+  //       };
+  //     }
 
-      return _outStreamAndFns;
-    };
+  //     return _outStreamAndFns;
+  //   };
 
-    return {
-      get outputObservable() {
-        return _getOrCreateOutputStream().stream.valueObsrvable.pipe(
-          map((x) => (x.terminate ? null : x.data))
-        );
-      },
-      nextOutput: async () => {
-        const r = await _getOrCreateOutputStream().nextValue();
-        if (r.terminate) {
-          return null;
-        } else {
-          return r.data;
-        }
-      },
-      ...rec,
-    };
-  };
+  //   return {
+  //     get outputObservable() {
+  //       return _getOrCreateOutputStream().stream.valueObsrvable.pipe(
+  //         map((x) => (x.terminate ? null : x.data))
+  //       );
+  //     },
+  //     nextOutput: async () => {
+  //       const r = await _getOrCreateOutputStream().nextValue();
+  //       if (r.terminate) {
+  //         return null;
+  //       } else {
+  //         return r.data;
+  //       }
+  //     },
+  //     ...rec,
+  //   };
+  // };
 
-  public saveToTextFile = async ({
-    relativePath,
-    data,
-  }: {
-    relativePath: string;
-    data: string;
-  }) => {
-    await ensurePathExists(this.dedicatedTempWorkingDir);
-    fs.writeFileSync(
-      path.join(this.dedicatedTempWorkingDir, relativePath),
-      data
-    );
-  };
+  // public saveToTextFile = async ({
+  //   relativePath,
+  //   data,
+  // }: {
+  //   relativePath: string;
+  //   data: string;
+  // }) => {
+  //   await ensurePathExists(this.dedicatedTempWorkingDir);
+  //   fs.writeFileSync(
+  //     path.join(this.dedicatedTempWorkingDir, relativePath),
+  //     data
+  //   );
+  // };
 
-  getLargeValueCdnUrl = async <T extends object>(key: keyof T, obj: T) => {
-    if (!this.storageProvider) {
-      throw new Error("storageProvider is not provided");
-    }
-    if (!this.storageProvider.getPublicUrl) {
-      throw new Error("storageProvider.getPublicUrl is not provided");
-    }
-    const { largeFilesToSave } = identifyLargeFiles(obj);
-    const found = largeFilesToSave.find((x) => x.path === key);
-    if (!found) {
-      console.error("Available keys: ", Object.keys(obj));
-      throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
-    } else {
-      return getPublicCdnUrl({
-        projectId: this.zzEnv.projectId,
-        jobId: this.jobId,
-        key: String(key),
-        storageProvider: this.storageProvider,
-      });
-    }
-  };
+  // getLargeValueCdnUrl = async <T extends object>(key: keyof T, obj: T) => {
+  //   if (!this.storageProvider) {
+  //     throw new Error("storageProvider is not provided");
+  //   }
+  //   if (!this.storageProvider.getPublicUrl) {
+  //     throw new Error("storageProvider.getPublicUrl is not provided");
+  //   }
+  //   const { largeFilesToSave } = identifyLargeFiles(obj);
+  //   const found = largeFilesToSave.find((x) => x.path === key);
+  //   if (!found) {
+  //     console.error("Available keys: ", Object.keys(obj));
+  //     throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
+  //   } else {
+  //     return getPublicCdnUrl({
+  //       projectId: this.zzEnv.projectId,
+  //       jobId: this.jobId,
+  //       key: String(key),
+  //       storageProvider: this.storageProvider,
+  //     });
+  //   }
+  // };
 }
 
 export async function setJobReadyForInputsInRedis({

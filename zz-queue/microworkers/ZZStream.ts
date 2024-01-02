@@ -1,6 +1,5 @@
 import { ZodType } from "zod";
 import Redis from "ioredis";
-import { ProjectConfig } from "../config-factory/config-defs";
 import { Observable } from "rxjs";
 import { ZZEnv } from "./ZZEnv";
 
@@ -10,49 +9,73 @@ const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
 export type InferStreamDef<T> = T extends ZZStream<infer P> ? P : never;
 
+export namespace ZZStream {
+  export type single<ZT> = ZT extends ZodType<infer T>
+    ? {
+        default: T;
+      }
+    : never;
+  export type multi<ZTMap> = ZTMap extends {
+    [K in keyof ZTMap]: ZodType<ZTMap[K]>;
+  }
+    ? {
+        [K in keyof ZTMap]: ZTMap[K];
+      }
+    : never;
+}
+
 export class ZZStream<T> {
   public readonly def: ZodType<T>;
   public readonly uniqueName: string;
-  private static _projectConfig: ProjectConfig;
-  private static _zzEnv: ZZEnv;
   public readonly hash: string;
+  private zzEnv: ZZEnv;
+  private logger: ReturnType<typeof getLogger>;
 
-  public static get zzEnv() {
-    return ZZStream._zzEnv;
+  public static single<T>(def: z.ZodType<T>) {
+    return {
+      default: def,
+    };
   }
 
-  public static set zzEnv(env: ZZEnv) {
-    ZZStream._zzEnv = env;
-  }
   nextValue: () => Promise<T>;
 
   private _valueObservable: Observable<T> | null = null;
 
   protected static globalRegistry: { [key: string]: ZZStream<unknown> } = {};
 
-  public static setProjectConfig(projectConfig: ProjectConfig) {
-    ZZStream._projectConfig = projectConfig;
-  }
-
   public static getOrCreate<T>({
     uniqueName,
     def,
+    zzEnv,
+    logger,
   }: {
     uniqueName: string;
-    def: ZodType<T>;
+    def?: ZodType<T>;
+    zzEnv?: ZZEnv;
+    logger?: ReturnType<typeof getLogger>;
   }): ZZStream<T> {
+    if (!zzEnv) {
+      zzEnv = ZZEnv.global();
+    }
     if (ZZStream.globalRegistry[uniqueName]) {
       const existing = ZZStream.globalRegistry[uniqueName];
       // check if types match
       // TODO: use a more robust way to check if types match
-      if (existing.hash !== hashDef(def)) {
-        throw new Error(
-          `ZZStream ${uniqueName} already exists with different type, and the new type provided is not compatible with the existing type.`
-        );
+      if (def) {
+        if (existing.hash !== hashDef(def)) {
+          throw new Error(
+            `ZZStream ${uniqueName} already exists with different type, and the new type provided is not compatible with the existing type.`
+          );
+        }
       }
       return existing as ZZStream<T>;
     } else {
-      const stream = new ZZStream({ uniqueName, def });
+      if (!def || !logger) {
+        throw new Error(
+          "def and logger must be provided if stream does not exist"
+        );
+      }
+      const stream = new ZZStream({ uniqueName, def, zzEnv, logger });
       ZZStream.globalRegistry[uniqueName] = stream;
       return stream;
     }
@@ -61,15 +84,21 @@ export class ZZStream<T> {
   protected constructor({
     uniqueName,
     def,
+    zzEnv,
+    logger,
   }: {
     uniqueName: string;
     def: ZodType<T>;
+    zzEnv: ZZEnv;
+    logger: ReturnType<typeof getLogger>;
   }) {
     this.def = def;
     this.uniqueName = uniqueName;
+    this.zzEnv = zzEnv;
     this.hash = hashDef(this.def);
     const { nextValue } = createLazyNextValueGenerator(this.valueObsrvable);
     this.nextValue = nextValue;
+    this.logger = logger;
   }
 
   private ensureValueObservable() {
@@ -104,9 +133,9 @@ export class ZZStream<T> {
   }
 
   private getPubSubClientsById({ queueId }: { queueId: string }) {
-    const id = `zzmsgq:${ZZStream._projectConfig.projectId}--${queueId!}`;
+    const id = `zzmsgq:${this.zzEnv.projectId}--${queueId!}`;
     if (!PUBSUB_BY_ID[id]) {
-      const sub = new Redis(ZZStream._zzEnv.redisConfig);
+      const sub = new Redis(this.zzEnv.redisConfig);
       sub.subscribe(id, (err, count) => {
         if (err) {
           console.error("Failed to subscribe: %s", err.message);
@@ -116,21 +145,33 @@ export class ZZStream<T> {
           // );
         }
       });
-      const pub = new Redis(ZZStream._zzEnv.redisConfig);
+      const pub = new Redis(this.zzEnv.redisConfig);
       PUBSUB_BY_ID[id] = { sub, pub };
     }
     return { channelId: id, clients: PUBSUB_BY_ID[id] };
   }
 
-  private async _pub<T>(msg: T) {
+  private async _pub<TT>(msg: TT) {
     const { channelId, clients } = await this.getPubSubClientsById({
       queueId: this.uniqueName,
     });
 
     // console.log("pubbing", channelId);
 
-    const addedMsg = await clients.pub.publish(channelId, customStringify(msg));
-    return addedMsg;
+    try {
+      const parsed = this.def.parse(msg) as T;
+      const addedMsg = await clients.pub.publish(
+        channelId,
+        customStringify(parsed)
+      );
+      return addedMsg;
+    } catch (err) {
+      console.error("errornous output: ", msg);
+      this.logger.error(
+        `EmitOutput error: data provided is invalid: ${JSON.stringify(err)}`
+      );
+      throw err;
+    }
   }
 
   public sub({ processor }: { processor: (message: T) => void }) {
@@ -178,6 +219,8 @@ function customParse(json: string): any {
   return JSON.parse(json, reviver);
 }
 import { z } from "zod";
+import { getLogger } from "../utils/createWorkerLogger";
+import { StreamDefSet, UnknownTMap } from "./StreamDefSet";
 const ss = z.object({});
 function hashDef(def: ZodType<unknown>) {
   const str = JSON.stringify(def);
