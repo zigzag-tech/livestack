@@ -9,7 +9,7 @@ export type InferStreamSetType<T> = T extends StreamDefSet<infer TMap>
 export type UnknownTMap = Record<string | number | symbol, unknown>;
 
 export class StreamDefSet<TMap extends UnknownTMap> {
-  private defs: Record<keyof TMap, z.ZodType<TMap[keyof TMap]>>;
+  public readonly defs: Record<keyof TMap, z.ZodType<TMap[keyof TMap]>>;
 
   constructor({
     defs,

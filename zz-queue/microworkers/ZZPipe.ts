@@ -16,7 +16,7 @@ import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 import { ZZStream } from "./ZZStream";
-import { StreamDefSet, UnknownTMap } from "./StreamDefSet";
+import { InferStreamSetType, StreamDefSet, UnknownTMap } from "./StreamDefSet";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
@@ -250,8 +250,13 @@ export class ZZPipe<
     }
 
     return {
-      sendInputToJob: <K extends keyof IMap>({ data, key }: { data: IMap[K], key?: K }) =>
-        this.sendInputToJob({ jobId, data, key }),
+      sendInputToJob: <K extends keyof IMap>({
+        data,
+        key,
+      }: {
+        data: IMap[K];
+        key?: K;
+      }) => this.sendInputToJob({ jobId, data, key }),
       terminateJobInput: (p?: { key?: keyof IMap }) =>
         this.terminateJobInput({
           jobId,
@@ -435,7 +440,6 @@ export class ZZPipe<
   }
 
   public static async requestComplexJob<
-
     Ps extends {
       [K in number]: any;
     },
@@ -452,21 +456,82 @@ export class ZZPipe<
   }: {
     jobGroupId: string;
     pipes: {
-      [K in keyof Ps]: PipeAndJobParams<Ps[K], IMaps[K], OMaps[K], TProgresses[K]>;
+      [K in keyof Ps]: PipeAndJobParams<K, Ps, IMaps, OMaps, TProgresses>;
     };
+    streamConnectors: {
+      from:
+        | PipeAndJobParams<number, Ps, IMaps, OMaps, TProgresses>["pipe"]
+        | PipeAndJobOutputKey<number, Ps, IMaps, OMaps, TProgresses>;
+      to:
+        | PipeAndJobParams<number, Ps, IMaps, OMaps, TProgresses>["pipe"]
+        | PipeAndJobInputKey<number, Ps, IMaps, OMaps, TProgresses>;
+    }[];
   }) {}
 }
 
 type PipeAndJobParams<
-  P,
-  IMap extends UnknownTMap,
-  OMap extends UnknownTMap,
-  TProgress
+  K extends keyof Ps,
+  Ps extends {
+    [K in number]: any;
+  },
+  IMaps extends {
+    [K in keyof Ps]: UnknownTMap;
+  },
+  OMaps extends {
+    [K in keyof Ps]: Record<any, unknown>;
+  },
+  TProgresses extends { [K in keyof Ps]: any },
+  P = Ps[K],
+  IMap extends UnknownTMap = IMaps[K],
+  OMap extends UnknownTMap = OMaps[K],
+  TProgress = TProgresses[K]
 > = {
   pipe: ZZPipe<P, IMap, OMap, TProgress>;
   jobParams: P;
-  outputKey?: keyof ZZPipe<P, IMap, OMap>["outputDefSet"];
+  outputKey?: keyof InferStreamSetType<ZZPipe<P, IMap, OMap>["outputDefSet"]>;
 };
+
+type PipeAndJobOutputKey<
+  K extends keyof Ps,
+  Ps extends {
+    [K in number]: any;
+  },
+  IMaps extends {
+    [K in keyof Ps]: UnknownTMap;
+  },
+  OMaps extends {
+    [K in keyof Ps]: Record<any, unknown>;
+  },
+  TProgresses extends { [K in keyof Ps]: any },
+  P = Ps[K],
+  IMap extends UnknownTMap = IMaps[K],
+  OMap extends UnknownTMap = OMaps[K],
+  TProgress = TProgresses[K]
+> = [
+  ZZPipe<P, IMap, OMap, TProgress>,
+  keyof InferStreamSetType<ZZPipe<P, IMap, OMap>["inputDefSet"]>
+];
+
+type PipeAndJobInputKey<
+  K extends keyof Ps,
+  Ps extends {
+    [K in number]: any;
+  },
+  IMaps extends {
+    [K in keyof Ps]: UnknownTMap;
+  },
+  OMaps extends {
+    [K in keyof Ps]: Record<any, unknown>;
+  },
+  TProgresses extends { [K in keyof Ps]: any },
+  P = Ps[K],
+  IMap extends UnknownTMap = IMaps[K],
+  OMap extends UnknownTMap = OMaps[K],
+  TProgress = TProgresses[K]
+> = [
+  ZZPipe<P, IMap, OMap, TProgress>,
+  keyof ZZPipe<P, IMap, OMap>["inputDefSet"]
+];
 
 export async function sleep(ms: number) {
   return new Promise((resolve) => {
