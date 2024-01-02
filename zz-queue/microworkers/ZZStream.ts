@@ -5,6 +5,9 @@ import { ZZEnv } from "./ZZEnv";
 
 import { createHash } from "crypto";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
+import { getLogger } from "../utils/createWorkerLogger";
+import { z } from "zod";
+
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
 export type InferStreamDef<T> = T extends ZZStream<infer P> ? P : never;
@@ -218,11 +221,8 @@ function customParse(json: string): any {
   }
   return JSON.parse(json, reviver);
 }
-import { z } from "zod";
-import { getLogger } from "../utils/createWorkerLogger";
-import { StreamDefSet, UnknownTMap } from "./StreamDefSet";
-const ss = z.object({});
-function hashDef(def: ZodType<unknown>) {
+
+export function hashDef(def: ZodType<unknown>) {
   const str = JSON.stringify(def);
   return createHash("sha256").update(str).digest("hex");
 }

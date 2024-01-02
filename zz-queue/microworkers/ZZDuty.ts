@@ -17,7 +17,7 @@ import { ZZEnv } from "./ZZEnv";
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 import { ZZStream } from "./ZZStream";
 import { StreamDefSet, UnknownTMap } from "./StreamDefSet";
-import { ZZProcessor } from "./ZZJob";
+
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
