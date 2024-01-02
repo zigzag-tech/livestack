@@ -32,9 +32,9 @@ type InferZodTypeMap<TMap extends UnknownTMap> = {
   [K in keyof TMap]: z.ZodType<TMap[K]>;
 };
 
-export type UnknownDuty = ZZDuty<unknown, UnknownTMap, UnknownTMap, unknown>;
+export type UnknownPipe = ZZPipe<unknown, UnknownTMap, UnknownTMap, unknown>;
 
-export class ZZDuty<
+export class ZZPipe<
   P,
   IMap extends UnknownTMap = UnknownTMap,
   OMap extends UnknownTMap = UnknownTMap,
@@ -73,7 +73,7 @@ export class ZZDuty<
     this.progressDef = progressDef || z.never();
 
     this.zzEnv = zzEnv || ZZEnv.global();
-    this.logger = getLogger(`duty:${this.name}`);
+    this.logger = getLogger(`pipe:${this.name}`);
 
     this.inputDefSet = new StreamDefSet({
       defs: input,
@@ -405,7 +405,7 @@ export class ZZDuty<
       { ...bullMQJobsOpts, jobId: jobId }
     );
     this.logger.info(
-      `Added job with ID ${j.id} to duty: ` +
+      `Added job with ID ${j.id} to pipe: ` +
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 

@@ -1,12 +1,12 @@
-import { UnknownTMap } from './StreamDefSet';
-import { CheckExtendsDuty } from './ZZJob';
-import { InferStreamDef } from './ZZStream';
-import { UnknownDuty } from './ZZDuty';
+import { UnknownTMap } from "./StreamDefSet";
+import { CheckExtendsPipe } from "./ZZJob";
+import { InferStreamDef } from "./ZZStream";
+import { UnknownPipe } from "./ZZPipe";
 import _ from "lodash";
 import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { ZZJob, ZZProcessor } from "./ZZJob";
-import { ZZDuty, getMicroworkerQueueByName } from "./ZZDuty";
+import { ZZPipe, getMicroworkerQueueByName } from "./ZZPipe";
 import { ZZEnv } from "./ZZEnv";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { ZodType, z } from "zod";
@@ -16,27 +16,28 @@ type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
 >;
 
-export class ZZWorkerDef<P,
-IMap extends UnknownTMap = UnknownTMap,
-OMap extends UnknownTMap = UnknownTMap,
-TProgress = never,
-WP extends object = {},
+export class ZZWorkerDef<
+  P,
+  IMap extends UnknownTMap = UnknownTMap,
+  OMap extends UnknownTMap = UnknownTMap,
+  TProgress = never,
+  WP extends object = {}
 > {
-  public readonly duty: ZZDuty<P, IMap, OMap, TProgress>;
+  public readonly pipe: ZZPipe<P, IMap, OMap, TProgress>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
-  public readonly processor: ZZProcessor<ZZDuty<P, IMap,OMap, TProgress>, WP>;
+  public readonly processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>;
 
   constructor({
-    duty,
+    pipe,
     processor,
     instanceParamsDef,
   }: {
     concurrency?: number;
-    duty: ZZDuty<P, IMap, OMap, TProgress>;
-    processor: ZZProcessor<ZZDuty<P, IMap,OMap, TProgress>, WP>;
+    pipe: ZZPipe<P, IMap, OMap, TProgress>;
+    processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>;
     instanceParamsDef?: z.ZodType<WP>;
   }) {
-    this.duty = duty;
+    this.pipe = pipe;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
   }
@@ -56,13 +57,13 @@ WP extends object = {},
 }
 
 export class ZZWorker<
-P,
-IMap extends UnknownTMap = UnknownTMap,
-OMap extends UnknownTMap = UnknownTMap,
-TProgress = never,
-WP extends object = {},
+  P,
+  IMap extends UnknownTMap = UnknownTMap,
+  OMap extends UnknownTMap = UnknownTMap,
+  TProgress = never,
+  WP extends object = {}
 > {
-  public readonly duty:  ZZDuty<P, IMap, OMap, TProgress>;
+  public readonly pipe: ZZPipe<P, IMap, OMap, TProgress>;
   protected readonly zzEnv: ZZEnv;
   protected readonly storageProvider?: IStorageProvider;
 
@@ -73,7 +74,7 @@ WP extends object = {},
     OMap[keyof OMap] | undefined
   >;
 
-  public readonly _rawQueue: IWorkerUtilFuncs<P,  OMap[keyof OMap]>["_rawQueue"];
+  public readonly _rawQueue: IWorkerUtilFuncs<P, OMap[keyof OMap]>["_rawQueue"];
   public readonly instanceParams?: WP;
   public readonly workerName: string;
   public readonly def: ZZWorkerDef<P, IMap, OMap, TProgress, WP>;
@@ -92,8 +93,8 @@ WP extends object = {},
   }) {
     // if worker name is not provided, use random string
 
-    this.duty = def.duty;
-    this.zzEnv = def.duty.zzEnv;
+    this.pipe = def.pipe;
+    this.zzEnv = def.pipe.zzEnv;
     this.instanceParams = instanceParams;
     this.def = def;
 
@@ -103,8 +104,8 @@ WP extends object = {},
       connection: this.zzEnv.redisConfig,
     };
 
-    const queueFuncs = getMicroworkerQueueByName<P,  OMap[keyof OMap], any>({
-      queueNameOnly: `${this.duty.name}`,
+    const queueFuncs = getMicroworkerQueueByName<P, OMap[keyof OMap], any>({
+      queueNameOnly: `${this.pipe.name}`,
       queueOptions: workerOptions,
       db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
@@ -112,19 +113,23 @@ WP extends object = {},
 
     this._rawQueue = queueFuncs._rawQueue;
     this.workerName =
-      workerName || "wkr:" + `${this.zzEnv.projectId}/${this.def.duty.name}`;
+      workerName || "wkr:" + `${this.zzEnv.projectId}/${this.def.pipe.name}`;
     this.logger = getLogger(`wkr:${this.workerName}`);
 
     const mergedWorkerOptions = _.merge({}, workerOptions);
 
-    this.bullMQWorker = new Worker<{ jobParams: P },  OMap[keyof OMap] | undefined, string>(
-      `${this.zzEnv.projectId}/${this.duty.name}`,
+    this.bullMQWorker = new Worker<
+      { jobParams: P },
+      OMap[keyof OMap] | undefined,
+      string
+    >(
+      `${this.zzEnv.projectId}/${this.pipe.name}`,
       async (job, token) => {
         const zzJ = new ZZJob({
           bullMQJob: job,
           bullMQToken: token,
           logger: this.logger,
-          duty: this.duty,
+          pipe: this.pipe,
           jobParams: job.data.jobParams,
           workerInstanceParams: this.instanceParams,
           storageProvider: this.zzEnv.storageProvider,

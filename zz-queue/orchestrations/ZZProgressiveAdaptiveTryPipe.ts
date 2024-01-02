@@ -1,13 +1,13 @@
-import { UnknownDuty, ZZDuty } from "../microworkers/ZZDuty";
+import { UnknownPipe, ZZPipe } from "../microworkers/ZZPipe";
 import { z } from "zod";
 import { ZZWorkerDef } from "../microworkers/ZZWorker";
 
 export interface AttemptDef<
-  MaDutyDef extends UnknownDuty,
-  ParentP = z.infer<MaDutyDef["jobParamsDef"]>,
-  ParentO = z.infer<MaDutyDef["outputDef"]>
+  MaPipeDef extends UnknownPipe,
+  ParentP = z.infer<MaPipeDef["jobParamsDef"]>,
+  ParentO = z.infer<MaPipeDef["outputDef"]>
 > {
-  def: MaDutyDef;
+  def: MaPipeDef;
   timeout: number;
   transformInput: (params: ParentP) => Promise<ParentP> | ParentP;
   transformOutput: (
@@ -15,34 +15,34 @@ export interface AttemptDef<
   ) => Promise<ParentO> | ParentO;
 }
 export class ZZProgressiveAdaptiveTryWorkerDef<
-  MaDuty extends UnknownDuty,
-  P = z.infer<MaDuty["jobParamsDef"]>,
-  O extends z.infer<MaDuty["outputDef"]> = z.infer<MaDuty["outputDef"]>
-> extends ZZWorkerDef<MaDuty, {}> {
-  attempts: AttemptDef<MaDuty>[];
+  MaPipe extends UnknownPipe,
+  P = z.infer<MaPipe["jobParamsDef"]>,
+  O extends z.infer<MaPipe["outputDef"]> = z.infer<MaPipe["outputDef"]>
+> extends ZZWorkerDef<MaPipe, {}> {
+  attempts: AttemptDef<MaPipe>[];
   constructor({
     attempts,
     ultimateFallback,
-    duty,
+    pipe,
   }: {
-    duty: ZZDuty<MaDuty>;
-    attempts: AttemptDef<MaDuty>[];
+    pipe: ZZPipe<MaPipe>;
+    attempts: AttemptDef<MaPipe>[];
     ultimateFallback?: () => Promise<O>;
   }) {
     super({
-      duty,
+      pipe,
       processor: async ({ logger, jobParams, spawnJob, jobId }) => {
         const genRetryFunction = ({
           def,
           transformInput,
           transformOutput,
-        }: AttemptDef<MaDuty>) => {
+        }: AttemptDef<MaPipe>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${def.name}`;
 
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
-              def: def as ZZDuty<P, I, O, any, any, any>,
+              def: def as ZZPipe<P, I, O, any, any, any>,
               jobParams: (await transformInput(jobParams)) as P,
             });
 

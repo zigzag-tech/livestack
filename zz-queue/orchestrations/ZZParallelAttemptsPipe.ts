@@ -1,5 +1,5 @@
-import { InferDutyInputDef, DutyDef } from "../microworkers/DutyDef";
-import { ZZDuty, sleep } from "../microworkers/ZZDuty";
+import { InferPipeInputDef, PipeDef } from "../microworkers/PipeDef";
+import { ZZPipe, sleep } from "../microworkers/ZZPipe";
 import { z } from "zod";
 import { ZZWorkerDef } from "../microworkers/ZZWorker";
 
@@ -13,7 +13,7 @@ type TriggerCheckContext = {
 };
 
 interface ParallelAttempt<
-  ParentDef extends DutyDef<
+  ParentDef extends PipeDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
@@ -26,7 +26,7 @@ interface ParallelAttempt<
 }
 
 export function genParallelAttempt<
-  ParentDef extends DutyDef<
+  ParentDef extends PipeDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
@@ -44,24 +44,24 @@ export function genParallelAttempt<
 }
 
 export class ZZParallelAttemptWorkerDef<
-  MaDutyDef extends DutyDef<
+  MaPipeDef extends PipeDef<
     unknown,
     unknown,
     Record<string | number | symbol, unknown>,
     unknown,
     unknown
   >,
-  P = z.infer<MaDutyDef["jobParamsDef"]>,
-  O extends z.infer<MaDutyDef["outputDef"]> = z.infer<MaDutyDef["outputDef"]>,
-  StreamI extends InferDutyInputDef<MaDutyDef> = InferDutyInputDef<MaDutyDef>
-> extends ZZWorkerDef<MaDutyDef, {}> {
+  P = z.infer<MaPipeDef["jobParamsDef"]>,
+  O extends z.infer<MaPipeDef["outputDef"]> = z.infer<MaPipeDef["outputDef"]>,
+  StreamI extends InferPipeInputDef<MaPipeDef> = InferPipeInputDef<MaPipeDef>
+> extends ZZWorkerDef<MaPipeDef, {}> {
   constructor({
     attempts,
     globalTimeoutCondition,
     transformCombinedOutput,
-    duty,
+    pipe,
   }: {
-    duty: ZZDuty<MaDutyDef>;
+    pipe: ZZPipe<MaPipeDef>;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {
@@ -71,19 +71,19 @@ export class ZZParallelAttemptWorkerDef<
         name: string;
       }[]
     ) => Promise<O> | O;
-    attempts: ParallelAttempt<MaDutyDef>[];
+    attempts: ParallelAttempt<MaPipeDef>[];
   }) {
     super({
-      duty,
+      pipe,
       processor: async ({ logger, jobParams, spawnJob, jobId }) => {
         const genRetryFunction = ({
           def: attemptDef,
-        }: ParallelAttempt<MaDutyDef>) => {
+        }: ParallelAttempt<MaPipeDef>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${attemptDef.name}`;
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
-              def: attemptDef as DutyDef<P, O, any, StreamI, any>,
+              def: attemptDef as PipeDef<P, O, any, StreamI, any>,
               jobParams: jobParams as P,
             });
 

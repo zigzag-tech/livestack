@@ -1,9 +1,9 @@
-import { ZZDuty } from "../microworkers/ZZDuty";
-import { DutyDef } from "../microworkers/DutyDef";
+import { ZZPipe } from "../microworkers/ZZPipe";
+import { PipeDef } from "../microworkers/PipeDef";
 import { z } from "zod";
 import { ZZEnv } from "../microworkers/ZZEnv";
 
-export class RunpodServerlessDuty<P extends object, O> extends ZZDuty<
+export class RunpodServerlessPipe<P extends object, O> extends ZZPipe<
   P,
   {
     runpodResult: O;
@@ -20,7 +20,7 @@ export class RunpodServerlessDuty<P extends object, O> extends ZZDuty<
   }: {
     serverlessEndpointId: string;
     runpodApiKey: string;
-    def: DutyDef<P, O>;
+    def: PipeDef<P, O>;
     zzEnv: ZZEnv;
   }) {
     super({

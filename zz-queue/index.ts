@@ -1,6 +1,6 @@
 import { ZZJob } from "./microworkers/ZZJob";
 import { ZZWorker, ZZWorkerDef } from "./microworkers/ZZWorker";
-import { ZZDuty } from "./microworkers/ZZDuty";
+import { ZZPipe } from "./microworkers/ZZPipe";
 import { ZZEnv } from "./microworkers/ZZEnv";
 
-export { ZZDuty, ZZWorker, ZZJob, ZZEnv, ZZWorkerDef };
+export { ZZPipe, ZZWorker, ZZJob, ZZEnv, ZZWorkerDef };
