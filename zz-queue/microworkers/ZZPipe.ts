@@ -424,9 +424,13 @@ export class ZZPipe<
     Ps extends {
       [k: number]: unknown;
     },
-    IMaps extends { [K in keyof Ps]: UnknownTMap },
-    OMaps extends { [K in keyof Ps]: UnknownTMap },
-    TProgresses extends any[]
+    IMaps extends {
+      [K in keyof Ps]: Record<string | number | symbol, unknown>;
+    },
+    OMaps extends {
+      [K in keyof Ps]: Record<string | number | symbol, unknown>;
+    },
+    TProgresses extends { [K in keyof Ps]: unknown }[]
   >({
     jobGroupId,
     pipes,
@@ -436,7 +440,7 @@ export class ZZPipe<
       [K in number]: {
         pipe: ZZPipe<Ps[K], IMaps[K], OMaps[K], TProgresses[K]>;
         jobParams: Ps[K];
-        outputKey?: keyof UnknownPipe["outputDefSet"]["defs"];
+        outputKey?: keyof OMaps;
       };
     };
   }) {}
