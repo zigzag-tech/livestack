@@ -90,11 +90,11 @@ export class ZZJob<
   emitOutput: (o: OMap[keyof OMap]) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
   nextInput = async <K extends keyof IMap>(key?: K) => {
-    await setJobReadyForInputsInRedis({
+    await this.setJobReadyForInputsInRedis({
       redisConfig: this.zzEnv.redisConfig,
       jobId: this.jobId,
       isReady: true,
-      key: key ? String(key) : "default",
+      key: key ? key : "default",
     });
     return (await this._ensureInputStreamFn(key).nextValue()) as IMap[K];
   };
@@ -247,9 +247,7 @@ export class ZZJob<
     };
   }
 
-  private _ensureInputStreamFn<K extends keyof IMap>(
-    key?: keyof IMap | "default"
-  ) {
+  private _ensureInputStreamFn<K extends keyof IMap>(key?: K | "default") {
     if (this.pipe.inputDefSet.isSingle) {
       if (key && key !== "default") {
         throw new Error(
@@ -285,11 +283,11 @@ export class ZZJob<
       subscriberCountObservable.subscribe((count) => {
         // console.log("count", count);
         if (count > 0) {
-          setJobReadyForInputsInRedis({
+          this.setJobReadyForInputsInRedis({
             redisConfig: this.zzEnv.redisConfig,
             jobId: this.jobId,
             isReady: true,
-            key: String(key) || "default",
+            key: key || "default",
           });
         }
       });
@@ -304,6 +302,31 @@ export class ZZJob<
     }
     return this.inputStreamFnsByKey[key as keyof IMap]!;
   }
+
+  setJobReadyForInputsInRedis = async ({
+    redisConfig,
+    jobId,
+    key,
+    isReady,
+  }: {
+    redisConfig: RedisOptions;
+    jobId: string;
+    key: keyof IMap | "default";
+    isReady: boolean;
+  }) => {
+    if (!key) {
+      throw new Error("key is required");
+    }
+    try {
+      const redis = new Redis(redisConfig);
+      await redis.set(
+        `ready_status__${jobId}/${String(key)}`,
+        isReady ? "true" : "false"
+      );
+    } catch (error) {
+      console.error("Error setJobReadyForInputsInRedis:", error);
+    }
+  };
 
   public beginProcessing = async (
     processor: (
@@ -553,29 +576,4 @@ export class ZZJob<
   //     });
   //   }
   // };
-}
-
-export async function setJobReadyForInputsInRedis({
-  redisConfig,
-  jobId,
-  key,
-  isReady,
-}: {
-  redisConfig: RedisOptions;
-  jobId: string;
-  key: string;
-  isReady: boolean;
-}) {
-  if (!key) {
-    throw new Error("key is required");
-  }
-  try {
-    const redis = new Redis(redisConfig);
-    await redis.set(
-      `ready_status__${jobId}/${key}`,
-      isReady ? "true" : "false"
-    );
-  } catch (error) {
-    console.error("Error setJobReadyForInputsInRedis:", error);
-  }
 }

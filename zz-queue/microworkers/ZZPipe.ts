@@ -230,30 +230,28 @@ export class ZZPipe<
   }
 
   public async waitForJobReadyForInputs({
-    key,
     jobId,
+    key,
   }: {
-    key?: keyof IMap;
     jobId: string;
+    key?: keyof IMap;
   }) {
-    let isReady = await getJobReadyForInputsInRedis({
-      redisConfig: this.zzEnv.redisConfig,
+    let isReady = await this.getJobReadyForInputsInRedis({
       jobId,
-      key: key ? String(key) : "default",
+      key: key ? key : "default",
     });
     while (!isReady) {
       await sleep(100);
-      isReady = await getJobReadyForInputsInRedis({
-        redisConfig: this.zzEnv.redisConfig,
+      isReady = await this.getJobReadyForInputsInRedis({
         jobId,
-        key: key ? String(key) : "default",
+        key: key ? key : "default",
       });
       console.log("isReady", isReady);
     }
 
     return {
-      sendInputToJob: ({ data }: { data: IMap[keyof IMap] }) =>
-        this.sendInputToJob({ jobId, data }),
+      sendInputToJob: <K extends keyof IMap>({ data, key }: { data: IMap[K], key?: K }) =>
+        this.sendInputToJob({ jobId, data, key }),
       terminateJobInput: (p?: { key?: keyof IMap }) =>
         this.terminateJobInput({
           jobId,
@@ -261,6 +259,22 @@ export class ZZPipe<
         }),
     };
   }
+
+  getJobReadyForInputsInRedis = async ({
+    jobId,
+    key,
+  }: {
+    jobId: string;
+    key: keyof IMap | "default";
+  }) => {
+    try {
+      const redis = new Redis(this.zzEnv.redisConfig);
+      const isReady = await redis.get(`ready_status__${jobId}/${String(key)}`);
+      return isReady === "true";
+    } catch (error) {
+      console.error("Error getJobReadyForInputsInRedis:", error);
+    }
+  };
 
   public subscribeToJobOutputTillTermination({
     jobId,
@@ -421,30 +435,30 @@ export class ZZPipe<
   }
 
   public static async requestComplexJob<
-    Ps extends {
-      [k: number]: unknown;
-    },
-    IMaps extends {
-      [K in keyof Ps]: Record<string | number | symbol, unknown>;
-    },
-    OMaps extends {
-      [K in keyof Ps]: Record<string | number | symbol, unknown>;
-    },
-    TProgresses extends { [K in keyof Ps]: unknown }[]
+    Ps extends any[],
+    IMaps extends Record<string | number | symbol, any>[keyof Ps],
+    OMaps extends Record<string | number | symbol, any>[keyof Ps],
+    TProgresses extends { [K in keyof Ps]: any }[]
   >({
     jobGroupId,
     pipes,
   }: {
     jobGroupId: string;
     pipes: {
-      [K in number]: {
-        pipe: ZZPipe<Ps[K], IMaps[K], OMaps[K], TProgresses[K]>;
-        jobParams: Ps[K];
-        outputKey?: keyof OMaps;
-      };
+      [K in keyof Ps]: PipeAndJobParams<Ps[K], IMaps[K], OMaps[K]>;
     };
   }) {}
 }
+
+type PipeAndJobParams<
+  P,
+  IMap extends Record<string | number | symbol, unknown>,
+  OMap extends Record<string | number | symbol, unknown>
+> = {
+  pipe: ZZPipe<P, IMap, OMap>;
+  jobParams: P;
+  outputKey?: keyof ZZPipe<P, IMap, OMap>["outputDefSet"];
+};
 
 export async function sleep(ms: number) {
   return new Promise((resolve) => {
@@ -513,20 +527,40 @@ function createAndReturnQueue<
   return funcs;
 }
 
-export async function getJobReadyForInputsInRedis({
-  redisConfig,
-  jobId,
-  key,
-}: {
-  redisConfig: RedisOptions;
-  jobId: string;
-  key: string;
-}) {
-  try {
-    const redis = new Redis(redisConfig);
-    const isReady = await redis.get(`ready_status__${jobId}/${key}`);
-    return isReady === "true";
-  } catch (error) {
-    console.error("Error getJobReadyForInputsInRedis:", error);
-  }
+type A<T> = {
+  a: {
+    b: T;
+  };
+};
+
+const a1: A<string> = {
+  a: {
+    b: "1",
+  },
+};
+const a2: A<number> = {
+  a: {
+    b: 1,
+  },
+};
+
+type S<T> = {
+  s: {
+    a: T;
+  };
+};
+
+const s1: S<string> = {
+  s: {
+    a: "1",
+  },
+};
+const s2: S<number> = {
+  s: {
+    a: 1,
+  },
+};
+
+function someFn<T>({ pairs }: { pairs: Array<{ a: A<T>; s: S<T> }> }) {
+  // function implementation
 }
