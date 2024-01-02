@@ -38,7 +38,7 @@ export class ZZPipe<
   P,
   IMap extends UnknownTMap = UnknownTMap,
   OMap extends UnknownTMap = UnknownTMap,
-  TProgress = never,
+  TProgress = never
 > implements IWorkerUtilFuncs<P, OMap[keyof OMap]>
 {
   public readonly zzEnv: ZZEnv;
@@ -420,12 +420,13 @@ export class ZZPipe<
     return j;
   }
 
-  public static async requestComplexJob<Ps extends {
-    [k: number]: unknown;
-  }, 
-  IMaps extends Record<any, any>[],
-  OMaps extends Record<any, any>[],
-  TProgresses extends any[],
+  public static async requestComplexJob<
+    Ps extends {
+      [k: number]: unknown;
+    },
+    IMaps extends { [K in keyof Ps]: UnknownTMap },
+    OMaps extends { [K in keyof Ps]: UnknownTMap },
+    TProgresses extends any[]
   >({
     jobGroupId,
     pipes,
