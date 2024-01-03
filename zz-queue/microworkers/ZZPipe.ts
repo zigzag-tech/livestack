@@ -17,6 +17,7 @@ import { ZZEnv } from "./ZZEnv";
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 import { ZZStream } from "./ZZStream";
 import { InferStreamSetType, StreamDefSet, UnknownTMap } from "./StreamDefSet";
+import { ZZWorkerDef } from "./ZZWorker";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
@@ -405,7 +406,7 @@ export class ZZPipe<
     jobParams: P;
     bullMQJobsOpts?: JobsOptions;
     inputStreamKeyIdOverrides: Partial<Record<keyof IMap, string>> | "default";
-    outputStreamKeyIdOverrides: Partial<Record<keyof OMap, string>>  | "default";
+    outputStreamKeyIdOverrides: Partial<Record<keyof OMap, string>> | "default";
   }) {
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
@@ -468,7 +469,7 @@ export class ZZPipe<
   >({
     jobGroupId,
     jobs,
-    jobConnectors
+    jobConnectors,
   }: {
     jobGroupId: string;
     jobs: {
@@ -484,85 +485,142 @@ export class ZZPipe<
         | PipeAndJobInputKey<number, Ps, IMaps, OMaps, TProgresses>;
     }[];
   }) {
-    const inOverridesByIndex = [] as Record<number, Partial<Record<keyof IMaps[number], string>>>;
-    const outOverridesByIndex = [] as Record<number, Partial<Record<keyof OMaps[number], string>>>;
+    const inOverridesByIndex = [] as Record<
+      number,
+      Partial<Record<keyof IMaps[number], string>>
+    >;
+    const outOverridesByIndex = [] as Record<
+      number,
+      Partial<Record<keyof OMaps[number], string>>
+    >;
     // calculate overrides based on jobConnectors
-    for(const connector of jobConnectors) {
-      const fromDef = Array.isArray(connector.from)? connector.from  : [connector.from, "default"] as const;
-      const toDef = Array.isArray(connector.to)? connector.to  : [connector.to, "default"] as const;
+    for (const connector of jobConnectors) {
+      const fromDef = Array.isArray(connector.from)
+        ? connector.from
+        : ([connector.from, "default"] as const);
+      const toDef = Array.isArray(connector.to)
+        ? connector.to
+        : ([connector.to, "default"] as const);
       const [from, fromKey] = fromDef;
       const [to, toKey] = toDef;
 
       const fromKeyStr = String(fromKey);
       const toKeyStr = String(toKey);
 
-      const fromJobIndex = (jobs as PipeAndJobParams<number, Ps, IMaps, OMaps, TProgresses>[]).findIndex(j => j.pipe === from);
-      const toJobIndex = (jobs as PipeAndJobParams<number, Ps, IMaps, OMaps, TProgresses>[]).findIndex(j => j.pipe === to);
+      const fromJobIndex = (
+        jobs as PipeAndJobParams<number, Ps, IMaps, OMaps, TProgresses>[]
+      ).findIndex((j) => j.pipe === from);
+      const toJobIndex = (
+        jobs as PipeAndJobParams<number, Ps, IMaps, OMaps, TProgresses>[]
+      ).findIndex((j) => j.pipe === to);
 
       if (fromJobIndex === -1) {
-        throw new Error(`Invalid jobConnector: (${from}, ${String(fromKey)}) -> (${to}, ${String(toKey)}): "from" job not found.`);
+        throw new Error(
+          `Invalid jobConnector: ${from.name}/${String(fromKey)} >> ${
+            to.name
+          }/${String(toKey)}: "from" job not found.`
+        );
       }
       const fromJob = jobs[fromJobIndex];
-      if(toJobIndex === -1) {
-        throw new Error(`Invalid jobConnector: (${from}, ${String(fromKey)}) -> (${to}, ${String(toKey)}): "to" job not found.`);
+      if (toJobIndex === -1) {
+        throw new Error(
+          `Invalid jobConnector: ${from.name}/${String(fromKey)} >> ${
+            to.name
+          }/${String(toKey)}: "to" job not found.`
+        );
       }
       const toJob = jobs[toJobIndex];
-      if(!fromJob.pipe.outputDefSet.hasDef(fromKey)) {
-        throw new Error(`Invalid jobConnector: (${from}, ${String(fromKey)}) -> (${to}, ${String(toKey)}): "from" key not found.`);
+      if (!fromJob.pipe.outputDefSet.hasDef(fromKey)) {
+        throw new Error(
+          `Invalid jobConnector: ${from}/${String(fromKey)} >> ${
+            to.name
+          }/${String(toKey)}: "from" key not found.`
+        );
       }
-      if(!toJob.pipe.inputDefSet.hasDef(toKey)) {
-        throw new Error(`Invalid jobConnector: (${from}, ${String(fromKey)}) -> (${to}, ${String(toKey)}): "to" key not found.`);
+      if (!toJob.pipe.inputDefSet.hasDef(toKey)) {
+        throw new Error(
+          `Invalid jobConnector: ${from}/${String(fromKey)} >> ${
+            to.name
+          }/${String(toKey)}: "to" key not found.`
+        );
       }
 
-      const commonStreamName = getSharedStreamId({
-        jobGroupId,
-        from, fromKey: fromKeyStr,
-        to, toKey: toKeyStr,
+      const commonStreamName = getStreamId({
+        groupId: jobGroupId,
+        from: {
+          pipe: from,
+          key: fromKeyStr,
+        },
+        to: {
+          pipe: to,
+          key: toKeyStr,
+        },
       });
 
-     
       inOverridesByIndex[toJobIndex] = {
         ...inOverridesByIndex[toJobIndex],
         [toKeyStr]: commonStreamName,
-      }
+      };
 
       outOverridesByIndex[fromJobIndex] = {
         ...outOverridesByIndex[fromJobIndex],
         [fromKeyStr]: commonStreamName,
-      }
+      };
     }
 
     for (let i = 0; i < Object.keys(jobs).length; i++) {
       // calculate overrides based on jobConnectors
-      
+
       const { pipe, jobParams } = jobs[i];
       const jobId = `${jobGroupId}-${i}`;
 
-
-      const job = await pipe._requestJob({
+      const jDef = {
         jobId,
         jobParams,
         inputStreamKeyIdOverrides: inOverridesByIndex[i],
         outputStreamKeyIdOverrides: outOverridesByIndex[i],
-      });
+      };
+      const job = await pipe._requestJob(jDef);
     }
+  }
+
+  // toString
+  public toString() {
+    return this.name;
+  }
+
+  // convenient function
+  public defineWorker(
+    p: Omit<
+      ConstructorParameters<typeof ZZWorkerDef<P, IMap, OMap, TProgress>>[0],
+      "pipe"
+    >
+  ) {
+    return new ZZWorkerDef<P, IMap, OMap, TProgress>({
+      ...p,
+      pipe: this,
+    });
   }
 }
 
-function getSharedStreamId({
-  jobGroupId,
+function getStreamId({
+  groupId,
   from,
-  fromKey,
   to,
-  toKey,
 }: {
-  jobGroupId: string;
-  from: ZZPipe<any, any, any, any>;
-  fromKey: string;
-  to: ZZPipe<any, any, any, any>;
-  toKey: string;
+  groupId: string;
+  from?: {
+    pipe: ZZPipe<any, any, any, any>;
+    key: string;
+  };
+  to?: {
+    pipe: ZZPipe<any, any, any, any>;
+    key: string;
+  };
 }) {
-  return `stream::${jobGroupId}::${from.name}/${fromKey}::${to.name}/${toKey}`;
+  const fromStr = from ? `${from.pipe.name}/${from.key}` : "";
+  const toStr = to ? `${to.pipe.name}/${to.key}` : "";
+  return `stream-${groupId}::${fromStr}>>${toStr}`;
 }
 
 type PipeAndJobParams<
@@ -584,7 +642,7 @@ type PipeAndJobParams<
 > = {
   pipe: ZZPipe<P, IMap, OMap, TProgress>;
   jobParams: P;
-  outputKey?: keyof InferStreamSetType<ZZPipe<P, IMap, OMap>["outputDefSet"]>;
+  jobLabel?: string;
 };
 
 type PipeAndJobOutputKey<
@@ -694,42 +752,4 @@ function createAndReturnQueue<
   );
 
   return funcs;
-}
-
-type A<T> = {
-  a: {
-    b: T;
-  };
-};
-
-const a1: A<string> = {
-  a: {
-    b: "1",
-  },
-};
-const a2: A<number> = {
-  a: {
-    b: 1,
-  },
-};
-
-type S<T> = {
-  s: {
-    a: T;
-  };
-};
-
-const s1: S<string> = {
-  s: {
-    a: "1",
-  },
-};
-const s2: S<number> = {
-  s: {
-    a: 1,
-  },
-};
-
-function someFn<T>({ pairs }: { pairs: Array<{ a: A<T>; s: S<T> }> }) {
-  // function implementation
 }

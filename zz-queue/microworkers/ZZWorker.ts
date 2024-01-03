@@ -1,7 +1,4 @@
 import { UnknownTMap } from "./StreamDefSet";
-import { CheckExtendsPipe } from "./ZZJob";
-import { InferStreamDef } from "./ZZStream";
-import { UnknownPipe } from "./ZZPipe";
 import _ from "lodash";
 import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
@@ -9,7 +6,7 @@ import { ZZJob, ZZProcessor } from "./ZZJob";
 import { ZZPipe, getMicroworkerQueueByName } from "./ZZPipe";
 import { ZZEnv } from "./ZZEnv";
 import { IStorageProvider } from "../storage/cloudStorage";
-import { ZodType, z } from "zod";
+import { z } from "zod";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 type IWorkerUtilFuncs<I, O> = ReturnType<
