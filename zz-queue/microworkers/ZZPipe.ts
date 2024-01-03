@@ -203,13 +203,6 @@ export class ZZPipe<
     data: IMap[keyof IMap];
     key?: keyof IMap;
   }) {
-    try {
-      const def = this.inputDefSet.getDef(key);
-      data = def.parse(data);
-    } catch (err) {
-      this.logger.error(`StreamInput data is invalid: ${JSON.stringify(err)}`);
-      throw err;
-    }
     const stream = this.getJobStream({ jobId, key, type: "stream-in" });
     const messageId = v4();
 
@@ -411,8 +404,8 @@ export class ZZPipe<
     jobId: string;
     jobParams: P;
     bullMQJobsOpts?: JobsOptions;
-    inputStreamKeyIdOverrides: Partial<Record<keyof IMap, string>>;
-    outputStreamKeyIdOverrides: Partial<Record<keyof OMap, string>>;
+    inputStreamKeyIdOverrides: Partial<Record<keyof IMap, string>> | "default";
+    outputStreamKeyIdOverrides: Partial<Record<keyof OMap, string>>  | "default";
   }) {
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
@@ -475,6 +468,7 @@ export class ZZPipe<
   >({
     jobGroupId,
     jobs,
+    jobConnectors
   }: {
     jobGroupId: string;
     jobs: {
@@ -490,19 +484,85 @@ export class ZZPipe<
         | PipeAndJobInputKey<number, Ps, IMaps, OMaps, TProgresses>;
     }[];
   }) {
-    for (const i in Object.keys(jobs)) {
-      const inputStreamKeyIdOverrides = {};
-      const outputStreamKeyIdOverrides = {};
+    const inOverridesByIndex = [] as Record<number, Partial<Record<keyof IMaps[number], string>>>;
+    const outOverridesByIndex = [] as Record<number, Partial<Record<keyof OMaps[number], string>>>;
+    // calculate overrides based on jobConnectors
+    for(const connector of jobConnectors) {
+      const fromDef = Array.isArray(connector.from)? connector.from  : [connector.from, "default"] as const;
+      const toDef = Array.isArray(connector.to)? connector.to  : [connector.to, "default"] as const;
+      const [from, fromKey] = fromDef;
+      const [to, toKey] = toDef;
+
+      const fromKeyStr = String(fromKey);
+      const toKeyStr = String(toKey);
+
+      const fromJobIndex = (jobs as PipeAndJobParams<number, Ps, IMaps, OMaps, TProgresses>[]).findIndex(j => j.pipe === from);
+      const toJobIndex = (jobs as PipeAndJobParams<number, Ps, IMaps, OMaps, TProgresses>[]).findIndex(j => j.pipe === to);
+
+      if (fromJobIndex === -1) {
+        throw new Error(`Invalid jobConnector: (${from}, ${String(fromKey)}) -> (${to}, ${String(toKey)}): "from" job not found.`);
+      }
+      const fromJob = jobs[fromJobIndex];
+      if(toJobIndex === -1) {
+        throw new Error(`Invalid jobConnector: (${from}, ${String(fromKey)}) -> (${to}, ${String(toKey)}): "to" job not found.`);
+      }
+      const toJob = jobs[toJobIndex];
+      if(!fromJob.pipe.outputDefSet.hasDef(fromKey)) {
+        throw new Error(`Invalid jobConnector: (${from}, ${String(fromKey)}) -> (${to}, ${String(toKey)}): "from" key not found.`);
+      }
+      if(!toJob.pipe.inputDefSet.hasDef(toKey)) {
+        throw new Error(`Invalid jobConnector: (${from}, ${String(fromKey)}) -> (${to}, ${String(toKey)}): "to" key not found.`);
+      }
+
+      const commonStreamName = getSharedStreamId({
+        jobGroupId,
+        from, fromKey: fromKeyStr,
+        to, toKey: toKeyStr,
+      });
+
+     
+      inOverridesByIndex[toJobIndex] = {
+        ...inOverridesByIndex[toJobIndex],
+        [toKeyStr]: commonStreamName,
+      }
+
+      outOverridesByIndex[fromJobIndex] = {
+        ...outOverridesByIndex[fromJobIndex],
+        [fromKeyStr]: commonStreamName,
+      }
+    }
+
+    for (let i = 0; i < Object.keys(jobs).length; i++) {
+      // calculate overrides based on jobConnectors
+      
       const { pipe, jobParams } = jobs[i];
       const jobId = `${jobGroupId}-${i}`;
+
+
       const job = await pipe._requestJob({
         jobId,
         jobParams,
-        inputStreamKeyIdOverrides,
-        outputStreamKeyIdOverrides,
+        inputStreamKeyIdOverrides: inOverridesByIndex[i],
+        outputStreamKeyIdOverrides: outOverridesByIndex[i],
       });
     }
   }
+}
+
+function getSharedStreamId({
+  jobGroupId,
+  from,
+  fromKey,
+  to,
+  toKey,
+}: {
+  jobGroupId: string;
+  from: ZZPipe<any, any, any, any>;
+  fromKey: string;
+  to: ZZPipe<any, any, any, any>;
+  toKey: string;
+}) {
+  return `stream::${jobGroupId}::${from.name}/${fromKey}::${to.name}/${toKey}`;
 }
 
 type PipeAndJobParams<
@@ -545,7 +605,7 @@ type PipeAndJobOutputKey<
   TProgress = TProgresses[K]
 > = [
   ZZPipe<P, IMap, OMap, TProgress>,
-  keyof InferStreamSetType<ZZPipe<P, IMap, OMap>["inputDefSet"]>
+  keyof InferStreamSetType<ZZPipe<P, IMap, OMap>["inputDefSet"]> | "default"
 ];
 
 type PipeAndJobInputKey<
@@ -566,7 +626,7 @@ type PipeAndJobInputKey<
   TProgress = TProgresses[K]
 > = [
   ZZPipe<P, IMap, OMap, TProgress>,
-  keyof ZZPipe<P, IMap, OMap>["inputDefSet"]
+  keyof ZZPipe<P, IMap, OMap>["inputDefSet"] | "default"
 ];
 
 export async function sleep(ms: number) {
