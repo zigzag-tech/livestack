@@ -401,14 +401,18 @@ export class ZZPipe<
     }
   }
 
-  public async requestJob({
+  private async _requestJob({
     jobId,
     jobParams,
     bullMQJobsOpts,
+    inputStreamKeyIdOverrides,
+    outputStreamKeyIdOverrides,
   }: {
     jobId: string;
     jobParams: P;
     bullMQJobsOpts?: JobsOptions;
+    inputStreamKeyIdOverrides: Partial<Record<keyof IMap, string>>;
+    outputStreamKeyIdOverrides: Partial<Record<keyof OMap, string>>;
   }) {
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
@@ -436,10 +440,28 @@ export class ZZPipe<
       jobParams: jobParams,
     });
 
-    return j;
+    // return j;
   }
 
-  public static async requestComplexJob<
+  public async requestJob({
+    jobId,
+    jobParams,
+    bullMQJobsOpts,
+  }: {
+    jobId: string;
+    jobParams: P;
+    bullMQJobsOpts?: JobsOptions;
+  }) {
+    return this._requestJob({
+      jobId,
+      jobParams,
+      bullMQJobsOpts,
+      inputStreamKeyIdOverrides: {},
+      outputStreamKeyIdOverrides: {},
+    });
+  }
+
+  public static async requestChainedJob<
     Ps extends {
       [K in number]: any;
     },
@@ -452,13 +474,14 @@ export class ZZPipe<
     TProgresses extends { [K in keyof Ps]: any }
   >({
     jobGroupId,
-    pipes,
+    jobs,
   }: {
     jobGroupId: string;
-    pipes: {
+    jobs: {
       [K in keyof Ps]: PipeAndJobParams<K, Ps, IMaps, OMaps, TProgresses>;
     };
-    streamConnectors: {
+
+    jobConnectors: {
       from:
         | PipeAndJobParams<number, Ps, IMaps, OMaps, TProgresses>["pipe"]
         | PipeAndJobOutputKey<number, Ps, IMaps, OMaps, TProgresses>;
@@ -466,7 +489,20 @@ export class ZZPipe<
         | PipeAndJobParams<number, Ps, IMaps, OMaps, TProgresses>["pipe"]
         | PipeAndJobInputKey<number, Ps, IMaps, OMaps, TProgresses>;
     }[];
-  }) {}
+  }) {
+    for (const i in Object.keys(jobs)) {
+      const inputStreamKeyIdOverrides = {};
+      const outputStreamKeyIdOverrides = {};
+      const { pipe, jobParams } = jobs[i];
+      const jobId = `${jobGroupId}-${i}`;
+      const job = await pipe._requestJob({
+        jobId,
+        jobParams,
+        inputStreamKeyIdOverrides,
+        outputStreamKeyIdOverrides,
+      });
+    }
+  }
 }
 
 type PipeAndJobParams<
