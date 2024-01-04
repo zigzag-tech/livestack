@@ -355,7 +355,15 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
     }
 
     const stream = ZZStream.getOrCreate({
-      uniqueName: queueId,
+      uniqueName: getStreamId({
+        groupId: queueId,
+        ...{
+          [type === "stream-in" ? "from" : "to"]: {
+            pipe: this,
+            key: p.key,
+          },
+        },
+      }),
       def,
       logger: this.logger,
       zzEnv: this.zzEnv,

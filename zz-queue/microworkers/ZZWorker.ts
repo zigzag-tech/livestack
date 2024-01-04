@@ -47,7 +47,7 @@ export class ZZWorkerDef<
     this.processor = processor;
   }
 
-  public async startWorker(p: { concurrency?: number; instanceParams?: WP }) {
+  public async startWorker(p?: { concurrency?: number; instanceParams?: WP }) {
     const { concurrency, instanceParams } = p || {};
 
     const worker = new ZZWorker<P, IMap, OMap, TProgress, WP>({
