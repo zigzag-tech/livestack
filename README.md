@@ -1,4 +1,4 @@
-<h1 align="center">LiveStack</h1>
+<h1 align="center">Livestack</h1>
 
 <p align="center">Brewing.</p>
 
