@@ -476,7 +476,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
     });
   }
 
-  public static async requestChainedJob<Pipes>({
+  public static async requestChainedJobs<Pipes>({
     jobGroupId,
     jobs,
     jobConnectors,
@@ -611,11 +611,20 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
       };
     }
 
+    // keep count of job with the same name
+    const countByName:{[k:string]: number} = {}
+
     for (let i = 0; i < Object.keys(jobs).length; i++) {
       // calculate overrides based on jobConnectors
-
+    
       const { pipe, jobParams } = jobs[i];
-      const jobId = `${jobGroupId}-${i}`;
+
+      if(!countByName[pipe.name]) {
+        countByName[pipe.name] = 1
+      } else {
+        countByName[pipe.name] += 1
+      }
+      const jobId = `[${jobGroupId}]${pipe.name}${countByName[pipe.name] > 0 ? `-${countByName[pipe.name]}` : ""}`;
 
       const jDef = {
         jobId,
@@ -623,7 +632,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
         inputStreamKeyIdOverrides: inOverridesByIndex[i],
         outputStreamKeyIdOverrides: outOverridesByIndex[i],
       };
-      const job = await pipe._requestJob(jDef);
+      await pipe._requestJob(jDef);
     }
   }
 
@@ -640,6 +649,19 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
       ...p,
       pipe: this,
     });
+  }
+
+  public async defineAndStartWorker<WP extends object>(
+    {
+      instanceParams,
+      ...p
+    }: Omit<ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>, "pipe"> & {
+      instanceParams?: WP;
+    }
+  ) {
+    const workerDef =  this.defineWorker(p);
+    await workerDef.startWorker({instanceParams});
+    return workerDef;
   }
 }
 
