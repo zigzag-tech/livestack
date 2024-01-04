@@ -29,7 +29,7 @@ export class StreamDefSet<TMap> {
     return Object.keys(this.defs).length === 1;
   }
 
-  public hasDef = (key: string| number|symbol) => {
+  public hasDef = (key: string) => {
     return key in this.defs;
   };
 

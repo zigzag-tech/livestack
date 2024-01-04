@@ -27,10 +27,14 @@ import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 
-export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZPipe<infer P, infer IMap, infer OMap, infer TP>
-? (
-  j: ZZJob<P, IMap, OMap, TP, WP>
-) => Promise<OMap[keyof OMap] | void> : never;
+export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZPipe<
+  infer P,
+  infer IMap,
+  infer OMap,
+  infer TP
+>
+  ? (j: ZZJob<P, IMap, OMap, TP, WP>) => Promise<OMap[keyof OMap] | void>
+  : never;
 
 export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   private readonly bullMQJob: Job<{ jobParams: P }, void>;
@@ -65,7 +69,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       isReady: true,
       key: key ? key : "default",
     });
-    return (await this._ensureInputStreamFn(key).nextValue());
+    return await this._ensureInputStreamFn(key).nextValue();
   };
 
   inputObservableFor = (key?: keyof IMap) => {

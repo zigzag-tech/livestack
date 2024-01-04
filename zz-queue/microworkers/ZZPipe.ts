@@ -1,5 +1,5 @@
-import { ZZWorkerDefParams } from './ZZWorker';
-import { InferDefMap } from './StreamDefSet';
+import { ZZWorkerDefParams } from "./ZZWorker";
+import { InferDefMap } from "./StreamDefSet";
 import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
@@ -18,7 +18,7 @@ import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 import { ZZStream } from "./ZZStream";
-import {  InferStreamSetType, StreamDefSet } from "./StreamDefSet";
+import { InferStreamSetType, StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
@@ -44,8 +44,7 @@ export type CheckPipe<PP> = PP extends ZZPipe<
   ? PP
   : never;
 
-export class ZZPipe<P, IMap, OMap, TProgress = never
->
+export class ZZPipe<P, IMap, OMap, TProgress = never>
   implements IWorkerUtilFuncs<P, OMap[keyof OMap]>
 {
   public readonly zzEnv: ZZEnv;
@@ -69,8 +68,8 @@ export class ZZPipe<P, IMap, OMap, TProgress = never
   }: {
     name: string;
     jobParamsDef: z.ZodType<P>;
-    input: InferDefMap<IMap> ;
-    output: InferDefMap<OMap> ;
+    input: InferDefMap<IMap>;
+    output: InferDefMap<OMap>;
     progressDef?: z.ZodType<TProgress>;
     zzEnv?: ZZEnv;
     concurrency?: number;
@@ -124,7 +123,11 @@ export class ZZPipe<P, IMap, OMap, TProgress = never
 
   public async getJobData<
     T extends "in" | "out" | "init-params",
-    U = T extends "in" ? IMap[keyof IMap] : T extends "out" ? OMap[keyof OMap] : P
+    U = T extends "in"
+      ? IMap[keyof IMap]
+      : T extends "out"
+      ? OMap[keyof OMap]
+      : P
   >({
     jobId,
     ioType,
@@ -257,7 +260,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never
         data: IMap[K];
         key?: K;
       }) => this.sendInputToJob({ jobId, data, key }),
-      terminateJobInput: (p?: { key?: keyof IMap }) =>
+      terminateJobInput: <K extends keyof IMap>(p?: { key?: K }) =>
         this.terminateJobInput({
           jobId,
           key: p?.key,
@@ -265,12 +268,12 @@ export class ZZPipe<P, IMap, OMap, TProgress = never
     };
   }
 
-  getJobReadyForInputsInRedis = async ({
+  getJobReadyForInputsInRedis = async <K extends keyof IMap>({
     jobId,
     key,
   }: {
     jobId: string;
-    key: keyof IMap;
+    key: K;
   }) => {
     try {
       const redis = new Redis(this.zzEnv.redisConfig);
@@ -312,17 +315,21 @@ export class ZZPipe<P, IMap, OMap, TProgress = never
     return queueId;
   }
 
-  public getJobStream = <T>(
+  public getJobStream = <
+    T,
+    KI extends keyof IMap = keyof IMap,
+    KO extends keyof OMap = keyof OMap
+  >(
     p: {
       jobId: string;
     } & (
       | {
           type: "stream-in";
-          key?: keyof IMap;
+          key?: KI;
         }
       | {
           type: "stream-out";
-          key?: keyof OMap;
+          key?: KO;
         }
     )
   ) => {
@@ -468,20 +475,33 @@ export class ZZPipe<P, IMap, OMap, TProgress = never
   }: {
     jobGroupId: string;
     jobs: {
-      [K in number]: PipeAndJobParams<CheckArray<Pipes>[K]>;
+      [K in keyof CheckArray<Pipes>]: PipeAndJobParams<CheckArray<Pipes>[K]>;
     };
 
     jobConnectors: {
       from:
-        | PipeAndJobParams<CheckArray<Pipes>[number]>["pipe"]
-        | PipeAndJobOutputKey<CheckArray<Pipes>[number]>;
+        | ZZPipe<any, any, any, any>
+        | [
+            ZZPipe<any, any, any, any>,
+            (
+              | keyof InferStreamSetType<CheckPipe<Pipes>["outputDefSet"]>
+              | "default"
+            )
+          ];
+
       to:
-        | PipeAndJobParams<CheckArray<Pipes>[number]>["pipe"]
-        | PipeAndJobInputKey<CheckArray<Pipes>[number]>;
+        | ZZPipe<any, any, any, any>
+        | [
+            ZZPipe<any, any, any, any>,
+            (
+              | keyof InferStreamSetType<CheckPipe<Pipes>["outputDefSet"]>
+              | "default"
+            )
+          ];
     }[];
   }) {
     const inOverridesByIndex = [] as {
-      [K in number]: Partial<
+      [K in keyof CheckArray<Pipes>]: Partial<
         Record<
           keyof CheckPipe<CheckArray<Pipes>[K]>["inputDefSet"]["defs"],
           string
@@ -535,14 +555,14 @@ export class ZZPipe<P, IMap, OMap, TProgress = never
         );
       }
       const toJob = jobs[toJobIndex];
-      if (!fromJob.pipe.outputDefSet.hasDef(fromKey)) {
+      if (!fromJob.pipe.outputDefSet.hasDef(fromKeyStr)) {
         throw new Error(
           `Invalid jobConnector: ${from}/${String(fromKey)} >> ${
             to.name
           }/${String(toKey)}: "from" key not found.`
         );
       }
-      if (!toJob.pipe.inputDefSet.hasDef(toKey)) {
+      if (!toJob.pipe.inputDefSet.hasDef(toKeyStr)) {
         throw new Error(
           `Invalid jobConnector: ${from}/${String(fromKey)} >> ${
             to.name
@@ -633,15 +653,19 @@ type PipeAndJobParams<Pipe> = {
   jobLabel?: string;
 };
 
-type PipeAndJobOutputKey<PP> = [
-  CheckPipe<PP>,
-  keyof InferStreamSetType<CheckPipe<PP>["outputDefSet"]> | "default"
-];
+type PipeAndJobOutputKey<PP> =
+  | [
+      CheckPipe<PP>,
+      keyof InferStreamSetType<CheckPipe<PP>["outputDefSet"]> | "default"
+    ]
+  | CheckPipe<PP>;
 
-type PipeAndJobInputKey<PP> = [
-  CheckPipe<PP>,
-  keyof InferStreamSetType<CheckPipe<PP>["inputDefSet"]> | "default"
-];
+type PipeAndJobInputKey<PP> =
+  | [
+      CheckPipe<PP>,
+      keyof InferStreamSetType<CheckPipe<PP>["inputDefSet"]> | "default"
+    ]
+  | CheckPipe<PP>;
 
 export async function sleep(ms: number) {
   return new Promise((resolve) => {
