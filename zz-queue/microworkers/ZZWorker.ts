@@ -12,6 +12,20 @@ type IWorkerUtilFuncs<I, O> = ReturnType<
   typeof getMicroworkerQueueByName<I, O, any>
 >;
 
+
+export type ZZWorkerDefParams<
+  P,
+  IMap,
+  OMap,
+  TProgress = never,
+  WP extends object = {}
+> = {
+  concurrency?: number;
+  pipe: ZZPipe<P, IMap, OMap, TProgress>;
+  processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>;
+  instanceParamsDef?: z.ZodType<WP>;
+}
+
 export class ZZWorkerDef<
   P,
   IMap,
@@ -27,12 +41,7 @@ export class ZZWorkerDef<
     pipe,
     processor,
     instanceParamsDef,
-  }: {
-    concurrency?: number;
-    pipe: ZZPipe<P, IMap, OMap, TProgress>;
-    processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>;
-    instanceParamsDef?: z.ZodType<WP>;
-  }) {
+  }: ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>) {
     this.pipe = pipe;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
@@ -67,7 +76,7 @@ export class ZZWorker<
     {
       jobParams: P;
     },
-    OMap[keyof OMap] | undefined
+    void
   >;
 
   public readonly _rawQueue: IWorkerUtilFuncs<P, OMap[keyof OMap]>["_rawQueue"];
@@ -116,7 +125,7 @@ export class ZZWorker<
 
     this.bullMQWorker = new Worker<
       { jobParams: P },
-      OMap[keyof OMap] | undefined,
+      void,
       string
     >(
       `${this.zzEnv.projectId}/${this.pipe.name}`,

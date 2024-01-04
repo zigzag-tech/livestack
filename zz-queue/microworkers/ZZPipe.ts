@@ -1,3 +1,5 @@
+import { ZZWorkerDefParams } from './ZZWorker';
+import { InferDefMap } from './StreamDefSet';
 import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { Knex } from "knex";
@@ -16,7 +18,7 @@ import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 import { ZZStream } from "./ZZStream";
-import { InferDefMap, InferStreamSetType, StreamDefSet } from "./StreamDefSet";
+import {  InferStreamSetType, StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
@@ -28,10 +30,6 @@ const queueMapByProjectIdAndQueueName = new Map<
   QueueName<GenericRecordType>,
   ReturnType<typeof createAndReturnQueue>
 >();
-
-type InferZodTypeMap<TMap> = {
-  [K in keyof TMap]: z.ZodType<TMap[K]>;
-};
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
@@ -46,7 +44,8 @@ export type CheckPipe<PP> = PP extends ZZPipe<
   ? PP
   : never;
 
-export class ZZPipe<P, IMap, OMap, TProgress = never>
+export class ZZPipe<P, IMap, OMap, TProgress = never
+>
   implements IWorkerUtilFuncs<P, OMap[keyof OMap]>
 {
   public readonly zzEnv: ZZEnv;
@@ -70,8 +69,8 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
   }: {
     name: string;
     jobParamsDef: z.ZodType<P>;
-    input: InferDefMap<IMap>;
-    output: InferDefMap<OMap>;
+    input: InferDefMap<IMap> ;
+    output: InferDefMap<OMap> ;
     progressDef?: z.ZodType<TProgress>;
     zzEnv?: ZZEnv;
     concurrency?: number;
@@ -125,7 +124,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
 
   public async getJobData<
     T extends "in" | "out" | "init-params",
-    U = T extends "in" ? IMap : T extends "out" ? OMap[keyof OMap] : P
+    U = T extends "in" ? IMap[keyof IMap] : T extends "out" ? OMap[keyof OMap] : P
   >({
     jobId,
     ioType,
@@ -597,12 +596,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
 
   // convenient function
   public defineWorker<WP extends object>(
-    p: Omit<
-      ConstructorParameters<
-        typeof ZZWorkerDef<P, IMap, OMap, TProgress, WP>
-      >[0],
-      "pipe"
-    >
+    p: Omit<ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>, "pipe">
   ) {
     return new ZZWorkerDef<P, IMap, OMap, TProgress, WP>({
       ...p,

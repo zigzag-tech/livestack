@@ -27,17 +27,13 @@ import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 
-export type ZZProcessor<MaPipe, WP extends object = {}> = MaPipe extends ZZPipe<
-  infer P,
-  infer IMap,
-  infer OMap,
-  infer TProgress
->
-  ? (j: ZZJob<P, IMap, OMap, TProgress, WP>) => Promise<OMap[keyof OMap] | void>
-  : never;
+export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZPipe<infer P, infer IMap, infer OMap, infer TP>
+? (
+  j: ZZJob<P, IMap, OMap, TP, WP>
+) => Promise<OMap[keyof OMap] | void> : never;
 
 export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
-  private readonly bullMQJob: Job<{ jobParams: P }, OMap[keyof OMap] | void>;
+  private readonly bullMQJob: Job<{ jobParams: P }, void>;
   public readonly _bullMQToken?: string;
   readonly jobParams: P;
   readonly logger: ReturnType<typeof getLogger>;
@@ -69,7 +65,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       isReady: true,
       key: key ? key : "default",
     });
-    return (await this._ensureInputStreamFn(key).nextValue()) as IMap[K];
+    return (await this._ensureInputStreamFn(key).nextValue());
   };
 
   inputObservableFor = (key?: keyof IMap) => {
@@ -101,7 +97,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   }>;
 
   constructor(p: {
-    bullMQJob: Job<{ jobParams: P }, OMap[keyof OMap] | undefined, string>;
+    bullMQJob: Job<{ jobParams: P }, void, string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
     jobParams: P;
@@ -302,10 +298,8 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   };
 
   public beginProcessing = async (
-    processor: (
-      j: ZZJob<P, IMap, OMap, TProgress>
-    ) => Promise<OMap[keyof OMap] | void>
-  ): Promise<OMap[keyof OMap] | undefined> => {
+    processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>
+  ): Promise<void> => {
     const jId = {
       opName: this.pipe.name,
       jobId: this.jobId,
@@ -320,89 +314,89 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     const logger = this.logger;
     const projectId = this.zzEnv.projectId;
 
-    if (savedResult) {
-      const jobData = await getJobDataAndIoEvents<OMap[keyof OMap]>({
+    // if (savedResult) {
+    //   const jobData = await getJobDataAndIoEvents<OMap[keyof OMap]>({
+    //     ...jId,
+    //     dbConn: this.zzEnv.db,
+    //     ioType: "out",
+    //   });
+    //   this.logger.info(
+    //     `Job already marked as complete; skipping: ${job.id}, ${this.bullMQJob.queueName} ` +
+    //       `${JSON.stringify(this.bullMQJob.data, longStringTruncator)}`,
+    //     +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
+    //   );
+
+    //   // return last job data
+    //   return jobData[jobData.length - 1]?.data || undefined;
+    // } else {
+    logger.info(
+      `Picked up job: ${job.id}, ${job.queueName} ` +
+        `${JSON.stringify(job.data, longStringTruncator)}`,
+      +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
+    );
+
+    try {
+      await updateJobStatus({
         ...jId,
         dbConn: this.zzEnv.db,
-        ioType: "out",
+        jobStatus: "running",
       });
-      this.logger.info(
-        `Job already marked as complete; skipping: ${job.id}, ${this.bullMQJob.queueName} ` +
-          `${JSON.stringify(this.bullMQJob.data, longStringTruncator)}`,
-        +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
+
+      const processedR = await processor(this);
+
+      // wait as long as there are still subscribers
+
+      await Promise.all(
+        (Object.values(this.inputStreamFnsByKey) as any).map(
+          async (x: (typeof this.inputStreamFnsByKey)[keyof IMap]) => {
+            await new Promise<void>((resolve) => {
+              x!.subscriberCountObservable
+                .pipe(takeUntil(x!.inputObservableUntracked))
+                .subscribe((count) => {
+                  if (count === 0) {
+                    resolve();
+                  }
+                });
+            });
+          }
+        )
       );
 
-      // return last job data
-      return jobData[jobData.length - 1]?.data || undefined;
-    } else {
-      logger.info(
-        `Picked up job: ${job.id}, ${job.queueName} ` +
-          `${JSON.stringify(job.data, longStringTruncator)}`,
-        +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
-      );
-
-      try {
-        await updateJobStatus({
-          ...jId,
-          dbConn: this.zzEnv.db,
-          jobStatus: "running",
-        });
-
-        const processedR = await processor(this as any);
-
-        // wait as long as there are still subscribers
-
-        await Promise.all(
-          (Object.values(this.inputStreamFnsByKey) as any).map(
-            async (x: (typeof this.inputStreamFnsByKey)[keyof IMap]) => {
-              await new Promise<void>((resolve) => {
-                x!.subscriberCountObservable
-                  .pipe(takeUntil(x!.inputObservableUntracked))
-                  .subscribe((count) => {
-                    if (count === 0) {
-                      resolve();
-                    }
-                  });
-              });
-            }
-          )
-        );
-
-        if (processedR) {
-          await this.emitOutput(processedR);
-        }
-
-        // await job.updateProgress(processedR as object);
-        await updateJobStatus({
-          ...jId,
-          dbConn: this.zzEnv.db,
-          jobStatus: "completed",
-        });
-        await this.signalOutputEnd();
-
-        if (processedR) {
-          return processedR;
-        }
-      } catch (e: any) {
-        if (e instanceof WaitingChildrenError) {
-          await updateJobStatus({
-            projectId,
-            opName: this.pipe.name,
-            jobId: job.id!,
-            dbConn: this.zzEnv.db,
-            jobStatus: "waiting_children",
-          });
-        } else {
-          await updateJobStatus({
-            projectId,
-            opName: this.pipe.name,
-            jobId: job.id!,
-            dbConn: this.zzEnv.db,
-            jobStatus: "failed",
-          });
-        }
-        throw e;
+      if (processedR) {
+        await this.emitOutput(processedR);
       }
+
+      // await job.updateProgress(processedR as object);
+      await updateJobStatus({
+        ...jId,
+        dbConn: this.zzEnv.db,
+        jobStatus: "completed",
+      });
+      await this.signalOutputEnd();
+
+      // if (processedR) {
+      //   return processedR;
+      // }
+    } catch (e: any) {
+      if (e instanceof WaitingChildrenError) {
+        await updateJobStatus({
+          projectId,
+          opName: this.pipe.name,
+          jobId: job.id!,
+          dbConn: this.zzEnv.db,
+          jobStatus: "waiting_children",
+        });
+      } else {
+        await updateJobStatus({
+          projectId,
+          opName: this.pipe.name,
+          jobId: job.id!,
+          dbConn: this.zzEnv.db,
+          jobStatus: "failed",
+        });
+      }
+      throw e;
+      // }
     }
   };
 

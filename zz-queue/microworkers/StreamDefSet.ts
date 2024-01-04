@@ -6,13 +6,17 @@ export type InferStreamSetType<T> = T extends StreamDefSet<infer TMap>
     }
   : never;
 
-export type InferDefMap<TMap> = TMap extends {
-  [K in keyof TMap]: TMap[K];
-}
-  ? {
-      [K in keyof TMap]: z.ZodType<TMap[K]>;
-    }
-  : never;
+// export type InferDefMap<TMap> = TMap extends {
+//   [key in infer K]: z.ZodType<infer V>;
+// }
+//   ? {
+//       [key in K]: z.ZodType<V>;
+//     }
+//   : never;
+
+export type InferDefMap<TMap> = {
+  [K in keyof TMap]: z.ZodType<TMap[K]>;
+};
 
 export class StreamDefSet<TMap> {
   public readonly defs: InferDefMap<TMap>;
