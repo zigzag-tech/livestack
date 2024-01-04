@@ -15,7 +15,7 @@ export interface AttemptDef<
   ) => Promise<ParentO> | ParentO;
 }
 export class ZZProgressiveAdaptiveTryWorkerDef<
-  MaPipe extends UnknownPipe,
+  MaPipe,
   P = z.infer<MaPipe["jobParamsDef"]>,
   O extends z.infer<MaPipe["outputDef"]> = z.infer<MaPipe["outputDef"]>
 > extends ZZWorkerDef<MaPipe, {}> {

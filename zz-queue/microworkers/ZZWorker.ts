@@ -1,4 +1,3 @@
-import { UnknownTMap } from "./StreamDefSet";
 import _ from "lodash";
 import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
@@ -15,8 +14,8 @@ type IWorkerUtilFuncs<I, O> = ReturnType<
 
 export class ZZWorkerDef<
   P,
-  IMap extends UnknownTMap = UnknownTMap,
-  OMap extends UnknownTMap = UnknownTMap,
+  IMap,
+  OMap,
   TProgress = never,
   WP extends object = {}
 > {
@@ -55,8 +54,8 @@ export class ZZWorkerDef<
 
 export class ZZWorker<
   P,
-  IMap extends UnknownTMap = UnknownTMap,
-  OMap extends UnknownTMap = UnknownTMap,
+  IMap,
+  OMap,
   TProgress = never,
   WP extends object = {}
 > {

@@ -14,9 +14,7 @@ export type InferStreamDef<T> = T extends ZZStream<infer P> ? P : never;
 
 export namespace ZZStream {
   export type single<ZT> = ZT extends ZodType<infer T>
-    ? {
-        default: T;
-      }
+    ? ZT
     : never;
   export type multi<ZTMap> = ZTMap extends {
     [K in keyof ZTMap]: ZodType<ZTMap[K]>;

@@ -21,49 +21,22 @@ import {
   updateJobStatus,
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { UnknownPipe, ZZPipe } from "../microworkers/ZZPipe";
+import { ZZPipe } from "../microworkers/ZZPipe";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
-import { InferStreamSetType } from "./StreamDefSet";
-import { UnknownTMap } from "./StreamDefSet";
 
-export type ZZProcessor<
-  MaPipe,
-  WP extends object = {},
-  P = z.infer<CheckExtendsPipe<MaPipe>["jobParamsDef"]>,
-  IMap extends UnknownTMap = InferStreamSetType<
-    CheckExtendsPipe<MaPipe>["inputDefSet"]
-  >,
-  OMap extends UnknownTMap = InferStreamSetType<
-    CheckExtendsPipe<MaPipe>["outputDefSet"]
-  >,
-  TProgress = z.infer<CheckExtendsPipe<MaPipe>["progressDef"]>
-> = (
-  j: ZZJob<P, IMap, OMap, TProgress, WP>
-) => Promise<OMap[keyof OMap] | void>;
-
-export type CheckExtendsPipe<T> = T extends ZZPipe<
+export type ZZProcessor<MaPipe, WP extends object = {}> = MaPipe extends ZZPipe<
   infer P,
-  infer I,
-  infer O,
-  infer T
+  infer IMap,
+  infer OMap,
+  infer TProgress
 >
-  ? ZZPipe<P, I, O, T>
-  : T extends ZZPipe<infer P, infer I, infer O>
-  ? ZZPipe<P, I, O>
-  : T extends UnknownPipe
-  ? UnknownPipe
+  ? (j: ZZJob<P, IMap, OMap, TProgress, WP>) => Promise<OMap[keyof OMap] | void>
   : never;
 
-export class ZZJob<
-  P,
-  IMap extends UnknownTMap = UnknownTMap,
-  OMap extends UnknownTMap = UnknownTMap,
-  TProgress = never,
-  WP extends object = {}
-> {
+export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   private readonly bullMQJob: Job<{ jobParams: P }, OMap[keyof OMap] | void>;
   public readonly _bullMQToken?: string;
   readonly jobParams: P;
@@ -267,7 +240,7 @@ export class ZZJob<
       const stream = this.pipe.getJobStream({
         jobId: this.jobId,
         type: "stream-in",
-        key,
+        key: key! as keyof IMap,
       }) as ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
       const inputObservableUntracked = stream.valueObsrvable.pipe(
         map((x) => (x.terminate ? null : x.data))

@@ -6,16 +6,18 @@ export type InferStreamSetType<T> = T extends StreamDefSet<infer TMap>
     }
   : never;
 
-export type UnknownTMap = Record<string | number | symbol, unknown>;
+export type InferDefMap<TMap> = TMap extends {
+  [K in keyof TMap]: TMap[K];
+}
+  ? {
+      [K in keyof TMap]: z.ZodType<TMap[K]>;
+    }
+  : never;
 
-export class StreamDefSet<TMap extends UnknownTMap> {
-  public readonly defs: Record<keyof TMap, z.ZodType<TMap[keyof TMap]>>;
+export class StreamDefSet<TMap> {
+  public readonly defs: InferDefMap<TMap>;
 
-  constructor({
-    defs,
-  }: {
-    defs: Record<keyof TMap, z.ZodType<TMap[keyof TMap]>>;
-  }) {
+  constructor({ defs }: { defs: InferDefMap<TMap> }) {
     this.defs = defs;
   }
 
@@ -23,19 +25,19 @@ export class StreamDefSet<TMap extends UnknownTMap> {
     return Object.keys(this.defs).length === 1;
   }
 
-  public hasDef = <K extends keyof TMap>(key: K) => {
+  public hasDef = (key: keyof TMap) => {
     return key in this.defs;
-  }
+  };
 
   public getDef = <K extends keyof TMap>(key?: K) => {
     if (!key) {
-      const def = this.defs["default" as const];
+      const def = this.defs["default" as keyof TMap];
       return def;
     } else {
-      if(!this.hasDef(key)) throw new Error(`No def for key ${String(key)}`);
+      if (!this.hasDef(key)) throw new Error(`No def for key ${String(key)}`);
       const def = (
         this.defs as Record<keyof TMap, z.ZodType<TMap[keyof TMap]>>
-      )[key as keyof TMap[K]] as z.ZodType<TMap[K]>;
+      )[key as keyof TMap] as z.ZodType<TMap[K]>;
       return def;
     }
   };
