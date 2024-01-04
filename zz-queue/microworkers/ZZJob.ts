@@ -21,7 +21,7 @@ import {
   updateJobStatus,
 } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { ZZPipe } from "../microworkers/ZZPipe";
+import { ZZPipe } from "./ZZPipe";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
