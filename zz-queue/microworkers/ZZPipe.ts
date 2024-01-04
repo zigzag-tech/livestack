@@ -17,7 +17,7 @@ import longStringTruncator from "../utils/longStringTruncator";
 import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
-import { ZZStream } from "./ZZStream";
+import { ZZStream, hashDef } from "./ZZStream";
 import { InferStreamSetType, StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 
@@ -518,66 +518,76 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
     };
     // calculate overrides based on jobConnectors
     for (const connector of jobConnectors) {
-      const fromDef = Array.isArray(connector.from)
+      const fromPairs = Array.isArray(connector.from)
         ? connector.from
         : ([connector.from, "default"] as const);
-      const toDef = Array.isArray(connector.to)
+      const toPairs = Array.isArray(connector.to)
         ? connector.to
         : ([connector.to, "default"] as const);
-      const [from] = fromDef;
-      const fromKey = fromDef[1] as keyof (typeof from)["outputDefSet"]["defs"];
-      const [to] = toDef;
-      const toKey = toDef[1] as keyof (typeof to)["inputDefSet"]["defs"];
+      const [fromP] = fromPairs;
+      const fromKey =
+        fromPairs[1] as keyof (typeof fromP)["outputDefSet"]["defs"];
+      const [toP] = toPairs;
+      const toKey = toPairs[1] as keyof (typeof toP)["inputDefSet"]["defs"];
 
       const fromKeyStr = String(fromKey);
       const toKeyStr = String(toKey);
 
       const fromJobIndex = (jobs as PipeAndJobParams<unknown>[]).findIndex(
-        (j) => j.pipe === from
+        (j) => j.pipe === fromP
       );
       const toJobIndex = (jobs as PipeAndJobParams<unknown>[]).findIndex(
-        (j) => j.pipe === to
+        (j) => j.pipe === toP
       );
 
       if (fromJobIndex === -1) {
         throw new Error(
-          `Invalid jobConnector: ${from.name}/${String(fromKey)} >> ${
-            to.name
+          `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
+            toP.name
           }/${String(toKey)}: "from" job not found.`
         );
       }
-      const fromJob = jobs[fromJobIndex];
+      const fromJobDecs = jobs[fromJobIndex];
       if (toJobIndex === -1) {
         throw new Error(
-          `Invalid jobConnector: ${from.name}/${String(fromKey)} >> ${
-            to.name
+          `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
+            toP.name
           }/${String(toKey)}: "to" job not found.`
         );
       }
-      const toJob = jobs[toJobIndex];
-      if (!fromJob.pipe.outputDefSet.hasDef(fromKeyStr)) {
+      const toJobDesc = jobs[toJobIndex];
+      if (!fromJobDecs.pipe.outputDefSet.hasDef(fromKeyStr)) {
         throw new Error(
-          `Invalid jobConnector: ${from}/${String(fromKey)} >> ${
-            to.name
+          `Invalid jobConnector: ${fromP}/${String(fromKey)} >> ${
+            toP.name
           }/${String(toKey)}: "from" key not found.`
         );
       }
-      if (!toJob.pipe.inputDefSet.hasDef(toKeyStr)) {
+      if (!toJobDesc.pipe.inputDefSet.hasDef(toKeyStr)) {
         throw new Error(
-          `Invalid jobConnector: ${from}/${String(fromKey)} >> ${
-            to.name
+          `Invalid jobConnector: ${fromP}/${String(fromKey)} >> ${
+            toP.name
           }/${String(toKey)}: "to" key not found.`
         );
       }
 
+      const fromDef = fromJobDecs.pipe.outputDefSet.getDef(fromKeyStr);
+      const toDef = toJobDesc.pipe.inputDefSet.getDef(toKeyStr);
+      if (hashDef(fromDef) !== hashDef(toDef)) {
+        throw new Error(
+          `Streams ${fromP.name}.${fromKeyStr} and ${toP.name}.${toKeyStr} are incompatible.`
+        );
+      }
+      // validate that the types match
+
       const commonStreamName = getStreamId({
         groupId: jobGroupId,
         from: {
-          pipe: from,
+          pipe: fromP,
           key: fromKeyStr,
         },
         to: {
-          pipe: to,
+          pipe: toP,
           key: toKeyStr,
         },
       });

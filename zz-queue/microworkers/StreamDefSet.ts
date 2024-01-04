@@ -33,12 +33,13 @@ export class StreamDefSet<TMap> {
     return key in this.defs;
   };
 
-  public getDef = <K extends keyof TMap>(key?: K) => {
+  public getDef = <K extends keyof TMap>(key?: string | K) => {
     if (!key) {
       const def = this.defs["default" as keyof TMap];
       return def;
     } else {
-      if (!this.hasDef(key as string)) throw new Error(`No def for key ${String(key)}`);
+      if (!this.hasDef(key as string))
+        throw new Error(`No def for key ${String(key)}`);
       const def = (
         this.defs as Record<keyof TMap, z.ZodType<TMap[keyof TMap]>>
       )[key as keyof TMap] as z.ZodType<TMap[K]>;
