@@ -16,7 +16,6 @@ import { getTempPathByJobId } from "../storage/temp-dirs";
 import path from "path";
 import {
   addJobDataAndIOEvent,
-  getJobDataAndIoEvents,
   getJobRec,
   updateJobStatus,
 } from "../db/knexConn";

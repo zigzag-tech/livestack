@@ -14,8 +14,8 @@
     "ioredis": "^5",
     "knex": "^2.x",
     "pg": "^8.x",
-    "winston": "^3.x",
     "rxjs": "^7",
+    "winston": "^3.x",
     "zod": "^3"
   },
   "types": "dist/index.d.ts",
