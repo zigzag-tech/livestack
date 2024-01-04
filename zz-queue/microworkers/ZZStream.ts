@@ -16,7 +16,7 @@ export namespace ZZStream {
   export type single<ZT> = ZT extends ZodType<infer T>
     ? {
         default: T;
-    }
+      }
     : never;
 
   export type multi<ZTMap> = ZTMap extends {
@@ -100,6 +100,7 @@ export class ZZStream<T> {
     this.uniqueName = uniqueName;
     this.zzEnv = zzEnv;
     this.hash = hashDef(this.def);
+    console.log("ZZStream constructor", this.uniqueName);
     const { nextValue } = createLazyNextValueGenerator(this.valueObsrvable);
     this.nextValue = nextValue;
     this.logger = logger;

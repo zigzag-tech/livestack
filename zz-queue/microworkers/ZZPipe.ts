@@ -2,7 +2,6 @@ import { ZZWorkerDefParams } from "./ZZWorker";
 import { InferDefMap } from "./StreamDefSet";
 import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import { Knex } from "knex";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
 
@@ -22,13 +21,10 @@ import { InferStreamSetType, StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
-type IWorkerUtilFuncs<I, O> = ReturnType<
-  typeof getMicroworkerQueueByName<I, O, any>
->;
 
 const queueMapByProjectIdAndQueueName = new Map<
   QueueName<GenericRecordType>,
-  ReturnType<typeof createAndReturnQueue>
+  ReturnType<typeof getCachedQueueByName>
 >();
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
@@ -44,13 +40,10 @@ export type CheckPipe<PP> = PP extends ZZPipe<
   ? PP
   : never;
 
-export class ZZPipe<P, IMap, OMap, TProgress = never>
-  implements IWorkerUtilFuncs<P, OMap[keyof OMap]>
-{
+export class ZZPipe<P, IMap, OMap, TProgress = never> {
   public readonly zzEnv: ZZEnv;
 
   protected logger: ReturnType<typeof getLogger>;
-  public readonly _rawQueue: IWorkerUtilFuncs<P, OMap[keyof OMap]>["_rawQueue"];
 
   readonly name: string;
   readonly jobParamsDef: z.ZodType<P>;
@@ -88,18 +81,16 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
     this.outputDefSet = new StreamDefSet({
       defs: output,
     });
+  }
 
-    const queueFuncs = getMicroworkerQueueByName<P, OMap[keyof OMap], any>({
-      queueNameOnly: `${this.name}`,
+  private get _rawQueue() {
+    return getCachedQueueByName<P, void>({
+      queueNameOnly: `${this.zzEnv.projectId}/${this.name}`,
       queueOptions: {
         connection: this.zzEnv.redisConfig,
       },
-      db: this.zzEnv.db,
       projectId: this.zzEnv.projectId,
     });
-
-    this._rawQueue = queueFuncs._rawQueue;
-    // this.getJobData = queueFuncs.getJobData;
   }
 
   // public async getJob(jobId: string) {
@@ -278,6 +269,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
     try {
       const redis = new Redis(this.zzEnv.redisConfig);
       const isReady = await redis.get(`ready_status__${jobId}/${String(key)}`);
+      console.debug("getJobReadyForInputsInRedis", jobId, key, ":", isReady);
       return isReady === "true";
     } catch (error) {
       console.error("Error getJobReadyForInputsInRedis:", error);
@@ -360,7 +352,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
         ...{
           [type === "stream-in" ? "from" : "to"]: {
             pipe: this,
-            key: p.key,
+            key: p.key || "default",
           },
         },
       }),
@@ -429,6 +421,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never>
     inputStreamKeyIdOverrides: Partial<Record<keyof IMap, string>>;
     outputStreamKeyIdOverrides: Partial<Record<keyof OMap, string>>;
   }) {
+    console.debug("ZZPipe._requestJob", jobId, jobParams);
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
     if (workers.length === 0) {
@@ -720,63 +713,36 @@ export async function sleep(ms: number) {
   });
 }
 
-export const getMicroworkerQueueByName = <
-  JobDataType,
-  JobReturnType,
-  T extends GenericRecordType
->(
-  p: Parameters<typeof createAndReturnQueue<JobDataType, JobReturnType, T>>[0]
+export const getCachedQueueByName = <JobParams, JobReturnType>(
+  p: {
+    projectId: string;
+    queueNameOnly: string;
+    queueOptions?: WorkerOptions;
+  }
   // & {
   //   queueNamesDef: T;
   // }
-): ReturnType<typeof createAndReturnQueue<JobDataType, JobReturnType, T>> => {
+) => {
   const {
     // queueNamesDef,
-    queueNameOnly: queueName,
+    queueNameOnly,
     projectId,
+    queueOptions,
   } = p;
   // if (!Object.values(queueNamesDef).includes(queueName)) {
   //   throw new Error(`Can not handle queueName ${queueName}!`);
   // }
   const existing = queueMapByProjectIdAndQueueName.get(
-    `${projectId}/${queueName}`
-  ) as ReturnType<typeof createAndReturnQueue<JobDataType, JobReturnType, T>>;
+    `${projectId}/${queueNameOnly}`
+  ) as Queue<{ jobParams: JobParams }, JobReturnType>;
   if (existing) {
     return existing;
   } else {
-    return createAndReturnQueue<JobDataType, JobReturnType, T>(p);
+    const queue = new Queue<{ jobParams: JobParams }, JobReturnType>(
+      `${projectId}/${queueNameOnly}`,
+      queueOptions
+    );
+    queueMapByProjectIdAndQueueName.set(`${projectId}/${queueNameOnly}`, queue);
+    return queue;
   }
 };
-
-function createAndReturnQueue<
-  JobDataType,
-  JobReturnType,
-  T extends GenericRecordType = GenericRecordType
->({
-  projectId,
-  queueNameOnly,
-  queueOptions,
-  db,
-}: {
-  projectId: string;
-  queueNameOnly: QueueName<T>;
-  queueOptions?: WorkerOptions;
-  db: Knex;
-}) {
-  const queue = new Queue<{ jobParams: JobDataType }, JobReturnType>(
-    `${projectId}/${queueNameOnly}`,
-    queueOptions
-  );
-
-  const funcs = {
-    _rawQueue: queue,
-  };
-
-  // todo: fix typing
-  queueMapByProjectIdAndQueueName.set(
-    `${projectId}/${queueNameOnly}`,
-    funcs as any
-  );
-
-  return funcs;
-}

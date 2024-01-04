@@ -2,16 +2,12 @@ import _ from "lodash";
 import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { ZZJob, ZZProcessor } from "./ZZJob";
-import { ZZPipe, getMicroworkerQueueByName } from "./ZZPipe";
+import { ZZPipe } from "./ZZPipe";
 import { ZZEnv } from "./ZZEnv";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { z } from "zod";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
-type IWorkerUtilFuncs<I, O> = ReturnType<
-  typeof getMicroworkerQueueByName<I, O, any>
->;
-
 
 export type ZZWorkerDefParams<
   P,
@@ -24,7 +20,7 @@ export type ZZWorkerDefParams<
   pipe: ZZPipe<P, IMap, OMap, TProgress>;
   processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>;
   instanceParamsDef?: z.ZodType<WP>;
-}
+};
 
 export class ZZWorkerDef<
   P,
@@ -79,7 +75,6 @@ export class ZZWorker<
     void
   >;
 
-  public readonly _rawQueue: IWorkerUtilFuncs<P, OMap[keyof OMap]>["_rawQueue"];
   public readonly instanceParams?: WP;
   public readonly workerName: string;
   public readonly def: ZZWorkerDef<P, IMap, OMap, TProgress, WP>;
@@ -109,25 +104,13 @@ export class ZZWorker<
       connection: this.zzEnv.redisConfig,
     };
 
-    const queueFuncs = getMicroworkerQueueByName<P, OMap[keyof OMap], any>({
-      queueNameOnly: `${this.pipe.name}`,
-      queueOptions: workerOptions,
-      db: this.zzEnv.db,
-      projectId: this.zzEnv.projectId,
-    });
-
-    this._rawQueue = queueFuncs._rawQueue;
     this.workerName =
       workerName || "wkr:" + `${this.zzEnv.projectId}/${this.def.pipe.name}`;
     this.logger = getLogger(`wkr:${this.workerName}`);
 
     const mergedWorkerOptions = _.merge({}, workerOptions);
 
-    this.bullMQWorker = new Worker<
-      { jobParams: P },
-      void,
-      string
-    >(
+    this.bullMQWorker = new Worker<{ jobParams: P }, void, string>(
       `${this.zzEnv.projectId}/${this.pipe.name}`,
       async (job, token) => {
         const zzJ = new ZZJob({
