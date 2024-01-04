@@ -29,7 +29,7 @@ export class StreamDefSet<TMap> {
     return Object.keys(this.defs).length === 1;
   }
 
-  public hasDef = (key: keyof TMap) => {
+  public hasDef = (key: string| number|symbol) => {
     return key in this.defs;
   };
 
@@ -38,7 +38,7 @@ export class StreamDefSet<TMap> {
       const def = this.defs["default" as keyof TMap];
       return def;
     } else {
-      if (!this.hasDef(key)) throw new Error(`No def for key ${String(key)}`);
+      if (!this.hasDef(key as string)) throw new Error(`No def for key ${String(key)}`);
       const def = (
         this.defs as Record<keyof TMap, z.ZodType<TMap[keyof TMap]>>
       )[key as keyof TMap] as z.ZodType<TMap[K]>;
