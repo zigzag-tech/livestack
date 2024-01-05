@@ -11,7 +11,7 @@ export type ZZJobUniqueId = z.infer<typeof ZZJobUniqueId>;
 export const ZZJobRec = <P>(jobParamsSchema: z.ZodType<P>) =>
   ZZJobUniqueId.and(
     z.object({
-      init_params: jobParamsSchema.optional(),
+      job_params: jobParamsSchema.optional(),
       time_created: z.date(),
     })
   );

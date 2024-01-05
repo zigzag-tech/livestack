@@ -81,7 +81,7 @@ JobUniqueId & {
 
   return {
     ...r,
-    init_params: convertMaybePrimtiveBack(r.init_params),
+    job_params: convertMaybePrimtiveBack(r.job_params),
   };
 }
 
@@ -245,7 +245,7 @@ export async function ensureJobAndInitStatusRec<T>({
       project_id: projectId,
       pipe_name: pipeName,
       job_id: jobId,
-      init_params: handlePrimitive(jobParams),
+      job_params: handlePrimitive(jobParams),
     })
     .onConflict(["project_id", "pipe_name", "job_id"])
     .ignore();

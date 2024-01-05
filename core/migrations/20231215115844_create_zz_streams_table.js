@@ -3,10 +3,10 @@
  * @returns { Promise<void> }
  */
 exports.up = function (knex) {
-  return knex.schema.createTable("zz_job_data", function (table) {
-    table.primary(["job_data_id"]);
-    table.string("job_data_id").notNullable();
-    table.jsonb("job_data").notNullable();
+  return knex.schema.createTable("zz_streams", function (table) {
+    table.primary(["project_id", "stream_id"]);
+    table.string("project_id").notNullable();
+    table.string("stream_id").notNullable();
     table.timestamp("time_created").defaultTo(knex.fn.now());
   });
 };
@@ -16,5 +16,5 @@ exports.up = function (knex) {
  * @returns { Promise<void> }
  */
 exports.down = function (knex) {
-  return knex.schema.dropTable("zz_job_data");
+  return knex.schema.dropTable("zz_streams");
 };
