@@ -3,7 +3,7 @@ import { isBinaryLikeObject } from "../utils/isBinaryLikeObject";
 import { TEMP_DIR } from "../storage/temp-dirs";
 import fs from "fs";
 import { ensurePathExists } from "../storage/ensurePathExists";
-
+import _ from "lodash";
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
 
@@ -17,7 +17,7 @@ export const identifyLargeFiles = (
   const newObj: any = Array.isArray(obj) ? [] : {};
   const largeFilesToSave: { path: string; value: any }[] = [];
 
-  for (const [key, value] of Object.entries(obj)) {
+  for (const [key, value] of _.entries(obj)) {
     const currentPath = path ? `${path}/${key}` : key;
 
     if (typeof value === "string" && value.length > LARGE_VALUE_THRESHOLD) {

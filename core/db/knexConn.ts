@@ -93,13 +93,13 @@ export async function ensureStreamRec({
   dbConn: Knex;
   streamId: string;
 }) {
-  await dbConn<ZZStreamRec>("zz_job_stream_connectors")
+  await dbConn<ZZStreamRec>("zz_streams")
     .insert({
       project_id: projectId,
       stream_id: streamId,
       time_created: new Date(),
     })
-    .onConflict(["project_id", "pipe_name", "stream_id"])
+    .onConflict(["project_id", "stream_id"])
     .ignore();
 }
 

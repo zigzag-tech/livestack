@@ -311,7 +311,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     return queueId;
   }
 
-  public getJobStream = async <
+  public getJobStream = <
     T,
     KI extends keyof IMap = keyof IMap,
     KO extends keyof OMap = keyof OMap
@@ -350,7 +350,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       throw new Error(`Invalid type ${type}`);
     }
 
-    const stream = await ZZStream.getOrCreate({
+    const stream = ZZStream.getOrCreate({
       uniqueName: getStreamId({
         groupId: queueId,
         ...{
@@ -453,7 +453,8 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
         dbConn: trx,
         jobParams: jobParams,
       });
-      for (const [key, streamId] of Object.entries(inputStreamKeyIdOverrides)) {
+
+      for (const [key, streamId] of _.entries(inputStreamKeyIdOverrides)) {
         await ensureStreamRec({
           projectId,
           streamId: streamId as string,
@@ -469,9 +470,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
         });
       }
 
-      for (const [key, streamId] of Object.entries(
-        outputStreamKeyIdOverrides
-      )) {
+      for (const [key, streamId] of _.entries(outputStreamKeyIdOverrides)) {
         await ensureStreamRec({
           projectId,
           streamId: streamId as string,

@@ -151,12 +151,11 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
 
-    const outputStream = this.pipe.getJobStream<OMap[keyof OMap]>({
-      jobId: this.jobId,
-      type: "stream-out",
-    });
-
     this.signalOutputEnd = async () => {
+      const outputStream = await this.pipe.getJobStream<OMap[keyof OMap]>({
+        jobId: this.jobId,
+        type: "stream-out",
+      });
       await outputStream.emitValue({
         __zz_datapoint_id__: v4(),
         terminate: true,
@@ -206,6 +205,10 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
           job_output_key: null,
           connector_type: "out",
         },
+      });
+      const outputStream = await this.pipe.getJobStream<OMap[keyof OMap]>({
+        jobId: this.jobId,
+        type: "stream-out",
       });
       // update progress to prevent job from being stalling
       await outputStream.emitValue({
