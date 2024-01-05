@@ -39,22 +39,6 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   readonly pipe: ZZPipe<P, IMap, OMap, TProgress>;
   // New properties for subscriber tracking
 
-  // public async aliveLoop(retVal: O) {
-  //   const redis = new Redis();
-  //   let lastTimeJobAlive = Date.now();
-  //   while (Date.now() - lastTimeJobAlive < JOB_ALIVE_TIMEOUT) {
-  //     lastTimeJobAlive = parseInt(
-  //       (await redis.get(`last-time-job-alive-${this.bullMQJob.id}`)) || "0"
-  //     );
-  //     await sleep(1000 * 60);
-  //   }
-  //   this.logger.info(
-  //     `Job with ${this.jobId} id expired. Marking as complete.`
-  //   );
-  //   await this.bullMQJob.moveToCompleted(retVal, this._bullMQToken!);
-  //   return retVal;
-  // }
-
   emitOutput: (o: OMap[keyof OMap]) => Promise<void>;
   signalOutputEnd: () => Promise<void>;
   nextInput = async <K extends keyof IMap>(key?: K) => {

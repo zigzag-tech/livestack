@@ -87,7 +87,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
   private get _rawQueue() {
     return getCachedQueueByName<P, void>({
-      queueNameOnly: `${this.zzEnv.projectId}/${this.name}`,
+      queueNameOnly: this.name,
       queueOptions: {
         connection: this.zzEnv.redisConfig,
       },
@@ -425,7 +425,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     inputStreamKeyIdOverrides: Partial<Record<keyof IMap, string>>;
     outputStreamKeyIdOverrides: Partial<Record<keyof OMap, string>>;
   }) {
-    console.debug("ZZPipe._requestJob", jobId, jobParams);
+    // console.debug("ZZPipe._requestJob", jobId, jobParams);
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
     if (workers.length === 0) {
@@ -433,19 +433,9 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
         `No worker for queue ${this._rawQueue.name}; job ${jobId} might be be stuck.`
       );
     }
-
-    const j = await this._rawQueue.add(
-      jobId,
-      { jobParams },
-      { ...bullMQJobsOpts, jobId: jobId }
-    );
-    this.logger.info(
-      `Added job with ID ${j.id} to pipe: ` +
-        `${JSON.stringify(j.data, longStringTruncator)}`
-    );
     const projectId = this.zzEnv.projectId;
 
-    this.zzEnv.db.transaction(async (trx) => {
+    await this.zzEnv.db.transaction(async (trx) => {
       await ensureJobAndInitStatusRec({
         projectId,
         pipeName: this.name,
@@ -486,6 +476,16 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
         });
       }
     });
+
+    const j = await this._rawQueue.add(
+      jobId,
+      { jobParams },
+      { ...bullMQJobsOpts, jobId: jobId }
+    );
+    this.logger.info(
+      `Added job with ID ${j.id} to pipe: ` +
+        `${JSON.stringify(j.data, longStringTruncator)}`
+    );
 
     // return j;
   }

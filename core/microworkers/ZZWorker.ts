@@ -52,7 +52,7 @@ export class ZZWorkerDef<
       instanceParams: instanceParams || ({} as WP),
     });
     // this.workers.push(worker);
-    await worker.bullMQWorker.waitUntilReady();
+    await worker.waitUntilReady();
     return worker;
   }
 }
@@ -68,7 +68,7 @@ export class ZZWorker<
   protected readonly zzEnv: ZZEnv;
   protected readonly storageProvider?: IStorageProvider;
 
-  public readonly bullMQWorker: Worker<
+  private readonly bullMQWorker: Worker<
     {
       jobParams: P;
     },
@@ -156,5 +156,9 @@ export class ZZWorker<
     this.bullMQWorker.waitUntilReady().then(() => {
       this.logger.info(`${this.bullMQWorker.name} zzzworker started.`);
     });
+  }
+
+  public async waitUntilReady() {
+    await this.bullMQWorker.waitUntilReady();
   }
 }

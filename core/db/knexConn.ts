@@ -271,13 +271,15 @@ export async function updateJobStatus({
   dbConn: Knex;
   jobStatus: ZZJobStatus;
 }) {
-  await dbConn("zz_job_status").insert<ZZJobStatusRec>({
+  const q = dbConn("zz_job_status").insert<ZZJobStatusRec>({
     status_id: v4(),
     project_id: projectId,
     pipe_name: pipeName,
     job_id: jobId,
     status: jobStatus,
   });
+  // console.debug(q.toString());
+  await q;
 }
 
 export async function ensureJobAndInitStatusRec<T>({
@@ -290,23 +292,26 @@ export async function ensureJobAndInitStatusRec<T>({
   dbConn: Knex;
   jobParams: T;
 }) {
-  await dbConn.transaction(async (trx) => {
-    await trx("zz_jobs")
-      .insert<ZZJobRec<T>>({
-        project_id: projectId,
-        pipe_name: pipeName,
-        job_id: jobId,
-        job_params: handlePrimitive(jobParams),
-      })
-      .onConflict(["project_id", "pipe_name", "job_id"])
-      .ignore();
+  // await dbConn.transaction(async (trx) => {
+  const q = dbConn("zz_jobs")
+    .insert<ZZJobRec<T>>({
+      project_id: projectId,
+      pipe_name: pipeName,
+      job_id: jobId,
+      job_params: handlePrimitive(jobParams),
+    })
+    .onConflict(["project_id", "pipe_name", "job_id"])
+    .ignore();
 
-    await updateJobStatus({
-      projectId,
-      pipeName,
-      jobId,
-      dbConn: trx,
-      jobStatus: "requested",
-    });
+  // console.log(q.toString());
+  await q;
+
+  await updateJobStatus({
+    projectId,
+    pipeName,
+    jobId,
+    dbConn,
+    jobStatus: "requested",
   });
+  // });
 }
