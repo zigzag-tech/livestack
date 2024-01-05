@@ -7,7 +7,7 @@ exports.up = function (knex) {
     table.primary(["io_event_id"]);
     table.string("io_event_id").notNullable();
     table.string("project_id").notNullable();
-    table.string("op_name").notNullable();
+    table.string("pipe_name").notNullable();
     table.string("job_id").notNullable();
     table.string("io_type").notNullable();
     table.string("job_data_id").notNullable();
@@ -16,8 +16,8 @@ exports.up = function (knex) {
 
     // add foreign key for primary key
     table
-      .foreign(["project_id", "op_name", "job_id"])
-      .references(["project_id", "op_name", "job_id"])
+      .foreign(["project_id", "pipe_name", "job_id"])
+      .references(["project_id", "pipe_name", "job_id"])
       .inTable("zz_jobs");
 
     // add foreign key for job_data_id
@@ -27,7 +27,7 @@ exports.up = function (knex) {
       .inTable("zz_job_data");
 
     // add index for primary key
-    table.index(["project_id", "op_name", "job_id"]);
+    table.index(["project_id", "pipe_name", "job_id"]);
   });
 };
 

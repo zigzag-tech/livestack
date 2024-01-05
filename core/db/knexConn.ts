@@ -35,13 +35,13 @@ export const getDatabaseInstance = ({
 
 type JobUniqueId = {
   projectId: string;
-  opName: string;
+  pipeName: string;
   jobId: string;
 };
 
 export async function getJobRec<T>({
   projectId,
-  opName,
+  pipeName,
   jobId,
   dbConn,
 }: // jobStatus,
@@ -54,10 +54,10 @@ JobUniqueId & {
     .leftJoin("zz_job_status", function () {
       this.on("zz_jobs.job_id", "=", "zz_job_status.job_id");
       this.on("zz_jobs.project_id", "=", "zz_job_status.project_id");
-      this.on("zz_jobs.op_name", "=", "zz_job_status.op_name");
+      this.on("zz_jobs.pipe_name", "=", "zz_job_status.pipe_name");
     })
     .where("zz_jobs.project_id", "=", projectId)
-    .andWhere("zz_jobs.op_name", "=", opName)
+    .andWhere("zz_jobs.pipe_name", "=", pipeName)
     .andWhere("zz_jobs.job_id", "=", jobId)
     .orderBy("zz_job_status.time_created", "desc")
     .first()) as
@@ -109,7 +109,7 @@ export async function getJobDataAndIoEvents<T>({
       this.on("zz_job_data.job_data_id", "=", "zz_job_io_events.job_data_id");
     })
     .where("zz_job_io_events.project_id", "=", jId.projectId)
-    .andWhere("zz_job_io_events.op_name", "=", jId.opName)
+    .andWhere("zz_job_io_events.pipe_name", "=", jId.pipeName)
     .andWhere("zz_job_io_events.job_id", "=", jId.jobId)
     .andWhere("zz_job_io_events.io_type", "=", ioType)
     .orderBy("zz_job_io_events.time_created", order)
@@ -127,7 +127,7 @@ export async function getJobDataAndIoEvents<T>({
 
 export async function addJobDataAndIOEvent<T>({
   projectId,
-  opName,
+  pipeName,
   jobId,
   dbConn,
   ioType,
@@ -141,7 +141,9 @@ export async function addJobDataAndIOEvent<T>({
   spawnPhaseId?: string;
   jobDataSuffix?: string;
 }) {
-  const jobDataId = `${projectId}:${opName}:${jobId}:${jobDataSuffix || v4()}`;
+  const jobDataId = `${projectId}:${pipeName}:${jobId}:${
+    jobDataSuffix || v4()
+  }`;
 
   await dbConn<
     ZZJobDataRec<
@@ -159,13 +161,15 @@ export async function addJobDataAndIOEvent<T>({
     .onConflict(["job_data_id"])
     .merge();
 
-  const ioEventId = `${projectId}:${opName}:${jobId}:${jobDataSuffix || v4()}`;
+  const ioEventId = `${projectId}:${pipeName}:${jobId}:${
+    jobDataSuffix || v4()
+  }`;
   // insert input event rec
   await dbConn<ZZJobIOEventRec>("zz_job_io_events")
     .insert(
       {
         project_id: projectId,
-        op_name: opName,
+        pipe_name: pipeName,
         job_id: jobId,
         io_type: ioType,
         io_event_id: ioEventId,
@@ -209,7 +213,7 @@ function convertMaybePrimtiveBack<T>(
 
 export async function updateJobStatus({
   projectId,
-  opName,
+  pipeName,
   jobId,
   dbConn,
   jobStatus,
@@ -220,7 +224,7 @@ export async function updateJobStatus({
   await dbConn("zz_job_status").insert<ZZJobStatusRec>({
     status_id: v4(),
     project_id: projectId,
-    op_name: opName,
+    pipe_name: pipeName,
     job_id: jobId,
     status: jobStatus,
   });
@@ -228,7 +232,7 @@ export async function updateJobStatus({
 
 export async function ensureJobAndInitStatusRec<T>({
   projectId,
-  opName,
+  pipeName,
   jobId,
   dbConn,
   jobParams,
@@ -239,16 +243,16 @@ export async function ensureJobAndInitStatusRec<T>({
   await dbConn("zz_jobs")
     .insert<ZZJobRec<T>>({
       project_id: projectId,
-      op_name: opName,
+      pipe_name: pipeName,
       job_id: jobId,
       init_params: handlePrimitive(jobParams),
     })
-    .onConflict(["project_id", "op_name", "job_id"])
+    .onConflict(["project_id", "pipe_name", "job_id"])
     .ignore();
 
   await updateJobStatus({
     projectId,
-    opName,
+    pipeName,
     jobId,
     dbConn,
     jobStatus: "waiting",
@@ -258,7 +262,7 @@ export async function ensureJobAndInitStatusRec<T>({
 
   const { jobDataId, ioEventId } = await addJobDataAndIOEvent({
     projectId,
-    opName,
+    pipeName,
     jobId,
     dbConn,
     ioType: "init-params",
@@ -275,24 +279,24 @@ export async function ensureJobAndInitStatusRec<T>({
 export async function ensureJobDependencies({
   projectId,
   parentJobId,
-  parentOpName,
+  parentPipeName,
   childJobId,
-  childOpName,
+  childPipeName,
   dbConn,
 }: {
   projectId: string;
   parentJobId: string;
-  parentOpName: string;
+  parentPipeName: string;
   childJobId: string;
-  childOpName: string;
+  childPipeName: string;
   io_event_id: string;
   dbConn: Knex;
 }) {
   await dbConn.raw(
     `
-    INSERT INTO "zz_job_deps" ("project_id", "parent_op_name", "parent_job_id", "child_op_name", "child_job_id")
+    INSERT INTO "zz_job_deps" ("project_id", "parent_pipe_name", "parent_job_id", "child_pipe_name", "child_job_id")
     VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT ("project_id", "parent_op_name", "parent_job_id", "child_op_name", "child_job_id") DO NOTHING
+    ON CONFLICT ("project_id", "parent_pipe_name", "parent_job_id", "child_pipe_name", "child_job_id") DO NOTHING
     `,
     [projectId, parentJobId, childJobId]
   );

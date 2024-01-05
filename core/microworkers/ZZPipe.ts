@@ -100,7 +100,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
   public async getJobRec(jobId: string) {
     return await getJobRec({
-      opName: this.name,
+      pipeName: this.name,
       projectId: this.zzEnv.projectId,
       jobId,
       dbConn: this.zzEnv.db,
@@ -131,7 +131,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     limit?: number;
   }) {
     const rec = await getJobDataAndIoEvents<U>({
-      opName: this.name,
+      pipeName: this.name,
       projectId: this.zzEnv.projectId,
       jobId,
       dbConn: this.zzEnv.db,
@@ -442,7 +442,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
     await ensureJobAndInitStatusRec({
       projectId: this.zzEnv.projectId,
-      opName: this.name,
+      pipeName: this.name,
       jobId,
       dbConn: this.zzEnv.db,
       jobParams: jobParams,

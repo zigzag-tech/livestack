@@ -12,21 +12,21 @@ exports.up = function (knex) {
     ]);
     table.string("project_id").notNullable();
     table.string("parent_job_id").notNullable();
-    table.string("parent_op_name").notNullable();
+    table.string("parent_pipe_name").notNullable();
     table.string("child_job_id").notNullable();
-    table.string("child_op_name").notNullable();
+    table.string("child_pipe_name").notNullable();
     table.string("io_event_id").nullable();
 
     // add foreign key for parent job
     table
-      .foreign(["project_id", "parent_job_id", "parent_op_name"])
-      .references(["project_id", "job_id", "op_name"])
+      .foreign(["project_id", "parent_job_id", "parent_pipe_name"])
+      .references(["project_id", "job_id", "pipe_name"])
       .inTable("zz_jobs");
 
     // add foreign key for child job
     table
-      .foreign(["project_id", "child_job_id", "child_op_name"])
-      .references(["project_id", "job_id", "op_name"])
+      .foreign(["project_id", "child_job_id", "child_pipe_name"])
+      .references(["project_id", "job_id", "pipe_name"])
       .inTable("zz_jobs");
 
     // add foreign key for io event

@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const ZZJobUniqueId = z.object({
   project_id: z.string(),
-  op_name: z.string(),
+  pipe_name: z.string(),
   job_id: z.string(),
 });
 
@@ -65,9 +65,9 @@ export type ZZJobIOEventRec = z.infer<typeof ZZJobIOEventRec>;
 export const ZZJobDepRec = z.object({
   project_id: z.string(),
   parent_job_id: z.string(),
-  parent_op_name: z.string(),
+  parent_pipe_name: z.string(),
   child_job_id: z.string(),
-  child_op_name: z.string(),
+  child_pipe_name: z.string(),
   io_event_id: z.string().optional().nullable(),
 });
 

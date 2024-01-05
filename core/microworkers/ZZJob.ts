@@ -203,7 +203,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
 
       const { jobDataId } = await addJobDataAndIOEvent({
         projectId: this.zzEnv.projectId,
-        opName: this.pipe.name,
+        pipeName: this.pipe.name,
         jobId: this.jobId,
         dbConn: this.zzEnv.db,
         ioType: "out",
@@ -310,7 +310,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>
   ): Promise<void> => {
     const jId = {
-      opName: this.pipe.name,
+      pipeName: this.pipe.name,
       jobId: this.jobId,
       projectId: this.zzEnv.projectId,
     };
@@ -391,7 +391,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       if (e instanceof WaitingChildrenError) {
         await updateJobStatus({
           projectId,
-          opName: this.pipe.name,
+          pipeName: this.pipe.name,
           jobId: job.id!,
           dbConn: this.zzEnv.db,
           jobStatus: "waiting_children",
@@ -399,7 +399,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       } else {
         await updateJobStatus({
           projectId,
-          opName: this.pipe.name,
+          pipeName: this.pipe.name,
           jobId: job.id!,
           dbConn: this.zzEnv.db,
           jobStatus: "failed",
@@ -428,9 +428,9 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   //   await ensureJobDependencies({
   //     projectId: this.zzEnv.projectId,
   //     parentJobId: this.jobId,
-  //     parentOpName: this.pipe.name,
+  //     parentPipeName: this.pipe.name,
   //     childJobId: p.jobId,
-  //     childOpName: p.def.name,
+  //     childPipeName: p.def.name,
   //     dbConn: this.zzEnv.db,
   //     io_event_id: spawnR.ioEventId,
   //   });
@@ -468,7 +468,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   //   });
   //   const [rec] = await getJobDataAndIoEvents<P>({
   //     projectId: this.zzEnv.projectId,
-  //     opName: childJobDef.name,
+  //     pipeName: childJobDef.name,
   //     jobId: childJobId,
   //     dbConn: this.zzEnv.db,
   //     ioType: "init-params",
