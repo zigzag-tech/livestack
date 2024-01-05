@@ -44,10 +44,10 @@ export async function getJobRec<T>({
   opName,
   jobId,
   dbConn,
-  jobStatus,
-}: JobUniqueId & {
+}: // jobStatus,
+JobUniqueId & {
   dbConn: Knex;
-  jobStatus?: ZZJobStatus;
+  // jobStatus?: ZZJobStatus;
 }) {
   const r = (await dbConn("zz_jobs")
     .select(["zz_jobs.*", "zz_job_status.status"])
@@ -71,9 +71,9 @@ export async function getJobRec<T>({
     | null;
 
   // check if job status is what we want
-  if (jobStatus && r?.status !== jobStatus) {
-    return null;
-  }
+  // if (jobStatus && r?.status !== jobStatus) {
+  //   return null;
+  // }
 
   if (!r) {
     return null;

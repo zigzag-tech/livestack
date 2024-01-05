@@ -314,15 +314,16 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       jobId: this.jobId,
       projectId: this.zzEnv.projectId,
     };
-    const savedResult = await getJobRec<OMap[keyof OMap]>({
-      ...jId,
-      dbConn: this.zzEnv.db,
-      jobStatus: "completed",
-    });
+
     const job = this.bullMQJob;
     const logger = this.logger;
     const projectId = this.zzEnv.projectId;
 
+    // const savedResult = await getJobRec<OMap[keyof OMap]>({
+    //   ...jId,
+    //   dbConn: this.zzEnv.db,
+    //   jobStatus: "completed",
+    // });
     // if (savedResult) {
     //   const jobData = await getJobDataAndIoEvents<OMap[keyof OMap]>({
     //     ...jId,
