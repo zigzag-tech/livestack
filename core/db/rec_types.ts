@@ -73,7 +73,7 @@ export const ZZJobStreamConnectorRec = z.object({
   job_id: z.string(),
   stream_id: z.string(),
   key: z.string(),
-  connector_type: z.enum(["input", "output"]),
+  connector_type: z.enum(["in", "out"]),
   time_created: z.date(),
 });
 

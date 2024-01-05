@@ -7,7 +7,7 @@ import { createHash } from "crypto";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
 import { getLogger } from "../utils/createWorkerLogger";
 import { z } from "zod";
-import { addStreamRec } from "../db/knexConn";
+import { ensureStreamRec } from "../db/knexConn";
 
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
@@ -81,7 +81,7 @@ export class ZZStream<T> {
         );
       }
       const stream = new ZZStream({ uniqueName, def, zzEnv, logger });
-      await addStreamRec({
+      await ensureStreamRec({
         projectId: zzEnv.projectId,
         streamId: uniqueName,
         dbConn: zzEnv.db,

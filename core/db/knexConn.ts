@@ -1,4 +1,8 @@
-import { ZZDatapointRec } from "./rec_types";
+import {
+  ZZDatapointRec,
+  ZZJobStreamConnectorRec,
+  ZZStreamRec,
+} from "./rec_types";
 import knex, { Knex } from "knex";
 import { ZZJobRec, ZZJobStatusRec, ZZJobStatus } from "./rec_types";
 import { v4 } from "uuid";
@@ -80,7 +84,7 @@ JobUniqueId & {
   };
 }
 
-export async function addStreamRec({
+export async function ensureStreamRec({
   projectId,
   streamId,
   dbConn,
@@ -89,13 +93,46 @@ export async function addStreamRec({
   dbConn: Knex;
   streamId: string;
 }) {
-  await dbConn("zz_job_stream_connectors")
+  await dbConn<ZZStreamRec>("zz_job_stream_connectors")
     .insert({
       project_id: projectId,
       stream_id: streamId,
       time_created: new Date(),
     })
     .onConflict(["project_id", "pipe_name", "stream_id"])
+    .ignore();
+}
+
+export async function ensureJobStreamConnectorRec({
+  projectId,
+  streamId,
+  dbConn,
+  jobId,
+  key,
+  connectorType,
+}: {
+  projectId: string;
+  dbConn: Knex;
+  streamId: string;
+  jobId: string;
+  key: string;
+  connectorType: "in" | "out";
+}) {
+  await dbConn<ZZJobStreamConnectorRec>("zz_job_stream_connectors")
+    .insert({
+      project_id: projectId,
+      job_id: jobId,
+      stream_id: streamId,
+      key,
+      connector_type: connectorType,
+      time_created: new Date(),
+    })
+    .onConflict<keyof ZZJobStreamConnectorRec>([
+      "project_id",
+      "job_id",
+      "key",
+      "connector_type",
+    ])
     .ignore();
 }
 

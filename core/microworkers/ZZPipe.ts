@@ -4,9 +4,11 @@ import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { GenericRecordType, QueueName } from "./workerCommon";
 import Redis from "ioredis";
-
+import _ from "lodash";
 import {
   ensureJobAndInitStatusRec,
+  ensureJobStreamConnectorRec,
+  ensureStreamRec,
   getJobDatapoints,
   getJobRec,
 } from "../db/knexConn";
@@ -441,13 +443,49 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       `Added job with ID ${j.id} to pipe: ` +
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
+    const projectId = this.zzEnv.projectId;
 
-    await ensureJobAndInitStatusRec({
-      projectId: this.zzEnv.projectId,
-      pipeName: this.name,
-      jobId,
-      dbConn: this.zzEnv.db,
-      jobParams: jobParams,
+    this.zzEnv.db.transaction(async (trx) => {
+      await ensureJobAndInitStatusRec({
+        projectId,
+        pipeName: this.name,
+        jobId,
+        dbConn: trx,
+        jobParams: jobParams,
+      });
+      for (const [key, streamId] of Object.entries(inputStreamKeyIdOverrides)) {
+        await ensureStreamRec({
+          projectId,
+          streamId: streamId as string,
+          dbConn: trx,
+        });
+        await ensureJobStreamConnectorRec({
+          projectId,
+          streamId: streamId as string,
+          dbConn: trx,
+          jobId,
+          key,
+          connectorType: "in",
+        });
+      }
+
+      for (const [key, streamId] of Object.entries(
+        outputStreamKeyIdOverrides
+      )) {
+        await ensureStreamRec({
+          projectId,
+          streamId: streamId as string,
+          dbConn: trx,
+        });
+        await ensureJobStreamConnectorRec({
+          projectId,
+          streamId: streamId as string,
+          dbConn: trx,
+          jobId,
+          key,
+          connectorType: "out",
+        });
+      }
     });
 
     // return j;
