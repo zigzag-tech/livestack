@@ -48,7 +48,7 @@ export class ZZStream<T> {
 
   protected static globalRegistry: { [key: string]: ZZStream<unknown> } = {};
 
-  public static getOrCreate<T>({
+  public static async getOrCreate<T>({
     uniqueName,
     def,
     zzEnv,
@@ -58,7 +58,7 @@ export class ZZStream<T> {
     def?: ZodType<T>;
     zzEnv?: ZZEnv;
     logger?: ReturnType<typeof getLogger>;
-  }): ZZStream<T> {
+  }): Promise<ZZStream<T>> {
     if (!zzEnv) {
       zzEnv = ZZEnv.global();
     }

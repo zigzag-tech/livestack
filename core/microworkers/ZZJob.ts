@@ -64,16 +64,18 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       isReady: true,
       key: key ? key : "default",
     });
-    return await this._ensureInputStreamFn(key).nextValue();
+    return await (await this._ensureInputStreamFn(key)).nextValue();
   };
 
-  inputObservableFor = (key?: keyof IMap) => {
-    return this._ensureInputStreamFn(key).trackedObservable;
+  inputObservableFor = async (key?: keyof IMap) => {
+    return await (
+      await this._ensureInputStreamFn(key)
+    ).trackedObservable;
   };
 
-  get inputObservable() {
-    return this.inputObservableFor();
-  }
+  // get inputObservable() {
+  //   return this.inputObservableFor();
+  // }
 
   dedicatedTempWorkingDir: string;
   baseWorkingRelativePath: string;
@@ -220,7 +222,9 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     };
   }
 
-  private _ensureInputStreamFn<K extends keyof IMap>(key?: K | "default") {
+  private async _ensureInputStreamFn<K extends keyof IMap>(
+    key?: K | "default"
+  ) {
     if (this.pipe.inputDefSet.isSingle) {
       if (key && key !== "default") {
         throw new Error(
@@ -237,11 +241,11 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     }
 
     if (!this.inputStreamFnsByKey[key! as keyof IMap]) {
-      const stream = this.pipe.getJobStream({
+      const stream = (await this.pipe.getJobStream({
         jobId: this.jobId,
         type: "stream-in",
         key: key! as keyof IMap,
-      }) as ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
+      })) as ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
       const inputObservableUntracked = stream.valueObsrvable.pipe(
         map((x) => (x.terminate ? null : x.data))
       );
