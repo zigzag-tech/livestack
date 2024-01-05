@@ -26,16 +26,6 @@ export const ZZJobStatusRec = z.object({
 
 export type ZZJobStatusRec = z.infer<typeof ZZJobStatusRec>;
 
-// Removed ZZJobDataRec as it's no longer needed.
-
-// TODO: infer type from schema definition
-// Removed ZZJobDataRec type as it's no longer needed.
-
-// Removed ZZJobIOEventRec as it's no longer needed.
-
-// Removed ZZJobIOEventRec type as it's no longer needed.
-
-// Added new types to reflect the current schema.
 export const ZZDatapointRec = z.object({
   project_id: z.string(),
   stream_id: z.string(),
