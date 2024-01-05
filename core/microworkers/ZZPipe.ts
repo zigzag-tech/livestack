@@ -206,7 +206,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     data: IMap[keyof IMap];
     key?: keyof IMap;
   }) {
-    const stream = this.getJobStream({ jobId, key, type: "stream-in" });
+    const stream = await this.getJobStream({ jobId, key, type: "stream-in" });
     const messageId = v4();
 
     await stream.pubToJob({
@@ -217,7 +217,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
   }
 
   async terminateJobInput({ jobId, key }: { jobId: string; key?: keyof IMap }) {
-    const stream = this.getJobStream({ jobId, type: "stream-in", key });
+    const stream = await this.getJobStream({ jobId, type: "stream-in", key });
     const messageId = v4();
     await stream.pubToJob({
       terminate: true,
@@ -309,7 +309,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     return queueId;
   }
 
-  public getJobStream = <
+  public getJobStream = async <
     T,
     KI extends keyof IMap = keyof IMap,
     KO extends keyof OMap = keyof OMap
@@ -348,7 +348,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       throw new Error(`Invalid type ${type}`);
     }
 
-    const stream = ZZStream.getOrCreate({
+    const stream = await ZZStream.getOrCreate({
       uniqueName: getStreamId({
         groupId: queueId,
         ...{
@@ -378,7 +378,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
           }
     ) => void;
   }) {
-    const stream = this.getJobStream<OMap[keyof OMap]>({
+    const stream = await this.getJobStream<OMap[keyof OMap]>({
       jobId,
       type: "stream-out",
     });
@@ -398,7 +398,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
   }
 
   public async nextOutputForJob(jobId: string) {
-    const pubSub = this.getJobStream<OMap[keyof OMap]>({
+    const pubSub = await this.getJobStream<OMap[keyof OMap]>({
       jobId,
       type: "stream-out",
     });

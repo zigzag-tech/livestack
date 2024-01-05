@@ -7,6 +7,7 @@ import { createHash } from "crypto";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
 import { getLogger } from "../utils/createWorkerLogger";
 import { z } from "zod";
+import { addStreamRec } from "../db/knexConn";
 
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
@@ -47,7 +48,7 @@ export class ZZStream<T> {
 
   protected static globalRegistry: { [key: string]: ZZStream<unknown> } = {};
 
-  public static getOrCreate<T>({
+  public static async getOrCreate<T>({
     uniqueName,
     def,
     zzEnv,
@@ -57,7 +58,7 @@ export class ZZStream<T> {
     def?: ZodType<T>;
     zzEnv?: ZZEnv;
     logger?: ReturnType<typeof getLogger>;
-  }): ZZStream<T> {
+  }): Promise<ZZStream<T>> {
     if (!zzEnv) {
       zzEnv = ZZEnv.global();
     }
@@ -80,6 +81,11 @@ export class ZZStream<T> {
         );
       }
       const stream = new ZZStream({ uniqueName, def, zzEnv, logger });
+      await addStreamRec({
+        projectId: zzEnv.projectId,
+        streamId: uniqueName,
+        dbConn: zzEnv.db,
+      });
       ZZStream.globalRegistry[uniqueName] = stream;
       return stream;
     }
@@ -100,7 +106,7 @@ export class ZZStream<T> {
     this.uniqueName = uniqueName;
     this.zzEnv = zzEnv;
     this.hash = hashDef(this.def);
-    console.log("ZZStream constructor", this.uniqueName);
+    console.debug("ZZStream constructor", this.uniqueName);
     const { nextValue } = createLazyNextValueGenerator(this.valueObsrvable);
     this.nextValue = nextValue;
     this.logger = logger;

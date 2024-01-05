@@ -80,6 +80,25 @@ JobUniqueId & {
   };
 }
 
+export async function addStreamRec({
+  projectId,
+  streamId,
+  dbConn,
+}: {
+  projectId: string;
+  dbConn: Knex;
+  streamId: string;
+}) {
+  await dbConn("zz_job_stream_connectors")
+    .insert({
+      project_id: projectId,
+      stream_id: streamId,
+      time_created: new Date(),
+    })
+    .onConflict(["project_id", "pipe_name", "stream_id"])
+    .ignore();
+}
+
 export async function getJobDatapoints<T>({
   ioType,
   order = "desc",
