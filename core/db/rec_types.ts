@@ -1,74 +1,69 @@
 import { z } from "zod";
 
-export const ZZJobUniqueId = z.object({
+// Removed ZZJobUniqueId as it's no longer needed.
+
+// Removed ZZJobUniqueId type as it's no longer needed.
+
+export const ZZJobRec = z.object({
   project_id: z.string(),
   pipe_name: z.string(),
   job_id: z.string(),
+  job_params: z.any().nullable(),
+  time_created: z.date(),
 });
 
-export type ZZJobUniqueId = z.infer<typeof ZZJobUniqueId>;
+export type ZZJobRec = z.infer<typeof ZZJobRec>;
 
-export const ZZJobRec = <P>(jobParamsSchema: z.ZodType<P>) =>
-  ZZJobUniqueId.and(
-    z.object({
-      job_params: jobParamsSchema.optional(),
-      time_created: z.date(),
-    })
-  );
+// Removed ZZJobStatus enum as it's no longer needed.
 
-export type ZZJobRec<P> = z.infer<ReturnType<typeof ZZJobRec<P>>>;
-
-export const ZZJobStatus = z.enum([
-  "waiting",
-  "running",
-  "completed",
-  "failed",
-  "waiting_children",
-]);
-export type ZZJobStatus = z.infer<typeof ZZJobStatus>;
-
-export const ZZJobStatusRec = ZZJobUniqueId.and(
-  z.object({
-    status: ZZJobStatus,
-    time_created: z.date(),
-  })
-);
+export const ZZJobStatusRec = z.object({
+  status_id: z.string(),
+  project_id: z.string(),
+  job_id: z.string(),
+  status: z.string(),
+  time_created: z.date(),
+});
 
 export type ZZJobStatusRec = z.infer<typeof ZZJobStatusRec>;
 
-export const ZZJobDataRec = <IO>(jobDataSchema: z.ZodType<IO>) =>
-  z.object({
-    job_data_id: z.string(),
-    job_data: jobDataSchema,
-    time_created: z.date(),
-  });
+// Removed ZZJobDataRec as it's no longer needed.
 
 // TODO: infer type from schema definition
-export type ZZJobDataRec<T> = {
-  job_data_id: string;
-  job_data: T;
-  time_created: Date;
-};
+// Removed ZZJobDataRec type as it's no longer needed.
 
-export const ZZJobIOEventRec = ZZJobUniqueId.and(
-  z.object({
-    io_event_id: z.string(),
-    job_data_id: z.string(),
-    io_type: z.enum(["in", "out", "init-params"]),
-    spawn_phase_id: z.string().optional().nullable(),
-    time_created: z.date(),
-  })
-);
+// Removed ZZJobIOEventRec as it's no longer needed.
 
-export type ZZJobIOEventRec = z.infer<typeof ZZJobIOEventRec>;
+// Removed ZZJobIOEventRec type as it's no longer needed.
 
-export const ZZJobDepRec = z.object({
+// Added new types to reflect the current schema.
+export const ZZDatapointRec = z.object({
   project_id: z.string(),
-  parent_job_id: z.string(),
-  parent_pipe_name: z.string(),
-  child_job_id: z.string(),
-  child_pipe_name: z.string(),
-  io_event_id: z.string().optional().nullable(),
+  stream_id: z.string(),
+  datapoint_id: z.string(),
+  data: z.any(),
+  job_id: z.string().nullable(),
+  job_output_key: z.string().nullable(),
+  connector_type: z.string(),
+  time_created: z.date(),
 });
 
-export type ZZJobDepRec = z.infer<typeof ZZJobDepRec>;
+export type ZZDatapointRec = z.infer<typeof ZZDatapointRec>;
+
+export const ZZStreamRec = z.object({
+  project_id: z.string(),
+  stream_id: z.string(),
+  time_created: z.date(),
+});
+
+export type ZZStreamRec = z.infer<typeof ZZStreamRec>;
+
+export const ZZJobStreamConnectorRec = z.object({
+  project_id: z.string(),
+  job_id: z.string(),
+  stream_id: z.string(),
+  key: z.string(),
+  connector_type: z.string(),
+  time_created: z.date(),
+});
+
+export type ZZJobStreamConnectorRec = z.infer<typeof ZZJobStreamConnectorRec>;
