@@ -1,43 +1,59 @@
 import { z } from "zod";
 
-// Removed ZZJobUniqueId as it's no longer needed.
-
-// Removed ZZJobUniqueId type as it's no longer needed.
-
-export const ZZJobRec = z.object({
+export const ZZJobUniqueId = z.object({
   project_id: z.string(),
   pipe_name: z.string(),
   job_id: z.string(),
-  job_params: z.any().nullable(),
-  time_created: z.date(),
 });
 
-export type ZZJobRec = z.infer<typeof ZZJobRec>;
+export type ZZJobUniqueId = z.infer<typeof ZZJobUniqueId>;
 
-// Removed ZZJobStatus enum as it's no longer needed.
+export const ZZJobRec = <P>(jobParamsSchema: z.ZodType<P>) =>
+  ZZJobUniqueId.and(
+    z.object({
+      job_params: jobParamsSchema.optional(),
+      time_created: z.date(),
+    })
+  );
 
-export const ZZJobStatusRec = z.object({
-  status_id: z.string(),
-  project_id: z.string(),
-  job_id: z.string(),
-  status: z.string(),
-  time_created: z.date(),
-});
+export type ZZJobRec<P> = z.infer<ReturnType<typeof ZZJobRec<P>>>;
+
+export const ZZJobStatus = z.enum([
+  "waiting",
+  "running",
+  "completed",
+  "failed",
+  "waiting_children",
+]);
+export type ZZJobStatus = z.infer<typeof ZZJobStatus>;
+
+export const ZZJobStatusRec = ZZJobUniqueId.and(
+  z.object({
+    status: ZZJobStatus,
+    time_created: z.date(),
+  })
+);
 
 export type ZZJobStatusRec = z.infer<typeof ZZJobStatusRec>;
 
-export const ZZDatapointRec = z.object({
-  project_id: z.string(),
-  stream_id: z.string(),
-  datapoint_id: z.string(),
-  data: z.any(),
-  job_id: z.string().nullable(),
-  job_output_key: z.string().nullable(),
-  connector_type: z.string(),
-  time_created: z.date(),
-});
+export const ZZDatapointRec = <IO>(jobDataSchema: z.ZodType<IO>) =>
+  z.object({
+    project_id: z.string(),
+    stream_id: z.string(),
+    datapoint_id: z.string(),
+    data: jobDataSchema,
+    job_id: z.string().nullable(),
+    job_output_key: z.string().nullable(),
+    connector_type: z.string(),
+    time_created: z.date(),
+  });
 
-export type ZZDatapointRec = z.infer<typeof ZZDatapointRec>;
+// TODO: infer type from schema definition
+export type ZZDatapointRec<T> = {
+  job_data_id: string;
+  job_data: T;
+  time_created: Date;
+};
 
 export const ZZStreamRec = z.object({
   project_id: z.string(),
@@ -52,7 +68,7 @@ export const ZZJobStreamConnectorRec = z.object({
   job_id: z.string(),
   stream_id: z.string(),
   key: z.string(),
-  connector_type: z.string(),
+  connector_type: z.enum(["input", "output"]),
   time_created: z.date(),
 });
 
