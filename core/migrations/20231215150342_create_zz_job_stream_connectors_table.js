@@ -4,13 +4,7 @@
  */
 exports.up = function (knex) {
   return knex.schema.createTable("zz_job_stream_connectors", function (table) {
-    table.primary([
-      "project_id",
-      "job_id",
-      "stream_id",
-      "key",
-      "connector_type",
-    ]);
+    table.primary(["project_id", "job_id", "key", "connector_type"]);
     table.string("project_id").notNullable();
     table.string("job_id").notNullable();
     table.string("stream_id").notNullable();

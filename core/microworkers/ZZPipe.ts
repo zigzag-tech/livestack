@@ -7,7 +7,7 @@ import Redis from "ioredis";
 
 import {
   ensureJobAndInitStatusRec,
-  getJobDataAndIoEvents,
+  getJobDatapoints,
   getJobRec,
 } from "../db/knexConn";
 import { v4 } from "uuid";
@@ -113,24 +113,22 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
   }
 
   public async getJobData<
-    T extends "in" | "out" | "init-params",
-    U = T extends "in"
-      ? IMap[keyof IMap]
-      : T extends "out"
-      ? OMap[keyof OMap]
-      : P
+    T extends "in" | "out",
+    U = T extends "in" ? IMap[keyof IMap] : OMap[keyof OMap]
   >({
     jobId,
-    ioType,
+    ioType = "out" as T,
     order,
     limit,
+    key = "default" as keyof (T extends "in" ? IMap : OMap),
   }: {
     jobId: string;
-    ioType: T;
+    ioType?: T;
     order?: "asc" | "desc";
     limit?: number;
+    key?: keyof (T extends "in" ? IMap : OMap);
   }) {
-    const rec = await getJobDataAndIoEvents<U>({
+    const rec = await getJobDatapoints<U>({
       pipeName: this.name,
       projectId: this.zzEnv.projectId,
       jobId,
@@ -138,6 +136,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       ioType,
       order,
       limit,
+      key: String(key),
     });
     return rec.map((r) => r.data);
   }
@@ -145,10 +144,12 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
   public async requestJobAndWaitOnResult({
     jobId: jobId,
     jobParams: jobParams,
+    outputKey = "default" as keyof OMap,
   }: // queueEventsOptions,
   {
     jobId?: string;
     jobParams: P;
+    outputKey?: keyof OMap;
   }): Promise<OMap[keyof OMap][]> {
     if (!jobId) {
       jobId = `${this.name}-${v4()}`;
@@ -171,6 +172,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
           jobId,
           ioType: "out",
           limit: 1000,
+          key: outputKey,
         });
         return results as OMap[keyof OMap][];
       } else if (status === "failed") {

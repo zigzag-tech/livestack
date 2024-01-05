@@ -50,8 +50,13 @@ export const ZZDatapointRec = <IO>(jobDataSchema: z.ZodType<IO>) =>
 
 // TODO: infer type from schema definition
 export type ZZDatapointRec<T> = {
-  job_data_id: string;
-  job_data: T;
+  project_id: string;
+  stream_id: string;
+  datapoint_id: string;
+  data: T;
+  job_id: string | null;
+  job_output_key: string | null;
+  connector_type: string;
   time_created: Date;
 };
 

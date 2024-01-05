@@ -1,11 +1,6 @@
+import { ZZDatapointRec, ZZStreamRec } from "./rec_types";
 import knex, { Knex } from "knex";
-import {
-  ZZJobDataRec,
-  ZZJobRec,
-  ZZJobStatusRec,
-  ZZJobStatus,
-  ZZJobIOEventRec,
-} from "./rec_types";
+import { ZZJobRec, ZZJobStatusRec, ZZJobStatus } from "./rec_types";
 import { v4 } from "uuid";
 
 export const getDatabaseInstance = ({
@@ -85,103 +80,82 @@ JobUniqueId & {
   };
 }
 
-export async function getJobDataAndIoEvents<T>({
-  limit = 100,
+export async function getJobDatapoints<T>({
   ioType,
   order = "desc",
   dbConn,
+  key,
+  limit = 100,
   ...jId
-}: JobUniqueId & {
-  dbConn: Knex;
-  ioType: "in" | "out" | "init-params";
-  order?: "asc" | "desc";
-  limit?: number;
-}) {
-  const r = await dbConn<ZZJobIOEventRec>("zz_job_io_events")
-    .join<
-      ZZJobDataRec<
-        | T
-        | {
-            __primitive__: T;
-          }
-      >
-    >("zz_job_data", function () {
-      this.on("zz_job_data.job_data_id", "=", "zz_job_io_events.job_data_id");
-    })
-    .where("zz_job_io_events.project_id", "=", jId.projectId)
-    .andWhere("zz_job_io_events.pipe_name", "=", jId.pipeName)
-    .andWhere("zz_job_io_events.job_id", "=", jId.jobId)
-    .andWhere("zz_job_io_events.io_type", "=", ioType)
-    .orderBy("zz_job_io_events.time_created", order)
-    .limit(limit)
-    .select("*");
-  if (r.length === 0) {
-    console.error("Job data not found", jId, ioType);
-    throw new Error(`Job data for ${jId.jobId} not found!`);
-  }
-  return r.map((rec) => ({
-    ioEventId: rec.io_event_id,
-    data: convertMaybePrimtiveBack(rec.job_data),
-  }));
-}
-
-export async function addJobDataAndIOEvent<T>({
-  projectId,
-  pipeName,
-  jobId,
-  dbConn,
-  ioType,
-  jobData,
-  spawnPhaseId,
-  jobDataSuffix,
-}: JobUniqueId & {
-  dbConn: Knex;
-  ioType: "in" | "out" | "init-params";
-  jobData: T;
-  spawnPhaseId?: string;
-  jobDataSuffix?: string;
-}) {
-  const jobDataId = `${projectId}:${pipeName}:${jobId}:${
-    jobDataSuffix || v4()
-  }`;
-
-  await dbConn<
-    ZZJobDataRec<
+}: { dbConn: Knex } & JobUniqueId & {
+    ioType: "in" | "out";
+    order?: "asc" | "desc";
+    limit?: number;
+    key: string;
+  }) {
+  const r = await dbConn<
+    ZZDatapointRec<
       | T
       | {
           __primitive__: T;
         }
     >
-  >("zz_job_data")
-    .insert({
-      job_data_id: jobDataId,
-      job_data: handlePrimitive(jobData),
-      time_created: new Date(),
-    })
-    .onConflict(["job_data_id"])
-    .merge();
+  >("zz_datapoints")
+    // .join<ZZJobRec>("zz_streams", function () {
+    //   this.on("zz_datapoints.project_id", "=", "zz_streams.project_id");
+    // })
+    // .where("zz_job_io_events.project_id", "=", jId.projectId)
+    // .andWhere("zz_job_io_events.pipe_name", "=", jId.pipeName)
+    // .andWhere("zz_job_io_events.job_id", "=", jId.jobId)
+    // .andWhere("zz_job_io_events.io_type", "=", ioType)
+    .orderBy("zz_datapoints.time_created", order)
+    .limit(limit)
+    .select("*");
+  // if (r.length === 0) {
+  //   console.error("Job datapoints not found", jId, ioType);
+  //   throw new Error(`Job datapoint for ${jId.jobId} not found!`);
+  // }
+  return r.map((rec) => ({
+    datapointId: rec.datapoint_id,
+    data: convertMaybePrimtiveBack(rec.data),
+  }));
+}
 
-  const ioEventId = `${projectId}:${pipeName}:${jobId}:${
-    jobDataSuffix || v4()
-  }`;
-  // insert input event rec
-  await dbConn<ZZJobIOEventRec>("zz_job_io_events")
-    .insert(
-      {
-        project_id: projectId,
-        pipe_name: pipeName,
-        job_id: jobId,
-        io_type: ioType,
-        io_event_id: ioEventId,
-        job_data_id: jobDataId,
-        spawn_phase_id: spawnPhaseId || null,
-      },
-      ["io_event_id"]
-    )
-    .onConflict(["io_event_id"])
-    .merge();
-
-  return { ioEventId, jobDataId };
+export async function addDatapoint<T>({
+  projectId,
+  streamId,
+  dbConn,
+  datapoint,
+}: {
+  dbConn: Knex;
+  projectId: string;
+  streamId: string;
+  datapoint: {
+    data: T;
+    job_id: string | null;
+    job_output_key: string | null;
+    connector_type: "in" | "out";
+  };
+}) {
+  const datapointId = v4();
+  await dbConn<
+    ZZDatapointRec<
+      | T
+      | {
+          __primitive__: T;
+        }
+    >
+  >("zz_datapoints").insert({
+    project_id: projectId,
+    stream_id: streamId,
+    datapoint_id: datapointId,
+    data: handlePrimitive(datapoint.data),
+    job_id: datapoint.job_id,
+    job_output_key: datapoint.job_output_key,
+    connector_type: datapoint.connector_type,
+    time_created: new Date(),
+  });
+  return datapointId;
 }
 
 function handlePrimitive<T>(d: T) {
@@ -240,85 +214,23 @@ export async function ensureJobAndInitStatusRec<T>({
   dbConn: Knex;
   jobParams: T;
 }) {
-  await dbConn("zz_jobs")
-    .insert<ZZJobRec<T>>({
-      project_id: projectId,
-      pipe_name: pipeName,
-      job_id: jobId,
-      job_params: handlePrimitive(jobParams),
-    })
-    .onConflict(["project_id", "pipe_name", "job_id"])
-    .ignore();
+  await dbConn.transaction(async (trx) => {
+    await trx("zz_jobs")
+      .insert<ZZJobRec<T>>({
+        project_id: projectId,
+        pipe_name: pipeName,
+        job_id: jobId,
+        job_params: handlePrimitive(jobParams),
+      })
+      .onConflict(["project_id", "pipe_name", "job_id"])
+      .ignore();
 
-  await updateJobStatus({
-    projectId,
-    pipeName,
-    jobId,
-    dbConn,
-    jobStatus: "waiting",
+    await updateJobStatus({
+      projectId,
+      pipeName,
+      jobId,
+      dbConn: trx,
+      jobStatus: "requested",
+    });
   });
-
-  const jobDataSuffix = "init_input";
-
-  const { jobDataId, ioEventId } = await addJobDataAndIOEvent({
-    projectId,
-    pipeName,
-    jobId,
-    dbConn,
-    ioType: "init-params",
-    jobData: jobParams,
-    jobDataSuffix,
-  });
-
-  return {
-    jobDataId,
-    ioEventId,
-  };
 }
-
-export async function ensureJobDependencies({
-  projectId,
-  parentJobId,
-  parentPipeName,
-  childJobId,
-  childPipeName,
-  dbConn,
-}: {
-  projectId: string;
-  parentJobId: string;
-  parentPipeName: string;
-  childJobId: string;
-  childPipeName: string;
-  io_event_id: string;
-  dbConn: Knex;
-}) {
-  await dbConn.raw(
-    `
-    INSERT INTO "zz_job_deps" ("project_id", "parent_pipe_name", "parent_job_id", "child_pipe_name", "child_job_id")
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT ("project_id", "parent_pipe_name", "parent_job_id", "child_pipe_name", "child_job_id") DO NOTHING
-    `,
-    [projectId, parentJobId, childJobId]
-  );
-}
-
-// export async function ensureJobDependencies({
-//   parentJobId,
-//   childJobId,
-//   dbConn,
-//   projectId,
-// }: {
-//   parentJobId: string;
-//   childJobId: string;
-//   dbConn: Knex;
-//   projectId: string;
-// }) {
-//   await dbConn.raw(
-//     `
-//     INSERT INTO "job_deps" ("project_id", "parent_job_id", "child_job_id")
-//     VALUES (?, ?, ?)
-//     ON CONFLICT ("project_id", "parent_job_id", "child_job_id") DO NOTHING
-//     `,
-//     [projectId, parentJobId, childJobId]
-//   );
-// }
