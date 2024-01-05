@@ -14,11 +14,7 @@ import {
 } from "../storage/cloudStorage";
 import { getTempPathByJobId } from "../storage/temp-dirs";
 import path from "path";
-import {
-  addJobDataAndIOEvent,
-  getJobRec,
-  updateJobStatus,
-} from "../db/knexConn";
+import { addDatapoint, getJobRec, updateJobStatus } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
 import { ZZPipe } from "./ZZPipe";
 import { identifyLargeFiles } from "../files/file-ops";
@@ -201,21 +197,23 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       //     JSON.stringify(o, longStringTruncator)
       // );
 
-      const { jobDataId } = await addJobDataAndIOEvent({
+      const { datapointId } = await addDatapoint({
         projectId: this.zzEnv.projectId,
-        pipeName: this.pipe.name,
-        jobId: this.jobId,
         dbConn: this.zzEnv.db,
-        ioType: "out",
-        jobData: o,
+        datapoint: {
+          data: o,
+          job_id: this.jobId,
+          job_output_key: null,
+          connector_type: "out",
+        },
       });
       // update progress to prevent job from being stalling
-      this.bullMQJob.updateProgress(this._dummyProgressCount++);
       await outputStream.emitValue({
         data: o,
-        __zz_datapoint_id__: jobDataId,
+        __zz_datapoint_id__: datapointId,
         terminate: false,
       });
+      this.bullMQJob.updateProgress(this._dummyProgressCount++);
     };
   }
 

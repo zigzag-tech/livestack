@@ -1,4 +1,4 @@
-import { ZZDatapointRec, ZZStreamRec } from "./rec_types";
+import { ZZDatapointRec } from "./rec_types";
 import knex, { Knex } from "knex";
 import { ZZJobRec, ZZJobStatusRec, ZZJobStatus } from "./rec_types";
 import { v4 } from "uuid";
@@ -123,13 +123,11 @@ export async function getJobDatapoints<T>({
 
 export async function addDatapoint<T>({
   projectId,
-  streamId,
   dbConn,
   datapoint,
 }: {
   dbConn: Knex;
   projectId: string;
-  streamId: string;
   datapoint: {
     data: T;
     job_id: string | null;
@@ -138,24 +136,46 @@ export async function addDatapoint<T>({
   };
 }) {
   const datapointId = v4();
-  await dbConn<
-    ZZDatapointRec<
-      | T
-      | {
-          __primitive__: T;
-        }
-    >
-  >("zz_datapoints").insert({
-    project_id: projectId,
-    stream_id: streamId,
-    datapoint_id: datapointId,
-    data: handlePrimitive(datapoint.data),
-    job_id: datapoint.job_id,
-    job_output_key: datapoint.job_output_key,
-    connector_type: datapoint.connector_type,
-    time_created: new Date(),
+
+  await dbConn.transaction(async (trx) => {
+    // get stream id
+
+    const streamId = (
+      await trx("zz_job_stream_connectors")
+        .select("stream_id")
+        .where("project_id", "=", projectId)
+        .andWhere("job_id", "=", datapoint.job_id)
+        .andWhere("job_output_key", "=", datapoint.job_output_key)
+        .andWhere("connector_type", "=", datapoint.connector_type)
+        .first()
+    )?.stream_id;
+
+    if (!streamId) {
+      throw new Error(
+        `Stream not found for ${projectId}/${datapoint.job_output_key}`
+      );
+    }
+
+    await dbConn<
+      ZZDatapointRec<
+        | T
+        | {
+            __primitive__: T;
+          }
+      >
+    >("zz_datapoints").insert({
+      project_id: projectId,
+      stream_id: streamId,
+      datapoint_id: datapointId,
+      data: handlePrimitive(datapoint.data),
+      job_id: datapoint.job_id,
+      job_output_key: datapoint.job_output_key,
+      connector_type: datapoint.connector_type,
+      time_created: new Date(),
+    });
   });
-  return datapointId;
+
+  return { datapointId };
 }
 
 function handlePrimitive<T>(d: T) {
