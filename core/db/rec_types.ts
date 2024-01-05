@@ -19,7 +19,7 @@ export const ZZJobRec = <P>(jobParamsSchema: z.ZodType<P>) =>
 export type ZZJobRec<P> = z.infer<ReturnType<typeof ZZJobRec<P>>>;
 
 export const ZZJobStatus = z.enum([
-  "waiting",
+  "requested",
   "running",
   "completed",
   "failed",
