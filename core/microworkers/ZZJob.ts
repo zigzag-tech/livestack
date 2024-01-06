@@ -138,7 +138,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     this.inputStreamFnsByKey = {};
 
     this.signalOutputEnd = async () => {
-      const outputStream = await this.pipe.getJobStream<OMap[keyof OMap]>({
+      const outputStream = await this.pipe.getJobStream({
         jobId: this.jobId,
         type: "stream-out",
       });
@@ -192,7 +192,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
           connector_type: "out",
         },
       });
-      const outputStream = await this.pipe.getJobStream<OMap[keyof OMap]>({
+      const outputStream = await this.pipe.getJobStream({
         jobId: this.jobId,
         type: "stream-out",
       });
