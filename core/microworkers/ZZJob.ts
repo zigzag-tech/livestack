@@ -140,7 +140,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     this.signalOutputEnd = async () => {
       const outputStream = await this.pipe.getJobStream({
         jobId: this.jobId,
-        type: "stream-out",
+        type: "out",
       });
       await outputStream.emitValue({
         __zz_datapoint_id__: v4(),
@@ -194,7 +194,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       });
       const outputStream = await this.pipe.getJobStream({
         jobId: this.jobId,
-        type: "stream-out",
+        type: "out",
       });
       // update progress to prevent job from being stalling
       await outputStream.emitValue({
@@ -227,7 +227,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     if (!this.inputStreamFnsByKey[key! as keyof IMap]) {
       const stream = (await this.pipe.getJobStream({
         jobId: this.jobId,
-        type: "stream-in",
+        type: "in",
         key: key! as keyof IMap,
       })) as ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
       const inputObservableUntracked = stream.valueObsrvable.pipe(
