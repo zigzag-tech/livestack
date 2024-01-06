@@ -136,6 +136,36 @@ export async function ensureJobStreamConnectorRec({
     .ignore();
 }
 
+export async function getJobStreamConnectorRecs({
+  projectId,
+  dbConn,
+  jobId,
+  key,
+  connectorType,
+}: {
+  projectId: string;
+  dbConn: Knex;
+  jobId: string;
+  connectorType?: "in" | "out";
+  key?: string;
+}) {
+  if (key && !connectorType) {
+    throw new Error("connectorType must be provided if key is provided");
+  }
+
+  const q = dbConn<ZZJobStreamConnectorRec>("zz_job_stream_connectors")
+    .where("project_id", "=", projectId)
+    .andWhere("job_id", "=", jobId);
+  if (key) {
+    q.andWhere("key", "=", key);
+  }
+  if (connectorType) {
+    q.andWhere("connector_type", "=", connectorType);
+  }
+  const r = await q.select("*");
+  return r;
+}
+
 export async function getJobDatapoints<T>({
   ioType,
   order = "desc",

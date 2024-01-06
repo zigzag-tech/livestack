@@ -11,6 +11,7 @@ import {
   ensureStreamRec,
   getJobDatapoints,
   getJobRec,
+  getJobStreamConnectorRecs,
 } from "../db/knexConn";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
@@ -295,6 +296,57 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     return queueId;
   }
 
+  private streamIdOverridesByKeyByTypeByJobId: {
+    [jobId: string]: {
+      in: Partial<Record<keyof IMap, string>> | null;
+      out: Partial<Record<keyof OMap, string>> | null;
+    };
+  } = {};
+
+  private async getStreamIdOverride({
+    jobId,
+    type,
+    key,
+  }: {
+    jobId: string;
+    type: "in" | "out";
+    key?: keyof IMap | keyof OMap;
+  }) {
+    const overridesById = this.streamIdOverridesByKeyByTypeByJobId[jobId];
+    if (!overridesById) {
+      this.streamIdOverridesByKeyByTypeByJobId[jobId] = {
+        in: null,
+        out: null,
+      };
+    }
+
+    const overridesByType =
+      this.streamIdOverridesByKeyByTypeByJobId[jobId][type];
+    if (!overridesByType) {
+      const connectors = await getJobStreamConnectorRecs({
+        projectId: this.zzEnv.projectId,
+        dbConn: this.zzEnv.db,
+        jobId,
+        connectorType: type,
+      });
+      const overrides = _.fromPairs(
+        connectors.map((c) => [c.key, c.stream_id])
+      );
+      this.streamIdOverridesByKeyByTypeByJobId[jobId][type] =
+        overrides as Partial<Record<keyof IMap | keyof OMap, string>>;
+    }
+
+    return (
+      ((
+        this.streamIdOverridesByKeyByTypeByJobId[jobId][type]! as Record<
+          any,
+          string
+        >
+      )[(key || "default") as keyof IMap | keyof OMap] as string | undefined) ||
+      null
+    );
+  }
+
   public getJobStream = async (
     p: {
       jobId: string;
@@ -314,10 +366,11 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       jobId,
     });
     let queueId: string;
-    let def: z.ZodType<WrapTerminatorAndDataId<unknown>>;
     type T = typeof type extends "stream-in"
       ? IMap[keyof IMap]
       : OMap[keyof OMap];
+
+    let def: z.ZodType<WrapTerminatorAndDataId<T>>;
 
     if (type === "stream-in") {
       const origDef = this.inputDefSet.getDef(p.key) as z.ZodType<
@@ -325,7 +378,9 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       >;
 
       queueId = `${queueIdPrefix}::${type}/${String(p.key || "default")}`;
-      def = wrapTerminatorAndDataId(origDef);
+      def = wrapTerminatorAndDataId(origDef) as z.ZodType<
+        WrapTerminatorAndDataId<T>
+      >;
     } else if (type === "stream-out") {
       queueId = `${queueIdPrefix}::${type}`;
       def = wrapTerminatorAndDataId(
@@ -335,7 +390,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       throw new Error(`Invalid type ${type}`);
     }
 
-    const stream = await ZZStream.getOrCreate({
+    const stream = await ZZStream.getOrCreate<WrapTerminatorAndDataId<T>>({
       uniqueName: getStreamId({
         groupId: queueId,
         ...{
@@ -401,14 +456,14 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     jobId,
     jobParams,
     bullMQJobsOpts,
-    inputStreamKeyIdOverrides,
-    outputStreamKeyIdOverrides,
+    inputStreamIdOverridesByKey,
+    outputStreamIdOverridesByKey,
   }: {
     jobId: string;
     jobParams: P;
     bullMQJobsOpts?: JobsOptions;
-    inputStreamKeyIdOverrides: Partial<Record<keyof IMap, string>>;
-    outputStreamKeyIdOverrides: Partial<Record<keyof OMap, string>>;
+    inputStreamIdOverridesByKey: Partial<Record<keyof IMap, string>>;
+    outputStreamIdOverridesByKey: Partial<Record<keyof OMap, string>>;
   }) {
     // console.debug("ZZPipe._requestJob", jobId, jobParams);
     // force job id to be the same as name
@@ -429,7 +484,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
         jobParams: jobParams,
       });
 
-      for (const [key, streamId] of _.entries(inputStreamKeyIdOverrides)) {
+      for (const [key, streamId] of _.entries(inputStreamIdOverridesByKey)) {
         await ensureStreamRec({
           projectId,
           streamId: streamId as string,
@@ -445,7 +500,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
         });
       }
 
-      for (const [key, streamId] of _.entries(outputStreamKeyIdOverrides)) {
+      for (const [key, streamId] of _.entries(outputStreamIdOverridesByKey)) {
         await ensureStreamRec({
           projectId,
           streamId: streamId as string,
@@ -488,8 +543,8 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       jobId,
       jobParams,
       bullMQJobsOpts,
-      inputStreamKeyIdOverrides: {},
-      outputStreamKeyIdOverrides: {},
+      inputStreamIdOverridesByKey: {},
+      outputStreamIdOverridesByKey: {},
     });
   }
 
