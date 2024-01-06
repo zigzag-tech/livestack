@@ -105,7 +105,8 @@ export class ZZWorker<
     };
 
     this.workerName =
-      workerName || "wkr:" + `${this.zzEnv.projectId}/${this.def.pipe.pipeName}`;
+      workerName ||
+      "wkr:" + `${this.zzEnv.projectId}/${this.def.pipe.pipeName}`;
     this.logger = getLogger(`wkr:${this.workerName}`);
 
     const mergedWorkerOptions = _.merge({}, workerOptions);
@@ -154,7 +155,7 @@ export class ZZWorker<
 
     this.bullMQWorker.run();
     this.bullMQWorker.waitUntilReady().then(() => {
-      this.logger.info(`${this.bullMQWorker.name} zzzworker started.`);
+      this.logger.info(`${this.bullMQWorker.name} worker started.`);
     });
   }
 
