@@ -194,7 +194,11 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     data: IMap[keyof IMap];
     key?: keyof IMap;
   }) {
-    const stream = await this.getJobStream({ jobId, key, type: "in" });
+    const stream = await this.getJobStream({
+      jobId,
+      key: key || ("default" as keyof IMap),
+      type: "in",
+    });
 
     await stream.pub({
       message: {
@@ -205,7 +209,11 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
   }
 
   async terminateJobInput({ jobId, key }: { jobId: string; key?: keyof IMap }) {
-    const stream = await this.getJobStream({ jobId, type: "in", key });
+    const stream = await this.getJobStream({
+      jobId,
+      type: "in",
+      key: key || ("default" as keyof IMap),
+    });
     const messageId = v4();
     await stream.pub({
       message: {
@@ -307,7 +315,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
   }: {
     jobId: string;
     type: "in" | "out";
-    key?: keyof IMap | keyof OMap;
+    key: keyof IMap | keyof OMap;
   }) {
     const overridesById = this.streamIdOverridesByKeyByTypeByJobId[jobId];
     if (!overridesById) {
@@ -352,7 +360,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     jobId: string;
     type: "in" | "out";
     p: {
-      key?: keyof IMap | keyof OMap;
+      key: keyof IMap | keyof OMap;
     };
   }) {
     let streamId: string;
@@ -385,7 +393,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
   >(p: {
     jobId: string;
     type: TT;
-    key?: K;
+    key: K;
   }) => {
     const { jobId, type } = p;
 
@@ -420,8 +428,10 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
   public async subForJobOutput({
     jobId,
     onMessage,
+    key,
   }: {
     jobId: string;
+    key?: keyof OMap;
     onMessage: (
       m:
         | { terminate: false; data: OMap[keyof OMap] }
@@ -433,6 +443,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     const stream = await this.getJobStream({
       jobId,
       type: "out",
+      key: key || ("default" as keyof OMap),
     });
     return await stream.sub({
       processor: (msg) => {
@@ -448,10 +459,11 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     });
   }
 
-  public async nextOutputForJob(jobId: string) {
+  public async nextOutputForJob(jobId: string, key?: keyof OMap) {
     const pubSub = await this.getJobStream({
       jobId,
       type: "out",
+      key: (key || "default") as keyof OMap,
     });
     const v = await pubSub.nextValue();
     if (v.terminate) {

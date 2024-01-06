@@ -137,10 +137,11 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
 
-    this.signalOutputEnd = async () => {
+    this.signalOutputEnd = async (key?: keyof OMap) => {
       const outputStream = await this.pipe.getJobStream({
         jobId: this.jobId,
         type: "out",
+        key: key || ("default" as keyof OMap),
       });
       await outputStream.pub({
         message: {
@@ -189,6 +190,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       const outputStream = await this.pipe.getJobStream({
         jobId: this.jobId,
         type: "out",
+        key,
       });
       // update progress to prevent job from being stalling
       await outputStream.pub({

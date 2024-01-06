@@ -28,9 +28,9 @@ exports.up = function (knex) {
 
     // add foreign key for job_data_id
     table
-      .foreign(["project_id", "job_id", "job_output_key", "connector_type"])
-      .references(["project_id", "job_id", "key", "connector_type"])
-      .inTable("zz_job_stream_connectors");
+      .foreign(["project_id", "job_id"])
+      .references(["project_id", "job_id"])
+      .inTable("zz_jobs");
 
     // add index for primary key
     table.index(["project_id", "stream_id", "datapoint_id"]);
