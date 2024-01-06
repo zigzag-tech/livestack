@@ -295,21 +295,17 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     return queueId;
   }
 
-  public getJobStream = async <
-    T,
-    KI extends keyof IMap = keyof IMap,
-    KO extends keyof OMap = keyof OMap
-  >(
+  public getJobStream = async <T>(
     p: {
       jobId: string;
     } & (
       | {
           type: "stream-in";
-          key?: KI;
+          key?: keyof IMap;
         }
       | {
           type: "stream-out";
-          key?: KO;
+          key?: keyof OMap;
         }
     )
   ) => {
