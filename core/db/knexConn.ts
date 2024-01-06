@@ -6,6 +6,7 @@ import {
 import knex, { Knex } from "knex";
 import { ZZJobRec, ZZJobStatusRec, ZZJobStatus } from "./rec_types";
 import { v4 } from "uuid";
+import longStringTruncator from "../utils/longStringTruncator";
 
 export const getDatabaseInstance = ({
   host,
@@ -221,6 +222,19 @@ export async function addDatapoint<T>({
   };
   data: T;
 }) {
+  console.debug(
+    "addDatapoint",
+    JSON.stringify(
+      {
+        projectId,
+        streamId,
+        jobInfo,
+        data,
+        datapointId,
+      },
+      longStringTruncator
+    )
+  );
   await dbConn.transaction(async (trx) => {
     // get stream id
 

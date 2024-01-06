@@ -352,7 +352,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     );
   }
 
-  public async getJobStreamId({
+  public async getStreamIdForJob({
     jobId,
     type,
     p,
@@ -410,7 +410,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     } else {
       throw new Error(`Invalid type ${type}`);
     }
-    const streamId = await this.getJobStreamId({
+    const streamId = await this.getStreamIdForJob({
       jobId,
       type,
       p,
