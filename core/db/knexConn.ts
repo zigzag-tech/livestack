@@ -206,37 +206,23 @@ export async function getJobDatapoints<T>({
 export async function addDatapoint<T>({
   projectId,
   dbConn,
-  datapoint,
+  streamId,
+  data,
+  jobInfo,
+  datapointId,
 }: {
+  datapointId: string;
   dbConn: Knex;
   projectId: string;
-  datapoint: {
-    data: T;
-    job_id: string | null;
-    job_output_key: string | null;
-    connector_type: "in" | "out";
+  streamId: string;
+  jobInfo?: {
+    jobId: string;
+    jobOutputKey: string;
   };
+  data: T;
 }) {
-  const datapointId = v4();
-
   await dbConn.transaction(async (trx) => {
     // get stream id
-
-    const streamId = (
-      await trx("zz_job_stream_connectors")
-        .select("stream_id")
-        .where("project_id", "=", projectId)
-        .andWhere("job_id", "=", datapoint.job_id)
-        .andWhere("job_output_key", "=", datapoint.job_output_key)
-        .andWhere("connector_type", "=", datapoint.connector_type)
-        .first()
-    )?.stream_id;
-
-    if (!streamId) {
-      throw new Error(
-        `Stream not found for ${projectId}/${datapoint.job_output_key}`
-      );
-    }
 
     await dbConn<
       ZZDatapointRec<
@@ -249,10 +235,10 @@ export async function addDatapoint<T>({
       project_id: projectId,
       stream_id: streamId,
       datapoint_id: datapointId,
-      data: handlePrimitive(datapoint.data),
-      job_id: datapoint.job_id,
-      job_output_key: datapoint.job_output_key,
-      connector_type: datapoint.connector_type,
+      data: handlePrimitive(data),
+      job_id: jobInfo?.jobId || null,
+      job_output_key: jobInfo?.jobOutputKey || null,
+      connector_type: jobInfo ? "out" : null,
       time_created: new Date(),
     });
   });

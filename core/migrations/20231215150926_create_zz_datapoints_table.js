@@ -13,8 +13,10 @@ exports.up = function (knex) {
     table.string("job_output_key").nullable();
 
     // hack to make foreign key work
-    table.string("connector_type").notNullable().defaultTo("output");
-    table.check("connector_type = 'output'");
+    table.string("connector_type").nullable();
+
+    // add constraint for connector_type to be either out or null
+    table.check("connector_type = 'out' or connector_type is null");
 
     table.timestamp("time_created").defaultTo(knex.fn.now());
 

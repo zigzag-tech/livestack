@@ -7,7 +7,9 @@ import { createHash } from "crypto";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
 import { getLogger } from "../utils/createWorkerLogger";
 import { z } from "zod";
-import { ensureStreamRec } from "../db/knexConn";
+import { addDatapoint, ensureStreamRec } from "../db/knexConn";
+import { ZZJob } from "./ZZJob";
+import { v4 } from "uuid";
 
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
@@ -132,16 +134,52 @@ export class ZZStream<T> {
     return this._valueObservable;
   }
 
-  public async emitValue(o: T) {
-    this.pubToJob(o);
+  public async pub({
+    message,
+    jobInfo,
+    messageIdOverride,
+  }: {
+    message: T;
+    jobInfo?: {
+      jobId: string;
+      jobOutputKey: string;
+    };
+    messageIdOverride?: string;
+  }) {
+    const datapointId = messageIdOverride || v4();
+    await addDatapoint({
+      streamId: this.uniqueName,
+      projectId: this.zzEnv.projectId,
+      dbConn: this.zzEnv.db,
+      jobInfo: jobInfo,
+      data: message,
+      datapointId,
+    });
+
+    const { channelId, clients } = await this.getPubSubClientsById({
+      queueId: this.uniqueName,
+    });
+
+    // console.log("pubbing", channelId);
+
+    try {
+      const parsed = this.def.parse(message) as T;
+      const addedMsg = await clients.pub.publish(
+        channelId,
+        customStringify(parsed)
+      );
+      return addedMsg;
+    } catch (err) {
+      console.error("errornous output: ", message);
+      this.logger.error(
+        `EmitOutput error: data provided is invalid: ${JSON.stringify(err)}`
+      );
+      throw err;
+    }
   }
 
   get valueObsrvable() {
     return this.ensureValueObservable();
-  }
-
-  public async pubToJob<T>(m: T) {
-    return await this._pub(m);
   }
 
   private getPubSubClientsById({ queueId }: { queueId: string }) {
@@ -161,29 +199,6 @@ export class ZZStream<T> {
       PUBSUB_BY_ID[id] = { sub, pub };
     }
     return { channelId: id, clients: PUBSUB_BY_ID[id] };
-  }
-
-  private async _pub<TT>(msg: TT) {
-    const { channelId, clients } = await this.getPubSubClientsById({
-      queueId: this.uniqueName,
-    });
-
-    // console.log("pubbing", channelId);
-
-    try {
-      const parsed = this.def.parse(msg) as T;
-      const addedMsg = await clients.pub.publish(
-        channelId,
-        customStringify(parsed)
-      );
-      return addedMsg;
-    } catch (err) {
-      console.error("errornous output: ", msg);
-      this.logger.error(
-        `EmitOutput error: data provided is invalid: ${JSON.stringify(err)}`
-      );
-      throw err;
-    }
   }
 
   public sub({ processor }: { processor: (message: T) => void }) {

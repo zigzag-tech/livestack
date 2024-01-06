@@ -142,13 +142,17 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
         jobId: this.jobId,
         type: "out",
       });
-      await outputStream.emitValue({
-        __zz_datapoint_id__: v4(),
-        terminate: true,
+      await outputStream.pub({
+        message: {
+          terminate: true,
+        },
       });
     };
 
-    this.emitOutput = async (o: OMap[keyof OMap]) => {
+    this.emitOutput = async (
+      o: OMap[keyof OMap],
+      key: keyof OMap = "default" as keyof OMap
+    ) => {
       let { largeFilesToSave, newObj } = identifyLargeFiles(o);
 
       if (this.storageProvider) {
@@ -182,25 +186,20 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       //     JSON.stringify(o, longStringTruncator)
       // );
 
-      const { datapointId } = await addDatapoint({
-        projectId: this.zzEnv.projectId,
-        dbConn: this.zzEnv.db,
-        datapoint: {
-          data: o,
-          job_id: this.jobId,
-          job_output_key: null,
-          connector_type: "out",
-        },
-      });
       const outputStream = await this.pipe.getJobStream({
         jobId: this.jobId,
         type: "out",
       });
       // update progress to prevent job from being stalling
-      await outputStream.emitValue({
-        data: o,
-        __zz_datapoint_id__: datapointId,
-        terminate: false,
+      await outputStream.pub({
+        message: {
+          data: o,
+          terminate: false,
+        },
+        jobInfo: {
+          jobId: this.jobId,
+          jobOutputKey: String(key),
+        },
       });
       this.bullMQJob.updateProgress(this._dummyProgressCount++);
     };

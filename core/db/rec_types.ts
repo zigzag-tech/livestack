@@ -56,7 +56,7 @@ export type ZZDatapointRec<T> = {
   data: T;
   job_id: string | null;
   job_output_key: string | null;
-  connector_type: string;
+  connector_type: string | null;
   time_created: Date;
 };
 

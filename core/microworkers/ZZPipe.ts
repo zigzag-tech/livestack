@@ -194,21 +194,22 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     key?: keyof IMap;
   }) {
     const stream = await this.getJobStream({ jobId, key, type: "in" });
-    const messageId = v4();
 
-    await stream.pubToJob({
-      data,
-      terminate: false,
-      __zz_datapoint_id__: messageId,
+    await stream.pub({
+      message: {
+        data,
+        terminate: false,
+      },
     });
   }
 
   async terminateJobInput({ jobId, key }: { jobId: string; key?: keyof IMap }) {
     const stream = await this.getJobStream({ jobId, type: "in", key });
     const messageId = v4();
-    await stream.pubToJob({
-      terminate: true,
-      __zz_datapoint_id__: messageId,
+    await stream.pub({
+      message: {
+        terminate: true,
+      },
     });
   }
 
@@ -272,7 +273,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     jobId: string;
     onMessage: (
       m:
-        | { terminate: false; data: OMap[keyof OMap]; messageId: string }
+        | { terminate: false; data: OMap[keyof OMap] }
         | {
             terminate: true;
           }
@@ -364,7 +365,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     } else {
       const queueIdPrefix = this.name + "::" + jobId;
       const queueId = `${queueIdPrefix}::${type}/${String(p.key || "default")}`;
-      streamId = getStreamId({
+      streamId = deriveStreamId({
         groupId: queueId,
         ...{
           [type === "in" ? "from" : "to"]: {
@@ -377,30 +378,26 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     return streamId;
   }
 
-  public getJobStream = async (
-    p: {
-      jobId: string;
-    } & (
-      | {
-          type: "in";
-          key?: keyof IMap;
-        }
-      | {
-          type: "out";
-          key?: keyof OMap;
-        }
-    )
-  ) => {
+  public getJobStream = async <
+    TT extends "in" | "out",
+    K extends TT extends "in" ? keyof IMap : keyof OMap
+  >(p: {
+    jobId: string;
+    type: TT;
+    key?: K;
+  }) => {
     const { jobId, type } = p;
 
     type T = typeof type extends "in" ? IMap[keyof IMap] : OMap[keyof OMap];
     let def: z.ZodType<WrapTerminatorAndDataId<T>>;
     if (type === "in") {
       def = wrapTerminatorAndDataId(
-        this.inputDefSet.getDef(p.key)
+        this.inputDefSet.getDef(p.key as keyof IMap)
       ) as z.ZodType<WrapTerminatorAndDataId<T>>;
     } else if (type === "out") {
-      def = wrapTerminatorAndDataId(this.outputDefSet.getDef(p.key));
+      def = wrapTerminatorAndDataId(
+        this.outputDefSet.getDef(p.key as keyof OMap)
+      ) as z.ZodType<WrapTerminatorAndDataId<T>>;
     } else {
       throw new Error(`Invalid type ${type}`);
     }
@@ -409,6 +406,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       type,
       p,
     });
+    console.log("getJobStreamId", streamId);
 
     const stream = await ZZStream.getOrCreate<WrapTerminatorAndDataId<T>>({
       uniqueName: streamId,
@@ -426,7 +424,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     jobId: string;
     onMessage: (
       m:
-        | { terminate: false; data: OMap[keyof OMap]; messageId: string }
+        | { terminate: false; data: OMap[keyof OMap] }
         | {
             terminate: true;
           }
@@ -444,7 +442,6 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
           onMessage({
             data: msg.data,
             terminate: false,
-            messageId: msg.__zz_datapoint_id__,
           });
         }
       },
@@ -672,7 +669,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       }
       // validate that the types match
 
-      const commonStreamName = getStreamId({
+      const commonStreamName = deriveStreamId({
         groupId: jobGroupId,
         from: {
           pipe: fromP,
@@ -756,7 +753,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
   }
 }
 
-function getStreamId<PP1, PP2>({
+function deriveStreamId<PP1, PP2>({
   groupId,
   from,
   to,
