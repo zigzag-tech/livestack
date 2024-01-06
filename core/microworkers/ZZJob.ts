@@ -274,12 +274,12 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     key: keyof IMap | "default";
     isReady: boolean;
   }) => {
-    console.debug("setJobReadyForInputsInRedis", {
-      pipe: this.pipe.name,
-      jobId,
-      key,
-      isReady,
-    });
+    // console.debug("setJobReadyForInputsInRedis", {
+    //   pipe: this.pipe.name,
+    //   jobId,
+    //   key,
+    //   isReady,
+    // });
     if (!key) {
       throw new Error("key is required");
     }

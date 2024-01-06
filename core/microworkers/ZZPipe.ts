@@ -22,6 +22,7 @@ import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
 import { ZZStream, hashDef } from "./ZZStream";
 import { InferStreamSetType, StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -406,7 +407,6 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       type,
       p,
     });
-    console.log("getJobStreamId", streamId);
 
     const stream = await ZZStream.getOrCreate<WrapTerminatorAndDataId<T>>({
       uniqueName: streamId,
@@ -663,9 +663,15 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       const fromDef = fromJobDecs.pipe.outputDefSet.getDef(fromKeyStr);
       const toDef = toJobDesc.pipe.inputDefSet.getDef(toKeyStr);
       if (hashDef(fromDef) !== hashDef(toDef)) {
-        throw new Error(
-          `Streams ${fromP.name}.${fromKeyStr} and ${toP.name}.${toKeyStr} are incompatible.`
+        const msg = `Streams ${fromP.name}.${fromKeyStr} and ${toP.name}.${toKeyStr} are incompatible.`;
+        console.error(
+          msg,
+          "Upstream schema: ",
+          zodToJsonSchema(fromDef),
+          "Downstream schema: ",
+          zodToJsonSchema(toDef)
         );
+        throw new Error(msg);
       }
       // validate that the types match
 

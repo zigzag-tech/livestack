@@ -8,8 +8,8 @@ import { createLazyNextValueGenerator } from "../realtime/pubsub";
 import { getLogger } from "../utils/createWorkerLogger";
 import { z } from "zod";
 import { addDatapoint, ensureStreamRec } from "../db/knexConn";
-import { ZZJob } from "./ZZJob";
 import { v4 } from "uuid";
+import { zodToJsonSchema } from "zod-to-json-schema";
 
 const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
@@ -172,7 +172,9 @@ export class ZZStream<T> {
     } catch (err) {
       console.error("errornous output: ", message);
       this.logger.error(
-        `EmitOutput error: data provided is invalid: ${JSON.stringify(err)}`
+        `Data point error for stream ${
+          this.uniqueName
+        }: data provided is invalid: ${JSON.stringify(err)}`
       );
       throw err;
     }
@@ -247,6 +249,6 @@ function customParse(json: string): any {
 }
 
 export function hashDef(def: ZodType<unknown>) {
-  const str = JSON.stringify(def);
+  const str = JSON.stringify(zodToJsonSchema(def));
   return createHash("sha256").update(str).digest("hex");
 }
