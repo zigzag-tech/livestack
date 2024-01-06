@@ -51,15 +51,15 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     return await (await this._ensureInputStreamFn(key)).nextValue();
   };
 
-  inputObservableFor = async (key?: keyof IMap) => {
-    return await (
-      await this._ensureInputStreamFn(key)
+  inputObservableFor =  (key?: keyof IMap) => {
+    return  (
+       this._ensureInputStreamFn(key)
     ).trackedObservable;
   };
 
-  // get inputObservable() {
-  //   return this.inputObservableFor();
-  // }
+  public get inputObservable() {
+    return this.inputObservableFor();
+  }
 
   dedicatedTempWorkingDir: string;
   baseWorkingRelativePath: string;
@@ -74,7 +74,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   private readonly inputStreamFnsByKey: Partial<{
     [K in keyof IMap]: {
       nextValue: () => Promise<IMap[K] | null>;
-      inputStream: ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
+      // inputStream: ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
       inputObservableUntracked: Observable<IMap[K] | null>;
       trackedObservable: Observable<IMap[K] | null>;
       subscriberCountObservable: Observable<number>;
@@ -207,9 +207,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     };
   }
 
-  private async _ensureInputStreamFn<K extends keyof IMap>(
-    key?: K | "default"
-  ) {
+  private _ensureInputStreamFn<K extends keyof IMap>(key?: K | "default") {
     if (this.pipe.inputDefSet.isSingle) {
       if (key && key !== "default") {
         throw new Error(
@@ -226,14 +224,30 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     }
 
     if (!this.inputStreamFnsByKey[key! as keyof IMap]) {
-      const stream = (await this.pipe.getJobStream({
+      const streamP = this.pipe.getJobStream({
         jobId: this.jobId,
         type: "in",
         key: key! as keyof IMap,
-      })) as ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
-      const inputObservableUntracked = stream.valueObsrvable.pipe(
-        map((x) => (x.terminate ? null : x.data))
-      );
+      }) as Promise<ZZStream<WrapTerminatorAndDataId<IMap[K]>>>;
+
+      const inputObservableUntracked = new Observable<IMap[K]>((s) => {
+        streamP.then((stream) => {
+          const obs = stream.valueObsrvable.pipe(
+            map((x) => (x.terminate ? null : x.data))
+          );
+          obs.subscribe((n) => {
+            if (n) {
+              s.next(n);
+            } else {
+              s.complete();
+            }
+          });
+        });
+
+        return () => {
+          s.unsubscribe();
+        };
+      });
 
       const { trackedObservable, subscriberCountObservable } =
         createTrackedObservable(inputObservableUntracked);
@@ -256,7 +270,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
 
       this.inputStreamFnsByKey[key as keyof IMap] = {
         nextValue,
-        inputStream: stream,
+        // inputStream: stream,
         inputObservableUntracked,
         trackedObservable,
         subscriberCountObservable,
