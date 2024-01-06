@@ -183,22 +183,6 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     }
   }
 
-  public async cancelLongRunningJob(jobId: string) {
-    const job = await this._rawQueue.getJob(jobId);
-    if (!job) {
-      throw new Error(`Job ${jobId} not found!`);
-    }
-
-    // signal to worker to cancel
-    const redis = new Redis(this.zzEnv.redisConfig);
-    redis.del(`last-time-job-alive-${jobId}`);
-  }
-
-  public async pingAlive(jobId: string) {
-    const redis = new Redis(this.zzEnv.redisConfig);
-    await redis.set(`last-time-job-alive-${jobId}`, Date.now());
-  }
-
   async sendInputToJob({
     jobId,
     data,
