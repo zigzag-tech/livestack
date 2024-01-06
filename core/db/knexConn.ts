@@ -157,13 +157,9 @@ export async function getJobDatapoints<T>({
         }
     >
   >("zz_datapoints")
-    // .join<ZZJobRec>("zz_streams", function () {
-    //   this.on("zz_datapoints.project_id", "=", "zz_streams.project_id");
-    // })
-    // .where("zz_job_io_events.project_id", "=", jId.projectId)
-    // .andWhere("zz_job_io_events.pipe_name", "=", jId.pipeName)
-    // .andWhere("zz_job_io_events.job_id", "=", jId.jobId)
-    // .andWhere("zz_job_io_events.io_type", "=", ioType)
+    .where("zz_datapoints.project_id", "=", jId.projectId)
+    .andWhere("zz_datapoints.job_id", "=", jId.jobId)
+    .andWhere("zz_datapoints.job_output_key", "=", key)
     .orderBy("zz_datapoints.time_created", order)
     .limit(limit)
     .select("*");
