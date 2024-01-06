@@ -376,9 +376,10 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     if (streamIdOverride) {
       streamId = streamIdOverride;
     } else {
-      const queueId = `${type}/${String(p.key || "default")}`;
+      // const queueIdPrefix = ;
+      // const queueId = `${type}/${String(p.key || "default")}`;
       streamId = deriveStreamId({
-        groupId: queueId,
+        groupId: `[${jobId}]`,
         ...{
           [type === "in" ? "from" : "to"]: {
             pipe: this,
