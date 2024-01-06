@@ -21,6 +21,7 @@ import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
+import _ from "lodash";
 
 export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZPipe<
   infer P,
@@ -40,7 +41,6 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   // New properties for subscriber tracking
 
   emitOutput: (o: OMap[keyof OMap]) => Promise<void>;
-  signalOutputEnd: () => Promise<void>;
   nextInput = async <K extends keyof IMap>(key?: K) => {
     await this.setJobReadyForInputsInRedis({
       redisConfig: this.zzEnv.redisConfig,
@@ -51,10 +51,8 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     return await (await this._ensureInputStreamFn(key)).nextValue();
   };
 
-  inputObservableFor =  (key?: keyof IMap) => {
-    return  (
-       this._ensureInputStreamFn(key)
-    ).trackedObservable;
+  inputObservableFor = (key?: keyof IMap) => {
+    return this._ensureInputStreamFn(key).trackedObservable;
   };
 
   public get inputObservable() {
@@ -136,19 +134,6 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     const tempWorkingDir = getTempPathByJobId(this.baseWorkingRelativePath);
     this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
-
-    this.signalOutputEnd = async (key?: keyof OMap) => {
-      const outputStream = await this.pipe.getJobStream({
-        jobId: this.jobId,
-        type: "out",
-        key: key || ("default" as keyof OMap),
-      });
-      await outputStream.pub({
-        message: {
-          terminate: true,
-        },
-      });
-    };
 
     this.emitOutput = async (
       o: OMap[keyof OMap],
@@ -252,12 +237,9 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       const { trackedObservable, subscriberCountObservable } =
         createTrackedObservable(inputObservableUntracked);
 
-      const { nextValue } = createLazyNextValueGenerator(
-        inputObservableUntracked
-      );
+      const { nextValue } = createLazyNextValueGenerator(trackedObservable);
 
       subscriberCountObservable.subscribe((count) => {
-        // console.log("count", count);
         if (count > 0) {
           this.setJobReadyForInputsInRedis({
             redisConfig: this.zzEnv.redisConfig,
@@ -359,10 +341,9 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       const processedR = await processor(this);
 
       // wait as long as there are still subscribers
-
       await Promise.all(
-        (Object.values(this.inputStreamFnsByKey) as any).map(
-          async (x: (typeof this.inputStreamFnsByKey)[keyof IMap]) => {
+        (_.values(this.inputStreamFnsByKey) as  (typeof this.inputStreamFnsByKey)[keyof IMap][]).map(
+          async (x) => {
             await new Promise<void>((resolve) => {
               x!.subscriberCountObservable
                 .pipe(takeUntil(x!.inputObservableUntracked))
@@ -412,6 +393,24 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       throw e;
       // }
     }
+  };
+
+  signalOutputEnd = async (key?: keyof OMap) => {
+    console.debug("signalOutputEnd", {
+      pipe: this.pipe.pipeName,
+      jobId: this.jobId,
+      key,
+      });
+    const outputStream = await this.pipe.getJobStream({
+      jobId: this.jobId,
+      type: "out",
+      key: key || ("default" as keyof OMap),
+    });
+    await outputStream.pub({
+      message: {
+        terminate: true,
+      },
+    });
   };
 
   // public spawnChildJobsToWaitOn = async <CI, CO>(p: {

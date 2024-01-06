@@ -376,8 +376,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     if (streamIdOverride) {
       streamId = streamIdOverride;
     } else {
-      const queueIdPrefix = this.pipeName + "::" + jobId;
-      const queueId = `${queueIdPrefix}::${type}/${String(p.key || "default")}`;
+      const queueId = `${type}/${String(p.key || "default")}`;
       streamId = deriveStreamId({
         groupId: queueId,
         ...{
@@ -692,7 +691,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       // validate that the types match
 
       const commonStreamName = deriveStreamId({
-        groupId: jobGroupId,
+        groupId: `[${jobGroupId}]`,
         from: {
           pipe: fromP,
           key: fromKeyStr,
@@ -791,8 +790,8 @@ function deriveStreamId<PP1, PP2>({
     key: string;
   };
 }) {
-  const fromStr = from ? `${from.pipe.pipeName}/${from.key}` : "";
-  const toStr = to ? `${to.pipe.pipeName}/${to.key}` : "";
+  const fromStr = from ? `${from.pipe.pipeName}/${from.key}` : "(*)";
+  const toStr = to ? `${to.pipe.pipeName}/${to.key}` : "(*)";
   return `stream-${groupId}::${fromStr}>>${toStr}`;
 }
 
