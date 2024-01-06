@@ -300,7 +300,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>
   ): Promise<void> => {
     const jId = {
-      pipeName: this.pipe.name,
+      pipeName: this.pipe.pipeName,
       jobId: this.jobId,
       projectId: this.zzEnv.projectId,
     };
@@ -381,7 +381,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       if (e instanceof WaitingChildrenError) {
         await updateJobStatus({
           projectId,
-          pipeName: this.pipe.name,
+          pipeName: this.pipe.pipeName,
           jobId: job.id!,
           dbConn: this.zzEnv.db,
           jobStatus: "waiting_children",
@@ -389,7 +389,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       } else {
         await updateJobStatus({
           projectId,
-          pipeName: this.pipe.name,
+          pipeName: this.pipe.pipeName,
           jobId: job.id!,
           dbConn: this.zzEnv.db,
           jobStatus: "failed",

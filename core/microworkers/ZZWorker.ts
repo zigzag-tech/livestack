@@ -105,13 +105,13 @@ export class ZZWorker<
     };
 
     this.workerName =
-      workerName || "wkr:" + `${this.zzEnv.projectId}/${this.def.pipe.name}`;
+      workerName || "wkr:" + `${this.zzEnv.projectId}/${this.def.pipe.pipeName}`;
     this.logger = getLogger(`wkr:${this.workerName}`);
 
     const mergedWorkerOptions = _.merge({}, workerOptions);
 
     this.bullMQWorker = new Worker<{ jobParams: P }, void, string>(
-      `${this.zzEnv.projectId}/${this.pipe.name}`,
+      `${this.zzEnv.projectId}/${this.pipe.pipeName}`,
       async (job, token) => {
         const zzJ = new ZZJob({
           bullMQJob: job,

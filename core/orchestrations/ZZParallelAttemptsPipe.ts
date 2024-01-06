@@ -60,7 +60,7 @@ export class ZZParallelAttemptWorkerDef<
           def: attemptDef,
         }: ParallelAttempt<MaPipeDef>) => {
           const fn = async () => {
-            const childJobId = `${jobId}/${attemptDef.name}`;
+            const childJobId = `${jobId}/${attemptDef.pipeName}`;
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
               def: attemptDef as PipeDef<P, O, any, StreamI, any>,
@@ -128,7 +128,7 @@ export class ZZParallelAttemptWorkerDef<
 
             let result: O | undefined = undefined;
             const fn = genRetryFunction(nextAttempt);
-            logger.info(`Started attempt ${nextAttempt.def.name}.`);
+            logger.info(`Started attempt ${nextAttempt.def.pipeName}.`);
             running.push({
               promise: fn()
                 .then((r) => {
@@ -139,7 +139,7 @@ export class ZZParallelAttemptWorkerDef<
                 .catch((e) => {
                   throw e;
                 }),
-              name: nextAttempt.def.name,
+              name: nextAttempt.def.pipeName,
               timeStarted: Date.now(),
               isResolved: () => isResolved(),
               getResult: () => result,

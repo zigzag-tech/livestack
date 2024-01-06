@@ -49,7 +49,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
   protected logger: ReturnType<typeof getLogger>;
 
-  readonly name: string;
+  public readonly pipeName: string;
   readonly jobParamsDef: z.ZodType<P>;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
@@ -71,12 +71,12 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     zzEnv?: ZZEnv;
     concurrency?: number;
   }) {
-    this.name = name;
+    this.pipeName = name;
     this.jobParamsDef = jobParamsDef;
     this.progressDef = progressDef || z.never();
 
     this.zzEnv = zzEnv || ZZEnv.global();
-    this.logger = getLogger(`pipe:${this.name}`);
+    this.logger = getLogger(`pipe:${this.pipeName}`);
 
     this.inputDefSet = new StreamDefSet({
       defs: input,
@@ -89,7 +89,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
   private get _rawQueue() {
     return getCachedQueueByName<P, void>({
-      queueNameOnly: this.name,
+      queueNameOnly: this.pipeName,
       queueOptions: {
         connection: this.zzEnv.redisConfig,
       },
@@ -104,7 +104,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
   public async getJobRec(jobId: string) {
     return await getJobRec({
-      pipeName: this.name,
+      pipeName: this.pipeName,
       projectId: this.zzEnv.projectId,
       jobId,
       dbConn: this.zzEnv.db,
@@ -133,7 +133,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     key?: keyof (T extends "in" ? IMap : OMap);
   }) {
     const rec = await getJobDatapoints<U>({
-      pipeName: this.name,
+      pipeName: this.pipeName,
       projectId: this.zzEnv.projectId,
       jobId,
       dbConn: this.zzEnv.db,
@@ -156,7 +156,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     outputKey?: keyof OMap;
   }): Promise<OMap[keyof OMap][]> {
     if (!jobId) {
-      jobId = `${this.name}-${v4()}`;
+      jobId = `${this.pipeName}-${v4()}`;
     }
 
     this.logger.info(
@@ -372,7 +372,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     if (streamIdOverride) {
       streamId = streamIdOverride;
     } else {
-      const queueIdPrefix = this.name + "::" + jobId;
+      const queueIdPrefix = this.pipeName + "::" + jobId;
       const queueId = `${queueIdPrefix}::${type}/${String(p.key || "default")}`;
       streamId = deriveStreamId({
         groupId: queueId,
@@ -499,7 +499,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     await this.zzEnv.db.transaction(async (trx) => {
       await ensureJobAndInitStatusRec({
         projectId,
-        pipeName: this.name,
+        pipeName: this.pipeName,
         jobId,
         dbConn: trx,
         jobParams: jobParams,
@@ -643,16 +643,16 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
       if (fromJobIndex === -1) {
         throw new Error(
-          `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
-            toP.name
+          `Invalid jobConnector: ${fromP.pipeName}/${String(fromKey)} >> ${
+            toP.pipeName
           }/${String(toKey)}: "from" job not found.`
         );
       }
       const fromJobDecs = jobs[fromJobIndex];
       if (toJobIndex === -1) {
         throw new Error(
-          `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
-            toP.name
+          `Invalid jobConnector: ${fromP.pipeName}/${String(fromKey)} >> ${
+            toP.pipeName
           }/${String(toKey)}: "to" job not found.`
         );
       }
@@ -660,14 +660,14 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       if (!fromJobDecs.pipe.outputDefSet.hasDef(fromKeyStr)) {
         throw new Error(
           `Invalid jobConnector: ${fromP}/${String(fromKey)} >> ${
-            toP.name
+            toP.pipeName
           }/${String(toKey)}: "from" key not found.`
         );
       }
       if (!toJobDesc.pipe.inputDefSet.hasDef(toKeyStr)) {
         throw new Error(
           `Invalid jobConnector: ${fromP}/${String(fromKey)} >> ${
-            toP.name
+            toP.pipeName
           }/${String(toKey)}: "to" key not found.`
         );
       }
@@ -675,7 +675,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       const fromDef = fromJobDecs.pipe.outputDefSet.getDef(fromKeyStr);
       const toDef = toJobDesc.pipe.inputDefSet.getDef(toKeyStr);
       if (hashDef(fromDef) !== hashDef(toDef)) {
-        const msg = `Streams ${fromP.name}.${fromKeyStr} and ${toP.name}.${toKeyStr} are incompatible.`;
+        const msg = `Streams ${fromP.pipeName}.${fromKeyStr} and ${toP.pipeName}.${toKeyStr} are incompatible.`;
         console.error(
           msg,
           "Upstream schema: ",
@@ -719,17 +719,17 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
       const { pipe, jobParams } = jobs[i];
 
-      if (!countByName[pipe.name]) {
-        countByName[pipe.name] = 1;
+      if (!countByName[pipe.pipeName]) {
+        countByName[pipe.pipeName] = 0;
       } else {
-        countByName[pipe.name] += 1;
+        countByName[pipe.pipeName] += 1;
       }
-      const jobId = `[${jobGroupId}]${pipe.name}${
-        countByName[pipe.name] > 0 ? `-${countByName[pipe.name]}` : ""
+      const jobId = `[${jobGroupId}]${pipe.pipeName}${
+        countByName[pipe.pipeName] > 0 ? `-${countByName[pipe.pipeName]}` : ""
       }`;
 
-      jobIdsByPipeName[pipe.name] = [
-        ...(jobIdsByPipeName[pipe.name] || []),
+      jobIdsByPipeName[pipe.pipeName] = [
+        ...(jobIdsByPipeName[pipe.pipeName] || []),
         jobId,
       ];
 
@@ -741,12 +741,13 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       };
       await pipe._requestJob(jDef);
     }
+    console.log("countByName", countByName);
     return { jobIdsByPipeName };
   }
 
   // toString
   public toString() {
-    return this.name;
+    return this.pipeName;
   }
 
   // convenient function
@@ -786,8 +787,8 @@ function deriveStreamId<PP1, PP2>({
     key: string;
   };
 }) {
-  const fromStr = from ? `${from.pipe.name}/${from.key}` : "";
-  const toStr = to ? `${to.pipe.name}/${to.key}` : "";
+  const fromStr = from ? `${from.pipe.pipeName}/${from.key}` : "";
+  const toStr = to ? `${to.pipe.pipeName}/${to.key}` : "";
   return `stream-${groupId}::${fromStr}>>${toStr}`;
 }
 

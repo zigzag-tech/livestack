@@ -222,19 +222,19 @@ export async function addDatapoint<T>({
   };
   data: T;
 }) {
-  console.debug(
-    "addDatapoint",
-    JSON.stringify(
-      {
-        projectId,
-        streamId,
-        jobInfo,
-        data,
-        datapointId,
-      },
-      longStringTruncator
-    )
-  );
+  // console.debug(
+  //   "addDatapoint",
+  //   JSON.stringify(
+  //     {
+  //       projectId,
+  //       streamId,
+  //       jobInfo,
+  //       data,
+  //       datapointId,
+  //     },
+  //     longStringTruncator
+  //   )
+  // );
   await dbConn.transaction(async (trx) => {
     // get stream id
 
