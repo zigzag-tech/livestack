@@ -132,7 +132,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     limit?: number;
     key?: keyof (T extends "in" ? IMap : OMap);
   }) {
-    const rec = await getJobDatapoints<U>({
+    const recs = await getJobDatapoints<WrapTerminatorAndDataId<U>>({
       pipeName: this.pipeName,
       projectId: this.zzEnv.projectId,
       jobId,
@@ -142,7 +142,11 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       limit,
       key: String(key),
     });
-    return rec.map((r) => r.data);
+    return recs
+      .map(r=>r.data)
+      .filter(r => r.terminate === false)
+      .map(r => r.terminate === false ? r.data : null) as OMap[keyof OMap][];
+
   }
 
   public async requestJobAndWaitOnResult({
@@ -169,7 +173,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     });
 
     while (true) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await sleep(200);
       const status = await this.getJobStatus(jobId);
       if (status === "completed") {
         const results = await this.getJobData({
@@ -178,7 +182,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
           limit: 1000,
           key: outputKey,
         });
-        return results as OMap[keyof OMap][];
+        return results;
       } else if (status === "failed") {
         throw new Error(`Job ${jobId} failed!`);
       }
