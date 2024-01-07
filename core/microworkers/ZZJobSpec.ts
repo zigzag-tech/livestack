@@ -33,7 +33,7 @@ const queueMapByProjectIdAndQueueName = new Map<
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
-export type CheckJobSpec<PP> = PP extends ZZJobSpec<
+export type CheckSpec<PP> = PP extends ZZJobSpec<
   infer P,
   infer I,
   infer O,
@@ -574,16 +574,14 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     });
   }
 
-  public static async requestChainedJobs<JobSpecs>({
+  public static async requestChainedJobs<Specs>({
     jobGroupId,
     jobs,
     jobConnectors,
   }: {
     jobGroupId: string;
     jobs: {
-      [K in keyof CheckArray<JobSpecs>]: JobSpecAndJobParams<
-        CheckArray<JobSpecs>[K]
-      >;
+      [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
     };
 
     jobConnectors: {
@@ -592,7 +590,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         | [
             ZZJobSpec<any, any, any, any>,
             (
-              | keyof InferStreamSetType<CheckJobSpec<JobSpecs>["outputDefSet"]>
+              | keyof InferStreamSetType<CheckSpec<Specs>["outputDefSet"]>
               | "default"
             )
           ];
@@ -602,16 +600,16 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         | [
             ZZJobSpec<any, any, any, any>,
             (
-              | keyof InferStreamSetType<CheckJobSpec<JobSpecs>["outputDefSet"]>
+              | keyof InferStreamSetType<CheckSpec<Specs>["outputDefSet"]>
               | "default"
             )
           ];
     }[];
   }) {
     const inOverridesByIndex = [] as {
-      [K in keyof CheckArray<JobSpecs>]: Partial<
+      [K in keyof CheckArray<Specs>]: Partial<
         Record<
-          keyof CheckJobSpec<CheckArray<JobSpecs>[K]>["inputDefSet"]["defs"],
+          keyof CheckSpec<CheckArray<Specs>[K]>["inputDefSet"]["defs"],
           string
         >
       >;
@@ -619,7 +617,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     const outOverridesByIndex = [] as {
       [K in number]: Partial<
         Record<
-          keyof CheckJobSpec<CheckArray<JobSpecs>[K]>["outputDefSet"]["defs"],
+          keyof CheckSpec<CheckArray<Specs>[K]>["outputDefSet"]["defs"],
           string
         >
       >;
@@ -786,11 +784,11 @@ function deriveStreamId<PP1, PP2>({
 }: {
   groupId: string;
   from?: {
-    jobSpec: CheckJobSpec<PP1>;
+    jobSpec: CheckSpec<PP1>;
     key: string;
   };
   to?: {
-    jobSpec: CheckJobSpec<PP2>;
+    jobSpec: CheckSpec<PP2>;
     key: string;
   };
 }) {
@@ -802,24 +800,24 @@ function deriveStreamId<PP1, PP2>({
 type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
 
 type JobSpecAndJobParams<JobSpec> = {
-  spec: CheckJobSpec<JobSpec>;
-  jobParams: z.infer<CheckJobSpec<JobSpec>["jobParamsDef"]>;
+  spec: CheckSpec<JobSpec>;
+  jobParams: z.infer<CheckSpec<JobSpec>["jobParamsDef"]>;
   jobLabel?: string;
 };
 
 type JobSpecAndJobOutputKey<PP> =
   | [
-      CheckJobSpec<PP>,
-      keyof InferStreamSetType<CheckJobSpec<PP>["outputDefSet"]> | "default"
+      CheckSpec<PP>,
+      keyof InferStreamSetType<CheckSpec<PP>["outputDefSet"]> | "default"
     ]
-  | CheckJobSpec<PP>;
+  | CheckSpec<PP>;
 
 type JobSpecAndJobInputKey<PP> =
   | [
-      CheckJobSpec<PP>,
-      keyof InferStreamSetType<CheckJobSpec<PP>["inputDefSet"]> | "default"
+      CheckSpec<PP>,
+      keyof InferStreamSetType<CheckSpec<PP>["inputDefSet"]> | "default"
     ]
-  | CheckJobSpec<PP>;
+  | CheckSpec<PP>;
 
 export async function sleep(ms: number) {
   return new Promise((resolve) => {

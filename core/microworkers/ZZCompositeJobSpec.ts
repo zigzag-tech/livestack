@@ -6,7 +6,7 @@
 
 // const jobSpec1, jobSpec2;
 
-// connectJobSpecs([jobSpec1, jobSpec2]);
+// connectSpecs([jobSpec1, jobSpec2]);
 
 // type JobSpecAndOutpet<
 //   T extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>
@@ -36,7 +36,7 @@
 // ]
 // ];
 
-// function connectJobSpecs<
+// function connectSpecs<
 //   T1 extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>,
 //   T2 extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>
 // >(p1: JobSpecAndOutpet<T1>, p2: JobSpecAndOutpet<T2>): JobSpecConnector<T1, T2> {
