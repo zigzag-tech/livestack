@@ -1,6 +1,4 @@
 import { ZodType } from "zod";
-import Redis from "ioredis";
-import { Observable } from "rxjs";
 import { ZZEnv } from "./ZZEnv";
 
 import { createHash } from "crypto";
@@ -11,7 +9,7 @@ import { addDatapoint, ensureStreamRec } from "../db/knexConn";
 import { v4 } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
-const PUBSUB_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
+const REDIS_CLIENT_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
 export type InferStreamDef<T> = T extends ZZStream<infer P> ? P : never;
 
@@ -31,6 +29,10 @@ export namespace ZZStream {
     : never;
 }
 
+// cursor based redis stream subscriber
+import { Redis } from "ioredis";
+import { Observable, Subscriber } from "rxjs";
+
 export class ZZStream<T> {
   public readonly def: ZodType<T>;
   public readonly uniqueName: string;
@@ -43,10 +45,6 @@ export class ZZStream<T> {
       default: def,
     };
   }
-
-  nextValue: () => Promise<T>;
-
-  private _valueObservable: Observable<T> | null = null;
 
   protected static globalRegistry: { [key: string]: ZZStream<unknown> } = {};
 
@@ -84,11 +82,13 @@ export class ZZStream<T> {
       }
       const stream = new ZZStream({ uniqueName, def, zzEnv, logger });
       // async
-      ensureStreamRec({
-        projectId: zzEnv.projectId,
-        streamId: uniqueName,
-        dbConn: zzEnv.db,
-      });
+      if (zzEnv.db) {
+        ensureStreamRec({
+          projectId: zzEnv.projectId,
+          streamId: uniqueName,
+          dbConn: zzEnv.db,
+        });
+      }
       ZZStream.globalRegistry[uniqueName] = stream;
       return stream;
     }
@@ -109,28 +109,7 @@ export class ZZStream<T> {
     this.uniqueName = uniqueName;
     this.zzEnv = zzEnv;
     this.hash = hashDef(this.def);
-    const { nextValue } = createLazyNextValueGenerator(this.valueObsrvable);
-    this.nextValue = nextValue;
     this.logger = logger;
-  }
-
-  private ensureValueObservable() {
-    if (!this._valueObservable) {
-      this._valueObservable = new Observable<T>((subscriber) => {
-        const { unsub } = this.sub({
-          processor: async (v) => {
-            subscriber.next(v);
-          },
-        });
-        return {
-          unsubscribe: () => {
-            unsub();
-          },
-        };
-      });
-    }
-
-    return this._valueObservable;
   }
 
   public async pub({
@@ -145,29 +124,9 @@ export class ZZStream<T> {
     };
     messageIdOverride?: string;
   }) {
-    const datapointId = messageIdOverride || v4();
-    await addDatapoint({
-      streamId: this.uniqueName,
-      projectId: this.zzEnv.projectId,
-      dbConn: this.zzEnv.db,
-      jobInfo: jobInfo,
-      data: message,
-      datapointId,
-    });
-
-    const { channelId, clients } = await this.getStreamClientsById({
-      queueId: this.uniqueName,
-    });
-
-    // console.log("pubbing", channelId);
-
+    let parsed: T;
     try {
-      const parsed = this.def.parse(message) as T;
-      const addedMsg = await clients.pub.publish(
-        channelId,
-        customStringify(parsed)
-      );
-      return addedMsg;
+      parsed = this.def.parse(message) as T;
     } catch (err) {
       console.error("errornous output: ", message);
       this.logger.error(
@@ -177,50 +136,126 @@ export class ZZStream<T> {
       );
       throw err;
     }
-  }
 
-  get valueObsrvable() {
-    return this.ensureValueObservable();
-  }
-
-  private getStreamClientsById({ queueId }: { queueId: string }) {
-    const id = `zzmsgq:${this.zzEnv.projectId}--${queueId!}`;
-    if (!PUBSUB_BY_ID[id]) {
-      const sub = new Redis(this.zzEnv.redisConfig);
-      sub.subscribe(id, (err, count) => {
-        if (err) {
-          console.error("Failed to subscribe: %s", err.message);
-        } else {
-          // console.info(
-          //   `getPubSubClientsById: subscribed successfully! This client is currently subscribed to ${count} channels.`
-          // );
-        }
+    if (this.zzEnv.db) {
+      const datapointId = messageIdOverride || v4();
+      await addDatapoint({
+        streamId: this.uniqueName,
+        projectId: this.zzEnv.projectId,
+        dbConn: this.zzEnv.db,
+        jobInfo: jobInfo,
+        data: parsed,
+        datapointId,
       });
-      const pub = new Redis(this.zzEnv.redisConfig);
-      PUBSUB_BY_ID[id] = { sub, pub };
     }
-    return { channelId: id, clients: PUBSUB_BY_ID[id] };
+
+    const { channelId, clients } = await getStreamClientsById({
+      queueId: this.uniqueName,
+      zzEnv: this.zzEnv,
+    });
+
+    try {
+      // Publish the data to the stream
+      const messageId = await clients.pub.xadd(
+        channelId,
+        "*",
+        "data",
+        customStringify(parsed)
+      );
+
+      return messageId;
+    } catch (error) {
+      console.error("Error publishing to stream:", error);
+      throw error;
+    }
   }
 
-  public sub({ processor }: { processor: (message: T) => void }) {
-    const { clients, channelId } = this.getStreamClientsById({
-      queueId: this.uniqueName,
+  public sub() {
+    return new ZZStreamSubscriber({ stream: this, zzEnv: this.zzEnv });
+  }
+}
+
+export class ZZStreamSubscriber<T> {
+  private zzEnv: ZZEnv;
+  private stream: ZZStream<T>;
+  private cursor: string = "0"; // Initial cursor position
+  private _valueObservable: Observable<T> | null = null;
+
+  constructor({ stream, zzEnv }: { stream: ZZStream<T>; zzEnv: ZZEnv }) {
+    this.stream = stream;
+    this.zzEnv = zzEnv;
+  }
+
+  private initializeObservable() {
+    this._valueObservable = new Observable((subscriber: Subscriber<T>) => {
+      this.readStream(subscriber);
+    });
+  }
+
+  private async readStream(subscriber: Subscriber<T>) {
+    const { channelId, clients } = getStreamClientsById({
+      queueId: this.stream.uniqueName,
+      zzEnv: this.zzEnv,
     });
 
-    // console.log("sub to", channelId);
+    try {
+      while (true) {
+        // XREAD with block and count parameters
+        const stream = await clients.sub.xread(
+          "BLOCK",
+          0,
+          "STREAMS",
+          channelId,
+          this.cursor
+        );
+        if (stream) {
+          const messages = stream[0][1]; // Assuming single stream
+          for (let message of messages) {
+            this.cursor = message[0];
+            const data: T = this.parseMessageData(message[1]);
+            subscriber.next(data);
+          }
+        }
+      }
+    } catch (error) {
+      subscriber.error(error);
+    }
+  }
 
-    clients.sub.on("message", async (channel, message) => {
-      const msg = customParse(message);
-      await processor(msg);
-    });
+  private parseMessageData(data: Array<any>): T {
+    // Look for the 'data' key and its subsequent value in the flattened array
+    const dataIdx = data.indexOf("data");
+    if (dataIdx === -1 || dataIdx === data.length - 1) {
+      console.error("data:", data);
+      throw new Error("Data key not found in stream message or is malformed");
+    }
 
-    const unsub = async () => {
-      await clients.sub.unsubscribe();
-    };
+    const jsonData = data[dataIdx + 1];
 
-    return {
-      unsub,
-    };
+    // Parse the JSON data (assuming data is stored as a JSON string)
+    try {
+      const parsedData = customParse(jsonData);
+      return parsedData as T;
+    } catch (error) {
+      throw new Error(`Error parsing data from stream: ${error}`);
+    }
+  }
+
+  public get valueObservable(): Observable<T> {
+    if (!this._valueObservable) {
+      this.initializeObservable();
+    }
+    return this._valueObservable!;
+  }
+
+  private _nextValue: (() => Promise<T>) | null = null;
+
+  public get nextValue() {
+    if (!this._nextValue) {
+      const { nextValue } = createLazyNextValueGenerator(this.valueObservable);
+      this._nextValue = nextValue;
+    }
+    return this._nextValue;
   }
 }
 
@@ -250,4 +285,21 @@ function customParse(json: string): any {
 export function hashDef(def: ZodType<unknown>) {
   const str = JSON.stringify(zodToJsonSchema(def));
   return createHash("sha256").update(str).digest("hex");
+}
+
+function getStreamClientsById({
+  queueId,
+  zzEnv,
+}: {
+  queueId: string;
+  zzEnv: ZZEnv;
+}) {
+  // const channelId = `zzstream:${zzEnv.projectId}/${queueId!}`;
+  const channelId = `${queueId!}`;
+  if (!REDIS_CLIENT_BY_ID[channelId]) {
+    const sub = new Redis(zzEnv.redisConfig);
+    const pub = new Redis(zzEnv.redisConfig);
+    REDIS_CLIENT_BY_ID[channelId] = { sub, pub };
+  }
+  return { channelId, clients: REDIS_CLIENT_BY_ID[channelId] };
 }

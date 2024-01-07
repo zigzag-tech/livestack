@@ -103,6 +103,11 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   // }
 
   public async getJobRec(jobId: string) {
+    if (!this.zzEnv.db) {
+      throw new Error(
+        "Database is not configured in ZZEnv, therefore can not get job record."
+      );
+    }
     return await getJobRec({
       specName: this.name,
       projectId: this.zzEnv.projectId,
@@ -132,6 +137,11 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     limit?: number;
     key?: keyof (T extends "in" ? IMap : OMap);
   }) {
+    if (!this.zzEnv.db) {
+      throw new Error(
+        "Database is not configured in ZZEnv, therefore can not get job data."
+      );
+    }
     const recs = await getJobDatapoints<WrapTerminatorAndDataId<U>>({
       specName: this.name,
       projectId: this.zzEnv.projectId,
@@ -332,7 +342,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
 
     const overridesByType =
       this.streamIdOverridesByKeyByTypeByJobId[jobId][type];
-    if (!overridesByType) {
+    if (!overridesByType && this.zzEnv.db) {
       const connectors = await getJobStreamConnectorRecs({
         projectId: this.zzEnv.projectId,
         dbConn: this.zzEnv.db,
@@ -465,12 +475,12 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   }
 
   public async nextOutputForJob(jobId: string, key?: keyof OMap) {
-    const pubSub = await this.getJobStream({
+    const stream = await this.getJobStream({
       jobId,
       type: "out",
       key: (key || "default") as keyof OMap,
     });
-    const v = await pubSub.nextValue();
+    const v = await stream.nextValue();
     if (v.terminate) {
       return null;
     } else {
