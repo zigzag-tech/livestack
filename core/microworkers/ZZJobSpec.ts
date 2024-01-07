@@ -382,7 +382,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       streamId = deriveStreamId({
         groupId: `[${jobId}]`,
         ...{
-          [type === "in" ? "from" : "to"]: {
+          [type === "in" ? "to" : "from"]: {
             jobSpec: this,
             key: p.key || "default",
           },
