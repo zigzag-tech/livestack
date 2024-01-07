@@ -1,4 +1,4 @@
-import { ZZPipe, sleep } from "../microworkers/ZZPipe";
+import { ZZJobSpec, sleep } from "../microworkers/ZZJobSpec";
 import { z } from "zod";
 import { ZZWorkerDef } from "../microworkers/ZZWorker";
 import { UnknownTMap } from "../microworkers/StreamDefSet";
@@ -13,14 +13,14 @@ type TriggerCheckContext = {
 };
 
 interface ParallelAttempt<
-  ParentDef extends ZZPipe<unknown, UnknownTMap, UnknownTMap, unknown>
+  ParentDef extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>
 > {
   def: ParentDef;
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
 
 export function genParallelAttempt<
-  ParentDef extends ZZPipe<unknown, UnknownTMap, UnknownTMap, unknown>
+  ParentDef extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>
 >(
   def: ParentDef,
   config: Omit<ParallelAttempt<ParentDef>, "def">
@@ -32,16 +32,16 @@ export function genParallelAttempt<
 }
 
 export class ZZParallelAttemptWorkerDef<
-  MaPipeDef extends ZZPipe<unknown, UnknownTMap, UnknownTMap, unknown>,
-  P = z.infer<MaPipeDef["jobParamsDef"]>
-> extends ZZWorkerDef<MaPipeDef, {}> {
+  MaJobSpecDef extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>,
+  P = z.infer<MaJobSpecDef["jobParamsDef"]>
+> extends ZZWorkerDef<MaJobSpecDef, {}> {
   constructor({
     attempts,
     globalTimeoutCondition,
     transformCombinedOutput,
-    pipe,
+    jobSpec,
   }: {
-    pipe: ZZPipe<MaPipeDef>;
+    jobSpec: ZZJobSpec<MaJobSpecDef>;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {
@@ -51,19 +51,19 @@ export class ZZParallelAttemptWorkerDef<
         name: string;
       }[]
     ) => Promise<O> | O;
-    attempts: ParallelAttempt<MaPipeDef>[];
+    attempts: ParallelAttempt<MaJobSpecDef>[];
   }) {
     super({
-      pipe,
+      jobSpec,
       processor: async ({ logger, jobParams, spawnJob, jobId }) => {
         const genRetryFunction = ({
           def: attemptDef,
-        }: ParallelAttempt<MaPipeDef>) => {
+        }: ParallelAttempt<MaJobSpecDef>) => {
           const fn = async () => {
-            const childJobId = `${jobId}/${attemptDef.pipeName}`;
+            const childJobId = `${jobId}/${attemptDef.name}`;
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
-              def: attemptDef as PipeDef<P, O, any, StreamI, any>,
+              def: attemptDef as JobSpecDef<P, O, any, StreamI, any>,
               jobParams: jobParams as P,
             });
 
@@ -128,7 +128,7 @@ export class ZZParallelAttemptWorkerDef<
 
             let result: O | undefined = undefined;
             const fn = genRetryFunction(nextAttempt);
-            logger.info(`Started attempt ${nextAttempt.def.pipeName}.`);
+            logger.info(`Started attempt ${nextAttempt.def.name}.`);
             running.push({
               promise: fn()
                 .then((r) => {
@@ -139,7 +139,7 @@ export class ZZParallelAttemptWorkerDef<
                 .catch((e) => {
                   throw e;
                 }),
-              name: nextAttempt.def.pipeName,
+              name: nextAttempt.def.name,
               timeStarted: Date.now(),
               isResolved: () => isResolved(),
               getResult: () => result,

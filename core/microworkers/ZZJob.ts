@@ -16,14 +16,14 @@ import { getTempPathByJobId } from "../storage/temp-dirs";
 import path from "path";
 import { addDatapoint, getJobRec, updateJobStatus } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { ZZPipe } from "./ZZPipe";
+import { ZZJobSpec } from "./ZZJobSpec";
 import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 import _ from "lodash";
 
-export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZPipe<
+export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZJobSpec<
   infer P,
   infer IMap,
   infer OMap,
@@ -37,7 +37,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   public readonly _bullMQToken?: string;
   readonly jobParams: P;
   readonly logger: ReturnType<typeof getLogger>;
-  readonly pipe: ZZPipe<P, IMap, OMap, TProgress>;
+  readonly spec: ZZJobSpec<P, IMap, OMap, TProgress>;
   // New properties for subscriber tracking
 
   emitOutput: (o: OMap[keyof OMap]) => Promise<void>;
@@ -85,7 +85,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     logger: ReturnType<typeof getLogger>;
     jobParams: P;
     storageProvider?: IStorageProvider;
-    pipe: ZZPipe<P, IMap, OMap, TProgress>;
+    jobSpec: ZZJobSpec<P, IMap, OMap, TProgress>;
     workerInstanceParams?: WP;
     workerInstanceParamsSchema?: z.ZodType<WP>;
     workerName: string;
@@ -95,10 +95,10 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     this._bullMQToken = p.bullMQToken;
     this.logger = p.logger;
     this.workerName = p.workerName;
-    this.pipe = p.pipe;
+    this.spec = p.jobSpec;
 
     try {
-      this.jobParams = p.pipe.jobParamsDef.parse(p.jobParams) as P;
+      this.jobParams = p.jobSpec.jobParamsDef.parse(p.jobParams) as P;
     } catch (err) {
       this.logger.error(
         `jobParams error: jobParams provided is invalid: ${JSON.stringify(
@@ -123,8 +123,8 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       throw err;
     }
     this.storageProvider = p.storageProvider;
-    this.zzEnv = p.pipe.zzEnv;
-    this.pipe = p.pipe;
+    this.zzEnv = p.jobSpec.zzEnv;
+    this.spec = p.jobSpec;
     this.baseWorkingRelativePath = path.join(
       this.zzEnv.projectId,
       this.workerName,
@@ -172,7 +172,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       //     JSON.stringify(o, longStringTruncator)
       // );
 
-      const outputStream = await this.pipe.getJobStream({
+      const outputStream = await this.spec.getJobStream({
         jobId: this.jobId,
         type: "out",
         key,
@@ -193,7 +193,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   }
 
   private _ensureInputStreamFn<K extends keyof IMap>(key?: K | "default") {
-    if (this.pipe.inputDefSet.isSingle) {
+    if (this.spec.inputDefSet.isSingle) {
       if (key && key !== "default") {
         throw new Error(
           `inputDefs is single stream, but key is provided: ${String(key)}`
@@ -209,7 +209,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     }
 
     if (!this.inputStreamFnsByKey[key! as keyof IMap]) {
-      const streamP = this.pipe.getJobStream({
+      const streamP = this.spec.getJobStream({
         jobId: this.jobId,
         type: "in",
         key: key! as keyof IMap,
@@ -273,7 +273,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     isReady: boolean;
   }) => {
     // console.debug("setJobReadyForInputsInRedis", {
-    //   pipe: this.pipe.name,
+    //   jobSpec: this.jobSpec.name,
     //   jobId,
     //   key,
     //   isReady,
@@ -293,10 +293,10 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   };
 
   public beginProcessing = async (
-    processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>
+    processor: ZZProcessor<ZZJobSpec<P, IMap, OMap, TProgress>, WP>
   ): Promise<void> => {
     const jId = {
-      pipeName: this.pipe.pipeName,
+      specName: this.spec.name,
       jobId: this.jobId,
       projectId: this.zzEnv.projectId,
     };
@@ -342,19 +342,21 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
 
       // wait as long as there are still subscribers
       await Promise.all(
-        (_.values(this.inputStreamFnsByKey) as  (typeof this.inputStreamFnsByKey)[keyof IMap][]).map(
-          async (x) => {
-            await new Promise<void>((resolve) => {
-              x!.subscriberCountObservable
-                .pipe(takeUntil(x!.inputObservableUntracked))
-                .subscribe((count) => {
-                  if (count === 0) {
-                    resolve();
-                  }
-                });
-            });
-          }
-        )
+        (
+          _.values(
+            this.inputStreamFnsByKey
+          ) as (typeof this.inputStreamFnsByKey)[keyof IMap][]
+        ).map(async (x) => {
+          await new Promise<void>((resolve) => {
+            x!.subscriberCountObservable
+              .pipe(takeUntil(x!.inputObservableUntracked))
+              .subscribe((count) => {
+                if (count === 0) {
+                  resolve();
+                }
+              });
+          });
+        })
       );
 
       if (processedR) {
@@ -376,7 +378,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       if (e instanceof WaitingChildrenError) {
         await updateJobStatus({
           projectId,
-          pipeName: this.pipe.pipeName,
+          specName: this.spec.name,
           jobId: job.id!,
           dbConn: this.zzEnv.db,
           jobStatus: "waiting_children",
@@ -384,7 +386,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       } else {
         await updateJobStatus({
           projectId,
-          pipeName: this.pipe.pipeName,
+          specName: this.spec.name,
           jobId: job.id!,
           dbConn: this.zzEnv.db,
           jobStatus: "failed",
@@ -397,11 +399,11 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
 
   signalOutputEnd = async (key?: keyof OMap) => {
     console.debug("signalOutputEnd", {
-      pipe: this.pipe.pipeName,
+      jobSpec: this.spec.name,
       jobId: this.jobId,
       key,
-      });
-    const outputStream = await this.pipe.getJobStream({
+    });
+    const outputStream = await this.spec.getJobStream({
       jobId: this.jobId,
       type: "out",
       key: key || ("default" as keyof OMap),
@@ -414,7 +416,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   };
 
   // public spawnChildJobsToWaitOn = async <CI, CO>(p: {
-  //   def: PipeDef<P, O, StreamIMap, StreamI, TProgress>;
+  //   def: JobSpecDef<P, O, StreamIMap, StreamI, TProgress>;
   //   jobId: string;
   //   jobParams: P;
   // }) => {
@@ -431,9 +433,9 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   //   await ensureJobDependencies({
   //     projectId: this.zzEnv.projectId,
   //     parentJobId: this.jobId,
-  //     parentPipeName: this.pipe.name,
+  //     parentJobSpecName: this.jobSpec.name,
   //     childJobId: p.jobId,
-  //     childPipeName: p.def.name,
+  //     childJobSpecName: p.def.name,
   //     dbConn: this.zzEnv.db,
   //     io_event_id: spawnR.ioEventId,
   //   });
@@ -442,7 +444,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   // };
 
   // public spawnJob = async <P, O>(p: {
-  //   def: PipeDef<P, O, StreamIMap, StreamI, TProgress>;
+  //   def: JobSpecDef<P, O, StreamIMap, StreamI, TProgress>;
   //   jobId: string;
   //   jobParams: P;
   // }) => {
@@ -455,23 +457,23 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   //   jobParams,
   //   flowProducerOpts,
   // }: {
-  //   def: PipeDef<P, O, StreamIMap, StreamI, TProgress>;
+  //   def: JobSpecDef<P, O, StreamIMap, StreamI, TProgress>;
   //   jobId: string;
   //   jobParams: P;
   //   flowProducerOpts?: FlowJob["opts"];
   // }) => {
-  //   const tempPipe = new ZZPipe({
+  //   const tempJobSpec = new ZZJobSpec({
   //     ...childJobDef,
   //     zzEnv: this.zzEnv,
   //   });
-  //   await tempPipe.requestJob({
+  //   await tempJobSpec.requestJob({
   //     jobId: childJobId,
   //     jobParams,
   //     bullMQJobsOpts: flowProducerOpts,
   //   });
   //   const [rec] = await getJobDataAndIoEvents<P>({
   //     projectId: this.zzEnv.projectId,
-  //     pipeName: childJobDef.name,
+  //     jobSpecName: childJobDef.name,
   //     jobId: childJobId,
   //     dbConn: this.zzEnv.db,
   //     ioType: "init-params",

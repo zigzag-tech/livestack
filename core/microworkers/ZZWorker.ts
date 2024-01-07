@@ -2,7 +2,7 @@ import _ from "lodash";
 import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { ZZJob, ZZProcessor } from "./ZZJob";
-import { ZZPipe } from "./ZZPipe";
+import { ZZJobSpec } from "./ZZJobSpec";
 import { ZZEnv } from "./ZZEnv";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { z } from "zod";
@@ -17,8 +17,8 @@ export type ZZWorkerDefParams<
   WP extends object = {}
 > = {
   concurrency?: number;
-  pipe: ZZPipe<P, IMap, OMap, TProgress>;
-  processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>;
+  jobSpec: ZZJobSpec<P, IMap, OMap, TProgress>;
+  processor: ZZProcessor<ZZJobSpec<P, IMap, OMap, TProgress>, WP>;
   instanceParamsDef?: z.ZodType<WP>;
 };
 
@@ -29,16 +29,19 @@ export class ZZWorkerDef<
   TProgress = never,
   WP extends object = {}
 > {
-  public readonly pipe: ZZPipe<P, IMap, OMap, TProgress>;
+  public readonly jobSpec: ZZJobSpec<P, IMap, OMap, TProgress>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
-  public readonly processor: ZZProcessor<ZZPipe<P, IMap, OMap, TProgress>, WP>;
+  public readonly processor: ZZProcessor<
+    ZZJobSpec<P, IMap, OMap, TProgress>,
+    WP
+  >;
 
   constructor({
-    pipe,
+    jobSpec,
     processor,
     instanceParamsDef,
   }: ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>) {
-    this.pipe = pipe;
+    this.jobSpec = jobSpec;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
   }
@@ -64,7 +67,7 @@ export class ZZWorker<
   TProgress = never,
   WP extends object = {}
 > {
-  public readonly pipe: ZZPipe<P, IMap, OMap, TProgress>;
+  public readonly jobSpec: ZZJobSpec<P, IMap, OMap, TProgress>;
   protected readonly zzEnv: ZZEnv;
   protected readonly storageProvider?: IStorageProvider;
 
@@ -93,8 +96,8 @@ export class ZZWorker<
   }) {
     // if worker name is not provided, use random string
 
-    this.pipe = def.pipe;
-    this.zzEnv = def.pipe.zzEnv;
+    this.jobSpec = def.jobSpec;
+    this.zzEnv = def.jobSpec.zzEnv;
     this.instanceParams = instanceParams;
     this.def = def;
 
@@ -105,20 +108,19 @@ export class ZZWorker<
     };
 
     this.workerName =
-      workerName ||
-      "wkr:" + `${this.zzEnv.projectId}/${this.def.pipe.pipeName}`;
+      workerName || "wkr:" + `${this.zzEnv.projectId}/${this.def.jobSpec.name}`;
     this.logger = getLogger(`wkr:${this.workerName}`);
 
     const mergedWorkerOptions = _.merge({}, workerOptions);
 
     this.bullMQWorker = new Worker<{ jobParams: P }, void, string>(
-      `${this.zzEnv.projectId}/${this.pipe.pipeName}`,
+      `${this.zzEnv.projectId}/${this.jobSpec.name}`,
       async (job, token) => {
         const zzJ = new ZZJob({
           bullMQJob: job,
           bullMQToken: token,
           logger: this.logger,
-          pipe: this.pipe,
+          jobSpec: this.jobSpec,
           jobParams: job.data.jobParams,
           workerInstanceParams: this.instanceParams,
           storageProvider: this.zzEnv.storageProvider,

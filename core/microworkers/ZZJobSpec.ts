@@ -33,23 +33,23 @@ const queueMapByProjectIdAndQueueName = new Map<
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
-export type CheckPipe<PP> = PP extends ZZPipe<
+export type CheckJobSpec<PP> = PP extends ZZJobSpec<
   infer P,
   infer I,
   infer O,
   infer TP
 >
   ? PP
-  : PP extends ZZPipe<infer P, infer I, infer O>
+  : PP extends ZZJobSpec<infer P, infer I, infer O>
   ? PP
   : never;
 
-export class ZZPipe<P, IMap, OMap, TProgress = never> {
+export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   public readonly zzEnv: ZZEnv;
 
   protected logger: ReturnType<typeof getLogger>;
 
-  public readonly pipeName: string;
+  public readonly name: string;
   readonly jobParamsDef: z.ZodType<P>;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
@@ -71,12 +71,12 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     zzEnv?: ZZEnv;
     concurrency?: number;
   }) {
-    this.pipeName = name;
+    this.name = name;
     this.jobParamsDef = jobParamsDef;
     this.progressDef = progressDef || z.never();
 
     this.zzEnv = zzEnv || ZZEnv.global();
-    this.logger = getLogger(`pipe:${this.pipeName}`);
+    this.logger = getLogger(`jobSpec:${this.name}`);
 
     this.inputDefSet = new StreamDefSet({
       defs: input,
@@ -89,7 +89,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
   private get _rawQueue() {
     return getCachedQueueByName<P, void>({
-      queueNameOnly: this.pipeName,
+      queueNameOnly: this.name,
       queueOptions: {
         connection: this.zzEnv.redisConfig,
       },
@@ -104,7 +104,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
   public async getJobRec(jobId: string) {
     return await getJobRec({
-      pipeName: this.pipeName,
+      specName: this.name,
       projectId: this.zzEnv.projectId,
       jobId,
       dbConn: this.zzEnv.db,
@@ -133,7 +133,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     key?: keyof (T extends "in" ? IMap : OMap);
   }) {
     const recs = await getJobDatapoints<WrapTerminatorAndDataId<U>>({
-      pipeName: this.pipeName,
+      specName: this.name,
       projectId: this.zzEnv.projectId,
       jobId,
       dbConn: this.zzEnv.db,
@@ -143,10 +143,11 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       key: String(key),
     });
     return recs
-      .map(r=>r.data)
-      .filter(r => r.terminate === false)
-      .map(r => r.terminate === false ? r.data : null) as OMap[keyof OMap][];
-
+      .map((r) => r.data)
+      .filter((r) => r.terminate === false)
+      .map((r) =>
+        r.terminate === false ? r.data : null
+      ) as OMap[keyof OMap][];
   }
 
   public async requestJobAndWaitOnResult({
@@ -160,7 +161,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     outputKey?: keyof OMap;
   }): Promise<OMap[keyof OMap][]> {
     if (!jobId) {
-      jobId = `${this.pipeName}-${v4()}`;
+      jobId = `${this.name}-${v4()}`;
     }
 
     this.logger.info(
@@ -382,7 +383,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
         groupId: `[${jobId}]`,
         ...{
           [type === "in" ? "from" : "to"]: {
-            pipe: this,
+            jobSpec: this,
             key: p.key || "default",
           },
         },
@@ -490,7 +491,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     inputStreamIdOverridesByKey: Partial<Record<keyof IMap, string>>;
     outputStreamIdOverridesByKey: Partial<Record<keyof OMap, string>>;
   }) {
-    // console.debug("ZZPipe._requestJob", jobId, jobParams);
+    // console.debug("ZZJobSpec._requestJob", jobId, jobParams);
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
     if (workers.length === 0) {
@@ -503,7 +504,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     await this.zzEnv.db.transaction(async (trx) => {
       await ensureJobAndInitStatusRec({
         projectId,
-        pipeName: this.pipeName,
+        specName: this.name,
         jobId,
         dbConn: trx,
         jobParams: jobParams,
@@ -548,7 +549,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       { ...bullMQJobsOpts, jobId: jobId }
     );
     this.logger.info(
-      `Added job with ID ${j.id} to pipe: ` +
+      `Added job with ID ${j.id} to jobSpec: ` +
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
@@ -573,42 +574,44 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     });
   }
 
-  public static async requestChainedJobs<Pipes>({
+  public static async requestChainedJobs<JobSpecs>({
     jobGroupId,
     jobs,
     jobConnectors,
   }: {
     jobGroupId: string;
     jobs: {
-      [K in keyof CheckArray<Pipes>]: PipeAndJobParams<CheckArray<Pipes>[K]>;
+      [K in keyof CheckArray<JobSpecs>]: JobSpecAndJobParams<
+        CheckArray<JobSpecs>[K]
+      >;
     };
 
     jobConnectors: {
       from:
-        | ZZPipe<any, any, any, any>
+        | ZZJobSpec<any, any, any, any>
         | [
-            ZZPipe<any, any, any, any>,
+            ZZJobSpec<any, any, any, any>,
             (
-              | keyof InferStreamSetType<CheckPipe<Pipes>["outputDefSet"]>
+              | keyof InferStreamSetType<CheckJobSpec<JobSpecs>["outputDefSet"]>
               | "default"
             )
           ];
 
       to:
-        | ZZPipe<any, any, any, any>
+        | ZZJobSpec<any, any, any, any>
         | [
-            ZZPipe<any, any, any, any>,
+            ZZJobSpec<any, any, any, any>,
             (
-              | keyof InferStreamSetType<CheckPipe<Pipes>["outputDefSet"]>
+              | keyof InferStreamSetType<CheckJobSpec<JobSpecs>["outputDefSet"]>
               | "default"
             )
           ];
     }[];
   }) {
     const inOverridesByIndex = [] as {
-      [K in keyof CheckArray<Pipes>]: Partial<
+      [K in keyof CheckArray<JobSpecs>]: Partial<
         Record<
-          keyof CheckPipe<CheckArray<Pipes>[K]>["inputDefSet"]["defs"],
+          keyof CheckJobSpec<CheckArray<JobSpecs>[K]>["inputDefSet"]["defs"],
           string
         >
       >;
@@ -616,7 +619,7 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
     const outOverridesByIndex = [] as {
       [K in number]: Partial<
         Record<
-          keyof CheckPipe<CheckArray<Pipes>[K]>["outputDefSet"]["defs"],
+          keyof CheckJobSpec<CheckArray<JobSpecs>[K]>["outputDefSet"]["defs"],
           string
         >
       >;
@@ -638,48 +641,48 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       const fromKeyStr = String(fromKey);
       const toKeyStr = String(toKey);
 
-      const fromJobIndex = (jobs as PipeAndJobParams<unknown>[]).findIndex(
-        (j) => j.pipe === fromP
+      const fromJobIndex = (jobs as JobSpecAndJobParams<unknown>[]).findIndex(
+        (j) => j.spec === fromP
       );
-      const toJobIndex = (jobs as PipeAndJobParams<unknown>[]).findIndex(
-        (j) => j.pipe === toP
+      const toJobIndex = (jobs as JobSpecAndJobParams<unknown>[]).findIndex(
+        (j) => j.spec === toP
       );
 
       if (fromJobIndex === -1) {
         throw new Error(
-          `Invalid jobConnector: ${fromP.pipeName}/${String(fromKey)} >> ${
-            toP.pipeName
+          `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
+            toP.name
           }/${String(toKey)}: "from" job not found.`
         );
       }
       const fromJobDecs = jobs[fromJobIndex];
       if (toJobIndex === -1) {
         throw new Error(
-          `Invalid jobConnector: ${fromP.pipeName}/${String(fromKey)} >> ${
-            toP.pipeName
+          `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
+            toP.name
           }/${String(toKey)}: "to" job not found.`
         );
       }
       const toJobDesc = jobs[toJobIndex];
-      if (!fromJobDecs.pipe.outputDefSet.hasDef(fromKeyStr)) {
+      if (!fromJobDecs.spec.outputDefSet.hasDef(fromKeyStr)) {
         throw new Error(
           `Invalid jobConnector: ${fromP}/${String(fromKey)} >> ${
-            toP.pipeName
+            toP.name
           }/${String(toKey)}: "from" key not found.`
         );
       }
-      if (!toJobDesc.pipe.inputDefSet.hasDef(toKeyStr)) {
+      if (!toJobDesc.spec.inputDefSet.hasDef(toKeyStr)) {
         throw new Error(
           `Invalid jobConnector: ${fromP}/${String(fromKey)} >> ${
-            toP.pipeName
+            toP.name
           }/${String(toKey)}: "to" key not found.`
         );
       }
 
-      const fromDef = fromJobDecs.pipe.outputDefSet.getDef(fromKeyStr);
-      const toDef = toJobDesc.pipe.inputDefSet.getDef(toKeyStr);
+      const fromDef = fromJobDecs.spec.outputDefSet.getDef(fromKeyStr);
+      const toDef = toJobDesc.spec.inputDefSet.getDef(toKeyStr);
       if (hashDef(fromDef) !== hashDef(toDef)) {
-        const msg = `Streams ${fromP.pipeName}.${fromKeyStr} and ${toP.pipeName}.${toKeyStr} are incompatible.`;
+        const msg = `Streams ${fromP.name}.${fromKeyStr} and ${toP.name}.${toKeyStr} are incompatible.`;
         console.error(
           msg,
           "Upstream schema: ",
@@ -694,11 +697,11 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
       const commonStreamName = deriveStreamId({
         groupId: `[${jobGroupId}]`,
         from: {
-          pipe: fromP,
+          jobSpec: fromP,
           key: fromKeyStr,
         },
         to: {
-          pipe: toP,
+          jobSpec: toP,
           key: toKeyStr,
         },
       });
@@ -716,24 +719,24 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
 
     // keep count of job with the same name
     const countByName: { [k: string]: number } = {};
-    const jobIdsByPipeName: { [k: string]: string[] } = {};
+    const jobIdsByJobSpecName: { [k: string]: string[] } = {};
 
     for (let i = 0; i < Object.keys(jobs).length; i++) {
       // calculate overrides based on jobConnectors
 
-      const { pipe, jobParams } = jobs[i];
+      const { spec: jobSpec, jobParams } = jobs[i];
 
-      if (!countByName[pipe.pipeName]) {
-        countByName[pipe.pipeName] = 0;
+      if (!countByName[jobSpec.name]) {
+        countByName[jobSpec.name] = 0;
       } else {
-        countByName[pipe.pipeName] += 1;
+        countByName[jobSpec.name] += 1;
       }
-      const jobId = `[${jobGroupId}]${pipe.pipeName}${
-        countByName[pipe.pipeName] > 0 ? `-${countByName[pipe.pipeName]}` : ""
+      const jobId = `[${jobGroupId}]${jobSpec.name}${
+        countByName[jobSpec.name] > 0 ? `-${countByName[jobSpec.name]}` : ""
       }`;
 
-      jobIdsByPipeName[pipe.pipeName] = [
-        ...(jobIdsByPipeName[pipe.pipeName] || []),
+      jobIdsByJobSpecName[jobSpec.name] = [
+        ...(jobIdsByJobSpecName[jobSpec.name] || []),
         jobId,
       ];
 
@@ -743,31 +746,31 @@ export class ZZPipe<P, IMap, OMap, TProgress = never> {
         inputStreamIdOverridesByKey: inOverridesByIndex[i],
         outputStreamIdOverridesByKey: outOverridesByIndex[i],
       };
-      await pipe._requestJob(jDef);
+      await jobSpec._requestJob(jDef);
     }
     console.log("countByName", countByName);
-    return { jobIdsByPipeName };
+    return { jobIdsByJobSpecName };
   }
 
   // toString
   public toString() {
-    return this.pipeName;
+    return this.name;
   }
 
   // convenient function
   public defineWorker<WP extends object>(
-    p: Omit<ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>, "pipe">
+    p: Omit<ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>, "jobSpec">
   ) {
     return new ZZWorkerDef<P, IMap, OMap, TProgress, WP>({
       ...p,
-      pipe: this,
+      jobSpec: this,
     });
   }
 
   public async defineAndStartWorker<WP extends object>({
     instanceParams,
     ...p
-  }: Omit<ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>, "pipe"> & {
+  }: Omit<ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>, "jobSpec"> & {
     instanceParams?: WP;
   }) {
     const workerDef = this.defineWorker(p);
@@ -783,40 +786,40 @@ function deriveStreamId<PP1, PP2>({
 }: {
   groupId: string;
   from?: {
-    pipe: CheckPipe<PP1>;
+    jobSpec: CheckJobSpec<PP1>;
     key: string;
   };
   to?: {
-    pipe: CheckPipe<PP2>;
+    jobSpec: CheckJobSpec<PP2>;
     key: string;
   };
 }) {
-  const fromStr = from ? `${from.pipe.pipeName}/${from.key}` : "(*)";
-  const toStr = to ? `${to.pipe.pipeName}/${to.key}` : "(*)";
+  const fromStr = from ? `${from.jobSpec.name}/${from.key}` : "(*)";
+  const toStr = to ? `${to.jobSpec.name}/${to.key}` : "(*)";
   return `stream-${groupId}::${fromStr}>>${toStr}`;
 }
 
 type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
 
-type PipeAndJobParams<Pipe> = {
-  pipe: CheckPipe<Pipe>;
-  jobParams: z.infer<CheckPipe<Pipe>["jobParamsDef"]>;
+type JobSpecAndJobParams<JobSpec> = {
+  spec: CheckJobSpec<JobSpec>;
+  jobParams: z.infer<CheckJobSpec<JobSpec>["jobParamsDef"]>;
   jobLabel?: string;
 };
 
-type PipeAndJobOutputKey<PP> =
+type JobSpecAndJobOutputKey<PP> =
   | [
-      CheckPipe<PP>,
-      keyof InferStreamSetType<CheckPipe<PP>["outputDefSet"]> | "default"
+      CheckJobSpec<PP>,
+      keyof InferStreamSetType<CheckJobSpec<PP>["outputDefSet"]> | "default"
     ]
-  | CheckPipe<PP>;
+  | CheckJobSpec<PP>;
 
-type PipeAndJobInputKey<PP> =
+type JobSpecAndJobInputKey<PP> =
   | [
-      CheckPipe<PP>,
-      keyof InferStreamSetType<CheckPipe<PP>["inputDefSet"]> | "default"
+      CheckJobSpec<PP>,
+      keyof InferStreamSetType<CheckJobSpec<PP>["inputDefSet"]> | "default"
     ]
-  | CheckPipe<PP>;
+  | CheckJobSpec<PP>;
 
 export async function sleep(ms: number) {
   return new Promise((resolve) => {

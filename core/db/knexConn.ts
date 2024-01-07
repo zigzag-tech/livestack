@@ -35,13 +35,13 @@ export const getDatabaseInstance = ({
 
 type JobUniqueId = {
   projectId: string;
-  pipeName: string;
+  specName: string;
   jobId: string;
 };
 
 export async function getJobRec<T>({
   projectId,
-  pipeName,
+  specName,
   jobId,
   dbConn,
 }: // jobStatus,
@@ -54,10 +54,10 @@ JobUniqueId & {
     .leftJoin("zz_job_status", function () {
       this.on("zz_jobs.job_id", "=", "zz_job_status.job_id");
       this.on("zz_jobs.project_id", "=", "zz_job_status.project_id");
-      this.on("zz_jobs.pipe_name", "=", "zz_job_status.pipe_name");
+      this.on("zz_jobs.spec_name", "=", "zz_job_status.spec_name");
     })
     .where("zz_jobs.project_id", "=", projectId)
-    .andWhere("zz_jobs.pipe_name", "=", pipeName)
+    .andWhere("zz_jobs.spec_name", "=", specName)
     .andWhere("zz_jobs.job_id", "=", jobId)
     .orderBy("zz_job_status.time_created", "desc")
     .first()) as
@@ -289,7 +289,7 @@ function convertMaybePrimtiveBack<T>(
 
 export async function updateJobStatus({
   projectId,
-  pipeName,
+  specName,
   jobId,
   dbConn,
   jobStatus,
@@ -300,7 +300,7 @@ export async function updateJobStatus({
   const q = dbConn("zz_job_status").insert<ZZJobStatusRec>({
     status_id: v4(),
     project_id: projectId,
-    pipe_name: pipeName,
+    spec_name: specName,
     job_id: jobId,
     status: jobStatus,
   });
@@ -310,7 +310,7 @@ export async function updateJobStatus({
 
 export async function ensureJobAndInitStatusRec<T>({
   projectId,
-  pipeName,
+  specName,
   jobId,
   dbConn,
   jobParams,
@@ -322,11 +322,11 @@ export async function ensureJobAndInitStatusRec<T>({
   const q = dbConn("zz_jobs")
     .insert<ZZJobRec<T>>({
       project_id: projectId,
-      pipe_name: pipeName,
+      spec_name: specName,
       job_id: jobId,
       job_params: handlePrimitive(jobParams),
     })
-    .onConflict(["project_id", "pipe_name", "job_id"])
+    .onConflict(["project_id", "spec_name", "job_id"])
     .ignore();
 
   // console.log(q.toString());
@@ -334,7 +334,7 @@ export async function ensureJobAndInitStatusRec<T>({
 
   await updateJobStatus({
     projectId,
-    pipeName,
+    specName,
     jobId,
     dbConn,
     jobStatus: "requested",

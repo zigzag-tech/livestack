@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const ZZJobUniqueId = z.object({
   project_id: z.string(),
-  pipe_name: z.string(),
+  spec_name: z.string(),
   job_id: z.string(),
 });
 

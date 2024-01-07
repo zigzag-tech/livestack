@@ -1,13 +1,13 @@
-import { UnknownPipe, ZZPipe } from "../microworkers/ZZPipe";
+import { UnknownJobSpec, ZZJobSpec } from "../microworkers/ZZJobSpec";
 import { z } from "zod";
 import { ZZWorkerDef } from "../microworkers/ZZWorker";
 
 export interface AttemptDef<
-  MaPipeDef extends UnknownPipe,
-  ParentP = z.infer<MaPipeDef["jobParamsDef"]>,
-  ParentO = z.infer<MaPipeDef["outputDef"]>
+  MaJobSpecDef extends UnknownJobSpec,
+  ParentP = z.infer<MaJobSpecDef["jobParamsDef"]>,
+  ParentO = z.infer<MaJobSpecDef["outputDef"]>
 > {
-  def: MaPipeDef;
+  def: MaJobSpecDef;
   timeout: number;
   transformInput: (params: ParentP) => Promise<ParentP> | ParentP;
   transformOutput: (
@@ -15,34 +15,34 @@ export interface AttemptDef<
   ) => Promise<ParentO> | ParentO;
 }
 export class ZZProgressiveAdaptiveTryWorkerDef<
-  MaPipe,
-  P = z.infer<MaPipe["jobParamsDef"]>,
-  O extends z.infer<MaPipe["outputDef"]> = z.infer<MaPipe["outputDef"]>
-> extends ZZWorkerDef<MaPipe, {}> {
-  attempts: AttemptDef<MaPipe>[];
+  MaJobSpec,
+  P = z.infer<MaJobSpec["jobParamsDef"]>,
+  O extends z.infer<MaJobSpec["outputDef"]> = z.infer<MaJobSpec["outputDef"]>
+> extends ZZWorkerDef<MaJobSpec, {}> {
+  attempts: AttemptDef<MaJobSpec>[];
   constructor({
     attempts,
     ultimateFallback,
-    pipe,
+    jobSpec,
   }: {
-    pipe: ZZPipe<MaPipe>;
-    attempts: AttemptDef<MaPipe>[];
+    jobSpec: ZZJobSpec<MaJobSpec>;
+    attempts: AttemptDef<MaJobSpec>[];
     ultimateFallback?: () => Promise<O>;
   }) {
     super({
-      pipe,
+      jobSpec,
       processor: async ({ logger, jobParams, spawnJob, jobId }) => {
         const genRetryFunction = ({
           def,
           transformInput,
           transformOutput,
-        }: AttemptDef<MaPipe>) => {
+        }: AttemptDef<MaJobSpec>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${def.name}`;
 
             const { nextOutput } = await spawnJob({
               jobId: childJobId,
-              def: def as ZZPipe<P, I, O, any, any, any>,
+              def: def as ZZJobSpec<P, I, O, any, any, any>,
               jobParams: (await transformInput(jobParams)) as P,
             });
 

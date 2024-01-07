@@ -7,19 +7,19 @@ exports.up = function (knex) {
     table.primary(["status_id"]);
     table.string("status_id").notNullable();
     table.string("project_id").notNullable();
-    table.string("pipe_name").notNullable();
+    table.string("spec_name").notNullable();
     table.string("job_id").notNullable();
     table.string("status").notNullable();
     table.timestamp("time_created").defaultTo(knex.fn.now());
 
     // add foreign key for primary key
     table
-      .foreign(["project_id", "pipe_name", "job_id"])
-      .references(["project_id", "pipe_name", "job_id"])
+      .foreign(["project_id", "spec_name", "job_id"])
+      .references(["project_id", "spec_name", "job_id"])
       .inTable("zz_jobs");
 
     // add index for primary key
-    table.index(["project_id", "pipe_name", "job_id"]);
+    table.index(["project_id", "spec_name", "job_id"]);
   });
 };
 

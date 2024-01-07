@@ -1,9 +1,9 @@
-import { ZZPipe } from "../microworkers/ZZPipe";
-import { PipeDef } from "../microworkers/PipeDef";
+import { ZZJobSpec } from "../microworkers/ZZJobSpec";
+import { JobSpecDef } from "../microworkers/JobSpecDef";
 import { z } from "zod";
 import { ZZEnv } from "../microworkers/ZZEnv";
 
-export class RunpodServerlessPipe<P extends object, O> extends ZZPipe<
+export class RunpodServerlessJobSpec<P extends object, O> extends ZZJobSpec<
   P,
   {
     runpodResult: O;
@@ -20,7 +20,7 @@ export class RunpodServerlessPipe<P extends object, O> extends ZZPipe<
   }: {
     serverlessEndpointId: string;
     runpodApiKey: string;
-    def: PipeDef<P, O>;
+    def: JobSpecDef<P, O>;
     zzEnv: ZZEnv;
   }) {
     super({
