@@ -109,7 +109,6 @@ export class ZZStream<T> {
     this.uniqueName = uniqueName;
     this.zzEnv = zzEnv;
     this.hash = hashDef(this.def);
-    console.debug("ZZStream constructor", this.uniqueName);
     const { nextValue } = createLazyNextValueGenerator(this.valueObsrvable);
     this.nextValue = nextValue;
     this.logger = logger;
@@ -156,7 +155,7 @@ export class ZZStream<T> {
       datapointId,
     });
 
-    const { channelId, clients } = await this.getPubSubClientsById({
+    const { channelId, clients } = await this.getStreamClientsById({
       queueId: this.uniqueName,
     });
 
@@ -184,7 +183,7 @@ export class ZZStream<T> {
     return this.ensureValueObservable();
   }
 
-  private getPubSubClientsById({ queueId }: { queueId: string }) {
+  private getStreamClientsById({ queueId }: { queueId: string }) {
     const id = `zzmsgq:${this.zzEnv.projectId}--${queueId!}`;
     if (!PUBSUB_BY_ID[id]) {
       const sub = new Redis(this.zzEnv.redisConfig);
@@ -204,7 +203,7 @@ export class ZZStream<T> {
   }
 
   public sub({ processor }: { processor: (message: T) => void }) {
-    const { clients, channelId } = this.getPubSubClientsById({
+    const { clients, channelId } = this.getStreamClientsById({
       queueId: this.uniqueName,
     });
 
