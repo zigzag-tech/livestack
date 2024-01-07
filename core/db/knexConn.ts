@@ -6,7 +6,6 @@ import {
 import knex, { Knex } from "knex";
 import { ZZJobRec, ZZJobStatusRec, ZZJobStatus } from "./rec_types";
 import { v4 } from "uuid";
-import longStringTruncator from "../utils/longStringTruncator";
 
 export const getDatabaseInstance = ({
   host,

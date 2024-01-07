@@ -76,7 +76,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     this.progressDef = progressDef || z.never();
 
     this.zzEnv = zzEnv || ZZEnv.global();
-    this.logger = getLogger(`jobSpec:${this.name}`);
+    this.logger = getLogger(`spec:${this.name}`);
 
     this.inputDefSet = new StreamDefSet({
       defs: input,
@@ -719,7 +719,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
 
     // keep count of job with the same name
     const countByName: { [k: string]: number } = {};
-    const jobIdsByJobSpecName: { [k: string]: string[] } = {};
+    const jobIdsBySpecName: { [k: string]: string[] } = {};
 
     for (let i = 0; i < Object.keys(jobs).length; i++) {
       // calculate overrides based on jobConnectors
@@ -735,8 +735,8 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         countByName[jobSpec.name] > 0 ? `-${countByName[jobSpec.name]}` : ""
       }`;
 
-      jobIdsByJobSpecName[jobSpec.name] = [
-        ...(jobIdsByJobSpecName[jobSpec.name] || []),
+      jobIdsBySpecName[jobSpec.name] = [
+        ...(jobIdsBySpecName[jobSpec.name] || []),
         jobId,
       ];
 
@@ -749,7 +749,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       await jobSpec._requestJob(jDef);
     }
     console.log("countByName", countByName);
-    return { jobIdsByJobSpecName };
+    return { jobIdsBySpecName };
   }
 
   // toString
