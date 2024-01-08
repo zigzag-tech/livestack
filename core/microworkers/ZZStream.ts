@@ -112,6 +112,22 @@ export class ZZStream<T> {
     this.logger = logger;
   }
 
+  public lastValue = async () => {
+    const { channelId, clients } = getStreamClientsById({
+      queueId: this.uniqueName,
+      zzEnv: this.zzEnv,
+    });
+    const stream = await clients.sub.xrevrange(channelId, "+", "-", "COUNT", 1);
+    if (stream && stream.length > 0) {
+      const messages = stream[0][1]; // Assuming single stream
+      if (messages.length > 0) {
+        const data: T = parseMessageData(messages);
+        return data;
+      }
+    }
+    return null;
+  };
+
   public async pub({
     message,
     jobInfo,
@@ -225,6 +241,8 @@ export class ZZStreamSubscriber<T> {
       while (!this.isUnsubscribed) {
         // XREAD with block and count parameters
         const stream = await clients.sub.xread(
+          "COUNT",
+          1,
           "BLOCK",
           1000, // Set a timeout for blocking, e.g., 1000 milliseconds
           "STREAMS",
@@ -235,7 +253,7 @@ export class ZZStreamSubscriber<T> {
           const messages = stream[0][1]; // Assuming single stream
           for (let message of messages) {
             this.cursor = message[0];
-            const data: T = this.parseMessageData(message[1]);
+            const data: T = parseMessageData(message[1]);
             subscriber.next(data);
           }
         }
@@ -247,25 +265,6 @@ export class ZZStreamSubscriber<T> {
       clients.sub.disconnect();
       subscriber.complete();
       subscriber.unsubscribe();
-    }
-  }
-
-  private parseMessageData(data: Array<any>): T {
-    // Look for the 'data' key and its subsequent value in the flattened array
-    const dataIdx = data.indexOf("data");
-    if (dataIdx === -1 || dataIdx === data.length - 1) {
-      console.error("data:", data);
-      throw new Error("Data key not found in stream message or is malformed");
-    }
-
-    const jsonData = data[dataIdx + 1];
-
-    // Parse the JSON data (assuming data is stored as a JSON string)
-    try {
-      const parsedData = customParse(jsonData);
-      return parsedData as T;
-    } catch (error) {
-      throw new Error(`Error parsing data from stream: ${error}`);
     }
   }
 
@@ -288,6 +287,25 @@ export class ZZStreamSubscriber<T> {
     }
     return this._nextValue();
   };
+}
+
+function parseMessageData<T>(data: Array<any>): T {
+  // Look for the 'data' key and its subsequent value in the flattened array
+  const dataIdx = data.indexOf("data");
+  if (dataIdx === -1 || dataIdx === data.length - 1) {
+    console.error("data:", data);
+    throw new Error("Data key not found in stream message or is malformed");
+  }
+
+  const jsonData = data[dataIdx + 1];
+
+  // Parse the JSON data (assuming data is stored as a JSON string)
+  try {
+    const parsedData = customParse(jsonData);
+    return parsedData as T;
+  } catch (error) {
+    throw new Error(`Error parsing data from stream: ${error}`);
+  }
 }
 
 // TODO: make internal

@@ -219,6 +219,11 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       type: "in",
     });
 
+    const lastV = await stream.lastValue();
+    if (lastV && lastV.terminate) {
+      throw new Error("Can not send input to a terminated stream!");
+    }
+
     await stream.pub({
       message: {
         data,
@@ -233,7 +238,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       type: "in",
       key: key || ("default" as keyof IMap),
     });
-    const messageId = v4();
+    
     await stream.pub({
       message: {
         terminate: true,
