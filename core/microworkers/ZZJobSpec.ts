@@ -207,7 +207,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   async sendInputToJob({
     jobId,
     data,
-    key,
+    key = "default" as keyof IMap,
   }: {
     jobId: string;
     data: IMap[keyof IMap];
@@ -215,7 +215,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   }) {
     const stream = await this.getJobStream({
       jobId,
-      key: key || ("default" as keyof IMap),
+      key,
       type: "in",
     });
 
@@ -226,6 +226,11 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       (await redis.get(`terminated__${jobId}/${String(key)}`)) === "true";
     await redis.disconnect();
     if (isTerminated) {
+      this.logger.error(
+        `Cannot send input to a terminated stream! jobId: ${jobId}, key: ${String(
+          key
+        )}`
+      );
       throw new Error("Cannot send input to a terminated stream!");
     }
 

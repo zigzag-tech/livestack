@@ -136,6 +136,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
         isReady: true,
         key: key ? key : "default",
       });
+
       const r = await (await this._ensureInputStreamFn(key)).nextValue();
       return r as IMap[K] | null;
     };
@@ -220,7 +221,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
         key: key! as keyof IMap,
       }) as Promise<ZZStream<WrapTerminatorAndDataId<IMap[K]>>>;
 
-      const inputObservableUntracked = new Observable<IMap[K]>((s) => {
+      const inputObservableUntracked = new Observable<IMap[K] | null>((s) => {
         streamP.then((stream) => {
           const sub = stream.subFromBeginning();
           const obs = sub.valueObservable.pipe(
@@ -230,6 +231,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
             if (n) {
               s.next(n);
             } else {
+              s.next(null);
               s.complete();
             }
           });
@@ -347,6 +349,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       }
 
       const processedR = await processor(this);
+      // console.debug("processed", this.jobId);
 
       // wait as long as there are still subscribers
       await Promise.all(
@@ -380,7 +383,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       }
 
       // await job.updateProgress(processedR as object);
-
+      // console.debug("signalOutputEnd", this.jobId);
       await this.signalOutputEnd();
 
       // if (processedR) {
@@ -414,11 +417,11 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   };
 
   signalOutputEnd = async (key?: keyof OMap) => {
-    console.debug("signalOutputEnd", {
-      jobSpec: this.spec.name,
-      jobId: this.jobId,
-      key,
-    });
+    // console.debug("signalOutputEnd", {
+    //   jobSpec: this.spec.name,
+    //   jobId: this.jobId,
+    //   key,
+    // });
     const outputStream = await this.spec.getJobStream({
       jobId: this.jobId,
       type: "out",
