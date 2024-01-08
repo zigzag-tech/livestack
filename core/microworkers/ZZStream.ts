@@ -2,7 +2,6 @@ import { ZodType } from "zod";
 import { ZZEnv } from "./ZZEnv";
 
 import { createHash } from "crypto";
-import { createLazyNextValueGenerator } from "../realtime/pubsub";
 import { getLogger } from "../utils/createWorkerLogger";
 import { z } from "zod";
 import { addDatapoint, ensureStreamRec } from "../db/knexConn";
@@ -32,6 +31,7 @@ export namespace ZZStream {
 // cursor based redis stream subscriber
 import { Redis } from "ioredis";
 import { Observable, Subscriber } from "rxjs";
+import { createLazyNextValueGenerator } from "../realtime/pubsub";
 
 export class ZZStream<T> {
   public readonly def: ZodType<T>;
@@ -170,20 +170,43 @@ export class ZZStream<T> {
     }
   }
 
-  public sub() {
-    return new ZZStreamSubscriber({ stream: this, zzEnv: this.zzEnv });
+  public subFromNow() {
+    return new ZZStreamSubscriber({
+      stream: this,
+      zzEnv: this.zzEnv,
+      initialCursor: "$",
+    });
+  }
+
+  public subFromBeginning() {
+    return new ZZStreamSubscriber({
+      stream: this,
+      zzEnv: this.zzEnv,
+      initialCursor: "0",
+    });
   }
 }
 
 export class ZZStreamSubscriber<T> {
   private zzEnv: ZZEnv;
   private stream: ZZStream<T>;
-  private cursor: string = "0"; // Initial cursor position
+  private cursor: string;
   private _valueObservable: Observable<T> | null = null;
+  private isUnsubscribed: boolean = false;
+  private _nextValue: (() => Promise<T>) | null = null;
 
-  constructor({ stream, zzEnv }: { stream: ZZStream<T>; zzEnv: ZZEnv }) {
+  constructor({
+    stream,
+    zzEnv,
+    initialCursor,
+  }: {
+    stream: ZZStream<T>;
+    zzEnv: ZZEnv;
+    initialCursor: "0" | "$";
+  }) {
     this.stream = stream;
     this.zzEnv = zzEnv;
+    this.cursor = initialCursor;
   }
 
   private initializeObservable() {
@@ -199,11 +222,11 @@ export class ZZStreamSubscriber<T> {
     });
 
     try {
-      while (true) {
+      while (!this.isUnsubscribed) {
         // XREAD with block and count parameters
         const stream = await clients.sub.xread(
           "BLOCK",
-          0,
+          1000, // Set a timeout for blocking, e.g., 1000 milliseconds
           "STREAMS",
           channelId,
           this.cursor
@@ -219,6 +242,11 @@ export class ZZStreamSubscriber<T> {
       }
     } catch (error) {
       subscriber.error(error);
+    } finally {
+      // Perform cleanup here if necessary
+      clients.sub.disconnect();
+      subscriber.complete();
+      subscriber.unsubscribe();
     }
   }
 
@@ -248,15 +276,18 @@ export class ZZStreamSubscriber<T> {
     return this._valueObservable!;
   }
 
-  private _nextValue: (() => Promise<T>) | null = null;
+  public unsubscribe = () => {
+    this.isUnsubscribed = true;
+    // Perform any additional cleanup or resource release here if necessary
+  };
 
-  public get nextValue() {
+  public nextValue = () => {
     if (!this._nextValue) {
       const { nextValue } = createLazyNextValueGenerator(this.valueObservable);
-      this._nextValue = nextValue;
+      this._nextValue = () => nextValue();
     }
-    return this._nextValue;
-  }
+    return this._nextValue();
+  };
 }
 
 // TODO: make internal

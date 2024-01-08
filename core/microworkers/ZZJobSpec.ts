@@ -18,8 +18,12 @@ import longStringTruncator from "../utils/longStringTruncator";
 
 import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
-import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
-import { ZZStream, hashDef } from "./ZZStream";
+import {
+  WrapTerminatorAndDataId,
+  wrapStreamSubscriberWithTermination,
+  wrapTerminatorAndDataId,
+} from "../utils/io";
+import { ZZStream, ZZStreamSubscriber, hashDef } from "./ZZStream";
 import { InferStreamSetType, StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -290,32 +294,6 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     }
   };
 
-  public subscribeToJobOutputTillTermination({
-    jobId,
-    onMessage,
-  }: {
-    jobId: string;
-    onMessage: (
-      m:
-        | { terminate: false; data: OMap[keyof OMap] }
-        | {
-            terminate: true;
-          }
-    ) => void;
-  }) {
-    return new Promise<void>((resolve, reject) => {
-      this.subForJobOutput({
-        jobId,
-        onMessage: (msg) => {
-          if (msg.terminate) {
-            resolve();
-          }
-          onMessage(msg);
-        },
-      });
-    });
-  }
-
   private streamIdOverridesByKeyByTypeByJobId: {
     [jobId: string]: {
       in: Partial<Record<keyof IMap, string>> | null;
@@ -440,52 +418,38 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     return stream as ZZStream<WrapTerminatorAndDataId<T>>;
   };
 
-  public async subForJobOutput({
+  public forJobOutput({
     jobId,
-    onMessage,
     key,
+    from = "beginning",
   }: {
     jobId: string;
     key?: keyof OMap;
-    onMessage: (
-      m:
-        | { terminate: false; data: OMap[keyof OMap] }
-        | {
-            terminate: true;
-          }
-    ) => void;
+    from?: "beginning" | "now";
   }) {
-    const stream = await this.getJobStream({
-      jobId,
-      type: "out",
-      key: key || ("default" as keyof OMap),
-    });
-    return await stream.sub({
-      processor: (msg) => {
-        if (msg.terminate) {
-          onMessage(msg);
+    const subuscriberP = new Promise<
+      ZZStreamSubscriber<WrapTerminatorAndDataId<OMap[keyof OMap]>>
+    >((resolve, reject) => {
+      this.getJobStream({
+        jobId,
+        type: "out",
+        key: key || ("default" as keyof OMap),
+      }).then((stream) => {
+        let subscriber: ZZStreamSubscriber<
+          WrapTerminatorAndDataId<OMap[keyof OMap]>
+        >;
+        if (from === "beginning") {
+          subscriber = stream.subFromBeginning();
+        } else if (from === "now") {
+          subscriber = stream.subFromNow();
         } else {
-          onMessage({
-            data: msg.data,
-            terminate: false,
-          });
+          throw new Error(`Invalid "from" ${from}`);
         }
-      },
+        resolve(subscriber);
+      });
     });
-  }
 
-  public async nextOutputForJob(jobId: string, key?: keyof OMap) {
-    const stream = await this.getJobStream({
-      jobId,
-      type: "out",
-      key: (key || "default") as keyof OMap,
-    });
-    const v = await stream.nextValue();
-    if (v.terminate) {
-      return null;
-    } else {
-      return v.data;
-    }
+    return wrapStreamSubscriberWithTermination(subuscriberP);
   }
 
   private async _requestJob({
@@ -510,48 +474,49 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       );
     }
     const projectId = this.zzEnv.projectId;
+    if (this.zzEnv.db) {
+      await this.zzEnv.db.transaction(async (trx) => {
+        await ensureJobAndInitStatusRec({
+          projectId,
+          specName: this.name,
+          jobId,
+          dbConn: trx,
+          jobParams: jobParams,
+        });
 
-    await this.zzEnv.db.transaction(async (trx) => {
-      await ensureJobAndInitStatusRec({
-        projectId,
-        specName: this.name,
-        jobId,
-        dbConn: trx,
-        jobParams: jobParams,
+        for (const [key, streamId] of _.entries(inputStreamIdOverridesByKey)) {
+          await ensureStreamRec({
+            projectId,
+            streamId: streamId as string,
+            dbConn: trx,
+          });
+          await ensureJobStreamConnectorRec({
+            projectId,
+            streamId: streamId as string,
+            dbConn: trx,
+            jobId,
+            key,
+            connectorType: "in",
+          });
+        }
+
+        for (const [key, streamId] of _.entries(outputStreamIdOverridesByKey)) {
+          await ensureStreamRec({
+            projectId,
+            streamId: streamId as string,
+            dbConn: trx,
+          });
+          await ensureJobStreamConnectorRec({
+            projectId,
+            streamId: streamId as string,
+            dbConn: trx,
+            jobId,
+            key,
+            connectorType: "out",
+          });
+        }
       });
-
-      for (const [key, streamId] of _.entries(inputStreamIdOverridesByKey)) {
-        await ensureStreamRec({
-          projectId,
-          streamId: streamId as string,
-          dbConn: trx,
-        });
-        await ensureJobStreamConnectorRec({
-          projectId,
-          streamId: streamId as string,
-          dbConn: trx,
-          jobId,
-          key,
-          connectorType: "in",
-        });
-      }
-
-      for (const [key, streamId] of _.entries(outputStreamIdOverridesByKey)) {
-        await ensureStreamRec({
-          projectId,
-          streamId: streamId as string,
-          dbConn: trx,
-        });
-        await ensureJobStreamConnectorRec({
-          projectId,
-          streamId: streamId as string,
-          dbConn: trx,
-          jobId,
-          key,
-          connectorType: "out",
-        });
-      }
-    });
+    }
 
     const j = await this._rawQueue.add(
       jobId,

@@ -217,7 +217,8 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
 
       const inputObservableUntracked = new Observable<IMap[K]>((s) => {
         streamP.then((stream) => {
-          const obs = stream.valueObsrvable.pipe(
+          const sub = stream.subFromBeginning();
+          const obs = sub.valueObservable.pipe(
             map((x) => (x.terminate ? null : x.data))
           );
           obs.subscribe((n) => {
@@ -332,11 +333,13 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     );
 
     try {
-      await updateJobStatus({
-        ...jId,
-        dbConn: this.zzEnv.db,
-        jobStatus: "running",
-      });
+      if (this.zzEnv.db) {
+        await updateJobStatus({
+          ...jId,
+          dbConn: this.zzEnv.db,
+          jobStatus: "running",
+        });
+      }
 
       const processedR = await processor(this);
 
@@ -363,12 +366,16 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
         await this.emitOutput(processedR);
       }
 
+      if (this.zzEnv.db) {
+        await updateJobStatus({
+          ...jId,
+          dbConn: this.zzEnv.db,
+          jobStatus: "completed",
+        });
+      }
+
       // await job.updateProgress(processedR as object);
-      await updateJobStatus({
-        ...jId,
-        dbConn: this.zzEnv.db,
-        jobStatus: "completed",
-      });
+
       await this.signalOutputEnd();
 
       // if (processedR) {
@@ -376,21 +383,25 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       // }
     } catch (e: any) {
       if (e instanceof WaitingChildrenError) {
-        await updateJobStatus({
-          projectId,
-          specName: this.spec.name,
-          jobId: job.id!,
-          dbConn: this.zzEnv.db,
-          jobStatus: "waiting_children",
-        });
+        if (this.zzEnv.db) {
+          await updateJobStatus({
+            projectId,
+            specName: this.spec.name,
+            jobId: job.id!,
+            dbConn: this.zzEnv.db,
+            jobStatus: "waiting_children",
+          });
+        }
       } else {
-        await updateJobStatus({
-          projectId,
-          specName: this.spec.name,
-          jobId: job.id!,
-          dbConn: this.zzEnv.db,
-          jobStatus: "failed",
-        });
+        if (this.zzEnv.db) {
+          await updateJobStatus({
+            projectId,
+            specName: this.spec.name,
+            jobId: job.id!,
+            dbConn: this.zzEnv.db,
+            jobStatus: "failed",
+          });
+        }
       }
       throw e;
       // }
