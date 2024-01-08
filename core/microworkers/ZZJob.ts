@@ -38,18 +38,12 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   readonly jobParams: P;
   readonly logger: ReturnType<typeof getLogger>;
   readonly spec: ZZJobSpec<P, IMap, OMap, TProgress>;
+  readonly nextInput: <K extends keyof IMap>(
+    key?: K
+  ) => Promise<IMap[K] | null>;
   // New properties for subscriber tracking
 
   emitOutput: (o: OMap[keyof OMap]) => Promise<void>;
-  nextInput = async <K extends keyof IMap>(key?: K) => {
-    await this.setJobReadyForInputsInRedis({
-      redisConfig: this.zzEnv.redisConfig,
-      jobId: this.jobId,
-      isReady: true,
-      key: key ? key : "default",
-    });
-    return await (await this._ensureInputStreamFn(key)).nextValue();
-  };
 
   inputObservableFor = (key?: keyof IMap) => {
     return this._ensureInputStreamFn(key).trackedObservable;
@@ -135,9 +129,20 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
 
-    this.emitOutput = async (
-      o: OMap[keyof OMap],
-      key: keyof OMap = "default" as keyof OMap
+    this.nextInput = async <K extends keyof IMap>(key?: K) => {
+      await this.setJobReadyForInputsInRedis({
+        redisConfig: this.zzEnv.redisConfig,
+        jobId: this.jobId,
+        isReady: true,
+        key: key ? key : "default",
+      });
+      const r = await (await this._ensureInputStreamFn(key)).nextValue();
+      return r as IMap[K] | null;
+    };
+
+    this.emitOutput = async <K extends keyof OMap>(
+      o: OMap[K],
+      key: K = "default" as K
     ) => {
       let { largeFilesToSave, newObj } = identifyLargeFiles(o);
 

@@ -721,7 +721,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       };
       await jobSpec._requestJob(jDef);
     }
-    console.log("countByName", countByName);
+    // console.log("countByName", countByName);
     return { jobIdsBySpecName };
   }
 
