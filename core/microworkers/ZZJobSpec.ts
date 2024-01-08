@@ -219,9 +219,14 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       type: "in",
     });
 
-    const lastV = await stream.lastValue();
-    if (lastV && lastV.terminate) {
-      throw new Error("Can not send input to a terminated stream!");
+    // const lastV = await stream.lastValue();
+    // mark job terminated in redis key value store
+    const redis = new Redis(this.zzEnv.redisConfig);
+    const isTerminated =
+      (await redis.get(`terminated__${jobId}/${String(key)}`)) === "true";
+    await redis.disconnect();
+    if (isTerminated) {
+      throw new Error("Cannot send input to a terminated stream!");
     }
 
     await stream.pub({
@@ -238,12 +243,17 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       type: "in",
       key: key || ("default" as keyof IMap),
     });
-    
+
     await stream.pub({
       message: {
         terminate: true,
       },
     });
+
+    // mark job terminated in redis key value store
+    const redis = new Redis(this.zzEnv.redisConfig);
+    await redis.set(`terminated__${jobId}/${String(key)}`, "true");
+    await redis.disconnect();
   }
 
   public async waitForJobReadyForInputs({
