@@ -117,9 +117,7 @@ export class ZZStream<T> {
       queueId: this.uniqueName,
       zzEnv: this.zzEnv,
     });
-    console.time("xrevrange")
     const stream = await clients.sub.xrevrange(channelId, "+", "-", "COUNT", 1);
-    console.timeEnd("xrevrange")
     if (stream && stream.length > 0) {
       const messages = stream[0][1]; // Assuming single stream
       if (messages.length > 0) {

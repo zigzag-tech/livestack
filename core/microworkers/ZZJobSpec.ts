@@ -252,7 +252,8 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
 
     // mark job terminated in redis key value store
     const redis = new Redis(this.zzEnv.redisConfig);
-    await redis.set(`terminated__${jobId}/${String(key)}`, "true");
+    // expire in 10 minutes
+    await redis.set(`terminated__${jobId}/${String(key)}`, "true", "EX", 600);
     await redis.disconnect();
   }
 
