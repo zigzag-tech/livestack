@@ -37,7 +37,6 @@ Livestack provides:
   -  live speech transcription.
   -  live RAG ingestion and consumption.
   -  realtime image generation.
-  -  etc.
 - Patterns and templates for common realtime AI apps.
 
 
