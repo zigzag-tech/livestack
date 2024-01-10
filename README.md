@@ -11,7 +11,7 @@
 
 <p align="center">
 <img src="assets/intro.gif"
-     width="70%" height="auto" hspace="10" />
+     width="70%" height="auto" />
 </p>
 
 ## Intro
