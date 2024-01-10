@@ -26,7 +26,7 @@ Livestack provides:
 - A simple setup process for real-time AI apps.
 - A real-time architecture for immediate user interaction responses.
 - Full history tracking of all app activities for easy debugging and AI improvement.
-- Ready-to-use AI components for tasks like live transcription and rapid image generation.
+- Ready-to-use AI components for rapid prototyping, such live transcription and near-realtime image generation.
 
 With Livestack, creating advanced AI applications is now easier and more accessible. It's not just for expert developers; even those with basic coding skills can get involved. This opens up more opportunities for everyone to build AI tools that can really make a difference in our daily lives.
 
