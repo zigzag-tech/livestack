@@ -7,7 +7,7 @@
 <img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat" alt="npm version" />
 </p>
 
-<p align="center">A realtime first, proactive AI application framework.</p>
+<p align="center">A realtime first, proactive AI orchestration framework.</p>
 
 <p align="center">
 <img src="assets/intro.gif"
@@ -37,7 +37,8 @@ Livestack provides:
   -  live speech transcription.
   -  live RAG ingestion and consumption.
   -  realtime image generation.
-- Patterns and templates for common realtime AI apps.
+- Patterns and templates for common realtime AI backend scenarios.
+- Support for both LLM and image generation models.
 
 
 ## Getting Started
