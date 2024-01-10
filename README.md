@@ -7,7 +7,7 @@
 <img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat" alt="npm version" />
 </p>
 
-<p align="center">A realtime-first & proactive AI application framework.</p>
+<p align="center">A realtime first, proactive AI application framework.</p>
 
 <p align="center">
 <img src="assets/intro.gif"
@@ -21,7 +21,7 @@ We foresee a future where AI evolves beyond just passive, command-driven chatbot
 
 At present, however, to realize such AI applications is a complex task. Popular AI frameworks today aren't well-suited for real-time interaction and often require extensive coding. 
 
-Livestack aims to democratize this process, making it approachable not just for seasoned developers but also for those with basic coding skills, and ultimately, for everyone.
+Livestack aims to democratize this process, making it approachable not just for seasoned developers but also for those with basic coding skills, and eventually, for everyone.
 
 We look forward to seeing your next big idea come to life with Livestack!
 
