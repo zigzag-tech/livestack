@@ -16,14 +16,16 @@
 
 ## Why Livestack?
 
-We envision a future where AI applications are more than just passive, command-driven chatbots. they'll become integral and helpful components of our daily lives, attuned to our individual needs and the specific context of our activities. They'll respond to our direct interactions and adapt to our preferences as we go about our day. They'll be able to anticipate our needs and provide us with the information and services we need, exactly when we need them. Expect improvement of our lives and productivity by orders of magnitudes in the years to come.
 
-Livestack is the first framework built to make this vision a reality, by providing
+We're shaping a future where AI is more than just basic chatbots. They'll be key parts of our everyday life, tailored to our needs and daily situations. These AIs will interact with us directly, adapting as our day progresses, and they'll anticipate and fulfill our needs just in time. This will greatly enhance our lives and productivity.
 
-- A easy-to-use scaffolding process to get started with your realtime AI application
-- A complete history of all application executions, including all user interactions and AI responses, making it easy to debug, run what-if scenarios, and improve your AI models
-- A realtime-first architecture, allowing you to build applications that respond to user interactions in real time, without the need for polling or other workarounds
-- Off-the-shelf components and services for common AI tasks, such as live transcription, near-realtime image generation, and more
+Livestack is pioneering this vision with:
+
+- A simple setup process for real-time AI apps
+- Full history tracking of all app activities for easy debugging and AI improvement.
+- A real-time architecture for immediate user interaction responses.
+- Ready-to-use AI components for tasks like live transcription and quick image generation."
+
 
 ## Getting Started
 
