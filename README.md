@@ -21,7 +21,7 @@ We envision a future where AI is more than just basic chatbots. They'll be key p
 
 Building these AI applications, however, is a complex task. Popular AI frameworks today aren't well-suited for real-time interaction and often require extensive coding. Livestack aims to democratize this process, making it accessible not just for seasoned developers but also for those with basic coding skills, and ultimately, for everyone.
 
-Livestack is pioneering the vision of realtime AI by providing:
+Livestack provides:
 
 - A simple setup process for real-time AI apps.
 - A real-time architecture for immediate user interaction responses.
