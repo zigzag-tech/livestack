@@ -27,7 +27,7 @@ We look forward to seeing your next big idea come to life with Livestack!
 
 ## Features
 
-Livestack provides:
+Livestack aims at providing:
 
 - A dead simple setup process for new AI application.
 - Stream-based architecture for efficient real-time data ingestion and consumption.
