@@ -21,18 +21,22 @@ We envision a future where AI is more than just passive, command-driven chatbots
 
 Building these AI applications, however, is a complex task. Popular AI frameworks today aren't well-suited for real-time interaction and often require extensive coding. Livestack aims to democratize this process, making it accessible not just for seasoned developers but also for those with basic coding skills, and ultimately, for everyone.
 
+We look forward to seeing your next big idea come to life with Livestack!
+
+## Features
+
 Livestack provides:
 
 - A simple setup process for real-time AI apps.
 - A stream-based, reactive architecture for realtime user interaction responses.
 - Full history tracking of all in-app activities for easy debugging and AI improvement.
+- Common templates and patterns for realtime AI apps.
 - Ready-to-use AI components for rapid prototyping, such as:
   -  live speech transcription.
   -  live RAG ingestion and consumption.
   -  realtime image generation.
   -  etc.
 
-We look forward to seeing your next big idea come to life with Livestack!
 
 ## Getting Started
 
