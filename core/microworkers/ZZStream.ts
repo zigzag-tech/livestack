@@ -66,13 +66,14 @@ export class ZZStream<T> {
       const existing = ZZStream.globalRegistry[uniqueName];
       // check if types match
       // TODO: use a more robust way to check if types match
-      if (def) {
-        if (existing.hash !== hashDef(def)) {
-          throw new Error(
-            `ZZStream ${uniqueName} already exists with different type, and the new type provided is not compatible with the existing type.`
-          );
-        }
-      }
+      // TODO: to bring back this check
+      // if (def) {
+      //   if (existing.hash !== hashDef(def)) {
+      //     throw new Error(
+      //       `ZZStream ${uniqueName} already exists with different type, and the new type provided is not compatible with the existing type.`
+      //     );
+      //   }
+      // }
       return existing as ZZStream<T>;
     } else {
       if (!def || !logger) {

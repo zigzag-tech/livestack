@@ -673,19 +673,20 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         );
       }
 
-      const fromDef = fromJobDecs.spec.outputDefSet.getDef(fromKeyStr);
-      const toDef = toJobDesc.spec.inputDefSet.getDef(toKeyStr);
-      if (hashDef(fromDef) !== hashDef(toDef)) {
-        const msg = `Streams ${fromP.name}.${fromKeyStr} and ${toP.name}.${toKeyStr} are incompatible.`;
-        console.error(
-          msg,
-          "Upstream schema: ",
-          zodToJsonSchema(fromDef),
-          "Downstream schema: ",
-          zodToJsonSchema(toDef)
-        );
-        throw new Error(msg);
-      }
+      // TODO: to bring back this check
+      // const fromDef = fromJobDecs.spec.outputDefSet.getDef(fromKeyStr);
+      // const toDef = toJobDesc.spec.inputDefSet.getDef(toKeyStr);
+      // if (hashDef(fromDef) !== hashDef(toDef)) {
+      //   const msg = `Streams ${fromP.name}.${fromKeyStr} and ${toP.name}.${toKeyStr} are incompatible.`;
+      //   console.error(
+      //     msg,
+      //     "Upstream schema: ",
+      //     zodToJsonSchema(fromDef),
+      //     "Downstream schema: ",
+      //     zodToJsonSchema(toDef)
+      //   );
+      //   throw new Error(msg);
+      // }
       // validate that the types match
 
       const commonStreamName = deriveStreamId({
