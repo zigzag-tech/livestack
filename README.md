@@ -31,7 +31,7 @@ Livestack provides:
 
 - A dead simple setup process for new AI application.
 - Stream-based architecture for efficient real-time data ingestion and consumption.
-- Reactive APIs enabling real-time, timebound user interactions and event-driven responses.
+- Reactive APIs enabling timebound and event-driven responses.
 - Full history tracking of all in-app activities for easy debugging and AI improvement.
 - Ready-to-use components for rapid prototyping, such as:
   -  live speech transcription.
