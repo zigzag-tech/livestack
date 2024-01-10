@@ -1,8 +1,4 @@
 
-
-<img src="assets/intro.gif"
-     width="50%" height="auto" align="right" hspace="10" />
-
 <h1 align="center">Livestack&nbsp; 🦓
 </h1>
 
@@ -13,6 +9,10 @@
 
 <p align="center">A realtime first AI application framework.</p>
 
+<p align="center">
+<img src="assets/intro.gif"
+     width="70%" height="auto" hspace="10" />
+</p>
 
 ## Intro
 
