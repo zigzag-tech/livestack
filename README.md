@@ -28,7 +28,7 @@ Livestack provides:
 - Full history tracking of all in-app activities for easy debugging and AI improvement.
 - Ready-to-use AI components for rapid prototyping, such as:
   -  live speech transcription.
-  -  live rag ingestion and consumption.
+  -  live RAG ingestion and consumption.
   -  realtime image generation.
   -  etc.
 
