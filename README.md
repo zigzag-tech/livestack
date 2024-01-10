@@ -32,7 +32,7 @@ Livestack provides:
   -  realtime image generation.
   -  etc.
 
-We hope that Livestack will enable everyone to build AI tools that can really make a difference in our daily lives.
+We look forward to seeing  your next big idea come to life with Livestack!
 
 ## Getting Started
 
