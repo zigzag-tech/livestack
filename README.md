@@ -24,9 +24,13 @@ Building these AI applications, however, is a complex task. Popular AI framework
 Livestack provides:
 
 - A simple setup process for real-time AI apps.
-- A real-time architecture for immediate user interaction responses.
-- Full history tracking of all app activities for easy debugging and AI improvement.
-- Ready-to-use AI components for rapid prototyping, such live transcription and near-realtime image generation.
+- A stream-based, reactive architecture for realtime user interaction responses.
+- Full history tracking of all in-app activities for easy debugging and AI improvement.
+- Ready-to-use AI components for rapid prototyping, such as:
+  -  live speech transcription.
+  -  live rag ingestion and consumption.
+  -  realtime image generation.
+  -  etc.
 
 We hope that Livestack will enable everyone to build AI tools that can really make a difference in our daily lives.
 
