@@ -32,7 +32,7 @@ Livestack provides:
   -  realtime image generation.
   -  etc.
 
-We look forward to seeing  your next big idea come to life with Livestack!
+We look forward to seeing your next big idea come to life with Livestack!
 
 ## Getting Started
 
