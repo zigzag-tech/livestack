@@ -37,7 +37,7 @@ Livestack aims at providing:
   -  live speech transcription.
   -  live RAG ingestion and consumption.
   -  realtime image generation.
-- Patterns and templates for common realtime AI backend scenarios.
+- Patterns and guidelines for common realtime AI backend scenarios.
 - Support for both LLM and image generation models.
 
 
