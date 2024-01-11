@@ -46,5 +46,3 @@ Livestack aims at providing:
 
 ## Comparison with other frameworks
 
-## Roadmap
-
