@@ -19,12 +19,15 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
     endpoint,
     concurrency = 3,
     jobSpec,
+    zzEnv,
   }: {
     jobSpec: ZZJobSpec<P, unknown, { default: O }>;
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
+    zzEnv?: ZZEnv;
   }) {
     super({
+      zzEnv,
       jobSpec,
       concurrency,
       processor: async ({ jobParams }) => {

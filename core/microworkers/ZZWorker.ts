@@ -20,6 +20,7 @@ export type ZZWorkerDefParams<
   jobSpec: ZZJobSpec<P, IMap, OMap, TProgress>;
   processor: ZZProcessor<ZZJobSpec<P, IMap, OMap, TProgress>, WP>;
   instanceParamsDef?: z.ZodType<WP>;
+  zzEnv?: ZZEnv;
 };
 
 export class ZZWorkerDef<
@@ -35,24 +36,31 @@ export class ZZWorkerDef<
     ZZJobSpec<P, IMap, OMap, TProgress>,
     WP
   >;
+  public readonly zzEnv: ZZEnv | null = null;
 
   constructor({
     jobSpec,
     processor,
     instanceParamsDef,
+    zzEnv,
   }: ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>) {
     this.jobSpec = jobSpec;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
   }
 
-  public async startWorker(p?: { concurrency?: number; instanceParams?: WP }) {
+  public async startWorker(p?: {
+    concurrency?: number;
+    instanceParams?: WP;
+    zzEnv?: ZZEnv;
+  }) {
     const { concurrency, instanceParams } = p || {};
 
     const worker = new ZZWorker<P, IMap, OMap, TProgress, WP>({
       def: this,
       concurrency,
       instanceParams: instanceParams || ({} as WP),
+      zzEnv: p?.zzEnv || this.zzEnv,
     });
     // this.workers.push(worker);
     await worker.waitUntilReady();
@@ -88,16 +96,18 @@ export class ZZWorker<
     def,
     workerName,
     concurrency = 3,
+    zzEnv,
   }: {
     def: ZZWorkerDef<P, IMap, OMap, TProgress, WP>;
     instanceParams?: WP;
     workerName?: string;
     concurrency?: number;
+    zzEnv?: ZZEnv | null;
   }) {
     // if worker name is not provided, use random string
 
     this.jobSpec = def.jobSpec;
-    this.zzEnv = def.jobSpec.zzEnv;
+    this.zzEnv = zzEnv || def.jobSpec.zzEnv;
     this.instanceParams = instanceParams;
     this.def = def;
 
