@@ -47,6 +47,7 @@ export class ZZWorkerDef<
     this.jobSpec = jobSpec;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
+    this.zzEnv = zzEnv || jobSpec.zzEnv;
   }
 
   public async startWorker(p?: {
