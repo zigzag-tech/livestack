@@ -10,7 +10,7 @@ type TriggerCheckContext = {
   }[];
 };
 
-interface ParallelAttempt<ParentP, ParentI, ParentO> {
+export interface ParallelAttempt<ParentP, ParentI, ParentO> {
   jobSpec: ZZJobSpec<ParentP, { default: ParentI }, { default: ParentO }>;
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
@@ -27,9 +27,11 @@ export function genParallelAttempt<ParentP, ParentI, ParentO>(
 
 export class ZZParallelAttemptWorkerDef<P, I, O> extends ZZWorkerDef<
   P,
-  {
-    default: I;
-  },
+  I extends unknown
+    ? unknown
+    : {
+        default: I;
+      },
   {
     default: O;
   }
@@ -42,9 +44,11 @@ export class ZZParallelAttemptWorkerDef<P, I, O> extends ZZWorkerDef<
   }: {
     jobSpec: ZZJobSpec<
       P,
-      {
-        default: I;
-      },
+      I extends unknown
+        ? unknown
+        : {
+            default: I;
+          },
       {
         default: O;
       }
