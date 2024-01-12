@@ -1,31 +1,45 @@
 import Replicate from "replicate";
-import { ZZEnv } from "../microworkers/JobSpecDef";
-import { JobSpecDef } from "../microworkers/JobSpecDef";
 import { ZZJobSpec } from "../microworkers/ZZJobSpec";
+import { z } from "zod";
+import { ZZWorkerDef } from "../microworkers/ZZWorker";
+import { ZZEnv } from "../microworkers/ZZEnv";
 if (!process.env.REPLICATE_API_TOKEN) {
   throw new Error("REPLICATE_API_TOKEN not found");
 }
 
 const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
 
-export class ReplicateJobSpec<P extends object, O> extends ZZJobSpec<P, O> {
+export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
+  P,
+  unknown,
+  { default: O }
+> {
   protected _endpoint: `${string}/${string}:${string}`;
-
+  public jobSpec: ZZJobSpec<P, unknown, { default: O }>;
   constructor({
     endpoint,
     concurrency = 3,
-    def,
+    input,
+    output,
     zzEnv,
   }: {
+    input: z.ZodType<P>;
+    output: z.ZodType<O>;
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
     zzEnv: ZZEnv;
-    def: JobSpecDef<P, O>;
   }) {
+    const jobSpec = new ZZJobSpec({
+      name: endpoint,
+      jobParamsDef: input,
+      output: {
+        default: output,
+      },
+    });
+
     super({
-      def,
+      jobSpec,
       concurrency,
-      zzEnv,
       processor: async ({ jobParams }) => {
         const replicate = new Replicate({
           auth: process.env.REPLICATE_API_TOKEN,
@@ -48,6 +62,7 @@ export class ReplicateJobSpec<P extends object, O> extends ZZJobSpec<P, O> {
         return result;
       },
     });
+    this.jobSpec = jobSpec;
     this._endpoint = endpoint;
   }
 }

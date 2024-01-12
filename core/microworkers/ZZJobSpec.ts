@@ -26,7 +26,6 @@ import {
 import { ZZStream, ZZStreamSubscriber, hashDef } from "./ZZStream";
 import { InferStreamSetType, StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
-import { zodToJsonSchema } from "zod-to-json-schema";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -69,7 +68,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   }: {
     name: string;
     jobParamsDef: z.ZodType<P>;
-    input: InferDefMap<IMap>;
+    input?: InferDefMap<IMap>;
     output: InferDefMap<OMap>;
     progressDef?: z.ZodType<TProgress>;
     zzEnv?: ZZEnv;
@@ -82,10 +81,15 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     this.zzEnv = zzEnv || ZZEnv.global();
     this.logger = getLogger(`spec:${this.name}`);
 
-    this.inputDefSet = new StreamDefSet({
-      defs: input,
-    });
-
+    if (!input) {
+      this.inputDefSet = new StreamDefSet({
+        defs: ZZStream.single(z.object({})) as InferDefMap<IMap>,
+      });
+    } else {
+      this.inputDefSet = new StreamDefSet({
+        defs: input,
+      });
+    }
     this.outputDefSet = new StreamDefSet({
       defs: output,
     });
@@ -414,6 +418,9 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     type T = typeof type extends "in" ? IMap[keyof IMap] : OMap[keyof OMap];
     let def: z.ZodType<WrapTerminatorAndDataId<T>>;
     if (type === "in") {
+      if (!this.inputDefSet) {
+        throw new Error(`No input defined for job spec ${this.name}`);
+      }
       def = wrapTerminatorAndDataId(
         this.inputDefSet.getDef(p.key as keyof IMap)
       ) as z.ZodType<WrapTerminatorAndDataId<T>>;
@@ -748,21 +755,26 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       spec: ZZJobSpec<P, I, O, TP>
     ) => {
       const jobs = jobIdsBySpecName[spec.name];
-      if(jobs.length > 1) {
-        throw new Error(`More than one job with spec ${spec.name} detected. Please use jobIdsBySpecName instead.`);
+      if (jobs.length > 1) {
+        throw new Error(
+          `More than one job with spec ${spec.name} detected. Please use jobIdsBySpecName instead.`
+        );
       }
       const [job] = jobs;
       return job;
-    }
+    };
 
     // Create interfaces for inputs and outputs
     const inputs = {
-      bySpec: <P, I, O, TP>(spec: ZZJobSpec<P,I,O,TP>) => {
+      bySpec: <P, I, O, TP>(spec: ZZJobSpec<P, I, O, TP>) => {
         // implementation for sending data to spec
         const jobId = identifySingleJobIdBySpec(spec);
 
         return {
-          send: async ({data, key = "default" as keyof I}: {
+          send: async ({
+            data,
+            key = "default" as keyof I,
+          }: {
             data: I[keyof I];
             key?: keyof I;
           }) => {
@@ -770,9 +782,9 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
               jobId,
               data,
               key,
-            })
+            });
           },
-          terminate: async <K extends keyof I>(key : K = "default" as K ) => {
+          terminate: async <K extends keyof I>(key: K = "default" as K) => {
             return await spec.terminateJobInput({
               jobId,
               key,
@@ -783,7 +795,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     };
 
     const outputs = {
-      bySpec: <P, I, O, TP>(spec: ZZJobSpec<P,I,O,TP>)  => {
+      bySpec: <P, I, O, TP>(spec: ZZJobSpec<P, I, O, TP>) => {
         const jobId = identifySingleJobIdBySpec(spec);
 
         const subscriberByKey = <K extends keyof O>(key: K) => {
@@ -792,20 +804,22 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
             key,
           });
           return subscriber;
-        }
+        };
 
-        let subscriberByDefaultKey: Awaited<ReturnType<typeof subscriberByKey>> | null = null;
+        let subscriberByDefaultKey: Awaited<
+          ReturnType<typeof subscriberByKey>
+        > | null = null;
 
         return {
-          forKey:<K extends keyof O>(key: K) => {
-            return  subscriberByKey(key);
+          forKey: <K extends keyof O>(key: K) => {
+            return subscriberByKey(key);
           },
           nextValue: async <K extends keyof O>() => {
-            if(subscriberByDefaultKey === null) {
+            if (subscriberByDefaultKey === null) {
               subscriberByDefaultKey = await subscriberByKey("default" as K);
             }
             return await subscriberByDefaultKey.nextValue();
-          }
+          },
         };
       },
     };
