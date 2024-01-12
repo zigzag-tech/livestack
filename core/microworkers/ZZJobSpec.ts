@@ -75,7 +75,8 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     concurrency?: number;
   }) {
     this.name = name;
-    this.jobParamsDef = jobParamsDef || z.object({}) as unknown as  z.ZodType<P>;
+    this.jobParamsDef =
+      jobParamsDef || (z.object({}) as unknown as z.ZodType<P>);
     this.progressDef = progressDef || z.never();
 
     this.zzEnv = zzEnv || ZZEnv.global();
@@ -556,64 +557,8 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
-    const inputs = {
-      send: async (data: IMap[keyof IMap]) => {
-        return await this.sendInputToJob({
-          jobId,
-          data,
-          key: "default" as keyof IMap,
-        });
-      },
-      terminate: async () => {
-        return await this.terminateJobInput({
-          jobId,
-          key: "default" as keyof IMap,
-        });
-      },
-      byKey: <K extends keyof IMap>(key: K) => {
-        return {
-          send: async (data: IMap[K]) => {
-            return await this.sendInputToJob({
-              jobId,
-              data,
-              key,
-            });
-          },
-          terminate: async () => {
-            return await this.terminateJobInput({
-              jobId,
-              key,
-            });
-          },
-        };
-      },
-    };
-    const subscriberByKey = <K extends keyof OMap>(key: K) => {
-      const subscriber = this.forJobOutput({
-        jobId,
-        key,
-      });
-      return subscriber;
-    };
-
-    let subscriberByDefaultKey: Awaited<
-      ReturnType<typeof subscriberByKey>
-    > | null = null;
-
-    const outputs = {
-      byKey: <K extends keyof OMap>(key: K) => {
-        return subscriberByKey(key);
-      },
-      nextValue: async () => {
-        if (subscriberByDefaultKey === null) {
-          subscriberByDefaultKey = await this.forJobOutput({
-            jobId,
-            key: "default" as keyof OMap,
-          });
-        }
-        return await subscriberByDefaultKey.nextValue();
-      },
-    };
+    const inputs = this._deriveInputsForJob(jobId);
+    const outputs = this._deriveOutputsForJob(jobId);
 
     return {
       inputs,
@@ -831,66 +776,69 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     // Create interfaces for inputs and outputs
     const inputs = {
       bySpec: <P, I, O, TP>(spec: ZZJobSpec<P, I, O, TP>) => {
-        // implementation for sending data to spec
-        const jobId = identifySingleJobIdBySpec(spec);
-
-        return {
-          send: async ({
-            data,
-            key = "default" as keyof I,
-          }: {
-            data: I[keyof I];
-            key?: keyof I;
-          }) => {
-            return await spec.sendInputToJob({
-              jobId,
-              data,
-              key,
-            });
-          },
-          terminate: async <K extends keyof I>(key: K = "default" as K) => {
-            return await spec.terminateJobInput({
-              jobId,
-              key,
-            });
-          },
-        };
+        return spec._deriveInputsForJob(identifySingleJobIdBySpec(spec));
       },
     };
 
     const outputs = {
       bySpec: <P, I, O, TP>(spec: ZZJobSpec<P, I, O, TP>) => {
-        const jobId = identifySingleJobIdBySpec(spec);
-
-        const subscriberByKey = <K extends keyof O>(key: K) => {
-          const subscriber = spec.forJobOutput({
-            jobId,
-            key,
-          });
-          return subscriber;
-        };
-
-        let subscriberByDefaultKey: Awaited<
-          ReturnType<typeof subscriberByKey>
-        > | null = null;
-
-        return {
-          byKey: <K extends keyof O>(key: K) => {
-            return subscriberByKey(key);
-          },
-          nextValue: async <K extends keyof O>() => {
-            if (subscriberByDefaultKey === null) {
-              subscriberByDefaultKey = await subscriberByKey("default" as K);
-            }
-            return await subscriberByDefaultKey.nextValue();
-          },
-        };
+        return spec._deriveOutputsForJob(identifySingleJobIdBySpec(spec));
       },
     };
 
     // console.log("countByName", countByName);
     return { jobIdsBySpecName, inputs, outputs };
   }
+
+  private _deriveInputsForJob = (jobId: string) => {
+    return {
+      send: async ({
+        data,
+        key = "default" as keyof IMap,
+      }: {
+        data: IMap[keyof IMap];
+        key?: keyof IMap;
+      }) => {
+        return await this.sendInputToJob({
+          jobId,
+          data,
+          key,
+        });
+      },
+      terminate: async <K extends keyof IMap>(key: K = "default" as K) => {
+        return await this.terminateJobInput({
+          jobId,
+          key,
+        });
+      },
+    };
+  };
+
+  private _deriveOutputsForJob = (jobId: string) => {
+    const subscriberByKey = <K extends keyof OMap>(key: K) => {
+      const subscriber = this.forJobOutput({
+        jobId,
+        key,
+      });
+      return subscriber;
+    };
+
+    let subscriberByDefaultKey: Awaited<
+      ReturnType<typeof subscriberByKey>
+    > | null = null;
+
+    return {
+      byKey: <K extends keyof OMap>(key: K) => {
+        return subscriberByKey(key);
+      },
+      nextValue: async <K extends keyof OMap>() => {
+        if (subscriberByDefaultKey === null) {
+          subscriberByDefaultKey = await subscriberByKey("default" as K);
+        }
+        return await subscriberByDefaultKey.nextValue();
+      },
+    };
+  };
 
   // toString
   public toString() {
