@@ -53,7 +53,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   protected logger: ReturnType<typeof getLogger>;
 
   public readonly name: string;
-  readonly jobParamsDef: z.ZodType<P>;
+  readonly jobParams: z.ZodType<P>;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
   readonly progressDef: z.ZodType<TProgress>;
@@ -61,13 +61,13 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   constructor({
     zzEnv,
     name,
-    jobParamsDef,
+    jobParams,
     output,
     input,
     progressDef,
   }: {
     name: string;
-    jobParamsDef?: z.ZodType<P>;
+    jobParams?: z.ZodType<P>;
     input?: InferDefMap<IMap>;
     output?: InferDefMap<OMap>;
     progressDef?: z.ZodType<TProgress>;
@@ -75,8 +75,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     concurrency?: number;
   }) {
     this.name = name;
-    this.jobParamsDef =
-      jobParamsDef || (z.object({}) as unknown as z.ZodType<P>);
+    this.jobParams = jobParams || (z.object({}) as unknown as z.ZodType<P>);
     this.progressDef = progressDef || z.never();
 
     this.zzEnv = zzEnv || ZZEnv.global();
@@ -103,9 +102,9 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     }
   }
 
-  public derive(
+  public derive<NewP, NewIMap, NewOMap, NewTP>(
     newP: Partial<
-      ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap, TProgress>>[0]
+      ConstructorParameters<typeof ZZJobSpec<NewP, NewIMap, NewOMap, NewTP>>[0]
     >
   ) {
     return new ZZJobSpec({
@@ -909,7 +908,7 @@ export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
 
 type JobSpecAndJobParams<JobSpec> = {
   spec: CheckSpec<JobSpec>;
-  jobParams: z.infer<CheckSpec<JobSpec>["jobParamsDef"]>;
+  jobParams: z.infer<CheckSpec<JobSpec>["jobParams"]>;
   jobLabel?: string;
 };
 

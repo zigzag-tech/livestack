@@ -92,7 +92,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     this.spec = p.jobSpec;
 
     try {
-      this.jobParams = p.jobSpec.jobParamsDef.parse(p.jobParams) as P;
+      this.jobParams = p.jobSpec.jobParams.parse(p.jobParams) as P;
     } catch (err) {
       this.logger.error(
         `jobParams error: jobParams provided is invalid: ${JSON.stringify(

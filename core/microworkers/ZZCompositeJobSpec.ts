@@ -104,7 +104,7 @@
 
 // const jobSpec1 = new ZZJobSpec({
 //   name: "jobSpec1",
-//   jobParamsDef: z.object({}),
+//   jobParams: z.object({}),
 //   input: ZZStream.single(z.object({})),
 //   output: ZZStream.single(z.object({})),
 //   zzEnv: ZZEnv.global(),
@@ -112,14 +112,14 @@
 
 // const jobSpec2 = new ZZJobSpec({
 //   name: "jobSpec2",
-//   jobParamsDef: z.object({}),
+//   jobParams: z.object({}),
 //   input: ZZStream.single(z.object({})),
 //   output: ZZStream.single(z.object({})),
 //   zzEnv: ZZEnv.global(),
 // });
 // const jobSpec3 = new ZZJobSpec({
 //   name: "jobSpec3",
-//   jobParamsDef: z.object({}),
+//   jobParams: z.object({}),
 //   input: ZZStream.single(z.object({})),
 //   output: ZZStream.single(z.object({})),
 //   zzEnv: ZZEnv.global(),

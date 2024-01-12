@@ -24,7 +24,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
     [K in keyof Specs]: AttemptDef<
       ParentP,
       ParentO,
-      z.infer<CheckSpec<Specs[K]>["jobParamsDef"]>,
+      z.infer<CheckSpec<Specs[K]>["jobParams"]>,
       InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
     >;
   };
@@ -40,7 +40,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
       [K in keyof Specs]: AttemptDef<
         ParentP,
         ParentO,
-        z.infer<CheckSpec<Specs[K]>["jobParamsDef"]>,
+        z.infer<CheckSpec<Specs[K]>["jobParams"]>,
         InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
       >;
     };
