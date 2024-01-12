@@ -3,12 +3,15 @@ import { ZZWorkerDef } from "../microworkers/ZZWorker";
 import { z } from "zod";
 import _ from "lodash";
 import { InferStreamSetType } from "../microworkers/StreamDefSet";
+import { ZZEnv } from "../microworkers/ZZEnv";
 export interface AttemptDef<ParentP, ParentO, P, OMap> {
   jobSpec: ZZJobSpec<P, unknown, OMap>;
   timeout: number;
   transformInput: (params: ParentP) => Promise<P> | P;
   transformOutput: <K extends keyof OMap>(
-    output: OMap[K]
+    // TODO: fix this type
+    // output: OMap[K]
+    output: any
   ) => Promise<ParentO> | ParentO;
 }
 
@@ -26,10 +29,12 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
     >;
   };
   constructor({
+    zzEnv,
     attempts,
     ultimateFallback,
     jobSpec,
   }: {
+    zzEnv?: ZZEnv;
     jobSpec: ZZJobSpec<ParentP, unknown, { default: ParentO }>;
     attempts: {
       [K in keyof Specs]: AttemptDef<
@@ -43,6 +48,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
   }) {
     super({
       jobSpec,
+      zzEnv,
       processor: async ({ logger, jobParams, jobId }) => {
         const genRetryFunction = <P, O>({
           jobSpec,
@@ -76,7 +82,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
         };
 
         const restToTry = (
-          _.values(attempts) as AttemptDef<ParentP, ParentO, any, any>[]
+          attempts as AttemptDef<ParentP, ParentO, any, any>[]
         ).map((a) => ({
           fn: genRetryFunction(a),
           timeout: a.timeout,
