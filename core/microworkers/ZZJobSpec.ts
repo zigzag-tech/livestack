@@ -605,13 +605,13 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         return subscriberByKey(key);
       },
       nextValue: async () => {
-        if (subscriberByKey === null) {
+        if (subscriberByDefaultKey === null) {
           subscriberByDefaultKey = await this.forJobOutput({
             jobId,
             key: "default" as keyof OMap,
           });
-          return await subscriberByDefaultKey.nextValue();
         }
+        return await subscriberByDefaultKey.nextValue();
       },
     };
 
