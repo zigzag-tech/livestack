@@ -891,7 +891,7 @@ function deriveStreamId<PP1, PP2>({
   return `stream-${groupId}::${fromStr}>>${toStr}`;
 }
 
-type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
+export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
 
 type JobSpecAndJobParams<JobSpec> = {
   spec: CheckSpec<JobSpec>;
