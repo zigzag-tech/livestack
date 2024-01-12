@@ -1,52 +1,46 @@
-import { UnknownJobSpec, ZZJobSpec } from "../microworkers/ZZJobSpec";
-import { z } from "zod";
+import { ZZJobSpec } from "../microworkers/ZZJobSpec";
 import { ZZWorkerDef } from "../microworkers/ZZWorker";
 
-export interface AttemptDef<
-  MaJobSpecDef extends UnknownJobSpec,
-  ParentP = z.infer<MaJobSpecDef["jobParamsDef"]>,
-  ParentO = z.infer<MaJobSpecDef["outputDef"]>
-> {
-  def: MaJobSpecDef;
+export interface AttemptDef<ParentP, ParentI, ParentO> {
+  jobSpec: ZZJobSpec<ParentP, { default: ParentI }, { default: ParentO }>;
   timeout: number;
   transformInput: (params: ParentP) => Promise<ParentP> | ParentP;
-  transformOutput: (
-    output: z.infer<this["def"]["outputDef"]>
-  ) => Promise<ParentO> | ParentO;
+  transformOutput: (output: ParentO) => Promise<ParentO> | ParentO;
 }
-export class ZZProgressiveAdaptiveTryWorkerDef<
-  MaJobSpec,
-  P = z.infer<MaJobSpec["jobParamsDef"]>,
-  O extends z.infer<MaJobSpec["outputDef"]> = z.infer<MaJobSpec["outputDef"]>
-> extends ZZWorkerDef<MaJobSpec, {}> {
-  attempts: AttemptDef<MaJobSpec>[];
+export class ZZProgressiveAdaptiveTryWorkerDef<P, I, O> extends ZZWorkerDef<
+  P,
+  { default: I },
+  { default: O }
+> {
+  attempts: AttemptDef<P, I, O>[];
   constructor({
     attempts,
     ultimateFallback,
     jobSpec,
   }: {
-    jobSpec: ZZJobSpec<MaJobSpec>;
-    attempts: AttemptDef<MaJobSpec>[];
+    jobSpec: ZZJobSpec<P, { default: I }, { default: O }>;
+    attempts: AttemptDef<P, I, O>[];
     ultimateFallback?: () => Promise<O>;
   }) {
     super({
       jobSpec,
-      processor: async ({ logger, jobParams, spawnJob, jobId }) => {
+      processor: async ({ logger, jobParams, jobId }) => {
         const genRetryFunction = ({
-          def,
+          jobSpec,
           transformInput,
           transformOutput,
-        }: AttemptDef<MaJobSpec>) => {
+        }: AttemptDef<P, I, O>) => {
           const fn = async () => {
-            const childJobId = `${jobId}/${def.name}`;
+            const childJobId = `${jobId}/${jobSpec.name}`;
 
-            const { nextOutput } = await spawnJob({
+            await jobSpec.requestJob({
               jobId: childJobId,
-              def: def as ZZJobSpec<P, I, O, any, any, any>,
               jobParams: (await transformInput(jobParams)) as P,
             });
 
-            const o = await nextOutput();
+            const jo = jobSpec.forJobOutput({ jobId: childJobId });
+
+            const o = await jo.nextValue();
             if (!o) {
               throw new Error("no output");
             }
@@ -65,7 +59,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
         const restToTry = attempts.map((a) => ({
           fn: genRetryFunction(a),
           timeout: a.timeout,
-          name: a.def.name,
+          name: a.jobSpec.name,
         }));
 
         let promises: {
