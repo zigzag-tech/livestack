@@ -107,10 +107,15 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       ConstructorParameters<typeof ZZJobSpec<NewP, NewIMap, NewOMap, NewTP>>[0]
     >
   ) {
-    return new ZZJobSpec({
+    return new ZZJobSpec<
+      P & NewP,
+      IMap & NewIMap,
+      OMap & NewOMap,
+      TProgress & NewTP
+    >({
       ...this,
       ...newP,
-    });
+    } as ConstructorParameters<typeof ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap, TProgress & NewTP>>[0]);
   }
 
   private get _rawQueue() {
