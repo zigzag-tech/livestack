@@ -727,6 +727,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       // }
       // validate that the types match
 
+      
       const commonStreamName = deriveStreamId({
         groupId: `[${jobGroupId}]`,
         from: {
@@ -737,7 +738,8 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
           jobSpec: toP,
           key: toKeyStr,
         },
-      });
+        // TODO: fix typing
+      } as any);
 
       inOverridesByIndex[toJobIndex] = {
         ...inOverridesByIndex[toJobIndex],
@@ -814,24 +816,42 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
 
   private _deriveInputsForJob = (jobId: string) => {
     return {
-      send: async ({
-        data,
-        key = "default" as keyof IMap,
-      }: {
-        data: IMap[keyof IMap];
-        key?: keyof IMap;
-      }) => {
+      send: async (data: IMap[keyof IMap]) => {
+        if(!this.inputDefSet.hasDef("default")) {
+          throw new Error(`There are more than one input keys defined for job ${this.name}, please use jobSpec.byKey({key}).send() instead.`);
+        }
         return await this.sendInputToJob({
           jobId,
           data,
-          key,
+          key: "default" as keyof IMap,
         });
       },
       terminate: async <K extends keyof IMap>(key: K = "default" as K) => {
+        if(!this.inputDefSet.hasDef("default")) {
+          throw new Error(`There are more than one input keys defined for job ${this.name}, please use jobSpec.byKey({key}).terminate() instead.`);
+        }
         return await this.terminateJobInput({
           jobId,
           key,
         });
+      },
+
+      byKey: <K extends keyof IMap>(key: K) => {
+        return {
+          send: async (data: IMap[K]) => {
+            return await this.sendInputToJob({
+              jobId,
+              data,
+              key,
+            });
+          },
+          terminate: async () => {
+            return await this.terminateJobInput({
+              jobId,
+              key,
+            });
+          },
+        };
       },
     };
   };
