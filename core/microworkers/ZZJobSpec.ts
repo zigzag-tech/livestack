@@ -67,7 +67,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     progressDef,
   }: {
     name: string;
-    jobParamsDef: z.ZodType<P>;
+    jobParamsDef?: z.ZodType<P>;
     input?: InferDefMap<IMap>;
     output: InferDefMap<OMap>;
     progressDef?: z.ZodType<TProgress>;
@@ -75,7 +75,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     concurrency?: number;
   }) {
     this.name = name;
-    this.jobParamsDef = jobParamsDef;
+    this.jobParamsDef = jobParamsDef || z.object({}) as unknown as  z.ZodType<P>;
     this.progressDef = progressDef || z.never();
 
     this.zzEnv = zzEnv || ZZEnv.global();
@@ -175,7 +175,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   }: // queueEventsOptions,
   {
     jobId?: string;
-    jobParams: P;
+    jobParams?: P;
     outputKey?: keyof OMap;
   }): Promise<OMap[keyof OMap][]> {
     if (!jobId) {
@@ -488,7 +488,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     outputStreamIdOverridesByKey,
   }: {
     jobId: string;
-    jobParams: P;
+    jobParams?: P;
     bullMQJobsOpts?: JobsOptions;
     inputStreamIdOverridesByKey: Partial<Record<keyof IMap, string>>;
     outputStreamIdOverridesByKey: Partial<Record<keyof OMap, string>>;
@@ -509,7 +509,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
           specName: this.name,
           jobId,
           dbConn: trx,
-          jobParams: jobParams,
+          jobParams,
         });
 
         for (const [key, streamId] of _.entries(inputStreamIdOverridesByKey)) {
@@ -545,7 +545,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         }
       });
     }
-
+    jobParams = jobParams || ({} as P);
     const j = await this._rawQueue.add(
       jobId,
       { jobParams },
@@ -629,7 +629,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     bullMQJobsOpts,
   }: {
     jobId: string;
-    jobParams: P;
+    jobParams?: P;
     bullMQJobsOpts?: JobsOptions;
   }) {
     return this._requestJob({
