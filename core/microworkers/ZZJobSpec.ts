@@ -556,7 +556,23 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
-    // return j;
+    return {
+      outputs: {
+        forKey: <K extends keyof OMap>(key: K) => {
+          return this.forJobOutput({
+            jobId,
+            key,
+          });
+        },
+        nextValue: async <K extends keyof OMap>() => {
+          const subscriber = await this.forJobOutput({
+            jobId,
+            key: "default" as K,
+          });
+          return await subscriber.nextValue();
+        },
+      },
+    };
   }
 
   public async requestJob({
