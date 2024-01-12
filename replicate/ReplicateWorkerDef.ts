@@ -15,28 +15,15 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
   { default: O }
 > {
   protected _endpoint: `${string}/${string}:${string}`;
-  public jobSpec: ZZJobSpec<P, unknown, { default: O }>;
   constructor({
     endpoint,
     concurrency = 3,
-    input,
-    output,
-    zzEnv,
+    jobSpec,
   }: {
-    input: z.ZodType<P>;
-    output: z.ZodType<O>;
+    jobSpec: ZZJobSpec<P, unknown, { default: O }>;
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
-    zzEnv: ZZEnv;
   }) {
-    const jobSpec = new ZZJobSpec({
-      name: endpoint,
-      jobParamsDef: input,
-      output: {
-        default: output,
-      },
-    });
-
     super({
       jobSpec,
       concurrency,
@@ -62,7 +49,6 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
         return result;
       },
     });
-    this.jobSpec = jobSpec;
     this._endpoint = endpoint;
   }
 }
