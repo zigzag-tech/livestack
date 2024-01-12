@@ -40,7 +40,7 @@ export class ZZStream<T> {
   private zzEnv: ZZEnv;
   private logger: ReturnType<typeof getLogger>;
 
-  public static single<T>(def: z.ZodType<T>) {
+  public static single<T>(def: z.ZodType<T, any>) {
     return {
       default: def,
     };

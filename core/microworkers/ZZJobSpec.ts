@@ -556,23 +556,71 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
-    return {
-      outputs: {
-        forKey: <K extends keyof OMap>(key: K) => {
-          return this.forJobOutput({
-            jobId,
-            key,
-          });
-        },
-        nextValue: async <K extends keyof OMap>() => {
-          const subscriber = await this.forJobOutput({
-            jobId,
-            key: "default" as K,
-          });
-          return await subscriber.nextValue();
-        },
+    const inputs = {
+      send: async (data: IMap[keyof IMap]) => {
+        return await this.sendInputToJob({
+          jobId,
+          data,
+          key: "default" as keyof IMap,
+        });
+      },
+      terminate: async () => {
+        return await this.terminateJobInput({
+          jobId,
+          key: "default" as keyof IMap,
+        });
+      },
+      byKey: <K extends keyof IMap>(key: K) => {
+        return {
+          send: async (data: IMap[K]) => {
+            return await this.sendInputToJob({
+              jobId,
+              data,
+              key,
+            });
+          },
+          terminate: async () => {
+            return await this.terminateJobInput({
+              jobId,
+              key,
+            });
+          },
+        };
       },
     };
+    const subscriberByKey = <K extends keyof OMap>(key: K) => {
+      const subscriber = this.forJobOutput({
+        jobId,
+        key,
+      });
+      return subscriber;
+    };
+
+    let subscriberByDefaultKey: Awaited<
+      ReturnType<typeof subscriberByKey>
+    > | null = null;
+
+    const outputs = {
+      byKey: <K extends keyof OMap>(key: K) => {
+        return subscriberByKey(key);
+      },
+      nextValue: async () => {
+        if (subscriberByKey === null) {
+          subscriberByDefaultKey = await this.forJobOutput({
+            jobId,
+            key: "default" as keyof OMap,
+          });
+          return await subscriberByDefaultKey.nextValue();
+        }
+      },
+    };
+
+    return {
+      inputs,
+      outputs,
+    };
+
+    // return j;
   }
 
   public async requestJob({
@@ -827,7 +875,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         > | null = null;
 
         return {
-          forKey: <K extends keyof O>(key: K) => {
+          byKey: <K extends keyof O>(key: K) => {
             return subscriberByKey(key);
           },
           nextValue: async <K extends keyof O>() => {

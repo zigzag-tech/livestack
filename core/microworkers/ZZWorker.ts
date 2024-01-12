@@ -66,6 +66,18 @@ export class ZZWorkerDef<
     await worker.waitUntilReady();
     return worker;
   }
+  public static define<P, IMap, OMap, TP, WP extends object>(
+    p: Omit<ZZWorkerDefParams<P, IMap, OMap, TP, WP>, "jobSpec"> & {
+      jobSpec: ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap, TP>>[0];
+    }
+  ) {
+    const spec = new ZZJobSpec<P, IMap, OMap, TP>(p.jobSpec);
+    return spec.defineWorker(p);
+  }
+
+  public requestJob: (typeof this.jobSpec)["requestJob"] = (p) => {
+    return this.jobSpec.requestJob(p);
+  };
 }
 
 export class ZZWorker<

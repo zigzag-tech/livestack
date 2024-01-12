@@ -9,8 +9,8 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "replicate": "^0.21",
-    "@livestack/core": "*"
+    "@livestack/core": "*",
+    "replicate": "^0.21"
   },
   "types": "dist/index.d.ts",
   "devDependencies": {
@@ -21,7 +21,6 @@
     "ts-node": "^10.9.1",
     "typescript": "5.2.2"
   },
-
   "main": "./dist/index.js",
   "author": ""
 }
