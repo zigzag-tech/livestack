@@ -1,0 +1,27 @@
+{
+  "name": "@livestack/replicate",
+  "version": "0.0.2",
+  "description": "Livestack replicate connectors.",
+  "scripts": {
+    "build": "tsc"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "dependencies": {
+    "replicate": "^0.21",
+    "@livestack/core": "*"
+  },
+  "types": "dist/index.d.ts",
+  "devDependencies": {
+    "@babel/preset-typescript": "^7.22.5",
+    "@types/lodash": "^4.14.201",
+    "@types/uuid": "^9.0.7",
+    "jest": "^29.5.0",
+    "ts-node": "^10.9.1",
+    "typescript": "5.2.2"
+  },
+
+  "main": "./dist/index.js",
+  "author": ""
+}
