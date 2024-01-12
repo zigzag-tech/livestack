@@ -56,6 +56,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   readonly jobParams: z.ZodType<P>;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
+
   readonly progressDef: z.ZodType<TProgress>;
 
   constructor({
@@ -100,6 +101,14 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         defs: output,
       });
     }
+  }
+
+  public inputDef(key: keyof IMap = "default" as keyof IMap) {
+    return this.inputDefSet.getDef(key);
+  }
+
+  public outputDef(key: keyof OMap = "default" as keyof OMap) {
+    return this.outputDefSet.getDef(key);
   }
 
   public derive<NewP, NewIMap, NewOMap, NewTP>(
@@ -727,7 +736,6 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       // }
       // validate that the types match
 
-      
       const commonStreamName = deriveStreamId({
         groupId: `[${jobGroupId}]`,
         from: {
@@ -817,8 +825,10 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   private _deriveInputsForJob = (jobId: string) => {
     return {
       send: async (data: IMap[keyof IMap]) => {
-        if(!this.inputDefSet.hasDef("default")) {
-          throw new Error(`There are more than one input keys defined for job ${this.name}, please use jobSpec.byKey({key}).send() instead.`);
+        if (!this.inputDefSet.hasDef("default")) {
+          throw new Error(
+            `There are more than one input keys defined for job ${this.name}, please use jobSpec.byKey({key}).send() instead.`
+          );
         }
         return await this.sendInputToJob({
           jobId,
@@ -827,8 +837,10 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         });
       },
       terminate: async <K extends keyof IMap>(key: K = "default" as K) => {
-        if(!this.inputDefSet.hasDef("default")) {
-          throw new Error(`There are more than one input keys defined for job ${this.name}, please use jobSpec.byKey({key}).terminate() instead.`);
+        if (!this.inputDefSet.hasDef("default")) {
+          throw new Error(
+            `There are more than one input keys defined for job ${this.name}, please use jobSpec.byKey({key}).terminate() instead.`
+          );
         }
         return await this.terminateJobInput({
           jobId,
