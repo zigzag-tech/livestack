@@ -69,7 +69,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     name: string;
     jobParamsDef?: z.ZodType<P>;
     input?: InferDefMap<IMap>;
-    output: InferDefMap<OMap>;
+    output?: InferDefMap<OMap>;
     progressDef?: z.ZodType<TProgress>;
     zzEnv?: ZZEnv;
     concurrency?: number;
@@ -91,8 +91,26 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
         defs: input,
       });
     }
-    this.outputDefSet = new StreamDefSet({
-      defs: output,
+
+    if (!output) {
+      this.outputDefSet = new StreamDefSet({
+        defs: ZZStream.single(z.void()) as InferDefMap<OMap>,
+      });
+    } else {
+      this.outputDefSet = new StreamDefSet({
+        defs: output,
+      });
+    }
+  }
+
+  public derive(
+    newP: Partial<
+      ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap, TProgress>>[0]
+    >
+  ) {
+    return new ZZJobSpec({
+      ...this,
+      ...newP,
     });
   }
 
