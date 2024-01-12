@@ -743,8 +743,75 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       };
       await jobSpec._requestJob(jDef);
     }
+
+    const identifySingleJobIdBySpec = <P, I, O, TP>(
+      spec: ZZJobSpec<P, I, O, TP>
+    ) => {
+      const jobs = jobIdsBySpecName[spec.name];
+      if(jobs.length > 1) {
+        throw new Error(`More than one job with spec ${spec.name} detected. Please use jobIdsBySpecName instead.`);
+      }
+      const [job] = jobs;
+      return job;
+    }
+
+    // Create interfaces for inputs and outputs
+    const inputs = {
+      bySpec: <P, I, O, TP>(spec: ZZJobSpec<P,I,O,TP>) => {
+        // implementation for sending data to spec
+        const jobId = identifySingleJobIdBySpec(spec);
+
+        return {
+          send: async ({data, key = "default" as keyof I}: {
+            data: I[keyof I];
+            key?: keyof I;
+          }) => {
+            return await spec.sendInputToJob({
+              jobId,
+              data,
+              key,
+            })
+          },
+          terminate: async <K extends keyof I>(key : K = "default" as K ) => {
+            return await spec.terminateJobInput({
+              jobId,
+              key,
+            });
+          },
+        };
+      },
+    };
+
+    const outputs = {
+      bySpec: <P, I, O, TP>(spec: ZZJobSpec<P,I,O,TP>)  => {
+        const jobId = identifySingleJobIdBySpec(spec);
+
+        const subscriberByKey = <K extends keyof O>(key: K) => {
+          const subscriber = spec.forJobOutput({
+            jobId,
+            key,
+          });
+          return subscriber;
+        }
+
+        let subscriberByDefaultKey: Awaited<ReturnType<typeof subscriberByKey>> | null = null;
+
+        return {
+          forKey:<K extends keyof O>(key: K) => {
+            return  subscriberByKey(key);
+          },
+          nextValue: async <K extends keyof O>() => {
+            if(subscriberByDefaultKey === null) {
+              subscriberByDefaultKey = await subscriberByKey("default" as K);
+            }
+            return await subscriberByDefaultKey.nextValue();
+          }
+        };
+      },
+    };
+
     // console.log("countByName", countByName);
-    return { jobIdsBySpecName };
+    return { jobIdsBySpecName, inputs, outputs };
   }
 
   // toString
