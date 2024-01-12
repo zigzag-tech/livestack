@@ -36,15 +36,15 @@ const queueMapByProjectIdAndQueueName = new Map<
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
-export type CheckSpec<PP> = PP extends ZZJobSpec<
+export type CheckSpec<SP> = SP extends ZZJobSpec<
   infer P,
   infer I,
   infer O,
   infer TP
 >
-  ? PP
-  : PP extends ZZJobSpec<infer P, infer I, infer O>
-  ? PP
+  ? ZZJobSpec<P, I, O, TP>
+  : SP extends ZZJobSpec<infer P, infer I, infer O>
+  ? ZZJobSpec<P, I, O>
   : never;
 
 export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
