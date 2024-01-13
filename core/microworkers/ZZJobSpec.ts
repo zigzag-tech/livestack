@@ -673,7 +673,7 @@ export class ZZJobSpec<
     return rs;
   }
 
-  public static async requestChainedJobs<Specs>({
+  public static async requestJobGroup<Specs>({
     jobGroupId,
     jobs,
     jobConnectors,
