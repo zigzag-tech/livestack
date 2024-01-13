@@ -24,7 +24,7 @@ import {
   wrapTerminatorAndDataId,
 } from "../utils/io";
 import { ZZStream, ZZStreamSubscriber, hashDef } from "./ZZStream";
-import { InferStreamSetType, StreamDefSet } from "./StreamDefSet";
+import { StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
@@ -546,18 +546,18 @@ export class ZZJobSpec<
     return wrapStreamSubscriberWithTermination(subuscriberP);
   }
 
-  private async _requestJob({
+  public async requestJob({
     jobId,
     jobParams,
     bullMQJobsOpts,
-    inputStreamIdOverridesByKey,
-    outputStreamIdOverridesByKey,
+    inputStreamIdOverridesByKey = {},
+    outputStreamIdOverridesByKey = {},
   }: {
     jobId: string;
     jobParams?: P;
     bullMQJobsOpts?: JobsOptions;
-    inputStreamIdOverridesByKey: Partial<Record<keyof IMap, string>>;
-    outputStreamIdOverridesByKey: Partial<Record<keyof OMap, string>>;
+    inputStreamIdOverridesByKey?: Partial<Record<keyof IMap, string>>;
+    outputStreamIdOverridesByKey?: Partial<Record<keyof OMap, string>>;
   }) {
     // console.debug("ZZJobSpec._requestJob", jobId, jobParams);
     // force job id to be the same as name
@@ -633,27 +633,6 @@ export class ZZJobSpec<
     // return j;
   }
 
-  public async requestJob({
-    jobId,
-    jobParams,
-    bullMQJobsOpts,
-  }: {
-    jobId?: string;
-    jobParams?: P;
-    bullMQJobsOpts?: JobsOptions;
-  }) {
-    if (!jobId) {
-      jobId = `${this.name}-${v4()}`;
-    }
-    return this._requestJob({
-      jobId,
-      jobParams,
-      bullMQJobsOpts,
-      inputStreamIdOverridesByKey: {},
-      outputStreamIdOverridesByKey: {},
-    });
-  }
-
   public async requestJobAndGetOutputs(
     p: Parameters<ZZJobSpec<P, IMap, OMap, TProgress>["requestJob"]>[0] & {
       key?: keyof OMap;
@@ -673,193 +652,7 @@ export class ZZJobSpec<
     return rs;
   }
 
-  public static async requestJobGroup<Specs>({
-    jobGroupId,
-    jobs,
-    jobConnectors,
-  }: {
-    jobGroupId: string;
-    jobs: {
-      [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
-    };
-
-    jobConnectors: JobConnector[];
-  }) {
-    const inOverridesByIndex = [] as {
-      [K in keyof CheckArray<Specs>]: Partial<
-        Record<
-          keyof CheckSpec<CheckArray<Specs>[K]>["inputDefSet"]["defs"],
-          string
-        >
-      >;
-    };
-    const outOverridesByIndex = [] as {
-      [K in number]: Partial<
-        Record<
-          keyof CheckSpec<CheckArray<Specs>[K]>["outputDefSet"]["defs"],
-          string
-        >
-      >;
-    };
-    
-    // calculate overrides based on jobConnectors
-    for (const connector of jobConnectors) {
-      const fromPairs = Array.isArray(connector.from)
-        ? connector.from
-        : ([connector.from, "default"] as const);
-      const toPairs = Array.isArray(connector.to)
-        ? connector.to
-        : ([connector.to, "default"] as const);
-      const [fromP] = fromPairs;
-      const fromKey =
-        fromPairs[1] as keyof (typeof fromP)["outputDefSet"]["defs"];
-      const [toP] = toPairs;
-      const toKey = toPairs[1] as keyof (typeof toP)["inputDefSet"]["defs"];
-
-      const fromKeyStr = String(fromKey);
-      const toKeyStr = String(toKey);
-
-      const fromJobIndex = (jobs as JobSpecAndJobParams<unknown>[]).findIndex(
-        (j) => j.spec === fromP
-      );
-      const toJobIndex = (jobs as JobSpecAndJobParams<unknown>[]).findIndex(
-        (j) => j.spec === toP
-      );
-
-      if (fromJobIndex === -1) {
-        throw new Error(
-          `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
-            toP.name
-          }/${String(toKey)}: "from" job not in the jobs list.`
-        );
-      }
-      const fromJobDecs = jobs[fromJobIndex];
-      if (toJobIndex === -1) {
-        throw new Error(
-          `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
-            toP.name
-          }/${String(toKey)}: "to" job not in the jobs list.`
-        );
-      }
-      const toJobDesc = jobs[toJobIndex];
-      if (!fromJobDecs.spec.outputDefSet.hasDef(fromKeyStr)) {
-        throw new Error(
-          `Invalid jobConnector: ${fromP}/${fromKeyStr} >> ${
-            toP.name
-          }/${String(toKey)}: "from" key "${fromKeyStr}" not found.`
-        );
-      }
-      if (!toJobDesc.spec.inputDefSet.hasDef(toKeyStr)) {
-        throw new Error(
-          `Invalid jobConnector: ${fromP}/${String(fromKey)} >> ${
-            toP.name
-          }/${String(toKey)}: "to" key "${toKeyStr}" not found.`
-        );
-      }
-
-      // TODO: to bring back this check
-      // const fromDef = fromJobDecs.spec.outputDefSet.getDef(fromKeyStr);
-      // const toDef = toJobDesc.spec.inputDefSet.getDef(toKeyStr);
-      // if (hashDef(fromDef) !== hashDef(toDef)) {
-      //   const msg = `Streams ${fromP.name}.${fromKeyStr} and ${toP.name}.${toKeyStr} are incompatible.`;
-      //   console.error(
-      //     msg,
-      //     "Upstream schema: ",
-      //     zodToJsonSchema(fromDef),
-      //     "Downstream schema: ",
-      //     zodToJsonSchema(toDef)
-      //   );
-      //   throw new Error(msg);
-      // }
-      // validate that the types match
-
-      const commonStreamName = deriveStreamId({
-        groupId: `[${jobGroupId}]`,
-        from: {
-          jobSpec: fromP,
-          key: fromKeyStr,
-        },
-        to: {
-          jobSpec: toP,
-          key: toKeyStr,
-        },
-        // TODO: fix typing
-      } as any);
-
-      inOverridesByIndex[toJobIndex] = {
-        ...inOverridesByIndex[toJobIndex],
-        [toKeyStr]: commonStreamName,
-      };
-
-      outOverridesByIndex[fromJobIndex] = {
-        ...outOverridesByIndex[fromJobIndex],
-        [fromKeyStr]: commonStreamName,
-      };
-    }
-
-    // keep count of job with the same name
-    const countByName: { [k: string]: number } = {};
-    const jobIdsBySpecName: { [k: string]: string[] } = {};
-
-    for (let i = 0; i < Object.keys(jobs).length; i++) {
-      // calculate overrides based on jobConnectors
-
-      const { spec: jobSpec, jobParams } = jobs[i];
-
-      if (!countByName[jobSpec.name]) {
-        countByName[jobSpec.name] = 0;
-      } else {
-        countByName[jobSpec.name] += 1;
-      }
-      const jobId = `[${jobGroupId}]${jobSpec.name}${
-        countByName[jobSpec.name] > 0 ? `-${countByName[jobSpec.name]}` : ""
-      }`;
-
-      jobIdsBySpecName[jobSpec.name] = [
-        ...(jobIdsBySpecName[jobSpec.name] || []),
-        jobId,
-      ];
-
-      const jDef = {
-        jobId,
-        jobParams,
-        inputStreamIdOverridesByKey: inOverridesByIndex[i],
-        outputStreamIdOverridesByKey: outOverridesByIndex[i],
-      };
-      await jobSpec._requestJob(jDef);
-    }
-
-    const identifySingleJobIdBySpec = <P, I, O, TP>(
-      spec: ZZJobSpec<P, I, O, TP>
-    ) => {
-      const jobs = jobIdsBySpecName[spec.name];
-      if (jobs.length > 1) {
-        throw new Error(
-          `More than one job with spec ${spec.name} detected. Please use jobIdsBySpecName instead.`
-        );
-      }
-      const [job] = jobs;
-      return job;
-    };
-
-    // Create interfaces for inputs and outputs
-    const inputs = {
-      bySpec: <P, I, O, TP>(spec: ZZJobSpec<P, I, O, TP>) => {
-        return spec._deriveInputsForJob(identifySingleJobIdBySpec(spec));
-      },
-    };
-
-    const outputs = {
-      bySpec: <P, I, O, TP>(spec: ZZJobSpec<P, I, O, TP>) => {
-        return spec._deriveOutputsForJob(identifySingleJobIdBySpec(spec));
-      },
-    };
-
-    // console.log("countByName", countByName);
-    return { jobIdsBySpecName, inputs, outputs };
-  }
-
-  private _deriveInputsForJob = (jobId: string) => {
+  public _deriveInputsForJob = (jobId: string) => {
     return {
       send: async (data: IMap[keyof IMap]) => {
         if (!this.inputDefSet.hasDef("default")) {
@@ -905,7 +698,7 @@ export class ZZJobSpec<
     };
   };
 
-  private _deriveOutputsForJob = (jobId: string) => {
+  public _deriveOutputsForJob = (jobId: string) => {
     const subscriberByKey = <K extends keyof OMap>(key: K) => {
       const subscriber = this.forJobOutput({
         jobId,
@@ -958,24 +751,7 @@ export class ZZJobSpec<
   }
 }
 
-
-interface JobConnector<Spec1, Spec2>  {
-  from:
-    | CheckSpec<Spec1>
-    | [
-      Spec1,
-        keyof InferStreamSetType<CheckSpec<Spec1>["outputDefSet"]> | "default"
-      ];
-
-  to:
-    | CheckSpec<Spec2>
-    | [
-        Spec2,
-        keyof InferStreamSetType<CheckSpec<Spec2>["outputDefSet"]> | "default"
-      ];
-};
-
-function deriveStreamId<PP1, PP2>({
+export function deriveStreamId<PP1, PP2>({
   groupId,
   from,
   to,
@@ -994,16 +770,6 @@ function deriveStreamId<PP1, PP2>({
   const toStr = to ? `${to.jobSpec.name}/${to.key}` : "(*)";
   return `stream-${groupId}::${fromStr}>>${toStr}`;
 }
-
-export type CheckArray<T> = T extends Array<infer V> ? Array<V> :
- never;
-
-type JobSpecAndJobParams<JobSpec> = {
-  spec: CheckSpec<JobSpec>;
-  jobParams: z.infer<CheckSpec<JobSpec>["jobParams"]>;
-  jobLabel?: string;
-};
-
 
 export async function sleep(ms: number) {
   return new Promise((resolve) => {

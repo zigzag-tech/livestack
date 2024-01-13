@@ -14,7 +14,7 @@ import {
 } from "../storage/cloudStorage";
 import { getTempPathByJobId } from "../storage/temp-dirs";
 import path from "path";
-import { addDatapoint, getJobRec, updateJobStatus } from "../db/knexConn";
+import { updateJobStatus } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
 import { ZZJobSpec } from "./ZZJobSpec";
 import { identifyLargeFiles } from "../files/file-ops";
