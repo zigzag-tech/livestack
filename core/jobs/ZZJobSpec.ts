@@ -576,7 +576,7 @@ export class ZZJobSpec<
     return stream as ZZStream<WrapTerminatorAndDataId<T>>;
   };
 
-  public forJobOutput({
+  public createOutputCollector({
     jobId,
     key,
     from = "beginning",
@@ -764,7 +764,7 @@ export class ZZJobSpec<
 
   public _deriveOutputsForJob = (jobId: string) => {
     const subscriberByKey = <K extends keyof OMap>(key: K) => {
-      const subscriber = this.forJobOutput({
+      const subscriber = this.createOutputCollector({
         jobId,
         key,
       });
