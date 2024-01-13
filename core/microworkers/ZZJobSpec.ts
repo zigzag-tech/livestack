@@ -47,7 +47,16 @@ export type CheckSpec<SP> = SP extends ZZJobSpec<
   ? ZZJobSpec<P, I, O>
   : never;
 
-export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
+export class ZZJobSpec<
+  P,
+  IMap = {
+    default: {};
+  },
+  OMap = {
+    default: {};
+  },
+  TProgress = never
+> {
   private readonly _zzEnv: ZZEnv | null = null;
 
   protected logger: ReturnType<typeof getLogger>;

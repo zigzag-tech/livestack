@@ -11,7 +11,7 @@ const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
 
 export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
   P,
-  unknown,
+  { default: {} },
   { default: O }
 > {
   protected _endpoint: `${string}/${string}:${string}`;
@@ -21,7 +21,7 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
     jobSpec,
     zzEnv,
   }: {
-    jobSpec: ZZJobSpec<P, unknown, { default: O }>;
+    jobSpec: ZZJobSpec<P, { default: {} }, { default: O }>;
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
     zzEnv?: ZZEnv;
