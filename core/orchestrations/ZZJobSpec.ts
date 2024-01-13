@@ -234,7 +234,7 @@ export class ZZJobSpec<
       ) as OMap[keyof OMap][];
   }
 
-  public async requestJobAndWaitOnResult({
+  public async requestJobAndWaitOnResults({
     jobId: jobId,
     jobParams: jobParams,
     outputKey = "default" as keyof OMap,
