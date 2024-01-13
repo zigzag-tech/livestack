@@ -683,7 +683,7 @@ export class ZZJobSpec<
       [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
     };
 
-    jobConnectors: JobConnector<Specs, any, any>[];
+    jobConnectors: JobConnector[];
   }) {
     const inOverridesByIndex = [] as {
       [K in keyof CheckArray<Specs>]: Partial<
@@ -701,6 +701,7 @@ export class ZZJobSpec<
         >
       >;
     };
+    
     // calculate overrides based on jobConnectors
     for (const connector of jobConnectors) {
       const fromPairs = Array.isArray(connector.from)
@@ -729,7 +730,7 @@ export class ZZJobSpec<
         throw new Error(
           `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
             toP.name
-          }/${String(toKey)}: "from" job not found.`
+          }/${String(toKey)}: "from" job not in the jobs list.`
         );
       }
       const fromJobDecs = jobs[fromJobIndex];
@@ -737,22 +738,22 @@ export class ZZJobSpec<
         throw new Error(
           `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
             toP.name
-          }/${String(toKey)}: "to" job not found.`
+          }/${String(toKey)}: "to" job not in the jobs list.`
         );
       }
       const toJobDesc = jobs[toJobIndex];
       if (!fromJobDecs.spec.outputDefSet.hasDef(fromKeyStr)) {
         throw new Error(
-          `Invalid jobConnector: ${fromP}/${String(fromKey)} >> ${
+          `Invalid jobConnector: ${fromP}/${fromKeyStr} >> ${
             toP.name
-          }/${String(toKey)}: "from" key not found.`
+          }/${String(toKey)}: "from" key "${fromKeyStr}" not found.`
         );
       }
       if (!toJobDesc.spec.inputDefSet.hasDef(toKeyStr)) {
         throw new Error(
           `Invalid jobConnector: ${fromP}/${String(fromKey)} >> ${
             toP.name
-          }/${String(toKey)}: "to" key not found.`
+          }/${String(toKey)}: "to" key "${toKeyStr}" not found.`
         );
       }
 
@@ -957,24 +958,19 @@ export class ZZJobSpec<
   }
 }
 
-type JobConnector<
-  Specs,
-  K1 extends keyof CheckArray<Specs>,
-  K2 extends keyof CheckArray<Specs>,
-  Spec1 = CheckArray<Specs>[K1],
-  Spec2 = CheckArray<Specs>[K2]
-> = {
+
+interface JobConnector<Spec1, Spec2>  {
   from:
     | CheckSpec<Spec1>
     | [
-        CheckSpec<Spec1>,
+      Spec1,
         keyof InferStreamSetType<CheckSpec<Spec1>["outputDefSet"]> | "default"
       ];
 
   to:
     | CheckSpec<Spec2>
     | [
-        CheckSpec<Spec2>,
+        Spec2,
         keyof InferStreamSetType<CheckSpec<Spec2>["outputDefSet"]> | "default"
       ];
 };
@@ -999,7 +995,8 @@ function deriveStreamId<PP1, PP2>({
   return `stream-${groupId}::${fromStr}>>${toStr}`;
 }
 
-export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
+export type CheckArray<T> = T extends Array<infer V> ? Array<V> :
+ never;
 
 type JobSpecAndJobParams<JobSpec> = {
   spec: CheckSpec<JobSpec>;
@@ -1007,19 +1004,6 @@ type JobSpecAndJobParams<JobSpec> = {
   jobLabel?: string;
 };
 
-type JobSpecAndJobOutputKey<PP> =
-  | [
-      CheckSpec<PP>,
-      keyof InferStreamSetType<CheckSpec<PP>["outputDefSet"]> | "default"
-    ]
-  | CheckSpec<PP>;
-
-type JobSpecAndJobInputKey<PP> =
-  | [
-      CheckSpec<PP>,
-      keyof InferStreamSetType<CheckSpec<PP>["inputDefSet"]> | "default"
-    ]
-  | CheckSpec<PP>;
 
 export async function sleep(ms: number) {
   return new Promise((resolve) => {

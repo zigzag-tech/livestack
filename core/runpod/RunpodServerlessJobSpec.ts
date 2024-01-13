@@ -1,7 +1,7 @@
-import { ZZJobSpec } from "../microworkers/ZZJobSpec";
+import { ZZJobSpec } from "../orchestrations/ZZJobSpec";
 import { JobSpecDef } from "../microworkers/JobSpecDef";
 import { z } from "zod";
-import { ZZEnv } from "../microworkers/ZZEnv";
+import { ZZEnv } from "../orchestrations/ZZEnv";
 
 export class RunpodServerlessJobSpec<P extends object, O> extends ZZJobSpec<
   P,
