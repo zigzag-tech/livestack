@@ -219,7 +219,7 @@ export class ZZJobGroupDef<Specs> {
     };
 
     // console.log("countByName", countByName);
-    return new ZZJobGroup({ jobIdsBySpecName, inputs, outputs });
+    return new ZZJobGroup({ jobIdsBySpecName, inputs, outputs, jobGroupDef: this });
   }
 }
 
@@ -235,11 +235,14 @@ export class ZZJobGroup<Specs> {
       spec: ZZJobSpec<P, I, O, TP>
     ) => ReturnType<ZZJobSpec<P, I, O, TP>["_deriveOutputsForJob"]>;
   };
+  public readonly jobGroupDef: ZZJobGroupDef<Specs>;
   constructor({
     jobIdsBySpecName,
     inputs,
     outputs,
+    jobGroupDef,
   }: {
+    jobGroupDef: ZZJobGroupDef<Specs>;
     jobIdsBySpecName: { [k: string]: string[] };
     inputs: {
       bySpec: <P, I, O, TP>(
@@ -255,6 +258,7 @@ export class ZZJobGroup<Specs> {
     this.jobIdsBySpecName = jobIdsBySpecName;
     this.inputs = inputs;
     this.outputs = outputs;
+    this.jobGroupDef = jobGroupDef;
   }
 
   public static define<Specs>({
