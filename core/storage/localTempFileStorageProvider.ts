@@ -1,8 +1,8 @@
 import fs from "fs";
 import { Stream } from "stream";
-import { IStorageProvider } from "../storage/cloudStorage";
-import { ensurePathExists } from "../storage/ensurePathExists";
-import { TEMP_DIR } from "../storage/temp-dirs";
+import { IStorageProvider } from "./cloudStorage";
+import { ensurePathExists } from "./ensurePathExists";
+import { TEMP_DIR } from "./temp-dirs";
 import path from "path";
 
 export function getLocalTempFileStorageProvider(
