@@ -26,6 +26,7 @@ import {
 import { ZZStream, ZZStreamSubscriber, hashDef } from "./ZZStream";
 import { StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
+import pLimit from "p-limit";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -283,53 +284,77 @@ export class ZZJobSpec<
     data: IMap[keyof IMap];
     key?: keyof IMap;
   }) {
-    const stream = await this.getJobStream({
-      jobId,
-      key,
-      type: "in",
+    await this._getStreamAndSendToJobInput(jobId, key, "in", {
+      data,
+      terminate: false,
     });
+  }
 
-    // const lastV = await stream.lastValue();
-    // mark job terminated in redis key value store
-    const redis = new Redis(this.zzEnv.redisConfig);
-    const isTerminated =
-      (await redis.get(`terminated__${jobId}/${String(key)}`)) === "true";
-    await redis.disconnect();
-    if (isTerminated) {
-      this.logger.error(
-        `Cannot send input to a terminated stream! jobId: ${jobId}, key: ${String(
-          key
-        )}`
-      );
-      throw new Error("Cannot send input to a terminated stream!");
+  private _sendFnsByJobIdAndKey: {
+    [jobId: string]: Partial<{
+      [key in keyof IMap]: pLimit.Limit;
+    }>;
+  } = {};
+
+  private async _getStreamAndSendToJobInput(
+    jobId: string,
+    key: keyof IMap,
+    type: "in" | "out",
+    d: WrapTerminatorAndDataId<IMap[keyof IMap]>
+  ) {
+    if (!this._sendFnsByJobIdAndKey[jobId]) {
+      this._sendFnsByJobIdAndKey[jobId] = {};
     }
+    if (!this._sendFnsByJobIdAndKey[jobId][key]) {
+      this._sendFnsByJobIdAndKey[jobId][key] = pLimit(1);
+    }
+    const limit = this._sendFnsByJobIdAndKey[jobId][key]!;
+    await limit(async () => {
+      const redis = new Redis(this.zzEnv.redisConfig);
+      if (!d.terminate) {
+        // const lastV = await stream.lastValue();
+        // mark job terminated in redis key value store
+        const isTerminated =
+          (await redis.get(`terminated__${jobId}/${String(key)}`)) === "true";
+        await redis.disconnect();
+        if (isTerminated) {
+          this.logger.error(
+            `Cannot send input to a terminated stream! jobId: ${jobId}, key: ${String(
+              key
+            )}`
+          );
+          throw new Error("Cannot send input to a terminated stream!");
+        }
+      } else {
+        await redis.set(
+          `terminated__${jobId}/${String(key)}`,
+          "true",
+          "EX",
+          600
+        );
+      }
+      await redis.disconnect();
 
-    await stream.pub({
-      message: {
-        data,
-        terminate: false,
-      },
+      const stream = await this.getJobStream({
+        jobId,
+        key,
+        type,
+      });
+      await stream.pub({
+        message: d,
+      });
     });
   }
 
   async terminateJobInput({ jobId, key }: { jobId: string; key?: keyof IMap }) {
-    const stream = await this.getJobStream({
+    await this._getStreamAndSendToJobInput(
       jobId,
-      type: "in",
-      key: key || ("default" as keyof IMap),
-    });
-
-    await stream.pub({
-      message: {
+      key || ("default" as keyof IMap),
+      "in",
+      {
         terminate: true,
-      },
-    });
-
-    // mark job terminated in redis key value store
-    const redis = new Redis(this.zzEnv.redisConfig);
-    // expire in 10 minutes
-    await redis.set(`terminated__${jobId}/${String(key)}`, "true", "EX", 600);
-    await redis.disconnect();
+      }
+    );
   }
 
   public async waitForJobReadyForInputs({
@@ -349,7 +374,7 @@ export class ZZJobSpec<
         jobId,
         key: key ? key : ("default" as keyof IMap),
       });
-      console.log("isReady", isReady);
+      // console.log("isReady", isReady);
     }
 
     return {

@@ -17,7 +17,8 @@
     "rxjs": "^7",
     "winston": "^3.x",
     "zod": "^3",
-    "zod-to-json-schema": "^3"
+    "zod-to-json-schema": "^3",
+    "p-limit": "^5"
   },
   "types": "dist/index.d.ts",
   "devDependencies": {
