@@ -1,6 +1,8 @@
-import { ZZJobSpec, sleep } from "../microworkers/ZZJobSpec";
+import { InferStreamSetType } from "../microworkers/StreamDefSet";
+import { CheckSpec, ZZJobSpec, sleep } from "../microworkers/ZZJobSpec";
 import { ZZWorkerDef } from "../microworkers/ZZWorker";
-
+import { z } from "zod";
+import { ZZEnv } from "../microworkers/ZZEnv";
 type TriggerCheckContext = {
   totalTimeElapsed: number;
   attemptStats: {
@@ -10,50 +12,32 @@ type TriggerCheckContext = {
   }[];
 };
 
-export interface ParallelAttempt<ParentP, ParentI, ParentO> {
-  jobSpec: ZZJobSpec<ParentP, { default: ParentI }, { default: ParentO }>;
+export interface ParallelAttempt<ParentP, ParentO, P, OMap> {
+  jobSpec: ZZJobSpec<P, unknown, OMap>;
+  timeout: number;
+  transformInput: (params: ParentP) => Promise<P> | P;
+  transformOutput: <K extends keyof ParentO>(
+    // TODO: fix this type
+    // output: OMap[K]
+    output: OMap[keyof OMap]
+  ) => Promise<ParentO[K]> | ParentO[K];
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
 
-export function genParallelAttempt<ParentP, ParentI, ParentO>(
-  jobSpec: ZZJobSpec<ParentP, { default: ParentI }, { default: ParentO }>,
-  config: Omit<ParallelAttempt<ParentP, ParentI, ParentO>, "jobSpec">
-): ParallelAttempt<ParentP, ParentI, ParentO> {
-  return {
-    jobSpec,
-    ...config,
-  };
-}
-
-export class ZZParallelAttemptWorkerDef<P, I, O> extends ZZWorkerDef<
-  P,
-  I extends unknown
-    ? unknown
-    : {
-        default: I;
-      },
-  {
-    default: O;
-  }
-> {
+export class ZZParallelAttemptWorkerDef<
+  ParentP,
+  ParentOMap,
+  Specs
+> extends ZZWorkerDef<ParentP, { default: {} }, ParentOMap> {
   constructor({
     attempts,
     globalTimeoutCondition,
     transformCombinedOutput,
     jobSpec,
+    zzEnv,
   }: {
-    jobSpec: ZZJobSpec<
-      P,
-      I extends unknown
-        ? unknown
-        : {
-            default: I;
-          },
-      {
-        default: O;
-      }
-    >;
-
+    zzEnv?: ZZEnv;
+    jobSpec: ZZJobSpec<ParentP, { default: {} }, ParentOMap>;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {
@@ -62,20 +46,30 @@ export class ZZParallelAttemptWorkerDef<P, I, O> extends ZZWorkerDef<
         error: boolean;
         name: string;
       }[]
-    ) => Promise<O> | O;
-    attempts: ParallelAttempt<P, I, O>[];
+    ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
+    attempts: {
+      [K in keyof Specs]: ParallelAttempt<
+        ParentP,
+        ParentOMap,
+        z.infer<CheckSpec<Specs[K]>["jobParams"]>,
+        InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
+      >;
+    };
   }) {
     super({
+      zzEnv,
       jobSpec,
       processor: async ({ logger, jobParams, jobId }) => {
-        const genRetryFunction = ({
-          jobSpec: attemptDef,
-        }: ParallelAttempt<P, I, O>) => {
+        const genRetryFunction = <P, O>({
+          jobSpec,
+          transformInput,
+          transformOutput,
+        }: ParallelAttempt<ParentP, ParentOMap, P, O>) => {
           const fn = async () => {
-            const childJobId = `${jobId}/${attemptDef.name}`;
+            const childJobId = `${jobId}/${jobSpec.name}`;
             const { outputs } = await jobSpec.requestJob({
               jobId: childJobId,
-              jobParams: jobParams as P,
+              jobParams: await transformInput(jobParams),
             });
 
             const o = await outputs.nextValue();
@@ -83,7 +77,7 @@ export class ZZParallelAttemptWorkerDef<P, I, O> extends ZZWorkerDef<
               throw new Error("no output");
             }
 
-            const result = o;
+            const result = await transformOutput(o);
 
             return {
               resolved: true as const,
@@ -95,13 +89,15 @@ export class ZZParallelAttemptWorkerDef<P, I, O> extends ZZWorkerDef<
         };
 
         const contexts: TriggerCheckContext[] = [];
-        const restAttempts = [...attempts];
+        const restAttempts = [
+          ...(attempts as Array<ParallelAttempt<any, any, any, any>>),
+        ];
         const running: {
           promise: ReturnType<ReturnType<typeof genRetryFunction>>;
           name: string;
           timeStarted: number;
           isResolved: () => boolean;
-          getResult: () => O | undefined;
+          getResult: () => ParentOMap[keyof ParentOMap] | undefined;
         }[] = [];
 
         const time = Date.now();
@@ -137,7 +133,7 @@ export class ZZParallelAttemptWorkerDef<P, I, O> extends ZZWorkerDef<
             nextAttempt = restAttempts.shift()!;
             const { setResolved, isResolved } = genResolvedTracker();
 
-            let result: O | undefined = undefined;
+            let result: ParentOMap[keyof ParentOMap] | undefined = undefined;
             const fn = genRetryFunction(nextAttempt);
             logger.info(`Started attempt ${nextAttempt.jobSpec.name}.`);
             running.push({

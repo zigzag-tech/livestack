@@ -58,14 +58,12 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
 
-            await jobSpec.requestJob({
+            const jo = await jobSpec.requestJob({
               jobId: childJobId,
               jobParams: await transformInput(jobParams),
             });
 
-            const jo = jobSpec.forJobOutput({ jobId: childJobId });
-
-            const o = await jo.nextValue();
+            const o = await jo.outputs.nextValue();
             if (!o) {
               throw new Error("no output");
             }
