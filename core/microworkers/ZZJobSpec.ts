@@ -683,27 +683,7 @@ export class ZZJobSpec<
       [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
     };
 
-    jobConnectors: {
-      from:
-        | ZZJobSpec<any, any, any, any>
-        | [
-            ZZJobSpec<any, any, any, any>,
-            (
-              | keyof InferStreamSetType<CheckSpec<Specs>["outputDefSet"]>
-              | "default"
-            )
-          ];
-
-      to:
-        | ZZJobSpec<any, any, any, any>
-        | [
-            ZZJobSpec<any, any, any, any>,
-            (
-              | keyof InferStreamSetType<CheckSpec<Specs>["outputDefSet"]>
-              | "default"
-            )
-          ];
-    }[];
+    jobConnectors: JobConnector<Specs, any, any>[];
   }) {
     const inOverridesByIndex = [] as {
       [K in keyof CheckArray<Specs>]: Partial<
@@ -976,6 +956,28 @@ export class ZZJobSpec<
     return workerDef;
   }
 }
+
+type JobConnector<
+  Specs,
+  K1 extends keyof CheckArray<Specs>,
+  K2 extends keyof CheckArray<Specs>,
+  Spec1 = CheckArray<Specs>[K1],
+  Spec2 = CheckArray<Specs>[K2]
+> = {
+  from:
+    | CheckSpec<Spec1>
+    | [
+        CheckSpec<Spec1>,
+        keyof InferStreamSetType<CheckSpec<Spec1>["outputDefSet"]> | "default"
+      ];
+
+  to:
+    | CheckSpec<Spec2>
+    | [
+        CheckSpec<Spec2>,
+        keyof InferStreamSetType<CheckSpec<Spec2>["outputDefSet"]> | "default"
+      ];
+};
 
 function deriveStreamId<PP1, PP2>({
   groupId,
