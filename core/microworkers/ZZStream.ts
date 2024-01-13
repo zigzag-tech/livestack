@@ -119,6 +119,11 @@ export class ZZStream<T> {
     this._zzEnv = zzEnv || null;
     this.hash = hashDef(this.def);
     this.logger = logger;
+    // console.debug(
+    //   "ZZStream created",
+    //   this.uniqueName,
+    //   JSON.stringify(zodToJsonSchema(this.def), null, 2)
+    // );
   }
 
   public lastValueSlow = async () => {

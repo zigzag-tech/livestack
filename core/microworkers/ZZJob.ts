@@ -119,8 +119,6 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       throw err;
     }
 
-    console.debug("p.workerInstanceParams", p.workerInstanceParams);
-
     this.storageProvider = p.storageProvider;
     this.zzEnv = p.jobSpec.zzEnv;
     this.spec = p.jobSpec;

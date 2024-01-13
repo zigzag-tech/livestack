@@ -66,6 +66,8 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   readonly jobParams: z.ZodType<P>;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
+  private readonly _originalInputs: InferDefMap<IMap> | undefined;
+  private readonly _originalOutputs: InferDefMap<OMap> | undefined;
 
   readonly progressDef: z.ZodType<TProgress>;
 
@@ -73,14 +75,14 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     zzEnv,
     name,
     jobParams,
-    output,
-    input,
+    outputs,
+    inputs,
     progressDef,
   }: {
     name: string;
     jobParams?: z.ZodType<P>;
-    input?: InferDefMap<IMap>;
-    output?: InferDefMap<OMap>;
+    inputs?: InferDefMap<IMap>;
+    outputs?: InferDefMap<OMap>;
     progressDef?: z.ZodType<TProgress>;
     zzEnv?: ZZEnv;
     concurrency?: number;
@@ -92,23 +94,26 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     this._zzEnv = zzEnv || null;
     this.logger = getLogger(`spec:${this.name}`);
 
-    if (!input) {
+    this._originalInputs = inputs;
+    this._originalOutputs = outputs;
+
+    if (!inputs) {
       this.inputDefSet = new StreamDefSet({
         defs: ZZStream.single(z.object({})) as InferDefMap<IMap>,
       });
     } else {
       this.inputDefSet = new StreamDefSet({
-        defs: input,
+        defs: inputs,
       });
     }
-
-    if (!output) {
+    if (!outputs) {
+      this.logger.warn(`No output defined for job spec ${this.name}.`);
       this.outputDefSet = new StreamDefSet({
         defs: ZZStream.single(z.void()) as InferDefMap<OMap>,
       });
     } else {
       this.outputDefSet = new StreamDefSet({
-        defs: output,
+        defs: outputs,
       });
     }
   }
@@ -124,8 +129,15 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
   public derive<NewP, NewIMap, NewOMap, NewTP>(
     newP: Partial<
       ConstructorParameters<typeof ZZJobSpec<NewP, NewIMap, NewOMap, NewTP>>[0]
-    >
+    > & {
+      name: string;
+    }
   ) {
+    if (newP.name === this.name) {
+      throw new Error(
+        `Derived job spec must have a different name from the original job spec ${this.name}.`
+      );
+    }
     return new ZZJobSpec<
       P & NewP,
       IMap & NewIMap,
@@ -133,7 +145,10 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
       TProgress & NewTP
     >({
       ...this,
+      inputs: this._originalInputs,
+      outputs: this._originalOutputs,
       ...newP,
+      name: newP.name,
     } as ConstructorParameters<typeof ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap, TProgress & NewTP>>[0]);
   }
 
@@ -354,7 +369,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     try {
       const redis = new Redis(this.zzEnv.redisConfig);
       const isReady = await redis.get(`ready_status__${jobId}/${String(key)}`);
-      console.debug("getJobReadyForInputsInRedis", jobId, key, ":", isReady);
+      // console.debug("getJobReadyForInputsInRedis", jobId, key, ":", isReady);
       return isReady === "true";
     } catch (error) {
       console.error("Error getJobReadyForInputsInRedis:", error);
