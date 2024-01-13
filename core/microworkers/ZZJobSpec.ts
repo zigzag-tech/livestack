@@ -48,9 +48,19 @@ export type CheckSpec<SP> = SP extends ZZJobSpec<
   : never;
 
 export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
-  public readonly zzEnv: ZZEnv;
+  private readonly _zzEnv: ZZEnv | null = null;
 
   protected logger: ReturnType<typeof getLogger>;
+
+  public get zzEnv() {
+    const resolved = this._zzEnv || ZZEnv.global();
+    if (!resolved) {
+      throw new Error(
+        `ZZEnv is not configured in ZZJobSpec ${this.name}. \nPlease either pass it when constructing ZZJobSpec or set it globally using ZZEnv.setGlobal().`
+      );
+    }
+    return resolved;
+  }
 
   public readonly name: string;
   readonly jobParams: z.ZodType<P>;
@@ -79,7 +89,7 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     this.jobParams = jobParams || (z.object({}) as unknown as z.ZodType<P>);
     this.progressDef = progressDef || z.never();
 
-    this.zzEnv = zzEnv || ZZEnv.global();
+    this._zzEnv = zzEnv || null;
     this.logger = getLogger(`spec:${this.name}`);
 
     if (!input) {

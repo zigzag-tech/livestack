@@ -16,10 +16,9 @@ export class ZZEnv implements EnvParams {
   public readonly projectId: string;
   public readonly db?: Knex;
   public readonly redisConfig: RedisOptions;
-  private static _zzEnv: ZZEnv;
+  private static _zzEnv: ZZEnv | null = null;
 
   static global() {
-    if (!ZZEnv._zzEnv) throw new Error("ZZEnv has not been set");
     return ZZEnv._zzEnv;
   }
 

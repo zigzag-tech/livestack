@@ -107,7 +107,9 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     try {
       this.workerInstanceParams = (p.workerInstanceParamsSchema?.parse(
         p.workerInstanceParams
-      ) || null) as WP extends object ? WP : null;
+      ) ||
+        p.workerInstanceParams ||
+        null) as WP extends object ? WP : null;
     } catch (err) {
       this.logger.error(
         `workerInstanceParams error: data provided is invalid: ${JSON.stringify(
@@ -116,6 +118,9 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       );
       throw err;
     }
+
+    console.debug("p.workerInstanceParams", p.workerInstanceParams);
+
     this.storageProvider = p.storageProvider;
     this.zzEnv = p.jobSpec.zzEnv;
     this.spec = p.jobSpec;

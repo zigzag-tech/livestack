@@ -135,19 +135,19 @@ export class ZZWorker<
     this.logger = getLogger(`wkr:${this.workerName}`);
 
     const mergedWorkerOptions = _.merge({}, workerOptions);
-
+    const that = this;
     this.bullMQWorker = new Worker<{ jobParams: P }, void, string>(
-      `${this.zzEnv.projectId}/${this.jobSpec.name}`,
+      `${that.zzEnv.projectId}/${this.jobSpec.name}`,
       async (job, token) => {
         const zzJ = new ZZJob({
           bullMQJob: job,
           bullMQToken: token,
-          logger: this.logger,
-          jobSpec: this.jobSpec,
+          logger: that.logger,
+          jobSpec: that.jobSpec,
           jobParams: job.data.jobParams,
-          workerInstanceParams: this.instanceParams,
-          storageProvider: this.zzEnv.storageProvider,
-          workerName: this.workerName,
+          workerInstanceParams: that.instanceParams,
+          storageProvider: that.zzEnv.storageProvider,
+          workerName: that.workerName,
         });
 
         return await zzJ.beginProcessing(this.def.processor.bind(zzJ) as any);

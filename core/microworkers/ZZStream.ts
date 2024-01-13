@@ -37,7 +37,15 @@ export class ZZStream<T> {
   public readonly def: ZodType<T>;
   public readonly uniqueName: string;
   public readonly hash: string;
-  private zzEnv: ZZEnv;
+  private _zzEnv: ZZEnv | null = null;
+
+  public get zzEnv() {
+    const resolved = this._zzEnv || ZZEnv.global();
+    if (!resolved) {
+      throw new Error("zzEnv not set.");
+    }
+    return resolved;
+  }
   private logger: ReturnType<typeof getLogger>;
 
   public static single<T>(def: z.ZodType<T, any>) {
@@ -56,7 +64,7 @@ export class ZZStream<T> {
   }: {
     uniqueName: string;
     def?: ZodType<T>;
-    zzEnv?: ZZEnv;
+    zzEnv?: ZZEnv | null;
     logger?: ReturnType<typeof getLogger>;
   }): Promise<ZZStream<T>> {
     if (!zzEnv) {
@@ -83,7 +91,7 @@ export class ZZStream<T> {
       }
       const stream = new ZZStream({ uniqueName, def, zzEnv, logger });
       // async
-      if (zzEnv.db) {
+      if (zzEnv?.db) {
         ensureStreamRec({
           projectId: zzEnv.projectId,
           streamId: uniqueName,
@@ -103,12 +111,12 @@ export class ZZStream<T> {
   }: {
     uniqueName: string;
     def: ZodType<T>;
-    zzEnv: ZZEnv;
+    zzEnv?: ZZEnv | null;
     logger: ReturnType<typeof getLogger>;
   }) {
     this.def = def;
     this.uniqueName = uniqueName;
-    this.zzEnv = zzEnv;
+    this._zzEnv = zzEnv || null;
     this.hash = hashDef(this.def);
     this.logger = logger;
   }
