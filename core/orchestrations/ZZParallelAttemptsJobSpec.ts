@@ -12,10 +12,12 @@ type TriggerCheckContext = {
   }[];
 };
 
-export interface ParallelAttempt<ParentP, ParentO, P, OMap> {
-  jobSpec: ZZJobSpec<P, unknown, OMap>;
+export interface ParallelAttempt<ParentI, ParentO, IMap, OMap> {
+  jobSpec: ZZJobSpec<unknown, IMap, OMap>;
   timeout: number;
-  transformInput: (params: ParentP) => Promise<P> | P;
+  transformInput: (
+    params: ParentI[keyof ParentI]
+  ) => Promise<IMap[keyof IMap]> | IMap[keyof IMap];
   transformOutput: <K extends keyof ParentO>(
     // TODO: fix this type
     // output: OMap[K]
@@ -25,19 +27,19 @@ export interface ParallelAttempt<ParentP, ParentO, P, OMap> {
 }
 
 export class ZZParallelAttemptWorkerDef<
-  ParentP,
+  ParentIMap,
   ParentOMap,
   Specs
-> extends ZZWorkerDef<ParentP, { default: {} }, ParentOMap> {
+> extends ZZWorkerDef<unknown, ParentIMap, ParentOMap> {
   constructor({
     attempts,
     globalTimeoutCondition,
     transformCombinedOutput,
-    jobSpec,
+    jobSpec: parentJobSpec,
     zzEnv,
   }: {
     zzEnv?: ZZEnv;
-    jobSpec: ZZJobSpec<ParentP, { default: {} }, ParentOMap>;
+    jobSpec: ZZJobSpec<unknown, ParentIMap, ParentOMap>;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {
@@ -49,28 +51,34 @@ export class ZZParallelAttemptWorkerDef<
     ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
     attempts: {
       [K in keyof Specs]: ParallelAttempt<
-        ParentP,
+        ParentIMap,
         ParentOMap,
-        z.infer<CheckSpec<Specs[K]>["jobParams"]>,
+        InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>,
         InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
       >;
     };
   }) {
     super({
       zzEnv,
-      jobSpec,
-      processor: async ({ logger, jobParams, jobId }) => {
-        const genRetryFunction = <P, O>({
+      jobSpec: parentJobSpec,
+      processor: async ({ logger, nextInput: parentNextInput, jobId }) => {
+        const genRetryFunction = <I, O>({
           jobSpec,
           transformInput,
           transformOutput,
-        }: ParallelAttempt<ParentP, ParentOMap, P, O>) => {
+        }: ParallelAttempt<ParentIMap, ParentOMap, I, O>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
-            const { outputs } = await jobSpec.requestJob({
+            const { outputs, inputs } = await jobSpec.requestJob({
               jobId: childJobId,
-              jobParams: await transformInput(jobParams),
             });
+
+            const inp = await parentNextInput();
+            if (!inp) {
+              throw new Error("no input");
+            }
+
+            await inputs.send(await transformInput(inp));
 
             const o = await outputs.nextValue();
             if (!o) {
