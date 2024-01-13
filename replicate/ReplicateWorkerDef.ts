@@ -1,8 +1,7 @@
 import Replicate from "replicate";
-import { ZZJobSpec } from "../core/microworkers/ZZJobSpec";
-import { z } from "zod";
-import { ZZWorkerDef } from "../core/microworkers/ZZWorker";
-import { ZZEnv } from "../core/microworkers/ZZEnv";
+import { ZZJobSpec } from "@livestack/core";
+import { ZZWorkerDef } from "@livestack/core";
+import { ZZEnv } from "@livestack/core";
 if (!process.env.REPLICATE_API_TOKEN) {
   throw new Error("REPLICATE_API_TOKEN not found");
 }
