@@ -11,7 +11,7 @@ export type WrapTerminatorAndDataId<T> =
     };
 
 export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
-  return z.union([
+  return z.discriminatedUnion("terminate", [
     z.object({
       data: t,
       terminate: z.literal(false),
@@ -19,7 +19,7 @@ export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
     z.object({
       terminate: z.literal(true),
     }),
-  ]) as z.ZodType<WrapTerminatorAndDataId<T>>;
+  ]);
 }
 
 export function wrapStreamSubscriberWithTermination<T>(
