@@ -1,8 +1,8 @@
-import { InferStreamSetType } from "./StreamDefSet";
-import { CheckSpec, ZZJobSpec, sleep } from "./ZZJobSpec";
-import { ZZWorkerDef } from "./ZZWorker";
+import { InferStreamSetType } from "../jobs/StreamDefSet";
+import { CheckSpec, ZZJobSpec, sleep } from "../jobs/ZZJobSpec";
+import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { z } from "zod";
-import { ZZEnv } from "./ZZEnv";
+import { ZZEnv } from "../jobs/ZZEnv";
 type TriggerCheckContext = {
   totalTimeElapsed: number;
   attemptStats: {

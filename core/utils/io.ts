@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ZZStreamSubscriber } from "../orchestrations/ZZStream";
+import { ZZStreamSubscriber } from "../jobs/ZZStream";
 import { Observable } from "rxjs";
 export type WrapTerminatorAndDataId<T> =
   | {

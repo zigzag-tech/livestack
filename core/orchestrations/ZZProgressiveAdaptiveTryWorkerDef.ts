@@ -1,9 +1,9 @@
-import { CheckSpec, ZZJobSpec } from "./ZZJobSpec";
-import { ZZWorkerDef } from "./ZZWorker";
+import { CheckSpec, ZZJobSpec } from "../jobs/ZZJobSpec";
+import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { z } from "zod";
 import _ from "lodash";
-import { InferStreamSetType } from "./StreamDefSet";
-import { ZZEnv } from "./ZZEnv";
+import { InferStreamSetType } from "../jobs/StreamDefSet";
+import { ZZEnv } from "../jobs/ZZEnv";
 export interface AttemptDef<ParentP, ParentO, P, OMap> {
   jobSpec: ZZJobSpec<P, unknown, OMap>;
   timeout: number;

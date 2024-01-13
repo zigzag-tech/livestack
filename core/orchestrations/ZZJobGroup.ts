@@ -1,5 +1,5 @@
-import { InferStreamSetType } from "./StreamDefSet";
-import { CheckSpec, deriveStreamId, ZZJobSpec } from "./ZZJobSpec";
+import { InferStreamSetType } from "../jobs/StreamDefSet";
+import { CheckSpec, deriveStreamId, ZZJobSpec } from "../jobs/ZZJobSpec";
 import { z } from "zod";
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
@@ -219,7 +219,12 @@ export class ZZJobGroupDef<Specs> {
     };
 
     // console.log("countByName", countByName);
-    return new ZZJobGroup({ jobIdsBySpecName, inputs, outputs, jobGroupDef: this });
+    return new ZZJobGroup({
+      jobIdsBySpecName,
+      inputs,
+      outputs,
+      jobGroupDef: this,
+    });
   }
 }
 

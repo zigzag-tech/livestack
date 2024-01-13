@@ -2,7 +2,7 @@ import { ZZWorkerDefParams } from "./ZZWorker";
 import { InferDefMap } from "./StreamDefSet";
 import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import { GenericRecordType, QueueName } from "./workerCommon";
+import { GenericRecordType, QueueName } from "../orchestrations/workerCommon";
 import Redis from "ioredis";
 import _ from "lodash";
 import {

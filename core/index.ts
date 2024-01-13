@@ -1,9 +1,9 @@
-import { ZZJob } from "./orchestrations/ZZJob";
-import { ZZWorker, ZZWorkerDef } from "./orchestrations/ZZWorker";
-import { ZZJobSpec } from "./orchestrations/ZZJobSpec";
-import { ZZEnv } from "./orchestrations/ZZEnv";
-import { ZZStream } from "./orchestrations/ZZStream";
-import { fileOrBufferSchema } from "./orchestrations/ZZEnv";
+import { ZZJob } from "./jobs/ZZJob";
+import { ZZWorker, ZZWorkerDef } from "./jobs/ZZWorker";
+import { ZZJobSpec } from "./jobs/ZZJobSpec";
+import { ZZEnv } from "./jobs/ZZEnv";
+import { ZZStream } from "./jobs/ZZStream";
+import { fileOrBufferSchema } from "./jobs/ZZEnv";
 import { ZZJobGroup } from "./orchestrations/ZZJobGroup";
 import { ZZJobGroupDef } from "./orchestrations/ZZJobGroup";
 
