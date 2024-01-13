@@ -1,13 +1,12 @@
-import { ZZJobSpec } from "../jobs/ZZJobSpec";
-import { JobSpecDef } from "../microworkers/JobSpecDef";
+import { ZZJobSpec } from "../core/jobs/ZZJobSpec";
 import { z } from "zod";
-import { ZZEnv } from "../jobs/ZZEnv";
+import { ZZEnv } from "../core/jobs/ZZEnv";
+import { ZZWorkerDef } from "../core/jobs/ZZWorker";
 
-export class RunpodServerlessJobSpec<P extends object, O> extends ZZJobSpec<
+export class RunpodServerlessWorkerDef<P extends object, O> extends ZZWorkerDef<
   P,
-  {
-    runpodResult: O;
-  }
+  { default: {} },
+  { default: O }
 > {
   protected _endpointId: string;
   protected _runpodApiKey: string;
@@ -15,20 +14,16 @@ export class RunpodServerlessJobSpec<P extends object, O> extends ZZJobSpec<
   constructor({
     serverlessEndpointId,
     runpodApiKey,
-    def,
+    jobSpec,
     zzEnv,
   }: {
     serverlessEndpointId: string;
     runpodApiKey: string;
-    def: JobSpecDef<P, O>;
+    jobSpec: ZZJobSpec<P, { default: {} }, { default: O }>;
     zzEnv: ZZEnv;
   }) {
     super({
-      def: def.derive({
-        output: z.object({
-          runpodResult: def.output,
-        }) as any,
-      }),
+      jobSpec,
       zzEnv,
       processor: async ({ jobParams, logger }) => {
         const runUrl = `https://api.runpod.ai/v2/${this._endpointId}/run`;
@@ -112,7 +107,7 @@ export class RunpodServerlessJobSpec<P extends object, O> extends ZZJobSpec<
         //   } as Partial<TJobData & { status: "FINISH"; runpodResult: TJobResult }>,
         // });
 
-        return { runpodResult: runpodResult.output };
+        return runpodResult.output;
       },
     });
     this._endpointId = serverlessEndpointId;
