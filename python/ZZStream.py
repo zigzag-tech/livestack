@@ -4,6 +4,7 @@ from rx import Observable
 
 T = TypeVar('T')
 
+
 class ZZStream(Generic[T]):
     def __init__(self, stream_id: str):
         self.stream_id = stream_id
