@@ -49,7 +49,14 @@ export class ZZJobGroupDef<Specs> {
     this.jobConnectors = jobConnectors;
   }
 
-  public async request({ jobGroupId }: { jobGroupId: string }) {
+  public async request({ jobGroupId, lazyJobCreation = false }: { jobGroupId: string, 
+  lazyJobCreation?: boolean
+  }) {
+
+    if(lazyJobCreation) {
+      throw new Error("Lazy job creation is not supported yet.")
+    }
+    
     const inOverridesByIndex = [] as {
       [K in keyof CheckArray<Specs>]: Partial<
         Record<
