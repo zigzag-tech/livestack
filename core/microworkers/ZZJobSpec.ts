@@ -604,10 +604,13 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     jobParams,
     bullMQJobsOpts,
   }: {
-    jobId: string;
+    jobId?: string;
     jobParams?: P;
     bullMQJobsOpts?: JobsOptions;
   }) {
+    if (!jobId) {
+      jobId = `${this.name}-${v4()}`;
+    }
     return this._requestJob({
       jobId,
       jobParams,
