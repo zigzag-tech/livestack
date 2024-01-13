@@ -645,6 +645,25 @@ export class ZZJobSpec<P, IMap, OMap, TProgress = never> {
     });
   }
 
+  public async requestJobAndGetOutputs(
+    p: Parameters<ZZJobSpec<P, IMap, OMap, TProgress>["requestJob"]>[0] & {
+      key?: keyof OMap;
+    }
+  ) {
+    const { jobId, jobParams, key } = p;
+    const { outputs } = await this.requestJob({
+      jobId,
+      jobParams,
+    });
+
+    const rs: OMap[keyof OMap][] = [];
+    let lastV: OMap[keyof OMap] | null = null;
+    while ((lastV = await outputs.nextValue()) !== null) {
+      rs.push(lastV);
+    }
+    return rs;
+  }
+
   public static async requestChainedJobs<Specs>({
     jobGroupId,
     jobs,

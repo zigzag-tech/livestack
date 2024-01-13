@@ -79,6 +79,11 @@ export class ZZWorkerDef<
   public requestJob: (typeof this.jobSpec)["requestJob"] = (p) => {
     return this.jobSpec.requestJob(p);
   };
+
+  public requestJobAndGetOutputs: (typeof this.jobSpec)["requestJobAndGetOutputs"] =
+    (p) => {
+      return this.jobSpec.requestJobAndGetOutputs(p);
+    };
 }
 
 export class ZZWorker<
