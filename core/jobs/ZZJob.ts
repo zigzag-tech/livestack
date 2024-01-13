@@ -181,22 +181,16 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       //     JSON.stringify(o, longStringTruncator)
       // );
 
-      const outputStream = await this.spec.getJobStream({
+      await this.spec._getStreamAndSendDataToPLimited({
         jobId: this.jobId,
         type: "out",
         key,
-      });
-      // update progress to prevent job from being stalling
-      await outputStream.pub({
-        message: {
+        data: {
           data: o,
           terminate: false,
         },
-        jobInfo: {
-          jobId: this.jobId,
-          jobOutputKey: String(key),
-        },
       });
+
       this.bullMQJob.updateProgress(this._dummyProgressCount++);
     };
   }
