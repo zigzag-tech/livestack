@@ -5,7 +5,7 @@ import { ZZEnv } from "./jobs/ZZEnv";
 import { ZZStream } from "./jobs/ZZStream";
 import { fileOrBufferSchema } from "./jobs/ZZEnv";
 import { ZZWorkflow } from "./orchestrations/ZZWorkflow";
-import { ZZWorkflowDef } from "./orchestrations/ZZWorkflow";
+import { ZZWorkflowSpec } from "./orchestrations/ZZWorkflow";
 
 export {
   ZZJobSpec,
@@ -16,5 +16,5 @@ export {
   ZZStream,
   fileOrBufferSchema,
   ZZWorkflow,
-  ZZWorkflowDef,
+  ZZWorkflowSpec,
 };

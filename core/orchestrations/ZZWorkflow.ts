@@ -31,7 +31,9 @@ export interface JobConnector<Spec1, Spec2> {
   ) => void;
 }
 
-export class ZZWorkflowDef<Specs> {
+export class ZZWorkflowSpec<Specs> {
+  public readonly name: string;
+
   public readonly jobs: {
     [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
   };
@@ -42,7 +44,9 @@ export class ZZWorkflowDef<Specs> {
   constructor({
     jobs,
     jobConnectors,
+    name,
   }: {
+    name: string;
     jobs: {
       [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
     };
@@ -53,6 +57,7 @@ export class ZZWorkflowDef<Specs> {
   }) {
     this.jobs = jobs;
     this.jobConnectors = jobConnectors;
+    this.name = name;
   }
 
   public async request({
@@ -256,14 +261,14 @@ export class ZZWorkflow<Specs> {
       spec: ZZJobSpec<P, I, O, TP>
     ) => ReturnType<ZZJobSpec<P, I, O, TP>["_deriveOutputsForJob"]>;
   };
-  public readonly jobGroupDef: ZZWorkflowDef<Specs>;
+  public readonly jobGroupDef: ZZWorkflowSpec<Specs>;
   constructor({
     jobIdsBySpecName,
     inputs,
     outputs,
     jobGroupDef,
   }: {
-    jobGroupDef: ZZWorkflowDef<Specs>;
+    jobGroupDef: ZZWorkflowSpec<Specs>;
     jobIdsBySpecName: { [k: string]: string[] };
     inputs: {
       bySpec: <P, I, O, TP>(
@@ -285,7 +290,9 @@ export class ZZWorkflow<Specs> {
   public static define<Specs>({
     jobs,
     jobConnectors,
+    name,
   }: {
+    name: string;
     jobs: {
       [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
     };
@@ -299,7 +306,7 @@ export class ZZWorkflow<Specs> {
       >
     >[];
   }) {
-    return new ZZWorkflowDef<Specs>({ jobs, jobConnectors });
+    return new ZZWorkflowSpec<Specs>({ name, jobs, jobConnectors });
   }
 
   public static connect = connect;
@@ -320,7 +327,13 @@ export function connect<
   transform?: (
     spec1Out: NonNullable<InferOutputType<Spec1, K1>>
   ) => NonNullable<InferInputType<Spec2, K2>>;
-}) {
+}): {
+  from: Spec1;
+  to: Spec2;
+  transform?: (
+    spec1Out: NonNullable<InferOutputType<Spec1, K1>>
+  ) => NonNullable<InferInputType<Spec2, K2>>;
+} {
   return {
     from,
     to,
