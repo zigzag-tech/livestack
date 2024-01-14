@@ -351,7 +351,7 @@ export class ZZJobSpec<
     const limit = dict[key]!;
 
     await limit(async () => {
-      console.debug("stream_data", JSON.stringify(d, longStringTruncator));
+      // console.debug("stream_data", JSON.stringify(d, longStringTruncator));
 
       const redis = new Redis(this.zzEnv.redisConfig);
       if (!d.terminate) {
