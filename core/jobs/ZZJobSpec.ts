@@ -27,6 +27,7 @@ import { ZZStream, ZZStreamSubscriber, hashDef } from "./ZZStream";
 import { StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 import pLimit from "p-limit";
+import { genLoopUntilTerminated } from "./ZZJob";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -793,16 +794,21 @@ export class ZZJobSpec<
       ReturnType<typeof subscriberByKey>
     > | null = null;
 
+    const nextValue = async <K extends keyof OMap>() => {
+      if (subscriberByDefaultKey === null) {
+        subscriberByDefaultKey = await subscriberByKey("default" as K);
+      }
+      return await subscriberByDefaultKey.nextValue();
+    };
+
+    const loopUntilTerminated = genLoopUntilTerminated(nextValue);
+
     return {
       byKey: <K extends keyof OMap>(key: K) => {
         return subscriberByKey(key);
       },
-      nextValue: async <K extends keyof OMap>() => {
-        if (subscriberByDefaultKey === null) {
-          subscriberByDefaultKey = await subscriberByKey("default" as K);
-        }
-        return await subscriberByDefaultKey.nextValue();
-      },
+      nextValue,
+      loopUntilTerminated,
     };
   };
 

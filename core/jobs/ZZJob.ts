@@ -70,6 +70,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       inputObservableUntracked: Observable<IMap[K] | null>;
       trackedObservable: Observable<IMap[K] | null>;
       subscriberCountObservable: Observable<number>;
+      loopUntilInputTerminated: (processor: (input: IMap[K]) => Promise<void>) => Promise<void>;
     };
   }>;
   public readonly loopUntilInputTerminated: <K extends keyof IMap>(
@@ -148,13 +149,14 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       return r as IMap[K] | null;
     };
 
+   
+
     this.loopUntilInputTerminated = async <K extends keyof IMap>(
       processor: (input: IMap[K]) => Promise<void>,
-      key? : K) => {
-      let input: IMap[K] | null = null;
-      while ((input = await this.nextInput(key)) !== null) {
-        await processor(input);
-      }
+      key?:  K
+    ) => {
+      const { loopUntilInputTerminated } = await this._ensureInputStreamFn(key);
+      await loopUntilInputTerminated(processor);
     }
 
     this.emitOutput = async <K extends keyof OMap>(
@@ -255,7 +257,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       const { trackedObservable, subscriberCountObservable } =
         createTrackedObservable(inputObservableUntracked);
 
-      const { nextValue } = createLazyNextValueGenerator(trackedObservable);
+      const { nextValue, } = createLazyNextValueGenerator(trackedObservable);
 
       subscriberCountObservable.subscribe((count) => {
         if (count > 0) {
@@ -268,15 +270,17 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
         }
       });
 
-      this.inputStreamFnsByKey[key as keyof IMap] = {
+      
+      this.inputStreamFnsByKey[key as K] = {
         nextValue,
         // inputStream: stream,
         inputObservableUntracked,
         trackedObservable,
         subscriberCountObservable,
+        loopUntilInputTerminated: genLoopUntilTerminated(nextValue)
       };
     }
-    return this.inputStreamFnsByKey[key as keyof IMap]!;
+    return this.inputStreamFnsByKey[key as K]!;
   }
 
   setJobReadyForInputsInRedis = async ({
@@ -587,4 +591,16 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   //     });
   //   }
   // };
+}
+
+
+export function genLoopUntilTerminated<T,  P extends unknown[]>(
+  nextValue: (...args: P) => Promise<T | null>, ...args: P
+) {
+  return async (processor: (input: T) => Promise<void>) => {
+    let v: T | null;
+    while ((v = await nextValue(...args)) !== null) {
+      await processor(v);
+    }
+  };
 }

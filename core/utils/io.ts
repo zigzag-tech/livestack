@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ZZStreamSubscriber } from "../jobs/ZZStream";
 import { Observable } from "rxjs";
+import { genLoopUntilTerminated } from "../jobs/ZZJob";
 export type WrapTerminatorAndDataId<T> =
   | {
       data: T;
@@ -76,10 +77,13 @@ export function wrapStreamSubscriberWithTermination<T>(
     });
   };
 
+  const loopUntilTerminated = genLoopUntilTerminated(newNextValue);
+
   return {
     valueObservable: newValueObservable,
     nextValue: newNextValue,
     unsubscribe: () => subscriberP.then((s) => s.unsubscribe()),
     waitUntilTerminated,
+    loopUntilTerminated,
   };
 }
