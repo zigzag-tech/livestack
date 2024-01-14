@@ -31,7 +31,7 @@ export interface JobConnector<Spec1, Spec2> {
   ) => void;
 }
 
-export class ZZJobGroupDef<Specs> {
+export class ZZWorkflowDef<Specs> {
   public readonly jobs: {
     [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
   };
@@ -235,7 +235,7 @@ export class ZZJobGroupDef<Specs> {
     };
 
     // console.log("countByName", countByName);
-    return new ZZJobGroup({
+    return new ZZWorkflow({
       jobIdsBySpecName,
       inputs,
       outputs,
@@ -244,7 +244,7 @@ export class ZZJobGroupDef<Specs> {
   }
 }
 
-export class ZZJobGroup<Specs> {
+export class ZZWorkflow<Specs> {
   public readonly jobIdsBySpecName: { [k: string]: string[] };
   public readonly inputs: {
     bySpec: <P, I, O, TP>(
@@ -256,14 +256,14 @@ export class ZZJobGroup<Specs> {
       spec: ZZJobSpec<P, I, O, TP>
     ) => ReturnType<ZZJobSpec<P, I, O, TP>["_deriveOutputsForJob"]>;
   };
-  public readonly jobGroupDef: ZZJobGroupDef<Specs>;
+  public readonly jobGroupDef: ZZWorkflowDef<Specs>;
   constructor({
     jobIdsBySpecName,
     inputs,
     outputs,
     jobGroupDef,
   }: {
-    jobGroupDef: ZZJobGroupDef<Specs>;
+    jobGroupDef: ZZWorkflowDef<Specs>;
     jobIdsBySpecName: { [k: string]: string[] };
     inputs: {
       bySpec: <P, I, O, TP>(
@@ -299,7 +299,7 @@ export class ZZJobGroup<Specs> {
       >
     >[];
   }) {
-    return new ZZJobGroupDef<Specs>({ jobs, jobConnectors });
+    return new ZZWorkflowDef<Specs>({ jobs, jobConnectors });
   }
 
   public static connect = connect;
