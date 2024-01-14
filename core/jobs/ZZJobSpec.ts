@@ -54,6 +54,16 @@ export type SpecOutputType<
   OMap = InferStreamSetType<CheckSpec<Spec>["outputDefSet"]>
 > = OMap[K extends keyof OMap ? K : never] | null;
 
+// export type InferInputType<
+//   Spec,
+//   K = "default",
+//   IMap = InferStreamSetType<CheckSpec<Spec>["inputDefSet"]> extends never
+//     ? Spec extends (k?: K) => Promise<infer IM>
+//       ? IM
+//       : never
+//     : InferStreamSetType<CheckSpec<Spec>["inputDefSet"]>
+// > = IMap[K extends keyof IMap ? K : never] | null;
+
 export class ZZJobSpec<
   P,
   IMap = {

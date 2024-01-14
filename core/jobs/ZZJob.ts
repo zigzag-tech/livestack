@@ -72,6 +72,10 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       subscriberCountObservable: Observable<number>;
     };
   }>;
+  public readonly loopUntilInputTerminated: <K extends keyof IMap>(
+    processor: (input: IMap[K]) => Promise<void>,
+    key?: K
+  ) => Promise<void>;
 
   constructor(p: {
     bullMQJob: Job<{ jobParams: P }, void, string>;
@@ -143,6 +147,15 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       const r = await (await this._ensureInputStreamFn(key)).nextValue();
       return r as IMap[K] | null;
     };
+
+    this.loopUntilInputTerminated = async <K extends keyof IMap>(
+      processor: (input: IMap[K]) => Promise<void>,
+      key? : K) => {
+      let input: IMap[K] | null = null;
+      while ((input = await this.nextInput(key)) !== null) {
+        await processor(input);
+      }
+    }
 
     this.emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
