@@ -13,7 +13,7 @@
     "dotenv": "^16.x",
     "ioredis": "^5",
     "knex": "^2.x",
-    "p-limit": "^5",
+    "p-limit": "^3",
     "pg": "^8.x",
     "rxjs": "^7",
     "winston": "^3.x",
