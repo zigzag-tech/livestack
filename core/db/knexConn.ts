@@ -234,26 +234,22 @@ export async function addDatapoint<T>({
   //     longStringTruncator
   //   )
   // );
-  await dbConn.transaction(async (trx) => {
-    // get stream id
-
-    await dbConn<
-      ZZDatapointRec<
-        | T
-        | {
-            __primitive__: T;
-          }
-      >
-    >("zz_datapoints").insert({
-      project_id: projectId,
-      stream_id: streamId,
-      datapoint_id: datapointId,
-      data: handlePrimitive(data),
-      job_id: jobInfo?.jobId || null,
-      job_output_key: jobInfo?.jobOutputKey || null,
-      connector_type: jobInfo ? "out" : null,
-      time_created: new Date(),
-    });
+  await dbConn<
+    ZZDatapointRec<
+      | T
+      | {
+          __primitive__: T;
+        }
+    >
+  >("zz_datapoints").insert({
+    project_id: projectId,
+    stream_id: streamId,
+    datapoint_id: datapointId,
+    data: handlePrimitive(data),
+    job_id: jobInfo?.jobId || null,
+    job_output_key: jobInfo?.jobOutputKey || null,
+    connector_type: jobInfo ? "out" : null,
+    time_created: new Date(),
   });
 
   return { datapointId };
