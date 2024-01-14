@@ -29,16 +29,15 @@ We look forward to seeing your next big idea come to life with Livestack!
 
 Livestack aims at providing:
 
-- A dead simple setup process for new AI application.
-- Stream-based architecture for efficient real-time data ingestion and consumption.
-- Reactive APIs enabling timebound and event-driven responses.
-- Full history tracking of all in-app activities for easy debugging and AI improvement.
-- Ready-to-use components for rapid prototyping, such as:
+- Native support for stream-based, realtime workflows.
+- Built-in queue system that automatically scales your application to many machines.
+- Built-in logging and visualization of all in-app activities for easy debugging and AI improvement.
+- (WIP) Common realtime AI components, patterns and guidelines for rapid prototyping, such as:
   -  live speech transcription.
-  -  live RAG ingestion and consumption.
+  -  live RAG workflow.
   -  realtime image generation.
-- Patterns and guidelines for common realtime AI backend scenarios.
-- Support for both LLM and image generation models.
+- (WIP) Support for both LLM and image generation models.
+- (WIP) Simple setup process for new AI application.
 
 
 ## Getting Started
