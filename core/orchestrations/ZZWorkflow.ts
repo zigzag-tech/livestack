@@ -58,38 +58,10 @@ export class ZZWorkflowSpec<Specs> {
     this.jobs = jobs;
     this.jobConnectors = jobConnectors;
     this.name = name;
-  }
-
-  public async request({
-    jobGroupId,
-    lazyJobCreation = false,
-  }: {
-    jobGroupId: string;
-    lazyJobCreation?: boolean;
-  }) {
-    if (lazyJobCreation) {
-      throw new Error("Lazy job creation is not supported yet.");
-    }
-
-    const inOverridesByIndex = [] as {
-      [K in keyof CheckArray<Specs>]: Partial<
-        Record<
-          keyof CheckSpec<CheckArray<Specs>[K]>["inputDefSet"]["defs"],
-          string
-        >
-      >;
-    };
-    const outOverridesByIndex = [] as {
-      [K in number]: Partial<
-        Record<
-          keyof CheckSpec<CheckArray<Specs>[K]>["outputDefSet"]["defs"],
-          string
-        >
-      >;
-    };
 
     // calculate overrides based on jobConnectors
-    for (const connector of this.jobConnectors) {
+    for (let i = 0; i < this.jobConnectors.length; i++) {
+      const connector = this.jobConnectors[i];
       const fromPairs = Array.isArray(connector.from)
         ? connector.from
         : ([connector.from, "default"] as const);
@@ -158,27 +130,80 @@ export class ZZWorkflowSpec<Specs> {
       //   throw new Error(msg);
       // }
       // validate that the types match
-      const commonStreamName = deriveStreamId({
-        groupId: `[${jobGroupId}]`,
+
+      this.connectorInfos[i] = {
         from: {
           jobSpec: fromP,
           key: fromKeyStr,
+          index: fromJobIndex,
         },
         to: {
           jobSpec: toP,
           key: toKeyStr,
+          index: toJobIndex,
         },
+      };
+    }
+  }
+
+  private connectorInfos: {
+    from: {
+      jobSpec: ZZJobSpec<any, any, any>;
+      key: string;
+      index: number;
+    };
+    to: {
+      jobSpec: ZZJobSpec<any, any, any>;
+      key: string;
+      index: number;
+    };
+  }[] = [];
+
+  public async request({
+    jobGroupId,
+    lazyJobCreation = false,
+  }: {
+    jobGroupId: string;
+    lazyJobCreation?: boolean;
+  }) {
+    if (lazyJobCreation) {
+      throw new Error("Lazy job creation is not supported yet.");
+    }
+
+    const inOverridesByIndex = [] as {
+      [K in keyof CheckArray<Specs>]: Partial<
+        Record<
+          keyof CheckSpec<CheckArray<Specs>[K]>["inputDefSet"]["defs"],
+          string
+        >
+      >;
+    };
+    const outOverridesByIndex = [] as {
+      [K in number]: Partial<
+        Record<
+          keyof CheckSpec<CheckArray<Specs>[K]>["outputDefSet"]["defs"],
+          string
+        >
+      >;
+    };
+
+    for (let i = 0; i < this.connectorInfos.length; i++) {
+      const { from, to } = this.connectorInfos[i];
+      const commonStreamName = deriveStreamId({
+        groupId: `[${jobGroupId}]`,
+        from,
+        to,
         // TODO: fix typing
       } as any);
 
-      inOverridesByIndex[toJobIndex] = {
-        ...inOverridesByIndex[toJobIndex],
-        [toKeyStr]: commonStreamName,
+      inOverridesByIndex[to.index] = {
+        ...inOverridesByIndex[to.index],
+        [to.key]: commonStreamName,
       };
 
-      outOverridesByIndex[fromJobIndex] = {
-        ...outOverridesByIndex[fromJobIndex],
-        [fromKeyStr]: commonStreamName,
+      outOverridesByIndex[from.index] = {
+        ...outOverridesByIndex[from.index],
+        [from.key]: commonStreamName,
       };
     }
 
