@@ -49,21 +49,17 @@ export type CheckSpec<SP> = SP extends ZZJobSpec<
   ? ZZJobSpec<P, I, O>
   : never;
 
-export type SpecOutputType<
+export type InferOutputType<
   Spec,
   K = "default",
   OMap = InferStreamSetType<CheckSpec<Spec>["outputDefSet"]>
 > = OMap[K extends keyof OMap ? K : never] | null;
 
-// export type InferInputType<
-//   Spec,
-//   K = "default",
-//   IMap = InferStreamSetType<CheckSpec<Spec>["inputDefSet"]> extends never
-//     ? Spec extends (k?: K) => Promise<infer IM>
-//       ? IM
-//       : never
-//     : InferStreamSetType<CheckSpec<Spec>["inputDefSet"]>
-// > = IMap[K extends keyof IMap ? K : never] | null;
+export type InferInputType<
+  Spec,
+  K = "default",
+  IMap = InferStreamSetType<CheckSpec<Spec>["inputDefSet"]>
+> = IMap[K extends keyof IMap ? K : never] | null;
 
 export class ZZJobSpec<
   P,
@@ -315,10 +311,10 @@ export class ZZJobSpec<
   private _sendFnsByJobIdAndKey: {
     [jobId: string]: Partial<{
       in: Partial<{
-        [key in keyof IMap]: pLimit.Limit;
+        [key in keyof IMap]: ReturnType<typeof pLimit>;
       }>;
       out: Partial<{
-        [key in keyof OMap]: pLimit.Limit;
+        [key in keyof OMap]: ReturnType<typeof pLimit>;
       }>;
     }>;
   } = {};
@@ -343,7 +339,9 @@ export class ZZJobSpec<
       this._sendFnsByJobIdAndKey[jobId][type] = {};
     }
     const dict = this._sendFnsByJobIdAndKey[jobId][type]! as Partial<{
-      [key in T extends "in" ? keyof IMap : keyof OMap]: pLimit.Limit;
+      [key in T extends "in" ? keyof IMap : keyof OMap]: ReturnType<
+        typeof pLimit
+      >;
     }>;
 
     if (!dict[key]) {

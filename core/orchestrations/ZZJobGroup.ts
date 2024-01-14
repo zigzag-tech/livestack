@@ -1,3 +1,4 @@
+import { InferInputType, InferOutputType } from "../jobs/ZZJobSpec";
 import { InferStreamSetType } from "../jobs/StreamDefSet";
 import { CheckSpec, deriveStreamId, ZZJobSpec } from "../jobs/ZZJobSpec";
 import { z } from "zod";
@@ -23,6 +24,11 @@ export interface JobConnector<Spec1, Spec2> {
         Spec2,
         keyof InferStreamSetType<CheckSpec<Spec2>["outputDefSet"]> | "default"
       ];
+
+  transform?: (
+    spec1Out: InferStreamSetType<CheckSpec<Spec1>["outputDefSet"]>,
+    spec2In: InferStreamSetType<CheckSpec<Spec2>["inputDefSet"]>
+  ) => void;
 }
 
 export class ZZJobGroupDef<Specs> {
@@ -284,13 +290,42 @@ export class ZZJobGroup<Specs> {
       [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
     };
 
-    jobConnectors: JobConnector<
-      ZZJobSpec<any, any, any, any>,
-      ZZJobSpec<any, any, any, any>
+    jobConnectors: ReturnType<
+      typeof connect<
+        ZZJobSpec<any, any, any, any>,
+        ZZJobSpec<any, any, any, any>,
+        any,
+        any
+      >
     >[];
   }) {
     return new ZZJobGroupDef<Specs>({ jobs, jobConnectors });
   }
+
+  public static connect = connect;
+}
+
+export function connect<
+  Spec1,
+  Spec2,
+  K1 extends keyof CheckSpec<Spec1>["outputDefSet"]["defs"],
+  K2 extends keyof CheckSpec<Spec2>["inputDefSet"]["defs"]
+>({
+  from,
+  to,
+  transform,
+}: {
+  from: Spec1;
+  to: Spec2;
+  transform?: (
+    spec1Out: NonNullable<InferOutputType<Spec1, K1>>
+  ) => NonNullable<InferInputType<Spec2, K2>>;
+}) {
+  return {
+    from,
+    to,
+    transform,
+  };
 }
 
 // export async function requestJobGroup<Specs>({
