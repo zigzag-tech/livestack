@@ -1,5 +1,5 @@
 import { ZZWorkerDefParams } from "./ZZWorker";
-import { InferDefMap } from "./StreamDefSet";
+import { InferDefMap, InferStreamSetType } from "./StreamDefSet";
 import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { GenericRecordType, QueueName } from "../orchestrations/workerCommon";
@@ -47,6 +47,12 @@ export type CheckSpec<SP> = SP extends ZZJobSpec<
   : SP extends ZZJobSpec<infer P, infer I, infer O>
   ? ZZJobSpec<P, I, O>
   : never;
+
+export type SpecOutputType<
+  Spec,
+  K = "default",
+  OMap = InferStreamSetType<CheckSpec<Spec>["outputDefSet"]>
+> = OMap[K extends keyof OMap ? K : never] | null;
 
 export class ZZJobSpec<
   P,
