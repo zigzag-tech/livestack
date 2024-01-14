@@ -16,7 +16,7 @@ if (processedR) {
         else condition needs to handle observable case // might wanna double check, but theoretically this shouldn't be a concern as the await Promise for counting input observables should have handled this
 
 3. Audio chunk
-Robust test case where audio chunk files come in, each file gets sent to whisper server (jobSpec.sendInput), value returned from whisper server as transcript, transcript output emitted => processor = inputObservable OR while loop ; await callWhisperServer (audioChunk) (returning transcript)
+Robust test case where audio chunk files come in, each file gets sent to whisper server (jobSpec.feedJobInput), value returned from whisper server as transcript, transcript output emitted => processor = inputObservable OR while loop ; await callWhisperServer (audioChunk) (returning transcript)
 
 parallel condition guaranteeing original input order
 

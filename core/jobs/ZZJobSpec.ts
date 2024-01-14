@@ -292,7 +292,7 @@ export class ZZJobSpec<
     }
   }
 
-  async sendInputToJob({
+  async feedJobInput({
     jobId,
     data,
     key = "default" as keyof IMap,
@@ -436,13 +436,13 @@ export class ZZJobSpec<
     }
 
     return {
-      sendInputToJob: <K extends keyof IMap>({
+      feedJobInput: <K extends keyof IMap>({
         data,
         key,
       }: {
         data: IMap[K];
         key?: K;
-      }) => this.sendInputToJob({ jobId, data, key }),
+      }) => this.feedJobInput({ jobId, data, key }),
       terminateJobInput: <K extends keyof IMap>(p?: { key?: K }) =>
         this.terminateJobInput({
           jobId,
@@ -737,13 +737,13 @@ export class ZZJobSpec<
 
   public _deriveInputsForJob = (jobId: string) => {
     return {
-      send: async (data: IMap[keyof IMap]) => {
+      feed: async (data: IMap[keyof IMap]) => {
         if (!this.inputDefSet.hasDef("default")) {
           throw new Error(
-            `There are more than one input keys defined for job ${this.name}, please use jobSpec.byKey({key}).send() instead.`
+            `There are more than one input keys defined for job ${this.name}, please use jobSpec.byKey({key}).feed() instead.`
           );
         }
-        return await this.sendInputToJob({
+        return await this.feedJobInput({
           jobId,
           data,
           key: "default" as keyof IMap,
@@ -763,8 +763,8 @@ export class ZZJobSpec<
 
       byKey: <K extends keyof IMap>(key: K) => {
         return {
-          send: async (data: IMap[K]) => {
-            return await this.sendInputToJob({
+          feed: async (data: IMap[K]) => {
+            return await this.feedJobInput({
               jobId,
               data,
               key,

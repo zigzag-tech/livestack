@@ -78,7 +78,7 @@ export class ZZParallelAttemptWorkerDef<
               throw new Error("no input");
             }
 
-            await inputs.send(await transformInput(inp));
+            await inputs.feed(await transformInput(inp));
 
             const o = await outputs.nextValue();
             if (!o) {
