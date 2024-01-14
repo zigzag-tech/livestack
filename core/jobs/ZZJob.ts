@@ -26,18 +26,17 @@ import _ from "lodash";
 export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZJobSpec<
   infer P,
   infer IMap,
-  infer OMap,
-  infer TP
+  infer OMap
 >
-  ? (j: ZZJob<P, IMap, OMap, TP, WP>) => Promise<OMap[keyof OMap] | void>
+  ? (j: ZZJob<P, IMap, OMap, WP>) => Promise<OMap[keyof OMap] | void>
   : never;
 
-export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
+export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   private readonly bullMQJob: Job<{ jobParams: P }, void>;
   public readonly _bullMQToken?: string;
   readonly jobParams: P;
   readonly logger: ReturnType<typeof getLogger>;
-  readonly spec: ZZJobSpec<P, IMap, OMap, TProgress>;
+  readonly spec: ZZJobSpec<P, IMap, OMap>;
   readonly nextInput: <K extends keyof IMap>(
     key?: K
   ) => Promise<IMap[K] | null>;
@@ -70,7 +69,9 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       inputObservableUntracked: Observable<IMap[K] | null>;
       trackedObservable: Observable<IMap[K] | null>;
       subscriberCountObservable: Observable<number>;
-      loopUntilInputTerminated: (processor: (input: IMap[K]) => Promise<void>) => Promise<void>;
+      loopUntilInputTerminated: (
+        processor: (input: IMap[K]) => Promise<void>
+      ) => Promise<void>;
     };
   }>;
   public readonly loopUntilInputTerminated: <K extends keyof IMap>(
@@ -84,7 +85,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
     logger: ReturnType<typeof getLogger>;
     jobParams: P;
     storageProvider?: IStorageProvider;
-    jobSpec: ZZJobSpec<P, IMap, OMap, TProgress>;
+    jobSpec: ZZJobSpec<P, IMap, OMap>;
     workerInstanceParams?: WP;
     workerInstanceParamsSchema?: z.ZodType<WP>;
     workerName: string;
@@ -149,15 +150,13 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       return r as IMap[K] | null;
     };
 
-   
-
     this.loopUntilInputTerminated = async <K extends keyof IMap>(
       processor: (input: IMap[K]) => Promise<void>,
-      key?:  K
+      key?: K
     ) => {
       const { loopUntilInputTerminated } = await this._ensureInputStreamFn(key);
       await loopUntilInputTerminated(processor);
-    }
+    };
 
     this.emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
@@ -257,7 +256,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
       const { trackedObservable, subscriberCountObservable } =
         createTrackedObservable(inputObservableUntracked);
 
-      const { nextValue, } = createLazyNextValueGenerator(trackedObservable);
+      const { nextValue } = createLazyNextValueGenerator(trackedObservable);
 
       subscriberCountObservable.subscribe((count) => {
         if (count > 0) {
@@ -270,14 +269,13 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
         }
       });
 
-      
       this.inputStreamFnsByKey[key as K] = {
         nextValue,
         // inputStream: stream,
         inputObservableUntracked,
         trackedObservable,
         subscriberCountObservable,
-        loopUntilInputTerminated: genLoopUntilTerminated(nextValue)
+        loopUntilInputTerminated: genLoopUntilTerminated(nextValue),
       };
     }
     return this.inputStreamFnsByKey[key as K]!;
@@ -315,7 +313,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   };
 
   public beginProcessing = async (
-    processor: ZZProcessor<ZZJobSpec<P, IMap, OMap, TProgress>, WP>
+    processor: ZZProcessor<ZZJobSpec<P, IMap, OMap>, WP>
   ): Promise<void> => {
     const jId = {
       specName: this.spec.name,
@@ -449,7 +447,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   };
 
   // public spawnChildJobsToWaitOn = async <CI, CO>(p: {
-  //   def: JobSpecDef<P, O, StreamIMap, StreamI, TProgress>;
+  //   def: JobSpecDef<P, O, StreamIMap, StreamI>;
   //   jobId: string;
   //   jobParams: P;
   // }) => {
@@ -477,7 +475,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   // };
 
   // public spawnJob = async <P, O>(p: {
-  //   def: JobSpecDef<P, O, StreamIMap, StreamI, TProgress>;
+  //   def: JobSpecDef<P, O, StreamIMap, StreamI>;
   //   jobId: string;
   //   jobParams: P;
   // }) => {
@@ -490,7 +488,7 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   //   jobParams,
   //   flowProducerOpts,
   // }: {
-  //   def: JobSpecDef<P, O, StreamIMap, StreamI, TProgress>;
+  //   def: JobSpecDef<P, O, StreamIMap, StreamI>;
   //   jobId: string;
   //   jobParams: P;
   //   flowProducerOpts?: FlowJob["opts"];
@@ -593,9 +591,9 @@ export class ZZJob<P, IMap, OMap, TProgress = never, WP extends object = {}> {
   // };
 }
 
-
-export function genLoopUntilTerminated<T,  P extends unknown[]>(
-  nextValue: (...args: P) => Promise<T | null>, ...args: P
+export function genLoopUntilTerminated<T, P extends unknown[]>(
+  nextValue: (...args: P) => Promise<T | null>,
+  ...args: P
 ) {
   return async (processor: (input: T) => Promise<void>) => {
     let v: T | null;

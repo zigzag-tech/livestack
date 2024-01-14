@@ -38,8 +38,8 @@ export class ZZWorkflowSpec<Specs> {
     [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
   };
   public readonly jobConnectors: JobConnector<
-    ZZJobSpec<any, any, any, any>,
-    ZZJobSpec<any, any, any, any>
+    ZZJobSpec<any, any, any>,
+    ZZJobSpec<any, any, any>
   >[];
   constructor({
     jobs,
@@ -51,8 +51,8 @@ export class ZZWorkflowSpec<Specs> {
       [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
     };
     jobConnectors: JobConnector<
-      ZZJobSpec<any, any, any, any>,
-      ZZJobSpec<any, any, any, any>
+      ZZJobSpec<any, any, any>,
+      ZZJobSpec<any, any, any>
     >[];
   }) {
     this.jobs = jobs;
@@ -213,9 +213,7 @@ export class ZZWorkflowSpec<Specs> {
       await jobSpec.requestJob(jDef);
     }
 
-    const identifySingleJobIdBySpec = <P, I, O, TP>(
-      spec: ZZJobSpec<P, I, O, TP>
-    ) => {
+    const identifySingleJobIdBySpec = <P, I, O>(spec: ZZJobSpec<P, I, O>) => {
       const jobs = jobIdsBySpecName[spec.name];
       if (jobs.length > 1) {
         throw new Error(
@@ -228,13 +226,13 @@ export class ZZWorkflowSpec<Specs> {
 
     // Create interfaces for inputs and outputs
     const inputs = {
-      bySpec: <P, I, O, TP>(spec: ZZJobSpec<P, I, O, TP>) => {
+      bySpec: <P, I, O>(spec: ZZJobSpec<P, I, O>) => {
         return spec._deriveInputsForJob(identifySingleJobIdBySpec(spec));
       },
     };
 
     const outputs = {
-      bySpec: <P, I, O, TP>(spec: ZZJobSpec<P, I, O, TP>) => {
+      bySpec: <P, I, O>(spec: ZZJobSpec<P, I, O>) => {
         return spec._deriveOutputsForJob(identifySingleJobIdBySpec(spec));
       },
     };
@@ -252,14 +250,14 @@ export class ZZWorkflowSpec<Specs> {
 export class ZZWorkflow<Specs> {
   public readonly jobIdsBySpecName: { [k: string]: string[] };
   public readonly inputs: {
-    bySpec: <P, I, O, TP>(
-      spec: ZZJobSpec<P, I, O, TP>
-    ) => ReturnType<ZZJobSpec<P, I, O, TP>["_deriveInputsForJob"]>;
+    bySpec: <P, I, O>(
+      spec: ZZJobSpec<P, I, O>
+    ) => ReturnType<ZZJobSpec<P, I, O>["_deriveInputsForJob"]>;
   };
   public readonly outputs: {
-    bySpec: <P, I, O, TP>(
-      spec: ZZJobSpec<P, I, O, TP>
-    ) => ReturnType<ZZJobSpec<P, I, O, TP>["_deriveOutputsForJob"]>;
+    bySpec: <P, I, O>(
+      spec: ZZJobSpec<P, I, O>
+    ) => ReturnType<ZZJobSpec<P, I, O>["_deriveOutputsForJob"]>;
   };
   public readonly jobGroupDef: ZZWorkflowSpec<Specs>;
   constructor({
@@ -271,14 +269,14 @@ export class ZZWorkflow<Specs> {
     jobGroupDef: ZZWorkflowSpec<Specs>;
     jobIdsBySpecName: { [k: string]: string[] };
     inputs: {
-      bySpec: <P, I, O, TP>(
-        spec: ZZJobSpec<P, I, O, TP>
-      ) => ReturnType<ZZJobSpec<P, I, O, TP>["_deriveInputsForJob"]>;
+      bySpec: <P, I, O>(
+        spec: ZZJobSpec<P, I, O>
+      ) => ReturnType<ZZJobSpec<P, I, O>["_deriveInputsForJob"]>;
     };
     outputs: {
-      bySpec: <P, I, O, TP>(
-        spec: ZZJobSpec<P, I, O, TP>
-      ) => ReturnType<ZZJobSpec<P, I, O, TP>["_deriveOutputsForJob"]>;
+      bySpec: <P, I, O>(
+        spec: ZZJobSpec<P, I, O>
+      ) => ReturnType<ZZJobSpec<P, I, O>["_deriveOutputsForJob"]>;
     };
   }) {
     this.jobIdsBySpecName = jobIdsBySpecName;
@@ -299,8 +297,8 @@ export class ZZWorkflow<Specs> {
 
     jobConnectors: ReturnType<
       typeof connect<
-        ZZJobSpec<any, any, any, any>,
-        ZZJobSpec<any, any, any, any>,
+        ZZJobSpec<any, any, any>,
+        ZZJobSpec<any, any, any>,
         any,
         any
       >

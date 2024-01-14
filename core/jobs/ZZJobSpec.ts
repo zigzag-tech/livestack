@@ -38,14 +38,7 @@ const queueMapByProjectIdAndQueueName = new Map<
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
-export type CheckSpec<SP> = SP extends ZZJobSpec<
-  infer P,
-  infer I,
-  infer O,
-  infer TP
->
-  ? ZZJobSpec<P, I, O, TP>
-  : SP extends ZZJobSpec<infer P, infer I, infer O>
+export type CheckSpec<SP> = SP extends ZZJobSpec<infer P, infer I, infer O>
   ? ZZJobSpec<P, I, O>
   : never;
 
@@ -68,8 +61,7 @@ export class ZZJobSpec<
   },
   OMap = {
     default: {};
-  },
-  TProgress = never
+  }
 > {
   private readonly _zzEnv: ZZEnv | null = null;
 
@@ -92,27 +84,22 @@ export class ZZJobSpec<
   private readonly _originalInputs: InferDefMap<IMap> | undefined;
   private readonly _originalOutputs: InferDefMap<OMap> | undefined;
 
-  readonly progressDef: z.ZodType<TProgress>;
-
   constructor({
     zzEnv,
     name,
     jobParams,
     outputs,
     inputs,
-    progressDef,
   }: {
     name: string;
     jobParams?: z.ZodType<P>;
     inputs?: InferDefMap<IMap>;
     outputs?: InferDefMap<OMap>;
-    progressDef?: z.ZodType<TProgress>;
     zzEnv?: ZZEnv;
     concurrency?: number;
   }) {
     this.name = name;
     this.jobParams = jobParams || (z.object({}) as unknown as z.ZodType<P>);
-    this.progressDef = progressDef || z.never();
 
     this._zzEnv = zzEnv || null;
     this.logger = getLogger(`spec:${this.name}`);
@@ -149,9 +136,9 @@ export class ZZJobSpec<
     return this.outputDefSet.getDef(key);
   }
 
-  public derive<NewP, NewIMap, NewOMap, NewTP>(
+  public derive<NewP, NewIMap, NewOMap>(
     newP: Partial<
-      ConstructorParameters<typeof ZZJobSpec<NewP, NewIMap, NewOMap, NewTP>>[0]
+      ConstructorParameters<typeof ZZJobSpec<NewP, NewIMap, NewOMap>>[0]
     > & {
       name: string;
     }
@@ -161,18 +148,13 @@ export class ZZJobSpec<
         `Derived job spec must have a different name from the original job spec ${this.name}.`
       );
     }
-    return new ZZJobSpec<
-      P & NewP,
-      IMap & NewIMap,
-      OMap & NewOMap,
-      TProgress & NewTP
-    >({
+    return new ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>({
       ...this,
       inputs: this._originalInputs,
       outputs: this._originalOutputs,
       ...newP,
       name: newP.name,
-    } as ConstructorParameters<typeof ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap, TProgress & NewTP>>[0]);
+    } as ConstructorParameters<typeof ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>>[0]);
   }
 
   private get _rawQueue() {
@@ -715,7 +697,7 @@ export class ZZJobSpec<
   }
 
   public async requestJobAndGetOutputs(
-    p: Parameters<ZZJobSpec<P, IMap, OMap, TProgress>["requestJob"]>[0] & {
+    p: Parameters<ZZJobSpec<P, IMap, OMap>["requestJob"]>[0] & {
       key?: keyof OMap;
     }
   ) {
@@ -817,9 +799,9 @@ export class ZZJobSpec<
 
   // convenient function
   public defineWorker<WP extends object>(
-    p: Omit<ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>, "jobSpec">
+    p: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec">
   ) {
-    return new ZZWorkerDef<P, IMap, OMap, TProgress, WP>({
+    return new ZZWorkerDef<P, IMap, OMap, WP>({
       ...p,
       jobSpec: this,
     });
@@ -828,7 +810,7 @@ export class ZZJobSpec<
   public async defineAndStartWorker<WP extends object>({
     instanceParams,
     ...p
-  }: Omit<ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>, "jobSpec"> & {
+  }: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec"> & {
     instanceParams?: WP;
   }) {
     const workerDef = this.defineWorker(p);

@@ -9,33 +9,18 @@ import { z } from "zod";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
-export type ZZWorkerDefParams<
-  P,
-  IMap,
-  OMap,
-  TProgress = never,
-  WP extends object = {}
-> = {
+export type ZZWorkerDefParams<P, IMap, OMap, WP extends object = {}> = {
   concurrency?: number;
-  jobSpec: ZZJobSpec<P, IMap, OMap, TProgress>;
-  processor: ZZProcessor<ZZJobSpec<P, IMap, OMap, TProgress>, WP>;
+  jobSpec: ZZJobSpec<P, IMap, OMap>;
+  processor: ZZProcessor<ZZJobSpec<P, IMap, OMap>, WP>;
   instanceParamsDef?: z.ZodType<WP>;
   zzEnv?: ZZEnv;
 };
 
-export class ZZWorkerDef<
-  P,
-  IMap,
-  OMap,
-  TProgress = never,
-  WP extends object = {}
-> {
-  public readonly jobSpec: ZZJobSpec<P, IMap, OMap, TProgress>;
+export class ZZWorkerDef<P, IMap, OMap, WP extends object = {}> {
+  public readonly jobSpec: ZZJobSpec<P, IMap, OMap>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
-  public readonly processor: ZZProcessor<
-    ZZJobSpec<P, IMap, OMap, TProgress>,
-    WP
-  >;
+  public readonly processor: ZZProcessor<ZZJobSpec<P, IMap, OMap>, WP>;
   public readonly zzEnv: ZZEnv | null = null;
 
   constructor({
@@ -43,7 +28,7 @@ export class ZZWorkerDef<
     processor,
     instanceParamsDef,
     zzEnv,
-  }: ZZWorkerDefParams<P, IMap, OMap, TProgress, WP>) {
+  }: ZZWorkerDefParams<P, IMap, OMap, WP>) {
     this.jobSpec = jobSpec;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
@@ -57,7 +42,7 @@ export class ZZWorkerDef<
   }) {
     const { concurrency, instanceParams } = p || {};
 
-    const worker = new ZZWorker<P, IMap, OMap, TProgress, WP>({
+    const worker = new ZZWorker<P, IMap, OMap, WP>({
       def: this,
       concurrency,
       instanceParams: instanceParams || ({} as WP),
@@ -67,12 +52,12 @@ export class ZZWorkerDef<
     await worker.waitUntilReady();
     return worker;
   }
-  public static define<P, IMap, OMap, TP, WP extends object>(
-    p: Omit<ZZWorkerDefParams<P, IMap, OMap, TP, WP>, "jobSpec"> & {
-      jobSpec: ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap, TP>>[0];
+  public static define<P, IMap, OMap, WP extends object>(
+    p: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec"> & {
+      jobSpec: ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0];
     }
   ) {
-    const spec = new ZZJobSpec<P, IMap, OMap, TP>(p.jobSpec);
+    const spec = new ZZJobSpec<P, IMap, OMap>(p.jobSpec);
     return spec.defineWorker(p);
   }
 
@@ -86,14 +71,8 @@ export class ZZWorkerDef<
     };
 }
 
-export class ZZWorker<
-  P,
-  IMap,
-  OMap,
-  TProgress = never,
-  WP extends object = {}
-> {
-  public readonly jobSpec: ZZJobSpec<P, IMap, OMap, TProgress>;
+export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
+  public readonly jobSpec: ZZJobSpec<P, IMap, OMap>;
   protected readonly zzEnv: ZZEnv;
   protected readonly storageProvider?: IStorageProvider;
 
@@ -106,7 +85,7 @@ export class ZZWorker<
 
   public readonly instanceParams?: WP;
   public readonly workerName: string;
-  public readonly def: ZZWorkerDef<P, IMap, OMap, TProgress, WP>;
+  public readonly def: ZZWorkerDef<P, IMap, OMap, WP>;
   protected readonly logger: ReturnType<typeof getLogger>;
 
   constructor({
@@ -116,7 +95,7 @@ export class ZZWorker<
     concurrency = 3,
     zzEnv,
   }: {
-    def: ZZWorkerDef<P, IMap, OMap, TProgress, WP>;
+    def: ZZWorkerDef<P, IMap, OMap, WP>;
     instanceParams?: WP;
     workerName?: string;
     concurrency?: number;
