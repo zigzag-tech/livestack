@@ -1,7 +1,7 @@
 {
-  "name": "@livestack/runpod",
+  "name": "@livestack/viz",
   "version": "0.0.2",
-  "description": "Livestack runpod connectors.",
+  "description": "Realtime livestack visualization.",
   "scripts": {
     "build": "tsc"
   },

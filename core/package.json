@@ -13,12 +13,12 @@
     "dotenv": "^16.x",
     "ioredis": "^5",
     "knex": "^2.x",
+    "p-limit": "^5",
     "pg": "^8.x",
     "rxjs": "^7",
     "winston": "^3.x",
     "zod": "^3",
-    "zod-to-json-schema": "^3",
-    "p-limit": "^5"
+    "zod-to-json-schema": "^3"
   },
   "types": "dist/index.d.ts",
   "devDependencies": {
