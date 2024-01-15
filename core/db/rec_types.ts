@@ -9,7 +9,7 @@ export const ZZJobUniqueId = z.object({
 export type ZZJobUniqueId = z.infer<typeof ZZJobUniqueId>;
 
 export const ZZJobRec = <P>(jobParamsSchema: z.ZodType<P>) =>
-  ZZJobUniqueId.and(
+  ZZJobUniqueId.merge(
     z.object({
       job_params: jobParamsSchema.optional(),
       time_created: z.date(),
@@ -27,7 +27,7 @@ export const ZZJobStatus = z.enum([
 ]);
 export type ZZJobStatus = z.infer<typeof ZZJobStatus>;
 
-export const ZZJobStatusRec = ZZJobUniqueId.and(
+export const ZZJobStatusRec = ZZJobUniqueId.merge(
   z.object({
     status: ZZJobStatus,
     time_created: z.date(),
