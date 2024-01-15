@@ -533,14 +533,17 @@ export class ZZJobSpec<
     } else {
       // const queueIdPrefix = ;
       // const queueId = `${type}/${String(p.key || "default")}`;
+      const dir = type === "in" ? "to" : "from";
       streamId = deriveStreamId({
         groupId: `[${jobId}]`,
-        ...{
-          [type === "in" ? "to" : "from"]: {
-            jobSpecName: this.name,
-            key: p.key || "default",
-          },
-        },
+        from:
+          type === "in"
+            ? undefined
+            : { specName: this.name, key: String(p.key) },
+        to:
+          type === "out"
+            ? undefined
+            : { specName: this.name, key: String(p.key) },
       });
     }
     return streamId;
@@ -850,14 +853,14 @@ export function uniqueStreamIdentifier({
     uniqueLabel?: string;
   };
 }) {
-  const fromStr = from
+  const fromStr = !!from
     ? `${from.specName}${
         from.uniqueLabel && from.uniqueLabel !== "default_label"
           ? `[${from.uniqueLabel}]`
           : ""
       }/${from.key}`
     : "(*)";
-  const toStr = to
+  const toStr = !!to
     ? `${to.specName}${
         to.uniqueLabel && to.uniqueLabel !== "default_label"
           ? `[${to.uniqueLabel}]`
