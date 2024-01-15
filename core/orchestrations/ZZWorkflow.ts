@@ -70,7 +70,7 @@ const WorkflowJobParams = z.object({
 });
 
 type WorkflowJobParams = z.infer<typeof WorkflowJobParams>;
-export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
+export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
   public readonly connections: CanonicalConnection[];
   public readonly defGraph: DefGraph;
   private orchestrationWorkerDef: ZZWorkerDef<WorkflowJobParams>;
@@ -106,7 +106,7 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
 
         const jobNodes = instG
           .nodes()
-          .filter((n) => instG.getNodeAttributes(n).type === "job");
+          .filter((n) => instG.getNodeAttributes(n).nodeType === "job");
 
         for (let i = 0; i < jobNodes.length; i++) {
           const jobNodeId = jobNodes[i];
@@ -120,18 +120,18 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
           const inboundEdges = instG.inboundEdges(jobNodeId);
           const inletEdgeIds = inboundEdges.filter((e) => {
             const node = instG.getNodeAttributes(instG.source(e));
-            return node.type === "inlet";
+            return node.nodeType === "inlet";
           });
           const inletNodeIds = inletEdgeIds.map((e) => instG.source(e));
           for (const inletNodeId of inletNodeIds) {
             const inletNode = instG.getNodeAttributes(inletNodeId);
-            if (inletNode.type !== "inlet") {
+            if (inletNode.nodeType !== "inlet") {
               throw new Error("Expected inlet node");
             }
             const streamToInpetEdgeId = instG.inboundEdges(inletNodeId)[0];
             const streamNodeId = instG.source(streamToInpetEdgeId);
             const streamNode = instG.getNodeAttributes(streamNodeId);
-            if (streamNode.type !== "stream") {
+            if (streamNode.nodeType !== "stream") {
               throw new Error("Expected stream node");
             }
             const streamId = streamNode.streamId;
@@ -142,20 +142,20 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
           const outboundEdges = instG.outboundEdges(jobNodeId);
           const outletEdgeIds = outboundEdges.filter((e) => {
             const node = instG.getNodeAttributes(instG.target(e));
-            return node.type === "outlet";
+            return node.nodeType === "outlet";
           });
           const outletNodeIds = outletEdgeIds.map((e) => instG.target(e));
 
           for (const outletNodeId of outletNodeIds) {
             const outletNode = instG.getNodeAttributes(outletNodeId);
-            if (outletNode.type !== "outlet") {
+            if (outletNode.nodeType !== "outlet") {
               throw new Error("Expected outlet node");
             }
 
             const streamFromOutputEdgeId = instG.outboundEdges(outletNodeId)[0];
             const streamNodeId = instG.target(streamFromOutputEdgeId);
             const streamNode = instG.getNodeAttributes(streamNodeId);
-            if (streamNode.type !== "stream") {
+            if (streamNode.nodeType !== "stream") {
               throw new Error("Expected stream node");
             }
             const streamId = streamNode.streamId;
@@ -257,8 +257,9 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
   }
 }
 
-export class ZZWorkflow<Specs> {
+export class ZZWorkflow {
   public readonly jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
+  public readonly graph: InstantiatedGraph;
   public readonly inputs: {
     bySpec: <P, I, O>(
       spec: ZZJobSpec<P, I, O>
@@ -269,18 +270,20 @@ export class ZZWorkflow<Specs> {
       spec: ZZJobSpec<P, I, O>
     ) => ReturnType<ZZJobSpec<P, I, O>["_deriveOutputsForJob"]>;
   };
-  public readonly jobGroupDef: ZZWorkflowSpec<Specs>;
+  public readonly jobGroupDef: ZZWorkflowSpec;
   constructor({
     jobGroupDef,
     jobGroupId,
   }: {
     jobGroupId: string;
-    jobGroupDef: ZZWorkflowSpec<Specs>;
+    jobGroupDef: ZZWorkflowSpec;
   }) {
     const instaG = instantiateFromDefGraph({
       defGraph: jobGroupDef.defGraph,
       groupId: jobGroupId,
     });
+
+    this.graph = instaG;
 
     const identifySpecAndJobIdBySpecQuery = (
       specQuery: UniqueSpecQuery
@@ -288,7 +291,7 @@ export class ZZWorkflow<Specs> {
       const specInfo = convertUniqueSpec(specQuery);
       const jobNodeId = instaG.findNode((id, n) => {
         return (
-          n.type === "job" &&
+          n.nodeType === "job" &&
           n.specName === specInfo.specName &&
           n.uniqueLabel === specInfo.uniqueLabel
         );
@@ -464,55 +467,58 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
 }
 
 type SpecNode = {
-  type: "spec";
+  nodeType: "spec";
   specName: string;
   uniqueLabel?: string;
 };
 type OutletNode = {
-  type: "outlet";
+  nodeType: "outlet";
   key: string;
 };
 type InletNode = {
-  type: "inlet";
+  nodeType: "inlet";
   key: string;
 };
-type DefGraphNode =
+type DefGraphNode = { label: string } & (
   | SpecNode
   | {
-      type: "stream";
+      nodeType: "stream";
     }
   | InletNode
-  | OutletNode;
+  | OutletNode
+);
 
-type InferNodeData<T extends DefGraphNode["type"]> = Extract<
+type InferNodeData<T extends DefGraphNode["nodeType"]> = Extract<
   DefGraphNode,
-  { type: T }
+  { nodeType: T }
 >;
 
-type DefNodeType = DefGraphNode["type"];
+type DefNodeType = DefGraphNode["nodeType"];
 type DefGraph = Graph<DefGraphNode>;
 
 type JobNode = {
-  type: "job";
+  nodeType: "job";
   jobId: string;
   specName: string;
   uniqueLabel?: string;
 };
 
 type InstantiatedGraph = Graph<
-  | JobNode
-  | {
-      type: "stream";
-      streamId: string;
-    }
-  | {
-      type: "inlet";
-      key: string;
-    }
-  | {
-      type: "outlet";
-      key: string;
-    }
+  { label: string } & (
+    | JobNode
+    | {
+        nodeType: "stream";
+        streamId: string;
+      }
+    | {
+        nodeType: "inlet";
+        key: string;
+      }
+    | {
+        nodeType: "outlet";
+        key: string;
+      }
+  )
 >;
 
 function convertedConnectionsToGraph(
@@ -524,7 +530,7 @@ function convertedConnectionsToGraph(
     id: string,
     data: InferNodeData<T>
   ): string {
-    const nodeId = `${data.type}_${id}`;
+    const nodeId = `${data.nodeType}_${id}`;
     if (!graph.hasNode(nodeId)) {
       graph.addNode(nodeId, { ...data });
     }
@@ -540,11 +546,16 @@ function convertedConnectionsToGraph(
     const fromSpecNodeId = createOrGetNodeId(fromSpecIdentifier, {
       specName: from.specName,
       ...(fromUniqueLabel ? { uniqueLabel: fromUniqueLabel } : {}),
-      type: "spec",
+      nodeType: "spec",
+      label: fromSpecIdentifier,
     });
     const fromOutletNodeId = createOrGetNodeId(
       `${fromSpecIdentifier}/${from.key}`,
-      { type: "outlet", key: from.key }
+      {
+        nodeType: "outlet",
+        key: from.key,
+        label: `${fromSpecIdentifier}/${from.key}`,
+      }
     );
     const streamId = uniqueStreamIdentifier({
       from: {
@@ -559,18 +570,22 @@ function convertedConnectionsToGraph(
       },
     });
     const streamNodeId = createOrGetNodeId(streamId, {
-      type: "stream",
+      nodeType: "stream",
+      label: streamId,
     });
     const toSpecIdentifier = uniqueSpecIdentifier(to);
-    const toInletNodeId = createOrGetNodeId(`${toSpecIdentifier}/${to.key}`, {
-      type: "inlet",
+    const id = `${toSpecIdentifier}/${to.key}`;
+    const toInletNodeId = createOrGetNodeId(id, {
+      nodeType: "inlet",
       key: to.key,
+      label: id,
     });
     const toUniqueLabel = to.uniqueLabel;
     const toSpecNodeId = createOrGetNodeId(toSpecIdentifier, {
       specName: to.specName,
       ...(toUniqueLabel ? { uniqueLabel: toUniqueLabel } : {}),
-      type: "spec",
+      nodeType: "spec",
+      label: toSpecIdentifier,
     });
 
     graph.addEdge(fromSpecNodeId, fromOutletNodeId);
@@ -630,15 +645,15 @@ function instantiateFromDefGraph({
 
   for (const nodeId of nodes) {
     const node = defGraph.getNodeAttributes(nodeId);
-    if (node.type === "spec") {
+    if (node.nodeType === "spec") {
       const jobId = `[${groupId}]${uniqueSpecIdentifier(node)}`;
       g.addNode(jobId, {
         ...node,
-        type: "job",
+        nodeType: "job",
         jobId,
       });
       jobNodeIdBySpecNodeId[nodeId] = jobId;
-    } else if (node.type === "stream") {
+    } else if (node.nodeType === "stream") {
       const { sourceSpecNode, targetSpecNode, outletNode, inletNode } =
         getStreamNodes(defGraph, nodeId);
       const streamId = deriveStreamId({
@@ -655,8 +670,9 @@ function instantiateFromDefGraph({
         },
       });
       g.addNode(streamId, {
-        type: "stream",
+        nodeType: "stream",
         streamId,
+        label: streamId,
       });
       streamNodeIdByStreamId[nodeId] = streamId;
     } else {
@@ -672,15 +688,15 @@ function instantiateFromDefGraph({
     const toNode = defGraph.getNodeAttributes(to);
 
     const newFrom =
-      fromNode.type === "spec"
+      fromNode.nodeType === "spec"
         ? jobNodeIdBySpecNodeId[from]
-        : fromNode.type === "stream"
+        : fromNode.nodeType === "stream"
         ? streamNodeIdByStreamId[from]
         : from;
     const newTo =
-      toNode.type === "spec"
+      toNode.nodeType === "spec"
         ? jobNodeIdBySpecNodeId[to]
-        : toNode.type === "stream"
+        : toNode.nodeType === "stream"
         ? streamNodeIdByStreamId[to]
         : to;
     g.addEdge(newFrom, newTo);
