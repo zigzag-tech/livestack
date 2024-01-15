@@ -69,12 +69,15 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
   constructor({
     connections,
     name,
+    zzEnv,
   }: {
     name: string;
+    zzEnv?: ZZEnv;
   } & WorkflowParams) {
     super({
       name,
       jobParams: WorkflowJobParams,
+      zzEnv,
     });
     const canonical = convertConnectionsCanonical({
       connections,
@@ -155,7 +158,7 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
   {
     jobGroupId?: string;
     // lazyJobCreation?: boolean;
-    jobParams: WorkflowChildJobParams;
+    jobParams?: WorkflowChildJobParams;
   }) {
     if (!jobGroupId) {
       jobGroupId = v4();
@@ -393,6 +396,7 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
 import Graph from "graphology";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { v4 } from "uuid";
+import { ZZEnv } from "../jobs/ZZEnv";
 
 type DefGraphNode =
   | {
