@@ -42,19 +42,15 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   // ) => Promise<IMap[K] | null>;
 
   //async iterator
-  readonly input: AsyncIterable<IMap[keyof IMap]>;
+  readonly input: ReturnType<typeof this.genInputObject> & {
+    for: <K extends keyof IMap>(
+      key: K
+    ) => ReturnType<ZZJob<P, IMap, OMap, WP>["genInputObject"]>;
+  };
 
   // New properties for subscriber tracking
 
   readonly output: { emit: (o: OMap[keyof OMap]) => Promise<void> };
-
-  inputObservableFor = (key?: keyof IMap) => {
-    return this._ensureInputStreamFn(key).trackedObservable;
-  };
-
-  public get inputObservable() {
-    return this.inputObservableFor();
-  }
 
   dedicatedTempWorkingDir: string;
   baseWorkingRelativePath: string;
@@ -138,30 +134,9 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
 
-    const nextInput = async <K extends keyof IMap>(key?: K) => {
-      await this.setJobReadyForInputsInRedis({
-        redisConfig: this.zzEnv.redisConfig,
-        jobId: this.jobId,
-        isReady: true,
-        key: key ? key : "default",
-      });
-
-      const r = await (await this._ensureInputStreamFn(key)).nextValue();
-      return r as IMap[K] | null;
-    };
     this.input = {
-      async *[Symbol.asyncIterator]() {
-        while (true) {
-          const input = await nextInput();
-
-          // Assuming nextInput returns null or a similar value to indicate completion
-          if (!input) {
-            break;
-          }
-
-          yield input;
-        }
-      },
+      ...this.genInputObject("default" as keyof IMap),
+      for: (key: keyof IMap) => this.genInputObject(key),
     };
 
     const emitOutput = async <K extends keyof OMap>(
@@ -217,6 +192,37 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       emit: emitOutput,
     };
   }
+
+  private readonly genInputObject = <K extends keyof IMap>(key: K) => {
+    const job = this;
+    const nextInput = async <K extends keyof IMap>(key?: K) => {
+      await job.setJobReadyForInputsInRedis({
+        redisConfig: job.zzEnv.redisConfig,
+        jobId: job.jobId,
+        isReady: true,
+        key: key ? key : "default",
+      });
+
+      const r = await (await job._ensureInputStreamFn(key)).nextValue();
+      return r as IMap[K] | null;
+    };
+    return {
+      get observable() {
+        return job._ensureInputStreamFn(key).trackedObservable;
+      },
+      async *[Symbol.asyncIterator]() {
+        while (true) {
+          const input = await nextInput(key);
+
+          // Assuming nextInput returns null or a similar value to indicate completion
+          if (!input) {
+            break;
+          }
+          yield input;
+        }
+      },
+    };
+  };
 
   private _ensureInputStreamFn<K extends keyof IMap>(key?: K | "default") {
     if (this.spec.inputDefSet.isSingle) {
