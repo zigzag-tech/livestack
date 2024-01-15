@@ -72,7 +72,7 @@ const WorkflowJobParams = z.object({
 type WorkflowJobParams = z.infer<typeof WorkflowJobParams>;
 export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
   public readonly connections: CanonicalConnection[];
-  private readonly defGraph: DefGraph;
+  public readonly defGraph: DefGraph;
   private orchestrationWorkerDef: ZZWorkerDef<WorkflowJobParams>;
 
   constructor({
@@ -237,10 +237,14 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
       jobGroupId = v4();
     }
 
-    const instantiatedGraph = instantiateFromDefGraph({
-      defGraph: this.defGraph,
-      groupId: jobGroupId,
+    // Create interfaces for inputs and outputs
+
+    // console.log("countByName", countByName);
+    const workflow = new ZZWorkflow({
+      jobGroupDef: this,
+      jobGroupId,
     });
+
     await this.requestJob({
       jobId: jobGroupId,
       jobParams: {
@@ -249,13 +253,40 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
       },
     });
 
-    // Create interfaces for inputs and outputs
+    return workflow;
+  }
+}
+
+export class ZZWorkflow<Specs> {
+  public readonly jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
+  public readonly inputs: {
+    bySpec: <P, I, O>(
+      spec: ZZJobSpec<P, I, O>
+    ) => ReturnType<ZZJobSpec<P, I, O>["_deriveInputsForJob"]>;
+  };
+  public readonly outputs: {
+    bySpec: <P, I, O>(
+      spec: ZZJobSpec<P, I, O>
+    ) => ReturnType<ZZJobSpec<P, I, O>["_deriveOutputsForJob"]>;
+  };
+  public readonly jobGroupDef: ZZWorkflowSpec<Specs>;
+  constructor({
+    jobGroupDef,
+    jobGroupId,
+  }: {
+    jobGroupId: string;
+    jobGroupDef: ZZWorkflowSpec<Specs>;
+  }) {
+    const instaG = instantiateFromDefGraph({
+      defGraph: jobGroupDef.defGraph,
+      groupId: jobGroupId,
+    });
 
     const identifySpecAndJobIdBySpecQuery = (
       specQuery: UniqueSpecQuery
     ): { spec: ZZJobSpec<any, any, any>; jobId: string } => {
       const specInfo = convertUniqueSpec(specQuery);
-      const jobNodeId = instantiatedGraph.findNode((id, n) => {
+      const jobNodeId = instaG.findNode((id, n) => {
         return (
           n.type === "job" &&
           n.specName === specInfo.specName &&
@@ -270,8 +301,7 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
           } not found.`
         );
       }
-      const jobId = (instantiatedGraph.getNodeAttributes(jobNodeId) as JobNode)
-        .jobId;
+      const jobId = (instaG.getNodeAttributes(jobNodeId) as JobNode).jobId;
       const childSpec = ZZJobSpec.lookupByName(specInfo.specName);
 
       return { spec: childSpec, jobId };
@@ -298,48 +328,6 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
       },
     };
 
-    // console.log("countByName", countByName);
-    return new ZZWorkflow({
-      jobIdBySpec,
-      inputs,
-      outputs,
-      jobGroupDef: this,
-    });
-  }
-}
-
-export class ZZWorkflow<Specs> {
-  public readonly jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
-  public readonly inputs: {
-    bySpec: <P, I, O>(
-      spec: ZZJobSpec<P, I, O>
-    ) => ReturnType<ZZJobSpec<P, I, O>["_deriveInputsForJob"]>;
-  };
-  public readonly outputs: {
-    bySpec: <P, I, O>(
-      spec: ZZJobSpec<P, I, O>
-    ) => ReturnType<ZZJobSpec<P, I, O>["_deriveOutputsForJob"]>;
-  };
-  public readonly jobGroupDef: ZZWorkflowSpec<Specs>;
-  constructor({
-    jobIdBySpec,
-    inputs,
-    outputs,
-    jobGroupDef,
-  }: {
-    jobGroupDef: ZZWorkflowSpec<Specs>;
-    jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
-    inputs: {
-      bySpec: <P, I, O>(
-        spec: ZZJobSpec<P, I, O>
-      ) => ReturnType<ZZJobSpec<P, I, O>["_deriveInputsForJob"]>;
-    };
-    outputs: {
-      bySpec: <P, I, O>(
-        spec: ZZJobSpec<P, I, O>
-      ) => ReturnType<ZZJobSpec<P, I, O>["_deriveOutputsForJob"]>;
-    };
-  }) {
     this.jobIdBySpec = jobIdBySpec;
     this.inputs = inputs;
     this.outputs = outputs;
