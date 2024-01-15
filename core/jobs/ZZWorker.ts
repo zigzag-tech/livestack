@@ -17,7 +17,16 @@ export type ZZWorkerDefParams<P, IMap, OMap, WP extends object = {}> = {
   zzEnv?: ZZEnv;
 };
 
-export class ZZWorkerDef<P, IMap, OMap, WP extends object = {}> {
+export class ZZWorkerDef<
+  P,
+  IMap = {
+    default: {};
+  },
+  OMap = {
+    default: {};
+  },
+  WP extends object = {}
+> {
   public readonly jobSpec: ZZJobSpec<P, IMap, OMap>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
   public readonly processor: ZZProcessor<ZZJobSpec<P, IMap, OMap>, WP>;

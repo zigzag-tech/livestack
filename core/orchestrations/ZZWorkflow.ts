@@ -1,7 +1,6 @@
-import { InferInputType, InferOutputType } from "../jobs/ZZJobSpec";
-import { InferStreamSetType } from "../jobs/StreamDefSet";
+// import { InferInputType, InferOutputType } from "../jobs/ZZJobSpec";
 import { CheckSpec, deriveStreamId, ZZJobSpec } from "../jobs/ZZJobSpec";
-import { z } from "zod";
+import { any, z } from "zod";
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
 
@@ -10,109 +9,125 @@ export type JobSpecAndJobParams<JobSpec> = {
   jobParams: z.infer<CheckSpec<JobSpec>["jobParams"]>;
   jobLabel?: string;
 };
-export interface JobConnector<Spec1, Spec2> {
-  from:
-    | CheckSpec<Spec1>
-    | [
-        Spec1,
-        keyof InferStreamSetType<CheckSpec<Spec1>["outputDefSet"]> | "default"
-      ];
 
-  to:
-    | CheckSpec<Spec2>
-    | [
-        Spec2,
-        keyof InferStreamSetType<CheckSpec<Spec2>["outputDefSet"]> | "default"
-      ];
+const SpecOrName = z.union([
+  z.string(),
+  z.instanceof(ZZJobSpec<any, any, any>),
+]);
+type SpecOrName = z.infer<typeof SpecOrName>;
 
-  transform?: (
-    spec1Out: InferStreamSetType<CheckSpec<Spec1>["outputDefSet"]>,
-    spec2In: InferStreamSetType<CheckSpec<Spec2>["inputDefSet"]>
-  ) => void;
-}
+const UniqueSpecQuery = z.union([
+  SpecOrName,
+  z.object({
+    spec: SpecOrName,
+    label: z.string().default("default_label"),
+  }),
+]);
+type UniqueSpecQuery = z.infer<typeof UniqueSpecQuery>;
 
-export class ZZWorkflowSpec<Specs> {
-  public readonly name: string;
+const SpecAndOutlet = z.union([
+  UniqueSpecQuery,
+  z.tuple([UniqueSpecQuery, z.string().or(z.literal("default"))]),
+]);
+type SpecAndOutlet = z.infer<typeof SpecAndOutlet>;
 
-  public readonly jobs: {
-    [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
-  };
-  public readonly jobConnectors: JobConnector<
-    ZZJobSpec<any, any, any>,
-    ZZJobSpec<any, any, any>
-  >[];
+const WorkflowParams = z.object({
+  connections: z.array(
+    z
+      .object({
+        from: SpecAndOutlet,
+        to: SpecAndOutlet,
+      })
+      .or(z.array(SpecAndOutlet))
+  ),
+});
+type WorkflowParams = z.infer<typeof WorkflowParams>;
+
+type CanonicalWorkflowParams = ReturnType<typeof convertConnectionsCanonical>;
+
+type CanonicalConnection = CanonicalWorkflowParams[number];
+const WorkflowChildJobParams = z.array(
+  z.object({
+    spec: SpecOrName,
+    params: z.any(),
+  })
+);
+type WorkflowChildJobParams = z.infer<typeof WorkflowChildJobParams>;
+const WorkflowJobParams = z.object({
+  groupId: z.string(),
+  jobParams: WorkflowChildJobParams.optional(),
+});
+
+type CanonicalConnectionPoint = CanonicalConnection[number];
+
+type WorkflowJobParams = z.infer<typeof WorkflowJobParams>;
+export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
+  public readonly connections: CanonicalConnection[];
+  private readonly defGraph: DefGraph;
+  private orchestrationWorkerDef: ZZWorkerDef<WorkflowJobParams>;
+
   constructor({
-    jobs,
-    jobConnectors,
+    connections,
     name,
   }: {
     name: string;
-    jobs: {
-      [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
-    };
-    jobConnectors: JobConnector<
-      ZZJobSpec<any, any, any>,
-      ZZJobSpec<any, any, any>
-    >[];
-  }) {
-    this.jobs = jobs;
-    this.jobConnectors = jobConnectors;
-    this.name = name;
+  } & WorkflowParams) {
+    super({
+      name,
+      jobParams: WorkflowJobParams,
+    });
+    const canonical = convertConnectionsCanonical({
+      connections,
+    });
+    this.connections = canonical;
+    this._validateConnections();
+    this.defGraph = convertedConnectionsToGraph(canonical);
+    this.orchestrationWorkerDef = new ZZWorkerDef({
+      jobSpec: this,
+      processor: async ({
+        jobParams: { groupId, jobParams: childrenJobParams },
+      }) => {
+        const instantiatedGraph = instantiateFromDefGraph({
+          defGraph: this.defGraph,
+          groupId,
+        });
 
+        const jobNodes = instantiatedGraph
+          .nodes()
+          .filter((n) => instantiatedGraph.getNodeAttributes(n).type === "job");
+
+        for (let i = 0; i < jobNodes.length; i++) {
+          const jobNode = instantiatedGraph.getNodeAttributes(
+            jobNodes[i]
+          ) as JobNode;
+          const childSpecName = jobNode.specName;
+          const childJobSpec = ZZJobSpec.lookupByName(childSpecName);
+          const jDef = {
+            jobId: jobNode.jobId,
+            childrenJobParams,
+          };
+          await childJobSpec.requestJob(jDef);
+        }
+      },
+    });
+  }
+
+  private _validateConnections() {
     // calculate overrides based on jobConnectors
-    for (let i = 0; i < this.jobConnectors.length; i++) {
-      const connector = this.jobConnectors[i];
-      const fromPairs = Array.isArray(connector.from)
-        ? connector.from
-        : ([connector.from, "default"] as const);
-      const toPairs = Array.isArray(connector.to)
-        ? connector.to
-        : ([connector.to, "default"] as const);
-      const [fromP] = fromPairs;
-      const fromKey =
-        fromPairs[1] as keyof (typeof fromP)["outputDefSet"]["defs"];
-      const [toP] = toPairs;
-      const toKey = toPairs[1] as keyof (typeof toP)["inputDefSet"]["defs"];
-
-      const fromKeyStr = String(fromKey);
-      const toKeyStr = String(toKey);
-
-      const fromJobIndex = (
-        this.jobs as JobSpecAndJobParams<unknown>[]
-      ).findIndex((j) => j.spec === fromP);
-      const toJobIndex = (
-        this.jobs as JobSpecAndJobParams<unknown>[]
-      ).findIndex((j) => j.spec === toP);
-
-      if (fromJobIndex === -1) {
-        throw new Error(
-          `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
-            toP.name
-          }/${String(toKey)}: "from" job not in the jobs list.`
-        );
-      }
-      const fromJobDecs = this.jobs[fromJobIndex];
-      if (toJobIndex === -1) {
-        throw new Error(
-          `Invalid jobConnector: ${fromP.name}/${String(fromKey)} >> ${
-            toP.name
-          }/${String(toKey)}: "to" job not in the jobs list.`
-        );
-      }
-      const toJobDesc = this.jobs[toJobIndex];
-      if (!fromJobDecs.spec.outputDefSet.hasDef(fromKeyStr)) {
-        throw new Error(
-          `Invalid jobConnector: ${fromP}/${fromKeyStr} >> ${toP.name}/${String(
-            toKey
-          )}: "from" key "${fromKeyStr}" not found.`
-        );
-      }
-      if (!toJobDesc.spec.inputDefSet.hasDef(toKeyStr)) {
-        throw new Error(
-          `Invalid jobConnector: ${fromP}/${String(fromKey)} >> ${
-            toP.name
-          }/${String(toKey)}: "to" key "${toKeyStr}" not found.`
-        );
+    for (let i = 0; i < this.connections.length; i++) {
+      for (let j = 0; j < this.connections[i].length - 1; j++) {
+        const outSpecInfo = this.connections[i][j];
+        const inSpecInfo = this.connections[i][j + 1];
+        validateSpecHasKey({
+          spec: ZZJobSpec.lookupByName(outSpecInfo.specName),
+          type: "out",
+          key: outSpecInfo.key,
+        });
+        validateSpecHasKey({
+          spec: ZZJobSpec.lookupByName(inSpecInfo.specName),
+          type: "in",
+          key: inSpecInfo.key,
+        });
       }
 
       // TODO: to bring back this check
@@ -130,141 +145,83 @@ export class ZZWorkflowSpec<Specs> {
       //   throw new Error(msg);
       // }
       // validate that the types match
-
-      this.connectorInfos[i] = {
-        from: {
-          jobSpec: fromP,
-          key: fromKeyStr,
-          index: fromJobIndex,
-        },
-        to: {
-          jobSpec: toP,
-          key: toKeyStr,
-          index: toJobIndex,
-        },
-      };
     }
   }
 
-  private connectorInfos: {
-    from: {
-      jobSpec: ZZJobSpec<any, any, any>;
-      key: string;
-      index: number;
-    };
-    to: {
-      jobSpec: ZZJobSpec<any, any, any>;
-      key: string;
-      index: number;
-    };
-  }[] = [];
-
-  public async request({
+  public async enqueue({
     jobGroupId,
-    lazyJobCreation = false,
-  }: {
-    jobGroupId: string;
-    lazyJobCreation?: boolean;
+    jobParams: childJobParams,
+  }: // lazyJobCreation = false,
+  {
+    jobGroupId?: string;
+    // lazyJobCreation?: boolean;
+    jobParams: WorkflowChildJobParams;
   }) {
-    if (lazyJobCreation) {
-      throw new Error("Lazy job creation is not supported yet.");
+    if (!jobGroupId) {
+      jobGroupId = v4();
     }
 
-    const inOverridesByIndex = [] as {
-      [K in keyof CheckArray<Specs>]: Partial<
-        Record<
-          keyof CheckSpec<CheckArray<Specs>[K]>["inputDefSet"]["defs"],
-          string
-        >
-      >;
-    };
-    const outOverridesByIndex = [] as {
-      [K in number]: Partial<
-        Record<
-          keyof CheckSpec<CheckArray<Specs>[K]>["outputDefSet"]["defs"],
-          string
-        >
-      >;
-    };
+    const instantiatedGraph = instantiateFromDefGraph({
+      defGraph: this.defGraph,
+      groupId: jobGroupId,
+    });
 
-    for (let i = 0; i < this.connectorInfos.length; i++) {
-      const { from, to } = this.connectorInfos[i];
-      const commonStreamName = deriveStreamId({
-        groupId: `[${jobGroupId}]`,
-        from,
-        to,
-        // TODO: fix typing
-      } as any);
-
-      inOverridesByIndex[to.index] = {
-        ...inOverridesByIndex[to.index],
-        [to.key]: commonStreamName,
-      };
-
-      outOverridesByIndex[from.index] = {
-        ...outOverridesByIndex[from.index],
-        [from.key]: commonStreamName,
-      };
-    }
-
-    // keep count of job with the same name
-    const countByName: { [k: string]: number } = {};
-    const jobIdsBySpecName: { [k: string]: string[] } = {};
-
-    for (let i = 0; i < Object.keys(this.jobs).length; i++) {
-      // calculate overrides based on jobConnectors
-      const { spec: jobSpec, jobParams } = this.jobs[i];
-
-      if (!countByName[jobSpec.name]) {
-        countByName[jobSpec.name] = 0;
-      } else {
-        countByName[jobSpec.name] += 1;
-      }
-      const jobId = `[${jobGroupId}]${jobSpec.name}${
-        countByName[jobSpec.name] > 0 ? `-${countByName[jobSpec.name]}` : ""
-      }`;
-
-      jobIdsBySpecName[jobSpec.name] = [
-        ...(jobIdsBySpecName[jobSpec.name] || []),
-        jobId,
-      ];
-
-      const jDef = {
-        jobId,
-        jobParams,
-        inputStreamIdOverridesByKey: inOverridesByIndex[i],
-        outputStreamIdOverridesByKey: outOverridesByIndex[i],
-      };
-      await jobSpec.requestJob(jDef);
-    }
-
-    const identifySingleJobIdBySpec = <P, I, O>(spec: ZZJobSpec<P, I, O>) => {
-      const jobs = jobIdsBySpecName[spec.name];
-      if (jobs.length > 1) {
-        throw new Error(
-          `More than one job with spec ${spec.name} detected. Please use jobIdsBySpecName instead.`
-        );
-      }
-      const [job] = jobs;
-      return job;
-    };
+    this.requestJob({
+      jobId: jobGroupId,
+      jobParams: {
+        groupId: jobGroupId,
+        jobParams: childJobParams,
+      },
+    });
 
     // Create interfaces for inputs and outputs
+
+    const identifySpecAndJobIdBySpecQuery = (
+      specQuery: UniqueSpecQuery
+    ): { spec: ZZJobSpec<any, any, any>; jobId: string } => {
+      const specInfo = convertUniqueSpec(specQuery);
+      const jobNode = instantiatedGraph.findNode((id, n) => {
+        n.type === "job" &&
+          n.specName === specInfo.specName &&
+          n.uniqueLabel === specInfo.uniqueLabel;
+      });
+
+      if (!jobNode) {
+        throw new Error(
+          `Spec ${specInfo.specName} with label ${specInfo.uniqueLabel} not found.`
+        );
+      }
+      const jobId = (instantiatedGraph.getNodeAttributes(jobNode) as JobNode)
+        .jobId;
+      const childSpec = ZZJobSpec.lookupByName(specInfo.specName);
+
+      return { spec: childSpec, jobId };
+    };
+
+    const jobIdBySpec = (specQuery: UniqueSpecQuery) => {
+      const { jobId } = identifySpecAndJobIdBySpecQuery(specQuery);
+      return jobId;
+    };
+
     const inputs = {
-      bySpec: <P, I, O>(spec: ZZJobSpec<P, I, O>) => {
-        return spec._deriveInputsForJob(identifySingleJobIdBySpec(spec));
+      bySpec: (specQuery: UniqueSpecQuery) => {
+        const { spec: childSpec, jobId } =
+          identifySpecAndJobIdBySpecQuery(specQuery);
+        return childSpec._deriveInputsForJob(jobId);
       },
     };
 
     const outputs = {
-      bySpec: <P, I, O>(spec: ZZJobSpec<P, I, O>) => {
-        return spec._deriveOutputsForJob(identifySingleJobIdBySpec(spec));
+      bySpec: (specQuery: UniqueSpecQuery) => {
+        const { spec: childSpec, jobId } =
+          identifySpecAndJobIdBySpecQuery(specQuery);
+        return childSpec._deriveOutputsForJob(jobId);
       },
     };
 
     // console.log("countByName", countByName);
     return new ZZWorkflow({
-      jobIdsBySpecName,
+      jobIdBySpec,
       inputs,
       outputs,
       jobGroupDef: this,
@@ -273,7 +230,7 @@ export class ZZWorkflowSpec<Specs> {
 }
 
 export class ZZWorkflow<Specs> {
-  public readonly jobIdsBySpecName: { [k: string]: string[] };
+  public readonly jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
   public readonly inputs: {
     bySpec: <P, I, O>(
       spec: ZZJobSpec<P, I, O>
@@ -286,13 +243,13 @@ export class ZZWorkflow<Specs> {
   };
   public readonly jobGroupDef: ZZWorkflowSpec<Specs>;
   constructor({
-    jobIdsBySpecName,
+    jobIdBySpec,
     inputs,
     outputs,
     jobGroupDef,
   }: {
     jobGroupDef: ZZWorkflowSpec<Specs>;
-    jobIdsBySpecName: { [k: string]: string[] };
+    jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
     inputs: {
       bySpec: <P, I, O>(
         spec: ZZJobSpec<P, I, O>
@@ -304,32 +261,14 @@ export class ZZWorkflow<Specs> {
       ) => ReturnType<ZZJobSpec<P, I, O>["_deriveOutputsForJob"]>;
     };
   }) {
-    this.jobIdsBySpecName = jobIdsBySpecName;
+    this.jobIdBySpec = jobIdBySpec;
     this.inputs = inputs;
     this.outputs = outputs;
     this.jobGroupDef = jobGroupDef;
   }
 
-  public static define<Specs>({
-    jobs,
-    jobConnectors,
-    name,
-  }: {
-    name: string;
-    jobs: {
-      [K in keyof CheckArray<Specs>]: JobSpecAndJobParams<CheckArray<Specs>[K]>;
-    };
-
-    jobConnectors: ReturnType<
-      typeof connect<
-        ZZJobSpec<any, any, any>,
-        ZZJobSpec<any, any, any>,
-        any,
-        any
-      >
-    >[];
-  }) {
-    return new ZZWorkflowSpec<Specs>({ name, jobs, jobConnectors });
+  public static define(p: ConstructorParameters<typeof ZZWorkflowSpec>[0]) {
+    return new ZZWorkflowSpec(p);
   }
 
   public static connect = connect;
@@ -337,29 +276,312 @@ export class ZZWorkflow<Specs> {
 
 export function connect<
   Spec1,
-  Spec2,
-  K1 extends keyof CheckSpec<Spec1>["outputDefSet"]["defs"],
-  K2 extends keyof CheckSpec<Spec2>["inputDefSet"]["defs"]
+  Spec2
+  // K1 extends keyof CheckSpec<Spec1>["outputDefSet"]["defs"],
+  // K2 extends keyof CheckSpec<Spec2>["inputDefSet"]["defs"]
 >({
   from,
   to,
-  transform,
-}: {
+}: // transform,
+{
   from: Spec1;
   to: Spec2;
-  transform?: (
-    spec1Out: NonNullable<InferOutputType<Spec1, K1>>
-  ) => NonNullable<InferInputType<Spec2, K2>>;
+  // transform?: (
+  //   spec1Out: NonNullable<InferOutputType<Spec1, K1>>
+  // ) => NonNullable<InferInputType<Spec2, K2>>;
 }): {
   from: Spec1;
   to: Spec2;
-  transform?: (
-    spec1Out: NonNullable<InferOutputType<Spec1, K1>>
-  ) => NonNullable<InferInputType<Spec2, K2>>;
+  // transform?: (
+  //   spec1Out: NonNullable<InferOutputType<Spec1, K1>>
+  // ) => NonNullable<InferInputType<Spec2, K2>>;
 } {
   return {
     from,
     to,
-    transform,
+    // transform,
   };
+}
+
+// Conversion functions using TypeScript
+function convertSpecOrName(specOrName: SpecOrName): string {
+  if (typeof specOrName === "string") {
+    return specOrName;
+  } else {
+    return specOrName.name;
+  }
+}
+
+function convertUniqueSpec(uniqueSpec: UniqueSpecQuery): {
+  specName: string;
+  uniqueLabel?: string;
+} {
+  if ("spec" in (uniqueSpec as any) && "label" in (uniqueSpec as any)) {
+    return {
+      specName: convertSpecOrName(
+        (
+          uniqueSpec as {
+            spec: SpecOrName;
+            label: string;
+          }
+        ).spec
+      ),
+      uniqueLabel: (
+        uniqueSpec as {
+          spec: SpecOrName;
+          label: string;
+        }
+      ).label,
+    };
+  } else {
+    return {
+      specName: convertSpecOrName(uniqueSpec as any),
+    };
+  }
+}
+
+function convertSpecAndOutlet(specAndOutlet: SpecAndOutlet): {
+  specName: string;
+  uniqueLabel?: string;
+  key: string;
+} {
+  if (Array.isArray(specAndOutlet)) {
+    const [uniqueSpec, key] = specAndOutlet;
+    return {
+      specName: convertUniqueSpec(uniqueSpec).specName,
+      uniqueLabel: convertUniqueSpec(uniqueSpec).uniqueLabel,
+      key: key,
+    };
+  } else {
+    const converted = convertUniqueSpec(specAndOutlet);
+    return {
+      specName: converted.specName,
+      uniqueLabel: converted.uniqueLabel,
+      key: "default",
+    };
+  }
+}
+
+type CanonicalSpecAndOutlet = ReturnType<typeof convertSpecAndOutlet>;
+
+function convertConnectionsCanonical(workflowParams: WorkflowParams) {
+  const convertedConnections = workflowParams.connections.reduce(
+    (acc, conn) => {
+      if (Array.isArray(conn)) {
+        let newAcc: [CanonicalSpecAndOutlet, CanonicalSpecAndOutlet][] = [];
+        const connCanonical = conn.map(convertSpecAndOutlet);
+        for (let i = 0; i < connCanonical.length - 1; i++) {
+          newAcc.push([connCanonical[i], connCanonical[i + 1]]);
+        }
+        return newAcc;
+      } else {
+        return [
+          ...acc,
+          [convertSpecAndOutlet(conn.from), convertSpecAndOutlet(conn.to)] as [
+            CanonicalSpecAndOutlet,
+            CanonicalSpecAndOutlet
+          ],
+        ];
+      }
+    },
+    [] as [CanonicalSpecAndOutlet, CanonicalSpecAndOutlet][]
+  );
+
+  return convertedConnections;
+}
+
+import Graph from "graphology";
+import { ZZWorkerDef } from "../jobs/ZZWorker";
+import { v4 } from "uuid";
+
+type DefGraphNode =
+  | {
+      type: "spec";
+      specName: string;
+      uniqueLabel?: string;
+    }
+  | {
+      type: "stream";
+      streamId: string;
+    }
+  | {
+      type: "inlet";
+      key: string;
+    }
+  | {
+      type: "outlet";
+      key: string;
+    };
+
+type InferNodeData<T extends DefGraphNode["type"]> = Extract<
+  DefGraphNode,
+  { type: T }
+>;
+
+type DefNodeType = DefGraphNode["type"];
+type DefGraph = Graph<DefGraphNode>;
+
+type JobNode = {
+  type: "job";
+  jobId: string;
+  specName: string;
+  uniqueLabel?: string;
+};
+
+type InstantiatedGraph = Graph<
+  | JobNode
+  | {
+      type: "stream";
+      streamId: string;
+    }
+  | {
+      type: "inlet";
+      key: string;
+    }
+  | {
+      type: "outlet";
+      key: string;
+    }
+>;
+
+function convertedConnectionsToGraph(
+  convertedConnections: CanonicalConnection[]
+): DefGraph {
+  const graph: DefGraph = new Graph();
+
+  function createOrGetNodeId<T extends DefNodeType>(
+    id: string,
+    data: InferNodeData<T>
+  ): string {
+    const nodeId = `${data.type}_${id}`;
+    if (!graph.hasNode(nodeId)) {
+      graph.addNode(nodeId, { ...data });
+    }
+    return nodeId;
+  }
+
+  function addConnection(
+    from: CanonicalConnectionPoint,
+    to: CanonicalConnectionPoint
+  ) {
+    const fromSpecIdentifier = uniqueSpecIdentifier(from);
+    const fromSpecNodeId = createOrGetNodeId(fromSpecIdentifier, {
+      specName: from.specName,
+      uniqueLabel: from.uniqueLabel,
+      type: "spec",
+    });
+    const fromOutletNodeId = createOrGetNodeId(
+      `${fromSpecIdentifier}/${from.key}`,
+      { type: "outlet", key: from.key }
+    );
+    const streamId = deriveStreamId({
+      groupId: "[groupId]",
+      from: {
+        specName: from.specName,
+        uniqueLabel: from.uniqueLabel,
+        key: from.key,
+      },
+      to: {
+        specName: to.specName,
+        uniqueLabel: to.uniqueLabel,
+        key: to.key,
+      },
+    });
+    const streamNodeId = createOrGetNodeId(streamId, {
+      type: "stream",
+      streamId,
+    });
+    const toSpecIdentifier = uniqueSpecIdentifier(to);
+    const toInletNodeId = createOrGetNodeId(`${toSpecIdentifier}/${to.key}`, {
+      type: "inlet",
+      key: to.key,
+    });
+    const toSpecNodeId = createOrGetNodeId(toSpecIdentifier, {
+      specName: to.specName,
+      uniqueLabel: to.uniqueLabel,
+      type: "spec",
+    });
+
+    graph.addEdge(fromSpecNodeId, fromOutletNodeId);
+    graph.addEdge(fromOutletNodeId, streamNodeId);
+    graph.addEdge(streamNodeId, toInletNodeId);
+    graph.addEdge(toInletNodeId, toSpecNodeId);
+  }
+
+  for (const connection of convertedConnections) {
+    // Split into multiple connections
+    for (let i = 0; i < connection.length - 1; i++) {
+      addConnection(connection[i], connection[i + 1]);
+    }
+  }
+
+  return graph;
+}
+
+function uniqueSpecIdentifier({
+  specName,
+  uniqueLabel,
+}: {
+  specName: string;
+  uniqueLabel?: string;
+}) {
+  return `${specName}${uniqueLabel ? `[${uniqueLabel}]` : ""}`;
+}
+
+function validateSpecHasKey<P, IMap, OMap>({
+  spec,
+  type,
+  key,
+}: {
+  spec: ZZJobSpec<P, IMap, OMap>;
+  type: "in" | "out";
+  key: string;
+}) {
+  if (type === "in") {
+    if (!spec.outputDefSet.hasDef(key)) {
+      throw new Error(`Invalid spec key: ${spec.name}/${key} specified.`);
+    }
+  }
+}
+
+function instantiateFromDefGraph({
+  defGraph,
+  groupId,
+}: {
+  defGraph: DefGraph;
+  groupId: string;
+}): InstantiatedGraph {
+  const g: InstantiatedGraph = new Graph();
+
+  const nodes = defGraph.nodes();
+  const jobNodeIdBySpecNodeId: { [k: string]: string } = {};
+
+  for (const nodeId of nodes) {
+    const specNode = defGraph.getNodeAttributes(nodeId);
+    if (specNode.type === "spec") {
+      const jobId = `[${groupId}]${uniqueSpecIdentifier(specNode)}`;
+      g.addNode(jobId, {
+        ...specNode,
+        type: "job",
+        jobId,
+      });
+      jobNodeIdBySpecNodeId[nodeId] = jobId;
+    } else {
+      g.addNode(nodeId, specNode);
+    }
+  }
+
+  const edges = defGraph.edges();
+  for (const edge of edges) {
+    const [from, to] = edge;
+    const fromNode = defGraph.getNodeAttributes(from);
+    const toNode = defGraph.getNodeAttributes(to);
+
+    const newFrom =
+      fromNode.type === "spec" ? jobNodeIdBySpecNodeId[from] : from;
+    const newTo = toNode.type === "spec" ? jobNodeIdBySpecNodeId[to] : to;
+    g.addEdge(newFrom, newTo);
+  }
+
+  return g;
 }

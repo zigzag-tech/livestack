@@ -23,7 +23,7 @@ import {
   wrapStreamSubscriberWithTermination,
   wrapTerminatorAndDataId,
 } from "../utils/io";
-import { ZZStream, ZZStreamSubscriber, hashDef } from "./ZZStream";
+import { ZZStream, ZZStreamSubscriber } from "./ZZStream";
 import { StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 import pLimit from "p-limit";
@@ -84,6 +84,9 @@ export class ZZJobSpec<
   private readonly _originalInputs: InferDefMap<IMap> | undefined;
   private readonly _originalOutputs: InferDefMap<OMap> | undefined;
 
+  private static _registryBySpecName: Record<string, ZZJobSpec<any, any, any>> =
+    {};
+
   constructor({
     zzEnv,
     name,
@@ -126,6 +129,15 @@ export class ZZJobSpec<
         defs: outputs,
       });
     }
+
+    ZZJobSpec._registryBySpecName[this.name] = this;
+  }
+
+  public static lookupByName(specName: string) {
+    if (!ZZJobSpec._registryBySpecName[specName]) {
+      throw new Error(`JobSpec ${specName} not defined on this machine.`);
+    }
+    return ZZJobSpec._registryBySpecName[specName];
   }
 
   public inputDef(key: keyof IMap = "default" as keyof IMap) {
@@ -525,7 +537,7 @@ export class ZZJobSpec<
         groupId: `[${jobId}]`,
         ...{
           [type === "in" ? "to" : "from"]: {
-            jobSpec: this,
+            jobSpecName: this.name,
             key: p.key || "default",
           },
         },
@@ -819,23 +831,37 @@ export class ZZJobSpec<
   }
 }
 
-export function deriveStreamId<PP1, PP2>({
+export function deriveStreamId({
   groupId,
   from,
   to,
 }: {
   groupId: string;
   from?: {
-    jobSpec: CheckSpec<PP1>;
+    specName: string;
     key: string;
+    uniqueLabel?: string;
   };
   to?: {
-    jobSpec: CheckSpec<PP2>;
+    specName: string;
     key: string;
+    uniqueLabel?: string;
   };
 }) {
-  const fromStr = from ? `${from.jobSpec.name}/${from.key}` : "(*)";
-  const toStr = to ? `${to.jobSpec.name}/${to.key}` : "(*)";
+  const fromStr = from
+    ? `${from.specName}${
+        from.uniqueLabel && from.uniqueLabel !== "default_label"
+          ? `[${from.uniqueLabel}]`
+          : ""
+      }/${from.key}`
+    : "(*)";
+  const toStr = to
+    ? `${to.specName}${
+        to.uniqueLabel && to.uniqueLabel !== "default_label"
+          ? `[${to.uniqueLabel}]`
+          : ""
+      }/${to.key}`
+    : "(*)";
   return `stream-${groupId}::${fromStr}>>${toStr}`;
 }
 
