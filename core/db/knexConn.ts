@@ -314,6 +314,7 @@ export async function ensureJobAndInitStatusRec<T>({
   jobParams: T;
 }) {
   // await dbConn.transaction(async (trx) => {
+
   const q = dbConn("zz_jobs")
     .insert<ZZJobRec<T>>({
       project_id: projectId,

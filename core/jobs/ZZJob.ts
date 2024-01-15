@@ -446,6 +446,12 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     });
   };
 
+  public static define<P, IMap, OMap>(
+    p: ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0]
+  ) {
+    return new ZZJobSpec<P, IMap, OMap>(p);
+  }
+
   // public spawnChildJobsToWaitOn = async <CI, CO>(p: {
   //   def: JobSpecDef<P, O, StreamIMap, StreamI>;
   //   jobId: string;

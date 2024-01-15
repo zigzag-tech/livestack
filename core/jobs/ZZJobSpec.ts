@@ -809,6 +809,10 @@ export class ZZJobSpec<
     return this.name;
   }
 
+  toJSON() {
+    return this.name;
+  }
+
   // convenient function
   public defineWorker<WP extends object>(
     p: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec">
@@ -819,7 +823,7 @@ export class ZZJobSpec<
     });
   }
 
-  public async defineAndStartWorker<WP extends object>({
+  public async defineWorkerAndStart<WP extends object>({
     instanceParams,
     ...p
   }: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec"> & {
@@ -831,12 +835,10 @@ export class ZZJobSpec<
   }
 }
 
-export function deriveStreamId({
-  groupId,
+export function uniqueStreamIdentifier({
   from,
   to,
 }: {
-  groupId: string;
   from?: {
     specName: string;
     key: string;
@@ -862,7 +864,16 @@ export function deriveStreamId({
           : ""
       }/${to.key}`
     : "(*)";
-  return `stream-${groupId}::${fromStr}>>${toStr}`;
+  return `${fromStr}>>${toStr}`;
+}
+
+export function deriveStreamId({
+  groupId,
+  from,
+  to,
+}: { groupId: string } & Parameters<typeof uniqueStreamIdentifier>[0]) {
+  const suffix = uniqueStreamIdentifier({ from, to });
+  return `stream-${groupId}::${suffix}`;
 }
 
 export async function sleep(ms: number) {
