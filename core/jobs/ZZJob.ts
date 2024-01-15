@@ -37,12 +37,16 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   readonly jobParams: P;
   readonly logger: ReturnType<typeof getLogger>;
   readonly spec: ZZJobSpec<P, IMap, OMap>;
-  readonly nextInput: <K extends keyof IMap>(
-    key?: K
-  ) => Promise<IMap[K] | null>;
+  // readonly nextInput: <K extends keyof IMap>(
+  //   key?: K
+  // ) => Promise<IMap[K] | null>;
+
+  //async iterator
+  readonly input: AsyncIterable<IMap[keyof IMap]>;
+
   // New properties for subscriber tracking
 
-  emitOutput: (o: OMap[keyof OMap]) => Promise<void>;
+  readonly output: { emit: (o: OMap[keyof OMap]) => Promise<void> };
 
   inputObservableFor = (key?: keyof IMap) => {
     return this._ensureInputStreamFn(key).trackedObservable;
@@ -74,10 +78,6 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       ) => Promise<void>;
     };
   }>;
-  public readonly loopUntilInputTerminated: <K extends keyof IMap>(
-    processor: (input: IMap[K]) => Promise<void>,
-    key?: K
-  ) => Promise<void>;
 
   constructor(p: {
     bullMQJob: Job<{ jobParams: P }, void, string>;
@@ -138,7 +138,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
 
-    this.nextInput = async <K extends keyof IMap>(key?: K) => {
+    const nextInput = async <K extends keyof IMap>(key?: K) => {
       await this.setJobReadyForInputsInRedis({
         redisConfig: this.zzEnv.redisConfig,
         jobId: this.jobId,
@@ -149,16 +149,22 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       const r = await (await this._ensureInputStreamFn(key)).nextValue();
       return r as IMap[K] | null;
     };
+    this.input = {
+      async *[Symbol.asyncIterator]() {
+        while (true) {
+          const input = await nextInput();
 
-    this.loopUntilInputTerminated = async <K extends keyof IMap>(
-      processor: (input: IMap[K]) => Promise<void>,
-      key?: K
-    ) => {
-      const { loopUntilInputTerminated } = await this._ensureInputStreamFn(key);
-      await loopUntilInputTerminated(processor);
+          // Assuming nextInput returns null or a similar value to indicate completion
+          if (!input) {
+            break;
+          }
+
+          yield input;
+        }
+      },
     };
 
-    this.emitOutput = async <K extends keyof OMap>(
+    const emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
       key: K = "default" as K
     ) => {
@@ -206,6 +212,9 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       });
 
       this.bullMQJob.updateProgress(this._dummyProgressCount++);
+    };
+    this.output = {
+      emit: emitOutput,
     };
   }
 
@@ -383,7 +392,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       );
 
       if (processedR) {
-        await this.emitOutput(processedR);
+        await this.output.emit(processedR);
       }
 
       if (this.zzEnv.db) {

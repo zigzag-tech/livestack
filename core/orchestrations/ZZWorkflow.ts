@@ -5,7 +5,11 @@ import {
   uniqueStreamIdentifier,
   ZZJobSpec,
 } from "../jobs/ZZJobSpec";
-import { any, z } from "zod";
+import { z } from "zod";
+import Graph from "graphology";
+import { ZZWorkerDef } from "../jobs/ZZWorker";
+import { v4 } from "uuid";
+import { ZZEnv } from "../jobs/ZZEnv";
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
 
@@ -470,11 +474,6 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
 
   return convertedConnections;
 }
-
-import Graph from "graphology";
-import { ZZWorkerDef } from "../jobs/ZZWorker";
-import { v4 } from "uuid";
-import { ZZEnv } from "../jobs/ZZEnv";
 
 type SpecNode = {
   type: "spec";
