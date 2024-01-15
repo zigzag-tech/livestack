@@ -43,7 +43,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
 
   //async iterator
   readonly input: ReturnType<typeof this.genInputObject> & {
-    for: <K extends keyof IMap>(
+    byKey: <K extends keyof IMap>(
       key: K
     ) => ReturnType<ZZJob<P, IMap, OMap, WP>["genInputObject"]>;
   };
@@ -136,7 +136,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
 
     this.input = {
       ...this.genInputObject("default" as keyof IMap),
-      for: (key: keyof IMap) => this.genInputObject(key),
+      byKey: (key: keyof IMap) => this.genInputObject(key),
     };
 
     const emitOutput = async <K extends keyof OMap>(

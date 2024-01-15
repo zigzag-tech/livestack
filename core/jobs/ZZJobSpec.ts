@@ -615,7 +615,8 @@ export class ZZJobSpec<
         } else if (from === "now") {
           subscriber = stream.subFromNow();
         } else {
-          throw new Error(`Invalid "from" ${from}`);
+          reject(new Error(`Invalid "from" ${from}`));
+          return undefined;
         }
         resolve(subscriber);
       });
@@ -796,14 +797,11 @@ export class ZZJobSpec<
       return await subscriberByDefaultKey.nextValue();
     };
 
-    const loopUntilTerminated = genLoopUntilTerminated(nextValue);
-
     return {
       byKey: <K extends keyof OMap>(key: K) => {
         return subscriberByKey(key);
       },
       nextValue,
-      loopUntilTerminated,
     };
   };
 
