@@ -518,7 +518,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   //     ...childJobDef,
   //     zzEnv: this.zzEnv,
   //   });
-  //   await tempJobSpec.requestJob({
+  //   await tempJobSpec.enqueueJob({
   //     jobId: childJobId,
   //     jobParams,
   //     bullMQJobsOpts: flowProducerOpts,

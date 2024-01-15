@@ -242,7 +242,7 @@ export class ZZJobSpec<
       ) as OMap[keyof OMap][];
   }
 
-  public async requestJobAndWaitOnResults({
+  public async enqueueJobAndWaitOnResults({
     jobId: jobId,
     jobParams: jobParams,
     outputKey = "default" as keyof OMap,
@@ -260,7 +260,7 @@ export class ZZJobSpec<
       `Enqueueing job ${jobId} with data: ${JSON.stringify(jobParams)}.`
     );
 
-    await this.requestJob({
+    await this.enqueueJob({
       jobId,
       jobParams,
     });
@@ -624,7 +624,7 @@ export class ZZJobSpec<
     return wrapStreamSubscriberWithTermination(subuscriberP);
   }
 
-  public async requestJob({
+  public async enqueueJob({
     jobId,
     jobParams,
     bullMQJobsOpts,
@@ -637,7 +637,7 @@ export class ZZJobSpec<
     inputStreamIdOverridesByKey?: Partial<Record<keyof IMap, string>>;
     outputStreamIdOverridesByKey?: Partial<Record<keyof OMap, string>>;
   }) {
-    // console.debug("ZZJobSpec._requestJob", jobId, jobParams);
+    // console.debug("ZZJobSpec._enqueueJob", jobId, jobParams);
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
     if (workers.length === 0) {
@@ -711,13 +711,13 @@ export class ZZJobSpec<
     // return j;
   }
 
-  public async requestJobAndGetOutputs(
-    p: Parameters<ZZJobSpec<P, IMap, OMap>["requestJob"]>[0] & {
+  public async enqueueJobAndGetOutputs(
+    p: Parameters<ZZJobSpec<P, IMap, OMap>["enqueueJob"]>[0] & {
       key?: keyof OMap;
     }
   ) {
     const { jobId, jobParams, key } = p;
-    const { outputs } = await this.requestJob({
+    const { outputs } = await this.enqueueJob({
       jobId,
       jobParams,
     });

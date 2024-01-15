@@ -58,7 +58,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
 
-            const jo = await jobSpec.requestJob({
+            const jo = await jobSpec.enqueueJob({
               jobId: childJobId,
               jobParams: await transformInput(jobParams),
             });

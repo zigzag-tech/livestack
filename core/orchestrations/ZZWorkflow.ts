@@ -164,7 +164,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
 
           const childSpecName = jobNode.specName;
           const childJobSpec = ZZJobSpec.lookupByName(childSpecName);
-          await childJobSpec.requestJob({
+          await childJobSpec.enqueueJob({
             jobId: jobNode.jobId,
             jobParams: childrenJobParams?.find(({ spec: specQuery }) => {
               const specInfo = convertUniqueSpec(specQuery);
@@ -245,7 +245,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
       jobGroupId,
     });
 
-    await this.requestJob({
+    await this.enqueueJob({
       jobId: jobGroupId,
       jobParams: {
         groupId: jobGroupId,

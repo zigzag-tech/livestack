@@ -69,7 +69,7 @@ export class ZZParallelAttemptWorkerDef<
         }: ParallelAttempt<ParentIMap, ParentOMap, I, O>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
-            const { outputs, inputs } = await jobSpec.requestJob({
+            const { outputs, inputs } = await jobSpec.enqueueJob({
               jobId: childJobId,
             });
 

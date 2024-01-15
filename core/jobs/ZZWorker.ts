@@ -70,13 +70,13 @@ export class ZZWorkerDef<
     return spec.defineWorker(p);
   }
 
-  public requestJob: (typeof this.jobSpec)["requestJob"] = (p) => {
-    return this.jobSpec.requestJob(p);
+  public enqueueJob: (typeof this.jobSpec)["enqueueJob"] = (p) => {
+    return this.jobSpec.enqueueJob(p);
   };
 
-  public requestJobAndGetOutputs: (typeof this.jobSpec)["requestJobAndGetOutputs"] =
+  public enqueueJobAndGetOutputs: (typeof this.jobSpec)["enqueueJobAndGetOutputs"] =
     (p) => {
-      return this.jobSpec.requestJobAndGetOutputs(p);
+      return this.jobSpec.enqueueJobAndGetOutputs(p);
     };
 }
 
