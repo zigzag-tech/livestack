@@ -95,26 +95,83 @@ export class ZZWorkflowSpec<Specs> extends ZZJobSpec<WorkflowJobParams> {
       processor: async ({
         jobParams: { groupId, jobParams: childrenJobParams },
       }) => {
-        const instantiatedGraph = instantiateFromDefGraph({
+        const instG = instantiateFromDefGraph({
           defGraph: this.defGraph,
           groupId,
         });
 
-        const jobNodes = instantiatedGraph
+        const jobNodes = instG
           .nodes()
-          .filter((n) => instantiatedGraph.getNodeAttributes(n).type === "job");
+          .filter((n) => instG.getNodeAttributes(n).type === "job");
 
         for (let i = 0; i < jobNodes.length; i++) {
-          const jobNode = instantiatedGraph.getNodeAttributes(
-            jobNodes[i]
-          ) as JobNode;
+          const jobNodeId = jobNodes[i];
+          const jobNode = instG.getNodeAttributes(jobNodeId) as JobNode;
+
+          //calculate input and output overrides
+          const inputStreamIdOverridesByKey: Record<string, string> = {};
+          const outputStreamIdOverridesByKey: Record<string, string> = {};
+
+          // get the stream id overrides for the inputs
+          const inboundEdges = instG.inboundEdges(jobNodeId);
+          const inletEdgeIds = inboundEdges.filter((e) => {
+            const node = instG.getNodeAttributes(instG.source(e));
+            return node.type === "inlet";
+          });
+          const inletNodeIds = inletEdgeIds.map((e) => instG.source(e));
+          for (const inletNodeId of inletNodeIds) {
+            const inletNode = instG.getNodeAttributes(inletNodeId);
+            if (inletNode.type !== "inlet") {
+              throw new Error("Expected inlet node");
+            }
+            const streamToInpetEdgeId = instG.inboundEdges(inletNodeId)[0];
+            const streamNodeId = instG.source(streamToInpetEdgeId);
+            const streamNode = instG.getNodeAttributes(streamNodeId);
+            if (streamNode.type !== "stream") {
+              throw new Error("Expected stream node");
+            }
+            const streamId = streamNode.streamId;
+            inputStreamIdOverridesByKey[inletNode.key] = streamId;
+          }
+
+          // get the stream id overrides for the outputs
+          const outboundEdges = instG.outboundEdges(jobNodeId);
+          const outletEdgeIds = outboundEdges.filter((e) => {
+            const node = instG.getNodeAttributes(instG.target(e));
+            return node.type === "outlet";
+          });
+          const outletNodeIds = outletEdgeIds.map((e) => instG.target(e));
+
+          for (const outletNodeId of outletNodeIds) {
+            const outletNode = instG.getNodeAttributes(outletNodeId);
+            if (outletNode.type !== "outlet") {
+              throw new Error("Expected outlet node");
+            }
+
+            const streamFromOutputEdgeId = instG.outboundEdges(outletNodeId)[0];
+            const streamNodeId = instG.target(streamFromOutputEdgeId);
+            const streamNode = instG.getNodeAttributes(streamNodeId);
+            if (streamNode.type !== "stream") {
+              throw new Error("Expected stream node");
+            }
+            const streamId = streamNode.streamId;
+            outputStreamIdOverridesByKey[outletNode.key] = streamId;
+          }
+
           const childSpecName = jobNode.specName;
           const childJobSpec = ZZJobSpec.lookupByName(childSpecName);
-          const jDef = {
+          await childJobSpec.requestJob({
             jobId: jobNode.jobId,
-            childrenJobParams,
-          };
-          await childJobSpec.requestJob(jDef);
+            jobParams: childrenJobParams?.find(({ spec: specQuery }) => {
+              const specInfo = convertUniqueSpec(specQuery);
+              return (
+                specInfo.specName === childSpecName &&
+                specInfo.uniqueLabel === jobNode.uniqueLabel
+              );
+            })?.params,
+            inputStreamIdOverridesByKey,
+            outputStreamIdOverridesByKey,
+          });
         }
       },
     });
@@ -334,7 +391,11 @@ function convertUniqueSpec(uniqueSpec: UniqueSpecQuery): {
   specName: string;
   uniqueLabel?: string;
 } {
-  if ("spec" in (uniqueSpec as any) && "label" in (uniqueSpec as any)) {
+  if (typeof uniqueSpec === "string") {
+    return {
+      specName: uniqueSpec,
+    };
+  } else if ("spec" in (uniqueSpec as any) && "label" in (uniqueSpec as any)) {
     return {
       specName: convertSpecOrName(
         (
