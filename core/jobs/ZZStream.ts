@@ -1,12 +1,17 @@
 import { ZodType } from "zod";
 import { ZZEnv } from "./ZZEnv";
-
+import {
+  IStorageProvider,
+  saveLargeFilesToStorage,
+} from "../storage/cloudStorage";
 import { createHash } from "crypto";
 import { getLogger } from "../utils/createWorkerLogger";
 import { z } from "zod";
 import { addDatapoint, ensureStreamRec } from "../db/knexConn";
 import { v4 } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
+import { identifyLargeFiles } from "../files/file-ops";
+import path from "path";
 
 const REDIS_CLIENT_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
@@ -38,6 +43,7 @@ export class ZZStream<T> {
   public readonly uniqueName: string;
   public readonly hash: string;
   private _zzEnv: ZZEnv | null = null;
+  baseWorkingRelativePath: string;
 
   public get zzEnv() {
     const resolved = this._zzEnv || ZZEnv.global();
@@ -124,6 +130,10 @@ export class ZZStream<T> {
     //   this.uniqueName,
     //   JSON.stringify(zodToJsonSchema(this.def), null, 2)
     // );
+    this.baseWorkingRelativePath = path.join(
+      this.zzEnv.projectId,
+      this.uniqueName
+    );
   }
 
   public lastValueSlow = async () => {
@@ -165,6 +175,34 @@ export class ZZStream<T> {
         }: data provided is invalid: ${JSON.stringify(err)}`
       );
       throw err;
+    }
+
+    let { largeFilesToSave, newObj } = identifyLargeFiles(parsed);
+
+    if (this.zzEnv.storageProvider) {
+      const fullPathLargeFilesToSave = largeFilesToSave.map((x) => ({
+        ...x,
+        path: path.join(this.baseWorkingRelativePath, x.path),
+      }));
+
+      if (fullPathLargeFilesToSave.length > 0) {
+        this.logger.info(
+          `Saving large files to storage: ${fullPathLargeFilesToSave
+            .map((x) => x.path)
+            .join(", ")}`
+        );
+        await saveLargeFilesToStorage(
+          fullPathLargeFilesToSave,
+          this.zzEnv.storageProvider
+        );
+        parsed = newObj;
+      }
+    } else {
+      if (largeFilesToSave.length > 0) {
+        throw new Error(
+          "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
+        );
+      }
     }
 
     if (this.zzEnv.db) {

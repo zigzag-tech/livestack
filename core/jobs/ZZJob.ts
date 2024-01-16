@@ -1,5 +1,4 @@
-import { WrapTerminatorAndDataId, wrapTerminatorAndDataId } from "../utils/io";
-import { v4 } from "uuid";
+import { WrapTerminatorAndDataId } from "../utils/io";
 import { ZZStream } from "./ZZStream";
 import { Job, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
@@ -8,16 +7,10 @@ import {
   createTrackedObservable,
 } from "../realtime/pubsub";
 import { Observable, map, takeUntil } from "rxjs";
-import {
-  IStorageProvider,
-  saveLargeFilesToStorage,
-} from "../storage/cloudStorage";
-import { getTempPathByJobId } from "../storage/temp-dirs";
-import path from "path";
+import { IStorageProvider } from "../storage/cloudStorage";
 import { updateJobStatus } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
 import { ZZJobSpec } from "./ZZJobSpec";
-import { identifyLargeFiles } from "../files/file-ops";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
@@ -51,9 +44,6 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   // New properties for subscriber tracking
 
   readonly output: { emit: (o: OMap[keyof OMap]) => Promise<void> };
-
-  dedicatedTempWorkingDir: string;
-  baseWorkingRelativePath: string;
 
   storageProvider?: IStorageProvider;
   readonly zzEnv: ZZEnv;
@@ -124,14 +114,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     this.storageProvider = p.storageProvider;
     this.zzEnv = p.jobSpec.zzEnv;
     this.spec = p.jobSpec;
-    this.baseWorkingRelativePath = path.join(
-      this.zzEnv.projectId,
-      this.workerName,
-      this.jobId!
-    );
 
-    const tempWorkingDir = getTempPathByJobId(this.baseWorkingRelativePath);
-    this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
 
     const reportOnReady = (
@@ -163,34 +146,6 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       o: OMap[K],
       key: K = "default" as K
     ) => {
-      let { largeFilesToSave, newObj } = identifyLargeFiles(o);
-
-      if (this.storageProvider) {
-        const fullPathLargeFilesToSave = largeFilesToSave.map((x) => ({
-          ...x,
-          path: path.join(this.baseWorkingRelativePath, x.path),
-        }));
-
-        if (fullPathLargeFilesToSave.length > 0) {
-          this.logger.info(
-            `Saving large files to storage: ${fullPathLargeFilesToSave
-              .map((x) => x.path)
-              .join(", ")}`
-          );
-          await saveLargeFilesToStorage(
-            fullPathLargeFilesToSave,
-            this.storageProvider
-          );
-          o = newObj;
-        }
-      } else {
-        if (largeFilesToSave.length > 0) {
-          throw new Error(
-            "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
-          );
-        }
-      }
-
       // this.logger.info(
       //   `Emitting output: ${this.jobId}, ${this.def.name} ` +
       //     JSON.stringify(o, longStringTruncator)
