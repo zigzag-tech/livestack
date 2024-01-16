@@ -173,7 +173,7 @@ export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
 
     this.bullMQWorker.run();
     this.bullMQWorker.waitUntilReady().then(() => {
-      this.logger.info(`${this.bullMQWorker.name} worker started.`);
+      this.logger.info(`WORKER STARTED: ${this.workerName}.`);
     });
   }
 
