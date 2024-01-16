@@ -81,8 +81,8 @@ export class ZZJobSpec<
   readonly jobParams: z.ZodType<P>;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
-  private readonly _originalInputs: InferDefMap<IMap> | undefined;
-  private readonly _originalOutputs: InferDefMap<OMap> | undefined;
+  public readonly inputs: InferDefMap<IMap> | undefined;
+  public readonly outputs: InferDefMap<OMap> | undefined;
 
   private static _registryBySpecName: Record<string, ZZJobSpec<any, any, any>> =
     {};
@@ -107,8 +107,8 @@ export class ZZJobSpec<
     this._zzEnv = zzEnv || null;
     this.logger = getLogger(`spec:${this.name}`);
 
-    this._originalInputs = inputs;
-    this._originalOutputs = outputs;
+    this.inputs = inputs;
+    this.outputs = outputs;
 
     if (!inputs) {
       this.inputDefSet = new StreamDefSet({
@@ -162,8 +162,8 @@ export class ZZJobSpec<
     }
     return new ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>({
       ...this,
-      inputs: this._originalInputs,
-      outputs: this._originalOutputs,
+      inputs: this.inputs,
+      outputs: this.outputs,
       ...newP,
       name: newP.name,
     } as ConstructorParameters<typeof ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>>[0]);
@@ -704,8 +704,6 @@ export class ZZJobSpec<
 
     const inputs = this._deriveInputsForJob(jobId);
     const outputs = this._deriveOutputsForJob(jobId);
-
- 
 
     return {
       inputs,
