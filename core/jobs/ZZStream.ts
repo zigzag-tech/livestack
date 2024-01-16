@@ -1,9 +1,6 @@
 import { ZodType } from "zod";
 import { ZZEnv } from "./ZZEnv";
-import {
-  IStorageProvider,
-  saveLargeFilesToStorage,
-} from "../storage/cloudStorage";
+import { saveLargeFilesToStorage } from "../storage/cloudStorage";
 import { createHash } from "crypto";
 import { getLogger } from "../utils/createWorkerLogger";
 import { z } from "zod";
