@@ -134,10 +134,30 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     this.dedicatedTempWorkingDir = tempWorkingDir;
     this.inputStreamFnsByKey = {};
 
+    const reportOnReady = (
+      obs: Observable<IMap[keyof IMap] | null>,
+      key: keyof IMap | "default"
+    ) => {
+      const sub = obs.subscribe(async () => {
+        await this.setJobReadyForInputsInRedis({
+          redisConfig: this.zzEnv.redisConfig,
+          jobId: this.jobId,
+          isReady: true,
+          key: key ? key : "default",
+        });
+        sub.unsubscribe();
+      });
+    };
+
     this.input = {
       ...this.genInputObject("default" as keyof IMap),
-      byKey: (key: keyof IMap) => this.genInputObject(key),
+      byKey: (key: keyof IMap) => {
+        const obj = this.genInputObject(key);
+        reportOnReady(obj.observable, key);
+        return obj;
+      },
     };
+    reportOnReady(this.input.observable, "default");
 
     const emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
@@ -195,24 +215,18 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
 
   private readonly genInputObject = <K extends keyof IMap>(key: K) => {
     const job = this;
-    const nextInput = async <K extends keyof IMap>(key?: K) => {
-      await job.setJobReadyForInputsInRedis({
-        redisConfig: job.zzEnv.redisConfig,
-        jobId: job.jobId,
-        isReady: true,
-        key: key ? key : "default",
-      });
-
+    const nextValue = async <K extends keyof IMap>(key?: K) => {
       const r = await (await job._ensureInputStreamFn(key)).nextValue();
       return r as IMap[K] | null;
     };
     return {
+      nextValue,
       get observable() {
         return job._ensureInputStreamFn(key).trackedObservable;
       },
       async *[Symbol.asyncIterator]() {
         while (true) {
-          const input = await nextInput(key);
+          const input = await nextValue(key);
 
           // Assuming nextInput returns null or a similar value to indicate completion
           if (!input) {
