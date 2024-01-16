@@ -43,7 +43,14 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
 
   // New properties for subscriber tracking
 
-  readonly output: { emit: (o: OMap[keyof OMap]) => Promise<void> };
+  readonly output: { 
+    emit: (o: OMap[keyof OMap]) => Promise<void> ;
+    byKey: <K extends keyof OMap>(
+      key: K
+    ) => {
+      emit: (o: OMap[K]) => Promise<void>;
+    }
+  };
 
   storageProvider?: IStorageProvider;
   readonly zzEnv: ZZEnv;
@@ -165,6 +172,9 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     };
     this.output = {
       emit: emitOutput,
+      byKey: (key: keyof OMap) => ({
+        emit: (o: OMap[typeof key]) => emitOutput(o, key),
+      }),
     };
   }
 
