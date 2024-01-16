@@ -1,0 +1,20 @@
+{
+  "name": "@livestack/gateway",
+  "version": "0.0.2",
+  "description": "Manges and routes requests between the frontend and livestack orechestration services.",
+  "scripts": {
+    "build": "tsc"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "dependencies": {
+    "@livestack/core": "*"
+  },
+  "types": "dist/index.d.ts",
+  "devDependencies": {
+    "typescript": "5.2.2"
+  },
+  "main": "./dist/index.js",
+  "author": ""
+}
