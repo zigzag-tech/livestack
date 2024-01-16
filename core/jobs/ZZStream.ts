@@ -166,6 +166,10 @@ export class ZZStream<T> {
       parsed = this.def.parse(message) as T;
     } catch (err) {
       console.error("errornous output: ", message);
+      console.error(
+        "Expected type: ",
+        JSON.stringify(zodToJsonSchema(this.def), null, 2)
+      );
       this.logger.error(
         `Data point error for stream ${
           this.uniqueName
