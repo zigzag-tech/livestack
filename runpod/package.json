@@ -9,8 +9,10 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "@livestack/core": "*",
     "replicate": "^0.21"
+  },
+  "peerDependencies": {
+    "@livestack/core": "*"
   },
   "types": "dist/index.d.ts",
   "devDependencies": {

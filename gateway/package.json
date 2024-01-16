@@ -9,11 +9,14 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "@livestack/core": "*"
+    "socket.io": "^4"
   },
   "types": "dist/index.d.ts",
   "devDependencies": {
     "typescript": "5.2.2"
+  },
+  "peerDependencies": {
+    "@livestack/core": "*"
   },
   "main": "./dist/index.js",
   "author": ""
