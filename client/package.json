@@ -1,0 +1,23 @@
+{
+  "name": "@livestack/client",
+  "version": "0.0.2",
+  "description": "Helper functions and react hooks that help display Livestack data in the frontend.",
+  "scripts": {
+    "build": "tsc"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "dependencies": {
+    "socket.io": "^4"
+  },
+  "types": "dist/index.d.ts",
+  "devDependencies": {
+    "typescript": "5.2.2"
+  },
+  "peerDependencies": {
+    "@livestack/core": "*"
+  },
+  "main": "./dist/index.js",
+  "author": ""
+}
