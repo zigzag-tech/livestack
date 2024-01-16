@@ -1,10 +1,16 @@
-import { Server as SocketIOServer } from "socket.io";
+import { ZZJobSpec, ZZWorkflowSpec } from '@livestack/core';
+import { Socket, Server as SocketIOServer } from "socket.io";
 import { Server as HTTPServer } from "http";
 
-export function setupSocketIOGateway(
-  httpServer: HTTPServer,
-  socketPath: string = "/livestack.socket.io"
-) {
+export function setupSocketIOGateway({
+  httpServer,
+  socketPath = "/livestack.socket.io",
+  onConnect,
+}: {
+  httpServer: HTTPServer;
+  socketPath?: string;
+  onConnect?: (conn: LiveGatewayConn) => void;
+}) {
   const io = new SocketIOServer(httpServer, {
     path: socketPath,
     cors: {
@@ -14,13 +20,18 @@ export function setupSocketIOGateway(
   });
 
   io.on("connection", async (socket) => {
-    console.info("connected");
-
+    console.info(`🦓 Socket client connected: ${socket.id}.`);
+    if (onConnect) {
+      const conn = new LiveGatewayConn(socket);
+      onConnect(conn);
+    }
     let disconnected = false;
 
     socket.on("disconnect", async () => {
-      if (disconnected) {
+      if (!disconnected) {
+        disconnected = true;
       }
+      console.info(`🦓 Socket client disconnected  ${socket.id}.`);
     });
 
     socket.on("reconnect", async () => {
@@ -32,18 +43,27 @@ export function setupSocketIOGateway(
   return io;
 }
 
-function b64decode(encoded: string): Float32Array {
-  // Decode the base64 string to a binary string
-  let binaryString = atob(encoded);
-
-  // Create a buffer to hold the bytes
-  let bytes = new Uint8Array(binaryString.length);
-
-  // Convert the binary string to bytes
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+class LiveGatewayConn {
+  socket: Socket;
+  
+  constructor(socket: Socket) {
+    this.socket = socket;
   }
 
-  // Convert the bytes back to a Float32Array
-  return new Float32Array(bytes.buffer);
+  public onDisconnect = async (cb: () => void) => {
+    this.socket.on("disconnect", cb);
+  }
+
+  public bind = async <P,IMap, OMap>(jobSpec: ZZJobSpec<P, IMap, OMap>, jobParams?: P) => {
+   const {inputs, outputs, jobId} = await jobSpec.enqueueJob({jobParams  });
+   this.onDisconnect(() => {
+      for (const key of inputs.keys) {
+        try {
+          inputs.byKey(key).terminate();
+        } catch (err) {
+          console.error(err);
+        }
+      }
+   });
+  }
 }

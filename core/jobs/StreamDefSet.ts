@@ -25,6 +25,10 @@ export class StreamDefSet<TMap> {
     this.defs = defs;
   }
 
+  get keys() {
+    return Object.keys(this.defs) as (keyof TMap)[];
+  }
+
   get isSingle() {
     return Object.keys(this.defs).length === 1;
   }

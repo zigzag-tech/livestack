@@ -625,19 +625,20 @@ export class ZZJobSpec<
     return wrapStreamSubscriberWithTermination(subuscriberP);
   }
 
-  public async enqueueJob({
-    jobId,
-    jobParams,
-    bullMQJobsOpts,
-    inputStreamIdOverridesByKey = {},
-    outputStreamIdOverridesByKey = {},
-  }: {
-    jobId: string;
+  public async enqueueJob(p?: {
+    jobId?: string;
     jobParams?: P;
     bullMQJobsOpts?: JobsOptions;
     inputStreamIdOverridesByKey?: Partial<Record<keyof IMap, string>>;
     outputStreamIdOverridesByKey?: Partial<Record<keyof OMap, string>>;
   }) {
+    let {
+      jobId = v4(),
+      jobParams,
+      bullMQJobsOpts,
+      inputStreamIdOverridesByKey,
+      outputStreamIdOverridesByKey,
+    } = p || {};
     // console.debug("ZZJobSpec._enqueueJob", jobId, jobParams);
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
@@ -704,9 +705,12 @@ export class ZZJobSpec<
     const inputs = this._deriveInputsForJob(jobId);
     const outputs = this._deriveOutputsForJob(jobId);
 
+ 
+
     return {
       inputs,
       outputs,
+      jobId,
     };
 
     // return j;
@@ -733,6 +737,7 @@ export class ZZJobSpec<
 
   public _deriveInputsForJob = (jobId: string) => {
     return {
+      keys: this.inputDefSet.keys,
       feed: async (data: IMap[keyof IMap]) => {
         if (!this.inputDefSet.hasDef("default")) {
           throw new Error(
@@ -798,6 +803,7 @@ export class ZZJobSpec<
     };
 
     return {
+      keys: this.outputDefSet.keys,
       byKey: <K extends keyof OMap>(key: K) => {
         return subscriberByKey(key);
       },

@@ -9,7 +9,7 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "socket.io": "^4"
+    "socket.io-client": "^4"
   },
   "types": "dist/index.d.ts",
   "devDependencies": {
