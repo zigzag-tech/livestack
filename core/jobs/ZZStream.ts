@@ -204,6 +204,11 @@ export class ZZStream<T> {
 
     if (this.zzEnv.db) {
       const datapointId = messageIdOverride || v4();
+      await ensureStreamRec({
+        projectId: this.zzEnv.projectId,
+        streamId: this.uniqueName,
+        dbConn: this.zzEnv.db,
+      });
       await addDatapoint({
         streamId: this.uniqueName,
         projectId: this.zzEnv.projectId,
