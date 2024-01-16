@@ -96,18 +96,18 @@ class LiveGatewayConn {
     jobSpec: ZZJobSpec<P, IMap, OMap>,
     jobParams?: P
   ) => {
-    const { inputs, outputs, jobId } = await jobSpec.enqueueJob({ jobParams });
+    const { input, output, jobId } = await jobSpec.enqueueJob({ jobParams });
     this.socket.emit("job_info", {
       jobId,
-      inputKeys: inputs.keys,
-      outputKeys: outputs.keys,
+      inputKeys: input.keys,
+      outputKeys: output.keys,
     });
-    for (const key of inputs.keys) {
+    for (const key of input.keys) {
       this.socket.on(
         `feed:${jobId}/${String(key)}`,
         async (data: IMap[typeof key]) => {
           try {
-            await inputs.byKey(key).feed(data);
+            await input.byKey(key).feed(data);
           } catch (err) {
             console.error(err);
           }
@@ -117,17 +117,17 @@ class LiveGatewayConn {
 
     let subs: Subscription[] = [];
 
-    for (const key of outputs.keys) {
-      const sub = outputs.byKey(key).valueObservable.subscribe((data) => {
+    for (const key of output.keys) {
+      const sub = output.byKey(key).valueObservable.subscribe((data) => {
         this.socket.emit(`output:${jobId}/${String(key)}`, data);
       });
       subs.push(sub);
     }
 
     this.onDisconnect(() => {
-      for (const key of inputs.keys) {
+      for (const key of input.keys) {
         try {
-          inputs.byKey(key).terminate();
+          input.byKey(key).terminate();
         } catch (err) {
           console.error(err);
         }

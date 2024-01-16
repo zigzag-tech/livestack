@@ -237,6 +237,8 @@ export class ZZStream<T> {
         customStringify(parsed)
       );
 
+      console.debug("ZZStream pub", this.uniqueName, parsed);
+
       return messageId;
     } catch (error) {
       console.error("Error publishing to stream:", error);

@@ -63,7 +63,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
               jobParams: await transformInput(jobParams),
             });
 
-            const o = await jo.outputs.nextValue();
+            const o = await jo.output.nextValue();
             if (!o) {
               throw new Error("no output");
             }

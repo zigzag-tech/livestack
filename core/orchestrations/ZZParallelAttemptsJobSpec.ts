@@ -69,7 +69,7 @@ export class ZZParallelAttemptWorkerDef<
         }: ParallelAttempt<ParentIMap, ParentOMap, I, O>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
-            const { outputs, inputs } = await jobSpec.enqueueJob({
+            const { output, input } = await jobSpec.enqueueJob({
               jobId: childJobId,
             });
 
@@ -78,9 +78,9 @@ export class ZZParallelAttemptWorkerDef<
               throw new Error("no input");
             }
 
-            await inputs.feed(await transformInput(inp));
+            await input.feed(await transformInput(inp));
 
-            const o = await outputs.nextValue();
+            const o = await output.nextValue();
             if (!o) {
               throw new Error("no output");
             }

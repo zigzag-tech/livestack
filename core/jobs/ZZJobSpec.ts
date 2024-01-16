@@ -81,8 +81,8 @@ export class ZZJobSpec<
   readonly jobParams: z.ZodType<P>;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
-  public readonly inputs: InferDefMap<IMap> | undefined;
-  public readonly outputs: InferDefMap<OMap> | undefined;
+  public readonly input: InferDefMap<IMap> | undefined;
+  public readonly output: InferDefMap<OMap> | undefined;
 
   private static _registryBySpecName: Record<string, ZZJobSpec<any, any, any>> =
     {};
@@ -91,13 +91,13 @@ export class ZZJobSpec<
     zzEnv,
     name,
     jobParams,
-    outputs,
-    inputs,
+    output,
+    input,
   }: {
     name: string;
     jobParams?: z.ZodType<P>;
-    inputs?: InferDefMap<IMap>;
-    outputs?: InferDefMap<OMap>;
+    input?: InferDefMap<IMap>;
+    output?: InferDefMap<OMap>;
     zzEnv?: ZZEnv;
     concurrency?: number;
   }) {
@@ -107,26 +107,26 @@ export class ZZJobSpec<
     this._zzEnv = zzEnv || null;
     this.logger = getLogger(`spec:${this.name}`);
 
-    this.inputs = inputs;
-    this.outputs = outputs;
+    this.input = input;
+    this.output = output;
 
-    if (!inputs) {
+    if (!input) {
       this.inputDefSet = new StreamDefSet({
         defs: ZZStream.single(z.object({})) as InferDefMap<IMap>,
       });
     } else {
       this.inputDefSet = new StreamDefSet({
-        defs: inputs,
+        defs: input,
       });
     }
-    if (!outputs) {
+    if (!output) {
       this.logger.warn(`No output defined for job spec ${this.name}.`);
       this.outputDefSet = new StreamDefSet({
         defs: ZZStream.single(z.void()) as InferDefMap<OMap>,
       });
     } else {
       this.outputDefSet = new StreamDefSet({
-        defs: outputs,
+        defs: output,
       });
     }
 
@@ -162,8 +162,8 @@ export class ZZJobSpec<
     }
     return new ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>({
       ...this,
-      inputs: this.inputs,
-      outputs: this.outputs,
+      input: this.input,
+      output: this.output,
       ...newP,
       name: newP.name,
     } as ConstructorParameters<typeof ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>>[0]);
@@ -702,12 +702,12 @@ export class ZZJobSpec<
         `${JSON.stringify(j.data, longStringTruncator)}`
     );
 
-    const inputs = this._deriveInputsForJob(jobId);
-    const outputs = this._deriveOutputsForJob(jobId);
+    const input = this._deriveInputsForJob(jobId);
+    const output = this._deriveOutputsForJob(jobId);
 
     return {
-      inputs,
-      outputs,
+      input,
+      output,
       jobId,
     };
 
@@ -720,14 +720,14 @@ export class ZZJobSpec<
     }
   ) {
     const { jobId, jobParams, key } = p;
-    const { outputs } = await this.enqueueJob({
+    const { output } = await this.enqueueJob({
       jobId,
       jobParams,
     });
 
     const rs: OMap[keyof OMap][] = [];
     let lastV: OMap[keyof OMap] | null = null;
-    while ((lastV = await outputs.nextValue()) !== null) {
+    while ((lastV = await output.nextValue()) !== null) {
       rs.push(lastV);
     }
     return rs;

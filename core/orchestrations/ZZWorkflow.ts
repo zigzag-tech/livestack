@@ -116,7 +116,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
           const inputStreamIdOverridesByKey: Record<string, string> = {};
           const outputStreamIdOverridesByKey: Record<string, string> = {};
 
-          // get the stream id overrides for the inputs
+          // get the stream id overrides for the input
           const inboundEdges = instG.inboundEdges(jobNodeId);
           const inletEdgeIds = inboundEdges.filter((e) => {
             const node = instG.getNodeAttributes(instG.source(e));
@@ -138,7 +138,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
             inputStreamIdOverridesByKey[inletNode.key] = streamId;
           }
 
-          // get the stream id overrides for the outputs
+          // get the stream id overrides for the output
           const outboundEdges = instG.outboundEdges(jobNodeId);
           const outletEdgeIds = outboundEdges.filter((e) => {
             const node = instG.getNodeAttributes(instG.target(e));
@@ -237,7 +237,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
       jobGroupId = v4();
     }
 
-    // Create interfaces for inputs and outputs
+    // Create interfaces for input and output
 
     // console.log("countByName", countByName);
     const workflow = new ZZWorkflow({
@@ -260,12 +260,12 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
 export class ZZWorkflow {
   public readonly jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
   public readonly graph: InstantiatedGraph;
-  public readonly inputs: {
+  public readonly input: {
     bySpec: (
       spec: UniqueSpecQuery
     ) => ReturnType<ZZJobSpec<any, any, any>["_deriveInputsForJob"]>;
   };
-  public readonly outputs: {
+  public readonly output: {
     bySpec: (
       spec: UniqueSpecQuery
     ) => ReturnType<ZZJobSpec<any, any, any>["_deriveOutputsForJob"]>;
@@ -315,7 +315,7 @@ export class ZZWorkflow {
       return jobId;
     };
 
-    const inputs = {
+    const input = {
       bySpec: (specQuery: UniqueSpecQuery) => {
         const { spec: childSpec, jobId } =
           identifySpecAndJobIdBySpecQuery(specQuery);
@@ -323,7 +323,7 @@ export class ZZWorkflow {
       },
     };
 
-    const outputs = {
+    const output = {
       bySpec: (specQuery: UniqueSpecQuery) => {
         const { spec: childSpec, jobId } =
           identifySpecAndJobIdBySpecQuery(specQuery);
@@ -332,8 +332,8 @@ export class ZZWorkflow {
     };
 
     this.jobIdBySpec = jobIdBySpec;
-    this.inputs = inputs;
-    this.outputs = outputs;
+    this.input = input;
+    this.output = output;
     this.jobGroupDef = jobGroupDef;
   }
 
