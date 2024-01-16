@@ -1,5 +1,5 @@
 import { Subscription } from "rxjs";
-import { ZZJobSpec } from "@livestack/core";
+import { ZZEnv, ZZJobSpec } from "@livestack/core";
 import { Socket, Server as SocketIOServer } from "socket.io";
 import { Server as HTTPServer } from "http";
 
@@ -7,10 +7,12 @@ export function setupSocketIOGateway({
   httpServer,
   socketPath = "/livestack.socket.io",
   onConnect,
+  allowedSpecsForBinding = [],
 }: {
   httpServer: HTTPServer;
   socketPath?: string;
   onConnect?: (conn: LiveGatewayConn) => void;
+  allowedSpecsForBinding?: string[];
 }) {
   const io = new SocketIOServer(httpServer, {
     path: socketPath,
@@ -23,7 +25,10 @@ export function setupSocketIOGateway({
   io.on("connection", async (socket) => {
     console.info(`🦓 Socket client connected: ${socket.id}.`);
     if (onConnect) {
-      const conn = new LiveGatewayConn(socket);
+      const conn = new LiveGatewayConn({
+        socket,
+        allowedSpecsForBinding,
+      });
       onConnect(conn);
     }
     let disconnected = false;
@@ -46,9 +51,38 @@ export function setupSocketIOGateway({
 
 class LiveGatewayConn {
   socket: Socket;
+  private readonly allowedSpecsForBinding: string[];
+  zzEnv: ZZEnv;
 
-  constructor(socket: Socket) {
+  constructor({
+    zzEnv,
+    socket,
+    allowedSpecsForBinding = [],
+  }: {
+    zzEnv?: ZZEnv | null;
+    socket: Socket;
+    allowedSpecsForBinding?: string[];
+  }) {
     this.socket = socket;
+    this.allowedSpecsForBinding = allowedSpecsForBinding;
+    zzEnv = zzEnv || ZZEnv.global();
+    if (!zzEnv) {
+      throw new Error("ZZEnv not found.");
+    }
+    this.zzEnv = zzEnv;
+
+    this.socket.on(
+      "request_and_bind",
+      async ({ specName }: { specName: string }) => {
+        if (!this.allowedSpecsForBinding.includes(specName)) {
+          throw new Error(
+            `Spec name ${specName} not allowed for binding to socket.`
+          );
+        }
+        const spec = ZZJobSpec.lookupByName(specName);
+        await this.bindToNewJob(spec);
+      }
+    );
   }
 
   public onDisconnect = async (cb: () => void) => {
@@ -60,6 +94,7 @@ class LiveGatewayConn {
     jobParams?: P
   ) => {
     const { inputs, outputs, jobId } = await jobSpec.enqueueJob({ jobParams });
+    this.socket.emit("jobId", jobId);
     for (const key of inputs.keys) {
       this.socket.on(
         `feed:${jobId}/${String(key)}`,

@@ -261,14 +261,14 @@ export class ZZWorkflow {
   public readonly jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
   public readonly graph: InstantiatedGraph;
   public readonly inputs: {
-    bySpec: <P, I, O>(
-      spec: ZZJobSpec<P, I, O>
-    ) => ReturnType<ZZJobSpec<P, I, O>["_deriveInputsForJob"]>;
+    bySpec: (
+      spec: UniqueSpecQuery
+    ) => ReturnType<ZZJobSpec<any, any, any>["_deriveInputsForJob"]>;
   };
   public readonly outputs: {
-    bySpec: <P, I, O>(
-      spec: ZZJobSpec<P, I, O>
-    ) => ReturnType<ZZJobSpec<P, I, O>["_deriveOutputsForJob"]>;
+    bySpec: (
+      spec: UniqueSpecQuery
+    ) => ReturnType<ZZJobSpec<any, any, any>["_deriveOutputsForJob"]>;
   };
   public readonly jobGroupDef: ZZWorkflowSpec;
   constructor({
