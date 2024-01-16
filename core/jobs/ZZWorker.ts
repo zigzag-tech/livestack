@@ -63,7 +63,7 @@ export class ZZWorkerDef<
   }
   public static define<P, IMap, OMap, WP extends object>(
     p: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec"> & {
-      jobSpec: ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0];
+      jobSpec: ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0] | ZZJobSpec<P, IMap, OMap>;
     }
   ) {
     const spec = new ZZJobSpec<P, IMap, OMap>(p.jobSpec);
