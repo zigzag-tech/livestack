@@ -12,7 +12,7 @@
     "replicate": "^0.21"
   },
   "peerDependencies": {
-    "@livestack/core": "*",
+    "@livestack/core": "*"
   },
   "types": "dist/index.d.ts",
   "devDependencies": {
