@@ -1,4 +1,5 @@
-import { ZZJobSpec, ZZWorkflowSpec } from '@livestack/core';
+import { Subscription } from "rxjs";
+import { ZZJobSpec } from "@livestack/core";
 import { Socket, Server as SocketIOServer } from "socket.io";
 import { Server as HTTPServer } from "http";
 
@@ -45,18 +46,43 @@ export function setupSocketIOGateway({
 
 class LiveGatewayConn {
   socket: Socket;
-  
+
   constructor(socket: Socket) {
     this.socket = socket;
   }
 
   public onDisconnect = async (cb: () => void) => {
     this.socket.on("disconnect", cb);
-  }
+  };
 
-  public bind = async <P,IMap, OMap>(jobSpec: ZZJobSpec<P, IMap, OMap>, jobParams?: P) => {
-   const {inputs, outputs, jobId} = await jobSpec.enqueueJob({jobParams  });
-   this.onDisconnect(() => {
+  public bindToNewJob = async <P, IMap, OMap>(
+    jobSpec: ZZJobSpec<P, IMap, OMap>,
+    jobParams?: P
+  ) => {
+    const { inputs, outputs, jobId } = await jobSpec.enqueueJob({ jobParams });
+    for (const key of inputs.keys) {
+      this.socket.on(
+        `feed:${jobId}/${String(key)}`,
+        async (data: IMap[typeof key]) => {
+          try {
+            await inputs.byKey(key).feed(data);
+          } catch (err) {
+            console.error(err);
+          }
+        }
+      );
+    }
+
+    let subs: Subscription[] = [];
+
+    for (const key of outputs.keys) {
+      const sub = outputs.byKey(key).valueObservable.subscribe((data) => {
+        this.socket.emit(`output:${jobId}/${String(key)}`, data);
+      });
+      subs.push(sub);
+    }
+
+    this.onDisconnect(() => {
       for (const key of inputs.keys) {
         try {
           inputs.byKey(key).terminate();
@@ -64,6 +90,10 @@ class LiveGatewayConn {
           console.error(err);
         }
       }
-   });
-  }
+
+      for (const sub of subs) {
+        sub.unsubscribe();
+      }
+    });
+  };
 }
