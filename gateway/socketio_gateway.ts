@@ -8,11 +8,13 @@ export function setupSocketIOGateway({
   socketPath = "/livestack.socket.io",
   onConnect,
   allowedSpecsForBinding = [],
+  zzEnv,
 }: {
   httpServer: HTTPServer;
   socketPath?: string;
   onConnect?: (conn: LiveGatewayConn) => void;
   allowedSpecsForBinding?: string[];
+  zzEnv?: ZZEnv | null;
 }) {
   const io = new SocketIOServer(httpServer, {
     path: socketPath,
@@ -28,6 +30,7 @@ export function setupSocketIOGateway({
       const conn = new LiveGatewayConn({
         socket,
         allowedSpecsForBinding,
+        zzEnv,
       });
       onConnect(conn);
     }
@@ -94,7 +97,11 @@ class LiveGatewayConn {
     jobParams?: P
   ) => {
     const { inputs, outputs, jobId } = await jobSpec.enqueueJob({ jobParams });
-    this.socket.emit("jobId", jobId);
+    this.socket.emit("job_info", {
+      jobId,
+      inputKeys: inputs.keys,
+      outputKeys: outputs.keys,
+    });
     for (const key of inputs.keys) {
       this.socket.on(
         `feed:${jobId}/${String(key)}`,
