@@ -77,13 +77,10 @@ export function wrapStreamSubscriberWithTermination<T>(
     });
   };
 
-  const loopUntilTerminated = genLoopUntilTerminated(newNextValue);
-
   return {
     valueObservable: newValueObservable,
     nextValue: newNextValue,
     unsubscribe: () => subscriberP.then((s) => s.unsubscribe()),
     waitUntilTerminated,
-    loopUntilTerminated,
   };
 }

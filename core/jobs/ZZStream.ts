@@ -301,13 +301,6 @@ export class ZZStreamSubscriber<T> {
     }
     return this._nextValue();
   };
-
-  public loopUntilTerminated = async (cb: (v: T) => Promise<void>) => {
-    let v: T;
-    while ((v = await this.nextValue()) !== null) {
-      await cb(v);
-    }
-  };
 }
 
 function parseMessageData<T>(data: Array<any>): T {
