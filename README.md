@@ -21,7 +21,7 @@ We foresee a future where AI evolves beyond just passive, command-driven chatbot
 
 As proactive companions, they will be actively participating in our daily routines, anticipating and fulfilling our needs just when we need them. We expect our lives and productivity to improve by orders of magnitude in the coming years.
 
-At present, however, to realize such AI applications is a complex task. Popular AI frameworks today aren't well-suited for realtime interaction and often require extensive coding. 
+At present, however, to realize such AI applications is a complex task. Popular AI frameworks today aren't well-suited for realtime interaction and often require extensive coding. Once prototyped, they are difficult to scale and deploy.
 
 Livestack aims to democratize this process, making it approachable not just for seasoned developers but also for those with basic coding skills, and eventually, for everyone.
 
