@@ -7,7 +7,7 @@
 <img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat" alt="npm version" />
 </p>
 
-<p align="center">A realtime first, fullstack AI orchestration framework for JavaScript.</p>
+<p align="center">A realtime first, fullstack AI orchestration framework for JavaScript developers.</p>
 
 <p align="center">
 <img src="assets/intro.gif"
