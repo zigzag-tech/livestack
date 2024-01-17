@@ -7,7 +7,7 @@
 <img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat" alt="npm version" />
 </p>
 
-<p align="center">A realtime first, proactive AI orchestration framework.</p>
+<p align="center">A realtime, fullstack AI orchestration framework for JavaScript develoers.</p>
 
 <p align="center">
 <img src="assets/intro.gif"
