@@ -31,6 +31,7 @@ import { ZZWorkerDef } from "./ZZWorker";
 import pLimit from "p-limit";
 import { convertSpecOrName } from "../orchestrations/ZZWorkflow";
 import { ZZJobSpecBase } from "@livestack/shared/ZZJobSpecBase";
+import { SpecOrName } from "@livestack/shared/ZZJobSpecBase";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -890,12 +891,6 @@ export const getCachedQueueByName = <JobParams, JobReturnType>(
     return queue;
   }
 };
-export const SpecOrName = z.union([
-  z.string(),
-  z.instanceof(ZZJobSpecBase<any, any, any>),
-]);
-export type SpecOrName = z.infer<typeof SpecOrName>;
-
 export const UniqueSpecQuery = z.union([
   SpecOrName,
   z.object({

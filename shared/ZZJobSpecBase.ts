@@ -1,6 +1,6 @@
 import { InferDefMap } from "./StreamDefSet";
-import { z } from "zod";
 import { StreamDefSet } from "./StreamDefSet";
+import { z } from "zod";
 
 export abstract class ZZJobSpecBase<
   P,
@@ -68,3 +68,8 @@ export function single<T>(def: z.ZodType<T, any>) {
     default: def,
   };
 }
+export const SpecOrName = z.union([
+  z.string(),
+  z.instanceof((ZZJobSpecBase<any, any, any>)),
+]);
+export type SpecOrName = z.infer<typeof SpecOrName>;

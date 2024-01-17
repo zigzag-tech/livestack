@@ -10,7 +10,8 @@ import Graph from "graphology";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { v4 } from "uuid";
 import { ZZEnv } from "../jobs/ZZEnv";
-import { SpecAndOutlet, SpecOrName, UniqueSpecQuery } from "../jobs/ZZJobSpec";
+import { SpecAndOutlet, UniqueSpecQuery } from "../jobs/ZZJobSpec";
+import { SpecOrName } from "@livestack/shared/ZZJobSpecBase";
 import { resolveUniqueSpec } from "../jobs/ZZJobSpec";
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
