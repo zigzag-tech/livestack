@@ -46,7 +46,7 @@ Livestack aims at providing:
 
 ## Comparison with other frameworks
 
-See [here](docs/comparison.md).
+See [here](_misc/docs/comparison.md).
 
 ## Design Principles
 
