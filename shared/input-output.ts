@@ -1,7 +1,7 @@
-import { UniqueSpecQuery } from "./ZZJobSpec";
+import { SpecOrName } from "./ZZJobSpecBase";
 
 export function genSpecLets() {
-  const bySpec = (spec: UniqueSpecQuery) => {
+  const bySpec = (spec: SpecOrName) => {
     return genLet<any>();
   };
 }
