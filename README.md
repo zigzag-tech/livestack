@@ -10,7 +10,7 @@
 <p align="center">A realtime first, fullstack AI orchestration framework for JavaScript developers.</p>
 
 <p align="center">
-<img src="assets/intro.gif"
+<img src="_misc/assets/intro.gif"
      width="70%" height="auto" />
 </p>
 
