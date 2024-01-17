@@ -1,6 +1,6 @@
-import { ZZJobSpec } from "../core/jobs/ZZJobSpec";
-import { ZZEnv } from "../core/jobs/ZZEnv";
-import { ZZWorkerDef } from "../core/jobs/ZZWorker";
+import { ZZJobSpec } from "@livestack/core";
+import { ZZEnv } from "@livestack/core";
+import { ZZWorkerDef } from "@livestack/core";
 
 export class RunpodServerlessWorkerDef<P extends object, O> extends ZZWorkerDef<
   P,
