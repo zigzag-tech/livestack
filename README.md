@@ -46,6 +46,8 @@ Livestack aims at providing:
 
 ## Comparison with other frameworks
 
+See [here](docs/comparison.md).
+
 ## Design Principles
 
 - Reduce cognitive load for developers. 
