@@ -1,5 +1,5 @@
-## @livestack/viz
+## @livestack/client
 
-Realtime Livestack workflow visualization.
+Frontend for livestack.
 
 WIP

@@ -1,5 +1,5 @@
-## @livestack/viz
+## @livestack/gateway
 
-Realtime Livestack workflow visualization.
+Websocket gateway server for Livestack.
 
 WIP
