@@ -1,0 +1,85 @@
+import { Socket } from "socket.io-client";
+import { useRef, useState } from "react";
+import useDeepCompareEffect from "use-deep-compare-effect";
+
+export function useJobBinding({
+  specName,
+  client,
+  outputsToWatch = [{ key: "default", mode: "replace" }],
+}: {
+  client: Socket;
+  specName: string;
+  outputsToWatch?: {
+    key?: string;
+    mode: "append" | "replace";
+  }[];
+}) {
+  const jobInfoRef = useRef<
+    | {
+        jobId: string;
+        inputKeys: string[];
+        outputKeys: string[];
+      }
+    | "not-initialized"
+    | "working"
+  >("not-initialized");
+
+  const [outputsByKey, setOutputsByKey] = useState<{
+    [key: string]: any;
+  }>({});
+
+  useDeepCompareEffect(() => {
+    if (jobInfoRef.current === "not-initialized") {
+      jobInfoRef.current = "working";
+      client.emit("request_and_bind", { specName });
+      client.on(
+        "job_info",
+        ({
+          inputKeys,
+          outputKeys,
+          jobId,
+        }: {
+          jobId: string;
+          inputKeys: string[];
+          outputKeys: string[];
+        }) => {
+          jobInfoRef.current = { jobId, inputKeys, outputKeys };
+          for (const { mode, key = "default" } of outputsToWatch) {
+            client.on(`output:${jobId}/${key}`, (data: any) => {
+              const timeStamped = { ...data, _timeStamp: Date.now() };
+              if (mode === "replace") {
+                setOutputsByKey((prev) => ({ ...prev, [key]: timeStamped }));
+              } else if (mode === "append") {
+                setOutputsByKey((prev) => ({
+                  ...prev,
+                  [key]: [...(prev[key] || []), timeStamped],
+                }));
+              }
+            });
+          }
+        }
+      );
+    }
+    return () => {
+      if (
+        jobInfoRef.current !== "not-initialized" &&
+        jobInfoRef.current !== "working"
+      ) {
+        client.emit("unbind", { specName, jobId: jobInfoRef.current?.jobId });
+      }
+    };
+  }, [specName, outputsToWatch]);
+
+  const feed = async <T,>(data: T, key: string = "default") => {
+    if (typeof jobInfoRef.current === "string") {
+      throw new Error("Background job not yet running.");
+    }
+    if (!jobInfoRef.current.inputKeys.includes(key)) {
+      throw new Error(`Key ${key} not in inputKeys.`);
+    }
+
+    client.emit(`feed:${jobInfoRef.current.jobId}/${key}`, data);
+  };
+
+  return { jobInfo: jobInfoRef.current, feed, outputsByKey };
+}

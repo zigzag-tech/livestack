@@ -9,14 +9,17 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "socket.io-client": "^4"
+    "socket.io-client": "^4",
+    "use-deep-compare-effect": "^1.8.1"
   },
   "types": "dist/index.d.ts",
   "devDependencies": {
+    "@types/react": "^18",
     "typescript": "5.2.2"
   },
   "peerDependencies": {
-    "@livestack/core": "*"
+    "@livestack/core": "*",
+    "react": "^18"
   },
   "main": "./dist/index.js",
   "author": ""
