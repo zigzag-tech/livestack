@@ -70,7 +70,7 @@ export class ZZJobSpec<
   private readonly _zzEnv: ZZEnv | null = null;
   protected static _registryBySpecName: Record<
     string,
-    ZZJobSpecBase<any, any, any>
+    ZZJobSpec<any, any, any>
   > = {};
 
   protected logger: ReturnType<typeof getLogger>;
