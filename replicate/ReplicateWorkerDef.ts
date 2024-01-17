@@ -2,34 +2,44 @@ import Replicate from "replicate";
 import { ZZJobSpec } from "@livestack/core";
 import { ZZWorkerDef } from "@livestack/core";
 import { ZZEnv } from "@livestack/core";
-if (!process.env.REPLICATE_API_TOKEN) {
-  throw new Error("REPLICATE_API_TOKEN not found");
-}
 
 const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
 
 export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
   P,
   { default: {} },
-  { default: O }
+  { default: O },
+  { replicateToken?: string }
 > {
   protected _endpoint: `${string}/${string}:${string}`;
+  protected _replicateToken?: string;
   constructor({
     endpoint,
     concurrency = 3,
     jobSpec,
     zzEnv,
+    replicateToken,
   }: {
     jobSpec: ZZJobSpec<P, { default: {} }, { default: O }>;
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
     zzEnv?: ZZEnv;
+    replicateToken?: string;
   }) {
     super({
       zzEnv,
       jobSpec,
       concurrency,
-      processor: async ({ jobParams }) => {
+      processor: async ({ jobParams, workerInstanceParams }) => {
+        const replicateToken =
+          workerInstanceParams?.replicateToken ||
+          this._replicateToken ||
+          process.env.REPLICATE_API_TOKEN;
+        if (!replicateToken) {
+          throw new Error(
+            "No replicate token provided. Please specify it in the worker instance params, job parameter or in the environment variable REPLICATE_API_TOKEN."
+          );
+        }
         const replicate = new Replicate({
           auth: process.env.REPLICATE_API_TOKEN,
         });
@@ -52,6 +62,7 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
       },
     });
     this._endpoint = endpoint;
+    this._replicateToken = replicateToken;
   }
 }
 
