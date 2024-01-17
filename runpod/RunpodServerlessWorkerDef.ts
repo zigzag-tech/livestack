@@ -1,5 +1,4 @@
 import { ZZJobSpec } from "../core/jobs/ZZJobSpec";
-import { z } from "zod";
 import { ZZEnv } from "../core/jobs/ZZEnv";
 import { ZZWorkerDef } from "../core/jobs/ZZWorker";
 

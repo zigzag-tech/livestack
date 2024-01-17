@@ -1,7 +1,7 @@
 {
   "name": "@livestack/shared",
   "version": "0.0.2",
-  "description": "RShared core Livestack logic for both frontend and backend.",
+  "description": "Shared core Livestack logic for both frontend and backend.",
   "scripts": {
     "build": "tsc"
   },
