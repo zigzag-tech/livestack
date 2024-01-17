@@ -33,13 +33,12 @@ Livestack aims at providing:
 
 - Native support for stream-based, realtime workflows.
 - Built-in queue system that automatically scales your application to many machines.
-- Built-in logging and visualization of all in-app activities for easy debugging and AI improvement.
+- Built-in logging and visualization of all in-app activities for easy debugging and AI tuning.
 - (WIP) Common realtime AI components, patterns and guidelines for rapid prototyping, such as:
   -  live speech transcription.
   -  live RAG workflow.
   -  realtime image generation.
-- (WIP) Support for both LLM and image generation models.
-- (WIP) Simple setup process for new AI application.
+- (WIP) Simple bootstrap process for new AI project.
 
 
 ## Getting Started
@@ -47,7 +46,8 @@ Livestack aims at providing:
 
 ## Comparison with other frameworks
 
-## Design principles
+## Design Principles
 
-- Reduce cognitive load for developers as much as possible.
-- Reasonable defaults for quick project setup.
+- Reduce cognitive load for developers. 
+- Reasonable defaults for quick project bootstrapping.
+- Minimal surprises.
