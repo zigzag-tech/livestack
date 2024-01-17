@@ -1,4 +1,4 @@
-import { InferStreamSetType } from "../jobs/StreamDefSet";
+import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { CheckSpec, ZZJobSpec, sleep } from "../jobs/ZZJobSpec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { z } from "zod";

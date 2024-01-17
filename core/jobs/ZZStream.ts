@@ -51,12 +51,6 @@ export class ZZStream<T> {
   }
   private logger: ReturnType<typeof getLogger>;
 
-  public static single<T>(def: z.ZodType<T, any>) {
-    return {
-      default: def,
-    };
-  }
-
   protected static globalRegistry: { [key: string]: ZZStream<unknown> } = {};
 
   public static async getOrCreate<T>({

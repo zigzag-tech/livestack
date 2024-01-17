@@ -1,5 +1,8 @@
 import { ZZWorkerDefParams } from "./ZZWorker";
-import { InferDefMap, InferStreamSetType } from "./StreamDefSet";
+import {
+  InferDefMap,
+  InferStreamSetType,
+} from "@livestack/shared/StreamDefSet";
 import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { GenericRecordType, QueueName } from "../orchestrations/workerCommon";
@@ -24,10 +27,10 @@ import {
   wrapTerminatorAndDataId,
 } from "../utils/io";
 import { ZZStream, ZZStreamSubscriber } from "./ZZStream";
-import { StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 import pLimit from "p-limit";
 import { convertSpecOrName } from "../orchestrations/ZZWorkflow";
+import { ZZJobSpecBase } from "@livestack/shared/ZZJobSpecBase";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -62,7 +65,7 @@ export class ZZJobSpec<
   OMap = {
     default: {};
   }
-> {
+> extends ZZJobSpecBase<P, IMap, OMap> {
   private readonly _zzEnv: ZZEnv | null = null;
 
   protected logger: ReturnType<typeof getLogger>;
@@ -77,15 +80,7 @@ export class ZZJobSpec<
     return resolved;
   }
 
-  public readonly name: string;
   readonly jobParams: z.ZodType<P>;
-  public readonly inputDefSet: StreamDefSet<IMap>;
-  public readonly outputDefSet: StreamDefSet<OMap>;
-  public readonly input: InferDefMap<IMap> | undefined;
-  public readonly output: InferDefMap<OMap> | undefined;
-
-  private static _registryBySpecName: Record<string, ZZJobSpec<any, any, any>> =
-    {};
 
   constructor({
     zzEnv,
@@ -101,43 +96,18 @@ export class ZZJobSpec<
     zzEnv?: ZZEnv;
     concurrency?: number;
   }) {
-    this.name = name;
-    this.jobParams = jobParams || (z.object({}) as unknown as z.ZodType<P>);
+    super({
+      name,
+      input,
+      output,
+    });
 
+    this.jobParams = jobParams || (z.object({}) as unknown as z.ZodType<P>);
     this._zzEnv = zzEnv || null;
     this.logger = getLogger(`spec:${this.name}`);
-
-    this.input = input;
-    this.output = output;
-
-    if (!input) {
-      this.inputDefSet = new StreamDefSet({
-        defs: ZZStream.single(z.object({})) as InferDefMap<IMap>,
-      });
-    } else {
-      this.inputDefSet = new StreamDefSet({
-        defs: input,
-      });
-    }
     if (!output) {
       this.logger.warn(`No output defined for job spec ${this.name}.`);
-      this.outputDefSet = new StreamDefSet({
-        defs: ZZStream.single(z.void()) as InferDefMap<OMap>,
-      });
-    } else {
-      this.outputDefSet = new StreamDefSet({
-        defs: output,
-      });
     }
-
-    ZZJobSpec._registryBySpecName[this.name] = this;
-  }
-
-  public static lookupByName(specName: string) {
-    if (!ZZJobSpec._registryBySpecName[specName]) {
-      throw new Error(`JobSpec ${specName} not defined on this machine.`);
-    }
-    return ZZJobSpec._registryBySpecName[specName];
   }
 
   public inputDef(key: keyof IMap = "default" as keyof IMap) {
@@ -922,7 +892,7 @@ export const getCachedQueueByName = <JobParams, JobReturnType>(
 };
 export const SpecOrName = z.union([
   z.string(),
-  z.instanceof(ZZJobSpec<any, any, any>),
+  z.instanceof(ZZJobSpecBase<any, any, any>),
 ]);
 export type SpecOrName = z.infer<typeof SpecOrName>;
 
