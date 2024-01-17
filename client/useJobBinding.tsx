@@ -1,19 +1,21 @@
-import { Socket } from "socket.io-client";
+import { Socket, io } from "socket.io-client";
 import { useRef, useState } from "react";
 import useDeepCompareEffect from "use-deep-compare-effect";
 
 export function useJobBinding({
+  serverBase,
   specName,
-  client,
   outputsToWatch = [{ key: "default", mode: "replace" }],
 }: {
-  client: Socket;
+  serverBase: string;
   specName: string;
   outputsToWatch?: {
     key?: string;
     mode: "append" | "replace";
   }[];
 }) {
+  const clientRef = useRef<Socket>();
+
   const jobInfoRef = useRef<
     | {
         jobId: string;
@@ -29,6 +31,20 @@ export function useJobBinding({
   }>({});
 
   useDeepCompareEffect(() => {
+    if (!clientRef.current) {
+      clientRef.current = io(serverBase, {
+        autoConnect: true,
+        path: "/livestack.socket.io",
+        transports: ["websocket", "polling"],
+      });
+    }
+    const client = clientRef.current;
+    client.on("error", (err) => {
+      console.error(err);
+      console.error(
+        "Error trying to connect to livestack gateway. Did you forget to set serverBase to the server hosting LiveStack gateway?"
+      );
+    });
     if (jobInfoRef.current === "not-initialized") {
       jobInfoRef.current = "working";
       client.emit("request_and_bind", { specName });
@@ -78,7 +94,10 @@ export function useJobBinding({
       throw new Error(`Key ${key} not in inputKeys.`);
     }
 
-    client.emit(`feed:${jobInfoRef.current.jobId}/${key}`, data);
+    if (!clientRef.current) {
+      throw new Error("clientRef.current is null");
+    }
+    clientRef.current.emit(`feed:${jobInfoRef.current.jobId}/${key}`, data);
   };
 
   return { jobInfo: jobInfoRef.current, feed, outputsByKey };
