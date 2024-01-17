@@ -1,11 +1,11 @@
-import {  SpecOrName } from '@livestack/shared/ZZJobSpecBase';
+import { SpecOrName } from "@livestack/shared/ZZJobSpecBase";
 import { Subscription } from "rxjs";
 import { ZZEnv, ZZJobSpec } from "@livestack/core";
 import { Socket, Server as SocketIOServer } from "socket.io";
 import { Server as HTTPServer } from "http";
-import { resolveUniqueSpec } from '@livestack/core/jobs/ZZJobSpec';
+import { resolveUniqueSpec } from "@livestack/core/jobs/ZZJobSpec";
 
-export function setupSocketIOGateway({
+export function setupJobBindingGateway({
   httpServer,
   socketPath = "/livestack.socket.io",
   onConnect,
@@ -31,7 +31,9 @@ export function setupSocketIOGateway({
     if (onConnect) {
       const conn = new LiveGatewayConn({
         socket,
-        allowedSpecsForBinding: allowedSpecsForBinding.map((s) => resolveUniqueSpec(s).specName),
+        allowedSpecsForBinding: allowedSpecsForBinding.map(
+          (s) => resolveUniqueSpec(s).specName
+        ),
         zzEnv,
       });
       onConnect(conn);
