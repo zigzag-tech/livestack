@@ -28,6 +28,7 @@ import { StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 import pLimit from "p-limit";
 import { genLoopUntilTerminated } from "./ZZJob";
+import { convertSpecOrName } from "../orchestrations/ZZWorkflow";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -920,3 +921,53 @@ export const getCachedQueueByName = <JobParams, JobReturnType>(
     return queue;
   }
 };
+export const SpecOrName = z.union([
+  z.string(),
+  z.instanceof(ZZJobSpec<any, any, any>),
+]);
+export type SpecOrName = z.infer<typeof SpecOrName>;
+
+export const UniqueSpecQuery = z.union([
+  SpecOrName,
+  z.object({
+    spec: SpecOrName,
+    label: z.string().default("default_label"),
+  }),
+]);
+export type UniqueSpecQuery = z.infer<typeof UniqueSpecQuery>;
+export const SpecAndOutlet = z.union([
+  UniqueSpecQuery,
+  z.tuple([UniqueSpecQuery, z.string().or(z.literal("default"))]),
+]);
+export type SpecAndOutlet = z.infer<typeof SpecAndOutlet>;
+export function resolveUniqueSpec(uniqueSpec: UniqueSpecQuery): {
+  specName: string;
+  uniqueLabel?: string;
+} {
+  if (typeof uniqueSpec === "string") {
+    return {
+      specName: uniqueSpec,
+    };
+  } else if ("spec" in (uniqueSpec as any) && "label" in (uniqueSpec as any)) {
+    return {
+      specName: convertSpecOrName(
+        (
+          uniqueSpec as {
+            spec: SpecOrName;
+            label: string;
+          }
+        ).spec
+      ),
+      uniqueLabel: (
+        uniqueSpec as {
+          spec: SpecOrName;
+          label: string;
+        }
+      ).label,
+    };
+  } else {
+    return {
+      specName: convertSpecOrName(uniqueSpec as any),
+    };
+  }
+}

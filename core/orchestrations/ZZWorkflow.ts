@@ -10,6 +10,8 @@ import Graph from "graphology";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { v4 } from "uuid";
 import { ZZEnv } from "../jobs/ZZEnv";
+import { SpecAndOutlet, SpecOrName, UniqueSpecQuery } from "../jobs/ZZJobSpec";
+import { resolveUniqueSpec } from "../jobs/ZZJobSpec";
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
 
@@ -18,27 +20,6 @@ export type JobSpecAndJobParams<JobSpec> = {
   jobParams: z.infer<CheckSpec<JobSpec>["jobParams"]>;
   jobLabel?: string;
 };
-
-const SpecOrName = z.union([
-  z.string(),
-  z.instanceof(ZZJobSpec<any, any, any>),
-]);
-type SpecOrName = z.infer<typeof SpecOrName>;
-
-const UniqueSpecQuery = z.union([
-  SpecOrName,
-  z.object({
-    spec: SpecOrName,
-    label: z.string().default("default_label"),
-  }),
-]);
-type UniqueSpecQuery = z.infer<typeof UniqueSpecQuery>;
-
-const SpecAndOutlet = z.union([
-  UniqueSpecQuery,
-  z.tuple([UniqueSpecQuery, z.string().or(z.literal("default"))]),
-]);
-type SpecAndOutlet = z.infer<typeof SpecAndOutlet>;
 
 const WorkflowParams = z.object({
   connections: z.array(
@@ -167,7 +148,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
           await childJobSpec.enqueueJob({
             jobId: jobNode.jobId,
             jobParams: childrenJobParams?.find(({ spec: specQuery }) => {
-              const specInfo = convertUniqueSpec(specQuery);
+              const specInfo = resolveUniqueSpec(specQuery);
               return (
                 specInfo.specName === childSpecName &&
                 specInfo.uniqueLabel === jobNode.uniqueLabel
@@ -288,7 +269,7 @@ export class ZZWorkflow {
     const identifySpecAndJobIdBySpecQuery = (
       specQuery: UniqueSpecQuery
     ): { spec: ZZJobSpec<any, any, any>; jobId: string } => {
-      const specInfo = convertUniqueSpec(specQuery);
+      const specInfo = resolveUniqueSpec(specQuery);
       const jobNodeId = instaG.findNode((id, n) => {
         return (
           n.nodeType === "job" &&
@@ -374,43 +355,11 @@ export function connect<
 }
 
 // Conversion functions using TypeScript
-function convertSpecOrName(specOrName: SpecOrName): string {
+export function convertSpecOrName(specOrName: SpecOrName): string {
   if (typeof specOrName === "string") {
     return specOrName;
   } else {
     return specOrName.name;
-  }
-}
-
-function convertUniqueSpec(uniqueSpec: UniqueSpecQuery): {
-  specName: string;
-  uniqueLabel?: string;
-} {
-  if (typeof uniqueSpec === "string") {
-    return {
-      specName: uniqueSpec,
-    };
-  } else if ("spec" in (uniqueSpec as any) && "label" in (uniqueSpec as any)) {
-    return {
-      specName: convertSpecOrName(
-        (
-          uniqueSpec as {
-            spec: SpecOrName;
-            label: string;
-          }
-        ).spec
-      ),
-      uniqueLabel: (
-        uniqueSpec as {
-          spec: SpecOrName;
-          label: string;
-        }
-      ).label,
-    };
-  } else {
-    return {
-      specName: convertSpecOrName(uniqueSpec as any),
-    };
   }
 }
 
@@ -421,14 +370,14 @@ function convertSpecAndOutlet(specAndOutlet: SpecAndOutlet): {
 } {
   if (Array.isArray(specAndOutlet)) {
     const [uniqueSpec, key] = specAndOutlet;
-    const uniqueLabel = convertUniqueSpec(uniqueSpec).uniqueLabel;
+    const uniqueLabel = resolveUniqueSpec(uniqueSpec).uniqueLabel;
     return {
-      specName: convertUniqueSpec(uniqueSpec).specName,
+      specName: resolveUniqueSpec(uniqueSpec).specName,
       ...(uniqueLabel ? { uniqueLabel } : {}),
       key: key,
     };
   } else {
-    const converted = convertUniqueSpec(specAndOutlet);
+    const converted = resolveUniqueSpec(specAndOutlet);
     const uniqueLabel = converted.uniqueLabel;
     return {
       specName: converted.specName,
