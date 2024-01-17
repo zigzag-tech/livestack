@@ -43,13 +43,13 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
 
   // New properties for subscriber tracking
 
-  readonly output: { 
-    emit: (o: OMap[keyof OMap]) => Promise<void> ;
+  readonly output: {
+    emit: (o: OMap[keyof OMap]) => Promise<void>;
     byKey: <K extends keyof OMap>(
       key: K
     ) => {
       emit: (o: OMap[K]) => Promise<void>;
-    }
+    };
   };
 
   storageProvider?: IStorageProvider;
@@ -66,9 +66,6 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       inputObservableUntracked: Observable<IMap[K] | null>;
       trackedObservable: Observable<IMap[K] | null>;
       subscriberCountObservable: Observable<number>;
-      loopUntilInputTerminated: (
-        processor: (input: IMap[K]) => Promise<void>
-      ) => Promise<void>;
     };
   }>;
 
@@ -269,7 +266,6 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
         inputObservableUntracked,
         trackedObservable,
         subscriberCountObservable,
-        loopUntilInputTerminated: genLoopUntilTerminated(nextValue),
       };
     }
     return this.inputStreamFnsByKey[key as K]!;
@@ -481,16 +477,4 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   //     });
   //   }
   // };
-}
-
-export function genLoopUntilTerminated<T, P extends unknown[]>(
-  nextValue: (...args: P) => Promise<T | null>,
-  ...args: P
-) {
-  return async (processor: (input: T) => Promise<void>) => {
-    let v: T | null;
-    while ((v = await nextValue(...args)) !== null) {
-      await processor(v);
-    }
-  };
 }

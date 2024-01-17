@@ -27,7 +27,6 @@ import { ZZStream, ZZStreamSubscriber } from "./ZZStream";
 import { StreamDefSet } from "./StreamDefSet";
 import { ZZWorkerDef } from "./ZZWorker";
 import pLimit from "p-limit";
-import { genLoopUntilTerminated } from "./ZZJob";
 import { convertSpecOrName } from "../orchestrations/ZZWorkflow";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
