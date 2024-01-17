@@ -57,6 +57,13 @@ export function single<T>(def: z.ZodType<T, any>) {
     default: def,
   };
 }
+
+export function multi<TMap extends {
+  [key: string]: z.ZodType<any, any>;
+} >(def: TMap) {
+  return def;
+}
+
 export const SpecOrName = z.union([
   z.string(),
   z.instanceof((ZZJobSpecBase<any, any, any>)),
