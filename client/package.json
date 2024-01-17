@@ -9,7 +9,6 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "socket.io-client": "^4",
     "use-deep-compare-effect": "^1.8.1"
   },
   "types": "dist/index.d.ts",
@@ -19,7 +18,8 @@
   },
   "peerDependencies": {
     "@livestack/core": "*",
-    "react": "^18"
+    "react": "^18",
+    "socket.io-client": "^4"
   },
   "main": "./dist/index.js",
   "author": ""
