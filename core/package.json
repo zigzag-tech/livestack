@@ -9,6 +9,7 @@
     "dist/**/*"
   ],
   "dependencies": {
+    "@livestack/shared": "*",
     "bullmq": "^4.x",
     "chalk": "^4",
     "dotenv": "^16.x",
