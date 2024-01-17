@@ -68,6 +68,10 @@ export class ZZJobSpec<
   }
 > extends ZZJobSpecBase<P, IMap, OMap> {
   private readonly _zzEnv: ZZEnv | null = null;
+  protected static _registryBySpecName: Record<
+    string,
+    ZZJobSpecBase<any, any, any>
+  > = {};
 
   protected logger: ReturnType<typeof getLogger>;
 
@@ -109,6 +113,14 @@ export class ZZJobSpec<
     if (!output) {
       this.logger.warn(`No output defined for job spec ${this.name}.`);
     }
+    ZZJobSpec._registryBySpecName[this.name] = this;
+  }
+
+  public static lookupByName(specName: string) {
+    if (!ZZJobSpec._registryBySpecName[specName]) {
+      throw new Error(`JobSpec ${specName} not defined on this machine.`);
+    }
+    return ZZJobSpec._registryBySpecName[specName];
   }
 
   public inputDef(key: keyof IMap = "default" as keyof IMap) {

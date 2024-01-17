@@ -16,10 +16,6 @@ export abstract class ZZJobSpecBase<
   public readonly outputDefSet: StreamDefSet<OMap>;
   public readonly input: InferDefMap<IMap> | undefined;
   public readonly output: InferDefMap<OMap> | undefined;
-  protected static _registryBySpecName: Record<
-    string,
-    ZZJobSpecBase<any, any, any>
-  > = {};
 
   constructor({
     name,
@@ -52,15 +48,8 @@ export abstract class ZZJobSpecBase<
       });
     }
 
-    ZZJobSpecBase._registryBySpecName[this.name] = this;
   }
 
-  public static lookupByName(specName: string) {
-    if (!ZZJobSpecBase._registryBySpecName[specName]) {
-      throw new Error(`JobSpec ${specName} not defined on this machine.`);
-    }
-    return ZZJobSpecBase._registryBySpecName[specName];
-  }
 }
 
 export function single<T>(def: z.ZodType<T, any>) {

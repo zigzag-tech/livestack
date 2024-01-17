@@ -1,8 +1,9 @@
-import { SpecOrName, resolveUniqueSpec } from '@livestack/core/jobs/ZZJobSpec';
+import {  SpecOrName } from '@livestack/shared/ZZJobSpecBase';
 import { Subscription } from "rxjs";
 import { ZZEnv, ZZJobSpec } from "@livestack/core";
 import { Socket, Server as SocketIOServer } from "socket.io";
 import { Server as HTTPServer } from "http";
+import { resolveUniqueSpec } from '@livestack/core/jobs/ZZJobSpec';
 
 export function setupSocketIOGateway({
   httpServer,
