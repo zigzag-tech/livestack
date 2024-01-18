@@ -308,10 +308,10 @@ export async function ensureJobAndInitStatusRec<T>({
   specName,
   jobId,
   dbConn,
-  jobParams,
+  jobOptions,
 }: JobUniqueId & {
   dbConn: Knex;
-  jobParams: T;
+  jobOptions: T;
 }) {
   // await dbConn.transaction(async (trx) => {
 
@@ -320,7 +320,7 @@ export async function ensureJobAndInitStatusRec<T>({
       project_id: projectId,
       spec_name: specName,
       job_id: jobId,
-      job_params: handlePrimitive(jobParams),
+      job_params: handlePrimitive(jobOptions),
     })
     .onConflict(["project_id", "spec_name", "job_id"])
     .ignore();

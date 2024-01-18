@@ -16,9 +16,9 @@ import { resolveUniqueSpec } from "../jobs/ZZJobSpec";
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
 
-export type JobSpecAndJobParams<JobSpec> = {
+export type JobSpecAndJobOptions<JobSpec> = {
   spec: CheckSpec<JobSpec>;
-  jobParams: z.infer<CheckSpec<JobSpec>["jobParams"]>;
+  jobOptions: z.infer<CheckSpec<JobSpec>["jobOptions"]>;
   jobLabel?: string;
 };
 
@@ -39,23 +39,23 @@ type CanonicalWorkflowParams = ReturnType<typeof convertConnectionsCanonical>;
 type CanonicalConnection = CanonicalWorkflowParams[number];
 type CanonicalConnectionPoint = CanonicalConnection[number];
 
-const WorkflowChildJobParams = z.array(
+const WorkflowChildJobOptions = z.array(
   z.object({
     spec: SpecOrName,
     params: z.any(),
   })
 );
-type WorkflowChildJobParams = z.infer<typeof WorkflowChildJobParams>;
-const WorkflowJobParams = z.object({
+type WorkflowChildJobOptions = z.infer<typeof WorkflowChildJobOptions>;
+const WorkflowJobOptions = z.object({
   groupId: z.string(),
-  jobParams: WorkflowChildJobParams.optional(),
+  jobOptions: WorkflowChildJobOptions.optional(),
 });
 
-type WorkflowJobParams = z.infer<typeof WorkflowJobParams>;
-export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
+type WorkflowJobOptions = z.infer<typeof WorkflowJobOptions>;
+export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions> {
   public readonly connections: CanonicalConnection[];
   public readonly defGraph: DefGraph;
-  private orchestrationWorkerDef: ZZWorkerDef<WorkflowJobParams>;
+  private orchestrationWorkerDef: ZZWorkerDef<WorkflowJobOptions>;
 
   constructor({
     connections,
@@ -67,7 +67,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
   } & WorkflowParams) {
     super({
       name,
-      jobParams: WorkflowJobParams,
+      jobOptions: WorkflowJobOptions,
       zzEnv,
     });
     const canonical = convertConnectionsCanonical({
@@ -79,7 +79,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
     this.orchestrationWorkerDef = new ZZWorkerDef({
       jobSpec: this,
       processor: async ({
-        jobParams: { groupId, jobParams: childrenJobParams },
+        jobOptions: { groupId, jobOptions: childrenJobOptions },
       }) => {
         const instG = instantiateFromDefGraph({
           defGraph: this.defGraph,
@@ -148,7 +148,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
           const childJobSpec = ZZJobSpec.lookupByName(childSpecName);
           await childJobSpec.enqueueJob({
             jobId: jobNode.jobId,
-            jobParams: childrenJobParams?.find(({ spec: specQuery }) => {
+            jobOptions: childrenJobOptions?.find(({ spec: specQuery }) => {
               const specInfo = resolveUniqueSpec(specQuery);
               return (
                 specInfo.specName === childSpecName &&
@@ -208,12 +208,12 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
 
   public async enqueue({
     jobGroupId,
-    jobParams: childJobParams,
+    jobOptions: childJobOptions,
   }: // lazyJobCreation = false,
   {
     jobGroupId?: string;
     // lazyJobCreation?: boolean;
-    jobParams?: WorkflowChildJobParams;
+    jobOptions?: WorkflowChildJobOptions;
   }) {
     if (!jobGroupId) {
       jobGroupId = v4();
@@ -229,9 +229,9 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobParams> {
 
     await this.enqueueJob({
       jobId: jobGroupId,
-      jobParams: {
+      jobOptions: {
         groupId: jobGroupId,
-        jobParams: childJobParams,
+        jobOptions: childJobOptions,
       },
     });
 

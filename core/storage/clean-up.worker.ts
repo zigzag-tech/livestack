@@ -64,7 +64,7 @@
 //     });
 //     await addJob({
 //       jobId: "clean-up-tmp-dir",
-//       jobParams: { repeatPattern: `every ${repeatInterval / 1000} seconds` },
+//       jobOptions: { repeatPattern: `every ${repeatInterval / 1000} seconds` },
 //       bullMQJobsOpts: {
 //         repeat: { every: repeatInterval },
 //       },

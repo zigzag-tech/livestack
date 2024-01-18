@@ -63,7 +63,9 @@ export class ZZWorkerDef<
   }
   public static define<P, IMap, OMap, WP extends object>(
     p: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec"> & {
-      jobSpec: ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0] | ZZJobSpec<P, IMap, OMap>;
+      jobSpec:
+        | ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0]
+        | ZZJobSpec<P, IMap, OMap>;
     }
   ) {
     const spec = new ZZJobSpec<P, IMap, OMap>(p.jobSpec);
@@ -87,7 +89,7 @@ export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
 
   private readonly bullMQWorker: Worker<
     {
-      jobParams: P;
+      jobOptions: P;
     },
     void
   >;
@@ -129,7 +131,7 @@ export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
 
     const mergedWorkerOptions = _.merge({}, workerOptions);
     const that = this;
-    this.bullMQWorker = new Worker<{ jobParams: P }, void, string>(
+    this.bullMQWorker = new Worker<{ jobOptions: P }, void, string>(
       `${that.zzEnv.projectId}/${this.jobSpec.name}`,
       async (job, token) => {
         const zzJ = new ZZJob({
@@ -137,7 +139,7 @@ export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
           bullMQToken: token,
           logger: that.logger,
           jobSpec: that.jobSpec,
-          jobParams: job.data.jobParams,
+          jobOptions: job.data.jobOptions,
           workerInstanceParams: that.instanceParams,
           storageProvider: that.zzEnv.storageProvider,
           workerName: that.workerName,

@@ -30,7 +30,7 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
       zzEnv,
       jobSpec,
       concurrency,
-      processor: async ({ jobParams, workerInstanceParams }) => {
+      processor: async ({ jobOptions, workerInstanceParams }) => {
         const replicateToken =
           workerInstanceParams?.replicateToken ||
           this._replicateToken ||
@@ -44,7 +44,7 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
           auth: process.env.REPLICATE_API_TOKEN,
         });
         const repR = replicate.run(this._endpoint, {
-          input: jobParams,
+          input: jobOptions,
         }) as Promise<unknown> as Promise<O>;
 
         const result = await Promise.race([

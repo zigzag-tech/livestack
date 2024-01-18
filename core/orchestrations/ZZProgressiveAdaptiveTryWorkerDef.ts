@@ -24,7 +24,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
     [K in keyof Specs]: AttemptDef<
       ParentP,
       ParentO,
-      z.infer<CheckSpec<Specs[K]>["jobParams"]>,
+      z.infer<CheckSpec<Specs[K]>["jobOptions"]>,
       InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
     >;
   };
@@ -40,7 +40,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
       [K in keyof Specs]: AttemptDef<
         ParentP,
         ParentO,
-        z.infer<CheckSpec<Specs[K]>["jobParams"]>,
+        z.infer<CheckSpec<Specs[K]>["jobOptions"]>,
         InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
       >;
     };
@@ -49,7 +49,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
     super({
       jobSpec,
       zzEnv,
-      processor: async ({ logger, jobParams, jobId }) => {
+      processor: async ({ logger, jobOptions, jobId }) => {
         const genRetryFunction = <P, O>({
           jobSpec,
           transformInput,
@@ -60,7 +60,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
 
             const jo = await jobSpec.enqueueJob({
               jobId: childJobId,
-              jobParams: await transformInput(jobParams),
+              jobOptions: await transformInput(jobOptions),
             });
 
             const o = await jo.output.nextValue();

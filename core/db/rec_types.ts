@@ -8,10 +8,10 @@ export const ZZJobUniqueId = z.object({
 
 export type ZZJobUniqueId = z.infer<typeof ZZJobUniqueId>;
 
-export const ZZJobRec = <P>(jobParamsSchema: z.ZodType<P>) =>
+export const ZZJobRec = <P>(jobOptionsSchema: z.ZodType<P>) =>
   ZZJobUniqueId.merge(
     z.object({
-      job_params: jobParamsSchema.optional(),
+      job_params: jobOptionsSchema.optional(),
       time_created: z.date(),
     })
   );

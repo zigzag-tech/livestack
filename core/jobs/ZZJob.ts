@@ -25,9 +25,9 @@ export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZJobSpec<
   : never;
 
 export class ZZJob<P, IMap, OMap, WP extends object = {}> {
-  private readonly bullMQJob: Job<{ jobParams: P }, void>;
+  private readonly bullMQJob: Job<{ jobOptions: P }, void>;
   public readonly _bullMQToken?: string;
-  readonly jobParams: P;
+  readonly jobOptions: P;
   readonly logger: ReturnType<typeof getLogger>;
   readonly spec: ZZJobSpec<P, IMap, OMap>;
   // readonly nextInput: <K extends keyof IMap>(
@@ -70,10 +70,10 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   }>;
 
   constructor(p: {
-    bullMQJob: Job<{ jobParams: P }, void, string>;
+    bullMQJob: Job<{ jobOptions: P }, void, string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
-    jobParams: P;
+    jobOptions: P;
     storageProvider?: IStorageProvider;
     jobSpec: ZZJobSpec<P, IMap, OMap>;
     workerInstanceParams?: WP;
@@ -88,10 +88,10 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     this.spec = p.jobSpec;
 
     try {
-      this.jobParams = p.jobSpec.jobParams.parse(p.jobParams) as P;
+      this.jobOptions = p.jobSpec.jobOptions.parse(p.jobOptions) as P;
     } catch (err) {
       this.logger.error(
-        `jobParams error: jobParams provided is invalid: ${JSON.stringify(
+        `jobOptions error: jobOptions provided is invalid: ${JSON.stringify(
           err,
           null,
           2

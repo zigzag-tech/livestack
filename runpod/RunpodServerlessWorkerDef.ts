@@ -24,7 +24,7 @@ export class RunpodServerlessWorkerDef<P extends object, O> extends ZZWorkerDef<
     super({
       jobSpec,
       zzEnv,
-      processor: async ({ jobParams, logger }) => {
+      processor: async ({ jobOptions, logger }) => {
         const runUrl = `https://api.runpod.ai/v2/${this._endpointId}/run`;
 
         const respP = await fetch(runUrl, {
@@ -34,7 +34,7 @@ export class RunpodServerlessWorkerDef<P extends object, O> extends ZZWorkerDef<
             Authorization: `Bearer ${this._runpodApiKey}`,
           },
           body: JSON.stringify({
-            input: jobParams,
+            input: jobOptions,
           }),
         });
 

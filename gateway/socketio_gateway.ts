@@ -98,9 +98,9 @@ class LiveGatewayConn {
 
   public bindToNewJob = async <P, IMap, OMap>(
     jobSpec: ZZJobSpec<P, IMap, OMap>,
-    jobParams?: P
+    jobOptions?: P
   ) => {
-    const { input, output, jobId } = await jobSpec.enqueueJob({ jobParams });
+    const { input, output, jobId } = await jobSpec.enqueueJob({ jobOptions });
     this.socket.emit("job_info", {
       jobId,
       inputKeys: input.keys,

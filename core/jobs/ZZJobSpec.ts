@@ -59,7 +59,7 @@ export type InferInputType<
 > = IMap[K extends keyof IMap ? K : never] | null;
 
 export class ZZJobSpec<
-  P,
+  P = {},
   IMap = {
     default: {};
   },
@@ -85,17 +85,17 @@ export class ZZJobSpec<
     return resolved;
   }
 
-  readonly jobParams: z.ZodType<P>;
+  readonly jobOptions: z.ZodType<P>;
 
   constructor({
     zzEnv,
     name,
-    jobParams,
+    jobOptions,
     output,
     input,
   }: {
     name: string;
-    jobParams?: z.ZodType<P>;
+    jobOptions?: z.ZodType<P>;
     input?: InferDefMap<IMap>;
     output?: InferDefMap<OMap>;
     zzEnv?: ZZEnv;
@@ -107,7 +107,7 @@ export class ZZJobSpec<
       output,
     });
 
-    this.jobParams = jobParams || (z.object({}) as unknown as z.ZodType<P>);
+    this.jobOptions = jobOptions || (z.object({}) as unknown as z.ZodType<P>);
     this._zzEnv = zzEnv || null;
     this.logger = getLogger(`spec:${this.name}`);
     if (!output) {
@@ -227,12 +227,12 @@ export class ZZJobSpec<
 
   public async enqueueJobAndWaitOnResults({
     jobId: jobId,
-    jobParams: jobParams,
+    jobOptions: jobOptions,
     outputKey = "default" as keyof OMap,
   }: // queueEventsOptions,
   {
     jobId?: string;
-    jobParams?: P;
+    jobOptions?: P;
     outputKey?: keyof OMap;
   }): Promise<OMap[keyof OMap][]> {
     if (!jobId) {
@@ -240,12 +240,12 @@ export class ZZJobSpec<
     }
 
     this.logger.info(
-      `Enqueueing job ${jobId} with data: ${JSON.stringify(jobParams)}.`
+      `Enqueueing job ${jobId} with data: ${JSON.stringify(jobOptions)}.`
     );
 
     await this.enqueueJob({
       jobId,
-      jobParams,
+      jobOptions,
     });
 
     while (true) {
@@ -610,19 +610,19 @@ export class ZZJobSpec<
 
   public async enqueueJob(p?: {
     jobId?: string;
-    jobParams?: P;
+    jobOptions?: P;
     bullMQJobsOpts?: JobsOptions;
     inputStreamIdOverridesByKey?: Partial<Record<keyof IMap, string>>;
     outputStreamIdOverridesByKey?: Partial<Record<keyof OMap, string>>;
   }) {
     let {
       jobId = v4(),
-      jobParams,
+      jobOptions,
       bullMQJobsOpts,
       inputStreamIdOverridesByKey,
       outputStreamIdOverridesByKey,
     } = p || {};
-    // console.debug("ZZJobSpec._enqueueJob", jobId, jobParams);
+    // console.debug("ZZJobSpec._enqueueJob", jobId, jobOptions);
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
     if (workers.length === 0) {
@@ -638,7 +638,7 @@ export class ZZJobSpec<
           specName: this.name,
           jobId,
           dbConn: trx,
-          jobParams,
+          jobOptions,
         });
 
         for (const [key, streamId] of _.entries(inputStreamIdOverridesByKey)) {
@@ -674,10 +674,10 @@ export class ZZJobSpec<
         }
       });
     }
-    jobParams = jobParams || ({} as P);
+    jobOptions = jobOptions || ({} as P);
     const j = await this._rawQueue.add(
       jobId,
-      { jobParams },
+      { jobOptions },
       { ...bullMQJobsOpts, jobId: jobId }
     );
     this.logger.info(
@@ -702,10 +702,10 @@ export class ZZJobSpec<
       key?: keyof OMap;
     }
   ) {
-    const { jobId, jobParams, key } = p;
+    const { jobId, jobOptions, key } = p;
     const { output } = await this.enqueueJob({
       jobId,
-      jobParams,
+      jobOptions,
     });
 
     const rs: OMap[keyof OMap][] = [];
@@ -870,7 +870,7 @@ export async function sleep(ms: number) {
   });
 }
 
-export const getCachedQueueByName = <JobParams, JobReturnType>(
+export const getCachedQueueByName = <JobOptions, JobReturnType>(
   p: {
     projectId: string;
     queueNameOnly: string;
@@ -891,11 +891,11 @@ export const getCachedQueueByName = <JobParams, JobReturnType>(
   // }
   const existing = queueMapByProjectIdAndQueueName.get(
     `${projectId}/${queueNameOnly}`
-  ) as Queue<{ jobParams: JobParams }, JobReturnType>;
+  ) as Queue<{ jobOptions: JobOptions }, JobReturnType>;
   if (existing) {
     return existing;
   } else {
-    const queue = new Queue<{ jobParams: JobParams }, JobReturnType>(
+    const queue = new Queue<{ jobOptions: JobOptions }, JobReturnType>(
       `${projectId}/${queueNameOnly}`,
       queueOptions
     );
