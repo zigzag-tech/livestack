@@ -29,7 +29,7 @@ import {
 import { ZZStream, ZZStreamSubscriber } from "./ZZStream";
 import { ZZWorkerDef } from "./ZZWorker";
 import pLimit from "p-limit";
-import { convertSpecOrName } from "../orchestrations/ZZWorkflow";
+import { convertSpecOrName } from "@livestack/shared/ZZJobSpecBase";
 import { ZZJobSpecBase } from "@livestack/shared/ZZJobSpecBase";
 import { SpecOrName } from "@livestack/shared/ZZJobSpecBase";
 

@@ -18,6 +18,7 @@
     "p-limit": "^3",
     "pg": "^8.x",
     "rxjs": "^7",
+    "uuid": "^9",
     "winston": "^3.x",
     "zod": "^3",
     "zod-to-json-schema": "^3"

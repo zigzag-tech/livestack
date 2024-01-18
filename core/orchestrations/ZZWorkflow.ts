@@ -1,4 +1,5 @@
 // import { InferInputType, InferOutputType } from "../jobs/ZZJobSpec";
+import { v4 } from "uuid";
 import {
   CheckSpec,
   deriveStreamId,
@@ -8,7 +9,6 @@ import {
 import { z } from "zod";
 import Graph from "graphology";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
-import { v4 } from "uuid";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { SpecAndOutlet, UniqueSpecQuery } from "../jobs/ZZJobSpec";
 import { SpecOrName } from "@livestack/shared/ZZJobSpecBase";
@@ -353,15 +353,6 @@ export function connect<
     to,
     // transform,
   };
-}
-
-// Conversion functions using TypeScript
-export function convertSpecOrName(specOrName: SpecOrName): string {
-  if (typeof specOrName === "string") {
-    return specOrName;
-  } else {
-    return specOrName.name;
-  }
 }
 
 function convertSpecAndOutlet(specAndOutlet: SpecAndOutlet): {
