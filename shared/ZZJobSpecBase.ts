@@ -47,9 +47,7 @@ export abstract class ZZJobSpecBase<
         defs: output,
       });
     }
-
   }
-
 }
 
 export function single<T>(def: z.ZodType<T, any>) {

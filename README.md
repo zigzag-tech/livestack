@@ -33,7 +33,7 @@ Livestack aims at providing:
 
 - Native support for stream-based, realtime orchestrations.
 - Fullstack templates for both frontend and backend.
-- Built-in queue system that automatically scales your application to many machines.
+- Built-in queue system that automatically scales your AI project to many machines.
 - Built-in data persistence of all in-app activities for easy debugging and future model tuning.
 - Graph-based workflows for better reasoning, visual inspection and debugging.
 - (WIP) Common realtime AI components, patterns and guidelines for rapid prototyping, including:
