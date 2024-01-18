@@ -64,6 +64,7 @@ export function useJobBinding({
           jobInfoRef.current = { jobId, inputKeys, outputKeys };
           for (const { mode, key = "default" } of outputsToWatch) {
             client.on(`output:${jobId}/${key}`, (data: any) => {
+              // TODO: `data` data structure needs to be corrected. Not always an object.
               const timeStamped = { ...data, _timeStamp: Date.now() };
               if (mode === "replace") {
                 setOutputsByKey((prev) => ({ ...prev, [key]: timeStamped }));
