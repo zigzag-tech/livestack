@@ -91,56 +91,6 @@ export class JobSocketIOClient {
   }
 }
 
-export class InputBindingClient extends JobSocketIOClient {
-  public readonly inputKeys: string[];
-  constructor({
-    specName,
-    uniqueSpecLabel,
-    socketIOClient,
-    socketIOURI,
-    socketIOPath,
-  }: {
-    specName: string;
-    uniqueSpecLabel?: string;
-    socketIOClient?: Socket;
-    socketIOURI?: string | null;
-    socketIOPath?: string | null;
-  }) {
-    super({
-      specName,
-      uniqueSpecLabel,
-      socketIOClient,
-      socketIOURI,
-      socketIOPath,
-    });
-    this.inputKeys = [];
-  }
-
-  public async feedInput<T>(data: T, key: string = "default") {
-    await this._ensureJobBinding();
-    if (!this.jobInfo) {
-      throw new Error("jobInfo is null");
-    }
-    if (!this.inputKeys.includes(key)) {
-      throw new Error(`Key ${key} not in inputKeys.`);
-    }
-
-    this.socketIOClient.emit(`feed:${this.jobInfo.jobId}/${key}`, data);
-  }
-
-  public async subToOutput<T>(
-    key: string = "default",
-    callback: (data: T) => void
-  ) {
-    await this._ensureJobBinding();
-    if (!this.jobInfo) {
-      throw new Error("jobInfo is null");
-    }
-
-    this.socketIOClient.on(`output:${this.jobInfo.jobId}/${key}`, callback);
-  }
-}
-
 export function useJobBinding({
   serverBase,
   socketPath = "/livestack.socket.io",
@@ -185,7 +135,6 @@ export function useJobBinding({
           path: socketPath,
           transports: ["websocket", "polling"],
         });
-
       }
     }
     const client = clientRef.current;
