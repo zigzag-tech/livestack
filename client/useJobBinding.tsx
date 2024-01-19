@@ -12,13 +12,16 @@ export function useJobBinding({
   socketIOClient,
   specName,
   uniqueSpecLabel,
-  outputsToWatch = [{ key: "default", mode: "replace" }],
+  streamsToWatch = [{ key: "default", mode: "replace" }],
 }: ClientConnParams & {
   specName: string;
   uniqueSpecLabel?: string;
-  outputsToWatch?: {
+  streamsToWatch?: {
     key?: string;
     mode: "append" | "replace";
+    specName?: string;
+    uniqueSpecLabel?: string;
+    type?: "output" | "input";
   }[];
 }) {
   const clientRef = useRef<JobSocketIOConnection>();
@@ -43,7 +46,7 @@ export function useJobBinding({
         if (!isCancelled) {
           clientRef.current = connection;
 
-          outputsToWatch.forEach(({ key = "default", mode }) => {
+          streamsToWatch.forEach(({ key = "default", mode }) => {
             connection.subToOutput(key, (data) => {
               setOutputsByKey((prevOutputs) => {
                 if (mode === "replace") {
@@ -76,7 +79,7 @@ export function useJobBinding({
         clientRef.current = undefined;
       }
     };
-  }, [socketIOURI, socketIOPath, specName, uniqueSpecLabel, outputsToWatch]);
+  }, [socketIOURI, socketIOPath, specName, uniqueSpecLabel, streamsToWatch]);
 
   const feed = async <T,>(data: T, key: string = "default") => {
     return await clientRef.current?.feed(data, key);
