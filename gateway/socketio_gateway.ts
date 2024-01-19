@@ -1,3 +1,7 @@
+import {
+  REQUEST_AND_BIND_CMD,
+  RequestAndBindType,
+} from "@livestack/shared/gateway-binding-types";
 import { SpecOrName } from "@livestack/shared/ZZJobSpecBase";
 import { Subscription } from "rxjs";
 import { ZZEnv, ZZJobSpec } from "@livestack/core";
@@ -31,8 +35,8 @@ export function setupJobBindingGateway({
     if (onConnect) {
       const conn = new LiveGatewayConn({
         socket,
-        allowedSpecsForBinding: allowedSpecsForBinding.map(
-          (s) => resolveUniqueSpec(s).specName
+        allowedSpecsForBinding: allowedSpecsForBinding.map((s) =>
+          resolveUniqueSpec(s)
         ),
         zzEnv,
       });
@@ -58,7 +62,10 @@ export function setupJobBindingGateway({
 
 class LiveGatewayConn {
   socket: Socket;
-  private readonly allowedSpecsForBinding: string[];
+  private readonly allowedSpecsForBinding: {
+    specName: string;
+    uniqueSpecLabel?: string;
+  }[];
   zzEnv: ZZEnv;
 
   constructor({
@@ -68,7 +75,10 @@ class LiveGatewayConn {
   }: {
     zzEnv?: ZZEnv | null;
     socket: Socket;
-    allowedSpecsForBinding?: string[];
+    allowedSpecsForBinding?: {
+      specName: string;
+      uniqueSpecLabel?: string;
+    }[];
   }) {
     this.socket = socket;
     this.allowedSpecsForBinding = allowedSpecsForBinding;
@@ -79,9 +89,14 @@ class LiveGatewayConn {
     this.zzEnv = zzEnv;
 
     this.socket.on(
-      "request_and_bind",
-      async ({ specName }: { specName: string }) => {
-        if (!this.allowedSpecsForBinding.includes(specName)) {
+      REQUEST_AND_BIND_CMD,
+      async ({ specName, uniqueSpecLabel }: RequestAndBindType) => {
+        if (
+          !this.allowedSpecsForBinding.some(
+            (s) =>
+              s.specName === specName && s.uniqueSpecLabel === uniqueSpecLabel
+          )
+        ) {
           throw new Error(
             `Spec name ${specName} not allowed for binding to socket.`
           );

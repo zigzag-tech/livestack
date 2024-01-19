@@ -830,25 +830,25 @@ export function uniqueStreamIdentifier({
   from?: {
     specName: string;
     key: string;
-    uniqueLabel?: string;
+    uniqueSpecLabel?: string;
   };
   to?: {
     specName: string;
     key: string;
-    uniqueLabel?: string;
+    uniqueSpecLabel?: string;
   };
 }) {
   const fromStr = !!from
     ? `${from.specName}${
-        from.uniqueLabel && from.uniqueLabel !== "default_label"
-          ? `[${from.uniqueLabel}]`
+        from.uniqueSpecLabel && from.uniqueSpecLabel !== "default_label"
+          ? `[${from.uniqueSpecLabel}]`
           : ""
       }/${from.key}`
     : "(*)";
   const toStr = !!to
     ? `${to.specName}${
-        to.uniqueLabel && to.uniqueLabel !== "default_label"
-          ? `[${to.uniqueLabel}]`
+        to.uniqueSpecLabel && to.uniqueSpecLabel !== "default_label"
+          ? `[${to.uniqueSpecLabel}]`
           : ""
       }/${to.key}`
     : "(*)";
@@ -918,7 +918,7 @@ export const SpecAndOutlet = z.union([
 export type SpecAndOutlet = z.infer<typeof SpecAndOutlet>;
 export function resolveUniqueSpec(uniqueSpec: UniqueSpecQuery): {
   specName: string;
-  uniqueLabel?: string;
+  uniqueSpecLabel?: string;
 } {
   if (typeof uniqueSpec === "string") {
     return {
@@ -934,7 +934,7 @@ export function resolveUniqueSpec(uniqueSpec: UniqueSpecQuery): {
           }
         ).spec
       ),
-      uniqueLabel: (
+      uniqueSpecLabel: (
         uniqueSpec as {
           spec: SpecOrName;
           label: string;

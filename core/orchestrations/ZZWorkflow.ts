@@ -152,7 +152,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions> {
               const specInfo = resolveUniqueSpec(specQuery);
               return (
                 specInfo.specName === childSpecName &&
-                specInfo.uniqueLabel === jobNode.uniqueLabel
+                specInfo.uniqueSpecLabel === jobNode.uniqueSpecLabel
               );
             })?.params,
             inputStreamIdOverridesByKey,
@@ -275,14 +275,16 @@ export class ZZWorkflow {
         return (
           n.nodeType === "job" &&
           n.specName === specInfo.specName &&
-          n.uniqueLabel === specInfo.uniqueLabel
+          n.uniqueSpecLabel === specInfo.uniqueSpecLabel
         );
       });
 
       if (!jobNodeId) {
         throw new Error(
           `Job of spec ${specInfo.specName} ${
-            specInfo.uniqueLabel ? `with label ${specInfo.uniqueLabel}` : ""
+            specInfo.uniqueSpecLabel
+              ? `with label ${specInfo.uniqueSpecLabel}`
+              : ""
           } not found.`
         );
       }
@@ -357,23 +359,23 @@ export function connect<
 
 function convertSpecAndOutlet(specAndOutlet: SpecAndOutlet): {
   specName: string;
-  uniqueLabel?: string;
+  uniqueSpecLabel?: string;
   key: string;
 } {
   if (Array.isArray(specAndOutlet)) {
     const [uniqueSpec, key] = specAndOutlet;
-    const uniqueLabel = resolveUniqueSpec(uniqueSpec).uniqueLabel;
+    const uniqueSpecLabel = resolveUniqueSpec(uniqueSpec).uniqueSpecLabel;
     return {
       specName: resolveUniqueSpec(uniqueSpec).specName,
-      ...(uniqueLabel ? { uniqueLabel } : {}),
+      ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
       key: key,
     };
   } else {
     const converted = resolveUniqueSpec(specAndOutlet);
-    const uniqueLabel = converted.uniqueLabel;
+    const uniqueSpecLabel = converted.uniqueSpecLabel;
     return {
       specName: converted.specName,
-      ...(uniqueLabel ? { uniqueLabel } : {}),
+      ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
       key: "default",
     };
   }
@@ -410,7 +412,7 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
 type SpecNode = {
   nodeType: "spec";
   specName: string;
-  uniqueLabel?: string;
+  uniqueSpecLabel?: string;
 };
 type OutletNode = {
   nodeType: "outlet";
@@ -441,7 +443,7 @@ type JobNode = {
   nodeType: "job";
   jobId: string;
   specName: string;
-  uniqueLabel?: string;
+  uniqueSpecLabel?: string;
 };
 
 type InstantiatedGraph = Graph<
@@ -483,10 +485,10 @@ function convertedConnectionsToGraph(
     to: CanonicalConnectionPoint
   ) {
     const fromSpecIdentifier = uniqueSpecIdentifier(from);
-    const fromUniqueLabel = from.uniqueLabel;
+    const fromUniqueLabel = from.uniqueSpecLabel;
     const fromSpecNodeId = createOrGetNodeId(fromSpecIdentifier, {
       specName: from.specName,
-      ...(fromUniqueLabel ? { uniqueLabel: fromUniqueLabel } : {}),
+      ...(fromUniqueLabel ? { uniqueSpecLabel: fromUniqueLabel } : {}),
       nodeType: "spec",
       label: fromSpecIdentifier,
     });
@@ -501,12 +503,12 @@ function convertedConnectionsToGraph(
     const streamId = uniqueStreamIdentifier({
       from: {
         specName: from.specName,
-        uniqueLabel: from.uniqueLabel,
+        uniqueSpecLabel: from.uniqueSpecLabel,
         key: from.key,
       },
       to: {
         specName: to.specName,
-        uniqueLabel: to.uniqueLabel,
+        uniqueSpecLabel: to.uniqueSpecLabel,
         key: to.key,
       },
     });
@@ -521,10 +523,10 @@ function convertedConnectionsToGraph(
       key: to.key,
       label: id,
     });
-    const toUniqueLabel = to.uniqueLabel;
+    const toUniqueLabel = to.uniqueSpecLabel;
     const toSpecNodeId = createOrGetNodeId(toSpecIdentifier, {
       specName: to.specName,
-      ...(toUniqueLabel ? { uniqueLabel: toUniqueLabel } : {}),
+      ...(toUniqueLabel ? { uniqueSpecLabel: toUniqueLabel } : {}),
       nodeType: "spec",
       label: toSpecIdentifier,
     });
@@ -547,12 +549,12 @@ function convertedConnectionsToGraph(
 
 function uniqueSpecIdentifier({
   specName,
-  uniqueLabel,
+  uniqueSpecLabel,
 }: {
   specName: string;
-  uniqueLabel?: string;
+  uniqueSpecLabel?: string;
 }) {
-  return `${specName}${uniqueLabel ? `[${uniqueLabel}]` : ""}`;
+  return `${specName}${uniqueSpecLabel ? `[${uniqueSpecLabel}]` : ""}`;
 }
 
 function validateSpecHasKey<P, IMap, OMap>({
@@ -601,12 +603,12 @@ function instantiateFromDefGraph({
         groupId,
         from: {
           specName: sourceSpecNode.specName,
-          uniqueLabel: sourceSpecNode.uniqueLabel,
+          uniqueSpecLabel: sourceSpecNode.uniqueSpecLabel,
           key: outletNode.key,
         },
         to: {
           specName: targetSpecNode.specName,
-          uniqueLabel: targetSpecNode.uniqueLabel,
+          uniqueSpecLabel: targetSpecNode.uniqueSpecLabel,
           key: inletNode.key,
         },
       });
