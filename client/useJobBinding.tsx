@@ -92,13 +92,13 @@ export class JobSocketIOClient {
 }
 
 export function useJobBinding({
-  serverBase,
-  socketPath = "/livestack.socket.io",
+  socketIOURI: socketIOURI,
+  socketIOPath: socketIOPath = "/livestack.socket.io",
   specName,
   outputsToWatch = [{ key: "default", mode: "replace" }],
 }: {
-  serverBase?: string | null;
-  socketPath?: string;
+  socketIOURI?: string | null;
+  socketIOPath?: string;
   specName: string;
   outputsToWatch?: {
     key?: string;
@@ -123,16 +123,16 @@ export function useJobBinding({
 
   useDeepCompareEffect(() => {
     if (!clientRef.current) {
-      if (serverBase) {
-        clientRef.current = io(serverBase, {
+      if (socketIOURI) {
+        clientRef.current = io(socketIOURI, {
           autoConnect: true,
-          path: socketPath,
+          path: socketIOPath,
           transports: ["websocket", "polling"],
         });
       } else {
         clientRef.current = io({
           autoConnect: true,
-          path: socketPath,
+          path: socketIOPath,
           transports: ["websocket", "polling"],
         });
       }
