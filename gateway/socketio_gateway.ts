@@ -1,3 +1,4 @@
+import { UNBIND_CMD } from "./../shared/gateway-binding-types";
 import {
   REQUEST_AND_BIND_CMD,
   RequestAndBindType,
@@ -144,6 +145,20 @@ class LiveGatewayConn {
     }
 
     this.onDisconnect(() => {
+      for (const key of input.keys) {
+        try {
+          input.byKey(key).terminate();
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      for (const sub of subs) {
+        sub.unsubscribe();
+      }
+    });
+
+    this.socket.on(`${UNBIND_CMD}:${jobId}`, () => {
       for (const key of input.keys) {
         try {
           input.byKey(key).terminate();

@@ -5,9 +5,10 @@ export type RequestAndBindType = {
 };
 
 export const JOB_INFO = "job_info";
-
 export type JobInfoType = {
   jobId: string;
   inputKeys: string[];
   outputKeys: string[];
 };
+
+export const UNBIND_CMD = "unbind";

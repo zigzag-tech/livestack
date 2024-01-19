@@ -43,7 +43,7 @@ Livestack aims at providing:
 - (WIP) Simple bootstrap process for new AI project.
 
 
-## Getting Started
+## Quickstart
 
 WIP
 

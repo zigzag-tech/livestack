@@ -1,114 +1,86 @@
-import { Socket } from "socket.io-client";
 import { useRef, useState } from "react";
 import useDeepCompareEffect from "use-deep-compare-effect";
-import { JobSocketIOClient } from "./JobSocketIOClient";
+import {
+  ClientConnParams,
+  JobSocketIOConnection,
+  bindNewJobToSocketIO,
+} from "./JobSocketIOClient";
 
 export function useJobBinding({
-  socketIOClient,
   socketIOURI,
   socketIOPath,
+  socketIOClient,
   specName,
+  uniqueSpecLabel,
   outputsToWatch = [{ key: "default", mode: "replace" }],
-}: {
-  socketIOClient?: Socket;
-  socketIOURI?: string;
-  socketIOPath?: string;
+}: ClientConnParams & {
   specName: string;
+  uniqueSpecLabel?: string;
   outputsToWatch?: {
     key?: string;
     mode: "append" | "replace";
   }[];
 }) {
-  const jobClientRef = useRef<JobSocketIOClient>();
-
-  const jobInfoRef = useRef<
-    | {
-        jobId: string;
-        inputKeys: string[];
-        outputKeys: string[];
-      }
-    | "not-initialized"
-    | "working"
-  >("not-initialized");
+  const clientRef = useRef<JobSocketIOConnection>();
 
   const [outputsByKey, setOutputsByKey] = useState<{
     [key: string]: any;
   }>({});
 
   useDeepCompareEffect(() => {
-    if (!jobClientRef.current) {
-      jobClientRef.current = new JobSocketIOClient({
-        specName,
-        socketIOClient,
-        socketIOURI,
-        socketIOPath,
-      });
-    }
-    const jobClient = jobClientRef.current;
+    let isCancelled = false;
 
-    if (jobInfoRef.current === "not-initialized") {
-      jobInfoRef.current = "working";
-      jobClient._ensureJobBinding().then(() => {
-        const jobInfo = jobClient.jobInfo;
-        if (jobInfo) {
-          jobInfoRef.current = jobInfo;
-          for (const { mode, key = "default" } of outputsToWatch) {
-            jobClient.socketIOClient.on(`output:${jobInfo.jobId}/${key}`, (data: any) => {
-              // TODO: `data` data structure needs to be corrected. Not always an object.
-              const timeStamped = { ...data, _timeStamp: Date.now() };
-              if (mode === "replace") {
-                setOutputsByKey((prev) => ({ ...prev, [key]: timeStamped }));
-              } else if (mode === "append") {
-                setOutputsByKey((prev) => ({
-                  ...prev,
-                  [key]: [...(prev[key] || []), timeStamped],
-                }));
-              }
+    async function setupConnection() {
+      try {
+        const connection = await bindNewJobToSocketIO({
+          socketIOURI,
+          socketIOPath,
+          socketIOClient,
+          specName,
+          uniqueSpecLabel,
+        });
+
+        if (!isCancelled) {
+          clientRef.current = connection;
+
+          outputsToWatch.forEach(({ key = "default", mode }) => {
+            connection.subToOutput(key, (data) => {
+              setOutputsByKey((prevOutputs) => {
+                if (mode === "replace") {
+                  return { ...prevOutputs, [key]: data };
+                } else {
+                  // mode === "append"
+                  return {
+                    ...prevOutputs,
+                    [key]: [...(prevOutputs[key] || []), data],
+                  };
+                }
+              });
             });
-          }
-        }
-      });
-        jobInfoRef.current = { jobId, inputKeys, outputKeys };
-        for (const { mode, key = "default" } of outputsToWatch) {
-          client.on(`output:${jobId}/${key}`, (data: any) => {
-            // TODO: `data` data structure needs to be corrected. Not always an object.
-            const timeStamped = { ...data, _timeStamp: Date.now() };
-            if (mode === "replace") {
-              setOutputsByKey((prev) => ({ ...prev, [key]: timeStamped }));
-            } else if (mode === "append") {
-              setOutputsByKey((prev) => ({
-                ...prev,
-                [key]: [...(prev[key] || []), timeStamped],
-              }));
-            }
           });
         }
-      });
+      } catch (error) {
+        console.error("Failed to setup JobSocketIOConnection:", error);
+      }
     }
+
+    setupConnection();
+
     return () => {
-      if (
-        jobInfoRef.current !== "not-initialized" &&
-        jobInfoRef.current !== "working"
-      ) {
-        jobClient.socketIOClient.emit("unbind", { specName, jobId: jobInfoRef.current?.jobId });
+      console.log("closing");
+
+      isCancelled = true;
+      if (clientRef.current) {
+        // Perform any necessary cleanup here, like unsubscribing from outputs
+        clientRef.current.close();
+        clientRef.current = undefined;
       }
     };
-  }, [specName, outputsToWatch]);
-  }, [specName, outputsToWatch, socketIOClient, socketIOURI, socketIOPath]);
+  }, [socketIOURI, socketIOPath, specName, uniqueSpecLabel, outputsToWatch]);
 
   const feed = async <T,>(data: T, key: string = "default") => {
-    if (typeof jobInfoRef.current === "string") {
-      throw new Error("Background job not yet running.");
-    }
-    if (!jobInfoRef.current.inputKeys.includes(key)) {
-      throw new Error(`Key ${key} not in inputKeys.`);
-    }
-
-    if (!jobClientRef.current) {
-      throw new Error("clientRef.current is null");
-    }
-    jobClientRef.current.socketIOClient.emit(`feed:${jobInfoRef.current.jobId}/${key}`, data);
+    return await clientRef.current?.feed(data, key);
   };
 
-  return { jobInfo: jobInfoRef.current, feed, outputsByKey };
+  return { feed, outputsByKey };
 }
