@@ -70,8 +70,6 @@ export function useJobBinding({
     setupConnection();
 
     return () => {
-      console.log("closing");
-
       isCancelled = true;
       if (clientRef.current) {
         // Perform any necessary cleanup here, like unsubscribing from outputs
