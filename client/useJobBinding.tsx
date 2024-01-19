@@ -10,8 +10,6 @@ export function useJobBinding({
   serverBase: string;
   specName: string;
   outputsToWatch?: {
-    childSpec?: string;
-    childSpecLabel?: string;
     key?: string;
     mode: "append" | "replace";
   }[];
