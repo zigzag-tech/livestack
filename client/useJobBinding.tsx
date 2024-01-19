@@ -4,10 +4,12 @@ import useDeepCompareEffect from "use-deep-compare-effect";
 
 export function useJobBinding({
   serverBase,
+  socketPath = "/livestack.socket.io",
   specName,
   outputsToWatch = [{ key: "default", mode: "replace" }],
 }: {
-  serverBase: string;
+  serverBase?: string | null;
+  socketPath?: string;
   specName: string;
   outputsToWatch?: {
     key?: string;
@@ -32,11 +34,20 @@ export function useJobBinding({
 
   useDeepCompareEffect(() => {
     if (!clientRef.current) {
-      clientRef.current = io(serverBase, {
-        autoConnect: true,
-        path: "/livestack.socket.io",
-        transports: ["websocket", "polling"],
-      });
+      if (serverBase) {
+        clientRef.current = io(serverBase, {
+          autoConnect: true,
+          path: socketPath,
+          transports: ["websocket", "polling"],
+        });
+      } else {
+        clientRef.current = io({
+          autoConnect: true,
+          path: socketPath,
+          transports: ["websocket", "polling"],
+        });
+
+      }
     }
     const client = clientRef.current;
     client.on("error", (err) => {
