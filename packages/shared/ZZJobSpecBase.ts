@@ -2,15 +2,7 @@ import { InferDefMap } from "./StreamDefSet";
 import { StreamDefSet } from "./StreamDefSet";
 import { z } from "zod";
 
-export abstract class ZZJobSpecBase<
-  P,
-  IMap = {
-    default: {};
-  },
-  OMap = {
-    default: {};
-  }
-> {
+export abstract class ZZJobSpecBase<P, IMap = {}, OMap = {}> {
   public readonly name: string;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
@@ -31,7 +23,7 @@ export abstract class ZZJobSpecBase<
     this.output = output;
     if (!input) {
       this.inputDefSet = new StreamDefSet({
-        defs: single(z.object({})) as InferDefMap<IMap>,
+        defs: z.object({}) as InferDefMap<IMap>,
       });
     } else {
       this.inputDefSet = new StreamDefSet({
@@ -40,7 +32,7 @@ export abstract class ZZJobSpecBase<
     }
     if (!output) {
       this.outputDefSet = new StreamDefSet({
-        defs: single(z.void()) as InferDefMap<OMap>,
+        defs: z.object({}) as InferDefMap<OMap>,
       });
     } else {
       this.outputDefSet = new StreamDefSet({
@@ -56,17 +48,19 @@ export function single<T>(def: z.ZodType<T, any>) {
   };
 }
 
-export function multi<TMap extends {
-  [key: string]: z.ZodType<any, any>;
-} >(def: TMap) {
+export function multi<
+  TMap extends {
+    [key: string]: z.ZodType<any, any>;
+  }
+>(def: TMap) {
   return def;
 }
 
 export const SpecOrName = z.union([
   z.string(),
-  z.instanceof((ZZJobSpecBase<any, any, any>)),
+  z.instanceof(ZZJobSpecBase<any, any, any>),
 ]);
-export type SpecOrName = z.infer<typeof SpecOrName>;// Conversion functions using TypeScript
+export type SpecOrName = z.infer<typeof SpecOrName>; // Conversion functions using TypeScript
 
 export function convertSpecOrName(specOrName: SpecOrName): string {
   if (typeof specOrName === "string") {
@@ -75,4 +69,3 @@ export function convertSpecOrName(specOrName: SpecOrName): string {
     return specOrName.name;
   }
 }
-

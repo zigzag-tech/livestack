@@ -19,7 +19,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
   ParentP,
   ParentO,
   Specs
-> extends ZZWorkerDef<ParentP, { default: {} }, { default: ParentO }> {
+> extends ZZWorkerDef<ParentP, {}, { default: ParentO }> {
   attempts: {
     [K in keyof Specs]: AttemptDef<
       ParentP,
@@ -35,7 +35,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
     jobSpec,
   }: {
     zzEnv?: ZZEnv;
-    jobSpec: ZZJobSpec<ParentP, { default: {} }, { default: ParentO }>;
+    jobSpec: ZZJobSpec<ParentP, {}, { default: ParentO }>;
     attempts: {
       [K in keyof Specs]: AttemptDef<
         ParentP,

@@ -2,9 +2,7 @@ import { z } from "zod";
 
 export type InferStreamSetType<T> = T extends StreamDefSet<infer TMap>
   ? TMap
-  : {
-      default: {};
-    };
+  : {};
 
 // export type InferDefMap<TMap> = TMap extends {
 //   [key in infer K]: z.ZodType<infer V>;

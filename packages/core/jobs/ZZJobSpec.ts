@@ -60,15 +60,11 @@ export type InferInputType<
   IMap = InferStreamSetType<CheckSpec<Spec>["inputDefSet"]>
 > = IMap[K extends keyof IMap ? K : never] | null;
 
-export class ZZJobSpec<
-  P = {},
-  IMap = {
-    default: {};
-  },
-  OMap = {
-    default: {};
-  }
-> extends ZZJobSpecBase<P, IMap, OMap> {
+export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
+  P,
+  IMap,
+  OMap
+> {
   private readonly _zzEnv: ZZEnv | null = null;
   protected static _registryBySpecName: Record<
     string,
