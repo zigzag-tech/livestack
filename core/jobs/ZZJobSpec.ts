@@ -22,11 +22,13 @@ import longStringTruncator from "../utils/longStringTruncator";
 import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import {
+  WrapTerminateFalse,
   WrapTerminatorAndDataId,
+  WrapWithTimestamp,
   wrapStreamSubscriberWithTermination,
   wrapTerminatorAndDataId,
 } from "../utils/io";
-import { ZZStream, ZZStreamSubscriber } from "./ZZStream";
+import { WithTimestamp, ZZStream, ZZStreamSubscriber } from "./ZZStream";
 import { ZZWorkerDef } from "./ZZWorker";
 import pLimit from "p-limit";
 import { convertSpecOrName } from "@livestack/shared/ZZJobSpecBase";
@@ -207,7 +209,9 @@ export class ZZJobSpec<
         "Database is not configured in ZZEnv, therefore can not get job data."
       );
     }
-    const recs = await getJobDatapoints<WrapTerminatorAndDataId<U>>({
+    const recs = await getJobDatapoints<
+      WithTimestamp<WrapTerminatorAndDataId<U>>
+    >({
       specName: this.name,
       projectId: this.zzEnv.projectId,
       jobId,
@@ -217,12 +221,15 @@ export class ZZJobSpec<
       limit,
       key: String(key),
     });
-    return recs
+    const points = recs
       .map((r) => r.data)
       .filter((r) => r.terminate === false)
-      .map((r) =>
-        r.terminate === false ? r.data : null
-      ) as OMap[keyof OMap][];
+      .map((r) => ({
+        data: (r as WithTimestamp<WrapTerminateFalse<U>>)
+          .data as OMap[keyof OMap],
+        timestamp: r.timestamp,
+      }));
+    return points;
   }
 
   public async enqueueJobAndWaitOnResults({
@@ -234,7 +241,7 @@ export class ZZJobSpec<
     jobId?: string;
     jobOptions?: P;
     outputKey?: keyof OMap;
-  }): Promise<OMap[keyof OMap][]> {
+  }): Promise<{ data: OMap[keyof OMap]; timestamp: number }[]> {
     if (!jobId) {
       jobId = `${this.name}-${v4()}`;
     }
@@ -708,8 +715,8 @@ export class ZZJobSpec<
       jobOptions,
     });
 
-    const rs: OMap[keyof OMap][] = [];
-    let lastV: OMap[keyof OMap] | null = null;
+    const rs: WrapWithTimestamp<OMap[keyof OMap]>[] = [];
+    let lastV: WrapWithTimestamp<OMap[keyof OMap]> | null = null;
     while ((lastV = await output.nextValue()) !== null) {
       rs.push(lastV);
     }
@@ -789,6 +796,17 @@ export class ZZJobSpec<
         return subscriberByKey(key);
       },
       nextValue,
+      async *[Symbol.asyncIterator]() {
+        while (true) {
+          const input = await nextValue();
+
+          // Assuming nextInput returns null or a similar value to indicate completion
+          if (!input) {
+            break;
+          }
+          yield input;
+        }
+      },
     };
   };
 

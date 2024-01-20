@@ -35,7 +35,7 @@ import { Redis } from "ioredis";
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
 
-export class ZZStream<T> {
+export class ZZStream<T extends object> {
   public readonly def: ZodType<T>;
   public readonly uniqueName: string;
   public readonly hash: string;
@@ -51,9 +51,9 @@ export class ZZStream<T> {
   }
   private logger: ReturnType<typeof getLogger>;
 
-  protected static globalRegistry: { [key: string]: ZZStream<unknown> } = {};
+  protected static globalRegistry: { [key: string]: ZZStream<any> } = {};
 
-  public static async getOrCreate<T>({
+  public static async getOrCreate<T extends object>({
     uniqueName,
     def,
     zzEnv,
@@ -257,13 +257,17 @@ export class ZZStream<T> {
   }
 }
 
-export class ZZStreamSubscriber<T> {
+export type WithTimestamp<T extends object> = T & {
+  timestamp: number;
+};
+
+export class ZZStreamSubscriber<T extends object> {
   private zzEnv: ZZEnv;
   private stream: ZZStream<T>;
-  private cursor: string;
-  private _valueObservable: Observable<T> | null = null;
+  private cursor: `${string}-${string}` | "$" | "0";
+  private _valueObservable: Observable<WithTimestamp<T>> | null = null;
   private isUnsubscribed: boolean = false;
-  private _nextValue: (() => Promise<T>) | null = null;
+  private _nextValue: (() => Promise<WithTimestamp<T>>) | null = null;
 
   constructor({
     stream,
@@ -280,12 +284,14 @@ export class ZZStreamSubscriber<T> {
   }
 
   private initializeObservable() {
-    this._valueObservable = new Observable((subscriber: Subscriber<T>) => {
-      this.readStream(subscriber);
-    });
+    this._valueObservable = new Observable(
+      (subscriber: Subscriber<WithTimestamp<T>>) => {
+        this.readStream(subscriber);
+      }
+    );
   }
 
-  private async readStream(subscriber: Subscriber<T>) {
+  private async readStream(subscriber: Subscriber<WithTimestamp<T>>) {
     const { channelId, clients } = getStreamClientsById({
       queueId: this.stream.uniqueName,
       zzEnv: this.zzEnv,
@@ -304,11 +310,15 @@ export class ZZStreamSubscriber<T> {
           this.cursor
         );
         if (stream) {
-          const messages = stream[0][1]; // Assuming single stream
+          const [key, messages] = stream[0]; // Assuming single stream
           for (let message of messages) {
-            this.cursor = message[0];
+            // id format: 1526919030474-55
+            // https://redis.io/commands/xadd/
+            this.cursor = message[0] as `${string}-${string}`;
+            const [timestampStr, _] = this.cursor.split("-");
+            const timestamp = Number(timestampStr);
             const data: T = parseMessageData(message[1]);
-            subscriber.next(data);
+            subscriber.next({ ...data, timestamp });
           }
         }
       }
@@ -322,7 +332,7 @@ export class ZZStreamSubscriber<T> {
     }
   }
 
-  public get valueObservable(): Observable<T> {
+  public get valueObservable(): Observable<WithTimestamp<T>> {
     if (!this._valueObservable) {
       this.initializeObservable();
     }
@@ -341,6 +351,18 @@ export class ZZStreamSubscriber<T> {
     }
     return this._nextValue();
   };
+
+  async *[Symbol.asyncIterator]() {
+    while (true) {
+      const input = await this.nextValue();
+
+      // Assuming nextInput returns null or a similar value to indicate completion
+      if (!input) {
+        break;
+      }
+      yield input;
+    }
+  }
 }
 
 function parseMessageData<T>(data: Array<any>): T {

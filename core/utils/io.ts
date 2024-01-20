@@ -1,14 +1,21 @@
 import { z } from "zod";
 import { ZZStreamSubscriber } from "../jobs/ZZStream";
 import { Observable } from "rxjs";
+
+export type WrapTerminateFalse<T> = {
+  data: T;
+  terminate: false;
+};
 export type WrapTerminatorAndDataId<T> =
-  | {
-      data: T;
-      terminate: false;
-    }
+  | WrapTerminateFalse<T>
   | {
       terminate: true;
     };
+
+export type WrapWithTimestamp<T> = {
+  data: T;
+  timestamp: number;
+};
 
 export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
   return z.discriminatedUnion("terminate", [
@@ -25,22 +32,27 @@ export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
 export function wrapStreamSubscriberWithTermination<T>(
   subscriberP: Promise<ZZStreamSubscriber<WrapTerminatorAndDataId<T>>>
 ) {
-  const newValueObservable = new Observable<T | null>((subscriber) => {
-    subscriberP.then((zzSub) => {
-      zzSub.valueObservable.subscribe({
-        next: (v) => {
-          if (v.terminate) {
-            subscriber.unsubscribe();
-            subscriber.complete();
-          } else {
-            subscriber.next(v.data);
-          }
-        },
-        error: (err) => subscriber.error(err),
-        complete: () => subscriber.complete(),
+  const newValueObservable = new Observable<WrapWithTimestamp<T> | null>(
+    (subscriber) => {
+      subscriberP.then((zzSub) => {
+        zzSub.valueObservable.subscribe({
+          next: (v) => {
+            if (v.terminate) {
+              subscriber.unsubscribe();
+              subscriber.complete();
+            } else {
+              subscriber.next({
+                data: v.data,
+                timestamp: v.timestamp,
+              });
+            }
+          },
+          error: (err) => subscriber.error(err),
+          complete: () => subscriber.complete(),
+        });
       });
-    });
-  });
+    }
+  );
   // const newValueObservable = subscriber.valueObservable.pipe(
   //   map((v) => {
   //     if (v.terminate) {
@@ -59,7 +71,10 @@ export function wrapStreamSubscriberWithTermination<T>(
       subscriber.unsubscribe();
       return null;
     } else {
-      return nextValue.data;
+      return {
+        data: nextValue.data,
+        timestamp: nextValue.timestamp,
+      };
     }
   };
 
