@@ -54,3 +54,4 @@ See [here](_misc/docs/comparison.md).
 - Reduce user cognitive wherever possible.
 - Reasonable defaults to reduce burden of configuration.
 - Minimal surprises and gotchas.
+- Battle-test a new feature, hurt it plenty, before accepting it to the framework.
