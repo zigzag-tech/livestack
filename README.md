@@ -7,7 +7,7 @@
 <img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat" alt="npm version" />
 </p>
 
-<p align="center">A realtime AI framework for JavaScript developers: <br />From concept to deployment in hours. </p>
+<p align="center">A realtime AI framework for JavaScript developers. <br />From concept to deployment in hours. </p>
 
 <p align="center">
 <img src="_misc/assets/intro.gif"
