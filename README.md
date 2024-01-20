@@ -53,6 +53,6 @@ See [here](_misc/docs/comparison.md).
 
 ## Design Principles
 
-- Reduce cognitive load for developers. 
-- Reasonable defaults for quick project bootstrapping.
-- Minimal surprises.
+- Reduce user cognitive wherever possible.
+- Reasonable defaults to reduce burden of configuration.
+- Minimal surprises and gotchas.
