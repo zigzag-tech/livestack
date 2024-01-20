@@ -51,7 +51,8 @@ See [here](_misc/docs/comparison.md).
 
 ## Design Principles
 
-- Reduce user cognitive wherever possible.
+- Reduce user cognitive load wherever possible.
 - Reasonable defaults to reduce burden of configuration.
 - Minimal surprises and gotchas.
+- Introduce new concepts only when absolutely necessary.
 - Battle-test a new feature, hurt it plenty, before accepting it to the framework.
