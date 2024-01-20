@@ -54,5 +54,5 @@ See [here](_misc/docs/comparison.md).
 - Reduce user cognitive load wherever possible.
 - Reasonable defaults to reduce burden of configuration.
 - Minimal surprises and gotchas.
-- Introduce new concepts only when absolutely necessary.
+- Introduce new concepts and abstractions only when absolutely necessary.
 - Battle-test a new feature, hurt it plenty, before accepting it to the framework.
