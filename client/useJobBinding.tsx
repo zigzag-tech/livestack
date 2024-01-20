@@ -6,36 +6,43 @@ import {
   bindNewJobToSocketIO,
 } from "./JobSocketIOClient";
 
-export function useJobBinding({
+export function useJobBinding<Ks extends string>({
   socketIOURI,
   socketIOPath,
   socketIOClient,
   specName,
   uniqueSpecLabel,
-  streamsToWatch = [{ key: "default", mode: "replace" }],
+  streamsToWatch = [{ key: "default" as Ks, mode: "replace" }],
 }: ClientConnParams & {
   specName: string;
   uniqueSpecLabel?: string;
   streamsToWatch?: {
-    key?: string;
+    key: Ks;
     mode: "append" | "replace";
     specName?: string;
     uniqueSpecLabel?: string;
     type?: "output" | "input";
   }[];
 }) {
-  const clientRef = useRef<JobSocketIOConnection>();
+  const clientRef = useRef<JobSocketIOConnection<Ks>>();
 
   const [outputsByKey, setOutputsByKey] = useState<{
-    [key: string]: any;
-  }>({});
+    [key in Ks]:
+      | { timestamp: number; data: any }
+      | { timestamp: number; data: any }[]
+      | null;
+  }>(
+    Object.fromEntries(streamsToWatch.map(({ key }) => [key, null])) as {
+      [key in Ks]: null;
+    }
+  );
 
   useDeepCompareEffect(() => {
     let isCancelled = false;
 
     async function setupConnection() {
       try {
-        const connection = await bindNewJobToSocketIO({
+        const connection = await bindNewJobToSocketIO<Ks>({
           socketIOURI,
           socketIOPath,
           socketIOClient,
@@ -46,7 +53,7 @@ export function useJobBinding({
         if (!isCancelled) {
           clientRef.current = connection;
 
-          streamsToWatch.forEach(({ key = "default", mode }) => {
+          streamsToWatch.forEach(({ key = "default" as Ks, mode }) => {
             connection.subToOutput(key, (data) => {
               setOutputsByKey((prevOutputs) => {
                 if (mode === "replace") {
@@ -55,7 +62,13 @@ export function useJobBinding({
                   // mode === "append"
                   return {
                     ...prevOutputs,
-                    [key]: [...(prevOutputs[key] || []), data],
+                    [key]: [
+                      ...((prevOutputs[key] as {
+                        timestamp: number;
+                        data: any;
+                      }[]) || []),
+                      data,
+                    ],
                   };
                 }
               });

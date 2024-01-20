@@ -6,10 +6,10 @@ import {
   JobInfoType,
 } from "@livestack/shared/gateway-binding-types";
 
-export class JobSocketIOConnection {
+export class JobSocketIOConnection<Ks> {
   public readonly jobId: string;
   public readonly inputKeys: string[];
-  public readonly outputKeys: string[];
+  public readonly outputKeys: Ks[];
   public readonly socketIOClient: Socket;
   private readonly isConnDedicated: boolean;
 
@@ -18,7 +18,7 @@ export class JobSocketIOConnection {
     socketIOClient,
     isConnDedicated,
   }: {
-    jobInfo: JobInfoType;
+    jobInfo: JobInfoType<Ks>;
     socketIOClient: Socket;
     isConnDedicated: boolean;
   }) {
@@ -39,10 +39,10 @@ export class JobSocketIOConnection {
     this.socketIOClient.emit(`feed:${this.jobId}/${key}`, data);
   }
 
-  private subscribedOutputKeys: string[] = [];
+  private subscribedOutputKeys: Ks[] = [];
 
   public async subToOutput<T>(
-    key: string = "default",
+    key: Ks = "default" as Ks,
     callback: (data: T) => void
   ) {
     // await getConnReadyPromise(this.socketIOClient);
@@ -100,11 +100,11 @@ function getClient({
   }
 }
 
-export async function bindNewJobToSocketIO({
+export async function bindNewJobToSocketIO<Ks>({
   specName,
   uniqueSpecLabel,
   ...connParams
-}: RequestAndBindType & ClientConnParams): Promise<JobSocketIOConnection> {
+}: RequestAndBindType & ClientConnParams): Promise<JobSocketIOConnection<Ks>> {
   const { newClient, conn } = getClient(connParams);
 
   // await getConnReadyPromise(conn!);
@@ -116,14 +116,14 @@ export async function bindNewJobToSocketIO({
   const { jobId, inputKeys, outputKeys } = await new Promise<{
     jobId: string;
     inputKeys: string[];
-    outputKeys: string[];
+    outputKeys: Ks[];
   }>((resolve) => {
-    conn.on(JOB_INFO, ({ inputKeys, outputKeys, jobId }: JobInfoType) => {
+    conn.on(JOB_INFO, ({ inputKeys, outputKeys, jobId }: JobInfoType<Ks>) => {
       resolve({ jobId, inputKeys, outputKeys });
     });
   });
 
-  return new JobSocketIOConnection({
+  return new JobSocketIOConnection<Ks>({
     jobInfo: { jobId, inputKeys, outputKeys },
     socketIOClient: conn,
     isConnDedicated: newClient,
