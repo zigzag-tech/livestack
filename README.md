@@ -17,11 +17,9 @@
 ## Why Livestack?
 
 
-We foresee a future where AI evolves beyond just passive, command-driven chatbots. 
+We believe the future of AI is not just about passive chatbots. It's about realtime AI applications that are always on, always listening, always ready to help.
 
-As proactive companions, they will be actively participating in our daily routines, anticipating and fulfilling our needs just when we need them. We expect our lives and productivity to improve by orders of magnitude in the coming years.
-
-At present, however, to realize such AI applications is a complex task. Popular AI frameworks today aren't well-suited for realtime interaction and often require extensive program design and coding. Once prototyped, there are still many steps to take to scale and deploy the application.
+At present, however, to implement such an AI project is still a complex task. Existing AI frameworks aren't well-suited for realtime interaction and often require extensive program design and coding. Once prototyped, there are still many steps to take to scale and deploy the application.
 
 Livestack aims to democratize this process, making it approachable not just for seasoned developers but also for those with basic coding skills, and eventually, for everyone.
 
