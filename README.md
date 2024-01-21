@@ -32,8 +32,11 @@ Livestack aims at providing:
 - Native support for stream-based, realtime orchestration.
 - Fullstack templates for both frontend and backend.
 - Built-in queue system that automatically scales AI project to many machines.
-- Graph-based workflows for better reasoning, visual inspection and debugging.
-- Built-in data persistence of all in-app activities for easy debugging and future model tuning.
+- Graph-based workflows for better reasoning, visual inspection and debugging:
+  - Multiple input/output streams for each job node (commonly encountered in modern AI components)
+  - Intuitive workflow query language for easy inspection and debugging.
+  - (WIP) Nested Workflows that allows for complex, multi-stage AI pipelines and component reusability.
+- Built-in data persistence of all in-app activities for easy debugging and model tuning.
 - (WIP) Common realtime AI components, patterns and guidelines for rapid prototyping, including:
   -  live speech transcription.
   -  live RAG workflow.
