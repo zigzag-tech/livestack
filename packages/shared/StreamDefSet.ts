@@ -37,7 +37,8 @@ export class StreamDefSet<TMap> {
 
   public getDef = <K extends keyof TMap>(key?: string | K) => {
     if (!key) {
-      const def = this.defs["default" as keyof TMap];
+      key = getSingleTag(this.defs) as K;
+      const def = this.defs[key as keyof TMap];
       return def;
     } else {
       if (!this.hasDef(key as string))
@@ -48,4 +49,17 @@ export class StreamDefSet<TMap> {
       return def;
     }
   };
+}
+
+export function getSingleTag<TMap>(
+  defSet: InferDefMap<TMap>,
+  type?: "input" | "output"
+) {
+  const keys = Object.keys(defSet);
+  if (keys.length !== 1) {
+    throw new Error(
+      `Expected exactly one tag in the defintion of ${type}, found ${keys.length}.`
+    );
+  }
+  return keys[0] as keyof TMap;
 }

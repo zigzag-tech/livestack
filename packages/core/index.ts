@@ -1,5 +1,6 @@
 import { ZZJob } from "./jobs/ZZJob";
-import { ZZWorker, ZZWorkerDef } from "./jobs/ZZWorker";
+import { ZZWorker } from "./jobs/ZZWorker";
+import { ZZWorkerDef } from "./jobs/ZZWorkerDef";
 import { ZZJobSpec } from "./jobs/ZZJobSpec";
 import { ZZEnv } from "./jobs/ZZEnv";
 import { ZZStream } from "./jobs/ZZStream";

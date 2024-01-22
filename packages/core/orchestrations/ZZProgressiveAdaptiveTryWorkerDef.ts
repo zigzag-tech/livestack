@@ -1,5 +1,5 @@
 import { CheckSpec, ZZJobSpec } from "../jobs/ZZJobSpec";
-import { ZZWorkerDef } from "../jobs/ZZWorker";
+import { ZZWorkerDef } from "../jobs/ZZWorkerDef";
 import { z } from "zod";
 import _ from "lodash";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";

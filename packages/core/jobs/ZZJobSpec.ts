@@ -1,7 +1,8 @@
-import { ZZWorkerDefParams } from "./ZZWorker";
+import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorkerDef";
 import {
   InferDefMap,
   InferStreamSetType,
+  getSingleTag,
 } from "@livestack/shared/StreamDefSet";
 import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
@@ -28,16 +29,9 @@ import {
   wrapStreamSubscriberWithTermination,
   wrapTerminatorAndDataId,
 } from "../utils/io";
-import {
-  WithTimestamp,
-  ZZStream,
-  ZZStreamDef,
-  ZZStreamSubscriber,
-} from "./ZZStream";
-import { ZZWorkerDef } from "./ZZWorker";
+import { WithTimestamp, ZZStream, ZZStreamSubscriber } from "./ZZStream";
 import pLimit from "p-limit";
 import { ZZJobSpecBase } from "@livestack/shared/ZZJobSpecBase";
-import { getSingleTag } from "../orchestrations/ZZWorkflow";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 

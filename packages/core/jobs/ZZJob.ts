@@ -15,7 +15,7 @@ import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 import _ from "lodash";
-import { getSingleTag } from "../orchestrations/ZZWorkflow";
+import { getSingleTag } from "@livestack/shared/StreamDefSet";
 
 export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZJobSpec<
   infer P,
@@ -25,7 +25,7 @@ export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZJobSpec<
   ? (j: ZZJob<P, IMap, OMap, WP>) => Promise<OMap[keyof OMap] | void>
   : never;
 
-interface ByTagCallable<TMap> {
+export interface ByTagCallable<TMap> {
   <K extends keyof TMap>(key: K): {
     nextValue: () => Promise<TMap[K] | null>;
     [Symbol.asyncIterator](): AsyncGenerator<TMap[K]>;
@@ -138,14 +138,16 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
 
     const reportOnReady = (
       obs: Observable<IMap[keyof IMap] | null>,
-      tag: keyof IMap | "default"
+      tag: keyof IMap
     ) => {
       const sub = obs.subscribe(async () => {
         await this.setJobReadyForInputsInRedis({
           redisConfig: this.zzEnv.redisConfig,
           jobId: this.jobId,
           isReady: true,
-          tag: tag ? tag : "default",
+          tag: tag
+            ? tag
+            : (getSingleTag(this.spec.inputDefSet.defs, "input") as keyof IMap),
         });
         sub.unsubscribe();
       });
@@ -178,7 +180,10 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     //     return obj;
     //   },
     // };
-    reportOnReady(this.input.observable, "default");
+    reportOnReady(
+      this.input.observable,
+      getSingleTag(this.spec.inputDefSet.defs, "input")
+    );
 
     const emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
@@ -217,7 +222,8 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   }
 
   private readonly genInputObject = () => {
-    return this.genInputObjectByTag("default" as keyof IMap);
+    const tag = getSingleTag(this.spec.inputDefSet.defs, "input");
+    return this.genInputObjectByTag(tag);
   };
 
   private readonly genInputObjectByTag = <K extends keyof IMap>(key: K) => {
@@ -245,14 +251,9 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     };
   };
 
-  private _ensureInputStreamFn<K extends keyof IMap>(tag?: K | "default") {
+  private _ensureInputStreamFn<K extends keyof IMap>(tag?: K) {
     if (this.spec.inputDefSet.isSingle) {
-      if (tag && tag !== "default") {
-        throw new Error(
-          `inputDefs is single stream, but key is provided: ${String(tag)}`
-        );
-      }
-      tag = "default" as const;
+      tag = getSingleTag(this.spec.inputDefSet.defs, "input") as K;
     } else {
       if (!tag) {
         throw new Error(
@@ -300,7 +301,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
             redisConfig: this.zzEnv.redisConfig,
             jobId: this.jobId,
             isReady: true,
-            tag: tag || "default",
+            tag: tag || getSingleTag(this.spec.inputDefSet.defs, "input"),
           });
         }
       });
@@ -324,7 +325,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   }: {
     redisConfig: RedisOptions;
     jobId: string;
-    tag: keyof IMap | "default";
+    tag: keyof IMap;
     isReady: boolean;
   }) => {
     // console.debug("setJobReadyForInputsInRedis", {
