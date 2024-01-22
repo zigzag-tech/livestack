@@ -230,7 +230,7 @@ export class ZZStream<T extends object> {
         customStringify(parsed)
       );
 
-      console.debug("ZZStream pub", this.uniqueName, parsed);
+      // console.debug("ZZStream pub", this.uniqueName, parsed);
 
       return messageId;
     } catch (error) {
