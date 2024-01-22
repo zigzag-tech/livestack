@@ -58,7 +58,7 @@ export function getSingleTag<TMap>(
   const keys = Object.keys(defSet);
   if (keys.length !== 1) {
     throw new Error(
-      `Expected exactly one tag in the defintion of ${type}, found ${keys.length}.`
+      ` ${type} is ambiguous; found more than two with tags [${keys.join(", ")}]. \nPlease specify which one to use with "${type}(tagName)".`
     );
   }
   return keys[0] as keyof TMap;
