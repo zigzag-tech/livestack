@@ -189,7 +189,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
 
     const emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
-      tag: K = "default" as K
+      tag: K = getSingleTag(this.spec.outputDefSet.defs, "output") as K
     ) => {
       // this.logger.info(
       //   `Emitting output: ${this.jobId}, ${this.def.name} ` +
@@ -439,7 +439,9 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
 
       // await job.updateProgress(processedR as object);
       // console.debug("signalOutputEnd", this.jobId);
-      await this.signalOutputEnd();
+      if (this.spec.outputDefSet.isSingle) {
+        await this.signalOutputEnd();
+      }
 
       // if (processedR) {
       //   return processedR;
@@ -480,7 +482,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     const outputStream = await this.spec.getJobStream({
       jobId: this.jobId,
       type: "out",
-      tag: tag || ("default" as keyof OMap),
+      tag: tag || getSingleTag(this.spec.outputDefSet.defs, "output"),
     });
     await outputStream.pub({
       message: {

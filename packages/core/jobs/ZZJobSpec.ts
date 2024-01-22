@@ -48,13 +48,13 @@ export type CheckSpec<SP> = SP extends ZZJobSpec<infer P, infer I, infer O>
 
 export type InferOutputType<
   Spec,
-  K = "default",
+  K,
   OMap = InferStreamSetType<CheckSpec<Spec>["outputDefSet"]>
 > = OMap[K extends keyof OMap ? K : never] | null;
 
 export type InferInputType<
   Spec,
-  K = "default",
+  K,
   IMap = InferStreamSetType<CheckSpec<Spec>["inputDefSet"]>
 > = IMap[K extends keyof IMap ? K : never] | null;
 
@@ -119,11 +119,17 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     return ZZJobSpec._registryBySpecName[specName];
   }
 
-  public inputDef(key: keyof IMap = "default" as keyof IMap) {
+  public inputDef(key?: keyof IMap) {
+    if (!key) {
+      key = getSingleTag(this.inputDefSet.defs) as keyof IMap;
+    }
     return this.inputDefSet.getDef(key);
   }
 
-  public outputDef(key: keyof OMap = "default" as keyof OMap) {
+  public outputDef(key: keyof OMap) {
+    if (!key) {
+      key = getSingleTag(this.outputDefSet.defs) as keyof OMap;
+    }
     return this.outputDefSet.getDef(key);
   }
 
@@ -190,7 +196,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     ioType = "out" as T,
     order,
     limit,
-    key = "default" as keyof (T extends "in" ? IMap : OMap),
+    key,
   }: {
     jobId: string;
     ioType?: T;
@@ -202,6 +208,13 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
       throw new Error(
         "Database is not configured in ZZEnv, therefore can not get job data."
       );
+    }
+    if (!key) {
+      if (ioType === "in") {
+        key = getSingleTag(this.inputDefSet.defs, "input") as typeof key;
+      } else {
+        key = getSingleTag(this.outputDefSet.defs, "output") as typeof key;
+      }
     }
     const recs = await getJobDatapoints<
       WithTimestamp<WrapTerminatorAndDataId<U>>
@@ -229,7 +242,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
   public async enqueueJobAndWaitOnResults({
     jobId: jobId,
     jobOptions: jobOptions,
-    outputKey = "default" as keyof OMap,
+    outputKey,
   }: // queueEventsOptions,
   {
     jobId?: string;
@@ -238,6 +251,10 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
   }): Promise<{ data: OMap[keyof OMap]; timestamp: number }[]> {
     if (!jobId) {
       jobId = `${this.name}-${v4()}`;
+    }
+
+    if (!outputKey) {
+      outputKey = getSingleTag(this.outputDefSet.defs, "output") as keyof OMap;
     }
 
     this.logger.info(
