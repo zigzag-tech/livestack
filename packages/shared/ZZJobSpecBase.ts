@@ -23,7 +23,7 @@ export abstract class ZZJobSpecBase<P, IMap = {}, OMap = {}> {
     this.output = output;
     if (!input) {
       this.inputDefSet = new StreamDefSet({
-        defs: z.object({}) as InferDefMap<IMap>,
+        defs: {} as InferDefMap<IMap>,
       });
     } else {
       this.inputDefSet = new StreamDefSet({
@@ -32,7 +32,7 @@ export abstract class ZZJobSpecBase<P, IMap = {}, OMap = {}> {
     }
     if (!output) {
       this.outputDefSet = new StreamDefSet({
-        defs: z.object({}) as InferDefMap<OMap>,
+        defs: {} as InferDefMap<OMap>,
       });
     } else {
       this.outputDefSet = new StreamDefSet({

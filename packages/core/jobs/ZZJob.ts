@@ -156,13 +156,13 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     this.input = (() => {
       const func = <K extends keyof IMap>(tag: K) => {
         const obj = this.genInputObjectByTag(tag);
-        reportOnReady(obj.observable, tag);
+        reportOnReady(obj.getObservable(), tag);
         return obj;
       };
 
       func.byTag = <K extends keyof IMap>(tag: K) => {
         const obj = this.genInputObjectByTag(tag);
-        reportOnReady(obj.observable, tag);
+        reportOnReady(obj.getObservable(), tag);
         return obj;
       };
 
@@ -180,10 +180,12 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     //     return obj;
     //   },
     // };
-    reportOnReady(
-      this.input.observable,
-      getSingleTag(this.spec.inputDefSet.defs, "input")
-    );
+    if (this.spec.inputDefSet.isSingle) {
+      reportOnReady(
+        this.input.getObservable(),
+        getSingleTag(this.spec.inputDefSet.defs, "input")
+      );
+    }
 
     const emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
@@ -222,24 +224,29 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   }
 
   private readonly genInputObject = () => {
-    const tag = getSingleTag(this.spec.inputDefSet.defs, "input");
-    return this.genInputObjectByTag(tag);
+    return this.genInputObjectByTag();
   };
 
-  private readonly genInputObjectByTag = <K extends keyof IMap>(key: K) => {
-    const job = this;
+  private readonly genInputObjectByTag = <K extends keyof IMap>(tag?: K) => {
+    const that = this;
     const nextValue = async (key?: K) => {
-      const r = await (await job._ensureInputStreamFn(key)).nextValue();
+      const r = await (await that._ensureInputStreamFn(key)).nextValue();
       return r as IMap[K] | null;
     };
     return {
       nextValue,
-      get observable() {
-        return job._ensureInputStreamFn(key).trackedObservable;
+      getObservable() {
+        if (!tag) {
+          tag = getSingleTag(that.spec.inputDefSet.defs, "input") as K;
+        }
+        return that._ensureInputStreamFn(tag).trackedObservable;
       },
       async *[Symbol.asyncIterator]() {
+        if (!tag) {
+          tag = getSingleTag(that.spec.inputDefSet.defs, "input") as K;
+        }
         while (true) {
-          const input = await nextValue(key);
+          const input = await nextValue(tag);
 
           // Assuming nextInput returns null or a similar value to indicate completion
           if (!input) {
