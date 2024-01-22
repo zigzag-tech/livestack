@@ -776,7 +776,20 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
         jobId,
         key,
       });
-      return subscriber;
+      return {
+        nextValue: subscriber.nextValue,
+        async *[Symbol.asyncIterator]() {
+          while (true) {
+            const input = await subscriber.nextValue();
+
+            // Assuming nextInput returns null or a similar value to indicate completion
+            if (!input) {
+              break;
+            }
+            yield input;
+          }
+        },
+      };
     };
 
     let subscriberByDefaultKey: Awaited<

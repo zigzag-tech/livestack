@@ -1,3 +1,4 @@
+import { tag } from "@livestack/core/orchestrations/ZZWorkflow";
 // import { InferInputType, InferOutputType } from "../jobs/ZZJobSpec";
 import { v4 } from "uuid";
 import {
@@ -11,10 +12,12 @@ import Graph from "graphology";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { InferDefMap } from "@livestack/shared/StreamDefSet";
-
+import _ from "lodash";
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
+
+const SPEC_TAG_SEPARATOR = "__//__";
 
 export type JobSpecAndJobOptions<JobSpec> = {
   spec: CheckSpec<JobSpec>;
@@ -70,6 +73,15 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions, any, any> {
   public readonly defGraph: DefGraph;
   private orchestrationWorkerDef: ZZWorkerDef<WorkflowJobOptions>;
 
+  public readonly inputSpecTagByWorkflowTag: Record<
+    string,
+    { specName: string; tag: string }
+  >;
+  public readonly outputSpecTagByWorkflowTag: Record<
+    string,
+    { specName: string; tag: string }
+  >;
+
   constructor({
     connections,
     name,
@@ -87,6 +99,50 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions, any, any> {
       connections,
     });
     this.connections = canonicalConns;
+
+    // collect all tag maps
+    let inputSpecTagByWorkflowTag: Record<
+      string,
+      { specName: string; tag: string }
+    > = {};
+    let outputSpecTagByWorkflowTag: Record<
+      string,
+      {
+        specName: string;
+        tag: string;
+      }
+    > = {};
+    for (const conn of canonicalConns) {
+      for (const c of conn) {
+        inputSpecTagByWorkflowTag = {
+          ...inputSpecTagByWorkflowTag,
+          ..._.fromPairs(
+            _.toPairs(c.inputTagMap).map(([specTag, wfTag]) => [
+              wfTag,
+              {
+                specName: c.spec.name,
+                tag: specTag,
+              },
+            ])
+          ),
+        };
+        outputSpecTagByWorkflowTag = {
+          ...outputSpecTagByWorkflowTag,
+          ..._.fromPairs(
+            _.toPairs(c.outputTagMap).map(([specTag, wfTag]) => [
+              wfTag,
+              {
+                specName: c.spec.name,
+                tag: specTag,
+              },
+            ])
+          ),
+        };
+      }
+    }
+    this.inputSpecTagByWorkflowTag = inputSpecTagByWorkflowTag;
+    this.outputSpecTagByWorkflowTag = outputSpecTagByWorkflowTag;
+
     this._validateConnections();
     this.defGraph = convertedConnectionsToGraph(canonicalConns);
     this.orchestrationWorkerDef = new ZZWorkerDef({
@@ -318,23 +374,35 @@ export class ZZWorkflow {
     };
 
     this.jobIdBySpec = jobIdBySpec;
+    const inputBySpec = (specQuery: UniqueSpecQuery) => {
+      const { spec: childSpec, jobId } =
+        identifySpecAndJobIdBySpecQuery(specQuery);
+      return childSpec._deriveInputsForJob(jobId);
+    };
     this.input = {
       byTag: (tag: string) => {
         // TODO
+        const { specName, tag: specTag } =
+          this.jobGroupDef.inputSpecTagByWorkflowTag[tag];
+        const r = inputBySpec(specName);
+        return r.byTag(specTag);
       },
-      bySpec: (specQuery: UniqueSpecQuery) => {
-        const { spec: childSpec, jobId } =
-          identifySpecAndJobIdBySpecQuery(specQuery);
-        return childSpec._deriveInputsForJob(jobId);
-      },
+      bySpec: inputBySpec,
+    };
+    const outputBySpec = (specQuery: UniqueSpecQuery) => {
+      const { spec: childSpec, jobId } =
+        identifySpecAndJobIdBySpecQuery(specQuery);
+      return childSpec._deriveOutputsForJob(jobId);
     };
     this.output = {
-      byTag: (tag: string) => {},
-      bySpec: (specQuery: UniqueSpecQuery) => {
-        const { spec: childSpec, jobId } =
-          identifySpecAndJobIdBySpecQuery(specQuery);
-        return childSpec._deriveOutputsForJob(jobId);
+      byTag: (tag: string) => {
+        // TODO
+        const { specName, tag: specTag } =
+          this.jobGroupDef.outputSpecTagByWorkflowTag[tag];
+        const r = outputBySpec(specName);
+        return r.byTag(specTag);
       },
+      bySpec: outputBySpec,
     };
     this.jobGroupDef = jobGroupDef;
   }
@@ -381,8 +449,8 @@ function convertSpecAndOutletWithTags(
   spec: ZZJobSpec<any, any, any>;
   uniqueSpecLabel?: string;
   tagInSpec: string;
-  inputTagMap: Partial<Record<string, string>>;
-  outputTagMap: Partial<Record<string, string>>;
+  inputTagMap: Record<string, string>;
+  outputTagMap: Record<string, string>;
 } {
   if (Array.isArray(specAndOutletOrTagged)) {
     const [uniqueSpec, tagInSpec] = specAndOutletOrTagged;
