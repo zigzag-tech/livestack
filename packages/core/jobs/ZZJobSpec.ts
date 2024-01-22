@@ -2,7 +2,6 @@ import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorkerDef";
 import {
   InferDefMap,
   InferStreamSetType,
-  getSingleTag,
 } from "@livestack/shared/StreamDefSet";
 import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
@@ -120,17 +119,11 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
   }
 
   public inputDef(key?: keyof IMap) {
-    if (!key) {
-      key = getSingleTag(this.inputDefSet.defs) as keyof IMap;
-    }
-    return this.inputDefSet.getDef(key);
+    return this.inputDefSet.getDef(key || this.getSingleInputTag());
   }
 
   public outputDef(key: keyof OMap) {
-    if (!key) {
-      key = getSingleTag(this.outputDefSet.defs) as keyof OMap;
-    }
-    return this.outputDefSet.getDef(key);
+    return this.outputDefSet.getDef(key || this.getSingleOutputTag());
   }
 
   public derive<NewP, NewIMap, NewOMap>(
@@ -190,6 +183,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
 
   public async getJobData<
     T extends "in" | "out",
+    K extends T extends "in" ? keyof IMap : keyof OMap,
     U = T extends "in" ? IMap[keyof IMap] : OMap[keyof OMap]
   >({
     jobId,
@@ -202,7 +196,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     ioType?: T;
     order?: "asc" | "desc";
     limit?: number;
-    key?: keyof (T extends "in" ? IMap : OMap);
+    key?: K;
   }) {
     if (!this.zzEnv.db) {
       throw new Error(
@@ -211,9 +205,9 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     }
     if (!key) {
       if (ioType === "in") {
-        key = getSingleTag(this.inputDefSet.defs, "input") as typeof key;
+        key = this.getSingleInputTag() as typeof key;
       } else {
-        key = getSingleTag(this.outputDefSet.defs, "output") as typeof key;
+        key = this.getSingleOutputTag() as typeof key;
       }
     }
     const recs = await getJobDatapoints<
@@ -232,29 +226,28 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
       .map((r) => r.data)
       .filter((r) => r.terminate === false)
       .map((r) => ({
-        data: (r as WithTimestamp<WrapTerminateFalse<U>>)
-          .data as OMap[keyof OMap],
+        data: (r as WithTimestamp<WrapTerminateFalse<U>>).data as U,
         timestamp: r.timestamp,
       }));
     return points;
   }
 
-  public async enqueueJobAndWaitOnResults({
+  public async enqueueJobAndWaitOnResults<K extends keyof OMap>({
     jobId: jobId,
     jobOptions: jobOptions,
-    outputKey,
+    tag,
   }: // queueEventsOptions,
   {
     jobId?: string;
     jobOptions?: P;
-    outputKey?: keyof OMap;
-  }): Promise<{ data: OMap[keyof OMap]; timestamp: number }[]> {
+    tag?: K;
+  }): Promise<{ data: OMap[K]; timestamp: number }[]> {
     if (!jobId) {
       jobId = `${this.name}-${v4()}`;
     }
 
-    if (!outputKey) {
-      outputKey = getSingleTag(this.outputDefSet.defs, "output") as keyof OMap;
+    if (!tag) {
+      tag = this.getSingleOutputTag() as K;
     }
 
     this.logger.info(
@@ -274,9 +267,9 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
           jobId,
           ioType: "out",
           limit: 1000,
-          key: outputKey,
+          key: tag,
         });
-        return results;
+        return results as { data: OMap[K]; timestamp: number }[];
       } else if (status === "failed") {
         throw new Error(`Job ${jobId} failed!`);
       }
@@ -436,14 +429,11 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
         data: IMap[K];
         key?: K;
       }) => {
-        const tag =
-          key || (getSingleTag(this.inputDefSet.defs, "input") as keyof IMap);
+        const tag = key || (this.getSingleInputTag() as keyof IMap);
         this.feedJobInput({ jobId, data, tag: tag as K });
       },
       terminateJobInput: <K extends keyof IMap>(p?: { key?: K }) => {
-        const tag =
-          p?.key ||
-          (getSingleTag(this.inputDefSet.defs, "input") as keyof IMap);
+        const tag = p?.key || (this.getSingleInputTag() as keyof IMap);
         this.terminateJobInput({
           jobId,
           tag: tag as K,
@@ -575,11 +565,15 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
         throw new Error(`No input defined for job spec ${this.name}`);
       }
       def = wrapTerminatorAndDataId(
-        this.inputDefSet.getDef(p.tag as keyof IMap)
+        this.inputDefSet.getDef(
+          (p.tag || this.getSingleInputTag()) as keyof IMap
+        )
       ) as z.ZodType<WrapTerminatorAndDataId<T>>;
     } else if (type === "out") {
       def = wrapTerminatorAndDataId(
-        this.outputDefSet.getDef(p.tag as keyof OMap)
+        this.outputDefSet.getDef(
+          (p.tag || this.getSingleOutputTag()) as keyof OMap
+        )
       ) as z.ZodType<WrapTerminatorAndDataId<T>>;
     } else {
       throw new Error(`Invalid type ${type}`);
@@ -743,19 +737,20 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
   }
 
   public _deriveInputsForJob = (jobId: string) => {
+    const that = this;
     return {
       keys: this.inputDefSet.keys,
       feed: async (data: IMap[keyof IMap]) => {
-        const tag = getSingleTag(this.inputDefSet.defs, "input");
-        return await this.feedJobInput({
+        const tag = that.getSingleInputTag();
+        return await that.feedJobInput({
           jobId,
           data,
           tag,
         });
       },
       terminate: async <K extends keyof IMap>(tag?: K) => {
-        tag = tag || (getSingleTag(this.inputDefSet.defs, "input") as K);
-        return await this.terminateJobInput({
+        tag = tag || (that.getSingleInputTag() as K);
+        return await that.terminateJobInput({
           jobId,
           tag,
         });

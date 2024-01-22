@@ -12,7 +12,6 @@ import { ZZWorkerDef } from "../jobs/ZZWorkerDef";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
 import { ByTagCallable } from "../jobs/ZZJob";
-import { getSingleTag } from "@livestack/shared/StreamDefSet";
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
@@ -479,7 +478,7 @@ function convertSpecAndOutletWithTags(
 ): {
   spec: ZZJobSpec<any, any, any>;
   uniqueSpecLabel?: string;
-  tagInSpec: string;
+  tagInSpec?: string;
   inputTagMap: Record<string, string>;
   outputTagMap: Record<string, string>;
 } {
@@ -498,20 +497,20 @@ function convertSpecAndOutletWithTags(
     const uniqueSpecLabel = converted.uniqueSpecLabel;
     const tagMaps = resolveTagMapping(specAndOutletOrTagged);
 
-    const tagInSpec = String(
-      getSingleTag(converted.spec.outputDefSet.defs, "output")
-    );
-
     return {
       spec: converted.spec,
       ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
-      tagInSpec,
       ...tagMaps,
     };
   }
 }
 
-type CanonicalSpecAndOutlet = ReturnType<typeof convertSpecAndOutletWithTags>;
+type CanonicalSpecAndOutlet = ReturnType<
+  typeof convertSpecAndOutletWithTags
+> & {
+  tagInSpec: string;
+  tagInSpecType: "input" | "output";
+};
 
 function convertConnectionsCanonical(workflowParams: WorkflowParams) {
   const convertedConnections = workflowParams.connections.reduce(
@@ -520,15 +519,36 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
         let newAcc: [CanonicalSpecAndOutlet, CanonicalSpecAndOutlet][] = [];
         const connCanonical = conn.map(convertSpecAndOutletWithTags);
         for (let i = 0; i < connCanonical.length - 1; i++) {
-          newAcc.push([connCanonical[i], connCanonical[i + 1]]);
+          newAcc.push([
+            {
+              ...connCanonical[i],
+              tagInSpecType: "output",
+              tagInSpec:
+                connCanonical[i].tagInSpec ||
+                String(connCanonical[i].spec.getSingleOutputTag()),
+            },
+            {
+              ...connCanonical[i + 1],
+              tagInSpecType: "input",
+              tagInSpec:
+                connCanonical[i + 1].tagInSpec ||
+                String(connCanonical[i + 1].spec.getSingleInputTag()),
+            },
+          ]);
         }
         return newAcc;
       } else {
         return [
           ...acc,
           [
-            convertSpecAndOutletWithTags(conn.from),
-            convertSpecAndOutletWithTags(conn.to),
+            {
+              ...convertSpecAndOutletWithTags(conn.from),
+              tagInSpecType: "output",
+            },
+            {
+              ...convertSpecAndOutletWithTags(conn.to),
+              tagInSpecType: "input",
+            },
           ] as [CanonicalSpecAndOutlet, CanonicalSpecAndOutlet],
         ];
       }
@@ -843,7 +863,7 @@ function _tagObj<P, IMap, OMap, IKs, OKs>(
     ) => {
       const tm = tagMaps as TagMaps<IMap, OMap, IKs | Ks, OKs>;
       if (typeof tagOrMap === "string") {
-        const key = getSingleTag(spec.inputDefSet.defs, "input");
+        const key = spec.getSingleInputTag();
         tm.inputTag[key] = tagOrMap;
       } else {
         tm.inputTag = { ...tagMaps.inputTag, ...tagOrMap };
@@ -855,7 +875,7 @@ function _tagObj<P, IMap, OMap, IKs, OKs>(
     ) => {
       const tm = tagMaps as TagMaps<IMap, OMap, IKs, OKs | Ks>;
       if (typeof tagOrMap === "string") {
-        const tag = getSingleTag(spec.outputDefSet.defs, "output");
+        const tag = spec.getSingleOutputTag();
         tm.outputTag[tag] = tagOrMap;
       } else {
         tm.inputTag = { ...tagMaps.inputTag, ...tagOrMap };

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ZZJobSpecBase } from "./ZZJobSpecBase";
 
 export type InferStreamSetType<T> = T extends StreamDefSet<infer TMap>
   ? TMap
@@ -35,31 +36,12 @@ export class StreamDefSet<TMap> {
     return key in this.defs;
   };
 
-  public getDef = <K extends keyof TMap>(key?: string | K) => {
-    if (!key) {
-      key = getSingleTag(this.defs) as K;
-      const def = this.defs[key as keyof TMap];
-      return def;
-    } else {
-      if (!this.hasDef(key as string))
-        throw new Error(`No def for key ${String(key)}`);
-      const def = (
-        this.defs as Record<keyof TMap, z.ZodType<TMap[keyof TMap]>>
-      )[key as keyof TMap] as z.ZodType<TMap[K]>;
-      return def;
-    }
+  public getDef = <K extends keyof TMap>(key: K) => {
+    if (!this.hasDef(key as string))
+      throw new Error(`No def for key ${String(key)}`);
+    const def = (this.defs as Record<keyof TMap, z.ZodType<TMap[keyof TMap]>>)[
+      key as keyof TMap
+    ] as z.ZodType<TMap[K]>;
+    return def;
   };
-}
-
-export function getSingleTag<TMap>(
-  defSet: InferDefMap<TMap>,
-  type?: "input" | "output"
-) {
-  const keys = Object.keys(defSet);
-  if (keys.length !== 1) {
-    throw new Error(
-      ` ${type} is ambiguous; found more than two with tags [${keys.join(", ")}]. \nPlease specify which one to use with "${type}(tagName)".`
-    );
-  }
-  return keys[0] as keyof TMap;
 }

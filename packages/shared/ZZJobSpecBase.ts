@@ -9,6 +9,27 @@ export abstract class ZZJobSpecBase<P, IMap = {}, OMap = {}> {
   public readonly input: InferDefMap<IMap> | undefined;
   public readonly output: InferDefMap<OMap> | undefined;
 
+  public getSingleInputTag() {
+    return this.getSingleTag("input");
+  }
+  public getSingleOutputTag() {
+    return this.getSingleTag("output");
+  }
+  private getSingleTag<T extends "input"| "output">(type: T)
+  : T extends "input" ? keyof IMap : keyof OMap {
+    const defSet = type === "input" ? this.inputDefSet : this.outputDefSet;
+    if (!defSet.isSingle) {
+      const keys = defSet.keys;
+      throw new Error(
+        ` ${type} is ambiguous for spec "${this.name}"; found more than two with tags [${keys.join(
+          ", "
+        )}]. \nPlease specify which one to use with "${type}(tagName)".`
+      );
+    } else {
+      return defSet.keys[0] as T extends "input" ? keyof IMap : keyof OMap;
+    }
+  }
+
   constructor({
     name,
     input,

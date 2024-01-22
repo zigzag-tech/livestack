@@ -15,7 +15,6 @@ import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 import _ from "lodash";
-import { getSingleTag } from "@livestack/shared/StreamDefSet";
 
 export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZJobSpec<
   infer P,
@@ -145,9 +144,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
           redisConfig: this.zzEnv.redisConfig,
           jobId: this.jobId,
           isReady: true,
-          tag: tag
-            ? tag
-            : (getSingleTag(this.spec.inputDefSet.defs, "input") as keyof IMap),
+          tag: tag ? tag : this.spec.getSingleInputTag(),
         });
         sub.unsubscribe();
       });
@@ -181,15 +178,12 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     //   },
     // };
     if (this.spec.inputDefSet.isSingle) {
-      reportOnReady(
-        this.input.getObservable(),
-        getSingleTag(this.spec.inputDefSet.defs, "input")
-      );
+      reportOnReady(this.input.getObservable(), this.spec.getSingleInputTag());
     }
 
     const emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
-      tag: K = getSingleTag(this.spec.outputDefSet.defs, "output") as K
+      tag = this.spec.getSingleOutputTag() as K
     ) => {
       // this.logger.info(
       //   `Emitting output: ${this.jobId}, ${this.def.name} ` +
@@ -216,7 +210,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
         emit: (o: OMap[K]) => emitOutput(o, tag),
       });
       func.emit = (o: OMap[keyof OMap]) => {
-        const tag = getSingleTag(this.spec.outputDefSet.defs, "output");
+        const tag = this.spec.getSingleOutputTag();
         return emitOutput(o, tag as keyof OMap);
       };
       return func;
@@ -237,13 +231,13 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       nextValue,
       getObservable() {
         if (!tag) {
-          tag = getSingleTag(that.spec.inputDefSet.defs, "input") as K;
+          tag = that.spec.getSingleInputTag() as K;
         }
         return that._ensureInputStreamFn(tag).trackedObservable;
       },
       async *[Symbol.asyncIterator]() {
         if (!tag) {
-          tag = getSingleTag(that.spec.inputDefSet.defs, "input") as K;
+          tag = that.spec.getSingleInputTag() as K;
         }
         while (true) {
           const input = await nextValue(tag);
@@ -260,7 +254,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
 
   private _ensureInputStreamFn<K extends keyof IMap>(tag?: K) {
     if (this.spec.inputDefSet.isSingle) {
-      tag = getSingleTag(this.spec.inputDefSet.defs, "input") as K;
+      tag = this.spec.getSingleInputTag() as K;
     } else {
       if (!tag) {
         throw new Error(
@@ -308,7 +302,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
             redisConfig: this.zzEnv.redisConfig,
             jobId: this.jobId,
             isReady: true,
-            tag: tag || getSingleTag(this.spec.inputDefSet.defs, "input"),
+            tag: tag || this.spec.getSingleInputTag(),
           });
         }
       });
@@ -482,7 +476,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     const outputStream = await this.spec.getJobStream({
       jobId: this.jobId,
       type: "out",
-      tag: tag || getSingleTag(this.spec.outputDefSet.defs, "output"),
+      tag: tag || this.spec.getSingleOutputTag(),
     });
     await outputStream.pub({
       message: {
