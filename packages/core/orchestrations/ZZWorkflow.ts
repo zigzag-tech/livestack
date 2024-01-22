@@ -10,9 +10,9 @@ import { z } from "zod";
 import Graph from "graphology";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { ZZEnv } from "../jobs/ZZEnv";
-import { SpecAndOutlet, UniqueSpecQuery } from "../jobs/ZZJobSpec";
-import { SpecOrName } from "@livestack/shared/ZZJobSpecBase";
-import { resolveUniqueSpec } from "../jobs/ZZJobSpec";
+import { InferDefMap } from "@livestack/shared/StreamDefSet";
+
+type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
 
@@ -22,22 +22,35 @@ export type JobSpecAndJobOptions<JobSpec> = {
   jobLabel?: string;
 };
 
-const WorkflowParams = z.object({
-  connections: z.array(
-    z
-      .object({
-        from: SpecAndOutlet,
-        to: SpecAndOutlet,
-      })
-      .or(z.array(SpecAndOutlet))
-  ),
-});
-type WorkflowParams = z.infer<typeof WorkflowParams>;
+// const WorkflowParams = z.object({
+//   connections: z.array(
+//     z
+//       .object({
+//         from: SpecAndOutlet,
+//         to: SpecAndOutlet,
+//       })
+//       .or(z.array(SpecAndOutlet))
+//   ),
+// });
+type WorkflowParams = {
+  connections: (
+    | {
+        from: SpecAndOutletOrTagged;
+        to: SpecAndOutletOrTagged;
+      }
+    | SpecAndOutletOrTagged[]
+  )[];
+};
 
 type CanonicalWorkflowParams = ReturnType<typeof convertConnectionsCanonical>;
 
 type CanonicalConnection = CanonicalWorkflowParams[number];
 type CanonicalConnectionPoint = CanonicalConnection[number];
+export const SpecOrName = z.union([
+  z.string(),
+  z.instanceof(ZZJobSpec<any, any, any>),
+]);
+export type SpecOrName = z.infer<typeof SpecOrName>; // Conversion functions using TypeScript
 
 const WorkflowChildJobOptions = z.array(
   z.object({
@@ -52,7 +65,7 @@ const WorkflowJobOptions = z.object({
 });
 
 type WorkflowJobOptions = z.infer<typeof WorkflowJobOptions>;
-export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions> {
+export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions, any, any> {
   public readonly connections: CanonicalConnection[];
   public readonly defGraph: DefGraph;
   private orchestrationWorkerDef: ZZWorkerDef<WorkflowJobOptions>;
@@ -70,12 +83,12 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions> {
       jobOptions: WorkflowJobOptions,
       zzEnv,
     });
-    const canonical = convertConnectionsCanonical({
+    const canonicalConns = convertConnectionsCanonical({
       connections,
     });
-    this.connections = canonical;
+    this.connections = canonicalConns;
     this._validateConnections();
-    this.defGraph = convertedConnectionsToGraph(canonical);
+    this.defGraph = convertedConnectionsToGraph(canonicalConns);
     this.orchestrationWorkerDef = new ZZWorkerDef({
       jobSpec: this,
       processor: async ({
@@ -95,8 +108,8 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions> {
           const jobNode = instG.getNodeAttributes(jobNodeId) as JobNode;
 
           //calculate input and output overrides
-          const inputStreamIdOverridesByKey: Record<string, string> = {};
-          const outputStreamIdOverridesByKey: Record<string, string> = {};
+          const inputStreamIdOverridesByTag: Record<string, string> = {};
+          const outputStreamIdOverridesByTag: Record<string, string> = {};
 
           // get the stream id overrides for the input
           const inboundEdges = instG.inboundEdges(jobNodeId);
@@ -117,7 +130,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions> {
               throw new Error("Expected stream node");
             }
             const streamId = streamNode.streamId;
-            inputStreamIdOverridesByKey[inletNode.key] = streamId;
+            inputStreamIdOverridesByTag[inletNode.tag] = streamId;
           }
 
           // get the stream id overrides for the output
@@ -141,7 +154,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions> {
               throw new Error("Expected stream node");
             }
             const streamId = streamNode.streamId;
-            outputStreamIdOverridesByKey[outletNode.key] = streamId;
+            outputStreamIdOverridesByTag[outletNode.tag] = streamId;
           }
 
           const childSpecName = jobNode.specName;
@@ -151,12 +164,12 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions> {
             jobOptions: childrenJobOptions?.find(({ spec: specQuery }) => {
               const specInfo = resolveUniqueSpec(specQuery);
               return (
-                specInfo.specName === childSpecName &&
+                specInfo.spec.name === childSpecName &&
                 specInfo.uniqueSpecLabel === jobNode.uniqueSpecLabel
               );
             })?.params,
-            inputStreamIdOverridesByKey,
-            outputStreamIdOverridesByKey,
+            inputStreamIdOverridesByTag,
+            outputStreamIdOverridesByTag,
           });
         }
       },
@@ -170,14 +183,14 @@ export class ZZWorkflowSpec extends ZZJobSpec<WorkflowJobOptions> {
         const outSpecInfo = this.connections[i][j];
         const inSpecInfo = this.connections[i][j + 1];
         validateSpecHasKey({
-          spec: ZZJobSpec.lookupByName(outSpecInfo.specName),
+          spec: outSpecInfo.spec,
           type: "out",
-          key: outSpecInfo.key,
+          tag: outSpecInfo.tagInSpec,
         });
         validateSpecHasKey({
-          spec: ZZJobSpec.lookupByName(inSpecInfo.specName),
+          spec: inSpecInfo.spec,
           type: "in",
-          key: inSpecInfo.key,
+          tag: inSpecInfo.tagInSpec,
         });
       }
 
@@ -243,11 +256,16 @@ export class ZZWorkflow {
   public readonly jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
   public readonly graph: InstantiatedGraph;
   public readonly input: {
+    byTag: (tag: string) => {
+      feed: (data: any) => Promise<void>;
+      terminate: () => Promise<void>;
+    };
     bySpec: (
       spec: UniqueSpecQuery
     ) => ReturnType<ZZJobSpec<any, any, any>["_deriveInputsForJob"]>;
   };
   public readonly output: {
+    byTag: (tag: string) => AsyncGenerator<{ data: any }>;
     bySpec: (
       spec: UniqueSpecQuery
     ) => ReturnType<ZZJobSpec<any, any, any>["_deriveOutputsForJob"]>;
@@ -274,14 +292,14 @@ export class ZZWorkflow {
       const jobNodeId = instaG.findNode((id, n) => {
         return (
           n.nodeType === "job" &&
-          n.specName === specInfo.specName &&
+          n.specName === specInfo.spec.name &&
           n.uniqueSpecLabel === specInfo.uniqueSpecLabel
         );
       });
 
       if (!jobNodeId) {
         throw new Error(
-          `Job of spec ${specInfo.specName} ${
+          `Job of spec ${specInfo.spec.name} ${
             specInfo.uniqueSpecLabel
               ? `with label ${specInfo.uniqueSpecLabel}`
               : ""
@@ -289,7 +307,7 @@ export class ZZWorkflow {
         );
       }
       const jobId = (instaG.getNodeAttributes(jobNodeId) as JobNode).jobId;
-      const childSpec = ZZJobSpec.lookupByName(specInfo.specName);
+      const childSpec = ZZJobSpec.lookupByName(specInfo.spec.name);
 
       return { spec: childSpec, jobId };
     };
@@ -299,25 +317,25 @@ export class ZZWorkflow {
       return jobId;
     };
 
-    const input = {
+    this.jobIdBySpec = jobIdBySpec;
+    this.input = {
+      byTag: (tag: string) => {
+        // TODO
+      },
       bySpec: (specQuery: UniqueSpecQuery) => {
         const { spec: childSpec, jobId } =
           identifySpecAndJobIdBySpecQuery(specQuery);
         return childSpec._deriveInputsForJob(jobId);
       },
     };
-
-    const output = {
+    this.output = {
+      byTag: (tag: string) => {},
       bySpec: (specQuery: UniqueSpecQuery) => {
         const { spec: childSpec, jobId } =
           identifySpecAndJobIdBySpecQuery(specQuery);
         return childSpec._deriveOutputsForJob(jobId);
       },
     };
-
-    this.jobIdBySpec = jobIdBySpec;
-    this.input = input;
-    this.output = output;
     this.jobGroupDef = jobGroupDef;
   }
 
@@ -357,38 +375,50 @@ export function connect<
   };
 }
 
-function convertSpecAndOutlet(specAndOutlet: SpecAndOutlet): {
-  specName: string;
+function convertSpecAndOutletWithTags(
+  specAndOutletOrTagged: SpecAndOutletOrTagged
+): {
+  spec: ZZJobSpec<any, any, any>;
   uniqueSpecLabel?: string;
-  key: string;
+  tagInSpec: string;
+  inputTagMap: Partial<Record<string, string>>;
+  outputTagMap: Partial<Record<string, string>>;
 } {
-  if (Array.isArray(specAndOutlet)) {
-    const [uniqueSpec, key] = specAndOutlet;
+  if (Array.isArray(specAndOutletOrTagged)) {
+    const [uniqueSpec, tagInSpec] = specAndOutletOrTagged;
     const uniqueSpecLabel = resolveUniqueSpec(uniqueSpec).uniqueSpecLabel;
+    const tagMaps = resolveTagMapping(uniqueSpec);
     return {
-      specName: resolveUniqueSpec(uniqueSpec).specName,
+      spec: resolveUniqueSpec(uniqueSpec).spec,
       ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
-      key: key,
+      tagInSpec,
+      ...tagMaps,
     };
   } else {
-    const converted = resolveUniqueSpec(specAndOutlet);
+    const converted = resolveUniqueSpec(specAndOutletOrTagged);
     const uniqueSpecLabel = converted.uniqueSpecLabel;
+    const tagMaps = resolveTagMapping(specAndOutletOrTagged);
+    const tagInSpec = String(
+      getSingleTag(converted.spec.outputDefSet.defs, "output")
+    );
+
     return {
-      specName: converted.specName,
+      spec: converted.spec,
       ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
-      key: "default",
+      tagInSpec,
+      ...tagMaps,
     };
   }
 }
 
-type CanonicalSpecAndOutlet = ReturnType<typeof convertSpecAndOutlet>;
+type CanonicalSpecAndOutlet = ReturnType<typeof convertSpecAndOutletWithTags>;
 
 function convertConnectionsCanonical(workflowParams: WorkflowParams) {
   const convertedConnections = workflowParams.connections.reduce(
     (acc, conn) => {
       if (Array.isArray(conn)) {
         let newAcc: [CanonicalSpecAndOutlet, CanonicalSpecAndOutlet][] = [];
-        const connCanonical = conn.map(convertSpecAndOutlet);
+        const connCanonical = conn.map(convertSpecAndOutletWithTags);
         for (let i = 0; i < connCanonical.length - 1; i++) {
           newAcc.push([connCanonical[i], connCanonical[i + 1]]);
         }
@@ -396,10 +426,10 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
       } else {
         return [
           ...acc,
-          [convertSpecAndOutlet(conn.from), convertSpecAndOutlet(conn.to)] as [
-            CanonicalSpecAndOutlet,
-            CanonicalSpecAndOutlet
-          ],
+          [
+            convertSpecAndOutletWithTags(conn.from),
+            convertSpecAndOutletWithTags(conn.to),
+          ] as [CanonicalSpecAndOutlet, CanonicalSpecAndOutlet],
         ];
       }
     },
@@ -416,11 +446,11 @@ type SpecNode = {
 };
 type OutletNode = {
   nodeType: "outlet";
-  key: string;
+  tag: string;
 };
 type InletNode = {
   nodeType: "inlet";
-  key: string;
+  tag: string;
 };
 type DefGraphNode = { label: string } & (
   | SpecNode
@@ -455,11 +485,11 @@ type InstantiatedGraph = Graph<
       }
     | {
         nodeType: "inlet";
-        key: string;
+        tag: string;
       }
     | {
         nodeType: "outlet";
-        key: string;
+        tag: string;
       }
   )
 >;
@@ -487,29 +517,29 @@ function convertedConnectionsToGraph(
     const fromSpecIdentifier = uniqueSpecIdentifier(from);
     const fromUniqueLabel = from.uniqueSpecLabel;
     const fromSpecNodeId = createOrGetNodeId(fromSpecIdentifier, {
-      specName: from.specName,
+      specName: from.spec.name,
       ...(fromUniqueLabel ? { uniqueSpecLabel: fromUniqueLabel } : {}),
       nodeType: "spec",
       label: fromSpecIdentifier,
     });
     const fromOutletNodeId = createOrGetNodeId(
-      `${fromSpecIdentifier}/${from.key}`,
+      `${fromSpecIdentifier}/${from.tagInSpec}`,
       {
         nodeType: "outlet",
-        key: from.key,
-        label: `${fromSpecIdentifier}/${from.key}`,
+        tag: from.tagInSpec,
+        label: `${fromSpecIdentifier}/${from.tagInSpec}`,
       }
     );
     const streamId = uniqueStreamIdentifier({
       from: {
-        specName: from.specName,
+        specName: from.tagInSpec,
         uniqueSpecLabel: from.uniqueSpecLabel,
-        key: from.key,
+        tag: from.tagInSpec,
       },
       to: {
-        specName: to.specName,
+        specName: to.spec.name,
         uniqueSpecLabel: to.uniqueSpecLabel,
-        key: to.key,
+        tag: to.tagInSpec,
       },
     });
     const streamNodeId = createOrGetNodeId(streamId, {
@@ -517,15 +547,15 @@ function convertedConnectionsToGraph(
       label: streamId,
     });
     const toSpecIdentifier = uniqueSpecIdentifier(to);
-    const id = `${toSpecIdentifier}/${to.key}`;
+    const id = `${toSpecIdentifier}/${to.tagInSpec}`;
     const toInletNodeId = createOrGetNodeId(id, {
       nodeType: "inlet",
-      key: to.key,
+      tag: to.tagInSpec,
       label: id,
     });
     const toUniqueLabel = to.uniqueSpecLabel;
     const toSpecNodeId = createOrGetNodeId(toSpecIdentifier, {
-      specName: to.specName,
+      specName: to.spec.name,
       ...(toUniqueLabel ? { uniqueSpecLabel: toUniqueLabel } : {}),
       nodeType: "spec",
       label: toSpecIdentifier,
@@ -549,26 +579,32 @@ function convertedConnectionsToGraph(
 
 function uniqueSpecIdentifier({
   specName,
+  spec,
   uniqueSpecLabel,
 }: {
-  specName: string;
+  specName?: string;
+  spec?: ZZJobSpec<any, any, any>;
   uniqueSpecLabel?: string;
 }) {
+  specName = specName ?? spec?.name;
+  if (!specName) {
+    throw new Error("specName or spec must be provided");
+  }
   return `${specName}${uniqueSpecLabel ? `[${uniqueSpecLabel}]` : ""}`;
 }
 
 function validateSpecHasKey<P, IMap, OMap>({
   spec,
   type,
-  key,
+  tag,
 }: {
   spec: ZZJobSpec<P, IMap, OMap>;
   type: "in" | "out";
-  key: string;
+  tag: string;
 }) {
   if (type === "in") {
-    if (!spec.outputDefSet.hasDef(key)) {
-      throw new Error(`Invalid spec key: ${spec.name}/${key} specified.`);
+    if (!spec.outputDefSet.hasDef(tag)) {
+      throw new Error(`Invalid spec tag: ${spec.name}/${tag} specified.`);
     }
   }
 }
@@ -604,12 +640,12 @@ function instantiateFromDefGraph({
         from: {
           specName: sourceSpecNode.specName,
           uniqueSpecLabel: sourceSpecNode.uniqueSpecLabel,
-          key: outletNode.key,
+          tag: outletNode.tag,
         },
         to: {
           specName: targetSpecNode.specName,
           uniqueSpecLabel: targetSpecNode.uniqueSpecLabel,
-          key: inletNode.key,
+          tag: inletNode.tag,
         },
       });
       g.addNode(streamId, {
@@ -668,5 +704,145 @@ function getStreamNodes(g: DefGraph, streamNodeId: string) {
     targetSpecNode,
     outletNode,
     inletNode,
+  };
+}
+
+type TagMaps<IMap, OMap, IKs, OKs> = {
+  inputTag: Partial<Record<keyof IMap, IKs>>;
+  outputTag: Partial<Record<keyof OMap, OKs>>;
+};
+
+interface TagObj<P, IMap, OMap, IKs, OKs> {
+  spec: ZZJobSpec<P, IMap, OMap>;
+  input: <newK extends string>(
+    tagOrMap: newK | Partial<Record<keyof IMap, newK>>
+  ) => TagObj<P, IMap, OMap, IKs | newK, OKs>;
+  output: <newK extends string>(
+    tagOrMap: newK | Partial<Record<keyof OMap, newK>>
+  ) => TagObj<P, IMap, OMap, IKs, OKs | newK>;
+  _tagMaps: TagMaps<IMap, OMap, IKs, OKs>;
+}
+
+export function tag<P, IMap, OMap>(spec: ZZJobSpec<P, IMap, OMap>) {
+  return _tagObj(spec, {
+    inputTag: {},
+    outputTag: {},
+  } as TagMaps<IMap, OMap, never, never>);
+}
+
+function _tagObj<P, IMap, OMap, IKs, OKs>(
+  spec: ZZJobSpec<P, IMap, OMap>,
+  _tagMaps: TagMaps<IMap, OMap, IKs, OKs>
+): TagObj<P, IMap, OMap, IKs, OKs> {
+  const tagMaps = { ..._tagMaps };
+  return {
+    spec,
+    _tagMaps: tagMaps,
+    input: <Ks extends string>(
+      tagOrMap: Ks | Partial<Record<keyof IMap, Ks>>
+    ) => {
+      const tm = tagMaps as TagMaps<IMap, OMap, IKs | Ks, OKs>;
+      if (typeof tagOrMap === "string") {
+        const key = getSingleTag(spec.inputDefSet.defs, "input");
+        tm.inputTag[key] = tagOrMap;
+      } else {
+        tm.inputTag = { ...tagMaps.inputTag, ...tagOrMap };
+      }
+      return _tagObj(spec, tm);
+    },
+    output: <Ks extends string>(
+      tagOrMap: Ks | Partial<Record<keyof OMap, string>>
+    ) => {
+      const tm = tagMaps as TagMaps<IMap, OMap, IKs, OKs | Ks>;
+      if (typeof tagOrMap === "string") {
+        const key = getSingleTag(spec.outputDefSet.defs, "output");
+        tm.outputTag[key] = tagOrMap;
+      } else {
+        tm.inputTag = { ...tagMaps.inputTag, ...tagOrMap };
+      }
+      return _tagObj(spec, tm);
+    },
+  };
+}
+
+export function getSingleTag<TMap>(
+  defSet: InferDefMap<TMap>,
+  type: "input" | "output"
+) {
+  const keys = Object.keys(defSet);
+  if (keys.length !== 1) {
+    throw new Error(
+      `Expected exactly one tag in the defintion of ${type}, found ${keys.length}.`
+    );
+  }
+  return keys[0] as keyof TMap;
+}
+
+export const UniqueSpecQuery = z.union([
+  SpecOrName,
+  z.object({
+    spec: SpecOrName,
+    label: z.string().default("default_label"),
+  }),
+]);
+export type UniqueSpecQuery = z.infer<typeof UniqueSpecQuery>;
+export const SpecAndOutlet = z.union([
+  UniqueSpecQuery,
+  z.tuple([UniqueSpecQuery, z.string().or(z.literal("default"))]),
+]);
+export type SpecAndOutlet = z.infer<typeof SpecAndOutlet>;
+export function resolveUniqueSpec(
+  uniqueSpec: UniqueSpecQuery | TagObj<any, any, any, any, any>
+): {
+  spec: ZZJobSpec<any, any, any>;
+  uniqueSpecLabel?: string;
+} {
+  if (typeof uniqueSpec === "string") {
+    const spec = ZZJobSpec.lookupByName(uniqueSpec);
+    return {
+      spec,
+    };
+  } else if ("spec" in (uniqueSpec as any) && "label" in (uniqueSpec as any)) {
+    const spec = convertSpecOrName(
+      (
+        uniqueSpec as {
+          spec: SpecOrName;
+          label: string;
+        }
+      ).spec
+    );
+
+    return {
+      spec,
+      uniqueSpecLabel: (
+        uniqueSpec as {
+          spec: SpecOrName;
+          label: string;
+        }
+      ).label,
+    };
+  } else {
+    const spec = convertSpecOrName(uniqueSpec as any);
+    return {
+      spec,
+    };
+  }
+}
+
+export function convertSpecOrName(specOrName: SpecOrName) {
+  if (typeof specOrName === "string") {
+    return ZZJobSpec.lookupByName(specOrName);
+  } else {
+    return specOrName;
+  }
+}
+
+function resolveTagMapping({
+  inputTag,
+  outputTag,
+}: Partial<TagMaps<any, any, any, any>> | any) {
+  return {
+    inputTagMap: inputTag ?? {},
+    outputTagMap: outputTag ?? {},
   };
 }

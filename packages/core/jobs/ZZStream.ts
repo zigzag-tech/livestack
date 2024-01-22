@@ -3,7 +3,6 @@ import { ZZEnv } from "./ZZEnv";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
 import { createHash } from "crypto";
 import { getLogger } from "../utils/createWorkerLogger";
-import { z } from "zod";
 import { addDatapoint, ensureStreamRec } from "../db/knexConn";
 import { v4 } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -254,6 +253,22 @@ export class ZZStream<T extends object> {
       zzEnv: this.zzEnv,
       initialCursor: "0",
     });
+  }
+
+  public static define<T extends object>(
+    ...p: ConstructorParameters<typeof ZZStreamDef<T>>
+  ) {
+    return new ZZStreamDef<T>(...p);
+  }
+}
+
+export class ZZStreamDef<T> {
+  public readonly streamDefName: string;
+  public readonly def?: ZodType<T>;
+
+  constructor(streamDefName: string, def?: ZodType<T>) {
+    this.streamDefName = streamDefName;
+    this.def = def;
   }
 }
 

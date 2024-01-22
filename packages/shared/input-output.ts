@@ -7,5 +7,5 @@ export function genSpecLets() {
 }
 
 export function genLet<K>() {
-  const byKey = (key: K) => {};
+  const byTag = (key: K) => {};
 }

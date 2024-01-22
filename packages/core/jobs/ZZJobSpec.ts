@@ -28,12 +28,16 @@ import {
   wrapStreamSubscriberWithTermination,
   wrapTerminatorAndDataId,
 } from "../utils/io";
-import { WithTimestamp, ZZStream, ZZStreamSubscriber } from "./ZZStream";
+import {
+  WithTimestamp,
+  ZZStream,
+  ZZStreamDef,
+  ZZStreamSubscriber,
+} from "./ZZStream";
 import { ZZWorkerDef } from "./ZZWorker";
 import pLimit from "p-limit";
-import { convertSpecOrName } from "@livestack/shared/ZZJobSpecBase";
 import { ZZJobSpecBase } from "@livestack/shared/ZZJobSpecBase";
-import { SpecOrName } from "@livestack/shared/ZZJobSpecBase";
+import { getSingleTag } from "../orchestrations/ZZWorkflow";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -268,18 +272,18 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     }
   }
 
-  async feedJobInput({
+  async feedJobInput<K extends keyof IMap>({
     jobId,
     data,
-    key = "default" as keyof IMap,
+    tag,
   }: {
     jobId: string;
-    data: IMap[keyof IMap];
-    key?: keyof IMap;
+    data: IMap[K];
+    tag: K;
   }) {
     await this._getStreamAndSendDataToPLimited({
       jobId,
-      key,
+      tag: tag,
       type: "in",
       data: {
         data,
@@ -301,12 +305,12 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
 
   public async _getStreamAndSendDataToPLimited<T extends "in" | "out">({
     jobId,
-    key,
+    tag,
     type,
     data: d,
   }: {
     jobId: string;
-    key: T extends "in" ? keyof IMap : keyof OMap;
+    tag: T extends "in" ? keyof IMap : keyof OMap;
     type: T;
     data: WrapTerminatorAndDataId<
       T extends "in" ? IMap[keyof IMap] : OMap[keyof OMap]
@@ -324,11 +328,11 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
       >;
     }>;
 
-    if (!dict[key]) {
-      dict[key] = pLimit(1);
+    if (!dict[tag]) {
+      dict[tag] = pLimit(1);
     }
 
-    const limit = dict[key]!;
+    const limit = dict[tag]!;
 
     await limit(async () => {
       // console.debug("stream_data", JSON.stringify(d, longStringTruncator));
@@ -338,14 +342,14 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
         // const lastV = await stream.lastValue();
         // mark job terminated in redis key value store
         const isTerminated =
-          (await redis.get(`terminated__${jobId}/${type}/${String(key)}`)) ===
+          (await redis.get(`terminated__${jobId}/${type}/${String(tag)}`)) ===
           "true";
         await redis.disconnect();
         if (isTerminated) {
           this.logger.error(
             `Cannot send ${
               type === "in" ? "input" : "output"
-            } to a terminated stream! jobId: ${jobId}, key: ${String(key)}`
+            } to a terminated stream! jobId: ${jobId}, tag: ${String(tag)}`
           );
           throw new Error(
             `Cannot send ${
@@ -355,7 +359,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
         }
       } else {
         await redis.set(
-          `terminated__${jobId}/${type}/${String(key)}`,
+          `terminated__${jobId}/${type}/${String(tag)}`,
           "true",
           "EX",
           600
@@ -365,7 +369,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
 
       const stream = await this.getJobStream({
         jobId,
-        key,
+        tag: tag,
         type,
       });
       await stream.pub({
@@ -374,7 +378,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
           ? {
               jobInfo: {
                 jobId,
-                jobOutputKey: String(key),
+                jobOutputKey: String(tag),
               },
             }
           : {}),
@@ -382,10 +386,10 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     });
   }
 
-  async terminateJobInput({ jobId, key }: { jobId: string; key?: keyof IMap }) {
+  async terminateJobInput({ jobId, tag }: { jobId: string; tag?: keyof IMap }) {
     await this._getStreamAndSendDataToPLimited({
       jobId,
-      key: key || ("default" as keyof IMap),
+      tag: tag || ("default" as keyof IMap),
       type: "in",
       data: {
         terminate: true,
@@ -395,20 +399,20 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
 
   public async waitForJobReadyForInputs({
     jobId,
-    key,
+    tag,
   }: {
     jobId: string;
-    key?: keyof IMap;
+    tag?: keyof IMap;
   }) {
     let isReady = await this.getJobReadyForInputsInRedis({
       jobId,
-      key: key ? key : ("default" as keyof IMap),
+      key: tag ? tag : ("default" as keyof IMap),
     });
     while (!isReady) {
       await sleep(100);
       isReady = await this.getJobReadyForInputsInRedis({
         jobId,
-        key: key ? key : ("default" as keyof IMap),
+        key: tag ? tag : ("default" as keyof IMap),
       });
       // console.log("isReady", isReady);
     }
@@ -420,12 +424,20 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
       }: {
         data: IMap[K];
         key?: K;
-      }) => this.feedJobInput({ jobId, data, key }),
-      terminateJobInput: <K extends keyof IMap>(p?: { key?: K }) =>
+      }) => {
+        const tag =
+          key || (getSingleTag(this.inputDefSet.defs, "input") as keyof IMap);
+        this.feedJobInput({ jobId, data, tag: tag as K });
+      },
+      terminateJobInput: <K extends keyof IMap>(p?: { key?: K }) => {
+        const tag =
+          p?.key ||
+          (getSingleTag(this.inputDefSet.defs, "input") as keyof IMap);
         this.terminateJobInput({
           jobId,
-          key: p?.key,
-        }),
+          tag: tag as K,
+        });
+      },
     };
   }
 
@@ -446,7 +458,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     }
   };
 
-  private streamIdOverridesByKeyByTypeByJobId: {
+  private streamIdOverridesByTagByTypeByJobId: {
     [jobId: string]: {
       in: Partial<Record<keyof IMap, string>> | null;
       out: Partial<Record<keyof OMap, string>> | null;
@@ -462,16 +474,16 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     type: "in" | "out";
     key: keyof IMap | keyof OMap;
   }) {
-    const overridesById = this.streamIdOverridesByKeyByTypeByJobId[jobId];
+    const overridesById = this.streamIdOverridesByTagByTypeByJobId[jobId];
     if (!overridesById) {
-      this.streamIdOverridesByKeyByTypeByJobId[jobId] = {
+      this.streamIdOverridesByTagByTypeByJobId[jobId] = {
         in: null,
         out: null,
       };
     }
 
     const overridesByType =
-      this.streamIdOverridesByKeyByTypeByJobId[jobId][type];
+      this.streamIdOverridesByTagByTypeByJobId[jobId][type];
     if (!overridesByType && this.zzEnv.db) {
       const connectors = await getJobStreamConnectorRecs({
         projectId: this.zzEnv.projectId,
@@ -482,13 +494,13 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
       const overrides = _.fromPairs(
         connectors.map((c) => [c.key, c.stream_id])
       );
-      this.streamIdOverridesByKeyByTypeByJobId[jobId][type] =
+      this.streamIdOverridesByTagByTypeByJobId[jobId][type] =
         overrides as Partial<Record<keyof IMap | keyof OMap, string>>;
     }
 
     return (
       ((
-        this.streamIdOverridesByKeyByTypeByJobId[jobId][type]! as Record<
+        this.streamIdOverridesByTagByTypeByJobId[jobId][type]! as Record<
           any,
           string
         >
@@ -505,14 +517,14 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     jobId: string;
     type: "in" | "out";
     p: {
-      key: keyof IMap | keyof OMap;
+      tag: keyof IMap | keyof OMap;
     };
   }) {
     let streamId: string;
     const streamIdOverride = await this.getStreamIdOverride({
       jobId,
       type,
-      key: p.key,
+      key: p.tag,
     });
     if (streamIdOverride) {
       streamId = streamIdOverride;
@@ -525,11 +537,11 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
         from:
           type === "in"
             ? undefined
-            : { specName: this.name, key: String(p.key) },
+            : { specName: this.name, tag: String(p.tag) },
         to:
           type === "out"
             ? undefined
-            : { specName: this.name, key: String(p.key) },
+            : { specName: this.name, tag: String(p.tag) },
       });
     }
     return streamId;
@@ -541,7 +553,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
   >(p: {
     jobId: string;
     type: TT;
-    key: K;
+    tag: K;
   }) => {
     const { jobId, type } = p;
 
@@ -552,11 +564,11 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
         throw new Error(`No input defined for job spec ${this.name}`);
       }
       def = wrapTerminatorAndDataId(
-        this.inputDefSet.getDef(p.key as keyof IMap)
+        this.inputDefSet.getDef(p.tag as keyof IMap)
       ) as z.ZodType<WrapTerminatorAndDataId<T>>;
     } else if (type === "out") {
       def = wrapTerminatorAndDataId(
-        this.outputDefSet.getDef(p.key as keyof OMap)
+        this.outputDefSet.getDef(p.tag as keyof OMap)
       ) as z.ZodType<WrapTerminatorAndDataId<T>>;
     } else {
       throw new Error(`Invalid type ${type}`);
@@ -591,7 +603,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
       this.getJobStream({
         jobId,
         type: "out",
-        key: key || ("default" as keyof OMap),
+        tag: key || ("default" as keyof OMap),
       }).then((stream) => {
         let subscriber: ZZStreamSubscriber<
           WrapTerminatorAndDataId<OMap[keyof OMap]>
@@ -615,15 +627,15 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     jobId?: string;
     jobOptions?: P;
     bullMQJobsOpts?: JobsOptions;
-    inputStreamIdOverridesByKey?: Partial<Record<keyof IMap, string>>;
-    outputStreamIdOverridesByKey?: Partial<Record<keyof OMap, string>>;
+    inputStreamIdOverridesByTag?: Partial<Record<keyof IMap, string>>;
+    outputStreamIdOverridesByTag?: Partial<Record<keyof OMap, string>>;
   }) {
     let {
       jobId = v4(),
       jobOptions,
       bullMQJobsOpts,
-      inputStreamIdOverridesByKey,
-      outputStreamIdOverridesByKey,
+      inputStreamIdOverridesByTag,
+      outputStreamIdOverridesByTag,
     } = p || {};
     // console.debug("ZZJobSpec._enqueueJob", jobId, jobOptions);
     // force job id to be the same as name
@@ -644,7 +656,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
           jobOptions,
         });
 
-        for (const [key, streamId] of _.entries(inputStreamIdOverridesByKey)) {
+        for (const [key, streamId] of _.entries(inputStreamIdOverridesByTag)) {
           await ensureStreamRec({
             projectId,
             streamId: streamId as string,
@@ -660,7 +672,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
           });
         }
 
-        for (const [key, streamId] of _.entries(outputStreamIdOverridesByKey)) {
+        for (const [key, streamId] of _.entries(outputStreamIdOverridesByTag)) {
           await ensureStreamRec({
             projectId,
             streamId: streamId as string,
@@ -723,42 +735,34 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     return {
       keys: this.inputDefSet.keys,
       feed: async (data: IMap[keyof IMap]) => {
-        if (!this.inputDefSet.hasDef("default")) {
-          throw new Error(
-            `There are more than one input keys defined for job ${this.name}, please use jobSpec.byKey({key}).feed() instead.`
-          );
-        }
+        const tag = getSingleTag(this.inputDefSet.defs, "input");
         return await this.feedJobInput({
           jobId,
           data,
-          key: "default" as keyof IMap,
+          tag,
         });
       },
-      terminate: async <K extends keyof IMap>(key: K = "default" as K) => {
-        if (!this.inputDefSet.hasDef("default")) {
-          throw new Error(
-            `There are more than one input keys defined for job ${this.name}, please use jobSpec.byKey({key}).terminate() instead.`
-          );
-        }
+      terminate: async <K extends keyof IMap>(tag?: K) => {
+        tag = tag || (getSingleTag(this.inputDefSet.defs, "input") as K);
         return await this.terminateJobInput({
           jobId,
-          key,
+          tag,
         });
       },
 
-      byKey: <K extends keyof IMap>(key: K) => {
+      byTag: <K extends keyof IMap>(key: K) => {
         return {
           feed: async (data: IMap[K]) => {
             return await this.feedJobInput({
               jobId,
               data,
-              key,
+              tag: key,
             });
           },
           terminate: async () => {
             return await this.terminateJobInput({
               jobId,
-              key,
+              tag: key,
             });
           },
         };
@@ -767,7 +771,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
   };
 
   public _deriveOutputsForJob = (jobId: string) => {
-    const subscriberByKey = <K extends keyof OMap>(key: K) => {
+    const subscriberByTag = <K extends keyof OMap>(key: K) => {
       const subscriber = this.createOutputCollector({
         jobId,
         key,
@@ -776,20 +780,20 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     };
 
     let subscriberByDefaultKey: Awaited<
-      ReturnType<typeof subscriberByKey>
+      ReturnType<typeof subscriberByTag>
     > | null = null;
 
     const nextValue = async <K extends keyof OMap>() => {
       if (subscriberByDefaultKey === null) {
-        subscriberByDefaultKey = await subscriberByKey("default" as K);
+        subscriberByDefaultKey = await subscriberByTag("default" as K);
       }
       return await subscriberByDefaultKey.nextValue();
     };
 
     return {
       keys: this.outputDefSet.keys,
-      byKey: <K extends keyof OMap>(key: K) => {
-        return subscriberByKey(key);
+      byTag: <K extends keyof OMap>(key: K) => {
+        return subscriberByTag(key);
       },
       nextValue,
       async *[Symbol.asyncIterator]() {
@@ -843,12 +847,12 @@ export function uniqueStreamIdentifier({
 }: {
   from?: {
     specName: string;
-    key: string;
+    tag: string;
     uniqueSpecLabel?: string;
   };
   to?: {
     specName: string;
-    key: string;
+    tag: string;
     uniqueSpecLabel?: string;
   };
 }) {
@@ -857,14 +861,14 @@ export function uniqueStreamIdentifier({
         from.uniqueSpecLabel && from.uniqueSpecLabel !== "default_label"
           ? `[${from.uniqueSpecLabel}]`
           : ""
-      }/${from.key}`
+      }/${from.tag}`
     : "(*)";
   const toStr = !!to
     ? `${to.specName}${
         to.uniqueSpecLabel && to.uniqueSpecLabel !== "default_label"
           ? `[${to.uniqueSpecLabel}]`
           : ""
-      }/${to.key}`
+      }/${to.tag}`
     : "(*)";
   return `${fromStr}>>${toStr}`;
 }
@@ -917,47 +921,3 @@ export const getCachedQueueByName = <JobOptions, JobReturnType>(
     return queue;
   }
 };
-export const UniqueSpecQuery = z.union([
-  SpecOrName,
-  z.object({
-    spec: SpecOrName,
-    label: z.string().default("default_label"),
-  }),
-]);
-export type UniqueSpecQuery = z.infer<typeof UniqueSpecQuery>;
-export const SpecAndOutlet = z.union([
-  UniqueSpecQuery,
-  z.tuple([UniqueSpecQuery, z.string().or(z.literal("default"))]),
-]);
-export type SpecAndOutlet = z.infer<typeof SpecAndOutlet>;
-export function resolveUniqueSpec(uniqueSpec: UniqueSpecQuery): {
-  specName: string;
-  uniqueSpecLabel?: string;
-} {
-  if (typeof uniqueSpec === "string") {
-    return {
-      specName: uniqueSpec,
-    };
-  } else if ("spec" in (uniqueSpec as any) && "label" in (uniqueSpec as any)) {
-    return {
-      specName: convertSpecOrName(
-        (
-          uniqueSpec as {
-            spec: SpecOrName;
-            label: string;
-          }
-        ).spec
-      ),
-      uniqueSpecLabel: (
-        uniqueSpec as {
-          spec: SpecOrName;
-          label: string;
-        }
-      ).label,
-    };
-  } else {
-    return {
-      specName: convertSpecOrName(uniqueSpec as any),
-    };
-  }
-}

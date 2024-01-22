@@ -127,7 +127,7 @@ class LiveGatewayConn {
         `feed:${jobId}/${String(key)}`,
         async (data: IMap[typeof key]) => {
           try {
-            await input.byKey(key).feed(data);
+            await input.byTag(key).feed(data);
           } catch (err) {
             console.error(err);
           }
@@ -138,7 +138,7 @@ class LiveGatewayConn {
     let subs: Subscription[] = [];
 
     for (const key of output.keys) {
-      const sub = output.byKey(key).valueObservable.subscribe((data) => {
+      const sub = output.byTag(key).valueObservable.subscribe((data) => {
         this.socket.emit(`output:${jobId}/${String(key)}`, data);
       });
       subs.push(sub);
@@ -147,7 +147,7 @@ class LiveGatewayConn {
     this.onDisconnect(() => {
       for (const key of input.keys) {
         try {
-          input.byKey(key).terminate();
+          input.byTag(key).terminate();
         } catch (err) {
           console.error(err);
         }
@@ -161,7 +161,7 @@ class LiveGatewayConn {
     this.socket.on(`${UNBIND_CMD}:${jobId}`, () => {
       for (const key of input.keys) {
         try {
-          input.byKey(key).terminate();
+          input.byTag(key).terminate();
         } catch (err) {
           console.error(err);
         }

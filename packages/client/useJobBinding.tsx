@@ -24,15 +24,17 @@ export function useJobBinding<Ks extends string>({
     type?: "output" | "input";
   }[];
 }) {
-  const clientRef = useRef<JobSocketIOConnection<Ks>>();
+  const clientRef = useRef<JobSocketIOConnection>();
 
-  const [outputsByKey, setOutputsByKey] = useState<{
+  const [outputsByTag, setOutputsByTag] = useState<{
     [key in Ks]:
       | { timestamp: number; data: any }
       | { timestamp: number; data: any }[]
       | null;
   }>(
-    Object.fromEntries(streamsToWatch.map(({ key }) => [key, null])) as {
+    Object.fromEntries(
+      streamsToWatch.map(({ key = "default" }) => [key, null])
+    ) as {
       [key in Ks]: null;
     }
   );
@@ -53,27 +55,36 @@ export function useJobBinding<Ks extends string>({
         if (!isCancelled) {
           clientRef.current = connection;
 
-          streamsToWatch.forEach(({ key = "default" as Ks, mode }) => {
-            connection.subToOutput(key, (data) => {
-              setOutputsByKey((prevOutputs) => {
-                if (mode === "replace") {
-                  return { ...prevOutputs, [key]: data };
-                } else {
-                  // mode === "append"
-                  return {
-                    ...prevOutputs,
-                    [key]: [
-                      ...((prevOutputs[key] as {
-                        timestamp: number;
-                        data: any;
-                      }[]) || []),
-                      data,
-                    ],
-                  };
+          streamsToWatch.forEach(
+            ({ key = "default" as Ks, mode, specName, uniqueSpecLabel }) => {
+              connection.subToOutput(
+                {
+                  key,
+                  specName,
+                  uniqueSpecLabel,
+                },
+                (data) => {
+                  setOutputsByTag((prevOutputs) => {
+                    if (mode === "replace") {
+                      return { ...prevOutputs, [key]: data };
+                    } else {
+                      // mode === "append"
+                      return {
+                        ...prevOutputs,
+                        [key]: [
+                          ...((prevOutputs[key] as {
+                            timestamp: number;
+                            data: any;
+                          }[]) || []),
+                          data,
+                        ],
+                      };
+                    }
+                  });
                 }
-              });
-            });
-          });
+              );
+            }
+          );
         }
       } catch (error) {
         console.error("Failed to setup JobSocketIOConnection:", error);
@@ -96,5 +107,5 @@ export function useJobBinding<Ks extends string>({
     return await clientRef.current?.feed(data, key);
   };
 
-  return { feed, outputsByKey };
+  return { feed, outputsByTag };
 }

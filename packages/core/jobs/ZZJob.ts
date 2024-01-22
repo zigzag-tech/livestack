@@ -15,6 +15,7 @@ import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 import _ from "lodash";
+import { getSingleTag } from "../orchestrations/ZZWorkflow";
 
 export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZJobSpec<
   infer P,
@@ -23,6 +24,13 @@ export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZJobSpec<
 >
   ? (j: ZZJob<P, IMap, OMap, WP>) => Promise<OMap[keyof OMap] | void>
   : never;
+
+interface ByTagCallable<TMap> {
+  <K extends keyof TMap>(key: K): {
+    nextValue: () => Promise<TMap[K] | null>;
+    [Symbol.asyncIterator](): AsyncGenerator<TMap[K]>;
+  };
+}
 
 export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   private readonly bullMQJob: Job<{ jobOptions: P }, void>;
@@ -35,18 +43,25 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   // ) => Promise<IMap[K] | null>;
 
   //async iterator
-  readonly input: ReturnType<typeof this.genInputObject> & {
-    byKey: <K extends keyof IMap>(
-      key: K
-    ) => ReturnType<ZZJob<P, IMap, OMap, WP>["genInputObject"]>;
-  };
+  readonly input: ReturnType<typeof this.genInputObject> &
+    ByTagCallable<IMap> & {
+      byTag: <K extends keyof IMap>(
+        tag: K
+      ) => {
+        nextValue: () => Promise<IMap[K] | null>;
+        [Symbol.asyncIterator](): AsyncGenerator<IMap[K]>;
+      };
+    };
 
   // New properties for subscriber tracking
 
   readonly output: {
+    <K extends keyof OMap>(key: K): {
+      emit: (o: OMap[K]) => Promise<void>;
+    };
     emit: (o: OMap[keyof OMap]) => Promise<void>;
-    byKey: <K extends keyof OMap>(
-      key: K
+    byTag: <K extends keyof OMap>(
+      tag: K
     ) => {
       emit: (o: OMap[K]) => Promise<void>;
     };
@@ -59,7 +74,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     null as WP extends object ? WP : null;
   public jobId: string;
   private readonly workerName;
-  private readonly inputStreamFnsByKey: Partial<{
+  private readonly inputStreamFnsByTag: Partial<{
     [K in keyof IMap]: {
       nextValue: () => Promise<IMap[K] | null>;
       // inputStream: ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
@@ -119,36 +134,55 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     this.zzEnv = p.jobSpec.zzEnv;
     this.spec = p.jobSpec;
 
-    this.inputStreamFnsByKey = {};
+    this.inputStreamFnsByTag = {};
 
     const reportOnReady = (
       obs: Observable<IMap[keyof IMap] | null>,
-      key: keyof IMap | "default"
+      tag: keyof IMap | "default"
     ) => {
       const sub = obs.subscribe(async () => {
         await this.setJobReadyForInputsInRedis({
           redisConfig: this.zzEnv.redisConfig,
           jobId: this.jobId,
           isReady: true,
-          key: key ? key : "default",
+          tag: tag ? tag : "default",
         });
         sub.unsubscribe();
       });
     };
 
-    this.input = {
-      ...this.genInputObject("default" as keyof IMap),
-      byKey: (key: keyof IMap) => {
-        const obj = this.genInputObject(key);
-        reportOnReady(obj.observable, key);
+    this.input = (() => {
+      const func = <K extends keyof IMap>(tag: K) => {
+        const obj = this.genInputObjectByTag(tag);
+        reportOnReady(obj.observable, tag);
         return obj;
-      },
-    };
+      };
+
+      func.byTag = <K extends keyof IMap>(tag: K) => {
+        const obj = this.genInputObjectByTag(tag);
+        reportOnReady(obj.observable, tag);
+        return obj;
+      };
+
+      const obj = this.genInputObject();
+      Object.assign(func, obj);
+
+      return func as any;
+    })();
+
+    // this.input = {
+    //   ...this.genInputObject(),
+    //   byTag: <K extends keyof IMap>(key: K) => {
+    //     const obj = this.genInputObjectByTag(key);
+    //     reportOnReady(obj.observable, key);
+    //     return obj;
+    //   },
+    // };
     reportOnReady(this.input.observable, "default");
 
     const emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
-      key: K = "default" as K
+      tag: K = "default" as K
     ) => {
       // this.logger.info(
       //   `Emitting output: ${this.jobId}, ${this.def.name} ` +
@@ -158,7 +192,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       await this.spec._getStreamAndSendDataToPLimited({
         jobId: this.jobId,
         type: "out",
-        key,
+        tag: tag,
         data: {
           data: o,
           terminate: false,
@@ -167,17 +201,28 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
 
       this.bullMQJob.updateProgress(this._dummyProgressCount++);
     };
-    this.output = {
-      emit: emitOutput,
-      byKey: (key: keyof OMap) => ({
-        emit: (o: OMap[typeof key]) => emitOutput(o, key),
-      }),
-    };
+    this.output = (() => {
+      const func = <K extends keyof OMap>(tag: K) => ({
+        emit: (o: OMap[K]) => emitOutput(o, tag),
+      });
+      func.byTag = <K extends keyof OMap>(tag: K) => ({
+        emit: (o: OMap[K]) => emitOutput(o, tag),
+      });
+      func.emit = (o: OMap[keyof OMap]) => {
+        const tag = getSingleTag(this.spec.outputDefSet.defs, "output");
+        return emitOutput(o, tag as keyof OMap);
+      };
+      return func;
+    })();
   }
 
-  private readonly genInputObject = <K extends keyof IMap>(key: K) => {
+  private readonly genInputObject = () => {
+    return this.genInputObjectByTag("default" as keyof IMap);
+  };
+
+  private readonly genInputObjectByTag = <K extends keyof IMap>(key: K) => {
     const job = this;
-    const nextValue = async <K extends keyof IMap>(key?: K) => {
+    const nextValue = async (key?: K) => {
       const r = await (await job._ensureInputStreamFn(key)).nextValue();
       return r as IMap[K] | null;
     };
@@ -200,27 +245,27 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     };
   };
 
-  private _ensureInputStreamFn<K extends keyof IMap>(key?: K | "default") {
+  private _ensureInputStreamFn<K extends keyof IMap>(tag?: K | "default") {
     if (this.spec.inputDefSet.isSingle) {
-      if (key && key !== "default") {
+      if (tag && tag !== "default") {
         throw new Error(
-          `inputDefs is single stream, but key is provided: ${String(key)}`
+          `inputDefs is single stream, but key is provided: ${String(tag)}`
         );
       }
-      key = "default" as const;
+      tag = "default" as const;
     } else {
-      if (!key) {
+      if (!tag) {
         throw new Error(
           `inputDefs is multiple streams, but key is not provided`
         );
       }
     }
 
-    if (!this.inputStreamFnsByKey[key! as keyof IMap]) {
+    if (!this.inputStreamFnsByTag[tag! as keyof IMap]) {
       const streamP = this.spec.getJobStream({
         jobId: this.jobId,
         type: "in",
-        key: key! as keyof IMap,
+        tag: tag! as keyof IMap,
       }) as Promise<ZZStream<WrapTerminatorAndDataId<IMap[K]>>>;
 
       const inputObservableUntracked = new Observable<IMap[K] | null>((s) => {
@@ -255,12 +300,12 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
             redisConfig: this.zzEnv.redisConfig,
             jobId: this.jobId,
             isReady: true,
-            key: key || "default",
+            tag: tag || "default",
           });
         }
       });
 
-      this.inputStreamFnsByKey[key as K] = {
+      this.inputStreamFnsByTag[tag as K] = {
         nextValue,
         // inputStream: stream,
         inputObservableUntracked,
@@ -268,18 +313,18 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
         subscriberCountObservable,
       };
     }
-    return this.inputStreamFnsByKey[key as K]!;
+    return this.inputStreamFnsByTag[tag as K]!;
   }
 
   setJobReadyForInputsInRedis = async ({
     redisConfig,
     jobId,
-    key,
+    tag,
     isReady,
   }: {
     redisConfig: RedisOptions;
     jobId: string;
-    key: keyof IMap | "default";
+    tag: keyof IMap | "default";
     isReady: boolean;
   }) => {
     // console.debug("setJobReadyForInputsInRedis", {
@@ -288,13 +333,13 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     //   key,
     //   isReady,
     // });
-    if (!key) {
+    if (!tag) {
       throw new Error("key is required");
     }
     try {
       const redis = new Redis(redisConfig);
       await redis.set(
-        `ready_status__${jobId}/${String(key)}`,
+        `ready_status__${jobId}/${String(tag)}`,
         isReady ? "true" : "false"
       );
     } catch (error) {
@@ -357,8 +402,8 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       await Promise.all(
         (
           _.values(
-            this.inputStreamFnsByKey
-          ) as (typeof this.inputStreamFnsByKey)[keyof IMap][]
+            this.inputStreamFnsByTag
+          ) as (typeof this.inputStreamFnsByTag)[keyof IMap][]
         ).map(async (x) => {
           await new Promise<void>((resolve) => {
             x!.subscriberCountObservable
@@ -418,7 +463,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     }
   };
 
-  signalOutputEnd = async (key?: keyof OMap) => {
+  signalOutputEnd = async (tag?: keyof OMap) => {
     // console.debug("signalOutputEnd", {
     //   jobSpec: this.spec.name,
     //   jobId: this.jobId,
@@ -427,7 +472,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     const outputStream = await this.spec.getJobStream({
       jobId: this.jobId,
       type: "out",
-      key: key || ("default" as keyof OMap),
+      tag: tag || ("default" as keyof OMap),
     });
     await outputStream.pub({
       message: {
@@ -478,3 +523,27 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   //   }
   // };
 }
+
+interface CallableObject {
+  // Call signature
+  (param: string): void;
+
+  // Property
+  someProperty: number;
+}
+
+// Implementing the CallableObject
+const myCallableObject: CallableObject = (() => {
+  // This is the function implementation
+  const func = (param: string) => {
+    console.log(`Called with param: ${param}`);
+  };
+
+  // Adding the property
+  func.someProperty = 42;
+
+  // Return the function
+  return func;
+})();
+myCallableObject("Hello, world!"); // This calls the function
+console.log(myCallableObject.someProperty); // This accesses the property

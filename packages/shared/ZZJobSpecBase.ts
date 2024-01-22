@@ -56,16 +56,3 @@ export function multi<
   return def;
 }
 
-export const SpecOrName = z.union([
-  z.string(),
-  z.instanceof(ZZJobSpecBase<any, any, any>),
-]);
-export type SpecOrName = z.infer<typeof SpecOrName>; // Conversion functions using TypeScript
-
-export function convertSpecOrName(specOrName: SpecOrName): string {
-  if (typeof specOrName === "string") {
-    return specOrName;
-  } else {
-    return specOrName.name;
-  }
-}
