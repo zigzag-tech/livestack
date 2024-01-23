@@ -118,14 +118,6 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     return ZZJobSpec._registryBySpecName[specName];
   }
 
-  public inputDef(key?: keyof IMap) {
-    return this.inputDefSet.getDef(key || this.getSingleInputTag());
-  }
-
-  public outputDef(key: keyof OMap) {
-    return this.outputDefSet.getDef(key || this.getSingleOutputTag());
-  }
-
   public derive<NewP, NewIMap, NewOMap>(
     newP: Partial<
       ConstructorParameters<typeof ZZJobSpec<NewP, NewIMap, NewOMap>>[0]

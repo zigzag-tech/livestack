@@ -4,10 +4,10 @@ import { z } from "zod";
 
 export abstract class ZZJobSpecBase<P, IMap = {}, OMap = {}> {
   public readonly name: string;
-  public readonly inputDefSet: StreamDefSet<IMap>;
-  public readonly outputDefSet: StreamDefSet<OMap>;
-  public readonly input: InferDefMap<IMap> | undefined;
-  public readonly output: InferDefMap<OMap> | undefined;
+  protected readonly inputDefSet: StreamDefSet<IMap>;
+  protected readonly outputDefSet: StreamDefSet<OMap>;
+  protected readonly input: InferDefMap<IMap> | undefined;
+  protected readonly output: InferDefMap<OMap> | undefined;
 
   public getSingleInputTag() {
     return this.getSingleTag("input");
