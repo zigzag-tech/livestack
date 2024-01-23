@@ -386,7 +386,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     //   return jobData[jobData.length - 1]?.data || undefined;
     // } else {
     logger.info(
-      `Picked up job: ${job.id}, ${job.queueName} ` +
+      `Job started: ${job.id}, ${job.queueName} ` +
         `${JSON.stringify(job.data, longStringTruncator)}`,
       +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
     );
