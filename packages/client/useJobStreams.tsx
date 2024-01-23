@@ -52,6 +52,36 @@ export function useOutput<O>({
   return output;
 }
 
+export function useInput({
+  specName,
+  uniqueSpecLabel,
+  jobId,
+  tag,
+}: {
+  specName?: string;
+  uniqueSpecLabel?: string;
+  jobId?: string;
+  tag: string;
+}) {
+  const feed = <T,>(data: T) => {
+    if (specName && jobId) {
+      const conn = GLOBALCONN_POOL_BY_JOB_ID[jobId];
+      if (!conn) {
+        throw new Error(`Connection not found with jobId "${jobId}".`);
+      }
+
+      return conn.feed(
+        {
+          data,
+        },
+        tag
+      );
+    }
+  };
+
+  return { feed };
+}
+
 export function useJobForConnection({
   socketIOURI,
   socketIOPath,
