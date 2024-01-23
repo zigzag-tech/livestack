@@ -6,8 +6,8 @@ export abstract class ZZJobSpecBase<P, IMap = {}, OMap = {}> {
   public readonly name: string;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
-  protected readonly input: InferDefMap<IMap> | undefined;
-  protected readonly output: InferDefMap<OMap> | undefined;
+  public readonly input: InferDefMap<IMap> | undefined;
+  public readonly output: InferDefMap<OMap> | undefined;
 
   public getSingleInputTag() {
     return this.getSingleTag("input");
@@ -70,7 +70,7 @@ export abstract class ZZJobSpecBase<P, IMap = {}, OMap = {}> {
   }
 }
 
-export function single<T>(def: z.ZodType<T, any>) {
+export function defaultTag<T>(def: z.ZodType<T, any>) {
   return {
     default: def,
   };

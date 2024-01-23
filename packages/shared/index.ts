@@ -1,4 +1,4 @@
-import { single, multi } from './ZZJobSpecBase';
+import { defaultTag, multi } from './ZZJobSpecBase';
 export {
-    single, multi
+    defaultTag as single, multi
 };

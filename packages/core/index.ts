@@ -1,6 +1,5 @@
 import { ZZJob } from "./jobs/ZZJob";
-import { ZZWorker } from "./jobs/ZZWorker";
-import { ZZWorkerDef } from "./jobs/ZZWorkerDef";
+import { ZZWorker, ZZWorkerDef } from "./jobs/ZZWorker";
 import { ZZJobSpec } from "./jobs/ZZJobSpec";
 import { ZZEnv } from "./jobs/ZZEnv";
 import { ZZStream } from "./jobs/ZZStream";
@@ -11,9 +10,9 @@ import { ZZWorkflowSpec } from "./orchestrations/ZZWorkflow";
 export {
   ZZJobSpec,
   ZZWorker,
+  ZZWorkerDef,
   ZZJob,
   ZZEnv,
-  ZZWorkerDef,
   ZZStream,
   fileOrBufferSchema,
   ZZWorkflow,
