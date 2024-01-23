@@ -1,4 +1,4 @@
-import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorkerDef";
+import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorker";
 import {
   InferDefMap,
   InferStreamSetType,
