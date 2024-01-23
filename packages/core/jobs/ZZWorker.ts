@@ -61,7 +61,7 @@ export class ZZWorkerDef<P, IMap = {}, OMap = {}, WP extends object = {}> {
   };
 
   public static define<P, IMap, OMap, WP extends object>(
-    p: Parameters<typeof defineWorker>[0]
+    p: Parameters<typeof defineWorker<P, IMap, OMap, WP>>[0]
   ) {
     return defineWorker(p);
   }
@@ -181,7 +181,7 @@ export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
   }
 
   public static define<P, IMap, OMap, WP extends object>(
-    p: Parameters<typeof defineWorker>[0]
+    p: Parameters<typeof defineWorker<P, IMap, OMap, WP>>[0]
   ) {
     return defineWorker(p);
   }
