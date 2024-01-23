@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import useDeepCompareEffect from "use-deep-compare-effect";
 import {
   ClientConnParams,
   JobSocketIOConnection,
@@ -27,7 +26,7 @@ export function useOutput<O>({
     tag: string;
   } | null>(null);
 
-  useDeepCompareEffect(() => {
+  useEffect(() => {
     if (specName && jobId) {
       const conn = GLOBALCONN_POOL_BY_JOB_ID[jobId];
       if (!conn) {
@@ -95,10 +94,9 @@ export function useJobForConnection({
   const [status, setStatus] = useState<JobStatus>({
     status: "connecting",
   });
+  const clientRef = useRef<JobSocketIOConnection>();
 
-  useDeepCompareEffect(() => {
-    const clientRef = useRef<JobSocketIOConnection>();
-
+  useEffect(() => {
     async function setupConnection() {
       try {
         setStatus({ status: "connecting" });
