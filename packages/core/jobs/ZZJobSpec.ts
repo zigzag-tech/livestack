@@ -763,6 +763,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
       });
       return {
         nextValue: subscriber.nextValue,
+        valueObservable: subscriber.valueObservable,
         async *[Symbol.asyncIterator]() {
           while (true) {
             const input = await subscriber.nextValue();

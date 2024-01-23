@@ -4,8 +4,8 @@ import {
   REQUEST_AND_BIND_CMD,
   JOB_INFO,
   JobInfoType,
-  StreamIdentifier,
-  resolveToUniqueStream,
+  FEED,
+  FeedParams,
 } from "@livestack/shared/gateway-binding-types";
 
 export class JobSocketIOConnection {
@@ -14,13 +14,19 @@ export class JobSocketIOConnection {
   public readonly availableOutputs: JobInfoType["availableOutputs"];
   public readonly socketIOClient: Socket;
   private readonly isConnDedicated: boolean;
+  public readonly specName: string;
+  public readonly uniqueSpecLabel: string | undefined;
 
   constructor({
     jobInfo: { jobId, availableInputs, availableOutputs },
+    specName,
+    uniqueSpecLabel,
     socketIOClient,
     isConnDedicated,
   }: {
     jobInfo: JobInfoType;
+    specName: string;
+    uniqueSpecLabel?: string;
     socketIOClient: Socket;
     isConnDedicated: boolean;
   }) {
@@ -29,32 +35,39 @@ export class JobSocketIOConnection {
     this.isConnDedicated = isConnDedicated;
     this.availableInputs = availableInputs;
     this.availableOutputs = availableOutputs;
+
+    this.specName = specName;
+    this.uniqueSpecLabel = uniqueSpecLabel;
   }
 
-  public async feed<T>(data: T, identifer: StreamIdentifier) {
+  public async feed<T>(data: T, tag: string) {
     // await getConnReadyPromise(this.socketIOClient);
-
-    const identifier = resolveToUniqueStream(identifer, this.availableInputs);
-    this.socketIOClient.emit(`feed`, { identifier, data });
+    const feedParams: FeedParams<T> = {
+      data,
+      tag,
+    };
+    this.socketIOClient.emit(FEED, feedParams);
   }
 
   private subscribedOutputKeys: string[] = [];
 
-  public async subToOutput<T>(
-    {
-      key = "default",
-      specName,
-      uniqueSpecLabel,
-    }: { key?: string; specName?: string; uniqueSpecLabel?: string },
-    callback: (data: T) => void
-  ) {
+  public subToOutput<T>({ tag }: { tag: string }, callback: (data: T) => void) {
     // await getConnReadyPromise(this.socketIOClient);
 
-    if (!this.outputKeys.includes(key)) {
-      throw new Error(`Key ${key} not in outputKeys.`);
+    if (!this.availableOutputs.some((o) => o.key === tag)) {
+      throw new Error(`Output of tag "${tag}" not in availableOutputs.`);
     }
-    this.socketIOClient.on(`output:${this.jobId}/${key}`, callback);
-    this.subscribedOutputKeys.push(key);
+    this.socketIOClient.on(`output:${this.jobId}/${tag}`, callback);
+    this.subscribedOutputKeys.push(tag);
+
+    const unsub = () => {
+      this.socketIOClient.off(`output:${this.jobId}/${tag}`, callback);
+      this.subscribedOutputKeys = this.subscribedOutputKeys.filter(
+        (k) => k !== tag
+      );
+    };
+
+    return unsub;
   }
 
   public async close() {
@@ -62,7 +75,7 @@ export class JobSocketIOConnection {
     for (const key of this.subscribedOutputKeys) {
       this.socketIOClient.off(`output:${this.jobId}/${key}`);
     }
-    console.log(this.isConnDedicated);
+    this.subscribedOutputKeys = [];
     if (this.isConnDedicated) {
       this.socketIOClient.close();
     }
@@ -103,7 +116,7 @@ function getClient({
   }
 }
 
-export async function bindNewJobToSocketIO<Ks>({
+export async function bindNewJobToSocketIO({
   specName,
   uniqueSpecLabel,
   ...connParams
@@ -116,20 +129,25 @@ export async function bindNewJobToSocketIO<Ks>({
     ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
   };
   conn.emit(REQUEST_AND_BIND_CMD, requestBindingData);
-  const { jobId, inputKeys, outputKeys } = await new Promise<{
+  const { jobId, availableInputs, availableOutputs } = await new Promise<{
     jobId: string;
-    inputKeys: string[];
-    outputKeys: Ks[];
+    availableOutputs: JobInfoType["availableOutputs"];
+    availableInputs: JobInfoType["availableInputs"];
   }>((resolve) => {
-    conn.on(JOB_INFO, ({ inputKeys, outputKeys, jobId }: JobInfoType) => {
-      resolve({ jobId, inputKeys, outputKeys });
-    });
+    conn.on(
+      JOB_INFO,
+      ({ availableInputs, availableOutputs, jobId }: JobInfoType) => {
+        resolve({ jobId, availableInputs, availableOutputs });
+      }
+    );
   });
 
   return new JobSocketIOConnection({
-    jobInfo: { jobId, inputKeys, outputKeys },
+    jobInfo: { jobId, availableInputs, availableOutputs },
     socketIOClient: conn,
     isConnDedicated: newClient,
+    specName,
+    uniqueSpecLabel,
   });
 }
 

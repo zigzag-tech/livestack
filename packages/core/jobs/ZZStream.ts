@@ -274,6 +274,7 @@ export class ZZStreamDef<T> {
 
 export type WithTimestamp<T extends object> = T & {
   timestamp: number;
+  messageId: string;
 };
 
 export class ZZStreamSubscriber<T extends object> {
@@ -333,7 +334,7 @@ export class ZZStreamSubscriber<T extends object> {
             const [timestampStr, _] = this.cursor.split("-");
             const timestamp = Number(timestampStr);
             const data: T = parseMessageData(message[1]);
-            subscriber.next({ ...data, timestamp });
+            subscriber.next({ ...data, timestamp, messageId: this.cursor });
           }
         }
       }

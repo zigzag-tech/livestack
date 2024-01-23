@@ -15,6 +15,7 @@ export type WrapTerminatorAndDataId<T> =
 export type WrapWithTimestamp<T> = {
   data: T;
   timestamp: number;
+  messageId: string;
 };
 
 export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
@@ -44,6 +45,7 @@ export function wrapStreamSubscriberWithTermination<T>(
               subscriber.next({
                 data: v.data,
                 timestamp: v.timestamp,
+                messageId: v.messageId,
               });
             }
           },

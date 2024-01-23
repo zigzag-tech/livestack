@@ -1,14 +1,18 @@
-import { UNBIND_CMD } from "./../shared/gateway-binding-types";
 import {
+  UNBIND_CMD,
   REQUEST_AND_BIND_CMD,
   RequestAndBindType,
+  FEED,
+  FeedParams,
 } from "@livestack/shared/gateway-binding-types";
-import { SpecOrName } from "@livestack/shared/ZZJobSpecBase";
 import { Subscription } from "rxjs";
 import { ZZEnv, ZZJobSpec } from "@livestack/core";
 import { Socket, Server as SocketIOServer } from "socket.io";
 import { Server as HTTPServer } from "http";
-import { resolveUniqueSpec } from "@livestack/core/jobs/ZZJobSpec";
+import {
+  SpecOrName,
+  resolveUniqueSpec,
+} from "@livestack/core/orchestrations/ZZWorkflow";
 
 export function setupJobBindingGateway({
   httpServer,
@@ -36,9 +40,12 @@ export function setupJobBindingGateway({
     if (onConnect) {
       const conn = new LiveGatewayConn({
         socket,
-        allowedSpecsForBinding: allowedSpecsForBinding.map((s) =>
-          resolveUniqueSpec(s)
-        ),
+        allowedSpecsForBinding: allowedSpecsForBinding
+          .map(resolveUniqueSpec)
+          .map(({ spec, uniqueSpecLabel }) => ({
+            specName: spec.name,
+            uniqueSpecLabel,
+          })),
         zzEnv,
       });
       onConnect(conn);
@@ -122,18 +129,16 @@ class LiveGatewayConn {
       inputKeys: input.keys,
       outputKeys: output.keys,
     });
-    for (const key of input.keys) {
-      this.socket.on(
-        `feed:${jobId}/${String(key)}`,
-        async (data: IMap[typeof key]) => {
-          try {
-            await input.byTag(key).feed(data);
-          } catch (err) {
-            console.error(err);
-          }
+    this.socket.on(
+      FEED,
+      async ({ data, tag }: FeedParams<IMap[keyof IMap]>) => {
+        try {
+          await input.byTag(tag as keyof IMap).feed(data);
+        } catch (err) {
+          console.error(err);
         }
-      );
-    }
+      }
+    );
 
     let subs: Subscription[] = [];
 
