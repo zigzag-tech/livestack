@@ -44,6 +44,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   //async iterator
   readonly input: ReturnType<typeof this.genInputObject> &
     ByTagCallable<IMap> & {
+      tags: (keyof IMap)[];
       byTag: <K extends keyof IMap>(
         tag: K
       ) => {
@@ -218,13 +219,16 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   }
 
   private readonly genInputObject = () => {
-    return this.genInputObjectByTag();
+    return {
+      ...this.genInputObjectByTag(),
+      tags: this.spec.inputDefSet.keys,
+    };
   };
 
   private readonly genInputObjectByTag = <K extends keyof IMap>(tag?: K) => {
     const that = this;
-    const nextValue = async (key?: K) => {
-      const r = await (await that._ensureInputStreamFn(key)).nextValue();
+    const nextValue = async (tag0?: K) => {
+      const r = await (await that._ensureInputStreamFn(tag0)).nextValue();
       return r as IMap[K] | null;
     };
     return {
