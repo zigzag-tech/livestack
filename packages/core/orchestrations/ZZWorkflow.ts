@@ -8,10 +8,10 @@ import {
 } from "../jobs/ZZJobSpec";
 import { z } from "zod";
 import Graph from "graphology";
-import { ZZWorkerDef } from "../jobs/ZZWorkerDef";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
 import { ByTagCallable } from "../jobs/ZZJob";
+import { ZZWorkerDef } from "../jobs/ZZWorker";
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;

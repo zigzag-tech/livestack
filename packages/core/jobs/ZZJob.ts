@@ -529,27 +529,3 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   //   }
   // };
 }
-
-interface CallableObject {
-  // Call signature
-  (param: string): void;
-
-  // Property
-  someProperty: number;
-}
-
-// Implementing the CallableObject
-const myCallableObject: CallableObject = (() => {
-  // This is the function implementation
-  const func = (param: string) => {
-    console.log(`Called with param: ${param}`);
-  };
-
-  // Adding the property
-  func.someProperty = 42;
-
-  // Return the function
-  return func;
-})();
-myCallableObject("Hello, world!"); // This calls the function
-console.log(myCallableObject.someProperty); // This accesses the property
