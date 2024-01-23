@@ -232,48 +232,38 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     return points;
   }
 
-  public async enqueueJobAndWaitOnResults<K extends keyof OMap>({
+  public async enqueueJobAndWaitOnSingleResults<K extends keyof OMap>({
     jobId: jobId,
     jobOptions: jobOptions,
-    tag,
+    outputTag,
   }: // queueEventsOptions,
   {
     jobId?: string;
     jobOptions?: P;
-    tag?: K;
-  }): Promise<{ data: OMap[K]; timestamp: number }[]> {
+    outputTag?: K;
+  }): Promise<{ data: OMap[K]; timestamp: number } | null> {
     if (!jobId) {
       jobId = `${this.name}-${v4()}`;
     }
 
-    if (!tag) {
-      tag = this.getSingleOutputTag() as K;
+    if (!outputTag) {
+      outputTag = this.getSingleOutputTag() as K;
     }
 
     this.logger.info(
       `Enqueueing job ${jobId} with data: ${JSON.stringify(jobOptions)}.`
     );
 
-    await this.enqueueJob({
+    const { output, input } = await this.enqueueJob({
       jobId,
       jobOptions,
     });
 
-    while (true) {
-      await sleep(200);
-      const status = await this.getJobStatus(jobId);
-      if (status === "completed") {
-        const results = await this.getJobData({
-          jobId,
-          ioType: "out",
-          limit: 1000,
-          key: tag,
-        });
-        return results as { data: OMap[K]; timestamp: number }[];
-      } else if (status === "failed") {
-        throw new Error(`Job ${jobId} failed!`);
-      }
-    }
+    const r = await output.byTag(outputTag).nextValue();
+    input.keys.forEach((k) => {
+      input.terminate(k);
+    });
+    return r;
   }
 
   async feedJobInput<K extends keyof IMap>({
@@ -548,7 +538,27 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     return streamId;
   }
 
-  public getJobStream = async <
+  public getInputJobStream = async <K extends keyof IMap>(p: {
+    jobId: string;
+    tag: K;
+  }) => {
+    return (await this.getJobStream({
+      ...p,
+      type: "in",
+    })) as ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
+  };
+
+  public getOutputJobStream = async <K extends keyof OMap>(p: {
+    jobId: string;
+    tag: K;
+  }) => {
+    return (await this.getJobStream({
+      ...p,
+      type: "out",
+    })) as ZZStream<WrapTerminatorAndDataId<OMap[K]>>;
+  };
+
+  private getJobStream = async <
     TT extends "in" | "out",
     K extends TT extends "in" ? keyof IMap : keyof OMap
   >(p: {
@@ -557,8 +567,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     tag: K;
   }) => {
     const { jobId, type } = p;
-
-    type T = typeof type extends "in" ? IMap[keyof IMap] : OMap[keyof OMap];
+    type T = TT extends "in" ? IMap[keyof IMap] : OMap[keyof OMap];
     let def: z.ZodType<WrapTerminatorAndDataId<T>>;
     if (type === "in") {
       if (!this.inputDefSet) {
@@ -593,26 +602,23 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     return stream as ZZStream<WrapTerminatorAndDataId<T>>;
   };
 
-  public createOutputCollector({
+  public createOutputCollector<K extends keyof OMap>({
     jobId,
     key,
     from = "beginning",
   }: {
     jobId: string;
-    key?: keyof OMap;
+    key?: K;
     from?: "beginning" | "now";
   }) {
     const subuscriberP = new Promise<
-      ZZStreamSubscriber<WrapTerminatorAndDataId<OMap[keyof OMap]>>
+      ZZStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>
     >((resolve, reject) => {
-      this.getJobStream({
+      this.getOutputJobStream({
         jobId,
-        type: "out",
-        tag: key || ("default" as keyof OMap),
+        tag: key || (this.getSingleOutputTag() as K),
       }).then((stream) => {
-        let subscriber: ZZStreamSubscriber<
-          WrapTerminatorAndDataId<OMap[keyof OMap]>
-        >;
+        let subscriber: ZZStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>;
         if (from === "beginning") {
           subscriber = stream.subFromBeginning();
         } else if (from === "now") {
@@ -715,25 +721,6 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     };
 
     // return j;
-  }
-
-  public async enqueueJobAndGetOutputs(
-    p: Parameters<ZZJobSpec<P, IMap, OMap>["enqueueJob"]>[0] & {
-      key?: keyof OMap;
-    }
-  ) {
-    const { jobId, jobOptions, key } = p;
-    const { output } = await this.enqueueJob({
-      jobId,
-      jobOptions,
-    });
-
-    const rs: WrapWithTimestamp<OMap[keyof OMap]>[] = [];
-    let lastV: WrapWithTimestamp<OMap[keyof OMap]> | null = null;
-    while ((lastV = await output.nextValue()) !== null) {
-      rs.push(lastV);
-    }
-    return rs;
   }
 
   public _deriveInputsForJob = (jobId: string) => {

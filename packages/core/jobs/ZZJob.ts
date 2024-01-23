@@ -263,11 +263,10 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       }
     }
 
-    if (!this.inputStreamFnsByTag[tag! as keyof IMap]) {
-      const streamP = this.spec.getJobStream({
+    if (!this.inputStreamFnsByTag[tag!]) {
+      const streamP = this.spec.getInputJobStream({
         jobId: this.jobId,
-        type: "in",
-        tag: tag! as keyof IMap,
+        tag: tag!,
       }) as Promise<ZZStream<WrapTerminatorAndDataId<IMap[K]>>>;
 
       const inputObservableUntracked = new Observable<IMap[K] | null>((s) => {
@@ -473,9 +472,8 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     //   jobId: this.jobId,
     //   key,
     // });
-    const outputStream = await this.spec.getJobStream({
+    const outputStream = await this.spec.getOutputJobStream({
       jobId: this.jobId,
-      type: "out",
       tag: tag || this.spec.getSingleOutputTag(),
     });
     await outputStream.pub({

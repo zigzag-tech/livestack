@@ -15,13 +15,20 @@ export abstract class ZZJobSpecBase<P, IMap = {}, OMap = {}> {
   public getSingleOutputTag() {
     return this.getSingleTag("output");
   }
-  private getSingleTag<T extends "input"| "output">(type: T)
-  : T extends "input" ? keyof IMap : keyof OMap {
+  private getSingleTag<T extends "input" | "output">(
+    type: T
+  ): T extends "input" ? keyof IMap : keyof OMap {
     const defSet = type === "input" ? this.inputDefSet : this.outputDefSet;
-    if (!defSet.isSingle) {
+    if (defSet.keys.length === 0) {
+      throw new Error(
+        `No ${type} found for spec "${this.name}". Please specify at least one in the "${type}" field of the spec's definition.`
+      );
+    } else if (defSet.keys.length > 1) {
       const keys = defSet.keys;
       throw new Error(
-        ` ${type} is ambiguous for spec "${this.name}"; found more than two with tags [${keys.join(
+        ` ${type} is ambiguous for spec "${
+          this.name
+        }"; found more than two with tags [${keys.join(
           ", "
         )}]. \nPlease specify which one to use with "${type}(tagName)".`
       );
@@ -76,4 +83,3 @@ export function multi<
 >(def: TMap) {
   return def;
 }
-

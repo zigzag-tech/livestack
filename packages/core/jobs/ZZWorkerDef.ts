@@ -61,9 +61,4 @@ export class ZZWorkerDef<P, IMap = {}, OMap = {}, WP extends object = {}> {
   public enqueueJob: (typeof this.jobSpec)["enqueueJob"] = (p) => {
     return this.jobSpec.enqueueJob(p);
   };
-
-  public enqueueJobAndGetOutputs: (typeof this.jobSpec)["enqueueJobAndGetOutputs"] =
-    (p) => {
-      return this.jobSpec.enqueueJobAndGetOutputs(p);
-    };
 }
