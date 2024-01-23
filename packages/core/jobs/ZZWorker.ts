@@ -59,6 +59,23 @@ export class ZZWorkerDef<P, IMap = {}, OMap = {}, WP extends object = {}> {
   public enqueueJob: (typeof this.jobSpec)["enqueueJob"] = (p) => {
     return this.jobSpec.enqueueJob(p);
   };
+
+  public static define<P, IMap, OMap, WP extends object>(
+    p: Parameters<typeof defineWorker>[0]
+  ) {
+    return defineWorker(p);
+  }
+}
+
+function defineWorker<P, IMap, OMap, WP extends object>(
+  p: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec"> & {
+    jobSpec:
+      | ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0]
+      | ZZJobSpec<P, IMap, OMap>;
+  }
+) {
+  const spec = new ZZJobSpec<P, IMap, OMap>(p.jobSpec);
+  return spec.defineWorker(p);
 }
 
 
@@ -164,13 +181,8 @@ export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
   }
 
   public static define<P, IMap, OMap, WP extends object>(
-    p: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec"> & {
-      jobSpec:
-        | ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0]
-        | ZZJobSpec<P, IMap, OMap>;
-    }
+    p: Parameters<typeof defineWorker>[0]
   ) {
-    const spec = new ZZJobSpec<P, IMap, OMap>(p.jobSpec);
-    return spec.defineWorker(p);
+    return defineWorker(p);
   }
 }
