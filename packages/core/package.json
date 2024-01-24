@@ -13,6 +13,8 @@
     "bullmq": "^4.x",
     "chalk": "^4",
     "dotenv": "^16.x",
+    "graphology": "^0.25.4",
+    "graphology-types": "^0.24.7",
     "ioredis": "^5",
     "knex": "^2.x",
     "p-limit": "^3",
