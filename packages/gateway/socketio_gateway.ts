@@ -1,9 +1,12 @@
 import {
   UNBIND_CMD,
+  UnbindParams,
   REQUEST_AND_BIND_CMD,
   RequestAndBindType,
   FEED,
   FeedParams,
+  JOB_INFO,
+  JobInfoType,
 } from "@livestack/shared/gateway-binding-types";
 import { Subscription } from "rxjs";
 import { ZZEnv, ZZJobSpec } from "@livestack/core";
@@ -37,17 +40,17 @@ export function setupJobBindingGateway({
 
   io.on("connection", async (socket) => {
     console.info(`🦓 Socket client connected: ${socket.id}.`);
+    const conn = new LiveGatewayConn({
+      socket,
+      allowedSpecsForBinding: allowedSpecsForBinding
+        .map(resolveUniqueSpec)
+        .map(({ spec, uniqueSpecLabel }) => ({
+          specName: spec.name,
+          uniqueSpecLabel,
+        })),
+      zzEnv,
+    });
     if (onConnect) {
-      const conn = new LiveGatewayConn({
-        socket,
-        allowedSpecsForBinding: allowedSpecsForBinding
-          .map(resolveUniqueSpec)
-          .map(({ spec, uniqueSpecLabel }) => ({
-            specName: spec.name,
-            uniqueSpecLabel,
-          })),
-        zzEnv,
-      });
       onConnect(conn);
     }
     let disconnected = false;
@@ -124,11 +127,12 @@ class LiveGatewayConn {
     jobOptions?: P
   ) => {
     const { input, output, jobId } = await jobSpec.enqueueJob({ jobOptions });
-    this.socket.emit("job_info", {
+    const data: JobInfoType = {
       jobId,
-      inputKeys: input.keys,
-      outputKeys: output.keys,
-    });
+      availableInputs: input.keys.map((k) => String(k)),
+      availableOutputs: output.keys.map((k) => String(k)),
+    };
+    this.socket.emit(JOB_INFO, data);
     this.socket.on(
       FEED,
       async ({ data, tag }: FeedParams<IMap[keyof IMap]>) => {
@@ -142,9 +146,9 @@ class LiveGatewayConn {
 
     let subs: Subscription[] = [];
 
-    for (const key of output.keys) {
-      const sub = output.byTag(key).valueObservable.subscribe((data) => {
-        this.socket.emit(`output:${jobId}/${String(key)}`, data);
+    for (const tag of output.keys) {
+      const sub = output.byTag(tag).valueObservable.subscribe((data) => {
+        this.socket.emit(`stream:${jobId}/${String(tag)}`, data);
       });
       subs.push(sub);
     }
@@ -163,7 +167,7 @@ class LiveGatewayConn {
       }
     });
 
-    this.socket.on(`${UNBIND_CMD}:${jobId}`, () => {
+    this.socket.on(UNBIND_CMD, ({ jobId }: UnbindParams) => {
       for (const key of input.keys) {
         try {
           input.byTag(key).terminate();

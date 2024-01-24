@@ -1,3 +1,4 @@
+import { Observable, Subject } from "rxjs";
 import { Socket, io } from "socket.io-client";
 import {
   RequestAndBindType,
@@ -6,6 +7,8 @@ import {
   JobInfoType,
   FEED,
   FeedParams,
+  UNBIND_CMD,
+  UnbindParams,
 } from "@livestack/shared/gateway-binding-types";
 
 export class JobSocketIOConnection {
@@ -40,6 +43,14 @@ export class JobSocketIOConnection {
     this.uniqueSpecLabel = uniqueSpecLabel;
   }
 
+  private localObservablesByTag: Record<
+    string,
+    {
+      observable: Observable<any>;
+      subj: Subject<any>;
+    }
+  > = {};
+
   public async feed<T>(data: T, tag: string) {
     // await getConnReadyPromise(this.socketIOClient);
     const feedParams: FeedParams<T> = {
@@ -47,33 +58,60 @@ export class JobSocketIOConnection {
       tag,
     };
     this.socketIOClient.emit(FEED, feedParams);
+    if (!this.localObservablesByTag[tag]) {
+      // create subject and observable
+      const subj = new Subject<T>();
+      const observable = subj.asObservable();
+      this.localObservablesByTag[tag] = { subj, observable };
+    }
+    this.localObservablesByTag[tag].subj.next(data);
   }
 
   private subscribedOutputKeys: string[] = [];
 
-  public subToOutput<T>({ tag }: { tag: string }, callback: (data: T) => void) {
+  public subToStream<T>({ tag }: { tag: string }, callback: (data: T) => void) {
     // await getConnReadyPromise(this.socketIOClient);
+    if (this.availableOutputs.some((t) => t === tag)) {
+      this.socketIOClient.on(`stream:${this.jobId}/${tag}`, callback);
+      this.subscribedOutputKeys.push(tag);
 
-    if (!this.availableOutputs.some((o) => o.key === tag)) {
-      throw new Error(`Output of tag "${tag}" not in availableOutputs.`);
-    }
-    this.socketIOClient.on(`output:${this.jobId}/${tag}`, callback);
-    this.subscribedOutputKeys.push(tag);
+      const unsub = () => {
+        this.socketIOClient.off(`stream:${this.jobId}/${tag}`, callback);
+        this.subscribedOutputKeys = this.subscribedOutputKeys.filter(
+          (k) => k !== tag
+        );
+      };
 
-    const unsub = () => {
-      this.socketIOClient.off(`output:${this.jobId}/${tag}`, callback);
-      this.subscribedOutputKeys = this.subscribedOutputKeys.filter(
-        (k) => k !== tag
+      return unsub;
+    } else if (this.availableInputs.some((t) => t === tag)) {
+      // subscribe to local observable
+      if (!this.localObservablesByTag[tag]) {
+        const subj = new Subject<T>();
+        const observable = subj.asObservable();
+        this.localObservablesByTag[tag] = { subj, observable };
+      }
+      const sub =
+        this.localObservablesByTag[tag].observable.subscribe(callback);
+      const unsub = () => {
+        sub.unsubscribe();
+      };
+      return unsub;
+    } else {
+      throw new Error(
+        `Tag "${tag}" not in available streams: [${[
+          ...this.availableOutputs,
+          ...this.availableInputs,
+        ]
+          .map((t) => `"${t}"`)
+          .join(", ")}]`
       );
-    };
-
-    return unsub;
+    }
   }
 
   public async close() {
-    this.socketIOClient.emit(`unbind:${this.jobId}`);
+    this.socketIOClient.emit(UNBIND_CMD, { jobId: this.jobId } as UnbindParams);
     for (const key of this.subscribedOutputKeys) {
-      this.socketIOClient.off(`output:${this.jobId}/${key}`);
+      this.socketIOClient.off(`stream:${this.jobId}/${key}`);
     }
     this.subscribedOutputKeys = [];
     if (this.isConnDedicated) {

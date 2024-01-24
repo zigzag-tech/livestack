@@ -33,7 +33,7 @@ export function useOutput<O>({
         throw new Error(`Connection not found with jobId "${jobId}".`);
       }
 
-      return conn.subToOutput<{
+      return conn.subToStream<{
         data: O;
         timestamp: number;
         messageId: string;
@@ -108,9 +108,7 @@ export function useJobForConnection({
           uniqueSpecLabel,
         });
         clientRef.current = connection;
-
         GLOBALCONN_POOL_BY_JOB_ID[connection.jobId] = connection;
-
         setStatus({
           status: "connected",
           jobId: connection.jobId,
@@ -132,6 +130,7 @@ export function useJobForConnection({
         if (conn) {
           // Perform any necessary cleanup here, like unsubscribing from outputs
           delete GLOBALCONN_POOL_BY_JOB_ID[conn.jobId];
+
           conn.close();
           clientRef.current = undefined;
         }
