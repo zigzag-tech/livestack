@@ -656,6 +656,7 @@ function convertedConnectionsToGraph(
   ) {
     const fromSpecIdentifier = uniqueSpecIdentifier(from);
     const fromUniqueLabel = from.uniqueSpecLabel;
+
     const fromSpecNodeId = createOrGetNodeId(fromSpecIdentifier, {
       specName: from.spec.name,
       ...(fromUniqueLabel ? { uniqueSpecLabel: fromUniqueLabel } : {}),
@@ -773,20 +774,27 @@ function instantiateFromDefGraph({
       });
       jobNodeIdBySpecNodeId[nodeId] = jobId;
     } else if (node.nodeType === "stream") {
-      const { sourceSpecNode, targetSpecNode, outletNode, inletNode } =
-        getStreamNodes(defGraph, nodeId);
+      const { source, target } = getStreamNodes(defGraph, nodeId);
       const streamId = deriveStreamId({
         groupId,
-        from: {
-          specName: sourceSpecNode.specName,
-          uniqueSpecLabel: sourceSpecNode.uniqueSpecLabel,
-          tag: outletNode.tag,
-        },
-        to: {
-          specName: targetSpecNode.specName,
-          uniqueSpecLabel: targetSpecNode.uniqueSpecLabel,
-          tag: inletNode.tag,
-        },
+        ...(source
+          ? {
+              from: {
+                specName: source.specNode.specName,
+                uniqueSpecLabel: source.specNode.uniqueSpecLabel,
+                tag: source.outletNode.tag,
+              },
+            }
+          : {}),
+        ...(target
+          ? {
+              to: {
+                specName: target.specNode.specName,
+                uniqueSpecLabel: target.specNode.uniqueSpecLabel,
+                tag: target.inletNode.tag,
+              },
+            }
+          : {}),
       });
       g.addNode(streamId, {
         nodeType: "stream",
@@ -825,25 +833,49 @@ function instantiateFromDefGraph({
 }
 
 function getStreamNodes(g: DefGraph, streamNodeId: string) {
-  const [ie] = g.inboundEdges(streamNodeId);
-  const outletNodeId = g.source(ie);
-  const outletNode = g.getNodeAttributes(outletNodeId) as OutletNode;
-  const [ie2] = g.inboundEdges(outletNodeId);
-  const sourceSpecNodeId = g.source(ie2);
-  const sourceSpecNode = g.getNodeAttributes(sourceSpecNodeId) as SpecNode;
+  let source: {
+    specNode: SpecNode;
+    outletNode: OutletNode;
+  } | null = null;
 
+  const [ie] = g.inboundEdges(streamNodeId);
+  if (ie) {
+    const outletNodeId = g.source(ie);
+    const outletNode = g.getNodeAttributes(outletNodeId) as OutletNode;
+    const [ie2] = g.inboundEdges(outletNodeId);
+    const sourceSpecNodeId = g.source(ie2);
+    const sourceSpecNode = g.getNodeAttributes(sourceSpecNodeId) as SpecNode;
+    source = {
+      specNode: sourceSpecNode,
+      outletNode,
+    };
+  } else {
+    source = null;
+  }
+
+  let target: {
+    specNode: SpecNode;
+    inletNode: InletNode;
+  } | null = null;
   const [oe] = g.outboundEdges(streamNodeId);
-  const inletNodeId = g.target(oe);
-  const inletNode = g.getNodeAttributes(inletNodeId) as InletNode;
-  const [oe2] = g.outboundEdges(inletNodeId);
-  const targetSpecNodeId = g.target(oe2);
-  const targetSpecNode = g.getNodeAttributes(targetSpecNodeId) as SpecNode;
+
+  if (!oe) {
+    target = null;
+  } else {
+    const inletNodeId = g.target(oe);
+    const inletNode = g.getNodeAttributes(inletNodeId) as InletNode;
+    const [oe2] = g.outboundEdges(inletNodeId);
+    const targetSpecNodeId = g.target(oe2);
+    const targetSpecNode = g.getNodeAttributes(targetSpecNodeId) as SpecNode;
+    target = {
+      specNode: targetSpecNode,
+      inletNode,
+    };
+  }
 
   return {
-    sourceSpecNode,
-    targetSpecNode,
-    outletNode,
-    inletNode,
+    source,
+    target,
   };
 }
 

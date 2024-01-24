@@ -464,6 +464,8 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
       };
     }
 
+    // check if overridesByType is already cached
+    // if not, fetch from db
     const overridesByType =
       this.streamIdOverridesByTagByTypeByJobId[jobId][type];
     if (!overridesByType && this.zzEnv.db) {
@@ -513,7 +515,6 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
     } else {
       // const queueIdPrefix = ;
       // const queueId = `${type}/${String(p.key || "default")}`;
-      const dir = type === "in" ? "to" : "from";
       streamId = deriveStreamId({
         groupId: `[${jobId}]`,
         from:
@@ -658,36 +659,48 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
           jobOptions,
         });
 
-        for (const [key, streamId] of _.entries(inputStreamIdOverridesByTag)) {
-          await ensureStreamRec({
-            projectId,
-            streamId: streamId as string,
-            dbConn: trx,
-          });
-          await ensureJobStreamConnectorRec({
-            projectId,
-            streamId: streamId as string,
-            dbConn: trx,
-            jobId,
-            key,
-            connectorType: "in",
-          });
+        if (inputStreamIdOverridesByTag) {
+          for (const [key, streamId] of _.entries(
+            inputStreamIdOverridesByTag
+          )) {
+            await ensureStreamRec({
+              projectId,
+              streamId: streamId as string,
+              dbConn: trx,
+            });
+            await ensureJobStreamConnectorRec({
+              projectId,
+              streamId: streamId as string,
+              dbConn: trx,
+              jobId,
+              key,
+              connectorType: "in",
+            });
+          }
+          this.streamIdOverridesByTagByTypeByJobId[jobId]["in"] =
+            inputStreamIdOverridesByTag;
         }
 
-        for (const [key, streamId] of _.entries(outputStreamIdOverridesByTag)) {
-          await ensureStreamRec({
-            projectId,
-            streamId: streamId as string,
-            dbConn: trx,
-          });
-          await ensureJobStreamConnectorRec({
-            projectId,
-            streamId: streamId as string,
-            dbConn: trx,
-            jobId,
-            key,
-            connectorType: "out",
-          });
+        if (outputStreamIdOverridesByTag) {
+          for (const [key, streamId] of _.entries(
+            outputStreamIdOverridesByTag
+          )) {
+            await ensureStreamRec({
+              projectId,
+              streamId: streamId as string,
+              dbConn: trx,
+            });
+            await ensureJobStreamConnectorRec({
+              projectId,
+              streamId: streamId as string,
+              dbConn: trx,
+              jobId,
+              key,
+              connectorType: "out",
+            });
+          }
+          this.streamIdOverridesByTagByTypeByJobId[jobId]["out"] =
+            outputStreamIdOverridesByTag;
         }
       });
     }
