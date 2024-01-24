@@ -327,6 +327,13 @@ export class ZZWorkflowSpec extends ZZJobSpec<
   }
 }
 
+type ByTagInputCallable<T> = {
+  (tag: string): {
+    feed: (data: T) => Promise<void>;
+    terminate: () => Promise<void>;
+  };
+};
+
 export class ZZWorkflow {
   public readonly jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
   public readonly graph: InstantiatedGraph;
@@ -338,7 +345,7 @@ export class ZZWorkflow {
     bySpec: (
       spec: UniqueSpecQuery
     ) => ReturnType<ZZJobSpec<any, any, any>["_deriveInputsForJob"]>;
-  };
+  } & ByTagInputCallable<any>;
   public readonly output: {
     byTag: ByTagCallable<any>;
     bySpec: (
@@ -399,8 +406,8 @@ export class ZZWorkflow {
       return childSpec._deriveInputsForJob(jobId);
     };
     const that = this;
-    this.input = {
-      byTag: (tag: string) => {
+    this.input = (() => {
+      const func = (tag: string) => {
         // TODO
         const lookupR = that.jobGroupDef.inputSpecTagByWorkflowTag[tag];
         if (!lookupR) {
@@ -411,9 +418,22 @@ export class ZZWorkflow {
         const { specName, tag: specTag } = lookupR;
         const r = inputBySpec(specName);
         return r.byTag(specTag);
-      },
-      bySpec: inputBySpec,
-    };
+      };
+      func.byTag = (tag: string) => {
+        // TODO
+        const lookupR = that.jobGroupDef.inputSpecTagByWorkflowTag[tag];
+        if (!lookupR) {
+          throw new Error(
+            `Tag ${tag} not found in workflow ${that.jobGroupDef.name}`
+          );
+        }
+        const { specName, tag: specTag } = lookupR;
+        const r = inputBySpec(specName);
+        return r.byTag(specTag);
+      };
+      func.bySpec = inputBySpec;
+      return func;
+    })() as any;
     const outputBySpec = (specQuery: UniqueSpecQuery) => {
       const { spec: childSpec, jobId } =
         identifySpecAndJobIdBySpecQuery(specQuery);
