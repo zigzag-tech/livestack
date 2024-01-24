@@ -51,18 +51,20 @@ export function useOutput<O>({
   return output;
 }
 
-export function useInput({
+export function useInput<T>({
   specName,
   uniqueSpecLabel,
   jobId,
   tag,
+  def,
 }: {
   specName?: string;
   uniqueSpecLabel?: string;
   jobId?: string;
   tag: string;
+  def?: z.ZodType<T>;
 }) {
-  const feed = <T,>(data: T) => {
+  const feed = (data: T) => {
     if (specName && jobId) {
       const conn = GLOBALCONN_POOL_BY_JOB_ID[jobId];
       if (!conn) {
@@ -123,15 +125,14 @@ export function useJobForConnection({
     }
 
     const connectP = setupConnection();
-
     return () => {
       (async () => {
         const conn = await connectP;
         if (conn) {
           // Perform any necessary cleanup here, like unsubscribing from outputs
-          delete GLOBALCONN_POOL_BY_JOB_ID[conn.jobId];
+          // delete GLOBALCONN_POOL_BY_JOB_ID[conn.jobId];
 
-          conn.close();
+          // conn.close();
           clientRef.current = undefined;
         }
       })();
