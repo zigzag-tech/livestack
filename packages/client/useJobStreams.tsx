@@ -33,11 +33,7 @@ export function useOutput<O>({
         throw new Error(`Connection not found with jobId "${jobId}".`);
       }
 
-      return conn.subToStream<{
-        data: O;
-        timestamp: number;
-        messageId: string;
-      }>(
+      return conn.subToStream<O>(
         {
           tag,
         },
@@ -71,12 +67,7 @@ export function useInput<T>({
         throw new Error(`Connection not found with jobId "${jobId}".`);
       }
 
-      return conn.feed(
-        {
-          data,
-        },
-        tag
-      );
+      return conn.feed(data, tag);
     }
   };
 
@@ -224,7 +215,7 @@ export function useCumulative<
       // and if not, insert it into cumulative, sorted by timestamp
       if (
         cumulative.length === 0 ||
-        cumulative[cumulative.length - 1].messageId !== c!.messageId
+        !cumulative.reverse().some((c2) => c2.messageId === c!.messageId)
       ) {
         const sorted = [...cumulative, c!].sort(
           (a, b) => a.timestamp - b.timestamp

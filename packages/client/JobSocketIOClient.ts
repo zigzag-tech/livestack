@@ -46,8 +46,18 @@ export class JobSocketIOConnection {
   private localObservablesByTag: Record<
     string,
     {
-      observable: Observable<any>;
-      subj: Subject<any>;
+      observable: Observable<{
+        data: any;
+        tag: string;
+        messageId: string;
+        timestamp: number;
+      }>;
+      subj: Subject<{
+        data: any;
+        tag: string;
+        messageId: string;
+        timestamp: number;
+      }>;
     }
   > = {};
 
@@ -60,16 +70,34 @@ export class JobSocketIOConnection {
     this.socketIOClient.emit(FEED, feedParams);
     if (!this.localObservablesByTag[tag]) {
       // create subject and observable
-      const subj = new Subject<T>();
+      const subj = new Subject<{
+        data: T;
+        tag: string;
+        messageId: string;
+        timestamp: number;
+      }>();
       const observable = subj.asObservable();
       this.localObservablesByTag[tag] = { subj, observable };
     }
-    this.localObservablesByTag[tag].subj.next(data);
+    this.localObservablesByTag[tag].subj.next({
+      data,
+      tag,
+      timestamp: Date.now(),
+      messageId: Math.random().toString(),
+    });
   }
 
   private subscribedOutputKeys: string[] = [];
 
-  public subToStream<T>({ tag }: { tag: string }, callback: (data: T) => void) {
+  public subToStream<T>(
+    { tag }: { tag: string },
+    callback: (data: {
+      data: T;
+      tag: string;
+      messageId: string;
+      timestamp: number;
+    }) => void
+  ) {
     // await getConnReadyPromise(this.socketIOClient);
     if (this.availableOutputs.some((t) => t === tag)) {
       this.socketIOClient.on(`stream:${this.jobId}/${tag}`, callback);
@@ -86,7 +114,12 @@ export class JobSocketIOConnection {
     } else if (this.availableInputs.some((t) => t === tag)) {
       // subscribe to local observable
       if (!this.localObservablesByTag[tag]) {
-        const subj = new Subject<T>();
+        const subj = new Subject<{
+          data: T;
+          tag: string;
+          messageId: string;
+          timestamp: number;
+        }>();
         const observable = subj.asObservable();
         this.localObservablesByTag[tag] = { subj, observable };
       }
