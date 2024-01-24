@@ -157,7 +157,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     this.outputSpecTagByWorkflowTag = outputSpecTagByWorkflowTag;
 
     this._validateConnections();
-    this.defGraph = convertedConnectionsToGraph(canonicalConns);
+    this.defGraph = deriveDefGraph(canonicalConns);
     this.orchestrationWorkerDef = new ZZWorkerDef({
       jobSpec: this,
       processor: async ({
@@ -634,11 +634,8 @@ type InstantiatedGraph = Graph<
   )
 >;
 
-function convertedConnectionsToGraph(
-  convertedConnections: CanonicalConnection[]
-): DefGraph {
+function deriveDefGraph(convertedConnections: CanonicalConnection[]): DefGraph {
   const graph: DefGraph = new Graph();
-
   function createOrGetNodeId<T extends DefNodeType>(
     id: string,
     data: InferNodeData<T>
@@ -708,12 +705,26 @@ function convertedConnectionsToGraph(
     graph.addEdge(toInletNodeId, toSpecNodeId);
   }
 
+  let specNodes = new Map<string, ZZJobSpec>();
+
+  const addToNodeMap = (ss: CanonicalSpecAndOutlet) => {
+    const identifier = uniqueSpecIdentifier(ss);
+    specNodes.set(identifier, ss.spec);
+  };
+
+  // Pass 1: create all nodes from the connections
   for (const connection of convertedConnections) {
     // Split into multiple connections
     for (let i = 0; i < connection.length - 1; i++) {
       addConnection(connection[i], connection[i + 1]);
     }
+    connection.forEach(addToNodeMap);
   }
+
+  // Pass 2: create any loose stream nodes along with their inlet/outlet nodes
+  // from spec nodes
+
+  // TODO
 
   return graph;
 }
@@ -838,8 +849,10 @@ function getStreamNodes(g: DefGraph, streamNodeId: string) {
     outletNode: OutletNode;
   } | null = null;
 
-  const [ie] = g.inboundEdges(streamNodeId);
-  if (ie) {
+  const [ie] = g.inboundEdges(streamNodeId) as (string | undefined)[];
+  if (!ie) {
+    source = null;
+  } else {
     const outletNodeId = g.source(ie);
     const outletNode = g.getNodeAttributes(outletNodeId) as OutletNode;
     const [ie2] = g.inboundEdges(outletNodeId);
@@ -849,15 +862,13 @@ function getStreamNodes(g: DefGraph, streamNodeId: string) {
       specNode: sourceSpecNode,
       outletNode,
     };
-  } else {
-    source = null;
   }
 
   let target: {
     specNode: SpecNode;
     inletNode: InletNode;
   } | null = null;
-  const [oe] = g.outboundEdges(streamNodeId);
+  const [oe] = g.outboundEdges(streamNodeId) as (string | undefined)[];
 
   if (!oe) {
     target = null;
