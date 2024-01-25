@@ -488,8 +488,12 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
           any,
           string
         >
-      )[(key || "default") as keyof IMap | keyof OMap] as string | undefined) ||
-      null
+      )[
+        key ||
+          (type === "in"
+            ? (this.getSingleInputTag() as keyof IMap)
+            : (this.getSingleOutputTag() as keyof OMap))
+      ] as string | undefined) || null
     );
   }
 
