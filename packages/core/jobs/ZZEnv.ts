@@ -38,6 +38,11 @@ export class ZZEnv implements EnvParams {
     this.projectId = projectId;
     this.db = db;
     this.redisConfig = redisConfig;
+
+    // TODO: make better global resolution logic
+    if (!ZZEnv.global()) {
+      ZZEnv.setGlobal(this);
+    }
   }
 
   public derive(newP: Partial<EnvParams>) {
