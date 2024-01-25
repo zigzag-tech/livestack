@@ -27,7 +27,7 @@ export function setupJobBindingGateway({
   httpServer: HTTPServer;
   socketPath?: string;
   onConnect?: (conn: LiveGatewayConn) => void;
-  allowedSpecsForBinding?: SpecOrName[];
+  allowedSpecsForBinding: SpecOrName[];
   zzEnv?: ZZEnv | null;
 }) {
   const io = new SocketIOServer(httpServer, {
