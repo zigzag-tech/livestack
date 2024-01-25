@@ -76,6 +76,7 @@ export function wrapStreamSubscriberWithTermination<T>(
       return {
         data: nextValue.data,
         timestamp: nextValue.timestamp,
+        messageId: nextValue.messageId,
       };
     }
   };

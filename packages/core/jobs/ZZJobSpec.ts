@@ -374,7 +374,7 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
   async terminateJobInput({ jobId, tag }: { jobId: string; tag?: keyof IMap }) {
     await this._getStreamAndSendDataToPLimited({
       jobId,
-      tag: tag || ("default" as keyof IMap),
+      tag: tag || (this.getSingleInputTag() as keyof IMap),
       type: "in",
       data: {
         terminate: true,
@@ -391,13 +391,13 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
   }) {
     let isReady = await this.getJobReadyForInputsInRedis({
       jobId,
-      key: tag ? tag : ("default" as keyof IMap),
+      key: tag ? tag : (this.getSingleInputTag() as keyof IMap),
     });
     while (!isReady) {
       await sleep(100);
       isReady = await this.getJobReadyForInputsInRedis({
         jobId,
-        key: tag ? tag : ("default" as keyof IMap),
+        key: tag ? tag : (this.getSingleInputTag() as keyof IMap),
       });
       // console.log("isReady", isReady);
     }
@@ -800,7 +800,8 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
 
     const nextValue = async <K extends keyof OMap>() => {
       if (subscriberByDefaultKey === null) {
-        subscriberByDefaultKey = await subscriberByTag("default" as K);
+        const key = this.getSingleOutputTag() as K;
+        subscriberByDefaultKey = await subscriberByTag(key);
       }
       return await subscriberByDefaultKey.nextValue();
     };

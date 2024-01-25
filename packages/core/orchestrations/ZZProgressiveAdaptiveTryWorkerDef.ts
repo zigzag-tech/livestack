@@ -1,5 +1,5 @@
 import { CheckSpec, ZZJobSpec } from "../jobs/ZZJobSpec";
-import { ZZWorkerDef } from "../jobs/ZZWorkerDef";
+import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { z } from "zod";
 import _ from "lodash";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
@@ -11,15 +11,15 @@ export interface AttemptDef<ParentP, ParentO, P, OMap> {
   transformOutput: <K extends keyof OMap>(
     // TODO: fix this type
     // output: OMap[K]
-    output: any
-  ) => Promise<ParentO> | ParentO;
+    output: OMap[K]
+  ) => Promise<ParentO[keyof ParentO]> | ParentO[keyof ParentO];
 }
 
 export class ZZProgressiveAdaptiveTryWorkerDef<
   ParentP,
   ParentO,
   Specs
-> extends ZZWorkerDef<ParentP, {}, { default: ParentO }> {
+> extends ZZWorkerDef<ParentP, {}, ParentO> {
   attempts: {
     [K in keyof Specs]: AttemptDef<
       ParentP,
@@ -35,7 +35,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
     jobSpec,
   }: {
     zzEnv?: ZZEnv;
-    jobSpec: ZZJobSpec<ParentP, {}, { default: ParentO }>;
+    jobSpec: ZZJobSpec<ParentP, {}, ParentO>;
     attempts: {
       [K in keyof Specs]: AttemptDef<
         ParentP,
@@ -68,7 +68,10 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
               throw new Error("no output");
             }
 
-            const result = await transformOutput(o);
+            const result = {
+              ...o,
+              data: await transformOutput(o.data),
+            };
 
             return {
               timeout: false as const,

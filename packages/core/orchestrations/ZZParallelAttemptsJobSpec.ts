@@ -1,7 +1,8 @@
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { CheckSpec, ZZJobSpec, sleep } from "../jobs/ZZJobSpec";
-import { ZZWorkerDef } from "../jobs/ZZWorkerDef";
+import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { ZZEnv } from "../jobs/ZZEnv";
+import { WrapWithTimestamp } from "../utils/io";
 type TriggerCheckContext = {
   totalTimeElapsed: number;
   attemptStats: {
@@ -60,7 +61,7 @@ export class ZZParallelAttemptWorkerDef<
     super({
       zzEnv,
       jobSpec: parentJobSpec,
-      processor: async ({ logger, nextInput: parentNextInput, jobId }) => {
+      processor: async ({ logger, input: parentInput, jobId }) => {
         const genRetryFunction = <I, O>({
           jobSpec,
           transformInput,
@@ -72,7 +73,7 @@ export class ZZParallelAttemptWorkerDef<
               jobId: childJobId,
             });
 
-            const inp = await parentNextInput();
+            const inp = await parentInput.nextValue();
             if (!inp) {
               throw new Error("no input");
             }
@@ -84,7 +85,10 @@ export class ZZParallelAttemptWorkerDef<
               throw new Error("no output");
             }
 
-            const result = await transformOutput(o);
+            const result = {
+              ...o,
+              data: await transformOutput(o.data),
+            };
 
             return {
               resolved: true as const,
@@ -104,7 +108,9 @@ export class ZZParallelAttemptWorkerDef<
           name: string;
           timeStarted: number;
           isResolved: () => boolean;
-          getResult: () => ParentOMap[keyof ParentOMap] | undefined;
+          getResult: () =>
+            | WrapWithTimestamp<ParentOMap[keyof ParentOMap]>
+            | undefined;
         }[] = [];
 
         const time = Date.now();
@@ -140,7 +146,9 @@ export class ZZParallelAttemptWorkerDef<
             nextAttempt = restAttempts.shift()!;
             const { setResolved, isResolved } = genResolvedTracker();
 
-            let result: ParentOMap[keyof ParentOMap] | undefined = undefined;
+            let result:
+              | WrapWithTimestamp<ParentOMap[keyof ParentOMap]>
+              | undefined = undefined;
             const fn = genRetryFunction(nextAttempt);
             logger.info(`Started attempt ${nextAttempt.jobSpec.name}.`);
             running.push({
