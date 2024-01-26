@@ -16,8 +16,6 @@ type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
 
-const SPEC_TAG_SEPARATOR = "__//__";
-
 export type JobSpecAndJobOptions<JobSpec> = {
   spec: CheckSpec<JobSpec>;
   jobOptions: z.infer<CheckSpec<JobSpec>["jobOptions"]>;
