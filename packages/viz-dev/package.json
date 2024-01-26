@@ -1,5 +1,5 @@
 {
-  "name": "@livestack/viz-dev",
+  "name": "@livestack/viz",
   "version": "0.0.2",
   "description": "Realtime livestack visualization.",
   "scripts": {
