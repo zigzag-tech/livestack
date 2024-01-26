@@ -16,8 +16,6 @@
 
 ## Why Livestack?
 
-
-
 We believe the future of AI is not just about passive chatbots. It's about realtime AI applications that are always on, always listening, always ready to help.
 
 At present, however, to implement such an AI project is still a complex task. Existing AI frameworks aren't well-suited for realtime interaction and often require extensive program design and coding. Once it's prototyped, there are still many steps to take to scale and deploy the application before it can be used by others.
@@ -55,8 +53,8 @@ See [here](_misc/docs/comparison.md).
 
 ## Design Principles
 
-- Reduce user cognitive load wherever possible.
+- Simplicity triumphs over complexity: reduce user's cognitive load as much as possible.
 - Reasonable defaults to reduce burden of configuration.
 - Minimal surprises and gotchas.
 - Introduce new concepts and abstractions only when absolutely necessary.
-- Battle-test a new feature, hurt it plenty, before accepting it to the framework.
+- Battle-test a new feature, hurt it plenty, before releasing it.
