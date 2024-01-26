@@ -9,7 +9,6 @@
     "moduleResolution": "node",
     "noEmit": false,
     "noUnusedLocals": false,
-    "preserveSymlinks": true,
     "noUnusedParameters": false,
     "resolveJsonModule": true,
     "preserveConstEnums": true,
