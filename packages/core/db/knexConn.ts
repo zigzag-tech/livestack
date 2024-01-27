@@ -303,7 +303,7 @@ export async function updateJobStatus({
   await q;
 }
 
-export async function createJobRelationRec({
+export async function ensureJobRelationRec({
   projectId,
   parentJobId,
   childJobId,
@@ -314,12 +314,15 @@ export async function createJobRelationRec({
   childJobId: string;
   dbConn: Knex;
 }) {
-  await dbConn("zz_job_relations").insert({
-    project_id: projectId,
-    parent_job_id: parentJobId,
-    child_job_id: childJobId,
-    time_created: new Date(),
-  });
+  await dbConn("zz_job_relations")
+    .insert({
+      project_id: projectId,
+      parent_job_id: parentJobId,
+      child_job_id: childJobId,
+      time_created: new Date(),
+    })
+    .onConflict(["project_id", "parent_job_id", "child_job_id"])
+    .merge();
 }
 
 export async function removeJobRelationRec({
