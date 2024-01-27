@@ -78,3 +78,12 @@ export const ZZJobStreamConnectorRec = z.object({
 });
 
 export type ZZJobStreamConnectorRec = z.infer<typeof ZZJobStreamConnectorRec>;
+
+export const ZZJobRelationRec = z.object({
+  project_id: z.string(),
+  parent_job_id: z.string(),
+  child_job_id: z.string(),
+  time_created: z.date(),
+});
+
+export type ZZJobRelationRec = z.infer<typeof ZZJobRelationRec>;
