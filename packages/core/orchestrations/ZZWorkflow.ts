@@ -12,6 +12,7 @@ import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
 import { ByTagCallable } from "../jobs/ZZJob";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
+import { ensureJobRelationRec } from "../db/knexConn";
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
@@ -226,6 +227,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<
 
           const childSpecName = jobNode.specName;
           const childJobSpec = ZZJobSpec.lookupByName(childSpecName);
+
           await childJobSpec.enqueueJob({
             jobId: jobNode.jobId,
             jobOptions: childrenJobOptions?.find(({ spec: specQuery }) => {
@@ -238,6 +240,14 @@ export class ZZWorkflowSpec extends ZZJobSpec<
             inputStreamIdOverridesByTag,
             outputStreamIdOverridesByTag,
           });
+          if (this.zzEnv.db) {
+            await ensureJobRelationRec({
+              projectId: this.zzEnv.projectId,
+              parentJobId: groupId,
+              childJobId: jobNode.jobId,
+              dbConn: this.zzEnv.db,
+            });
+          }
         }
       },
     });
