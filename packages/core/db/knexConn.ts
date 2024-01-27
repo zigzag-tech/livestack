@@ -303,6 +303,45 @@ export async function updateJobStatus({
   await q;
 }
 
+export async function createJobRelationRec({
+  projectId,
+  parentJobId,
+  childJobId,
+  dbConn,
+}: {
+  projectId: string;
+  parentJobId: string;
+  childJobId: string;
+  dbConn: Knex;
+}) {
+  await dbConn("zz_job_relations").insert({
+    project_id: projectId,
+    parent_job_id: parentJobId,
+    child_job_id: childJobId,
+    time_created: new Date(),
+  });
+}
+
+export async function removeJobRelationRec({
+  projectId,
+  parentJobId,
+  childJobId,
+  dbConn,
+}: {
+  projectId: string;
+  parentJobId: string;
+  childJobId: string;
+  dbConn: Knex;
+}) {
+  await dbConn("zz_job_relations")
+    .where({
+      project_id: projectId,
+      parent_job_id: parentJobId,
+      child_job_id: childJobId,
+    })
+    .delete();
+}
+
 export async function ensureJobAndInitStatusRec<T>({
   projectId,
   specName,
