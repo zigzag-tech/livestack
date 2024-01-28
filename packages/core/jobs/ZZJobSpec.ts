@@ -73,7 +73,7 @@ export class ZZJobSpec<
   O = any,
   IMap = InferTMap<I>,
   OMap = InferTMap<O>
-> extends ZZJobSpecBase<P, IMap, OMap> {
+> extends ZZJobSpecBase<IMap, OMap> {
   private readonly _zzEnv: ZZEnv | null = null;
   protected static _registryBySpecName: Record<
     string,

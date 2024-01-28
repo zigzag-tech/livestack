@@ -2,7 +2,7 @@ import { InferDefMap } from "./StreamDefSet";
 import { StreamDefSet } from "./StreamDefSet";
 import { z } from "zod";
 
-export abstract class ZZJobSpecBase<P, IMap, OMap> {
+export abstract class ZZJobSpecBase<IMap, OMap> {
   public readonly name: string;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
