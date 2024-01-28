@@ -16,7 +16,7 @@ import {
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 
-import { ZodType, z } from "zod";
+import { z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import {
   WrapTerminateFalse,
@@ -27,6 +27,8 @@ import {
 import { WithTimestamp, ZZStream, ZZStreamSubscriber } from "./ZZStream";
 import pLimit from "p-limit";
 import { IOSpec } from "@livestack/shared";
+import { InferTMap } from "@livestack/shared/IOSpec";
+import { wrapIfSingle } from "@livestack/shared/IOSpec";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -59,21 +61,13 @@ export type InferInputType<
   IMap = InferStreamSetType<CheckSpec<Spec>["inputDefSet"]>
 > = IMap[K extends keyof IMap ? K : never] | null;
 
-export type InferTMap<T> = T extends z.ZodType
-  ? { default: z.infer<T> }
-  : T extends Record<string, ZodType>
-  ? {
-      [K in keyof T]: z.infer<T[K]>;
-    }
-  : never;
-
 export class ZZJobSpec<
   P = {},
-  I = any,
-  O = any,
+  I = never,
+  O = never,
   IMap = InferTMap<I>,
   OMap = InferTMap<O>
-> extends IOSpec<IMap, OMap> {
+> extends IOSpec<I, O, IMap, OMap> {
   private readonly _zzEnv: ZZEnv | null = null;
   protected static _registryBySpecName: Record<
     string,
@@ -953,28 +947,3 @@ export const getCachedQueueByName = <JobOptions, JobReturnType>(
     return queue;
   }
 };
-
-function wrapIfSingle<
-  T,
-  TMap = T extends z.ZodType<infer TMap>
-    ? {
-        default: z.ZodType<TMap>;
-      }
-    : T extends {
-        [key: string]: z.ZodType<any>;
-      }
-    ? T
-    : T extends undefined
-    ? {}
-    : never
->(def: T): TMap {
-  if (!def) {
-    return {} as TMap;
-  } else if (def instanceof z.ZodType) {
-    return {
-      default: def!,
-    } as TMap;
-  } else {
-    return def as TMap;
-  }
-}

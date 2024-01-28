@@ -3,10 +3,10 @@ import { v4 } from "uuid";
 import {
   CheckSpec,
   deriveStreamId,
-  InferTMap,
   uniqueStreamIdentifier,
   ZZJobSpec,
 } from "../jobs/ZZJobSpec";
+import { InferTMap } from "@livestack/shared/IOSpec";
 import { z } from "zod";
 import Graph from "graphology";
 import { ZZEnv } from "../jobs/ZZEnv";

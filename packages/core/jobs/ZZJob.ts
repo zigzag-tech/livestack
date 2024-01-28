@@ -14,7 +14,7 @@ import { ZZJobSpec } from "./ZZJobSpec";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
-import { InferTMap } from "./ZZJobSpec";
+import { InferTMap } from "@livestack/shared/IOSpec";
 import _ from "lodash";
 
 export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
