@@ -234,7 +234,7 @@ export class ZZJobSpec<
 
   public async enqueueJobAndWaitOnSingleResults<K extends keyof OMap>({
     jobId: jobId,
-    jobOptions: jobOptions,
+    jobOptions,
     outputTag,
   }: // queueEventsOptions,
   {
