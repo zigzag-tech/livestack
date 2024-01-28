@@ -724,12 +724,11 @@ function deriveDefGraph(convertedConnections: CanonicalConnection[]): DefGraph {
     graph.addEdge(toInletNodeId, toSpecNodeId);
   }
 
-  let specNodes = new Map<string, ZZJobSpec>();
+  let specNodes = new Map<string, ZZJobSpec<any, any, any, any>>();
 
   const addToNodeMap = (ss: CanonicalSpecAndOutlet) => {
     const identifier = uniqueSpecIdentifier(ss);
-    //TODO: get rid of any
-    specNodes.set(identifier, ss.spec as any);
+    specNodes.set(identifier, ss.spec);
   };
 
   // Pass 1: create all nodes from the connections
