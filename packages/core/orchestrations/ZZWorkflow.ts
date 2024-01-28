@@ -728,6 +728,7 @@ function deriveDefGraph(convertedConnections: CanonicalConnection[]): DefGraph {
 
   const addToNodeMap = (ss: CanonicalSpecAndOutlet) => {
     const identifier = uniqueSpecIdentifier(ss);
+    //TODO: get rid of any
     specNodes.set(identifier, ss.spec as any);
   };
 
