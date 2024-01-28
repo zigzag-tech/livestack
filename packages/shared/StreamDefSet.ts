@@ -1,17 +1,8 @@
 import { z } from "zod";
-import { ZZJobSpecBase } from "./ZZJobSpecBase";
 
 export type InferStreamSetType<T> = T extends StreamDefSet<infer TMap>
   ? TMap
   : {};
-
-// export type InferDefMap<TMap> = TMap extends {
-//   [key in infer K]: z.ZodType<infer V>;
-// }
-//   ? {
-//       [key in K]: z.ZodType<V>;
-//     }
-//   : never;
 
 export type InferDefMap<TMap> = {
   [K in keyof TMap]: z.ZodType<TMap[K]>;
