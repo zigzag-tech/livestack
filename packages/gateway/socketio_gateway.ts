@@ -122,8 +122,8 @@ class LiveGatewayConn {
     this.socket.on("disconnect", cb);
   };
 
-  public bindToNewJob = async <P, IMap, OMap>(
-    jobSpec: ZZJobSpec<P, IMap, OMap>,
+  public bindToNewJob = async <P, I, O, IMap, OMap>(
+    jobSpec: ZZJobSpec<P, I, O, IMap, OMap>,
     jobOptions?: P
   ) => {
     const { input, output, jobId } = await jobSpec.enqueueJob({ jobOptions });
@@ -135,10 +135,9 @@ class LiveGatewayConn {
     this.socket.emit(JOB_INFO, data);
     this.socket.on(
       FEED,
-      async ({ data, tag }: FeedParams<IMap[keyof IMap]>) => {
+      async <K extends keyof IMap>({ data, tag }: FeedParams<K, IMap[K]>) => {
         try {
-          // TODO: do not use "any"
-          await input.byTag(tag as any).feed(data as any);
+          await input.byTag(tag).feed(data);
         } catch (err) {
           console.error(err);
         }

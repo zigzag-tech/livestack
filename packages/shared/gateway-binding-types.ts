@@ -11,7 +11,6 @@ export type JobInfoType = {
   availableOutputs: string[];
 };
 
-
 export type StreamIdentifier = {
   specName?: string;
   uniqueSpecLabel?: string;
@@ -23,10 +22,9 @@ export type UnbindParams = {
   jobId: string;
 };
 
-
 export const FEED = "feed";
 
-export type FeedParams<T> = {
+export type FeedParams<K, T> = {
   data: T;
-  tag: string;
+  tag: K;
 };
