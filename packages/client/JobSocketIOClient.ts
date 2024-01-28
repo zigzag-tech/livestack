@@ -61,8 +61,20 @@ export class JobSocketIOConnection {
     }
   > = {};
 
-  public async feed<T>(data: T, tag: string) {
+  public async feed<T>(data: T, tag?: string) {
     // await getConnReadyPromise(this.socketIOClient);
+    if (!tag) {
+      if (this.availableInputs.length > 1) {
+        throw new Error(
+          ` $Ambiguous input for spec "${
+            this.specName
+          }"; found more than two with tags [${this.availableInputs.join(
+            ", "
+          )}]. \nPlease specify which one to use with "output(tagName)".`
+        );
+      }
+      tag = this.availableInputs[0];
+    }
     const feedParams: FeedParams<T> = {
       data,
       tag,
@@ -90,7 +102,7 @@ export class JobSocketIOConnection {
   private subscribedOutputKeys: string[] = [];
 
   public subToStream<T>(
-    { tag }: { tag: string },
+    { tag }: { tag?: string },
     callback: (data: {
       data: T;
       tag: string;
@@ -99,6 +111,18 @@ export class JobSocketIOConnection {
     }) => void
   ) {
     // await getConnReadyPromise(this.socketIOClient);
+    if (!tag) {
+      if (this.availableOutputs.length > 1) {
+        throw new Error(
+          ` $Ambiguous output for spec "${
+            this.specName
+          }"; found more than two with tags [${this.availableOutputs.join(
+            ", "
+          )}]. \nPlease specify which one to use with "input(tagName)".`
+        );
+      }
+      tag = this.availableOutputs[0];
+    }
     if (this.availableOutputs.some((t) => t === tag)) {
       this.socketIOClient.on(`stream:${this.jobId}/${tag}`, callback);
       this.subscribedOutputKeys.push(tag);

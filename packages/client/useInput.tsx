@@ -12,7 +12,7 @@ export function useInput<T>({
     jobId?: string;
     connRef: React.MutableRefObject<Promise<JobSocketIOConnection> | undefined>;
   };
-  tag: string;
+  tag?: string;
   def?: z.ZodType<T>;
 }) {
   const feed = async (data: T) => {

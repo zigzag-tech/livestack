@@ -26,7 +26,7 @@ export abstract class ZZJobSpecBase<P, IMap, OMap> {
     } else if (defSet.keys.length > 1) {
       const keys = defSet.keys;
       throw new Error(
-        ` ${type} is ambiguous for spec "${
+        `Ambiguous ${type} for spec "${
           this.name
         }"; found more than two with tags [${keys.join(
           ", "

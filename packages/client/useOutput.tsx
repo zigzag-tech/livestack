@@ -13,14 +13,14 @@ export function useOutput<O>({
     jobId?: string;
     connRef: React.MutableRefObject<Promise<JobSocketIOConnection> | undefined>;
   };
-  tag: string;
+  tag?: string;
   def?: z.ZodType<O>;
 }) {
   const [output, setOutput] = useState<{
     data: O;
     timestamp: number;
     messageId: string;
-    tag: string;
+    tag?: string;
   } | null>(null);
 
   useEffect(() => {
