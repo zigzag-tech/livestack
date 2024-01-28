@@ -1,8 +1,5 @@
 import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorker";
-import {
-  InferDefMap,
-  InferStreamSetType,
-} from "@livestack/shared/StreamDefSet";
+import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { JobsOptions, Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { GenericRecordType, QueueName } from "../orchestrations/workerCommon";
@@ -19,7 +16,7 @@ import {
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 
-import { z } from "zod";
+import { ZodType, z } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import {
   WrapTerminateFalse,
@@ -40,8 +37,14 @@ const queueMapByProjectIdAndQueueName = new Map<
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
-export type CheckSpec<SP> = SP extends ZZJobSpec<infer P, infer I, infer O>
-  ? ZZJobSpec<P, I, O>
+export type CheckSpec<SP> = SP extends ZZJobSpec<
+  infer P,
+  infer I,
+  infer O,
+  infer IMap,
+  infer OMap
+>
+  ? ZZJobSpec<P, I, O, IMap, OMap>
   : never;
 
 export type InferOutputType<
@@ -56,15 +59,25 @@ export type InferInputType<
   IMap = InferStreamSetType<CheckSpec<Spec>["inputDefSet"]>
 > = IMap[K extends keyof IMap ? K : never] | null;
 
-export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
-  P,
-  IMap,
-  OMap
-> {
+export type InferTMap<T> = T extends z.ZodType
+  ? { default: z.infer<T> }
+  : T extends Record<string, ZodType>
+  ? {
+      [K in keyof T]: z.infer<T[K]>;
+    }
+  : never;
+
+export class ZZJobSpec<
+  P = {},
+  I = any,
+  O = any,
+  IMap = InferTMap<I>,
+  OMap = InferTMap<O>
+> extends ZZJobSpecBase<P, IMap, OMap> {
   private readonly _zzEnv: ZZEnv | null = null;
   protected static _registryBySpecName: Record<
     string,
-    ZZJobSpec<any, any, any>
+    ZZJobSpec<any, any, any, any, any>
   > = {};
 
   protected logger: ReturnType<typeof getLogger>;
@@ -90,15 +103,15 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
   }: {
     name: string;
     jobOptions?: z.ZodType<P>;
-    input?: InferDefMap<IMap>;
-    output?: InferDefMap<OMap>;
+    input?: I;
+    output?: O;
     zzEnv?: ZZEnv;
     concurrency?: number;
   }) {
     super({
       name,
-      input,
-      output,
+      input: wrapIfSingle(input),
+      output: wrapIfSingle(output),
     });
 
     this.jobOptions = jobOptions || (z.object({}) as unknown as z.ZodType<P>);
@@ -130,9 +143,6 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
       );
     }
     return new ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>({
-      ...this,
-      input: this.input,
-      output: this.output,
       ...newP,
       name: newP.name,
     } as ConstructorParameters<typeof ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>>[0]);
@@ -837,9 +847,9 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
 
   // convenient function
   public defineWorker<WP extends object>(
-    p: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec">
+    p: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec">
   ) {
-    return new ZZWorkerDef<P, IMap, OMap, WP>({
+    return new ZZWorkerDef<P, I, O, WP, IMap, OMap>({
       ...p,
       jobSpec: this,
     });
@@ -848,12 +858,18 @@ export class ZZJobSpec<P = {}, IMap = {}, OMap = {}> extends ZZJobSpecBase<
   public async defineWorkerAndStart<WP extends object>({
     instanceParams,
     ...p
-  }: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec"> & {
+  }: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec"> & {
     instanceParams?: WP;
   }) {
     const workerDef = this.defineWorker(p);
     await workerDef.startWorker({ instanceParams });
     return workerDef;
+  }
+
+  public static define<P, IMap, OMap>(
+    p: ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0]
+  ) {
+    return new ZZJobSpec<P, IMap, OMap>(p);
   }
 }
 
@@ -937,3 +953,28 @@ export const getCachedQueueByName = <JobOptions, JobReturnType>(
     return queue;
   }
 };
+
+function wrapIfSingle<
+  T,
+  TMap = T extends z.ZodType<infer TMap>
+    ? {
+        default: z.ZodType<TMap>;
+      }
+    : T extends {
+        [key: string]: z.ZodType<any>;
+      }
+    ? T
+    : T extends undefined
+    ? {}
+    : never
+>(def: T): TMap {
+  if (!def) {
+    return {} as TMap;
+  } else if (def instanceof z.ZodType) {
+    return {
+      default: def!,
+    } as TMap;
+  } else {
+    return def as TMap;
+  }
+}

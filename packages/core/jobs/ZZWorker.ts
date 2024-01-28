@@ -8,22 +8,20 @@ import { ZZProcessor } from "./ZZJob";
 import { ZZEnv } from "./ZZEnv";
 import { z } from "zod";
 
-
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
-
-export type ZZWorkerDefParams<P, IMap, OMap, WP extends object = {}> = {
+export type ZZWorkerDefParams<P, I, O, WP extends object, IMap, OMap> = {
   concurrency?: number;
-  jobSpec: ZZJobSpec<P, IMap, OMap>;
-  processor: ZZProcessor<ZZJobSpec<P, IMap, OMap>, WP>;
+  jobSpec: ZZJobSpec<P, I, O, IMap, OMap>;
+  processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
   instanceParamsDef?: z.ZodType<WP>;
   zzEnv?: ZZEnv;
 };
 
-export class ZZWorkerDef<P, IMap = {}, OMap = {}, WP extends object = {}> {
-  public readonly jobSpec: ZZJobSpec<P, IMap, OMap>;
+export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
+  public readonly jobSpec: ZZJobSpec<P, I, O, IMap, OMap>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
-  public readonly processor: ZZProcessor<ZZJobSpec<P, IMap, OMap>, WP>;
+  public readonly processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
   public readonly zzEnv: ZZEnv | null = null;
 
   constructor({
@@ -31,7 +29,7 @@ export class ZZWorkerDef<P, IMap = {}, OMap = {}, WP extends object = {}> {
     processor,
     instanceParamsDef,
     zzEnv,
-  }: ZZWorkerDefParams<P, IMap, OMap, WP>) {
+  }: ZZWorkerDefParams<P, I, O, WP, IMap, OMap>) {
     this.jobSpec = jobSpec;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
@@ -45,7 +43,7 @@ export class ZZWorkerDef<P, IMap = {}, OMap = {}, WP extends object = {}> {
   }) {
     const { concurrency, instanceParams } = p || {};
 
-    const worker = new ZZWorker<P, IMap, OMap, WP>({
+    const worker = new ZZWorker<P, I, O, WP, IMap, OMap>({
       def: this,
       concurrency,
       instanceParams: instanceParams || ({} as WP),
@@ -60,27 +58,29 @@ export class ZZWorkerDef<P, IMap = {}, OMap = {}, WP extends object = {}> {
     return this.jobSpec.enqueueJob(p);
   };
 
-  public static define<P, IMap, OMap, WP extends object>(
-    p: Parameters<typeof defineWorker<P, IMap, OMap, WP>>[0]
+  public static define<P, I, O, WP extends object, IMap, OMap>(
+    p: Parameters<typeof defineWorker<P, I, O, WP, IMap, OMap>>[0]
   ) {
     return defineWorker(p);
   }
 }
 
-function defineWorker<P, IMap, OMap, WP extends object>(
-  p: Omit<ZZWorkerDefParams<P, IMap, OMap, WP>, "jobSpec"> & {
+function defineWorker<P, I, O, WP extends object, IMap, OMap>(
+  p: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec"> & {
     jobSpec:
-      | ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0]
-      | ZZJobSpec<P, IMap, OMap>;
+      | ConstructorParameters<typeof ZZJobSpec<P, I, O, IMap, OMap>>[0]
+      | ZZJobSpec<P, I, O, IMap, OMap>;
   }
 ) {
-  const spec = new ZZJobSpec<P, IMap, OMap>(p.jobSpec);
+  const spec =
+    p.jobSpec instanceof ZZJobSpec
+      ? p.jobSpec
+      : (new ZZJobSpec(p.jobSpec) as ZZJobSpec<P, I, O, IMap, OMap>);
   return spec.defineWorker(p);
 }
 
-
-export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
-  public readonly jobSpec: ZZJobSpec<P, IMap, OMap>;
+export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
+  public readonly jobSpec: ZZJobSpec<P, I, O, IMap, OMap>;
   protected readonly zzEnv: ZZEnv;
   protected readonly storageProvider?: IStorageProvider;
 
@@ -93,7 +93,7 @@ export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
 
   public readonly instanceParams?: WP;
   public readonly workerName: string;
-  public readonly def: ZZWorkerDef<P, IMap, OMap, WP>;
+  public readonly def: ZZWorkerDef<P, I, O, WP, IMap, OMap>;
   protected readonly logger: ReturnType<typeof getLogger>;
 
   constructor({
@@ -103,7 +103,7 @@ export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
     concurrency = 3,
     zzEnv,
   }: {
-    def: ZZWorkerDef<P, IMap, OMap, WP>;
+    def: ZZWorkerDef<P, I, O, WP, IMap, OMap>;
     instanceParams?: WP;
     workerName?: string;
     concurrency?: number;
@@ -180,8 +180,8 @@ export class ZZWorker<P, IMap, OMap, WP extends object = {}> {
     await this.bullMQWorker.waitUntilReady();
   }
 
-  public static define<P, IMap, OMap, WP extends object>(
-    p: Parameters<typeof defineWorker<P, IMap, OMap, WP>>[0]
+  public static define<P, I, O, WP extends object, IMap, OMap>(
+    p: Parameters<typeof defineWorker<P, I, O, WP, IMap, OMap>>[0]
   ) {
     return defineWorker(p);
   }

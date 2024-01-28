@@ -3,6 +3,7 @@ import { v4 } from "uuid";
 import {
   CheckSpec,
   deriveStreamId,
+  InferTMap,
   uniqueStreamIdentifier,
   ZZJobSpec,
 } from "../jobs/ZZJobSpec";
@@ -49,7 +50,7 @@ type CanonicalConnection = CanonicalWorkflowParams[number];
 type CanonicalConnectionPoint = CanonicalConnection[number];
 export const SpecOrName = z.union([
   z.string(),
-  z.instanceof(ZZJobSpec<any, any, any>),
+  z.instanceof(ZZJobSpec<any, any, any, any, any>),
 ]);
 export type SpecOrName = z.infer<typeof SpecOrName>; // Conversion functions using TypeScript
 
@@ -76,14 +77,24 @@ const WorkflowJobOptionsSanitized = z.object({
   jobOptions: WorkflowChildJobOptionsSanitized.optional(),
 });
 type WorkflowJobOptionsSanitized = z.infer<typeof WorkflowJobOptionsSanitized>;
+
 export class ZZWorkflowSpec extends ZZJobSpec<
   WorkflowJobOptionsSanitized,
+  any,
+  any,
   any,
   any
 > {
   public readonly connections: CanonicalConnection[];
   public readonly defGraph: DefGraph;
-  private orchestrationWorkerDef: ZZWorkerDef<WorkflowJobOptionsSanitized>;
+  private orchestrationWorkerDef: ZZWorkerDef<
+    WorkflowJobOptionsSanitized,
+    any,
+    any,
+    any,
+    any,
+    any
+  >;
 
   public readonly inputSpecTagByWorkflowTag: Record<
     string,
@@ -425,7 +436,7 @@ export class ZZWorkflow {
         }
         const { specName, tag: specTag } = lookupR;
         const r = inputBySpec(specName);
-        return r.byTag(specTag);
+        return r.byTag(specTag as any);
       };
       func.byTag = (tag: string) => {
         // TODO
@@ -437,7 +448,7 @@ export class ZZWorkflow {
         }
         const { specName, tag: specTag } = lookupR;
         const r = inputBySpec(specName);
-        return r.byTag(specTag);
+        return r.byTag(specTag as any);
       };
       func.bySpec = inputBySpec;
       return func;
@@ -458,7 +469,7 @@ export class ZZWorkflow {
         }
         const { specName, tag: specTag } = lookupR;
         const r = outputBySpec(specName);
-        return r.byTag(specTag);
+        return r.byTag(specTag as any);
       },
       bySpec: outputBySpec,
     };
@@ -753,12 +764,12 @@ function uniqueSpecIdentifier({
   return `${specName}${uniqueSpecLabel ? `[${uniqueSpecLabel}]` : ""}`;
 }
 
-function validateSpecHasKey<P, IMap, OMap>({
+function validateSpecHasKey<P, I, O, IMap, OMap>({
   spec,
   type,
   tag,
 }: {
-  spec: ZZJobSpec<P, IMap, OMap>;
+  spec: ZZJobSpec<P, I, O, IMap, OMap>;
   type: "in" | "out";
   tag: string;
 }) {
@@ -898,20 +909,20 @@ function getStreamNodes(g: DefGraph, streamNodeId: string) {
   };
 }
 
-type TagMaps<IMap, OMap, IKs, OKs> = {
-  inputTag: Partial<Record<keyof IMap, IKs>>;
-  outputTag: Partial<Record<keyof OMap, OKs>>;
+type TagMaps<I, O, IKs, OKs> = {
+  inputTag: Partial<Record<keyof InferTMap<I>, IKs>>;
+  outputTag: Partial<Record<keyof InferTMap<O>, OKs>>;
 };
 
-interface TagObj<P, IMap, OMap, IKs, OKs> {
-  spec: ZZJobSpec<P, IMap, OMap>;
+interface TagObj<P, I, O, IKs, OKs> {
+  spec: ZZJobSpec<P, I, O>;
   input: <newK extends string>(
-    tagOrMap: newK | Partial<Record<keyof IMap, newK>>
-  ) => TagObj<P, IMap, OMap, IKs | newK, OKs>;
+    tagOrMap: newK | Partial<Record<keyof InferTMap<I>, newK>>
+  ) => TagObj<P, I, O, IKs | newK, OKs>;
   output: <newK extends string>(
-    tagOrMap: newK | Partial<Record<keyof OMap, newK>>
-  ) => TagObj<P, IMap, OMap, IKs, OKs | newK>;
-  _tagMaps: TagMaps<IMap, OMap, IKs, OKs>;
+    tagOrMap: newK | Partial<Record<keyof InferTMap<O>, newK>>
+  ) => TagObj<P, I, O, IKs, OKs | newK>;
+  _tagMaps: TagMaps<I, O, IKs, OKs>;
 }
 
 export function tag<P, IMap, OMap>(spec: ZZJobSpec<P, IMap, OMap>) {
@@ -921,18 +932,18 @@ export function tag<P, IMap, OMap>(spec: ZZJobSpec<P, IMap, OMap>) {
   } as TagMaps<IMap, OMap, never, never>);
 }
 
-function _tagObj<P, IMap, OMap, IKs, OKs>(
-  spec: ZZJobSpec<P, IMap, OMap>,
-  _tagMaps: TagMaps<IMap, OMap, IKs, OKs>
-): TagObj<P, IMap, OMap, IKs, OKs> {
+function _tagObj<P, I, O, IKs, OKs>(
+  spec: ZZJobSpec<P, I, O>,
+  _tagMaps: TagMaps<I, O, IKs, OKs>
+): TagObj<P, I, O, IKs, OKs> {
   const tagMaps = { ..._tagMaps };
   return {
     spec,
     _tagMaps: tagMaps,
     input: <Ks extends string>(
-      tagOrMap: Ks | Partial<Record<keyof IMap, Ks>>
+      tagOrMap: Ks | Partial<Record<keyof InferTMap<I>, Ks>>
     ) => {
-      const tm = tagMaps as TagMaps<IMap, OMap, IKs | Ks, OKs>;
+      const tm = tagMaps as TagMaps<I, O, IKs | Ks, OKs>;
       if (typeof tagOrMap === "string") {
         const key = spec.getSingleInputTag();
         tm.inputTag[key] = tagOrMap;
@@ -942,9 +953,9 @@ function _tagObj<P, IMap, OMap, IKs, OKs>(
       return _tagObj(spec, tm);
     },
     output: <Ks extends string>(
-      tagOrMap: Ks | Partial<Record<keyof OMap, string>>
+      tagOrMap: Ks | Partial<Record<keyof InferTMap<O>, string>>
     ) => {
-      const tm = tagMaps as TagMaps<IMap, OMap, IKs, OKs | Ks>;
+      const tm = tagMaps as TagMaps<I, O, IKs, OKs | Ks>;
       if (typeof tagOrMap === "string") {
         const tag = spec.getSingleOutputTag();
         tm.outputTag[tag] = tagOrMap;

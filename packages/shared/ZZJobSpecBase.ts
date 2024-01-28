@@ -2,12 +2,12 @@ import { InferDefMap } from "./StreamDefSet";
 import { StreamDefSet } from "./StreamDefSet";
 import { z } from "zod";
 
-export abstract class ZZJobSpecBase<P, IMap = {}, OMap = {}> {
+export abstract class ZZJobSpecBase<P, IMap, OMap> {
   public readonly name: string;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
-  public readonly input: InferDefMap<IMap> | undefined;
-  public readonly output: InferDefMap<OMap> | undefined;
+  protected readonly input: InferDefMap<IMap>;
+  protected readonly output: InferDefMap<OMap>;
 
   public getSingleInputTag() {
     return this.getSingleTag("input");
@@ -43,8 +43,8 @@ export abstract class ZZJobSpecBase<P, IMap = {}, OMap = {}> {
     output,
   }: {
     name: string;
-    input?: InferDefMap<IMap>;
-    output?: InferDefMap<OMap>;
+    input: InferDefMap<IMap>;
+    output: InferDefMap<OMap>;
   }) {
     this.name = name;
     this.input = input;

@@ -14,15 +14,12 @@ import { ZZJobSpec } from "./ZZJobSpec";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
+import { InferTMap } from "./ZZJobSpec";
 import _ from "lodash";
 
-export type ZZProcessor<PP, WP extends object = {}> = PP extends ZZJobSpec<
-  infer P,
-  infer IMap,
-  infer OMap
->
-  ? (j: ZZJob<P, IMap, OMap, WP>) => Promise<OMap[keyof OMap] | void>
-  : never;
+export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
+  j: ZZJob<P, I, O, WP, IMap, OMap>
+) => Promise<OMap[keyof OMap] | void>;
 
 export interface ByTagCallable<TMap> {
   <K extends keyof TMap>(key: K): {
@@ -31,12 +28,19 @@ export interface ByTagCallable<TMap> {
   };
 }
 
-export class ZZJob<P, IMap, OMap, WP extends object = {}> {
+export class ZZJob<
+  P,
+  I,
+  O,
+  WP extends object = {},
+  IMap = InferTMap<I>,
+  OMap = InferTMap<O>
+> {
   private readonly bullMQJob: Job<{ jobOptions: P }, void>;
   public readonly _bullMQToken?: string;
   readonly jobOptions: P;
   readonly logger: ReturnType<typeof getLogger>;
-  readonly spec: ZZJobSpec<P, IMap, OMap>;
+  readonly spec: ZZJobSpec<P, I, O, IMap, OMap>;
   // readonly nextInput: <K extends keyof IMap>(
   //   key?: K
   // ) => Promise<IMap[K] | null>;
@@ -90,7 +94,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
     logger: ReturnType<typeof getLogger>;
     jobOptions: P;
     storageProvider?: IStorageProvider;
-    jobSpec: ZZJobSpec<P, IMap, OMap>;
+    jobSpec: ZZJobSpec<P, I, O, IMap, OMap>;
     workerInstanceParams?: WP;
     workerInstanceParamsSchema?: z.ZodType<WP>;
     workerName: string;
@@ -353,7 +357,7 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
   };
 
   public beginProcessing = async (
-    processor: ZZProcessor<ZZJobSpec<P, IMap, OMap>, WP>
+    processor: ZZProcessor<P, I, O, WP, IMap, OMap>
   ): Promise<void> => {
     const jId = {
       specName: this.spec.name,
@@ -486,12 +490,6 @@ export class ZZJob<P, IMap, OMap, WP extends object = {}> {
       },
     });
   };
-
-  public static define<P, IMap, OMap>(
-    p: ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0]
-  ) {
-    return new ZZJobSpec<P, IMap, OMap>(p);
-  }
 
   // public saveToTextFile = async ({
   //   relativePath,
