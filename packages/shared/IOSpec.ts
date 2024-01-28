@@ -2,12 +2,12 @@ import { InferDefMap } from "./StreamDefSet";
 import { StreamDefSet } from "./StreamDefSet";
 import { ZodType, z } from "zod";
 
-export abstract class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
+export class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
   public readonly name: string;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
-  protected readonly input: InferDefMap<IMap>;
-  protected readonly output: InferDefMap<OMap>;
+  public readonly input: InferDefMap<IMap>;
+  public readonly output: InferDefMap<OMap>;
 
   public getSingleInputTag() {
     return this.getSingleTag("input");
@@ -37,7 +37,15 @@ export abstract class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
     }
   }
 
-  constructor({ name, input, output }: { name: string; input: I; output: O }) {
+  protected constructor({
+    name,
+    input,
+    output,
+  }: {
+    name: string;
+    input: I;
+    output: O;
+  }) {
     this.name = name;
     this.input = wrapIfSingle(input);
     this.output = wrapIfSingle(output);
@@ -59,6 +67,18 @@ export abstract class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
         defs: this.output,
       });
     }
+  }
+
+  public static define<I, O>({
+    name,
+    input,
+    output,
+  }: {
+    name: string;
+    input: I;
+    output: O;
+  }): IOSpec<I, O> {
+    return new IOSpec<I, O>({ name, input, output });
   }
 }
 export type InferTMap<T> = T extends z.ZodType

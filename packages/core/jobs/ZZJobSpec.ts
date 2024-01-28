@@ -76,16 +76,6 @@ export class ZZJobSpec<
 
   protected logger: ReturnType<typeof getLogger>;
 
-  public get zzEnv() {
-    const resolved = this._zzEnv || ZZEnv.global();
-    if (!resolved) {
-      throw new Error(
-        `ZZEnv is not configured in ZZJobSpec ${this.name}. \nPlease either pass it when constructing ZZJobSpec or set it globally using ZZEnv.setGlobal().`
-      );
-    }
-    return resolved;
-  }
-
   readonly jobOptions: z.ZodType<P>;
 
   constructor({
@@ -97,11 +87,16 @@ export class ZZJobSpec<
   }: {
     name: string;
     jobOptions?: z.ZodType<P>;
-    input?: I;
-    output?: O;
+
     zzEnv?: ZZEnv;
     concurrency?: number;
-  }) {
+  } & (
+    | {
+        input?: I;
+        output?: O;
+      }
+    | IOSpec<I, O, IMap, OMap>
+  )) {
     super({
       name,
       input: wrapIfSingle(input),
@@ -140,6 +135,16 @@ export class ZZJobSpec<
       ...newP,
       name: newP.name,
     } as ConstructorParameters<typeof ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>>[0]);
+  }
+
+  public get zzEnv() {
+    const resolved = this._zzEnv || ZZEnv.global();
+    if (!resolved) {
+      throw new Error(
+        `ZZEnv is not configured in ZZJobSpec ${this.name}. \nPlease either pass it when constructing ZZJobSpec or set it globally using ZZEnv.setGlobal().`
+      );
+    }
+    return resolved;
   }
 
   private get _rawQueue() {
@@ -860,10 +865,10 @@ export class ZZJobSpec<
     return workerDef;
   }
 
-  public static define<P, IMap, OMap>(
-    p: ConstructorParameters<typeof ZZJobSpec<P, IMap, OMap>>[0]
+  public static override define<P, I, O>(
+    p: ConstructorParameters<typeof ZZJobSpec<P, I, O>>[0]
   ) {
-    return new ZZJobSpec<P, IMap, OMap>(p);
+    return new ZZJobSpec<P, I, O>(p);
   }
 }
 
