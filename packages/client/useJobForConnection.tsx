@@ -4,86 +4,6 @@ import {
   JobSocketIOConnection,
   bindNewJobToSocketIO,
 } from "./JobSocketIOClient";
-import { z } from "zod";
-
-export function useOutput<O>({
-  job: {
-  specName,
-  uniqueSpecLabel,
-  jobId,connRef, 
-  },
-  tag,
-  def,
-}: {
-  job: {
-    specName?: string;
-    uniqueSpecLabel?: string;
-    jobId?: string;
-    connRef:  React.MutableRefObject<Promise<JobSocketIOConnection> | undefined>;
-  },
-  tag: string;
-  def?: z.ZodType<O>;
-}) {
-  const [output, setOutput] = useState<{
-    data: O;
-    timestamp: number;
-    messageId: string;
-    tag: string;
-  } | null>(null);
-
-  useEffect(() => {
-    if (specName && jobId) {
-      const conn = connRef.current;
-      if (!conn) {
-        throw new Error(`Connection not found with jobId "${jobId}".`);
-      }
-
-      conn.then(conn => conn.subToStream<O>(
-        {
-          tag,
-        },
-        (data) => {
-          setOutput({ ...data, tag });
-        }
-      ));
-    }
-  }, [specName, uniqueSpecLabel, jobId, tag]);
-
-  return output;
-}
-
-export function useInput<T>({
-  job: {
-    specName,
-    uniqueSpecLabel,
-    jobId,connRef
-    },
-  tag,
-  def,
-}: {
-  job: {
-    specName?: string;
-    uniqueSpecLabel?: string;
-    jobId?: string;
-    connRef:  React.MutableRefObject<Promise<JobSocketIOConnection> | undefined>;
-  },
-  tag: string;
-  def?: z.ZodType<T>;
-}) {
-  const feed = async (data: T) => {
-    console.log(specName, jobId, connRef)
-    if (specName && jobId) {
-      const conn = connRef.current;
-      if (!conn) {
-        throw new Error(`Connection not found with jobId "${jobId}".`);
-      }
-
-      return await (await conn).feed(data, tag);
-    }
-  };
-
-  return { feed };
-}
 
 export function useJobForConnection({
   socketIOURI,
@@ -101,11 +21,10 @@ export function useJobForConnection({
   const clientRef = useRef<Promise<JobSocketIOConnection>>();
 
   useEffect(() => {
-  
-    if(!clientRef.current) {
+    if (!clientRef.current) {
       try {
         setStatus({ status: "connecting" });
-        const connection =  bindNewJobToSocketIO({
+        const connection = bindNewJobToSocketIO({
           socketIOURI,
           socketIOPath,
           socketIOClient,
@@ -113,7 +32,7 @@ export function useJobForConnection({
           uniqueSpecLabel,
         });
         clientRef.current = connection;
-       connection.then((c) => {
+        connection.then((c) => {
           setStatus({
             status: "connected",
             jobId: c.jobId,
@@ -128,15 +47,13 @@ export function useJobForConnection({
     }
 
     return () => {
-     clientRef.current?.then((c) => c.close());
-     clientRef.current = undefined;
+      clientRef.current?.then((c) => c.close());
+      clientRef.current = undefined;
     };
   }, [socketIOURI, socketIOPath, specName, uniqueSpecLabel]);
 
-  return {...status, connRef: clientRef};
+  return { ...status, connRef: clientRef };
 }
-
-
 
 type JobStatus =
   | {
