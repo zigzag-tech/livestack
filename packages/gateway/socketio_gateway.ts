@@ -137,7 +137,8 @@ class LiveGatewayConn {
       FEED,
       async ({ data, tag }: FeedParams<IMap[keyof IMap]>) => {
         try {
-          await input.byTag(tag as keyof IMap).feed(data);
+          // TODO: do not use "any"
+          await input.byTag(tag as any).feed(data as any);
         } catch (err) {
           console.error(err);
         }
