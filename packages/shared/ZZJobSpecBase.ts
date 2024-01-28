@@ -69,17 +69,3 @@ export abstract class ZZJobSpecBase<P, IMap, OMap> {
     }
   }
 }
-
-export function defaultTag<T>(def: z.ZodType<T, any>) {
-  return {
-    default: def,
-  };
-}
-
-export function multi<
-  TMap extends {
-    [key: string]: z.ZodType<any, any>;
-  }
->(def: TMap) {
-  return def;
-}
