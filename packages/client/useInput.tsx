@@ -16,7 +16,6 @@ export function useInput<T>({
   def?: z.ZodType<T>;
 }) {
   const feed = async (data: T) => {
-    console.log(specName, jobId, connRef);
     if (specName && jobId) {
       const conn = connRef.current;
       if (!conn) {
