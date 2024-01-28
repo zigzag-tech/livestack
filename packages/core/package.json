@@ -29,7 +29,7 @@
   "devDependencies": {
     "@types/lodash": "^4.14.201",
     "@types/uuid": "^9.0.7",
-    "typescript": "5.2.2"
+    "typescript": "5.3.3"
   },
   "optionalDependencies": {
     "@google-cloud/storage": "^7.x"
