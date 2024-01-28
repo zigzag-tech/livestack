@@ -26,7 +26,7 @@ import {
 } from "../utils/io";
 import { WithTimestamp, ZZStream, ZZStreamSubscriber } from "./ZZStream";
 import pLimit from "p-limit";
-import { ZZJobSpecBase } from "@livestack/shared/ZZJobSpecBase";
+import { IOSpec } from "@livestack/shared";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -73,7 +73,7 @@ export class ZZJobSpec<
   O = any,
   IMap = InferTMap<I>,
   OMap = InferTMap<O>
-> extends ZZJobSpecBase<IMap, OMap> {
+> extends IOSpec<IMap, OMap> {
   private readonly _zzEnv: ZZEnv | null = null;
   protected static _registryBySpecName: Record<
     string,

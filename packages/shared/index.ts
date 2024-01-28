@@ -1,4 +1,1 @@
-import { defaultTag, multi } from './ZZJobSpecBase';
-export {
-    defaultTag as single, multi
-};
+export { IOSpec } from "./IOSpec";

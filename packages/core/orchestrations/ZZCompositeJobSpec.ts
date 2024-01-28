@@ -3,7 +3,6 @@
 // import { ZZStream, hashDef } from "./ZZStream";
 // import { InferStreamSetType, UnknownTMap } from "./StreamDefSet";
 // import { ZZEnv } from "./ZZEnv";
-// import { single } from "@livestack/shared/ZZJobSpecBase";
 
 // const jobSpec1, jobSpec2;
 
@@ -106,23 +105,23 @@
 // const jobSpec1 = new ZZJobSpec({
 //   name: "jobSpec1",
 //   jobOptions: z.object({}),
-//   input: single(z.object({})),
-//   output: single(z.object({})),
+//   input: (z.object({})),
+//   output: (z.object({})),
 //   zzEnv: ZZEnv.global(),
 // });
 
 // const jobSpec2 = new ZZJobSpec({
 //   name: "jobSpec2",
 //   jobOptions: z.object({}),
-//   input: single(z.object({})),
-//   output: single(z.object({})),
+//   input: (z.object({})),
+//   output: (z.object({})),
 //   zzEnv: ZZEnv.global(),
 // });
 // const jobSpec3 = new ZZJobSpec({
 //   name: "jobSpec3",
 //   jobOptions: z.object({}),
-//   input: single(z.object({})),
-//   output: single(z.object({})),
+//   input: (z.object({})),
+//   output: (z.object({})),
 //   zzEnv: ZZEnv.global(),
 // });
 

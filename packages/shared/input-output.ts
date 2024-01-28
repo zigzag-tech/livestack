@@ -1,4 +1,4 @@
-import { SpecOrName } from "./ZZJobSpecBase";
+import { SpecOrName } from "./IOSpec";
 
 export function genSpecLets() {
   const bySpec = (spec: SpecOrName) => {
