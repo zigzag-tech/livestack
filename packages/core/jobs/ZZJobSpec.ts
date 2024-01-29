@@ -264,7 +264,7 @@ export class ZZJobSpec<
     });
 
     const r = await output.byTag(outputTag).nextValue();
-    input.keys.forEach((k) => {
+    input.tags.forEach((k) => {
       input.terminate(k);
     });
     return r;
@@ -753,7 +753,7 @@ export class ZZJobSpec<
   public _deriveInputsForJob = (jobId: string) => {
     const that = this;
     return {
-      keys: this.inputDefSet.keys,
+      tags: this.inputDefSet.keys,
       feed: async (data: IMap[keyof IMap]) => {
         const tag = that.getSingleInputTag();
         return await that.feedJobInput({
