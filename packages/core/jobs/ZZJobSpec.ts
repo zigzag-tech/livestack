@@ -273,11 +273,11 @@ export class ZZJobSpec<
   async feedJobInput<K extends keyof IMap>({
     jobId,
     data,
-    tag,
+    tag = this.getSingleInputTag() as K,
   }: {
     jobId: string;
     data: IMap[K];
-    tag: K;
+    tag?: K;
   }) {
     await this._getStreamAndSendDataToPLimited({
       jobId,
