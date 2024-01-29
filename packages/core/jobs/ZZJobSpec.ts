@@ -694,6 +694,12 @@ export class ZZJobSpec<
               connectorType: "in",
             });
           }
+          if (!this.streamIdOverridesByTagByTypeByJobId[jobId]) {
+            this.streamIdOverridesByTagByTypeByJobId[jobId] = {
+              in: null,
+              out: null,
+            };
+          }
           this.streamIdOverridesByTagByTypeByJobId[jobId]["in"] =
             inputStreamIdOverridesByTag;
         }
