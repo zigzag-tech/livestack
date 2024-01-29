@@ -6,7 +6,11 @@ import { getLogger } from "../utils/createWorkerLogger";
 import { addDatapoint, ensureStreamRec } from "../db/knexConn";
 import { v4 } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { identifyLargeFiles } from "../files/file-ops";
+import {
+  identifyLargeFiles,
+  identifyLargeFilesToRestore,
+  restoreLargeValues,
+} from "../files/file-ops";
 import path from "path";
 
 const REDIS_CLIENT_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
@@ -334,7 +338,29 @@ export class ZZStreamSubscriber<T extends object> {
             const [timestampStr, _] = this.cursor.split("-");
             const timestamp = Number(timestampStr);
             const data: T = parseMessageData(message[1]);
-            subscriber.next({ ...data, timestamp, messageId: this.cursor });
+            let restored = data;
+            const { largeFilesToRestore, newObj } =
+              identifyLargeFilesToRestore(data);
+
+            if (largeFilesToRestore.length > 0) {
+              if (!this.zzEnv.storageProvider) {
+                throw new Error(
+                  "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
+                );
+              } else {
+                restored = (await restoreLargeValues(
+                  newObj,
+                  largeFilesToRestore,
+                  this.zzEnv.storageProvider.fetchFromStorage
+                )) as T;
+              }
+            }
+
+            subscriber.next({
+              ...restored,
+              timestamp,
+              messageId: this.cursor,
+            });
           }
         }
       }

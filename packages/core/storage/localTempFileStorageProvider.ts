@@ -4,6 +4,12 @@ import { IStorageProvider } from "./cloudStorage";
 import { ensurePathExists } from "./ensurePathExists";
 import { TEMP_DIR } from "./temp-dirs";
 import path from "path";
+import {
+  InferRestoredFileType,
+  LargeFileWithoutValue,
+  OriginalType,
+} from "../files/file-ops";
+import { Readable } from "stream";
 
 export function getLocalTempFileStorageProvider(
   baseTempPath: string
@@ -48,9 +54,33 @@ export function getLocalTempFileStorageProvider(
     await fs.promises.copyFile(fullPath, destination);
   };
 
+  const fetchFromStorage = async <T extends OriginalType>(
+    f: LargeFileWithoutValue<T>
+  ) => {
+    const fullPath = `${pathPrefix}/${f.path}`;
+    const data = await fs.promises.readFile(fullPath);
+    type R = InferRestoredFileType<T>;
+    if (f.originalType === "string") {
+      return data.toString() as R;
+    } else if (f.originalType === "buffer") {
+      return data as R;
+    } else if (f.originalType === "array-buffer") {
+      return data.buffer as R;
+    } else if (f.originalType === "blob") {
+      return new Blob([data]) as R;
+    } else if (f.originalType === "file") {
+      return new File([data], fullPath) as R;
+    } else if (f.originalType === "stream") {
+      return fs.createReadStream(fullPath) as Readable as R;
+    } else {
+      throw new Error("Unsupported originalType " + f.originalType);
+    }
+  };
+
   return {
     putToStorage,
     uploadFromLocalPath,
     downloadFromStorage,
+    fetchFromStorage,
   };
 }

@@ -1,19 +1,21 @@
 import { Stream } from "stream";
-export const isBinaryLikeObject = (obj: any): boolean => {
+export const detectBinaryLikeObject = (
+  obj: any
+): false | "array-buffer" | "stream" | "blob" | "file" | "buffer" => {
   if (obj instanceof ArrayBuffer) {
-    return true;
+    return "array-buffer";
   }
   if (obj instanceof Stream) {
-    return true;
+    return "stream";
   }
   if (typeof Blob !== "undefined" && obj instanceof Blob) {
-    return true;
+    return "blob";
   }
   if (typeof File !== "undefined" && obj instanceof File) {
-    return true;
+    return "file";
   }
   if (typeof Buffer !== "undefined" && Buffer.isBuffer(obj)) {
-    return true;
+    return "buffer";
   }
   return false;
 };

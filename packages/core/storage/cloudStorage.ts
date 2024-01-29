@@ -1,4 +1,9 @@
 import { Stream } from "stream";
+import {
+  InferRestoredFileType,
+  LargeFileWithoutValue,
+  OriginalType,
+} from "../files/file-ops";
 
 export interface IStorageProvider {
   putToStorage: (
@@ -13,6 +18,9 @@ export interface IStorageProvider {
     filePath: string;
     destination: string;
   }) => Promise<void>;
+  fetchFromStorage: <T extends OriginalType>(
+    f: LargeFileWithoutValue<T>
+  ) => Promise<InferRestoredFileType<T>>;
   getPublicUrl?: (path: string) => string;
 }
 
