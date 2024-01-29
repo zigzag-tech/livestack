@@ -49,7 +49,7 @@ export function setupJobBindingGateway({
       if (!disconnected) {
         disconnected = true;
       }
-      console.info(`🦓 Socket client disconnected  ${socket.id}.`);
+      console.info(`🦓 Socket client disconnected ${socket.id}.`);
     });
 
     socket.on("reconnect", async () => {
@@ -57,6 +57,8 @@ export function setupJobBindingGateway({
       console.log("reconnected");
     });
   });
-  console.info("🦓 LiveStack socket.io gateway initiated.");
+  console.info(
+    `🦓 LiveStack socket.io gateway initiated on path ${socketPath}.`
+  );
   return io;
 }
