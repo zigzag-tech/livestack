@@ -149,7 +149,9 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     this.bullMQWorker.on("active", (job: Job) => {});
 
     this.bullMQWorker.on("failed", async (job, error: Error) => {
-      this.logger.error(`JOB FAILED: ${job?.id}, ${error}`);
+      this.logger.error(
+        `JOB FAILED: ID: ${job?.id}, spec: ${this.jobSpec.name}, message: ${error}`
+      );
     });
 
     this.bullMQWorker.on("error", (err) => {
