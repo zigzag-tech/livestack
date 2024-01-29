@@ -40,7 +40,7 @@ export function getLocalTempFileStorageProvider(
     localPath,
     destination,
   }) => {
-    const fullPath = `${pathPrefix}/${destination}`;
+    const fullPath = path.join(pathPrefix, destination);
     await ensurePathExists(path.dirname(fullPath));
     await fs.promises.copyFile(localPath, fullPath);
   };
@@ -49,7 +49,8 @@ export function getLocalTempFileStorageProvider(
     filePath,
     destination,
   }) => {
-    const fullPath = `${pathPrefix}/${filePath}`;
+    const fullPath = path.join(pathPrefix, destination);
+
     await ensurePathExists(path.dirname(fullPath));
     await fs.promises.copyFile(fullPath, destination);
   };
@@ -57,7 +58,7 @@ export function getLocalTempFileStorageProvider(
   const fetchFromStorage = async <T extends OriginalType>(
     f: LargeFileWithoutValue<T>
   ) => {
-    const fullPath = `${pathPrefix}/${f.path}`;
+    const fullPath = path.join(pathPrefix, f.path);
     const data = await fs.promises.readFile(fullPath);
     type R = InferRestoredFileType<T>;
     if (f.originalType === "string") {

@@ -7,7 +7,7 @@ import { addDatapoint, ensureStreamRec } from "../db/knexConn";
 import { v4 } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
-  identifyLargeFiles,
+  identifyLargeFilesToSave,
   identifyLargeFilesToRestore,
   restoreLargeValues,
 } from "../files/file-ops";
@@ -175,7 +175,7 @@ export class ZZStream<T extends object> {
       throw err;
     }
 
-    let { largeFilesToSave, newObj } = identifyLargeFiles(parsed);
+    let { largeFilesToSave, newObj } = identifyLargeFilesToSave(parsed);
 
     if (this.zzEnv.storageProvider) {
       const fullPathLargeFilesToSave = largeFilesToSave.map((x) => ({
@@ -184,11 +184,11 @@ export class ZZStream<T extends object> {
       }));
 
       if (fullPathLargeFilesToSave.length > 0) {
-        this.logger.info(
-          `Saving large files to storage: ${fullPathLargeFilesToSave
-            .map((x) => x.path)
-            .join(", ")}`
-        );
+        // this.logger.info(
+        //   `Saving large files to storage: ${fullPathLargeFilesToSave
+        //     .map((x) => x.path)
+        //     .join(", ")}`
+        // );
         await saveLargeFilesToStorage(
           fullPathLargeFilesToSave,
           this.zzEnv.storageProvider
@@ -348,11 +348,12 @@ export class ZZStreamSubscriber<T extends object> {
                   "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
                 );
               } else {
-                restored = (await restoreLargeValues(
-                  newObj,
+                restored = (await restoreLargeValues({
+                  obj_: newObj,
                   largeFilesToRestore,
-                  this.zzEnv.storageProvider.fetchFromStorage
-                )) as T;
+                  basePath: this.stream.baseWorkingRelativePath,
+                  fetcher: this.zzEnv.storageProvider.fetchFromStorage,
+                })) as T;
               }
             }
 

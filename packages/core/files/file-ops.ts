@@ -4,6 +4,7 @@ import { TEMP_DIR } from "../storage/temp-dirs";
 import fs from "fs";
 import { join as pathJoin } from "path";
 import { ensurePathExists } from "../storage/ensurePathExists";
+import path from "path";
 import _ from "lodash";
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 import { Readable } from "stream";
@@ -19,7 +20,7 @@ type LargeFileToSave<T extends OriginalType> = {
   originalType: T;
 };
 
-export const identifyLargeFiles = (
+export const identifyLargeFilesToSave = (
   obj: any,
   path = ""
 ): {
@@ -54,7 +55,7 @@ export const identifyLargeFiles = (
           originalType: type,
         };
       } else if (typeof value === "object") {
-        const result = identifyLargeFiles(value, currentPath);
+        const result = identifyLargeFilesToSave(value, currentPath);
         newObj[key] = result.newObj;
         largeFilesToSave.push(...result.largeFilesToSave);
       } else {
@@ -124,21 +125,31 @@ export type InferRestoredFileType<T extends OriginalType> = T extends "string"
   ? ArrayBuffer
   : never;
 
-export async function restoreLargeValues(
-  obj_: any,
-  largeFilesToRestore: { path: string; originalType: OriginalType }[],
+export async function restoreLargeValues({
+  obj_,
+  largeFilesToRestore,
+  basePath = "",
+  fetcher,
+}: {
+  obj_: any;
+  basePath?: string;
+  largeFilesToRestore: { path: string; originalType: OriginalType }[];
   fetcher: <T extends OriginalType>(
     v: LargeFileWithoutValue<T>
-  ) => Promise<InferRestoredFileType<T>>
-) {
+  ) => Promise<InferRestoredFileType<T>>;
+}) {
   // iterate over the large files to restore, and replace the value in the path
   // with the value returned from the fetcher.
   // use p-limit to limit the number of concurrent fetches
-  const limit = pLimit(10);
+  const limit = pLimit(3);
   const promises = largeFilesToRestore.map((largeFile) =>
     limit(async () => {
-      const value = await fetcher(largeFile);
-      _.set(obj_, largeFile.path, value);
+      const value = await fetcher({
+        ...largeFile,
+        path: path.join(basePath, largeFile.path),
+      });
+      // replace slash with dot in path before setting the value
+      _.set(obj_, largeFile.path.replace(/\//g, "."), value);
     })
   );
   await Promise.all(promises);
