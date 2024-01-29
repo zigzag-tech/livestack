@@ -1,2 +1,2 @@
-import { setupJobBindingGateway } from "./socketio_gateway";
+import { setupJobBindingGateway } from "./setupJobBindingGateway";
 export { setupJobBindingGateway };
