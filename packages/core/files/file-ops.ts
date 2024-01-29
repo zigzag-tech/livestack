@@ -1,7 +1,8 @@
 import { IStorageProvider } from "../storage/cloudStorage";
 import { detectBinaryLikeObject } from "../utils/isBinaryLikeObject";
 import { TEMP_DIR } from "../storage/temp-dirs";
-import fs, { join as pathJoin } from "fs";
+import fs from "fs";
+import { join as pathJoin } from "path";
 import { ensurePathExists } from "../storage/ensurePathExists";
 import _ from "lodash";
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
