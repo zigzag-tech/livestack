@@ -87,16 +87,11 @@ export class ZZJobSpec<
   }: {
     name: string;
     jobOptions?: z.ZodType<P>;
-
     zzEnv?: ZZEnv;
     concurrency?: number;
-  } & (
-    | {
-        input?: I;
-        output?: O;
-      }
-    | IOSpec<I, O, IMap, OMap>
-  )) {
+    input?: I;
+    output?: O;
+  }) {
     super({
       name,
       input: wrapIfSingle(input),
