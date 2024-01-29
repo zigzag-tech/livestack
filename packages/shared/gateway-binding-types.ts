@@ -4,7 +4,7 @@ export type RequestAndBindType = {
   uniqueSpecLabel?: string;
 };
 
-export const JOB_INFO = "job_info";
+export const MSG_JOB_INFO = "job_info";
 export type JobInfoType = {
   jobId: string;
   availableInputs: string[];
@@ -17,12 +17,12 @@ export type StreamIdentifier = {
   key?: string;
 };
 
-export const UNBIND_CMD = "unbind";
+export const CMD_UNBIND = "unbind";
 export type UnbindParams = {
   jobId: string;
 };
 
-export const FEED = "feed";
+export const CMD_FEED = "feed";
 
 export type FeedParams<K, T> = {
   data: T;

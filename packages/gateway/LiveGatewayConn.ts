@@ -1,11 +1,11 @@
 import {
-  UNBIND_CMD,
+  CMD_UNBIND,
   UnbindParams,
   REQUEST_AND_BIND_CMD,
   RequestAndBindType,
-  FEED,
+  CMD_FEED,
   FeedParams,
-  JOB_INFO,
+  MSG_JOB_INFO,
   JobInfoType,
 } from "@livestack/shared/gateway-binding-types";
 import { Subscription } from "rxjs";
@@ -70,12 +70,13 @@ export class LiveGatewayConn {
     const { input, output, jobId } = await jobSpec.enqueueJob({ jobOptions });
     const data: JobInfoType = {
       jobId,
-      availableInputs: input.keys.map((k) => String(k)),
+      availableInputs: input.tags.map((k) => String(k)),
       availableOutputs: output.keys.map((k) => String(k)),
     };
-    this.socket.emit(JOB_INFO, data);
+    this.socket.emit(MSG_JOB_INFO, data);
+
     this.socket.on(
-      FEED,
+      CMD_FEED,
       async <K extends keyof IMap>({ data, tag }: FeedParams<K, IMap[K]>) => {
         try {
           await input.byTag(tag).feed(data);
@@ -95,7 +96,7 @@ export class LiveGatewayConn {
     }
 
     this.onDisconnect(() => {
-      for (const key of input.keys) {
+      for (const key of input.tags) {
         try {
           input.byTag(key).terminate();
         } catch (err) {
@@ -108,8 +109,8 @@ export class LiveGatewayConn {
       }
     });
 
-    this.socket.on(UNBIND_CMD, ({ jobId }: UnbindParams) => {
-      for (const key of input.keys) {
+    this.socket.on(CMD_UNBIND, ({ jobId }: UnbindParams) => {
+      for (const key of input.tags) {
         try {
           input.byTag(key).terminate();
         } catch (err) {

@@ -3,11 +3,11 @@ import { Socket, io } from "socket.io-client";
 import {
   RequestAndBindType,
   REQUEST_AND_BIND_CMD,
-  JOB_INFO,
+  MSG_JOB_INFO,
   JobInfoType,
-  FEED,
+  CMD_FEED,
   FeedParams,
-  UNBIND_CMD,
+  CMD_UNBIND,
   UnbindParams,
 } from "@livestack/shared/gateway-binding-types";
 
@@ -79,7 +79,7 @@ export class JobSocketIOConnection {
       data,
       tag,
     };
-    this.socketIOClient.emit(FEED, feedParams);
+    this.socketIOClient.emit(CMD_FEED, feedParams);
     if (!this.localObservablesByTag[tag]) {
       // create subject and observable
       const subj = new Subject<{
@@ -166,7 +166,7 @@ export class JobSocketIOConnection {
   }
 
   public async close() {
-    this.socketIOClient.emit(UNBIND_CMD, { jobId: this.jobId } as UnbindParams);
+    this.socketIOClient.emit(CMD_UNBIND, { jobId: this.jobId } as UnbindParams);
     for (const key of this.subscribedOutputKeys) {
       this.socketIOClient.off(`stream:${this.jobId}/${key}`);
     }
@@ -230,7 +230,7 @@ export async function bindNewJobToSocketIO({
     availableInputs: JobInfoType["availableInputs"];
   }>((resolve) => {
     conn.on(
-      JOB_INFO,
+      MSG_JOB_INFO,
       ({ availableInputs, availableOutputs, jobId }: JobInfoType) => {
         resolve({ jobId, availableInputs, availableOutputs });
       }
