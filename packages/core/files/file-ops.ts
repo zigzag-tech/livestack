@@ -1,7 +1,7 @@
 import { IStorageProvider } from "../storage/cloudStorage";
 import { detectBinaryLikeObject } from "../utils/isBinaryLikeObject";
 import { TEMP_DIR } from "../storage/temp-dirs";
-import fs from "fs";
+import fs, { join as pathJoin } from "fs";
 import { ensurePathExists } from "../storage/ensurePathExists";
 import _ from "lodash";
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
@@ -32,7 +32,7 @@ export const identifyLargeFiles = (
   const largeFilesToSave: LargeFileToSave<any>[] = [];
 
   for (const [key, value] of _.entries(obj)) {
-    const currentPath = path ? `${path}/${key}` : key;
+    const currentPath = path ? pathJoin(path, key) : key;
 
     if (typeof value === "string" && value.length > LARGE_VALUE_THRESHOLD) {
       largeFilesToSave.push({
@@ -85,7 +85,7 @@ export function identifyLargeFilesToRestore(
   const largeFilesToRestore: LargeFileWithoutValue<any>[] = [];
   const newObj: any = Array.isArray(obj) ? [] : {};
   for (const [key, value] of _.entries(obj)) {
-    const currentPath = path ? `${path}/${key}` : key;
+    const currentPath = path ? pathJoin(path, key) : key;
     if (value && (value as any)[OBJ_REF_VALUE]) {
       largeFilesToRestore.push({
         path: currentPath,
