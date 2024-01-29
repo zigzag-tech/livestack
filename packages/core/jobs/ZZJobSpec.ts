@@ -134,21 +134,30 @@ export class ZZJobSpec<
 
   public get zzEnv() {
     const resolved = this._zzEnv || ZZEnv.global();
-    if (!resolved) {
+    // if (!resolved) {
+    //   throw new Error(
+    //     `ZZEnv is not configured in ZZJobSpec ${this.name}. \nPlease either pass it when constructing ZZJobSpec or set it globally using ZZEnv.setGlobal().`
+    //   );
+    // }
+    return resolved;
+  }
+
+  public get zzEnvEnsured() {
+    if (!this.zzEnv) {
       throw new Error(
         `ZZEnv is not configured in ZZJobSpec ${this.name}. \nPlease either pass it when constructing ZZJobSpec or set it globally using ZZEnv.setGlobal().`
       );
     }
-    return resolved;
+    return this.zzEnv;
   }
 
   private get _rawQueue() {
     return getCachedQueueByName<P, void>({
       queueNameOnly: this.name,
       queueOptions: {
-        connection: this.zzEnv.redisConfig,
+        connection: this.zzEnvEnsured.redisConfig,
       },
-      projectId: this.zzEnv.projectId,
+      projectId: this.zzEnvEnsured.projectId,
     });
   }
 
@@ -158,16 +167,16 @@ export class ZZJobSpec<
   // }
 
   public async getJobRec(jobId: string) {
-    if (!this.zzEnv.db) {
+    if (!this.zzEnvEnsured.db) {
       throw new Error(
         "Database is not configured in ZZEnv, therefore can not get job record."
       );
     }
     return await getJobRec({
       specName: this.name,
-      projectId: this.zzEnv.projectId,
+      projectId: this.zzEnvEnsured.projectId,
       jobId,
-      dbConn: this.zzEnv.db,
+      dbConn: this.zzEnvEnsured.db,
     });
   }
 
@@ -193,7 +202,7 @@ export class ZZJobSpec<
     limit?: number;
     key?: K;
   }) {
-    if (!this.zzEnv.db) {
+    if (!this.zzEnvEnsured.db) {
       throw new Error(
         "Database is not configured in ZZEnv, therefore can not get job data."
       );
@@ -209,9 +218,9 @@ export class ZZJobSpec<
       WithTimestamp<WrapTerminatorAndDataId<U>>
     >({
       specName: this.name,
-      projectId: this.zzEnv.projectId,
+      projectId: this.zzEnvEnsured.projectId,
       jobId,
-      dbConn: this.zzEnv.db,
+      dbConn: this.zzEnvEnsured.db,
       ioType,
       order,
       limit,
@@ -326,7 +335,7 @@ export class ZZJobSpec<
     await limit(async () => {
       // console.debug("stream_data", JSON.stringify(d, longStringTruncator));
 
-      const redis = new Redis(this.zzEnv.redisConfig);
+      const redis = new Redis(this.zzEnvEnsured.redisConfig);
       if (!d.terminate) {
         // const lastV = await stream.lastValue();
         // mark job terminated in redis key value store
@@ -435,7 +444,7 @@ export class ZZJobSpec<
     key: K;
   }) => {
     try {
-      const redis = new Redis(this.zzEnv.redisConfig);
+      const redis = new Redis(this.zzEnvEnsured.redisConfig);
       const isReady = await redis.get(`ready_status__${jobId}/${String(key)}`);
       // console.debug("getJobReadyForInputsInRedis", jobId, key, ":", isReady);
       return isReady === "true";
@@ -472,10 +481,10 @@ export class ZZJobSpec<
     // if not, fetch from db
     const overridesByType =
       this.streamIdOverridesByTagByTypeByJobId[jobId][type];
-    if (!overridesByType && this.zzEnv.db) {
+    if (!overridesByType && this.zzEnvEnsured.db) {
       const connectors = await getJobStreamConnectorRecs({
-        projectId: this.zzEnv.projectId,
-        dbConn: this.zzEnv.db,
+        projectId: this.zzEnvEnsured.projectId,
+        dbConn: this.zzEnvEnsured.db,
         jobId,
         connectorType: type,
       });
@@ -656,9 +665,9 @@ export class ZZJobSpec<
         `No worker for queue ${this._rawQueue.name}; job ${jobId} might be be stuck.`
       );
     }
-    const projectId = this.zzEnv.projectId;
-    if (this.zzEnv.db) {
-      await this.zzEnv.db.transaction(async (trx) => {
+    const projectId = this.zzEnvEnsured.projectId;
+    if (this.zzEnvEnsured.db) {
+      await this.zzEnvEnsured.db.transaction(async (trx) => {
         await ensureJobAndInitStatusRec({
           projectId,
           specName: this.name,

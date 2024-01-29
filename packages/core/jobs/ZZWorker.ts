@@ -110,7 +110,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     // if worker name is not provided, use random string
 
     this.jobSpec = def.jobSpec;
-    this.zzEnv = zzEnv || def.jobSpec.zzEnv;
+    this.zzEnv = zzEnv || def.jobSpec.zzEnvEnsured;
     this.instanceParams = instanceParams;
     this.def = def;
 

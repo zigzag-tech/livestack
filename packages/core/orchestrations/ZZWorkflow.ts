@@ -251,12 +251,12 @@ export class ZZWorkflowSpec extends ZZJobSpec<
             inputStreamIdOverridesByTag,
             outputStreamIdOverridesByTag,
           });
-          if (this.zzEnv.db) {
+          if (this.zzEnvEnsured.db) {
             await ensureJobRelationRec({
-              projectId: this.zzEnv.projectId,
+              projectId: this.zzEnvEnsured.projectId,
               parentJobId: groupId,
               childJobId: jobNode.jobId,
-              dbConn: this.zzEnv.db,
+              dbConn: this.zzEnvEnsured.db,
             });
           }
         }

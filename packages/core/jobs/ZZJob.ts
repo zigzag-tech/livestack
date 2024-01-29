@@ -135,7 +135,7 @@ export class ZZJob<
     }
 
     this.storageProvider = p.storageProvider;
-    this.zzEnv = p.jobSpec.zzEnv;
+    this.zzEnv = p.jobSpec.zzEnvEnsured;
     this.spec = p.jobSpec;
 
     this.inputStreamFnsByTag = {};
