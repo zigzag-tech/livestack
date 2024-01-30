@@ -80,7 +80,7 @@ JobUniqueId & {
 
   return {
     ...r,
-    job_params: convertMaybePrimtiveBack(r.job_params),
+    job_params: convertMaybePrimtiveOrArrayBack(r.job_params),
   };
 }
 
@@ -183,7 +183,10 @@ export async function getJobDatapoints<T>({
     ZZDatapointRec<
       | T
       | {
-          __primitive__: T;
+          [PRIMTIVE_KEY]: T;
+        }
+      | {
+          [ARRAY_KEY]: T;
         }
     >
   >("zz_datapoints")
@@ -199,7 +202,7 @@ export async function getJobDatapoints<T>({
   // }
   return r.map((rec) => ({
     datapointId: rec.datapoint_id,
-    data: convertMaybePrimtiveBack(rec.data),
+    data: convertMaybePrimtiveOrArrayBack(rec.data),
   }));
 }
 
@@ -238,14 +241,17 @@ export async function addDatapoint<T>({
     ZZDatapointRec<
       | T
       | {
-          __primitive__: T;
+          [PRIMTIVE_KEY]: T;
+        }
+      | {
+          [ARRAY_KEY]: T;
         }
     >
   >("zz_datapoints").insert({
     project_id: projectId,
     stream_id: streamId,
     datapoint_id: datapointId,
-    data: handlePrimitive(data),
+    data: handlePrimitiveOrArray(data),
     job_id: jobInfo?.jobId || null,
     job_output_key: jobInfo?.jobOutputKey || null,
     connector_type: jobInfo ? "out" : null,
@@ -255,12 +261,24 @@ export async function addDatapoint<T>({
   return { datapointId };
 }
 
-function handlePrimitive<T>(d: T) {
+const PRIMTIVE_KEY = "__primitive__";
+const ARRAY_KEY = "__array__";
+
+function handlePrimitiveOrArray<T>(d: T) {
   // stringify if jobData is primitive
-  let jobDataT: T | { __primitive__: T };
+  let jobDataT:
+    | T
+    | { [PRIMTIVE_KEY]: T }
+    | {
+        [ARRAY_KEY]: T;
+      };
   if (typeof d !== "object" || d === null) {
     jobDataT = {
-      __primitive__: d,
+      [PRIMTIVE_KEY]: d,
+    };
+  } else if (Array.isArray(d)) {
+    jobDataT = {
+      [ARRAY_KEY]: d,
     };
   } else {
     jobDataT = d;
@@ -268,15 +286,20 @@ function handlePrimitive<T>(d: T) {
   return jobDataT;
 }
 
-function convertMaybePrimtiveBack<T>(
+function convertMaybePrimtiveOrArrayBack<T>(
   p:
     | T
     | {
-        __primitive__: T;
+        [PRIMTIVE_KEY]: T;
+      }
+    | {
+        [ARRAY_KEY]: T;
       }
 ): T {
-  if (typeof p === "object" && p !== null && "__primitive__" in p) {
-    return p.__primitive__;
+  if (typeof p === "object" && p !== null && PRIMTIVE_KEY in p) {
+    return p[PRIMTIVE_KEY];
+  } else if (typeof p === "object" && p !== null && ARRAY_KEY in p) {
+    return p[ARRAY_KEY];
   } else {
     return p;
   }
@@ -362,7 +385,7 @@ export async function ensureJobAndInitStatusRec<T>({
       project_id: projectId,
       spec_name: specName,
       job_id: jobId,
-      job_params: handlePrimitive(jobOptions),
+      job_params: handlePrimitiveOrArray(jobOptions),
     })
     .onConflict(["project_id", "spec_name", "job_id"])
     .ignore();
