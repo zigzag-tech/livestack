@@ -1,6 +1,6 @@
 # Comparison with other frameworks
 
-## Langchain
+## Langchain/LangGraph
 WIP
 
 ## Llamaindex
@@ -8,3 +8,6 @@ WIP
 
 ## ComfyUI
 WIP
+
+## DSPy
+
