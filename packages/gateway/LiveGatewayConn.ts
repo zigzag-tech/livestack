@@ -71,7 +71,7 @@ export class LiveGatewayConn {
     const data: JobInfoType = {
       jobId,
       availableInputs: input.tags.map((k) => String(k)),
-      availableOutputs: output.keys.map((k) => String(k)),
+      availableOutputs: output.tags.map((k) => String(k)),
     };
     this.socket.emit(MSG_JOB_INFO, data);
 
@@ -88,7 +88,7 @@ export class LiveGatewayConn {
 
     let subs: Subscription[] = [];
 
-    for (const tag of output.keys) {
+    for (const tag of output.tags) {
       const sub = output.byTag(tag).valueObservable.subscribe((data) => {
         this.socket.emit(`stream:${jobId}/${String(tag)}`, data);
       });
