@@ -1,5 +1,4 @@
-import { InferDefMap } from "./StreamDefSet";
-import { StreamDefSet } from "./StreamDefSet";
+import { StreamDefSet, InferDefMap } from "./StreamDefSet";
 import { ZodType, z } from "zod";
 
 export class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
@@ -8,34 +7,6 @@ export class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
   public readonly outputDefSet: StreamDefSet<OMap>;
   public readonly input: InferDefMap<IMap>;
   public readonly output: InferDefMap<OMap>;
-
-  public getSingleInputTag() {
-    return this.getSingleTag("input");
-  }
-  public getSingleOutputTag() {
-    return this.getSingleTag("output");
-  }
-  private getSingleTag<T extends "input" | "output">(
-    type: T
-  ): T extends "input" ? keyof IMap : keyof OMap {
-    const defSet = type === "input" ? this.inputDefSet : this.outputDefSet;
-    if (defSet.keys.length === 0) {
-      throw new Error(
-        `No ${type} found for spec "${this.name}". Please specify at least one in the "${type}" field of the spec's definition.`
-      );
-    } else if (defSet.keys.length > 1) {
-      const keys = defSet.keys;
-      throw new Error(
-        `Ambiguous ${type} for spec "${
-          this.name
-        }"; found more than two with tags [${keys.join(
-          ", "
-        )}]. \nPlease specify which one to use with "${type}(tagName)".`
-      );
-    } else {
-      return defSet.keys[0] as T extends "input" ? keyof IMap : keyof OMap;
-    }
-  }
 
   protected constructor({
     name,
