@@ -7,7 +7,7 @@ import {
 } from "@livestack/core/orchestrations/ZZWorkflow";
 import { LiveGatewayConn } from "./LiveGatewayConn";
 
-export function setupJobBindingGateway({
+export function initJobBinding({
   httpServer,
   socketPath = "/livestack.socket.io",
   onConnect,

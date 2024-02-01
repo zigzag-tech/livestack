@@ -5,7 +5,7 @@ import {
   bindNewJobToSocketIO,
 } from "./JobSocketIOClient";
 
-export function useJobForConnection({
+export function useJobBinding({
   socketIOURI,
   socketIOPath,
   socketIOClient,
