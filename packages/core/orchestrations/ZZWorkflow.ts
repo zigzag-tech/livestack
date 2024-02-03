@@ -1,19 +1,18 @@
 // import { InferInputType, InferOutputType } from "../jobs/ZZJobSpec";
-import { v4 } from "uuid";
-import {
-  CheckSpec,
-  deriveStreamId,
-  uniqueStreamIdentifier,
-  ZZJobSpec,
-} from "../jobs/ZZJobSpec";
-import { InferTMap } from "@livestack/shared/IOSpec";
+import { CheckSpec, SpecOrName, ZZJobSpec } from "../jobs/ZZJobSpec";
+import { IOSpec, InferTMap } from "@livestack/shared/IOSpec";
 import { z } from "zod";
-import Graph from "graphology";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
-import { ByTagCallable } from "../jobs/ZZJob";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
-import { ensureJobRelationRec } from "../db/knexConn";
+import { JobsOptions } from "bullmq";
+import { JobNode, InstantiatedGraph, CanonicalConnection } from "./Graph";
+import {
+  SpecAndOutlet,
+  resolveUniqueSpec,
+  resolveTagMapping,
+} from "../jobs/ZZJobSpec";
+
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 
 export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
@@ -24,16 +23,6 @@ export type JobSpecAndJobOptions<JobSpec> = {
   jobLabel?: string;
 };
 
-// const WorkflowParams = z.object({
-//   connections: z.array(
-//     z
-//       .object({
-//         from: SpecAndOutlet,
-//         to: SpecAndOutlet,
-//       })
-//       .or(z.array(SpecAndOutlet))
-//   ),
-// });
 type WorkflowParams = {
   connections: (
     | {
@@ -43,16 +32,6 @@ type WorkflowParams = {
     | SpecAndOutletOrTagged[]
   )[];
 };
-
-type CanonicalWorkflowParams = ReturnType<typeof convertConnectionsCanonical>;
-
-type CanonicalConnection = CanonicalWorkflowParams[number];
-type CanonicalConnectionPoint = CanonicalConnection[number];
-export const SpecOrName = z.union([
-  z.string(),
-  z.instanceof(ZZJobSpec<any, any, any, any, any>),
-]);
-export type SpecOrName = z.infer<typeof SpecOrName>; // Conversion functions using TypeScript
 
 const WorkflowChildJobOptions = z.array(
   z.object({
@@ -79,16 +58,44 @@ const WorkflowJobOptionsSanitized = z.object({
 type WorkflowJobOptionsSanitized = z.infer<typeof WorkflowJobOptionsSanitized>;
 
 export class ZZWorkflowSpec extends ZZJobSpec<
-  WorkflowJobOptionsSanitized,
+  WorkflowChildJobOptionsSanitized,
   any,
+  // {
+  //   status: z.ZodType<{
+  //     status: "finished";
+  //   }>;
+  // },
   any,
   any,
   any
 > {
   public readonly connections: CanonicalConnection[];
-  public readonly defGraph: DefGraph;
+  private workflowGraphCreated: boolean = false;
+
+  public override getDefGraph() {
+    const g = super.getDefGraph();
+    if (!this.workflowGraphCreated) {
+      const parentSpecNodeId = g.getRootSpecNodeId();
+      if (!parentSpecNodeId) {
+        throw new Error("No parent spec node id found");
+      }
+
+      for (const conn of this.connections) {
+        const { fromSpecNodeId, toSpecNodeId } = g.addConnectedDualSpecs(
+          conn[0],
+          conn[1]
+        );
+        g.ensureParentChildRelation(parentSpecNodeId, fromSpecNodeId);
+        g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
+      }
+
+      this.workflowGraphCreated = true;
+    }
+    return g;
+  }
+
   private orchestrationWorkerDef: ZZWorkerDef<
-    WorkflowJobOptionsSanitized,
+    WorkflowChildJobOptionsSanitized,
     any,
     any,
     any,
@@ -96,13 +103,17 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     any
   >;
 
-  public readonly inputSpecTagByWorkflowTag: Record<
+  protected readonly inputSpecTagByWorkflowTag: Record<
     string,
-    { specName: string; tag: string }
+    { specName: string; tag: string; uniqueSpecLabel?: string }
   >;
-  public readonly outputSpecTagByWorkflowTag: Record<
+  protected readonly outputSpecTagByWorkflowTag: Record<
     string,
-    { specName: string; tag: string }
+    { specName: string; tag: string; uniqueSpecLabel?: string }
+  >;
+  protected readonly publicTagBySpecUniqueLabelAndTag: Record<
+    `${string}[${string | ""}]::${"in" | "out"}/${string}`,
+    string
   >;
 
   constructor({
@@ -115,15 +126,18 @@ export class ZZWorkflowSpec extends ZZJobSpec<
   } & WorkflowParams) {
     super({
       name,
-      jobOptions: WorkflowJobOptionsSanitized,
+      jobOptions: WorkflowChildJobOptionsSanitized,
       zzEnv,
+      // output: {
+      //   status: z.object({ status: z.literal("finished") }),
+      // },
     });
     const canonicalConns = convertConnectionsCanonical({
       connections,
     });
     this.connections = canonicalConns;
 
-    // collect all tag maps
+    // collect all the input and output that are tagged
     let inputSpecTagByWorkflowTag: Record<
       string,
       { specName: string; tag: string }
@@ -134,7 +148,19 @@ export class ZZWorkflowSpec extends ZZJobSpec<
         specName: string;
         tag: string;
       }
+    > = {
+      // status: {
+      //   specName: this.name,
+      //   tag: "status",
+      // },
+    };
+
+    // reverse
+    let publicTagBySpecUniqueLabelAndTag: Record<
+      `${string}[${string | ""}]::${"in" | "out"}/${string}`,
+      string
     > = {};
+
     for (const conn of canonicalConns) {
       for (const c of conn) {
         inputSpecTagByWorkflowTag = {
@@ -145,6 +171,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<
               {
                 specName: c.spec.name,
                 tag: specTag,
+                uniqueSpecLabel: c.uniqueSpecLabel,
               },
             ])
           ),
@@ -157,33 +184,53 @@ export class ZZWorkflowSpec extends ZZJobSpec<
               {
                 specName: c.spec.name,
                 tag: specTag,
+                uniqueSpecLabel: c.uniqueSpecLabel,
               },
             ])
           ),
         };
+        for (const [specTag, tag] of Object.entries(c.inputTagMap)) {
+          publicTagBySpecUniqueLabelAndTag[
+            `${c.spec.name}[${c.uniqueSpecLabel || ""}]::in/${specTag}`
+          ] = tag;
+        }
+        for (const [specTag, tag] of Object.entries(c.outputTagMap)) {
+          publicTagBySpecUniqueLabelAndTag[
+            `${c.spec.name}[${c.uniqueSpecLabel || ""}]::out/${specTag}`
+          ] = tag;
+        }
       }
     }
     this.inputSpecTagByWorkflowTag = inputSpecTagByWorkflowTag;
     this.outputSpecTagByWorkflowTag = outputSpecTagByWorkflowTag;
+    this.publicTagBySpecUniqueLabelAndTag = publicTagBySpecUniqueLabelAndTag;
 
     this._validateConnections();
-    this.defGraph = deriveDefGraph(canonicalConns);
+    // for (const conn of canonicalConns) {
+    //   this.getDefGraph().addConnectedDualSpecs(conn[0], conn[1]);
+    // }
     this.orchestrationWorkerDef = new ZZWorkerDef({
       jobSpec: this,
-      processor: async ({
-        jobOptions: { groupId, jobOptions: childrenJobOptions },
-      }) => {
-        const instG = instantiateFromDefGraph({
-          defGraph: this.defGraph,
-          groupId,
+      processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
+        const groupId = jobId;
+
+        const instG = new InstantiatedGraph({
+          defGraph: this.getDefGraph(),
+          contextId: groupId,
+          streamIdOverrides: {},
         });
 
-        const jobNodes = instG
+        const allJobNodes = instG
           .nodes()
           .filter((n) => instG.getNodeAttributes(n).nodeType === "job");
+        // remove self
+        const jobNodesExceptSelf = allJobNodes.filter((n) => {
+          const node = instG.getNodeAttributes(n) as JobNode;
+          return node.jobId !== `[${groupId}]${this.name}`;
+        });
 
-        for (let i = 0; i < jobNodes.length; i++) {
-          const jobNodeId = jobNodes[i];
+        for (let i = 0; i < jobNodesExceptSelf.length; i++) {
+          const jobNodeId = jobNodesExceptSelf[i];
           const jobNode = instG.getNodeAttributes(jobNodeId) as JobNode;
 
           //calculate input and output overrides
@@ -241,6 +288,8 @@ export class ZZWorkflowSpec extends ZZJobSpec<
 
           await childJobSpec.enqueueJob({
             jobId: jobNode.jobId,
+            parentJobId: groupId,
+            uniqueSpecLabel: jobNode.uniqueSpecLabel,
             jobOptions: childrenJobOptions?.find(({ spec: specQuery }) => {
               const specInfo = resolveUniqueSpec(specQuery);
               return (
@@ -251,17 +300,60 @@ export class ZZWorkflowSpec extends ZZJobSpec<
             inputStreamIdOverridesByTag,
             outputStreamIdOverridesByTag,
           });
-          if (this.zzEnvEnsured.db) {
-            await ensureJobRelationRec({
-              projectId: this.zzEnvEnsured.projectId,
-              parentJobId: groupId,
-              childJobId: jobNode.jobId,
-              dbConn: this.zzEnvEnsured.db,
-            });
-          }
         }
+        // await output.emit({ status: "finished" });
       },
     });
+  }
+
+  protected override convertSpecTagToPublicTag({
+    specName,
+    tag,
+    uniqueSpecLabel,
+    type,
+  }: {
+    specName: string;
+    tag: string;
+    uniqueSpecLabel?: string;
+    type: "in" | "out";
+  }) {
+    return this.publicTagBySpecUniqueLabelAndTag[
+      `${specName}[${uniqueSpecLabel || ""}]::${type}/${tag}`
+    ];
+  }
+
+  protected override convertPublicTagToSpecTag({
+    type,
+    tag,
+  }: {
+    type: "in" | "out";
+    tag: string | symbol | number;
+  }) {
+    if (type === "in") {
+      if (!this.inputSpecTagByWorkflowTag[tag.toString()]) {
+        throw new Error(
+          `No input spec tag found in workflow ${
+            this.name
+          } for ${tag.toString()}`
+        );
+      }
+      return {
+        ...this.inputSpecTagByWorkflowTag[tag.toString()],
+        type,
+      };
+    } else {
+      if (!this.outputSpecTagByWorkflowTag[tag.toString()]) {
+        throw new Error(
+          `No output spec tag found in workflow ${
+            this.name
+          } for ${tag.toString()}`
+        );
+      }
+      return {
+        ...this.outputSpecTagByWorkflowTag[tag.toString()],
+        type,
+      };
+    }
   }
 
   private _validateConnections() {
@@ -300,6 +392,51 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     }
   }
 
+  protected override async lookUpChildJobIdByGroupIDAndSpecTag({
+    groupId,
+    specInfo,
+  }: {
+    groupId: string;
+    specInfo: {
+      specName: string;
+      uniqueSpecLabel?: string;
+    };
+  }) {
+    if (!this.zzEnvEnsured.db) {
+      throw new Error("No db connection found");
+    }
+
+    let workflow = ZZWorkflow.lookupById(groupId);
+    if (!workflow) {
+      workflow = new ZZWorkflow({
+        jobGroupId: groupId,
+        jobGroupDef: this,
+      });
+    }
+
+    const instaG = workflow.graph;
+
+    const childJobNodeId = instaG.findNode((n) => {
+      const node = instaG.getNodeAttributes(n);
+      if (node.nodeType !== "job" && node.nodeType !== "root-job") {
+        return false;
+      } else {
+        return (
+          node.specName === specInfo.specName &&
+          (node.nodeType === "root-job" ||
+            (node.uniqueSpecLabel || null) ===
+              (specInfo.uniqueSpecLabel || null))
+        );
+      }
+    });
+    if (!childJobNodeId) {
+      throw new Error(
+        `No child job found for ${groupId} and ${specInfo.specName}`
+      );
+    }
+    return (instaG.getNodeAttributes(childJobNodeId) as JobNode).jobId;
+  }
+
   public async startWorker(
     p?: Parameters<typeof this.orchestrationWorkerDef.startWorker>[0]
   ) {
@@ -307,71 +444,48 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     return this;
   }
 
-  public async enqueue({
-    jobGroupId,
-    jobOptions: childJobOptions,
-  }: // lazyJobCreation = false,
-  {
-    jobGroupId?: string;
-    // lazyJobCreation?: boolean;
-    jobOptions?: WorkflowChildJobOptions;
+  public async enqueueJob(p?: {
+    jobId?: string;
+    jobOptions?: WorkflowChildJobOptionsSanitized;
+    bullMQJobsOpts?: JobsOptions;
   }) {
-    if (!jobGroupId) {
-      jobGroupId = v4();
-    }
-
-    // Create interfaces for input and output
-
-    // console.log("countByName", countByName);
-    const workflow = new ZZWorkflow({
-      jobGroupDef: this,
-      jobGroupId,
-    });
+    let { jobOptions } = p || {};
 
     // sanitize child job options
-    const childJobOptionsSanitized = (childJobOptions || []).map((c) => ({
-      spec: typeof c.spec === "string" ? c.spec : c.spec.name,
+    const childJobOptionsSanitized = (jobOptions || []).map((c) => ({
+      spec: typeof c.spec === "string" ? c.spec : c.spec,
       params: c.params,
     }));
 
-    await this.enqueueJob({
-      jobId: jobGroupId,
-      jobOptions: {
-        groupId: jobGroupId,
-        jobOptions: childJobOptionsSanitized,
-      },
+    const manager = await super.enqueueJob({
+      ...p,
+      jobOptions: childJobOptionsSanitized,
     });
 
-    return workflow;
+    // const out = await manager.output("status");
+
+    // wait on output to finish
+    // const r = await out.nextValue();
+    return manager;
   }
 }
 
-type ByTagInputCallable<T> = {
-  (tag: string): {
-    feed: (data: T) => Promise<void>;
-    terminate: () => Promise<void>;
-  };
-};
-
 export class ZZWorkflow {
-  public readonly jobIdBySpec: (specQuery: UniqueSpecQuery) => string;
-  public readonly graph: InstantiatedGraph;
-  public readonly input: {
-    byTag: (tag: string) => {
-      feed: (data: any) => Promise<void>;
-      terminate: () => Promise<void>;
-    };
-    bySpec: (
-      spec: UniqueSpecQuery
-    ) => ReturnType<ZZJobSpec<any, any, any>["_deriveInputsForJob"]>;
-  } & ByTagInputCallable<any>;
-  public readonly output: {
-    byTag: ByTagCallable<any>;
-    bySpec: (
-      spec: UniqueSpecQuery
-    ) => ReturnType<ZZJobSpec<any, any, any>["_deriveOutputsForJob"]>;
-  };
+  private _graph: InstantiatedGraph | null = null;
+  public get graph(): InstantiatedGraph {
+    if (!this._graph) {
+      this._graph = new InstantiatedGraph({
+        defGraph: this.jobGroupDef.getDefGraph(),
+        contextId: this.contextId,
+        streamIdOverrides: {},
+      });
+    }
+    return this._graph;
+  }
   public readonly jobGroupDef: ZZWorkflowSpec;
+  public readonly contextId: string;
+  private static _workflowById: Record<string, ZZWorkflow> = {};
+
   constructor({
     jobGroupDef,
     jobGroupId,
@@ -379,137 +493,19 @@ export class ZZWorkflow {
     jobGroupId: string;
     jobGroupDef: ZZWorkflowSpec;
   }) {
-    const instaG = instantiateFromDefGraph({
-      defGraph: jobGroupDef.defGraph,
-      groupId: jobGroupId,
-    });
-
-    this.graph = instaG;
-
-    const identifySpecAndJobIdBySpecQuery = (
-      specQuery: UniqueSpecQuery
-    ): { spec: ZZJobSpec<any, any, any>; jobId: string } => {
-      const specInfo = resolveUniqueSpec(specQuery);
-      const jobNodeId = instaG.findNode((id, n) => {
-        return (
-          n.nodeType === "job" &&
-          n.specName === specInfo.spec.name &&
-          n.uniqueSpecLabel === specInfo.uniqueSpecLabel
-        );
-      });
-
-      if (!jobNodeId) {
-        throw new Error(
-          `Job of spec ${specInfo.spec.name} ${
-            specInfo.uniqueSpecLabel
-              ? `with label ${specInfo.uniqueSpecLabel}`
-              : ""
-          } not found.`
-        );
-      }
-      const jobId = (instaG.getNodeAttributes(jobNodeId) as JobNode).jobId;
-      const childSpec = ZZJobSpec.lookupByName(specInfo.spec.name);
-
-      return { spec: childSpec, jobId };
-    };
-
-    const jobIdBySpec = (specQuery: UniqueSpecQuery) => {
-      const { jobId } = identifySpecAndJobIdBySpecQuery(specQuery);
-      return jobId;
-    };
-
-    this.jobIdBySpec = jobIdBySpec;
-    const inputBySpec = (specQuery: UniqueSpecQuery) => {
-      const { spec: childSpec, jobId } =
-        identifySpecAndJobIdBySpecQuery(specQuery);
-      return childSpec._deriveInputsForJob(jobId);
-    };
-    const that = this;
-    this.input = (() => {
-      const func = (tag: string) => {
-        // TODO
-        const lookupR = that.jobGroupDef.inputSpecTagByWorkflowTag[tag];
-        if (!lookupR) {
-          throw new Error(
-            `Tag ${tag} not found in workflow ${that.jobGroupDef.name}`
-          );
-        }
-        const { specName, tag: specTag } = lookupR;
-        const r = inputBySpec(specName);
-        return r.byTag(specTag as any);
-      };
-      func.byTag = (tag: string) => {
-        // TODO
-        const lookupR = that.jobGroupDef.inputSpecTagByWorkflowTag[tag];
-        if (!lookupR) {
-          throw new Error(
-            `Tag ${tag} not found in workflow ${that.jobGroupDef.name}`
-          );
-        }
-        const { specName, tag: specTag } = lookupR;
-        const r = inputBySpec(specName);
-        return r.byTag(specTag as any);
-      };
-      func.bySpec = inputBySpec;
-      return func;
-    })() as any;
-    const outputBySpec = (specQuery: UniqueSpecQuery) => {
-      const { spec: childSpec, jobId } =
-        identifySpecAndJobIdBySpecQuery(specQuery);
-      return childSpec._deriveOutputsForJob(jobId);
-    };
-    this.output = {
-      byTag: (tag: string | number | symbol) => {
-        const lookupR =
-          that.jobGroupDef.outputSpecTagByWorkflowTag[String(tag)];
-        if (!lookupR) {
-          throw new Error(
-            `Tag ${String(tag)} not found in workflow ${that.jobGroupDef.name}`
-          );
-        }
-        const { specName, tag: specTag } = lookupR;
-        const r = outputBySpec(specName);
-        return r.byTag(specTag as any);
-      },
-      bySpec: outputBySpec,
-    };
+    this.contextId = jobGroupId;
     this.jobGroupDef = jobGroupDef;
+    ZZWorkflow._workflowById[jobGroupId] = this;
   }
 
   public static define(p: ConstructorParameters<typeof ZZWorkflowSpec>[0]) {
     return new ZZWorkflowSpec(p);
   }
 
-  public static connect = connect;
-}
-
-export function connect<
-  Spec1,
-  Spec2
-  // K1 extends keyof CheckSpec<Spec1>["outputDefSet"]["defs"],
-  // K2 extends keyof CheckSpec<Spec2>["inputDefSet"]["defs"]
->({
-  from,
-  to,
-}: // transform,
-{
-  from: Spec1;
-  to: Spec2;
-  // transform?: (
-  //   spec1Out: NonNullable<InferOutputType<Spec1, K1>>
-  // ) => NonNullable<InferInputType<Spec2, K2>>;
-}): {
-  from: Spec1;
-  to: Spec2;
-  // transform?: (
-  //   spec1Out: NonNullable<InferOutputType<Spec1, K1>>
-  // ) => NonNullable<InferInputType<Spec2, K2>>;
-} {
-  return {
-    from,
-    to,
-    // transform,
-  };
+  public static lookupById(jobGroupId: string) {
+    const r = this._workflowById[jobGroupId] as ZZWorkflow | undefined;
+    return r || null;
+  }
 }
 
 function convertSpecAndOutletWithTags(
@@ -544,7 +540,7 @@ function convertSpecAndOutletWithTags(
   }
 }
 
-type CanonicalSpecAndOutlet = ReturnType<
+export type CanonicalSpecAndOutlet = ReturnType<
   typeof convertSpecAndOutletWithTags
 > & {
   tagInSpec: string;
@@ -598,178 +594,12 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
   return convertedConnections;
 }
 
-type SpecNode = {
-  nodeType: "spec";
-  specName: string;
-  uniqueSpecLabel?: string;
-};
-type OutletNode = {
-  nodeType: "outlet";
-  tag: string;
-};
-type InletNode = {
-  nodeType: "inlet";
-  tag: string;
-};
-type DefGraphNode = { label: string } & (
-  | SpecNode
-  | {
-      nodeType: "stream";
-    }
-  | InletNode
-  | OutletNode
-);
-
-type InferNodeData<T extends DefGraphNode["nodeType"]> = Extract<
-  DefGraphNode,
-  { nodeType: T }
->;
-
-type DefNodeType = DefGraphNode["nodeType"];
-type DefGraph = Graph<DefGraphNode>;
-
-type JobNode = {
-  nodeType: "job";
-  jobId: string;
-  specName: string;
-  uniqueSpecLabel?: string;
-};
-
-type InstantiatedGraph = Graph<
-  { label: string } & (
-    | JobNode
-    | {
-        nodeType: "stream";
-        streamId: string;
-      }
-    | {
-        nodeType: "inlet";
-        tag: string;
-      }
-    | {
-        nodeType: "outlet";
-        tag: string;
-      }
-  )
->;
-
-function deriveDefGraph(convertedConnections: CanonicalConnection[]): DefGraph {
-  const graph: DefGraph = new Graph();
-  function createOrGetNodeId<T extends DefNodeType>(
-    id: string,
-    data: InferNodeData<T>
-  ): string {
-    const nodeId = `${data.nodeType}_${id}`;
-    if (!graph.hasNode(nodeId)) {
-      graph.addNode(nodeId, { ...data });
-    }
-    return nodeId;
-  }
-
-  function addConnection(
-    from: CanonicalConnectionPoint,
-    to: CanonicalConnectionPoint
-  ) {
-    const fromSpecIdentifier = uniqueSpecIdentifier(from);
-    const fromUniqueLabel = from.uniqueSpecLabel;
-
-    const fromSpecNodeId = createOrGetNodeId(fromSpecIdentifier, {
-      specName: from.spec.name,
-      ...(fromUniqueLabel ? { uniqueSpecLabel: fromUniqueLabel } : {}),
-      nodeType: "spec",
-      label: fromSpecIdentifier,
-    });
-    const fromOutletNodeId = createOrGetNodeId(
-      `${fromSpecIdentifier}/${from.tagInSpec}`,
-      {
-        nodeType: "outlet",
-        tag: from.tagInSpec,
-        label: `${fromSpecIdentifier}/${from.tagInSpec}`,
-      }
-    );
-    const streamId = uniqueStreamIdentifier({
-      from: {
-        specName: from.tagInSpec,
-        uniqueSpecLabel: from.uniqueSpecLabel,
-        tag: from.tagInSpec,
-      },
-      to: {
-        specName: to.spec.name,
-        uniqueSpecLabel: to.uniqueSpecLabel,
-        tag: to.tagInSpec,
-      },
-    });
-    const streamNodeId = createOrGetNodeId(streamId, {
-      nodeType: "stream",
-      label: streamId,
-    });
-    const toSpecIdentifier = uniqueSpecIdentifier(to);
-    const id = `${toSpecIdentifier}/${to.tagInSpec}`;
-    const toInletNodeId = createOrGetNodeId(id, {
-      nodeType: "inlet",
-      tag: to.tagInSpec,
-      label: id,
-    });
-    const toUniqueLabel = to.uniqueSpecLabel;
-    const toSpecNodeId = createOrGetNodeId(toSpecIdentifier, {
-      specName: to.spec.name,
-      ...(toUniqueLabel ? { uniqueSpecLabel: toUniqueLabel } : {}),
-      nodeType: "spec",
-      label: toSpecIdentifier,
-    });
-
-    graph.addEdge(fromSpecNodeId, fromOutletNodeId);
-    graph.addEdge(fromOutletNodeId, streamNodeId);
-    graph.addEdge(streamNodeId, toInletNodeId);
-    graph.addEdge(toInletNodeId, toSpecNodeId);
-  }
-
-  let specNodes = new Map<string, ZZJobSpec<any, any, any, any>>();
-
-  const addToNodeMap = (ss: CanonicalSpecAndOutlet) => {
-    const identifier = uniqueSpecIdentifier(ss);
-    specNodes.set(identifier, ss.spec);
-  };
-
-  // Pass 1: create all nodes from the connections
-  for (const connection of convertedConnections) {
-    // Split into multiple connections
-    for (let i = 0; i < connection.length - 1; i++) {
-      addConnection(connection[i], connection[i + 1]);
-    }
-    connection.forEach(addToNodeMap);
-  }
-
-  // Pass 2: create any loose stream nodes along with their inlet/outlet nodes
-  // from spec nodes
-
-  // TODO
-
-  return graph;
-}
-
-function uniqueSpecIdentifier({
-  specName,
-  spec,
-  uniqueSpecLabel,
-}: {
-  specName?: string;
-  spec?: ZZJobSpec<any, any, any>;
-  uniqueSpecLabel?: string;
-}) {
-  specName = specName ?? spec?.name;
-  if (!specName) {
-    throw new Error("specName or spec must be provided");
-  }
-  return `${specName}${uniqueSpecLabel ? `[${uniqueSpecLabel}]` : ""}`;
-}
-
 function validateSpecHasKey<P, I, O, IMap, OMap>({
   spec,
   type,
   tag,
 }: {
-  spec: ZZJobSpec<P, I, O, IMap, OMap>;
+  spec: IOSpec<I, O, IMap, OMap>;
   type: "in" | "out";
   tag: string;
 }) {
@@ -780,141 +610,12 @@ function validateSpecHasKey<P, I, O, IMap, OMap>({
   }
 }
 
-function instantiateFromDefGraph({
-  defGraph,
-  groupId,
-}: {
-  defGraph: DefGraph;
-  groupId: string;
-}): InstantiatedGraph {
-  const g: InstantiatedGraph = new Graph();
-
-  const nodes = defGraph.nodes();
-  const jobNodeIdBySpecNodeId: { [k: string]: string } = {};
-  const streamNodeIdByStreamId: { [k: string]: string } = {};
-
-  for (const nodeId of nodes) {
-    const node = defGraph.getNodeAttributes(nodeId);
-    if (node.nodeType === "spec") {
-      const jobId = `[${groupId}]${uniqueSpecIdentifier(node)}`;
-      g.addNode(jobId, {
-        ...node,
-        nodeType: "job",
-        jobId,
-      });
-      jobNodeIdBySpecNodeId[nodeId] = jobId;
-    } else if (node.nodeType === "stream") {
-      const { source, target } = getStreamNodes(defGraph, nodeId);
-      const streamId = deriveStreamId({
-        groupId,
-        ...(source
-          ? {
-              from: {
-                specName: source.specNode.specName,
-                uniqueSpecLabel: source.specNode.uniqueSpecLabel,
-                tag: source.outletNode.tag,
-              },
-            }
-          : {}),
-        ...(target
-          ? {
-              to: {
-                specName: target.specNode.specName,
-                uniqueSpecLabel: target.specNode.uniqueSpecLabel,
-                tag: target.inletNode.tag,
-              },
-            }
-          : {}),
-      });
-      g.addNode(streamId, {
-        nodeType: "stream",
-        streamId,
-        label: streamId,
-      });
-      streamNodeIdByStreamId[nodeId] = streamId;
-    } else {
-      g.addNode(nodeId, node);
-    }
-  }
-
-  const edges = defGraph.edges();
-  for (const edgeId of edges) {
-    const from = defGraph.source(edgeId);
-    const to = defGraph.target(edgeId);
-    const fromNode = defGraph.getNodeAttributes(from);
-    const toNode = defGraph.getNodeAttributes(to);
-
-    const newFrom =
-      fromNode.nodeType === "spec"
-        ? jobNodeIdBySpecNodeId[from]
-        : fromNode.nodeType === "stream"
-        ? streamNodeIdByStreamId[from]
-        : from;
-    const newTo =
-      toNode.nodeType === "spec"
-        ? jobNodeIdBySpecNodeId[to]
-        : toNode.nodeType === "stream"
-        ? streamNodeIdByStreamId[to]
-        : to;
-    g.addEdge(newFrom, newTo);
-  }
-
-  return g;
-}
-
-function getStreamNodes(g: DefGraph, streamNodeId: string) {
-  let source: {
-    specNode: SpecNode;
-    outletNode: OutletNode;
-  } | null = null;
-
-  const [ie] = g.inboundEdges(streamNodeId) as (string | undefined)[];
-  if (!ie) {
-    source = null;
-  } else {
-    const outletNodeId = g.source(ie);
-    const outletNode = g.getNodeAttributes(outletNodeId) as OutletNode;
-    const [ie2] = g.inboundEdges(outletNodeId);
-    const sourceSpecNodeId = g.source(ie2);
-    const sourceSpecNode = g.getNodeAttributes(sourceSpecNodeId) as SpecNode;
-    source = {
-      specNode: sourceSpecNode,
-      outletNode,
-    };
-  }
-
-  let target: {
-    specNode: SpecNode;
-    inletNode: InletNode;
-  } | null = null;
-  const [oe] = g.outboundEdges(streamNodeId) as (string | undefined)[];
-
-  if (!oe) {
-    target = null;
-  } else {
-    const inletNodeId = g.target(oe);
-    const inletNode = g.getNodeAttributes(inletNodeId) as InletNode;
-    const [oe2] = g.outboundEdges(inletNodeId);
-    const targetSpecNodeId = g.target(oe2);
-    const targetSpecNode = g.getNodeAttributes(targetSpecNodeId) as SpecNode;
-    target = {
-      specNode: targetSpecNode,
-      inletNode,
-    };
-  }
-
-  return {
-    source,
-    target,
-  };
-}
-
-type TagMaps<I, O, IKs, OKs> = {
+export type TagMaps<I, O, IKs, OKs> = {
   inputTag: Partial<Record<keyof InferTMap<I>, IKs>>;
   outputTag: Partial<Record<keyof InferTMap<O>, OKs>>;
 };
 
-interface TagObj<P, I, O, IKs, OKs> {
+export interface TagObj<P, I, O, IKs, OKs> {
   spec: ZZJobSpec<P, I, O>;
   input: <newK extends string>(
     tagOrMap: newK | Partial<Record<keyof InferTMap<I>, newK>>
@@ -960,87 +661,9 @@ function _tagObj<P, I, O, IKs, OKs>(
         const tag = spec.getSingleOutputTag();
         tm.outputTag[tag] = tagOrMap;
       } else {
-        tm.inputTag = { ...tagMaps.inputTag, ...tagOrMap };
+        tm.outputTag = { ...tagMaps.outputTag, ...tagOrMap };
       }
       return _tagObj(spec, tm);
     },
-  };
-}
-
-export const UniqueSpecQuery = z.union([
-  SpecOrName,
-  z.object({
-    spec: SpecOrName,
-    label: z.string().default("default_label"),
-  }),
-]);
-export type UniqueSpecQuery = z.infer<typeof UniqueSpecQuery>;
-export const SpecAndOutlet = z.union([
-  UniqueSpecQuery,
-  z.tuple([UniqueSpecQuery, z.string().or(z.literal("default"))]),
-]);
-export type SpecAndOutlet = z.infer<typeof SpecAndOutlet>;
-export function resolveUniqueSpec(
-  uniqueSpec: UniqueSpecQuery | TagObj<any, any, any, any, any>
-): {
-  spec: ZZJobSpec<any, any, any>;
-  uniqueSpecLabel?: string;
-} {
-  if (typeof uniqueSpec === "string") {
-    const spec = ZZJobSpec.lookupByName(uniqueSpec);
-    return {
-      spec,
-    };
-  } else if ("spec" in (uniqueSpec as any) && "label" in (uniqueSpec as any)) {
-    const spec = convertSpecOrName(
-      (
-        uniqueSpec as {
-          spec: SpecOrName;
-          label: string;
-        }
-      ).spec
-    );
-
-    return {
-      spec,
-      uniqueSpecLabel: (
-        uniqueSpec as {
-          spec: SpecOrName;
-          label: string;
-        }
-      ).label,
-    };
-  } else {
-    const spec = convertSpecOrName(uniqueSpec as any);
-    return {
-      spec,
-    };
-  }
-}
-
-export function convertSpecOrName(
-  specOrName: SpecOrName | TagObj<any, any, any, any, any>
-) {
-  if (typeof specOrName === "string") {
-    return ZZJobSpec.lookupByName(specOrName);
-  } else if (specOrName instanceof ZZJobSpec) {
-    return specOrName;
-  } else if (specOrName.spec instanceof ZZJobSpec) {
-    return convertSpecOrName(specOrName.spec);
-  } else {
-    throw new Error("Invalid spec");
-  }
-}
-
-function resolveTagMapping({
-  _tagMaps,
-}:
-  | {
-      _tagMaps?: Partial<TagMaps<any, any, any, any>>;
-    }
-  | any) {
-  return {
-    inputTagMap: _tagMaps?.inputTag ?? {},
-    outputTagMap: _tagMaps?.outputTag ?? {},
   };
 }
