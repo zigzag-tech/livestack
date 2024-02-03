@@ -66,6 +66,7 @@ export class ZZJob<
       getStreamId: () => Promise<string>;
     };
     emit: (o: OMap[keyof OMap]) => Promise<void>;
+    getStreamId: () => Promise<string>;
     byTag: <K extends keyof OMap>(
       tag: K
     ) => {
@@ -237,6 +238,14 @@ export class ZZJob<
       func.emit = (o: OMap[keyof OMap]) => {
         const tag = this.spec.getSingleOutputTag();
         return emitOutput(o, tag as keyof OMap);
+      };
+      func.getStreamId = async () => {
+        const tag = this.spec.getSingleOutputTag();
+        const s = await that.spec.getOutputJobStream({
+          jobId: that.jobId,
+          tag,
+        });
+        return s.uniqueName;
       };
       func;
       return func;

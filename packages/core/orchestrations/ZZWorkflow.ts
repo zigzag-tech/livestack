@@ -212,7 +212,6 @@ export class ZZWorkflowSpec extends ZZJobSpec<
       jobSpec: this,
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;
-
         const instG = new InstantiatedGraph({
           defGraph: this.getDefGraph(),
           contextId: groupId,
@@ -301,6 +300,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<
             outputStreamIdOverridesByTag,
           });
         }
+
         await output("status").emit({ status: "finished" });
       },
     });
@@ -463,10 +463,9 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     });
 
     const out = await manager.output("status");
-    console.log("e");
     // wait on output to finish
     const r = await out.nextValue();
-    console.log("r", r);
+
     return manager;
   }
 }

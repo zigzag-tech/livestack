@@ -1001,7 +1001,6 @@ export class ZZJobSpec<
         `Cannot find a single unambiguous ${type} for spec "${this.name}". Please specify at least one in the "${type}" field of the spec's definition.`
       );
     } else if (qualified.length > 1) {
-      const conn = qualified.map((q) => q.conns[0]);
       throw new Error(
         `Ambiguous ${type} for spec "${this.name}"; found more than two child specs with a single ${type}. \nPlease specify which one to use with "${type}(tagName)".`
       );
