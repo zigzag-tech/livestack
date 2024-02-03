@@ -67,23 +67,27 @@ export class InstantiatedGraph extends Graph<
     contextId,
     defGraph,
     streamIdOverrides,
+    rootJobId,
   }: {
     defGraph: DefGraph;
     contextId: string;
+    rootJobId: string;
     streamIdOverrides: StreamIdOverridesForRootSpec;
   }) {
     super({ multi: false });
-    this.instantiate({ defGraph, contextId, streamIdOverrides });
+    this.instantiate({ defGraph, contextId, rootJobId, streamIdOverrides });
   }
 
   private instantiate({
     defGraph,
     contextId,
     streamIdOverrides,
+    rootJobId,
   }: {
     defGraph: DefGraph;
     contextId: string;
     streamIdOverrides: StreamIdOverridesForRootSpec;
+    rootJobId: string;
   }) {
     const nodes = defGraph.nodes();
     const childJobNodeIdBySpecNodeId: { [k: string]: string } = {};
@@ -92,11 +96,10 @@ export class InstantiatedGraph extends Graph<
     for (const nodeId of nodes) {
       const node = defGraph.getNodeAttributes(nodeId);
       if (node.nodeType === "root-spec") {
-        const jobId: JobId = `[${contextId}]${uniqueSpecIdentifier(node)}`;
-        this.addNode(contextId, {
+        this.addNode(rootJobId, {
           ...node,
           nodeType: "root-job",
-          jobId: contextId,
+          jobId: rootJobId,
         });
       } else if (node.nodeType === "spec") {
         const jobId: JobId = `[${contextId}]${uniqueSpecIdentifier(node)}`;
@@ -157,7 +160,7 @@ export class InstantiatedGraph extends Graph<
         fromNode.nodeType === "spec"
           ? childJobNodeIdBySpecNodeId[from]
           : fromNode.nodeType === "root-spec"
-          ? contextId
+          ? rootJobId
           : fromNode.nodeType === "stream-def"
           ? streamNodeIdByStreamId[from]
           : from;
@@ -165,12 +168,16 @@ export class InstantiatedGraph extends Graph<
         toNode.nodeType === "spec"
           ? childJobNodeIdBySpecNodeId[to]
           : toNode.nodeType === "root-spec"
-          ? contextId
+          ? rootJobId
           : toNode.nodeType === "stream-def"
           ? streamNodeIdByStreamId[to]
           : to;
       if (!this.hasEdge(newFrom, newTo)) {
-        this.addEdge(newFrom, newTo);
+        try {
+          this.addEdge(newFrom, newTo);
+        } catch (e) {
+          throw e;
+        }
       }
     }
   }

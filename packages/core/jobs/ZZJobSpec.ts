@@ -472,7 +472,6 @@ export class ZZJobSpec<
         }
       }
     });
-    const nodes = instaG.nodes().map((nid) => instaG.getNodeAttributes(nid));
 
     if (!streamNodeId) {
       throw new Error(

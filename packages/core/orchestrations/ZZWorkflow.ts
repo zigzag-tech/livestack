@@ -217,6 +217,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<
         const instG = new InstantiatedGraph({
           defGraph: this.getDefGraph(),
           contextId: groupId,
+          rootJobId: groupId,
           streamIdOverrides: {},
         });
 
@@ -477,6 +478,7 @@ export class ZZWorkflow {
       this._graph = new InstantiatedGraph({
         defGraph: this.jobGroupDef.getDefGraph(),
         contextId: this.contextId,
+        rootJobId: this.contextId,
         streamIdOverrides: {},
       });
     }

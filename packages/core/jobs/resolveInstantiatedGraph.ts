@@ -34,6 +34,7 @@ export async function resolveInstantiatedGraph({
   const instaG = new InstantiatedGraph({
     defGraph: spec.getDefGraph(),
     contextId: parentRec?.job_id || jobId,
+    rootJobId: jobId,
     streamIdOverrides,
   });
 
