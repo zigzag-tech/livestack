@@ -156,11 +156,6 @@ export class ZZJobSpec<
 
   public get zzEnv() {
     const resolved = this._zzEnv || ZZEnv.global();
-    // if (!resolved) {
-    //   throw new Error(
-    //     `ZZEnv is not configured in ZZJobSpec ${this.name}. \nPlease either pass it when constructing ZZJobSpec or set it globally using ZZEnv.setGlobal().`
-    //   );
-    // }
     return resolved;
   }
 
@@ -727,11 +722,12 @@ export class ZZJobSpec<
     const that = this;
     return (() => {
       const genByTagFn = () => {
-        return <K extends keyof IMap>(tag: K) => {
+        return <K extends keyof IMap>(tag?: K) => {
+          const resolvedTag = tag || (that.getSingleInputTag() as K);
           return {
             feed: async (data: IMap[K]) => {
               const specTagInfo = that.convertPublicTagToSpecTag({
-                tag,
+                tag: resolvedTag,
                 type: "in",
               });
               const responsibleSpec = ZZJobSpec.lookupByName(
@@ -755,7 +751,7 @@ export class ZZJobSpec<
             },
             terminate: async () => {
               const specTagInfo = that.convertPublicTagToSpecTag({
-                tag,
+                tag: resolvedTag,
                 type: "in",
               });
               const responsibleSpec = ZZJobSpec.lookupByName(
