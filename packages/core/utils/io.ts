@@ -14,11 +14,13 @@ export interface ByTagOutput<T> {
     data: T;
     timestamp: number;
   } | null>;
+  getStreamId: () => Promise<string>;
 }
 
 export interface ByTagInput<T> {
   feed: (data: T) => Promise<void>;
   terminate: () => Promise<void>;
+  getStreamId: () => Promise<string>;
 }
 
 export type WrapTerminateFalse<T> = {
@@ -50,6 +52,7 @@ export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
 }
 
 export function wrapStreamSubscriberWithTermination<T>(
+  streamIdP: Promise<string>,
   subscriberP: Promise<ZZStreamSubscriber<WrapTerminatorAndDataId<T>>>
 ): ByTagOutput<T> {
   const newValueObservable = new Observable<WrapWithTimestamp<T> | null>(
@@ -100,7 +103,12 @@ export function wrapStreamSubscriberWithTermination<T>(
     }
   };
 
+  const getStreamId = async () => {
+    return await streamIdP;
+  };
+
   return {
+    getStreamId,
     valueObservable: newValueObservable,
     nextValue: newNextValue,
     async *[Symbol.asyncIterator]() {

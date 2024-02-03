@@ -415,6 +415,9 @@ export class ZZJobSpec<
             }
           : {}),
       });
+      return {
+        streamId: stream.uniqueName,
+      };
     });
   }
 
@@ -571,15 +574,16 @@ export class ZZJobSpec<
     tag?: K;
     from?: "beginning" | "now";
   }): ByTagOutput<OMap[K]> {
+    const tagToWatch = tag || (this.getSingleOutputTag() as K);
+    const streamP = this.getOutputJobStream({
+      jobId,
+      tag: tagToWatch,
+    });
     const subuscriberP = new Promise<
       ZZStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>
     >((resolve, reject) => {
-      const tagToWatch = tag || (this.getSingleOutputTag() as K);
-      this.getOutputJobStream({
-        jobId,
-        tag: tagToWatch,
-      }).then((stream) => {
-        console.debug("Output collector for stream", stream.uniqueName);
+      streamP.then((stream) => {
+        // console.debug("Output collector for stream", stream.uniqueName);
         let subscriber: ZZStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>;
         if (from === "beginning") {
           subscriber = stream.subFromBeginning();
@@ -592,8 +596,9 @@ export class ZZJobSpec<
         resolve(subscriber);
       });
     });
+    const streamIdP = streamP.then((stream) => stream.uniqueName);
 
-    return wrapStreamSubscriberWithTermination(subuscriberP);
+    return wrapStreamSubscriberWithTermination(streamIdP, subuscriberP);
   }
 
   public async enqueueJob(p?: {
@@ -772,6 +777,21 @@ export class ZZJobSpec<
                 },
               });
             },
+            getStreamId: async () => {
+              const specTagInfo = that.convertPublicTagToSpecTag({
+                tag: resolvedTag,
+                type: "in",
+              });
+              const responsibleSpec = ZZJobSpec.lookupByName(
+                specTagInfo.specName
+              );
+
+              const s = await responsibleSpec.getInputJobStream({
+                jobId,
+                tag: resolvedTag,
+              });
+              return s.uniqueName;
+            },
           };
         };
       };
@@ -810,6 +830,7 @@ export class ZZJobSpec<
       ] as ByTagOutput<OMap[K]>;
 
       return {
+        getStreamId: subscriber.getStreamId,
         nextValue: subscriber.nextValue,
         valueObservable: subscriber.valueObservable,
         async *[Symbol.asyncIterator]() {
@@ -1127,7 +1148,7 @@ export class JobManager<P, I, O, IMap, OMap> {
 export interface JobInput<IMap> {
   <K extends keyof IMap>(tag?: K): ByTagInput<IMap[K]>;
   tags: (keyof IMap)[];
-  feed: <K extends keyof IMap>(data: IMap[K]) => Promise<void>;
+  feed: <K extends keyof IMap>(data: IMap[K], tag?: K) => Promise<void>;
   terminate: <K extends keyof IMap>(tag?: K) => Promise<void>;
   byTag: <K extends keyof IMap>(tag: K) => ByTagInput<IMap[K]>;
 }

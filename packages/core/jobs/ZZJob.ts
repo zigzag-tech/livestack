@@ -63,12 +63,14 @@ export class ZZJob<
   readonly output: {
     <K extends keyof OMap>(key: K): {
       emit: (o: OMap[K]) => Promise<void>;
+      getStreamId: () => Promise<string>;
     };
     emit: (o: OMap[keyof OMap]) => Promise<void>;
     byTag: <K extends keyof OMap>(
       tag: K
     ) => {
       emit: (o: OMap[K]) => Promise<void>;
+      getStreamId: () => Promise<string>;
     };
   };
 
@@ -210,17 +212,33 @@ export class ZZJob<
 
       await this.bullMQJob.updateProgress(this._dummyProgressCount++);
     };
+    const that = this;
     this.output = (() => {
       const func = <K extends keyof OMap>(tag: K) => ({
         emit: (o: OMap[K]) => emitOutput(o, tag),
+        async getStreamId() {
+          const s = await that.spec.getOutputJobStream({
+            jobId: that.jobId,
+            tag,
+          });
+          return s.uniqueName;
+        },
       });
       func.byTag = <K extends keyof OMap>(tag: K) => ({
         emit: (o: OMap[K]) => emitOutput(o, tag),
+        async getStreamId() {
+          const s = await that.spec.getOutputJobStream({
+            jobId: that.jobId,
+            tag,
+          });
+          return s.uniqueName;
+        },
       });
       func.emit = (o: OMap[keyof OMap]) => {
         const tag = this.spec.getSingleOutputTag();
         return emitOutput(o, tag as keyof OMap);
       };
+      func;
       return func;
     })();
   }
