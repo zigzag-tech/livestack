@@ -9,7 +9,7 @@ exports.up = function (knex) {
     table.string("job_id").notNullable();
     table.string("stream_id").notNullable();
     table.string("key").notNullable();
-    table.string("connector_type").notNullable(); // input or output
+    table.string("connector_type").notNullable(); // "input" or "output"
     table.timestamp("time_created").defaultTo(knex.fn.now());
 
     // add foreign key for parent job
