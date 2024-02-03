@@ -16,6 +16,8 @@ import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 import { InferTMap } from "@livestack/shared/IOSpec";
 import _ from "lodash";
+import { InstantiatedGraph, JobId } from "../orchestrations/Graph";
+import { RawQueueJobData } from "../orchestrations/workerCommon";
 
 export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
   j: ZZJob<P, I, O, WP, IMap, OMap>
@@ -36,14 +38,13 @@ export class ZZJob<
   IMap = InferTMap<I>,
   OMap = InferTMap<O>
 > {
-  private readonly bullMQJob: Job<{ jobOptions: P }, void>;
+  private readonly bullMQJob: Job<RawQueueJobData<P>, void>;
   public readonly _bullMQToken?: string;
   readonly jobOptions: P;
+
   readonly logger: ReturnType<typeof getLogger>;
   readonly spec: ZZJobSpec<P, I, O, IMap, OMap>;
-  // readonly nextInput: <K extends keyof IMap>(
-  //   key?: K
-  // ) => Promise<IMap[K] | null>;
+  public graph: InstantiatedGraph;
 
   //async iterator
   readonly input: ReturnType<typeof this.genInputObject> &
@@ -76,7 +77,7 @@ export class ZZJob<
   private _dummyProgressCount = 0;
   public workerInstanceParams: WP extends object ? WP : null =
     null as WP extends object ? WP : null;
-  public jobId: string;
+  public jobId: JobId;
   private readonly workerName;
   private readonly inputStreamFnsByTag: Partial<{
     [K in keyof IMap]: {
@@ -89,7 +90,7 @@ export class ZZJob<
   }>;
 
   constructor(p: {
-    bullMQJob: Job<{ jobOptions: P }, void, string>;
+    bullMQJob: Job<RawQueueJobData<P>, void, string>;
     bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
     jobOptions: P;
@@ -98,13 +99,15 @@ export class ZZJob<
     workerInstanceParams?: WP;
     workerInstanceParamsSchema?: z.ZodType<WP>;
     workerName: string;
+    graph: InstantiatedGraph;
   }) {
     this.bullMQJob = p.bullMQJob;
-    this.jobId = this.bullMQJob.id!;
+    this.jobId = this.bullMQJob.id! as JobId;
     this._bullMQToken = p.bullMQToken;
     this.logger = p.logger;
     this.workerName = p.workerName;
     this.spec = p.jobSpec;
+    this.graph = p.graph;
 
     try {
       this.jobOptions = p.jobSpec.jobOptions.parse(p.jobOptions) as P;
@@ -205,7 +208,7 @@ export class ZZJob<
         },
       });
 
-      this.bullMQJob.updateProgress(this._dummyProgressCount++);
+      await this.bullMQJob.updateProgress(this._dummyProgressCount++);
     };
     this.output = (() => {
       const func = <K extends keyof OMap>(tag: K) => ({
@@ -369,28 +372,8 @@ export class ZZJob<
     const logger = this.logger;
     const projectId = this.zzEnv.projectId;
 
-    // const savedResult = await getJobRec<OMap[keyof OMap]>({
-    //   ...jId,
-    //   dbConn: this.zzEnv.db,
-    //   jobStatus: "completed",
-    // });
-    // if (savedResult) {
-    //   const jobData = await getJobDataAndIoEvents<OMap[keyof OMap]>({
-    //     ...jId,
-    //     dbConn: this.zzEnv.db,
-    //     ioType: "out",
-    //   });
-    //   this.logger.info(
-    //     `Job already marked as complete; skipping: ${job.id}, ${this.bullMQJob.queueName} ` +
-    //       `${JSON.stringify(this.bullMQJob.data, longStringTruncator)}`,
-    //     +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
-    //   );
-
-    //   // return last job data
-    //   return jobData[jobData.length - 1]?.data || undefined;
-    // } else {
     logger.info(
-      `Job started: ${job.id}, ${job.queueName} ` +
+      `Job started. Job ID: ${job.id}.` +
         `${JSON.stringify(job.data, longStringTruncator)}`,
       +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
     );
