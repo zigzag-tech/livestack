@@ -7,7 +7,7 @@
 <img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat" alt="npm version" />
 </p>
 
-<p align="center">A realtime AI framework for JavaScript developers. <br />From concept to deployment in hours. </p>
+<p align="center">A realtime, end-to-end AI framework for JavaScript developers. <br />From concept to deployment in hours. </p>
 
 <p align="center">
 <img src="_misc/assets/intro.gif"
@@ -29,7 +29,8 @@ We look forward to seeing your next idea come to life with Livestack!
 Livestack aims at providing:
 
 - Native support for stream-based, realtime orchestration.
-- Fullstack templates for both frontend and backend.
+- Fullstack, end-to-end templates for both frontend and backend.
+- Fully typed with zod and TypeScript support for better developer experience.
 - Built-in queue system that automatically scales AI project to many machines.
 - Graph-based workflows for better reasoning, visual inspection and debugging:
   - Multiple input/output streams for each job node (commonly encountered in modern AI components)
