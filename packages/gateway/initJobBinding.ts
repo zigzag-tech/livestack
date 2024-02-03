@@ -1,11 +1,8 @@
 import { ZZEnv } from "@livestack/core";
 import { Server as SocketIOServer } from "socket.io";
 import { Server as HTTPServer } from "http";
-import {
-  SpecOrName,
-  resolveUniqueSpec,
-} from "@livestack/core/orchestrations/ZZWorkflow";
 import { LiveGatewayConn } from "./LiveGatewayConn";
+import { SpecOrName, resolveUniqueSpec } from "@livestack/core/jobs/ZZJobSpec";
 
 export function initJobBinding({
   httpServer,

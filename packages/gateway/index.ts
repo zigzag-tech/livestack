@@ -1,1 +1,1 @@
-export { initJobBinding } from "./setupJobBindingGateway";
+export { initJobBinding } from "./initJobBinding";
