@@ -1,6 +1,25 @@
 import { z } from "zod";
 import { ZZStreamSubscriber } from "../jobs/ZZStream";
 import { Observable } from "rxjs";
+export interface ByTagOutput<T> {
+  [Symbol.asyncIterator]: () => AsyncIterableIterator<{
+    data: T;
+    timestamp: number;
+  }>;
+  nextValue: () => Promise<{
+    data: T;
+    timestamp: number;
+  } | null>;
+  valueObservable: Observable<{
+    data: T;
+    timestamp: number;
+  } | null>;
+}
+
+export interface ByTagInput<T> {
+  feed: (data: T) => Promise<void>;
+  terminate: () => Promise<void>;
+}
 
 export type WrapTerminateFalse<T> = {
   data: T;
@@ -32,7 +51,7 @@ export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
 
 export function wrapStreamSubscriberWithTermination<T>(
   subscriberP: Promise<ZZStreamSubscriber<WrapTerminatorAndDataId<T>>>
-) {
+): ByTagOutput<T> {
   const newValueObservable = new Observable<WrapWithTimestamp<T> | null>(
     (subscriber) => {
       subscriberP.then((zzSub) => {
@@ -81,23 +100,15 @@ export function wrapStreamSubscriberWithTermination<T>(
     }
   };
 
-  const waitUntilTerminated = () => {
-    return new Promise<void>((resolve, reject) => {
-      newValueObservable.subscribe({
-        next: (v) => {
-          if (v === null) {
-            resolve();
-          }
-        },
-        error: reject,
-      });
-    });
-  };
-
   return {
     valueObservable: newValueObservable,
     nextValue: newNextValue,
-    unsubscribe: () => subscriberP.then((s) => s.unsubscribe()),
-    waitUntilTerminated,
+    async *[Symbol.asyncIterator]() {
+      let nextValue = await newNextValue();
+      while (nextValue !== null) {
+        yield nextValue;
+        nextValue = await newNextValue();
+      }
+    },
   };
 }
