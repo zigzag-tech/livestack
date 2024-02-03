@@ -7,14 +7,14 @@ import fs from "fs";
 interface EnvParams {
   readonly storageProvider?: IStorageProvider;
   readonly projectId: string;
-  readonly db?: Knex;
+  readonly db: Knex;
   readonly redisConfig?: RedisOptions;
 }
 
 export class ZZEnv implements EnvParams {
   public readonly storageProvider?: IStorageProvider;
   public readonly projectId: string;
-  public readonly db?: Knex;
+  public readonly db: Knex;
   public readonly redisConfig: RedisOptions;
   private static _zzEnv: ZZEnv | null = null;
 
