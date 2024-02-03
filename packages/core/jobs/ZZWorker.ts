@@ -7,6 +7,9 @@ import { IStorageProvider } from "../storage/cloudStorage";
 import { ZZProcessor } from "./ZZJob";
 import { ZZEnv } from "./ZZEnv";
 import { z } from "zod";
+import { JobId } from "../orchestrations/Graph";
+import { RawQueueJobData } from "../orchestrations/workerCommon";
+import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -82,12 +85,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
   protected readonly zzEnv: ZZEnv;
   protected readonly storageProvider?: IStorageProvider;
 
-  private readonly bullMQWorker: Worker<
-    {
-      jobOptions: P;
-    },
-    void
-  >;
+  private readonly bullMQWorker: Worker<RawQueueJobData<P>, void>;
 
   public readonly instanceParams?: WP;
   public readonly workerName: string;
@@ -126,9 +124,17 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
 
     const mergedWorkerOptions = _.merge({}, workerOptions);
     const that = this;
-    this.bullMQWorker = new Worker<{ jobOptions: P }, void, string>(
+    this.bullMQWorker = new Worker<RawQueueJobData<P>, void, string>(
       `${that.zzEnv.projectId}/${this.jobSpec.name}`,
       async (job, token) => {
+        const jobId = job.id! as JobId;
+
+        const localG = await resolveInstantiatedGraph({
+          jobId,
+          zzEnv: that.zzEnv,
+          spec: that.jobSpec,
+        });
+
         const zzJ = new ZZJob({
           bullMQJob: job,
           bullMQToken: token,
@@ -138,6 +144,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
           workerInstanceParams: that.instanceParams,
           storageProvider: that.zzEnv.storageProvider,
           workerName: that.workerName,
+          graph: localG,
         });
 
         return await zzJ.beginProcessing(this.def.processor.bind(zzJ) as any);
