@@ -60,12 +60,11 @@ type WorkflowJobOptionsSanitized = z.infer<typeof WorkflowJobOptionsSanitized>;
 export class ZZWorkflowSpec extends ZZJobSpec<
   WorkflowChildJobOptionsSanitized,
   any,
-  // {
-  //   status: z.ZodType<{
-  //     status: "finished";
-  //   }>;
-  // },
-  any,
+  {
+    status: z.ZodType<{
+      status: "finished";
+    }>;
+  },
   any,
   any
 > {
@@ -128,9 +127,9 @@ export class ZZWorkflowSpec extends ZZJobSpec<
       name,
       jobOptions: WorkflowChildJobOptionsSanitized,
       zzEnv,
-      // output: {
-      //   status: z.object({ status: z.literal("finished") }),
-      // },
+      output: {
+        status: z.object({ status: z.literal("finished") }),
+      },
     });
     const canonicalConns = convertConnectionsCanonical({
       connections,
@@ -149,10 +148,10 @@ export class ZZWorkflowSpec extends ZZJobSpec<
         tag: string;
       }
     > = {
-      // status: {
-      //   specName: this.name,
-      //   tag: "status",
-      // },
+      status: {
+        specName: this.name,
+        tag: "status",
+      },
     };
 
     // reverse
@@ -302,7 +301,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<
             outputStreamIdOverridesByTag,
           });
         }
-        // await output.emit({ status: "finished" });
+        await output("status").emit({ status: "finished" });
       },
     });
   }
@@ -463,10 +462,11 @@ export class ZZWorkflowSpec extends ZZJobSpec<
       jobOptions: childJobOptionsSanitized,
     });
 
-    // const out = await manager.output("status");
-
+    const out = await manager.output("status");
+    console.log("e");
     // wait on output to finish
-    // const r = await out.nextValue();
+    const r = await out.nextValue();
+    console.log("r", r);
     return manager;
   }
 }
