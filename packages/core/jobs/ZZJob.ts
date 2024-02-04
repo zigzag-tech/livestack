@@ -413,12 +413,7 @@ export class ZZJob<
           jobStatus: "running",
         });
       }
-
-      const processedR = await processor(this);
-      // console.debug("processed", this.jobId);
-
-      // wait as long as there are still subscribers
-      await Promise.all(
+      const allInputUnsubscribed = Promise.all(
         (
           _.values(
             this.inputStreamFnsByTag
@@ -435,6 +430,11 @@ export class ZZJob<
           });
         })
       );
+      const processedR = await processor(this);
+      // console.debug("processed", this.jobId);
+
+      // wait as long as there are still subscribers
+      await allInputUnsubscribed;
 
       if (processedR) {
         await this.output.emit(processedR);
@@ -488,7 +488,7 @@ export class ZZJob<
     // console.debug("signalOutputEnd", {
     //   jobSpec: this.spec.name,
     //   jobId: this.jobId,
-    //   key,
+    //   tag,
     // });
     const outputStream = await this.spec.getOutputJobStream({
       jobId: this.jobId,
