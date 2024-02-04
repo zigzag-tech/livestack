@@ -596,16 +596,24 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
         }
         return newAcc;
       } else {
+        const fromPartialCanonical = convertSpecAndOutletWithTags(conn.from);
+        const toPartialCanonical = convertSpecAndOutletWithTags(conn.to);
         return [
           ...acc,
           [
             {
-              ...convertSpecAndOutletWithTags(conn.from),
+              ...fromPartialCanonical,
               tagInSpecType: "output",
+              tagInSpec:
+                fromPartialCanonical.tagInSpec ||
+                String(fromPartialCanonical.spec.getSingleOutputTag()),
             },
             {
-              ...convertSpecAndOutletWithTags(conn.to),
+              ...toPartialCanonical,
               tagInSpecType: "input",
+              tagInSpec:
+                toPartialCanonical.tagInSpec ||
+                String(toPartialCanonical.spec.getSingleInputTag()),
             },
           ] as [CanonicalSpecAndOutlet, CanonicalSpecAndOutlet],
         ];
