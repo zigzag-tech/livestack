@@ -146,20 +146,20 @@ export class ZZJob<
 
     this.inputStreamFnsByTag = {};
 
-    const reportOnReady = (
-      obs: Observable<IMap[keyof IMap] | null>,
-      tag: keyof IMap
-    ) => {
-      const sub = obs.subscribe(async () => {
-        await this.setJobReadyForInputsInRedis({
-          redisConfig: this.zzEnv.redisConfig,
-          jobId: this.jobId,
-          isReady: true,
-          tag: tag ? tag : this.spec.getSingleInputTag(),
-        });
-        sub.unsubscribe();
-      });
-    };
+    // const reportOnReady = (
+    //   obs: Observable<IMap[keyof IMap] | null>,
+    //   tag: keyof IMap
+    // ) => {
+    //   const sub = obs.subscribe(async () => {
+    //     await this.setJobReadyForInputsInRedis({
+    //       redisConfig: this.zzEnv.redisConfig,
+    //       jobId: this.jobId,
+    //       isReady: true,
+    //       tag: tag ? tag : this.spec.getSingleInputTag(),
+    //     });
+    //     sub.unsubscribe();
+    //   });
+    // };
 
     this.input = (() => {
       const func = <K extends keyof IMap>(tag: K) => {
@@ -241,6 +241,7 @@ export class ZZJob<
       };
       func.getStreamId = async () => {
         const tag = this.spec.getSingleOutputTag();
+
         const s = await that.spec.getOutputJobStream({
           jobId: that.jobId,
           tag,
