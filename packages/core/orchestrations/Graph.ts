@@ -385,16 +385,16 @@ export class DefGraph extends Graph<DefGraphNode> {
     return nodeId;
   }
 
-  public getRootSpecNodeId(): string | null {
+  public getRootSpecNodeId(): string {
     const nodes = this.filterNodes(
       (_, attrs) => attrs.nodeType === "root-spec"
     );
-    if (nodes.length > 1) {
+    if (nodes.length !== 1) {
       throw new Error(
         `Expected exactly one root spec node, got ${nodes.length}.`
       );
     }
-    return nodes[0] || null;
+    return nodes[0];
   }
 
   public getSpecNodeIds() {

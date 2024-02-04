@@ -940,13 +940,14 @@ export class ZZJobSpec<
     // naive implementation: find spec node with only one input
     // or output which is not connected to another spec, and return its tag
     const dg = this.getDefGraph();
-    const rootSpecNodeId = dg.getRootSpecNodeId();
-    let specNodeIds: string[] = [];
-    if (rootSpecNodeId) {
+    let specNodeIds = dg.getSpecNodeIds();
+    if (specNodeIds.length === 0) {
+      const rootSpecNodeId = dg.getRootSpecNodeId();
       specNodeIds = [rootSpecNodeId];
     } else {
       specNodeIds = dg.getSpecNodeIds();
     }
+
     const pass0 = specNodeIds.map((specNodeId) => {
       const specNode = dg.getNodeAttributes(specNodeId) as SpecNode;
       if (type === "input") {
@@ -980,12 +981,11 @@ export class ZZJobSpec<
       .filter(({ conns }) => {
         const conn = conns[0];
         if (type === "input") {
-          return !getNodesConnectedToStream(dg, conn.streamNodeId).source;
+          const { source } = getNodesConnectedToStream(dg, conn.streamNodeId);
+          return !source;
         } else {
-          return (
-            getNodesConnectedToStream(dg, conn.streamNodeId).targets.length ===
-            0
-          );
+          const { targets } = getNodesConnectedToStream(dg, conn.streamNodeId);
+          return targets.length === 0;
         }
       })
       .map((qualified) => ({
