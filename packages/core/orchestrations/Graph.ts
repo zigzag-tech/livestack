@@ -442,10 +442,10 @@ export class DefGraph extends Graph<DefGraphNode> {
 
     this.streamNodeIdBySpecIdentifierTypeAndTag[
       `${fromSpecIdentifier}::out/${from.tagInSpec}`
-    ] = streamNodeId;
+    ] = streamDefId;
     this.streamNodeIdBySpecIdentifierTypeAndTag[
       `${toSpecIdentifier}::in/${to.tagInSpec}`
-    ] = streamNodeId;
+    ] = streamDefId;
 
     return {
       fromSpecNodeId,
