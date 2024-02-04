@@ -164,13 +164,13 @@ export class ZZJob<
     this.input = (() => {
       const func = <K extends keyof IMap>(tag: K) => {
         const obj = this.genInputObjectByTag(tag);
-        reportOnReady(obj.getObservable(), tag);
+        // reportOnReady(obj.getObservable(), tag);
         return obj;
       };
 
       func.byTag = <K extends keyof IMap>(tag: K) => {
         const obj = this.genInputObjectByTag(tag);
-        reportOnReady(obj.getObservable(), tag);
+        // reportOnReady(obj.getObservable(), tag);
         return obj;
       };
 
@@ -188,9 +188,9 @@ export class ZZJob<
     //     return obj;
     //   },
     // };
-    if (this.spec.inputDefSet.isSingle) {
-      reportOnReady(this.input.getObservable(), this.spec.getSingleInputTag());
-    }
+    // if (this.spec.inputDefSet.isSingle) {
+    //   reportOnReady(this.input.getObservable(), this.spec.getSingleInputTag());
+    // }
 
     const emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
@@ -267,12 +267,12 @@ export class ZZJob<
     };
     return {
       nextValue,
-      getObservable() {
-        if (!tag) {
-          tag = that.spec.getSingleInputTag() as K;
-        }
-        return that._ensureInputStreamFn(tag).trackedObservable;
-      },
+      // getObservable() {
+      //   if (!tag) {
+      //     tag = that.spec.getSingleInputTag() as K;
+      //   }
+      //   return that._ensureInputStreamFn(tag).trackedObservable;
+      // },
       async *[Symbol.asyncIterator]() {
         if (!tag) {
           tag = that.spec.getSingleInputTag() as K;
@@ -423,6 +423,7 @@ export class ZZJob<
             x!.subscriberCountObservable
               .pipe(takeUntil(x!.inputObservableUntracked))
               .subscribe((count) => {
+                console.log("count", count);
                 if (count === 0) {
                   resolve();
                 }
@@ -436,7 +437,7 @@ export class ZZJob<
       // wait as long as there are still subscribers
       await allInputUnsubscribed;
 
-      if (processedR) {
+      if (processedR && this.spec.outputDefSet.isSingle) {
         await this.output.emit(processedR);
       }
 
@@ -450,8 +451,8 @@ export class ZZJob<
 
       // await job.updateProgress(processedR as object);
       // console.debug("signalOutputEnd", this.jobId);
-      if (this.spec.outputDefSet.isSingle) {
-        await this.signalOutputEnd();
+      for (const tag of this.spec.outputDefSet.keys) {
+        await this.signalOutputEnd(tag);
       }
 
       // if (processedR) {
