@@ -189,7 +189,7 @@ export type StreamIdOverridesForRootSpec = {
 
 export class DefGraph extends Graph<DefGraphNode> {
   private streamNodeIdBySpecIdentifierTypeAndTag: {
-    [k: `${string}::${string}/${string}`]: string;
+    [k: `${string}::${"in" | "out"}/${string}`]: string;
   } = {};
 
   constructor({ root }: { root: IOSpec<any, any, any, any> }) {
@@ -222,7 +222,7 @@ export class DefGraph extends Graph<DefGraphNode> {
 
       const streamDefId =
         this.streamNodeIdBySpecIdentifierTypeAndTag[
-          `${specIdentifier}::${tagStr}/${tagStr}`
+          `${specIdentifier}::in/${tagStr}`
         ] ||
         uniqueStreamIdentifier({
           to: {
@@ -254,7 +254,7 @@ export class DefGraph extends Graph<DefGraphNode> {
 
       const streamDefId =
         this.streamNodeIdBySpecIdentifierTypeAndTag[
-          `${specIdentifier}::${tagStr}/${tagStr}`
+          `${specIdentifier}::out/${tagStr}`
         ] ||
         uniqueStreamIdentifier({
           from: {
@@ -272,6 +272,110 @@ export class DefGraph extends Graph<DefGraphNode> {
 
       this.ensureEdge(outletNodeId, streamNodeId);
     }
+  }
+
+  public ensureInletAndStream({
+    specName,
+    uniqueSpecLabel,
+    tag,
+  }: {
+    tag: string | symbol | number;
+    specName: string;
+    uniqueSpecLabel?: string;
+  }) {
+    const specIdentifier = uniqueSpecIdentifier({
+      specName,
+      uniqueSpecLabel,
+    });
+
+    const specNodeId = this.ensureNode(specIdentifier, {
+      specName,
+      ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
+      nodeType: "spec",
+      label: specIdentifier,
+    });
+
+    const tagStr = tag.toString();
+    const inletIdentifier = `${specIdentifier}/${tagStr}`;
+    const inletNodeId = this.ensureNode(inletIdentifier, {
+      nodeType: "inlet",
+      tag: tagStr,
+      label: inletIdentifier,
+    });
+
+    this.ensureEdge(inletNodeId, specNodeId);
+
+    const streamDefId =
+      this.streamNodeIdBySpecIdentifierTypeAndTag[
+        `${specIdentifier}::in/${tagStr}`
+      ] ||
+      uniqueStreamIdentifier({
+        to: {
+          specName,
+          uniqueSpecLabel,
+          tag: tagStr,
+        },
+      });
+
+    const streamNodeId = this.ensureNode(streamDefId, {
+      nodeType: "stream-def",
+      label: streamDefId,
+      streamDefId,
+    });
+
+    this.ensureEdge(streamNodeId, inletNodeId);
+  }
+
+  public ensureOutletAndStream({
+    specName,
+    uniqueSpecLabel,
+    tag,
+  }: {
+    specName: string;
+    uniqueSpecLabel?: string;
+    tag: string | symbol | number;
+  }) {
+    const specIdentifier = uniqueSpecIdentifier({
+      specName,
+      uniqueSpecLabel,
+    });
+
+    const specNodeId = this.ensureNode(specIdentifier, {
+      specName,
+      ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
+      nodeType: "spec",
+      label: specIdentifier,
+    });
+
+    const tagStr = tag.toString();
+    const outletIdentifier = `${specIdentifier}/${tagStr}`;
+    const outletNodeId = this.ensureNode(outletIdentifier, {
+      nodeType: "outlet",
+      tag: tagStr,
+      label: outletIdentifier,
+    });
+
+    this.ensureEdge(specNodeId, outletNodeId);
+
+    const streamDefId =
+      this.streamNodeIdBySpecIdentifierTypeAndTag[
+        `${specIdentifier}::out/${tagStr}`
+      ] ||
+      uniqueStreamIdentifier({
+        from: {
+          specName,
+          uniqueSpecLabel,
+          tag: tagStr,
+        },
+      });
+
+    const streamNodeId = this.ensureNode(streamDefId, {
+      nodeType: "stream-def",
+      label: streamDefId,
+      streamDefId,
+    });
+
+    this.ensureEdge(outletNodeId, streamNodeId);
   }
 
   public addConnectedDualSpecs(
@@ -337,10 +441,10 @@ export class DefGraph extends Graph<DefGraphNode> {
     this.ensureEdge(toInletNodeId, toSpecNodeId);
 
     this.streamNodeIdBySpecIdentifierTypeAndTag[
-      `${fromSpecIdentifier}::${from.tagInSpec}/${to.tagInSpec}`
+      `${fromSpecIdentifier}::out/${from.tagInSpec}`
     ] = streamNodeId;
     this.streamNodeIdBySpecIdentifierTypeAndTag[
-      `${toSpecIdentifier}::${to.tagInSpec}/${from.tagInSpec}`
+      `${toSpecIdentifier}::in/${to.tagInSpec}`
     ] = streamNodeId;
 
     return {

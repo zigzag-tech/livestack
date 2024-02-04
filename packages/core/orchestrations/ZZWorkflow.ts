@@ -79,6 +79,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<
         throw new Error("No parent spec node id found");
       }
 
+      // pass1
       for (const conn of this.connections) {
         const { fromSpecNodeId, toSpecNodeId } = g.addConnectedDualSpecs(
           conn[0],
@@ -86,6 +87,27 @@ export class ZZWorkflowSpec extends ZZJobSpec<
         );
         g.ensureParentChildRelation(parentSpecNodeId, fromSpecNodeId);
         g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
+      }
+      // pass2: add all loose tags in specs
+
+      for (const conn of this.connections) {
+        for (const c of conn) {
+          const spec = c.spec;
+          for (const tag of spec.inputDefSet.keys) {
+            g.ensureInletAndStream({
+              specName: spec.name,
+              tag,
+              uniqueSpecLabel: c.uniqueSpecLabel,
+            });
+          }
+          for (const tag of spec.outputDefSet.keys) {
+            g.ensureOutletAndStream({
+              specName: spec.name,
+              tag,
+              uniqueSpecLabel: c.uniqueSpecLabel,
+            });
+          }
+        }
       }
 
       this.workflowGraphCreated = true;
