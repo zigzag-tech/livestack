@@ -75,7 +75,7 @@ export class JobSocketIOConnection {
       }
       tag = this.availableInputs[0];
     }
-    const feedParams: FeedParams<T> = {
+    const feedParams: FeedParams<string, T> = {
       data,
       tag,
     };
