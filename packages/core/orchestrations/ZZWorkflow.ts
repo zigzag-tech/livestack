@@ -155,77 +155,40 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     });
     this.connections = canonicalConns;
 
-    // collect all the input and output that are tagged
-    let inputSpecTagByWorkflowAlias: Record<
-      string,
-      { specName: string; tag: string }
-    > = {};
-    let outputSpecTagByWorkflowAlias: Record<
-      string,
-      {
-        specName: string;
-        tag: string;
-      }
-    > = {
-      status: {
-        specName: this.name,
-        tag: "status",
+    this.specTagByTypeByWorkflowAlias = {
+      in: {},
+      out: {
+        status: {
+          specName: this.name,
+          tag: "status",
+        },
       },
     };
-
-    // reverse
-    let workflowTagBySpecUniqueLabelAndTag: Record<
-      `${string}[${string | ""}]::${"in" | "out"}/${string}`,
-      string
-    > = {};
+    // inverse
+    this.workflowAliasBySpecUniqueLabelAndTag = {};
 
     for (const conn of canonicalConns) {
       for (const c of conn) {
-        inputSpecTagByWorkflowAlias = {
-          ...inputSpecTagByWorkflowAlias,
-          ..._.fromPairs(
-            _.toPairs(c.inputAliasMap).map(([specTag, alias]) => [
-              alias,
-              {
-                specName: c.spec.name,
-                tag: specTag,
-                uniqueSpecLabel: c.uniqueSpecLabel,
-              },
-            ])
-          ),
-        };
-        outputSpecTagByWorkflowAlias = {
-          ...outputSpecTagByWorkflowAlias,
-          ..._.fromPairs(
-            _.toPairs(c.outputAliasMap).map(([specTag, wfTag]) => [
-              wfTag,
-              {
-                specName: c.spec.name,
-                tag: specTag,
-                uniqueSpecLabel: c.uniqueSpecLabel,
-              },
-            ])
-          ),
-        };
-        for (const [specTag, tag] of Object.entries(c.inputAliasMap)) {
-          workflowTagBySpecUniqueLabelAndTag[
-            `${c.spec.name}[${c.uniqueSpecLabel || ""}]::in/${specTag}`
-          ] = tag;
+        for (const [specTag, alias] of Object.entries(c.inputAliasMap)) {
+          this.assignAlias({
+            alias,
+            tag: specTag,
+            specName: c.spec.name,
+            uniqueSpecLabel: c.uniqueSpecLabel,
+            type: "in",
+          });
         }
-        for (const [specTag, tag] of Object.entries(c.outputAliasMap)) {
-          workflowTagBySpecUniqueLabelAndTag[
-            `${c.spec.name}[${c.uniqueSpecLabel || ""}]::out/${specTag}`
-          ] = tag;
+        for (const [specTag, alias] of Object.entries(c.outputAliasMap)) {
+          this.assignAlias({
+            alias,
+            tag: specTag,
+            specName: c.spec.name,
+            uniqueSpecLabel: c.uniqueSpecLabel,
+            type: "out",
+          });
         }
       }
     }
-    this.specTagByTypeByWorkflowAlias = {
-      in: inputSpecTagByWorkflowAlias,
-      out: outputSpecTagByWorkflowAlias,
-    };
-
-    this.workflowAliasBySpecUniqueLabelAndTag =
-      workflowTagBySpecUniqueLabelAndTag;
 
     this._validateConnections();
     // for (const conn of canonicalConns) {
@@ -327,6 +290,31 @@ export class ZZWorkflowSpec extends ZZJobSpec<
         await output("status").emit({ status: "finished" });
       },
     });
+  }
+
+  private assignAlias({
+    alias,
+    tag,
+    specName,
+    uniqueSpecLabel,
+    type,
+  }: {
+    alias: string;
+    tag: string;
+    specName: string;
+    uniqueSpecLabel?: string;
+    type: "in" | "out";
+  }) {
+    this.specTagByTypeByWorkflowAlias[type][alias] = {
+      specName,
+      tag,
+      uniqueSpecLabel,
+    };
+
+    // inverse
+    this.workflowAliasBySpecUniqueLabelAndTag[
+      `${specName}[${uniqueSpecLabel || ""}]::${type}/${tag}`
+    ] = alias;
   }
 
   protected override convertSpecTagToWorkflowAlias({
