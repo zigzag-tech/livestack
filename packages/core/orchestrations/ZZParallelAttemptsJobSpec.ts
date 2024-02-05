@@ -1,8 +1,9 @@
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
-import { CheckSpec, JobSpec, sleep } from "../jobs/JobSpec";
+import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { WrapWithTimestamp } from "../utils/io";
+import sleep from "../utils/sleep";
 type TriggerCheckContext = {
   totalTimeElapsed: number;
   attemptStats: {
@@ -12,25 +13,34 @@ type TriggerCheckContext = {
   }[];
 };
 
-export interface ParallelAttempt<ParentI, ParentO, IMap, OMap> {
-  jobSpec: JobSpec<unknown, IMap, OMap>;
+export interface ParallelAttempt<
+  ParentI,
+  ParentO,
+  ParentIMap,
+  ParentOMap,
+  IMap,
+  OMap
+> {
+  jobSpec: JobSpec<unknown, ParentI, ParentO, IMap, OMap>;
   timeout: number;
   transformInput: (
-    params: ParentI[keyof ParentI]
+    params: ParentIMap[keyof ParentIMap]
   ) => Promise<IMap[keyof IMap]> | IMap[keyof IMap];
-  transformOutput: <K extends keyof ParentO>(
+  transformOutput: <K extends keyof ParentOMap>(
     // TODO: fix this type
     // output: OMap[K]
     output: OMap[keyof OMap]
-  ) => Promise<ParentO[K]> | ParentO[K];
+  ) => Promise<ParentOMap[K]> | ParentOMap[K];
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
 
 export class ZZParallelAttemptWorkerDef<
+  ParentI,
+  ParentO,
   ParentIMap,
   ParentOMap,
   Specs
-> extends ZZWorkerDef<unknown, ParentIMap, ParentOMap> {
+> extends ZZWorkerDef<unknown, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
   constructor({
     attempts,
     globalTimeoutCondition,
@@ -39,7 +49,7 @@ export class ZZParallelAttemptWorkerDef<
     zzEnv,
   }: {
     zzEnv?: ZZEnv;
-    jobSpec: JobSpec<unknown, ParentIMap, ParentOMap>;
+    jobSpec: JobSpec<unknown, ParentI, ParentO, ParentIMap, ParentOMap>;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {
@@ -51,6 +61,8 @@ export class ZZParallelAttemptWorkerDef<
     ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
     attempts: {
       [K in keyof Specs]: ParallelAttempt<
+        ParentI,
+        ParentO,
         ParentIMap,
         ParentOMap,
         InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>,
@@ -66,7 +78,7 @@ export class ZZParallelAttemptWorkerDef<
           jobSpec,
           transformInput,
           transformOutput,
-        }: ParallelAttempt<ParentIMap, ParentOMap, I, O>) => {
+        }: ParallelAttempt<ParentI, ParentO, ParentIMap, ParentOMap, I, O>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
             const { output, input } = await jobSpec.enqueueJob({
@@ -101,7 +113,7 @@ export class ZZParallelAttemptWorkerDef<
 
         const contexts: TriggerCheckContext[] = [];
         const restAttempts = [
-          ...(attempts as Array<ParallelAttempt<any, any, any, any>>),
+          ...(attempts as Array<ParallelAttempt<any, any, any, any, any, any>>),
         ];
         const running: {
           promise: ReturnType<ReturnType<typeof genRetryFunction>>;
