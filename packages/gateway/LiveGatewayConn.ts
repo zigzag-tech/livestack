@@ -9,7 +9,7 @@ import {
   JobInfoType,
 } from "@livestack/shared/gateway-binding-types";
 import { Subscription } from "rxjs";
-import { ZZEnv, Spec } from "@livestack/core";
+import { ZZEnv, JobSpec } from "@livestack/core";
 import { Socket } from "socket.io";
 
 export class LiveGatewayConn {
@@ -53,7 +53,7 @@ export class LiveGatewayConn {
             `Spec name ${specName} not allowed for binding to socket.`
           );
         }
-        const spec = Spec.lookupByName(specName);
+        const spec = JobSpec.lookupByName(specName);
         await this.bindToNewJob(spec);
       }
     );
@@ -64,7 +64,7 @@ export class LiveGatewayConn {
   };
 
   public bindToNewJob = async <P, I, O, IMap, OMap>(
-    jobSpec: Spec<P, I, O, IMap, OMap>,
+    jobSpec: JobSpec<P, I, O, IMap, OMap>,
     jobOptions?: P
   ) => {
     const { input, output, jobId } = await jobSpec.enqueueJob({ jobOptions });
