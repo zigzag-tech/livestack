@@ -657,7 +657,7 @@ export interface TagObj<P, I, O, IKs, OKs> {
   _tagMaps: TagMaps<I, O, IKs, OKs>;
 }
 
-export function tag<P, IMap, OMap>(spec: ZZJobSpec<P, IMap, OMap>) {
+export function alias<P, IMap, OMap>(spec: ZZJobSpec<P, IMap, OMap>) {
   return _tagObj(spec, {
     inputTag: {},
     outputTag: {},

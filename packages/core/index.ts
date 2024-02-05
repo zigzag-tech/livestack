@@ -4,6 +4,6 @@ export { ZZJobSpec } from "./jobs/ZZJobSpec";
 export { ZZEnv } from "./jobs/ZZEnv";
 export { ZZStream } from "./jobs/ZZStream";
 export { fileOrBufferSchema } from "./jobs/ZZEnv";
-export { ZZWorkflow, ZZWorkflowSpec, tag } from "./orchestrations/ZZWorkflow";
+export { ZZWorkflow, ZZWorkflowSpec, alias } from "./orchestrations/ZZWorkflow";
 
 export * from "@livestack/shared";
