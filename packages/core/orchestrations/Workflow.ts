@@ -1,4 +1,3 @@
-// import { InferInputType, InferOutputType } from "../jobs/Spec";
 import { CheckSpec, SpecOrName, JobSpec } from "../jobs/JobSpec";
 import { IOSpec, InferTMap } from "@livestack/shared/IOSpec";
 import { z } from "zod";
