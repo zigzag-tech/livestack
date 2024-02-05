@@ -162,6 +162,7 @@ export class DataStream<T extends object> {
     try {
       parsed = this.def.parse(message) as T;
     } catch (err) {
+      console.error(err);
       console.error("errornous output: ", message);
       console.error(
         "Expected type: ",
