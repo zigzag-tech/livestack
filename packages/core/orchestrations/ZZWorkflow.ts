@@ -124,14 +124,11 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     any
   >;
 
-  protected readonly inputSpecTagByWorkflowAlias: Record<
-    string,
-    { specName: string; tag: string; uniqueSpecLabel?: string }
+  protected readonly specTagByTypeByWorkflowAlias: Record<
+    "in" | "out",
+    Record<string, { specName: string; tag: string; uniqueSpecLabel?: string }>
   >;
-  protected readonly outputSpecTagByWorkflowAlias: Record<
-    string,
-    { specName: string; tag: string; uniqueSpecLabel?: string }
-  >;
+
   protected readonly workflowAliasBySpecUniqueLabelAndTag: Record<
     `${string}[${string | ""}]::${"in" | "out"}/${string}`,
     string
@@ -222,8 +219,10 @@ export class ZZWorkflowSpec extends ZZJobSpec<
         }
       }
     }
-    this.inputSpecTagByWorkflowAlias = inputSpecTagByWorkflowTag;
-    this.outputSpecTagByWorkflowAlias = outputSpecTagByWorkflowTag;
+    this.specTagByTypeByWorkflowAlias = {
+      in: inputSpecTagByWorkflowTag,
+      out: outputSpecTagByWorkflowTag,
+    };
     this.workflowAliasBySpecUniqueLabelAndTag =
       workflowTagBySpecUniqueLabelAndTag;
 
@@ -352,31 +351,17 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     type: "in" | "out";
     alias: string | symbol | number;
   }) {
-    if (type === "in") {
-      if (!this.inputSpecTagByWorkflowAlias[alias.toString()]) {
-        throw new Error(
-          `No input spec tag found in workflow ${
-            this.name
-          } for ${alias.toString()}`
-        );
-      }
-      return {
-        ...this.inputSpecTagByWorkflowAlias[alias.toString()],
-        type,
-      };
-    } else {
-      if (!this.outputSpecTagByWorkflowAlias[alias.toString()]) {
-        throw new Error(
-          `No output spec tag found in workflow ${
-            this.name
-          } for ${alias.toString()}`
-        );
-      }
-      return {
-        ...this.outputSpecTagByWorkflowAlias[alias.toString()],
-        type,
-      };
+    if (!this.specTagByTypeByWorkflowAlias[type][alias.toString()]) {
+      throw new Error(
+        `No ${type === "in" ? "input" : "output"} spec tag found in workflow ${
+          this.name
+        } for ${alias.toString()}`
+      );
     }
+    return {
+      ...this.specTagByTypeByWorkflowAlias[type][alias.toString()],
+      type,
+    };
   }
 
   private _validateConnections() {
