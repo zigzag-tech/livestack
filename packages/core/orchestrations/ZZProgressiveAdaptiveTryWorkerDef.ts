@@ -18,12 +18,13 @@ export interface AttemptDef<ParentP, ParentO, P, OMap> {
 export class ZZProgressiveAdaptiveTryWorkerDef<
   ParentP,
   ParentO,
+  ParentOMap,
   Specs
-> extends ZZWorkerDef<ParentP, any, any, {}, any, ParentO> {
+> extends ZZWorkerDef<ParentP, any, ParentO, {}, any, ParentOMap> {
   attempts: {
     [K in keyof Specs]: AttemptDef<
       ParentP,
-      ParentO,
+      ParentOMap,
       z.infer<CheckSpec<Specs[K]>["jobOptions"]>,
       InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
     >;
@@ -35,16 +36,16 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
     jobSpec,
   }: {
     zzEnv?: ZZEnv;
-    jobSpec: JobSpec<ParentP, any, any, any, ParentO>;
+    jobSpec: JobSpec<ParentP, any, any, any, ParentOMap>;
     attempts: {
       [K in keyof Specs]: AttemptDef<
         ParentP,
-        ParentO,
+        ParentOMap,
         z.infer<CheckSpec<Specs[K]>["jobOptions"]>,
         InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
       >;
     };
-    ultimateFallback?: () => Promise<ParentO[keyof ParentO]>;
+    ultimateFallback?: () => Promise<ParentOMap[keyof ParentOMap]>;
   }) {
     super({
       jobSpec,
@@ -54,7 +55,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
           jobSpec,
           transformInput,
           transformOutput,
-        }: AttemptDef<ParentP, ParentO, P, OMap>) => {
+        }: AttemptDef<ParentP, ParentOMap, P, OMap>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
 
@@ -78,7 +79,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
         };
 
         const restToTry = (
-          attempts as AttemptDef<ParentP, ParentO, any, any>[]
+          attempts as AttemptDef<ParentP, ParentOMap, any, any>[]
         ).map((a) => ({
           fn: genRetryFunction(a),
           timeout: a.timeout,
