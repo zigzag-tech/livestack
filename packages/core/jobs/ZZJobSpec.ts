@@ -801,6 +801,11 @@ export class ZZJobSpec<
 
       byTagFn.feed = async (data: IMap[keyof IMap]) => {
         const tag = that.getSingleInputTag();
+        if (!tag) {
+          throw new Error(
+            `Cannot find any input to feed to for spec ${this.name}.`
+          );
+        }
         return await byTagFn(tag).feed(data);
       };
 
@@ -816,17 +821,28 @@ export class ZZJobSpec<
     jobId: string
   ) => {
     const singletonSubscriberByTag = <K extends keyof OMap>(tag: K) => {
-      if (!this._outputCollectorByJobIdAndTag[`${jobId}/${tag.toString()}`]) {
-        const subscriber = this.createOutputCollector({
+      const specTagInfo = this.convertPublicTagToSpecTag({
+        tag,
+        type: "out",
+      });
+      const responsibleSpec = ZZJobSpec.lookupByName(specTagInfo.specName);
+
+      if (
+        !responsibleSpec._outputCollectorByJobIdAndTag[
+          `${jobId}/${tag.toString()}`
+        ]
+      ) {
+        const subscriber = responsibleSpec.createOutputCollector({
           jobId,
-          tag,
+          tag: specTagInfo.tag,
         });
-        this._outputCollectorByJobIdAndTag[`${jobId}/${tag.toString()}`] =
-          subscriber;
+        responsibleSpec._outputCollectorByJobIdAndTag[
+          `${jobId}/${specTagInfo.tag.toString()}`
+        ] = subscriber;
       }
 
-      const subscriber = this._outputCollectorByJobIdAndTag[
-        `${jobId}/${tag.toString()}`
+      const subscriber = responsibleSpec._outputCollectorByJobIdAndTag[
+        `${jobId}/${specTagInfo.tag.toString()}`
       ] as ByTagOutput<OMap[K]>;
 
       return {
@@ -1009,9 +1025,21 @@ export class ZZJobSpec<
         `Ambiguous ${type} for spec "${this.name}"; found more than two child specs with a single ${type}. \nPlease specify which one to use with "${type}(tagName)".`
       );
     } else {
-      return qualified[0].conns[0].publicTag as T extends "input"
-        ? keyof IMap
-        : keyof OMap;
+      const qualifiedC = qualified[0].conns[0];
+      if (!qualifiedC.publicTag) {
+        // the user didn't give a public tag; auto-register
+      }
+      const t =
+        (qualified[0].conns[0].publicTag as T extends "input"
+          ? keyof IMap
+          : keyof OMap) || null;
+
+      if (!t) {
+        throw new Error(
+          `Failed to find single and only tag on ${type} of spec ${this.name}.`
+        );
+      }
+      return t;
     }
   }
 
