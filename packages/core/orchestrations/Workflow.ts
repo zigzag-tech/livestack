@@ -5,7 +5,8 @@ import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { JobsOptions } from "bullmq";
-import { JobNode, InstantiatedGraph, CanonicalConnection } from "./Graph";
+import { CanonicalConnection } from "./InstantiatedGraph";
+import { JobNode, InstantiatedGraph } from "./InstantiatedGraph";
 import {
   SpecAndOutlet,
   resolveUniqueSpec,

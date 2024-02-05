@@ -1,8 +1,6 @@
-import {
-  SpecNode,
-  StreamNode,
-  getNodesConnectedToStream,
-} from "../orchestrations/Graph";
+import { SpecNode } from "../orchestrations/DefGraph";
+import { getNodesConnectedToStream } from "../orchestrations/InstantiatedGraph";
+import { StreamNode } from "../orchestrations/InstantiatedGraph";
 import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorker";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { JobsOptions, Queue, WorkerOptions } from "bullmq";
@@ -40,7 +38,8 @@ import pLimit from "p-limit";
 import { IOSpec } from "@livestack/shared";
 import { InferTMap } from "@livestack/shared/IOSpec";
 import { wrapIfSingle } from "@livestack/shared/IOSpec";
-import { DefGraph, InstantiatedGraph, JobNode } from "../orchestrations/Graph";
+import { DefGraph } from "../orchestrations/DefGraph";
+import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { Observable } from "rxjs";
 import { TagObj, TagMaps } from "../orchestrations/Workflow";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";

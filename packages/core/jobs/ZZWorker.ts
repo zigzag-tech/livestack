@@ -7,7 +7,7 @@ import { IStorageProvider } from "../storage/cloudStorage";
 import { ZZProcessor } from "./ZZJob";
 import { ZZEnv } from "./ZZEnv";
 import { z } from "zod";
-import { JobId } from "../orchestrations/Graph";
+import { JobId } from "../orchestrations/InstantiatedGraph";
 import { RawQueueJobData } from "../orchestrations/workerCommon";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
 

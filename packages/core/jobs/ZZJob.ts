@@ -16,7 +16,7 @@ import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 import { InferTMap } from "@livestack/shared/IOSpec";
 import _ from "lodash";
-import { InstantiatedGraph, JobId } from "../orchestrations/Graph";
+import { InstantiatedGraph, JobId } from "../orchestrations/InstantiatedGraph";
 import { RawQueueJobData } from "../orchestrations/workerCommon";
 
 export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (

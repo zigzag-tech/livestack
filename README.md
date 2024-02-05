@@ -32,7 +32,7 @@ Livestack aims at providing:
 - Fullstack, end-to-end templates for both frontend and backend.
 - Fully typed with zod and TypeScript support for better developer experience.
 - Built-in queue system that automatically scales AI project to many machines.
-- Graph-based workflows for better reasoning, visual inspection and debugging:
+- Fully graph-based workflows for better reasoning, visual inspection and debugging:
   - Multiple input/output streams for each job node (commonly encountered in modern AI components)
   - Intuitive workflow query language for easy inspection and debugging.
   - (WIP) Nested Workflows that allows for complex, multi-stage AI pipelines and component reusability.
