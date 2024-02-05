@@ -113,16 +113,6 @@ export class WorkflowSpec extends JobSpec<
         }
       }
 
-      // add alias nodes
-
-      // g.assignAlias({
-      //   alias: "status",
-      //   specName: this.name,
-      //   tag: "status",
-      //   type: "out",
-      //   rootSpecName: this.name,
-      // });
-
       for (const conn of this.connections) {
         for (const c of conn) {
           for (const [specTag, alias] of Object.entries(c.inputAliasMap)) {
@@ -161,16 +151,6 @@ export class WorkflowSpec extends JobSpec<
     any,
     any
   >;
-
-  // protected readonly specTagByTypeByWorkflowAlias: Record<
-  //   "in" | "out",
-  //   Record<string, { specName: string; tag: string; uniqueSpecLabel?: string }>
-  // >;
-
-  // protected readonly workflowAliasBySpecUniqueLabelAndTag: Record<
-  //   `${string}[${string | ""}]::${"in" | "out"}/${string}`,
-  //   string
-  // >;
 
   constructor({
     connections,
@@ -330,31 +310,6 @@ export class WorkflowSpec extends JobSpec<
     });
   }
 
-  // private assignAlias({
-  //   alias,
-  //   tag,
-  //   specName,
-  //   uniqueSpecLabel,
-  //   type,
-  // }: {
-  //   alias: string;
-  //   tag: string;
-  //   specName: string;
-  //   uniqueSpecLabel?: string;
-  //   type: "in" | "out";
-  // }) {
-  //   this.specTagByTypeByWorkflowAlias[type][alias] = {
-  //     specName,
-  //     tag,
-  //     uniqueSpecLabel,
-  //   };
-
-  //   // inverse
-  //   this.workflowAliasBySpecUniqueLabelAndTag[
-  //     `${specName}[${uniqueSpecLabel || ""}]::${type}/${tag}`
-  //   ] = alias;
-  // }
-
   protected override convertSpecTagToWorkflowAlias({
     specName,
     tag,
@@ -413,17 +368,6 @@ export class WorkflowSpec extends JobSpec<
       });
       return r;
     }
-    // if (!this.specTagByTypeByWorkflowAlias[type][alias.toString()]) {
-    //   throw new Error(
-    //     `No ${type === "in" ? "input" : "output"} spec tag found in workflow ${
-    //       this.name
-    //     } for ${alias.toString()}`
-    //   );
-    // }
-    // return {
-    //   ...this.specTagByTypeByWorkflowAlias[type][alias.toString()],
-    //   type,
-    // };
   }
 
   private _validateConnections() {
