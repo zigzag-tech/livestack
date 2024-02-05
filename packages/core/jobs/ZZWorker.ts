@@ -2,7 +2,7 @@ import _ from "lodash";
 import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { ZZJob } from "./ZZJob";
-import { JobSpec } from "./Spec";
+import { JobSpec } from "./JobSpec";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { ZZProcessor } from "./ZZJob";
 import { ZZEnv } from "./ZZEnv";

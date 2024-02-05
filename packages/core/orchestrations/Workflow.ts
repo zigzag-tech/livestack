@@ -1,5 +1,5 @@
 // import { InferInputType, InferOutputType } from "../jobs/Spec";
-import { CheckSpec, SpecOrName, JobSpec } from "../jobs/Spec";
+import { CheckSpec, SpecOrName, JobSpec } from "../jobs/JobSpec";
 import { IOSpec, InferTMap } from "@livestack/shared/IOSpec";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
@@ -11,7 +11,7 @@ import {
   SpecAndOutlet,
   resolveUniqueSpec,
   resolveTagMapping,
-} from "../jobs/Spec";
+} from "../jobs/JobSpec";
 
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 

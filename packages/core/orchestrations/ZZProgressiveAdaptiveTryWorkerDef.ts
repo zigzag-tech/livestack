@@ -1,4 +1,4 @@
-import { CheckSpec, JobSpec } from "../jobs/Spec";
+import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { z } from "zod";
 import _ from "lodash";

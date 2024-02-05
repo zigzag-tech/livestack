@@ -1,5 +1,5 @@
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
-import { CheckSpec, JobSpec, sleep } from "../jobs/Spec";
+import { CheckSpec, JobSpec, sleep } from "../jobs/JobSpec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { WrapWithTimestamp } from "../utils/io";

@@ -10,7 +10,7 @@ import { Observable, map, takeUntil } from "rxjs";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { updateJobStatus } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { JobSpec } from "./Spec";
+import { JobSpec } from "./JobSpec";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
