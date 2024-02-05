@@ -549,16 +549,26 @@ function convertSpecAndOutletWithTags(
   }
 }
 
-type CanonicalConnection = {
-  from: CanonicalSpecAndOutlet;
-  to: CanonicalSpecAndOutlet;
+type CanonicalConnection<T1 = any, T2 = any> = {
+  from: CanonicalSpecAndOutlet<T1>;
+  to: CanonicalSpecAndOutlet<T2>;
+  transform?: <T1, T2>(o: any) => any;
 };
 
-export type CanonicalSpecAndOutlet = ReturnType<
-  typeof convertSpecAndOutletWithTags
-> & {
+export type CanonicalSpecAndOutlet<T = any> = {
+  spec: JobSpec<
+    any,
+    any,
+    any & {
+      K: T;
+    },
+    any
+  >;
+  uniqueSpecLabel?: string;
   tagInSpec: string;
   tagInSpecType: "input" | "output";
+  inputAliasMap: Record<string, string>;
+  outputAliasMap: Record<string, string>;
 };
 
 function convertConnectionsCanonical(workflowParams: WorkflowParams) {
