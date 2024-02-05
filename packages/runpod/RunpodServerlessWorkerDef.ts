@@ -1,9 +1,12 @@
-import { Spec } from "@livestack/core";
+import { JobSpec } from "@livestack/core";
 import { ZZEnv } from "@livestack/core";
 import { ZZWorkerDef } from "@livestack/core";
 
 export class RunpodServerlessWorkerDef<P extends object, O> extends ZZWorkerDef<
   P,
+  any,
+  any,
+  any,
   {},
   { default: O }
 > {
@@ -18,7 +21,7 @@ export class RunpodServerlessWorkerDef<P extends object, O> extends ZZWorkerDef<
   }: {
     serverlessEndpointId: string;
     runpodApiKey: string;
-    jobSpec: Spec<P, {}, { default: O }>;
+    jobSpec: JobSpec<P, any, any, {}, { default: O }>;
     zzEnv: ZZEnv;
   }) {
     super({

@@ -1,5 +1,5 @@
 import Replicate from "replicate";
-import { Spec } from "@livestack/core";
+import { JobSpec } from "@livestack/core";
 import { ZZWorkerDef } from "@livestack/core";
 import { ZZEnv } from "@livestack/core";
 
@@ -7,9 +7,11 @@ const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
 
 export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
   P,
+  any,
+  any,
+  { replicateToken?: string },
   {},
-  { default: O },
-  { replicateToken?: string }
+  { default: O }
 > {
   protected _endpoint: `${string}/${string}:${string}`;
   protected _replicateToken?: string;
@@ -20,7 +22,7 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
     zzEnv,
     replicateToken,
   }: {
-    jobSpec: Spec<P, {}, { default: O }>;
+    jobSpec: JobSpec<P, any, any, {}, { default: O }>;
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
     zzEnv?: ZZEnv;
