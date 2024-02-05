@@ -5,7 +5,6 @@ import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { JobsOptions } from "bullmq";
-import { CanonicalConnection } from "./InstantiatedGraph";
 import { JobNode, InstantiatedGraph } from "./InstantiatedGraph";
 import {
   SpecAndOutlet,
@@ -68,10 +67,7 @@ export class WorkflowSpec extends JobSpec<
   any,
   any
 > {
-  public readonly connections: [
-    CanonicalSpecAndOutlet,
-    CanonicalSpecAndOutlet
-  ][];
+  public readonly connections: CanonicalConnection[];
   private workflowGraphCreated: boolean = false;
 
   public override getDefGraph() {
@@ -85,8 +81,8 @@ export class WorkflowSpec extends JobSpec<
       // pass1
       for (const conn of this.connections) {
         const { fromSpecNodeId, toSpecNodeId } = g.addConnectedDualSpecs(
-          conn[0],
-          conn[1]
+          conn.from,
+          conn.to
         );
         g.ensureParentChildRelation(parentSpecNodeId, fromSpecNodeId);
         g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
@@ -94,7 +90,7 @@ export class WorkflowSpec extends JobSpec<
       // pass2: add all loose tags in specs
 
       for (const conn of this.connections) {
-        for (const c of conn) {
+        for (const c of [conn.from, conn.to]) {
           const spec = c.spec;
           for (const tag of spec.inputDefSet.keys) {
             g.ensureInletAndStream({
@@ -114,7 +110,7 @@ export class WorkflowSpec extends JobSpec<
       }
 
       for (const conn of this.connections) {
-        for (const c of conn) {
+        for (const c of [conn.from, conn.to]) {
           for (const [specTag, alias] of Object.entries(c.inputAliasMap)) {
             g.assignAlias({
               alias,
@@ -373,20 +369,18 @@ export class WorkflowSpec extends JobSpec<
   private _validateConnections() {
     // calculate overrides based on jobConnectors
     for (let i = 0; i < this.connections.length; i++) {
-      for (let j = 0; j < this.connections[i].length - 1; j++) {
-        const outSpecInfo = this.connections[i][j];
-        const inSpecInfo = this.connections[i][j + 1];
-        validateSpecHasKey({
-          spec: outSpecInfo.spec,
-          type: "out",
-          tag: outSpecInfo.tagInSpec,
-        });
-        validateSpecHasKey({
-          spec: inSpecInfo.spec,
-          type: "in",
-          tag: inSpecInfo.tagInSpec,
-        });
-      }
+      const outSpecInfo = this.connections[i].from;
+      const inSpecInfo = this.connections[i].to;
+      validateSpecHasKey({
+        spec: outSpecInfo.spec,
+        type: "out",
+        tag: outSpecInfo.tagInSpec,
+      });
+      validateSpecHasKey({
+        spec: inSpecInfo.spec,
+        type: "in",
+        tag: inSpecInfo.tagInSpec,
+      });
 
       // TODO: to bring back this check
       // const fromDef = fromJobDecs.spec.outputDefSet.getDef(fromKeyStr);
@@ -555,6 +549,11 @@ function convertSpecAndOutletWithTags(
   }
 }
 
+type CanonicalConnection = {
+  from: CanonicalSpecAndOutlet;
+  to: CanonicalSpecAndOutlet;
+};
+
 export type CanonicalSpecAndOutlet = ReturnType<
   typeof convertSpecAndOutletWithTags
 > & {
@@ -566,25 +565,25 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
   const convertedConnections = workflowParams.connections.reduce(
     (acc, conn) => {
       if (Array.isArray(conn)) {
-        let newAcc: [CanonicalSpecAndOutlet, CanonicalSpecAndOutlet][] = [];
+        let newAcc: CanonicalConnection[] = [];
         const connCanonical = conn.map(convertSpecAndOutletWithTags);
         for (let i = 0; i < connCanonical.length - 1; i++) {
-          newAcc.push([
-            {
+          newAcc.push({
+            from: {
               ...connCanonical[i],
               tagInSpecType: "output",
               tagInSpec:
                 connCanonical[i].tagInSpec ||
                 String(connCanonical[i].spec.getSingleOutputTag()),
             },
-            {
+            to: {
               ...connCanonical[i + 1],
               tagInSpecType: "input",
               tagInSpec:
                 connCanonical[i + 1].tagInSpec ||
                 String(connCanonical[i + 1].spec.getSingleInputTag()),
             },
-          ]);
+          });
         }
         return newAcc;
       } else {
@@ -592,26 +591,26 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
         const toPartialCanonical = convertSpecAndOutletWithTags(conn.to);
         return [
           ...acc,
-          [
-            {
+          {
+            from: {
               ...fromPartialCanonical,
               tagInSpecType: "output",
               tagInSpec:
                 fromPartialCanonical.tagInSpec ||
                 String(fromPartialCanonical.spec.getSingleOutputTag()),
             },
-            {
+            to: {
               ...toPartialCanonical,
               tagInSpecType: "input",
               tagInSpec:
                 toPartialCanonical.tagInSpec ||
                 String(toPartialCanonical.spec.getSingleInputTag()),
             },
-          ] as [CanonicalSpecAndOutlet, CanonicalSpecAndOutlet],
+          } as CanonicalConnection,
         ];
       }
     },
-    [] as [CanonicalSpecAndOutlet, CanonicalSpecAndOutlet][]
+    [] as CanonicalConnection[]
   );
 
   return convertedConnections;

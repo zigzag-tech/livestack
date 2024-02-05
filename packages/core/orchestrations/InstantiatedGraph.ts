@@ -214,10 +214,6 @@ export type CanonicalConnectionPoint = {
   tagInSpecType: "input" | "output";
 };
 
-export type CanonicalConnection = [
-  CanonicalConnectionPoint,
-  CanonicalConnectionPoint
-];
 export function uniqueSpecIdentifier({
   specName,
   spec,
