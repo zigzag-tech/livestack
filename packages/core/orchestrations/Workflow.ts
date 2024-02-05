@@ -68,7 +68,10 @@ export class WorkflowSpec extends JobSpec<
   any,
   any
 > {
-  public readonly connections: CanonicalConnection[];
+  public readonly connections: [
+    CanonicalSpecAndOutlet,
+    CanonicalSpecAndOutlet
+  ][];
   private workflowGraphCreated: boolean = false;
 
   public override getDefGraph() {
@@ -110,6 +113,41 @@ export class WorkflowSpec extends JobSpec<
         }
       }
 
+      // add alias nodes
+
+      // g.assignAlias({
+      //   alias: "status",
+      //   specName: this.name,
+      //   tag: "status",
+      //   type: "out",
+      //   rootSpecName: this.name,
+      // });
+
+      for (const conn of this.connections) {
+        for (const c of conn) {
+          for (const [specTag, alias] of Object.entries(c.inputAliasMap)) {
+            g.assignAlias({
+              alias,
+              tag: specTag,
+              specName: c.spec.name,
+              uniqueSpecLabel: c.uniqueSpecLabel,
+              type: "in",
+              rootSpecName: this.name,
+            });
+          }
+          for (const [specTag, alias] of Object.entries(c.outputAliasMap)) {
+            g.assignAlias({
+              alias,
+              tag: specTag,
+              specName: c.spec.name,
+              uniqueSpecLabel: c.uniqueSpecLabel,
+              type: "out",
+              rootSpecName: this.name,
+            });
+          }
+        }
+      }
+
       this.workflowGraphCreated = true;
     }
     return g;
@@ -124,15 +162,15 @@ export class WorkflowSpec extends JobSpec<
     any
   >;
 
-  protected readonly specTagByTypeByWorkflowAlias: Record<
-    "in" | "out",
-    Record<string, { specName: string; tag: string; uniqueSpecLabel?: string }>
-  >;
+  // protected readonly specTagByTypeByWorkflowAlias: Record<
+  //   "in" | "out",
+  //   Record<string, { specName: string; tag: string; uniqueSpecLabel?: string }>
+  // >;
 
-  protected readonly workflowAliasBySpecUniqueLabelAndTag: Record<
-    `${string}[${string | ""}]::${"in" | "out"}/${string}`,
-    string
-  >;
+  // protected readonly workflowAliasBySpecUniqueLabelAndTag: Record<
+  //   `${string}[${string | ""}]::${"in" | "out"}/${string}`,
+  //   string
+  // >;
 
   constructor({
     connections,
@@ -155,40 +193,40 @@ export class WorkflowSpec extends JobSpec<
     });
     this.connections = canonicalConns;
 
-    this.specTagByTypeByWorkflowAlias = {
-      in: {},
-      out: {
-        status: {
-          specName: this.name,
-          tag: "status",
-        },
-      },
-    };
+    // this.specTagByTypeByWorkflowAlias = {
+    //   in: {},
+    //   out: {
+    //     status: {
+    //       specName: this.name,
+    //       tag: "status",
+    //     },
+    //   },
+    // };
     // inverse
-    this.workflowAliasBySpecUniqueLabelAndTag = {};
+    // this.workflowAliasBySpecUniqueLabelAndTag = {};
 
-    for (const conn of canonicalConns) {
-      for (const c of conn) {
-        for (const [specTag, alias] of Object.entries(c.inputAliasMap)) {
-          this.assignAlias({
-            alias,
-            tag: specTag,
-            specName: c.spec.name,
-            uniqueSpecLabel: c.uniqueSpecLabel,
-            type: "in",
-          });
-        }
-        for (const [specTag, alias] of Object.entries(c.outputAliasMap)) {
-          this.assignAlias({
-            alias,
-            tag: specTag,
-            specName: c.spec.name,
-            uniqueSpecLabel: c.uniqueSpecLabel,
-            type: "out",
-          });
-        }
-      }
-    }
+    // for (const conn of canonicalConns) {
+    //   for (const c of conn) {
+    //     for (const [specTag, alias] of Object.entries(c.inputAliasMap)) {
+    //       this.assignAlias({
+    //         alias,
+    //         tag: specTag,
+    //         specName: c.spec.name,
+    //         uniqueSpecLabel: c.uniqueSpecLabel,
+    //         type: "in",
+    //       });
+    //     }
+    //     for (const [specTag, alias] of Object.entries(c.outputAliasMap)) {
+    //       this.assignAlias({
+    //         alias,
+    //         tag: specTag,
+    //         specName: c.spec.name,
+    //         uniqueSpecLabel: c.uniqueSpecLabel,
+    //         type: "out",
+    //       });
+    //     }
+    //   }
+    // }
 
     this._validateConnections();
     // for (const conn of canonicalConns) {
@@ -292,30 +330,30 @@ export class WorkflowSpec extends JobSpec<
     });
   }
 
-  private assignAlias({
-    alias,
-    tag,
-    specName,
-    uniqueSpecLabel,
-    type,
-  }: {
-    alias: string;
-    tag: string;
-    specName: string;
-    uniqueSpecLabel?: string;
-    type: "in" | "out";
-  }) {
-    this.specTagByTypeByWorkflowAlias[type][alias] = {
-      specName,
-      tag,
-      uniqueSpecLabel,
-    };
+  // private assignAlias({
+  //   alias,
+  //   tag,
+  //   specName,
+  //   uniqueSpecLabel,
+  //   type,
+  // }: {
+  //   alias: string;
+  //   tag: string;
+  //   specName: string;
+  //   uniqueSpecLabel?: string;
+  //   type: "in" | "out";
+  // }) {
+  //   this.specTagByTypeByWorkflowAlias[type][alias] = {
+  //     specName,
+  //     tag,
+  //     uniqueSpecLabel,
+  //   };
 
-    // inverse
-    this.workflowAliasBySpecUniqueLabelAndTag[
-      `${specName}[${uniqueSpecLabel || ""}]::${type}/${tag}`
-    ] = alias;
-  }
+  //   // inverse
+  //   this.workflowAliasBySpecUniqueLabelAndTag[
+  //     `${specName}[${uniqueSpecLabel || ""}]::${type}/${tag}`
+  //   ] = alias;
+  // }
 
   protected override convertSpecTagToWorkflowAlias({
     specName,
@@ -328,9 +366,26 @@ export class WorkflowSpec extends JobSpec<
     uniqueSpecLabel?: string;
     type: "in" | "out";
   }) {
-    return this.workflowAliasBySpecUniqueLabelAndTag[
-      `${specName}[${uniqueSpecLabel || ""}]::${type}/${tag}`
-    ];
+    const existingAlias = this.getDefGraph().lookupRootSpecAlias({
+      specName,
+      tag,
+      uniqueSpecLabel,
+      type,
+    });
+    if (!existingAlias) {
+      const alias = `${specName}[${uniqueSpecLabel || ""}]::${type}/${tag}`;
+      this.getDefGraph().assignAlias({
+        alias,
+        specName,
+        tag,
+        uniqueSpecLabel,
+        type,
+        rootSpecName: this.name,
+      });
+      return alias;
+    } else {
+      return existingAlias;
+    }
   }
 
   protected override convertWorkflowAliasToSpecTag({
@@ -340,17 +395,35 @@ export class WorkflowSpec extends JobSpec<
     type: "in" | "out";
     alias: string | symbol | number;
   }) {
-    if (!this.specTagByTypeByWorkflowAlias[type][alias.toString()]) {
-      throw new Error(
-        `No ${type === "in" ? "input" : "output"} spec tag found in workflow ${
-          this.name
-        } for ${alias.toString()}`
-      );
+    if (
+      (type === "in" ? this.inputDefSet : this.outputDefSet).keys.includes(
+        alias
+      )
+    ) {
+      return {
+        specName: this.name,
+        tag: alias.toString(),
+        type,
+        uniqueSpecLabel: undefined,
+      };
+    } else {
+      const r = this.getDefGraph().lookupSpecAndTagByAlias({
+        alias: alias.toString(),
+        type,
+      });
+      return r;
     }
-    return {
-      ...this.specTagByTypeByWorkflowAlias[type][alias.toString()],
-      type,
-    };
+    // if (!this.specTagByTypeByWorkflowAlias[type][alias.toString()]) {
+    //   throw new Error(
+    //     `No ${type === "in" ? "input" : "output"} spec tag found in workflow ${
+    //       this.name
+    //     } for ${alias.toString()}`
+    //   );
+    // }
+    // return {
+    //   ...this.specTagByTypeByWorkflowAlias[type][alias.toString()],
+    //   type,
+    // };
   }
 
   private _validateConnections() {

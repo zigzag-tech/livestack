@@ -1,3 +1,4 @@
+import { alias } from "@livestack/core";
 import Graph from "graphology";
 import { IOSpec } from "@livestack/shared";
 import { Attributes } from "graphology-types";
@@ -130,6 +131,221 @@ export class DefGraph extends Graph<DefGraphNode> {
       });
 
       this.ensureEdge(outletNodeId, streamNodeId);
+    }
+  }
+
+  public assignAlias({
+    alias,
+    specName,
+    rootSpecName,
+    uniqueSpecLabel,
+    type,
+    tag,
+  }: {
+    alias: string;
+    specName: string;
+    rootSpecName: string;
+    uniqueSpecLabel?: string;
+    type: "in" | "out";
+    tag: string | symbol | number;
+  }) {
+    const specNodeId = this.findNode((nId) => {
+      const attrs = this.getNodeAttributes(nId);
+      return (
+        attrs.nodeType === "spec" &&
+        attrs.specName === specName &&
+        attrs.uniqueSpecLabel === uniqueSpecLabel
+      );
+    });
+
+    if (!specNodeId) {
+      throw new Error(
+        `Spec node not found for specName: ${specName}, uniqueSpecLabel: ${uniqueSpecLabel}`
+      );
+    }
+
+    const rootSpecNodeId = this.findNode((nId) => {
+      const attrs = this.getNodeAttributes(nId);
+      return attrs.nodeType === "root-spec" && attrs.specName === rootSpecName;
+    });
+    if (!rootSpecNodeId) {
+      throw new Error(`Root spec node not found for specName: ${rootSpecName}`);
+    }
+
+    const rootSpecNode = this.getNodeAttributes(rootSpecNodeId) as RootSpecNode;
+    const aliasId = `${rootSpecNode.specName}/${alias}`;
+
+    const aliasNodeId = this.ensureNode(alias, {
+      nodeType: "alias",
+      alias,
+      label: aliasId,
+    });
+
+    if (type === "in") {
+      const inletNodeId = this.findInboundNeighbor(
+        specNodeId,
+        (nId, attrs) =>
+          attrs.nodeType === "inlet" && attrs.tag === tag.toString()
+      );
+
+      if (!inletNodeId) {
+        throw new Error(
+          `Inlet node not found for specName: ${specName}, uniqueSpecLabel: ${uniqueSpecLabel}, tag: ${tag.toString()}`
+        );
+      }
+      this.ensureEdge(inletNodeId, aliasNodeId);
+      this.ensureEdge(aliasNodeId, rootSpecNodeId);
+    } else {
+      const outletNodeId = this.findOutboundNeighbor(
+        specNodeId,
+        (nId, attrs) =>
+          attrs.nodeType === "outlet" && attrs.tag === tag.toString()
+      );
+
+      if (!outletNodeId) {
+        throw new Error(
+          `Outlet node not found for specName: ${specName}, uniqueSpecLabel: ${uniqueSpecLabel}, tag: ${tag.toString()}`
+        );
+      }
+      this.ensureEdge(rootSpecNodeId, aliasNodeId);
+      this.ensureEdge(aliasNodeId, outletNodeId);
+    }
+  }
+
+  public lookupRootSpecAlias({
+    specName,
+    tag,
+    uniqueSpecLabel,
+    type,
+  }: {
+    specName: string;
+    tag: string;
+    uniqueSpecLabel?: string;
+    type: "in" | "out";
+  }) {
+    const rootSpecNodeId = this.findNode((nId) => {
+      const attrs = this.getNodeAttributes(nId);
+      return attrs.nodeType === "root-spec" && attrs.specName === specName;
+    });
+
+    const specNodeId = this.findNode((nId) => {
+      const attrs = this.getNodeAttributes(nId);
+      return (
+        attrs.nodeType === "spec" &&
+        attrs.specName === specName &&
+        attrs.uniqueSpecLabel === uniqueSpecLabel
+      );
+    });
+
+    if (type === "in") {
+      const inletNodeId = this.findInboundNeighbor(
+        specNodeId,
+        (nId, attrs) => attrs.nodeType === "inlet" && attrs.tag === tag
+      );
+      if (!inletNodeId) {
+        throw new Error(
+          `Inlet node not found for specName: ${specName}, uniqueSpecLabel: ${uniqueSpecLabel}, tag: ${tag}`
+        );
+      }
+
+      const aliasNodeId = this.findOutboundNeighbor(
+        inletNodeId,
+        (nId, attrs) => attrs.nodeType === "alias"
+      );
+
+      return aliasNodeId
+        ? (this.getNodeAttributes(aliasNodeId) as AliasNode).alias
+        : null;
+    } else {
+      const outletNodeId = this.findOutboundNeighbor(
+        specNodeId,
+        (nId, attrs) => attrs.nodeType === "outlet" && attrs.tag === tag
+      );
+      if (!outletNodeId) {
+        throw new Error(
+          `Outlet node not found for specName: ${specName}, uniqueSpecLabel: ${uniqueSpecLabel}, tag: ${tag}`
+        );
+      }
+
+      const aliasNodeId = this.findInboundNeighbor(
+        outletNodeId,
+        (nId, attrs) => attrs.nodeType === "alias"
+      );
+
+      return aliasNodeId
+        ? (this.getNodeAttributes(aliasNodeId) as AliasNode).alias
+        : null;
+    }
+  }
+
+  public lookupSpecAndTagByAlias({
+    type,
+    alias,
+  }: {
+    type: "in" | "out";
+    alias: string | symbol | number;
+  }) {
+    const rootSpecNodeId = this.findNode((nId) => {
+      const attrs = this.getNodeAttributes(nId);
+      return attrs.nodeType === "root-spec";
+    });
+
+    if (!rootSpecNodeId) {
+      throw new Error("Root spec node not found");
+    }
+
+    if (type === "in") {
+      const aliasNodeId = this.findInboundNeighbor(
+        rootSpecNodeId,
+        (nId, attrs) =>
+          attrs.nodeType === "alias" && attrs.alias === alias.toString()
+      );
+      const inletNodeId = this.findInboundNeighbor(
+        aliasNodeId,
+        (nId, attrs) => attrs.nodeType === "inlet"
+      );
+      const inletNode = this.getNodeAttributes(inletNodeId) as InletNode;
+
+      const specNodeId = this.findOutboundNeighbor(
+        inletNodeId,
+        (nId, attrs) => attrs.nodeType === "spec"
+      );
+      const specNode = this.getNodeAttributes(specNodeId) as SpecNode;
+
+      return {
+        specName: specNode.specName,
+        tag: inletNode.tag,
+        uniqueSpecLabel: specNode.uniqueSpecLabel,
+        type,
+      };
+    } else {
+      const aliasNodeId = this.findOutboundNeighbor(
+        rootSpecNodeId,
+        (nId, attrs) =>
+          attrs.nodeType === "alias" && attrs.alias === alias.toString()
+      );
+
+      if (!aliasNodeId) {
+        throw new Error(`Alias node not found for alias: ${alias.toString()}`);
+      }
+      const outletNodeId = this.findOutboundNeighbor(
+        aliasNodeId,
+        (nId, attrs) => attrs.nodeType === "outlet"
+      );
+      const outletNode = this.getNodeAttributes(outletNodeId) as OutletNode;
+
+      const specNodeId = this.findInboundNeighbor(
+        outletNodeId,
+        (nId, attrs) => attrs.nodeType === "spec"
+      );
+      const specNode = this.getNodeAttributes(specNodeId) as SpecNode;
+
+      return {
+        specName: specNode.specName,
+        tag: outletNode.tag,
+        uniqueSpecLabel: specNode.uniqueSpecLabel,
+        type,
+      };
     }
   }
 

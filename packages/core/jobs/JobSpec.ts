@@ -515,7 +515,6 @@ export class JobSpec<
       alias: p.tag,
       type,
     });
-
     const responsibleSpec = JobSpec.lookupByName(specTagInfo.specName);
 
     let def: z.ZodType<WrapTerminatorAndDataId<T>>;
