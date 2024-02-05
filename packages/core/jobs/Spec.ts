@@ -35,7 +35,7 @@ import {
   wrapStreamSubscriberWithTermination,
   wrapTerminatorAndDataId,
 } from "../utils/io";
-import { WithTimestamp, ZZStream, ZZStreamSubscriber } from "./ZZStream";
+import { WithTimestamp, DataStream, DataStreamSubscriber } from "./DataStream";
 import pLimit from "p-limit";
 import { IOSpec } from "@livestack/shared";
 import { InferTMap } from "@livestack/shared/IOSpec";
@@ -488,7 +488,7 @@ export class Spec<
     return (await this.getJobStream({
       ...p,
       type: "in",
-    })) as ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
+    })) as DataStream<WrapTerminatorAndDataId<IMap[K]>>;
   };
 
   public getOutputJobStream = async <K extends keyof OMap>(p: {
@@ -498,7 +498,7 @@ export class Spec<
     return (await this.getJobStream({
       ...p,
       type: "out",
-    })) as ZZStream<WrapTerminatorAndDataId<OMap[K]>>;
+    })) as DataStream<WrapTerminatorAndDataId<OMap[K]>>;
   };
 
   protected getJobStream = async <
@@ -552,13 +552,13 @@ export class Spec<
       p: specTagInfo,
     });
 
-    const stream = await ZZStream.getOrCreate<WrapTerminatorAndDataId<T>>({
+    const stream = await DataStream.getOrCreate<WrapTerminatorAndDataId<T>>({
       uniqueName: streamId,
       def,
       logger: responsibleSpec.logger,
       zzEnv: responsibleSpec.zzEnv,
     });
-    return stream as ZZStream<WrapTerminatorAndDataId<T>>;
+    return stream as DataStream<WrapTerminatorAndDataId<T>>;
   };
 
   private _outputCollectorByJobIdAndTag: {
@@ -580,11 +580,11 @@ export class Spec<
       tag: tagToWatch,
     });
     const subuscriberP = new Promise<
-      ZZStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>
+      DataStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>
     >((resolve, reject) => {
       streamP.then((stream) => {
         // console.debug("Output collector for stream", stream.uniqueName);
-        let subscriber: ZZStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>;
+        let subscriber: DataStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>;
         if (from === "beginning") {
           subscriber = stream.subFromBeginning();
         } else if (from === "now") {

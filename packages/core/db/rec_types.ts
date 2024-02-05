@@ -60,13 +60,13 @@ export type ZZDatapointRec<T> = {
   time_created: Date;
 };
 
-export const ZZStreamRec = z.object({
+export const DataStreamRec = z.object({
   project_id: z.string(),
   stream_id: z.string(),
   time_created: z.date(),
 });
 
-export type ZZStreamRec = z.infer<typeof ZZStreamRec>;
+export type DataStreamRec = z.infer<typeof DataStreamRec>;
 
 export const ZZJobStreamConnectorRec = z.object({
   project_id: z.string(),

@@ -1,5 +1,5 @@
 import { WrapTerminatorAndDataId } from "../utils/io";
-import { ZZStream } from "./ZZStream";
+import { DataStream } from "./DataStream";
 import { Job, WaitingChildrenError } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
@@ -85,7 +85,7 @@ export class ZZJob<
   private readonly inputStreamFnsByTag: Partial<{
     [K in keyof IMap]: {
       nextValue: () => Promise<IMap[K] | null>;
-      // inputStream: ZZStream<WrapTerminatorAndDataId<IMap[K]>>;
+      // inputStream: DataStream<WrapTerminatorAndDataId<IMap[K]>>;
       inputObservableUntracked: Observable<IMap[K] | null>;
       trackedObservable: Observable<IMap[K] | null>;
       subscriberCountObservable: Observable<number>;
@@ -306,7 +306,7 @@ export class ZZJob<
       const streamP = this.spec.getInputJobStream({
         jobId: this.jobId,
         tag: tag!,
-      }) as Promise<ZZStream<WrapTerminatorAndDataId<IMap[K]>>>;
+      }) as Promise<DataStream<WrapTerminatorAndDataId<IMap[K]>>>;
 
       const inputObservableUntracked = new Observable<IMap[K] | null>((s) => {
         streamP.then((stream) => {

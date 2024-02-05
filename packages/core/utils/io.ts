@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ZZStreamSubscriber } from "../jobs/ZZStream";
+import { DataStreamSubscriber } from "../jobs/DataStream";
 import { Observable } from "rxjs";
 export interface ByTagOutput<T> {
   [Symbol.asyncIterator]: () => AsyncIterableIterator<{
@@ -53,7 +53,7 @@ export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
 
 export function wrapStreamSubscriberWithTermination<T>(
   streamIdP: Promise<string>,
-  subscriberP: Promise<ZZStreamSubscriber<WrapTerminatorAndDataId<T>>>
+  subscriberP: Promise<DataStreamSubscriber<WrapTerminatorAndDataId<T>>>
 ): ByTagOutput<T> {
   const newValueObservable = new Observable<WrapWithTimestamp<T> | null>(
     (subscriber) => {

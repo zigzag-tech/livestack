@@ -1,6 +1,6 @@
 // import { Spec } from "./Spec";
 // import { z } from "zod";
-// import { ZZStream, hashDef } from "./ZZStream";
+// import { DataStream, hashDef } from "./DataStream";
 // import { InferStreamSetType, UnknownTMap } from "./StreamDefSet";
 // import { ZZEnv } from "./ZZEnv";
 

@@ -15,9 +15,9 @@ import path from "path";
 
 const REDIS_CLIENT_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
-export type InferStreamDef<T> = T extends ZZStream<infer P> ? P : never;
+export type InferStreamDef<T> = T extends DataStream<infer P> ? P : never;
 
-export namespace ZZStream {
+export namespace DataStream {
   export type single<ZT> = ZT extends ZodType<infer T>
     ? {
         default: T;
@@ -38,7 +38,7 @@ import { Redis } from "ioredis";
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
 
-export class ZZStream<T extends object> {
+export class DataStream<T extends object> {
   public readonly def: ZodType<T>;
   public readonly uniqueName: string;
   public readonly hash: string;
@@ -54,7 +54,7 @@ export class ZZStream<T extends object> {
   }
   private logger: ReturnType<typeof getLogger>;
 
-  protected static globalRegistry: { [key: string]: ZZStream<any> } = {};
+  protected static globalRegistry: { [key: string]: DataStream<any> } = {};
 
   public static async getOrCreate<T extends object>({
     uniqueName,
@@ -66,30 +66,30 @@ export class ZZStream<T extends object> {
     def?: ZodType<T>;
     zzEnv?: ZZEnv | null;
     logger?: ReturnType<typeof getLogger>;
-  }): Promise<ZZStream<T>> {
+  }): Promise<DataStream<T>> {
     if (!zzEnv) {
       zzEnv = ZZEnv.global();
     }
-    if (ZZStream.globalRegistry[uniqueName]) {
-      const existing = ZZStream.globalRegistry[uniqueName];
+    if (DataStream.globalRegistry[uniqueName]) {
+      const existing = DataStream.globalRegistry[uniqueName];
       // check if types match
       // TODO: use a more robust way to check if types match
       // TODO: to bring back this check
       // if (def) {
       //   if (existing.hash !== hashDef(def)) {
       //     throw new Error(
-      //       `ZZStream ${uniqueName} already exists with different type, and the new type provided is not compatible with the existing type.`
+      //       `DataStream ${uniqueName} already exists with different type, and the new type provided is not compatible with the existing type.`
       //     );
       //   }
       // }
-      return existing as ZZStream<T>;
+      return existing as DataStream<T>;
     } else {
       if (!def || !logger) {
         throw new Error(
           "def and logger must be provided if stream does not exist"
         );
       }
-      const stream = new ZZStream({ uniqueName, def, zzEnv, logger });
+      const stream = new DataStream({ uniqueName, def, zzEnv, logger });
       // async
       if (zzEnv?.db) {
         ensureStreamRec({
@@ -98,7 +98,7 @@ export class ZZStream<T extends object> {
           dbConn: zzEnv.db,
         });
       }
-      ZZStream.globalRegistry[uniqueName] = stream;
+      DataStream.globalRegistry[uniqueName] = stream;
       return stream;
     }
   }
@@ -120,7 +120,7 @@ export class ZZStream<T extends object> {
     this.hash = hashDef(this.def);
     this.logger = logger;
     // console.debug(
-    //   "ZZStream created",
+    //   "DataStream created",
     //   this.uniqueName,
     //   JSON.stringify(zodToJsonSchema(this.def), null, 2)
     // );
@@ -234,7 +234,7 @@ export class ZZStream<T extends object> {
         customStringify(parsed)
       );
 
-      // console.debug("ZZStream pub", this.uniqueName, parsed);
+      // console.debug("DataStream pub", this.uniqueName, parsed);
 
       return messageId;
     } catch (error) {
@@ -244,7 +244,7 @@ export class ZZStream<T extends object> {
   }
 
   public subFromNow() {
-    return new ZZStreamSubscriber({
+    return new DataStreamSubscriber({
       stream: this,
       zzEnv: this.zzEnv,
       initialCursor: "$",
@@ -252,7 +252,7 @@ export class ZZStream<T extends object> {
   }
 
   public subFromBeginning() {
-    return new ZZStreamSubscriber({
+    return new DataStreamSubscriber({
       stream: this,
       zzEnv: this.zzEnv,
       initialCursor: "0",
@@ -260,13 +260,13 @@ export class ZZStream<T extends object> {
   }
 
   public static define<T extends object>(
-    ...p: ConstructorParameters<typeof ZZStreamDef<T>>
+    ...p: ConstructorParameters<typeof DataStreamDef<T>>
   ) {
-    return new ZZStreamDef<T>(...p);
+    return new DataStreamDef<T>(...p);
   }
 }
 
-export class ZZStreamDef<T> {
+export class DataStreamDef<T> {
   public readonly streamDefName: string;
   public readonly def?: ZodType<T>;
 
@@ -281,9 +281,9 @@ export type WithTimestamp<T extends object> = T & {
   messageId: string;
 };
 
-export class ZZStreamSubscriber<T extends object> {
+export class DataStreamSubscriber<T extends object> {
   private zzEnv: ZZEnv;
-  private stream: ZZStream<T>;
+  private stream: DataStream<T>;
   private cursor: `${string}-${string}` | "$" | "0";
   private _valueObservable: Observable<WithTimestamp<T>> | null = null;
   private isUnsubscribed: boolean = false;
@@ -294,7 +294,7 @@ export class ZZStreamSubscriber<T extends object> {
     zzEnv,
     initialCursor,
   }: {
-    stream: ZZStream<T>;
+    stream: DataStream<T>;
     zzEnv: ZZEnv;
     initialCursor: "0" | "$";
   }) {

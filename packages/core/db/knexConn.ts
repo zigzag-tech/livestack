@@ -2,7 +2,7 @@ import {
   ZZDatapointRec,
   ZZJobRelationRec,
   ZZJobStreamConnectorRec,
-  ZZStreamRec,
+  DataStreamRec,
 } from "./rec_types";
 import knex, { Knex } from "knex";
 import { ZZJobRec, ZZJobStatusRec, ZZJobStatus } from "./rec_types";
@@ -94,7 +94,7 @@ export async function ensureStreamRec({
   dbConn: Knex;
   streamId: string;
 }) {
-  await dbConn<ZZStreamRec>("zz_streams")
+  await dbConn<DataStreamRec>("zz_streams")
     .insert({
       project_id: projectId,
       stream_id: streamId,
