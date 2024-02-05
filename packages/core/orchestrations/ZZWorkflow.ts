@@ -156,11 +156,11 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     this.connections = canonicalConns;
 
     // collect all the input and output that are tagged
-    let inputSpecTagByWorkflowTag: Record<
+    let inputSpecTagByWorkflowAlias: Record<
       string,
       { specName: string; tag: string }
     > = {};
-    let outputSpecTagByWorkflowTag: Record<
+    let outputSpecTagByWorkflowAlias: Record<
       string,
       {
         specName: string;
@@ -181,10 +181,23 @@ export class ZZWorkflowSpec extends ZZJobSpec<
 
     for (const conn of canonicalConns) {
       for (const c of conn) {
-        inputSpecTagByWorkflowTag = {
-          ...inputSpecTagByWorkflowTag,
+        inputSpecTagByWorkflowAlias = {
+          ...inputSpecTagByWorkflowAlias,
           ..._.fromPairs(
-            _.toPairs(c.inputTagMap).map(([specTag, wfTag]) => [
+            _.toPairs(c.inputAliasMap).map(([specTag, alias]) => [
+              alias,
+              {
+                specName: c.spec.name,
+                tag: specTag,
+                uniqueSpecLabel: c.uniqueSpecLabel,
+              },
+            ])
+          ),
+        };
+        outputSpecTagByWorkflowAlias = {
+          ...outputSpecTagByWorkflowAlias,
+          ..._.fromPairs(
+            _.toPairs(c.outputAliasMap).map(([specTag, wfTag]) => [
               wfTag,
               {
                 specName: c.spec.name,
@@ -194,25 +207,12 @@ export class ZZWorkflowSpec extends ZZJobSpec<
             ])
           ),
         };
-        outputSpecTagByWorkflowTag = {
-          ...outputSpecTagByWorkflowTag,
-          ..._.fromPairs(
-            _.toPairs(c.outputTagMap).map(([specTag, wfTag]) => [
-              wfTag,
-              {
-                specName: c.spec.name,
-                tag: specTag,
-                uniqueSpecLabel: c.uniqueSpecLabel,
-              },
-            ])
-          ),
-        };
-        for (const [specTag, tag] of Object.entries(c.inputTagMap)) {
+        for (const [specTag, tag] of Object.entries(c.inputAliasMap)) {
           workflowTagBySpecUniqueLabelAndTag[
             `${c.spec.name}[${c.uniqueSpecLabel || ""}]::in/${specTag}`
           ] = tag;
         }
-        for (const [specTag, tag] of Object.entries(c.outputTagMap)) {
+        for (const [specTag, tag] of Object.entries(c.outputAliasMap)) {
           workflowTagBySpecUniqueLabelAndTag[
             `${c.spec.name}[${c.uniqueSpecLabel || ""}]::out/${specTag}`
           ] = tag;
@@ -220,9 +220,10 @@ export class ZZWorkflowSpec extends ZZJobSpec<
       }
     }
     this.specTagByTypeByWorkflowAlias = {
-      in: inputSpecTagByWorkflowTag,
-      out: outputSpecTagByWorkflowTag,
+      in: inputSpecTagByWorkflowAlias,
+      out: outputSpecTagByWorkflowAlias,
     };
+
     this.workflowAliasBySpecUniqueLabelAndTag =
       workflowTagBySpecUniqueLabelAndTag;
 
@@ -523,28 +524,28 @@ function convertSpecAndOutletWithTags(
   spec: ZZJobSpec<any, any, any>;
   uniqueSpecLabel?: string;
   tagInSpec?: string;
-  inputTagMap: Record<string, string>;
-  outputTagMap: Record<string, string>;
+  inputAliasMap: Record<string, string>;
+  outputAliasMap: Record<string, string>;
 } {
   if (Array.isArray(specAndOutletOrTagged)) {
     const [uniqueSpec, tagInSpec] = specAndOutletOrTagged;
     const uniqueSpecLabel = resolveUniqueSpec(uniqueSpec).uniqueSpecLabel;
-    const tagMaps = resolveTagMapping(uniqueSpec);
+    const aliasMaps = resolveTagMapping(uniqueSpec);
     return {
       spec: resolveUniqueSpec(uniqueSpec).spec,
       ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
       tagInSpec,
-      ...tagMaps,
+      ...aliasMaps,
     };
   } else {
     const converted = resolveUniqueSpec(specAndOutletOrTagged);
     const uniqueSpecLabel = converted.uniqueSpecLabel;
-    const tagMaps = resolveTagMapping(specAndOutletOrTagged);
+    const aliasMaps = resolveTagMapping(specAndOutletOrTagged);
 
     return {
       spec: converted.spec,
       ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
-      ...tagMaps,
+      ...aliasMaps,
     };
   }
 }
@@ -640,7 +641,7 @@ export interface TagObj<P, I, O, IKs, OKs> {
   output: <newK extends string>(
     tagOrMap: newK | Partial<Record<keyof InferTMap<O>, newK>>
   ) => TagObj<P, I, O, IKs, OKs | newK>;
-  _tagMaps: TagMaps<I, O, IKs, OKs>;
+  _aliasMaps: TagMaps<I, O, IKs, OKs>;
 }
 
 export function alias<P, IMap, OMap>(spec: ZZJobSpec<P, IMap, OMap>) {
@@ -652,33 +653,33 @@ export function alias<P, IMap, OMap>(spec: ZZJobSpec<P, IMap, OMap>) {
 
 function _tagObj<P, I, O, IKs, OKs>(
   spec: ZZJobSpec<P, I, O>,
-  _tagMaps: TagMaps<I, O, IKs, OKs>
+  _aliasMaps: TagMaps<I, O, IKs, OKs>
 ): TagObj<P, I, O, IKs, OKs> {
-  const tagMaps = { ..._tagMaps };
+  const aliasMaps = { ..._aliasMaps };
   return {
     spec,
-    _tagMaps: tagMaps,
+    _aliasMaps: aliasMaps,
     input: <Ks extends string>(
       tagOrMap: Ks | Partial<Record<keyof InferTMap<I>, Ks>>
     ) => {
-      const tm = tagMaps as TagMaps<I, O, IKs | Ks, OKs>;
+      const tm = aliasMaps as TagMaps<I, O, IKs | Ks, OKs>;
       if (typeof tagOrMap === "string") {
         const key = spec.getSingleInputTag();
         tm.inputTag[key] = tagOrMap;
       } else {
-        tm.inputTag = { ...tagMaps.inputTag, ...tagOrMap };
+        tm.inputTag = { ...aliasMaps.inputTag, ...tagOrMap };
       }
       return _tagObj(spec, tm);
     },
     output: <Ks extends string>(
       tagOrMap: Ks | Partial<Record<keyof InferTMap<O>, string>>
     ) => {
-      const tm = tagMaps as TagMaps<I, O, IKs, OKs | Ks>;
+      const tm = aliasMaps as TagMaps<I, O, IKs, OKs | Ks>;
       if (typeof tagOrMap === "string") {
         const tag = spec.getSingleOutputTag();
         tm.outputTag[tag] = tagOrMap;
       } else {
-        tm.outputTag = { ...tagMaps.outputTag, ...tagOrMap };
+        tm.outputTag = { ...aliasMaps.outputTag, ...tagOrMap };
       }
       return _tagObj(spec, tm);
     },

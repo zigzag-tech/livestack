@@ -1274,14 +1274,14 @@ export function convertSpecOrName(
   }
 }
 export function resolveTagMapping({
-  _tagMaps,
+  _aliasMaps,
 }:
   | {
-      _tagMaps?: Partial<TagMaps<any, any, any, any>>;
+      _aliasMaps?: Partial<TagMaps<any, any, any, any>>;
     }
   | any) {
   return {
-    inputTagMap: _tagMaps?.inputTag ?? {},
-    outputTagMap: _tagMaps?.outputTag ?? {},
+    inputAliasMap: _aliasMaps?.inputTag ?? {},
+    outputAliasMap: _aliasMaps?.outputTag ?? {},
   };
 }
