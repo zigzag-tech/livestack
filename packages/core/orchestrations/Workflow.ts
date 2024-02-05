@@ -1,5 +1,5 @@
-// import { InferInputType, InferOutputType } from "../jobs/ZZJobSpec";
-import { CheckSpec, SpecOrName, ZZJobSpec } from "../jobs/ZZJobSpec";
+// import { InferInputType, InferOutputType } from "../jobs/Spec";
+import { CheckSpec, SpecOrName, Spec } from "../jobs/Spec";
 import { IOSpec, InferTMap } from "@livestack/shared/IOSpec";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
@@ -11,7 +11,7 @@ import {
   SpecAndOutlet,
   resolveUniqueSpec,
   resolveTagMapping,
-} from "../jobs/ZZJobSpec";
+} from "../jobs/Spec";
 
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 
@@ -57,7 +57,7 @@ const WorkflowJobOptionsSanitized = z.object({
 });
 type WorkflowJobOptionsSanitized = z.infer<typeof WorkflowJobOptionsSanitized>;
 
-export class WorkflowSpec extends ZZJobSpec<
+export class WorkflowSpec extends Spec<
   WorkflowChildJobOptionsSanitized,
   any,
   {
@@ -269,7 +269,7 @@ export class WorkflowSpec extends ZZJobSpec<
           }
 
           const childSpecName = jobNode.specName;
-          const childJobSpec = ZZJobSpec.lookupByName(childSpecName);
+          const childJobSpec = Spec.lookupByName(childSpecName);
 
           await childJobSpec.enqueueJob({
             jobId: jobNode.jobId,
@@ -509,7 +509,7 @@ export class Workflow {
 function convertSpecAndOutletWithTags(
   specAndOutletOrTagged: SpecAndOutletOrTagged
 ): {
-  spec: ZZJobSpec<any, any, any>;
+  spec: Spec<any, any, any>;
   uniqueSpecLabel?: string;
   tagInSpec?: string;
   inputAliasMap: Record<string, string>;
@@ -622,7 +622,7 @@ export type TagMaps<I, O, IKs, OKs> = {
 };
 
 export interface TagObj<P, I, O, IKs, OKs> {
-  spec: ZZJobSpec<P, I, O>;
+  spec: Spec<P, I, O>;
   input: <newK extends string>(
     tagOrMap: newK | Partial<Record<keyof InferTMap<I>, newK>>
   ) => TagObj<P, I, O, IKs | newK, OKs>;
@@ -632,7 +632,7 @@ export interface TagObj<P, I, O, IKs, OKs> {
   _aliasMaps: TagMaps<I, O, IKs, OKs>;
 }
 
-export function alias<P, IMap, OMap>(spec: ZZJobSpec<P, IMap, OMap>) {
+export function alias<P, IMap, OMap>(spec: Spec<P, IMap, OMap>) {
   return _tagObj(spec, {
     inputTag: {},
     outputTag: {},
@@ -640,7 +640,7 @@ export function alias<P, IMap, OMap>(spec: ZZJobSpec<P, IMap, OMap>) {
 }
 
 function _tagObj<P, I, O, IKs, OKs>(
-  spec: ZZJobSpec<P, I, O>,
+  spec: Spec<P, I, O>,
   _aliasMaps: TagMaps<I, O, IKs, OKs>
 ): TagObj<P, I, O, IKs, OKs> {
   const aliasMaps = { ..._aliasMaps };

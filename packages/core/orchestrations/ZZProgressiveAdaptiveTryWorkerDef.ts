@@ -1,11 +1,11 @@
-import { CheckSpec, ZZJobSpec } from "../jobs/ZZJobSpec";
+import { CheckSpec, Spec } from "../jobs/Spec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { z } from "zod";
 import _ from "lodash";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { ZZEnv } from "../jobs/ZZEnv";
 export interface AttemptDef<ParentP, ParentO, P, OMap> {
-  jobSpec: ZZJobSpec<P, unknown, OMap>;
+  jobSpec: Spec<P, unknown, OMap>;
   timeout: number;
   transformInput: (params: ParentP) => Promise<P> | P;
   transformOutput: <K extends keyof OMap>(
@@ -35,7 +35,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
     jobSpec,
   }: {
     zzEnv?: ZZEnv;
-    jobSpec: ZZJobSpec<ParentP, {}, ParentO>;
+    jobSpec: Spec<ParentP, {}, ParentO>;
     attempts: {
       [K in keyof Specs]: AttemptDef<
         ParentP,

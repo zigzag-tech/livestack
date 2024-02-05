@@ -54,14 +54,14 @@ const queueMapByProjectIdAndQueueName = new Map<
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
-export type CheckSpec<SP> = SP extends ZZJobSpec<
+export type CheckSpec<SP> = SP extends Spec<
   infer P,
   infer I,
   infer O,
   infer IMap,
   infer OMap
 >
-  ? ZZJobSpec<P, I, O, IMap, OMap>
+  ? Spec<P, I, O, IMap, OMap>
   : never;
 
 export type InferOutputType<
@@ -76,7 +76,7 @@ export type InferInputType<
   IMap = InferStreamSetType<CheckSpec<Spec>["inputDefSet"]>
 > = IMap[K extends keyof IMap ? K : never] | null;
 
-export class ZZJobSpec<
+export class Spec<
   P = {},
   I = never,
   O = never,
@@ -86,7 +86,7 @@ export class ZZJobSpec<
   private readonly _zzEnv: ZZEnv | null = null;
   protected static _registryBySpecName: Record<
     string,
-    ZZJobSpec<any, any, any, any, any>
+    Spec<any, any, any, any, any>
   > = {};
 
   protected logger: ReturnType<typeof getLogger>;
@@ -126,19 +126,19 @@ export class ZZJobSpec<
     // if (!output) {
     //   this.logger.warn(`No output defined for job spec ${this.name}.`);
     // }
-    ZZJobSpec._registryBySpecName[this.name] = this;
+    Spec._registryBySpecName[this.name] = this;
   }
 
   public static lookupByName(specName: string) {
-    if (!ZZJobSpec._registryBySpecName[specName]) {
+    if (!Spec._registryBySpecName[specName]) {
       throw new Error(`JobSpec ${specName} not defined on this machine.`);
     }
-    return ZZJobSpec._registryBySpecName[specName];
+    return Spec._registryBySpecName[specName];
   }
 
   public derive<NewP, NewIMap, NewOMap>(
     newP: Partial<
-      ConstructorParameters<typeof ZZJobSpec<NewP, NewIMap, NewOMap>>[0]
+      ConstructorParameters<typeof Spec<NewP, NewIMap, NewOMap>>[0]
     > & {
       name: string;
     }
@@ -148,10 +148,10 @@ export class ZZJobSpec<
         `Derived job spec must have a different name from the original job spec ${this.name}.`
       );
     }
-    return new ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>({
+    return new Spec<P & NewP, IMap & NewIMap, OMap & NewOMap>({
       ...newP,
       name: newP.name,
-    } as ConstructorParameters<typeof ZZJobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>>[0]);
+    } as ConstructorParameters<typeof Spec<P & NewP, IMap & NewIMap, OMap & NewOMap>>[0]);
   }
 
   public get zzEnv() {
@@ -162,7 +162,7 @@ export class ZZJobSpec<
   public get zzEnvEnsured() {
     if (!this.zzEnv) {
       throw new Error(
-        `ZZEnv is not configured in ZZJobSpec ${this.name}. \nPlease either pass it when constructing ZZJobSpec or set it globally using ZZEnv.setGlobal().`
+        `ZZEnv is not configured in Spec ${this.name}. \nPlease either pass it when constructing Spec or set it globally using ZZEnv.setGlobal().`
       );
     }
     return this.zzEnv;
@@ -517,7 +517,7 @@ export class ZZJobSpec<
       type,
     });
 
-    const responsibleSpec = ZZJobSpec.lookupByName(specTagInfo.specName);
+    const responsibleSpec = Spec.lookupByName(specTagInfo.specName);
 
     let def: z.ZodType<WrapTerminatorAndDataId<T>>;
     if (type === "in") {
@@ -618,7 +618,7 @@ export class ZZJobSpec<
       outputStreamIdOverridesByTag,
     } = p || {};
 
-    // console.debug("ZZJobSpec._enqueueJob", jobId, jobOptions);
+    // console.debug("Spec._enqueueJob", jobId, jobOptions);
     // force job id to be the same as name
     const workers = await this._rawQueue.getWorkers();
     if (workers.length === 0) {
@@ -735,9 +735,7 @@ export class ZZJobSpec<
                 alias: resolvedTag,
                 type: "in",
               });
-              const responsibleSpec = ZZJobSpec.lookupByName(
-                specTagInfo.specName
-              );
+              const responsibleSpec = Spec.lookupByName(specTagInfo.specName);
               const responsibleJobId =
                 await this.lookUpChildJobIdByGroupIDAndSpecTag({
                   groupId: jobId,
@@ -759,9 +757,7 @@ export class ZZJobSpec<
                 alias: resolvedTag,
                 type: "in",
               });
-              const responsibleSpec = ZZJobSpec.lookupByName(
-                specTagInfo.specName
-              );
+              const responsibleSpec = Spec.lookupByName(specTagInfo.specName);
               const responsibleJobId =
                 await this.lookUpChildJobIdByGroupIDAndSpecTag({
                   groupId: jobId,
@@ -782,9 +778,7 @@ export class ZZJobSpec<
                 alias: resolvedTag,
                 type: "in",
               });
-              const responsibleSpec = ZZJobSpec.lookupByName(
-                specTagInfo.specName
-              );
+              const responsibleSpec = Spec.lookupByName(specTagInfo.specName);
 
               const s = await responsibleSpec.getInputJobStream({
                 jobId,
@@ -825,7 +819,7 @@ export class ZZJobSpec<
         alias: tag,
         type: "out",
       });
-      const responsibleSpec = ZZJobSpec.lookupByName(specTagInfo.specName);
+      const responsibleSpec = Spec.lookupByName(specTagInfo.specName);
 
       if (
         !responsibleSpec._outputCollectorByJobIdAndTag[
@@ -1052,7 +1046,7 @@ export class ZZJobSpec<
   //   groupId: string,
   //   specQuery: UniqueSpecQuery
   // ): {
-  //   spec: ZZJobSpec<any, any, any>;
+  //   spec: Spec<any, any, any>;
   //   jobId: string;
   // } {
   //   const specInfo = resolveUniqueSpec(specQuery);
@@ -1074,7 +1068,7 @@ export class ZZJobSpec<
   //     );
   //   }
   //   const jobId = (this.graph.getNodeAttributes(jobNodeId) as JobNode).jobId;
-  //   const childSpec = ZZJobSpec.lookupByName(specInfo.spec.name);
+  //   const childSpec = Spec.lookupByName(specInfo.spec.name);
 
   //   return { spec: childSpec, jobId };
   // }
@@ -1110,9 +1104,9 @@ export class ZZJobSpec<
   }
 
   public static override define<P, I, O>(
-    p: ConstructorParameters<typeof ZZJobSpec<P, I, O>>[0]
+    p: ConstructorParameters<typeof Spec<P, I, O>>[0]
   ) {
-    return new ZZJobSpec<P, I, O>(p);
+    return new Spec<P, I, O>(p);
   }
 }
 
@@ -1162,7 +1156,7 @@ export class JobManager<P, I, O, IMap, OMap> {
     output,
     instantiatedGraph,
   }: {
-    spec: ZZJobSpec<P, I, O, IMap, OMap>;
+    spec: Spec<P, I, O, IMap, OMap>;
     jobId: string;
     input: JobInput<IMap>;
     output: JobOutput<OMap>;
@@ -1204,7 +1198,7 @@ export interface JobOutput<OMap> {
 }
 export const SpecOrName = z.union([
   z.string(),
-  z.instanceof(ZZJobSpec<any, any, any, any, any>),
+  z.instanceof(Spec<any, any, any, any, any>),
 ]);
 export type SpecOrName = z.infer<typeof SpecOrName>; // Conversion functions using TypeScript
 
@@ -1225,11 +1219,11 @@ export type SpecAndOutlet = z.infer<typeof SpecAndOutlet>;
 export function resolveUniqueSpec(
   uniqueSpec: UniqueSpecQuery | TagObj<any, any, any, any, any>
 ): {
-  spec: ZZJobSpec<any, any, any>;
+  spec: Spec<any, any, any>;
   uniqueSpecLabel?: string;
 } {
   if (typeof uniqueSpec === "string") {
-    const spec = ZZJobSpec.lookupByName(uniqueSpec);
+    const spec = Spec.lookupByName(uniqueSpec);
     return {
       spec,
     };
@@ -1264,10 +1258,10 @@ export function convertSpecOrName(
   specOrName: SpecOrName | TagObj<any, any, any, any, any>
 ) {
   if (typeof specOrName === "string") {
-    return ZZJobSpec.lookupByName(specOrName);
-  } else if (specOrName instanceof ZZJobSpec) {
+    return Spec.lookupByName(specOrName);
+  } else if (specOrName instanceof Spec) {
     return specOrName;
-  } else if (specOrName.spec instanceof ZZJobSpec) {
+  } else if (specOrName.spec instanceof Spec) {
     return convertSpecOrName(specOrName.spec);
   } else {
     throw new Error("Invalid spec");

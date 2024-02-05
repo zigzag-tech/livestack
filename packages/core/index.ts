@@ -1,6 +1,6 @@
 export { ZZJob } from "./jobs/ZZJob";
 export { ZZWorker, ZZWorkerDef } from "./jobs/ZZWorker";
-export { ZZJobSpec } from "./jobs/ZZJobSpec";
+export { Spec } from "./jobs/Spec";
 export { ZZEnv } from "./jobs/ZZEnv";
 export { ZZStream } from "./jobs/ZZStream";
 export { fileOrBufferSchema } from "./jobs/ZZEnv";

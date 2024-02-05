@@ -1,4 +1,4 @@
-// import { ZZJobSpec } from "./ZZJobSpec";
+// import { Spec } from "./Spec";
 // import { z } from "zod";
 // import { ZZStream, hashDef } from "./ZZStream";
 // import { InferStreamSetType, UnknownTMap } from "./StreamDefSet";
@@ -9,12 +9,12 @@
 // connectSpecs([jobSpec1, jobSpec2]);
 
 // type JobSpecAndOutpet<
-//   T extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>
-// > = [ZZJobSpec<T>, keyof InferStreamSetType<T["inputDefSet"]>] | ZZJobSpec<T>;
+//   T extends Spec<unknown, UnknownTMap, UnknownTMap, unknown>
+// > = [Spec<T>, keyof InferStreamSetType<T["inputDefSet"]>] | Spec<T>;
 
 // type JobSpecConnector<
-//   T1 extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>,
-//   T2 extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>
+//   T1 extends Spec<unknown, UnknownTMap, UnknownTMap, unknown>,
+//   T2 extends Spec<unknown, UnknownTMap, UnknownTMap, unknown>
 // > = {
 //   in: {
 //     jobSpec: T1;
@@ -37,8 +37,8 @@
 // ];
 
 // function connectSpecs<
-//   T1 extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>,
-//   T2 extends ZZJobSpec<unknown, UnknownTMap, UnknownTMap, unknown>
+//   T1 extends Spec<unknown, UnknownTMap, UnknownTMap, unknown>,
+//   T2 extends Spec<unknown, UnknownTMap, UnknownTMap, unknown>
 // >(p1: JobSpecAndOutpet<T1>, p2: JobSpecAndOutpet<T2>): JobSpecConnector<T1, T2> {
 //   // process p1: if array, get jobSpec and key; else, get jobSpec and key as "default"
 //   const p1JobSpec = Array.isArray(p1) ? p1[0] : p1;
@@ -92,17 +92,17 @@
 //     connectors,
 //   }: {
 //     jobSpecs: {
-//       [K in number]: ZZJobSpec<Ps[K], IMaps[K], OMaps[K], TProgresses[K]>;
+//       [K in number]: Spec<Ps[K], IMaps[K], OMaps[K], TProgresses[K]>;
 //     };
 //     connectors: JobSpecConnector<
-//       ZZJobSpec<Ps[number], IMaps[number], OMaps[number], TProgresses[number]>,
-//       ZZJobSpec<Ps[number], IMaps[number], OMaps[number], TProgresses[number]>>[]
+//       Spec<Ps[number], IMaps[number], OMaps[number], TProgresses[number]>,
+//       Spec<Ps[number], IMaps[number], OMaps[number], TProgresses[number]>>[]
 //   }) {
 
 //   }
 // }
 
-// const jobSpec1 = new ZZJobSpec({
+// const jobSpec1 = new Spec({
 //   name: "jobSpec1",
 //   jobOptions: z.object({}),
 //   input: (z.object({})),
@@ -110,14 +110,14 @@
 //   zzEnv: ZZEnv.global(),
 // });
 
-// const jobSpec2 = new ZZJobSpec({
+// const jobSpec2 = new Spec({
 //   name: "jobSpec2",
 //   jobOptions: z.object({}),
 //   input: (z.object({})),
 //   output: (z.object({})),
 //   zzEnv: ZZEnv.global(),
 // });
-// const jobSpec3 = new ZZJobSpec({
+// const jobSpec3 = new Spec({
 //   name: "jobSpec3",
 //   jobOptions: z.object({}),
 //   input: (z.object({})),

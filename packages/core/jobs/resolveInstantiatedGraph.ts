@@ -2,7 +2,7 @@ import { StreamIdOverridesForRootSpec } from "../orchestrations/Graph";
 import { getJobStreamConnectorRecs, getParentJobRec } from "../db/knexConn";
 import { ZZEnv } from "./ZZEnv";
 import { InstantiatedGraph } from "../orchestrations/Graph";
-import { ZZJobSpec } from "./ZZJobSpec";
+import { Spec } from "./Spec";
 
 export async function resolveInstantiatedGraph({
   zzEnv,
@@ -10,7 +10,7 @@ export async function resolveInstantiatedGraph({
   jobId,
 }: {
   zzEnv: ZZEnv;
-  spec: ZZJobSpec<any, any, any, any, any>;
+  spec: Spec<any, any, any, any, any>;
   jobId: string;
 }) {
   const streams = await getJobStreamConnectorRecs({

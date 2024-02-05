@@ -1,5 +1,5 @@
 import Replicate from "replicate";
-import { ZZJobSpec } from "@livestack/core";
+import { Spec } from "@livestack/core";
 import { ZZWorkerDef } from "@livestack/core";
 import { ZZEnv } from "@livestack/core";
 
@@ -20,7 +20,7 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
     zzEnv,
     replicateToken,
   }: {
-    jobSpec: ZZJobSpec<P, {}, { default: O }>;
+    jobSpec: Spec<P, {}, { default: O }>;
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
     zzEnv?: ZZEnv;
