@@ -5,7 +5,7 @@ import _ from "lodash";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { ZZEnv } from "../jobs/ZZEnv";
 export interface AttemptDef<ParentP, ParentO, P, OMap> {
-  jobSpec: JobSpec<P, unknown, OMap>;
+  jobSpec: JobSpec<P, any, any, unknown, OMap>;
   timeout: number;
   transformInput: (params: ParentP) => Promise<P> | P;
   transformOutput: <K extends keyof OMap>(
@@ -19,7 +19,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
   ParentP,
   ParentO,
   Specs
-> extends ZZWorkerDef<ParentP, {}, ParentO> {
+> extends ZZWorkerDef<ParentP, any, any, {}, any, ParentO> {
   attempts: {
     [K in keyof Specs]: AttemptDef<
       ParentP,
@@ -35,7 +35,7 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
     jobSpec,
   }: {
     zzEnv?: ZZEnv;
-    jobSpec: JobSpec<ParentP, {}, ParentO>;
+    jobSpec: JobSpec<ParentP, any, any, any, ParentO>;
     attempts: {
       [K in keyof Specs]: AttemptDef<
         ParentP,
@@ -44,17 +44,17 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
         InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
       >;
     };
-    ultimateFallback?: () => Promise<ParentO>;
+    ultimateFallback?: () => Promise<ParentO[keyof ParentO]>;
   }) {
     super({
       jobSpec,
       zzEnv,
       processor: async ({ logger, jobOptions, jobId }) => {
-        const genRetryFunction = <P, O>({
+        const genRetryFunction = <P, OMap>({
           jobSpec,
           transformInput,
           transformOutput,
-        }: AttemptDef<ParentP, ParentO, P, O>) => {
+        }: AttemptDef<ParentP, ParentO, P, OMap>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
 
@@ -68,15 +68,10 @@ export class ZZProgressiveAdaptiveTryWorkerDef<
               throw new Error("no output");
             }
 
-            const result = {
-              ...o,
-              data: await transformOutput(o.data),
-            };
-
             return {
               timeout: false as const,
               error: false as const,
-              result,
+              result: await transformOutput(o.data),
             };
           };
           return fn;
