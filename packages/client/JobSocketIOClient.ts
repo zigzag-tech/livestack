@@ -102,7 +102,7 @@ export class JobSocketIOConnection {
   private subscribedOutputKeys: string[] = [];
 
   public subToStream<T>(
-    { tag }: { tag?: string },
+    { tag, type }: { tag?: string; type: "input" | "output" },
     callback: (data: {
       data: T;
       tag: string;
@@ -123,7 +123,7 @@ export class JobSocketIOConnection {
       }
       tag = this.availableOutputs[0];
     }
-    if (this.availableOutputs.some((t) => t === tag)) {
+    if (type === "output" && this.availableOutputs.some((t) => t === tag)) {
       this.socketIOClient.on(`stream:${this.jobId}/${tag}`, callback);
       this.subscribedOutputKeys.push(tag);
 
@@ -135,7 +135,10 @@ export class JobSocketIOConnection {
       };
 
       return unsub;
-    } else if (this.availableInputs.some((t) => t === tag)) {
+    } else if (
+      type === "input" &&
+      this.availableInputs.some((t) => t === tag)
+    ) {
       // subscribe to local observable
       if (!this.localObservablesByTag[tag]) {
         const subj = new Subject<{
@@ -155,7 +158,7 @@ export class JobSocketIOConnection {
       return unsub;
     } else {
       throw new Error(
-        `Tag "${tag}" not in available streams: [${[
+        `Tag "${tag}" of type ${type} not in available streams: [${[
           ...this.availableOutputs,
           ...this.availableInputs,
         ]

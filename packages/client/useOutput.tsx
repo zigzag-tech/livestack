@@ -16,6 +16,30 @@ export function useOutput<O>({
   tag?: string;
   def?: z.ZodType<O>;
 }) {
+  return useStream<O>({
+    job: { specName, uniqueSpecLabel, jobId, connRef },
+    tag,
+    def,
+    type: "output",
+  });
+}
+
+export function useStream<O>({
+  job: { specName, uniqueSpecLabel, jobId, connRef },
+  tag,
+  def,
+  type,
+}: {
+  job: {
+    specName?: string;
+    uniqueSpecLabel?: string;
+    jobId?: string;
+    connRef: React.MutableRefObject<Promise<JobSocketIOConnection> | undefined>;
+  };
+  type: "input" | "output";
+  tag?: string;
+  def?: z.ZodType<O>;
+}) {
   const [output, setOutput] = useState<{
     data: O;
     timestamp: number;
@@ -34,6 +58,7 @@ export function useOutput<O>({
         conn.subToStream<O>(
           {
             tag,
+            type,
           },
           (data) => {
             setOutput({ ...data, tag });
