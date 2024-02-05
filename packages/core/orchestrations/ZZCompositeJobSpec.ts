@@ -102,7 +102,7 @@
 //   }
 // }
 
-// const jobSpec1 = new Spec({
+// const jobSpec1 = new JobSpec({
 //   name: "jobSpec1",
 //   jobOptions: z.object({}),
 //   input: (z.object({})),
@@ -110,14 +110,14 @@
 //   zzEnv: ZZEnv.global(),
 // });
 
-// const jobSpec2 = new Spec({
+// const jobSpec2 = new JobSpec({
 //   name: "jobSpec2",
 //   jobOptions: z.object({}),
 //   input: (z.object({})),
 //   output: (z.object({})),
 //   zzEnv: ZZEnv.global(),
 // });
-// const jobSpec3 = new Spec({
+// const jobSpec3 = new JobSpec({
 //   name: "jobSpec3",
 //   jobOptions: z.object({}),
 //   input: (z.object({})),
