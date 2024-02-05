@@ -1,3 +1,4 @@
+import { WrapWithTimestamp } from "./../utils/io";
 import { SpecNode } from "../orchestrations/DefGraph";
 import { getNodesConnectedToStream } from "../orchestrations/InstantiatedGraph";
 import { StreamNode } from "../orchestrations/InstantiatedGraph";
@@ -883,10 +884,9 @@ export class JobSpec<
       func.byTag = singletonSubscriberByTag;
       func.tags = this.outputDefSet.keys;
       func.nextValue = nextValue;
-      (func.valueObservable = new Observable<{
-        data: OMap[keyof OMap];
-        timestamp: number;
-      }>((subscriber) => {
+      (func.valueObservable = new Observable<
+        WrapWithTimestamp<OMap[keyof OMap]>
+      >((subscriber) => {
         while (true) {
           const next = nextValue();
           if (!next) {
@@ -1186,14 +1186,8 @@ export interface JobOutput<OMap> {
   <K extends keyof OMap>(tag?: K): ByTagOutput<OMap[K]>;
   tags: (keyof OMap)[];
   byTag: <K extends keyof OMap>(tag: K) => ByTagOutput<OMap[K]>;
-  nextValue: () => Promise<{
-    data: OMap[keyof OMap];
-    timestamp: number;
-  } | null>;
-  valueObservable: Observable<{
-    data: OMap[keyof OMap];
-    timestamp: number;
-  } | null>;
+  nextValue: () => Promise<WrapWithTimestamp<OMap[keyof OMap]> | null>;
+  valueObservable: Observable<WrapWithTimestamp<OMap[keyof OMap]> | null>;
 
   [Symbol.asyncIterator]: () => AsyncIterableIterator<{
     data: OMap[keyof OMap];

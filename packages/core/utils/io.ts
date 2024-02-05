@@ -6,10 +6,7 @@ export interface ByTagOutput<T> {
     data: T;
     timestamp: number;
   }>;
-  nextValue: () => Promise<{
-    data: T;
-    timestamp: number;
-  } | null>;
+  nextValue: () => Promise<WrapWithTimestamp<T> | null>;
   valueObservable: Observable<{
     data: T;
     timestamp: number;
