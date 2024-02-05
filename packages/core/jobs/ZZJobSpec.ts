@@ -512,8 +512,8 @@ export class ZZJobSpec<
     const { jobId, type } = p;
     type T = TT extends "in" ? IMap[keyof IMap] : OMap[keyof OMap];
 
-    const specTagInfo = this.convertPublicTagToSpecTag({
-      tag: p.tag,
+    const specTagInfo = this.convertWorkflowAliasToSpecTag({
+      alias: p.tag,
       type,
     });
 
@@ -731,8 +731,8 @@ export class ZZJobSpec<
           const resolvedTag = tag || (that.getSingleInputTag() as K);
           return {
             feed: async (data: IMap[K]) => {
-              const specTagInfo = that.convertPublicTagToSpecTag({
-                tag: resolvedTag,
+              const specTagInfo = that.convertWorkflowAliasToSpecTag({
+                alias: resolvedTag,
                 type: "in",
               });
               const responsibleSpec = ZZJobSpec.lookupByName(
@@ -755,8 +755,8 @@ export class ZZJobSpec<
               });
             },
             terminate: async () => {
-              const specTagInfo = that.convertPublicTagToSpecTag({
-                tag: resolvedTag,
+              const specTagInfo = that.convertWorkflowAliasToSpecTag({
+                alias: resolvedTag,
                 type: "in",
               });
               const responsibleSpec = ZZJobSpec.lookupByName(
@@ -778,8 +778,8 @@ export class ZZJobSpec<
               });
             },
             getStreamId: async () => {
-              const specTagInfo = that.convertPublicTagToSpecTag({
-                tag: resolvedTag,
+              const specTagInfo = that.convertWorkflowAliasToSpecTag({
+                alias: resolvedTag,
                 type: "in",
               });
               const responsibleSpec = ZZJobSpec.lookupByName(
@@ -821,8 +821,8 @@ export class ZZJobSpec<
     jobId: string
   ) => {
     const singletonSubscriberByTag = <K extends keyof OMap>(tag: K) => {
-      const specTagInfo = this.convertPublicTagToSpecTag({
-        tag,
+      const specTagInfo = this.convertWorkflowAliasToSpecTag({
+        alias: tag,
         type: "out",
       });
       const responsibleSpec = ZZJobSpec.lookupByName(specTagInfo.specName);
@@ -919,7 +919,7 @@ export class ZZJobSpec<
     return this.getSingleTag("output");
   }
 
-  protected convertSpecTagToPublicTag({
+  protected convertSpecTagToWorkflowAlias({
     tag,
   }: {
     specName: string;
@@ -930,12 +930,12 @@ export class ZZJobSpec<
     return tag;
   }
 
-  protected convertPublicTagToSpecTag({
+  protected convertWorkflowAliasToSpecTag({
     type,
-    tag,
+    alias,
   }: {
     type: "in" | "out";
-    tag: string | symbol | number;
+    alias: string | symbol | number;
   }): {
     specName: string;
     tag: string;
@@ -944,7 +944,7 @@ export class ZZJobSpec<
   } {
     return {
       specName: this.name,
-      tag: tag.toString(),
+      tag: alias.toString(),
       type,
       uniqueSpecLabel: undefined as string | undefined,
     };
@@ -1008,7 +1008,7 @@ export class ZZJobSpec<
         ...qualified,
         conns: qualified.conns.map((c) => ({
           ...c,
-          publicTag: this.convertSpecTagToPublicTag(c),
+          alias: this.convertSpecTagToWorkflowAlias(c),
         })),
       }));
     const qualified = pass2;
@@ -1026,11 +1026,11 @@ export class ZZJobSpec<
       );
     } else {
       const qualifiedC = qualified[0].conns[0];
-      if (!qualifiedC.publicTag) {
+      if (!qualifiedC.alias) {
         // the user didn't give a public tag; auto-register
       }
       const t =
-        (qualified[0].conns[0].publicTag as T extends "input"
+        (qualified[0].conns[0].alias as T extends "input"
           ? keyof IMap
           : keyof OMap) || null;
 

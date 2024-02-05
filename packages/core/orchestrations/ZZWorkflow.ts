@@ -124,15 +124,15 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     any
   >;
 
-  protected readonly inputSpecTagByWorkflowTag: Record<
+  protected readonly inputSpecTagByWorkflowAlias: Record<
     string,
     { specName: string; tag: string; uniqueSpecLabel?: string }
   >;
-  protected readonly outputSpecTagByWorkflowTag: Record<
+  protected readonly outputSpecTagByWorkflowAlias: Record<
     string,
     { specName: string; tag: string; uniqueSpecLabel?: string }
   >;
-  protected readonly publicTagBySpecUniqueLabelAndTag: Record<
+  protected readonly workflowAliasBySpecUniqueLabelAndTag: Record<
     `${string}[${string | ""}]::${"in" | "out"}/${string}`,
     string
   >;
@@ -177,7 +177,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     };
 
     // reverse
-    let publicTagBySpecUniqueLabelAndTag: Record<
+    let workflowTagBySpecUniqueLabelAndTag: Record<
       `${string}[${string | ""}]::${"in" | "out"}/${string}`,
       string
     > = {};
@@ -211,20 +211,21 @@ export class ZZWorkflowSpec extends ZZJobSpec<
           ),
         };
         for (const [specTag, tag] of Object.entries(c.inputTagMap)) {
-          publicTagBySpecUniqueLabelAndTag[
+          workflowTagBySpecUniqueLabelAndTag[
             `${c.spec.name}[${c.uniqueSpecLabel || ""}]::in/${specTag}`
           ] = tag;
         }
         for (const [specTag, tag] of Object.entries(c.outputTagMap)) {
-          publicTagBySpecUniqueLabelAndTag[
+          workflowTagBySpecUniqueLabelAndTag[
             `${c.spec.name}[${c.uniqueSpecLabel || ""}]::out/${specTag}`
           ] = tag;
         }
       }
     }
-    this.inputSpecTagByWorkflowTag = inputSpecTagByWorkflowTag;
-    this.outputSpecTagByWorkflowTag = outputSpecTagByWorkflowTag;
-    this.publicTagBySpecUniqueLabelAndTag = publicTagBySpecUniqueLabelAndTag;
+    this.inputSpecTagByWorkflowAlias = inputSpecTagByWorkflowTag;
+    this.outputSpecTagByWorkflowAlias = outputSpecTagByWorkflowTag;
+    this.workflowAliasBySpecUniqueLabelAndTag =
+      workflowTagBySpecUniqueLabelAndTag;
 
     this._validateConnections();
     // for (const conn of canonicalConns) {
@@ -328,7 +329,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     });
   }
 
-  protected override convertSpecTagToPublicTag({
+  protected override convertSpecTagToWorkflowAlias({
     specName,
     tag,
     uniqueSpecLabel,
@@ -339,40 +340,40 @@ export class ZZWorkflowSpec extends ZZJobSpec<
     uniqueSpecLabel?: string;
     type: "in" | "out";
   }) {
-    return this.publicTagBySpecUniqueLabelAndTag[
+    return this.workflowAliasBySpecUniqueLabelAndTag[
       `${specName}[${uniqueSpecLabel || ""}]::${type}/${tag}`
     ];
   }
 
-  protected override convertPublicTagToSpecTag({
+  protected override convertWorkflowAliasToSpecTag({
     type,
-    tag,
+    alias,
   }: {
     type: "in" | "out";
-    tag: string | symbol | number;
+    alias: string | symbol | number;
   }) {
     if (type === "in") {
-      if (!this.inputSpecTagByWorkflowTag[tag.toString()]) {
+      if (!this.inputSpecTagByWorkflowAlias[alias.toString()]) {
         throw new Error(
           `No input spec tag found in workflow ${
             this.name
-          } for ${tag.toString()}`
+          } for ${alias.toString()}`
         );
       }
       return {
-        ...this.inputSpecTagByWorkflowTag[tag.toString()],
+        ...this.inputSpecTagByWorkflowAlias[alias.toString()],
         type,
       };
     } else {
-      if (!this.outputSpecTagByWorkflowTag[tag.toString()]) {
+      if (!this.outputSpecTagByWorkflowAlias[alias.toString()]) {
         throw new Error(
           `No output spec tag found in workflow ${
             this.name
-          } for ${tag.toString()}`
+          } for ${alias.toString()}`
         );
       }
       return {
-        ...this.outputSpecTagByWorkflowTag[tag.toString()],
+        ...this.outputSpecTagByWorkflowAlias[alias.toString()],
         type,
       };
     }
