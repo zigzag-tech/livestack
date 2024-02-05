@@ -42,7 +42,7 @@ import { InferTMap } from "@livestack/shared/IOSpec";
 import { wrapIfSingle } from "@livestack/shared/IOSpec";
 import { DefGraph, InstantiatedGraph, JobNode } from "../orchestrations/Graph";
 import { Observable } from "rxjs";
-import { TagObj, TagMaps } from "../orchestrations/ZZWorkflow";
+import { TagObj, TagMaps } from "../orchestrations/Workflow";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;

@@ -57,7 +57,7 @@ const WorkflowJobOptionsSanitized = z.object({
 });
 type WorkflowJobOptionsSanitized = z.infer<typeof WorkflowJobOptionsSanitized>;
 
-export class ZZWorkflowSpec extends ZZJobSpec<
+export class WorkflowSpec extends ZZJobSpec<
   WorkflowChildJobOptionsSanitized,
   any,
   {
@@ -403,9 +403,9 @@ export class ZZWorkflowSpec extends ZZJobSpec<
       throw new Error("No db connection found");
     }
 
-    let workflow = ZZWorkflow.lookupById(groupId);
+    let workflow = Workflow.lookupById(groupId);
     if (!workflow) {
-      workflow = new ZZWorkflow({
+      workflow = new Workflow({
         jobGroupId: groupId,
         jobGroupDef: this,
       });
@@ -467,7 +467,7 @@ export class ZZWorkflowSpec extends ZZJobSpec<
   }
 }
 
-export class ZZWorkflow {
+export class Workflow {
   private _graph: InstantiatedGraph | null = null;
   public get graph(): InstantiatedGraph {
     if (!this._graph) {
@@ -480,28 +480,28 @@ export class ZZWorkflow {
     }
     return this._graph;
   }
-  public readonly jobGroupDef: ZZWorkflowSpec;
+  public readonly jobGroupDef: WorkflowSpec;
   public readonly contextId: string;
-  private static _workflowById: Record<string, ZZWorkflow> = {};
+  private static _workflowById: Record<string, Workflow> = {};
 
   constructor({
     jobGroupDef,
     jobGroupId,
   }: {
     jobGroupId: string;
-    jobGroupDef: ZZWorkflowSpec;
+    jobGroupDef: WorkflowSpec;
   }) {
     this.contextId = jobGroupId;
     this.jobGroupDef = jobGroupDef;
-    ZZWorkflow._workflowById[jobGroupId] = this;
+    Workflow._workflowById[jobGroupId] = this;
   }
 
-  public static define(p: ConstructorParameters<typeof ZZWorkflowSpec>[0]) {
-    return new ZZWorkflowSpec(p);
+  public static define(p: ConstructorParameters<typeof WorkflowSpec>[0]) {
+    return new WorkflowSpec(p);
   }
 
   public static lookupById(jobGroupId: string) {
-    const r = this._workflowById[jobGroupId] as ZZWorkflow | undefined;
+    const r = this._workflowById[jobGroupId] as Workflow | undefined;
     return r || null;
   }
 }
