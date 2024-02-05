@@ -1,5 +1,5 @@
 // import { InferInputType, InferOutputType } from "../jobs/Spec";
-import { CheckSpec, SpecOrName, Spec } from "../jobs/Spec";
+import { CheckSpec, SpecOrName, JobSpec } from "../jobs/Spec";
 import { IOSpec, InferTMap } from "@livestack/shared/IOSpec";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
@@ -57,7 +57,7 @@ const WorkflowJobOptionsSanitized = z.object({
 });
 type WorkflowJobOptionsSanitized = z.infer<typeof WorkflowJobOptionsSanitized>;
 
-export class WorkflowSpec extends Spec<
+export class WorkflowSpec extends JobSpec<
   WorkflowChildJobOptionsSanitized,
   any,
   {
@@ -269,7 +269,7 @@ export class WorkflowSpec extends Spec<
           }
 
           const childSpecName = jobNode.specName;
-          const childJobSpec = Spec.lookupByName(childSpecName);
+          const childJobSpec = JobSpec.lookupByName(childSpecName);
 
           await childJobSpec.enqueueJob({
             jobId: jobNode.jobId,
@@ -509,7 +509,7 @@ export class Workflow {
 function convertSpecAndOutletWithTags(
   specAndOutletOrTagged: SpecAndOutletOrTagged
 ): {
-  spec: Spec<any, any, any>;
+  spec: JobSpec<any, any, any>;
   uniqueSpecLabel?: string;
   tagInSpec?: string;
   inputAliasMap: Record<string, string>;
@@ -622,7 +622,7 @@ export type TagMaps<I, O, IKs, OKs> = {
 };
 
 export interface TagObj<P, I, O, IKs, OKs> {
-  spec: Spec<P, I, O>;
+  spec: JobSpec<P, I, O>;
   input: <newK extends string>(
     tagOrMap: newK | Partial<Record<keyof InferTMap<I>, newK>>
   ) => TagObj<P, I, O, IKs | newK, OKs>;
@@ -632,7 +632,7 @@ export interface TagObj<P, I, O, IKs, OKs> {
   _aliasMaps: TagMaps<I, O, IKs, OKs>;
 }
 
-export function alias<P, IMap, OMap>(spec: Spec<P, IMap, OMap>) {
+export function alias<P, IMap, OMap>(spec: JobSpec<P, IMap, OMap>) {
   return _tagObj(spec, {
     inputTag: {},
     outputTag: {},
@@ -640,7 +640,7 @@ export function alias<P, IMap, OMap>(spec: Spec<P, IMap, OMap>) {
 }
 
 function _tagObj<P, I, O, IKs, OKs>(
-  spec: Spec<P, I, O>,
+  spec: JobSpec<P, I, O>,
   _aliasMaps: TagMaps<I, O, IKs, OKs>
 ): TagObj<P, I, O, IKs, OKs> {
   const aliasMaps = { ..._aliasMaps };

@@ -2,7 +2,7 @@ import _ from "lodash";
 import { Worker, Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import { ZZJob } from "./ZZJob";
-import { Spec } from "./Spec";
+import { JobSpec } from "./Spec";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { ZZProcessor } from "./ZZJob";
 import { ZZEnv } from "./ZZEnv";
@@ -15,14 +15,14 @@ export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
 export type ZZWorkerDefParams<P, I, O, WP extends object, IMap, OMap> = {
   concurrency?: number;
-  jobSpec: Spec<P, I, O, IMap, OMap>;
+  jobSpec: JobSpec<P, I, O, IMap, OMap>;
   processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
   instanceParamsDef?: z.ZodType<WP>;
   zzEnv?: ZZEnv;
 };
 
 export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
-  public readonly jobSpec: Spec<P, I, O, IMap, OMap>;
+  public readonly jobSpec: JobSpec<P, I, O, IMap, OMap>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
   public readonly processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
   public readonly zzEnv: ZZEnv | null = null;
@@ -70,18 +70,18 @@ export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
 
 function defineWorker<P, I, O, WP extends object, IMap, OMap>(
   p: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec"> & {
-    jobSpec: Spec<P, I, O, IMap, OMap>;
+    jobSpec: JobSpec<P, I, O, IMap, OMap>;
   }
 ) {
   const spec =
-    p.jobSpec instanceof Spec
+    p.jobSpec instanceof JobSpec
       ? p.jobSpec
-      : (new Spec(p.jobSpec) as Spec<P, I, O, IMap, OMap>);
+      : (new JobSpec(p.jobSpec) as JobSpec<P, I, O, IMap, OMap>);
   return spec.defineWorker(p);
 }
 
 export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
-  public readonly jobSpec: Spec<P, I, O, IMap, OMap>;
+  public readonly jobSpec: JobSpec<P, I, O, IMap, OMap>;
   protected readonly zzEnv: ZZEnv;
   protected readonly storageProvider?: IStorageProvider;
 

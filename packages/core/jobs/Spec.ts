@@ -54,14 +54,14 @@ const queueMapByProjectIdAndQueueName = new Map<
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
-export type CheckSpec<SP> = SP extends Spec<
+export type CheckSpec<SP> = SP extends JobSpec<
   infer P,
   infer I,
   infer O,
   infer IMap,
   infer OMap
 >
-  ? Spec<P, I, O, IMap, OMap>
+  ? JobSpec<P, I, O, IMap, OMap>
   : never;
 
 export type InferOutputType<
@@ -76,7 +76,7 @@ export type InferInputType<
   IMap = InferStreamSetType<CheckSpec<Spec>["inputDefSet"]>
 > = IMap[K extends keyof IMap ? K : never] | null;
 
-export class Spec<
+export class JobSpec<
   P = {},
   I = never,
   O = never,
@@ -86,7 +86,7 @@ export class Spec<
   private readonly _zzEnv: ZZEnv | null = null;
   protected static _registryBySpecName: Record<
     string,
-    Spec<any, any, any, any, any>
+    JobSpec<any, any, any, any, any>
   > = {};
 
   protected logger: ReturnType<typeof getLogger>;
@@ -126,19 +126,19 @@ export class Spec<
     // if (!output) {
     //   this.logger.warn(`No output defined for job spec ${this.name}.`);
     // }
-    Spec._registryBySpecName[this.name] = this;
+    JobSpec._registryBySpecName[this.name] = this;
   }
 
   public static lookupByName(specName: string) {
-    if (!Spec._registryBySpecName[specName]) {
+    if (!JobSpec._registryBySpecName[specName]) {
       throw new Error(`JobSpec ${specName} not defined on this machine.`);
     }
-    return Spec._registryBySpecName[specName];
+    return JobSpec._registryBySpecName[specName];
   }
 
   public derive<NewP, NewIMap, NewOMap>(
     newP: Partial<
-      ConstructorParameters<typeof Spec<NewP, NewIMap, NewOMap>>[0]
+      ConstructorParameters<typeof JobSpec<NewP, NewIMap, NewOMap>>[0]
     > & {
       name: string;
     }
@@ -148,10 +148,10 @@ export class Spec<
         `Derived job spec must have a different name from the original job spec ${this.name}.`
       );
     }
-    return new Spec<P & NewP, IMap & NewIMap, OMap & NewOMap>({
+    return new JobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>({
       ...newP,
       name: newP.name,
-    } as ConstructorParameters<typeof Spec<P & NewP, IMap & NewIMap, OMap & NewOMap>>[0]);
+    } as ConstructorParameters<typeof JobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>>[0]);
   }
 
   public get zzEnv() {
@@ -517,7 +517,7 @@ export class Spec<
       type,
     });
 
-    const responsibleSpec = Spec.lookupByName(specTagInfo.specName);
+    const responsibleSpec = JobSpec.lookupByName(specTagInfo.specName);
 
     let def: z.ZodType<WrapTerminatorAndDataId<T>>;
     if (type === "in") {
@@ -735,7 +735,9 @@ export class Spec<
                 alias: resolvedTag,
                 type: "in",
               });
-              const responsibleSpec = Spec.lookupByName(specTagInfo.specName);
+              const responsibleSpec = JobSpec.lookupByName(
+                specTagInfo.specName
+              );
               const responsibleJobId =
                 await this.lookUpChildJobIdByGroupIDAndSpecTag({
                   groupId: jobId,
@@ -757,7 +759,9 @@ export class Spec<
                 alias: resolvedTag,
                 type: "in",
               });
-              const responsibleSpec = Spec.lookupByName(specTagInfo.specName);
+              const responsibleSpec = JobSpec.lookupByName(
+                specTagInfo.specName
+              );
               const responsibleJobId =
                 await this.lookUpChildJobIdByGroupIDAndSpecTag({
                   groupId: jobId,
@@ -778,7 +782,9 @@ export class Spec<
                 alias: resolvedTag,
                 type: "in",
               });
-              const responsibleSpec = Spec.lookupByName(specTagInfo.specName);
+              const responsibleSpec = JobSpec.lookupByName(
+                specTagInfo.specName
+              );
 
               const s = await responsibleSpec.getInputJobStream({
                 jobId,
@@ -819,7 +825,7 @@ export class Spec<
         alias: tag,
         type: "out",
       });
-      const responsibleSpec = Spec.lookupByName(specTagInfo.specName);
+      const responsibleSpec = JobSpec.lookupByName(specTagInfo.specName);
 
       if (
         !responsibleSpec._outputCollectorByJobIdAndTag[
@@ -1104,9 +1110,9 @@ export class Spec<
   }
 
   public static override define<P, I, O>(
-    p: ConstructorParameters<typeof Spec<P, I, O>>[0]
+    p: ConstructorParameters<typeof JobSpec<P, I, O>>[0]
   ) {
-    return new Spec<P, I, O>(p);
+    return new JobSpec<P, I, O>(p);
   }
 }
 
@@ -1156,7 +1162,7 @@ export class JobManager<P, I, O, IMap, OMap> {
     output,
     instantiatedGraph,
   }: {
-    spec: Spec<P, I, O, IMap, OMap>;
+    spec: JobSpec<P, I, O, IMap, OMap>;
     jobId: string;
     input: JobInput<IMap>;
     output: JobOutput<OMap>;
@@ -1198,7 +1204,7 @@ export interface JobOutput<OMap> {
 }
 export const SpecOrName = z.union([
   z.string(),
-  z.instanceof(Spec<any, any, any, any, any>),
+  z.instanceof(JobSpec<any, any, any, any, any>),
 ]);
 export type SpecOrName = z.infer<typeof SpecOrName>; // Conversion functions using TypeScript
 
@@ -1219,11 +1225,11 @@ export type SpecAndOutlet = z.infer<typeof SpecAndOutlet>;
 export function resolveUniqueSpec(
   uniqueSpec: UniqueSpecQuery | TagObj<any, any, any, any, any>
 ): {
-  spec: Spec<any, any, any>;
+  spec: JobSpec<any, any, any>;
   uniqueSpecLabel?: string;
 } {
   if (typeof uniqueSpec === "string") {
-    const spec = Spec.lookupByName(uniqueSpec);
+    const spec = JobSpec.lookupByName(uniqueSpec);
     return {
       spec,
     };
@@ -1258,10 +1264,10 @@ export function convertSpecOrName(
   specOrName: SpecOrName | TagObj<any, any, any, any, any>
 ) {
   if (typeof specOrName === "string") {
-    return Spec.lookupByName(specOrName);
-  } else if (specOrName instanceof Spec) {
+    return JobSpec.lookupByName(specOrName);
+  } else if (specOrName instanceof JobSpec) {
     return specOrName;
-  } else if (specOrName.spec instanceof Spec) {
+  } else if (specOrName.spec instanceof JobSpec) {
     return convertSpecOrName(specOrName.spec);
   } else {
     throw new Error("Invalid spec");

@@ -1,5 +1,5 @@
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
-import { CheckSpec, Spec, sleep } from "../jobs/Spec";
+import { CheckSpec, JobSpec, sleep } from "../jobs/Spec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { WrapWithTimestamp } from "../utils/io";
@@ -13,7 +13,7 @@ type TriggerCheckContext = {
 };
 
 export interface ParallelAttempt<ParentI, ParentO, IMap, OMap> {
-  jobSpec: Spec<unknown, IMap, OMap>;
+  jobSpec: JobSpec<unknown, IMap, OMap>;
   timeout: number;
   transformInput: (
     params: ParentI[keyof ParentI]
@@ -39,7 +39,7 @@ export class ZZParallelAttemptWorkerDef<
     zzEnv,
   }: {
     zzEnv?: ZZEnv;
-    jobSpec: Spec<unknown, ParentIMap, ParentOMap>;
+    jobSpec: JobSpec<unknown, ParentIMap, ParentOMap>;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {

@@ -10,7 +10,7 @@ import { Observable, map, takeUntil } from "rxjs";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { updateJobStatus } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
-import { Spec } from "./Spec";
+import { JobSpec } from "./Spec";
 import { z } from "zod";
 import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
@@ -43,7 +43,7 @@ export class ZZJob<
   readonly jobOptions: P;
 
   readonly logger: ReturnType<typeof getLogger>;
-  readonly spec: Spec<P, I, O, IMap, OMap>;
+  readonly spec: JobSpec<P, I, O, IMap, OMap>;
   public graph: InstantiatedGraph;
 
   //async iterator
@@ -98,7 +98,7 @@ export class ZZJob<
     logger: ReturnType<typeof getLogger>;
     jobOptions: P;
     storageProvider?: IStorageProvider;
-    jobSpec: Spec<P, I, O, IMap, OMap>;
+    jobSpec: JobSpec<P, I, O, IMap, OMap>;
     workerInstanceParams?: WP;
     workerInstanceParamsSchema?: z.ZodType<WP>;
     workerName: string;
