@@ -41,7 +41,7 @@ export class ZZEnv implements EnvParams {
         "No projectId provided to ZZEnv. Giving it a default one: ",
         projectId
       );
-      fs.writeFileSync("PROJECT_ID", projectId);
+      // fs.writeFileSync("PROJECT_ID", projectId);
     }
     this.projectId = projectId;
     this.db = db;
