@@ -3,17 +3,19 @@ import { TransformFunction } from "./DefGraph";
 export class TransformRegistry {
   private static _transformsByWorkflowByReceivingSpecNameAndTag: Record<
     string,
-    Record<`${string}/${string}`, TransformFunction>
+    Record<`${string}${`[${string}]` | ""}/${string}`, TransformFunction>
   > = {};
 
   public static registerTransform({
     workflowSpecName,
     receivingSpecName,
+    receivingSpecUniqueLabel,
     tag,
     transform,
   }: {
     workflowSpecName: string;
     receivingSpecName: string;
+    receivingSpecUniqueLabel: string | null;
     tag: string;
     transform: TransformFunction;
   }) {
@@ -28,23 +30,32 @@ export class TransformRegistry {
     }
     TransformRegistry._transformsByWorkflowByReceivingSpecNameAndTag[
       workflowSpecName
-    ][`${receivingSpecName}/${tag.toString()}`] = transform;
+    ][
+      `${receivingSpecName}${
+        receivingSpecUniqueLabel ? `[${receivingSpecUniqueLabel}]` : ""
+      }/${tag.toString()}`
+    ] = transform;
   }
 
   public static getTransform({
     workflowSpecName,
     receivingSpecName,
+    receivingSpecUniqueLabel,
     tag,
   }: {
     workflowSpecName: string;
     receivingSpecName: string;
+    receivingSpecUniqueLabel: string | null;
     tag: string;
   }) {
     return (
       (TransformRegistry._transformsByWorkflowByReceivingSpecNameAndTag[
         workflowSpecName
-      ]?.[`${receivingSpecName}/${tag}`] as TransformFunction | undefined) ||
-      null
+      ]?.[
+        `${receivingSpecName}${
+          receivingSpecUniqueLabel ? `[${receivingSpecUniqueLabel}]` : ""
+        }/${tag}`
+      ] as TransformFunction | undefined) || null
     );
   }
 }
