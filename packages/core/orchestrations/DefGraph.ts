@@ -481,6 +481,12 @@ export class DefGraph extends Graph<DefGraphNode> {
     to: CanonicalConnectionTo
   ) {
     const fromSpecIdentifier = uniqueSpecIdentifier(from);
+    const transformsToRegister: {
+      specName: string;
+      uniqueSpecLabel: string | undefined;
+      tag: string;
+      transform: TransformFunction;
+    }[] = [];
     const fromSpecNodeId = this.ensureNode(fromSpecIdentifier, {
       specName: from.spec.name,
       ...(from.uniqueSpecLabel
@@ -506,6 +512,14 @@ export class DefGraph extends Graph<DefGraphNode> {
       label: id,
       hasTransform: !!to.transform,
     });
+    if (to.transform) {
+      transformsToRegister.push({
+        specName: to.spec.name,
+        uniqueSpecLabel: to.uniqueSpecLabel,
+        tag: to.tagInSpec,
+        transform: to.transform,
+      });
+    }
     const toUniqueLabel = to.uniqueSpecLabel;
     const toSpecNodeId = this.ensureNode(toSpecIdentifier, {
       specName: to.spec.name,
@@ -551,6 +565,7 @@ export class DefGraph extends Graph<DefGraphNode> {
       streamNodeId,
       fromOutletNodeId,
       toInletNodeId,
+      transformsToRegister,
     };
   }
 

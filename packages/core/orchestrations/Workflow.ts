@@ -11,7 +11,7 @@ import {
   resolveUniqueSpec,
   resolveTagMapping,
 } from "../jobs/JobSpec";
-import { TransformFunction } from "./DefGraph";
+import { InletNode, TransformFunction } from "./DefGraph";
 
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 type WithT =
@@ -105,13 +105,19 @@ export class WorkflowSpec extends JobSpec<
 
       // pass1
       for (const conn of this.connections) {
-        const { fromSpecNodeId, toSpecNodeId } = g.addConnectedDualSpecs(
-          conn.from,
-          conn.to
-        );
+        const { fromSpecNodeId, toSpecNodeId, transformsToRegister } =
+          g.addConnectedDualSpecs(conn.from, conn.to);
         g.ensureParentChildRelation(parentSpecNodeId, fromSpecNodeId);
         g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
+
+        for (const { specName, ...rest } of transformsToRegister) {
+          this.registerTransform({
+            receivingSpec: JobSpec.lookupByName(specName),
+            ...rest,
+          });
+        }
       }
+
       // pass2: add all loose tags in specs
 
       for (const conn of this.connections) {
@@ -173,16 +179,24 @@ export class WorkflowSpec extends JobSpec<
 
   private registerTransform<IMap>({
     receivingSpec,
-    tagName,
+    tag,
     transform,
   }: {
     receivingSpec: JobSpec<unknown, unknown, unknown, IMap, unknown>;
-    tagName: keyof IMap;
+    tag: keyof IMap;
     transform: TransformFunction;
   }) {
     this._transformsByReceivingSpecNameAndTag[
-      `${receivingSpec}/${tagName.toString()}`
+      `${receivingSpec}/${tag.toString()}`
     ] = transform;
+  }
+
+  private transformsRegistered: boolean = false;
+  private ensureTransformsRegistered() {
+    if (!this.transformsRegistered) {
+      const dg = this.getDefGraph();
+      this.transformsRegistered = true;
+    }
   }
 
   private getTransform<IMap>({
@@ -192,6 +206,7 @@ export class WorkflowSpec extends JobSpec<
     receivingSpec: JobSpec<unknown, unknown, unknown, IMap, unknown>;
     tagName: keyof IMap;
   }) {
+    this.ensureTransformsRegistered();
     return this._transformsByReceivingSpecNameAndTag[
       `${receivingSpec}/${tagName.toString()}`
     ];
