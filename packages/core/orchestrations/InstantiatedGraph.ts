@@ -37,11 +37,13 @@ export class InstantiatedGraph extends Graph<
     defGraph,
     streamIdOverrides,
     rootJobId,
+    inletHasTransformOverridesByTag,
   }: {
     defGraph: DefGraph;
     contextId: string;
     rootJobId: string;
     streamIdOverrides: StreamIdOverridesForRootSpec;
+    inletHasTransformOverridesByTag: Record<string, boolean>;
   }) {
     super({ multi: false });
     this.instantiate({
@@ -49,6 +51,7 @@ export class InstantiatedGraph extends Graph<
       contextId,
       rootJobId,
       streamIdOverrides,
+      inletHasTransformOverridesByTag,
     });
   }
 
@@ -56,12 +59,14 @@ export class InstantiatedGraph extends Graph<
     defGraph,
     contextId,
     streamIdOverrides,
+    inletHasTransformOverridesByTag,
     rootJobId,
   }: {
     defGraph: DefGraph;
     contextId: string;
     streamIdOverrides: StreamIdOverridesForRootSpec;
     rootJobId: string;
+    inletHasTransformOverridesByTag: Record<string, boolean>;
   }) {
     const nodes = defGraph.nodes();
     const childJobNodeIdBySpecNodeId: { [k: string]: string } = {};
@@ -115,6 +120,11 @@ export class InstantiatedGraph extends Graph<
           });
         }
         streamNodeIdByStreamId[nodeId] = streamId;
+      } else if (node.nodeType === "inlet") {
+        this.addNode(nodeId, {
+          ...node,
+          hasTransform: inletHasTransformOverridesByTag[node.tag],
+        });
       } else {
         if (!this.hasNode(nodeId)) {
           this.addNode(nodeId, node);

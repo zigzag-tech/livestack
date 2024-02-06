@@ -72,28 +72,29 @@ export class DefGraph extends Graph<DefGraphNode> {
 
   constructor({ root }: { root: IOSpec<any, any, any, any> }) {
     super({ multi: false });
-    this.addSingleRootSpec(root);
+    this.addSingleRootSpec({ root });
   }
 
-  private addSingleRootSpec(spec: IOSpec<any, any, any, any>) {
+  private addSingleRootSpec({ root }: { root: IOSpec<any, any, any, any> }) {
     const specIdentifier = uniqueSpecIdentifier({
-      spec,
+      spec: root,
     });
 
     const specNodeId = this.ensureNode(specIdentifier, {
       nodeType: "root-spec",
-      specName: spec.name,
+      specName: root.name,
       label: specIdentifier,
     });
 
     // add inlet and outlet nodes, their edges, and the connected stream node and edges
-    for (const tag of spec.inputDefSet.keys) {
+    for (const tag of root.inputDefSet.keys) {
       const tagStr = tag.toString();
       const inletIdentifier = `${specIdentifier}/${tagStr}`;
       const inletNodeId = this.ensureNode(inletIdentifier, {
         nodeType: "inlet",
         tag: tagStr,
         label: inletIdentifier,
+        // this might be overwritten when instantiated
         hasTransform: false,
       });
 
@@ -105,7 +106,7 @@ export class DefGraph extends Graph<DefGraphNode> {
         ] ||
         uniqueStreamIdentifier({
           to: {
-            specName: spec.name,
+            specName: root.name,
             uniqueSpecLabel: undefined,
             tag: tagStr,
           },
@@ -120,7 +121,7 @@ export class DefGraph extends Graph<DefGraphNode> {
       this.ensureEdge(streamNodeId, inletNodeId);
     }
 
-    for (const tag of spec.outputDefSet.keys) {
+    for (const tag of root.outputDefSet.keys) {
       const tagStr = tag.toString();
       const outletIdentifier = `${specIdentifier}/${tagStr}`;
       const outletNodeId = this.ensureNode(outletIdentifier, {
@@ -137,7 +138,7 @@ export class DefGraph extends Graph<DefGraphNode> {
         ] ||
         uniqueStreamIdentifier({
           from: {
-            specName: spec.name,
+            specName: root.name,
             uniqueSpecLabel: undefined,
             tag: tagStr,
           },

@@ -3,6 +3,7 @@ import { getJobStreamConnectorRecs, getParentJobRec } from "../db/knexConn";
 import { ZZEnv } from "./ZZEnv";
 import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { JobSpec } from "./JobSpec";
+import { TransformRegistry } from "../orchestrations/TransformRegistry";
 
 // TODO: cache this
 export async function resolveInstantiatedGraph({
@@ -32,11 +33,27 @@ export async function resolveInstantiatedGraph({
     dbConn: zzEnv.db,
   });
 
+  const inletHasTransformOverridesByTag: Record<string, boolean> = {};
+  if (parentRec) {
+    for (const tag of spec.inputDefSet.keys) {
+      const transform = TransformRegistry.getTransform({
+        workflowSpecName: parentRec.spec_name,
+        receivingSpecName: spec.name,
+        receivingSpecUniqueLabel: parentRec.unique_spec_label || null,
+        tag: tag.toString(),
+      });
+      if (!!transform) {
+        inletHasTransformOverridesByTag[tag.toString()] = true;
+      }
+    }
+  }
+
   const instaG = new InstantiatedGraph({
     defGraph: spec.getDefGraph(),
     contextId: parentRec?.job_id || jobId,
     rootJobId: jobId,
     streamIdOverrides,
+    inletHasTransformOverridesByTag,
   });
 
   return instaG;

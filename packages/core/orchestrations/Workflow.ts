@@ -13,6 +13,7 @@ import {
 } from "../jobs/JobSpec";
 import { TransformFunction } from "./DefGraph";
 import { TransformRegistry } from "./TransformRegistry";
+import { getParentJobRec } from "../db/knexConn";
 
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 type WithT =
@@ -226,11 +227,31 @@ export class WorkflowSpec extends JobSpec<
       jobSpec: this,
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;
+        const parentRec = await getParentJobRec({
+          projectId: this.zzEnvEnsured.projectId,
+          childJobId: groupId,
+          dbConn: this.zzEnvEnsured.db,
+        });
+        const inletHasTransformOverridesByTag: Record<string, boolean> = {};
+        if (parentRec) {
+          for (const tag of this.inputDefSet.keys) {
+            const transform = TransformRegistry.getTransform({
+              workflowSpecName: parentRec.spec_name,
+              receivingSpecName: this.name,
+              receivingSpecUniqueLabel: parentRec.unique_spec_label || null,
+              tag: tag.toString(),
+            });
+            if (!!transform) {
+              inletHasTransformOverridesByTag[tag.toString()] = true;
+            }
+          }
+        }
         const instG = new InstantiatedGraph({
           defGraph: this.getDefGraph(),
           contextId: groupId,
           rootJobId: groupId,
           streamIdOverrides: {},
+          inletHasTransformOverridesByTag,
         });
 
         const allJobNodes = instG
@@ -436,7 +457,7 @@ export class WorkflowSpec extends JobSpec<
       });
     }
 
-    const instaG = workflow.graph;
+    const instaG = await workflow.graphP;
 
     const childJobNodeId = instaG.findNode((n) => {
       const node = instaG.getNodeAttributes(n);
@@ -493,17 +514,40 @@ export class WorkflowSpec extends JobSpec<
 }
 
 export class Workflow {
-  private _graph: InstantiatedGraph | null = null;
-  public get graph(): InstantiatedGraph {
-    if (!this._graph) {
-      this._graph = new InstantiatedGraph({
-        defGraph: this.jobGroupDef.getDefGraph(),
-        contextId: this.contextId,
-        rootJobId: this.contextId,
-        streamIdOverrides: {},
-      });
+  private _graphP: Promise<InstantiatedGraph> | null = null;
+  public get graphP(): Promise<InstantiatedGraph> {
+    const that = this;
+    if (!this._graphP) {
+      this._graphP = (async () => {
+        const parentRec = await getParentJobRec({
+          projectId: that.jobGroupDef.zzEnvEnsured.projectId,
+          childJobId: this.contextId,
+          dbConn: that.jobGroupDef.zzEnvEnsured.db,
+        });
+        const inletHasTransformOverridesByTag: Record<string, boolean> = {};
+        if (parentRec) {
+          for (const tag of that.jobGroupDef.inputDefSet.keys) {
+            const transform = TransformRegistry.getTransform({
+              workflowSpecName: parentRec.spec_name,
+              receivingSpecName: that.jobGroupDef.name,
+              receivingSpecUniqueLabel: parentRec.unique_spec_label || null,
+              tag: tag.toString(),
+            });
+            if (!!transform) {
+              inletHasTransformOverridesByTag[tag.toString()] = true;
+            }
+          }
+        }
+        return new InstantiatedGraph({
+          defGraph: this.jobGroupDef.getDefGraph(),
+          contextId: this.contextId,
+          rootJobId: this.contextId,
+          streamIdOverrides: {},
+          inletHasTransformOverridesByTag,
+        });
+      })();
     }
-    return this._graph;
+    return this._graphP;
   }
   public readonly jobGroupDef: WorkflowSpec;
   public readonly contextId: string;
