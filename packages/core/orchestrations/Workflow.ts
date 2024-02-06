@@ -111,17 +111,21 @@ export class WorkflowSpec extends JobSpec<
         g.ensureParentChildRelation(parentSpecNodeId, fromSpecNodeId);
         g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
 
-        for (const { specName, ...rest } of transformsToRegister) {
+        for (const {
+          specName,
+          uniqueSpecLabel,
+          ...rest
+        } of transformsToRegister) {
           TransformRegistry.registerTransform({
             workflowSpecName: this.name,
             receivingSpecName: specName,
+            receivingSpecUniqueLabel: uniqueSpecLabel || null,
             ...rest,
           });
         }
       }
 
       // pass2: add all loose tags in specs
-
       for (const conn of this.connections) {
         for (const c of [conn.from, conn.to]) {
           const spec = c.spec;
@@ -138,7 +142,6 @@ export class WorkflowSpec extends JobSpec<
               specName: spec.name,
               tag,
               uniqueSpecLabel: c.uniqueSpecLabel,
-              hasTransform: false,
             });
           }
         }
@@ -228,7 +231,6 @@ export class WorkflowSpec extends JobSpec<
           contextId: groupId,
           rootJobId: groupId,
           streamIdOverrides: {},
-          contextWorkflowSpecName: this.name,
         });
 
         const allJobNodes = instG
@@ -499,7 +501,6 @@ export class Workflow {
         contextId: this.contextId,
         rootJobId: this.contextId,
         streamIdOverrides: {},
-        contextWorkflowSpecName: this.jobGroupDef.name,
       });
     }
     return this._graph;

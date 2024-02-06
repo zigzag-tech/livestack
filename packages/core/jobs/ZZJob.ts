@@ -8,7 +8,7 @@ import {
 } from "../realtime/pubsub";
 import { Observable, map, takeUntil } from "rxjs";
 import { IStorageProvider } from "../storage/cloudStorage";
-import { updateJobStatus } from "../db/knexConn";
+import { getParentJobRec, updateJobStatus } from "../db/knexConn";
 import longStringTruncator from "../utils/longStringTruncator";
 import { JobSpec } from "./JobSpec";
 import { z } from "zod";
@@ -82,7 +82,7 @@ export class ZZJob<
   public workerInstanceParams: WP extends object ? WP : null =
     null as WP extends object ? WP : null;
   public jobId: JobId;
-  private readonly workerName;
+  public readonly workerName;
   private readonly inputStreamFnsByTag: Partial<{
     [K in keyof IMap]: {
       nextValue: () => Promise<IMap[K] | null>;
@@ -280,6 +280,21 @@ export class ZZJob<
     };
   };
 
+  private _parentRec:
+    | Awaited<ReturnType<typeof getParentJobRec>>
+    | "uninitialized" = "uninitialized";
+
+  private getParentRec = async () => {
+    if (this._parentRec === "uninitialized") {
+      this._parentRec = await getParentJobRec({
+        projectId: this.zzEnv.projectId,
+        dbConn: this.zzEnv.db,
+        childJobId: this.jobId,
+      });
+    }
+    return this._parentRec;
+  };
+
   private _ensureInputStreamFn<K extends keyof IMap>(tag?: K) {
     if (this.spec.inputDefSet.isSingle) {
       tag = this.spec.getSingleInputTag() as K;
@@ -296,9 +311,10 @@ export class ZZJob<
         jobId: this.jobId,
         tag: tag!,
       }) as Promise<DataStream<WrapTerminatorAndDataId<IMap[K] | unknown>>>;
+      const parentRecP = this.getParentRec();
 
       const inputObservableUntracked = new Observable<IMap[K] | null>((s) => {
-        streamP.then((stream) => {
+        Promise.all([streamP, parentRecP]).then(([stream, parentRec]) => {
           const sub = stream.subFromBeginning();
           const obs = sub.valueObservable.pipe(
             map((x) => (x.terminate ? null : x.data))
@@ -309,12 +325,15 @@ export class ZZJob<
 
               // find any transform function defined for this input
               // and apply it if found
-              const transform = !this.graph.contextWorkflowSpecName
+
+              const transform = !parentRec
                 ? null
                 : TransformRegistry.getTransform({
                     receivingSpecName: this.spec.name,
                     tag: tag!.toString(),
-                    workflowSpecName: this.graph.contextWorkflowSpecName,
+                    workflowSpecName: parentRec.spec_name,
+                    receivingSpecUniqueLabel:
+                      parentRec.unique_spec_label || null,
                   });
               if (transform) {
                 r = transform(n);
