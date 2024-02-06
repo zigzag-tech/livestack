@@ -207,13 +207,6 @@ export function getNodesConnectedToStream<
   };
 }
 
-export type CanonicalConnectionPoint = {
-  spec: IOSpec<any, any, any, any>;
-  uniqueSpecLabel?: string;
-  tagInSpec: string;
-  tagInSpecType: "input" | "output";
-};
-
 export function uniqueSpecIdentifier({
   specName,
   spec,

@@ -53,7 +53,7 @@ export class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
   }
 }
 export type InferTMap<T> = T extends z.ZodType
-  ? { default: z.infer<T> }
+  ? { [t in NoInfer<"default"> as string]: z.infer<T> }
   : T extends Record<string, ZodType>
   ? {
       [K in keyof T]: z.infer<T[K]>;
@@ -63,7 +63,7 @@ export function wrapIfSingle<
   T,
   TMap = T extends z.ZodType<infer TMap>
     ? {
-        default: z.ZodType<TMap>;
+        [t in NoInfer<"default"> as string]: z.ZodType<TMap>;
       }
     : T extends {
         [key: string]: z.ZodType<any>;

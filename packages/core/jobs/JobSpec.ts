@@ -1265,15 +1265,23 @@ export function convertSpecOrName(
     throw new Error("Invalid spec");
   }
 }
-export function resolveTagMapping({
-  _aliasMaps,
-}:
-  | {
-      _aliasMaps?: Partial<TagMaps<any, any, any, any>>;
-    }
-  | any) {
+export function resolveTagMapping(
+  p:
+    | {
+        _aliasMaps?: Partial<TagMaps<any, any, any, any>>;
+      }
+    | string
+    | any
+) {
+  let inputAliasMap: Record<string, string> = {};
+  let outputAliasMap: Record<string, string> = {};
+
+  if (typeof p === "object" && !(p instanceof JobSpec) && p._aliasMaps) {
+    inputAliasMap = p._aliasMaps.inputTag || {};
+    outputAliasMap = p._aliasMaps.outputTag || {};
+  }
   return {
-    inputAliasMap: _aliasMaps?.inputTag ?? {},
-    outputAliasMap: _aliasMaps?.outputTag ?? {},
+    inputAliasMap,
+    outputAliasMap,
   };
 }

@@ -5,7 +5,6 @@ import { Attributes } from "graphology-types";
 import {
   uniqueSpecIdentifier,
   uniqueStreamIdentifier,
-  CanonicalConnectionPoint,
 } from "./InstantiatedGraph";
 
 export type SpecNode = {
@@ -17,11 +16,15 @@ export type RootSpecNode = {
   nodeType: "root-spec";
   specName: string;
 };
-export type OutletNode = {
+type Transformable = {
+  hasTransform: boolean;
+};
+export type OutletNode = Transformable & {
   nodeType: "outlet";
   tag: string;
 };
-export type InletNode = {
+
+export type InletNode = Transformable & {
   nodeType: "inlet";
   tag: string;
 };
@@ -46,6 +49,22 @@ export type InferNodeData<T extends DefGraphNode["nodeType"]> = Extract<
   DefGraphNode,
   { nodeType: T }
 >;
+
+type CanonicalConnectionBase = {
+  spec: IOSpec<any, any, any, any>;
+  uniqueSpecLabel?: string;
+  tagInSpec: string;
+  transform?: Function;
+};
+
+export type CanonicalConnectionFrom = CanonicalConnectionBase & {
+  tagInSpecType: "output";
+};
+
+export type CanonicalConnectionTo = CanonicalConnectionBase & {
+  tagInSpecType: "input";
+};
+
 export type DefNodeType = DefGraphNode["nodeType"];
 export class DefGraph extends Graph<DefGraphNode> {
   private streamNodeIdBySpecIdentifierTypeAndTag: {
@@ -76,6 +95,7 @@ export class DefGraph extends Graph<DefGraphNode> {
         nodeType: "inlet",
         tag: tagStr,
         label: inletIdentifier,
+        hasTransform: false,
       });
 
       this.ensureEdge(inletNodeId, specNodeId);
@@ -108,6 +128,7 @@ export class DefGraph extends Graph<DefGraphNode> {
         nodeType: "outlet",
         tag: tagStr,
         label: outletIdentifier,
+        hasTransform: false,
       });
 
       this.ensureEdge(specNodeId, outletNodeId);
@@ -353,10 +374,12 @@ export class DefGraph extends Graph<DefGraphNode> {
     specName,
     uniqueSpecLabel,
     tag,
+    hasTransform,
   }: {
     tag: string | symbol | number;
     specName: string;
     uniqueSpecLabel?: string;
+    hasTransform: boolean;
   }) {
     const specIdentifier = uniqueSpecIdentifier({
       specName,
@@ -376,6 +399,7 @@ export class DefGraph extends Graph<DefGraphNode> {
       nodeType: "inlet",
       tag: tagStr,
       label: inletIdentifier,
+      hasTransform,
     });
 
     this.ensureEdge(inletNodeId, specNodeId);
@@ -409,6 +433,7 @@ export class DefGraph extends Graph<DefGraphNode> {
     specName: string;
     uniqueSpecLabel?: string;
     tag: string | symbol | number;
+    hasTransform: boolean;
   }) {
     const specIdentifier = uniqueSpecIdentifier({
       specName,
@@ -428,6 +453,7 @@ export class DefGraph extends Graph<DefGraphNode> {
       nodeType: "outlet",
       tag: tagStr,
       label: outletIdentifier,
+      hasTransform: false,
     });
 
     this.ensureEdge(specNodeId, outletNodeId);
@@ -454,11 +480,10 @@ export class DefGraph extends Graph<DefGraphNode> {
   }
 
   public addConnectedDualSpecs(
-    from: CanonicalConnectionPoint,
-    to: CanonicalConnectionPoint
+    from: CanonicalConnectionFrom,
+    to: CanonicalConnectionTo
   ) {
     const fromSpecIdentifier = uniqueSpecIdentifier(from);
-
     const fromSpecNodeId = this.ensureNode(fromSpecIdentifier, {
       specName: from.spec.name,
       ...(from.uniqueSpecLabel
@@ -473,6 +498,7 @@ export class DefGraph extends Graph<DefGraphNode> {
         nodeType: "outlet",
         tag: from.tagInSpec,
         label: `${fromSpecIdentifier}/${from.tagInSpec}`,
+        hasTransform: !!from.transform,
       }
     );
 
@@ -482,6 +508,7 @@ export class DefGraph extends Graph<DefGraphNode> {
       nodeType: "inlet",
       tag: to.tagInSpec,
       label: id,
+      hasTransform: !!from.transform,
     });
     const toUniqueLabel = to.uniqueSpecLabel;
     const toSpecNodeId = this.ensureNode(toSpecIdentifier, {

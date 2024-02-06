@@ -13,8 +13,40 @@ import {
 } from "../jobs/JobSpec";
 
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
+type TransformFunction<T1 = any, T2 = any> = (o: T1) => T2 | Promise<T2>;
+type WithT =
+  | [SpecAndOutletOrTagged]
+  | [SpecAndOutletOrTagged, TransformFunction];
 
-export type CheckArray<T> = T extends Array<infer V> ? Array<V> : never;
+type Combos =
+  | [...WithT, SpecAndOutletOrTagged]
+  | [...WithT, ...WithT, SpecAndOutletOrTagged]
+  | [...WithT, ...WithT, ...WithT, SpecAndOutletOrTagged]
+  | [[...WithT, ...WithT, ...WithT, ...WithT, SpecAndOutletOrTagged]]
+  | [[...WithT, ...WithT, ...WithT, ...WithT, ...WithT, SpecAndOutletOrTagged]]
+  | [
+      [
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        SpecAndOutletOrTagged
+      ]
+    ]
+  | [
+      [
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        SpecAndOutletOrTagged
+      ]
+    ];
 
 export type JobSpecAndJobOptions<JobSpec> = {
   spec: CheckSpec<JobSpec>;
@@ -28,17 +60,10 @@ type WorkflowParams = {
         from: SpecAndOutletOrTagged;
         to: SpecAndOutletOrTagged;
       }
-    | SpecAndOutletOrTagged[]
+    | Combos
   )[];
 };
 
-const WorkflowChildJobOptions = z.array(
-  z.object({
-    spec: SpecOrName,
-    params: z.any(),
-  })
-);
-type WorkflowChildJobOptions = z.infer<typeof WorkflowChildJobOptions>;
 const WorkflowChildJobOptionsSanitized = z.array(
   z.object({
     spec: z.string(),
@@ -97,6 +122,7 @@ export class WorkflowSpec extends JobSpec<
               specName: spec.name,
               tag,
               uniqueSpecLabel: c.uniqueSpecLabel,
+              hasTransform: false,
             });
           }
           for (const tag of spec.outputDefSet.keys) {
@@ -104,6 +130,7 @@ export class WorkflowSpec extends JobSpec<
               specName: spec.name,
               tag,
               uniqueSpecLabel: c.uniqueSpecLabel,
+              hasTransform: false,
             });
           }
         }
@@ -550,12 +577,12 @@ function convertSpecAndOutletWithTags(
 }
 
 type CanonicalConnection<T1 = any, T2 = any> = {
-  from: CanonicalSpecAndOutlet<T1>;
-  to: CanonicalSpecAndOutlet<T2>;
-  transform?: <T1, T2>(o: any) => any;
+  from: CanonicalSpecAndOutlet<"output", T1>;
+  to: CanonicalSpecAndOutlet<"input", T2>;
+  transform: TransformFunction<T1, T2> | null;
 };
 
-export type CanonicalSpecAndOutlet<T = any> = {
+export type CanonicalSpecAndOutlet<TAG extends "input" | "output", T = any> = {
   spec: JobSpec<
     any,
     any,
@@ -566,9 +593,10 @@ export type CanonicalSpecAndOutlet<T = any> = {
   >;
   uniqueSpecLabel?: string;
   tagInSpec: string;
-  tagInSpecType: "input" | "output";
+  tagInSpecType: TAG;
   inputAliasMap: Record<string, string>;
   outputAliasMap: Record<string, string>;
+  tansform?: (o: any) => any;
 };
 
 function convertConnectionsCanonical(workflowParams: WorkflowParams) {
@@ -576,25 +604,48 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
     (acc, conn) => {
       if (Array.isArray(conn)) {
         let newAcc: CanonicalConnection[] = [];
-        const connCanonical = conn.map(convertSpecAndOutletWithTags);
-        for (let i = 0; i < connCanonical.length - 1; i++) {
+        let cursor = 0;
+
+        const handleAndAdvanceCursor = () => {
+          const from = convertSpecAndOutletWithTags(
+            conn[cursor] as SpecAndOutletOrTagged
+          );
+          let to: ReturnType<typeof convertSpecAndOutletWithTags>;
+          cursor++;
+          let transform: TransformFunction | null = null;
+          if (typeof conn[cursor] === "function") {
+            transform = conn[cursor] as TransformFunction;
+            cursor++;
+            to = convertSpecAndOutletWithTags(
+              conn[cursor] as SpecAndOutletOrTagged
+            );
+          } else {
+            to = convertSpecAndOutletWithTags(
+              conn[cursor] as SpecAndOutletOrTagged
+            );
+          }
+          cursor++;
+
           newAcc.push({
             from: {
-              ...connCanonical[i],
+              ...from,
               tagInSpecType: "output",
               tagInSpec:
-                connCanonical[i].tagInSpec ||
-                String(connCanonical[i].spec.getSingleOutputTag()),
+                from.tagInSpec || String(from.spec.getSingleOutputTag()),
             },
             to: {
-              ...connCanonical[i + 1],
+              ...to,
               tagInSpecType: "input",
-              tagInSpec:
-                connCanonical[i + 1].tagInSpec ||
-                String(connCanonical[i + 1].spec.getSingleInputTag()),
+              tagInSpec: to.tagInSpec || String(to.spec.getSingleInputTag()),
             },
+            transform,
           });
+        };
+
+        while (cursor < conn.length) {
+          handleAndAdvanceCursor();
         }
+
         return newAcc;
       } else {
         const fromPartialCanonical = convertSpecAndOutletWithTags(conn.from);
