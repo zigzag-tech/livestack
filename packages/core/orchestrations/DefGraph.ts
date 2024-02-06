@@ -431,7 +431,6 @@ export class DefGraph extends Graph<DefGraphNode> {
     specName: string;
     uniqueSpecLabel?: string;
     tag: string | symbol | number;
-    hasTransform: boolean;
   }) {
     const specIdentifier = uniqueSpecIdentifier({
       specName,
