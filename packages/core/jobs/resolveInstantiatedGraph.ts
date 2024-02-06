@@ -36,6 +36,7 @@ export async function resolveInstantiatedGraph({
     contextId: parentRec?.job_id || jobId,
     rootJobId: jobId,
     streamIdOverrides,
+    contextWorkflowSpecName: parentRec?.spec_name || null,
   });
 
   return instaG;

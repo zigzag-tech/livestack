@@ -44,6 +44,7 @@ import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { Observable } from "rxjs";
 import { TagObj, TagMaps } from "../orchestrations/Workflow";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
+import { TransformRegistry } from "../orchestrations/TransformRegistry";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -488,7 +489,7 @@ export class JobSpec<
     return (await this.getJobStream({
       ...p,
       type: "in",
-    })) as DataStream<WrapTerminatorAndDataId<IMap[K]>>;
+    })) as DataStream<WrapTerminatorAndDataId<unknown>>;
   };
 
   public getOutputJobStream = async <K extends keyof OMap>(p: {
@@ -557,6 +558,7 @@ export class JobSpec<
       logger: responsibleSpec.logger,
       zzEnv: responsibleSpec.zzEnv,
     });
+
     return stream as DataStream<WrapTerminatorAndDataId<T>>;
   };
 

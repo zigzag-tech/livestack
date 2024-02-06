@@ -18,6 +18,7 @@ import { InferTMap } from "@livestack/shared/IOSpec";
 import _ from "lodash";
 import { InstantiatedGraph, JobId } from "../orchestrations/InstantiatedGraph";
 import { RawQueueJobData } from "../orchestrations/workerCommon";
+import { TransformRegistry } from "../orchestrations/TransformRegistry";
 
 export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
   j: ZZJob<P, I, O, WP, IMap, OMap>
@@ -180,18 +181,6 @@ export class ZZJob<
       return func as any;
     })();
 
-    // this.input = {
-    //   ...this.genInputObject(),
-    //   byTag: <K extends keyof IMap>(key: K) => {
-    //     const obj = this.genInputObjectByTag(key);
-    //     reportOnReady(obj.observable, key);
-    //     return obj;
-    //   },
-    // };
-    // if (this.spec.inputDefSet.isSingle) {
-    //   reportOnReady(this.input.getObservable(), this.spec.getSingleInputTag());
-    // }
-
     const emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
       tag = this.spec.getSingleOutputTag() as K
@@ -306,7 +295,7 @@ export class ZZJob<
       const streamP = this.spec.getInputJobStream({
         jobId: this.jobId,
         tag: tag!,
-      }) as Promise<DataStream<WrapTerminatorAndDataId<IMap[K]>>>;
+      }) as Promise<DataStream<WrapTerminatorAndDataId<IMap[K] | unknown>>>;
 
       const inputObservableUntracked = new Observable<IMap[K] | null>((s) => {
         streamP.then((stream) => {
@@ -316,7 +305,23 @@ export class ZZJob<
           );
           obs.subscribe((n) => {
             if (n) {
-              s.next(n);
+              let r: IMap[K];
+
+              // find any transform function defined for this input
+              // and apply it if found
+              const transform = !this.graph.contextWorkflowSpecName
+                ? null
+                : TransformRegistry.getTransform({
+                    receivingSpecName: this.spec.name,
+                    tag: tag!.toString(),
+                    workflowSpecName: this.graph.contextWorkflowSpecName,
+                  });
+              if (transform) {
+                r = transform(n);
+              } else {
+                r = n as IMap[K];
+              }
+              s.next(r);
             } else {
               s.next(null);
               s.complete();

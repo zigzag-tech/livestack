@@ -1,4 +1,4 @@
-import { CheckSpec, SpecOrName, JobSpec } from "../jobs/JobSpec";
+import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { IOSpec, InferTMap } from "@livestack/shared/IOSpec";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
@@ -11,7 +11,8 @@ import {
   resolveUniqueSpec,
   resolveTagMapping,
 } from "../jobs/JobSpec";
-import { InletNode, TransformFunction } from "./DefGraph";
+import { TransformFunction } from "./DefGraph";
+import { TransformRegistry } from "./TransformRegistry";
 
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 type WithT =
@@ -111,8 +112,9 @@ export class WorkflowSpec extends JobSpec<
         g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
 
         for (const { specName, ...rest } of transformsToRegister) {
-          this.registerTransform({
-            receivingSpec: JobSpec.lookupByName(specName),
+          TransformRegistry.registerTransform({
+            workflowSpecName: this.name,
+            receivingSpecName: specName,
             ...rest,
           });
         }
@@ -177,39 +179,12 @@ export class WorkflowSpec extends JobSpec<
     TransformFunction
   > = {};
 
-  private registerTransform<IMap>({
-    receivingSpec,
-    tag,
-    transform,
-  }: {
-    receivingSpec: JobSpec<unknown, unknown, unknown, IMap, unknown>;
-    tag: keyof IMap;
-    transform: TransformFunction;
-  }) {
-    this._transformsByReceivingSpecNameAndTag[
-      `${receivingSpec}/${tag.toString()}`
-    ] = transform;
-  }
-
   private transformsRegistered: boolean = false;
   private ensureTransformsRegistered() {
     if (!this.transformsRegistered) {
       const dg = this.getDefGraph();
       this.transformsRegistered = true;
     }
-  }
-
-  private getTransform<IMap>({
-    receivingSpec,
-    tagName,
-  }: {
-    receivingSpec: JobSpec<unknown, unknown, unknown, IMap, unknown>;
-    tagName: keyof IMap;
-  }) {
-    this.ensureTransformsRegistered();
-    return this._transformsByReceivingSpecNameAndTag[
-      `${receivingSpec}/${tagName.toString()}`
-    ];
   }
 
   private orchestrationWorkerDef: ZZWorkerDef<
@@ -253,6 +228,7 @@ export class WorkflowSpec extends JobSpec<
           contextId: groupId,
           rootJobId: groupId,
           streamIdOverrides: {},
+          contextWorkflowSpecName: this.name,
         });
 
         const allJobNodes = instG
@@ -523,6 +499,7 @@ export class Workflow {
         contextId: this.contextId,
         rootJobId: this.contextId,
         streamIdOverrides: {},
+        contextWorkflowSpecName: this.jobGroupDef.name,
       });
     }
     return this._graph;

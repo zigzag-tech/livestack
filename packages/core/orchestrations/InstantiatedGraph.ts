@@ -32,19 +32,28 @@ export class InstantiatedGraph extends Graph<
     | AliasNode
   )
 > {
+  public readonly contextWorkflowSpecName: string | null;
   constructor({
     contextId,
     defGraph,
     streamIdOverrides,
     rootJobId,
+    contextWorkflowSpecName,
   }: {
     defGraph: DefGraph;
     contextId: string;
     rootJobId: string;
+    contextWorkflowSpecName: string | null;
     streamIdOverrides: StreamIdOverridesForRootSpec;
   }) {
     super({ multi: false });
-    this.instantiate({ defGraph, contextId, rootJobId, streamIdOverrides });
+    this.instantiate({
+      defGraph,
+      contextId,
+      rootJobId,
+      streamIdOverrides,
+    });
+    this.contextWorkflowSpecName = contextWorkflowSpecName || null;
   }
 
   private instantiate({
@@ -151,6 +160,7 @@ export class InstantiatedGraph extends Graph<
     }
   }
 }
+
 export type StreamIdOverridesForRootSpec = {
   [k: `${"in" | "out"}/${string}`]: string;
 };
