@@ -4,6 +4,7 @@ import { ZZEnv } from "./ZZEnv";
 import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { JobSpec } from "./JobSpec";
 
+// TODO: cache this
 export async function resolveInstantiatedGraph({
   zzEnv,
   spec,
@@ -36,7 +37,6 @@ export async function resolveInstantiatedGraph({
     contextId: parentRec?.job_id || jobId,
     rootJobId: jobId,
     streamIdOverrides,
-    contextWorkflowSpecName: parentRec?.spec_name || null,
   });
 
   return instaG;
