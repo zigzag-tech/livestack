@@ -11,9 +11,9 @@ import {
   resolveUniqueSpec,
   resolveTagMapping,
 } from "../jobs/JobSpec";
+import { TransformFunction } from "./DefGraph";
 
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
-type TransformFunction<T1 = any, T2 = any> = (o: T1) => T2 | Promise<T2>;
 type WithT =
   | [SpecAndOutletOrTagged]
   | [SpecAndOutletOrTagged, TransformFunction];
@@ -166,6 +166,37 @@ export class WorkflowSpec extends JobSpec<
     return g;
   }
 
+  private _transformsByReceivingSpecNameAndTag: Record<
+    `${string}/${string}`,
+    TransformFunction
+  > = {};
+
+  private registerTransform<IMap>({
+    receivingSpec,
+    tagName,
+    transform,
+  }: {
+    receivingSpec: JobSpec<unknown, unknown, unknown, IMap, unknown>;
+    tagName: keyof IMap;
+    transform: TransformFunction;
+  }) {
+    this._transformsByReceivingSpecNameAndTag[
+      `${receivingSpec}/${tagName.toString()}`
+    ] = transform;
+  }
+
+  private getTransform<IMap>({
+    receivingSpec,
+    tagName,
+  }: {
+    receivingSpec: JobSpec<unknown, unknown, unknown, IMap, unknown>;
+    tagName: keyof IMap;
+  }) {
+    return this._transformsByReceivingSpecNameAndTag[
+      `${receivingSpec}/${tagName.toString()}`
+    ];
+  }
+
   private orchestrationWorkerDef: ZZWorkerDef<
     WorkflowChildJobOptionsSanitized,
     any,
@@ -196,45 +227,8 @@ export class WorkflowSpec extends JobSpec<
     });
     this.connections = canonicalConns;
 
-    // this.specTagByTypeByWorkflowAlias = {
-    //   in: {},
-    //   out: {
-    //     status: {
-    //       specName: this.name,
-    //       tag: "status",
-    //     },
-    //   },
-    // };
-    // inverse
-    // this.workflowAliasBySpecUniqueLabelAndTag = {};
-
-    // for (const conn of canonicalConns) {
-    //   for (const c of conn) {
-    //     for (const [specTag, alias] of Object.entries(c.inputAliasMap)) {
-    //       this.assignAlias({
-    //         alias,
-    //         tag: specTag,
-    //         specName: c.spec.name,
-    //         uniqueSpecLabel: c.uniqueSpecLabel,
-    //         type: "in",
-    //       });
-    //     }
-    //     for (const [specTag, alias] of Object.entries(c.outputAliasMap)) {
-    //       this.assignAlias({
-    //         alias,
-    //         tag: specTag,
-    //         specName: c.spec.name,
-    //         uniqueSpecLabel: c.uniqueSpecLabel,
-    //         type: "out",
-    //       });
-    //     }
-    //   }
-    // }
-
     this._validateConnections();
-    // for (const conn of canonicalConns) {
-    //   this.getDefGraph().addConnectedDualSpecs(conn[0], conn[1]);
-    // }
+
     this.orchestrationWorkerDef = new ZZWorkerDef({
       jobSpec: this,
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
@@ -577,26 +571,40 @@ function convertSpecAndOutletWithTags(
 }
 
 type CanonicalConnection<T1 = any, T2 = any> = {
-  from: CanonicalSpecAndOutlet<"output", T1>;
-  to: CanonicalSpecAndOutlet<"input", T2>;
-  transform: TransformFunction<T1, T2> | null;
+  from: CanonicalSpecAndOutletFrom<T1>;
+  to: CanonicalSpecAndOutletTo<T2>;
 };
 
-export type CanonicalSpecAndOutlet<TAG extends "input" | "output", T = any> = {
+type CanonicalSpecAndOutletBase = {
+  spec: JobSpec<any, any, any>;
+  uniqueSpecLabel?: string;
+  tagInSpec: string;
+  inputAliasMap: Record<string, string>;
+  outputAliasMap: Record<string, string>;
+};
+export type CanonicalSpecAndOutletFrom<T = any> = CanonicalSpecAndOutletBase & {
   spec: JobSpec<
+    any,
     any,
     any,
     any & {
       K: T;
+    }
+  >;
+  tagInSpecType: "output";
+};
+
+export type CanonicalSpecAndOutletTo<T = any> = CanonicalSpecAndOutletBase & {
+  spec: JobSpec<
+    any,
+    any & {
+      K: T;
     },
+    any,
     any
   >;
-  uniqueSpecLabel?: string;
-  tagInSpec: string;
-  tagInSpecType: TAG;
-  inputAliasMap: Record<string, string>;
-  outputAliasMap: Record<string, string>;
-  tansform?: (o: any) => any;
+  transform: TransformFunction | null;
+  tagInSpecType: "input";
 };
 
 function convertConnectionsCanonical(workflowParams: WorkflowParams) {
@@ -637,8 +645,8 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
               ...to,
               tagInSpecType: "input",
               tagInSpec: to.tagInSpec || String(to.spec.getSingleInputTag()),
+              transform: transform,
             },
-            transform,
           });
         };
 

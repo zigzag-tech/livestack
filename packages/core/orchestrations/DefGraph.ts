@@ -1,4 +1,3 @@
-import { alias } from "@livestack/core";
 import Graph from "graphology";
 import { IOSpec } from "@livestack/shared";
 import { Attributes } from "graphology-types";
@@ -16,17 +15,16 @@ export type RootSpecNode = {
   nodeType: "root-spec";
   specName: string;
 };
-type Transformable = {
-  hasTransform: boolean;
-};
-export type OutletNode = Transformable & {
+
+export type OutletNode = {
   nodeType: "outlet";
   tag: string;
 };
 
-export type InletNode = Transformable & {
+export type InletNode = {
   nodeType: "inlet";
   tag: string;
+  hasTransform: boolean;
 };
 export type StreamDefNode = {
   nodeType: "stream-def";
@@ -54,7 +52,6 @@ type CanonicalConnectionBase = {
   spec: IOSpec<any, any, any, any>;
   uniqueSpecLabel?: string;
   tagInSpec: string;
-  transform?: Function;
 };
 
 export type CanonicalConnectionFrom = CanonicalConnectionBase & {
@@ -63,6 +60,8 @@ export type CanonicalConnectionFrom = CanonicalConnectionBase & {
 
 export type CanonicalConnectionTo = CanonicalConnectionBase & {
   tagInSpecType: "input";
+  // inlets may have a transform
+  transform: TransformFunction | null;
 };
 
 export type DefNodeType = DefGraphNode["nodeType"];
@@ -128,7 +127,6 @@ export class DefGraph extends Graph<DefGraphNode> {
         nodeType: "outlet",
         tag: tagStr,
         label: outletIdentifier,
-        hasTransform: false,
       });
 
       this.ensureEdge(specNodeId, outletNodeId);
@@ -453,7 +451,6 @@ export class DefGraph extends Graph<DefGraphNode> {
       nodeType: "outlet",
       tag: tagStr,
       label: outletIdentifier,
-      hasTransform: false,
     });
 
     this.ensureEdge(specNodeId, outletNodeId);
@@ -498,7 +495,6 @@ export class DefGraph extends Graph<DefGraphNode> {
         nodeType: "outlet",
         tag: from.tagInSpec,
         label: `${fromSpecIdentifier}/${from.tagInSpec}`,
-        hasTransform: !!from.transform,
       }
     );
 
@@ -508,7 +504,7 @@ export class DefGraph extends Graph<DefGraphNode> {
       nodeType: "inlet",
       tag: to.tagInSpec,
       label: id,
-      hasTransform: !!from.transform,
+      hasTransform: !!to.transform,
     });
     const toUniqueLabel = to.uniqueSpecLabel;
     const toSpecNodeId = this.ensureNode(toSpecIdentifier, {
@@ -651,3 +647,4 @@ export class DefGraph extends Graph<DefGraphNode> {
     });
   }
 }
+export type TransformFunction<T1 = any, T2 = any> = (o: T1) => T2 | Promise<T2>;
