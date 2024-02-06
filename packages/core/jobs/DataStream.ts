@@ -1,7 +1,7 @@
 import { ZodType } from "zod";
 import { ZZEnv } from "./ZZEnv";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
-import { createHash } from "crypto";
+// import { createHash } from "crypto";
 import { getLogger } from "../utils/createWorkerLogger";
 import { addDatapoint, ensureStreamRec } from "../db/knexConn";
 import { v4 } from "uuid";
@@ -39,9 +39,9 @@ import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
 
 export class DataStream<T extends object> {
-  public readonly def: ZodType<T>;
+  public readonly def: ZodType<T> | null;
   public readonly uniqueName: string;
-  public readonly hash: string;
+  // public readonly hash: string;
   private _zzEnv: ZZEnv | null = null;
   baseWorkingRelativePath: string;
 
@@ -63,7 +63,7 @@ export class DataStream<T extends object> {
     logger,
   }: {
     uniqueName: string;
-    def?: ZodType<T>;
+    def?: ZodType<T> | null;
     zzEnv?: ZZEnv | null;
     logger?: ReturnType<typeof getLogger>;
   }): Promise<DataStream<T>> {
@@ -84,12 +84,17 @@ export class DataStream<T extends object> {
       // }
       return existing as DataStream<T>;
     } else {
-      if (!def || !logger) {
+      if (!logger) {
         throw new Error(
-          "def and logger must be provided if stream does not exist"
+          "def and logger must be provided if stream does not exist."
         );
       }
-      const stream = new DataStream({ uniqueName, def, zzEnv, logger });
+      const stream = new DataStream({
+        uniqueName,
+        def: def || null,
+        zzEnv,
+        logger,
+      });
       // async
       if (zzEnv?.db) {
         ensureStreamRec({
@@ -110,14 +115,14 @@ export class DataStream<T extends object> {
     logger,
   }: {
     uniqueName: string;
-    def: ZodType<T>;
+    def: ZodType<T> | null;
     zzEnv?: ZZEnv | null;
     logger: ReturnType<typeof getLogger>;
   }) {
     this.def = def;
     this.uniqueName = uniqueName;
     this._zzEnv = zzEnv || null;
-    this.hash = hashDef(this.def);
+    // this.hash = hashDef(this.def);
     this.logger = logger;
     // console.debug(
     //   "DataStream created",
@@ -159,21 +164,24 @@ export class DataStream<T extends object> {
     messageIdOverride?: string;
   }) {
     let parsed: T;
-    try {
-      parsed = this.def.parse(message) as T;
-    } catch (err) {
-      console.error(err);
-      console.error("errornous output: ", message);
-      console.error(
-        "Expected type: ",
-        JSON.stringify(zodToJsonSchema(this.def), null, 2)
-      );
-      this.logger.error(
-        `Data point error for stream ${
-          this.uniqueName
-        }: data provided is invalid: ${JSON.stringify(err)}`
-      );
-      throw err;
+    if (!this.def) {
+      parsed = message;
+    } else {
+      try {
+        parsed = this.def.parse(message) as T;
+      } catch (err) {
+        this.logger.error("Data validation error" + JSON.stringify(err));
+        console.log(this.uniqueName, " errornous output: ", message);
+        this.logger.error(
+          "Expected type: " + JSON.stringify(zodToJsonSchema(this.def), null, 2)
+        );
+        this.logger.error(
+          `Data point error for stream ${
+            this.uniqueName
+          }: data provided is invalid: ${JSON.stringify(err)}`
+        );
+        throw err;
+      }
     }
 
     let { largeFilesToSave, newObj } = identifyLargeFilesToSave(parsed);
@@ -451,10 +459,10 @@ function customParse(json: string): any {
   return JSON.parse(json, reviver);
 }
 
-export function hashDef(def: ZodType<unknown>) {
-  const str = JSON.stringify(zodToJsonSchema(def));
-  return createHash("sha256").update(str).digest("hex");
-}
+// export function hashDef(def: ZodType<unknown>) {
+//   const str = JSON.stringify(zodToJsonSchema(def));
+//   return createHash("sha256").update(str).digest("hex");
+// }
 
 function getStreamClientsById({
   queueId,
