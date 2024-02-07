@@ -41,7 +41,6 @@ export class ZZJob<
   OMap = InferTMap<O>
 > {
   private readonly bullMQJob: Job<RawQueueJobData<P>, void>;
-  public readonly _bullMQToken?: string;
   readonly jobOptions: P;
 
   readonly logger: ReturnType<typeof getLogger>;
@@ -96,7 +95,6 @@ export class ZZJob<
 
   constructor(p: {
     bullMQJob: Job<RawQueueJobData<P>, void, string>;
-    bullMQToken?: string;
     logger: ReturnType<typeof getLogger>;
     jobOptions: P;
     storageProvider?: IStorageProvider;
@@ -108,7 +106,6 @@ export class ZZJob<
   }) {
     this.bullMQJob = p.bullMQJob;
     this.jobId = this.bullMQJob.id! as JobId;
-    this._bullMQToken = p.bullMQToken;
     this.logger = p.logger;
     this.workerName = p.workerName;
     this.spec = p.jobSpec;

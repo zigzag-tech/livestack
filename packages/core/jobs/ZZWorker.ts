@@ -137,7 +137,6 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
 
         const zzJ = new ZZJob({
           bullMQJob: job,
-          bullMQToken: token,
           logger: that.logger,
           jobSpec: that.jobSpec,
           jobOptions: job.data.jobOptions,
