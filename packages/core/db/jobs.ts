@@ -6,6 +6,29 @@ import {
 } from "./primitives";
 import { JobUniqueId } from "./db_funcs";
 
+export interface ZZJobUniqueId {
+  project_id: string;
+  spec_name: string;
+  job_id: string;
+}
+
+export interface JobRec<P> extends ZZJobUniqueId {
+  job_params?: P;
+  time_created: Date;
+}
+
+export type ZZJobStatus =
+  | "requested"
+  | "running"
+  | "completed"
+  | "failed"
+  | "waiting_children";
+
+export interface ZZJobStatusRec extends ZZJobUniqueId {
+  status: ZZJobStatus;
+  time_created: Date;
+}
+
 export async function getJobRec<T>({
   projectId,
   specName,
@@ -102,26 +125,4 @@ export async function ensureJobAndInitStatusRec<T>({
     jobStatus: "requested",
   });
   // });
-}
-export interface ZZJobUniqueId {
-  project_id: string;
-  spec_name: string;
-  job_id: string;
-}
-
-export interface JobRec<P> extends ZZJobUniqueId {
-  job_params?: P;
-  time_created: Date;
-}
-
-export type ZZJobStatus =
-  | "requested"
-  | "running"
-  | "completed"
-  | "failed"
-  | "waiting_children";
-
-export interface ZZJobStatusRec extends ZZJobUniqueId {
-  status: ZZJobStatus;
-  time_created: Date;
 }
