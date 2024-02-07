@@ -1,6 +1,6 @@
 import { createChannel, createClient } from "nice-grpc";
-import { JobDBServiceDefinition } from "@livestack/vault-interface";
+import { DBServiceDefinition } from "@livestack/vault-interface";
 export const jobDBClient = createClient(
-  JobDBServiceDefinition,
+  DBServiceDefinition,
   createChannel("localhost:50051")
 );

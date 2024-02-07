@@ -5,7 +5,7 @@ import {
   handlePrimitiveOrArray,
 } from "./primitives";
 import {
-  JobDBServiceImplementation,
+  DBServiceImplementation,
   JobRec,
   WrapServiceNullResponses,
   DeepPartial,
@@ -29,7 +29,7 @@ export interface ZZJobStatusRec extends ZZJobUniqueId {
   time_created: Date;
 }
 
-export const jobDbService = (dbConn: Knex): JobDBServiceImplementation => ({
+export const jobDbService = (dbConn: Knex): DBServiceImplementation => ({
   async getJobRec({ projectId, specName, jobId }) {
     const r = (await dbConn("zz_jobs")
       .select(["zz_jobs.*", "zz_job_status.status"])

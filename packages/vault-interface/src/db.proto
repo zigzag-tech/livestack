@@ -6,16 +6,43 @@ import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto"; 
 import "google/protobuf/any.proto";
-import "jobs.proto";
 
 service DBService {
   rpc GetJobRec(GetJobRecRequest) returns (GetJobRecResponse);
-  rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
-  rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
-  rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
-  rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
-  rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
+  // rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
+  // rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
+  // rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
+  // rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
+  // rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
 }
+
+
+message GetJobRecRequest {
+  string projectId = 1;
+  string specName = 2;
+  string jobId = 3;
+}
+
+message JobRecAndStatus {
+  JobRec rec = 1;
+  string status = 2;
+}
+
+message GetJobRecResponse {
+  oneof value {
+    JobRecAndStatus rec = 1; // The actual response data
+    google.protobuf.Empty null_response = 2; // Signal that the response is null
+  }
+}
+
+message JobRec {
+  string project_id = 1;
+  string spec_name = 2; // Align with jobs.ts
+  string job_id = 3;
+  google.protobuf.Timestamp time_created = 4;
+  google.protobuf.Struct job_params = 5;
+}
+
 
 message GetZZJobTestRequest {
   string id = 1;
