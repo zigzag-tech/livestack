@@ -7,7 +7,7 @@ import {
 import { StreamNode } from "../orchestrations/InstantiatedGraph";
 import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorker";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
-import { JobsOptions, Queue, WorkerOptions } from "bullmq";
+import { Queue, WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
   GenericRecordType,
@@ -671,14 +671,12 @@ export class JobSpec<
     jobOptions?: P;
     parentJobId?: string;
     uniqueSpecLabel?: string;
-    bullMQJobsOpts?: JobsOptions;
     inputStreamIdOverridesByTag?: Partial<Record<keyof IMap, string>>;
     outputStreamIdOverridesByTag?: Partial<Record<keyof OMap, string>>;
   }) {
     let {
       jobId = v4(),
       jobOptions,
-      bullMQJobsOpts,
       inputStreamIdOverridesByTag,
       outputStreamIdOverridesByTag,
     } = p || {};
@@ -767,7 +765,7 @@ export class JobSpec<
         jobOptions,
         contextId: p?.parentJobId || null,
       },
-      { ...bullMQJobsOpts, jobId: jobId }
+      { jobId: jobId }
     );
     this.logger.info(
       `Added job with ID ${j.id} to jobSpec: ` +

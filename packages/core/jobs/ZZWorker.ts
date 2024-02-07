@@ -126,7 +126,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     const that = this;
     this.bullMQWorker = new Worker<RawQueueJobData<P>, void, string>(
       `${that.zzEnv.projectId}/${this.jobSpec.name}`,
-      async (job, token) => {
+      async (job) => {
         const jobId = job.id! as JobId;
 
         const localG = await resolveInstantiatedGraph({
@@ -136,7 +136,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
         });
 
         const zzJ = new ZZJob({
-          bullMQJob: job,
+          jobId,
           logger: that.logger,
           jobSpec: that.jobSpec,
           jobOptions: job.data.jobOptions,
@@ -144,6 +144,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
           storageProvider: that.zzEnv.storageProvider,
           workerName: that.workerName,
           graph: localG,
+          updateProgress: job.updateProgress.bind(job),
         });
 
         return await zzJ.beginProcessing(this.def.processor.bind(zzJ) as any);
@@ -152,8 +153,6 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     );
 
     // Setup event listeners
-    this.bullMQWorker.on("active", (job: Job) => {});
-
     this.bullMQWorker.on("failed", async (job, error: Error) => {
       this.logger.error(
         `JOB FAILED: ID: ${job?.id}, spec: ${this.jobSpec.name}, message: ${error}`
@@ -167,19 +166,16 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
       }
     });
 
-    this.bullMQWorker.on(
-      "progress",
-      (job: Job, progress: number | object) => {}
-    );
-
     this.bullMQWorker.on("completed", async (job: Job) => {
       this.logger.info(`JOB COMPLETED: ${job.id}`);
     });
 
-    this.bullMQWorker.run();
-    this.bullMQWorker.waitUntilReady().then(() => {
-      this.logger.info(`WORKER STARTED: ${this.workerName}.`);
-    });
+    this.bullMQWorker
+      .run()
+      .then(() => this.bullMQWorker.waitUntilReady())
+      .then(() => {
+        this.logger.info(`WORKER STARTED: ${this.workerName}.`);
+      });
   }
 
   public async waitUntilReady() {

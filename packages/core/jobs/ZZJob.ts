@@ -1,6 +1,5 @@
 import { WrapTerminatorAndDataId } from "../utils/io";
 import { DataStream } from "./DataStream";
-import { Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
   createLazyNextValueGenerator,
@@ -18,7 +17,6 @@ import { ZZEnv } from "./ZZEnv";
 import { InferTMap } from "@livestack/shared/IOSpec";
 import _ from "lodash";
 import { InstantiatedGraph, JobId } from "../orchestrations/InstantiatedGraph";
-import { RawQueueJobData } from "../orchestrations/workerCommon";
 import { TransformRegistry } from "../orchestrations/TransformRegistry";
 
 export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
@@ -40,7 +38,6 @@ export class ZZJob<
   IMap = InferTMap<I>,
   OMap = InferTMap<O>
 > {
-  private readonly bullMQJob: Job<RawQueueJobData<P>, void>;
   readonly jobOptions: P;
 
   readonly logger: ReturnType<typeof getLogger>;
@@ -92,9 +89,9 @@ export class ZZJob<
       subscriberCountObservable: Observable<number>;
     };
   }>;
+  private updateProgress: (count: number) => Promise<void>;
 
   constructor(p: {
-    bullMQJob: Job<RawQueueJobData<P>, void, string>;
     logger: ReturnType<typeof getLogger>;
     jobOptions: P;
     storageProvider?: IStorageProvider;
@@ -103,13 +100,15 @@ export class ZZJob<
     workerInstanceParamsSchema?: z.ZodType<WP>;
     workerName: string;
     graph: InstantiatedGraph;
+    jobId: JobId;
+    updateProgress: (count: number) => Promise<void>;
   }) {
-    this.bullMQJob = p.bullMQJob;
-    this.jobId = this.bullMQJob.id! as JobId;
+    this.jobId = p.jobId as JobId;
     this.logger = p.logger;
     this.workerName = p.workerName;
     this.spec = p.jobSpec;
     this.graph = p.graph;
+    this.updateProgress = p.updateProgress;
 
     try {
       this.jobOptions = p.jobSpec.jobOptions.parse(p.jobOptions) as P;
@@ -198,7 +197,7 @@ export class ZZJob<
         },
       });
 
-      await this.bullMQJob.updateProgress(this._dummyProgressCount++);
+      await this.updateProgress(this._dummyProgressCount++);
     };
     const that = this;
     this.output = (() => {
@@ -418,14 +417,12 @@ export class ZZJob<
       projectId: this.zzEnv.projectId,
     };
 
-    const job = this.bullMQJob;
     const logger = this.logger;
     const projectId = this.zzEnv.projectId;
 
     logger.info(
-      `Job started. Job ID: ${job.id}.` +
-        `${JSON.stringify(job.data, longStringTruncator)}`,
-      +`${JSON.stringify(await job.getChildrenValues(), longStringTruncator)}`
+      `Job started. Job ID: ${this.jobId}.` +
+        `${JSON.stringify(this.jobOptions, longStringTruncator)}`
     );
 
     try {
@@ -486,7 +483,7 @@ export class ZZJob<
         await updateJobStatus({
           projectId,
           specName: this.spec.name,
-          jobId: job.id!,
+          jobId: this.jobId,
           dbConn: this.zzEnv.db,
           jobStatus: "failed",
         });

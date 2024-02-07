@@ -4,7 +4,6 @@ import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
-import { JobsOptions } from "bullmq";
 import { JobNode, InstantiatedGraph } from "./InstantiatedGraph";
 import {
   SpecAndOutlet,
@@ -490,7 +489,6 @@ export class WorkflowSpec extends JobSpec<
   public async enqueueJob(p?: {
     jobId?: string;
     jobOptions?: WorkflowChildJobOptionsSanitized;
-    bullMQJobsOpts?: JobsOptions;
   }) {
     let { jobOptions } = p || {};
 
