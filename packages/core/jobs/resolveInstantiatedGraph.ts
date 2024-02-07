@@ -1,6 +1,6 @@
 import { StreamIdOverridesForRootSpec } from "../orchestrations/InstantiatedGraph";
-import { getJobStreamConnectorRecs } from "../../vault-dev-server/src/db/streams";
-import { getParentJobRec } from "../../vault-dev-server/src/db/job_relations";
+import { getJobStreamConnectorRecs } from "@livestack/vault-dev-server/src/db/streams";
+import { getParentJobRec } from "@livestack/vault-dev-server/src/db/job_relations";
 import { ZZEnv } from "./ZZEnv";
 import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { JobSpec } from "./JobSpec";

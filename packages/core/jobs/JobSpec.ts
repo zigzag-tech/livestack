@@ -19,13 +19,13 @@ import _ from "lodash";
 import {
   ensureJobAndInitStatusRec,
   jobDbService,
-} from "../../vault-dev-server/src/db/jobs";
+} from "@livestack/vault-dev-server/src/db/jobs";
 import {
   ensureJobStreamConnectorRec,
   ensureStreamRec,
-} from "../../vault-dev-server/src/db/streams";
-import { ensureJobRelationRec } from "../../vault-dev-server/src/db/job_relations";
-import { getJobDatapoints } from "../../vault-dev-server/src/db/data_points";
+} from "@livestack/vault-dev-server/src/db/streams";
+import { ensureJobRelationRec } from "@livestack/vault-dev-server/src/db/job_relations";
+import { getJobDatapoints } from "@livestack/vault-dev-server/src/db/data_points";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 
