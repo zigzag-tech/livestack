@@ -1,2 +1,2 @@
-export * from "./generated/jobs";
+export * from "./generated/db";
 export * from "./wrapNullResponse";

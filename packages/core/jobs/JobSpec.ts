@@ -16,10 +16,7 @@ import {
 } from "../orchestrations/workerCommon";
 import Redis from "ioredis";
 import _ from "lodash";
-import {
-  ensureJobAndInitStatusRec,
-  jobDbService,
-} from "@livestack/vault-dev-server/src/db/jobs";
+import { ensureJobAndInitStatusRec } from "@livestack/vault-dev-server/src/db/jobs";
 import {
   ensureJobStreamConnectorRec,
   ensureStreamRec,

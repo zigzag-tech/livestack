@@ -1,5 +1,4 @@
 /* eslint-disable */
-import type { CallContext, CallOptions } from "nice-grpc-common";
 import _m0 from "protobufjs/minimal";
 import { Empty } from "./google/protobuf/empty";
 import { Struct } from "./google/protobuf/struct";
@@ -395,30 +394,6 @@ export const JobRec = {
     return message;
   },
 };
-
-export type JobDBServiceDefinition = typeof JobDBServiceDefinition;
-export const JobDBServiceDefinition = {
-  name: "JobDBService",
-  fullName: "livestack.JobDBService",
-  methods: {
-    getJobRec: {
-      name: "GetJobRec",
-      requestType: GetJobRecRequest,
-      requestStream: false,
-      responseType: GetJobRecResponse,
-      responseStream: false,
-      options: {},
-    },
-  },
-} as const;
-
-export interface JobDBServiceImplementation<CallContextExt = {}> {
-  getJobRec(request: GetJobRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<GetJobRecResponse>>;
-}
-
-export interface JobDBServiceClient<CallOptionsExt = {}> {
-  getJobRec(request: DeepPartial<GetJobRecRequest>, options?: CallOptions & CallOptionsExt): Promise<GetJobRecResponse>;
-}
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 

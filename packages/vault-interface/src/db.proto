@@ -6,8 +6,10 @@ import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto"; 
 import "google/protobuf/any.proto";
+import "jobs.proto";
 
 service DBService {
+  rpc GetJobRec(GetJobRecRequest) returns (GetJobRecResponse);
   rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
   rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
   rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
@@ -24,8 +26,6 @@ message GetZZJobTestResponse {
   string pipeName = 2;
   string jobId = 3;
 }
-
-
 
 message EnsureStreamRecRequest {
   string project_id = 1;

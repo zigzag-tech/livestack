@@ -5,6 +5,7 @@ import { Any } from "./google/protobuf/any";
 import { Empty } from "./google/protobuf/empty";
 import { Struct } from "./google/protobuf/struct";
 import { Timestamp } from "./google/protobuf/timestamp";
+import { GetJobRecRequest, GetJobRecResponse } from "./jobs";
 
 export const protobufPackage = "livestack";
 
@@ -1136,6 +1137,14 @@ export const DBServiceDefinition = {
   name: "DBService",
   fullName: "livestack.DBService",
   methods: {
+    getJobRec: {
+      name: "GetJobRec",
+      requestType: GetJobRecRequest,
+      requestStream: false,
+      responseType: GetJobRecResponse,
+      responseStream: false,
+      options: {},
+    },
     ensureStreamRec: {
       name: "EnsureStreamRec",
       requestType: EnsureStreamRecRequest,
@@ -1180,6 +1189,7 @@ export const DBServiceDefinition = {
 } as const;
 
 export interface DBServiceImplementation<CallContextExt = {}> {
+  getJobRec(request: GetJobRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<GetJobRecResponse>>;
   ensureStreamRec(request: EnsureStreamRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
   ensureJobStreamConnectorRec(
     request: EnsureJobStreamConnectorRecRequest,
@@ -1200,6 +1210,7 @@ export interface DBServiceImplementation<CallContextExt = {}> {
 }
 
 export interface DBServiceClient<CallOptionsExt = {}> {
+  getJobRec(request: DeepPartial<GetJobRecRequest>, options?: CallOptions & CallOptionsExt): Promise<GetJobRecResponse>;
   ensureStreamRec(request: DeepPartial<EnsureStreamRecRequest>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
   ensureJobStreamConnectorRec(
     request: DeepPartial<EnsureJobStreamConnectorRecRequest>,
