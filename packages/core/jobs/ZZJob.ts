@@ -1,6 +1,6 @@
 import { WrapTerminatorAndDataId } from "../utils/io";
 import { DataStream } from "./DataStream";
-import { Job, WaitingChildrenError } from "bullmq";
+import { Job } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
   createLazyNextValueGenerator,
@@ -485,26 +485,14 @@ export class ZZJob<
       //   return processedR;
       // }
     } catch (e: any) {
-      if (e instanceof WaitingChildrenError) {
-        if (this.zzEnv.db) {
-          await updateJobStatus({
-            projectId,
-            specName: this.spec.name,
-            jobId: job.id!,
-            dbConn: this.zzEnv.db,
-            jobStatus: "waiting_children",
-          });
-        }
-      } else {
-        if (this.zzEnv.db) {
-          await updateJobStatus({
-            projectId,
-            specName: this.spec.name,
-            jobId: job.id!,
-            dbConn: this.zzEnv.db,
-            jobStatus: "failed",
-          });
-        }
+      if (this.zzEnv.db) {
+        await updateJobStatus({
+          projectId,
+          specName: this.spec.name,
+          jobId: job.id!,
+          dbConn: this.zzEnv.db,
+          jobStatus: "failed",
+        });
       }
       throw e;
       // }
