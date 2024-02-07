@@ -29,5 +29,4 @@ message JobRec {
   string job_id = 3;
   google.protobuf.Timestamp time_created = 4;
   google.protobuf.Struct job_params = 5;
-  // Removed status field to align with jobs.ts
 }

@@ -32,11 +32,14 @@ export interface GetJobRecResponse {
 
 export interface JobRec {
   projectId: string;
-  pipeName: string;
+  /** Align with jobs.ts */
+  specName: string;
   jobId: string;
-  timeCreated: Date | undefined;
+  timeCreated:
+    | Date
+    | undefined;
+  /** Removed status field to align with jobs.ts */
   jobParams: { [key: string]: any } | undefined;
-  status: string;
 }
 
 function createBaseGetJobRecRequest(): GetJobRecRequest {
@@ -207,7 +210,7 @@ export const GetJobRecResponse = {
 };
 
 function createBaseJobRec(): JobRec {
-  return { projectId: "", pipeName: "", jobId: "", timeCreated: undefined, jobParams: undefined, status: "" };
+  return { projectId: "", specName: "", jobId: "", timeCreated: undefined, jobParams: undefined };
 }
 
 export const JobRec = {
@@ -215,8 +218,8 @@ export const JobRec = {
     if (message.projectId !== "") {
       writer.uint32(10).string(message.projectId);
     }
-    if (message.pipeName !== "") {
-      writer.uint32(18).string(message.pipeName);
+    if (message.specName !== "") {
+      writer.uint32(18).string(message.specName);
     }
     if (message.jobId !== "") {
       writer.uint32(26).string(message.jobId);
@@ -226,9 +229,6 @@ export const JobRec = {
     }
     if (message.jobParams !== undefined) {
       Struct.encode(Struct.wrap(message.jobParams), writer.uint32(42).fork()).ldelim();
-    }
-    if (message.status !== "") {
-      writer.uint32(50).string(message.status);
     }
     return writer;
   },
@@ -252,7 +252,7 @@ export const JobRec = {
             break;
           }
 
-          message.pipeName = reader.string();
+          message.specName = reader.string();
           continue;
         case 3:
           if (tag !== 26) {
@@ -275,13 +275,6 @@ export const JobRec = {
 
           message.jobParams = Struct.unwrap(Struct.decode(reader, reader.uint32()));
           continue;
-        case 6:
-          if (tag !== 50) {
-            break;
-          }
-
-          message.status = reader.string();
-          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -294,11 +287,10 @@ export const JobRec = {
   fromJSON(object: any): JobRec {
     return {
       projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      pipeName: isSet(object.pipeName) ? globalThis.String(object.pipeName) : "",
+      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
       timeCreated: isSet(object.timeCreated) ? fromJsonTimestamp(object.timeCreated) : undefined,
       jobParams: isObject(object.jobParams) ? object.jobParams : undefined,
-      status: isSet(object.status) ? globalThis.String(object.status) : "",
     };
   },
 
@@ -307,8 +299,8 @@ export const JobRec = {
     if (message.projectId !== "") {
       obj.projectId = message.projectId;
     }
-    if (message.pipeName !== "") {
-      obj.pipeName = message.pipeName;
+    if (message.specName !== "") {
+      obj.specName = message.specName;
     }
     if (message.jobId !== "") {
       obj.jobId = message.jobId;
@@ -319,9 +311,6 @@ export const JobRec = {
     if (message.jobParams !== undefined) {
       obj.jobParams = message.jobParams;
     }
-    if (message.status !== "") {
-      obj.status = message.status;
-    }
     return obj;
   },
 
@@ -331,11 +320,10 @@ export const JobRec = {
   fromPartial<I extends Exact<DeepPartial<JobRec>, I>>(object: I): JobRec {
     const message = createBaseJobRec();
     message.projectId = object.projectId ?? "";
-    message.pipeName = object.pipeName ?? "";
+    message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
     message.timeCreated = object.timeCreated ?? undefined;
     message.jobParams = object.jobParams ?? undefined;
-    message.status = object.status ?? "";
     return message;
   },
 };
