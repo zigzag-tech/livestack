@@ -1,4 +1,4 @@
-import { ZZJobStreamConnectorRec, DataStreamRec } from "./rec_types";
+import { ZZJobStreamConnectorRec, DataStreamRec } from "./streams";
 import { Knex } from "knex";
 
 export async function ensureStreamRec({
@@ -81,4 +81,18 @@ export async function getJobStreamConnectorRecs({
   }
   const r = await q.select("*");
   return r;
+}
+export interface DataStreamRec {
+  project_id: string;
+  stream_id: string;
+  time_created: Date;
+}
+
+export interface ZZJobStreamConnectorRec {
+  project_id: string;
+  job_id: string;
+  stream_id: string;
+  key: string;
+  connector_type: "in" | "out";
+  time_created: Date;
 }

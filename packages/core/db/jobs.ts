@@ -1,5 +1,4 @@
 import { Knex } from "knex";
-import { JobRec, ZZJobStatusRec, ZZJobStatus } from "./rec_types";
 import { v4 } from "uuid";
 import {
   convertMaybePrimtiveOrArrayBack,
@@ -103,4 +102,26 @@ export async function ensureJobAndInitStatusRec<T>({
     jobStatus: "requested",
   });
   // });
+}
+export interface ZZJobUniqueId {
+  project_id: string;
+  spec_name: string;
+  job_id: string;
+}
+
+export interface JobRec<P> extends ZZJobUniqueId {
+  job_params?: P;
+  time_created: Date;
+}
+
+export type ZZJobStatus =
+  | "requested"
+  | "running"
+  | "completed"
+  | "failed"
+  | "waiting_children";
+
+export interface ZZJobStatusRec extends ZZJobUniqueId {
+  status: ZZJobStatus;
+  time_created: Date;
 }

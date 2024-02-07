@@ -1,6 +1,5 @@
-import { ZZJobRelationRec } from "./rec_types";
 import { Knex } from "knex";
-import { JobRec } from "./rec_types";
+import { JobRec } from "./jobs";
 import { convertMaybePrimtiveOrArrayBack } from "./primitives";
 
 export async function ensureJobRelationRec({
@@ -95,4 +94,10 @@ export async function getParentJobRec({
         rec.unique_spec_label === "null" ? null : rec.unique_spec_label,
     };
   }
+}
+export interface ZZJobRelationRec {
+  project_id: string;
+  parent_job_id: string;
+  child_job_id: string;
+  time_created: Date;
 }

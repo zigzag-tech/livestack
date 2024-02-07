@@ -1,4 +1,3 @@
-import { ZZDatapointRec } from "./rec_types";
 import { Knex } from "knex";
 import {
   ARRAY_KEY,
@@ -88,4 +87,14 @@ export async function addDatapoint<T>({
   });
 
   return { datapointId };
+}
+export interface ZZDatapointRec<T> {
+  project_id: string;
+  stream_id: string;
+  datapoint_id: string;
+  data: T;
+  job_id: string | null;
+  job_output_key: string | null;
+  connector_type: "out" | null;
+  time_created: Date;
 }
