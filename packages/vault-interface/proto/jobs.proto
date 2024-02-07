@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package livestack;
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto"; 
+
+
+message GetJobRecRequest {
+  string project_id = 1;
+  string pipe_name = 2;
+  string job_id = 3;
+}
+
+message GetJobRecResponse {
+  oneof response {
+    JobData job_data = 1; // The actual response data
+    google.protobuf.Empty null_response = 2; // Signal that the response is null
+  }
+}
+
+message JobData {
+  string project_id = 1;
+  string pipe_name = 2;
+  string job_id = 3;
+  google.protobuf.Timestamp time_created = 4;
+  google.protobuf.Struct job_params = 5;
+  string status = 6;
+}
