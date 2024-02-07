@@ -7,15 +7,20 @@ import { Timestamp } from "./google/protobuf/timestamp";
 export const protobufPackage = "livestack";
 
 export interface GetJobRecRequest {
-  project_id: string;
-  pipe_name: string;
-  job_id: string;
+  projectId: string;
+  specName: string;
+  jobId: string;
+}
+
+export interface JobRecAndStatus {
+  rec: JobRec | undefined;
+  status: string;
 }
 
 export interface GetJobRecResponse {
   /** The actual response data */
-  job_data?:
-    | JobRec
+  rec?:
+    | JobRecAndStatus
     | undefined;
   /** Signal that the response is null */
   null_response?: Empty | undefined;
@@ -31,19 +36,19 @@ export interface JobRec {
 }
 
 function createBaseGetJobRecRequest(): GetJobRecRequest {
-  return { project_id: "", pipe_name: "", job_id: "" };
+  return { projectId: "", specName: "", jobId: "" };
 }
 
 export const GetJobRecRequest = {
   encode(message: GetJobRecRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.project_id !== "") {
-      writer.uint32(10).string(message.project_id);
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
     }
-    if (message.pipe_name !== "") {
-      writer.uint32(18).string(message.pipe_name);
+    if (message.specName !== "") {
+      writer.uint32(18).string(message.specName);
     }
-    if (message.job_id !== "") {
-      writer.uint32(26).string(message.job_id);
+    if (message.jobId !== "") {
+      writer.uint32(26).string(message.jobId);
     }
     return writer;
   },
@@ -60,21 +65,21 @@ export const GetJobRecRequest = {
             break;
           }
 
-          message.project_id = reader.string();
+          message.projectId = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
             break;
           }
 
-          message.pipe_name = reader.string();
+          message.specName = reader.string();
           continue;
         case 3:
           if (tag !== 26) {
             break;
           }
 
-          message.job_id = reader.string();
+          message.jobId = reader.string();
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -87,22 +92,22 @@ export const GetJobRecRequest = {
 
   fromJSON(object: any): GetJobRecRequest {
     return {
-      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
-      pipe_name: isSet(object.pipe_name) ? globalThis.String(object.pipe_name) : "",
-      job_id: isSet(object.job_id) ? globalThis.String(object.job_id) : "",
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
+      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
     };
   },
 
   toJSON(message: GetJobRecRequest): unknown {
     const obj: any = {};
-    if (message.project_id !== "") {
-      obj.project_id = message.project_id;
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
     }
-    if (message.pipe_name !== "") {
-      obj.pipe_name = message.pipe_name;
+    if (message.specName !== "") {
+      obj.specName = message.specName;
     }
-    if (message.job_id !== "") {
-      obj.job_id = message.job_id;
+    if (message.jobId !== "") {
+      obj.jobId = message.jobId;
     }
     return obj;
   },
@@ -112,21 +117,95 @@ export const GetJobRecRequest = {
   },
   fromPartial<I extends Exact<DeepPartial<GetJobRecRequest>, I>>(object: I): GetJobRecRequest {
     const message = createBaseGetJobRecRequest();
-    message.project_id = object.project_id ?? "";
-    message.pipe_name = object.pipe_name ?? "";
-    message.job_id = object.job_id ?? "";
+    message.projectId = object.projectId ?? "";
+    message.specName = object.specName ?? "";
+    message.jobId = object.jobId ?? "";
+    return message;
+  },
+};
+
+function createBaseJobRecAndStatus(): JobRecAndStatus {
+  return { rec: undefined, status: "" };
+}
+
+export const JobRecAndStatus = {
+  encode(message: JobRecAndStatus, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.rec !== undefined) {
+      JobRec.encode(message.rec, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.status !== "") {
+      writer.uint32(18).string(message.status);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): JobRecAndStatus {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseJobRecAndStatus();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.rec = JobRec.decode(reader, reader.uint32());
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.status = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): JobRecAndStatus {
+    return {
+      rec: isSet(object.rec) ? JobRec.fromJSON(object.rec) : undefined,
+      status: isSet(object.status) ? globalThis.String(object.status) : "",
+    };
+  },
+
+  toJSON(message: JobRecAndStatus): unknown {
+    const obj: any = {};
+    if (message.rec !== undefined) {
+      obj.rec = JobRec.toJSON(message.rec);
+    }
+    if (message.status !== "") {
+      obj.status = message.status;
+    }
+    return obj;
+  },
+
+  create<I extends Exact<DeepPartial<JobRecAndStatus>, I>>(base?: I): JobRecAndStatus {
+    return JobRecAndStatus.fromPartial(base ?? ({} as any));
+  },
+  fromPartial<I extends Exact<DeepPartial<JobRecAndStatus>, I>>(object: I): JobRecAndStatus {
+    const message = createBaseJobRecAndStatus();
+    message.rec = (object.rec !== undefined && object.rec !== null) ? JobRec.fromPartial(object.rec) : undefined;
+    message.status = object.status ?? "";
     return message;
   },
 };
 
 function createBaseGetJobRecResponse(): GetJobRecResponse {
-  return { job_data: undefined, null_response: undefined };
+  return { rec: undefined, null_response: undefined };
 }
 
 export const GetJobRecResponse = {
   encode(message: GetJobRecResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.job_data !== undefined) {
-      JobRec.encode(message.job_data, writer.uint32(10).fork()).ldelim();
+    if (message.rec !== undefined) {
+      JobRecAndStatus.encode(message.rec, writer.uint32(10).fork()).ldelim();
     }
     if (message.null_response !== undefined) {
       Empty.encode(message.null_response, writer.uint32(18).fork()).ldelim();
@@ -146,7 +225,7 @@ export const GetJobRecResponse = {
             break;
           }
 
-          message.job_data = JobRec.decode(reader, reader.uint32());
+          message.rec = JobRecAndStatus.decode(reader, reader.uint32());
           continue;
         case 2:
           if (tag !== 18) {
@@ -166,15 +245,15 @@ export const GetJobRecResponse = {
 
   fromJSON(object: any): GetJobRecResponse {
     return {
-      job_data: isSet(object.job_data) ? JobRec.fromJSON(object.job_data) : undefined,
+      rec: isSet(object.rec) ? JobRecAndStatus.fromJSON(object.rec) : undefined,
       null_response: isSet(object.null_response) ? Empty.fromJSON(object.null_response) : undefined,
     };
   },
 
   toJSON(message: GetJobRecResponse): unknown {
     const obj: any = {};
-    if (message.job_data !== undefined) {
-      obj.job_data = JobRec.toJSON(message.job_data);
+    if (message.rec !== undefined) {
+      obj.rec = JobRecAndStatus.toJSON(message.rec);
     }
     if (message.null_response !== undefined) {
       obj.null_response = Empty.toJSON(message.null_response);
@@ -187,8 +266,8 @@ export const GetJobRecResponse = {
   },
   fromPartial<I extends Exact<DeepPartial<GetJobRecResponse>, I>>(object: I): GetJobRecResponse {
     const message = createBaseGetJobRecResponse();
-    message.job_data = (object.job_data !== undefined && object.job_data !== null)
-      ? JobRec.fromPartial(object.job_data)
+    message.rec = (object.rec !== undefined && object.rec !== null)
+      ? JobRecAndStatus.fromPartial(object.rec)
       : undefined;
     message.null_response = (object.null_response !== undefined && object.null_response !== null)
       ? Empty.fromPartial(object.null_response)
@@ -316,16 +395,16 @@ export const JobRec = {
   },
 };
 
-export interface jobs {
+export interface JobDBService {
   GetJobRec(request: GetJobRecRequest): Promise<GetJobRecResponse>;
 }
 
-export const jobsServiceName = "livestack.jobs";
-export class jobsClientImpl implements jobs {
+export const JobDBServiceServiceName = "livestack.JobDBService";
+export class JobDBServiceClientImpl implements JobDBService {
   private readonly rpc: Rpc;
   private readonly service: string;
   constructor(rpc: Rpc, opts?: { service?: string }) {
-    this.service = opts?.service || jobsServiceName;
+    this.service = opts?.service || JobDBServiceServiceName;
     this.rpc = rpc;
     this.GetJobRec = this.GetJobRec.bind(this);
   }

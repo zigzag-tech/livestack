@@ -16,7 +16,7 @@ import {
 } from "../orchestrations/workerCommon";
 import Redis from "ioredis";
 import _ from "lodash";
-import { ensureJobAndInitStatusRec, getJobRec } from "../db/jobs";
+import { ensureJobAndInitStatusRec, jobDbService } from "../db/jobs";
 import { ensureJobStreamConnectorRec, ensureStreamRec } from "../db/streams";
 import { ensureJobRelationRec } from "../db/job_relations";
 import { getJobDatapoints } from "../db/data_points";
@@ -190,12 +190,19 @@ export class JobSpec<
         "Database is not configured in ZZEnv, therefore can not get job record."
       );
     }
-    return await getJobRec({
+    const r = await jobDbService(this.zzEnvEnsured.db).GetJobRec({
       specName: this.name,
       projectId: this.zzEnvEnsured.projectId,
       jobId,
-      dbConn: this.zzEnvEnsured.db,
     });
+    if (!r) {
+      return null;
+    } else {
+      return {
+        ...r.rec,
+        status: r.status,
+      };
+    }
   }
 
   public async getJobStatus(jobId: string) {

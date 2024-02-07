@@ -1140,7 +1140,7 @@ export const AddDatapointResponse = {
   },
 };
 
-export interface livestack {
+export interface DBService {
   EnsureStreamRec(request: EnsureStreamRecRequest): Promise<Empty>;
   EnsureJobStreamConnectorRec(request: EnsureJobStreamConnectorRecRequest): Promise<Empty>;
   GetJobStreamConnectorRecs(request: GetJobStreamConnectorRecsRequest): Observable<JobStreamConnectorRecord>;
@@ -1148,12 +1148,12 @@ export interface livestack {
   AddDatapoint(request: AddDatapointRequest): Promise<AddDatapointResponse>;
 }
 
-export const livestackServiceName = "livestack.livestack";
-export class livestackClientImpl implements livestack {
+export const DBServiceServiceName = "livestack.DBService";
+export class DBServiceClientImpl implements DBService {
   private readonly rpc: Rpc;
   private readonly service: string;
   constructor(rpc: Rpc, opts?: { service?: string }) {
-    this.service = opts?.service || livestackServiceName;
+    this.service = opts?.service || DBServiceServiceName;
     this.rpc = rpc;
     this.EnsureStreamRec = this.EnsureStreamRec.bind(this);
     this.EnsureJobStreamConnectorRec = this.EnsureJobStreamConnectorRec.bind(this);
