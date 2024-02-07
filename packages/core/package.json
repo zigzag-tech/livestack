@@ -12,7 +12,6 @@
     "@livestack/shared": "*",
     "@livestack/vault-client": "*",
     "@livestack/vault-dev-server": "*",
-    "bullmq": "^4.x",
     "chalk": "^4",
     "dotenv": "^16.x",
     "graphology": "^0.25.4",

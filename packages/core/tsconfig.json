@@ -1,12 +1,5 @@
 {
-  "include": [
-    "missing-modules.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    "*.ts",
-    "*.tsx",
-    "../vault-interface/src/wrapNullResponse.ts"
-  ],
+  "include": ["missing-modules.d.ts", "**/*.ts", "**/*.tsx", "*.ts", "*.tsx"],
   "compilerOptions": {
     "module": "CommonJS",
     // "types": ["reflect-metadata"],

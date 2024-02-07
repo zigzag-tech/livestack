@@ -1,4 +1,3 @@
-import { Observable } from "rxjs";
 import {
   QueueServiceImplementation,
   QueueJob,
@@ -9,16 +8,20 @@ import {
   ToWorker,
 } from "@livestack/vault-interface/src/generated/queue";
 import { Queue, Worker } from "bullmq";
+import { genPromiseCycle } from "@livestack/shared";
 
 const _rawQueueBySpecName = new Map<string, Queue>();
 
 class ProjectQueueService implements QueueServiceImplementation {
-  projectId: string;
-  constructor({ projectId }: { projectId: string }) {
-    this.projectId = projectId;
-  }
+  //   projectId: string;
+  //   constructor({ projectId }: { projectId: string }) {
+  //     this.projectId = projectId;
+  //   }
 
   async addJob(job: QueueJob) {
+    // if (job.projectId !== this.projectId) {
+    //   throw new Error("Invalid projectId " + job.projectId);
+    // }
     const queue = this.getQueue(job);
     const workers = await queue.getWorkers();
     if (workers.length === 0) {
@@ -43,11 +46,11 @@ class ProjectQueueService implements QueueServiceImplementation {
   }
 
   private getQueue({
-    projectId,
     specName,
+    projectId,
   }: {
-    projectId: string;
     specName: string;
+    projectId: string;
   }) {
     const queueId = `${projectId}/${specName}`;
     if (!_rawQueueBySpecName.has(queueId)) {
@@ -64,44 +67,51 @@ class ProjectQueueService implements QueueServiceImplementation {
     return _rawQueueBySpecName.get(queueId)!;
   }
 
-  workerReportDuty(request: AsyncIterable<FromWorker>) {
-    let resolveJobPromise: (value: QueueJob) => void; // Resolver function for the current job promise
-    let jobPromise = new Promise<QueueJob>(
-      (resolve) => (resolveJobPromise = resolve)
-    ); // Initial job promise
+  private workerBundleById: Record<
+    string,
+    {
+      worker: Worker;
+      updateProgress: null | ((progress: number) => Promise<void>);
+      jobCompleteCycleByJobId: Record<
+        string,
+        ReturnType<typeof genPromiseCycle>
+      >;
+    }
+  > = {};
 
-    const sendJob = async (job: QueueJob) => {
-      resolveJobPromise(job); // Resolve the current job promise with the job data
+  reportAsWorker(request: AsyncIterable<FromWorker>) {
+    let resolveJobPromise: (value: { job: QueueJob; workerId: string }) => void; // Resolver function for the current job promise
+    let jobPromise = new Promise<{
+      job: QueueJob;
+      workerId: string;
+    }>((resolve) => (resolveJobPromise = resolve)); // Initial job promise
+
+    const sendJob = async ({
+      job,
+      workerId,
+    }: {
+      job: QueueJob;
+      workerId: string;
+    }) => {
+      resolveJobPromise({ job, workerId }); // Resolve the current job promise with the job data
       jobPromise = new Promise((resolve) => (resolveJobPromise = resolve)); // Create a new promise for the next job
     };
 
     const iter: ServerStreamingMethodResult<ToWorker> = {
       async *[Symbol.asyncIterator]() {
         while (true) {
-          const job = await jobPromise;
-          yield { job };
+          const d = await jobPromise;
+          jobPromise = new Promise((resolve) => (resolveJobPromise = resolve));
+          yield d;
         }
       },
     };
 
-    let worker: Worker;
-
     let updateProgress: null | ((progress: number) => Promise<void>) = null;
-    let resolveJobCompletePromise;
-    let rejectJobCompletePromise;
-    const jobCompletePromise = new Promise<void>((resolve, reject) => {
-      resolveJobCompletePromise = resolve;
-      rejectJobCompletePromise = reject;
-    });
-
-    const cleanUpAfterJob = () => {
-      resolveJobCompletePromise = null;
-      rejectJobCompletePromise = null;
-      updateProgress = null;
-    };
 
     (async () => {
       for await (const {
+        workerId,
         signUp,
         progressUpdate,
         jobCompleted,
@@ -110,23 +120,30 @@ class ProjectQueueService implements QueueServiceImplementation {
       } of request) {
         if (signUp) {
           const { projectId, specName } = signUp;
-          if (projectId !== this.projectId) {
-            throw new Error("Invalid projectId " + projectId);
-          }
-          worker = new Worker(
+          //   if (projectId !== this.projectId) {
+          //     throw new Error("Invalid projectId " + projectId);
+          //   }
+          const worker = new Worker(
             `${projectId}/${specName}`,
             async (job) => {
+              const jobCompleteCycle = genPromiseCycle();
+              this.workerBundleById[workerId].jobCompleteCycleByJobId[job.id!] =
+                jobCompleteCycle;
+
               sendJob({
-                projectId: this.projectId,
-                jobId: job.id!,
-                specName,
-                jobOptionsStr: JSON.stringify(job.data.jobOptions),
-                contextId: job.data.contextId || "",
+                workerId,
+                job: {
+                  projectId: projectId,
+                  jobId: job.id!,
+                  specName,
+                  jobOptionsStr: JSON.stringify(job.data.jobOptions),
+                  contextId: job.data.contextId || "",
+                },
               });
 
               updateProgress = job.updateProgress.bind(job);
 
-              return await jobCompletePromise;
+              return await jobCompleteCycle.promise;
             },
             {
               concurrency: 1,
@@ -136,27 +153,42 @@ class ProjectQueueService implements QueueServiceImplementation {
               },
             }
           );
+
+          this.workerBundleById[workerId] = {
+            worker,
+            updateProgress,
+            jobCompleteCycleByJobId: {},
+          };
+          await worker.waitUntilReady();
+
           // TODO
         } else if (progressUpdate) {
           if (!updateProgress) {
+            console.error(progressUpdate);
             throw new Error("updateProgress not initialized");
           } else {
             // TODO: fix typing
             (updateProgress as any)(progressUpdate.progress);
           }
         } else if (jobCompleted) {
-          if (!resolveJobCompletePromise) {
+          if (!this.workerBundleById[workerId]) {
             throw new Error("resolveWorkerCompletePromise not initialized");
           }
-          (resolveJobCompletePromise as any)();
-          cleanUpAfterJob();
+          this.workerBundleById[workerId].jobCompleteCycleByJobId[
+            jobCompleted.jobId
+          ].resolveNext(void 0);
         } else if (jobFailed) {
-          if (!rejectJobCompletePromise) {
+          if (!this.workerBundleById[workerId]) {
             throw new Error("rejectWorkerCompletePromise not initialized");
           }
-          (rejectJobCompletePromise as any)(JSON.parse(jobFailed.errorStr));
-          cleanUpAfterJob();
+          this.workerBundleById[workerId].jobCompleteCycleByJobId[
+            jobFailed.jobId
+          ].rejectNext(void 0);
         } else if (workerStopped) {
+          if (!workerId) {
+            throw new Error("workerId not initialized");
+          }
+          delete this.workerBundleById[workerId];
           return;
         } else {
           throw new Error("Unknown message from worker");
@@ -170,9 +202,9 @@ class ProjectQueueService implements QueueServiceImplementation {
 
 const _projectServiceMap: Record<string, ProjectQueueService> = {};
 
-export const getQueueService = ({ projectId }: { projectId: string }) => {
-  if (!_projectServiceMap[projectId]) {
-    _projectServiceMap[projectId] = new ProjectQueueService({ projectId });
+export const getQueueService = () => {
+  if (!_projectServiceMap["default"]) {
+    _projectServiceMap["default"] = new ProjectQueueService();
   }
-  return _projectServiceMap[projectId];
+  return _projectServiceMap["default"];
 };

@@ -6,11 +6,13 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@livestack/shared": "*",
     "@livestack/vault-interface": "*",
     "bullmq": "^4.x",
     "dotenv": "^16.x",
     "knex": "^2.x",
-    "pg": "^8.x"
+    "pg": "^8.x",
+    "uuid": "^9"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

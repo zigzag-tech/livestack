@@ -44,6 +44,7 @@ export interface JobFailed {
 }
 
 export interface FromWorker {
+  workerId: string;
   signUp?: SignUp | undefined;
   progressUpdate?: ProgressUpdate | undefined;
   jobCompleted?: JobCompleted | undefined;
@@ -52,6 +53,7 @@ export interface FromWorker {
 }
 
 export interface ToWorker {
+  workerId: string;
   job: QueueJob | undefined;
 }
 
@@ -621,6 +623,7 @@ export const JobFailed = {
 
 function createBaseFromWorker(): FromWorker {
   return {
+    workerId: "",
     signUp: undefined,
     progressUpdate: undefined,
     jobCompleted: undefined,
@@ -631,20 +634,23 @@ function createBaseFromWorker(): FromWorker {
 
 export const FromWorker = {
   encode(message: FromWorker, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.workerId !== "") {
+      writer.uint32(10).string(message.workerId);
+    }
     if (message.signUp !== undefined) {
-      SignUp.encode(message.signUp, writer.uint32(10).fork()).ldelim();
+      SignUp.encode(message.signUp, writer.uint32(18).fork()).ldelim();
     }
     if (message.progressUpdate !== undefined) {
-      ProgressUpdate.encode(message.progressUpdate, writer.uint32(18).fork()).ldelim();
+      ProgressUpdate.encode(message.progressUpdate, writer.uint32(26).fork()).ldelim();
     }
     if (message.jobCompleted !== undefined) {
-      JobCompleted.encode(message.jobCompleted, writer.uint32(26).fork()).ldelim();
+      JobCompleted.encode(message.jobCompleted, writer.uint32(34).fork()).ldelim();
     }
     if (message.jobFailed !== undefined) {
-      JobFailed.encode(message.jobFailed, writer.uint32(34).fork()).ldelim();
+      JobFailed.encode(message.jobFailed, writer.uint32(42).fork()).ldelim();
     }
     if (message.workerStopped !== undefined) {
-      WorkerStopped.encode(message.workerStopped, writer.uint32(42).fork()).ldelim();
+      WorkerStopped.encode(message.workerStopped, writer.uint32(50).fork()).ldelim();
     }
     return writer;
   },
@@ -661,31 +667,38 @@ export const FromWorker = {
             break;
           }
 
-          message.signUp = SignUp.decode(reader, reader.uint32());
+          message.workerId = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
             break;
           }
 
-          message.progressUpdate = ProgressUpdate.decode(reader, reader.uint32());
+          message.signUp = SignUp.decode(reader, reader.uint32());
           continue;
         case 3:
           if (tag !== 26) {
             break;
           }
 
-          message.jobCompleted = JobCompleted.decode(reader, reader.uint32());
+          message.progressUpdate = ProgressUpdate.decode(reader, reader.uint32());
           continue;
         case 4:
           if (tag !== 34) {
             break;
           }
 
-          message.jobFailed = JobFailed.decode(reader, reader.uint32());
+          message.jobCompleted = JobCompleted.decode(reader, reader.uint32());
           continue;
         case 5:
           if (tag !== 42) {
+            break;
+          }
+
+          message.jobFailed = JobFailed.decode(reader, reader.uint32());
+          continue;
+        case 6:
+          if (tag !== 50) {
             break;
           }
 
@@ -702,6 +715,7 @@ export const FromWorker = {
 
   fromJSON(object: any): FromWorker {
     return {
+      workerId: isSet(object.workerId) ? globalThis.String(object.workerId) : "",
       signUp: isSet(object.signUp) ? SignUp.fromJSON(object.signUp) : undefined,
       progressUpdate: isSet(object.progressUpdate) ? ProgressUpdate.fromJSON(object.progressUpdate) : undefined,
       jobCompleted: isSet(object.jobCompleted) ? JobCompleted.fromJSON(object.jobCompleted) : undefined,
@@ -712,6 +726,9 @@ export const FromWorker = {
 
   toJSON(message: FromWorker): unknown {
     const obj: any = {};
+    if (message.workerId !== "") {
+      obj.workerId = message.workerId;
+    }
     if (message.signUp !== undefined) {
       obj.signUp = SignUp.toJSON(message.signUp);
     }
@@ -735,6 +752,7 @@ export const FromWorker = {
   },
   fromPartial(object: DeepPartial<FromWorker>): FromWorker {
     const message = createBaseFromWorker();
+    message.workerId = object.workerId ?? "";
     message.signUp = (object.signUp !== undefined && object.signUp !== null)
       ? SignUp.fromPartial(object.signUp)
       : undefined;
@@ -755,13 +773,16 @@ export const FromWorker = {
 };
 
 function createBaseToWorker(): ToWorker {
-  return { job: undefined };
+  return { workerId: "", job: undefined };
 }
 
 export const ToWorker = {
   encode(message: ToWorker, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.workerId !== "") {
+      writer.uint32(10).string(message.workerId);
+    }
     if (message.job !== undefined) {
-      QueueJob.encode(message.job, writer.uint32(10).fork()).ldelim();
+      QueueJob.encode(message.job, writer.uint32(18).fork()).ldelim();
     }
     return writer;
   },
@@ -778,6 +799,13 @@ export const ToWorker = {
             break;
           }
 
+          message.workerId = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
           message.job = QueueJob.decode(reader, reader.uint32());
           continue;
       }
@@ -790,11 +818,17 @@ export const ToWorker = {
   },
 
   fromJSON(object: any): ToWorker {
-    return { job: isSet(object.job) ? QueueJob.fromJSON(object.job) : undefined };
+    return {
+      workerId: isSet(object.workerId) ? globalThis.String(object.workerId) : "",
+      job: isSet(object.job) ? QueueJob.fromJSON(object.job) : undefined,
+    };
   },
 
   toJSON(message: ToWorker): unknown {
     const obj: any = {};
+    if (message.workerId !== "") {
+      obj.workerId = message.workerId;
+    }
     if (message.job !== undefined) {
       obj.job = QueueJob.toJSON(message.job);
     }
@@ -806,6 +840,7 @@ export const ToWorker = {
   },
   fromPartial(object: DeepPartial<ToWorker>): ToWorker {
     const message = createBaseToWorker();
+    message.workerId = object.workerId ?? "";
     message.job = (object.job !== undefined && object.job !== null) ? QueueJob.fromPartial(object.job) : undefined;
     return message;
   },
@@ -824,8 +859,8 @@ export const QueueServiceDefinition = {
       responseStream: false,
       options: {},
     },
-    workerReportDuty: {
-      name: "WorkerReportDuty",
+    reportAsWorker: {
+      name: "ReportAsWorker",
       requestType: FromWorker,
       requestStream: true,
       responseType: ToWorker,
@@ -837,7 +872,7 @@ export const QueueServiceDefinition = {
 
 export interface QueueServiceImplementation<CallContextExt = {}> {
   addJob(request: QueueJob, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
-  workerReportDuty(
+  reportAsWorker(
     request: AsyncIterable<FromWorker>,
     context: CallContext & CallContextExt,
   ): ServerStreamingMethodResult<DeepPartial<ToWorker>>;
@@ -845,7 +880,7 @@ export interface QueueServiceImplementation<CallContextExt = {}> {
 
 export interface QueueServiceClient<CallOptionsExt = {}> {
   addJob(request: DeepPartial<QueueJob>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
-  workerReportDuty(
+  reportAsWorker(
     request: AsyncIterable<DeepPartial<FromWorker>>,
     options?: CallOptions & CallOptionsExt,
   ): AsyncIterable<ToWorker>;
