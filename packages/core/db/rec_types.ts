@@ -9,7 +9,12 @@ export interface JobRec<P> extends ZZJobUniqueId {
   time_created: Date;
 }
 
-export type ZZJobStatus = "requested" | "running" | "completed" | "failed" | "waiting_children";
+export type ZZJobStatus =
+  | "requested"
+  | "running"
+  | "completed"
+  | "failed"
+  | "waiting_children";
 
 export interface ZZJobStatusRec extends ZZJobUniqueId {
   status: ZZJobStatus;
@@ -26,10 +31,6 @@ export interface ZZDatapointRec<T> {
   connector_type: string;
   time_created: Date;
 }
-
-  connector_type: string | null;
-  time_created: Date;
-};
 
 export interface DataStreamRec {
   project_id: string;
