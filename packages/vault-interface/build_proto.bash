@@ -1,4 +1,5 @@
 #!/bin/bash
+# https://rsbh.dev/blogs/grpc-with-nodejs-typescript
 
 OUT_DIR="./src/generated"
 
