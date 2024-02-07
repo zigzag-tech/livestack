@@ -8,7 +8,7 @@ import {
 } from "../realtime/pubsub";
 import { Observable, map, takeUntil } from "rxjs";
 import { IStorageProvider } from "../storage/cloudStorage";
-import { getParentJobRec, updateJobStatus } from "../db/knexConn";
+import { getParentJobRec, updateJobStatus } from "../db/db_funcs";
 import longStringTruncator from "../utils/longStringTruncator";
 import { JobSpec } from "./JobSpec";
 import { z } from "zod";

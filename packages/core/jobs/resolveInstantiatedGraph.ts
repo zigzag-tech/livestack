@@ -1,5 +1,5 @@
 import { StreamIdOverridesForRootSpec } from "../orchestrations/InstantiatedGraph";
-import { getJobStreamConnectorRecs, getParentJobRec } from "../db/knexConn";
+import { getJobStreamConnectorRecs, getParentJobRec } from "../db/db_funcs";
 import { ZZEnv } from "./ZZEnv";
 import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { JobSpec } from "./JobSpec";

@@ -23,7 +23,7 @@ import {
   ensureStreamRec,
   getJobDatapoints,
   getJobRec,
-} from "../db/knexConn";
+} from "../db/db_funcs";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 
