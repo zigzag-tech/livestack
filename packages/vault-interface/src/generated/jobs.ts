@@ -15,13 +15,13 @@ export interface GetJobRecRequest {
 export interface GetJobRecResponse {
   /** The actual response data */
   jobData?:
-    | JobData
+    | JobRec
     | undefined;
   /** Signal that the response is null */
   nullResponse?: Empty | undefined;
 }
 
-export interface JobData {
+export interface JobRec {
   projectId: string;
   pipeName: string;
   jobId: string;
@@ -126,7 +126,7 @@ function createBaseGetJobRecResponse(): GetJobRecResponse {
 export const GetJobRecResponse = {
   encode(message: GetJobRecResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.jobData !== undefined) {
-      JobData.encode(message.jobData, writer.uint32(10).fork()).ldelim();
+      JobRec.encode(message.jobData, writer.uint32(10).fork()).ldelim();
     }
     if (message.nullResponse !== undefined) {
       Empty.encode(message.nullResponse, writer.uint32(18).fork()).ldelim();
@@ -146,7 +146,7 @@ export const GetJobRecResponse = {
             break;
           }
 
-          message.jobData = JobData.decode(reader, reader.uint32());
+          message.jobData = JobRec.decode(reader, reader.uint32());
           continue;
         case 2:
           if (tag !== 18) {
@@ -166,7 +166,7 @@ export const GetJobRecResponse = {
 
   fromJSON(object: any): GetJobRecResponse {
     return {
-      jobData: isSet(object.jobData) ? JobData.fromJSON(object.jobData) : undefined,
+      jobData: isSet(object.jobData) ? JobRec.fromJSON(object.jobData) : undefined,
       nullResponse: isSet(object.nullResponse) ? Empty.fromJSON(object.nullResponse) : undefined,
     };
   },
@@ -174,7 +174,7 @@ export const GetJobRecResponse = {
   toJSON(message: GetJobRecResponse): unknown {
     const obj: any = {};
     if (message.jobData !== undefined) {
-      obj.jobData = JobData.toJSON(message.jobData);
+      obj.jobData = JobRec.toJSON(message.jobData);
     }
     if (message.nullResponse !== undefined) {
       obj.nullResponse = Empty.toJSON(message.nullResponse);
@@ -188,7 +188,7 @@ export const GetJobRecResponse = {
   fromPartial<I extends Exact<DeepPartial<GetJobRecResponse>, I>>(object: I): GetJobRecResponse {
     const message = createBaseGetJobRecResponse();
     message.jobData = (object.jobData !== undefined && object.jobData !== null)
-      ? JobData.fromPartial(object.jobData)
+      ? JobRec.fromPartial(object.jobData)
       : undefined;
     message.nullResponse = (object.nullResponse !== undefined && object.nullResponse !== null)
       ? Empty.fromPartial(object.nullResponse)
@@ -197,12 +197,12 @@ export const GetJobRecResponse = {
   },
 };
 
-function createBaseJobData(): JobData {
+function createBaseJobRec(): JobRec {
   return { projectId: "", pipeName: "", jobId: "", timeCreated: undefined, jobParams: undefined, status: "" };
 }
 
-export const JobData = {
-  encode(message: JobData, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const JobRec = {
+  encode(message: JobRec, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.projectId !== "") {
       writer.uint32(10).string(message.projectId);
     }
@@ -224,10 +224,10 @@ export const JobData = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): JobData {
+  decode(input: _m0.Reader | Uint8Array, length?: number): JobRec {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseJobData();
+    const message = createBaseJobRec();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -282,7 +282,7 @@ export const JobData = {
     return message;
   },
 
-  fromJSON(object: any): JobData {
+  fromJSON(object: any): JobRec {
     return {
       projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       pipeName: isSet(object.pipeName) ? globalThis.String(object.pipeName) : "",
@@ -293,7 +293,7 @@ export const JobData = {
     };
   },
 
-  toJSON(message: JobData): unknown {
+  toJSON(message: JobRec): unknown {
     const obj: any = {};
     if (message.projectId !== "") {
       obj.projectId = message.projectId;
@@ -316,11 +316,11 @@ export const JobData = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<JobData>, I>>(base?: I): JobData {
-    return JobData.fromPartial(base ?? ({} as any));
+  create<I extends Exact<DeepPartial<JobRec>, I>>(base?: I): JobRec {
+    return JobRec.fromPartial(base ?? ({} as any));
   },
-  fromPartial<I extends Exact<DeepPartial<JobData>, I>>(object: I): JobData {
-    const message = createBaseJobData();
+  fromPartial<I extends Exact<DeepPartial<JobRec>, I>>(object: I): JobRec {
+    const message = createBaseJobRec();
     message.projectId = object.projectId ?? "";
     message.pipeName = object.pipeName ?? "";
     message.jobId = object.jobId ?? "";

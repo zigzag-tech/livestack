@@ -1,5 +1,5 @@
 import { Knex } from "knex";
-import { ZZJobRec, ZZJobStatusRec, ZZJobStatus } from "./rec_types";
+import { JobRec, ZZJobStatusRec, ZZJobStatus } from "./rec_types";
 import { v4 } from "uuid";
 import {
   convertMaybePrimtiveOrArrayBack,
@@ -27,7 +27,7 @@ export async function getJobRec<T>({
     .andWhere("zz_jobs.job_id", "=", jobId)
     .orderBy("zz_job_status.time_created", "desc")
     .first()) as
-    | (ZZJobRec<
+    | (JobRec<
         | T
         | {
             __primitive__: T;
@@ -83,7 +83,7 @@ export async function ensureJobAndInitStatusRec<T>({
 }) {
   // await dbConn.transaction(async (trx) => {
   const q = dbConn("zz_jobs")
-    .insert<ZZJobRec<T>>({
+    .insert<JobRec<T>>({
       project_id: projectId,
       spec_name: specName,
       job_id: jobId,

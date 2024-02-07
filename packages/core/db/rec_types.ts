@@ -8,7 +8,7 @@ export const ZZJobUniqueId = z.object({
 
 export type ZZJobUniqueId = z.infer<typeof ZZJobUniqueId>;
 
-export const ZZJobRec = <P>(jobOptionsSchema: z.ZodType<P>) =>
+export const JobRec = <P>(jobOptionsSchema: z.ZodType<P>) =>
   ZZJobUniqueId.merge(
     z.object({
       job_params: jobOptionsSchema.optional(),
@@ -16,7 +16,7 @@ export const ZZJobRec = <P>(jobOptionsSchema: z.ZodType<P>) =>
     })
   );
 
-export type ZZJobRec<P> = z.infer<ReturnType<typeof ZZJobRec<P>>>;
+export type JobRec<P> = z.infer<ReturnType<typeof JobRec<P>>>;
 
 export const ZZJobStatus = z.enum([
   "requested",

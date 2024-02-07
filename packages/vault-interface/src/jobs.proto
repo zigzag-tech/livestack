@@ -15,12 +15,12 @@ message GetJobRecRequest {
 
 message GetJobRecResponse {
   oneof response {
-    JobData job_data = 1; // The actual response data
+    JobRec job_data = 1; // The actual response data
     google.protobuf.Empty null_response = 2; // Signal that the response is null
   }
 }
 
-message JobData {
+message JobRec {
   string project_id = 1;
   string pipe_name = 2;
   string job_id = 3;

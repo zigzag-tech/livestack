@@ -1,6 +1,6 @@
 import { ZZJobRelationRec } from "./rec_types";
 import { Knex } from "knex";
-import { ZZJobRec } from "./rec_types";
+import { JobRec } from "./rec_types";
 import { convertMaybePrimtiveOrArrayBack } from "./primitives";
 
 export async function ensureJobRelationRec({
@@ -45,7 +45,7 @@ export async function getChildJobs({
   // join the job table to get the job spec name and params
   const r = await dbConn("zz_job_relations")
     .select<
-      (ZZJobRec<unknown> & {
+      (JobRec<unknown> & {
         unique_spec_label: string | null;
       })[]
     >(["zz_jobs.*", "zz_job_relations.unique_spec_label"])
@@ -75,7 +75,7 @@ export async function getParentJobRec({
   // join the job table to get the job spec name and params
   const rec = await dbConn("zz_job_relations")
     .first<
-      ZZJobRec<unknown> & {
+      JobRec<unknown> & {
         unique_spec_label: string | null;
       }
     >(["zz_jobs.*", "zz_job_relations.unique_spec_label"])
