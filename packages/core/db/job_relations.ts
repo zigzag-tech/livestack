@@ -1,6 +1,6 @@
 import { Knex } from "knex";
-import { JobRec } from "./jobs";
 import { convertMaybePrimtiveOrArrayBack } from "./primitives";
+import { JobRec } from "@livestack/vault-interface/src/generated/jobs";
 
 export async function ensureJobRelationRec({
   projectId,
@@ -44,7 +44,7 @@ export async function getChildJobs({
   // join the job table to get the job spec name and params
   const r = await dbConn("zz_job_relations")
     .select<
-      (JobRec<unknown> & {
+      (JobRec & {
         unique_spec_label: string | null;
       })[]
     >(["zz_jobs.*", "zz_job_relations.unique_spec_label"])
@@ -74,7 +74,7 @@ export async function getParentJobRec({
   // join the job table to get the job spec name and params
   const rec = await dbConn("zz_job_relations")
     .first<
-      JobRec<unknown> & {
+      JobRec & {
         unique_spec_label: string | null;
       }
     >(["zz_jobs.*", "zz_job_relations.unique_spec_label"])

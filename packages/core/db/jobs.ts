@@ -4,16 +4,12 @@ import {
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
 } from "./primitives";
+import { JobRec } from "@livestack/vault-interface/src/generated/jobs";
 
 export interface ZZJobUniqueId {
   project_id: string;
   spec_name: string;
   job_id: string;
-}
-
-export interface JobRec<P> extends ZZJobUniqueId {
-  job_params?: P;
-  time_created: Date;
 }
 
 export type ZZJobStatus =
@@ -28,7 +24,7 @@ export interface ZZJobStatusRec extends ZZJobUniqueId {
   time_created: Date;
 }
 
-export async function getJobRec<T>({
+export async function getJobRec({
   projectId,
   specName,
   jobId,
@@ -47,15 +43,7 @@ export async function getJobRec<T>({
     .andWhere("zz_jobs.spec_name", "=", specName)
     .andWhere("zz_jobs.job_id", "=", jobId)
     .orderBy("zz_job_status.time_created", "desc")
-    .first()) as
-    | (JobRec<
-        | T
-        | {
-            __primitive__: T;
-          }
-      > &
-        Pick<ZZJobStatusRec, "status">)
-    | null;
+    .first()) as (JobRec & Pick<ZZJobStatusRec, "status">) | null;
 
   // check if job status is what we want
   // if (jobStatus && r?.status !== jobStatus) {
@@ -104,7 +92,7 @@ export async function ensureJobAndInitStatusRec<T>({
 }) {
   // await dbConn.transaction(async (trx) => {
   const q = dbConn("zz_jobs")
-    .insert<JobRec<T>>({
+    .insert<JobRec>({
       project_id: projectId,
       spec_name: specName,
       job_id: jobId,

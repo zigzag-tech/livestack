@@ -1,13 +1,4 @@
 /* eslint-disable */
-import { ChannelCredentials, Client, makeGenericClientConstructor, Metadata } from "@grpc/grpc-js";
-import type {
-  CallOptions,
-  ClientOptions,
-  ClientUnaryCall,
-  handleUnaryCall,
-  ServiceError,
-  UntypedServiceImplementation,
-} from "@grpc/grpc-js";
 import _m0 from "protobufjs/minimal";
 import { Empty } from "./google/protobuf/empty";
 import { Struct } from "./google/protobuf/struct";
@@ -16,46 +7,43 @@ import { Timestamp } from "./google/protobuf/timestamp";
 export const protobufPackage = "livestack";
 
 export interface GetJobRecRequest {
-  projectId: string;
-  pipeName: string;
-  jobId: string;
+  project_id: string;
+  pipe_name: string;
+  job_id: string;
 }
 
 export interface GetJobRecResponse {
   /** The actual response data */
-  jobData?:
+  job_data?:
     | JobRec
     | undefined;
   /** Signal that the response is null */
-  nullResponse?: Empty | undefined;
+  null_response?: Empty | undefined;
 }
 
 export interface JobRec {
-  projectId: string;
+  project_id: string;
   /** Align with jobs.ts */
-  specName: string;
-  jobId: string;
-  timeCreated:
-    | Date
-    | undefined;
-  /** Removed status field to align with jobs.ts */
-  jobParams: { [key: string]: any } | undefined;
+  spec_name: string;
+  job_id: string;
+  time_created: Date | undefined;
+  job_params: { [key: string]: any } | undefined;
 }
 
 function createBaseGetJobRecRequest(): GetJobRecRequest {
-  return { projectId: "", pipeName: "", jobId: "" };
+  return { project_id: "", pipe_name: "", job_id: "" };
 }
 
 export const GetJobRecRequest = {
   encode(message: GetJobRecRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.project_id !== "") {
+      writer.uint32(10).string(message.project_id);
     }
-    if (message.pipeName !== "") {
-      writer.uint32(18).string(message.pipeName);
+    if (message.pipe_name !== "") {
+      writer.uint32(18).string(message.pipe_name);
     }
-    if (message.jobId !== "") {
-      writer.uint32(26).string(message.jobId);
+    if (message.job_id !== "") {
+      writer.uint32(26).string(message.job_id);
     }
     return writer;
   },
@@ -72,21 +60,21 @@ export const GetJobRecRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.project_id = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
             break;
           }
 
-          message.pipeName = reader.string();
+          message.pipe_name = reader.string();
           continue;
         case 3:
           if (tag !== 26) {
             break;
           }
 
-          message.jobId = reader.string();
+          message.job_id = reader.string();
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -99,22 +87,22 @@ export const GetJobRecRequest = {
 
   fromJSON(object: any): GetJobRecRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      pipeName: isSet(object.pipeName) ? globalThis.String(object.pipeName) : "",
-      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
+      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
+      pipe_name: isSet(object.pipe_name) ? globalThis.String(object.pipe_name) : "",
+      job_id: isSet(object.job_id) ? globalThis.String(object.job_id) : "",
     };
   },
 
   toJSON(message: GetJobRecRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.project_id !== "") {
+      obj.project_id = message.project_id;
     }
-    if (message.pipeName !== "") {
-      obj.pipeName = message.pipeName;
+    if (message.pipe_name !== "") {
+      obj.pipe_name = message.pipe_name;
     }
-    if (message.jobId !== "") {
-      obj.jobId = message.jobId;
+    if (message.job_id !== "") {
+      obj.job_id = message.job_id;
     }
     return obj;
   },
@@ -124,24 +112,24 @@ export const GetJobRecRequest = {
   },
   fromPartial<I extends Exact<DeepPartial<GetJobRecRequest>, I>>(object: I): GetJobRecRequest {
     const message = createBaseGetJobRecRequest();
-    message.projectId = object.projectId ?? "";
-    message.pipeName = object.pipeName ?? "";
-    message.jobId = object.jobId ?? "";
+    message.project_id = object.project_id ?? "";
+    message.pipe_name = object.pipe_name ?? "";
+    message.job_id = object.job_id ?? "";
     return message;
   },
 };
 
 function createBaseGetJobRecResponse(): GetJobRecResponse {
-  return { jobData: undefined, nullResponse: undefined };
+  return { job_data: undefined, null_response: undefined };
 }
 
 export const GetJobRecResponse = {
   encode(message: GetJobRecResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.jobData !== undefined) {
-      JobRec.encode(message.jobData, writer.uint32(10).fork()).ldelim();
+    if (message.job_data !== undefined) {
+      JobRec.encode(message.job_data, writer.uint32(10).fork()).ldelim();
     }
-    if (message.nullResponse !== undefined) {
-      Empty.encode(message.nullResponse, writer.uint32(18).fork()).ldelim();
+    if (message.null_response !== undefined) {
+      Empty.encode(message.null_response, writer.uint32(18).fork()).ldelim();
     }
     return writer;
   },
@@ -158,14 +146,14 @@ export const GetJobRecResponse = {
             break;
           }
 
-          message.jobData = JobRec.decode(reader, reader.uint32());
+          message.job_data = JobRec.decode(reader, reader.uint32());
           continue;
         case 2:
           if (tag !== 18) {
             break;
           }
 
-          message.nullResponse = Empty.decode(reader, reader.uint32());
+          message.null_response = Empty.decode(reader, reader.uint32());
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -178,18 +166,18 @@ export const GetJobRecResponse = {
 
   fromJSON(object: any): GetJobRecResponse {
     return {
-      jobData: isSet(object.jobData) ? JobRec.fromJSON(object.jobData) : undefined,
-      nullResponse: isSet(object.nullResponse) ? Empty.fromJSON(object.nullResponse) : undefined,
+      job_data: isSet(object.job_data) ? JobRec.fromJSON(object.job_data) : undefined,
+      null_response: isSet(object.null_response) ? Empty.fromJSON(object.null_response) : undefined,
     };
   },
 
   toJSON(message: GetJobRecResponse): unknown {
     const obj: any = {};
-    if (message.jobData !== undefined) {
-      obj.jobData = JobRec.toJSON(message.jobData);
+    if (message.job_data !== undefined) {
+      obj.job_data = JobRec.toJSON(message.job_data);
     }
-    if (message.nullResponse !== undefined) {
-      obj.nullResponse = Empty.toJSON(message.nullResponse);
+    if (message.null_response !== undefined) {
+      obj.null_response = Empty.toJSON(message.null_response);
     }
     return obj;
   },
@@ -199,36 +187,36 @@ export const GetJobRecResponse = {
   },
   fromPartial<I extends Exact<DeepPartial<GetJobRecResponse>, I>>(object: I): GetJobRecResponse {
     const message = createBaseGetJobRecResponse();
-    message.jobData = (object.jobData !== undefined && object.jobData !== null)
-      ? JobRec.fromPartial(object.jobData)
+    message.job_data = (object.job_data !== undefined && object.job_data !== null)
+      ? JobRec.fromPartial(object.job_data)
       : undefined;
-    message.nullResponse = (object.nullResponse !== undefined && object.nullResponse !== null)
-      ? Empty.fromPartial(object.nullResponse)
+    message.null_response = (object.null_response !== undefined && object.null_response !== null)
+      ? Empty.fromPartial(object.null_response)
       : undefined;
     return message;
   },
 };
 
 function createBaseJobRec(): JobRec {
-  return { projectId: "", specName: "", jobId: "", timeCreated: undefined, jobParams: undefined };
+  return { project_id: "", spec_name: "", job_id: "", time_created: undefined, job_params: undefined };
 }
 
 export const JobRec = {
   encode(message: JobRec, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.project_id !== "") {
+      writer.uint32(10).string(message.project_id);
     }
-    if (message.specName !== "") {
-      writer.uint32(18).string(message.specName);
+    if (message.spec_name !== "") {
+      writer.uint32(18).string(message.spec_name);
     }
-    if (message.jobId !== "") {
-      writer.uint32(26).string(message.jobId);
+    if (message.job_id !== "") {
+      writer.uint32(26).string(message.job_id);
     }
-    if (message.timeCreated !== undefined) {
-      Timestamp.encode(toTimestamp(message.timeCreated), writer.uint32(34).fork()).ldelim();
+    if (message.time_created !== undefined) {
+      Timestamp.encode(toTimestamp(message.time_created), writer.uint32(34).fork()).ldelim();
     }
-    if (message.jobParams !== undefined) {
-      Struct.encode(Struct.wrap(message.jobParams), writer.uint32(42).fork()).ldelim();
+    if (message.job_params !== undefined) {
+      Struct.encode(Struct.wrap(message.job_params), writer.uint32(42).fork()).ldelim();
     }
     return writer;
   },
@@ -245,35 +233,35 @@ export const JobRec = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.project_id = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
             break;
           }
 
-          message.specName = reader.string();
+          message.spec_name = reader.string();
           continue;
         case 3:
           if (tag !== 26) {
             break;
           }
 
-          message.jobId = reader.string();
+          message.job_id = reader.string();
           continue;
         case 4:
           if (tag !== 34) {
             break;
           }
 
-          message.timeCreated = fromTimestamp(Timestamp.decode(reader, reader.uint32()));
+          message.time_created = fromTimestamp(Timestamp.decode(reader, reader.uint32()));
           continue;
         case 5:
           if (tag !== 42) {
             break;
           }
 
-          message.jobParams = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          message.job_params = Struct.unwrap(Struct.decode(reader, reader.uint32()));
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -286,30 +274,30 @@ export const JobRec = {
 
   fromJSON(object: any): JobRec {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
-      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
-      timeCreated: isSet(object.timeCreated) ? fromJsonTimestamp(object.timeCreated) : undefined,
-      jobParams: isObject(object.jobParams) ? object.jobParams : undefined,
+      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
+      spec_name: isSet(object.spec_name) ? globalThis.String(object.spec_name) : "",
+      job_id: isSet(object.job_id) ? globalThis.String(object.job_id) : "",
+      time_created: isSet(object.time_created) ? fromJsonTimestamp(object.time_created) : undefined,
+      job_params: isObject(object.job_params) ? object.job_params : undefined,
     };
   },
 
   toJSON(message: JobRec): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.project_id !== "") {
+      obj.project_id = message.project_id;
     }
-    if (message.specName !== "") {
-      obj.specName = message.specName;
+    if (message.spec_name !== "") {
+      obj.spec_name = message.spec_name;
     }
-    if (message.jobId !== "") {
-      obj.jobId = message.jobId;
+    if (message.job_id !== "") {
+      obj.job_id = message.job_id;
     }
-    if (message.timeCreated !== undefined) {
-      obj.timeCreated = message.timeCreated.toISOString();
+    if (message.time_created !== undefined) {
+      obj.time_created = message.time_created.toISOString();
     }
-    if (message.jobParams !== undefined) {
-      obj.jobParams = message.jobParams;
+    if (message.job_params !== undefined) {
+      obj.job_params = message.job_params;
     }
     return obj;
   },
@@ -319,55 +307,38 @@ export const JobRec = {
   },
   fromPartial<I extends Exact<DeepPartial<JobRec>, I>>(object: I): JobRec {
     const message = createBaseJobRec();
-    message.projectId = object.projectId ?? "";
-    message.specName = object.specName ?? "";
-    message.jobId = object.jobId ?? "";
-    message.timeCreated = object.timeCreated ?? undefined;
-    message.jobParams = object.jobParams ?? undefined;
+    message.project_id = object.project_id ?? "";
+    message.spec_name = object.spec_name ?? "";
+    message.job_id = object.job_id ?? "";
+    message.time_created = object.time_created ?? undefined;
+    message.job_params = object.job_params ?? undefined;
     return message;
   },
 };
 
-export type jobsService = typeof jobsService;
-export const jobsService = {
-  getJobRec: {
-    path: "/livestack.jobs/GetJobRec",
-    requestStream: false,
-    responseStream: false,
-    requestSerialize: (value: GetJobRecRequest) => Buffer.from(GetJobRecRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer) => GetJobRecRequest.decode(value),
-    responseSerialize: (value: GetJobRecResponse) => Buffer.from(GetJobRecResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer) => GetJobRecResponse.decode(value),
-  },
-} as const;
-
-export interface jobsServer extends UntypedServiceImplementation {
-  getJobRec: handleUnaryCall<GetJobRecRequest, GetJobRecResponse>;
+export interface jobs {
+  GetJobRec(request: GetJobRecRequest): Promise<GetJobRecResponse>;
 }
 
-export interface jobsClient extends Client {
-  getJobRec(
-    request: GetJobRecRequest,
-    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
-  ): ClientUnaryCall;
-  getJobRec(
-    request: GetJobRecRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
-  ): ClientUnaryCall;
-  getJobRec(
-    request: GetJobRecRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
-  ): ClientUnaryCall;
+export const jobsServiceName = "livestack.jobs";
+export class jobsClientImpl implements jobs {
+  private readonly rpc: Rpc;
+  private readonly service: string;
+  constructor(rpc: Rpc, opts?: { service?: string }) {
+    this.service = opts?.service || jobsServiceName;
+    this.rpc = rpc;
+    this.GetJobRec = this.GetJobRec.bind(this);
+  }
+  GetJobRec(request: GetJobRecRequest): Promise<GetJobRecResponse> {
+    const data = GetJobRecRequest.encode(request).finish();
+    const promise = this.rpc.request(this.service, "GetJobRec", data);
+    return promise.then((data) => GetJobRecResponse.decode(_m0.Reader.create(data)));
+  }
 }
 
-export const jobsClient = makeGenericClientConstructor(jobsService, "livestack.jobs") as unknown as {
-  new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): jobsClient;
-  service: typeof jobsService;
-  serviceName: string;
-};
+interface Rpc {
+  request(service: string, method: string, data: Uint8Array): Promise<Uint8Array>;
+}
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 

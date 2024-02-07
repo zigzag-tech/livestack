@@ -121,19 +121,19 @@ export interface Any {
    * Schemes other than `http`, `https` (or the empty scheme) might be
    * used with implementation specific semantics.
    */
-  typeUrl: string;
+  type_url: string;
   /** Must be a valid serialized protocol buffer of the above specified type. */
   value: Uint8Array;
 }
 
 function createBaseAny(): Any {
-  return { typeUrl: "", value: new Uint8Array(0) };
+  return { type_url: "", value: new Uint8Array(0) };
 }
 
 export const Any = {
   encode(message: Any, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.typeUrl !== "") {
-      writer.uint32(10).string(message.typeUrl);
+    if (message.type_url !== "") {
+      writer.uint32(10).string(message.type_url);
     }
     if (message.value.length !== 0) {
       writer.uint32(18).bytes(message.value);
@@ -153,7 +153,7 @@ export const Any = {
             break;
           }
 
-          message.typeUrl = reader.string();
+          message.type_url = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -173,15 +173,15 @@ export const Any = {
 
   fromJSON(object: any): Any {
     return {
-      typeUrl: isSet(object.typeUrl) ? globalThis.String(object.typeUrl) : "",
+      type_url: isSet(object.type_url) ? globalThis.String(object.type_url) : "",
       value: isSet(object.value) ? bytesFromBase64(object.value) : new Uint8Array(0),
     };
   },
 
   toJSON(message: Any): unknown {
     const obj: any = {};
-    if (message.typeUrl !== "") {
-      obj.typeUrl = message.typeUrl;
+    if (message.type_url !== "") {
+      obj.type_url = message.type_url;
     }
     if (message.value.length !== 0) {
       obj.value = base64FromBytes(message.value);
@@ -194,7 +194,7 @@ export const Any = {
   },
   fromPartial<I extends Exact<DeepPartial<Any>, I>>(object: I): Any {
     const message = createBaseAny();
-    message.typeUrl = object.typeUrl ?? "";
+    message.type_url = object.type_url ?? "";
     message.value = object.value ?? new Uint8Array(0);
     return message;
   },
