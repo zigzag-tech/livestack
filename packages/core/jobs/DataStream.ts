@@ -3,7 +3,8 @@ import { ZZEnv } from "./ZZEnv";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
 // import { createHash } from "crypto";
 import { getLogger } from "../utils/createWorkerLogger";
-import { addDatapoint, ensureStreamRec } from "../db/db_funcs";
+import { ensureStreamRec } from "../db/streams";
+import { addDatapoint } from "../db/data_points";
 import { v4 } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {

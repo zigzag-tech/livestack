@@ -16,14 +16,10 @@ import {
 } from "../orchestrations/workerCommon";
 import Redis from "ioredis";
 import _ from "lodash";
-import {
-  ensureJobAndInitStatusRec,
-  ensureJobRelationRec,
-  ensureJobStreamConnectorRec,
-  ensureStreamRec,
-  getJobDatapoints,
-  getJobRec,
-} from "../db/db_funcs";
+import { ensureJobAndInitStatusRec, getJobRec } from "../db/jobs";
+import { ensureJobStreamConnectorRec, ensureStreamRec } from "../db/streams";
+import { ensureJobRelationRec } from "../db/job_relations";
+import { getJobDatapoints } from "../db/data_points";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 
