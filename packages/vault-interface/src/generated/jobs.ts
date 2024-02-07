@@ -1,4 +1,5 @@
 /* eslint-disable */
+import type { CallContext, CallOptions } from "nice-grpc-common";
 import _m0 from "protobufjs/minimal";
 import { Empty } from "./google/protobuf/empty";
 import { Struct } from "./google/protobuf/struct";
@@ -112,10 +113,10 @@ export const GetJobRecRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GetJobRecRequest>, I>>(base?: I): GetJobRecRequest {
-    return GetJobRecRequest.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<GetJobRecRequest>): GetJobRecRequest {
+    return GetJobRecRequest.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<GetJobRecRequest>, I>>(object: I): GetJobRecRequest {
+  fromPartial(object: DeepPartial<GetJobRecRequest>): GetJobRecRequest {
     const message = createBaseGetJobRecRequest();
     message.projectId = object.projectId ?? "";
     message.specName = object.specName ?? "";
@@ -187,10 +188,10 @@ export const JobRecAndStatus = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<JobRecAndStatus>, I>>(base?: I): JobRecAndStatus {
-    return JobRecAndStatus.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<JobRecAndStatus>): JobRecAndStatus {
+    return JobRecAndStatus.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<JobRecAndStatus>, I>>(object: I): JobRecAndStatus {
+  fromPartial(object: DeepPartial<JobRecAndStatus>): JobRecAndStatus {
     const message = createBaseJobRecAndStatus();
     message.rec = (object.rec !== undefined && object.rec !== null) ? JobRec.fromPartial(object.rec) : undefined;
     message.status = object.status ?? "";
@@ -261,10 +262,10 @@ export const GetJobRecResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GetJobRecResponse>, I>>(base?: I): GetJobRecResponse {
-    return GetJobRecResponse.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<GetJobRecResponse>): GetJobRecResponse {
+    return GetJobRecResponse.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<GetJobRecResponse>, I>>(object: I): GetJobRecResponse {
+  fromPartial(object: DeepPartial<GetJobRecResponse>): GetJobRecResponse {
     const message = createBaseGetJobRecResponse();
     message.rec = (object.rec !== undefined && object.rec !== null)
       ? JobRecAndStatus.fromPartial(object.rec)
@@ -381,10 +382,10 @@ export const JobRec = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<JobRec>, I>>(base?: I): JobRec {
-    return JobRec.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<JobRec>): JobRec {
+    return JobRec.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<JobRec>, I>>(object: I): JobRec {
+  fromPartial(object: DeepPartial<JobRec>): JobRec {
     const message = createBaseJobRec();
     message.project_id = object.project_id ?? "";
     message.spec_name = object.spec_name ?? "";
@@ -395,28 +396,28 @@ export const JobRec = {
   },
 };
 
-export interface JobDBService {
-  GetJobRec(request: GetJobRecRequest): Promise<GetJobRecResponse>;
+export type JobDBServiceDefinition = typeof JobDBServiceDefinition;
+export const JobDBServiceDefinition = {
+  name: "JobDBService",
+  fullName: "livestack.JobDBService",
+  methods: {
+    getJobRec: {
+      name: "GetJobRec",
+      requestType: GetJobRecRequest,
+      requestStream: false,
+      responseType: GetJobRecResponse,
+      responseStream: false,
+      options: {},
+    },
+  },
+} as const;
+
+export interface JobDBServiceImplementation<CallContextExt = {}> {
+  getJobRec(request: GetJobRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<GetJobRecResponse>>;
 }
 
-export const JobDBServiceServiceName = "livestack.JobDBService";
-export class JobDBServiceClientImpl implements JobDBService {
-  private readonly rpc: Rpc;
-  private readonly service: string;
-  constructor(rpc: Rpc, opts?: { service?: string }) {
-    this.service = opts?.service || JobDBServiceServiceName;
-    this.rpc = rpc;
-    this.GetJobRec = this.GetJobRec.bind(this);
-  }
-  GetJobRec(request: GetJobRecRequest): Promise<GetJobRecResponse> {
-    const data = GetJobRecRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "GetJobRec", data);
-    return promise.then((data) => GetJobRecResponse.decode(_m0.Reader.create(data)));
-  }
-}
-
-interface Rpc {
-  request(service: string, method: string, data: Uint8Array): Promise<Uint8Array>;
+export interface JobDBServiceClient<CallOptionsExt = {}> {
+  getJobRec(request: DeepPartial<GetJobRecRequest>, options?: CallOptions & CallOptionsExt): Promise<GetJobRecResponse>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
@@ -426,10 +427,6 @@ export type DeepPartial<T> = T extends Builtin ? T
   : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
-
-type KeysOfUnion<T> = T extends T ? keyof T : never;
-export type Exact<P, I extends P> = P extends Builtin ? P
-  : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
 
 function toTimestamp(date: Date): Timestamp {
   const seconds = Math.trunc(date.getTime() / 1_000);

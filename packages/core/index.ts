@@ -1,3 +1,6 @@
+// TODO: temporary hack to always leave the dev server running
+import "@livestack/vault-dev-server/src/main";
+
 export { ZZJob } from "./jobs/ZZJob";
 export { ZZWorker, ZZWorkerDef } from "./jobs/ZZWorker";
 export { JobSpec } from "./jobs/JobSpec";

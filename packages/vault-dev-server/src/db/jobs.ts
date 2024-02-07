@@ -4,7 +4,12 @@ import {
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
 } from "./primitives";
-import { JobDBService, JobRec } from "@livestack/vault-interface";
+import {
+  JobDBServiceImplementation,
+  JobRec,
+  WrapServiceNullResponses,
+  DeepPartial,
+} from "@livestack/vault-interface";
 
 export interface ZZJobUniqueId {
   project_id: string;
@@ -24,39 +29,8 @@ export interface ZZJobStatusRec extends ZZJobUniqueId {
   time_created: Date;
 }
 
-export function wrapNullResponse<T, R>(
-  f: (a: T) => Promise<{
-    rec?: R;
-    null_response?: {};
-  }>
-): (a: T) => Promise<R | null> {
-  return async (a) => {
-    const r = await f(a);
-    if (r.null_response) {
-      return null;
-    }
-    return r.rec as R;
-  };
-}
-
-type WrapNullResponse<Fn> = Fn extends (a: infer T) => Promise<{
-  rec?: infer R;
-  null_response?: {};
-}>
-  ? (a: T) => Promise<R | null>
-  : never;
-
-type WrappedService<S> = {
-  [K in keyof S]: S[K] extends (...args: infer T) => Promise<{
-    rec?: infer R;
-    null_response?: {};
-  }>
-    ? (...args: T) => Promise<R | null>
-    : never;
-};
-
-export const jobDbService = (dbConn: Knex): WrappedService<JobDBService> => ({
-  async GetJobRec({ projectId, specName, jobId }) {
+export const jobDbService = (dbConn: Knex): JobDBServiceImplementation => ({
+  async getJobRec({ projectId, specName, jobId }) {
     const r = (await dbConn("zz_jobs")
       .select(["zz_jobs.*", "zz_job_status.status"])
       .leftJoin("zz_job_status", function () {
@@ -75,7 +49,9 @@ export const jobDbService = (dbConn: Knex): WrappedService<JobDBService> => ({
     //   return null;
     // }
     if (!r) {
-      return null;
+      return {
+        null_response: {},
+      };
     }
 
     const withJobParams = {
@@ -85,8 +61,10 @@ export const jobDbService = (dbConn: Knex): WrappedService<JobDBService> => ({
 
     const { status, ...rest } = withJobParams;
     return {
-      status,
-      rec: rest,
+      rec: {
+        status,
+        rec: rest,
+      },
     };
   },
 });

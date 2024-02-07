@@ -1,7 +1,6 @@
 /* eslint-disable */
+import type { CallContext, CallOptions } from "nice-grpc-common";
 import _m0 from "protobufjs/minimal";
-import { Observable } from "rxjs";
-import { map } from "rxjs/operators";
 import { Any } from "./google/protobuf/any";
 import { Empty } from "./google/protobuf/empty";
 import { Struct } from "./google/protobuf/struct";
@@ -127,10 +126,10 @@ export const GetZZJobTestRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GetZZJobTestRequest>, I>>(base?: I): GetZZJobTestRequest {
-    return GetZZJobTestRequest.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<GetZZJobTestRequest>): GetZZJobTestRequest {
+    return GetZZJobTestRequest.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<GetZZJobTestRequest>, I>>(object: I): GetZZJobTestRequest {
+  fromPartial(object: DeepPartial<GetZZJobTestRequest>): GetZZJobTestRequest {
     const message = createBaseGetZZJobTestRequest();
     message.id = object.id ?? "";
     return message;
@@ -214,10 +213,10 @@ export const GetZZJobTestResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GetZZJobTestResponse>, I>>(base?: I): GetZZJobTestResponse {
-    return GetZZJobTestResponse.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<GetZZJobTestResponse>): GetZZJobTestResponse {
+    return GetZZJobTestResponse.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<GetZZJobTestResponse>, I>>(object: I): GetZZJobTestResponse {
+  fromPartial(object: DeepPartial<GetZZJobTestResponse>): GetZZJobTestResponse {
     const message = createBaseGetZZJobTestResponse();
     message.projectId = object.projectId ?? "";
     message.pipeName = object.pipeName ?? "";
@@ -289,10 +288,10 @@ export const EnsureStreamRecRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<EnsureStreamRecRequest>, I>>(base?: I): EnsureStreamRecRequest {
-    return EnsureStreamRecRequest.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<EnsureStreamRecRequest>): EnsureStreamRecRequest {
+    return EnsureStreamRecRequest.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<EnsureStreamRecRequest>, I>>(object: I): EnsureStreamRecRequest {
+  fromPartial(object: DeepPartial<EnsureStreamRecRequest>): EnsureStreamRecRequest {
     const message = createBaseEnsureStreamRecRequest();
     message.project_id = object.project_id ?? "";
     message.stream_id = object.stream_id ?? "";
@@ -405,14 +404,10 @@ export const EnsureJobStreamConnectorRecRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<EnsureJobStreamConnectorRecRequest>, I>>(
-    base?: I,
-  ): EnsureJobStreamConnectorRecRequest {
-    return EnsureJobStreamConnectorRecRequest.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<EnsureJobStreamConnectorRecRequest>): EnsureJobStreamConnectorRecRequest {
+    return EnsureJobStreamConnectorRecRequest.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<EnsureJobStreamConnectorRecRequest>, I>>(
-    object: I,
-  ): EnsureJobStreamConnectorRecRequest {
+  fromPartial(object: DeepPartial<EnsureJobStreamConnectorRecRequest>): EnsureJobStreamConnectorRecRequest {
     const message = createBaseEnsureJobStreamConnectorRecRequest();
     message.project_id = object.project_id ?? "";
     message.stream_id = object.stream_id ?? "";
@@ -514,14 +509,10 @@ export const GetJobStreamConnectorRecsRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GetJobStreamConnectorRecsRequest>, I>>(
-    base?: I,
-  ): GetJobStreamConnectorRecsRequest {
-    return GetJobStreamConnectorRecsRequest.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<GetJobStreamConnectorRecsRequest>): GetJobStreamConnectorRecsRequest {
+    return GetJobStreamConnectorRecsRequest.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<GetJobStreamConnectorRecsRequest>, I>>(
-    object: I,
-  ): GetJobStreamConnectorRecsRequest {
+  fromPartial(object: DeepPartial<GetJobStreamConnectorRecsRequest>): GetJobStreamConnectorRecsRequest {
     const message = createBaseGetJobStreamConnectorRecsRequest();
     message.project_id = object.project_id ?? "";
     message.job_id = object.job_id ?? "";
@@ -650,10 +641,10 @@ export const JobStreamConnectorRecord = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<JobStreamConnectorRecord>, I>>(base?: I): JobStreamConnectorRecord {
-    return JobStreamConnectorRecord.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<JobStreamConnectorRecord>): JobStreamConnectorRecord {
+    return JobStreamConnectorRecord.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<JobStreamConnectorRecord>, I>>(object: I): JobStreamConnectorRecord {
+  fromPartial(object: DeepPartial<JobStreamConnectorRecord>): JobStreamConnectorRecord {
     const message = createBaseJobStreamConnectorRecord();
     message.project_id = object.project_id ?? "";
     message.job_id = object.job_id ?? "";
@@ -798,10 +789,10 @@ export const GetJobDatapointsRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<GetJobDatapointsRequest>, I>>(base?: I): GetJobDatapointsRequest {
-    return GetJobDatapointsRequest.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<GetJobDatapointsRequest>): GetJobDatapointsRequest {
+    return GetJobDatapointsRequest.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<GetJobDatapointsRequest>, I>>(object: I): GetJobDatapointsRequest {
+  fromPartial(object: DeepPartial<GetJobDatapointsRequest>): GetJobDatapointsRequest {
     const message = createBaseGetJobDatapointsRequest();
     message.project_id = object.project_id ?? "";
     message.pipe_name = object.pipe_name ?? "";
@@ -877,10 +868,10 @@ export const DatapointRecord = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<DatapointRecord>, I>>(base?: I): DatapointRecord {
-    return DatapointRecord.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<DatapointRecord>): DatapointRecord {
+    return DatapointRecord.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<DatapointRecord>, I>>(object: I): DatapointRecord {
+  fromPartial(object: DeepPartial<DatapointRecord>): DatapointRecord {
     const message = createBaseDatapointRecord();
     message.datapoint_id = object.datapoint_id ?? "";
     message.data = object.data ?? undefined;
@@ -951,10 +942,10 @@ export const JobInfo = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<JobInfo>, I>>(base?: I): JobInfo {
-    return JobInfo.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<JobInfo>): JobInfo {
+    return JobInfo.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<JobInfo>, I>>(object: I): JobInfo {
+  fromPartial(object: DeepPartial<JobInfo>): JobInfo {
     const message = createBaseJobInfo();
     message.job_id = object.job_id ?? "";
     message.job_output_key = object.job_output_key ?? "";
@@ -1067,10 +1058,10 @@ export const AddDatapointRequest = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<AddDatapointRequest>, I>>(base?: I): AddDatapointRequest {
-    return AddDatapointRequest.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<AddDatapointRequest>): AddDatapointRequest {
+    return AddDatapointRequest.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<AddDatapointRequest>, I>>(object: I): AddDatapointRequest {
+  fromPartial(object: DeepPartial<AddDatapointRequest>): AddDatapointRequest {
     const message = createBaseAddDatapointRequest();
     message.project_id = object.project_id ?? "";
     message.stream_id = object.stream_id ?? "";
@@ -1130,73 +1121,102 @@ export const AddDatapointResponse = {
     return obj;
   },
 
-  create<I extends Exact<DeepPartial<AddDatapointResponse>, I>>(base?: I): AddDatapointResponse {
-    return AddDatapointResponse.fromPartial(base ?? ({} as any));
+  create(base?: DeepPartial<AddDatapointResponse>): AddDatapointResponse {
+    return AddDatapointResponse.fromPartial(base ?? {});
   },
-  fromPartial<I extends Exact<DeepPartial<AddDatapointResponse>, I>>(object: I): AddDatapointResponse {
+  fromPartial(object: DeepPartial<AddDatapointResponse>): AddDatapointResponse {
     const message = createBaseAddDatapointResponse();
     message.datapoint_id = object.datapoint_id ?? "";
     return message;
   },
 };
 
-export interface DBService {
-  EnsureStreamRec(request: EnsureStreamRecRequest): Promise<Empty>;
-  EnsureJobStreamConnectorRec(request: EnsureJobStreamConnectorRecRequest): Promise<Empty>;
-  GetJobStreamConnectorRecs(request: GetJobStreamConnectorRecsRequest): Observable<JobStreamConnectorRecord>;
-  GetJobDatapoints(request: GetJobDatapointsRequest): Promise<DatapointRecord>;
-  AddDatapoint(request: AddDatapointRequest): Promise<AddDatapointResponse>;
+export type DBServiceDefinition = typeof DBServiceDefinition;
+export const DBServiceDefinition = {
+  name: "DBService",
+  fullName: "livestack.DBService",
+  methods: {
+    ensureStreamRec: {
+      name: "EnsureStreamRec",
+      requestType: EnsureStreamRecRequest,
+      requestStream: false,
+      responseType: Empty,
+      responseStream: false,
+      options: {},
+    },
+    ensureJobStreamConnectorRec: {
+      name: "EnsureJobStreamConnectorRec",
+      requestType: EnsureJobStreamConnectorRecRequest,
+      requestStream: false,
+      responseType: Empty,
+      responseStream: false,
+      options: {},
+    },
+    getJobStreamConnectorRecs: {
+      name: "GetJobStreamConnectorRecs",
+      requestType: GetJobStreamConnectorRecsRequest,
+      requestStream: false,
+      responseType: JobStreamConnectorRecord,
+      responseStream: true,
+      options: {},
+    },
+    getJobDatapoints: {
+      name: "GetJobDatapoints",
+      requestType: GetJobDatapointsRequest,
+      requestStream: false,
+      responseType: DatapointRecord,
+      responseStream: false,
+      options: {},
+    },
+    addDatapoint: {
+      name: "AddDatapoint",
+      requestType: AddDatapointRequest,
+      requestStream: false,
+      responseType: AddDatapointResponse,
+      responseStream: false,
+      options: {},
+    },
+  },
+} as const;
+
+export interface DBServiceImplementation<CallContextExt = {}> {
+  ensureStreamRec(request: EnsureStreamRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
+  ensureJobStreamConnectorRec(
+    request: EnsureJobStreamConnectorRecRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<Empty>>;
+  getJobStreamConnectorRecs(
+    request: GetJobStreamConnectorRecsRequest,
+    context: CallContext & CallContextExt,
+  ): ServerStreamingMethodResult<DeepPartial<JobStreamConnectorRecord>>;
+  getJobDatapoints(
+    request: GetJobDatapointsRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<DatapointRecord>>;
+  addDatapoint(
+    request: AddDatapointRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<AddDatapointResponse>>;
 }
 
-export const DBServiceServiceName = "livestack.DBService";
-export class DBServiceClientImpl implements DBService {
-  private readonly rpc: Rpc;
-  private readonly service: string;
-  constructor(rpc: Rpc, opts?: { service?: string }) {
-    this.service = opts?.service || DBServiceServiceName;
-    this.rpc = rpc;
-    this.EnsureStreamRec = this.EnsureStreamRec.bind(this);
-    this.EnsureJobStreamConnectorRec = this.EnsureJobStreamConnectorRec.bind(this);
-    this.GetJobStreamConnectorRecs = this.GetJobStreamConnectorRecs.bind(this);
-    this.GetJobDatapoints = this.GetJobDatapoints.bind(this);
-    this.AddDatapoint = this.AddDatapoint.bind(this);
-  }
-  EnsureStreamRec(request: EnsureStreamRecRequest): Promise<Empty> {
-    const data = EnsureStreamRecRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "EnsureStreamRec", data);
-    return promise.then((data) => Empty.decode(_m0.Reader.create(data)));
-  }
-
-  EnsureJobStreamConnectorRec(request: EnsureJobStreamConnectorRecRequest): Promise<Empty> {
-    const data = EnsureJobStreamConnectorRecRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "EnsureJobStreamConnectorRec", data);
-    return promise.then((data) => Empty.decode(_m0.Reader.create(data)));
-  }
-
-  GetJobStreamConnectorRecs(request: GetJobStreamConnectorRecsRequest): Observable<JobStreamConnectorRecord> {
-    const data = GetJobStreamConnectorRecsRequest.encode(request).finish();
-    const result = this.rpc.serverStreamingRequest(this.service, "GetJobStreamConnectorRecs", data);
-    return result.pipe(map((data) => JobStreamConnectorRecord.decode(_m0.Reader.create(data))));
-  }
-
-  GetJobDatapoints(request: GetJobDatapointsRequest): Promise<DatapointRecord> {
-    const data = GetJobDatapointsRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "GetJobDatapoints", data);
-    return promise.then((data) => DatapointRecord.decode(_m0.Reader.create(data)));
-  }
-
-  AddDatapoint(request: AddDatapointRequest): Promise<AddDatapointResponse> {
-    const data = AddDatapointRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "AddDatapoint", data);
-    return promise.then((data) => AddDatapointResponse.decode(_m0.Reader.create(data)));
-  }
-}
-
-interface Rpc {
-  request(service: string, method: string, data: Uint8Array): Promise<Uint8Array>;
-  clientStreamingRequest(service: string, method: string, data: Observable<Uint8Array>): Promise<Uint8Array>;
-  serverStreamingRequest(service: string, method: string, data: Uint8Array): Observable<Uint8Array>;
-  bidirectionalStreamingRequest(service: string, method: string, data: Observable<Uint8Array>): Observable<Uint8Array>;
+export interface DBServiceClient<CallOptionsExt = {}> {
+  ensureStreamRec(request: DeepPartial<EnsureStreamRecRequest>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
+  ensureJobStreamConnectorRec(
+    request: DeepPartial<EnsureJobStreamConnectorRecRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<Empty>;
+  getJobStreamConnectorRecs(
+    request: DeepPartial<GetJobStreamConnectorRecsRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): AsyncIterable<JobStreamConnectorRecord>;
+  getJobDatapoints(
+    request: DeepPartial<GetJobDatapointsRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<DatapointRecord>;
+  addDatapoint(
+    request: DeepPartial<AddDatapointRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<AddDatapointResponse>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
@@ -1206,10 +1226,6 @@ export type DeepPartial<T> = T extends Builtin ? T
   : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
-
-type KeysOfUnion<T> = T extends T ? keyof T : never;
-export type Exact<P, I extends P> = P extends Builtin ? P
-  : P & { [K in keyof P]: Exact<P[K], I[K]> } & { [K in Exclude<keyof I, KeysOfUnion<P>>]: never };
 
 function toTimestamp(date: Date): Timestamp {
   const seconds = Math.trunc(date.getTime() / 1_000);
@@ -1240,3 +1256,5 @@ function isObject(value: any): boolean {
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;
 }
+
+export type ServerStreamingMethodResult<Response> = { [Symbol.asyncIterator](): AsyncIterator<Response, void> };

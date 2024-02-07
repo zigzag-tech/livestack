@@ -1,4 +1,4 @@
-import { Knex } from "knex";
+import { Knex } from "@livestack/vault-dev-server";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { RedisOptions } from "ioredis";
 import { Stream } from "stream";

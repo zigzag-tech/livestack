@@ -13,7 +13,7 @@ import {
 } from "../jobs/JobSpec";
 import { TransformFunction } from "./DefGraph";
 import { TransformRegistry } from "./TransformRegistry";
-import { getParentJobRec } from "../db/job_relations";
+import { getParentJobRec } from "../../vault-dev-server/src/db/job_relations";
 
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 type WithT =

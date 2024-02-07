@@ -8,8 +8,8 @@ import {
 } from "../realtime/pubsub";
 import { Observable, map, takeUntil } from "rxjs";
 import { IStorageProvider } from "../storage/cloudStorage";
-import { updateJobStatus } from "../db/jobs";
-import { getParentJobRec } from "../db/job_relations";
+import { updateJobStatus } from "../../vault-dev-server/src/db/jobs";
+import { getParentJobRec } from "../../vault-dev-server/src/db/job_relations";
 import longStringTruncator from "../utils/longStringTruncator";
 import { JobSpec } from "./JobSpec";
 import { z } from "zod";

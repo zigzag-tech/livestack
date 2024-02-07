@@ -16,10 +16,16 @@ import {
 } from "../orchestrations/workerCommon";
 import Redis from "ioredis";
 import _ from "lodash";
-import { ensureJobAndInitStatusRec, jobDbService } from "../db/jobs";
-import { ensureJobStreamConnectorRec, ensureStreamRec } from "../db/streams";
-import { ensureJobRelationRec } from "../db/job_relations";
-import { getJobDatapoints } from "../db/data_points";
+import {
+  ensureJobAndInitStatusRec,
+  jobDbService,
+} from "../../vault-dev-server/src/db/jobs";
+import {
+  ensureJobStreamConnectorRec,
+  ensureStreamRec,
+} from "../../vault-dev-server/src/db/streams";
+import { ensureJobRelationRec } from "../../vault-dev-server/src/db/job_relations";
+import { getJobDatapoints } from "../../vault-dev-server/src/db/data_points";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 
@@ -43,6 +49,7 @@ import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { Observable } from "rxjs";
 import { TagObj, TagMaps } from "../orchestrations/Workflow";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
+import { jobDBClient } from "@livestack/vault-client";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -190,17 +197,18 @@ export class JobSpec<
         "Database is not configured in ZZEnv, therefore can not get job record."
       );
     }
-    const r = await jobDbService(this.zzEnvEnsured.db).GetJobRec({
+
+    const r = await jobDBClient.getJobRec({
       specName: this.name,
       projectId: this.zzEnvEnsured.projectId,
       jobId,
     });
-    if (!r) {
+    if (r.null_response) {
       return null;
     } else {
       return {
-        ...r.rec,
-        status: r.status,
+        ...r.rec!.rec,
+        status: r.rec!.status,
       };
     }
   }

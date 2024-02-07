@@ -6,7 +6,10 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@livestack/vault-interface": "*"
+    "@livestack/vault-interface": "*",
+    "dotenv": "^16.x",
+    "knex": "^2.x",
+    "pg": "^8.x"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
