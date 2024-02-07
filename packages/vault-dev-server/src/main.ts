@@ -11,7 +11,7 @@ async function main() {
   const address = `${HOST}:${PORT}`;
 
   await server.listen(address);
-  console.log(`Vault dev server listening on ${address}.`);
+  console.info(`Vault dev server listening on ${address}.`);
 }
 
 main();
