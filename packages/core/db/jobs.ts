@@ -4,7 +4,7 @@ import {
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
 } from "./primitives";
-import { JobDBService, JobRec } from "@livestack/vault-interface";
+import { JobDBService, JobRec } from "@livestack/vault-client";
 
 export interface ZZJobUniqueId {
   project_id: string;

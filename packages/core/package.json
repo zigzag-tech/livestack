@@ -10,7 +10,8 @@
   ],
   "dependencies": {
     "@livestack/shared": "*",
-    "@livestack/vault-interface": "*",
+    "@livestack/vault-client": "*",
+    "@livestack/vault-dev-server": "*",
     "bullmq": "^4.x",
     "chalk": "^4",
     "dotenv": "^16.x",

@@ -1,5 +1,5 @@
 {
-  "name": "@livestack/vault-interface",
+  "name": "@livestack/vault-client",
   "version": "0.0.1",
   "packageManager": "yarn@4.0.2",
   "private": true,
