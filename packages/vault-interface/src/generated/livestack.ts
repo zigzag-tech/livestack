@@ -20,7 +20,6 @@ import { Any } from "./google/protobuf/any";
 import { Empty } from "./google/protobuf/empty";
 import { Struct } from "./google/protobuf/struct";
 import { Timestamp } from "./google/protobuf/timestamp";
-import { GetJobRecRequest, GetJobRecResponse } from "./jobs";
 
 export const protobufPackage = "livestack";
 
@@ -1155,19 +1154,10 @@ export const AddDatapointResponse = {
   },
 };
 
-export type zzcloudServiceService = typeof zzcloudServiceService;
-export const zzcloudServiceService = {
-  getJobRec: {
-    path: "/livestack.zzcloudService/GetJobRec",
-    requestStream: false,
-    responseStream: false,
-    requestSerialize: (value: GetJobRecRequest) => Buffer.from(GetJobRecRequest.encode(value).finish()),
-    requestDeserialize: (value: Buffer) => GetJobRecRequest.decode(value),
-    responseSerialize: (value: GetJobRecResponse) => Buffer.from(GetJobRecResponse.encode(value).finish()),
-    responseDeserialize: (value: Buffer) => GetJobRecResponse.decode(value),
-  },
+export type livestackService = typeof livestackService;
+export const livestackService = {
   ensureStreamRec: {
-    path: "/livestack.zzcloudService/EnsureStreamRec",
+    path: "/livestack.livestack/EnsureStreamRec",
     requestStream: false,
     responseStream: false,
     requestSerialize: (value: EnsureStreamRecRequest) => Buffer.from(EnsureStreamRecRequest.encode(value).finish()),
@@ -1176,7 +1166,7 @@ export const zzcloudServiceService = {
     responseDeserialize: (value: Buffer) => Empty.decode(value),
   },
   ensureJobStreamConnectorRec: {
-    path: "/livestack.zzcloudService/EnsureJobStreamConnectorRec",
+    path: "/livestack.livestack/EnsureJobStreamConnectorRec",
     requestStream: false,
     responseStream: false,
     requestSerialize: (value: EnsureJobStreamConnectorRecRequest) =>
@@ -1186,7 +1176,7 @@ export const zzcloudServiceService = {
     responseDeserialize: (value: Buffer) => Empty.decode(value),
   },
   getJobStreamConnectorRecs: {
-    path: "/livestack.zzcloudService/GetJobStreamConnectorRecs",
+    path: "/livestack.livestack/GetJobStreamConnectorRecs",
     requestStream: false,
     responseStream: true,
     requestSerialize: (value: GetJobStreamConnectorRecsRequest) =>
@@ -1197,7 +1187,7 @@ export const zzcloudServiceService = {
     responseDeserialize: (value: Buffer) => JobStreamConnectorRecord.decode(value),
   },
   getJobDatapoints: {
-    path: "/livestack.zzcloudService/GetJobDatapoints",
+    path: "/livestack.livestack/GetJobDatapoints",
     requestStream: false,
     responseStream: false,
     requestSerialize: (value: GetJobDatapointsRequest) => Buffer.from(GetJobDatapointsRequest.encode(value).finish()),
@@ -1206,7 +1196,7 @@ export const zzcloudServiceService = {
     responseDeserialize: (value: Buffer) => DatapointRecord.decode(value),
   },
   addDatapoint: {
-    path: "/livestack.zzcloudService/AddDatapoint",
+    path: "/livestack.livestack/AddDatapoint",
     requestStream: false,
     responseStream: false,
     requestSerialize: (value: AddDatapointRequest) => Buffer.from(AddDatapointRequest.encode(value).finish()),
@@ -1216,8 +1206,7 @@ export const zzcloudServiceService = {
   },
 } as const;
 
-export interface zzcloudServiceServer extends UntypedServiceImplementation {
-  getJobRec: handleUnaryCall<GetJobRecRequest, GetJobRecResponse>;
+export interface livestackServer extends UntypedServiceImplementation {
   ensureStreamRec: handleUnaryCall<EnsureStreamRecRequest, Empty>;
   ensureJobStreamConnectorRec: handleUnaryCall<EnsureJobStreamConnectorRecRequest, Empty>;
   getJobStreamConnectorRecs: handleServerStreamingCall<GetJobStreamConnectorRecsRequest, JobStreamConnectorRecord>;
@@ -1225,22 +1214,7 @@ export interface zzcloudServiceServer extends UntypedServiceImplementation {
   addDatapoint: handleUnaryCall<AddDatapointRequest, AddDatapointResponse>;
 }
 
-export interface zzcloudServiceClient extends Client {
-  getJobRec(
-    request: GetJobRecRequest,
-    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
-  ): ClientUnaryCall;
-  getJobRec(
-    request: GetJobRecRequest,
-    metadata: Metadata,
-    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
-  ): ClientUnaryCall;
-  getJobRec(
-    request: GetJobRecRequest,
-    metadata: Metadata,
-    options: Partial<CallOptions>,
-    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
-  ): ClientUnaryCall;
+export interface livestackClient extends Client {
   ensureStreamRec(
     request: EnsureStreamRecRequest,
     callback: (error: ServiceError | null, response: Empty) => void,
@@ -1312,12 +1286,9 @@ export interface zzcloudServiceClient extends Client {
   ): ClientUnaryCall;
 }
 
-export const zzcloudServiceClient = makeGenericClientConstructor(
-  zzcloudServiceService,
-  "livestack.zzcloudService",
-) as unknown as {
-  new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): zzcloudServiceClient;
-  service: typeof zzcloudServiceService;
+export const livestackClient = makeGenericClientConstructor(livestackService, "livestack.livestack") as unknown as {
+  new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): livestackClient;
+  service: typeof livestackService;
   serviceName: string;
 };
 

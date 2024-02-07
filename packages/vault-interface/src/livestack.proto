@@ -6,10 +6,8 @@ import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto"; 
 import "google/protobuf/any.proto";
-import "jobs.proto";
 
-service zzcloudService {
-  rpc GetJobRec(GetJobRecRequest) returns (GetJobRecResponse);
+service livestack {
   rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
   rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
   rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);

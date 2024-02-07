@@ -1,4 +1,13 @@
 /* eslint-disable */
+import { ChannelCredentials, Client, makeGenericClientConstructor, Metadata } from "@grpc/grpc-js";
+import type {
+  CallOptions,
+  ClientOptions,
+  ClientUnaryCall,
+  handleUnaryCall,
+  ServiceError,
+  UntypedServiceImplementation,
+} from "@grpc/grpc-js";
 import _m0 from "protobufjs/minimal";
 import { Empty } from "./google/protobuf/empty";
 import { Struct } from "./google/protobuf/struct";
@@ -329,6 +338,47 @@ export const JobRec = {
     message.status = object.status ?? "";
     return message;
   },
+};
+
+export type jobsService = typeof jobsService;
+export const jobsService = {
+  getJobRec: {
+    path: "/livestack.jobs/GetJobRec",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: GetJobRecRequest) => Buffer.from(GetJobRecRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer) => GetJobRecRequest.decode(value),
+    responseSerialize: (value: GetJobRecResponse) => Buffer.from(GetJobRecResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer) => GetJobRecResponse.decode(value),
+  },
+} as const;
+
+export interface jobsServer extends UntypedServiceImplementation {
+  getJobRec: handleUnaryCall<GetJobRecRequest, GetJobRecResponse>;
+}
+
+export interface jobsClient extends Client {
+  getJobRec(
+    request: GetJobRecRequest,
+    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
+  ): ClientUnaryCall;
+  getJobRec(
+    request: GetJobRecRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
+  ): ClientUnaryCall;
+  getJobRec(
+    request: GetJobRecRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
+  ): ClientUnaryCall;
+}
+
+export const jobsClient = makeGenericClientConstructor(jobsService, "livestack.jobs") as unknown as {
+  new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): jobsClient;
+  service: typeof jobsService;
+  serviceName: string;
 };
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

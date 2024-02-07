@@ -6,6 +6,9 @@ import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto"; 
 
+service jobs {
+    rpc GetJobRec(GetJobRecRequest) returns (GetJobRecResponse);
+}
 
 message GetJobRecRequest {
   string project_id = 1;
