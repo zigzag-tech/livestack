@@ -1,0 +1,16 @@
+{
+  "name": "@livestack/vault-dev-server",
+  "version": "0.0.1",
+  "packageManager": "yarn@4.0.2",
+  "private": true,
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@livestack/vault-interface": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "5.4.0-beta"
+  },
+  "main": "src/index.js"
+}
