@@ -1,7 +1,21 @@
 /* eslint-disable */
+import {
+  ChannelCredentials,
+  Client,
+  ClientReadableStream,
+  handleServerStreamingCall,
+  makeGenericClientConstructor,
+  Metadata,
+} from "@grpc/grpc-js";
+import type {
+  CallOptions,
+  ClientOptions,
+  ClientUnaryCall,
+  handleUnaryCall,
+  ServiceError,
+  UntypedServiceImplementation,
+} from "@grpc/grpc-js";
 import _m0 from "protobufjs/minimal";
-import { Observable } from "rxjs";
-import { map } from "rxjs/operators";
 import { Any } from "./google/protobuf/any";
 import { Empty } from "./google/protobuf/empty";
 import { Struct } from "./google/protobuf/struct";
@@ -1141,72 +1155,171 @@ export const AddDatapointResponse = {
   },
 };
 
-export interface zzcloudService {
-  GetJobRec(request: GetJobRecRequest): Promise<GetJobRecResponse>;
-  EnsureStreamRec(request: EnsureStreamRecRequest): Promise<Empty>;
-  EnsureJobStreamConnectorRec(request: EnsureJobStreamConnectorRecRequest): Promise<Empty>;
-  GetJobStreamConnectorRecs(request: GetJobStreamConnectorRecsRequest): Observable<JobStreamConnectorRecord>;
-  GetJobDatapoints(request: GetJobDatapointsRequest): Promise<DatapointRecord>;
-  AddDatapoint(request: AddDatapointRequest): Promise<AddDatapointResponse>;
+export type zzcloudServiceService = typeof zzcloudServiceService;
+export const zzcloudServiceService = {
+  getJobRec: {
+    path: "/livestack.zzcloudService/GetJobRec",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: GetJobRecRequest) => Buffer.from(GetJobRecRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer) => GetJobRecRequest.decode(value),
+    responseSerialize: (value: GetJobRecResponse) => Buffer.from(GetJobRecResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer) => GetJobRecResponse.decode(value),
+  },
+  ensureStreamRec: {
+    path: "/livestack.zzcloudService/EnsureStreamRec",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: EnsureStreamRecRequest) => Buffer.from(EnsureStreamRecRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer) => EnsureStreamRecRequest.decode(value),
+    responseSerialize: (value: Empty) => Buffer.from(Empty.encode(value).finish()),
+    responseDeserialize: (value: Buffer) => Empty.decode(value),
+  },
+  ensureJobStreamConnectorRec: {
+    path: "/livestack.zzcloudService/EnsureJobStreamConnectorRec",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: EnsureJobStreamConnectorRecRequest) =>
+      Buffer.from(EnsureJobStreamConnectorRecRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer) => EnsureJobStreamConnectorRecRequest.decode(value),
+    responseSerialize: (value: Empty) => Buffer.from(Empty.encode(value).finish()),
+    responseDeserialize: (value: Buffer) => Empty.decode(value),
+  },
+  getJobStreamConnectorRecs: {
+    path: "/livestack.zzcloudService/GetJobStreamConnectorRecs",
+    requestStream: false,
+    responseStream: true,
+    requestSerialize: (value: GetJobStreamConnectorRecsRequest) =>
+      Buffer.from(GetJobStreamConnectorRecsRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer) => GetJobStreamConnectorRecsRequest.decode(value),
+    responseSerialize: (value: JobStreamConnectorRecord) =>
+      Buffer.from(JobStreamConnectorRecord.encode(value).finish()),
+    responseDeserialize: (value: Buffer) => JobStreamConnectorRecord.decode(value),
+  },
+  getJobDatapoints: {
+    path: "/livestack.zzcloudService/GetJobDatapoints",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: GetJobDatapointsRequest) => Buffer.from(GetJobDatapointsRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer) => GetJobDatapointsRequest.decode(value),
+    responseSerialize: (value: DatapointRecord) => Buffer.from(DatapointRecord.encode(value).finish()),
+    responseDeserialize: (value: Buffer) => DatapointRecord.decode(value),
+  },
+  addDatapoint: {
+    path: "/livestack.zzcloudService/AddDatapoint",
+    requestStream: false,
+    responseStream: false,
+    requestSerialize: (value: AddDatapointRequest) => Buffer.from(AddDatapointRequest.encode(value).finish()),
+    requestDeserialize: (value: Buffer) => AddDatapointRequest.decode(value),
+    responseSerialize: (value: AddDatapointResponse) => Buffer.from(AddDatapointResponse.encode(value).finish()),
+    responseDeserialize: (value: Buffer) => AddDatapointResponse.decode(value),
+  },
+} as const;
+
+export interface zzcloudServiceServer extends UntypedServiceImplementation {
+  getJobRec: handleUnaryCall<GetJobRecRequest, GetJobRecResponse>;
+  ensureStreamRec: handleUnaryCall<EnsureStreamRecRequest, Empty>;
+  ensureJobStreamConnectorRec: handleUnaryCall<EnsureJobStreamConnectorRecRequest, Empty>;
+  getJobStreamConnectorRecs: handleServerStreamingCall<GetJobStreamConnectorRecsRequest, JobStreamConnectorRecord>;
+  getJobDatapoints: handleUnaryCall<GetJobDatapointsRequest, DatapointRecord>;
+  addDatapoint: handleUnaryCall<AddDatapointRequest, AddDatapointResponse>;
 }
 
-export const zzcloudServiceServiceName = "livestack.zzcloudService";
-export class zzcloudServiceClientImpl implements zzcloudService {
-  private readonly rpc: Rpc;
-  private readonly service: string;
-  constructor(rpc: Rpc, opts?: { service?: string }) {
-    this.service = opts?.service || zzcloudServiceServiceName;
-    this.rpc = rpc;
-    this.GetJobRec = this.GetJobRec.bind(this);
-    this.EnsureStreamRec = this.EnsureStreamRec.bind(this);
-    this.EnsureJobStreamConnectorRec = this.EnsureJobStreamConnectorRec.bind(this);
-    this.GetJobStreamConnectorRecs = this.GetJobStreamConnectorRecs.bind(this);
-    this.GetJobDatapoints = this.GetJobDatapoints.bind(this);
-    this.AddDatapoint = this.AddDatapoint.bind(this);
-  }
-  GetJobRec(request: GetJobRecRequest): Promise<GetJobRecResponse> {
-    const data = GetJobRecRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "GetJobRec", data);
-    return promise.then((data) => GetJobRecResponse.decode(_m0.Reader.create(data)));
-  }
-
-  EnsureStreamRec(request: EnsureStreamRecRequest): Promise<Empty> {
-    const data = EnsureStreamRecRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "EnsureStreamRec", data);
-    return promise.then((data) => Empty.decode(_m0.Reader.create(data)));
-  }
-
-  EnsureJobStreamConnectorRec(request: EnsureJobStreamConnectorRecRequest): Promise<Empty> {
-    const data = EnsureJobStreamConnectorRecRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "EnsureJobStreamConnectorRec", data);
-    return promise.then((data) => Empty.decode(_m0.Reader.create(data)));
-  }
-
-  GetJobStreamConnectorRecs(request: GetJobStreamConnectorRecsRequest): Observable<JobStreamConnectorRecord> {
-    const data = GetJobStreamConnectorRecsRequest.encode(request).finish();
-    const result = this.rpc.serverStreamingRequest(this.service, "GetJobStreamConnectorRecs", data);
-    return result.pipe(map((data) => JobStreamConnectorRecord.decode(_m0.Reader.create(data))));
-  }
-
-  GetJobDatapoints(request: GetJobDatapointsRequest): Promise<DatapointRecord> {
-    const data = GetJobDatapointsRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "GetJobDatapoints", data);
-    return promise.then((data) => DatapointRecord.decode(_m0.Reader.create(data)));
-  }
-
-  AddDatapoint(request: AddDatapointRequest): Promise<AddDatapointResponse> {
-    const data = AddDatapointRequest.encode(request).finish();
-    const promise = this.rpc.request(this.service, "AddDatapoint", data);
-    return promise.then((data) => AddDatapointResponse.decode(_m0.Reader.create(data)));
-  }
+export interface zzcloudServiceClient extends Client {
+  getJobRec(
+    request: GetJobRecRequest,
+    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
+  ): ClientUnaryCall;
+  getJobRec(
+    request: GetJobRecRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
+  ): ClientUnaryCall;
+  getJobRec(
+    request: GetJobRecRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: GetJobRecResponse) => void,
+  ): ClientUnaryCall;
+  ensureStreamRec(
+    request: EnsureStreamRecRequest,
+    callback: (error: ServiceError | null, response: Empty) => void,
+  ): ClientUnaryCall;
+  ensureStreamRec(
+    request: EnsureStreamRecRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: Empty) => void,
+  ): ClientUnaryCall;
+  ensureStreamRec(
+    request: EnsureStreamRecRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: Empty) => void,
+  ): ClientUnaryCall;
+  ensureJobStreamConnectorRec(
+    request: EnsureJobStreamConnectorRecRequest,
+    callback: (error: ServiceError | null, response: Empty) => void,
+  ): ClientUnaryCall;
+  ensureJobStreamConnectorRec(
+    request: EnsureJobStreamConnectorRecRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: Empty) => void,
+  ): ClientUnaryCall;
+  ensureJobStreamConnectorRec(
+    request: EnsureJobStreamConnectorRecRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: Empty) => void,
+  ): ClientUnaryCall;
+  getJobStreamConnectorRecs(
+    request: GetJobStreamConnectorRecsRequest,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<JobStreamConnectorRecord>;
+  getJobStreamConnectorRecs(
+    request: GetJobStreamConnectorRecsRequest,
+    metadata?: Metadata,
+    options?: Partial<CallOptions>,
+  ): ClientReadableStream<JobStreamConnectorRecord>;
+  getJobDatapoints(
+    request: GetJobDatapointsRequest,
+    callback: (error: ServiceError | null, response: DatapointRecord) => void,
+  ): ClientUnaryCall;
+  getJobDatapoints(
+    request: GetJobDatapointsRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: DatapointRecord) => void,
+  ): ClientUnaryCall;
+  getJobDatapoints(
+    request: GetJobDatapointsRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: DatapointRecord) => void,
+  ): ClientUnaryCall;
+  addDatapoint(
+    request: AddDatapointRequest,
+    callback: (error: ServiceError | null, response: AddDatapointResponse) => void,
+  ): ClientUnaryCall;
+  addDatapoint(
+    request: AddDatapointRequest,
+    metadata: Metadata,
+    callback: (error: ServiceError | null, response: AddDatapointResponse) => void,
+  ): ClientUnaryCall;
+  addDatapoint(
+    request: AddDatapointRequest,
+    metadata: Metadata,
+    options: Partial<CallOptions>,
+    callback: (error: ServiceError | null, response: AddDatapointResponse) => void,
+  ): ClientUnaryCall;
 }
 
-interface Rpc {
-  request(service: string, method: string, data: Uint8Array): Promise<Uint8Array>;
-  clientStreamingRequest(service: string, method: string, data: Observable<Uint8Array>): Promise<Uint8Array>;
-  serverStreamingRequest(service: string, method: string, data: Uint8Array): Observable<Uint8Array>;
-  bidirectionalStreamingRequest(service: string, method: string, data: Observable<Uint8Array>): Observable<Uint8Array>;
-}
+export const zzcloudServiceClient = makeGenericClientConstructor(
+  zzcloudServiceService,
+  "livestack.zzcloudService",
+) as unknown as {
+  new (address: string, credentials: ChannelCredentials, options?: Partial<ClientOptions>): zzcloudServiceClient;
+  service: typeof zzcloudServiceService;
+  serviceName: string;
+};
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 
