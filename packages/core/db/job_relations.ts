@@ -1,6 +1,6 @@
 import { Knex } from "knex";
 import { convertMaybePrimtiveOrArrayBack } from "./primitives";
-import { JobRec } from "@livestack/vault-interface/src/generated/jobs";
+import { JobRec } from "@livestack/vault-interface";
 
 export async function ensureJobRelationRec({
   projectId,
