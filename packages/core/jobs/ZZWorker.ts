@@ -10,6 +10,7 @@ import { z } from "zod";
 import { JobId } from "../orchestrations/InstantiatedGraph";
 import { RawQueueJobData } from "../orchestrations/workerCommon";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
+import { queueClient } from "@livestack/vault-client/src/queue";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -125,6 +126,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     const mergedWorkerOptions = _.merge({}, workerOptions);
     const that = this;
     const workerQueueId = `${that.zzEnv.projectId}/${this.jobSpec.name}`;
+
     this.bullMQWorker = new Worker<RawQueueJobData<P>, void, string>(
       workerQueueId,
       async (job) => {

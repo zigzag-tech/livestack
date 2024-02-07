@@ -8,13 +8,7 @@ import {
 import { StreamNode } from "../orchestrations/InstantiatedGraph";
 import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorker";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
-import { WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
-import {
-  GenericRecordType,
-  QueueName,
-  RawQueueJobData,
-} from "../orchestrations/workerCommon";
 import Redis from "ioredis";
 import _ from "lodash";
 import { ensureJobAndInitStatusRec } from "@livestack/vault-dev-server/src/db/jobs";

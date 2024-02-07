@@ -7,6 +7,7 @@ import "google/protobuf/empty.proto";
 
 service QueueService {
   rpc AddJob(QueueJob) returns (google.protobuf.Empty);
+  rpc WorkerReportDuty(stream FromWorker) returns (stream ToWorker);
 }
 
 message QueueJob {
@@ -15,4 +16,48 @@ message QueueJob {
   string jobId = 3;
   string contextId = 4;
   string jobOptionsStr = 5;
+}
+
+message SignUp {
+  string projectId = 1;
+  string specName = 2;
+}
+
+message WorkerStopped {
+  string projectId = 1;
+  string specName = 2;
+}
+
+message ProgressUpdate {
+  string projectId = 1;
+  string specName = 2;
+  string jobId = 3;
+  int32 progress = 4;
+}
+
+message JobCompleted {
+  string projectId = 1;
+  string specName = 2;
+  string jobId = 3;
+}
+
+message JobFailed {
+  string projectId = 1;
+  string specName = 2;
+  string jobId = 3;
+  string errorStr = 4;
+}
+
+message FromWorker {
+  oneof value {
+    SignUp signUp = 1;
+    ProgressUpdate progressUpdate = 2;
+    JobCompleted jobCompleted = 3;
+    JobFailed jobFailed = 4;
+    WorkerStopped workerStopped = 5;
+  }
+}
+
+message ToWorker {
+  QueueJob job = 1;
 }
