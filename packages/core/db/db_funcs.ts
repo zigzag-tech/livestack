@@ -24,9 +24,3 @@ export const getDatabaseInstance = ({
     },
     useNullAsDefault: true,
   });
-
-export type JobUniqueId = {
-  projectId: string;
-  specName: string;
-  jobId: string;
-};

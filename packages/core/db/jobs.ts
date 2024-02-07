@@ -4,7 +4,6 @@ import {
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
 } from "./primitives";
-import { JobUniqueId } from "./db_funcs";
 
 export interface ZZJobUniqueId {
   project_id: string;
@@ -126,3 +125,8 @@ export async function ensureJobAndInitStatusRec<T>({
   });
   // });
 }
+export type JobUniqueId = {
+  projectId: string;
+  specName: string;
+  jobId: string;
+};
