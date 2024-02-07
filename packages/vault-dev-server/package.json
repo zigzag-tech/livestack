@@ -6,7 +6,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@livestack/vault-client": "*"
+    "@livestack/vault-interface": "*"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
