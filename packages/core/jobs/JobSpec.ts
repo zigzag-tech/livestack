@@ -1,3 +1,4 @@
+import { queueClient } from "@livestack/vault-client/src/queue";
 import { WrapWithTimestamp } from "./../utils/io";
 import { InletNode, SpecNode } from "../orchestrations/DefGraph";
 import {
@@ -7,7 +8,7 @@ import {
 import { StreamNode } from "../orchestrations/InstantiatedGraph";
 import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorker";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
-import { Queue, WorkerOptions } from "bullmq";
+import { WorkerOptions } from "bullmq";
 import { getLogger } from "../utils/createWorkerLogger";
 import {
   GenericRecordType,
@@ -46,14 +47,9 @@ import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { Observable } from "rxjs";
 import { TagObj, TagMaps } from "../orchestrations/Workflow";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
-import { jobDBClient } from "@livestack/vault-client";
+import { dbClient } from "@livestack/vault-client";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
-
-const queueMapByProjectIdAndQueueName = new Map<
-  QueueName<GenericRecordType>,
-  ReturnType<typeof getCachedQueueByName>
->();
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
@@ -173,21 +169,6 @@ export class JobSpec<
     return this.zzEnv;
   }
 
-  private get _rawQueue() {
-    return getCachedQueueByName<P, void>({
-      queueNameOnly: this.name,
-      queueOptions: {
-        connection: this.zzEnvEnsured.redisConfig,
-      },
-      projectId: this.zzEnvEnsured.projectId,
-    });
-  }
-
-  // public async getJob(jobId: string) {
-  //   const j = await this._rawQueue.getJob(jobId);
-  //   return j || null;
-  // }
-
   public async getJobRec(jobId: string) {
     if (!this.zzEnvEnsured.db) {
       throw new Error(
@@ -195,7 +176,7 @@ export class JobSpec<
       );
     }
 
-    const r = await jobDBClient.getJobRec({
+    const r = await dbClient.getJobRec({
       specName: this.name,
       projectId: this.zzEnvEnsured.projectId,
       jobId,
@@ -682,13 +663,6 @@ export class JobSpec<
     } = p || {};
 
     // console.debug("Spec._enqueueJob", jobId, jobOptions);
-    // force job id to be the same as name
-    const workers = await this._rawQueue.getWorkers();
-    if (workers.length === 0) {
-      this.logger.warn(
-        `No worker for queue ${this._rawQueue.name}; job ${jobId} might be be stuck.`
-      );
-    }
 
     const projectId = this.zzEnvEnsured.projectId;
 
@@ -759,17 +733,16 @@ export class JobSpec<
       await trx.commit();
     });
     jobOptions = jobOptions || ({} as P);
-    const j = await this._rawQueue.add(
+    const j = await queueClient.addJob({
+      projectId,
+      specName: this.name,
       jobId,
-      {
-        jobOptions,
-        contextId: p?.parentJobId || null,
-      },
-      { jobId: jobId }
-    );
+      jobOptionsStr: JSON.stringify(jobOptions as any),
+      contextId: p?.parentJobId,
+    });
     this.logger.info(
-      `Added job with ID ${j.id} to jobSpec: ` +
-        `${JSON.stringify(j.data, longStringTruncator)}`
+      `Added job with ID ${jobId} to jobSpec: ` +
+        `${JSON.stringify(jobOptions, longStringTruncator)}`
     );
 
     return await this.getJobManager(jobId);
@@ -1181,39 +1154,6 @@ export class JobSpec<
   }
 }
 
-export const getCachedQueueByName = <JobOptions, JobReturnType>(
-  p: {
-    projectId: string;
-    queueNameOnly: string;
-    queueOptions?: WorkerOptions;
-  }
-  // & {
-  //   queueNamesDef: T;
-  // }
-) => {
-  const {
-    // queueNamesDef,
-    queueNameOnly,
-    projectId,
-    queueOptions,
-  } = p;
-  // if (!Object.values(queueNamesDef).includes(queueName)) {
-  //   throw new Error(`Can not handle queueName ${queueName}!`);
-  // }
-  const existing = queueMapByProjectIdAndQueueName.get(
-    `${projectId}/${queueNameOnly}`
-  ) as Queue<RawQueueJobData<JobOptions>, JobReturnType>;
-  if (existing) {
-    return existing;
-  } else {
-    const queue = new Queue<RawQueueJobData<JobOptions>, JobReturnType>(
-      `${projectId}/${queueNameOnly}`,
-      queueOptions
-    );
-    queueMapByProjectIdAndQueueName.set(`${projectId}/${queueNameOnly}`, queue);
-    return queue;
-  }
-};
 export class JobManager<P, I, O, IMap, OMap> {
   public readonly input: JobInput<IMap>;
   public readonly output: JobOutput<OMap>;

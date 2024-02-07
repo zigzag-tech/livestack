@@ -124,8 +124,9 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
 
     const mergedWorkerOptions = _.merge({}, workerOptions);
     const that = this;
+    const workerQueueId = `${that.zzEnv.projectId}/${this.jobSpec.name}`;
     this.bullMQWorker = new Worker<RawQueueJobData<P>, void, string>(
-      `${that.zzEnv.projectId}/${this.jobSpec.name}`,
+      workerQueueId,
       async (job) => {
         const jobId = job.id! as JobId;
 

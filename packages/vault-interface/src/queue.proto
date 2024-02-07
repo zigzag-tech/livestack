@@ -2,12 +2,17 @@ syntax = "proto3";
 
 package livestack;
 
-import "google/protobuf/struct.proto";
-import "google/protobuf/timestamp.proto";
+// import "google/protobuf/struct.proto";
 import "google/protobuf/empty.proto"; 
-import "google/protobuf/any.proto";
 
 service QueueService {
-  
+  rpc AddJob(QueueJob) returns (google.protobuf.Empty);
 }
 
+message QueueJob {
+  string projectId = 1;
+  string specName = 2;
+  string jobId = 3;
+  string contextId = 4;
+  string jobOptionsStr = 5;
+}

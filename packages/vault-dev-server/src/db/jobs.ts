@@ -4,12 +4,7 @@ import {
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
 } from "./primitives";
-import {
-  DBServiceImplementation,
-  JobRec,
-  WrapServiceNullResponses,
-  DeepPartial,
-} from "@livestack/vault-interface";
+import { DBServiceImplementation, JobRec } from "@livestack/vault-interface";
 
 export interface ZZJobUniqueId {
   project_id: string;
@@ -29,7 +24,7 @@ export interface ZZJobStatusRec extends ZZJobUniqueId {
   time_created: Date;
 }
 
-export const jobDbService = (dbConn: Knex): DBServiceImplementation => ({
+export const dbService = (dbConn: Knex): DBServiceImplementation => ({
   async getJobRec({ projectId, specName, jobId }) {
     const r = (await dbConn("zz_jobs")
       .select(["zz_jobs.*", "zz_job_status.status"])
