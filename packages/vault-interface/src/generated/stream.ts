@@ -4,6 +4,39 @@ import _m0 from "protobufjs/minimal";
 
 export const protobufPackage = "livestack";
 
+export enum SubType {
+  fromStart = 0,
+  fromNow = 1,
+  UNRECOGNIZED = -1,
+}
+
+export function subTypeFromJSON(object: any): SubType {
+  switch (object) {
+    case 0:
+    case "fromStart":
+      return SubType.fromStart;
+    case 1:
+    case "fromNow":
+      return SubType.fromNow;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return SubType.UNRECOGNIZED;
+  }
+}
+
+export function subTypeToJSON(object: SubType): string {
+  switch (object) {
+    case SubType.fromStart:
+      return "fromStart";
+    case SubType.fromNow:
+      return "fromNow";
+    case SubType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface StreamPubMessage {
   projectId: string;
   uniqueName: string;
@@ -16,9 +49,12 @@ export interface StreamPubResult {
   messageId: string;
 }
 
-export interface SubParams {
+export interface SubRequest {
   projectId: string;
   uniqueName: string;
+  jobId: string;
+  outputTag: string;
+  subType: SubType;
 }
 
 export interface StreamDatapoint {
@@ -203,25 +239,34 @@ export const StreamPubResult = {
   },
 };
 
-function createBaseSubParams(): SubParams {
-  return { projectId: "", uniqueName: "" };
+function createBaseSubRequest(): SubRequest {
+  return { projectId: "", uniqueName: "", jobId: "", outputTag: "", subType: 0 };
 }
 
-export const SubParams = {
-  encode(message: SubParams, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const SubRequest = {
+  encode(message: SubRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.projectId !== "") {
       writer.uint32(10).string(message.projectId);
     }
     if (message.uniqueName !== "") {
       writer.uint32(18).string(message.uniqueName);
     }
+    if (message.jobId !== "") {
+      writer.uint32(26).string(message.jobId);
+    }
+    if (message.outputTag !== "") {
+      writer.uint32(34).string(message.outputTag);
+    }
+    if (message.subType !== 0) {
+      writer.uint32(40).int32(message.subType);
+    }
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): SubParams {
+  decode(input: _m0.Reader | Uint8Array, length?: number): SubRequest {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseSubParams();
+    const message = createBaseSubRequest();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -239,6 +284,27 @@ export const SubParams = {
 
           message.uniqueName = reader.string();
           continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.jobId = reader.string();
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.outputTag = reader.string();
+          continue;
+        case 5:
+          if (tag !== 40) {
+            break;
+          }
+
+          message.subType = reader.int32() as any;
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -248,14 +314,17 @@ export const SubParams = {
     return message;
   },
 
-  fromJSON(object: any): SubParams {
+  fromJSON(object: any): SubRequest {
     return {
       projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
+      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
+      outputTag: isSet(object.outputTag) ? globalThis.String(object.outputTag) : "",
+      subType: isSet(object.subType) ? subTypeFromJSON(object.subType) : 0,
     };
   },
 
-  toJSON(message: SubParams): unknown {
+  toJSON(message: SubRequest): unknown {
     const obj: any = {};
     if (message.projectId !== "") {
       obj.projectId = message.projectId;
@@ -263,16 +332,28 @@ export const SubParams = {
     if (message.uniqueName !== "") {
       obj.uniqueName = message.uniqueName;
     }
+    if (message.jobId !== "") {
+      obj.jobId = message.jobId;
+    }
+    if (message.outputTag !== "") {
+      obj.outputTag = message.outputTag;
+    }
+    if (message.subType !== 0) {
+      obj.subType = subTypeToJSON(message.subType);
+    }
     return obj;
   },
 
-  create(base?: DeepPartial<SubParams>): SubParams {
-    return SubParams.fromPartial(base ?? {});
+  create(base?: DeepPartial<SubRequest>): SubRequest {
+    return SubRequest.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<SubParams>): SubParams {
-    const message = createBaseSubParams();
+  fromPartial(object: DeepPartial<SubRequest>): SubRequest {
+    const message = createBaseSubRequest();
     message.projectId = object.projectId ?? "";
     message.uniqueName = object.uniqueName ?? "";
+    message.jobId = object.jobId ?? "";
+    message.outputTag = object.outputTag ?? "";
+    message.subType = object.subType ?? 0;
     return message;
   },
 };
@@ -381,7 +462,7 @@ export const StreamServiceDefinition = {
     },
     sub: {
       name: "Sub",
-      requestType: SubParams,
+      requestType: SubRequest,
       requestStream: false,
       responseType: StreamDatapoint,
       responseStream: true,
@@ -393,14 +474,14 @@ export const StreamServiceDefinition = {
 export interface StreamServiceImplementation<CallContextExt = {}> {
   pub(request: StreamPubMessage, context: CallContext & CallContextExt): Promise<DeepPartial<StreamPubResult>>;
   sub(
-    request: SubParams,
+    request: SubRequest,
     context: CallContext & CallContextExt,
   ): ServerStreamingMethodResult<DeepPartial<StreamDatapoint>>;
 }
 
 export interface StreamServiceClient<CallOptionsExt = {}> {
   pub(request: DeepPartial<StreamPubMessage>, options?: CallOptions & CallOptionsExt): Promise<StreamPubResult>;
-  sub(request: DeepPartial<SubParams>, options?: CallOptions & CallOptionsExt): AsyncIterable<StreamDatapoint>;
+  sub(request: DeepPartial<SubRequest>, options?: CallOptions & CallOptionsExt): AsyncIterable<StreamDatapoint>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

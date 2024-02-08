@@ -7,7 +7,7 @@ package livestack;
 
 service StreamService {
   rpc Pub(StreamPubMessage) returns (StreamPubResult);
-  rpc Sub(SubParams) returns (stream StreamDatapoint);
+  rpc Sub(SubRequest) returns (stream StreamDatapoint);
 }
 
 
@@ -23,9 +23,17 @@ message StreamPubResult {
   string messageId = 1;
 }
 
-message SubParams {
+enum SubType {
+  fromStart = 0;
+  fromNow = 1;
+}
+
+message SubRequest {
   string projectId = 1;
   string uniqueName = 2;
+  string jobId = 3;
+  string outputTag = 4;
+  SubType subType = 5;
 }
 
 message StreamDatapoint {
