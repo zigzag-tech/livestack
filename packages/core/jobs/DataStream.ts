@@ -15,7 +15,13 @@ import {
 import path from "path";
 import { createClient } from "redis";
 
-const REDIS_CLIENT_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
+const REDIS_CLIENT_BY_ID: Record<
+  string,
+  {
+    pub: Awaited<ReturnType<typeof createClient>>;
+    sub: Awaited<ReturnType<typeof createClient>>;
+  }
+> = {};
 
 export type InferStreamDef<T> = T extends DataStream<infer P> ? P : never;
 
@@ -36,7 +42,6 @@ export namespace DataStream {
 }
 
 // cursor based redis stream subscriber
-import { Redis } from "ioredis";
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
 
@@ -138,7 +143,7 @@ export class DataStream<T extends object> {
   }
 
   public lastValueSlow = async () => {
-    const { channelId } = getStreamClientsById({
+    const { channelId } = await getStreamClientsById({
       queueId: this.uniqueName,
       zzEnv: this.zzEnv,
     });
@@ -250,12 +255,13 @@ export class DataStream<T extends object> {
 
     try {
       // Publish the data to the stream
-      const messageId = await clients.pub.xadd(
+      const messageId = await clients.pub.sendCommand([
+        "XADD",
         channelId,
         "*",
         "data",
-        customStringify(parsed)
-      );
+        customStringify(parsed),
+      ]);
 
       // console.debug("DataStream pub", this.uniqueName, parsed);
 
@@ -335,7 +341,7 @@ export class DataStreamSubscriber<T extends object> {
   }
 
   private async readStream(subscriber: Subscriber<WithTimestamp<T>>) {
-    const { channelId, clients } = getStreamClientsById({
+    const { channelId, clients } = await getStreamClientsById({
       queueId: this.stream.uniqueName,
       zzEnv: this.zzEnv,
     });
@@ -343,15 +349,17 @@ export class DataStreamSubscriber<T extends object> {
     try {
       while (!this.isUnsubscribed) {
         // XREAD with block and count parameters
-        const stream = await clients.sub.xread(
+        const stream = (await clients.sub.sendCommand([
+          "XREAD",
           "COUNT",
-          1,
+          "1",
           "BLOCK",
-          1000, // Set a timeout for blocking, e.g., 1000 milliseconds
+          "1000", // Set a timeout for blocking, e.g., 1000 milliseconds
           "STREAMS",
           channelId,
-          this.cursor
-        );
+          this.cursor,
+        ])) as [string, [string, string[]][]][];
+
         if (stream) {
           const [key, messages] = stream[0]; // Assuming single stream
           for (let message of messages) {
@@ -478,7 +486,7 @@ function customParse(json: string): any {
 //   return createHash("sha256").update(str).digest("hex");
 // }
 
-function getStreamClientsById({
+async function getStreamClientsById({
   queueId,
   zzEnv,
 }: {
@@ -488,8 +496,13 @@ function getStreamClientsById({
   // const channelId = `zzstream:${zzEnv.projectId}/${queueId!}`;
   const channelId = `${queueId!}`;
   if (!REDIS_CLIENT_BY_ID[channelId]) {
-    const sub = new Redis(zzEnv.redisConfig);
-    const pub = new Redis(zzEnv.redisConfig);
+    const sub = await createClient(zzEnv.redisConfig)
+      .on("error", (err) => console.log("Redis Client Error", err))
+      .connect();
+    const pub = await createClient(zzEnv.redisConfig)
+      .on("error", (err) => console.log("Redis Client Error", err))
+      .connect();
+
     REDIS_CLIENT_BY_ID[channelId] = { sub, pub };
   }
   return { channelId, clients: REDIS_CLIENT_BY_ID[channelId] };
