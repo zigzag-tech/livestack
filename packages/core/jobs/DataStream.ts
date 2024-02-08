@@ -135,7 +135,7 @@ export class DataStream<T extends object> {
     );
   }
 
-  public lastValueSlow = async () => {
+  public lastValue = async () => {
     const { null_response, datapoint } = await streamClient.lastValue({
       projectId: this.zzEnv.projectId,
       uniqueName: this.uniqueName,

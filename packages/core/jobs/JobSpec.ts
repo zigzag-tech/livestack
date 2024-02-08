@@ -358,7 +358,7 @@ export class JobSpec<
         type,
       });
 
-      const lastV = await stream.lastValueSlow();
+      const lastV = await stream.lastValue();
       if (lastV?.terminate) {
         this.logger.error(
           `Cannot send ${
