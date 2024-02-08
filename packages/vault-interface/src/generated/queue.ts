@@ -9,7 +9,7 @@ export interface QueueJob {
   projectId: string;
   specName: string;
   jobId: string;
-  contextId: string;
+  contextId?: string | undefined;
   jobOptionsStr: string;
 }
 
@@ -58,7 +58,7 @@ export interface ToWorker {
 }
 
 function createBaseQueueJob(): QueueJob {
-  return { projectId: "", specName: "", jobId: "", contextId: "", jobOptionsStr: "" };
+  return { projectId: "", specName: "", jobId: "", contextId: undefined, jobOptionsStr: "" };
 }
 
 export const QueueJob = {
@@ -72,7 +72,7 @@ export const QueueJob = {
     if (message.jobId !== "") {
       writer.uint32(26).string(message.jobId);
     }
-    if (message.contextId !== "") {
+    if (message.contextId !== undefined) {
       writer.uint32(34).string(message.contextId);
     }
     if (message.jobOptionsStr !== "") {
@@ -137,7 +137,7 @@ export const QueueJob = {
       projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
-      contextId: isSet(object.contextId) ? globalThis.String(object.contextId) : "",
+      contextId: isSet(object.contextId) ? globalThis.String(object.contextId) : undefined,
       jobOptionsStr: isSet(object.jobOptionsStr) ? globalThis.String(object.jobOptionsStr) : "",
     };
   },
@@ -153,7 +153,7 @@ export const QueueJob = {
     if (message.jobId !== "") {
       obj.jobId = message.jobId;
     }
-    if (message.contextId !== "") {
+    if (message.contextId !== undefined) {
       obj.contextId = message.contextId;
     }
     if (message.jobOptionsStr !== "") {
@@ -170,7 +170,7 @@ export const QueueJob = {
     message.projectId = object.projectId ?? "";
     message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
-    message.contextId = object.contextId ?? "";
+    message.contextId = object.contextId ?? undefined;
     message.jobOptionsStr = object.jobOptionsStr ?? "";
     return message;
   },

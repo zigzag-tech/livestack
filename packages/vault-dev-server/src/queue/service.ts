@@ -123,7 +123,7 @@ class ProjectQueueService implements QueueServiceImplementation {
                   jobId: job.id!,
                   specName,
                   jobOptionsStr: JSON.stringify(job.data.jobOptions),
-                  contextId: job.data.contextId || "",
+                  contextId: job.data.contextId || undefined,
                 },
               });
 
