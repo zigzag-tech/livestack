@@ -61,7 +61,7 @@ export async function addDatapoint<T>({
   streamId: string;
   jobInfo?: {
     jobId: string;
-    jobOutputKey: string;
+    outputTag: string;
   };
   data: T;
 }) {
@@ -81,7 +81,7 @@ export async function addDatapoint<T>({
     datapoint_id: datapointId,
     data: handlePrimitiveOrArray(data),
     job_id: jobInfo?.jobId || null,
-    job_output_key: jobInfo?.jobOutputKey || null,
+    job_output_key: jobInfo?.outputTag || null,
     connector_type: jobInfo ? "out" : null,
     time_created: new Date(),
   });
