@@ -3,5 +3,5 @@ import { DBServiceDefinition } from "@livestack/vault-interface";
 
 export const dbClient = createClient(
   DBServiceDefinition,
-  createChannel("localhost:50051")
+  createChannel("localhost:50504")
 );
