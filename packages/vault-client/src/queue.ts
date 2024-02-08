@@ -3,5 +3,5 @@ import { QueueServiceDefinition } from "@livestack/vault-interface";
 
 export const queueClient = createClient(
   QueueServiceDefinition,
-  createChannel("localhost:50504")
+  createChannel("livedev.zztech.io:50504")
 );

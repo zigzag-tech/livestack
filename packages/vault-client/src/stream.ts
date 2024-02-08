@@ -3,5 +3,5 @@ import { StreamServiceDefinition } from "@livestack/vault-interface";
 
 export const streamClient = createClient(
   StreamServiceDefinition,
-  createChannel("localhost:50504")
+  createChannel("livedev.zztech.io:50504")
 );

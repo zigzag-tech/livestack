@@ -16,7 +16,7 @@ async function main() {
   server.add(StreamServiceDefinition, getStreamService());
 
   const HOST = process.env.HOST || "0.0.0.0";
-  const PORT = Number(process.env.PORT) || 50504;
+  const PORT = Number(process.env.PORT) || 50508;
   const address = `${HOST}:${PORT}`;
 
   await server.listen(address);
