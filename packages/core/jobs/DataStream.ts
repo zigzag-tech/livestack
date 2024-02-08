@@ -322,11 +322,6 @@ export class DataStreamSubscriber<T extends object> {
   }
 
   private async readStream(subscriber: Subscriber<WithTimestamp<T>>) {
-    const { channelId, clients } = await getStreamClientsById({
-      queueId: this.stream.uniqueName,
-      zzEnv: this.zzEnv,
-    });
-
     try {
       const iter = streamClient.sub({
         projectId: this.zzEnv.projectId,
@@ -365,7 +360,6 @@ export class DataStreamSubscriber<T extends object> {
       subscriber.error(error);
     } finally {
       // Perform cleanup here if necessary
-      clients.sub.disconnect();
       subscriber.complete();
       subscriber.unsubscribe();
     }
