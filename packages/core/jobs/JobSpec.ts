@@ -9,7 +9,6 @@ import { StreamNode } from "../orchestrations/InstantiatedGraph";
 import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorker";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { getLogger } from "../utils/createWorkerLogger";
-import Redis from "ioredis";
 import _ from "lodash";
 import { ensureJobAndInitStatusRec } from "@livestack/vault-dev-server/src/db/jobs";
 import {
@@ -42,6 +41,7 @@ import { Observable } from "rxjs";
 import { TagObj, TagMaps } from "../orchestrations/Workflow";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
 import { dbClient } from "@livestack/vault-client";
+import { Logger } from "winston";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -352,53 +352,48 @@ export class JobSpec<
     await limit(async () => {
       // console.debug("stream_data", JSON.stringify(d, longStringTruncator));
 
-      const redis = new Redis(this.zzEnvEnsured.redisConfig);
-      if (!d.terminate) {
-        // const lastV = await stream.lastValue();
-        // mark job terminated in redis key value store
-        const isTerminated =
-          (await redis.get(`terminated__${jobId}/${type}/${String(tag)}`)) ===
-          "true";
-        await redis.disconnect();
-        if (isTerminated) {
-          this.logger.error(
-            `Cannot send ${
-              type === "in" ? "input" : "output"
-            } to a terminated stream! jobId: ${jobId}, tag: ${String(tag)}`
-          );
-          throw new Error(
-            `Cannot send ${
-              type === "in" ? "input" : "output"
-            } to a terminated stream!`
-          );
-        }
-      } else {
-        await redis.set(
-          `terminated__${jobId}/${type}/${String(tag)}`,
-          "true",
-          "EX",
-          600
-        );
-      }
-      await redis.disconnect();
-
       const stream = await this.getJobStream({
         jobId,
         tag: tag,
         type,
       });
+
+      const lastV = await stream.lastValueSlow();
+      if (lastV?.terminate) {
+        this.logger.error(
+          `Cannot send ${
+            type === "in" ? "input" : "output"
+          } to a terminated stream! jobId: ${jobId}, tag: ${String(tag)}`
+        );
+        throw new Error(
+          `Cannot send ${
+            type === "in" ? "input" : "output"
+          } to a terminated stream!`
+        );
+      }
+
+      // await ensureStreamNotTerminated({
+      //   zzEnv: this.zzEnvEnsured,
+      //   logger: this.logger,
+      //   jobId,
+      //   type,
+      //   tag,
+      //   data: d,
+      // });
+
       // console.debug(
       //   "stream_data",
       //   stream.uniqueName,
       //   JSON.stringify(d, longStringTruncator)
       // );
+
       await stream.pub({
         message: d,
         ...(type === "out"
           ? {
               jobInfo: {
                 jobId,
-                jobOutputKey: String(tag),
+                outputTag: String(tag),
               },
             }
           : {}),

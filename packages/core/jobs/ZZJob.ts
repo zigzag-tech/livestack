@@ -12,7 +12,6 @@ import { getParentJobRec } from "@livestack/vault-dev-server/src/db/job_relation
 import longStringTruncator from "../utils/longStringTruncator";
 import { JobSpec } from "./JobSpec";
 import { z } from "zod";
-import Redis, { RedisOptions } from "ioredis";
 import { ZZEnv } from "./ZZEnv";
 import { InferTMap } from "@livestack/shared/IOSpec";
 import _ from "lodash";
@@ -355,17 +354,6 @@ export class ZZJob<
 
       const { nextValue } = createLazyNextValueGenerator(trackedObservable);
 
-      subscriberCountObservable.subscribe((count) => {
-        if (count > 0) {
-          this.setJobReadyForInputsInRedis({
-            redisConfig: this.zzEnv.redisConfig,
-            jobId: this.jobId,
-            isReady: true,
-            tag: tag || this.spec.getSingleInputTag(),
-          });
-        }
-      });
-
       this.inputStreamFnsByTag[tag as K] = {
         nextValue,
         // inputStream: stream,
@@ -376,37 +364,6 @@ export class ZZJob<
     }
     return this.inputStreamFnsByTag[tag as K]!;
   }
-
-  setJobReadyForInputsInRedis = async ({
-    redisConfig,
-    jobId,
-    tag,
-    isReady,
-  }: {
-    redisConfig: RedisOptions;
-    jobId: string;
-    tag: keyof IMap;
-    isReady: boolean;
-  }) => {
-    // console.debug("setJobReadyForInputsInRedis", {
-    //   jobSpec: this.jobSpec.name,
-    //   jobId,
-    //   key,
-    //   isReady,
-    // });
-    if (!tag) {
-      throw new Error("key is required");
-    }
-    try {
-      const redis = new Redis(redisConfig);
-      await redis.set(
-        `ready_status__${jobId}/${String(tag)}`,
-        isReady ? "true" : "false"
-      );
-    } catch (error) {
-      console.error("Error setJobReadyForInputsInRedis:", error);
-    }
-  };
 
   public beginProcessing = async (
     processor: ZZProcessor<P, I, O, WP, IMap, OMap>

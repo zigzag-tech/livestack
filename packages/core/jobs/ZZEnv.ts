@@ -1,21 +1,20 @@
 import { Knex } from "@livestack/vault-dev-server";
 import { IStorageProvider } from "../storage/cloudStorage";
-import { RedisOptions } from "ioredis";
 import { Stream } from "stream";
 import { z } from "zod";
-import fs from "fs";
+import { RedisClientOptions } from "redis";
 interface EnvParams {
   readonly storageProvider?: IStorageProvider;
   readonly projectId: string;
   readonly db: Knex;
-  readonly redisConfig?: RedisOptions;
+  readonly redisConfig?: RedisClientOptions;
 }
 
 export class ZZEnv implements EnvParams {
   public readonly storageProvider?: IStorageProvider;
   public readonly projectId: string;
   public readonly db: Knex;
-  public readonly redisConfig: RedisOptions;
+  public readonly redisConfig: RedisClientOptions;
   private static _zzEnv: ZZEnv | null = null;
 
   static global() {
