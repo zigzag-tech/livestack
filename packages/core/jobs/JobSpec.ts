@@ -661,6 +661,8 @@ export class JobSpec<
         outputStreamIdOverridesByTag;
     }
 
+    jobOptions = jobOptions || ({} as P);
+
     await dbClient.ensureJobAndStatusAndConnectorRecs({
       projectId: this.zzEnvEnsured.projectId,
       specName: this.name,
@@ -672,7 +674,6 @@ export class JobSpec<
       outputStreamIdOverridesByTag: outputStreamIdOverridesByTag || {},
     });
 
-    jobOptions = jobOptions || ({} as P);
     const j = await queueClient.addJob({
       projectId,
       specName: this.name,
