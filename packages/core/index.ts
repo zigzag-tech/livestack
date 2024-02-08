@@ -1,5 +1,6 @@
-// TODO: temporary hack to always leave the dev server running
-import "@livestack/vault-dev-server/src/main";
+// check if @livestack/vault-dev-server module is installed
+// and if so, import the main function from it
+// import "@livestack/vault-dev-server";
 
 export { ZZJob } from "./jobs/ZZJob";
 export { ZZWorker, ZZWorkerDef } from "./jobs/ZZWorker";

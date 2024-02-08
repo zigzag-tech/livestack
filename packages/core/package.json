@@ -30,7 +30,8 @@
     "typescript": "5.4.0-beta"
   },
   "optionalDependencies": {
-    "@google-cloud/storage": "^7.x"
+    "@google-cloud/storage": "^7.x",
+    "@livestack/vault-dev-server": "*"
   },
   "main": "./dist/index.js",
   "author": ""

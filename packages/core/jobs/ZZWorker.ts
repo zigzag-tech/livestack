@@ -116,14 +116,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
       workerName || "wkr:" + `${this.zzEnv.projectId}/${this.def.jobSpec.name}`;
     this.logger = getLogger(`wkr:${this.workerName}`);
 
-    const workerOptions = {
-      autorun: false,
-      concurrency,
-      connection: this.zzEnv.redisConfig,
-    };
-    const mergedWorkerOptions = _.merge({}, workerOptions);
     const that = this;
-    const workerQueueId = `${that.zzEnv.projectId}/${this.jobSpec.name}`;
 
     // create async iterator to report duty
     const { iterator: iterParams, resolveNext: resolveNext } =

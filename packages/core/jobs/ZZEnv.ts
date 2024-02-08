@@ -1,17 +1,14 @@
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Stream } from "stream";
 import { z } from "zod";
-import { RedisClientOptions } from "redis";
 interface EnvParams {
   readonly storageProvider?: IStorageProvider;
   readonly projectId: string;
-  readonly redisConfig?: RedisClientOptions;
 }
 
 export class ZZEnv implements EnvParams {
   public readonly storageProvider?: IStorageProvider;
   public readonly projectId: string;
-  public readonly redisConfig: RedisClientOptions;
   private static _zzEnv: ZZEnv | null = null;
 
   static global() {
@@ -25,7 +22,6 @@ export class ZZEnv implements EnvParams {
   constructor({
     storageProvider,
     projectId,
-    redisConfig,
   }: Omit<EnvParams, "projectId"> & {
     projectId?: string;
   }) {
@@ -39,7 +35,6 @@ export class ZZEnv implements EnvParams {
       // fs.writeFileSync("PROJECT_ID", projectId);
     }
     this.projectId = projectId;
-    this.redisConfig = redisConfig || {};
 
     // TODO: make better global resolution logic
     if (!ZZEnv.global()) {

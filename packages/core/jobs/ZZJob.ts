@@ -148,7 +148,6 @@ export class ZZJob<
     // ) => {
     //   const sub = obs.subscribe(async () => {
     //     await this.setJobReadyForInputsInRedis({
-    //       redisConfig: this.zzEnv.redisConfig,
     //       jobId: this.jobId,
     //       isReady: true,
     //       tag: tag ? tag : this.spec.getSingleInputTag(),
