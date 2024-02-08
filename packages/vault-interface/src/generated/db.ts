@@ -1970,12 +1970,19 @@ export const DBServiceDefinition = {
       responseStream: false,
       options: {},
     },
-    /** rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse); */
     getJobDatapoints: {
       name: "GetJobDatapoints",
       requestType: GetJobDatapointsRequest,
       requestStream: false,
       responseType: GetJobDatapointsResponse,
+      responseStream: false,
+      options: {},
+    },
+    addDatapoint: {
+      name: "AddDatapoint",
+      requestType: AddDatapointRequest,
+      requestStream: false,
+      responseType: AddDatapointResponse,
       responseStream: false,
       options: {},
     },
@@ -1989,11 +1996,14 @@ export interface DBServiceImplementation<CallContextExt = {}> {
     request: EnsureJobAndStatusAndConnectorRecsRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<Empty>>;
-  /** rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse); */
   getJobDatapoints(
     request: GetJobDatapointsRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<GetJobDatapointsResponse>>;
+  addDatapoint(
+    request: AddDatapointRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<AddDatapointResponse>>;
 }
 
 export interface DBServiceClient<CallOptionsExt = {}> {
@@ -2003,11 +2013,14 @@ export interface DBServiceClient<CallOptionsExt = {}> {
     request: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<Empty>;
-  /** rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse); */
   getJobDatapoints(
     request: DeepPartial<GetJobDatapointsRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<GetJobDatapointsResponse>;
+  addDatapoint(
+    request: DeepPartial<AddDatapointRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<AddDatapointResponse>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

@@ -3,7 +3,6 @@ import { ZZEnv } from "./ZZEnv";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
 // import { createHash } from "crypto";
 import { getLogger } from "../utils/createWorkerLogger";
-import { addDatapoint } from "@livestack/vault-dev-server/src/db/data_points";
 import { v4 } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
@@ -211,21 +210,18 @@ export class DataStream<T extends object> {
       }
     }
 
-    if (this.zzEnv.db) {
-      const datapointId = v4();
-      await dbClient.ensureStreamRec({
-        project_id: this.zzEnv.projectId,
-        stream_id: this.uniqueName,
-      });
-      await addDatapoint({
-        streamId: this.uniqueName,
-        projectId: this.zzEnv.projectId,
-        dbConn: this.zzEnv.db,
-        jobInfo: jobInfo,
-        data: parsed,
-        datapointId,
-      });
-    }
+    const datapointId = v4();
+    await dbClient.ensureStreamRec({
+      project_id: this.zzEnv.projectId,
+      stream_id: this.uniqueName,
+    });
+    await dbClient.addDatapoint({
+      streamId: this.uniqueName,
+      projectId: this.zzEnv.projectId,
+      jobInfo: jobInfo,
+      dataStr: JSON.stringify(parsed),
+      datapointId,
+    });
 
     try {
       // Publish the data to the stream

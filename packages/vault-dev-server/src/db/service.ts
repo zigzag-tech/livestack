@@ -10,14 +10,12 @@ import {
   DBServiceImplementation,
   JobRec,
   EnsureStreamRecRequest,
-  ConnectorType,
   Order,
 } from "@livestack/vault-interface";
 import _ from "lodash";
 import { dbClient } from "@livestack/vault-client";
 import { ensureJobRelationRec } from "./job_relations";
 import { ensureJobStreamConnectorRec } from "./streams";
-import { ZZDatapointRec } from "./data_points";
 
 export interface ZZJobUniqueId {
   project_id: string;
@@ -200,7 +198,37 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       })),
     };
   },
-  // addDatapoint: async ({ projectId, streamId, datapointId, jobInfo }) => {},
+  addDatapoint: async ({
+    projectId,
+    streamId,
+    datapointId,
+    jobInfo,
+    dataStr,
+  }) => {
+    const data = JSON.parse(dataStr);
+    await dbConn<
+      ZZDatapointRec<
+        | any
+        | {
+            [PRIMTIVE_KEY]: any;
+          }
+        | {
+            [ARRAY_KEY]: any;
+          }
+      >
+    >("zz_datapoints").insert({
+      project_id: projectId,
+      stream_id: streamId,
+      datapoint_id: datapointId,
+      data: handlePrimitiveOrArray(data),
+      job_id: jobInfo?.jobId || null,
+      job_output_key: jobInfo?.outputTag || null,
+      connector_type: jobInfo ? "out" : null,
+      time_created: new Date(),
+    });
+
+    return { datapointId };
+  },
 });
 
 export async function updateJobStatus({
@@ -262,3 +290,14 @@ export type JobUniqueId = {
   specName: string;
   jobId: string;
 };
+
+export interface ZZDatapointRec<T> {
+  project_id: string;
+  stream_id: string;
+  datapoint_id: string;
+  data: T;
+  job_id: string | null;
+  job_output_key: string | null;
+  connector_type: "out" | null;
+  time_created: Date;
+}

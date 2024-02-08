@@ -12,7 +12,7 @@ service DBService {
   rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
   rpc EnsureJobAndStatusAndConnectorRecs(EnsureJobAndStatusAndConnectorRecsRequest) returns (google.protobuf.Empty);
   rpc GetJobDatapoints(GetJobDatapointsRequest) returns (GetJobDatapointsResponse);
-  // rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
+  rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
 }
 
 
