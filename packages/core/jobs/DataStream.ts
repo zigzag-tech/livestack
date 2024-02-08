@@ -174,14 +174,12 @@ export class DataStream<T extends object> {
   public async pub({
     message,
     jobInfo,
-    messageIdOverride,
   }: {
     message: T;
     jobInfo?: {
       jobId: string;
       outputTag: string;
     };
-    messageIdOverride?: string;
   }) {
     let parsed: T;
     if (!this.def) {
@@ -233,7 +231,7 @@ export class DataStream<T extends object> {
     }
 
     if (this.zzEnv.db) {
-      const datapointId = messageIdOverride || v4();
+      const datapointId = v4();
       await ensureStreamRec({
         projectId: this.zzEnv.projectId,
         streamId: this.uniqueName,
@@ -255,7 +253,6 @@ export class DataStream<T extends object> {
         projectId: this.zzEnv.projectId,
         uniqueName: this.uniqueName,
         dataStr: customStringify(parsed),
-        messageIdOverride,
       });
 
       // console.debug("DataStream pub", this.uniqueName, parsed);
@@ -489,7 +486,7 @@ async function getStreamClientsById({
   zzEnv: ZZEnv;
 }) {
   // const channelId = `zzstream:${zzEnv.projectId}/${queueId!}`;
-  const channelId = `${queueId!}`;
+  const channelId = `${zzEnv.projectId}/${queueId!}`;
   if (!REDIS_CLIENT_BY_ID[channelId]) {
     const sub = await createClient(zzEnv.redisConfig)
       .on("error", (err) => console.log("Redis Client Error", err))

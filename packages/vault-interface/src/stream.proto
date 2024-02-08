@@ -14,10 +14,7 @@ service StreamService {
 message StreamPubMessage {
   string projectId = 1;
   string uniqueName = 2;
-  optional string jobId = 3;
-  optional string outputTag = 4;
-  optional string messageIdOverride = 5;
-  string dataStr = 6;
+  string dataStr = 3;
 }
 
 message StreamPubResult {

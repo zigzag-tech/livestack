@@ -40,9 +40,6 @@ export function subTypeToJSON(object: SubType): string {
 export interface StreamPubMessage {
   projectId: string;
   uniqueName: string;
-  jobId?: string | undefined;
-  outputTag?: string | undefined;
-  messageIdOverride?: string | undefined;
   dataStr: string;
 }
 
@@ -65,14 +62,7 @@ export interface StreamDatapoint {
 }
 
 function createBaseStreamPubMessage(): StreamPubMessage {
-  return {
-    projectId: "",
-    uniqueName: "",
-    jobId: undefined,
-    outputTag: undefined,
-    messageIdOverride: undefined,
-    dataStr: "",
-  };
+  return { projectId: "", uniqueName: "", dataStr: "" };
 }
 
 export const StreamPubMessage = {
@@ -83,17 +73,8 @@ export const StreamPubMessage = {
     if (message.uniqueName !== "") {
       writer.uint32(18).string(message.uniqueName);
     }
-    if (message.jobId !== undefined) {
-      writer.uint32(26).string(message.jobId);
-    }
-    if (message.outputTag !== undefined) {
-      writer.uint32(34).string(message.outputTag);
-    }
-    if (message.messageIdOverride !== undefined) {
-      writer.uint32(42).string(message.messageIdOverride);
-    }
     if (message.dataStr !== "") {
-      writer.uint32(50).string(message.dataStr);
+      writer.uint32(26).string(message.dataStr);
     }
     return writer;
   },
@@ -124,27 +105,6 @@ export const StreamPubMessage = {
             break;
           }
 
-          message.jobId = reader.string();
-          continue;
-        case 4:
-          if (tag !== 34) {
-            break;
-          }
-
-          message.outputTag = reader.string();
-          continue;
-        case 5:
-          if (tag !== 42) {
-            break;
-          }
-
-          message.messageIdOverride = reader.string();
-          continue;
-        case 6:
-          if (tag !== 50) {
-            break;
-          }
-
           message.dataStr = reader.string();
           continue;
       }
@@ -160,9 +120,6 @@ export const StreamPubMessage = {
     return {
       projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
-      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : undefined,
-      outputTag: isSet(object.outputTag) ? globalThis.String(object.outputTag) : undefined,
-      messageIdOverride: isSet(object.messageIdOverride) ? globalThis.String(object.messageIdOverride) : undefined,
       dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
     };
   },
@@ -174,15 +131,6 @@ export const StreamPubMessage = {
     }
     if (message.uniqueName !== "") {
       obj.uniqueName = message.uniqueName;
-    }
-    if (message.jobId !== undefined) {
-      obj.jobId = message.jobId;
-    }
-    if (message.outputTag !== undefined) {
-      obj.outputTag = message.outputTag;
-    }
-    if (message.messageIdOverride !== undefined) {
-      obj.messageIdOverride = message.messageIdOverride;
     }
     if (message.dataStr !== "") {
       obj.dataStr = message.dataStr;
@@ -197,9 +145,6 @@ export const StreamPubMessage = {
     const message = createBaseStreamPubMessage();
     message.projectId = object.projectId ?? "";
     message.uniqueName = object.uniqueName ?? "";
-    message.jobId = object.jobId ?? undefined;
-    message.outputTag = object.outputTag ?? undefined;
-    message.messageIdOverride = object.messageIdOverride ?? undefined;
     message.dataStr = object.dataStr ?? "";
     return message;
   },

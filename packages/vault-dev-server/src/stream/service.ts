@@ -12,9 +12,8 @@ class StreamServiceByProject implements StreamServiceImplementation {
     request: StreamPubMessage,
     context: CallContext
   ): Promise<{ messageId: string }> {
-    const { projectId, uniqueName, jobId, outputTag, messageIdOverride } =
-      request;
-    const channelId = `${uniqueName}`;
+    const { projectId, uniqueName, dataStr } = request;
+    const channelId = `${projectId}/${uniqueName}`;
     const pubClient = await createClient().connect();
 
     // Publish the message to the Redis stream
@@ -23,7 +22,7 @@ class StreamServiceByProject implements StreamServiceImplementation {
       channelId,
       "*",
       "data",
-      request.dataStr,
+      dataStr,
     ]);
 
     await pubClient.disconnect();
