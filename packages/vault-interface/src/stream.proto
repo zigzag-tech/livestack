@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package livestack;
+
+// import "google/protobuf/struct.proto";
+// import "google/protobuf/empty.proto"; 
+
+service StreamService {
+  rpc Pub(StreamPubMessage) returns (StreamPubResult);
+  rpc Sub(SubParams) returns (stream StreamDatapoint);
+}
+
+
+message StreamPubMessage {
+  string projectId = 1;
+  string uniqueName = 2;
+  optional string jobId = 3;
+  optional string outputTag = 4;
+  optional string messageIdOverride = 5;
+}
+
+message StreamPubResult {
+  string messageId = 1;
+}
+
+message SubParams {
+  string projectId = 1;
+  string uniqueName = 2;
+}
+
+message StreamDatapoint {
+  int32 timestamp = 1;
+  string messageId = 2;
+  string dataStr = 3;
+}
