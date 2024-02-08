@@ -1525,13 +1525,6 @@ export const DBServiceDefinition = {
   name: "DBService",
   fullName: "livestack.DBService",
   methods: {
-    /**
-     * rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
-     * rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
-     * rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
-     * rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
-     * rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
-     */
     getJobRec: {
       name: "GetJobRec",
       requestType: GetJobRecRequest,
@@ -1540,29 +1533,43 @@ export const DBServiceDefinition = {
       responseStream: false,
       options: {},
     },
+    /**
+     * rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
+     * rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
+     * rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
+     * rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
+     */
+    ensureStreamRec: {
+      name: "EnsureStreamRec",
+      requestType: EnsureStreamRecRequest,
+      requestStream: false,
+      responseType: Empty,
+      responseStream: false,
+      options: {},
+    },
   },
 } as const;
 
 export interface DBServiceImplementation<CallContextExt = {}> {
+  getJobRec(request: GetJobRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<GetJobRecResponse>>;
   /**
-   * rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
    * rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
    * rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
    * rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
    * rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
    */
-  getJobRec(request: GetJobRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<GetJobRecResponse>>;
+  ensureStreamRec(request: EnsureStreamRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
 }
 
 export interface DBServiceClient<CallOptionsExt = {}> {
+  getJobRec(request: DeepPartial<GetJobRecRequest>, options?: CallOptions & CallOptionsExt): Promise<GetJobRecResponse>;
   /**
-   * rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
    * rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
    * rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
    * rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
    * rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
    */
-  getJobRec(request: DeepPartial<GetJobRecRequest>, options?: CallOptions & CallOptionsExt): Promise<GetJobRecResponse>;
+  ensureStreamRec(request: DeepPartial<EnsureStreamRecRequest>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

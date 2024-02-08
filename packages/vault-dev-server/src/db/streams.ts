@@ -1,24 +1,5 @@
 import { Knex } from "knex";
 
-export async function ensureStreamRec({
-  projectId,
-  streamId,
-  dbConn,
-}: {
-  projectId: string;
-  dbConn: Knex;
-  streamId: string;
-}) {
-  await dbConn<DataStreamRec>("zz_streams")
-    .insert({
-      project_id: projectId,
-      stream_id: streamId,
-      time_created: new Date(),
-    })
-    .onConflict(["project_id", "stream_id"])
-    .ignore();
-}
-
 export async function ensureJobStreamConnectorRec({
   projectId,
   streamId,

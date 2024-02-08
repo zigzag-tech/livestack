@@ -3,6 +3,8 @@ export {
   DBServiceDefinition,
   DBServiceImplementation,
   JobRec,
+  EnsureJobStreamConnectorRecRequest,
+  EnsureStreamRecRequest,
 } from "./generated/db";
 export {
   FromWorker,

@@ -9,7 +9,7 @@ import "google/protobuf/any.proto";
 
 service DBService {
   rpc GetJobRec(GetJobRecRequest) returns (GetJobRecResponse);
-  // rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
+  rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
   // rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
   // rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
   // rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);

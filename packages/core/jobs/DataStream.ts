@@ -3,7 +3,6 @@ import { ZZEnv } from "./ZZEnv";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
 // import { createHash } from "crypto";
 import { getLogger } from "../utils/createWorkerLogger";
-import { ensureStreamRec } from "@livestack/vault-dev-server/src/db/streams";
 import { addDatapoint } from "@livestack/vault-dev-server/src/db/data_points";
 import { v4 } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
@@ -35,7 +34,7 @@ export namespace DataStream {
 // cursor based redis stream subscriber
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
-import { streamClient } from "@livestack/vault-client";
+import { dbClient, streamClient } from "@livestack/vault-client";
 import { SubType } from "@livestack/vault-interface/src/generated/stream";
 
 export class DataStream<T extends object> {
@@ -97,10 +96,9 @@ export class DataStream<T extends object> {
       });
       // async
       if (zzEnv?.db) {
-        ensureStreamRec({
-          projectId: zzEnv.projectId,
-          streamId: uniqueName,
-          dbConn: zzEnv.db,
+        await dbClient.ensureStreamRec({
+          project_id: zzEnv.projectId,
+          stream_id: uniqueName,
         });
       }
       DataStream.globalRegistry[uniqueName] = stream;
@@ -215,10 +213,9 @@ export class DataStream<T extends object> {
 
     if (this.zzEnv.db) {
       const datapointId = v4();
-      await ensureStreamRec({
-        projectId: this.zzEnv.projectId,
-        streamId: this.uniqueName,
-        dbConn: this.zzEnv.db,
+      await dbClient.ensureStreamRec({
+        project_id: this.zzEnv.projectId,
+        stream_id: this.uniqueName,
       });
       await addDatapoint({
         streamId: this.uniqueName,

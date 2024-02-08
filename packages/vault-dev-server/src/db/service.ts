@@ -4,7 +4,11 @@ import {
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
 } from "./primitives";
-import { DBServiceImplementation, JobRec } from "@livestack/vault-interface";
+import {
+  DBServiceImplementation,
+  JobRec,
+  EnsureStreamRecRequest,
+} from "@livestack/vault-interface";
 
 export interface ZZJobUniqueId {
   project_id: string;
@@ -61,6 +65,22 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
         rec: rest,
       },
     };
+  },
+  ensureStreamRec: async (rec) => {
+    const { project_id, stream_id } = rec;
+    await dbConn<
+      EnsureStreamRecRequest & {
+        time_created: Date;
+      }
+    >("zz_streams")
+      .insert({
+        project_id,
+        stream_id,
+        time_created: new Date(),
+      })
+      .onConflict(["project_id", "stream_id"])
+      .ignore();
+    return { null_response: {} };
   },
 });
 

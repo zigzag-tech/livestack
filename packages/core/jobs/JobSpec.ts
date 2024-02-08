@@ -11,10 +11,7 @@ import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { getLogger } from "../utils/createWorkerLogger";
 import _ from "lodash";
 import { ensureJobAndInitStatusRec } from "@livestack/vault-dev-server/src/db/service";
-import {
-  ensureJobStreamConnectorRec,
-  ensureStreamRec,
-} from "@livestack/vault-dev-server/src/db/streams";
+import { ensureJobStreamConnectorRec } from "@livestack/vault-dev-server/src/db/streams";
 import { ensureJobRelationRec } from "@livestack/vault-dev-server/src/db/job_relations";
 import { getJobDatapoints } from "@livestack/vault-dev-server/src/db/data_points";
 import { v4 } from "uuid";
@@ -676,10 +673,9 @@ export class JobSpec<
 
       if (inputStreamIdOverridesByTag) {
         for (const [key, streamId] of _.entries(inputStreamIdOverridesByTag)) {
-          await ensureStreamRec({
-            projectId,
-            streamId: streamId as string,
-            dbConn: trx,
+          await dbClient.ensureStreamRec({
+            project_id: projectId,
+            stream_id: streamId as string,
           });
           await ensureJobStreamConnectorRec({
             projectId,
@@ -702,10 +698,10 @@ export class JobSpec<
 
       if (outputStreamIdOverridesByTag) {
         for (const [key, streamId] of _.entries(outputStreamIdOverridesByTag)) {
-          await ensureStreamRec({
-            projectId,
-            streamId: streamId as string,
-            dbConn: trx,
+          dbClient;
+          await dbClient.ensureStreamRec({
+            project_id: projectId,
+            stream_id: streamId as string,
           });
           await ensureJobStreamConnectorRec({
             projectId,
