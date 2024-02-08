@@ -1,10 +1,11 @@
 import { StreamIdOverridesForRootSpec } from "../orchestrations/InstantiatedGraph";
-import { getJobStreamConnectorRecs } from "@livestack/vault-dev-server/src/db/streams";
 import { getParentJobRec } from "@livestack/vault-dev-server/src/db/job_relations";
 import { ZZEnv } from "./ZZEnv";
 import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { JobSpec } from "./JobSpec";
 import { TransformRegistry } from "../orchestrations/TransformRegistry";
+import { dbClient } from "@livestack/vault-client";
+import { ConnectorType } from "@livestack/vault-interface";
 
 // TODO: cache this
 export async function resolveInstantiatedGraph({
@@ -16,16 +17,20 @@ export async function resolveInstantiatedGraph({
   spec: JobSpec<any, any, any, any, any>;
   jobId: string;
 }) {
-  const streams = await getJobStreamConnectorRecs({
+  const { records: streams } = await dbClient.getJobStreamConnectorRecs({
     projectId: zzEnv.projectId,
     jobId,
-    dbConn: zzEnv.db,
   });
 
   const streamIdOverrides: StreamIdOverridesForRootSpec = Object.fromEntries(
-    streams.map((s) => {
-      return [`${s.connector_type}/${s.key}`, s.stream_id];
-    })
+    streams
+      .map((s) => ({
+        ...s,
+        connector_type: s.connector_type === ConnectorType.IN ? "in" : "out",
+      }))
+      .map((s) => {
+        return [`${s.connector_type}/${s.key}`, s.stream_id];
+      })
   );
 
   const parentRec = await getParentJobRec({

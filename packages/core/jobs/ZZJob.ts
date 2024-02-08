@@ -7,7 +7,6 @@ import {
 } from "../realtime/pubsub";
 import { Observable, map, takeUntil } from "rxjs";
 import { IStorageProvider } from "../storage/cloudStorage";
-import { updateJobStatus } from "@livestack/vault-dev-server/src/db/service";
 import { getParentJobRec } from "@livestack/vault-dev-server/src/db/job_relations";
 import longStringTruncator from "../utils/longStringTruncator";
 import { JobSpec } from "./JobSpec";
@@ -17,6 +16,7 @@ import { InferTMap } from "@livestack/shared/IOSpec";
 import _ from "lodash";
 import { InstantiatedGraph, JobId } from "../orchestrations/InstantiatedGraph";
 import { TransformRegistry } from "../orchestrations/TransformRegistry";
+import { dbClient } from "@livestack/vault-client";
 
 export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
   j: ZZJob<P, I, O, WP, IMap, OMap>
@@ -383,13 +383,10 @@ export class ZZJob<
     );
 
     try {
-      if (this.zzEnv.db) {
-        await updateJobStatus({
-          ...jId,
-          dbConn: this.zzEnv.db,
-          jobStatus: "running",
-        });
-      }
+      await dbClient.appendJobStatusRec({
+        ...jId,
+        jobStatus: "running",
+      });
       const allInputUnsubscribed = Promise.all(
         (
           _.values(
@@ -418,13 +415,10 @@ export class ZZJob<
         await this.output.emit(processedR);
       }
 
-      if (this.zzEnv.db) {
-        await updateJobStatus({
-          ...jId,
-          dbConn: this.zzEnv.db,
-          jobStatus: "completed",
-        });
-      }
+      await dbClient.appendJobStatusRec({
+        ...jId,
+        jobStatus: "completed",
+      });
 
       // await job.updateProgress(processedR as object);
       // console.debug("signalOutputEnd", this.jobId);
@@ -436,15 +430,12 @@ export class ZZJob<
       //   return processedR;
       // }
     } catch (e: any) {
-      if (this.zzEnv.db) {
-        await updateJobStatus({
-          projectId,
-          specName: this.spec.name,
-          jobId: this.jobId,
-          dbConn: this.zzEnv.db,
-          jobStatus: "failed",
-        });
-      }
+      await dbClient.appendJobStatusRec({
+        projectId,
+        specName: this.spec.name,
+        jobId: this.jobId,
+        jobStatus: "failed",
+      });
       throw e;
       // }
     }

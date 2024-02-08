@@ -11,11 +11,15 @@ import {
   JobRec,
   EnsureStreamRecRequest,
   Order,
+  ConnectorType,
 } from "@livestack/vault-interface";
 import _ from "lodash";
 import { dbClient } from "@livestack/vault-client";
 import { ensureJobRelationRec } from "./job_relations";
-import { ensureJobStreamConnectorRec } from "./streams";
+import {
+  ZZJobStreamConnectorRec,
+  ensureJobStreamConnectorRec,
+} from "./streams";
 
 export interface ZZJobUniqueId {
   project_id: string;
@@ -229,9 +233,47 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
 
     return { datapointId };
   },
+  getJobStreamConnectorRecs: async ({
+    projectId,
+    jobId,
+    key,
+    connectorType,
+  }) => {
+    if (key && !connectorType) {
+      throw new Error("connectorType must be provided if key is provided");
+    }
+
+    const q = dbConn<ZZJobStreamConnectorRec>("zz_job_stream_connectors")
+      .where("project_id", "=", projectId)
+      .andWhere("job_id", "=", jobId);
+    if (key) {
+      q.andWhere("key", "=", key);
+    }
+    if (connectorType) {
+      q.andWhere("connector_type", "=", connectorType);
+    }
+    const r = (await q.select("*")).map((rec) => ({
+      ...rec,
+      key: rec.key,
+      connector_type:
+        rec.connector_type === "in" ? ConnectorType.IN : ConnectorType.OUT,
+    }));
+    return { records: r };
+  },
+  appendJobStatusRec: async ({ projectId, specName, jobId, jobStatus }) => {
+    await appendJobStatusRec({
+      projectId,
+      specName,
+      jobId,
+      dbConn,
+      jobStatus: jobStatus as ZZJobStatus,
+    });
+
+    return {};
+  },
 });
 
-export async function updateJobStatus({
+async function appendJobStatusRec({
   projectId,
   specName,
   jobId,
@@ -276,7 +318,7 @@ export async function ensureJobAndInitStatusRec<T>({
   // console.log(q.toString());
   await q;
 
-  await updateJobStatus({
+  await appendJobStatusRec({
     projectId,
     specName,
     jobId,

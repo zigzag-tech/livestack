@@ -138,22 +138,6 @@ export interface EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverrid
   value: string;
 }
 
-export interface GetJobStreamConnectorRecsRequest {
-  project_id: string;
-  job_id: string;
-  key: string;
-  connector_type: string;
-}
-
-export interface JobStreamConnectorRecord {
-  project_id: string;
-  job_id: string;
-  time_created: Date | undefined;
-  stream_id: string;
-  key: string;
-  connector_type: string;
-}
-
 export interface GetJobDatapointsRequest {
   projectId: string;
   specName: string;
@@ -188,6 +172,33 @@ export interface AddDatapointRequest {
 
 export interface AddDatapointResponse {
   datapointId: string;
+}
+
+export interface GetJobStreamConnectorRecsRequest {
+  projectId: string;
+  jobId: string;
+  key?: string | undefined;
+  connectorType?: ConnectorType | undefined;
+}
+
+export interface JobStreamConnectorRecord {
+  project_id: string;
+  job_id: string;
+  time_created: Date | undefined;
+  stream_id: string;
+  key: string;
+  connector_type: ConnectorType;
+}
+
+export interface GetJobStreamConnectorRecsResponse {
+  records: JobStreamConnectorRecord[];
+}
+
+export interface AppendJobStatusRecRequest {
+  projectId: string;
+  specName: string;
+  jobId: string;
+  jobStatus: string;
 }
 
 function createBaseJobRec(): JobRec {
@@ -1167,244 +1178,6 @@ export const EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesBy
   },
 };
 
-function createBaseGetJobStreamConnectorRecsRequest(): GetJobStreamConnectorRecsRequest {
-  return { project_id: "", job_id: "", key: "", connector_type: "" };
-}
-
-export const GetJobStreamConnectorRecsRequest = {
-  encode(message: GetJobStreamConnectorRecsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.project_id !== "") {
-      writer.uint32(10).string(message.project_id);
-    }
-    if (message.job_id !== "") {
-      writer.uint32(18).string(message.job_id);
-    }
-    if (message.key !== "") {
-      writer.uint32(26).string(message.key);
-    }
-    if (message.connector_type !== "") {
-      writer.uint32(34).string(message.connector_type);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetJobStreamConnectorRecsRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetJobStreamConnectorRecsRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.project_id = reader.string();
-          continue;
-        case 2:
-          if (tag !== 18) {
-            break;
-          }
-
-          message.job_id = reader.string();
-          continue;
-        case 3:
-          if (tag !== 26) {
-            break;
-          }
-
-          message.key = reader.string();
-          continue;
-        case 4:
-          if (tag !== 34) {
-            break;
-          }
-
-          message.connector_type = reader.string();
-          continue;
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skipType(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): GetJobStreamConnectorRecsRequest {
-    return {
-      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
-      job_id: isSet(object.job_id) ? globalThis.String(object.job_id) : "",
-      key: isSet(object.key) ? globalThis.String(object.key) : "",
-      connector_type: isSet(object.connector_type) ? globalThis.String(object.connector_type) : "",
-    };
-  },
-
-  toJSON(message: GetJobStreamConnectorRecsRequest): unknown {
-    const obj: any = {};
-    if (message.project_id !== "") {
-      obj.project_id = message.project_id;
-    }
-    if (message.job_id !== "") {
-      obj.job_id = message.job_id;
-    }
-    if (message.key !== "") {
-      obj.key = message.key;
-    }
-    if (message.connector_type !== "") {
-      obj.connector_type = message.connector_type;
-    }
-    return obj;
-  },
-
-  create(base?: DeepPartial<GetJobStreamConnectorRecsRequest>): GetJobStreamConnectorRecsRequest {
-    return GetJobStreamConnectorRecsRequest.fromPartial(base ?? {});
-  },
-  fromPartial(object: DeepPartial<GetJobStreamConnectorRecsRequest>): GetJobStreamConnectorRecsRequest {
-    const message = createBaseGetJobStreamConnectorRecsRequest();
-    message.project_id = object.project_id ?? "";
-    message.job_id = object.job_id ?? "";
-    message.key = object.key ?? "";
-    message.connector_type = object.connector_type ?? "";
-    return message;
-  },
-};
-
-function createBaseJobStreamConnectorRecord(): JobStreamConnectorRecord {
-  return { project_id: "", job_id: "", time_created: undefined, stream_id: "", key: "", connector_type: "" };
-}
-
-export const JobStreamConnectorRecord = {
-  encode(message: JobStreamConnectorRecord, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.project_id !== "") {
-      writer.uint32(10).string(message.project_id);
-    }
-    if (message.job_id !== "") {
-      writer.uint32(18).string(message.job_id);
-    }
-    if (message.time_created !== undefined) {
-      Timestamp.encode(toTimestamp(message.time_created), writer.uint32(26).fork()).ldelim();
-    }
-    if (message.stream_id !== "") {
-      writer.uint32(34).string(message.stream_id);
-    }
-    if (message.key !== "") {
-      writer.uint32(42).string(message.key);
-    }
-    if (message.connector_type !== "") {
-      writer.uint32(50).string(message.connector_type);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): JobStreamConnectorRecord {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseJobStreamConnectorRecord();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.project_id = reader.string();
-          continue;
-        case 2:
-          if (tag !== 18) {
-            break;
-          }
-
-          message.job_id = reader.string();
-          continue;
-        case 3:
-          if (tag !== 26) {
-            break;
-          }
-
-          message.time_created = fromTimestamp(Timestamp.decode(reader, reader.uint32()));
-          continue;
-        case 4:
-          if (tag !== 34) {
-            break;
-          }
-
-          message.stream_id = reader.string();
-          continue;
-        case 5:
-          if (tag !== 42) {
-            break;
-          }
-
-          message.key = reader.string();
-          continue;
-        case 6:
-          if (tag !== 50) {
-            break;
-          }
-
-          message.connector_type = reader.string();
-          continue;
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skipType(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): JobStreamConnectorRecord {
-    return {
-      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
-      job_id: isSet(object.job_id) ? globalThis.String(object.job_id) : "",
-      time_created: isSet(object.time_created) ? fromJsonTimestamp(object.time_created) : undefined,
-      stream_id: isSet(object.stream_id) ? globalThis.String(object.stream_id) : "",
-      key: isSet(object.key) ? globalThis.String(object.key) : "",
-      connector_type: isSet(object.connector_type) ? globalThis.String(object.connector_type) : "",
-    };
-  },
-
-  toJSON(message: JobStreamConnectorRecord): unknown {
-    const obj: any = {};
-    if (message.project_id !== "") {
-      obj.project_id = message.project_id;
-    }
-    if (message.job_id !== "") {
-      obj.job_id = message.job_id;
-    }
-    if (message.time_created !== undefined) {
-      obj.time_created = message.time_created.toISOString();
-    }
-    if (message.stream_id !== "") {
-      obj.stream_id = message.stream_id;
-    }
-    if (message.key !== "") {
-      obj.key = message.key;
-    }
-    if (message.connector_type !== "") {
-      obj.connector_type = message.connector_type;
-    }
-    return obj;
-  },
-
-  create(base?: DeepPartial<JobStreamConnectorRecord>): JobStreamConnectorRecord {
-    return JobStreamConnectorRecord.fromPartial(base ?? {});
-  },
-  fromPartial(object: DeepPartial<JobStreamConnectorRecord>): JobStreamConnectorRecord {
-    const message = createBaseJobStreamConnectorRecord();
-    message.project_id = object.project_id ?? "";
-    message.job_id = object.job_id ?? "";
-    message.time_created = object.time_created ?? undefined;
-    message.stream_id = object.stream_id ?? "";
-    message.key = object.key ?? "";
-    message.connector_type = object.connector_type ?? "";
-    return message;
-  },
-};
-
 function createBaseGetJobDatapointsRequest(): GetJobDatapointsRequest {
   return { projectId: "", specName: "", jobId: "", key: "", ioType: 0, order: undefined, limit: undefined };
 }
@@ -1941,6 +1714,409 @@ export const AddDatapointResponse = {
   },
 };
 
+function createBaseGetJobStreamConnectorRecsRequest(): GetJobStreamConnectorRecsRequest {
+  return { projectId: "", jobId: "", key: undefined, connectorType: undefined };
+}
+
+export const GetJobStreamConnectorRecsRequest = {
+  encode(message: GetJobStreamConnectorRecsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
+    }
+    if (message.jobId !== "") {
+      writer.uint32(18).string(message.jobId);
+    }
+    if (message.key !== undefined) {
+      writer.uint32(26).string(message.key);
+    }
+    if (message.connectorType !== undefined) {
+      writer.uint32(32).int32(message.connectorType);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): GetJobStreamConnectorRecsRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetJobStreamConnectorRecsRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.projectId = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.jobId = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        case 4:
+          if (tag !== 32) {
+            break;
+          }
+
+          message.connectorType = reader.int32() as any;
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetJobStreamConnectorRecsRequest {
+    return {
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
+      key: isSet(object.key) ? globalThis.String(object.key) : undefined,
+      connectorType: isSet(object.connectorType) ? connectorTypeFromJSON(object.connectorType) : undefined,
+    };
+  },
+
+  toJSON(message: GetJobStreamConnectorRecsRequest): unknown {
+    const obj: any = {};
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
+    }
+    if (message.jobId !== "") {
+      obj.jobId = message.jobId;
+    }
+    if (message.key !== undefined) {
+      obj.key = message.key;
+    }
+    if (message.connectorType !== undefined) {
+      obj.connectorType = connectorTypeToJSON(message.connectorType);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<GetJobStreamConnectorRecsRequest>): GetJobStreamConnectorRecsRequest {
+    return GetJobStreamConnectorRecsRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<GetJobStreamConnectorRecsRequest>): GetJobStreamConnectorRecsRequest {
+    const message = createBaseGetJobStreamConnectorRecsRequest();
+    message.projectId = object.projectId ?? "";
+    message.jobId = object.jobId ?? "";
+    message.key = object.key ?? undefined;
+    message.connectorType = object.connectorType ?? undefined;
+    return message;
+  },
+};
+
+function createBaseJobStreamConnectorRecord(): JobStreamConnectorRecord {
+  return { project_id: "", job_id: "", time_created: undefined, stream_id: "", key: "", connector_type: 0 };
+}
+
+export const JobStreamConnectorRecord = {
+  encode(message: JobStreamConnectorRecord, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.project_id !== "") {
+      writer.uint32(10).string(message.project_id);
+    }
+    if (message.job_id !== "") {
+      writer.uint32(18).string(message.job_id);
+    }
+    if (message.time_created !== undefined) {
+      Timestamp.encode(toTimestamp(message.time_created), writer.uint32(26).fork()).ldelim();
+    }
+    if (message.stream_id !== "") {
+      writer.uint32(34).string(message.stream_id);
+    }
+    if (message.key !== "") {
+      writer.uint32(42).string(message.key);
+    }
+    if (message.connector_type !== 0) {
+      writer.uint32(48).int32(message.connector_type);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): JobStreamConnectorRecord {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseJobStreamConnectorRecord();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.project_id = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.job_id = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.time_created = fromTimestamp(Timestamp.decode(reader, reader.uint32()));
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.stream_id = reader.string();
+          continue;
+        case 5:
+          if (tag !== 42) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        case 6:
+          if (tag !== 48) {
+            break;
+          }
+
+          message.connector_type = reader.int32() as any;
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): JobStreamConnectorRecord {
+    return {
+      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
+      job_id: isSet(object.job_id) ? globalThis.String(object.job_id) : "",
+      time_created: isSet(object.time_created) ? fromJsonTimestamp(object.time_created) : undefined,
+      stream_id: isSet(object.stream_id) ? globalThis.String(object.stream_id) : "",
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      connector_type: isSet(object.connector_type) ? connectorTypeFromJSON(object.connector_type) : 0,
+    };
+  },
+
+  toJSON(message: JobStreamConnectorRecord): unknown {
+    const obj: any = {};
+    if (message.project_id !== "") {
+      obj.project_id = message.project_id;
+    }
+    if (message.job_id !== "") {
+      obj.job_id = message.job_id;
+    }
+    if (message.time_created !== undefined) {
+      obj.time_created = message.time_created.toISOString();
+    }
+    if (message.stream_id !== "") {
+      obj.stream_id = message.stream_id;
+    }
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.connector_type !== 0) {
+      obj.connector_type = connectorTypeToJSON(message.connector_type);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<JobStreamConnectorRecord>): JobStreamConnectorRecord {
+    return JobStreamConnectorRecord.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<JobStreamConnectorRecord>): JobStreamConnectorRecord {
+    const message = createBaseJobStreamConnectorRecord();
+    message.project_id = object.project_id ?? "";
+    message.job_id = object.job_id ?? "";
+    message.time_created = object.time_created ?? undefined;
+    message.stream_id = object.stream_id ?? "";
+    message.key = object.key ?? "";
+    message.connector_type = object.connector_type ?? 0;
+    return message;
+  },
+};
+
+function createBaseGetJobStreamConnectorRecsResponse(): GetJobStreamConnectorRecsResponse {
+  return { records: [] };
+}
+
+export const GetJobStreamConnectorRecsResponse = {
+  encode(message: GetJobStreamConnectorRecsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    for (const v of message.records) {
+      JobStreamConnectorRecord.encode(v!, writer.uint32(10).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): GetJobStreamConnectorRecsResponse {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetJobStreamConnectorRecsResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.records.push(JobStreamConnectorRecord.decode(reader, reader.uint32()));
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetJobStreamConnectorRecsResponse {
+    return {
+      records: globalThis.Array.isArray(object?.records)
+        ? object.records.map((e: any) => JobStreamConnectorRecord.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: GetJobStreamConnectorRecsResponse): unknown {
+    const obj: any = {};
+    if (message.records?.length) {
+      obj.records = message.records.map((e) => JobStreamConnectorRecord.toJSON(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<GetJobStreamConnectorRecsResponse>): GetJobStreamConnectorRecsResponse {
+    return GetJobStreamConnectorRecsResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<GetJobStreamConnectorRecsResponse>): GetJobStreamConnectorRecsResponse {
+    const message = createBaseGetJobStreamConnectorRecsResponse();
+    message.records = object.records?.map((e) => JobStreamConnectorRecord.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseAppendJobStatusRecRequest(): AppendJobStatusRecRequest {
+  return { projectId: "", specName: "", jobId: "", jobStatus: "" };
+}
+
+export const AppendJobStatusRecRequest = {
+  encode(message: AppendJobStatusRecRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
+    }
+    if (message.specName !== "") {
+      writer.uint32(18).string(message.specName);
+    }
+    if (message.jobId !== "") {
+      writer.uint32(26).string(message.jobId);
+    }
+    if (message.jobStatus !== "") {
+      writer.uint32(34).string(message.jobStatus);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): AppendJobStatusRecRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseAppendJobStatusRecRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.projectId = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.specName = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.jobId = reader.string();
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.jobStatus = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): AppendJobStatusRecRequest {
+    return {
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
+      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
+      jobStatus: isSet(object.jobStatus) ? globalThis.String(object.jobStatus) : "",
+    };
+  },
+
+  toJSON(message: AppendJobStatusRecRequest): unknown {
+    const obj: any = {};
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
+    }
+    if (message.specName !== "") {
+      obj.specName = message.specName;
+    }
+    if (message.jobId !== "") {
+      obj.jobId = message.jobId;
+    }
+    if (message.jobStatus !== "") {
+      obj.jobStatus = message.jobStatus;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<AppendJobStatusRecRequest>): AppendJobStatusRecRequest {
+    return AppendJobStatusRecRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<AppendJobStatusRecRequest>): AppendJobStatusRecRequest {
+    const message = createBaseAppendJobStatusRecRequest();
+    message.projectId = object.projectId ?? "";
+    message.specName = object.specName ?? "";
+    message.jobId = object.jobId ?? "";
+    message.jobStatus = object.jobStatus ?? "";
+    return message;
+  },
+};
+
 export type DBServiceDefinition = typeof DBServiceDefinition;
 export const DBServiceDefinition = {
   name: "DBService",
@@ -1986,6 +2162,22 @@ export const DBServiceDefinition = {
       responseStream: false,
       options: {},
     },
+    getJobStreamConnectorRecs: {
+      name: "GetJobStreamConnectorRecs",
+      requestType: GetJobStreamConnectorRecsRequest,
+      requestStream: false,
+      responseType: GetJobStreamConnectorRecsResponse,
+      responseStream: false,
+      options: {},
+    },
+    appendJobStatusRec: {
+      name: "AppendJobStatusRec",
+      requestType: AppendJobStatusRecRequest,
+      requestStream: false,
+      responseType: Empty,
+      responseStream: false,
+      options: {},
+    },
   },
 } as const;
 
@@ -2004,6 +2196,14 @@ export interface DBServiceImplementation<CallContextExt = {}> {
     request: AddDatapointRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<AddDatapointResponse>>;
+  getJobStreamConnectorRecs(
+    request: GetJobStreamConnectorRecsRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<GetJobStreamConnectorRecsResponse>>;
+  appendJobStatusRec(
+    request: AppendJobStatusRecRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<Empty>>;
 }
 
 export interface DBServiceClient<CallOptionsExt = {}> {
@@ -2021,6 +2221,14 @@ export interface DBServiceClient<CallOptionsExt = {}> {
     request: DeepPartial<AddDatapointRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<AddDatapointResponse>;
+  getJobStreamConnectorRecs(
+    request: DeepPartial<GetJobStreamConnectorRecsRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<GetJobStreamConnectorRecsResponse>;
+  appendJobStatusRec(
+    request: DeepPartial<AppendJobStatusRecRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<Empty>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

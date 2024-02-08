@@ -13,6 +13,8 @@ service DBService {
   rpc EnsureJobAndStatusAndConnectorRecs(EnsureJobAndStatusAndConnectorRecsRequest) returns (google.protobuf.Empty);
   rpc GetJobDatapoints(GetJobDatapointsRequest) returns (GetJobDatapointsResponse);
   rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
+  rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (GetJobStreamConnectorRecsResponse);
+  rpc AppendJobStatusRec(AppendJobStatusRecRequest) returns (google.protobuf.Empty);
 }
 
 
@@ -62,14 +64,6 @@ enum ConnectorType {
   OUT = 1;
 }
 
-// message EnsureJobStreamConnectorRecRequest {
-//   string project_id = 1;
-//   string stream_id = 2;
-//   string job_id = 3;
-//   string key = 4;
-//   ConnectorType connector_type = 5;
-// }
-
 message EnsureJobAndStatusAndConnectorRecsRequest {
   string projectId = 1;
   string specName = 2;
@@ -82,21 +76,8 @@ message EnsureJobAndStatusAndConnectorRecsRequest {
 
 }
 
-message GetJobStreamConnectorRecsRequest {
-  string project_id = 1;
-  string job_id = 2;
-  string key = 3;
-  string connector_type = 4;
-}
 
-message JobStreamConnectorRecord {
-  string project_id = 1;
-  string job_id = 2;
-  google.protobuf.Timestamp time_created = 3;
-  string stream_id = 4;
-  string key = 5;
-  string connector_type = 6;
-}
+
 
 enum Order {
   ASC = 0;
@@ -137,4 +118,33 @@ message AddDatapointRequest {
 
 message AddDatapointResponse {
   string datapointId = 1;
+}
+
+message GetJobStreamConnectorRecsRequest {
+  string projectId = 1;
+  string jobId = 2;
+  optional string key = 3;
+  optional ConnectorType connectorType = 4;
+}
+
+
+message JobStreamConnectorRecord {
+  string project_id = 1;
+  string job_id = 2;
+  google.protobuf.Timestamp time_created = 3;
+  string stream_id = 4;
+  string key = 5;
+  ConnectorType connector_type = 6;
+}
+
+message GetJobStreamConnectorRecsResponse {
+  repeated JobStreamConnectorRecord records = 1;
+}
+
+
+message AppendJobStatusRecRequest {
+  string projectId = 1;
+  string specName = 2;
+  string jobId = 3;
+  string jobStatus = 4;
 }
