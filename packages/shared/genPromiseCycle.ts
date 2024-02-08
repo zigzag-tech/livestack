@@ -48,3 +48,20 @@ export function genPromiseCycle<T>() {
     },
   };
 }
+
+export function genManuallyFedIterator<T>() {
+  const g = genPromiseCycle<T>();
+  const iter = {
+    async *[Symbol.asyncIterator]() {
+      while (true) {
+        const d = await g.promise;
+        yield d;
+      }
+    },
+  };
+  return {
+    iterator: iter,
+    resolveNext: g.resolveNext,
+    rejectNext: g.rejectNext,
+  };
+}

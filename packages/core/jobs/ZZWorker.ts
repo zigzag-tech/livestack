@@ -12,7 +12,7 @@ import { queueClient } from "@livestack/vault-client/src/queue";
 import { QueueJob } from "@livestack/vault-interface";
 import { FromWorker } from "@livestack/vault-interface/src/generated/queue";
 import { v4 } from "uuid";
-import { genPromiseCycle } from "@livestack/shared";
+import { genManuallyFedIterator, genPromiseCycle } from "@livestack/shared";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -127,26 +127,12 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     const workerQueueId = `${that.zzEnv.projectId}/${this.jobSpec.name}`;
 
     // create async iterator to report duty
-
-    // let resolveReportPromise: (value: FromWorker) => void;
-    // let reportPromise = new Promise<FromWorker>((resolve) => {
-    //   resolveReportPromise = resolve;
-    // });
-
-    const reportPromiseCycle = genPromiseCycle<FromWorker>();
-
-    const iterParams = {
-      async *[Symbol.asyncIterator]() {
-        while (true) {
-          const report = await reportPromiseCycle.promise;
-          yield report;
-        }
-      },
-    };
+    const { iterator: iterParams, resolveNext: resolveNext } =
+      genManuallyFedIterator<FromWorker>();
 
     const iter = queueClient.reportAsWorker(iterParams);
 
-    reportPromiseCycle.resolveNext({
+    resolveNext({
       signUp: {
         projectId: that.zzEnv.projectId,
         specName: that.jobSpec.name,
@@ -174,7 +160,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
         workerName: that.workerName,
         graph: localG,
         updateProgress: async (progress): Promise<void> => {
-          reportPromiseCycle.resolveNext({
+          resolveNext({
             progressUpdate: {
               jobId,
               progress,
@@ -196,7 +182,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
 
         try {
           doIt(job);
-          reportPromiseCycle.resolveNext({
+          resolveNext({
             jobCompleted: {
               jobId: job.jobId,
               projectId: that.zzEnv.projectId,
@@ -206,7 +192,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
           });
           that.logger.info(`JOB COMPLETED: ${job.jobId}`);
         } catch (err) {
-          reportPromiseCycle.resolveNext({
+          resolveNext({
             jobFailed: {
               jobId: job.jobId,
               projectId: that.zzEnv.projectId,

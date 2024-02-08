@@ -1,2 +1,2 @@
-export { IOSpec } from "./IOSpec";
-export { genPromiseCycle } from "./genPromiseCycle";
+export * from "./IOSpec";
+export * from "./genPromiseCycle";

@@ -8,7 +8,7 @@ import {
   ToWorker,
 } from "@livestack/vault-interface/src/generated/queue";
 import { Queue, Worker } from "bullmq";
-import { genPromiseCycle } from "@livestack/shared";
+import { genPromiseCycle, genManuallyFedIterator } from "@livestack/shared";
 
 const _rawQueueBySpecName = new Map<string, Queue>();
 
@@ -80,11 +80,8 @@ class ProjectQueueService implements QueueServiceImplementation {
   > = {};
 
   reportAsWorker(request: AsyncIterable<FromWorker>) {
-    let resolveJobPromise: (value: { job: QueueJob; workerId: string }) => void; // Resolver function for the current job promise
-    let jobPromise = new Promise<{
-      job: QueueJob;
-      workerId: string;
-    }>((resolve) => (resolveJobPromise = resolve)); // Initial job promise
+    const { iterator: iter, resolveNext: resolveJobPromise } =
+      genManuallyFedIterator<ToWorker>();
 
     const sendJob = async ({
       job,
@@ -94,17 +91,6 @@ class ProjectQueueService implements QueueServiceImplementation {
       workerId: string;
     }) => {
       resolveJobPromise({ job, workerId }); // Resolve the current job promise with the job data
-      jobPromise = new Promise((resolve) => (resolveJobPromise = resolve)); // Create a new promise for the next job
-    };
-
-    const iter: ServerStreamingMethodResult<ToWorker> = {
-      async *[Symbol.asyncIterator]() {
-        while (true) {
-          const d = await jobPromise;
-          jobPromise = new Promise((resolve) => (resolveJobPromise = resolve));
-          yield d;
-        }
-      },
     };
 
     let updateProgress: null | ((progress: number) => Promise<void>) = null;
