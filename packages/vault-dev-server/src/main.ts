@@ -1,5 +1,5 @@
 import { createServer } from "nice-grpc";
-import { dbService } from "./db/jobs";
+import { dbService } from "./db/service";
 import { getQueueService } from "./queue/service";
 import { db } from "./db/knexConn";
 import {

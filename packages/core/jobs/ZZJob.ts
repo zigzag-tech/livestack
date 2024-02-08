@@ -7,7 +7,7 @@ import {
 } from "../realtime/pubsub";
 import { Observable, map, takeUntil } from "rxjs";
 import { IStorageProvider } from "../storage/cloudStorage";
-import { updateJobStatus } from "@livestack/vault-dev-server/src/db/jobs";
+import { updateJobStatus } from "@livestack/vault-dev-server/src/db/service";
 import { getParentJobRec } from "@livestack/vault-dev-server/src/db/job_relations";
 import longStringTruncator from "../utils/longStringTruncator";
 import { JobSpec } from "./JobSpec";

@@ -1,2 +1,2 @@
-export * from "./db/jobs";
+export * from "./db/service";
 export { Knex } from "knex";

@@ -5,7 +5,7 @@ import {
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
 } from "./primitives";
-import { JobUniqueId } from "./jobs";
+import { JobUniqueId } from "./service";
 
 export async function getJobDatapoints<T>({
   ioType,
