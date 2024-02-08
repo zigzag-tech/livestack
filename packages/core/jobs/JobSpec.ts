@@ -1,4 +1,4 @@
-import { queueClient } from "@livestack/vault-client/src/queue";
+import { queueClient } from "@livestack/vault-client";
 import { WrapWithTimestamp } from "./../utils/io";
 import { InletNode, SpecNode } from "../orchestrations/DefGraph";
 import {
@@ -10,7 +10,7 @@ import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorker";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { getLogger } from "../utils/createWorkerLogger";
 import _ from "lodash";
-import { ensureJobAndInitStatusRec } from "@livestack/vault-dev-server/src/db/jobs";
+import { ensureJobAndInitStatusRec } from "@livestack/vault-dev-server/src/db/service";
 import {
   ensureJobStreamConnectorRec,
   ensureStreamRec,

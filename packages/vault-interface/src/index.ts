@@ -5,6 +5,7 @@ export {
   JobRec,
 } from "./generated/db";
 export {
+  FromWorker,
   QueueJob,
   QueueServiceClient,
   QueueServiceDefinition,

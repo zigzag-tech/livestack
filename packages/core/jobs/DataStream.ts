@@ -44,6 +44,7 @@ export namespace DataStream {
 // cursor based redis stream subscriber
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
+import { streamClient } from "@livestack/vault-client";
 
 export class DataStream<T extends object> {
   public readonly def: ZodType<T> | null;
@@ -248,20 +249,14 @@ export class DataStream<T extends object> {
       });
     }
 
-    const { channelId, clients } = await getStreamClientsById({
-      queueId: this.uniqueName,
-      zzEnv: this.zzEnv,
-    });
-
     try {
       // Publish the data to the stream
-      const messageId = await clients.pub.sendCommand([
-        "XADD",
-        channelId,
-        "*",
-        "data",
-        customStringify(parsed),
-      ]);
+      const { messageId } = await streamClient.pub({
+        projectId: this.zzEnv.projectId,
+        uniqueName: this.uniqueName,
+        dataStr: customStringify(parsed),
+        messageIdOverride,
+      });
 
       // console.debug("DataStream pub", this.uniqueName, parsed);
 

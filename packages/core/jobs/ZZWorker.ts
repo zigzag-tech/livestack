@@ -8,11 +8,10 @@ import { ZZEnv } from "./ZZEnv";
 import { z } from "zod";
 import { JobId } from "../orchestrations/InstantiatedGraph";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
-import { queueClient } from "@livestack/vault-client/src/queue";
-import { QueueJob } from "@livestack/vault-interface";
-import { FromWorker } from "@livestack/vault-interface/src/generated/queue";
+import { QueueJob, FromWorker } from "@livestack/vault-interface";
 import { v4 } from "uuid";
 import { genManuallyFedIterator, genPromiseCycle } from "@livestack/shared";
+import { queueClient } from "@livestack/vault-client";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 

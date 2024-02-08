@@ -17,6 +17,7 @@ message StreamPubMessage {
   optional string jobId = 3;
   optional string outputTag = 4;
   optional string messageIdOverride = 5;
+  string dataStr = 6;
 }
 
 message StreamPubResult {

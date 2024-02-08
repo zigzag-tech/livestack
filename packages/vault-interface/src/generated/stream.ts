@@ -43,6 +43,7 @@ export interface StreamPubMessage {
   jobId?: string | undefined;
   outputTag?: string | undefined;
   messageIdOverride?: string | undefined;
+  dataStr: string;
 }
 
 export interface StreamPubResult {
@@ -64,7 +65,14 @@ export interface StreamDatapoint {
 }
 
 function createBaseStreamPubMessage(): StreamPubMessage {
-  return { projectId: "", uniqueName: "", jobId: undefined, outputTag: undefined, messageIdOverride: undefined };
+  return {
+    projectId: "",
+    uniqueName: "",
+    jobId: undefined,
+    outputTag: undefined,
+    messageIdOverride: undefined,
+    dataStr: "",
+  };
 }
 
 export const StreamPubMessage = {
@@ -83,6 +91,9 @@ export const StreamPubMessage = {
     }
     if (message.messageIdOverride !== undefined) {
       writer.uint32(42).string(message.messageIdOverride);
+    }
+    if (message.dataStr !== "") {
+      writer.uint32(50).string(message.dataStr);
     }
     return writer;
   },
@@ -129,6 +140,13 @@ export const StreamPubMessage = {
 
           message.messageIdOverride = reader.string();
           continue;
+        case 6:
+          if (tag !== 50) {
+            break;
+          }
+
+          message.dataStr = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -145,6 +163,7 @@ export const StreamPubMessage = {
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : undefined,
       outputTag: isSet(object.outputTag) ? globalThis.String(object.outputTag) : undefined,
       messageIdOverride: isSet(object.messageIdOverride) ? globalThis.String(object.messageIdOverride) : undefined,
+      dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
     };
   },
 
@@ -165,6 +184,9 @@ export const StreamPubMessage = {
     if (message.messageIdOverride !== undefined) {
       obj.messageIdOverride = message.messageIdOverride;
     }
+    if (message.dataStr !== "") {
+      obj.dataStr = message.dataStr;
+    }
     return obj;
   },
 
@@ -178,6 +200,7 @@ export const StreamPubMessage = {
     message.jobId = object.jobId ?? undefined;
     message.outputTag = object.outputTag ?? undefined;
     message.messageIdOverride = object.messageIdOverride ?? undefined;
+    message.dataStr = object.dataStr ?? "";
     return message;
   },
 };
