@@ -13,6 +13,7 @@ import {
   restoreLargeValues,
 } from "../files/file-ops";
 import path from "path";
+import { createClient } from "redis";
 
 const REDIS_CLIENT_BY_ID: Record<string, { pub: Redis; sub: Redis }> = {};
 
@@ -137,13 +138,25 @@ export class DataStream<T extends object> {
   }
 
   public lastValueSlow = async () => {
-    const { channelId, clients } = getStreamClientsById({
+    const { channelId } = getStreamClientsById({
       queueId: this.uniqueName,
       zzEnv: this.zzEnv,
     });
-    const stream = await clients.sub.xrevrange(channelId, "+", "-", "COUNT", 1);
-    if (stream && stream.length > 0) {
-      const messages = stream[0][1]; // Assuming single stream
+    const client = await createClient()
+      .on("error", (err) => console.log("Redis Client Error", err))
+      .connect();
+
+    const s = (await client.sendCommand([
+      "XREVRANGE",
+      channelId,
+      "+",
+      "-",
+      "COUNT",
+      "1",
+    ])) as [string, ...[string, string][]][];
+
+    if (s && s.length > 0) {
+      const messages = s[0][1]; // Assuming single stream
       if (messages.length > 0) {
         const data: T = parseMessageData(messages);
         return data;
@@ -160,7 +173,7 @@ export class DataStream<T extends object> {
     message: T;
     jobInfo?: {
       jobId: string;
-      jobOutputKey: string;
+      outputTag: string;
     };
     messageIdOverride?: string;
   }) {
