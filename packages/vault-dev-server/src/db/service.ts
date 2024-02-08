@@ -14,7 +14,6 @@ import {
   ConnectorType,
 } from "@livestack/vault-interface";
 import _ from "lodash";
-import { dbClient } from "@livestack/vault-client";
 import { ensureJobRelationRec, getParentJobRec } from "./job_relations";
 import {
   ZZJobStreamConnectorRec,
@@ -78,20 +77,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     };
   },
   ensureStreamRec: async (rec) => {
-    const { project_id, stream_id } = rec;
-    await dbConn<
-      EnsureStreamRecRequest & {
-        time_created: Date;
-      }
-    >("zz_streams")
-      .insert({
-        project_id,
-        stream_id,
-        time_created: new Date(),
-      })
-      .onConflict(["project_id", "stream_id"])
-      .ignore();
-    return { null_response: {} };
+    return await ensureStreamRec(dbConn, rec);
   },
   ensureJobAndStatusAndConnectorRecs: async (rec) => {
     const {
@@ -126,7 +112,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
 
       if (inputStreamIdOverridesByTag) {
         for (const [key, streamId] of _.entries(inputStreamIdOverridesByTag)) {
-          await dbClient.ensureStreamRec({
+          await ensureStreamRec(dbConn, {
             project_id: projectId,
             stream_id: streamId as string,
           });
@@ -143,8 +129,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
 
       if (outputStreamIdOverridesByTag) {
         for (const [key, streamId] of _.entries(outputStreamIdOverridesByTag)) {
-          dbClient;
-          await dbClient.ensureStreamRec({
+          await ensureStreamRec(dbConn, {
             project_id: projectId,
             stream_id: streamId as string,
           });
@@ -293,6 +278,26 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     }
   },
 });
+
+async function ensureStreamRec(
+  dbConn: Knex,
+  rec: { project_id: string; stream_id: string }
+) {
+  const { project_id, stream_id } = rec;
+  await dbConn<
+    EnsureStreamRecRequest & {
+      time_created: Date;
+    }
+  >("zz_streams")
+    .insert({
+      project_id,
+      stream_id,
+      time_created: new Date(),
+    })
+    .onConflict(["project_id", "stream_id"])
+    .ignore();
+  return { null_response: {} };
+}
 
 async function appendJobStatusRec({
   projectId,
