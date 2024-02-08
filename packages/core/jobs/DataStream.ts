@@ -13,15 +13,6 @@ import {
   restoreLargeValues,
 } from "../files/file-ops";
 import path from "path";
-import { createClient } from "redis";
-
-const REDIS_CLIENT_BY_ID: Record<
-  string,
-  {
-    pub: Awaited<ReturnType<typeof createClient>>;
-    sub: Awaited<ReturnType<typeof createClient>>;
-  }
-> = {};
 
 export type InferStreamDef<T> = T extends DataStream<infer P> ? P : never;
 
@@ -440,25 +431,3 @@ function customParse(json: string): any {
 //   const str = JSON.stringify(zodToJsonSchema(def));
 //   return createHash("sha256").update(str).digest("hex");
 // }
-
-async function getStreamClientsById({
-  queueId,
-  zzEnv,
-}: {
-  queueId: string;
-  zzEnv: ZZEnv;
-}) {
-  // const channelId = `zzstream:${zzEnv.projectId}/${queueId!}`;
-  const channelId = `${zzEnv.projectId}/${queueId!}`;
-  if (!REDIS_CLIENT_BY_ID[channelId]) {
-    const sub = await createClient(zzEnv.redisConfig)
-      .on("error", (err) => console.log("Redis Client Error", err))
-      .connect();
-    const pub = await createClient(zzEnv.redisConfig)
-      .on("error", (err) => console.log("Redis Client Error", err))
-      .connect();
-
-    REDIS_CLIENT_BY_ID[channelId] = { sub, pub };
-  }
-  return { channelId, clients: REDIS_CLIENT_BY_ID[channelId] };
-}

@@ -151,12 +151,4 @@ function parseMessageDataStr<T>(data: Array<any>): string {
   const jsonDataStr = data[dataIdx + 1] as string;
 
   return jsonDataStr;
-
-  // Parse the JSON data (assuming data is stored as a JSON string)
-  //   try {
-  //     const parsedData = customParse(jsonData);
-  //     return parsedData as T;
-  //   } catch (error) {
-  //     throw new Error(`Error parsing data from stream: ${error}`);
-  //   }
 }
