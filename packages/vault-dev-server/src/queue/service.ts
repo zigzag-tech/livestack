@@ -4,7 +4,6 @@ import {
 } from "@livestack/vault-interface";
 import {
   FromWorker,
-  ServerStreamingMethodResult,
   ToWorker,
 } from "@livestack/vault-interface/src/generated/queue";
 import { Queue, Worker } from "bullmq";
@@ -12,7 +11,7 @@ import { genPromiseCycle, genManuallyFedIterator } from "@livestack/shared";
 
 const _rawQueueBySpecName = new Map<string, Queue>();
 
-class ProjectQueueService implements QueueServiceImplementation {
+class QueueServiceByProject implements QueueServiceImplementation {
   //   projectId: string;
   //   constructor({ projectId }: { projectId: string }) {
   //     this.projectId = projectId;
@@ -186,11 +185,11 @@ class ProjectQueueService implements QueueServiceImplementation {
   }
 }
 
-const _projectServiceMap: Record<string, ProjectQueueService> = {};
+const _projectServiceMap: Record<string, QueueServiceByProject> = {};
 
 export const getQueueService = () => {
   if (!_projectServiceMap["default"]) {
-    _projectServiceMap["default"] = new ProjectQueueService();
+    _projectServiceMap["default"] = new QueueServiceByProject();
   }
   return _projectServiceMap["default"];
 };

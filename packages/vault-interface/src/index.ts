@@ -10,4 +10,10 @@ export {
   QueueServiceDefinition,
   QueueServiceImplementation,
 } from "./generated/queue";
+export {
+  StreamServiceClient,
+  StreamServiceDefinition,
+  StreamServiceImplementation,
+} from "./generated/stream";
+
 export * from "./wrapNullResponse";
