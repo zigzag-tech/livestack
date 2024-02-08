@@ -9,7 +9,6 @@ import { StreamNode } from "../orchestrations/InstantiatedGraph";
 import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorker";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { getLogger } from "../utils/createWorkerLogger";
-import { getJobDatapoints } from "@livestack/vault-dev-server/src/db/data_points";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
 
@@ -34,6 +33,7 @@ import { Observable } from "rxjs";
 import { TagObj, TagMaps } from "../orchestrations/Workflow";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
 import { dbClient } from "@livestack/vault-client";
+import { ConnectorType, Order } from "@livestack/vault-interface";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -211,20 +211,20 @@ export class JobSpec<
         key = this.getSingleOutputTag() as typeof key;
       }
     }
-    const recs = await getJobDatapoints<
-      WithTimestamp<WrapTerminatorAndDataId<U>>
-    >({
+    const dRaw = await dbClient.getJobDatapoints({
       specName: this.name,
       projectId: this.zzEnvEnsured.projectId,
       jobId,
-      dbConn: this.zzEnvEnsured.db,
-      ioType,
-      order,
+      ioType: ioType === "in" ? ConnectorType.IN : ConnectorType.OUT,
+      order: order === "desc" ? Order.DESC : Order.ASC,
       limit,
       key: String(key),
     });
+    const recsRaw = dRaw.points;
+    const recs = recsRaw.map((r) => {
+      return JSON.parse(r.dataStr) as U;
+    }) as WithTimestamp<WrapTerminatorAndDataId<U>>[];
     const points = recs
-      .map((r) => r.data)
       .filter((r) => r.terminate === false)
       .map((r) => ({
         data: (r as WithTimestamp<WrapTerminateFalse<U>>).data as U,

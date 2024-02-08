@@ -5,14 +5,13 @@ package livestack;
 import  "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/empty.proto"; 
-import "google/protobuf/any.proto";
+// import "google/protobuf/any.proto";
 
 service DBService {
   rpc GetJobRec(GetJobRecRequest) returns (GetJobRecResponse);
   rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
   rpc EnsureJobAndStatusAndConnectorRecs(EnsureJobAndStatusAndConnectorRecsRequest) returns (google.protobuf.Empty);
-  // rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
-  // rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
+  rpc GetJobDatapoints(GetJobDatapointsRequest) returns (GetJobDatapointsResponse);
   // rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
 }
 
@@ -99,34 +98,43 @@ message JobStreamConnectorRecord {
   string connector_type = 6;
 }
 
+enum Order {
+  ASC = 0;
+  DESC = 1;
+}
+
 message GetJobDatapointsRequest {
-  string project_id = 1;
-  string pipe_name = 2;
-  string job_id = 3;
-  string io_type = 4;
-  string order = 5;
-  int32 limit = 6;
-  string key = 7;
+  string projectId = 1;
+  string specName = 2;
+  string jobId = 3;
+  string key = 4;
+  ConnectorType ioType = 5;
+  optional Order order = 7;
+  optional int32 limit = 8;
 }
 
 message DatapointRecord {
-  string datapoint_id = 1;
-  google.protobuf.Struct data = 2;
+  string datapointId = 1;
+  string dataStr = 2;
+}
+
+message GetJobDatapointsResponse {
+  repeated DatapointRecord points = 1;
 }
 
 message JobInfo {
-  string job_id = 1;
-  string job_output_key = 2;
+  string jobId = 1;
+  string outputTag = 2;
 }
 
 message AddDatapointRequest {
-  string project_id = 1;
-  string stream_id = 2;
-  string datapoint_id = 3;
-  JobInfo job_info = 4;
-  google.protobuf.Any data = 5;
+  string projectId = 1;
+  string streamId = 2;
+  string datapointId = 3;
+  string dataStr = 4;
+  optional JobInfo jobInfo = 5;
 }
 
 message AddDatapointResponse {
-  string datapoint_id = 1;
+  string datapointId = 1;
 }

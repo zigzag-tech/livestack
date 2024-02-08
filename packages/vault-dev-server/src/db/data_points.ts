@@ -7,46 +7,6 @@ import {
 } from "./primitives";
 import { JobUniqueId } from "./service";
 
-export async function getJobDatapoints<T>({
-  ioType,
-  order = "desc",
-  dbConn,
-  key,
-  limit = 100,
-  ...jId
-}: { dbConn: Knex } & JobUniqueId & {
-    ioType: "in" | "out";
-    order?: "asc" | "desc";
-    limit?: number;
-    key: string;
-  }) {
-  const r = await dbConn<
-    ZZDatapointRec<
-      | T
-      | {
-          [PRIMTIVE_KEY]: T;
-        }
-      | {
-          [ARRAY_KEY]: T;
-        }
-    >
-  >("zz_datapoints")
-    .where("zz_datapoints.project_id", "=", jId.projectId)
-    .andWhere("zz_datapoints.job_id", "=", jId.jobId)
-    .andWhere("zz_datapoints.job_output_key", "=", key)
-    .orderBy("zz_datapoints.time_created", order)
-    .limit(limit)
-    .select("*");
-  // if (r.length === 0) {
-  //   console.error("Job datapoints not found", jId, ioType);
-  //   throw new Error(`Job datapoint for ${jId.jobId} not found!`);
-  // }
-  return r.map((rec) => ({
-    datapointId: rec.datapoint_id,
-    data: convertMaybePrimtiveOrArrayBack(rec.data),
-  }));
-}
-
 export async function addDatapoint<T>({
   projectId,
   dbConn,

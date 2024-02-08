@@ -1,6 +1,8 @@
 import { Knex } from "knex";
 import { v4 } from "uuid";
 import {
+  ARRAY_KEY,
+  PRIMTIVE_KEY,
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
 } from "./primitives";
@@ -9,11 +11,13 @@ import {
   JobRec,
   EnsureStreamRecRequest,
   ConnectorType,
+  Order,
 } from "@livestack/vault-interface";
 import _ from "lodash";
 import { dbClient } from "@livestack/vault-client";
 import { ensureJobRelationRec } from "./job_relations";
 import { ensureJobStreamConnectorRec } from "./streams";
+import { ZZDatapointRec } from "./data_points";
 
 export interface ZZJobUniqueId {
   project_id: string;
@@ -156,6 +160,47 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     });
     return {};
   },
+  getJobDatapoints: async ({
+    projectId,
+    jobId,
+    specName,
+    ioType,
+    key,
+    order,
+    limit,
+  }) => {
+    const r = await dbConn("zz_datapoints")
+      .where("zz_datapoints.project_id", "=", projectId)
+      .andWhere("zz_datapoints.job_id", "=", jobId)
+      .andWhere("zz_datapoints.job_output_key", "=", key)
+      .orderBy(
+        "zz_datapoints.time_created",
+        order === Order.DESC ? "desc" : "asc"
+      )
+      .limit(limit || 1000)
+      .select<
+        ZZDatapointRec<
+          | any
+          | {
+              [PRIMTIVE_KEY]: any;
+            }
+          | {
+              [ARRAY_KEY]: any;
+            }
+        >[]
+      >("*");
+    // if (r.length === 0) {
+    //   console.error("Job datapoints not found", jId, ioType);
+    //   throw new Error(`Job datapoint for ${jId.jobId} not found!`);
+    // }
+    return {
+      points: r.map((rec) => ({
+        datapointId: rec.datapoint_id,
+        dataStr: JSON.stringify(convertMaybePrimtiveOrArrayBack(rec.data)),
+      })),
+    };
+  },
+  // addDatapoint: async ({ projectId, streamId, datapointId, jobInfo }) => {},
 });
 
 export async function updateJobStatus({
