@@ -1,4 +1,3 @@
-import { Knex } from "@livestack/vault-dev-server";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Stream } from "stream";
 import { z } from "zod";
@@ -6,14 +5,12 @@ import { RedisClientOptions } from "redis";
 interface EnvParams {
   readonly storageProvider?: IStorageProvider;
   readonly projectId: string;
-  readonly db: Knex;
   readonly redisConfig?: RedisClientOptions;
 }
 
 export class ZZEnv implements EnvParams {
   public readonly storageProvider?: IStorageProvider;
   public readonly projectId: string;
-  public readonly db: Knex;
   public readonly redisConfig: RedisClientOptions;
   private static _zzEnv: ZZEnv | null = null;
 
@@ -28,7 +25,6 @@ export class ZZEnv implements EnvParams {
   constructor({
     storageProvider,
     projectId,
-    db,
     redisConfig,
   }: Omit<EnvParams, "projectId"> & {
     projectId?: string;
@@ -43,7 +39,6 @@ export class ZZEnv implements EnvParams {
       // fs.writeFileSync("PROJECT_ID", projectId);
     }
     this.projectId = projectId;
-    this.db = db;
     this.redisConfig = redisConfig || {};
 
     // TODO: make better global resolution logic

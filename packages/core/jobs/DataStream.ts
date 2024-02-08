@@ -94,7 +94,7 @@ export class DataStream<T extends object> {
         logger,
       });
       // async
-      if (zzEnv?.db) {
+      if (zzEnv) {
         await dbClient.ensureStreamRec({
           project_id: zzEnv.projectId,
           stream_id: uniqueName,

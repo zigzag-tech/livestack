@@ -7,7 +7,6 @@ import {
 } from "../realtime/pubsub";
 import { Observable, map, takeUntil } from "rxjs";
 import { IStorageProvider } from "../storage/cloudStorage";
-import { getParentJobRec } from "@livestack/vault-dev-server/src/db/job_relations";
 import longStringTruncator from "../utils/longStringTruncator";
 import { JobSpec } from "./JobSpec";
 import { z } from "zod";
@@ -277,16 +276,33 @@ export class ZZJob<
   };
 
   private _parentRec:
-    | Awaited<ReturnType<typeof getParentJobRec>>
+    | (Omit<
+        NonNullable<
+          Awaited<ReturnType<typeof dbClient.getParentJobRec>>["rec"]
+        >,
+        "job_params_str"
+      > & {
+        job_params: any;
+      })
+    | null
     | "uninitialized" = "uninitialized";
 
   private getParentRec = async () => {
     if (this._parentRec === "uninitialized") {
-      this._parentRec = await getParentJobRec({
+      const { null_response, rec } = await dbClient.getParentJobRec({
         projectId: this.zzEnv.projectId,
-        dbConn: this.zzEnv.db,
         childJobId: this.jobId,
       });
+      if (!rec) {
+        this._parentRec = null;
+      } else {
+        this._parentRec = {
+          ...rec,
+          job_params: rec.job_params_str
+            ? JSON.parse(rec.job_params_str)
+            : undefined,
+        };
+      }
     }
     return this._parentRec;
   };

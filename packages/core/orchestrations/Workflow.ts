@@ -1,3 +1,4 @@
+import { dbClient } from "@livestack/vault-client";
 import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { IOSpec, InferTMap } from "@livestack/shared/IOSpec";
 import { z } from "zod";
@@ -12,7 +13,6 @@ import {
 } from "../jobs/JobSpec";
 import { TransformFunction } from "./DefGraph";
 import { TransformRegistry } from "./TransformRegistry";
-import { getParentJobRec } from "@livestack/vault-dev-server/src/db/job_relations";
 
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
 type WithT =
@@ -226,10 +226,9 @@ export class WorkflowSpec extends JobSpec<
       jobSpec: this,
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;
-        const parentRec = await getParentJobRec({
+        const { rec: parentRec } = await dbClient.getParentJobRec({
           projectId: this.zzEnvEnsured.projectId,
           childJobId: groupId,
-          dbConn: this.zzEnvEnsured.db,
         });
         const inletHasTransformOverridesByTag: Record<string, boolean> = {};
         if (parentRec) {
@@ -444,10 +443,6 @@ export class WorkflowSpec extends JobSpec<
       uniqueSpecLabel?: string;
     };
   }) {
-    if (!this.zzEnvEnsured.db) {
-      throw new Error("No db connection found");
-    }
-
     let workflow = Workflow.lookupById(groupId);
     if (!workflow) {
       workflow = new Workflow({
@@ -517,10 +512,9 @@ export class Workflow {
     const that = this;
     if (!this._graphP) {
       this._graphP = (async () => {
-        const parentRec = await getParentJobRec({
+        const { rec: parentRec } = await dbClient.getParentJobRec({
           projectId: that.jobGroupDef.zzEnvEnsured.projectId,
           childJobId: this.contextId,
-          dbConn: that.jobGroupDef.zzEnvEnsured.db,
         });
         const inletHasTransformOverridesByTag: Record<string, boolean> = {};
         if (parentRec) {

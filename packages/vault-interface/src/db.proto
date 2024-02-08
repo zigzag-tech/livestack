@@ -15,6 +15,7 @@ service DBService {
   rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
   rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (GetJobStreamConnectorRecsResponse);
   rpc AppendJobStatusRec(AppendJobStatusRecRequest) returns (google.protobuf.Empty);
+  rpc GetParentJobRec(GetParentJobRecRequest) returns (GetParentJobRecResponse);
 }
 
 
@@ -147,4 +148,25 @@ message AppendJobStatusRecRequest {
   string specName = 2;
   string jobId = 3;
   string jobStatus = 4;
+}
+
+message GetParentJobRecRequest {
+  string projectId = 1;
+  string childJobId = 2;
+}
+
+message ParentJobRec {
+  string project_id = 1;
+  string parent_job_id = 2;
+  string spec_name = 3;
+  optional string unique_spec_label = 4;
+  google.protobuf.Timestamp time_created = 5;
+  optional string job_params_str = 6;
+}
+
+message GetParentJobRecResponse {
+  oneof value {
+    ParentJobRec rec = 1; // The actual response data
+    google.protobuf.Empty null_response = 2; // Signal that the response is null
+  }
 }

@@ -156,12 +156,6 @@ export class JobSpec<
   }
 
   public async getJobRec(jobId: string) {
-    if (!this.zzEnvEnsured.db) {
-      throw new Error(
-        "Database is not configured in ZZEnv, therefore can not get job record."
-      );
-    }
-
     const r = await dbClient.getJobRec({
       specName: this.name,
       projectId: this.zzEnvEnsured.projectId,
@@ -199,11 +193,6 @@ export class JobSpec<
     limit?: number;
     key?: K;
   }) {
-    if (!this.zzEnvEnsured.db) {
-      throw new Error(
-        "Database is not configured in ZZEnv, therefore can not get job data."
-      );
-    }
     if (!key) {
       if (ioType === "in") {
         key = this.getSingleInputTag() as typeof key;

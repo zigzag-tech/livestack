@@ -201,6 +201,29 @@ export interface AppendJobStatusRecRequest {
   jobStatus: string;
 }
 
+export interface GetParentJobRecRequest {
+  projectId: string;
+  childJobId: string;
+}
+
+export interface ParentJobRec {
+  project_id: string;
+  parent_job_id: string;
+  spec_name: string;
+  unique_spec_label?: string | undefined;
+  time_created: Date | undefined;
+  job_params_str?: string | undefined;
+}
+
+export interface GetParentJobRecResponse {
+  /** The actual response data */
+  rec?:
+    | ParentJobRec
+    | undefined;
+  /** Signal that the response is null */
+  null_response?: Empty | undefined;
+}
+
 function createBaseJobRec(): JobRec {
   return { project_id: "", spec_name: "", job_id: "", time_created: undefined, job_params: undefined };
 }
@@ -2117,6 +2140,297 @@ export const AppendJobStatusRecRequest = {
   },
 };
 
+function createBaseGetParentJobRecRequest(): GetParentJobRecRequest {
+  return { projectId: "", childJobId: "" };
+}
+
+export const GetParentJobRecRequest = {
+  encode(message: GetParentJobRecRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
+    }
+    if (message.childJobId !== "") {
+      writer.uint32(18).string(message.childJobId);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): GetParentJobRecRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetParentJobRecRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.projectId = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.childJobId = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetParentJobRecRequest {
+    return {
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      childJobId: isSet(object.childJobId) ? globalThis.String(object.childJobId) : "",
+    };
+  },
+
+  toJSON(message: GetParentJobRecRequest): unknown {
+    const obj: any = {};
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
+    }
+    if (message.childJobId !== "") {
+      obj.childJobId = message.childJobId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<GetParentJobRecRequest>): GetParentJobRecRequest {
+    return GetParentJobRecRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<GetParentJobRecRequest>): GetParentJobRecRequest {
+    const message = createBaseGetParentJobRecRequest();
+    message.projectId = object.projectId ?? "";
+    message.childJobId = object.childJobId ?? "";
+    return message;
+  },
+};
+
+function createBaseParentJobRec(): ParentJobRec {
+  return {
+    project_id: "",
+    parent_job_id: "",
+    spec_name: "",
+    unique_spec_label: undefined,
+    time_created: undefined,
+    job_params_str: undefined,
+  };
+}
+
+export const ParentJobRec = {
+  encode(message: ParentJobRec, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.project_id !== "") {
+      writer.uint32(10).string(message.project_id);
+    }
+    if (message.parent_job_id !== "") {
+      writer.uint32(18).string(message.parent_job_id);
+    }
+    if (message.spec_name !== "") {
+      writer.uint32(26).string(message.spec_name);
+    }
+    if (message.unique_spec_label !== undefined) {
+      writer.uint32(34).string(message.unique_spec_label);
+    }
+    if (message.time_created !== undefined) {
+      Timestamp.encode(toTimestamp(message.time_created), writer.uint32(42).fork()).ldelim();
+    }
+    if (message.job_params_str !== undefined) {
+      writer.uint32(50).string(message.job_params_str);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ParentJobRec {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseParentJobRec();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.project_id = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.parent_job_id = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.spec_name = reader.string();
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.unique_spec_label = reader.string();
+          continue;
+        case 5:
+          if (tag !== 42) {
+            break;
+          }
+
+          message.time_created = fromTimestamp(Timestamp.decode(reader, reader.uint32()));
+          continue;
+        case 6:
+          if (tag !== 50) {
+            break;
+          }
+
+          message.job_params_str = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ParentJobRec {
+    return {
+      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
+      parent_job_id: isSet(object.parent_job_id) ? globalThis.String(object.parent_job_id) : "",
+      spec_name: isSet(object.spec_name) ? globalThis.String(object.spec_name) : "",
+      unique_spec_label: isSet(object.unique_spec_label) ? globalThis.String(object.unique_spec_label) : undefined,
+      time_created: isSet(object.time_created) ? fromJsonTimestamp(object.time_created) : undefined,
+      job_params_str: isSet(object.job_params_str) ? globalThis.String(object.job_params_str) : undefined,
+    };
+  },
+
+  toJSON(message: ParentJobRec): unknown {
+    const obj: any = {};
+    if (message.project_id !== "") {
+      obj.project_id = message.project_id;
+    }
+    if (message.parent_job_id !== "") {
+      obj.parent_job_id = message.parent_job_id;
+    }
+    if (message.spec_name !== "") {
+      obj.spec_name = message.spec_name;
+    }
+    if (message.unique_spec_label !== undefined) {
+      obj.unique_spec_label = message.unique_spec_label;
+    }
+    if (message.time_created !== undefined) {
+      obj.time_created = message.time_created.toISOString();
+    }
+    if (message.job_params_str !== undefined) {
+      obj.job_params_str = message.job_params_str;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ParentJobRec>): ParentJobRec {
+    return ParentJobRec.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ParentJobRec>): ParentJobRec {
+    const message = createBaseParentJobRec();
+    message.project_id = object.project_id ?? "";
+    message.parent_job_id = object.parent_job_id ?? "";
+    message.spec_name = object.spec_name ?? "";
+    message.unique_spec_label = object.unique_spec_label ?? undefined;
+    message.time_created = object.time_created ?? undefined;
+    message.job_params_str = object.job_params_str ?? undefined;
+    return message;
+  },
+};
+
+function createBaseGetParentJobRecResponse(): GetParentJobRecResponse {
+  return { rec: undefined, null_response: undefined };
+}
+
+export const GetParentJobRecResponse = {
+  encode(message: GetParentJobRecResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.rec !== undefined) {
+      ParentJobRec.encode(message.rec, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.null_response !== undefined) {
+      Empty.encode(message.null_response, writer.uint32(18).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): GetParentJobRecResponse {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseGetParentJobRecResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.rec = ParentJobRec.decode(reader, reader.uint32());
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.null_response = Empty.decode(reader, reader.uint32());
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): GetParentJobRecResponse {
+    return {
+      rec: isSet(object.rec) ? ParentJobRec.fromJSON(object.rec) : undefined,
+      null_response: isSet(object.null_response) ? Empty.fromJSON(object.null_response) : undefined,
+    };
+  },
+
+  toJSON(message: GetParentJobRecResponse): unknown {
+    const obj: any = {};
+    if (message.rec !== undefined) {
+      obj.rec = ParentJobRec.toJSON(message.rec);
+    }
+    if (message.null_response !== undefined) {
+      obj.null_response = Empty.toJSON(message.null_response);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<GetParentJobRecResponse>): GetParentJobRecResponse {
+    return GetParentJobRecResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<GetParentJobRecResponse>): GetParentJobRecResponse {
+    const message = createBaseGetParentJobRecResponse();
+    message.rec = (object.rec !== undefined && object.rec !== null) ? ParentJobRec.fromPartial(object.rec) : undefined;
+    message.null_response = (object.null_response !== undefined && object.null_response !== null)
+      ? Empty.fromPartial(object.null_response)
+      : undefined;
+    return message;
+  },
+};
+
 export type DBServiceDefinition = typeof DBServiceDefinition;
 export const DBServiceDefinition = {
   name: "DBService",
@@ -2178,6 +2492,14 @@ export const DBServiceDefinition = {
       responseStream: false,
       options: {},
     },
+    getParentJobRec: {
+      name: "GetParentJobRec",
+      requestType: GetParentJobRecRequest,
+      requestStream: false,
+      responseType: GetParentJobRecResponse,
+      responseStream: false,
+      options: {},
+    },
   },
 } as const;
 
@@ -2204,6 +2526,10 @@ export interface DBServiceImplementation<CallContextExt = {}> {
     request: AppendJobStatusRecRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<Empty>>;
+  getParentJobRec(
+    request: GetParentJobRecRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<GetParentJobRecResponse>>;
 }
 
 export interface DBServiceClient<CallOptionsExt = {}> {
@@ -2229,6 +2555,10 @@ export interface DBServiceClient<CallOptionsExt = {}> {
     request: DeepPartial<AppendJobStatusRecRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<Empty>;
+  getParentJobRec(
+    request: DeepPartial<GetParentJobRecRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<GetParentJobRecResponse>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

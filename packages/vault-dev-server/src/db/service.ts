@@ -15,7 +15,7 @@ import {
 } from "@livestack/vault-interface";
 import _ from "lodash";
 import { dbClient } from "@livestack/vault-client";
-import { ensureJobRelationRec } from "./job_relations";
+import { ensureJobRelationRec, getParentJobRec } from "./job_relations";
 import {
   ZZJobStreamConnectorRec,
   ensureJobStreamConnectorRec,
@@ -270,6 +270,27 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     });
 
     return {};
+  },
+  getParentJobRec: async ({ projectId, childJobId }) => {
+    const r = await getParentJobRec({
+      projectId,
+      childJobId,
+      dbConn,
+    });
+    if (!r) {
+      return { null_response: {} };
+    } else {
+      return {
+        rec: {
+          ...r,
+          unique_spec_label: r.unique_spec_label
+            ? r.unique_spec_label
+            : undefined,
+          job_params:
+            r.job_params ?? convertMaybePrimtiveOrArrayBack(r.job_params),
+        },
+      };
+    }
   },
 });
 

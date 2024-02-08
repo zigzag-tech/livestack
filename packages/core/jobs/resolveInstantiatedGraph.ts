@@ -1,5 +1,4 @@
 import { StreamIdOverridesForRootSpec } from "../orchestrations/InstantiatedGraph";
-import { getParentJobRec } from "@livestack/vault-dev-server/src/db/job_relations";
 import { ZZEnv } from "./ZZEnv";
 import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { JobSpec } from "./JobSpec";
@@ -33,19 +32,19 @@ export async function resolveInstantiatedGraph({
       })
   );
 
-  const parentRec = await getParentJobRec({
+  const parentRec = await dbClient.getParentJobRec({
     projectId: zzEnv.projectId,
     childJobId: jobId,
-    dbConn: zzEnv.db,
   });
 
   const inletHasTransformOverridesByTag: Record<string, boolean> = {};
-  if (parentRec) {
+  if (parentRec.rec) {
+    const pRec = parentRec.rec;
     for (const tag of spec.inputDefSet.keys) {
       const transform = TransformRegistry.getTransform({
-        workflowSpecName: parentRec.spec_name,
+        workflowSpecName: pRec.spec_name,
         receivingSpecName: spec.name,
-        receivingSpecUniqueLabel: parentRec.unique_spec_label || null,
+        receivingSpecUniqueLabel: pRec.unique_spec_label || null,
         tag: tag.toString(),
       });
       if (!!transform) {
@@ -56,7 +55,7 @@ export async function resolveInstantiatedGraph({
 
   const instaG = new InstantiatedGraph({
     defGraph: spec.getDefGraph(),
-    contextId: parentRec?.job_id || jobId,
+    contextId: parentRec.rec?.parent_job_id || jobId,
     rootJobId: jobId,
     streamIdOverrides,
     inletHasTransformOverridesByTag,
