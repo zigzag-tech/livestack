@@ -9,10 +9,6 @@ import { StreamNode } from "../orchestrations/InstantiatedGraph";
 import { ZZWorkerDefParams, ZZWorkerDef } from "./ZZWorker";
 import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
 import { getLogger } from "../utils/createWorkerLogger";
-import _ from "lodash";
-import { ensureJobAndInitStatusRec } from "@livestack/vault-dev-server/src/db/service";
-import { ensureJobStreamConnectorRec } from "@livestack/vault-dev-server/src/db/streams";
-import { ensureJobRelationRec } from "@livestack/vault-dev-server/src/db/job_relations";
 import { getJobDatapoints } from "@livestack/vault-dev-server/src/db/data_points";
 import { v4 } from "uuid";
 import longStringTruncator from "../utils/longStringTruncator";
@@ -38,7 +34,6 @@ import { Observable } from "rxjs";
 import { TagObj, TagMaps } from "../orchestrations/Workflow";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
 import { dbClient } from "@livestack/vault-client";
-import { Logger } from "winston";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -651,72 +646,32 @@ export class JobSpec<
     // console.debug("Spec._enqueueJob", jobId, jobOptions);
 
     const projectId = this.zzEnvEnsured.projectId;
+    if (!this.streamIdOverridesByTagByTypeByJobId[jobId]) {
+      this.streamIdOverridesByTagByTypeByJobId[jobId] = {
+        in: null,
+        out: null,
+      };
+    }
+    if (inputStreamIdOverridesByTag) {
+      this.streamIdOverridesByTagByTypeByJobId[jobId]["in"] =
+        inputStreamIdOverridesByTag;
+    }
+    if (outputStreamIdOverridesByTag) {
+      this.streamIdOverridesByTagByTypeByJobId[jobId]["out"] =
+        outputStreamIdOverridesByTag;
+    }
 
-    await this.zzEnvEnsured.db.transaction(async (trx) => {
-      await ensureJobAndInitStatusRec({
-        projectId,
-        specName: this.name,
-        jobId,
-        dbConn: trx,
-        jobOptions,
-      });
-
-      if (p?.parentJobId) {
-        await ensureJobRelationRec({
-          projectId: this.zzEnvEnsured.projectId,
-          parentJobId: p.parentJobId,
-          childJobId: jobId,
-          dbConn: trx,
-          uniqueSpecLabel: p.uniqueSpecLabel,
-        });
-      }
-
-      if (inputStreamIdOverridesByTag) {
-        for (const [key, streamId] of _.entries(inputStreamIdOverridesByTag)) {
-          await dbClient.ensureStreamRec({
-            project_id: projectId,
-            stream_id: streamId as string,
-          });
-          await ensureJobStreamConnectorRec({
-            projectId,
-            streamId: streamId as string,
-            dbConn: trx,
-            jobId,
-            key,
-            connectorType: "in",
-          });
-        }
-        if (!this.streamIdOverridesByTagByTypeByJobId[jobId]) {
-          this.streamIdOverridesByTagByTypeByJobId[jobId] = {
-            in: null,
-            out: null,
-          };
-        }
-        this.streamIdOverridesByTagByTypeByJobId[jobId]["in"] =
-          inputStreamIdOverridesByTag;
-      }
-
-      if (outputStreamIdOverridesByTag) {
-        for (const [key, streamId] of _.entries(outputStreamIdOverridesByTag)) {
-          dbClient;
-          await dbClient.ensureStreamRec({
-            project_id: projectId,
-            stream_id: streamId as string,
-          });
-          await ensureJobStreamConnectorRec({
-            projectId,
-            streamId: streamId as string,
-            dbConn: trx,
-            jobId,
-            key,
-            connectorType: "out",
-          });
-        }
-        this.streamIdOverridesByTagByTypeByJobId[jobId]["out"] =
-          outputStreamIdOverridesByTag;
-      }
-      await trx.commit();
+    await dbClient.ensureJobAndStatusAndConnectorRecs({
+      projectId: this.zzEnvEnsured.projectId,
+      specName: this.name,
+      jobId,
+      jobOptionsStr: JSON.stringify(jobOptions),
+      parentJobId: p?.parentJobId,
+      uniqueSpecLabel: p?.uniqueSpecLabel,
+      inputStreamIdOverridesByTag: inputStreamIdOverridesByTag || {},
+      outputStreamIdOverridesByTag: outputStreamIdOverridesByTag || {},
     });
+
     jobOptions = jobOptions || ({} as P);
     const j = await queueClient.addJob({
       projectId,
@@ -1165,7 +1120,6 @@ export class JobManager<P, I, O, IMap, OMap> {
     this.jobId = jobId;
   }
 }
-
 export interface JobInput<IMap> {
   <K extends keyof IMap>(tag?: K): ByTagInput<IMap[K]>;
   tags: (keyof IMap)[];

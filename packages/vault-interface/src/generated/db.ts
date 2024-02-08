@@ -8,6 +8,39 @@ import { Timestamp } from "./google/protobuf/timestamp";
 
 export const protobufPackage = "livestack";
 
+export enum ConnectorType {
+  IN = 0,
+  OUT = 1,
+  UNRECOGNIZED = -1,
+}
+
+export function connectorTypeFromJSON(object: any): ConnectorType {
+  switch (object) {
+    case 0:
+    case "IN":
+      return ConnectorType.IN;
+    case 1:
+    case "OUT":
+      return ConnectorType.OUT;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return ConnectorType.UNRECOGNIZED;
+  }
+}
+
+export function connectorTypeToJSON(object: ConnectorType): string {
+  switch (object) {
+    case ConnectorType.IN:
+      return "IN";
+    case ConnectorType.OUT:
+      return "OUT";
+    case ConnectorType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface JobRec {
   project_id: string;
   /** Align with jobs.ts */
@@ -52,12 +85,25 @@ export interface EnsureStreamRecRequest {
   stream_id: string;
 }
 
-export interface EnsureJobStreamConnectorRecRequest {
-  project_id: string;
-  stream_id: string;
-  job_id: string;
+export interface EnsureJobAndStatusAndConnectorRecsRequest {
+  projectId: string;
+  specName: string;
+  jobId: string;
+  jobOptionsStr: string;
+  parentJobId?: string | undefined;
+  uniqueSpecLabel?: string | undefined;
+  inputStreamIdOverridesByTag: { [key: string]: string };
+  outputStreamIdOverridesByTag: { [key: string]: string };
+}
+
+export interface EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
   key: string;
-  connector_type: string;
+  value: string;
+}
+
+export interface EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
+  key: string;
+  value: string;
 }
 
 export interface GetJobStreamConnectorRecsRequest {
@@ -688,34 +734,58 @@ export const EnsureStreamRecRequest = {
   },
 };
 
-function createBaseEnsureJobStreamConnectorRecRequest(): EnsureJobStreamConnectorRecRequest {
-  return { project_id: "", stream_id: "", job_id: "", key: "", connector_type: "" };
+function createBaseEnsureJobAndStatusAndConnectorRecsRequest(): EnsureJobAndStatusAndConnectorRecsRequest {
+  return {
+    projectId: "",
+    specName: "",
+    jobId: "",
+    jobOptionsStr: "",
+    parentJobId: undefined,
+    uniqueSpecLabel: undefined,
+    inputStreamIdOverridesByTag: {},
+    outputStreamIdOverridesByTag: {},
+  };
 }
 
-export const EnsureJobStreamConnectorRecRequest = {
-  encode(message: EnsureJobStreamConnectorRecRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.project_id !== "") {
-      writer.uint32(10).string(message.project_id);
+export const EnsureJobAndStatusAndConnectorRecsRequest = {
+  encode(message: EnsureJobAndStatusAndConnectorRecsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
     }
-    if (message.stream_id !== "") {
-      writer.uint32(18).string(message.stream_id);
+    if (message.specName !== "") {
+      writer.uint32(18).string(message.specName);
     }
-    if (message.job_id !== "") {
-      writer.uint32(26).string(message.job_id);
+    if (message.jobId !== "") {
+      writer.uint32(26).string(message.jobId);
     }
-    if (message.key !== "") {
-      writer.uint32(34).string(message.key);
+    if (message.jobOptionsStr !== "") {
+      writer.uint32(34).string(message.jobOptionsStr);
     }
-    if (message.connector_type !== "") {
-      writer.uint32(42).string(message.connector_type);
+    if (message.parentJobId !== undefined) {
+      writer.uint32(42).string(message.parentJobId);
     }
+    if (message.uniqueSpecLabel !== undefined) {
+      writer.uint32(50).string(message.uniqueSpecLabel);
+    }
+    Object.entries(message.inputStreamIdOverridesByTag).forEach(([key, value]) => {
+      EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.encode(
+        { key: key as any, value },
+        writer.uint32(58).fork(),
+      ).ldelim();
+    });
+    Object.entries(message.outputStreamIdOverridesByTag).forEach(([key, value]) => {
+      EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.encode(
+        { key: key as any, value },
+        writer.uint32(66).fork(),
+      ).ldelim();
+    });
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): EnsureJobStreamConnectorRecRequest {
+  decode(input: _m0.Reader | Uint8Array, length?: number): EnsureJobAndStatusAndConnectorRecsRequest {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseEnsureJobStreamConnectorRecRequest();
+    const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -724,35 +794,68 @@ export const EnsureJobStreamConnectorRecRequest = {
             break;
           }
 
-          message.project_id = reader.string();
+          message.projectId = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
             break;
           }
 
-          message.stream_id = reader.string();
+          message.specName = reader.string();
           continue;
         case 3:
           if (tag !== 26) {
             break;
           }
 
-          message.job_id = reader.string();
+          message.jobId = reader.string();
           continue;
         case 4:
           if (tag !== 34) {
             break;
           }
 
-          message.key = reader.string();
+          message.jobOptionsStr = reader.string();
           continue;
         case 5:
           if (tag !== 42) {
             break;
           }
 
-          message.connector_type = reader.string();
+          message.parentJobId = reader.string();
+          continue;
+        case 6:
+          if (tag !== 50) {
+            break;
+          }
+
+          message.uniqueSpecLabel = reader.string();
+          continue;
+        case 7:
+          if (tag !== 58) {
+            break;
+          }
+
+          const entry7 = EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.decode(
+            reader,
+            reader.uint32(),
+          );
+          if (entry7.value !== undefined) {
+            message.inputStreamIdOverridesByTag[entry7.key] = entry7.value;
+          }
+          continue;
+        case 8:
+          if (tag !== 66) {
+            break;
+          }
+
+          const entry8 = EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.decode(
+            reader,
+            reader.uint32(),
+          );
+          if (entry8.value !== undefined) {
+            message.outputStreamIdOverridesByTag[entry8.key] = entry8.value;
+          }
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -763,46 +866,267 @@ export const EnsureJobStreamConnectorRecRequest = {
     return message;
   },
 
-  fromJSON(object: any): EnsureJobStreamConnectorRecRequest {
+  fromJSON(object: any): EnsureJobAndStatusAndConnectorRecsRequest {
     return {
-      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
-      stream_id: isSet(object.stream_id) ? globalThis.String(object.stream_id) : "",
-      job_id: isSet(object.job_id) ? globalThis.String(object.job_id) : "",
-      key: isSet(object.key) ? globalThis.String(object.key) : "",
-      connector_type: isSet(object.connector_type) ? globalThis.String(object.connector_type) : "",
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
+      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
+      jobOptionsStr: isSet(object.jobOptionsStr) ? globalThis.String(object.jobOptionsStr) : "",
+      parentJobId: isSet(object.parentJobId) ? globalThis.String(object.parentJobId) : undefined,
+      uniqueSpecLabel: isSet(object.uniqueSpecLabel) ? globalThis.String(object.uniqueSpecLabel) : undefined,
+      inputStreamIdOverridesByTag: isObject(object.inputStreamIdOverridesByTag)
+        ? Object.entries(object.inputStreamIdOverridesByTag).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
+      outputStreamIdOverridesByTag: isObject(object.outputStreamIdOverridesByTag)
+        ? Object.entries(object.outputStreamIdOverridesByTag).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
-  toJSON(message: EnsureJobStreamConnectorRecRequest): unknown {
+  toJSON(message: EnsureJobAndStatusAndConnectorRecsRequest): unknown {
     const obj: any = {};
-    if (message.project_id !== "") {
-      obj.project_id = message.project_id;
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
     }
-    if (message.stream_id !== "") {
-      obj.stream_id = message.stream_id;
+    if (message.specName !== "") {
+      obj.specName = message.specName;
     }
-    if (message.job_id !== "") {
-      obj.job_id = message.job_id;
+    if (message.jobId !== "") {
+      obj.jobId = message.jobId;
     }
-    if (message.key !== "") {
-      obj.key = message.key;
+    if (message.jobOptionsStr !== "") {
+      obj.jobOptionsStr = message.jobOptionsStr;
     }
-    if (message.connector_type !== "") {
-      obj.connector_type = message.connector_type;
+    if (message.parentJobId !== undefined) {
+      obj.parentJobId = message.parentJobId;
+    }
+    if (message.uniqueSpecLabel !== undefined) {
+      obj.uniqueSpecLabel = message.uniqueSpecLabel;
+    }
+    if (message.inputStreamIdOverridesByTag) {
+      const entries = Object.entries(message.inputStreamIdOverridesByTag);
+      if (entries.length > 0) {
+        obj.inputStreamIdOverridesByTag = {};
+        entries.forEach(([k, v]) => {
+          obj.inputStreamIdOverridesByTag[k] = v;
+        });
+      }
+    }
+    if (message.outputStreamIdOverridesByTag) {
+      const entries = Object.entries(message.outputStreamIdOverridesByTag);
+      if (entries.length > 0) {
+        obj.outputStreamIdOverridesByTag = {};
+        entries.forEach(([k, v]) => {
+          obj.outputStreamIdOverridesByTag[k] = v;
+        });
+      }
     }
     return obj;
   },
 
-  create(base?: DeepPartial<EnsureJobStreamConnectorRecRequest>): EnsureJobStreamConnectorRecRequest {
-    return EnsureJobStreamConnectorRecRequest.fromPartial(base ?? {});
+  create(base?: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>): EnsureJobAndStatusAndConnectorRecsRequest {
+    return EnsureJobAndStatusAndConnectorRecsRequest.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<EnsureJobStreamConnectorRecRequest>): EnsureJobStreamConnectorRecRequest {
-    const message = createBaseEnsureJobStreamConnectorRecRequest();
-    message.project_id = object.project_id ?? "";
-    message.stream_id = object.stream_id ?? "";
-    message.job_id = object.job_id ?? "";
+  fromPartial(
+    object: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>,
+  ): EnsureJobAndStatusAndConnectorRecsRequest {
+    const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest();
+    message.projectId = object.projectId ?? "";
+    message.specName = object.specName ?? "";
+    message.jobId = object.jobId ?? "";
+    message.jobOptionsStr = object.jobOptionsStr ?? "";
+    message.parentJobId = object.parentJobId ?? undefined;
+    message.uniqueSpecLabel = object.uniqueSpecLabel ?? undefined;
+    message.inputStreamIdOverridesByTag = Object.entries(object.inputStreamIdOverridesByTag ?? {}).reduce<
+      { [key: string]: string }
+    >((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = globalThis.String(value);
+      }
+      return acc;
+    }, {});
+    message.outputStreamIdOverridesByTag = Object.entries(object.outputStreamIdOverridesByTag ?? {}).reduce<
+      { [key: string]: string }
+    >((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = globalThis.String(value);
+      }
+      return acc;
+    }, {});
+    return message;
+  },
+};
+
+function createBaseEnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry(): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
+  return { key: "", value: "" };
+}
+
+export const EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry = {
+  encode(
+    message: EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry,
+    writer: _m0.Writer = _m0.Writer.create(),
+  ): _m0.Writer {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number,
+  ): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create(
+    base?: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry>,
+  ): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
+    return EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.fromPartial(base ?? {});
+  },
+  fromPartial(
+    object: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry>,
+  ): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
+    const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry();
     message.key = object.key ?? "";
-    message.connector_type = object.connector_type ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseEnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry(): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
+  return { key: "", value: "" };
+}
+
+export const EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry = {
+  encode(
+    message: EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry,
+    writer: _m0.Writer = _m0.Writer.create(),
+  ): _m0.Writer {
+    if (message.key !== "") {
+      writer.uint32(10).string(message.key);
+    }
+    if (message.value !== "") {
+      writer.uint32(18).string(message.value);
+    }
+    return writer;
+  },
+
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number,
+  ): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.key = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.value = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
+    return {
+      key: isSet(object.key) ? globalThis.String(object.key) : "",
+      value: isSet(object.value) ? globalThis.String(object.value) : "",
+    };
+  },
+
+  toJSON(message: EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry): unknown {
+    const obj: any = {};
+    if (message.key !== "") {
+      obj.key = message.key;
+    }
+    if (message.value !== "") {
+      obj.value = message.value;
+    }
+    return obj;
+  },
+
+  create(
+    base?: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry>,
+  ): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
+    return EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.fromPartial(base ?? {});
+  },
+  fromPartial(
+    object: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry>,
+  ): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
+    const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
     return message;
   },
 };
@@ -1533,15 +1857,22 @@ export const DBServiceDefinition = {
       responseStream: false,
       options: {},
     },
+    ensureStreamRec: {
+      name: "EnsureStreamRec",
+      requestType: EnsureStreamRecRequest,
+      requestStream: false,
+      responseType: Empty,
+      responseStream: false,
+      options: {},
+    },
     /**
-     * rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
      * rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
      * rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
      * rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
      */
-    ensureStreamRec: {
-      name: "EnsureStreamRec",
-      requestType: EnsureStreamRecRequest,
+    ensureJobAndStatusAndConnectorRecs: {
+      name: "EnsureJobAndStatusAndConnectorRecs",
+      requestType: EnsureJobAndStatusAndConnectorRecsRequest,
       requestStream: false,
       responseType: Empty,
       responseStream: false,
@@ -1552,24 +1883,30 @@ export const DBServiceDefinition = {
 
 export interface DBServiceImplementation<CallContextExt = {}> {
   getJobRec(request: GetJobRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<GetJobRecResponse>>;
+  ensureStreamRec(request: EnsureStreamRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
   /**
-   * rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
    * rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
    * rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
    * rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
    */
-  ensureStreamRec(request: EnsureStreamRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
+  ensureJobAndStatusAndConnectorRecs(
+    request: EnsureJobAndStatusAndConnectorRecsRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<Empty>>;
 }
 
 export interface DBServiceClient<CallOptionsExt = {}> {
   getJobRec(request: DeepPartial<GetJobRecRequest>, options?: CallOptions & CallOptionsExt): Promise<GetJobRecResponse>;
+  ensureStreamRec(request: DeepPartial<EnsureStreamRecRequest>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
   /**
-   * rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
    * rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
    * rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
    * rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
    */
-  ensureStreamRec(request: DeepPartial<EnsureStreamRecRequest>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
+  ensureJobAndStatusAndConnectorRecs(
+    request: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<Empty>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

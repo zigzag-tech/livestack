@@ -8,7 +8,12 @@ import {
   DBServiceImplementation,
   JobRec,
   EnsureStreamRecRequest,
+  ConnectorType,
 } from "@livestack/vault-interface";
+import _ from "lodash";
+import { dbClient } from "@livestack/vault-client";
+import { ensureJobRelationRec } from "./job_relations";
+import { ensureJobStreamConnectorRec } from "./streams";
 
 export interface ZZJobUniqueId {
   project_id: string;
@@ -81,6 +86,75 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       .onConflict(["project_id", "stream_id"])
       .ignore();
     return { null_response: {} };
+  },
+  ensureJobAndStatusAndConnectorRecs: async (rec) => {
+    const {
+      projectId,
+      specName,
+      jobId,
+      parentJobId,
+      uniqueSpecLabel,
+      jobOptionsStr,
+      inputStreamIdOverridesByTag,
+      outputStreamIdOverridesByTag,
+    } = rec;
+    const jobOptions = JSON.parse(jobOptionsStr);
+    await dbConn.transaction(async (trx) => {
+      await ensureJobAndInitStatusRec({
+        projectId,
+        specName,
+        jobId,
+        dbConn: trx,
+        jobOptions,
+      });
+
+      if (parentJobId) {
+        await ensureJobRelationRec({
+          projectId: projectId,
+          parentJobId: parentJobId,
+          childJobId: jobId,
+          dbConn: trx,
+          uniqueSpecLabel: uniqueSpecLabel,
+        });
+      }
+
+      if (inputStreamIdOverridesByTag) {
+        for (const [key, streamId] of _.entries(inputStreamIdOverridesByTag)) {
+          await dbClient.ensureStreamRec({
+            project_id: projectId,
+            stream_id: streamId as string,
+          });
+          await ensureJobStreamConnectorRec({
+            projectId,
+            streamId: streamId as string,
+            jobId,
+            key,
+            connectorType: "in",
+            dbConn: trx,
+          });
+        }
+      }
+
+      if (outputStreamIdOverridesByTag) {
+        for (const [key, streamId] of _.entries(outputStreamIdOverridesByTag)) {
+          dbClient;
+          await dbClient.ensureStreamRec({
+            project_id: projectId,
+            stream_id: streamId as string,
+          });
+          await ensureJobStreamConnectorRec({
+            projectId,
+            streamId: streamId as string,
+            jobId,
+            key,
+            connectorType: "out",
+            dbConn: trx,
+          });
+        }
+      }
+      await trx.commit();
+    });
+    return {};
   },
 });
 

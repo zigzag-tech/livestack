@@ -10,7 +10,7 @@ import "google/protobuf/any.proto";
 service DBService {
   rpc GetJobRec(GetJobRecRequest) returns (GetJobRecResponse);
   rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
-  // rpc EnsureJobStreamConnectorRec(EnsureJobStreamConnectorRecRequest) returns (google.protobuf.Empty);
+  rpc EnsureJobAndStatusAndConnectorRecs(EnsureJobAndStatusAndConnectorRecsRequest) returns (google.protobuf.Empty);
   // rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (stream JobStreamConnectorRecord);
   // rpc GetJobDatapoints(GetJobDatapointsRequest) returns (DatapointRecord);
   // rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
@@ -58,12 +58,29 @@ message EnsureStreamRecRequest {
   string stream_id = 2;
 }
 
-message EnsureJobStreamConnectorRecRequest {
-  string project_id = 1;
-  string stream_id = 2;
-  string job_id = 3;
-  string key = 4;
-  string connector_type = 5;
+enum ConnectorType {
+  IN = 0;
+  OUT = 1;
+}
+
+// message EnsureJobStreamConnectorRecRequest {
+//   string project_id = 1;
+//   string stream_id = 2;
+//   string job_id = 3;
+//   string key = 4;
+//   ConnectorType connector_type = 5;
+// }
+
+message EnsureJobAndStatusAndConnectorRecsRequest {
+  string projectId = 1;
+  string specName = 2;
+  string jobId = 3;
+  string jobOptionsStr = 4;
+  optional string parentJobId = 5;
+  optional string uniqueSpecLabel = 6;
+  map<string, string> inputStreamIdOverridesByTag = 7;
+  map<string, string> outputStreamIdOverridesByTag = 8;
+
 }
 
 message GetJobStreamConnectorRecsRequest {
