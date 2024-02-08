@@ -9,7 +9,7 @@ import {
   StreamServiceDefinition,
 } from "@livestack/vault-interface";
 
-async function main() {
+export async function launchVaultDevServer() {
   const server = createServer();
   server.add(DBServiceDefinition, dbService(db));
   server.add(QueueServiceDefinition, getQueueService());
@@ -22,5 +22,3 @@ async function main() {
   await server.listen(address);
   console.info(`🌌🔒 Vault dev server started. Listening on ${address}.`);
 }
-
-main();
