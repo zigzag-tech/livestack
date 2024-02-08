@@ -2,6 +2,12 @@ import { Storage } from "@google-cloud/storage";
 import fs from "fs";
 import { Stream } from "stream";
 import { IStorageProvider } from "./cloudStorage";
+import {
+  InferRestoredFileType,
+  LargeFileWithoutValue,
+  OriginalType,
+} from "../files/file-ops";
+import { Readable } from "stream";
 
 export function getGoogleCloudStorageProvider({
   bucketName,
@@ -13,23 +19,50 @@ export function getGoogleCloudStorageProvider({
     return putToGoogleCloudStorage(bucketName, path, data);
   };
 
-  const downloadFromStorage: IStorageProvider["downloadFromStorage"] = async ({
-    filePath,
-    destination,
-  }) => {
-    await bucket.file(filePath).download({ destination });
+  // const downloadFromStorage: IStorageProvider["downloadFromStorage"] = async ({
+  //   filePath,
+  //   destination,
+  // }) => {
+  //   await bucket.file(filePath).download({ destination });
+  // };
+
+  const fetchFromStorage: IStorageProvider["fetchFromStorage"] = async <
+    T extends OriginalType
+  >({
+    path,
+    originalType,
+  }: LargeFileWithoutValue<T>) => {
+    const [file, resp] = await bucket.file(path).get({});
+
+    type R = InferRestoredFileType<T>;
+    if (originalType === "string") {
+      return file.toString() as R;
+    } else if (originalType === "buffer") {
+      return data as R;
+    } else if (originalType === "array-buffer") {
+      return data.buffer as R;
+    } else if (originalType === "blob") {
+      return new Blob([data]) as R;
+    } else if (originalType === "file") {
+      return new File([data], path) as R;
+    } else if (originalType === "stream") {
+      return fs.createReadStream(path) as Readable as R;
+    } else {
+      throw new Error("Unsupported originalType " + originalType);
+    }
   };
 
-  const uploadFromLocalPath: IStorageProvider["uploadFromLocalPath"] = async ({
-    localPath,
-    destination,
-  }) => {
-    await bucket.upload(localPath, { destination });
-  };
+  // const uploadFromLocalPath: IStorageProvider["uploadFromLocalPath"] = async ({
+  //   localPath,
+  //   destination,
+  // }) => {
+  //   await bucket.upload(localPath, { destination });
+  // };
   return {
     putToStorage,
-    downloadFromStorage,
-    uploadFromLocalPath,
+    fetchFromStorage,
+    // downloadFromStorage,
+    // uploadFromLocalPath,
   };
 }
 const getStorageBucket = (bucketName: string) =>

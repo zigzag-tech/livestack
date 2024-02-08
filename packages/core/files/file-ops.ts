@@ -156,20 +156,20 @@ export async function restoreLargeValues({
   return obj_;
 }
 
-export async function ensureLocalSourceFileExists(
-  storageProvider: IStorageProvider,
-  filePath: string
-) {
-  try {
-    fs.accessSync(filePath);
-  } catch (error) {
-    if (storageProvider) {
-      ensurePathExists(filePath);
-      const gcsFileName = filePath.split(`${TEMP_DIR}/`)[1].replace(/_/g, "/");
-      await storageProvider.downloadFromStorage({
-        filePath: gcsFileName,
-        destination: filePath,
-      });
-    }
-  }
-}
+// export async function ensureLocalSourceFileExists(
+//   storageProvider: IStorageProvider,
+//   filePath: string
+// ) {
+//   try {
+//     fs.accessSync(filePath);
+//   } catch (error) {
+//     if (storageProvider) {
+//       ensurePathExists(filePath);
+//       const gcsFileName = filePath.split(`${TEMP_DIR}/`)[1].replace(/_/g, "/");
+//       await storageProvider.downloadFromStorage({
+//         filePath: gcsFileName,
+//         destination: filePath,
+//       });
+//     }
+//   }
+// }

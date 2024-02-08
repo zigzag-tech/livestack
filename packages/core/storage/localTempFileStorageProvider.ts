@@ -36,24 +36,24 @@ export function getLocalTempFileStorageProvider(
     }
   };
 
-  const uploadFromLocalPath: IStorageProvider["uploadFromLocalPath"] = async ({
-    localPath,
-    destination,
-  }) => {
-    const fullPath = path.join(pathPrefix, destination);
-    await ensurePathExists(path.dirname(fullPath));
-    await fs.promises.copyFile(localPath, fullPath);
-  };
+  // const uploadFromLocalPath: IStorageProvider["uploadFromLocalPath"] = async ({
+  //   localPath,
+  //   destination,
+  // }) => {
+  //   const fullPath = path.join(pathPrefix, destination);
+  //   await ensurePathExists(path.dirname(fullPath));
+  //   await fs.promises.copyFile(localPath, fullPath);
+  // };
 
-  const downloadFromStorage: IStorageProvider["downloadFromStorage"] = async ({
-    filePath,
-    destination,
-  }) => {
-    const fullPath = path.join(pathPrefix, destination);
+  // const downloadFromStorage: IStorageProvider["downloadFromStorage"] = async ({
+  //   filePath,
+  //   destination,
+  // }) => {
+  //   const fullPath = path.join(pathPrefix, destination);
 
-    await ensurePathExists(path.dirname(fullPath));
-    await fs.promises.copyFile(fullPath, destination);
-  };
+  //   await ensurePathExists(path.dirname(fullPath));
+  //   await fs.promises.copyFile(fullPath, destination);
+  // };
 
   const fetchFromStorage = async <T extends OriginalType>(
     f: LargeFileWithoutValue<T>
@@ -80,8 +80,8 @@ export function getLocalTempFileStorageProvider(
 
   return {
     putToStorage,
-    uploadFromLocalPath,
-    downloadFromStorage,
+    // uploadFromLocalPath,
+    // downloadFromStorage,
     fetchFromStorage,
   };
 }
