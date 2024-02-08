@@ -45,6 +45,7 @@ export namespace DataStream {
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
 import { streamClient } from "@livestack/vault-client";
+import { SubType } from "@livestack/vault-interface/src/generated/stream";
 
 export class DataStream<T extends object> {
   public readonly def: ZodType<T> | null;
@@ -144,31 +145,22 @@ export class DataStream<T extends object> {
   }
 
   public lastValueSlow = async () => {
-    const { channelId } = await getStreamClientsById({
-      queueId: this.uniqueName,
-      zzEnv: this.zzEnv,
+    const { null_response, datapoint } = await streamClient.lastValue({
+      projectId: this.zzEnv.projectId,
+      uniqueName: this.uniqueName,
     });
-    const client = await createClient()
-      .on("error", (err) => console.log("Redis Client Error", err))
-      .connect();
-
-    const s = (await client.sendCommand([
-      "XREVRANGE",
-      channelId,
-      "+",
-      "-",
-      "COUNT",
-      "1",
-    ])) as [string, ...[string, string][]][];
-
-    if (s && s.length > 0) {
-      const messages = s[0][1]; // Assuming single stream
-      if (messages.length > 0) {
-        const data: T = parseMessageData(messages);
-        return data;
-      }
+    if (null_response) {
+      return null;
+    } else if (datapoint) {
+      const data = customParse(datapoint.dataStr);
+      return {
+        ...data,
+        timestamp: datapoint.timestamp,
+        messageId: datapoint.messageId,
+      };
+    } else {
+      throw new Error("Unexpected response from lastValue");
     }
-    return null;
   };
 
   public async pub({
@@ -269,6 +261,7 @@ export class DataStream<T extends object> {
       stream: this,
       zzEnv: this.zzEnv,
       initialCursor: "$",
+      subType: SubType.fromNow,
     });
   }
 
@@ -277,6 +270,7 @@ export class DataStream<T extends object> {
       stream: this,
       zzEnv: this.zzEnv,
       initialCursor: "0",
+      subType: SubType.fromStart,
     });
   }
 
@@ -309,19 +303,23 @@ export class DataStreamSubscriber<T extends object> {
   private _valueObservable: Observable<WithTimestamp<T>> | null = null;
   private isUnsubscribed: boolean = false;
   private _nextValue: (() => Promise<WithTimestamp<T>>) | null = null;
+  private subType: SubType;
 
   constructor({
     stream,
     zzEnv,
     initialCursor,
+    subType,
   }: {
     stream: DataStream<T>;
     zzEnv: ZZEnv;
     initialCursor: "0" | "$";
+    subType: SubType;
   }) {
     this.stream = stream;
     this.zzEnv = zzEnv;
     this.cursor = initialCursor;
+    this.subType = subType;
   }
 
   private initializeObservable() {
@@ -339,54 +337,38 @@ export class DataStreamSubscriber<T extends object> {
     });
 
     try {
-      while (!this.isUnsubscribed) {
-        // XREAD with block and count parameters
-        const stream = (await clients.sub.sendCommand([
-          "XREAD",
-          "COUNT",
-          "1",
-          "BLOCK",
-          "1000", // Set a timeout for blocking, e.g., 1000 milliseconds
-          "STREAMS",
-          channelId,
-          this.cursor,
-        ])) as [string, [string, string[]][]][];
+      const iter = streamClient.sub({
+        projectId: this.zzEnv.projectId,
+        uniqueName: this.stream.uniqueName,
+        subType: this.subType,
+      });
 
-        if (stream) {
-          const [key, messages] = stream[0]; // Assuming single stream
-          for (let message of messages) {
-            // id format: 1526919030474-55
-            // https://redis.io/commands/xadd/
-            this.cursor = message[0] as `${string}-${string}`;
-            const [timestampStr, _] = this.cursor.split("-");
-            const timestamp = Number(timestampStr);
-            const data: T = parseMessageData(message[1]);
-            let restored = data;
-            const { largeFilesToRestore, newObj } =
-              identifyLargeFilesToRestore(data);
+      for await (const message of iter) {
+        const data: T = customParse(message.dataStr);
+        let restored = data;
+        const { largeFilesToRestore, newObj } =
+          identifyLargeFilesToRestore(data);
 
-            if (largeFilesToRestore.length > 0) {
-              if (!this.zzEnv.storageProvider) {
-                throw new Error(
-                  "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
-                );
-              } else {
-                restored = (await restoreLargeValues({
-                  obj_: newObj,
-                  largeFilesToRestore,
-                  basePath: this.stream.baseWorkingRelativePath,
-                  fetcher: this.zzEnv.storageProvider.fetchFromStorage,
-                })) as T;
-              }
-            }
-
-            subscriber.next({
-              ...restored,
-              timestamp,
-              messageId: this.cursor,
-            });
+        if (largeFilesToRestore.length > 0) {
+          if (!this.zzEnv.storageProvider) {
+            throw new Error(
+              "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
+            );
+          } else {
+            restored = (await restoreLargeValues({
+              obj_: newObj,
+              largeFilesToRestore,
+              basePath: this.stream.baseWorkingRelativePath,
+              fetcher: this.zzEnv.storageProvider.fetchFromStorage,
+            })) as T;
           }
         }
+
+        subscriber.next({
+          ...restored,
+          timestamp: message.timestamp,
+          messageId: message.messageId,
+        });
       }
     } catch (error) {
       subscriber.error(error);
@@ -428,25 +410,6 @@ export class DataStreamSubscriber<T extends object> {
       }
       yield input;
     }
-  }
-}
-
-function parseMessageData<T>(data: Array<any>): T {
-  // Look for the 'data' key and its subsequent value in the flattened array
-  const dataIdx = data.indexOf("data");
-  if (dataIdx === -1 || dataIdx === data.length - 1) {
-    console.error("data:", data);
-    throw new Error("Data key not found in stream message or is malformed");
-  }
-
-  const jsonData = data[dataIdx + 1];
-
-  // Parse the JSON data (assuming data is stored as a JSON string)
-  try {
-    const parsedData = customParse(jsonData);
-    return parsedData as T;
-  } catch (error) {
-    throw new Error(`Error parsing data from stream: ${error}`);
   }
 }
 

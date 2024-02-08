@@ -3,11 +3,12 @@ syntax = "proto3";
 package livestack;
 
 // import "google/protobuf/struct.proto";
-// import "google/protobuf/empty.proto"; 
+import "google/protobuf/empty.proto"; 
 
 service StreamService {
   rpc Pub(StreamPubMessage) returns (StreamPubResult);
   rpc Sub(SubRequest) returns (stream StreamDatapoint);
+  rpc LastValue(SubRequest) returns (LastValueResponse);
 }
 
 
@@ -29,8 +30,6 @@ enum SubType {
 message SubRequest {
   string projectId = 1;
   string uniqueName = 2;
-  string jobId = 3;
-  string outputTag = 4;
   SubType subType = 5;
 }
 
@@ -38,4 +37,11 @@ message StreamDatapoint {
   int32 timestamp = 1;
   string messageId = 2;
   string dataStr = 3;
+}
+
+message LastValueResponse {
+  oneof value {
+    StreamDatapoint datapoint = 1;
+    google.protobuf.Empty null_response = 2;
+  }
 }

@@ -1,6 +1,7 @@
 /* eslint-disable */
 import type { CallContext, CallOptions } from "nice-grpc-common";
 import _m0 from "protobufjs/minimal";
+import { Empty } from "./google/protobuf/empty";
 
 export const protobufPackage = "livestack";
 
@@ -50,8 +51,6 @@ export interface StreamPubResult {
 export interface SubRequest {
   projectId: string;
   uniqueName: string;
-  jobId: string;
-  outputTag: string;
   subType: SubType;
 }
 
@@ -59,6 +58,11 @@ export interface StreamDatapoint {
   timestamp: number;
   messageId: string;
   dataStr: string;
+}
+
+export interface LastValueResponse {
+  datapoint?: StreamDatapoint | undefined;
+  null_response?: Empty | undefined;
 }
 
 function createBaseStreamPubMessage(): StreamPubMessage {
@@ -208,7 +212,7 @@ export const StreamPubResult = {
 };
 
 function createBaseSubRequest(): SubRequest {
-  return { projectId: "", uniqueName: "", jobId: "", outputTag: "", subType: 0 };
+  return { projectId: "", uniqueName: "", subType: 0 };
 }
 
 export const SubRequest = {
@@ -218,12 +222,6 @@ export const SubRequest = {
     }
     if (message.uniqueName !== "") {
       writer.uint32(18).string(message.uniqueName);
-    }
-    if (message.jobId !== "") {
-      writer.uint32(26).string(message.jobId);
-    }
-    if (message.outputTag !== "") {
-      writer.uint32(34).string(message.outputTag);
     }
     if (message.subType !== 0) {
       writer.uint32(40).int32(message.subType);
@@ -252,20 +250,6 @@ export const SubRequest = {
 
           message.uniqueName = reader.string();
           continue;
-        case 3:
-          if (tag !== 26) {
-            break;
-          }
-
-          message.jobId = reader.string();
-          continue;
-        case 4:
-          if (tag !== 34) {
-            break;
-          }
-
-          message.outputTag = reader.string();
-          continue;
         case 5:
           if (tag !== 40) {
             break;
@@ -286,8 +270,6 @@ export const SubRequest = {
     return {
       projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
-      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
-      outputTag: isSet(object.outputTag) ? globalThis.String(object.outputTag) : "",
       subType: isSet(object.subType) ? subTypeFromJSON(object.subType) : 0,
     };
   },
@@ -299,12 +281,6 @@ export const SubRequest = {
     }
     if (message.uniqueName !== "") {
       obj.uniqueName = message.uniqueName;
-    }
-    if (message.jobId !== "") {
-      obj.jobId = message.jobId;
-    }
-    if (message.outputTag !== "") {
-      obj.outputTag = message.outputTag;
     }
     if (message.subType !== 0) {
       obj.subType = subTypeToJSON(message.subType);
@@ -319,8 +295,6 @@ export const SubRequest = {
     const message = createBaseSubRequest();
     message.projectId = object.projectId ?? "";
     message.uniqueName = object.uniqueName ?? "";
-    message.jobId = object.jobId ?? "";
-    message.outputTag = object.outputTag ?? "";
     message.subType = object.subType ?? 0;
     return message;
   },
@@ -415,6 +389,84 @@ export const StreamDatapoint = {
   },
 };
 
+function createBaseLastValueResponse(): LastValueResponse {
+  return { datapoint: undefined, null_response: undefined };
+}
+
+export const LastValueResponse = {
+  encode(message: LastValueResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.datapoint !== undefined) {
+      StreamDatapoint.encode(message.datapoint, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.null_response !== undefined) {
+      Empty.encode(message.null_response, writer.uint32(18).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): LastValueResponse {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseLastValueResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.datapoint = StreamDatapoint.decode(reader, reader.uint32());
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.null_response = Empty.decode(reader, reader.uint32());
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): LastValueResponse {
+    return {
+      datapoint: isSet(object.datapoint) ? StreamDatapoint.fromJSON(object.datapoint) : undefined,
+      null_response: isSet(object.null_response) ? Empty.fromJSON(object.null_response) : undefined,
+    };
+  },
+
+  toJSON(message: LastValueResponse): unknown {
+    const obj: any = {};
+    if (message.datapoint !== undefined) {
+      obj.datapoint = StreamDatapoint.toJSON(message.datapoint);
+    }
+    if (message.null_response !== undefined) {
+      obj.null_response = Empty.toJSON(message.null_response);
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<LastValueResponse>): LastValueResponse {
+    return LastValueResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<LastValueResponse>): LastValueResponse {
+    const message = createBaseLastValueResponse();
+    message.datapoint = (object.datapoint !== undefined && object.datapoint !== null)
+      ? StreamDatapoint.fromPartial(object.datapoint)
+      : undefined;
+    message.null_response = (object.null_response !== undefined && object.null_response !== null)
+      ? Empty.fromPartial(object.null_response)
+      : undefined;
+    return message;
+  },
+};
+
 export type StreamServiceDefinition = typeof StreamServiceDefinition;
 export const StreamServiceDefinition = {
   name: "StreamService",
@@ -436,6 +488,14 @@ export const StreamServiceDefinition = {
       responseStream: true,
       options: {},
     },
+    lastValue: {
+      name: "LastValue",
+      requestType: SubRequest,
+      requestStream: false,
+      responseType: LastValueResponse,
+      responseStream: false,
+      options: {},
+    },
   },
 } as const;
 
@@ -445,11 +505,13 @@ export interface StreamServiceImplementation<CallContextExt = {}> {
     request: SubRequest,
     context: CallContext & CallContextExt,
   ): ServerStreamingMethodResult<DeepPartial<StreamDatapoint>>;
+  lastValue(request: SubRequest, context: CallContext & CallContextExt): Promise<DeepPartial<LastValueResponse>>;
 }
 
 export interface StreamServiceClient<CallOptionsExt = {}> {
   pub(request: DeepPartial<StreamPubMessage>, options?: CallOptions & CallOptionsExt): Promise<StreamPubResult>;
   sub(request: DeepPartial<SubRequest>, options?: CallOptions & CallOptionsExt): AsyncIterable<StreamDatapoint>;
+  lastValue(request: DeepPartial<SubRequest>, options?: CallOptions & CallOptionsExt): Promise<LastValueResponse>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
