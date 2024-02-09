@@ -211,21 +211,23 @@ export class DataStream<T extends object> {
     }
 
     const datapointId = v4();
-    await dbClient.addDatapoint({
-      streamId: this.uniqueName,
-      projectId: this.zzEnv.projectId,
-      jobInfo: jobInfo,
-      dataStr: JSON.stringify(parsed),
-      datapointId,
-    });
 
     try {
       // Publish the data to the stream
-      const { messageId } = await streamClient.pub({
-        projectId: this.zzEnv.projectId,
-        uniqueName: this.uniqueName,
-        dataStr: customStringify(parsed),
-      });
+      const [_, { messageId }] = await Promise.all([
+        dbClient.addDatapoint({
+          streamId: this.uniqueName,
+          projectId: this.zzEnv.projectId,
+          jobInfo: jobInfo,
+          dataStr: JSON.stringify(parsed),
+          datapointId,
+        }),
+        streamClient.pub({
+          projectId: this.zzEnv.projectId,
+          uniqueName: this.uniqueName,
+          dataStr: customStringify(parsed),
+        }),
+      ]);
 
       // console.debug("DataStream pub", this.uniqueName, parsed);
 
