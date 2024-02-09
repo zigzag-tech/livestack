@@ -1,4 +1,4 @@
-import { genManuallyFedIterator, genPromiseCycle } from "@livestack/shared";
+import { genManuallyFedIterator } from "@livestack/shared";
 import { StreamServiceImplementation } from "@livestack/vault-interface";
 import {
   StreamPubMessage,
