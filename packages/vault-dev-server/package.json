@@ -11,6 +11,7 @@
     "dotenv": "^16.x",
     "knex": "^2.x",
     "pg": "^8.x",
+    "redis": "^4",
     "uuid": "^9"
   },
   "devDependencies": {
