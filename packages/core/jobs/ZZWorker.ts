@@ -11,7 +11,7 @@ import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
 import { QueueJob, FromWorker } from "@livestack/vault-interface";
 import { v4 } from "uuid";
 import { genManuallyFedIterator, genPromiseCycle } from "@livestack/shared";
-import { queueClient } from "@livestack/vault-client";
+import { vaultClient } from "@livestack/vault-client";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -122,7 +122,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     const { iterator: iterParams, resolveNext: resolveNext } =
       genManuallyFedIterator<FromWorker>();
 
-    const iter = queueClient.reportAsWorker(iterParams);
+    const iter = vaultClient.queue.reportAsWorker(iterParams);
 
     resolveNext({
       signUp: {

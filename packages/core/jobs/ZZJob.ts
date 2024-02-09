@@ -15,7 +15,7 @@ import { InferTMap } from "@livestack/shared/IOSpec";
 import _ from "lodash";
 import { InstantiatedGraph, JobId } from "../orchestrations/InstantiatedGraph";
 import { TransformRegistry } from "../orchestrations/TransformRegistry";
-import { dbClient } from "@livestack/vault-client";
+import { vaultClient } from "@livestack/vault-client";
 
 export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
   j: ZZJob<P, I, O, WP, IMap, OMap>
@@ -277,7 +277,7 @@ export class ZZJob<
   private _parentRec:
     | (Omit<
         NonNullable<
-          Awaited<ReturnType<typeof dbClient.getParentJobRec>>["rec"]
+          Awaited<ReturnType<typeof vaultClient.db.getParentJobRec>>["rec"]
         >,
         "job_params_str"
       > & {
@@ -288,7 +288,7 @@ export class ZZJob<
 
   private getParentRec = async () => {
     if (this._parentRec === "uninitialized") {
-      const { null_response, rec } = await dbClient.getParentJobRec({
+      const { null_response, rec } = await vaultClient.db.getParentJobRec({
         projectId: this.zzEnv.projectId,
         childJobId: this.jobId,
       });
@@ -398,7 +398,7 @@ export class ZZJob<
     );
 
     try {
-      await dbClient.appendJobStatusRec({
+      await vaultClient.db.appendJobStatusRec({
         ...jId,
         jobStatus: "running",
       });
@@ -430,7 +430,7 @@ export class ZZJob<
         await this.output.emit(processedR);
       }
 
-      await dbClient.appendJobStatusRec({
+      await vaultClient.db.appendJobStatusRec({
         ...jId,
         jobStatus: "completed",
       });
@@ -445,7 +445,7 @@ export class ZZJob<
       //   return processedR;
       // }
     } catch (e: any) {
-      await dbClient.appendJobStatusRec({
+      await vaultClient.db.appendJobStatusRec({
         projectId,
         specName: this.spec.name,
         jobId: this.jobId,

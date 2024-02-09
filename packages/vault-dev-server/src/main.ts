@@ -9,14 +9,14 @@ import {
   StreamServiceDefinition,
 } from "@livestack/vault-interface";
 
-export async function launchVaultDevServer() {
+export async function launchVaultDevServer(port = 50508) {
   const server = createServer();
   server.add(DBServiceDefinition, dbService(db));
   server.add(QueueServiceDefinition, getQueueService());
   server.add(StreamServiceDefinition, getStreamService());
 
-  const HOST = process.env.HOST || "0.0.0.0";
-  const PORT = Number(process.env.PORT) || 50508;
+  const HOST = process.env.VAULT_SERVER_LOCAL_DEV_SERVER_HOST || "0.0.0.0";
+  const PORT = Number(process.env.VAULT_SERVER_LOCAL_DEV_SERVER_PORT) || port;
   const address = `${HOST}:${PORT}`;
 
   await server.listen(address);
