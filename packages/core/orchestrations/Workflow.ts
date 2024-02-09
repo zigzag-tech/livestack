@@ -5,13 +5,13 @@ import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
-import { JobNode, InstantiatedGraph } from "./InstantiatedGraph";
+import { JobNode, InstantiatedGraph } from "@livestack/shared";
 import {
   SpecAndOutlet,
   resolveUniqueSpec,
   resolveTagMapping,
 } from "../jobs/JobSpec";
-import { TransformFunction } from "./DefGraph";
+import { TransformFunction } from "@livestack/shared";
 import { TransformRegistry } from "./TransformRegistry";
 
 type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;

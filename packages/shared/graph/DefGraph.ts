@@ -1,5 +1,5 @@
 import Graph from "graphology";
-import { IOSpec } from "@livestack/shared";
+import { IOSpec } from "../IOSpec";
 import { Attributes } from "graphology-types";
 import {
   uniqueSpecIdentifier,
