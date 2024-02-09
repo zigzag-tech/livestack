@@ -32,6 +32,12 @@ export class InstantiatedGraph extends Graph<
     | AliasNode
   )
 > {
+  public contextId: string;
+  public rootJobId: string;
+  public streamIdOverrides: StreamIdOverridesForRootSpec;
+  public inletHasTransformOverridesByTag: Record<string, boolean>;
+  public defGraph: DefGraph;
+
   constructor({
     contextId,
     defGraph,
@@ -46,28 +52,23 @@ export class InstantiatedGraph extends Graph<
     inletHasTransformOverridesByTag: Record<string, boolean>;
   }) {
     super({ multi: false });
-    this.instantiate({
-      defGraph,
-      contextId,
-      rootJobId,
-      streamIdOverrides,
-      inletHasTransformOverridesByTag,
-    });
+    this.contextId = contextId;
+    this.rootJobId = rootJobId;
+    this.streamIdOverrides = streamIdOverrides;
+    this.inletHasTransformOverridesByTag = inletHasTransformOverridesByTag;
+    this.defGraph = defGraph;
+
+    this.instantiate();
   }
 
-  private instantiate({
-    defGraph,
-    contextId,
-    streamIdOverrides,
-    inletHasTransformOverridesByTag,
-    rootJobId,
-  }: {
-    defGraph: DefGraph;
-    contextId: string;
-    streamIdOverrides: StreamIdOverridesForRootSpec;
-    rootJobId: string;
-    inletHasTransformOverridesByTag: Record<string, boolean>;
-  }) {
+  private instantiate() {
+    const contextId = this.contextId;
+    const rootJobId = this.rootJobId;
+    const streamIdOverrides = this.streamIdOverrides;
+    const inletHasTransformOverridesByTag =
+      this.inletHasTransformOverridesByTag;
+    const defGraph = this.defGraph;
+
     const nodes = defGraph.nodes();
     const childJobNodeIdBySpecNodeId: { [k: string]: string } = {};
     const streamNodeIdByStreamId: { [k: string]: string } = {};
@@ -197,6 +198,29 @@ export class InstantiatedGraph extends Graph<
       }
     });
     return streamNodeId;
+  }
+
+  public override toJSON() {
+    const json = super.toJSON();
+    const newJ = {
+      ...json,
+      contextId: this.contextId,
+      rootJobId: this.rootJobId,
+      streamIdOverrides: this.streamIdOverrides,
+      inletHasTransformOverridesByTag: this.inletHasTransformOverridesByTag,
+      defGraph: this.defGraph.toJSON(),
+    };
+    return newJ;
+  }
+
+  static loadFromJSON(json: ReturnType<InstantiatedGraph["toJSON"]>) {
+    return new InstantiatedGraph({
+      contextId: json.contextId,
+      defGraph: DefGraph.loadFromJSON(json.defGraph),
+      rootJobId: json.rootJobId,
+      streamIdOverrides: json.streamIdOverrides,
+      inletHasTransformOverridesByTag: json.inletHasTransformOverridesByTag,
+    });
   }
 }
 

@@ -661,5 +661,22 @@ export class DefGraph extends Graph<DefGraphNode> {
       };
     });
   }
+
+  public override toJSON() {
+    const json = super.toJSON();
+    return {
+      ...json,
+      streamNodeIdBySpecIdentifierTypeAndTag:
+        this.streamNodeIdBySpecIdentifierTypeAndTag,
+    };
+  }
+
+  static loadFromJSON(json: ReturnType<DefGraph["toJSON"]>) {
+    const g = new Graph();
+    g.import(json);
+    (g as DefGraph).streamNodeIdBySpecIdentifierTypeAndTag =
+      json.streamNodeIdBySpecIdentifierTypeAndTag;
+    return g as DefGraph;
+  }
 }
 export type TransformFunction<T1 = any, T2 = any> = (o: T1) => T2 | Promise<T2>;
