@@ -1,4 +1,4 @@
-import { TransformFunction } from "./DefGraph";
+import { TransformFunction } from "@livestack/shared";
 
 export class TransformRegistry {
   private static _transformsByWorkflowByReceivingSpecNameAndTag: Record<

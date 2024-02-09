@@ -1,6 +1,6 @@
 import Graph from "graphology";
 import { InletNode, OutletNode, AliasNode, DefGraph } from "./DefGraph";
-import { IOSpec } from "@livestack/shared";
+import { IOSpec } from "../IOSpec";
 import { Attributes } from "graphology-types";
 import { SpecNode, RootSpecNode } from "./DefGraph";
 
