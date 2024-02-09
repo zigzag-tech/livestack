@@ -33,7 +33,7 @@ export namespace DataStream {
 // cursor based redis stream subscriber
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../realtime/pubsub";
-import { dbClient, streamClient } from "@livestack/vault-client";
+import { vaultClient } from "@livestack/vault-client";
 import { SubType } from "@livestack/vault-interface/src/generated/stream";
 
 export class DataStream<T extends object> {
@@ -95,7 +95,7 @@ export class DataStream<T extends object> {
       });
       // async
       if (zzEnv) {
-        await dbClient.ensureStreamRec({
+        await vaultClient.db.ensureStreamRec({
           project_id: zzEnv.projectId,
           stream_id: uniqueName,
         });
@@ -133,7 +133,7 @@ export class DataStream<T extends object> {
   }
 
   public lastValue = async () => {
-    const { null_response, datapoint } = await streamClient.lastValue({
+    const { null_response, datapoint } = await vaultClient.stream.lastValue({
       projectId: this.zzEnv.projectId,
       uniqueName: this.uniqueName,
     });
@@ -215,14 +215,14 @@ export class DataStream<T extends object> {
     try {
       // Publish the data to the stream
       const [_, { messageId }] = await Promise.all([
-        dbClient.addDatapoint({
+        vaultClient.db.addDatapoint({
           streamId: this.uniqueName,
           projectId: this.zzEnv.projectId,
           jobInfo: jobInfo,
           dataStr: JSON.stringify(parsed),
           datapointId,
         }),
-        streamClient.pub({
+        vaultClient.stream.pub({
           projectId: this.zzEnv.projectId,
           uniqueName: this.uniqueName,
           dataStr: customStringify(parsed),
@@ -314,7 +314,7 @@ export class DataStreamSubscriber<T extends object> {
 
   private async readStream(subscriber: Subscriber<WithTimestamp<T>>) {
     try {
-      const iter = streamClient.sub({
+      const iter = vaultClient.stream.sub({
         projectId: this.zzEnv.projectId,
         uniqueName: this.stream.uniqueName,
         subType: this.subType,

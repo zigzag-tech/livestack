@@ -1,4 +1,4 @@
-import { dbClient } from "@livestack/vault-client";
+import { vaultClient } from "@livestack/vault-client";
 import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { IOSpec, InferTMap } from "@livestack/shared/IOSpec";
 import { z } from "zod";
@@ -226,7 +226,7 @@ export class WorkflowSpec extends JobSpec<
       jobSpec: this,
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;
-        const { rec: parentRec } = await dbClient.getParentJobRec({
+        const { rec: parentRec } = await vaultClient.db.getParentJobRec({
           projectId: this.zzEnvEnsured.projectId,
           childJobId: groupId,
         });
@@ -512,7 +512,7 @@ export class Workflow {
     const that = this;
     if (!this._graphP) {
       this._graphP = (async () => {
-        const { rec: parentRec } = await dbClient.getParentJobRec({
+        const { rec: parentRec } = await vaultClient.db.getParentJobRec({
           projectId: that.jobGroupDef.zzEnvEnsured.projectId,
           childJobId: this.contextId,
         });

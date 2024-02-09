@@ -1,4 +1,4 @@
-import { queueClient } from "@livestack/vault-client";
+import { vaultClient } from "@livestack/vault-client";
 import { WrapWithTimestamp } from "./../utils/io";
 import { InletNode, SpecNode } from "../orchestrations/DefGraph";
 import {
@@ -32,7 +32,6 @@ import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { Observable } from "rxjs";
 import { TagObj, TagMaps } from "../orchestrations/Workflow";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
-import { dbClient } from "@livestack/vault-client";
 import { ConnectorType, Order } from "@livestack/vault-interface";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
@@ -156,7 +155,7 @@ export class JobSpec<
   }
 
   public async getJobRec(jobId: string) {
-    const r = await dbClient.getJobRec({
+    const r = await vaultClient.db.getJobRec({
       specName: this.name,
       projectId: this.zzEnvEnsured.projectId,
       jobId,
@@ -200,7 +199,7 @@ export class JobSpec<
         key = this.getSingleOutputTag() as typeof key;
       }
     }
-    const dRaw = await dbClient.getJobDatapoints({
+    const dRaw = await vaultClient.db.getJobDatapoints({
       specName: this.name,
       projectId: this.zzEnvEnsured.projectId,
       jobId,
@@ -652,7 +651,7 @@ export class JobSpec<
 
     jobOptions = jobOptions || ({} as P);
 
-    await dbClient.ensureJobAndStatusAndConnectorRecs({
+    await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
       projectId: this.zzEnvEnsured.projectId,
       specName: this.name,
       jobId,
@@ -663,7 +662,7 @@ export class JobSpec<
       outputStreamIdOverridesByTag: outputStreamIdOverridesByTag || {},
     });
 
-    const j = await queueClient.addJob({
+    const j = await vaultClient.queue.addJob({
       projectId,
       specName: this.name,
       jobId,

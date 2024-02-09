@@ -3,7 +3,7 @@ import { ZZEnv } from "./ZZEnv";
 import { InstantiatedGraph } from "../orchestrations/InstantiatedGraph";
 import { JobSpec } from "./JobSpec";
 import { TransformRegistry } from "../orchestrations/TransformRegistry";
-import { dbClient } from "@livestack/vault-client";
+import { vaultClient } from "@livestack/vault-client";
 import { ConnectorType } from "@livestack/vault-interface";
 import { lruCacheFn } from "../utils/lruCacheFn";
 
@@ -67,10 +67,10 @@ export async function resolveInstantiatedGraph({
 
 const getParentRecCached = lruCacheFn(
   (rec) => `${rec.project_id}/${rec.childJobId}`,
-  dbClient.getParentJobRec.bind(dbClient)
+  vaultClient.db.getParentJobRec.bind(vaultClient.db)
 );
 
 const getJobStreamConnectorRecsCached = lruCacheFn(
   (rec) => `${rec.projectId}/${rec.jobId}`,
-  dbClient.getJobStreamConnectorRecs.bind(dbClient)
+  vaultClient.db.getJobStreamConnectorRecs.bind(vaultClient.db)
 );
