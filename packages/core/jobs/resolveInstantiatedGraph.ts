@@ -5,6 +5,7 @@ import { JobSpec } from "./JobSpec";
 import { TransformRegistry } from "../orchestrations/TransformRegistry";
 import { dbClient } from "@livestack/vault-client";
 import { ConnectorType } from "@livestack/vault-interface";
+import { lruCacheFn } from "../utils/lruCacheFn";
 
 // TODO: cache this
 export async function resolveInstantiatedGraph({
@@ -16,7 +17,7 @@ export async function resolveInstantiatedGraph({
   spec: JobSpec<any, any, any, any, any>;
   jobId: string;
 }) {
-  const { records: streams } = await dbClient.getJobStreamConnectorRecs({
+  const { records: streams } = await getJobStreamConnectorRecsCached({
     projectId: zzEnv.projectId,
     jobId,
   });
@@ -32,7 +33,7 @@ export async function resolveInstantiatedGraph({
       })
   );
 
-  const parentRec = await dbClient.getParentJobRec({
+  const parentRec = await getParentRecCached({
     projectId: zzEnv.projectId,
     childJobId: jobId,
   });
@@ -63,3 +64,13 @@ export async function resolveInstantiatedGraph({
 
   return instaG;
 }
+
+const getParentRecCached = lruCacheFn(
+  (rec) => `${rec.project_id}/${rec.childJobId}`,
+  dbClient.getParentJobRec.bind(dbClient)
+);
+
+const getJobStreamConnectorRecsCached = lruCacheFn(
+  (rec) => `${rec.projectId}/${rec.jobId}`,
+  dbClient.getJobStreamConnectorRecs.bind(dbClient)
+);
