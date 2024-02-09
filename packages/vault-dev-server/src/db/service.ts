@@ -194,6 +194,10 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     jobInfo,
     dataStr,
   }) => {
+    await ensureStreamRec(dbConn, {
+      project_id: projectId,
+      stream_id: streamId,
+    });
     const data = JSON.parse(dataStr);
     await dbConn<
       ZZDatapointRec<
