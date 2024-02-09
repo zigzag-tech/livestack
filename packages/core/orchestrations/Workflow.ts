@@ -177,19 +177,6 @@ export class WorkflowSpec extends JobSpec<
     return g;
   }
 
-  private _transformsByReceivingSpecNameAndTag: Record<
-    `${string}/${string}`,
-    TransformFunction
-  > = {};
-
-  private transformsRegistered: boolean = false;
-  private ensureTransformsRegistered() {
-    if (!this.transformsRegistered) {
-      const dg = this.getDefGraph();
-      this.transformsRegistered = true;
-    }
-  }
-
   private orchestrationWorkerDef: ZZWorkerDef<
     WorkflowChildJobOptionsSanitized,
     any,
