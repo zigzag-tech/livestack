@@ -211,10 +211,6 @@ export class DataStream<T extends object> {
     }
 
     const datapointId = v4();
-    await dbClient.ensureStreamRec({
-      project_id: this.zzEnv.projectId,
-      stream_id: this.uniqueName,
-    });
     await dbClient.addDatapoint({
       streamId: this.uniqueName,
       projectId: this.zzEnv.projectId,
