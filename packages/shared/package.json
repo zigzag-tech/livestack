@@ -15,7 +15,6 @@
     "zod": "^3"
   },
   "devDependencies": {
-    "@babel/preset-typescript": "^7.23.3",
     "typescript": "5.4.0-beta"
   },
   "main": "dist/livestack-shared.cjs.js",
