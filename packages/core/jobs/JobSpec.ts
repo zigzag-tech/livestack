@@ -335,19 +335,21 @@ export class JobSpec<
         type,
       });
 
-      const lastV = await stream.lastValue();
-      if (lastV?.terminate) {
-        this.logger.error(
-          `Cannot send ${
-            type === "in" ? "input" : "output"
-          } to a terminated stream! jobId: ${jobId}, tag: ${String(tag)}`
-        );
-        console.error("data to send: ", d);
-        throw new Error(
-          `Cannot send ${
-            type === "in" ? "input" : "output"
-          } to a terminated stream!`
-        );
+      if (!d.terminate) {
+        const lastV = await stream.lastValue();
+        if (lastV?.terminate) {
+          this.logger.error(
+            `Cannot send ${
+              type === "in" ? "input" : "output"
+            } to a terminated stream! jobId: ${jobId}, tag: ${String(tag)}`
+          );
+          console.error("data to send: ", d);
+          throw new Error(
+            `Cannot send ${
+              type === "in" ? "input" : "output"
+            } to a terminated stream!`
+          );
+        }
       }
 
       // await ensureStreamNotTerminated({
