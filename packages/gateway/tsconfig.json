@@ -13,6 +13,7 @@
     "resolveJsonModule": true,
     "preserveConstEnums": true,
     "removeComments": false,
+    "isolatedModules": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "sourceMap": true,
