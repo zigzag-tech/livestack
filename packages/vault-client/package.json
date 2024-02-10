@@ -19,6 +19,7 @@
   },
   "main": "dist/livestack-vault-client.cjs.js",
   "types": "dist/livestack-vault-client.cjs.d.ts",
+  "module": "dist/livestack-vault-client.esm.js",
   "preconstruct": {
     "entrypoints": [
       "./index.ts"
