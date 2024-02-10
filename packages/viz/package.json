@@ -8,13 +8,14 @@
   "files": [
     "dist/**/*"
   ],
-  "types": "dist/index.d.ts",
+  "types": "dist/livestack-viz.cjs.d",
+  "module": "dist/livestack-viz.esm.js",
+  "main": "dist/livestack-viz.cjs.js",
   "devDependencies": {
     "typescript": "5.4.0-beta"
   },
   "peerDependencies": {
     "@livestack/core": "*"
   },
-  "main": "./dist/index.js",
   "author": ""
 }
