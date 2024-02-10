@@ -19,14 +19,14 @@ export function findSuitableVaultServer() {
       main.launchVaultDevServer(port);
       vaultServerURL = `localhost:${port}`;
     } catch (e) {
+      console.log(e);
       throw new Error(
-        "Vault dev server module @live/vault-dev-server not installed or failed to launch. Aborting app."
+        "Vault dev server module @livestack/vault-dev-server not installed or failed to launch. Aborting app."
       );
     }
   } else {
     vaultServerURL = "livedev.zztech.io:50504";
   }
-
   return {
     db: createClient(DBServiceDefinition, createChannel(vaultServerURL)),
     stream: createClient(
