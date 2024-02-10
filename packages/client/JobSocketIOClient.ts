@@ -10,6 +10,7 @@ import {
   CMD_UNBIND,
   UnbindParams,
 } from "@livestack/shared/gateway-binding-types";
+import { requestAndGetResponse } from "./requestAndGetResponse";
 
 export class JobSocketIOConnection {
   public readonly jobId: string;
@@ -168,7 +169,10 @@ export class JobSocketIOConnection {
     }
   }
 
+  private closed = false;
+
   public async close() {
+    if (this.closed) return;
     this.socketIOClient.emit(CMD_UNBIND, { jobId: this.jobId } as UnbindParams);
     for (const key of this.subscribedOutputKeys) {
       this.socketIOClient.off(`stream:${this.jobId}/${key}`);
@@ -177,6 +181,7 @@ export class JobSocketIOConnection {
     if (this.isConnDedicated) {
       this.socketIOClient.close();
     }
+    this.closed = true;
   }
 }
 
@@ -223,7 +228,8 @@ export async function bindNewJobToSocketIO({
   specName,
   uniqueSpecLabel,
   ...connParams
-}: RequestAndBindType & ClientConnParams): Promise<JobSocketIOConnection> {
+}: Omit<RequestAndBindType, "requestIdentifier"> &
+  ClientConnParams): Promise<JobSocketIOConnection> {
   const { newClient, conn } = getClient(connParams);
 
   // await getConnReadyPromise(conn!);
@@ -231,19 +237,12 @@ export async function bindNewJobToSocketIO({
     specName,
     ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
   };
-  conn.emit(REQUEST_AND_BIND_CMD, requestBindingData);
-  const { jobId, availableInputs, availableOutputs } = await new Promise<{
-    jobId: string;
-    availableOutputs: JobInfoType["availableOutputs"];
-    availableInputs: JobInfoType["availableInputs"];
-  }>((resolve) => {
-    conn.on(
-      MSG_JOB_INFO,
-      ({ availableInputs, availableOutputs, jobId }: JobInfoType) => {
-        resolve({ jobId, availableInputs, availableOutputs });
-      }
-    );
-  });
+  const { jobId, availableInputs, availableOutputs } =
+    await requestAndGetResponse<RequestAndBindType, JobInfoType>({
+      req: { data: requestBindingData, method: REQUEST_AND_BIND_CMD },
+      res: { method: MSG_JOB_INFO },
+      conn,
+    });
 
   return new JobSocketIOConnection({
     jobInfo: { jobId, availableInputs, availableOutputs },

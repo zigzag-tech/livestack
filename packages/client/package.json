@@ -10,7 +10,8 @@
   ],
   "dependencies": {
     "@livestack/shared": "*",
-    "use-deep-compare-effect": "^1.8.1"
+    "use-deep-compare-effect": "^1.8.1",
+    "uuid": "^9"
   },
   "types": "dist/index.d.ts",
   "devDependencies": {
