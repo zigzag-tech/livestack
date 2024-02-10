@@ -71,7 +71,25 @@ export class LiveGatewayConn {
         return data;
       },
     });
+
+    this.socket.on(CMD_UNBIND, ({ jobId }: UnbindParams) => {
+      const input = this.jobFnsById[jobId].input;
+      for (const key of input.tags) {
+        try {
+          input.byTag(key).terminate();
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
+      const subs = this.subsByJobId[jobId];
+
+      for (const sub of subs) {
+        sub.unsubscribe();
+      }
+    });
   }
+  private subsByJobId: Record<string, Subscription[]> = {};
   private jobFnsById: Record<
     string,
     {
@@ -105,7 +123,7 @@ export class LiveGatewayConn {
       }
     );
 
-    let subs: Subscription[] = [];
+    const subs: Subscription[] = [];
 
     for (const tag of output.tags) {
       const sub = output.byTag(tag).valueObservable.subscribe((data) => {
@@ -113,6 +131,7 @@ export class LiveGatewayConn {
       });
       subs.push(sub);
     }
+    this.subsByJobId[jobId] = subs;
 
     this.onDisconnect(() => {
       for (const key of input.tags) {
@@ -126,20 +145,8 @@ export class LiveGatewayConn {
       for (const sub of subs) {
         sub.unsubscribe();
       }
-    });
-
-    this.socket.on(CMD_UNBIND, ({ jobId }: UnbindParams) => {
-      for (const key of input.tags) {
-        try {
-          input.byTag(key).terminate();
-        } catch (err) {
-          console.error(err);
-        }
-      }
-
-      for (const sub of subs) {
-        sub.unsubscribe();
-      }
+      delete this.subsByJobId[jobId];
+      delete this.jobFnsById[jobId];
     });
   };
 }
