@@ -13,8 +13,6 @@
     "@livestack/vault-client": "*",
     "chalk": "^4",
     "dotenv": "^16.x",
-    "graphology": "^0.25.4",
-    "graphology-types": "^0.24.7",
     "lru-cache": "^10.2.0",
     "p-limit": "^3",
     "rxjs": "^7",
