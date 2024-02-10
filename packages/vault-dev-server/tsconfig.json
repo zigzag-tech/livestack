@@ -1,12 +1,12 @@
 {
   "include": ["missing-modules.d.ts", "**/*.ts", "**/*.tsx", "*.ts", "*.tsx"],
   "compilerOptions": {
-    "module": "CommonJS",
+    "module": "NodeNext",
     // "types": ["reflect-metadata"],
     "outDir": "dist",
     "target": "ES5",
     "pretty": true,
-    "moduleResolution": "node",
+    "moduleResolution": "NodeNext",
     "noEmit": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,

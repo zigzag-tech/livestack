@@ -12,12 +12,13 @@
   "dependencies": {
     "@livestack/shared": "*",
     "@livestack/vault-interface": "*",
+    "better-sqlite3": "^9.4.0",
     "bullmq": "^4.x",
     "dotenv": "^16.x",
+    "get-port": "^7.0.0",
     "knex": "^2.x",
     "lodash": "^4.x",
     "nice-grpc": "^2.1",
-    "pg": "^8.x",
     "redis": "^4",
     "uuid": "^9"
   },
