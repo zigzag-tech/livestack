@@ -25,6 +25,7 @@
     "zod-to-json-schema": "^3"
   },
   "devDependencies": {
+    "@preconstruct/cli": "^2.8.3",
     "@types/lodash": "^4.14.201",
     "@types/uuid": "^9.0.7",
     "typescript": "5.4.0-beta"
