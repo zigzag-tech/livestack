@@ -1,5 +1,8 @@
 export { DBServiceDefinition, DBServiceImplementation } from "./generated/db";
-export { QueueServiceDefinition } from "./generated/queue";
+export {
+  QueueServiceDefinition,
+  QueueServiceImplementation,
+} from "./generated/queue";
 export {
   StreamServiceDefinition,
   StreamServiceImplementation,

@@ -22,3 +22,7 @@ export async function launchVaultDevServer(port = 50508) {
   await server.listen(address);
   console.info(`🌌🔒 Vault dev server started. Listening on ${address}.`);
 }
+
+if (require.main === module) {
+  launchVaultDevServer();
+}
