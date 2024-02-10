@@ -3,17 +3,18 @@
   "version": "0.0.2",
   "description": "Helper functions and react hooks that help display Livestack data in the frontend.",
   "scripts": {
-    "build": "tsc"
+    "build": "preconstruct build",
+    "postinstall": "preconstruct dev"
   },
   "files": [
     "dist/**/*"
   ],
   "dependencies": {
     "@livestack/shared": "*",
+    "rxjs": "^7",
     "use-deep-compare-effect": "^1.8.1",
     "uuid": "^9"
   },
-  "types": "dist/index.d.ts",
   "devDependencies": {
     "@types/react": "^18",
     "typescript": "5.4.0-beta"
@@ -22,6 +23,13 @@
     "react": "^18",
     "socket.io-client": "^4"
   },
-  "main": "./index.ts",
+  "types": "dist/livestack-client.cjs.d",
+  "module": "dist/livestack-client.esm.js",
+  "main": "dist/livestack-client.cjs.js",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  },
   "author": ""
 }

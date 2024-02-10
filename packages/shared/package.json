@@ -20,6 +20,7 @@
   },
   "main": "dist/livestack-shared.cjs.js",
   "types": "dist/livestack-shared.cjs.d.ts",
+  "module": "dist/livestack-shared.esm.js",
   "preconstruct": {
     "entrypoints": [
       "./index.ts"
