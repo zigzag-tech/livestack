@@ -32,8 +32,7 @@ export function getGoogleCloudStorageProvider({
     path,
     originalType,
   }: LargeFileWithoutValue<T>) => {
-    const [file, resp] = await bucket.file(path).get({});
-
+    const [file, resp] = await bucket.file(path).download({});
     type R = InferRestoredFileType<T>;
     if (originalType === "string") {
       return file.toString() as R;

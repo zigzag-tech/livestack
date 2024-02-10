@@ -7,11 +7,11 @@ import {
   FeedParams,
   MSG_JOB_INFO,
   JobInfoType,
-} from "@livestack/shared/gateway-binding-types";
+} from "@livestack/shared";
 import { Subscription } from "rxjs";
 import { ZZEnv, JobSpec } from "@livestack/core";
 import { Socket } from "socket.io";
-import { JobInput, JobOutput } from "@livestack/core/jobs/JobSpec";
+import { JobInput, JobOutput } from "@livestack/core";
 
 export class LiveGatewayConn {
   socket: Socket;

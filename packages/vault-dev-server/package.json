@@ -4,12 +4,18 @@
   "packageManager": "yarn@4.0.2",
   "author": "",
   "license": "MIT",
+  "scripts": {
+    "build": "preconstruct build",
+    "postinstall": "preconstruct dev"
+  },
   "dependencies": {
     "@livestack/shared": "*",
     "@livestack/vault-interface": "*",
     "bullmq": "^4.x",
     "dotenv": "^16.x",
     "knex": "^2.x",
+    "lodash": "^4.x",
+    "nice-grpc": "^2.1",
     "pg": "^8.x",
     "redis": "^4",
     "uuid": "^9"
@@ -18,5 +24,14 @@
     "@types/node": "^20.11.0",
     "typescript": "5.4.0-beta"
   },
-  "main": "src/main"
+  "files": [
+    "dist"
+  ],
+  "main": "dist/livestack-vault-dev-server.cjs.js",
+  "types": "dist/livestack-vault-dev-server.d.ts",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
 }

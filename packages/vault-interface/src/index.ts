@@ -1,7 +1,10 @@
+export { DBServiceDefinition, DBServiceImplementation } from "./generated/db";
+export { QueueServiceDefinition } from "./generated/queue";
 export {
-  DBServiceClient,
-  DBServiceDefinition,
-  DBServiceImplementation,
+  StreamServiceDefinition,
+  StreamServiceImplementation,
+} from "./generated/stream";
+export {
   JobRec,
   EnsureJobAndStatusAndConnectorRecsRequest,
   EnsureStreamRecRequest,
@@ -13,17 +16,6 @@ export {
   AddDatapointResponse,
   Order,
 } from "./generated/db";
-export {
-  FromWorker,
-  QueueJob,
-  QueueServiceClient,
-  QueueServiceDefinition,
-  QueueServiceImplementation,
-} from "./generated/queue";
-export {
-  StreamServiceClient,
-  StreamServiceDefinition,
-  StreamServiceImplementation,
-} from "./generated/stream";
+export { FromWorker, QueueJob } from "./generated/queue";
 
 export * from "./wrapNullResponse";

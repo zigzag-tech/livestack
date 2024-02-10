@@ -9,7 +9,6 @@
   "files": [
     "dist"
   ],
-  "types": "dist/declarations/src/livestack-shared.cjs.d.ts",
   "dependencies": {
     "graphology": "^0.25.4",
     "graphology-types": "^0.24.7",
@@ -20,6 +19,7 @@
     "typescript": "5.4.0-beta"
   },
   "main": "dist/livestack-shared.cjs.js",
+  "types": "dist/livestack-shared.cjs.d.ts",
   "preconstruct": {
     "entrypoints": [
       "./index.ts"

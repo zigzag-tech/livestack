@@ -1,5 +1,5 @@
 import { InstantiatedGraph, JobId } from "@livestack/shared";
-import { InferTMap } from "@livestack/shared/IOSpec";
+import { InferTMap } from "@livestack/shared";
 import { vaultClient } from "@livestack/vault-client";
 import _ from "lodash";
 import { Observable, map, takeUntil } from "rxjs";

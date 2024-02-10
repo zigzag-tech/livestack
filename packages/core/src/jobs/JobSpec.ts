@@ -5,6 +5,11 @@ import {
   StreamNode,
   getNodesConnectedToStream,
   getSourceSpecNodeConnectedToStream,
+  DefGraph,
+  IOSpec,
+  InferTMap,
+  InstantiatedGraph,
+  wrapIfSingle,
 } from "@livestack/shared";
 import { vaultClient } from "@livestack/vault-client";
 import { v4 } from "uuid";
@@ -12,9 +17,6 @@ import { getLogger } from "../utils/createWorkerLogger";
 import longStringTruncator from "../utils/longStringTruncator";
 import { WrapWithTimestamp } from "./../utils/io";
 import { ZZWorkerDef, ZZWorkerDefParams } from "./ZZWorker";
-
-import { DefGraph, IOSpec, InstantiatedGraph } from "@livestack/shared";
-import { InferTMap, wrapIfSingle } from "@livestack/shared/IOSpec";
 import { ConnectorType, Order } from "@livestack/vault-interface";
 import pLimit from "p-limit";
 import { Observable } from "rxjs";
@@ -1076,7 +1078,7 @@ export class JobSpec<
     return workerDef;
   }
 
-  public static override define<P, I, O>(
+  public static define<P, I, O>(
     p: ConstructorParameters<typeof JobSpec<P, I, O>>[0]
   ) {
     return new JobSpec<P, I, O>(p);

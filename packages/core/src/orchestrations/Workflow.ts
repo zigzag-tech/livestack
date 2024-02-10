@@ -1,6 +1,6 @@
 import { vaultClient } from "@livestack/vault-client";
 import { CheckSpec, JobSpec } from "../jobs/JobSpec";
-import { IOSpec, InferTMap } from "@livestack/shared/IOSpec";
+import { IOSpec, InferTMap } from "@livestack/shared";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";

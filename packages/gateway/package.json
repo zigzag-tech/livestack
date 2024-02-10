@@ -18,6 +18,6 @@
   "peerDependencies": {
     "@livestack/core": "*"
   },
-  "main": "./dist/index.js",
+  "main": "dist/livestack-gateway.cjs.js",
   "author": ""
 }

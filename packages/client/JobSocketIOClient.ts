@@ -9,7 +9,7 @@ import {
   FeedParams,
   CMD_UNBIND,
   UnbindParams,
-} from "@livestack/shared/gateway-binding-types";
+} from "@livestack/shared";
 import { requestAndGetResponse } from "./requestAndGetResponse";
 
 export class JobSocketIOConnection {

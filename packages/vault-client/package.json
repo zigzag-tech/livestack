@@ -5,6 +5,10 @@
   "private": true,
   "author": "",
   "license": "MIT",
+  "scripts": {
+    "build": "preconstruct build",
+    "postinstall": "preconstruct dev"
+  },
   "dependencies": {
     "@livestack/vault-interface": "*",
     "nice-grpc": "^2.1.7"
@@ -13,5 +17,11 @@
     "@types/node": "^20.11.0",
     "typescript": "5.4.0-beta"
   },
-  "main": "src/index.ts"
+  "main": "dist/livestack-vault-client.cjs.js",
+  "types": "dist/livestack-vault-client.cjs.d.ts",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
 }
