@@ -24,7 +24,6 @@
     "zod": "^3",
     "zod-to-json-schema": "^3"
   },
-  "types": "dist/livestack-core.cjs.d.ts",
   "devDependencies": {
     "@types/lodash": "^4.14.201",
     "@types/uuid": "^9.0.7",
@@ -34,7 +33,9 @@
     "@google-cloud/storage": "^7.x",
     "@livestack/vault-dev-server": "*"
   },
+  "module": "dist/livestack-core.esm.js",
   "main": "dist/livestack-core.cjs.js",
+  "types": "dist/livestack-core.cjs.d.ts",
   "preconstruct": {
     "entrypoints": [
       "index.ts"
