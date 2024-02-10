@@ -3,7 +3,8 @@
   "version": "0.0.2",
   "description": "Orchestration, in real-time.",
   "scripts": {
-    "build": "tsc"
+    "build": "preconstruct build",
+    "postinstall": "preconstruct dev"
   },
   "files": [
     "dist/**/*"
@@ -11,8 +12,10 @@
   "dependencies": {
     "@livestack/shared": "*",
     "@livestack/vault-client": "*",
+    "@livestack/vault-interface": "*",
     "chalk": "^4",
     "dotenv": "^16.x",
+    "lodash": "^4.17.21",
     "lru-cache": "^10.2.0",
     "p-limit": "^3",
     "rxjs": "^7",
@@ -21,7 +24,7 @@
     "zod": "^3",
     "zod-to-json-schema": "^3"
   },
-  "types": "dist/index.d.ts",
+  "types": "dist/livestack-core.cjs.d.ts",
   "devDependencies": {
     "@types/lodash": "^4.14.201",
     "@types/uuid": "^9.0.7",
@@ -31,6 +34,11 @@
     "@google-cloud/storage": "^7.x",
     "@livestack/vault-dev-server": "*"
   },
-  "main": "./dist/index.js",
+  "main": "dist/livestack-core.cjs.js",
+  "preconstruct": {
+    "entrypoints": [
+      "index.ts"
+    ]
+  },
   "author": ""
 }
