@@ -14,10 +14,15 @@
   "peerDependencies": {
     "@livestack/core": "*"
   },
-  "types": "dist/index.d.ts",
   "devDependencies": {
     "typescript": "5.4.0-beta"
   },
-  "main": "./dist/index.js",
-  "author": ""
+  "main": "dist/livestack-replicate.cjs.js",
+  "types": "dist/livestack-replicate.cjs.d.ts",
+  "module": "dist/livestack-replicate.esm.js",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
 }

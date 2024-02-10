@@ -8,16 +8,14 @@
   "files": [
     "dist/**/*"
   ],
-  "dependencies": {
-    "replicate": "^0.21"
-  },
   "peerDependencies": {
     "@livestack/core": "*"
   },
-  "types": "dist/index.d.ts",
   "devDependencies": {
     "typescript": "5.4.0-beta"
   },
-  "main": "./dist/index.js",
+  "main": "dist/livestack-runpod.cjs.js",
+  "types": "dist/livestack-runpod.cjs.d.ts",
+  "module": "dist/livestack-runpod.esm.js",
   "author": ""
 }
