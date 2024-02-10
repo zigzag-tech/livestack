@@ -47,7 +47,9 @@ export function useJobBinding({
     }
 
     return () => {
-      clientRef.current?.then((c) => c.close());
+      clientRef.current?.then((c) => {
+        c.close();
+      });
       clientRef.current = undefined;
     };
   }, [socketIOURI, socketIOPath, specName, uniqueSpecLabel]);

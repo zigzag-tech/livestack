@@ -34,6 +34,5 @@ export async function requestAndGetResponse<T, R>({
       }
     };
     conn.on(res.method, listener);
-    conn.off(res.method, listener);
   });
 }

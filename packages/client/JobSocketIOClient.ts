@@ -243,7 +243,6 @@ export async function bindNewJobToSocketIO({
       res: { method: MSG_JOB_INFO },
       conn,
     });
-
   return new JobSocketIOConnection({
     jobInfo: { jobId, availableInputs, availableOutputs },
     socketIOClient: conn,
