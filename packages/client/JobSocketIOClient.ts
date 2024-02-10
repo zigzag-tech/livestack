@@ -79,6 +79,7 @@ export class JobSocketIOConnection {
     const feedParams: FeedParams<string, T> = {
       data,
       tag,
+      jobId: this.jobId,
     };
     this.socketIOClient.emit(CMD_FEED, feedParams);
     if (!this.localObservablesByTag[tag]) {

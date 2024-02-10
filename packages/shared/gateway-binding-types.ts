@@ -27,4 +27,5 @@ export const CMD_FEED = "feed";
 export type FeedParams<K, T> = {
   data: T;
   tag: K;
+  jobId: string;
 };
