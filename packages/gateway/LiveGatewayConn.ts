@@ -88,6 +88,17 @@ export class LiveGatewayConn {
         sub.unsubscribe();
       }
     });
+    this.socket.on(
+      CMD_FEED,
+      async <K extends keyof any>({ data, tag, jobId }: FeedParams<K, any>) => {
+        const { input } = this.jobFnsById[jobId];
+        try {
+          await input.byTag(tag).feed(data);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    );
   }
   private subsByJobId: Record<string, Subscription[]> = {};
   private jobFnsById: Record<
@@ -112,16 +123,6 @@ export class LiveGatewayConn {
     jobSpec: JobSpec<P, I, O, IMap, OMap>;
   }) => {
     const { input, output } = this.jobFnsById[jobId];
-    this.socket.on(
-      CMD_FEED,
-      async <K extends keyof IMap>({ data, tag }: FeedParams<K, IMap[K]>) => {
-        try {
-          await input.byTag(tag).feed(data);
-        } catch (err) {
-          console.error(err);
-        }
-      }
-    );
 
     const subs: Subscription[] = [];
 
