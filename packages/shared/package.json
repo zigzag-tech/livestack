@@ -3,15 +3,27 @@
   "version": "0.0.2",
   "description": "Shared core Livestack logic for both frontend and backend.",
   "scripts": {
-    "build": "tsc"
+    "build": "preconstruct build",
+    "postinstall": "preconstruct dev"
   },
   "files": [
-    "dist/**/*"
+    "dist"
   ],
-  "types": "dist/index.d.ts",
+  "types": "dist/declarations/src/livestack-shared.cjs.d.ts",
+  "dependencies": {
+    "graphology": "^0.25.4",
+    "graphology-types": "^0.24.7",
+    "zod": "^3"
+  },
   "devDependencies": {
+    "@babel/preset-typescript": "^7.23.3",
     "typescript": "5.4.0-beta"
   },
-  "main": "./dist/index.js",
+  "main": "dist/livestack-shared.cjs.js",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  },
   "author": ""
 }
