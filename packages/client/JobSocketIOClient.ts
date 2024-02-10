@@ -186,6 +186,8 @@ export interface ClientConnParams {
   socketIOPath?: string | null;
 }
 
+const connCacheBySocketIOURIAndPath: Record<`${string}/${string}`, Socket> = {};
+
 function getClient({
   socketIOClient,
   socketIOURI,
@@ -195,21 +197,24 @@ function getClient({
 
   if (socketIOClient) {
     return { newClient: false, conn: socketIOClient };
-  } else if (socketIOURI) {
-    return {
-      newClient: true,
-      conn: io(socketIOURI, {
-        path: socketIOPath || "/livestack.socket.io",
-        autoConnect: true,
-      }),
-    };
   } else {
+    const socketIOURIAndPathKey = `${socketIOURI}/${
+      socketIOPath || ""
+    }` as const;
+    if (!connCacheBySocketIOURIAndPath[socketIOURIAndPathKey]) {
+      connCacheBySocketIOURIAndPath[socketIOURIAndPathKey] = socketIOURI
+        ? io(socketIOURI, {
+            path: socketIOPath || "/livestack.socket.io",
+            autoConnect: true,
+          })
+        : io({
+            path: socketIOPath || "/livestack.socket.io",
+            autoConnect: true,
+          });
+    }
     return {
-      newClient: true,
-      conn: io({
-        path: socketIOPath || "/livestack.socket.io",
-        autoConnect: true,
-      }),
+      newClient: false,
+      conn: connCacheBySocketIOURIAndPath[socketIOURIAndPathKey],
     };
   }
 }

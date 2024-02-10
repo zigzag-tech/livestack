@@ -329,7 +329,6 @@ export class JobSpec<
 
     await limit(async () => {
       // console.debug("stream_data", JSON.stringify(d, longStringTruncator));
-
       const stream = await this.getJobStream({
         jobId,
         tag: tag,
@@ -343,6 +342,7 @@ export class JobSpec<
             type === "in" ? "input" : "output"
           } to a terminated stream! jobId: ${jobId}, tag: ${String(tag)}`
         );
+        console.error("data to send: ", d);
         throw new Error(
           `Cannot send ${
             type === "in" ? "input" : "output"
@@ -623,7 +623,7 @@ export class JobSpec<
     outputStreamIdOverridesByTag?: Partial<Record<keyof OMap, string>>;
   }) {
     let {
-      jobId = v4(),
+      jobId = "j-" + this.name + "-" + v4(),
       jobOptions,
       inputStreamIdOverridesByTag,
       outputStreamIdOverridesByTag,
