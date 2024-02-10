@@ -9,7 +9,11 @@ import {
   StreamServiceDefinition,
 } from "@livestack/vault-interface";
 
-export async function launchVaultDevServer(port = 50508) {
+export async function launchVaultDevServer(port?: string | number) {
+  // if (!port) {
+  //   const { default: getPort } = await import("get-port");
+  //   port = await getPort({ port: 50508 });
+  // }
   const server = createServer();
   server.add(DBServiceDefinition, dbService(db));
   server.add(QueueServiceDefinition, getQueueService());
@@ -21,6 +25,7 @@ export async function launchVaultDevServer(port = 50508) {
 
   await server.listen(address);
   console.info(`🌌🔒 Vault dev server started. Listening on ${address}.`);
+  return { port };
 }
 
 if (require.main === module) {

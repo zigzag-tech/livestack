@@ -15,8 +15,9 @@ export function findSuitableVaultServer() {
     try {
       require.resolve("@livestack/vault-dev-server");
       const main = require("@livestack/vault-dev-server");
-      main.launchVaultDevServer(50508);
-      vaultServerURL = "localhost:50508";
+      const port = 50508;
+      main.launchVaultDevServer(port);
+      vaultServerURL = `localhost:${port}`;
     } catch (e) {
       throw new Error(
         "Vault dev server module @live/vault-dev-server not installed or failed to launch. Aborting app."

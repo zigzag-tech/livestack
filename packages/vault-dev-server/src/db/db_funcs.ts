@@ -1,26 +1,14 @@
 import knex from "knex";
 
 export const getDatabaseInstance = ({
-  host,
-  port,
-  user,
-  password,
-  database,
+  dbPath = "./livestack.sqlite",
 }: {
-  host: string;
-  port: string;
-  user: string;
-  password: string;
-  database: string;
+  dbPath?: string;
 }) =>
   knex({
-    client: "postgresql",
+    client: "better-sqlite3",
     connection: {
-      host,
-      port: parseInt(port),
-      user,
-      password,
-      database,
+      filename: dbPath,
     },
     useNullAsDefault: true,
   });
