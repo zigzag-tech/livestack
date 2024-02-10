@@ -80,6 +80,6 @@ export function wrapIfSingle<
       default: def!,
     } as TMap;
   } else {
-    return def as TMap;
+    return def as unknown as TMap;
   }
 }

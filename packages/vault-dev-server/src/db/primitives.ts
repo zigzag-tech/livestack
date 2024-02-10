@@ -37,6 +37,6 @@ export function convertMaybePrimtiveOrArrayBack<T>(
   } else if (typeof p === "object" && p !== null && ARRAY_KEY in p) {
     return p[ARRAY_KEY];
   } else {
-    return p;
+    return p as T;
   }
 }
