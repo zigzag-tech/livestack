@@ -11,6 +11,7 @@ import {
 import { Subscription } from "rxjs";
 import { ZZEnv, JobSpec } from "@livestack/core";
 import { Socket } from "socket.io";
+import { JobInput, JobOutput } from "@livestack/core/jobs/JobSpec";
 
 export class LiveGatewayConn {
   socket: Socket;
@@ -40,9 +41,11 @@ export class LiveGatewayConn {
     }
     this.zzEnv = zzEnv;
 
-    this.socket.on(
-      REQUEST_AND_BIND_CMD,
-      async ({ specName, uniqueSpecLabel }: RequestAndBindType) => {
+    addMethodResponder({
+      socket: this.socket,
+      req: { method: REQUEST_AND_BIND_CMD },
+      res: { method: MSG_JOB_INFO },
+      fn: async ({ specName, uniqueSpecLabel }: RequestAndBindType) => {
         if (
           !this.allowedSpecsForBinding.some(
             (s) =>
@@ -54,27 +57,43 @@ export class LiveGatewayConn {
           );
         }
         const spec = JobSpec.lookupByName(specName);
-        await this.bindToNewJob(spec);
-      }
-    );
+        const jobOutput = await spec.enqueueJob({});
+        this.jobFnsById[jobOutput.jobId] = jobOutput;
+        const data: JobInfoType = {
+          jobId: jobOutput.jobId,
+          availableInputs: jobOutput.input.tags.map((k) => String(k)),
+          availableOutputs: jobOutput.output.tags.map((k) => String(k)),
+        };
+        this.bindToNewJob({
+          jobSpec: spec,
+          jobId: jobOutput.jobId,
+        });
+        return data;
+      },
+    });
   }
+  private jobFnsById: Record<
+    string,
+    {
+      input: JobInput<any>;
+      output: JobOutput<any>;
+    }
+  > = {};
 
   public onDisconnect = async (cb: () => void) => {
     this.socket.on("disconnect", cb);
   };
 
-  public bindToNewJob = async <P, I, O, IMap, OMap>(
-    jobSpec: JobSpec<P, I, O, IMap, OMap>,
-    jobOptions?: P
-  ) => {
-    const { input, output, jobId } = await jobSpec.enqueueJob({ jobOptions });
-    const data: JobInfoType = {
-      jobId,
-      availableInputs: input.tags.map((k) => String(k)),
-      availableOutputs: output.tags.map((k) => String(k)),
-    };
-    this.socket.emit(MSG_JOB_INFO, data);
+  public bindToNewJob = async <P, I, O, IMap, OMap>({
+    jobSpec,
 
+    jobId,
+  }: {
+    jobId: string;
+
+    jobSpec: JobSpec<P, I, O, IMap, OMap>;
+  }) => {
+    const { input, output } = this.jobFnsById[jobId];
     this.socket.on(
       CMD_FEED,
       async <K extends keyof IMap>({ data, tag }: FeedParams<K, IMap[K]>) => {
@@ -123,4 +142,28 @@ export class LiveGatewayConn {
       }
     });
   };
+}
+
+function addMethodResponder<P, R>({
+  socket,
+  req,
+  res,
+  fn,
+}: {
+  req: {
+    method: string;
+  };
+  res: {
+    method: string;
+  };
+  socket: Socket;
+  fn: (arg: P) => Promise<R>;
+}) {
+  socket.on(req.method, async (arg: { data: P; requestIdentifier: string }) => {
+    const result = await fn(arg.data);
+    socket.emit(res.method, {
+      data: result,
+      requestIdentifier: arg.requestIdentifier,
+    });
+  });
 }
