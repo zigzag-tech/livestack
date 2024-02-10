@@ -16,7 +16,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "sourceMap": true,
-    "isolatedModules": false,
+    "isolatedModules": true,
     "strict": true,
     "strictNullChecks": true,
     "downlevelIteration": true,
