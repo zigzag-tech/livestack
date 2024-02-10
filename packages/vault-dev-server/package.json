@@ -5,6 +5,7 @@
   "author": "",
   "license": "MIT",
   "scripts": {
+    "dev": "preconstruct dev && ts-node src/index.ts --transpile-only --project tsconfig.json",
     "build": "preconstruct build",
     "postinstall": "preconstruct dev"
   },
@@ -22,6 +23,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
+    "ts-node": "^10.9.2",
     "typescript": "5.4.0-beta"
   },
   "files": [
@@ -29,6 +31,7 @@
   ],
   "main": "dist/livestack-vault-dev-server.cjs.js",
   "types": "dist/livestack-vault-dev-server.d.ts",
+  "module": "dist/livestack-vault-dev-server.esm.js",
   "preconstruct": {
     "entrypoints": [
       "./index.ts"
