@@ -47,6 +47,19 @@ type Combos =
         ...WithT,
         SpecAndOutletOrTagged
       ]
+    ]
+  | [
+      [
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        ...WithT,
+        SpecAndOutletOrTagged
+      ]
     ];
 
 export type JobSpecAndJobOptions<JobSpec> = {
