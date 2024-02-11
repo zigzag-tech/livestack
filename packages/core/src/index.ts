@@ -12,3 +12,4 @@ export * from "./jobs/JobSpec";
 export * from "./orchestrations/ParallelAttemptWorkflow";
 export * from "./orchestrations/ProgressiveAdaptiveTryWorkerDef";
 export * from "./storage/cloudStorage";
+export * from "./utils/createWorkerLogger";
