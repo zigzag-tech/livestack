@@ -1,5 +1,5 @@
-import { getDatabaseInstance } from "./db_funcs";
+import { getSQLite3DatabaseInstance } from "./db_funcs";
 
-export const db = getDatabaseInstance({
+export const db = getSQLite3DatabaseInstance({
   dbPath: process.env.DB_PATH,
 });
