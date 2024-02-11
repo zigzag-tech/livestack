@@ -3,7 +3,8 @@
   "version": "0.0.2",
   "description": "Livestack replicate connectors.",
   "scripts": {
-    "build": "tsc"
+    "build": "preconstruct build",
+    "postinstall": "preconstruct dev"
   },
   "files": [
     "dist/**/*"
