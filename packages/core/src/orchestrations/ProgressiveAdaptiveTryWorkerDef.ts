@@ -4,6 +4,7 @@ import { z } from "zod";
 import _ from "lodash";
 import { InferStreamSetType } from "@livestack/shared";
 import { ZZEnv } from "../jobs/ZZEnv";
+import { genTimeoutPromise } from "../utils/genTimeoutPromise";
 export interface AttemptDef<ParentP, ParentO, P, OMap> {
   jobSpec: JobSpec<P, any, any, unknown, OMap>;
   timeout: number;
@@ -134,13 +135,3 @@ export class ProgressiveAdaptiveTryWorkerDef<
     this.attempts = attempts;
   }
 }
-
-export const genTimeoutPromise = async (timeout: number) => {
-  const timeoutPromise = new Promise<void>((resolve) => {
-    setTimeout(() => {
-      resolve();
-    }, timeout);
-  });
-  await timeoutPromise;
-  return { timeout: true as const, error: false as const };
-};
