@@ -122,7 +122,7 @@ export class JobSpec<
     return JobSpec._registryBySpecName[specName];
   }
 
-  public derive<NewP, NewIMap, NewOMap>(
+  public derive<NewP, NewI, NewO, NewIMap, NewOMap>(
     newP: Partial<
       ConstructorParameters<typeof JobSpec<NewP, NewIMap, NewOMap>>[0]
     > & {
@@ -134,10 +134,16 @@ export class JobSpec<
         `Derived job spec must have a different name from the original job spec ${this.name}.`
       );
     }
-    return new JobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>({
+    return new JobSpec<
+      P & NewP,
+      NewI & I,
+      NewO & O,
+      IMap & NewIMap,
+      OMap & NewOMap
+    >({
       ...newP,
       name: newP.name,
-    } as ConstructorParameters<typeof JobSpec<P & NewP, IMap & NewIMap, OMap & NewOMap>>[0]);
+    } as ConstructorParameters<typeof JobSpec<P & NewP, NewI & I, NewO & O, IMap & NewIMap, OMap & NewOMap>>[0]);
   }
 
   public get zzEnv() {
