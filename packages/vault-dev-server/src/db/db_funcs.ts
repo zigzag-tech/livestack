@@ -1,7 +1,7 @@
 import Knex from "knex";
 import { ensureTables } from "./ensureTables";
 
-export const getDatabaseInstance = ({
+export const getSQLite3DatabaseInstance = ({
   dbPath = "./livestack.sqlite",
 }: {
   dbPath?: string;
