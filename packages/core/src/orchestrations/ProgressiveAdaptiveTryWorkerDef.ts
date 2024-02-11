@@ -1,29 +1,22 @@
 import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
-import { z } from "zod";
 import _ from "lodash";
 import { InferStreamSetType, InferTMap } from "@livestack/shared";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { genTimeoutPromise } from "../utils/genTimeoutPromise";
-export interface AttemptDef<
-  ParentI,
-  ParentO,
-  ParentIMap,
-  ParentOMap,
-  I,
-  O,
-  IMap,
-  OMap
-> {
+
+export type AttemptDef<ParentIMap, ParentOMap, I, O, IMap, OMap> = {
   jobSpec: JobSpec<any, I, O, IMap, OMap>;
   timeout: number;
   transformInput: <K extends keyof ParentIMap>(
-    params: ParentIMap[K]
-  ) => Promise<IMap[keyof IMap]> | IMap[keyof IMap];
+    data: NoInfer<ParentIMap[K]>
+  ) => NoInfer<Promise<IMap[keyof IMap]> | IMap[keyof IMap]>;
   transformOutput: <K extends keyof OMap>(
-    output: OMap[K]
-  ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
-}
+    output: NoInfer<OMap[K]>
+  ) => NoInfer<
+    Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap]
+  >;
+};
 
 export class ProgressiveAdaptiveTryWorkerDef<
   ParentI,
@@ -34,8 +27,6 @@ export class ProgressiveAdaptiveTryWorkerDef<
 > extends ZZWorkerDef<any, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
   attempts: {
     [K in keyof Specs]: AttemptDef<
-      ParentI,
-      ParentO,
       ParentIMap,
       ParentOMap,
       InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>>,
@@ -54,10 +45,8 @@ export class ProgressiveAdaptiveTryWorkerDef<
     jobSpec: JobSpec<any, ParentI, ParentO, ParentIMap, ParentOMap>;
     attempts: {
       [K in keyof Specs]: AttemptDef<
-        ParentI,
-        ParentO,
-        ParentIMap,
-        ParentOMap,
+        NoInfer<ParentIMap>,
+        NoInfer<ParentOMap>,
         InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>>,
         InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>>,
         InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>,
@@ -69,26 +58,19 @@ export class ProgressiveAdaptiveTryWorkerDef<
     super({
       jobSpec,
       zzEnv,
+      workerPrefix: "prog-adaptive-try",
       processor: async ({ logger, input, jobId }) => {
         const genRetryFunction = <I, O, IMap, OMap>({
           jobSpec,
           transformInput,
           transformOutput,
-        }: AttemptDef<
-          ParentI,
-          ParentO,
-          ParentIMap,
-          ParentOMap,
-          I,
-          O,
-          IMap,
-          OMap
-        >) => {
+        }: AttemptDef<ParentIMap, ParentOMap, I, O, IMap, OMap>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
             const inpt = (await input.nextValue())!;
             const jo = await jobSpec.enqueueJob({
               jobId: childJobId,
+              parentJobId: jobId,
             });
             const transformed = await transformInput(inpt);
             await jo.input.feed(transformed);
@@ -108,16 +90,7 @@ export class ProgressiveAdaptiveTryWorkerDef<
         };
 
         const restToTry = (
-          attempts as AttemptDef<
-            ParentI,
-            ParentO,
-            ParentIMap,
-            ParentOMap,
-            any,
-            any,
-            any,
-            any
-          >[]
+          attempts as AttemptDef<ParentIMap, ParentOMap, any, any, any, any>[]
         ).map((a) => ({
           fn: genRetryFunction(a),
           timeout: a.timeout,
@@ -134,14 +107,14 @@ export class ProgressiveAdaptiveTryWorkerDef<
 
         while (restToTry.length > 0) {
           const m = restToTry.shift()!;
-          logger.info(
-            `Trying ${m.name}(${restToTry.length} more to attempt)...`
+          console.info(
+            `Trying ${m.name} (${restToTry.length} remaining to attempt)...`
           );
           promises.push({
             promise: m.fn().catch((e) => {
               console.log(e);
 
-              logger.warn("");
+              console.warn("");
               return {
                 timeout: false,
                 error: true as const,
@@ -157,7 +130,7 @@ export class ProgressiveAdaptiveTryWorkerDef<
           if (!r.timeout && !r.error) {
             return r.result;
           } else if (r.timeout) {
-            logger.info(`Timeout for ${m.name}. Moving on...`);
+            console.info(`Timeout for ${m.name}. Moving on...`);
           }
         }
 

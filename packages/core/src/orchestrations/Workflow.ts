@@ -210,6 +210,7 @@ export class WorkflowSpec extends JobSpec<
     this._validateConnections();
 
     this.orchestrationWorkerDef = new ZZWorkerDef({
+      workerPrefix: "workflow",
       jobSpec: this,
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;

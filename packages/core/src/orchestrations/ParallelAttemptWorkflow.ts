@@ -73,6 +73,7 @@ export class ParallelAttemptWorkflow<
     super({
       zzEnv,
       jobSpec: parentJobSpec,
+      workerPrefix: "paral-try",
       processor: async ({ logger, input: parentInput, jobId }) => {
         const genRetryFunction = <I, O>({
           jobSpec,
