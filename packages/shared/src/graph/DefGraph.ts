@@ -346,7 +346,13 @@ export class DefGraph extends Graph<DefGraphNode> {
       );
 
       if (!aliasNodeId) {
-        throw new Error(`Alias node not found for alias: ${alias.toString()}`);
+        throw new Error(
+          `Alias node not found for alias: ${alias.toString()}. Available aliases: ${this.filterNodes(
+            (nId, attrs) => attrs.nodeType === "alias"
+          )
+            .map((nId) => (this.getNodeAttributes(nId) as AliasNode).alias)
+            .join(", ")}`
+        );
       }
       const outletNodeId = this.findOutboundNeighbor(
         aliasNodeId,

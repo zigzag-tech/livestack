@@ -99,8 +99,8 @@ export class WorkflowSpec extends JobSpec<
   WorkflowChildJobOptionsSanitized,
   any,
   {
-    status: z.ZodType<{
-      status: "finished";
+    __zz_workflow_status: z.ZodType<{
+      __zz_workflow_status: "finished";
     }>;
   },
   any,
@@ -212,7 +212,9 @@ export class WorkflowSpec extends JobSpec<
       jobOptions: WorkflowChildJobOptionsSanitized,
       zzEnv,
       output: {
-        status: z.object({ status: z.literal("finished") }),
+        __zz_workflow_status: z.object({
+          __zz_workflow_status: z.literal("finished"),
+        }),
       },
     });
     const canonicalConns = convertConnectionsCanonical({
@@ -335,7 +337,9 @@ export class WorkflowSpec extends JobSpec<
           });
         }
 
-        await output("status").emit({ status: "finished" });
+        await output("__zz_workflow_status").emit({
+          __zz_workflow_status: "finished",
+        });
       },
     });
   }

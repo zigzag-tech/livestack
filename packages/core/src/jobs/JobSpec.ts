@@ -554,7 +554,7 @@ export class JobSpec<
         const source = getSourceSpecNodeConnectedToStream(instaG, streamNodeId);
         if (!source) {
           this.logger.warn(
-            `A transform function is applied to the input stream ${streamId} of job ${connectedJobId} but, its definition is unclear. Runtime type checking will be skipped for this stream.`
+            `A transform function is applied to the input stream ${streamId} of job ${connectedJobId} but its definition is unclear. Runtime type checking will be skipped for this stream.`
           );
           def = null;
         } else {
