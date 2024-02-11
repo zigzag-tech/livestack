@@ -370,7 +370,7 @@ type Attemp5<
   ParallelAttempt<ParentIMap, ParentOMap, I5, O5, IMap5, OMap5>
 ];
 
-type AttemptsUpTo5<
+export type AttemptsUpTo5<
   ParentIMap,
   ParentOMap,
   I1,
