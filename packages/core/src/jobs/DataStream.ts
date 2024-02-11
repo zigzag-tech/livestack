@@ -214,6 +214,8 @@ export class DataStream<T extends object> {
 
     try {
       // Publish the data to the stream
+      // console.debug("Data point added to stream", this.uniqueName, parsed);
+
       const [_, { messageId }] = await Promise.all([
         vaultClient.db.addDatapoint({
           streamId: this.uniqueName,
@@ -319,8 +321,13 @@ export class DataStreamSubscriber<T extends object> {
         uniqueName: this.stream.uniqueName,
         subType: this.subType,
       });
-
+      // console.debug("DataStreamSubscriber readStream", this.stream.uniqueName);
       for await (const message of iter) {
+        // console.debug(
+        //   "DataStreamSubscriber message",
+        //   this.stream.uniqueName,
+        //   message
+        // );
         const data: T = customParse(message.dataStr);
         let restored = data;
         const { largeFilesToRestore, newObj } =
