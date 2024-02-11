@@ -64,6 +64,12 @@ export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
     return this.jobSpec.enqueueJob(p);
   };
 
+  public submitAndTerminate: (typeof this.jobSpec)["submitAndTerminate"] = (
+    p
+  ) => {
+    return this.jobSpec.submitAndTerminate(p);
+  };
+
   public static define<P, I, O, WP extends object, IMap, OMap>(
     p: Parameters<typeof defineWorker<P, I, O, WP, IMap, OMap>>[0]
   ) {
