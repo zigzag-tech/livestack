@@ -35,11 +35,6 @@ export class ZZEnv implements EnvParams {
       // fs.writeFileSync("PROJECT_ID", projectId);
     }
     this.projectId = projectId;
-
-    // TODO: make better global resolution logic
-    if (!ZZEnv.global()) {
-      ZZEnv.setGlobal(this);
-    }
   }
 
   public derive(newP: Partial<EnvParams>) {
