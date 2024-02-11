@@ -503,7 +503,7 @@ export class WorkflowSpec extends JobSpec<
       jobOptions: childJobOptionsSanitized,
     });
 
-    const out = await manager.output("status");
+    const out = await manager.output("__zz_workflow_status");
     // wait on output to finish
     const r = await out.nextValue();
 
