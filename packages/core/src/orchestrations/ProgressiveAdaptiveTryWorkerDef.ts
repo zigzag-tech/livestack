@@ -7,7 +7,7 @@ import { genTimeoutPromise } from "../utils/genTimeoutPromise";
 
 export interface AttemptDef<ParentIMap, ParentOMap, I, O, IMap, OMap> {
   jobSpec: JobSpec<any, I, O, IMap, OMap>;
-  timeout: number;
+  timeout?: number;
   transformInput: <K extends keyof ParentIMap>(
     data: ParentIMap[K]
   ) => Promise<IMap[keyof IMap]> | IMap[keyof IMap];
@@ -21,18 +21,53 @@ export class ProgressiveAdaptiveTryWorkerDef<
   ParentO,
   ParentIMap,
   ParentOMap,
-  Specs
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2 = never,
+  O2 = never,
+  IMap2 = never,
+  OMap2 = never,
+  I3 = never,
+  O3 = never,
+  IMap3 = never,
+  OMap3 = never,
+  I4 = never,
+  O4 = never,
+  IMap4 = never,
+  OMap4 = never,
+  I5 = never,
+  O5 = never,
+  IMap5 = never,
+  OMap5 = never
 > extends ZZWorkerDef<any, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
-  attempts: {
-    [K in keyof Specs]: AttemptDef<
-      ParentIMap,
-      ParentOMap,
-      InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>>,
-      InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>>,
-      InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>,
-      InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
-    >;
-  };
+  attempts:
+    | AttemptsUpTo5<
+        ParentIMap,
+        ParentOMap,
+        I1,
+        O1,
+        IMap1,
+        OMap1,
+        I2,
+        O2,
+        IMap2,
+        OMap2,
+        I3,
+        O3,
+        IMap3,
+        OMap3,
+        I4,
+        O4,
+        IMap4,
+        OMap4,
+        I5,
+        O5,
+        IMap5,
+        OMap5
+      >
+    | AttemptDef<ParentIMap, ParentOMap, any, any, any, any>;
   constructor({
     zzEnv,
     attempts,
@@ -41,16 +76,32 @@ export class ProgressiveAdaptiveTryWorkerDef<
   }: {
     zzEnv?: ZZEnv;
     jobSpec: JobSpec<any, ParentI, ParentO, ParentIMap, ParentOMap>;
-    attempts: {
-      [K in keyof Specs]: AttemptDef<
-        ParentIMap,
-        ParentOMap,
-        InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>>,
-        InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>>,
-        InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>,
-        InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
-      >;
-    };
+    attempts:
+      | AttemptsUpTo5<
+          ParentIMap,
+          ParentOMap,
+          I1,
+          O1,
+          IMap1,
+          OMap1,
+          I2,
+          O2,
+          IMap2,
+          OMap2,
+          I3,
+          O3,
+          IMap3,
+          OMap3,
+          I4,
+          O4,
+          IMap4,
+          OMap4,
+          I5,
+          O5,
+          IMap5,
+          OMap5
+        >
+      | AttemptDef<ParentIMap, ParentOMap, any, any, any, any>;
     ultimateFallback?: () => Promise<ParentOMap[keyof ParentOMap]>;
   }) {
     super({
@@ -120,12 +171,12 @@ export class ProgressiveAdaptiveTryWorkerDef<
                 error: true as const,
               };
             }),
-            timeout: m.timeout,
+            timeout: m.timeout || 1000 * 60,
           });
 
           const r = await Promise.race([
             ...promises.map((p) => p.promise),
-            genTimeoutPromise(m.timeout),
+            genTimeoutPromise(m.timeout || 1000 * 60),
           ]);
           if (!r.timeout && !r.error) {
             return r.result;
@@ -145,3 +196,223 @@ export class ProgressiveAdaptiveTryWorkerDef<
     this.attempts = attempts;
   }
 }
+
+type Attemp2<
+  ParentIMap,
+  ParentOMap,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2,
+  O2,
+  IMap2,
+  OMap2
+> = [
+  AttemptDef<ParentIMap, ParentOMap, I1, O1, IMap1, OMap1>,
+  AttemptDef<ParentIMap, ParentOMap, I2, O2, IMap2, OMap2>
+];
+
+type Attemp3<
+  ParentIMap,
+  ParentOMap,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2,
+  O2,
+  IMap2,
+  OMap2,
+  I3,
+  O3,
+  IMap3,
+  OMap3
+> = [
+  ...Attemp2<
+    ParentIMap,
+    ParentOMap,
+    I1,
+    O1,
+    IMap1,
+    OMap1,
+    I2,
+    O2,
+    IMap2,
+    OMap2
+  >,
+  AttemptDef<ParentIMap, ParentOMap, I3, O3, IMap3, OMap3>
+];
+
+type Attemp4<
+  ParentIMap,
+  ParentOMap,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2,
+  O2,
+  IMap2,
+  OMap2,
+  I3,
+  O3,
+  IMap3,
+  OMap3,
+  I4,
+  O4,
+  IMap4,
+  OMap4
+> = [
+  ...Attemp3<
+    ParentIMap,
+    ParentOMap,
+    I1,
+    O1,
+    IMap1,
+    OMap1,
+    I2,
+    O2,
+    IMap2,
+    OMap2,
+    I3,
+    O3,
+    IMap3,
+    OMap3
+  >,
+  AttemptDef<ParentIMap, ParentOMap, I4, O4, IMap4, OMap4>
+];
+
+type Attemp5<
+  ParentIMap,
+  ParentOMap,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2,
+  O2,
+  IMap2,
+  OMap2,
+  I3,
+  O3,
+  IMap3,
+  OMap3,
+  I4,
+  O4,
+  IMap4,
+  OMap4,
+  I5,
+  O5,
+  IMap5,
+  OMap5
+> = [
+  ...Attemp4<
+    ParentIMap,
+    ParentOMap,
+    I1,
+    O1,
+    IMap1,
+    OMap1,
+    I2,
+    O2,
+    IMap2,
+    OMap2,
+    I3,
+    O3,
+    IMap3,
+    OMap3,
+    I4,
+    O4,
+    IMap4,
+    OMap4
+  >,
+  AttemptDef<ParentIMap, ParentOMap, I5, O5, IMap5, OMap5>
+];
+
+export type AttemptsUpTo5<
+  ParentIMap,
+  ParentOMap,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2,
+  O2,
+  IMap2,
+  OMap2,
+  I3,
+  O3,
+  IMap3,
+  OMap3,
+  I4,
+  O4,
+  IMap4,
+  OMap4,
+  I5,
+  O5,
+  IMap5,
+  OMap5
+> =
+  | [AttemptDef<ParentIMap, ParentOMap, I1, O1, IMap1, OMap1>]
+  | Attemp2<ParentIMap, ParentOMap, I1, O1, IMap1, OMap1, I2, O2, IMap2, OMap2>
+  | Attemp3<
+      ParentIMap,
+      ParentOMap,
+      I1,
+      O1,
+      IMap1,
+      OMap1,
+      I2,
+      O2,
+      IMap2,
+      OMap2,
+      I3,
+      O3,
+      IMap3,
+      OMap3
+    >
+  | Attemp4<
+      ParentIMap,
+      ParentOMap,
+      I1,
+      O1,
+      IMap1,
+      OMap1,
+      I2,
+      O2,
+      IMap2,
+      OMap2,
+      I3,
+      O3,
+      IMap3,
+      OMap3,
+      I4,
+      O4,
+      IMap4,
+      OMap4
+    >
+  | Attemp5<
+      ParentIMap,
+      ParentOMap,
+      I1,
+      O1,
+      IMap1,
+      OMap1,
+      I2,
+      O2,
+      IMap2,
+      OMap2,
+      I3,
+      O3,
+      IMap3,
+      OMap3,
+      I4,
+      O4,
+      IMap4,
+      OMap4,
+      I5,
+      O5,
+      IMap5,
+      OMap5
+    >;
