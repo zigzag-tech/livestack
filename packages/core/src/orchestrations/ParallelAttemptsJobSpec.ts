@@ -1,4 +1,4 @@
-import { InferStreamSetType } from "@livestack/shared/StreamDefSet";
+import { InferStreamSetType } from "@livestack/shared";
 import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { ZZEnv } from "../jobs/ZZEnv";
@@ -34,7 +34,7 @@ export interface ParallelAttempt<
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
 
-export class ZZParallelAttemptWorkerDef<
+export class ParallelAttemptWorkerDef<
   ParentI,
   ParentO,
   ParentIMap,
