@@ -307,7 +307,7 @@ function createBaseStreamDatapoint(): StreamDatapoint {
 export const StreamDatapoint = {
   encode(message: StreamDatapoint, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.timestamp !== 0) {
-      writer.uint32(8).int32(message.timestamp);
+      writer.uint32(8).uint32(message.timestamp);
     }
     if (message.messageId !== "") {
       writer.uint32(18).string(message.messageId);
@@ -330,7 +330,7 @@ export const StreamDatapoint = {
             break;
           }
 
-          message.timestamp = reader.int32();
+          message.timestamp = reader.uint32();
           continue;
         case 2:
           if (tag !== 18) {
