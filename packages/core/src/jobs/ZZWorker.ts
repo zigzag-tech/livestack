@@ -10,7 +10,7 @@ import { JobId } from "@livestack/shared";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
 import { QueueJob, FromWorker } from "@livestack/vault-interface";
 import { v4 } from "uuid";
-import { genManuallyFedIterator, genPromiseCycle } from "@livestack/shared";
+import { genManuallyFedIterator } from "@livestack/shared";
 import { vaultClient } from "@livestack/vault-client";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
