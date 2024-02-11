@@ -34,7 +34,7 @@ export interface ParallelAttempt<
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
 
-export class ParallelAttemptWorkerDef<
+export class ParallelAttemptWorkflow<
   ParentI,
   ParentO,
   ParentIMap,
