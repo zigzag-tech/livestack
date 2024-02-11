@@ -79,6 +79,7 @@ export function getLocalTempFileStorageProvider(
   };
 
   return {
+    getPublicUrl: (path: string) => path,
     putToStorage,
     // uploadFromLocalPath,
     // downloadFromStorage,
