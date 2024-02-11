@@ -1095,6 +1095,7 @@ export class JobSpec<
 export class JobManager<P, I, O, IMap, OMap> {
   public readonly input: JobInput<IMap>;
   public readonly output: JobOutput<OMap>;
+
   public readonly jobId: string;
   public readonly graph: InstantiatedGraph;
 
@@ -1117,6 +1118,19 @@ export class JobManager<P, I, O, IMap, OMap> {
     this.output = output;
     this.jobId = jobId;
   }
+
+  feedAndWaitOnSingleResults: <
+    KI extends keyof IMap,
+    KO extends keyof OMap
+  >(p: {
+    data: IMap[KI];
+    inputTag?: KI;
+    outputTag?: KO;
+  }) => Promise<{ data: OMap[KO]; timestamp: number } | null> = async (p) => {
+    const { data, inputTag, outputTag } = p;
+    await this.input.feed(data, inputTag);
+    return await this.output(outputTag).nextValue();
+  };
 }
 export interface JobInput<IMap> {
   <K extends keyof IMap>(tag?: K): ByTagInput<IMap[K]>;
