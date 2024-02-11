@@ -5,14 +5,14 @@ import { ZZEnv } from "@livestack/core";
 
 const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
 
-export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
-  P,
-  any,
-  any,
-  { replicateToken?: string },
-  {},
-  { [k: string]: O }
-> {
+export class ReplicateWorkerDef<
+  I,
+  O,
+  IMap,
+  OMap,
+  KI extends keyof IMap,
+  KO extends keyof OMap
+> extends ZZWorkerDef<any, I, O, { replicateToken?: string }, IMap, OMap> {
   protected _endpoint: `${string}/${string}:${string}`;
   protected _replicateToken?: string;
   constructor({
@@ -21,18 +21,22 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
     jobSpec,
     zzEnv,
     replicateToken,
+    inputTag,
+    outputTag,
   }: {
-    jobSpec: JobSpec<P, any, any, {}, { [k: string]: O }>;
+    jobSpec: JobSpec<any, I, O, IMap, OMap>;
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
     zzEnv?: ZZEnv;
     replicateToken?: string;
+    inputTag?: KI;
+    outputTag?: KO;
   }) {
     super({
       zzEnv,
       jobSpec,
       concurrency,
-      processor: async ({ jobOptions, workerInstanceParams }) => {
+      processor: async ({ logger, input, output, workerInstanceParams }) => {
         const replicateToken =
           workerInstanceParams?.replicateToken ||
           this._replicateToken ||
@@ -45,10 +49,11 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
         const replicate = new Replicate({
           auth: process.env.REPLICATE_API_TOKEN,
         });
+        const params = (await input(inputTag).nextValue())!;
         const repR = replicate.run(this._endpoint, {
-          input: jobOptions,
-        }) as Promise<unknown> as Promise<O>;
-
+          input: params,
+        }) as Promise<unknown> as Promise<OMap[KO]>;
+        logger.info("Sending request to replicate endpoint...");
         const result = await Promise.race([
           repR,
           timeout(TIMEOUT_IN_SECONDS * 1000),
@@ -59,8 +64,9 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
             `no result returned from replicate endpoint: ${this._endpoint}`
           );
         }
+        logger.info("Replicate result received.");
 
-        return result;
+        await output(outputTag).emit(result);
       },
     });
     this._endpoint = endpoint;

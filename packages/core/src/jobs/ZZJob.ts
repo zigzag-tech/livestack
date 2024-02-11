@@ -23,7 +23,7 @@ export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
 ) => Promise<OMap[keyof OMap] | void>;
 
 export interface ByTagCallable<TMap> {
-  <K extends keyof TMap>(key: K): {
+  <K extends keyof TMap>(key?: K): {
     nextValue: () => Promise<TMap[K] | null>;
     [Symbol.asyncIterator](): AsyncGenerator<TMap[K]>;
   };
@@ -58,7 +58,7 @@ export class ZZJob<
   // New properties for subscriber tracking
 
   readonly output: {
-    <K extends keyof OMap>(key: K): {
+    <K extends keyof OMap>(key?: K): {
       emit: (o: OMap[K]) => Promise<void>;
       getStreamId: () => Promise<string>;
     };
@@ -199,9 +199,12 @@ export class ZZJob<
     };
     const that = this;
     this.output = (() => {
-      const func = <K extends keyof OMap>(tag: K) => ({
+      const func = <K extends keyof OMap>(tag?: K) => ({
         emit: (o: OMap[K]) => emitOutput(o, tag),
         async getStreamId() {
+          if (!tag) {
+            tag = that.spec.getSingleOutputTag() as K;
+          }
           const s = await that.spec.getOutputJobStream({
             jobId: that.jobId,
             tag,
