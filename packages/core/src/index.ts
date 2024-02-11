@@ -8,3 +8,6 @@ export { Workflow, WorkflowSpec, alias } from "./orchestrations/Workflow";
 export * from "./storage/localTempFileStorageProvider";
 export * from "@livestack/shared";
 export * from "./jobs/JobSpec";
+
+export * from "./orchestrations/ParallelAttemptsJobSpec";
+export * from "./orchestrations/ProgressiveAdaptiveTryWorkerDef";
