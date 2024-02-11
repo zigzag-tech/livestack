@@ -34,7 +34,7 @@ message SubRequest {
 }
 
 message StreamDatapoint {
-  int32 timestamp = 1;
+  uint32 timestamp = 1;
   string messageId = 2;
   string dataStr = 3;
 }
