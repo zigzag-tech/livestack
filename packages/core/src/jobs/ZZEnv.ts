@@ -16,6 +16,8 @@ export class ZZEnv implements EnvParams {
   }
 
   static setGlobal(env: ZZEnv) {
+    console.info("Global project ID set to ", env.projectId);
+
     ZZEnv._zzEnv = env;
   }
 
