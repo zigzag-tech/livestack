@@ -9,14 +9,12 @@
     "dist/**/*"
   ],
   "dependencies": {
+    "@livestack/core": "*",
+    "@livestack/shared": "*",
     "socket.io": "^4"
   },
   "devDependencies": {
     "typescript": "5.4.0-beta"
-  },
-  "peerDependencies": {
-    "@livestack/core": "*",
-    "@livestack/shared": "*"
   },
   "main": "dist/livestack-gateway.cjs.js",
   "types": "dist/livestack-gateway.cjs.d.ts",
