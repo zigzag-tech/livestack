@@ -59,7 +59,7 @@ export class ProgressiveAdaptiveTryWorkerDef<
       jobSpec,
       zzEnv,
       workerPrefix: "prog-adaptive-try",
-      processor: async ({ logger, input, jobId }) => {
+      processor: async ({ input, jobId }) => {
         const genRetryFunction = <I, O, IMap, OMap>({
           jobSpec,
           transformInput,
@@ -73,7 +73,7 @@ export class ProgressiveAdaptiveTryWorkerDef<
               parentJobId: jobId,
             });
             const transformed = await transformInput(inpt);
-            await jo.input.feed(transformed);
+            await jo.input.feed(transformed as IMap[keyof IMap]);
 
             const o = await jo.output.nextValue();
             if (!o) {
@@ -83,7 +83,9 @@ export class ProgressiveAdaptiveTryWorkerDef<
             return {
               timeout: false as const,
               error: false as const,
-              result: await transformOutput(o.data),
+              result: (await transformOutput(
+                o.data
+              )) as ParentOMap[keyof ParentOMap],
             };
           };
           return fn;
