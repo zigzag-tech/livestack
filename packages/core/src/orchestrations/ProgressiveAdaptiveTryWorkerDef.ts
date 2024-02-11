@@ -2,31 +2,45 @@ import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { z } from "zod";
 import _ from "lodash";
-import { InferStreamSetType } from "@livestack/shared";
+import { InferStreamSetType, InferTMap } from "@livestack/shared";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { genTimeoutPromise } from "../utils/genTimeoutPromise";
-export interface AttemptDef<ParentP, ParentO, P, OMap> {
-  jobSpec: JobSpec<P, any, any, unknown, OMap>;
+export interface AttemptDef<
+  ParentI,
+  ParentO,
+  ParentIMap,
+  ParentOMap,
+  I,
+  O,
+  IMap,
+  OMap
+> {
+  jobSpec: JobSpec<any, I, O, IMap, OMap>;
   timeout: number;
-  transformInput: (params: ParentP) => Promise<P> | P;
+  transformInput: <K extends keyof ParentIMap>(
+    params: ParentIMap[K]
+  ) => Promise<IMap[keyof IMap]> | IMap[keyof IMap];
   transformOutput: <K extends keyof OMap>(
-    // TODO: fix this type
-    // output: OMap[K]
     output: OMap[K]
-  ) => Promise<ParentO[keyof ParentO]> | ParentO[keyof ParentO];
+  ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
 }
 
 export class ProgressiveAdaptiveTryWorkerDef<
-  ParentP,
+  ParentI,
   ParentO,
+  ParentIMap,
   ParentOMap,
   Specs
-> extends ZZWorkerDef<ParentP, any, ParentO, {}, any, ParentOMap> {
+> extends ZZWorkerDef<any, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
   attempts: {
     [K in keyof Specs]: AttemptDef<
-      ParentP,
+      ParentI,
+      ParentO,
+      ParentIMap,
       ParentOMap,
-      z.infer<CheckSpec<Specs[K]>["jobOptions"]>,
+      InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>>,
+      InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>>,
+      InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>,
       InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
     >;
   };
@@ -37,12 +51,16 @@ export class ProgressiveAdaptiveTryWorkerDef<
     jobSpec,
   }: {
     zzEnv?: ZZEnv;
-    jobSpec: JobSpec<ParentP, any, any, any, ParentOMap>;
+    jobSpec: JobSpec<any, ParentI, ParentO, ParentIMap, ParentOMap>;
     attempts: {
       [K in keyof Specs]: AttemptDef<
-        ParentP,
+        ParentI,
+        ParentO,
+        ParentIMap,
         ParentOMap,
-        z.infer<CheckSpec<Specs[K]>["jobOptions"]>,
+        InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>>,
+        InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>>,
+        InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>,
         InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
       >;
     };
@@ -51,19 +69,29 @@ export class ProgressiveAdaptiveTryWorkerDef<
     super({
       jobSpec,
       zzEnv,
-      processor: async ({ logger, jobOptions, jobId }) => {
-        const genRetryFunction = <P, OMap>({
+      processor: async ({ logger, input, jobId }) => {
+        const genRetryFunction = <I, O, IMap, OMap>({
           jobSpec,
           transformInput,
           transformOutput,
-        }: AttemptDef<ParentP, ParentOMap, P, OMap>) => {
+        }: AttemptDef<
+          ParentI,
+          ParentO,
+          ParentIMap,
+          ParentOMap,
+          I,
+          O,
+          IMap,
+          OMap
+        >) => {
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
-
+            const inpt = (await input.nextValue())!;
             const jo = await jobSpec.enqueueJob({
               jobId: childJobId,
-              jobOptions: await transformInput(jobOptions),
             });
+            const transformed = await transformInput(inpt);
+            await jo.input.feed(transformed);
 
             const o = await jo.output.nextValue();
             if (!o) {
@@ -80,7 +108,16 @@ export class ProgressiveAdaptiveTryWorkerDef<
         };
 
         const restToTry = (
-          attempts as AttemptDef<ParentP, ParentOMap, any, any>[]
+          attempts as AttemptDef<
+            ParentI,
+            ParentO,
+            ParentIMap,
+            ParentOMap,
+            any,
+            any,
+            any,
+            any
+          >[]
         ).map((a) => ({
           fn: genRetryFunction(a),
           timeout: a.timeout,
