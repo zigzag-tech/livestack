@@ -21,6 +21,7 @@ export type ZZWorkerDefParams<P, I, O, WP extends object, IMap, OMap> = {
   processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
   instanceParamsDef?: z.ZodType<WP>;
   zzEnv?: ZZEnv;
+  workerPrefix?: string;
 };
 
 export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
@@ -28,17 +29,20 @@ export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
   public readonly processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
   public readonly zzEnv: ZZEnv | null = null;
+  public readonly workerPrefix?: string;
 
   constructor({
     jobSpec,
     processor,
     instanceParamsDef,
     zzEnv,
+    workerPrefix,
   }: ZZWorkerDefParams<P, I, O, WP, IMap, OMap>) {
     this.jobSpec = jobSpec;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
     this.zzEnv = zzEnv || jobSpec.zzEnv;
+    this.workerPrefix = workerPrefix;
   }
 
   public async startWorker(p?: {
@@ -120,7 +124,11 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     this.def = def;
 
     this.workerName =
-      workerName || "wkr:" + `${this.zzEnv.projectId}/${this.def.jobSpec.name}`;
+      workerName ||
+      "wkr:" +
+        `${this.zzEnv.projectId}/${
+          this.def.workerPrefix ? `(${this.def.workerPrefix})` : ""
+        }${this.def.jobSpec.name}`;
     this.logger = getLogger(`wkr:${this.workerName}`);
 
     const that = this;
