@@ -1,4 +1,5 @@
 /* eslint-disable */
+import Long from "long";
 import type { CallContext, CallOptions } from "nice-grpc-common";
 import _m0 from "protobufjs/minimal";
 import { Empty } from "./google/protobuf/empty";
@@ -307,7 +308,7 @@ function createBaseStreamDatapoint(): StreamDatapoint {
 export const StreamDatapoint = {
   encode(message: StreamDatapoint, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.timestamp !== 0) {
-      writer.uint32(8).uint32(message.timestamp);
+      writer.uint32(8).uint64(message.timestamp);
     }
     if (message.messageId !== "") {
       writer.uint32(18).string(message.messageId);
@@ -330,7 +331,7 @@ export const StreamDatapoint = {
             break;
           }
 
-          message.timestamp = reader.uint32();
+          message.timestamp = longToNumber(reader.uint64() as Long);
           continue;
         case 2:
           if (tag !== 18) {
@@ -521,6 +522,18 @@ export type DeepPartial<T> = T extends Builtin ? T
   : T extends ReadonlyArray<infer U> ? ReadonlyArray<DeepPartial<U>>
   : T extends {} ? { [K in keyof T]?: DeepPartial<T[K]> }
   : Partial<T>;
+
+function longToNumber(long: Long): number {
+  if (long.gt(globalThis.Number.MAX_SAFE_INTEGER)) {
+    throw new globalThis.Error("Value is larger than Number.MAX_SAFE_INTEGER");
+  }
+  return long.toNumber();
+}
+
+if (_m0.util.Long !== Long) {
+  _m0.util.Long = Long as any;
+  _m0.configure();
+}
 
 function isSet(value: any): boolean {
   return value !== null && value !== undefined;
