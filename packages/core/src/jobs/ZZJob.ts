@@ -308,12 +308,17 @@ export class ZZJob<
   };
 
   private _ensureInputStreamFn<K extends keyof IMap>(tag?: K) {
+    if (this.spec.inputDefSet.keys.length === 0) {
+      throw new Error("inputDefs is empty for spec " + this.spec.name);
+    }
     if (this.spec.inputDefSet.isSingle) {
       tag = this.spec.getSingleInputTag() as K;
     } else {
       if (!tag) {
         throw new Error(
-          `inputDefs is multiple streams, but key is not provided`
+          `inputDefs consists of multiple streams ${this.spec.inputDefSet.keys.join(
+            ", "
+          )}, but key is not provided.`
         );
       }
     }
