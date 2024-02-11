@@ -141,6 +141,7 @@ export class JobSpec<
       IMap & NewIMap,
       OMap & NewOMap
     >({
+      ...(this as any),
       ...newP,
       name: newP.name,
     } as ConstructorParameters<typeof JobSpec<P & NewP, NewI & I, NewO & O, IMap & NewIMap, OMap & NewOMap>>[0]);
