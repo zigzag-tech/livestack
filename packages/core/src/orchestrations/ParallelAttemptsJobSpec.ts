@@ -40,7 +40,7 @@ export class ParallelAttemptWorkerDef<
   ParentIMap,
   ParentOMap,
   Specs
-> extends ZZWorkerDef<unknown, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
+> extends ZZWorkerDef<any, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
   constructor({
     attempts,
     globalTimeoutCondition,
@@ -49,7 +49,7 @@ export class ParallelAttemptWorkerDef<
     zzEnv,
   }: {
     zzEnv?: ZZEnv;
-    jobSpec: JobSpec<unknown, ParentI, ParentO, ParentIMap, ParentOMap>;
+    jobSpec: JobSpec<any, ParentI, ParentO, ParentIMap, ParentOMap>;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
       results: {
