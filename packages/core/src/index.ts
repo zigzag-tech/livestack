@@ -9,6 +9,6 @@ export * from "./storage/localTempFileStorageProvider";
 export * from "@livestack/shared";
 export * from "./jobs/JobSpec";
 
-export * from "./orchestrations/ParallelAttemptsJobSpec";
+export * from "./orchestrations/ParallelAttemptWorkflow";
 export * from "./orchestrations/ProgressiveAdaptiveTryWorkerDef";
 export * from "./storage/cloudStorage";
