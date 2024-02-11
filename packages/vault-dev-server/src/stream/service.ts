@@ -70,6 +70,7 @@ class StreamServiceByProject implements StreamServiceImplementation {
             // https://redis.io/commands/xadd/
             cursor = message[0] as `${string}-${string}`;
             const [timestampStr, _] = cursor.split("-");
+            console.log(cursor, timestampStr);
             const timestamp = Number(timestampStr);
             const dataStr = parseMessageDataStr(message[1]);
             resolveNext({
