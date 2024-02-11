@@ -19,5 +19,9 @@
   "main": "dist/livestack-runpod.cjs.js",
   "types": "dist/livestack-runpod.cjs.d.ts",
   "module": "dist/livestack-runpod.esm.js",
-  "author": ""
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
 }
