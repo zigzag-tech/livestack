@@ -9,13 +9,14 @@ import {
   createLazyNextValueGenerator,
   createTrackedObservable,
 } from "../realtime/pubsub";
-import { IStorageProvider } from "../storage/cloudStorage";
+import { IStorageProvider, getPublicCdnUrl } from "../storage/cloudStorage";
 import { getLogger } from "../utils/createWorkerLogger";
 import { WrapTerminatorAndDataId } from "../utils/io";
 import longStringTruncator from "../utils/longStringTruncator";
 import { DataStream } from "./DataStream";
 import { JobSpec } from "./JobSpec";
 import { ZZEnv } from "./ZZEnv";
+import { identifyLargeFilesToSave } from "../files/file-ops";
 
 export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
   j: ZZJob<P, I, O, WP, IMap, OMap>
@@ -487,25 +488,25 @@ export class ZZJob<
   //   );
   // };
 
-  // getLargeValueCdnUrl = async <T extends object>(key: keyof T, obj: T) => {
-  //   if (!this.storageProvider) {
-  //     throw new Error("storageProvider is not provided");
-  //   }
-  //   if (!this.storageProvider.getPublicUrl) {
-  //     throw new Error("storageProvider.getPublicUrl is not provided");
-  //   }
-  //   const { largeFilesToSave } = identifyLargeFiles(obj);
-  //   const found = largeFilesToSave.find((x) => x.path === key);
-  //   if (!found) {
-  //     console.error("Available keys: ", Object.keys(obj));
-  //     throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
-  //   } else {
-  //     return getPublicCdnUrl({
-  //       projectId: this.zzEnv.projectId,
-  //       jobId: this.jobId,
-  //       key: String(key),
-  //       storageProvider: this.storageProvider,
-  //     });
-  //   }
-  // };
+  getLargeValueCdnUrl = async <T extends object>(key: keyof T, obj: T) => {
+    if (!this.storageProvider) {
+      throw new Error("storageProvider is not provided");
+    }
+    if (!this.storageProvider.getPublicUrl) {
+      throw new Error("storageProvider.getPublicUrl is not provided");
+    }
+    const { largeFilesToSave } = identifyLargeFilesToSave(obj);
+    const found = largeFilesToSave.find((x) => x.path === key);
+    if (!found) {
+      console.error("Available keys: ", Object.keys(obj));
+      throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
+    } else {
+      return getPublicCdnUrl({
+        projectId: this.zzEnv.projectId,
+        jobId: this.jobId,
+        key: String(key),
+        storageProvider: this.storageProvider,
+      });
+    }
+  };
 }

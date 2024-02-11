@@ -11,7 +11,7 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
   any,
   { replicateToken?: string },
   {},
-  { default: O }
+  { [k: string]: O }
 > {
   protected _endpoint: `${string}/${string}:${string}`;
   protected _replicateToken?: string;
@@ -22,7 +22,7 @@ export class ReplicateWorkerDef<P extends object, O> extends ZZWorkerDef<
     zzEnv,
     replicateToken,
   }: {
-    jobSpec: JobSpec<P, any, any, {}, { default: O }>;
+    jobSpec: JobSpec<P, any, any, {}, { [k: string]: O }>;
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
     zzEnv?: ZZEnv;

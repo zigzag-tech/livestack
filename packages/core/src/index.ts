@@ -11,3 +11,4 @@ export * from "./jobs/JobSpec";
 
 export * from "./orchestrations/ParallelAttemptsJobSpec";
 export * from "./orchestrations/ProgressiveAdaptiveTryWorkerDef";
+export * from "./storage/cloudStorage";
