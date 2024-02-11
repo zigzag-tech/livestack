@@ -686,6 +686,31 @@ export class JobSpec<
     return await this.getJobManager(jobId);
   }
 
+  public submitAndTerminate = async <
+    KI extends keyof IMap,
+    KO extends keyof OMap
+  >({
+    jobOptions,
+    input,
+    inputTag,
+    outputTag,
+  }: {
+    jobOptions?: P;
+    input: IMap[KI];
+    inputTag?: KI;
+    outputTag?: KO;
+  }) => {
+    const manager = await this.enqueueJob({
+      jobOptions,
+    });
+    await manager.input(inputTag).feed(input);
+    const out = await manager.output(outputTag).nextValue();
+    manager.input.tags.forEach((k) => {
+      manager.input.terminate(k);
+    });
+    return out;
+  };
+
   protected async lookUpChildJobIdByGroupIDAndSpecTag({
     groupId,
   }: {
@@ -1119,16 +1144,13 @@ export class JobManager<P, I, O, IMap, OMap> {
     this.jobId = jobId;
   }
 
-  feedAndWaitOnSingleResults: <
-    KI extends keyof IMap,
-    KO extends keyof OMap
-  >(p: {
-    data: IMap[KI];
+  submitAndWait: <KI extends keyof IMap, KO extends keyof OMap>(p: {
+    input: IMap[KI];
     inputTag?: KI;
     outputTag?: KO;
   }) => Promise<{ data: OMap[KO]; timestamp: number } | null> = async (p) => {
-    const { data, inputTag, outputTag } = p;
-    await this.input.feed(data, inputTag);
+    const { input: inputData, inputTag, outputTag } = p;
+    await this.input.feed(inputData, inputTag);
     return await this.output(outputTag).nextValue();
   };
 }
