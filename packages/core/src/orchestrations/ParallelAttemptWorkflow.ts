@@ -1,4 +1,4 @@
-import { InferStreamSetType } from "@livestack/shared";
+import { InferStreamSetType, InferTMap } from "@livestack/shared";
 import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { ZZEnv } from "../jobs/ZZEnv";
@@ -13,24 +13,15 @@ type TriggerCheckContext = {
   }[];
 };
 
-export interface ParallelAttempt<
-  ParentI,
-  ParentO,
-  ParentIMap,
-  ParentOMap,
-  IMap,
-  OMap
-> {
-  jobSpec: JobSpec<unknown, ParentI, ParentO, IMap, OMap>;
-  timeout: number;
-  transformInput: (
-    params: ParentIMap[keyof ParentIMap]
-  ) => Promise<IMap[keyof IMap]> | IMap[keyof IMap];
-  transformOutput: <K extends keyof ParentOMap>(
-    // TODO: fix this type
-    // output: OMap[K]
-    output: OMap[keyof OMap]
-  ) => Promise<ParentOMap[K]> | ParentOMap[K];
+export interface ParallelAttempt<ParentIMap, ParentOMap, I, O, IMap, OMap> {
+  jobSpec: JobSpec<any, I, O, IMap, OMap>;
+  timeout?: number;
+  transformInput: <K extends keyof ParentIMap>(
+    params: ParentIMap[K]
+  ) => Promise<NoInfer<IMap[keyof IMap]>> | NoInfer<IMap[keyof IMap]>;
+  transformOutput: <K extends keyof OMap>(
+    output: OMap[K]
+  ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
 
@@ -39,7 +30,26 @@ export class ParallelAttemptWorkflow<
   ParentO,
   ParentIMap,
   ParentOMap,
-  Specs
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2 = never,
+  O2 = never,
+  IMap2 = never,
+  OMap2 = never,
+  I3 = never,
+  O3 = never,
+  IMap3 = never,
+  OMap3 = never,
+  I4 = never,
+  O4 = never,
+  IMap4 = never,
+  OMap4 = never,
+  I5 = never,
+  O5 = never,
+  IMap5 = never,
+  OMap5 = never
 > extends ZZWorkerDef<any, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
   constructor({
     attempts,
@@ -59,27 +69,43 @@ export class ParallelAttemptWorkflow<
         name: string;
       }[]
     ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
-    attempts: {
-      [K in keyof Specs]: ParallelAttempt<
-        ParentI,
-        ParentO,
-        ParentIMap,
-        ParentOMap,
-        InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>,
-        InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>
-      >;
-    };
+    attempts:
+      | AttemptsUpTo5<
+          ParentIMap,
+          ParentOMap,
+          I1,
+          O1,
+          IMap1,
+          OMap1,
+          I2,
+          O2,
+          IMap2,
+          OMap2,
+          I3,
+          O3,
+          IMap3,
+          OMap3,
+          I4,
+          O4,
+          IMap4,
+          OMap4,
+          I5,
+          O5,
+          IMap5,
+          OMap5
+        >
+      | ParallelAttempt<ParentIMap, ParentOMap, any, any, any, any>;
   }) {
     super({
       zzEnv,
       jobSpec: parentJobSpec,
       workerPrefix: "paral-try",
       processor: async ({ logger, input: parentInput, jobId }) => {
-        const genRetryFunction = <I, O>({
+        const genRetryFunction = <I, O, IMap, OMap>({
           jobSpec,
           transformInput,
           transformOutput,
-        }: ParallelAttempt<ParentI, ParentO, ParentIMap, ParentOMap, I, O>) => {
+        }: ParallelAttempt<ParentIMap, ParentOMap, I, O, IMap, OMap>) => {
           const fn = async () => {
             const childJobId = `${jobId}/${jobSpec.name}`;
             const { output, input } = await jobSpec.enqueueJob({
@@ -91,7 +117,7 @@ export class ParallelAttemptWorkflow<
               throw new Error("no input");
             }
 
-            await input.feed(await transformInput(inp));
+            await input.feed((await transformInput(inp)) as IMap[keyof IMap]);
 
             const o = await output.nextValue();
             if (!o) {
@@ -210,3 +236,223 @@ const genResolvedTracker = () => {
     isResolved: () => resolved,
   };
 };
+
+type Attemp2<
+  ParentIMap,
+  ParentOMap,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2,
+  O2,
+  IMap2,
+  OMap2
+> = [
+  ParallelAttempt<ParentIMap, ParentOMap, I1, O1, IMap1, OMap1>,
+  ParallelAttempt<ParentIMap, ParentOMap, I2, O2, IMap2, OMap2>
+];
+
+type Attemp3<
+  ParentIMap,
+  ParentOMap,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2,
+  O2,
+  IMap2,
+  OMap2,
+  I3,
+  O3,
+  IMap3,
+  OMap3
+> = [
+  ...Attemp2<
+    ParentIMap,
+    ParentOMap,
+    I1,
+    O1,
+    IMap1,
+    OMap1,
+    I2,
+    O2,
+    IMap2,
+    OMap2
+  >,
+  ParallelAttempt<ParentIMap, ParentOMap, I3, O3, IMap3, OMap3>
+];
+
+type Attemp4<
+  ParentIMap,
+  ParentOMap,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2,
+  O2,
+  IMap2,
+  OMap2,
+  I3,
+  O3,
+  IMap3,
+  OMap3,
+  I4,
+  O4,
+  IMap4,
+  OMap4
+> = [
+  ...Attemp3<
+    ParentIMap,
+    ParentOMap,
+    I1,
+    O1,
+    IMap1,
+    OMap1,
+    I2,
+    O2,
+    IMap2,
+    OMap2,
+    I3,
+    O3,
+    IMap3,
+    OMap3
+  >,
+  ParallelAttempt<ParentIMap, ParentOMap, I4, O4, IMap4, OMap4>
+];
+
+type Attemp5<
+  ParentIMap,
+  ParentOMap,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2,
+  O2,
+  IMap2,
+  OMap2,
+  I3,
+  O3,
+  IMap3,
+  OMap3,
+  I4,
+  O4,
+  IMap4,
+  OMap4,
+  I5,
+  O5,
+  IMap5,
+  OMap5
+> = [
+  ...Attemp4<
+    ParentIMap,
+    ParentOMap,
+    I1,
+    O1,
+    IMap1,
+    OMap1,
+    I2,
+    O2,
+    IMap2,
+    OMap2,
+    I3,
+    O3,
+    IMap3,
+    OMap3,
+    I4,
+    O4,
+    IMap4,
+    OMap4
+  >,
+  ParallelAttempt<ParentIMap, ParentOMap, I5, O5, IMap5, OMap5>
+];
+
+type AttemptsUpTo5<
+  ParentIMap,
+  ParentOMap,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  I2,
+  O2,
+  IMap2,
+  OMap2,
+  I3,
+  O3,
+  IMap3,
+  OMap3,
+  I4,
+  O4,
+  IMap4,
+  OMap4,
+  I5,
+  O5,
+  IMap5,
+  OMap5
+> =
+  | [ParallelAttempt<ParentIMap, ParentOMap, I1, O1, IMap1, OMap1>]
+  | Attemp2<ParentIMap, ParentOMap, I1, O1, IMap1, OMap1, I2, O2, IMap2, OMap2>
+  | Attemp3<
+      ParentIMap,
+      ParentOMap,
+      I1,
+      O1,
+      IMap1,
+      OMap1,
+      I2,
+      O2,
+      IMap2,
+      OMap2,
+      I3,
+      O3,
+      IMap3,
+      OMap3
+    >
+  | Attemp4<
+      ParentIMap,
+      ParentOMap,
+      I1,
+      O1,
+      IMap1,
+      OMap1,
+      I2,
+      O2,
+      IMap2,
+      OMap2,
+      I3,
+      O3,
+      IMap3,
+      OMap3,
+      I4,
+      O4,
+      IMap4,
+      OMap4
+    >
+  | Attemp5<
+      ParentIMap,
+      ParentOMap,
+      I1,
+      O1,
+      IMap1,
+      OMap1,
+      I2,
+      O2,
+      IMap2,
+      OMap2,
+      I3,
+      O3,
+      IMap3,
+      OMap3,
+      I4,
+      O4,
+      IMap4,
+      OMap4,
+      I5,
+      O5,
+      IMap5,
+      OMap5
+    >;
