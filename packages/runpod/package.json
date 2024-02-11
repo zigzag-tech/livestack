@@ -13,6 +13,7 @@
     "@livestack/core": "*"
   },
   "devDependencies": {
+    "@preconstruct/cli": "^2.8.3",
     "typescript": "5.4.0-beta"
   },
   "main": "dist/livestack-runpod.cjs.js",
