@@ -26,6 +26,7 @@ export function findSuitableVaultServer() {
     }
   } else {
     vaultServerURL = "livedev.example.net:50504";
+    console.info("vaultServerURL:", vaultServerURL);
   }
   return {
     db: createClient(DBServiceDefinition, createChannel(vaultServerURL)),
