@@ -5,18 +5,16 @@ import { InferStreamSetType, InferTMap } from "@livestack/shared";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { genTimeoutPromise } from "../utils/genTimeoutPromise";
 
-export type AttemptDef<ParentIMap, ParentOMap, I, O, IMap, OMap> = {
+export interface AttemptDef<ParentIMap, ParentOMap, I, O, IMap, OMap> {
   jobSpec: JobSpec<any, I, O, IMap, OMap>;
   timeout: number;
   transformInput: <K extends keyof ParentIMap>(
-    data: NoInfer<ParentIMap[K]>
-  ) => NoInfer<Promise<IMap[keyof IMap]> | IMap[keyof IMap]>;
+    data: ParentIMap[K]
+  ) => Promise<IMap[keyof IMap]> | IMap[keyof IMap];
   transformOutput: <K extends keyof OMap>(
-    output: NoInfer<OMap[K]>
-  ) => NoInfer<
-    Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap]
-  >;
-};
+    output: OMap[K]
+  ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
+}
 
 export class ProgressiveAdaptiveTryWorkerDef<
   ParentI,
@@ -45,8 +43,8 @@ export class ProgressiveAdaptiveTryWorkerDef<
     jobSpec: JobSpec<any, ParentI, ParentO, ParentIMap, ParentOMap>;
     attempts: {
       [K in keyof Specs]: AttemptDef<
-        NoInfer<ParentIMap>,
-        NoInfer<ParentOMap>,
+        ParentIMap,
+        ParentOMap,
         InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>>,
         InferTMap<InferStreamSetType<CheckSpec<Specs[K]>["outputDefSet"]>>,
         InferStreamSetType<CheckSpec<Specs[K]>["inputDefSet"]>,
