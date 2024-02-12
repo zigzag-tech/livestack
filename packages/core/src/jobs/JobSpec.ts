@@ -686,7 +686,7 @@ export class JobSpec<
     return await this.getJobManager(jobId);
   }
 
-  public submitAndTerminate = async <
+  public enqueueAndGetResult = async <
     KI extends keyof IMap,
     KO extends keyof OMap
   >({
