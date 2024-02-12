@@ -1038,11 +1038,15 @@ export class JobSpec<
     const qualified = pass2;
     if (qualified.length === 0) {
       throw new Error(
-        `Cannot find a single unambiguous ${type} for spec "${
+        `Cannot identify a single unambiguous ${type} for spec "${
           this.name
-        }". Please specify at least one in the "${type}" field of the spec's definition. Available ${type}s: ${
-          qualified.map((q) => q.conns[0].tag).join(", ") || "none"
-        }`
+        }". Please specify at least one in the "${type}" field of the spec's definition. Available ${type}s: [${(type ===
+        "input"
+          ? this.inputTags
+          : this.outputTags
+        )
+          .map((s) => `"${s.toString()}"`)
+          .join(", ")}]}`
       );
     } else if (qualified.length > 1) {
       throw new Error(
