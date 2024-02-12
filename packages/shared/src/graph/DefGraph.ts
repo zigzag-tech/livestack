@@ -33,6 +33,7 @@ export type StreamDefNode = {
 export type AliasNode = {
   nodeType: "alias";
   alias: string;
+  direction: "in" | "out";
 };
 
 export type DefGraphNode = { label: string } & (
@@ -87,7 +88,7 @@ export class DefGraph extends Graph<DefGraphNode> {
     });
 
     // add inlet and outlet nodes, their edges, and the connected stream node and edges
-    for (const tag of root.inputDefSet.keys) {
+    for (const tag of root.inputDefSet.tags) {
       const tagStr = tag.toString();
       const inletIdentifier = `${specIdentifier}/${tagStr}`;
       const inletNodeId = this.ensureNode(inletIdentifier, {
@@ -121,7 +122,7 @@ export class DefGraph extends Graph<DefGraphNode> {
       this.ensureEdge(streamNodeId, inletNodeId);
     }
 
-    for (const tag of root.outputDefSet.keys) {
+    for (const tag of root.outputDefSet.tags) {
       const tagStr = tag.toString();
       const outletIdentifier = `${specIdentifier}/${tagStr}`;
       const outletNodeId = this.ensureNode(outletIdentifier, {
@@ -199,6 +200,7 @@ export class DefGraph extends Graph<DefGraphNode> {
       nodeType: "alias",
       alias,
       label: aliasId,
+      direction: type,
     });
 
     if (type === "in") {
@@ -296,6 +298,10 @@ export class DefGraph extends Graph<DefGraphNode> {
         ? (this.getNodeAttributes(aliasNodeId) as AliasNode).alias
         : null;
     }
+  }
+
+  public getAllAliasNodeIds() {
+    return this.filterNodes((nId, attrs) => attrs.nodeType === "alias");
   }
 
   public lookupSpecAndTagByAlias({
