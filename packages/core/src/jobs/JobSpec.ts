@@ -1138,9 +1138,11 @@ export class JobSpec<
   }
 
   public static define<P, I, O>(
-    p: ConstructorParameters<typeof JobSpec<P, I, O>>[0]
+    p: ConstructorParameters<
+      typeof JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>
+    >[0]
   ) {
-    return new JobSpec<P, I, O>(p);
+    return new JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>(p);
   }
 }
 
@@ -1205,62 +1207,12 @@ export const SpecOrName = z.union([
   z.string(),
   z.instanceof(JobSpec<any, any, any, any, any>),
 ]);
-export type SpecOrName = z.infer<typeof SpecOrName>; // Conversion functions using TypeScript
-
-export const UniqueSpecQuery = z.union([
-  SpecOrName,
-  z.object({
-    spec: SpecOrName,
-    label: z.string().default("default_label"),
-  }),
-]);
-
-export type UniqueSpecQuery = z.infer<typeof UniqueSpecQuery>;
-export const SpecAndOutlet = z.union([
-  UniqueSpecQuery,
-  z.tuple([UniqueSpecQuery, z.string().or(z.literal("default"))]),
-]);
-export type SpecAndOutlet = z.infer<typeof SpecAndOutlet>;
-export function resolveUniqueSpec(
-  uniqueSpec: UniqueSpecQuery | TagObj<any, any, any, any, any>
-): {
-  spec: JobSpec<any, any, any>;
-  uniqueSpecLabel?: string;
-} {
-  if (typeof uniqueSpec === "string") {
-    const spec = JobSpec.lookupByName(uniqueSpec);
-    return {
-      spec,
-    };
-  } else if ("spec" in (uniqueSpec as any) && "label" in (uniqueSpec as any)) {
-    const spec = convertSpecOrName(
-      (
-        uniqueSpec as {
-          spec: SpecOrName;
-          label: string;
-        }
-      ).spec
-    );
-
-    return {
-      spec,
-      uniqueSpecLabel: (
-        uniqueSpec as {
-          spec: SpecOrName;
-          label: string;
-        }
-      ).label,
-    };
-  } else {
-    const spec = convertSpecOrName(uniqueSpec as any);
-    return {
-      spec,
-    };
-  }
-}
+export type SpecOrName<P = any, I = any, O = any, IMap = any, OMap = any> =
+  | string
+  | JobSpec<P, I, O, IMap, OMap>;
 
 export function convertSpecOrName(
-  specOrName: SpecOrName | TagObj<any, any, any, any, any>
+  specOrName: SpecOrName | TagObj<any, any, any, any, any, any, any>
 ) {
   if (typeof specOrName === "string") {
     return JobSpec.lookupByName(specOrName);
@@ -1275,7 +1227,7 @@ export function convertSpecOrName(
 export function resolveTagMapping(
   p:
     | {
-        _aliasMaps?: Partial<TagMaps<any, any, any, any>>;
+        _aliasMaps?: Partial<TagMaps<any, any, any, any, any, any>>;
       }
     | string
     | any
