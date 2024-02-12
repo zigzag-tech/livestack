@@ -125,7 +125,7 @@ export class LiveGatewayConn {
     const { input, output } = this.jobFnsById[jobId];
 
     const subs: Subscription[] = [];
-
+    console.info("Tags to transmit for job ", jobId, ":", output.tags);
     for (const tag of output.tags) {
       const sub = output.byTag(tag).valueObservable.subscribe((data) => {
         this.socket.emit(`stream:${jobId}/${String(tag)}`, data);
