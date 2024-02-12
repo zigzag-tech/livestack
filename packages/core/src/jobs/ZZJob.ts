@@ -249,8 +249,8 @@ export class ZZJob<
 
   private readonly genInputObjectByTag = <K extends keyof IMap>(tag?: K) => {
     const that = this;
-    const nextValue = async (tag0?: K) => {
-      const r = await (await that._ensureInputStreamFn(tag0)).nextValue();
+    const nextValue = async () => {
+      const r = await (await that._ensureInputStreamFn(tag)).nextValue();
       return r as IMap[K] | null;
     };
     return {
@@ -266,7 +266,7 @@ export class ZZJob<
           tag = that.spec.getSingleInputTag() as K;
         }
         while (true) {
-          const input = await nextValue(tag);
+          const input = await nextValue();
 
           // Assuming nextInput returns null or a similar value to indicate completion
           if (!input) {
