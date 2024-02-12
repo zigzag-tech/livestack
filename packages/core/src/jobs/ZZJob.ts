@@ -243,7 +243,7 @@ export class ZZJob<
   private readonly genInputObject = () => {
     return {
       ...this.genInputObjectByTag(),
-      tags: this.spec.inputDefSet.keys,
+      tags: this.spec.inputTags,
     };
   };
 
@@ -311,15 +311,15 @@ export class ZZJob<
   };
 
   private _ensureInputStreamFn<K extends keyof IMap>(tag?: K) {
-    if (this.spec.inputDefSet.keys.length === 0) {
+    if (this.spec.inputTags.length === 0) {
       throw new Error("inputDefs is empty for spec " + this.spec.name);
     }
-    if (this.spec.inputDefSet.isSingle) {
+    if (this.spec.isInputSingle) {
       tag = this.spec.getSingleInputTag() as K;
     } else {
       if (!tag) {
         throw new Error(
-          `inputDefs consists of multiple streams ${this.spec.inputDefSet.keys.join(
+          `inputDefs consists of multiple streams ${this.spec.inputTags.join(
             ", "
           )}, but key is not provided.`
         );
@@ -435,7 +435,7 @@ export class ZZJob<
       // wait as long as there are still subscribers
       await allInputUnsubscribed;
 
-      if (processedR && this.spec.outputDefSet.isSingle) {
+      if (processedR && this.spec.isOutputSingle) {
         await this.output.emit(processedR);
       }
 
@@ -446,7 +446,7 @@ export class ZZJob<
 
       // await job.updateProgress(processedR as object);
       // console.debug("signalOutputEnd", this.jobId);
-      for (const tag of this.spec.outputDefSet.keys) {
+      for (const tag of this.spec.outputDefSet.tags) {
         await this.signalOutputEnd(tag);
       }
 

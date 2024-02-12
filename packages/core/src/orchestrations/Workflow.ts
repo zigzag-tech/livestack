@@ -1,6 +1,6 @@
 import { vaultClient } from "@livestack/vault-client";
 import { CheckSpec, JobSpec } from "../jobs/JobSpec";
-import { IOSpec, InferTMap } from "@livestack/shared";
+import { AliasNode, IOSpec, InferTMap } from "@livestack/shared";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
@@ -142,7 +142,7 @@ export class WorkflowSpec extends JobSpec<
       for (const conn of this.connections) {
         for (const c of [conn.from, conn.to]) {
           const spec = c.spec;
-          for (const tag of spec.inputDefSet.keys) {
+          for (const tag of spec.inputTags) {
             g.ensureInletAndStream({
               specName: spec.name,
               tag,
@@ -150,7 +150,7 @@ export class WorkflowSpec extends JobSpec<
               hasTransform: false,
             });
           }
-          for (const tag of spec.outputDefSet.keys) {
+          for (const tag of spec.outputTags) {
             g.ensureOutletAndStream({
               specName: spec.name,
               tag,
@@ -235,7 +235,7 @@ export class WorkflowSpec extends JobSpec<
         });
         const inletHasTransformOverridesByTag: Record<string, boolean> = {};
         if (parentRec) {
-          for (const tag of this.inputDefSet.keys) {
+          for (const tag of this.inputTags) {
             const transform = TransformRegistry.getTransform({
               workflowSpecName: parentRec.spec_name,
               receivingSpecName: this.name,
@@ -343,6 +343,29 @@ export class WorkflowSpec extends JobSpec<
       },
     });
   }
+  public override get inputTags() {
+    // traverse the def graph and get tags from alias nodes
+    const g = this.getDefGraph();
+    const aliasNodeIds = g.getAllAliasNodeIds();
+    return [
+      ...aliasNodeIds
+        .map((n) => g.getNodeAttributes(n) as AliasNode)
+        .filter((n) => n.direction === "in")
+        .map((n) => n.alias),
+    ];
+  }
+
+  public override get outputTags() {
+    // traverse the def graph and get tags from alias nodes
+    const g = this.getDefGraph();
+    const aliasNodeIds = g.getAllAliasNodeIds();
+    return [
+      ...aliasNodeIds
+        .map((n) => g.getNodeAttributes(n) as AliasNode)
+        .filter((n) => n.direction === "out")
+        .map((n) => n.alias),
+    ];
+  }
 
   protected override convertSpecTagToWorkflowAlias({
     specName,
@@ -384,9 +407,10 @@ export class WorkflowSpec extends JobSpec<
     type: "in" | "out";
     alias: string | symbol | number;
   }) {
+    // from the root spec level
     if (
-      (type === "in" ? this.inputDefSet : this.outputDefSet).keys.includes(
-        alias
+      (type === "in" ? this.inputDefSet.tags : this.outputDefSet.tags).includes(
+        alias.toString()
       )
     ) {
       return {
@@ -523,7 +547,7 @@ export class Workflow {
         });
         const inletHasTransformOverridesByTag: Record<string, boolean> = {};
         if (parentRec) {
-          for (const tag of that.jobGroupDef.inputDefSet.keys) {
+          for (const tag of that.jobGroupDef.inputTags) {
             const transform = TransformRegistry.getTransform({
               workflowSpecName: parentRec.spec_name,
               receivingSpecName: that.jobGroupDef.name,

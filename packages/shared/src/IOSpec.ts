@@ -1,12 +1,14 @@
 import { StreamDefSet, InferDefMap } from "./StreamDefSet";
 import { ZodType, z } from "zod";
 
-export class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
+export abstract class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
   public readonly name: string;
   public readonly inputDefSet: StreamDefSet<IMap>;
   public readonly outputDefSet: StreamDefSet<OMap>;
   public readonly input: InferDefMap<IMap>;
   public readonly output: InferDefMap<OMap>;
+  public abstract get inputTags(): (keyof IMap)[];
+  public abstract get outputTags(): (keyof OMap)[];
 
   protected constructor({
     name,
@@ -38,18 +40,6 @@ export class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
         defs: this.output,
       });
     }
-  }
-
-  public static define<I, O>({
-    name,
-    input,
-    output,
-  }: {
-    name: string;
-    input: I;
-    output: O;
-  }): IOSpec<I, O> {
-    return new IOSpec<I, O>({ name, input, output });
   }
 }
 export type InferTMap<T> = T extends z.ZodType

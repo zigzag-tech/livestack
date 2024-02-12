@@ -43,7 +43,7 @@ export async function resolveInstantiatedGraph({
   const inletHasTransformOverridesByTag: Record<string, boolean> = {};
   if (parentRec.rec) {
     const pRec = parentRec.rec;
-    for (const tag of spec.inputDefSet.keys) {
+    for (const tag of spec.inputTags) {
       const transform = TransformRegistry.getTransform({
         workflowSpecName: pRec.spec_name,
         receivingSpecName: spec.name,

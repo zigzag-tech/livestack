@@ -799,7 +799,7 @@ export class JobSpec<
       };
       const byTagFn = genByTagFn() as JobInput<IMap>;
       byTagFn.byTag = genByTagFn();
-      byTagFn.tags = this.inputDefSet.keys;
+      byTagFn.tags = this.inputTags;
 
       byTagFn.feed = async (data: IMap[keyof IMap]) => {
         const tag = that.getSingleInputTag();
@@ -818,6 +818,29 @@ export class JobSpec<
       return byTagFn;
     })();
   };
+
+  protected _getInputTags() {
+    return this.inputDefSet.tags;
+  }
+  protected _getOutputTags() {
+    return this.outputDefSet.tags;
+  }
+
+  public get inputTags() {
+    return this._getInputTags();
+  }
+
+  public get outputTags() {
+    return this._getOutputTags();
+  }
+
+  public get isInputSingle() {
+    return this.inputTags.length === 1;
+  }
+
+  public get isOutputSingle() {
+    return this.outputTags.length === 1;
+  }
 
   public _deriveOutputsForJob: (jobId: string) => JobOutput<OMap> = (
     jobId: string
@@ -885,7 +908,7 @@ export class JobSpec<
         return singletonSubscriberByTag(tag);
       }) as JobOutput<OMap>;
       func.byTag = singletonSubscriberByTag;
-      func.tags = this.outputDefSet.keys;
+      func.tags = this.outputTags;
       func.nextValue = nextValue;
       (func.valueObservable = new Observable<
         WrapWithTimestamp<OMap[keyof OMap]>
