@@ -68,10 +68,10 @@ export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
     return this.jobSpec.enqueueJob(p);
   };
 
-  public submitAndTerminate: (typeof this.jobSpec)["submitAndTerminate"] = (
+  public enqueueAndGetResult: (typeof this.jobSpec)["enqueueAndGetResult"] = (
     p
   ) => {
-    return this.jobSpec.submitAndTerminate(p);
+    return this.jobSpec.enqueueAndGetResult(p);
   };
 
   public static define<P, I, O, WP extends object, IMap, OMap>(
