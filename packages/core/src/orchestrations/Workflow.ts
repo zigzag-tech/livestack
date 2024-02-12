@@ -1,64 +1,84 @@
 import { vaultClient } from "@livestack/vault-client";
-import { CheckSpec, JobSpec } from "../jobs/JobSpec";
+import {
+  CheckSpec,
+  JobSpec,
+  SpecOrName,
+  convertSpecOrName,
+} from "../jobs/JobSpec";
 import { AliasNode, IOSpec, InferTMap } from "@livestack/shared";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { JobNode, InstantiatedGraph } from "@livestack/shared";
-import {
-  SpecAndOutlet,
-  resolveUniqueSpec,
-  resolveTagMapping,
-} from "../jobs/JobSpec";
+import { resolveTagMapping } from "../jobs/JobSpec";
 import { TransformFunction } from "@livestack/shared";
 import { TransformRegistry } from "./TransformRegistry";
 
-type SpecAndOutletOrTagged = SpecAndOutlet | TagObj<any, any, any, any, any>;
-type WithT =
-  | [SpecAndOutletOrTagged]
-  | [SpecAndOutletOrTagged, TransformFunction];
+type UniqueSpecQuery<P = any, I = any, O = any, IMap = any, OMap = any> =
+  | SpecOrNameOrTagged<P, I, O, IMap, OMap>
+  | { spec: SpecOrName<P, I, O, IMap, OMap>; label: string };
+type SpecOrNameOrTagged<P = any, I = any, O = any, IMap = any, OMap = any> =
+  | SpecOrName<P, I, O, IMap, OMap>
+  | TagObj<P, I, O, IMap, OMap, any, any>;
+
+type TaggedSpecAndOutlet<P = any, I = any, O = any, IMap = any, OMap = any> =
+  | SpecOrNameOrTagged<P, I, O, IMap, OMap>
+  | [SpecOrNameOrTagged<P, I, O, IMap, OMap>, keyof OMap | keyof IMap];
+
+type WithTr<P = any, I = any, O = any, IMap = any, OMap = any> =
+  | [TaggedSpecAndOutlet<P, I, O, IMap, OMap>]
+  | [TaggedSpecAndOutlet<P, I, O, IMap, OMap>, TransformFunction];
 
 type Combos =
-  | [...WithT, SpecAndOutletOrTagged]
-  | [...WithT, ...WithT, SpecAndOutletOrTagged]
-  | [...WithT, ...WithT, ...WithT, SpecAndOutletOrTagged]
-  | [[...WithT, ...WithT, ...WithT, ...WithT, SpecAndOutletOrTagged]]
-  | [[...WithT, ...WithT, ...WithT, ...WithT, ...WithT, SpecAndOutletOrTagged]]
+  | [...WithTr, TaggedSpecAndOutlet]
+  | [...WithTr, ...WithTr, TaggedSpecAndOutlet]
+  | [...WithTr, ...WithTr, ...WithTr, TaggedSpecAndOutlet]
+  | [[...WithTr, ...WithTr, ...WithTr, ...WithTr, TaggedSpecAndOutlet]]
   | [
       [
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        SpecAndOutletOrTagged
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        TaggedSpecAndOutlet
       ]
     ]
   | [
       [
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        SpecAndOutletOrTagged
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        TaggedSpecAndOutlet
       ]
     ]
   | [
       [
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        ...WithT,
-        SpecAndOutletOrTagged
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        TaggedSpecAndOutlet
+      ]
+    ]
+  | [
+      [
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        ...WithTr,
+        TaggedSpecAndOutlet
       ]
     ];
 
@@ -71,8 +91,8 @@ export type JobSpecAndJobOptions<JobSpec> = {
 type WorkflowParams = {
   connections: (
     | {
-        from: SpecAndOutletOrTagged;
-        to: SpecAndOutletOrTagged;
+        from: TaggedSpecAndOutlet;
+        to: TaggedSpecAndOutlet;
       }
     | Combos
   )[];
@@ -597,7 +617,7 @@ export class Workflow {
 }
 
 function convertSpecAndOutletWithTags(
-  specAndOutletOrTagged: SpecAndOutletOrTagged
+  specAndOutletOrTagged: TaggedSpecAndOutlet
 ): {
   spec: JobSpec<any, any, any>;
   uniqueSpecLabel?: string;
@@ -612,7 +632,7 @@ function convertSpecAndOutletWithTags(
     return {
       spec: resolveUniqueSpec(uniqueSpec).spec,
       ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
-      tagInSpec,
+      tagInSpec: tagInSpec.toString(),
       ...aliasMaps,
     };
   } else {
@@ -674,7 +694,7 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
 
         const handleAndAdvanceCursor = () => {
           const from = convertSpecAndOutletWithTags(
-            conn[cursor] as SpecAndOutletOrTagged
+            conn[cursor] as TaggedSpecAndOutlet
           );
           let to: ReturnType<typeof convertSpecAndOutletWithTags>;
           cursor++;
@@ -683,11 +703,11 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
             transform = conn[cursor] as TransformFunction;
             cursor++;
             to = convertSpecAndOutletWithTags(
-              conn[cursor] as SpecAndOutletOrTagged
+              conn[cursor] as TaggedSpecAndOutlet
             );
           } else {
             to = convertSpecAndOutletWithTags(
-              conn[cursor] as SpecAndOutletOrTagged
+              conn[cursor] as TaggedSpecAndOutlet
             );
           }
           cursor++;
@@ -759,60 +779,103 @@ function validateSpecHasKey<P, I, O, IMap, OMap>({
   }
 }
 
-export type TagMaps<I, O, IKs, OKs> = {
-  inputTag: Partial<Record<keyof InferTMap<I>, IKs>>;
-  outputTag: Partial<Record<keyof InferTMap<O>, OKs>>;
+export type TagMaps<I, O, IMap, OMap, IKs, OKs> = {
+  inputTag: Partial<Record<keyof IMap, IKs>>;
+  outputTag: Partial<Record<keyof OMap, OKs>>;
 };
 
-export interface TagObj<P, I, O, IKs, OKs> {
-  spec: JobSpec<P, I, O>;
+export interface TagObj<P, I, O, IMap, OMap, IKs, OKs> {
+  spec: JobSpec<P, I, O, IMap, OMap>;
+  uniqueSpecLabel?: string;
   input: <newK extends string>(
     tagOrMap: newK | Partial<Record<keyof InferTMap<I>, newK>>
-  ) => TagObj<P, I, O, IKs | newK, OKs>;
+  ) => TagObj<P, I, O, IMap, OMap, IKs | newK, OKs>;
   output: <newK extends string>(
     tagOrMap: newK | Partial<Record<keyof InferTMap<O>, newK>>
-  ) => TagObj<P, I, O, IKs, OKs | newK>;
-  _aliasMaps: TagMaps<I, O, IKs, OKs>;
+  ) => TagObj<P, I, O, IMap, OMap, IKs, OKs | newK>;
+  _aliasMaps: TagMaps<I, O, IMap, OMap, IKs, OKs>;
 }
 
-export function alias<P, IMap, OMap>(spec: JobSpec<P, IMap, OMap>) {
-  return _tagObj(spec, {
+export function alias<P, I, O, IMap, OMap>(
+  specLike: SpecOrName<P, I, O, IMap, OMap>
+) {
+  return _tagObj(specLike, {
     inputTag: {},
     outputTag: {},
-  } as TagMaps<IMap, OMap, never, never>);
+  } as TagMaps<I, O, IMap, OMap, never, never>);
 }
 
-function _tagObj<P, I, O, IKs, OKs>(
-  spec: JobSpec<P, I, O>,
-  _aliasMaps: TagMaps<I, O, IKs, OKs>
-): TagObj<P, I, O, IKs, OKs> {
+function _tagObj<P, I, O, IMap, OMap, IKs, OKs>(
+  specLike: SpecOrName<P, I, O, IMap, OMap>,
+  _aliasMaps: TagMaps<I, O, IMap, OMap, IKs, OKs>
+): TagObj<P, I, O, IMap, OMap, IKs, OKs> {
   const aliasMaps = { ..._aliasMaps };
+  const specAndLabel = resolveUniqueSpec(specLike);
   return {
-    spec,
+    spec: specAndLabel.spec,
+    uniqueSpecLabel: specAndLabel.uniqueSpecLabel,
     _aliasMaps: aliasMaps,
     input: <Ks extends string>(
       tagOrMap: Ks | Partial<Record<keyof InferTMap<I>, Ks>>
     ) => {
-      const tm = aliasMaps as TagMaps<I, O, IKs | Ks, OKs>;
+      const tm = aliasMaps as TagMaps<I, O, IMap, OMap, IKs | Ks, OKs>;
       if (typeof tagOrMap === "string") {
-        const key = spec.getSingleInputTag();
+        const key = specAndLabel.spec.getSingleInputTag();
         tm.inputTag[key] = tagOrMap;
       } else {
         tm.inputTag = { ...aliasMaps.inputTag, ...tagOrMap };
       }
-      return _tagObj(spec, tm);
+      return _tagObj(specAndLabel.spec, tm);
     },
     output: <Ks extends string>(
       tagOrMap: Ks | Partial<Record<keyof InferTMap<O>, string>>
     ) => {
-      const tm = aliasMaps as TagMaps<I, O, IKs, OKs | Ks>;
+      const tm = aliasMaps as TagMaps<I, O, IMap, OMap, IKs, OKs | Ks>;
       if (typeof tagOrMap === "string") {
-        const tag = spec.getSingleOutputTag();
+        const tag = specAndLabel.spec.getSingleOutputTag();
         tm.outputTag[tag] = tagOrMap;
       } else {
         tm.outputTag = { ...aliasMaps.outputTag, ...tagOrMap };
       }
-      return _tagObj(spec, tm);
+      return _tagObj(specAndLabel.spec, tm);
     },
   };
+}
+
+function resolveUniqueSpec<P, I, O, IMap, OMap>(
+  uniqueSpec: UniqueSpecQuery<P, I, O, IMap, OMap>
+): {
+  spec: JobSpec<P, I, O, IMap, OMap>;
+  uniqueSpecLabel?: string;
+} {
+  if (typeof uniqueSpec === "string") {
+    const spec = JobSpec.lookupByName(uniqueSpec);
+    return {
+      spec,
+    };
+  } else if ("spec" in (uniqueSpec as any) && "label" in (uniqueSpec as any)) {
+    const spec = convertSpecOrName(
+      (
+        uniqueSpec as {
+          spec: SpecOrNameOrTagged;
+          label: string;
+        }
+      ).spec
+    );
+
+    return {
+      spec,
+      uniqueSpecLabel: (
+        uniqueSpec as {
+          spec: SpecOrNameOrTagged;
+          label: string;
+        }
+      ).label,
+    };
+  } else {
+    const spec = convertSpecOrName(uniqueSpec as any);
+    return {
+      spec,
+    };
+  }
 }
