@@ -1152,6 +1152,7 @@ export class JobManager<P, I, O, IMap, OMap> {
 
   public readonly jobId: string;
   public readonly graph: InstantiatedGraph;
+  public readonly spec: JobSpec<P, I, O, IMap, OMap>;
 
   constructor({
     spec,
@@ -1171,6 +1172,7 @@ export class JobManager<P, I, O, IMap, OMap> {
     this.input = input;
     this.output = output;
     this.jobId = jobId;
+    this.spec = spec;
   }
 
   submitAndWait: <KI extends keyof IMap, KO extends keyof OMap>(p: {
