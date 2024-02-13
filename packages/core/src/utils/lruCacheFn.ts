@@ -1,10 +1,10 @@
 import { LRUCache } from "lru-cache";
 
 export function lruCacheFn<T extends any[], R extends {}>(
-  keyFn: (...args: T) => string,
+  keyFn: (...args: NoInfer<T>) => string,
   fn: (...args: T) => R
 ): (...args: T) => R {
-  const cache = new LRUCache<string, R>({ max: 50 });
+  const cache = new LRUCache<string, R>({ max: 100 });
   return (...args: T) => {
     const key = keyFn(...args);
     if (cache.has(key)) {
