@@ -716,11 +716,13 @@ export class JobSpec<
     KI extends keyof IMap,
     KO extends keyof OMap
   >({
+    jobId,
     jobOptions,
     input,
     inputTag,
     outputTag,
   }: {
+    jobId?: string;
     jobOptions?: P;
     input: IMap[KI];
     inputTag?: KI;
@@ -728,6 +730,7 @@ export class JobSpec<
   }) => {
     const manager = await this.enqueueJob({
       jobOptions,
+      jobId,
     });
     await manager.input(inputTag).feed(input);
     const out = await manager.output(outputTag).nextValue();
