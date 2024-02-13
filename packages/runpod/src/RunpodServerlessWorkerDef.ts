@@ -2,13 +2,13 @@ import { JobSpec } from "@livestack/core";
 import { ZZEnv } from "@livestack/core";
 import { ZZWorkerDef } from "@livestack/core";
 
-export class RunpodServerlessWorkerDef<P extends object, O> extends ZZWorkerDef<
-  P,
+export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
   any,
   any,
   any,
-  {},
-  { default: O }
+  any,
+  { [k: string]: I },
+  { [k: string]: O }
 > {
   protected _endpointId: string;
   protected _runpodApiKey: string;
@@ -21,14 +21,15 @@ export class RunpodServerlessWorkerDef<P extends object, O> extends ZZWorkerDef<
   }: {
     serverlessEndpointId: string;
     runpodApiKey: string;
-    jobSpec: JobSpec<P, any, any, {}, { default: O }>;
-    zzEnv: ZZEnv;
+    jobSpec: JobSpec<any, any, any, { [k: string]: I }, { [k: string]: O }>;
+    zzEnv?: ZZEnv;
   }) {
     super({
       jobSpec,
       zzEnv,
-      processor: async ({ jobOptions, logger }) => {
-        const runUrl = `https://api.runpod.ai/v2/${this._endpointId}/run`;
+      processor: async ({ input, logger }) => {
+        const runUrl = `https://api.runpod.ai/v2/${this._endpointId}/runsync`;
+        const data = (await input.nextValue())!;
 
         const respP = await fetch(runUrl, {
           method: "POST",
@@ -37,7 +38,7 @@ export class RunpodServerlessWorkerDef<P extends object, O> extends ZZWorkerDef<
             Authorization: `Bearer ${this._runpodApiKey}`,
           },
           body: JSON.stringify({
-            input: jobOptions,
+            input: data,
           }),
         });
 
@@ -97,9 +98,10 @@ export class RunpodServerlessWorkerDef<P extends object, O> extends ZZWorkerDef<
         }
 
         if (runpodResult.status === "CANCELLED") {
-          throw new Error(`Runpod job ${runpodResult.id} was cancelled`);
+          throw new Error(`Runpod job ${runpodResult.id} was cancelled.`);
         } else if (runpodResult.status === "FAILED") {
-          throw new Error(`Runpod job ${runpodResult.id} failed`);
+          console.error(runpodResult);
+          throw new Error(`Runpod job ${runpodResult.id} failed.`);
         }
 
         // await update({
