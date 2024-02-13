@@ -77,7 +77,11 @@ export async function getParentJobRec({
       JobRec & {
         unique_spec_label: string | null;
       }
-    >(["zz_jobs.*", "zz_job_relations.unique_spec_label"])
+    >([
+      "zz_jobs.*",
+      "zz_job_relations.unique_spec_label",
+      "zz_job_relations.parent_job_id",
+    ])
     .leftJoin("zz_jobs", function () {
       this.on("zz_job_relations.parent_job_id", "=", "zz_jobs.job_id");
       this.on("zz_job_relations.project_id", "=", "zz_jobs.project_id");
