@@ -109,11 +109,11 @@ export const resolveInstantiatedGraph = lruCacheFn(
 );
 
 const getParentRecCached = lruCacheFn(
-  (rec) => `${rec.project_id}/${rec.childJobId}`,
+  ((rec: any) => `${rec.project_id}/${rec.childJobId}`) as any,
   vaultClient.db.getParentJobRec.bind(vaultClient.db)
 );
 
 const getJobStreamConnectorRecsCached = lruCacheFn(
-  (rec) => `${rec.projectId}/${rec.jobId}`,
+  ((rec: any) => `${rec.projectId}/${rec.jobId}`) as any,
   vaultClient.db.getJobStreamConnectorRecs.bind(vaultClient.db)
 );
