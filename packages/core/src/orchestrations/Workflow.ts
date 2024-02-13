@@ -866,7 +866,7 @@ function _tagObj<P, I, O, IMap, OMap, IKs, OKs>(
   };
 }
 
-function resolveUniqueSpec<P, I, O, IMap, OMap>(
+export function resolveUniqueSpec<P, I, O, IMap, OMap>(
   uniqueSpec: UniqueSpecQuery<P, I, O, IMap, OMap>
 ): {
   spec: JobSpec<P, I, O, IMap, OMap>;
