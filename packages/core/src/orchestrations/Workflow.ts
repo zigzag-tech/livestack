@@ -732,7 +732,7 @@ function convertConnectionsCanonical(workflowParams: WorkflowParams) {
           handleAndAdvanceCursor();
         }
 
-        return newAcc;
+        return { ...acc, ...newAcc };
       } else {
         const fromPartialCanonical = convertSpecAndOutletWithTags(conn.from);
         const toPartialCanonical = convertSpecAndOutletWithTags(conn.to);
