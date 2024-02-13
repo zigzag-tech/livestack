@@ -828,7 +828,6 @@ function _tagObj<P, I, O, IMap, OMap, IKs, OKs>(
           const tag = specAndLabel.spec.getSingleInputTag();
           tm.inputTag[tag] = tagOrMap;
         } else if (!specAndLabel.spec.inputTags.includes(tagOrMap as any)) {
-          console.log(JSON.stringify(specAndLabel.spec.inputTags));
           throw new Error(
             `Invalid input tag: ${tagOrMap} specified. Available: [${specAndLabel.spec.inputTags.join(
               ", "
@@ -858,7 +857,7 @@ function _tagObj<P, I, O, IMap, OMap, IKs, OKs>(
         }
         tm.outputTag[tagOrMap as unknown as keyof OMap] = tagOrMap;
       } else {
-        tm.inputTag = { ...aliasMaps.inputTag, ...tagOrMap };
+        tm.outputTag = { ...aliasMaps.outputTag, ...tagOrMap };
       }
       return _tagObj(specAndLabel.spec, tm);
     },

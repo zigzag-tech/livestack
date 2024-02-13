@@ -326,6 +326,19 @@ export class DefGraph extends Graph<DefGraphNode> {
         (nId, attrs) =>
           attrs.nodeType === "alias" && attrs.alias === alias.toString()
       );
+
+      if (!aliasNodeId) {
+        throw new Error(
+          `inbound alias node "${alias.toString()}" not found for ${rootSpecNodeId}. Available aliases: [${this.filterInboundNeighbors(
+            rootSpecNodeId,
+            (nId, attrs) => attrs.nodeType === "alias"
+          )
+            .map(
+              (nId) => `"${(this.getNodeAttributes(nId) as AliasNode).alias}"`
+            )
+            .join(", ")}]`
+        );
+      }
       const inletNodeId = this.findInboundNeighbor(
         aliasNodeId,
         (nId, attrs) => attrs.nodeType === "inlet"
@@ -353,7 +366,8 @@ export class DefGraph extends Graph<DefGraphNode> {
 
       if (!aliasNodeId) {
         throw new Error(
-          `Alias node not found for alias: ${alias.toString()}. Available aliases: [${this.filterNodes(
+          `Outbound alias node "${alias.toString()}" not found for ${rootSpecNodeId}. Available aliases: [${this.filterOutboundNeighbors(
+            rootSpecNodeId,
             (nId, attrs) => attrs.nodeType === "alias"
           )
             .map(
