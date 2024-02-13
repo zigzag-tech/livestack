@@ -33,6 +33,7 @@ import {
 import { DataStream, DataStreamSubscriber, WithTimestamp } from "./DataStream";
 import { ZZEnv } from "./ZZEnv";
 import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
+import { lruCacheFn } from "../utils/lruCacheFn";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -457,154 +458,158 @@ export class JobSpec<
     })) as DataStream<WrapTerminatorAndDataId<OMap[K]>>;
   };
 
-  protected getJobStream = async <
-    TT extends "in" | "out",
-    K extends TT extends "in" ? keyof IMap : keyof OMap
-  >(p: {
-    jobId: string;
-    type: TT;
-    tag: K;
-  }) => {
-    const { jobId, type } = p;
-    type T = TT extends "in" ? IMap[keyof IMap] : OMap[keyof OMap];
+  protected getJobStream = lruCacheFn(
+    ({ jobId, type, tag }) => `${this.name}--${jobId}::${type}/${tag}`,
+    async <
+      TT extends "in" | "out",
+      K extends TT extends "in" ? keyof IMap : keyof OMap
+    >(p: {
+      jobId: string;
+      type: TT;
+      tag: K;
+    }) => {
+      const { jobId, type } = p;
+      type T = TT extends "in" ? IMap[keyof IMap] : OMap[keyof OMap];
 
-    const specTagInfo = this.convertWorkflowAliasToSpecTag({
-      alias: p.tag,
-      type,
-    });
-
-    // connected spec may not be the spec responsible for the stream's shape
-    const connectedSpec = JobSpec.lookupByName(specTagInfo.specName);
-
-    const connectedJobId = await this.lookUpChildJobIdByGroupIDAndSpecTag({
-      groupId: jobId,
-      specInfo: specTagInfo,
-    });
-
-    const streamId = await connectedSpec.getStreamIdForJob({
-      jobId: connectedJobId,
-      type,
-      p: specTagInfo,
-    });
-
-    let def: z.ZodType<WrapTerminatorAndDataId<T>> | null;
-    if (type === "out") {
-      def = wrapTerminatorAndDataId(
-        connectedSpec.outputDefSet.getDef(
-          (specTagInfo.tag || connectedSpec.getSingleOutputTag()) as keyof OMap
-        )
-      ) as z.ZodType<WrapTerminatorAndDataId<T>>;
-    } else if (type === "in") {
-      // in principle, always try to find the source of the stream and use its def first
-      const instaG = await resolveInstantiatedGraph({
-        specName: this.name,
-        jobId,
-        zzEnv: this.zzEnvEnsured,
+      const specTagInfo = this.convertWorkflowAliasToSpecTag({
+        alias: p.tag,
+        type,
       });
-      // console.log(
-      //   "streamSourceSpecTypeByStreamId",
-      //   this.name,
-      //   instaG.streamSourceSpecTypeByStreamId
-      // );
-      if (instaG.streamSourceSpecTypeByStreamId[streamId]) {
-        const sourceSpec = JobSpec.lookupByName(
-          instaG.streamSourceSpecTypeByStreamId[streamId].specName
-        );
-        const source = sourceSpec.outputDefSet.getDef(
-          instaG.streamSourceSpecTypeByStreamId[streamId].tag
-        );
-        def = wrapTerminatorAndDataId(source) as z.ZodType<
-          WrapTerminatorAndDataId<T>
-        >;
-      } else {
-        // check if inlet node has a transform
-        const connectedJobNodeId = instaG.findNode((nId) => {
-          const n = instaG.getNodeAttributes(nId);
-          if (n.nodeType !== "job" && n.nodeType !== "root-job") {
-            return false;
-          } else {
-            return n.jobId === connectedJobId;
-          }
-        });
 
-        if (!connectedJobNodeId) {
-          throw new Error(
-            `Connected job node not found for job ${jobId} and tag ${p.tag.toString()}`
+      // connected spec may not be the spec responsible for the stream's shape
+      const connectedSpec = JobSpec.lookupByName(specTagInfo.specName);
+
+      const connectedJobId = await this.lookUpChildJobIdByGroupIDAndSpecTag({
+        groupId: jobId,
+        specInfo: specTagInfo,
+      });
+
+      const streamId = await connectedSpec.getStreamIdForJob({
+        jobId: connectedJobId,
+        type,
+        p: specTagInfo,
+      });
+
+      let def: z.ZodType<WrapTerminatorAndDataId<T>> | null;
+      if (type === "out") {
+        def = wrapTerminatorAndDataId(
+          connectedSpec.outputDefSet.getDef(
+            (specTagInfo.tag ||
+              connectedSpec.getSingleOutputTag()) as keyof OMap
+          )
+        ) as z.ZodType<WrapTerminatorAndDataId<T>>;
+      } else if (type === "in") {
+        // in principle, always try to find the source of the stream and use its def first
+        const instaG = await resolveInstantiatedGraph({
+          specName: this.name,
+          jobId,
+          zzEnv: this.zzEnvEnsured,
+        });
+        // console.log(
+        //   "streamSourceSpecTypeByStreamId",
+        //   this.name,
+        //   instaG.streamSourceSpecTypeByStreamId
+        // );
+        if (instaG.streamSourceSpecTypeByStreamId[streamId]) {
+          const sourceSpec = JobSpec.lookupByName(
+            instaG.streamSourceSpecTypeByStreamId[streamId].specName
           );
-        }
-
-        const inletNodeId = instaG.findNode((nId) => {
-          const n = instaG.getNodeAttributes(nId);
-          if (n.nodeType !== "inlet") {
-            return false;
-          } else {
-            const ee = instaG.findOutboundEdge((eId) => {
-              return instaG.target(eId) === connectedJobNodeId;
-            });
-            return !!ee;
-          }
-        });
-
-        const inletNode = instaG.getNodeAttributes(inletNodeId) as InletNode;
-        if (!inletNode.hasTransform) {
-          // no transform; proceed as usual
-          def = wrapTerminatorAndDataId(
-            connectedSpec.inputDefSet.getDef(
-              (specTagInfo.tag ||
-                connectedSpec.getSingleInputTag()) as keyof IMap
-            )
-          ) as z.ZodType<WrapTerminatorAndDataId<T>>;
+          const source = sourceSpec.outputDefSet.getDef(
+            instaG.streamSourceSpecTypeByStreamId[streamId].tag
+          );
+          def = wrapTerminatorAndDataId(source) as z.ZodType<
+            WrapTerminatorAndDataId<T>
+          >;
         } else {
-          // try to find source of the stream
-          const streamNodeId = instaG.findStreamNodeIdConnectedToJob({
-            jobId: connectedJobId,
-            type: "in",
-            tag: specTagInfo.tag,
+          // check if inlet node has a transform
+          const connectedJobNodeId = instaG.findNode((nId) => {
+            const n = instaG.getNodeAttributes(nId);
+            if (n.nodeType !== "job" && n.nodeType !== "root-job") {
+              return false;
+            } else {
+              return n.jobId === connectedJobId;
+            }
           });
-          if (!streamNodeId) {
+
+          if (!connectedJobNodeId) {
             throw new Error(
-              `Stream node not found for job ${connectedJobId} and tag ${specTagInfo.tag}`
+              `Connected job node not found for job ${jobId} and tag ${p.tag.toString()}`
             );
           }
 
-          const source = getSourceSpecNodeConnectedToStream(
-            instaG,
-            streamNodeId
-          );
-          if (!source) {
-            this.logger.warn(
-              `A transform function is applied to the input stream ${streamId} of job ${connectedJobId} but its definition is unclear. Runtime type checking will be skipped for this stream.`
-            );
-            def = null;
-          } else {
-            const responsibleSpec = JobSpec.lookupByName(
-              source.origin.specName
-            );
+          const inletNodeId = instaG.findNode((nId) => {
+            const n = instaG.getNodeAttributes(nId);
+            if (n.nodeType !== "inlet") {
+              return false;
+            } else {
+              const ee = instaG.findOutboundEdge((eId) => {
+                return instaG.target(eId) === connectedJobNodeId;
+              });
+              return !!ee;
+            }
+          });
+
+          const inletNode = instaG.getNodeAttributes(inletNodeId) as InletNode;
+          if (!inletNode.hasTransform) {
+            // no transform; proceed as usual
             def = wrapTerminatorAndDataId(
-              responsibleSpec.outputDefSet.getDef(
-                (source.outletNode.tag ||
-                  responsibleSpec.getSingleOutputTag()) as keyof OMap
+              connectedSpec.inputDefSet.getDef(
+                (specTagInfo.tag ||
+                  connectedSpec.getSingleInputTag()) as keyof IMap
               )
             ) as z.ZodType<WrapTerminatorAndDataId<T>>;
+          } else {
+            // try to find source of the stream
+            const streamNodeId = instaG.findStreamNodeIdConnectedToJob({
+              jobId: connectedJobId,
+              type: "in",
+              tag: specTagInfo.tag,
+            });
+            if (!streamNodeId) {
+              throw new Error(
+                `Stream node not found for job ${connectedJobId} and tag ${specTagInfo.tag}`
+              );
+            }
+
+            const source = getSourceSpecNodeConnectedToStream(
+              instaG,
+              streamNodeId
+            );
+            if (!source) {
+              this.logger.warn(
+                `A transform function is applied to the input stream ${streamId} of job ${connectedJobId} but its definition is unclear. Runtime type checking will be skipped for this stream.`
+              );
+              def = null;
+            } else {
+              const responsibleSpec = JobSpec.lookupByName(
+                source.origin.specName
+              );
+              def = wrapTerminatorAndDataId(
+                responsibleSpec.outputDefSet.getDef(
+                  (source.outletNode.tag ||
+                    responsibleSpec.getSingleOutputTag()) as keyof OMap
+                )
+              ) as z.ZodType<WrapTerminatorAndDataId<T>>;
+            }
           }
         }
+        // TODO: def should not just come from input spec.
+        // If the stream connected to an output spec, it should always
+        // come from the output if there's a transform.
+      } else {
+        throw new Error(`Invalid type ${type}`);
       }
-      // TODO: def should not just come from input spec.
-      // If the stream connected to an output spec, it should always
-      // come from the output if there's a transform.
-    } else {
-      throw new Error(`Invalid type ${type}`);
+
+      const stream = await DataStream.getOrCreate<WrapTerminatorAndDataId<T>>({
+        uniqueName: streamId,
+        def,
+        logger: connectedSpec.logger,
+        zzEnv: connectedSpec.zzEnv,
+      });
+
+      return stream as DataStream<WrapTerminatorAndDataId<T>>;
     }
-
-    const stream = await DataStream.getOrCreate<WrapTerminatorAndDataId<T>>({
-      uniqueName: streamId,
-      def,
-      logger: connectedSpec.logger,
-      zzEnv: connectedSpec.zzEnv,
-    });
-
-    return stream as DataStream<WrapTerminatorAndDataId<T>>;
-  };
+  );
 
   private _outputCollectorByJobIdAndTag: {
     [k: `${string}/${string}`]: ByTagOutput<OMap[keyof OMap]>;
