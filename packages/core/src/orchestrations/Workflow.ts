@@ -527,7 +527,7 @@ export class WorkflowSpec extends JobSpec<
     p?: Parameters<typeof this.orchestrationWorkerDef.startWorker>[0]
   ) {
     await this.orchestrationWorkerDef.startWorker(p);
-    return this;
+    return void 0;
   }
 
   public async enqueueJob(p?: {
@@ -773,7 +773,11 @@ function validateSpecHasKey<P, I, O, IMap, OMap>({
   tag: string;
 }) {
   if (type === "in") {
-    if (!spec.outputDefSet.hasDef(tag)) {
+    if (!spec.inputTags.includes(tag as keyof IMap)) {
+      throw new Error(`Invalid spec tag: ${spec.name}/${tag} specified.`);
+    }
+  } else {
+    if (!spec.outputTags.includes(tag as keyof OMap)) {
       throw new Error(`Invalid spec tag: ${spec.name}/${tag} specified.`);
     }
   }
@@ -796,7 +800,7 @@ export interface TagObj<P, I, O, IMap, OMap, IKs, OKs> {
   _aliasMaps: TagMaps<I, O, IMap, OMap, IKs, OKs>;
 }
 
-export function alias<P, I, O, IMap, OMap>(
+export function expose<P, I, O, IMap, OMap>(
   specLike: SpecOrName<P, I, O, IMap, OMap>
 ) {
   return _tagObj(specLike, {
@@ -820,8 +824,18 @@ function _tagObj<P, I, O, IMap, OMap, IKs, OKs>(
     ) => {
       const tm = aliasMaps as TagMaps<I, O, IMap, OMap, IKs | Ks, OKs>;
       if (typeof tagOrMap === "string") {
-        const key = specAndLabel.spec.getSingleInputTag();
-        tm.inputTag[key] = tagOrMap;
+        if (specAndLabel.spec.inputTags.length === 1) {
+          const tag = specAndLabel.spec.getSingleInputTag();
+          tm.inputTag[tag] = tagOrMap;
+        } else if (!specAndLabel.spec.inputTags.includes(tagOrMap as any)) {
+          console.log(JSON.stringify(specAndLabel.spec.inputTags));
+          throw new Error(
+            `Invalid input tag: ${tagOrMap} specified. Available: [${specAndLabel.spec.inputTags.join(
+              ", "
+            )}]`
+          );
+        }
+        tm.inputTag[tagOrMap as unknown as keyof IMap] = tagOrMap;
       } else {
         tm.inputTag = { ...aliasMaps.inputTag, ...tagOrMap };
       }
@@ -832,10 +846,19 @@ function _tagObj<P, I, O, IMap, OMap, IKs, OKs>(
     ) => {
       const tm = aliasMaps as TagMaps<I, O, IMap, OMap, IKs, OKs | Ks>;
       if (typeof tagOrMap === "string") {
-        const tag = specAndLabel.spec.getSingleOutputTag();
-        tm.outputTag[tag] = tagOrMap;
+        if (specAndLabel.spec.outputTags.length === 1) {
+          const tag = specAndLabel.spec.getSingleOutputTag();
+          tm.outputTag[tag] = tagOrMap;
+        } else if (!specAndLabel.spec.outputTags.includes(tagOrMap as any)) {
+          throw new Error(
+            `Invalid output tag: ${tagOrMap} specified. Available: [${specAndLabel.spec.outputTags.join(
+              ", "
+            )}]`
+          );
+        }
+        tm.outputTag[tagOrMap as unknown as keyof OMap] = tagOrMap;
       } else {
-        tm.outputTag = { ...aliasMaps.outputTag, ...tagOrMap };
+        tm.inputTag = { ...aliasMaps.inputTag, ...tagOrMap };
       }
       return _tagObj(specAndLabel.spec, tm);
     },

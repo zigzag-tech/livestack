@@ -4,7 +4,7 @@ export { JobSpec } from "./jobs/JobSpec";
 export { ZZEnv } from "./jobs/ZZEnv";
 export { DataStream } from "./jobs/DataStream";
 export { fileOrBufferSchema } from "./jobs/ZZEnv";
-export { Workflow, WorkflowSpec, alias } from "./orchestrations/Workflow";
+export { Workflow, WorkflowSpec, expose } from "./orchestrations/Workflow";
 export * from "./storage/localTempFileStorageProvider";
 export * from "@livestack/shared";
 export * from "./jobs/JobSpec";
