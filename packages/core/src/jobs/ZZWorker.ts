@@ -154,7 +154,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
       const localG = await resolveInstantiatedGraph({
         jobId,
         zzEnv: that.zzEnv,
-        spec: that.jobSpec,
+        specName: that.jobSpec.name,
       });
 
       const zzJ = new ZZJob({

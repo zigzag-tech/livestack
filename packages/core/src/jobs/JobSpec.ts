@@ -267,7 +267,7 @@ export class JobSpec<
     const output = this._deriveOutputsForJob(jobId);
 
     const instaG = await resolveInstantiatedGraph({
-      spec: this,
+      specName: this.name,
       jobId,
       zzEnv: this.zzEnvEnsured,
     });
@@ -416,7 +416,7 @@ export class JobSpec<
     };
   }) {
     const instaG = await resolveInstantiatedGraph({
-      spec: this,
+      specName: this.name,
       jobId,
       zzEnv: this.zzEnvEnsured,
     });
@@ -497,7 +497,7 @@ export class JobSpec<
     } else if (type === "in") {
       // in principle, always try to find the source of the stream and use its def first
       const instaG = await resolveInstantiatedGraph({
-        spec: this,
+        specName: this.name,
         jobId,
         zzEnv: this.zzEnvEnsured,
       });
