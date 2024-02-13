@@ -272,6 +272,7 @@ export class WorkflowSpec extends JobSpec<
           contextId: groupId,
           rootJobId: groupId,
           streamIdOverrides: {},
+          streamSourceSpecTypeByStreamId: {},
           inletHasTransformOverridesByTag,
         });
 
@@ -584,6 +585,7 @@ export class Workflow {
           contextId: this.contextId,
           rootJobId: this.contextId,
           streamIdOverrides: {},
+          streamSourceSpecTypeByStreamId: {},
           inletHasTransformOverridesByTag,
         });
       })();

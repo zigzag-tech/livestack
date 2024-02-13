@@ -1,6 +1,8 @@
 import {
   InstantiatedGraph,
   StreamIdOverridesForRootSpec,
+  StreamNode,
+  getSourceSpecNodeConnectedToStream,
 } from "@livestack/shared";
 import { vaultClient } from "@livestack/vault-client";
 import { ConnectorType } from "@livestack/vault-interface";
@@ -18,7 +20,7 @@ export async function resolveInstantiatedGraph({
   zzEnv: ZZEnv;
   spec: JobSpec<any, any, any, any, any>;
   jobId: string;
-}) {
+}): Promise<InstantiatedGraph> {
   const { records: streams } = await getJobStreamConnectorRecsCached({
     projectId: zzEnv.projectId,
     jobId,
@@ -41,8 +43,43 @@ export async function resolveInstantiatedGraph({
   });
 
   const inletHasTransformOverridesByTag: Record<string, boolean> = {};
+  const streamSourceSpecTypeByStreamId: Record<
+    string,
+    {
+      specName: string;
+      tag: string;
+    }
+  > = {};
+
   if (parentRec.rec) {
     const pRec = parentRec.rec;
+    const parentSpec = JobSpec.lookupByName(pRec.spec_name);
+    const parentInstaG = await resolveInstantiatedGraph({
+      zzEnv,
+      spec: parentSpec,
+      jobId: pRec.parent_job_id,
+    });
+
+    const streamNodeIds = parentInstaG.filterNodes(
+      (nId) => parentInstaG.getNodeAttributes(nId).nodeType === "stream"
+    );
+
+    for (const streamNodeId of streamNodeIds) {
+      const streamId = (
+        parentInstaG.getNodeAttributes(streamNodeId) as StreamNode
+      ).streamId;
+      const sourceSpecNode = getSourceSpecNodeConnectedToStream(
+        parentInstaG,
+        streamNodeId
+      );
+      if (sourceSpecNode) {
+        streamSourceSpecTypeByStreamId[streamId] = {
+          specName: sourceSpecNode.origin.specName,
+          tag: sourceSpecNode.outletNode.tag,
+        };
+      }
+    }
+
     for (const tag of spec.inputTags) {
       const transform = TransformRegistry.getTransform({
         workflowSpecName: pRec.spec_name,
@@ -62,6 +99,7 @@ export async function resolveInstantiatedGraph({
     rootJobId: jobId,
     streamIdOverrides,
     inletHasTransformOverridesByTag,
+    streamSourceSpecTypeByStreamId,
   });
 
   return instaG;

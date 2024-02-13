@@ -169,7 +169,11 @@ export class DataStream<T extends object> {
         parsed = this.def.parse(message) as T;
       } catch (err) {
         this.logger.error("Data validation error" + JSON.stringify(err));
-        console.log(this.uniqueName, " errornous output: ", message);
+        console.error(
+          this.uniqueName,
+          " errornous output: ",
+          JSON.stringify(message, null, 2)
+        );
         this.logger.error(
           "Expected type: " + JSON.stringify(zodToJsonSchema(this.def), null, 2)
         );

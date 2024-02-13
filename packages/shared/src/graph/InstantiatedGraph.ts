@@ -36,6 +36,13 @@ export class InstantiatedGraph extends Graph<
   public rootJobId: string;
   public streamIdOverrides: StreamIdOverridesForRootSpec;
   public inletHasTransformOverridesByTag: Record<string, boolean>;
+  public streamSourceSpecTypeByStreamId: Record<
+    string,
+    {
+      specName: string;
+      tag: string;
+    }
+  >;
   public defGraph: DefGraph;
 
   constructor({
@@ -44,18 +51,27 @@ export class InstantiatedGraph extends Graph<
     streamIdOverrides,
     rootJobId,
     inletHasTransformOverridesByTag,
+    streamSourceSpecTypeByStreamId,
   }: {
     defGraph: DefGraph;
     contextId: string;
     rootJobId: string;
     streamIdOverrides: StreamIdOverridesForRootSpec;
     inletHasTransformOverridesByTag: Record<string, boolean>;
+    streamSourceSpecTypeByStreamId: Record<
+      string,
+      {
+        specName: string;
+        tag: string;
+      }
+    >;
   }) {
     super({ multi: false });
     this.contextId = contextId;
     this.rootJobId = rootJobId;
     this.streamIdOverrides = streamIdOverrides;
     this.inletHasTransformOverridesByTag = inletHasTransformOverridesByTag;
+    this.streamSourceSpecTypeByStreamId = streamSourceSpecTypeByStreamId;
     this.defGraph = defGraph;
 
     this.instantiate();
@@ -208,6 +224,7 @@ export class InstantiatedGraph extends Graph<
       rootJobId: this.rootJobId,
       streamIdOverrides: this.streamIdOverrides,
       inletHasTransformOverridesByTag: this.inletHasTransformOverridesByTag,
+      streamSourceSpecTypeByStreamId: this.streamSourceSpecTypeByStreamId,
       defGraph: this.defGraph.toJSON(),
     };
     return newJ;
@@ -220,6 +237,7 @@ export class InstantiatedGraph extends Graph<
       rootJobId: json.rootJobId,
       streamIdOverrides: json.streamIdOverrides,
       inletHasTransformOverridesByTag: json.inletHasTransformOverridesByTag,
+      streamSourceSpecTypeByStreamId: json.streamSourceSpecTypeByStreamId,
     });
   }
 }
