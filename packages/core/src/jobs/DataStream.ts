@@ -143,8 +143,26 @@ export class DataStream<T extends object> {
       return null;
     } else if (datapoint) {
       const data = customParse(datapoint.dataStr);
+
+      let restored = data;
+      const { largeFilesToRestore, newObj } = identifyLargeFilesToRestore(data);
+
+      if (largeFilesToRestore.length > 0) {
+        if (!this.zzEnv.storageProvider) {
+          throw new Error(
+            "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
+          );
+        } else {
+          restored = (await restoreLargeValues({
+            obj_: newObj,
+            largeFilesToRestore,
+            basePath: this.baseWorkingRelativePath,
+            fetcher: this.zzEnv.storageProvider.fetchFromStorage,
+          })) as T;
+        }
+      }
       return {
-        ...data,
+        ...restored,
         timestamp: datapoint.timestamp,
         messageId: datapoint.messageId,
       } as WithTimestamp<T>;

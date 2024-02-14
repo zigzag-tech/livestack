@@ -30,37 +30,46 @@ export const identifyLargeFilesToSave = (
   if (obj === null || typeof obj !== "object") {
     return { newObj: obj, largeFilesToSave: [] };
   }
-  const newObj: any = Array.isArray(obj) ? [] : {};
   const largeFilesToSave: LargeFileToSave<any>[] = [];
+  if (typeof obj === "string" && obj.length > LARGE_VALUE_THRESHOLD) {
+    largeFilesToSave.push({
+      path,
+      value: obj,
+      originalType: "string",
+    });
+    return {
+      newObj: {
+        [OBJ_REF_VALUE]: true,
+        originalType: "string",
+      },
+      largeFilesToSave,
+    };
+  } else {
+    const type = detectBinaryLikeObject(obj);
+    if (type) {
+      largeFilesToSave.push({ path, value: obj, originalType: type });
+      return {
+        newObj: {
+          newObj: {
+            [OBJ_REF_VALUE]: true,
+            originalType: "string",
+          },
+          largeFilesToSave,
+        },
+        largeFilesToSave,
+      };
+    }
+  }
+  let newObj: any = Array.isArray(obj) ? [] : {};
 
   for (const [key, value] of _.entries(obj)) {
     const currentPath = path ? pathJoin(path, key) : key;
-
-    if (typeof value === "string" && value.length > LARGE_VALUE_THRESHOLD) {
-      largeFilesToSave.push({
-        path: currentPath,
-        value,
-        originalType: "string",
-      });
-      newObj[key] = {
-        [OBJ_REF_VALUE]: true,
-        originalType: "string",
-      };
+    if (typeof value === "object") {
+      const result = identifyLargeFilesToSave(value, currentPath);
+      newObj[key] = result.newObj;
+      largeFilesToSave.push(...result.largeFilesToSave);
     } else {
-      const type = detectBinaryLikeObject(value);
-      if (type) {
-        largeFilesToSave.push({ path: currentPath, value, originalType: type });
-        newObj[key] = {
-          [OBJ_REF_VALUE]: true,
-          originalType: type,
-        };
-      } else if (typeof value === "object") {
-        const result = identifyLargeFilesToSave(value, currentPath);
-        newObj[key] = result.newObj;
-        largeFilesToSave.push(...result.largeFilesToSave);
-      } else {
-        newObj[key] = value;
-      }
+      newObj[key] = value;
     }
   }
   return { newObj, largeFilesToSave };
@@ -85,15 +94,17 @@ export function identifyLargeFilesToRestore(
     };
   }
   const largeFilesToRestore: LargeFileWithoutValue<any>[] = [];
+  if (typeof obj === "object" && obj[OBJ_REF_VALUE] && obj.originalType) {
+    largeFilesToRestore.push({
+      originalType: obj.originalType,
+      path: path,
+    });
+    return { largeFilesToRestore, newObj: obj };
+  }
   const newObj: any = Array.isArray(obj) ? [] : {};
   for (const [key, value] of _.entries(obj)) {
     const currentPath = path ? pathJoin(path, key) : key;
-    if (value && (value as any)[OBJ_REF_VALUE]) {
-      largeFilesToRestore.push({
-        path: currentPath,
-        originalType: (value as LargeFileWithoutPath<any>).originalType,
-      });
-    } else if (typeof value === "object") {
+    if (typeof value === "object") {
       const result = identifyLargeFilesToRestore(value, currentPath);
       newObj[key] = result.newObj;
       largeFilesToRestore.push(...result.largeFilesToRestore);
@@ -149,7 +160,12 @@ export async function restoreLargeValues({
         path: path.join(basePath, largeFile.path),
       });
       // replace slash with dot in path before setting the value
-      _.set(obj_, largeFile.path.replace(/\//g, "."), value);
+      const p = largeFile.path.replace(/\//g, ".");
+      if (p === "") {
+        obj_ = value;
+      } else {
+        _.set(obj_, p, value);
+      }
     })
   );
   await Promise.all(promises);
