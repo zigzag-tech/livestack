@@ -5,7 +5,7 @@ import fs from "fs";
 import { join as pathJoin } from "path";
 import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
-import _ from "lodash";
+import _, { isUndefined } from "lodash";
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 import { Readable } from "stream";
 const LARGE_VALUE_THRESHOLD = 1024 * 10;
@@ -27,7 +27,7 @@ export const identifyLargeFilesToSave = (
   newObj: any;
   largeFilesToSave: LargeFileToSave<any>[];
 } => {
-  if (obj === null || typeof obj !== "object") {
+  if (obj === null || isUndefined(obj)) {
     return { newObj: obj, largeFilesToSave: [] };
   }
   const largeFilesToSave: LargeFileToSave<any>[] = [];
@@ -80,7 +80,7 @@ export function identifyLargeFilesToRestore(
   largeFilesToRestore: LargeFileWithoutValue<any>[];
   newObj: any;
 } {
-  if (obj === null || typeof obj !== "object") {
+  if (obj === null || isUndefined(obj)) {
     return {
       largeFilesToRestore: [],
       newObj: obj,
