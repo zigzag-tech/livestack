@@ -64,13 +64,9 @@ export const identifyLargeFilesToSave = (
 
   for (const [key, value] of _.entries(obj)) {
     const currentPath = path ? pathJoin(path, key) : key;
-    if (typeof value === "object") {
-      const result = identifyLargeFilesToSave(value, currentPath);
-      newObj[key] = result.newObj;
-      largeFilesToSave.push(...result.largeFilesToSave);
-    } else {
-      newObj[key] = value;
-    }
+    const result = identifyLargeFilesToSave(value, currentPath);
+    newObj[key] = result.newObj;
+    largeFilesToSave.push(...result.largeFilesToSave);
   }
   return { newObj, largeFilesToSave };
 };
@@ -104,13 +100,9 @@ export function identifyLargeFilesToRestore(
   const newObj: any = Array.isArray(obj) ? [] : {};
   for (const [key, value] of _.entries(obj)) {
     const currentPath = path ? pathJoin(path, key) : key;
-    if (typeof value === "object") {
-      const result = identifyLargeFilesToRestore(value, currentPath);
-      newObj[key] = result.newObj;
-      largeFilesToRestore.push(...result.largeFilesToRestore);
-    } else {
-      newObj[key] = value;
-    }
+    const result = identifyLargeFilesToRestore(value, currentPath);
+    newObj[key] = result.newObj;
+    largeFilesToRestore.push(...result.largeFilesToRestore);
   }
 
   return { largeFilesToRestore, newObj };
