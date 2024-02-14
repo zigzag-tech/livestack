@@ -50,11 +50,8 @@ export const identifyLargeFilesToSave = (
       largeFilesToSave.push({ path, value: obj, originalType: type });
       return {
         newObj: {
-          newObj: {
-            [OBJ_REF_VALUE]: true,
-            originalType: "string",
-          },
-          largeFilesToSave,
+          [OBJ_REF_VALUE]: true,
+          originalType: "string",
         },
         largeFilesToSave,
       };
