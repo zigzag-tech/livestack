@@ -6,7 +6,7 @@ import {
   ServerStreamingMethodResult,
   SubType,
   ValueByReverseIndexRequest,
-  LatestValueRequest,
+  LastValueRequest,
 } from "@livestack/vault-interface/src/generated/stream";
 import { CallContext } from "nice-grpc-common";
 import { createClient } from "redis";
@@ -86,8 +86,8 @@ class StreamServiceByProject implements StreamServiceImplementation {
     return iterator;
   }
 
-  async latestValue(
-    request: LatestValueRequest,
+  async lastValue(
+    request: LastValueRequest,
     context: CallContext
   ): Promise<{
     datapoint?:

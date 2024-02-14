@@ -72,12 +72,12 @@ export interface ValueByReverseIndexResponse {
   null_response?: Empty | undefined;
 }
 
-export interface LatestValueRequest {
+export interface LastValueRequest {
   projectId: string;
   uniqueName: string;
 }
 
-export interface LatestValueResponse {
+export interface LastValueResponse {
   datapoint?: StreamDatapoint | undefined;
   null_response?: Empty | undefined;
 }
@@ -573,12 +573,12 @@ export const ValueByReverseIndexResponse = {
   },
 };
 
-function createBaseLatestValueRequest(): LatestValueRequest {
+function createBaseLastValueRequest(): LastValueRequest {
   return { projectId: "", uniqueName: "" };
 }
 
-export const LatestValueRequest = {
-  encode(message: LatestValueRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const LastValueRequest = {
+  encode(message: LastValueRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.projectId !== "") {
       writer.uint32(10).string(message.projectId);
     }
@@ -588,10 +588,10 @@ export const LatestValueRequest = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): LatestValueRequest {
+  decode(input: _m0.Reader | Uint8Array, length?: number): LastValueRequest {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLatestValueRequest();
+    const message = createBaseLastValueRequest();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -618,14 +618,14 @@ export const LatestValueRequest = {
     return message;
   },
 
-  fromJSON(object: any): LatestValueRequest {
+  fromJSON(object: any): LastValueRequest {
     return {
       projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
     };
   },
 
-  toJSON(message: LatestValueRequest): unknown {
+  toJSON(message: LastValueRequest): unknown {
     const obj: any = {};
     if (message.projectId !== "") {
       obj.projectId = message.projectId;
@@ -636,23 +636,23 @@ export const LatestValueRequest = {
     return obj;
   },
 
-  create(base?: DeepPartial<LatestValueRequest>): LatestValueRequest {
-    return LatestValueRequest.fromPartial(base ?? {});
+  create(base?: DeepPartial<LastValueRequest>): LastValueRequest {
+    return LastValueRequest.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<LatestValueRequest>): LatestValueRequest {
-    const message = createBaseLatestValueRequest();
+  fromPartial(object: DeepPartial<LastValueRequest>): LastValueRequest {
+    const message = createBaseLastValueRequest();
     message.projectId = object.projectId ?? "";
     message.uniqueName = object.uniqueName ?? "";
     return message;
   },
 };
 
-function createBaseLatestValueResponse(): LatestValueResponse {
+function createBaseLastValueResponse(): LastValueResponse {
   return { datapoint: undefined, null_response: undefined };
 }
 
-export const LatestValueResponse = {
-  encode(message: LatestValueResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const LastValueResponse = {
+  encode(message: LastValueResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.datapoint !== undefined) {
       StreamDatapoint.encode(message.datapoint, writer.uint32(10).fork()).ldelim();
     }
@@ -662,10 +662,10 @@ export const LatestValueResponse = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): LatestValueResponse {
+  decode(input: _m0.Reader | Uint8Array, length?: number): LastValueResponse {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseLatestValueResponse();
+    const message = createBaseLastValueResponse();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -692,14 +692,14 @@ export const LatestValueResponse = {
     return message;
   },
 
-  fromJSON(object: any): LatestValueResponse {
+  fromJSON(object: any): LastValueResponse {
     return {
       datapoint: isSet(object.datapoint) ? StreamDatapoint.fromJSON(object.datapoint) : undefined,
       null_response: isSet(object.null_response) ? Empty.fromJSON(object.null_response) : undefined,
     };
   },
 
-  toJSON(message: LatestValueResponse): unknown {
+  toJSON(message: LastValueResponse): unknown {
     const obj: any = {};
     if (message.datapoint !== undefined) {
       obj.datapoint = StreamDatapoint.toJSON(message.datapoint);
@@ -710,11 +710,11 @@ export const LatestValueResponse = {
     return obj;
   },
 
-  create(base?: DeepPartial<LatestValueResponse>): LatestValueResponse {
-    return LatestValueResponse.fromPartial(base ?? {});
+  create(base?: DeepPartial<LastValueResponse>): LastValueResponse {
+    return LastValueResponse.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<LatestValueResponse>): LatestValueResponse {
-    const message = createBaseLatestValueResponse();
+  fromPartial(object: DeepPartial<LastValueResponse>): LastValueResponse {
+    const message = createBaseLastValueResponse();
     message.datapoint = (object.datapoint !== undefined && object.datapoint !== null)
       ? StreamDatapoint.fromPartial(object.datapoint)
       : undefined;
@@ -754,11 +754,11 @@ export const StreamServiceDefinition = {
       responseStream: false,
       options: {},
     },
-    latestValue: {
-      name: "latestValue",
-      requestType: LatestValueRequest,
+    lastValue: {
+      name: "lastValue",
+      requestType: LastValueRequest,
       requestStream: false,
-      responseType: LatestValueResponse,
+      responseType: LastValueResponse,
       responseStream: false,
       options: {},
     },
@@ -775,10 +775,7 @@ export interface StreamServiceImplementation<CallContextExt = {}> {
     request: ValueByReverseIndexRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<ValueByReverseIndexResponse>>;
-  latestValue(
-    request: LatestValueRequest,
-    context: CallContext & CallContextExt,
-  ): Promise<DeepPartial<LatestValueResponse>>;
+  lastValue(request: LastValueRequest, context: CallContext & CallContextExt): Promise<DeepPartial<LastValueResponse>>;
 }
 
 export interface StreamServiceClient<CallOptionsExt = {}> {
@@ -788,10 +785,7 @@ export interface StreamServiceClient<CallOptionsExt = {}> {
     request: DeepPartial<ValueByReverseIndexRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<ValueByReverseIndexResponse>;
-  latestValue(
-    request: DeepPartial<LatestValueRequest>,
-    options?: CallOptions & CallOptionsExt,
-  ): Promise<LatestValueResponse>;
+  lastValue(request: DeepPartial<LastValueRequest>, options?: CallOptions & CallOptionsExt): Promise<LastValueResponse>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
