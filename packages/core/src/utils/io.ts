@@ -103,18 +103,33 @@ export function wrapStreamSubscriberWithTermination<T>(
 
   const mostRecentValue = async () => {
     const subscriber = await subscriberP;
-    const mostRecent =
-      (await subscriber.mostRecentValue()) as WrapWithTimestamp<
-        WrapTerminateFalse<T>
-      > | null;
+    const mostRecent = (await subscriber.stream.valueByReverseIndex(
+      0
+    )) as WrapWithTimestamp<WrapTerminatorAndDataId<T>> | null;
     if (!mostRecent) {
       return null;
     } else {
-      return {
-        data: mostRecent.data,
-        timestamp: mostRecent.timestamp,
-        messageId: mostRecent.messageId,
-      };
+      if (mostRecent.data.terminate) {
+        // try get second most recent
+        const secondMostRecent = (await subscriber.stream.valueByReverseIndex(
+          1
+        )) as WrapWithTimestamp<WrapTerminateFalse<T>> | null;
+        if (!secondMostRecent) {
+          return null;
+        } else {
+          return {
+            data: secondMostRecent.data.data,
+            timestamp: secondMostRecent.timestamp,
+            messageId: secondMostRecent.messageId,
+          };
+        }
+      } else {
+        return {
+          data: mostRecent.data.data,
+          timestamp: mostRecent.timestamp,
+          messageId: mostRecent.messageId,
+        };
+      }
     }
   };
 
