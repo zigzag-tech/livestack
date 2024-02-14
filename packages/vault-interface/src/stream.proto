@@ -9,7 +9,7 @@ service StreamService {
   rpc Pub(StreamPubMessage) returns (StreamPubResult);
   rpc Sub(SubRequest) returns (stream StreamDatapoint);
   rpc valueByReverseIndex(ValueByReverseIndexRequest) returns (ValueByReverseIndexResponse);
-  rpc latestValue(LatestValueRequest) returns (LatestValueResponse);
+  rpc lastValue(LastValueRequest) returns (LastValueResponse);
 }
 
 
@@ -53,12 +53,12 @@ message ValueByReverseIndexResponse {
   }
 }
 
-message LatestValueRequest {
+message LastValueRequest {
   string projectId = 1;
   string uniqueName = 2;
 }
 
-message LatestValueResponse {
+message LastValueResponse {
   oneof value {
     StreamDatapoint datapoint = 1;
     google.protobuf.Empty null_response = 2;
