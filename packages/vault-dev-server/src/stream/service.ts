@@ -153,7 +153,6 @@ class StreamServiceByProject implements StreamServiceImplementation {
     const { projectId, uniqueName, index = 0 } = request;
     const channelId = `${projectId}/${uniqueName}`;
     const subClient = await createClient().connect();
-    console.log("a");
     const s = (await subClient.sendCommand([
       "XREVRANGE",
       channelId,
