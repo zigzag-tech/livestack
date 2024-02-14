@@ -460,7 +460,7 @@ export class ZZJob<
         jobId: this.jobId,
         jobStatus: "failed",
       });
-      throw e;
+      // throw e;
       // }
     }
   };

@@ -5,6 +5,7 @@ import {
   SubRequest,
   ServerStreamingMethodResult,
   SubType,
+  ValueByReverseIndexRequest,
 } from "@livestack/vault-interface/src/generated/stream";
 import { CallContext } from "nice-grpc-common";
 import { createClient } from "redis";
@@ -84,8 +85,8 @@ class StreamServiceByProject implements StreamServiceImplementation {
     return iterator;
   }
 
-  async lastValue(
-    request: SubRequest,
+  async valueByReverseIndex(
+    request: ValueByReverseIndexRequest,
     context: CallContext
   ): Promise<{
     datapoint?:
@@ -97,7 +98,7 @@ class StreamServiceByProject implements StreamServiceImplementation {
       | undefined;
     null_response?: {} | undefined;
   }> {
-    const { projectId, uniqueName } = request;
+    const { projectId, uniqueName, index = 0 } = request;
     const channelId = `${projectId}/${uniqueName}`;
     const subClient = await createClient().connect();
 
@@ -107,12 +108,12 @@ class StreamServiceByProject implements StreamServiceImplementation {
       "+",
       "-",
       "COUNT",
-      "1",
+      `{${index + 1}}`,
     ])) as [string, ...[string, string][]][];
 
     if (s && s.length > 0) {
       const messages = s[0][1]; // Assuming single stream
-      const message = s[0][0];
+      const message = s[0][index];
       if (messages.length > 0) {
         const cursor = message[0] as `${string}-${string}`;
         const [timestampStr, _] = cursor.split("-");

@@ -346,7 +346,7 @@ export class JobSpec<
       });
 
       if (!d.terminate) {
-        const lastV = await stream.lastValue();
+        const lastV = await stream.valueByReverseIndex(0);
         if (lastV?.terminate) {
           this.logger.error(
             `Cannot send ${
@@ -902,6 +902,7 @@ export class JobSpec<
       return {
         getStreamId: subscriber.getStreamId,
         nextValue: subscriber.nextValue,
+        mostRecentValue: subscriber.mostRecentValue,
         valueObservable: subscriber.valueObservable,
         async *[Symbol.asyncIterator]() {
           while (true) {
@@ -1227,6 +1228,7 @@ export interface JobOutput<OMap> {
   tags: (keyof OMap)[];
   byTag: <K extends keyof OMap>(tag: K) => ByTagOutput<OMap[K]>;
   nextValue: () => Promise<WrapWithTimestamp<OMap[keyof OMap]> | null>;
+  mostRecentValue: () => Promise<WrapWithTimestamp<OMap[keyof OMap]> | null>;
   valueObservable: Observable<WrapWithTimestamp<OMap[keyof OMap]> | null>;
 
   [Symbol.asyncIterator]: () => AsyncIterableIterator<{

@@ -60,7 +60,7 @@ export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
     });
     // this.workers.push(worker);
     // await worker.waitUntilReady();
-    console.info("Worker started: ", worker.workerName);
+    // console.info("Worker started: ", worker.workerName);
     return worker;
   }
 

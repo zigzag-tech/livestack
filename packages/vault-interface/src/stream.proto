@@ -8,7 +8,7 @@ import "google/protobuf/empty.proto";
 service StreamService {
   rpc Pub(StreamPubMessage) returns (StreamPubResult);
   rpc Sub(SubRequest) returns (stream StreamDatapoint);
-  rpc LastValue(SubRequest) returns (LastValueResponse);
+  rpc valueByReverseIndex(ValueByReverseIndexRequest) returns (ValueByReverseIndexResponse);
 }
 
 
@@ -39,7 +39,13 @@ message StreamDatapoint {
   string dataStr = 3;
 }
 
-message LastValueResponse {
+message ValueByReverseIndexRequest {
+  string projectId = 1;
+  string uniqueName = 2;
+  uint64 index = 3;
+}
+
+message ValueByReverseIndexResponse {
   oneof value {
     StreamDatapoint datapoint = 1;
     google.protobuf.Empty null_response = 2;

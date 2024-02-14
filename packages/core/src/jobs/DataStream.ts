@@ -132,11 +132,13 @@ export class DataStream<T extends object> {
     );
   }
 
-  public lastValue = async () => {
-    const { null_response, datapoint } = await vaultClient.stream.lastValue({
-      projectId: this.zzEnv.projectId,
-      uniqueName: this.uniqueName,
-    });
+  public valueByReverseIndex = async (index: number) => {
+    const { null_response, datapoint } =
+      await vaultClient.stream.valueByReverseIndex({
+        projectId: this.zzEnv.projectId,
+        uniqueName: this.uniqueName,
+        index,
+      });
     if (null_response) {
       return null;
     } else if (datapoint) {
@@ -145,7 +147,7 @@ export class DataStream<T extends object> {
         ...data,
         timestamp: datapoint.timestamp,
         messageId: datapoint.messageId,
-      };
+      } as WithTimestamp<T>;
     } else {
       throw new Error("Unexpected response from lastValue");
     }
