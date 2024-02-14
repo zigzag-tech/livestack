@@ -111,22 +111,27 @@ class StreamServiceByProject implements StreamServiceImplementation {
       `{${index + 1}}`,
     ])) as [string, ...[string, string][]][];
 
-    if (s && s.length > 0) {
-      const messages = s[0][1]; // Assuming single stream
-      const message = s[0][index];
-      if (messages.length > 0) {
-        const cursor = message[0] as `${string}-${string}`;
-        const [timestampStr, _] = cursor.split("-");
-        const timestamp = Number(timestampStr);
-        const dataStr = parseMessageDataStr(messages);
-        return {
-          datapoint: {
-            timestamp,
-            dataStr,
-            messageId: message[0],
-          },
-        };
+    try {
+      if (s && s.length > 0) {
+        const messages = s[0][1]; // Assuming single stream
+        const message = s[0][index];
+        if (messages.length > 0) {
+          const cursor = message[0] as `${string}-${string}`;
+          const [timestampStr, _] = cursor.split("-");
+          const timestamp = Number(timestampStr);
+          const dataStr = parseMessageDataStr(messages);
+          return {
+            datapoint: {
+              timestamp,
+              dataStr,
+              messageId: message[0],
+            },
+          };
+        }
       }
+    } catch (e) {
+      console.error(e);
+      throw e;
     }
     return { null_response: {} };
   }
