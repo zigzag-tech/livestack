@@ -183,52 +183,6 @@ export class JobSpec<
     return job?.status || null;
   }
 
-  public async getJobData<
-    T extends "in" | "out",
-    K extends T extends "in" ? keyof IMap : keyof OMap,
-    U = T extends "in" ? IMap[keyof IMap] : OMap[keyof OMap]
-  >({
-    jobId,
-    ioType = "out" as T,
-    order,
-    limit,
-    key,
-  }: {
-    jobId: string;
-    ioType?: T;
-    order?: "asc" | "desc";
-    limit?: number;
-    key?: K;
-  }) {
-    if (!key) {
-      if (ioType === "in") {
-        key = this.getSingleInputTag() as typeof key;
-      } else {
-        key = this.getSingleOutputTag() as typeof key;
-      }
-    }
-    const dRaw = await vaultClient.db.getJobDatapoints({
-      specName: this.name,
-      projectId: this.zzEnvEnsured.projectId,
-      jobId,
-      ioType: ioType === "in" ? ConnectorType.IN : ConnectorType.OUT,
-      order: order === "desc" ? Order.DESC : Order.ASC,
-      limit,
-      key: String(key),
-    });
-    const recsRaw = dRaw.points;
-    const recs = recsRaw.map((r) => {
-      return JSON.parse(r.dataStr) as U;
-    }) as WithTimestamp<WrapTerminatorAndDataId<U>>[];
-    const points = recs
-      .filter((r) => r.terminate === false)
-      .map((r) => ({
-        data: (r as WithTimestamp<WrapTerminateFalse<U>>).data as U,
-        timestamp: r.timestamp,
-      }));
-    return points;
-  }
-
   public async enqueueJobAndWaitOnSingleResults<K extends keyof OMap>({
     jobId: jobId,
     jobOptions,
