@@ -288,7 +288,7 @@ export type WithTimestamp<T extends object> = T & {
 
 export class DataStreamSubscriber<T extends object> {
   private zzEnv: ZZEnv;
-  private stream: DataStream<T>;
+  public readonly stream: DataStream<T>;
   private cursor: `${string}-${string}` | "$" | "0";
   private _valueObservable: Observable<WithTimestamp<T>> | null = null;
   private isUnsubscribed: boolean = false;
