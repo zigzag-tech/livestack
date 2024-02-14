@@ -163,8 +163,9 @@ class StreamServiceByProject implements StreamServiceImplementation {
     ])) as [string, ...[string, string][]][];
     try {
       if (s && s.length > 0) {
-        const messages = s[0][1]; // Assuming single stream
-        const message = s[0][s[0].length - 1];
+        const p = s[index];
+        const messages = p[1]; // Assuming single stream
+        const message = p[0];
         if (messages.length > 0) {
           const cursor = message[0] as `${string}-${string}`;
           const [timestampStr, _] = cursor.split("-");
