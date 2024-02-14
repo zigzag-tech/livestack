@@ -7,6 +7,7 @@ export interface ByTagOutput<T> {
     timestamp: number;
   }>;
   nextValue: () => Promise<WrapWithTimestamp<T> | null>;
+  mostRecentValue: () => Promise<WrapWithTimestamp<T> | null>;
   valueObservable: Observable<{
     data: T;
     timestamp: number;
@@ -100,6 +101,23 @@ export function wrapStreamSubscriberWithTermination<T>(
     }
   };
 
+  const mostRecentValue = async () => {
+    const subscriber = await subscriberP;
+    const mostRecent =
+      (await subscriber.mostRecentValue()) as WrapWithTimestamp<
+        WrapTerminateFalse<T>
+      > | null;
+    if (!mostRecent) {
+      return null;
+    } else {
+      return {
+        data: mostRecent.data,
+        timestamp: mostRecent.timestamp,
+        messageId: mostRecent.messageId,
+      };
+    }
+  };
+
   const getStreamId = async () => {
     return await streamIdP;
   };
@@ -108,6 +126,7 @@ export function wrapStreamSubscriberWithTermination<T>(
     getStreamId,
     valueObservable: newValueObservable,
     nextValue: newNextValue,
+    mostRecentValue: mostRecentValue,
     async *[Symbol.asyncIterator]() {
       let nextValue = await newNextValue();
       while (nextValue !== null) {
