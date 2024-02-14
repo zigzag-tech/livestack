@@ -6,6 +6,7 @@ import {
   ServerStreamingMethodResult,
   SubType,
   ValueByReverseIndexRequest,
+  LatestValueRequest,
 } from "@livestack/vault-interface/src/generated/stream";
 import { CallContext } from "nice-grpc-common";
 import { createClient } from "redis";
@@ -83,6 +84,57 @@ class StreamServiceByProject implements StreamServiceImplementation {
       }
     })();
     return iterator;
+  }
+
+  async latestValue(
+    request: LatestValueRequest,
+    context: CallContext
+  ): Promise<{
+    datapoint?:
+      | {
+          timestamp?: number | undefined;
+          messageId?: string | undefined;
+          dataStr?: string | undefined;
+        }
+      | undefined;
+    null_response?: {} | undefined;
+  }> {
+    const { projectId, uniqueName } = request;
+    const channelId = `${projectId}/${uniqueName}`;
+    const subClient = await createClient().connect();
+
+    const s = (await subClient.sendCommand([
+      "XREVRANGE",
+      channelId,
+      "+",
+      "-",
+      "COUNT",
+      `1`,
+    ])) as [string, ...[string, string][]][];
+
+    try {
+      if (s && s.length > 0) {
+        const messages = s[0][1]; // Assuming single stream
+        const message = s[0][0];
+        if (messages.length > 0) {
+          const cursor = message[0] as `${string}-${string}`;
+          const [timestampStr, _] = cursor.split("-");
+          const timestamp = Number(timestampStr);
+          const dataStr = parseMessageDataStr(messages);
+          return {
+            datapoint: {
+              timestamp,
+              dataStr,
+              messageId: message[0],
+            },
+          };
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      throw e;
+    }
+    return { null_response: {} };
   }
 
   async valueByReverseIndex(
