@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DataStreamSubscriber } from "../jobs/DataStream";
+import { DataStreamSubscriber, WithTimestamp } from "../jobs/DataStream";
 import { Observable } from "rxjs";
 export interface ByTagOutput<T> {
   [Symbol.asyncIterator]: () => AsyncIterableIterator<{
@@ -105,27 +105,27 @@ export function wrapStreamSubscriberWithTermination<T>(
     const subscriber = await subscriberP;
     const mostRecent = (await subscriber.stream.valueByReverseIndex(
       0
-    )) as WrapWithTimestamp<WrapTerminatorAndDataId<T>> | null;
+    )) as WithTimestamp<WrapTerminatorAndDataId<T>> | null;
     if (!mostRecent) {
       return null;
     } else {
-      if (mostRecent.data.terminate) {
+      if (mostRecent.terminate) {
         // try get second most recent
         const secondMostRecent = (await subscriber.stream.valueByReverseIndex(
           1
-        )) as WrapWithTimestamp<WrapTerminateFalse<T>> | null;
+        )) as WithTimestamp<WrapTerminateFalse<T>> | null;
         if (!secondMostRecent) {
           return null;
         } else {
           return {
-            data: secondMostRecent.data.data,
+            data: secondMostRecent.data,
             timestamp: secondMostRecent.timestamp,
             messageId: secondMostRecent.messageId,
           };
         }
       } else {
         return {
-          data: mostRecent.data.data,
+          data: mostRecent.data,
           timestamp: mostRecent.timestamp,
           messageId: mostRecent.messageId,
         };
