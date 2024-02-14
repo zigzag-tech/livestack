@@ -153,16 +153,15 @@ class StreamServiceByProject implements StreamServiceImplementation {
     const { projectId, uniqueName, index = 0 } = request;
     const channelId = `${projectId}/${uniqueName}`;
     const subClient = await createClient().connect();
-
+    console.log("a");
     const s = (await subClient.sendCommand([
       "XREVRANGE",
       channelId,
       "+",
       "-",
       "COUNT",
-      `{${index + 1}}`,
+      `${index + 1}`,
     ])) as [string, ...[string, string][]][];
-
     try {
       if (s && s.length > 0) {
         const messages = s[0][1]; // Assuming single stream
