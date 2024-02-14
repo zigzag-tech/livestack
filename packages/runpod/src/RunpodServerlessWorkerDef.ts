@@ -140,8 +140,8 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
         //   } as Partial<TJobData & { status: "FINISH"; runpodResult: TJobResult }>,
         // });
 
-        await output("status").emit("completed");
         await output("default").emit(runpodResult.output);
+        await output("status").emit("completed");
       },
     });
     this._endpointId = serverlessEndpointId;
