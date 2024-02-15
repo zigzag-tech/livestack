@@ -88,10 +88,11 @@ export class LiveGatewayConn {
         sub.unsubscribe();
       }
     });
+    const that = this;
     this.socket.on(
       CMD_FEED,
       async <K extends keyof any>({ data, tag, jobId }: FeedParams<K, any>) => {
-        const { input } = this.jobFnsById[jobId];
+        const { input } = that.jobFnsById[jobId];
         try {
           await input.byTag(tag).feed(data);
         } catch (err) {
