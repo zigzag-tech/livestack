@@ -41,6 +41,7 @@ export function useCumulative<
         TSOrNull<T5, O5>,
         TSOrNull<T6, O6>
       ]
+    | TSOrNull<any, any>[]
 ) {
   const [cumulative, setCumulative] = useState<
     (
