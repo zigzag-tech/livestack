@@ -5,9 +5,9 @@ import {
   OriginalType,
 } from "../files/file-ops";
 
-export interface IStorageProvider {
+export interface IStorageProvider<ResourceId = string> {
   putToStorage: (
-    destination: string,
+    destination: ResourceId,
     data: Buffer | string | Stream | File | Blob | ArrayBuffer
   ) => Promise<void>;
   // uploadFromLocalPath: (p: {
@@ -18,10 +18,11 @@ export interface IStorageProvider {
   //   filePath: string;
   //   destination: string;
   // }) => Promise<void>;
-  fetchFromStorage: <T extends OriginalType>(
-    f: LargeFileWithoutValue<T>
-  ) => Promise<InferRestoredFileType<T>>;
-  getPublicUrl?: (path: string) => string;
+  fetchFromStorage: <T extends OriginalType>(f: {
+    path: ResourceId;
+    originalType: T;
+  }) => Promise<InferRestoredFileType<T>>;
+  getPublicUrl?: (path: ResourceId) => string;
 }
 
 export const saveLargeFilesToStorage = async (
