@@ -188,7 +188,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
         }
 
         try {
-          doIt(job);
+          await doIt(job);
           resolveNext({
             jobCompleted: {
               jobId: job.jobId,
