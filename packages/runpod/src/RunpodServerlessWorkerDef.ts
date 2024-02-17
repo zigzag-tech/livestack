@@ -117,9 +117,9 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
           }
 
           runpodResult = await respP.json();
-          logger.info(
-            `Status for job ${runpodResult.id}: ${runpodResult.status}.`
-          );
+          // logger.info(
+          //   `Status for job ${runpodResult.id}: ${runpodResult.status}.`
+          // );
         }
 
         if (runpodResult.status === "CANCELLED") {
