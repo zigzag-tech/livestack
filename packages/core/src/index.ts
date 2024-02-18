@@ -7,8 +7,9 @@ export { fileOrBufferSchema } from "./jobs/ZZEnv";
 export {
   Workflow,
   WorkflowSpec,
-  expose,
   resolveUniqueSpec,
+  conn,
+  expose,
 } from "./orchestrations/Workflow";
 export * from "./storage/localTempFileStorageProvider";
 export * from "@livestack/shared";

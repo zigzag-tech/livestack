@@ -88,14 +88,132 @@ export type JobSpecAndJobOptions<JobSpec> = {
   jobLabel?: string;
 };
 
+type SpecAndOutput<P, I, O, IMap, OMap, K extends keyof OMap> = {
+  spec: UniqueSpecQuery<P, I, O, IMap, OMap>;
+  output?: K;
+};
+
+type SpecAndInput<P, I, O, IMap, OMap, K extends keyof IMap> = {
+  spec: UniqueSpecQuery<P, I, O, IMap, OMap>;
+  input?: K;
+};
+
+interface Connection<
+  P1 = any,
+  I1 = any,
+  O1 = any,
+  IMap1 = any,
+  OMap1 = any,
+  P2 = any,
+  I2 = any,
+  O2 = any,
+  IMap2 = any,
+  OMap2 = any,
+  K1Out extends keyof OMap1 = keyof OMap1,
+  K2In extends keyof IMap2 = keyof IMap2
+> {
+  from: SpecAndOutput<P1, I1, O1, IMap1, OMap1, K1Out>;
+  to: SpecAndInput<P2, I2, O2, IMap2, OMap2, K2In>;
+  transform?: NoInfer<TransformFunction<OMap1[K1Out], IMap2[K2In]>>;
+}
+
+/**Exampe:
+    const workflow = Workflow.define({
+    name: "fake-workflow",
+    connections: [
+      conn({
+        from: {
+          spec: fakeTextGenSpec,
+          output: "combined",
+        },
+        transform: ({ combined }) => ({ text: combined }),
+        to: {
+          spec: fakeTextSummarizerSpec,
+          input: "text",
+        },
+      }),
+    ],
+    exposures: [
+      expose({
+        spec: fakeTextGenSpec,
+        input: {
+          "num-stream1": "num",
+          "bool-stream2": "bool",
+        },
+      }),
+      expose({
+        spec: fakeTextSummarizerSpec,
+        output: { default: "text" },
+      }),
+    ],
+  });
+ */
+
+export function conn<
+  P1,
+  I1,
+  O1,
+  IMap1,
+  OMap1,
+  P2,
+  I2,
+  O2,
+  IMap2,
+  OMap2,
+  K1Out extends keyof OMap1,
+  K2In extends keyof IMap2
+>(
+  p: Connection<P1, I1, O1, IMap1, OMap1, P2, I2, O2, IMap2, OMap2, K1Out, K2In>
+): CanonicalConnection<P1, I1, O1, IMap1, OMap1, P2, I2, O2, IMap2, OMap2> {
+  const from = resolveUniqueSpec(p.from.spec);
+  const to = resolveUniqueSpec(p.to.spec);
+  return {
+    from: {
+      ...from,
+      output: (
+        p.from.output || (from.spec.getSingleOutputTag() as K1Out)
+      ).toString(),
+      tagInSpecType: "output",
+    },
+    to: {
+      ...to,
+      input: (p.to.input || (to.spec.getSingleInputTag() as K2In)).toString(),
+      tagInSpecType: "input",
+    },
+    transform:
+      (p.transform as TransformFunction<OMap1[keyof OMap1], IMap2[K2In]>) ||
+      null,
+  };
+}
+
+interface Exposure<P = any, I = any, O = any, IMap = any, OMap = any> {
+  spec: UniqueSpecQuery<P, I, O, IMap, OMap>;
+  input?: Partial<Record<keyof IMap, string>>;
+  output?: Partial<Record<keyof OMap, string>>;
+}
+
+interface CanonicalExposure {
+  specName: string;
+  uniqueSpecLabel?: string;
+  input: Record<string, string>;
+  output: Record<string, string>;
+}
+
+export function expose<P, I, O, IMap, OMap>(
+  p: Exposure<P, I, O, IMap, OMap>
+): CanonicalExposure {
+  const resolvedSpec = resolveUniqueSpec(p.spec);
+  return {
+    specName: resolvedSpec.spec.name,
+    uniqueSpecLabel: resolvedSpec.uniqueSpecLabel,
+    input: (p.input || {}) as Record<string, string>,
+    output: (p.output || {}) as Record<string, string>,
+  };
+}
+
 type WorkflowParams = {
-  connections: (
-    | {
-        from: TaggedSpecAndOutlet;
-        to: TaggedSpecAndOutlet;
-      }
-    | Combos
-  )[];
+  connections: CanonicalConnection[];
+  exposures: CanonicalExposure[];
 };
 
 const WorkflowChildJobOptionsSanitized = z.array(
@@ -127,6 +245,7 @@ export class WorkflowSpec extends JobSpec<
   any
 > {
   public readonly connections: CanonicalConnection[];
+  public readonly exposures: CanonicalExposure[];
   private workflowGraphCreated: boolean = false;
 
   public override getDefGraph() {
@@ -139,21 +258,29 @@ export class WorkflowSpec extends JobSpec<
 
       // pass1
       for (const conn of this.connections) {
-        const { fromSpecNodeId, toSpecNodeId, transformsToRegister } =
-          g.addConnectedDualSpecs(conn.from, conn.to);
+        const { fromSpecNodeId, toSpecNodeId } = g.addConnectedDualSpecs(
+          {
+            specName: conn.from.spec.name,
+            uniqueSpecLabel: conn.from.uniqueSpecLabel,
+            output: conn.from.output,
+          },
+          {
+            specName: conn.to.spec.name,
+            uniqueSpecLabel: conn.to.uniqueSpecLabel,
+            input: conn.to.input,
+            hasTransform: !!conn.transform,
+          }
+        );
         g.ensureParentChildRelation(parentSpecNodeId, fromSpecNodeId);
         g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
 
-        for (const {
-          specName,
-          uniqueSpecLabel,
-          ...rest
-        } of transformsToRegister) {
+        if (conn.transform) {
           TransformRegistry.registerTransform({
             workflowSpecName: this.name,
-            receivingSpecName: specName,
-            receivingSpecUniqueLabel: uniqueSpecLabel || null,
-            ...rest,
+            receivingSpecName: conn.to.spec.name,
+            receivingSpecUniqueLabel: conn.to.uniqueSpecLabel || null,
+            tag: conn.to.input,
+            transform: conn.transform,
           });
         }
       }
@@ -180,28 +307,26 @@ export class WorkflowSpec extends JobSpec<
         }
       }
 
-      for (const conn of this.connections) {
-        for (const c of [conn.from, conn.to]) {
-          for (const [specTag, alias] of Object.entries(c.inputAliasMap)) {
-            g.assignAlias({
-              alias,
-              tag: specTag,
-              specName: c.spec.name,
-              uniqueSpecLabel: c.uniqueSpecLabel,
-              type: "in",
-              rootSpecName: this.name,
-            });
-          }
-          for (const [specTag, alias] of Object.entries(c.outputAliasMap)) {
-            g.assignAlias({
-              alias,
-              tag: specTag,
-              specName: c.spec.name,
-              uniqueSpecLabel: c.uniqueSpecLabel,
-              type: "out",
-              rootSpecName: this.name,
-            });
-          }
+      for (const exposure of this.exposures) {
+        for (const [specTag, alias] of Object.entries(exposure.input || {})) {
+          g.assignAlias({
+            alias,
+            tag: specTag,
+            specName: exposure.specName,
+            uniqueSpecLabel: exposure.uniqueSpecLabel,
+            type: "in",
+            rootSpecName: this.name,
+          });
+        }
+        for (const [specTag, alias] of Object.entries(exposure.output || {})) {
+          g.assignAlias({
+            alias,
+            tag: specTag,
+            specName: exposure.specName,
+            uniqueSpecLabel: exposure.uniqueSpecLabel,
+            type: "out",
+            rootSpecName: this.name,
+          });
         }
       }
 
@@ -221,6 +346,7 @@ export class WorkflowSpec extends JobSpec<
 
   constructor({
     connections,
+    exposures,
     name,
     zzEnv,
   }: {
@@ -237,10 +363,11 @@ export class WorkflowSpec extends JobSpec<
         }),
       },
     });
-    const canonicalConns = convertConnectionsCanonical({
-      connections,
-    });
-    this.connections = canonicalConns;
+    // const canonicalConns = convertConnectionsCanonical({
+    //   connections,
+    // });
+    this.connections = connections;
+    this.exposures = exposures;
 
     this._validateConnections();
 
@@ -456,13 +583,13 @@ export class WorkflowSpec extends JobSpec<
       const inSpecInfo = this.connections[i].to;
       validateSpecHasKey({
         spec: outSpecInfo.spec,
-        type: "out",
-        tag: outSpecInfo.tagInSpec,
+        type: "output",
+        tag: outSpecInfo.output,
       });
       validateSpecHasKey({
         spec: inSpecInfo.spec,
-        type: "in",
-        tag: inSpecInfo.tagInSpec,
+        type: "input",
+        tag: inSpecInfo.input,
       });
 
       // TODO: to bring back this check
@@ -618,152 +745,38 @@ export class Workflow {
   }
 }
 
-function convertSpecAndOutletWithTags(
-  specAndOutletOrTagged: TaggedSpecAndOutlet
-): {
-  spec: JobSpec<any, any, any>;
+type CanonicalConnection<
+  P1 = any,
+  I1 = any,
+  O1 = any,
+  IMap1 = any,
+  OMap1 = any,
+  P2 = any,
+  I2 = any,
+  O2 = any,
+  IMap2 = any,
+  OMap2 = any
+> = {
+  from: CanonicalSpecAndOutletFrom<P1, I1, O1, IMap1, OMap1>;
+  to: CanonicalSpecAndOutletTo<P2, I2, O2, IMap2, OMap2>;
+  transform: TransformFunction<OMap1[keyof OMap1], IMap2[keyof IMap2]> | null;
+};
+
+type CanonicalSpecAndOutletBase<P, I, O, IMap, OMap> = {
+  spec: JobSpec<P, I, O, IMap, OMap>;
   uniqueSpecLabel?: string;
-  tagInSpec?: string;
-  inputAliasMap: Record<string, string>;
-  outputAliasMap: Record<string, string>;
-} {
-  if (Array.isArray(specAndOutletOrTagged)) {
-    const [uniqueSpec, tagInSpec] = specAndOutletOrTagged;
-    const uniqueSpecLabel = resolveUniqueSpec(uniqueSpec).uniqueSpecLabel;
-    const aliasMaps = resolveTagMapping(uniqueSpec);
-    return {
-      spec: resolveUniqueSpec(uniqueSpec).spec,
-      ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
-      tagInSpec: tagInSpec.toString(),
-      ...aliasMaps,
-    };
-  } else {
-    const converted = resolveUniqueSpec(specAndOutletOrTagged);
-    const uniqueSpecLabel = converted.uniqueSpecLabel;
-    const aliasMaps = resolveTagMapping(specAndOutletOrTagged);
-
-    return {
-      spec: converted.spec,
-      ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
-      ...aliasMaps,
-    };
-  }
-}
-
-type CanonicalConnection<T1 = any, T2 = any> = {
-  from: CanonicalSpecAndOutletFrom<T1>;
-  to: CanonicalSpecAndOutletTo<T2>;
 };
+export type CanonicalSpecAndOutletFrom<P, I, O, IMap, OMap> =
+  CanonicalSpecAndOutletBase<P, I, O, IMap, OMap> & {
+    output: string;
+    tagInSpecType: "output";
+  };
 
-type CanonicalSpecAndOutletBase = {
-  spec: JobSpec<any, any, any>;
-  uniqueSpecLabel?: string;
-  tagInSpec: string;
-  inputAliasMap: Record<string, string>;
-  outputAliasMap: Record<string, string>;
-};
-export type CanonicalSpecAndOutletFrom<T = any> = CanonicalSpecAndOutletBase & {
-  spec: JobSpec<
-    any,
-    any,
-    any,
-    any & {
-      K: T;
-    }
-  >;
-  tagInSpecType: "output";
-};
-
-export type CanonicalSpecAndOutletTo<T = any> = CanonicalSpecAndOutletBase & {
-  spec: JobSpec<
-    any,
-    any & {
-      K: T;
-    },
-    any,
-    any
-  >;
-  transform: TransformFunction | null;
-  tagInSpecType: "input";
-};
-
-function convertConnectionsCanonical(workflowParams: WorkflowParams) {
-  const convertedConnections = workflowParams.connections.reduce(
-    (acc, conn) => {
-      if (Array.isArray(conn)) {
-        let newAcc: CanonicalConnection[] = [];
-        let cursor = 0;
-
-        const handleAndAdvanceCursor = () => {
-          const from = convertSpecAndOutletWithTags(
-            conn[cursor] as TaggedSpecAndOutlet
-          );
-          let to: ReturnType<typeof convertSpecAndOutletWithTags>;
-          cursor++;
-          let transform: TransformFunction | null = null;
-          if (typeof conn[cursor] === "function") {
-            transform = conn[cursor] as TransformFunction;
-            cursor++;
-            to = convertSpecAndOutletWithTags(
-              conn[cursor] as TaggedSpecAndOutlet
-            );
-          } else {
-            to = convertSpecAndOutletWithTags(
-              conn[cursor] as TaggedSpecAndOutlet
-            );
-          }
-          cursor++;
-
-          newAcc.push({
-            from: {
-              ...from,
-              tagInSpecType: "output",
-              tagInSpec:
-                from.tagInSpec || String(from.spec.getSingleOutputTag()),
-            },
-            to: {
-              ...to,
-              tagInSpecType: "input",
-              tagInSpec: to.tagInSpec || String(to.spec.getSingleInputTag()),
-              transform: transform,
-            },
-          });
-        };
-
-        while (cursor < conn.length) {
-          handleAndAdvanceCursor();
-        }
-
-        return [...acc, ...newAcc];
-      } else {
-        const fromPartialCanonical = convertSpecAndOutletWithTags(conn.from);
-        const toPartialCanonical = convertSpecAndOutletWithTags(conn.to);
-        return [
-          ...acc,
-          {
-            from: {
-              ...fromPartialCanonical,
-              tagInSpecType: "output",
-              tagInSpec:
-                fromPartialCanonical.tagInSpec ||
-                String(fromPartialCanonical.spec.getSingleOutputTag()),
-            },
-            to: {
-              ...toPartialCanonical,
-              tagInSpecType: "input",
-              tagInSpec:
-                toPartialCanonical.tagInSpec ||
-                String(toPartialCanonical.spec.getSingleInputTag()),
-            },
-          } as CanonicalConnection,
-        ];
-      }
-    },
-    [] as CanonicalConnection[]
-  );
-
-  return convertedConnections;
-}
+export type CanonicalSpecAndOutletTo<P, I, O, IMap, OMap> =
+  CanonicalSpecAndOutletBase<P, I, O, IMap, OMap> & {
+    input: string;
+    tagInSpecType: "input";
+  };
 
 function validateSpecHasKey<P, I, O, IMap, OMap>({
   spec,
@@ -771,17 +784,18 @@ function validateSpecHasKey<P, I, O, IMap, OMap>({
   tag,
 }: {
   spec: IOSpec<I, O, IMap, OMap>;
-  type: "in" | "out";
+  type: "input" | "output";
   tag: string;
 }) {
-  if (type === "in") {
-    if (!spec.inputTags.includes(tag as keyof IMap)) {
-      throw new Error(`Invalid spec tag: ${spec.name}/${tag} specified.`);
-    }
-  } else {
-    if (!spec.outputTags.includes(tag as keyof OMap)) {
-      throw new Error(`Invalid spec tag: ${spec.name}/${tag} specified.`);
-    }
+  const tags = (type === "input" ? spec.inputTags : spec.outputTags).map((s) =>
+    s.toString()
+  );
+  if (!tags.includes(tag)) {
+    throw new Error(
+      `Invalid ${type} tag "${tag}" specified for spec "${
+        spec.name
+      }". Available tags: [${tags.map((s) => `"${s}"`).join(", ")}]`
+    );
   }
 }
 
@@ -802,14 +816,14 @@ export interface TagObj<P, I, O, IMap, OMap, IKs, OKs> {
   _aliasMaps: TagMaps<I, O, IMap, OMap, IKs, OKs>;
 }
 
-export function expose<P, I, O, IMap, OMap>(
-  specLike: SpecOrName<P, I, O, IMap, OMap>
-) {
-  return _tagObj(specLike, {
-    inputTag: {},
-    outputTag: {},
-  } as TagMaps<I, O, IMap, OMap, never, never>);
-}
+// function expose0<P, I, O, IMap, OMap>(
+//   specLike: SpecOrName<P, I, O, IMap, OMap>
+// ) {
+//   return _tagObj(specLike, {
+//     inputTag: {},
+//     outputTag: {},
+//   } as TagMaps<I, O, IMap, OMap, never, never>);
+// }
 
 function _tagObj<P, I, O, IMap, OMap, IKs, OKs>(
   specLike: SpecOrName<P, I, O, IMap, OMap>,

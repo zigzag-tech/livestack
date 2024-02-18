@@ -45,19 +45,18 @@ export type InferNodeData<T extends DefGraphNode["nodeType"]> = Extract<
 >;
 
 type CanonicalConnectionBase = {
-  spec: { name: string };
+  specName: string;
   uniqueSpecLabel?: string;
-  tagInSpec: string;
 };
 
 export type CanonicalConnectionFrom = CanonicalConnectionBase & {
-  tagInSpecType: "output";
+  output: string;
 };
 
 export type CanonicalConnectionTo = CanonicalConnectionBase & {
-  tagInSpecType: "input";
+  input: string;
   // inlets may have a transform
-  transform: TransformFunction | null;
+  hasTransform: boolean;
 };
 
 export type DefNodeType = DefGraphNode["nodeType"];
@@ -511,14 +510,9 @@ export class DefGraph extends Graph<DefGraphNode> {
     to: CanonicalConnectionTo
   ) {
     const fromSpecIdentifier = uniqueSpecIdentifier(from);
-    const transformsToRegister: {
-      specName: string;
-      uniqueSpecLabel: string | undefined;
-      tag: string;
-      transform: TransformFunction;
-    }[] = [];
+
     const fromSpecNodeId = this.ensureNode(fromSpecIdentifier, {
-      specName: from.spec.name,
+      specName: from.specName,
       ...(from.uniqueSpecLabel
         ? { uniqueSpecLabel: from.uniqueSpecLabel }
         : {}),
@@ -526,33 +520,26 @@ export class DefGraph extends Graph<DefGraphNode> {
       label: fromSpecIdentifier,
     });
     const fromOutletNodeId = this.ensureNode(
-      `${fromSpecIdentifier}/${from.tagInSpec}`,
+      `${fromSpecIdentifier}/${from.output}`,
       {
         nodeType: "outlet",
-        tag: from.tagInSpec,
-        label: `${fromSpecIdentifier}/${from.tagInSpec}`,
+        tag: from.output,
+        label: `${fromSpecIdentifier}/${from.output}`,
       }
     );
 
     const toSpecIdentifier = uniqueSpecIdentifier(to);
-    const id = `${toSpecIdentifier}/${to.tagInSpec}`;
+    const id = `${toSpecIdentifier}/${to.input}`;
     const toInletNodeId = this.ensureNode(id, {
       nodeType: "inlet",
-      tag: to.tagInSpec,
+      tag: to.input,
       label: id,
-      hasTransform: !!to.transform,
+      hasTransform: !!to.hasTransform,
     });
-    if (to.transform) {
-      transformsToRegister.push({
-        specName: to.spec.name,
-        uniqueSpecLabel: to.uniqueSpecLabel,
-        tag: to.tagInSpec,
-        transform: to.transform,
-      });
-    }
+
     const toUniqueLabel = to.uniqueSpecLabel;
     const toSpecNodeId = this.ensureNode(toSpecIdentifier, {
-      specName: to.spec.name,
+      specName: to.specName,
       ...(toUniqueLabel ? { uniqueSpecLabel: toUniqueLabel } : {}),
       nodeType: "spec",
       label: toSpecIdentifier,
@@ -560,14 +547,14 @@ export class DefGraph extends Graph<DefGraphNode> {
 
     const streamDefId = uniqueStreamIdentifier({
       from: {
-        specName: from.spec.name,
+        specName: from.specName,
         uniqueSpecLabel: from.uniqueSpecLabel,
-        tag: from.tagInSpec,
+        tag: from.output,
       },
       to: {
-        specName: to.spec.name,
+        specName: to.specName,
         uniqueSpecLabel: to.uniqueSpecLabel,
-        tag: to.tagInSpec,
+        tag: to.input,
       },
     });
 
@@ -583,10 +570,10 @@ export class DefGraph extends Graph<DefGraphNode> {
     this.ensureEdge(toInletNodeId, toSpecNodeId);
 
     this.streamNodeIdBySpecIdentifierTypeAndTag[
-      `${fromSpecIdentifier}::out/${from.tagInSpec}`
+      `${fromSpecIdentifier}::out/${from.output}`
     ] = streamDefId;
     this.streamNodeIdBySpecIdentifierTypeAndTag[
-      `${toSpecIdentifier}::in/${to.tagInSpec}`
+      `${toSpecIdentifier}::in/${to.input}`
     ] = streamDefId;
 
     return {
@@ -595,7 +582,6 @@ export class DefGraph extends Graph<DefGraphNode> {
       streamNodeId,
       fromOutletNodeId,
       toInletNodeId,
-      transformsToRegister,
     };
   }
 
