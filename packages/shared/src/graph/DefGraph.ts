@@ -1,10 +1,5 @@
 import Graph from "graphology";
-import { IOSpec } from "../IOSpec";
 import { Attributes } from "graphology-types";
-import {
-  uniqueSpecIdentifier,
-  uniqueStreamIdentifier,
-} from "./InstantiatedGraph";
 
 export type SpecNode = {
   nodeType: "spec";
@@ -50,7 +45,7 @@ export type InferNodeData<T extends DefGraphNode["nodeType"]> = Extract<
 >;
 
 type CanonicalConnectionBase = {
-  spec: IOSpec<any, any, any, any>;
+  spec: { name: string };
   uniqueSpecLabel?: string;
   tagInSpec: string;
 };
@@ -66,17 +61,24 @@ export type CanonicalConnectionTo = CanonicalConnectionBase & {
 };
 
 export type DefNodeType = DefGraphNode["nodeType"];
+
+type SpecBase = {
+  name: string;
+  inputDefSet: { tags: string[] };
+  outputDefSet: { tags: string[] };
+};
+
 export class DefGraph extends Graph<DefGraphNode> {
   private streamNodeIdBySpecIdentifierTypeAndTag: {
     [k: `${string}::${"in" | "out"}/${string}`]: string;
   } = {};
 
-  constructor({ root }: { root: IOSpec<any, any, any, any> }) {
+  constructor({ root }: { root: SpecBase }) {
     super({ multi: false });
     this.addSingleRootSpec({ root });
   }
 
-  private addSingleRootSpec({ root }: { root: IOSpec<any, any, any, any> }) {
+  private addSingleRootSpec({ root }: { root: SpecBase }) {
     const specIdentifier = uniqueSpecIdentifier({
       spec: root,
     });
@@ -708,3 +710,50 @@ export class DefGraph extends Graph<DefGraphNode> {
   }
 }
 export type TransformFunction<T1 = any, T2 = any> = (o: T1) => T2 | Promise<T2>;
+
+export function uniqueSpecIdentifier({
+  specName,
+  spec,
+  uniqueSpecLabel,
+}: {
+  specName?: string;
+  spec?: { name: string };
+  uniqueSpecLabel?: string;
+}) {
+  specName = specName ?? spec?.name;
+  if (!specName) {
+    throw new Error("specName or spec must be provided");
+  }
+  return `${specName}${uniqueSpecLabel ? `[${uniqueSpecLabel}]` : ""}`;
+}
+export function uniqueStreamIdentifier({
+  from,
+  to,
+}: {
+  from?: {
+    specName: string;
+    tag: string;
+    uniqueSpecLabel?: string;
+  };
+  to?: {
+    specName: string;
+    tag: string;
+    uniqueSpecLabel?: string;
+  };
+}) {
+  const fromStr = !!from
+    ? `${from.specName}${
+        from.uniqueSpecLabel && from.uniqueSpecLabel !== "default_label"
+          ? `(${from.uniqueSpecLabel})`
+          : ""
+      }/${from.tag}`
+    : "(*)";
+  const toStr = !!to
+    ? `${to.specName}${
+        to.uniqueSpecLabel && to.uniqueSpecLabel !== "default_label"
+          ? `(${to.uniqueSpecLabel})`
+          : ""
+      }/${to.tag}`
+    : "(*)";
+  return `${fromStr}>>${toStr}`;
+}

@@ -1,6 +1,11 @@
 import Graph from "graphology";
-import { InletNode, OutletNode, AliasNode, DefGraph } from "./DefGraph";
-import { IOSpec } from "../IOSpec";
+import {
+  InletNode,
+  OutletNode,
+  AliasNode,
+  DefGraph,
+  uniqueSpecIdentifier,
+} from "./DefGraph";
 import { Attributes } from "graphology-types";
 import { SpecNode, RootSpecNode } from "./DefGraph";
 
@@ -316,51 +321,4 @@ export function getNodesConnectedToStream<
     source,
     targets,
   };
-}
-
-export function uniqueSpecIdentifier({
-  specName,
-  spec,
-  uniqueSpecLabel,
-}: {
-  specName?: string;
-  spec?: IOSpec<any, any, any, any>;
-  uniqueSpecLabel?: string;
-}) {
-  specName = specName ?? spec?.name;
-  if (!specName) {
-    throw new Error("specName or spec must be provided");
-  }
-  return `${specName}${uniqueSpecLabel ? `[${uniqueSpecLabel}]` : ""}`;
-}
-export function uniqueStreamIdentifier({
-  from,
-  to,
-}: {
-  from?: {
-    specName: string;
-    tag: string;
-    uniqueSpecLabel?: string;
-  };
-  to?: {
-    specName: string;
-    tag: string;
-    uniqueSpecLabel?: string;
-  };
-}) {
-  const fromStr = !!from
-    ? `${from.specName}${
-        from.uniqueSpecLabel && from.uniqueSpecLabel !== "default_label"
-          ? `(${from.uniqueSpecLabel})`
-          : ""
-      }/${from.tag}`
-    : "(*)";
-  const toStr = !!to
-    ? `${to.specName}${
-        to.uniqueSpecLabel && to.uniqueSpecLabel !== "default_label"
-          ? `(${to.uniqueSpecLabel})`
-          : ""
-      }/${to.tag}`
-    : "(*)";
-  return `${fromStr}>>${toStr}`;
 }
