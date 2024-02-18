@@ -306,9 +306,24 @@ export class WorkflowSpec extends JobSpec<
           }
         }
       }
+      type Rec = Record<
+        string,
+        {
+          specName: string;
+          uniqueSpecLabel?: string;
+          tag: string;
+        }
+      >;
+      const inputAliasesSoFar: Rec = {};
+      const outputAliasesSoFar: Rec = {};
 
       for (const exposure of this.exposures) {
         for (const [specTag, alias] of Object.entries(exposure.input || {})) {
+          if (inputAliasesSoFar[alias]) {
+            throw new Error(
+              `Input alias "${alias}" already used for input "${inputAliasesSoFar[alias].tag}" of spec "${inputAliasesSoFar[alias].specName}"`
+            );
+          }
           g.assignAlias({
             alias,
             tag: specTag,
@@ -317,8 +332,18 @@ export class WorkflowSpec extends JobSpec<
             type: "in",
             rootSpecName: this.name,
           });
+          inputAliasesSoFar[alias] = {
+            specName: exposure.specName,
+            uniqueSpecLabel: exposure.uniqueSpecLabel,
+            tag: specTag,
+          };
         }
         for (const [specTag, alias] of Object.entries(exposure.output || {})) {
+          if (outputAliasesSoFar[alias]) {
+            throw new Error(
+              `Output alias "${alias}" already used for output "${outputAliasesSoFar[alias].tag}" of spec "${outputAliasesSoFar[alias].specName}"`
+            );
+          }
           g.assignAlias({
             alias,
             tag: specTag,
@@ -327,6 +352,11 @@ export class WorkflowSpec extends JobSpec<
             type: "out",
             rootSpecName: this.name,
           });
+          outputAliasesSoFar[alias] = {
+            specName: exposure.specName,
+            uniqueSpecLabel: exposure.uniqueSpecLabel,
+            tag: specTag,
+          };
         }
       }
 
