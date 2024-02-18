@@ -63,8 +63,8 @@ export type DefNodeType = DefGraphNode["nodeType"];
 
 type SpecBase = {
   name: string;
-  inputDefSet: { tags: string[] };
-  outputDefSet: { tags: string[] };
+  inputDefSet: { tags: (string | number | symbol)[] };
+  outputDefSet: { tags: (string | number | symbol)[] };
 };
 
 export class DefGraph extends Graph<DefGraphNode> {
