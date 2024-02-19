@@ -17,7 +17,6 @@ import { getLogger } from "../utils/createWorkerLogger";
 import longStringTruncator from "../utils/longStringTruncator";
 import { WrapWithTimestamp } from "./../utils/io";
 import { ZZWorkerDef, ZZWorkerDefParams } from "./ZZWorker";
-import { ConnectorType, Order } from "@livestack/vault-interface";
 import pLimit from "p-limit";
 import { Observable } from "rxjs";
 import { z } from "zod";
@@ -25,7 +24,6 @@ import { TagMaps, TagObj } from "../orchestrations/Workflow";
 import {
   ByTagInput,
   ByTagOutput,
-  WrapTerminateFalse,
   WrapTerminatorAndDataId,
   wrapStreamSubscriberWithTermination,
   wrapTerminatorAndDataId,
@@ -566,7 +564,9 @@ export class JobSpec<
   );
 
   private _outputCollectorByJobIdAndTag: {
-    [k: `${string}/${string}`]: ByTagOutput<OMap[keyof OMap]>;
+    [k: `${string}/${string}[${string}]/${string}`]: ByTagOutput<
+      OMap[keyof OMap]
+    >;
   } = {};
 
   public createOutputCollector<K extends keyof OMap>({
@@ -835,22 +835,29 @@ export class JobSpec<
       });
       const responsibleSpec = JobSpec.lookupByName(specTagInfo.specName);
 
+      // TODO: add cleanup for output collectors
       if (
-        !responsibleSpec._outputCollectorByJobIdAndTag[
-          `${jobId}/${tag.toString()}`
+        !this._outputCollectorByJobIdAndTag[
+          `${jobId}/${specTagInfo.specName}[${
+            specTagInfo.uniqueSpecLabel || "default"
+          }]/${specTagInfo.tag.toString()}`
         ]
       ) {
         const subscriber = responsibleSpec.createOutputCollector({
           jobId,
           tag: specTagInfo.tag,
         });
-        responsibleSpec._outputCollectorByJobIdAndTag[
-          `${jobId}/${specTagInfo.tag.toString()}`
+        this._outputCollectorByJobIdAndTag[
+          `${jobId}/${specTagInfo.specName}[${
+            specTagInfo.uniqueSpecLabel || "default"
+          }]/${specTagInfo.tag.toString()}`
         ] = subscriber;
       }
 
-      const subscriber = responsibleSpec._outputCollectorByJobIdAndTag[
-        `${jobId}/${specTagInfo.tag.toString()}`
+      const subscriber = this._outputCollectorByJobIdAndTag[
+        `${jobId}/${specTagInfo.specName}[${
+          specTagInfo.uniqueSpecLabel || "default"
+        }]/${specTagInfo.tag.toString()}`
       ] as ByTagOutput<OMap[K]>;
 
       return {

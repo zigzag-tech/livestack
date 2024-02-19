@@ -92,6 +92,7 @@ export class LiveGatewayConn {
     this.socket.on(
       CMD_FEED,
       async <K extends keyof any>({ data, tag, jobId }: FeedParams<K, any>) => {
+        // console.info("Feeding data to job ", jobId, " with tag ", tag);
         const { input } = that.jobFnsById[jobId];
         try {
           await input.byTag(tag).feed(data);
