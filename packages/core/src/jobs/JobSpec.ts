@@ -772,8 +772,14 @@ export class JobSpec<
                 specTagInfo.specName
               );
 
+              const responsibleJobId =
+                await this.lookUpChildJobIdByGroupIDAndSpecTag({
+                  groupId: jobId,
+                  specInfo: specTagInfo,
+                });
+
               const s = await responsibleSpec.getInputJobStream({
-                jobId,
+                jobId: responsibleJobId,
                 tag: resolvedTag,
               });
               return s.uniqueName;
@@ -874,14 +880,13 @@ export class JobSpec<
           await (await subscriberP).mostRecentValue(),
         valueObservable: new Observable<WrapWithTimestamp<OMap[K]> | null>(
           (subs) => {
-            let sub: any;
             subscriberP.then((subscriber) => {
               subscriber.nextValue().then((v) => {
                 subs.next(v);
               });
             });
             return () => {
-              sub.unsubscribe();
+              subs.unsubscribe();
             };
           }
         ),
