@@ -238,7 +238,11 @@ export class DataStream<T extends object> {
 
     try {
       // Publish the data to the stream
-      // console.debug("Data point added to stream", this.uniqueName, parsed);
+      // console.debug(
+      //   "Data point added to stream",
+      //   this.uniqueName,
+      //   JSON.stringify(parsed)
+      // );
 
       const [_, { messageId }] = await Promise.all([
         vaultClient.db.addDatapoint({
