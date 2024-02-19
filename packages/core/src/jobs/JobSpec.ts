@@ -880,13 +880,18 @@ export class JobSpec<
           await (await subscriberP).mostRecentValue(),
         valueObservable: new Observable<WrapWithTimestamp<OMap[K]> | null>(
           (subs) => {
-            subscriberP.then((subscriber) => {
-              subscriber.nextValue().then((v) => {
-                subs.next(v);
-              });
+            subscriberP.then(async (subscriber) => {
+              while (true) {
+                const input = await subscriber.nextValue();
+                if (!input) {
+                  subs.complete();
+                  break;
+                }
+                subs.next(input);
+              }
             });
             return () => {
-              subs.unsubscribe();
+              subs.complete();
             };
           }
         ),
