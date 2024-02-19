@@ -387,7 +387,6 @@ export class DataStreamSubscriber<T extends object> {
     } finally {
       // Perform cleanup here if necessary
       subscriber.complete();
-      subscriber.unsubscribe();
     }
   }
 
