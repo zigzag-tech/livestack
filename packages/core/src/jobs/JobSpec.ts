@@ -421,6 +421,7 @@ export class JobSpec<
       tag: K;
     }) => {
       const { jobId, type } = p;
+
       type T = TT extends "in" ? IMap[keyof IMap] : OMap[keyof OMap];
 
       const specTagInfo = this.convertWorkflowAliasToSpecTag({
@@ -564,8 +565,8 @@ export class JobSpec<
   );
 
   private _outputCollectorByJobIdAndTag: {
-    [k: `${string}/${string}[${string}]/${string}`]: ByTagOutput<
-      OMap[keyof OMap]
+    [k: `${string}/${string}[${string}]/${string}`]: Promise<
+      ByTagOutput<OMap[keyof OMap]>
     >;
   } = {};
 
@@ -843,31 +844,50 @@ export class JobSpec<
           }]/${specTagInfo.tag.toString()}`
         ]
       ) {
-        const subscriber = responsibleSpec.createOutputCollector({
-          jobId,
-          tag: specTagInfo.tag,
+        const responsibleJobIdP = this.lookUpChildJobIdByGroupIDAndSpecTag({
+          groupId: jobId,
+          specInfo: specTagInfo,
         });
+        const subscriberP = responsibleJobIdP.then((responsibleJobId) =>
+          responsibleSpec.createOutputCollector({
+            jobId: responsibleJobId,
+            tag: specTagInfo.tag,
+          })
+        );
         this._outputCollectorByJobIdAndTag[
           `${jobId}/${specTagInfo.specName}[${
             specTagInfo.uniqueSpecLabel || "default"
           }]/${specTagInfo.tag.toString()}`
-        ] = subscriber;
+        ] = subscriberP;
       }
 
-      const subscriber = this._outputCollectorByJobIdAndTag[
+      const subscriberP = this._outputCollectorByJobIdAndTag[
         `${jobId}/${specTagInfo.specName}[${
           specTagInfo.uniqueSpecLabel || "default"
         }]/${specTagInfo.tag.toString()}`
-      ] as ByTagOutput<OMap[K]>;
+      ] as Promise<ByTagOutput<OMap[K]>>;
 
       return {
-        getStreamId: subscriber.getStreamId,
-        nextValue: subscriber.nextValue,
-        mostRecentValue: subscriber.mostRecentValue,
-        valueObservable: subscriber.valueObservable,
+        getStreamId: async () => await (await subscriberP).getStreamId(),
+        nextValue: async () => await (await subscriberP).nextValue(),
+        mostRecentValue: async () =>
+          await (await subscriberP).mostRecentValue(),
+        valueObservable: new Observable<WrapWithTimestamp<OMap[K]> | null>(
+          (subs) => {
+            let sub: any;
+            subscriberP.then((subscriber) => {
+              subscriber.nextValue().then((v) => {
+                subs.next(v);
+              });
+            });
+            return () => {
+              sub.unsubscribe();
+            };
+          }
+        ),
         async *[Symbol.asyncIterator]() {
           while (true) {
-            const input = await subscriber.nextValue();
+            const input = await (await subscriberP).nextValue();
 
             // Assuming nextInput returns null or a similar value to indicate completion
             if (!input) {
