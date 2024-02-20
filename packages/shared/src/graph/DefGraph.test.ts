@@ -34,7 +34,6 @@ describe("DefGraph", () => {
     );
     expect(fromSpecNodeId).not.toBeNull();
     expect(toSpecNodeId).not.toBeNull();
-    w;
     const fromOutletNodeId = graph.outboundNeighbors(fromSpecNodeId!)[0];
     expect(fromOutletNodeId).not.toBeNull();
     const streamNodeId = graph.outboundNeighbors(fromOutletNodeId!)[0];
