@@ -5,6 +5,8 @@
   "scripts": {
     "build": "preconstruct build",
     "postinstall": "preconstruct dev"
+    "postinstall": "preconstruct dev",
+    "test": "mocha 'src/**/*.test.ts'"
   },
   "files": [
     "dist"
@@ -16,6 +18,12 @@
   },
   "devDependencies": {
     "@preconstruct/cli": "^2.8.3",
+    "typescript": "5.4.0-beta",
+    "mocha": "^10.0.0",
+    "chai": "^4.3.6",
+    "@types/mocha": "^9.1.0",
+    "@types/chai": "^4.3.0",
+    "ts-node": "^10.9.1"
     "typescript": "5.4.0-beta"
   },
   "main": "dist/livestack-shared.cjs.js",
