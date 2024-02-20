@@ -17,11 +17,11 @@ pub enum NodeType {
 pub struct DefGraphNode {
     pub node_type: NodeType,
     pub label: String,
-    pub spec_name: Option<String>,
-    pub tag: Option<String>,
-    pub stream_def_id: Option<String>,
-    pub alias: Option<String>,
+    pub spec_name: String,
     pub unique_spec_label: Option<String>,
+    pub tag: Option<String>,
+    pub has_transform: Option<bool>,
+    pub direction: Option<String>,
     // Additional fields as needed
 }
 
@@ -31,11 +31,12 @@ impl DefGraphNode {
         DefGraphNode {
             node_type,
             label,
-            spec_name: None,
+            spec_name,
             tag: None,
-            stream_def_id: None,
-            alias: None,
+            has_transform: None,
+            direction: None,
             unique_spec_label: None,
+            stream_node_id_by_spec_identifier_type_and_tag,
         }
     }
 
@@ -60,6 +61,16 @@ impl DefGraphNode {
         self
     }
 
+    pub fn with_has_transform(mut self, has_transform: bool) -> Self {
+        self.has_transform = Some(has_transform);
+        self
+    }
+
+    pub fn with_direction(mut self, direction: String) -> Self {
+        self.direction = Some(direction);
+        self
+    }
+
     pub fn with_unique_spec_label(mut self, unique_spec_label: String) -> Self {
         self.unique_spec_label = Some(unique_spec_label);
         self
@@ -68,16 +79,19 @@ impl DefGraphNode {
 
 pub struct DefGraph {
     graph: DiGraph<DefGraphNode, ()>,
+    stream_node_id_by_spec_identifier_type_and_tag: HashMap<String, NodeIndex>,
     // Additional fields as needed
 }
 
 impl DefGraph {
     pub fn new() -> Self {
         let graph = DiGraph::new();
+        let stream_node_id_by_spec_identifier_type_and_tag = HashMap::new();
         DefGraph { graph }
     }
 
     // Methods to manipulate the graph (add nodes, edges, etc.)
+    // TODO: Implement methods equivalent to TypeScript implementation
     // ...
 }
 
