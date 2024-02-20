@@ -90,9 +90,35 @@ impl DefGraph {
         DefGraph { graph }
     }
 
+    pub fn ensure_node(&mut self, id: &str, data: DefGraphNode) -> NodeIndex {
+        let node_id = format!("{}_{}", data.node_type.as_str(), id);
+        let nodes = self.graph.node_indices().find(|&n| self.graph[n].label == node_id);
+        match nodes {
+            Some(node_index) => node_index,
+            None => {
+                let node_index = self.graph.add_node(data);
+                self.stream_node_id_by_spec_identifier_type_and_tag.insert(node_id, node_index);
+                node_index
+            }
+        }
+    }
+
     // Methods to manipulate the graph (add nodes, edges, etc.)
     // TODO: Implement methods equivalent to TypeScript implementation
     // ...
+}
+
+impl NodeType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            NodeType::Spec => "spec",
+            NodeType::RootSpec => "root-spec",
+            NodeType::Inlet => "inlet",
+            NodeType::Outlet => "outlet",
+            NodeType::StreamDef => "stream-def",
+            NodeType::Alias => "alias",
+        }
+    }
 }
 
 // Implement the methods to mimic the TypeScript functionality
