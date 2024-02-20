@@ -1,5 +1,6 @@
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
+use neon::prelude::*;
 use std::collections::HashMap;
 use std::fmt;
 
@@ -120,6 +121,17 @@ impl NodeType {
         }
     }
 }
+impl Finalize for DefGraph {}
+
+pub fn create_def_graph(mut cx: FunctionContext) -> JsResult<JsBox<DefGraph>> {
+    let def_graph = DefGraph::new();
+    Ok(cx.boxed(def_graph))
+}
+
+register_module!(mut cx, {
+    cx.export_function("createDefGraph", create_def_graph)?;
+    Ok(())
+});
 
 // Implement the methods to mimic the TypeScript functionality
 // ...
