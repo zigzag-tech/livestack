@@ -1,0 +1,15 @@
+{
+  "name": "@livestack/core-crosslang-darwin-universal",
+  "version": "0.0.0",
+  "os": [
+    "darwin"
+  ],
+  "main": "core-crosslang.darwin-universal.node",
+  "files": [
+    "core-crosslang.darwin-universal.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  }
+}
