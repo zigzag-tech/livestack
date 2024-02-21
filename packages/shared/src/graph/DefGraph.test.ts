@@ -99,3 +99,42 @@ describe("DefGraph", () => {
     expect(sameNodeId).toEqual(nodeId);
   });
 });
+  it("should ensure inlets and streams are created correctly", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: [] },
+        outputDefSet: { tags: [] },
+      },
+    });
+    const specName = "TestSpec";
+    const tag = "inputTag";
+    const hasTransform = true;
+
+    // Ensure inlet and stream nodes are created
+    graph.ensureInletAndStream({
+      specName,
+      tag,
+      hasTransform,
+    });
+
+    // Check if the spec node is created
+    const specNodeId = graph.findNode(
+      (_, attrs) => attrs.nodeType === "spec" && attrs.specName === specName
+    );
+    expect(specNodeId).not.toBeNull();
+
+    // Check if the inlet node is created
+    const inletNodeId = graph.findNode(
+      (_, attrs) =>
+        attrs.nodeType === "inlet" && attrs.tag === tag && attrs.hasTransform === hasTransform
+    );
+    expect(inletNodeId).not.toBeNull();
+
+    // Check if the stream node is created and connected to the inlet node
+    const streamNodeId = graph.findNode(
+      (_, attrs) => attrs.nodeType === "stream-def"
+    );
+    expect(streamNodeId).not.toBeNull();
+    expect(graph.hasEdge(streamNodeId, inletNodeId)).toBe(true);
+  });
