@@ -50,9 +50,13 @@ impl DefGraph {
         self.node_indices.values().cloned().collect()
     }
 
-        pub fn node_weight(&self, index: NodeIndex) -> Option<&DefGraphNode> {
-                self.graph.node_weight(index)
-            }
+    pub fn node_weight(&self, index: NodeIndex) -> Option<&DefGraphNode> {
+        self.graph.node_weight(index)
+    }
+
+    public fn raw_edges(&self) -> Vec<(NodeIndex, NodeIndex)> {
+        self.graph.raw_edges().iter().map(|edge| (edge.source(), edge.target())).collect()
+    }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpecBase {
