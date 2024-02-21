@@ -138,3 +138,41 @@ describe("DefGraph", () => {
     expect(streamNodeId).not.toBeNull();
     expect(graph.hasEdge(streamNodeId, inletNodeId)).toBe(true);
   });
+  it("should ensure outlets and streams are created correctly", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: [] },
+        outputDefSet: { tags: [] },
+      },
+    });
+    const specName = "TestSpec";
+    const tag = "outputTag";
+
+    // Ensure outlet and stream nodes are created
+    graph.ensureOutletAndStream({
+      specName,
+      tag,
+    });
+
+    // Check if the spec node is created
+    const specNodeId = graph.findNode(
+      (_, attrs) => attrs.nodeType === "spec" && attrs.specName === specName
+    );
+    expect(specNodeId).not.toBeNull();
+
+    // Check if the outlet node is created
+    const outletNodeId = graph.findNode(
+      (_, attrs) =>
+        attrs.nodeType === "outlet" && attrs.tag === tag
+    );
+    expect(outletNodeId).not.toBeNull();
+
+    // Check if the stream node is created and connected to the outlet node
+    const streamNodeId = graph.findNode(
+      (_, attrs) => attrs.nodeType === "stream-def"
+    );
+    expect(streamNodeId).not.toBeNull();
+    expect(graph.hasEdge(specNodeId, outletNodeId)).toBe(true);
+    expect(graph.hasEdge(outletNodeId, streamNodeId)).toBe(true);
+  });
