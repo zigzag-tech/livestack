@@ -32,6 +32,38 @@ pub struct DefGraph {
 }
 
 impl DefGraph {
+    pub fn lookup_root_spec_alias(
+        &self,
+        spec_name: &str,
+        tag: &str,
+        direction: &str,
+    ) -> Option<String> {
+        let spec_node_id = self.node_indices.get(spec_name)?;
+        let alias_node_id = match direction {
+            "in" => {
+                let inlet_node_id = self.find_inbound_neighbor(spec_name, |node| {
+                    node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
+                })?;
+                self.find_outbound_neighbor(&inlet_node_id.to_string(), |node| {
+                    node.node_type == NodeType::Alias
+                })
+            }
+            "out" => {
+                let outlet_node_id = self.find_outbound_neighbor(spec_name, |node| {
+                    node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
+                })?;
+                self.find_inbound_neighbor(&outlet_node_id.to_string(), |node| {
+                    node.node_type == NodeType::Alias
+                })
+            }
+            _ => return None,
+        };
+
+        alias_node_id.and_then(|id| {
+            self.graph.node_weight(id).and_then(|node| node.alias.clone())
+        })
+    }
+
     pub fn find_inbound_neighbor<F>(&self, node_id: &str, mut condition: F) -> Option<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
