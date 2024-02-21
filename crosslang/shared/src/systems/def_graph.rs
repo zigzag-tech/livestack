@@ -7,7 +7,7 @@ use serde_json::to_string;
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum NodeType {
     RootSpec,
     Spec,
@@ -17,7 +17,7 @@ pub enum NodeType {
     Alias,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DefGraphNode {
     pub node_type: NodeType,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,19 +42,41 @@ pub struct DefGraph {
     pub node_indices: HashMap<String, NodeIndex>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpecBase {
     pub name: String,
     pub input_tags: Vec<String>,
     pub output_tags: Vec<String>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SerializedDefGraph {
     pub graph: Vec<DefGraphNode>,
     pub node_indices: HashMap<String, NodeIndex>,
 }
+
 impl DefGraph {
+    /// Deserializes a `DefGraph` from a JSON string.
+    pub fn load_from_json(json_str: &str) -> Result<Self, serde_json::Error> {
+        // Deserialize the JSON string to a SerializedDefGraph
+        let serialized_graph: SerializedDefGraph = serde_json::from_str(json_str)?;
+
+        // Reconstruct the graph from the serialized form
+        let mut graph = DiGraph::<DefGraphNode, ()>::new();
+        let mut node_indices = HashMap::new();
+
+        for node in serialized_graph.graph {
+            let index = graph.add_node(node.clone());
+            node_indices.insert(node.label.clone(), index);
+        }
+
+        // TODO: Reconstruct edges if necessary
+
+        Ok(DefGraph {
+            graph,
+            node_indices,
+        })
+    }
     /// Serializes the `DefGraph` to a JSON string.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         // Convert the graph into a serializable form
