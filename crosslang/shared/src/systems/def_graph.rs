@@ -39,7 +39,7 @@ pub struct DefGraphNode {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DefGraph {
-    pub graph: DiGraph<DefGraphNode, ()>,
+     graph: DiGraph<DefGraphNode, ()>,
     node_indices: HashMap<String, NodeIndex>,
 }
 
@@ -59,6 +59,14 @@ impl DefGraph {
 
     pub fn contains_edge(&self, from: NodeIndex, to: NodeIndex) -> bool {
         self.graph.contains_edge(from, to)
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.graph.node_count()
+    }
+
+    pub fn edge_count(&self) -> usize {
+        self.graph.edge_count()
     }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
