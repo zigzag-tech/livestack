@@ -42,4 +42,34 @@ describe("DefGraph", () => {
     expect(toInletNodeId).not.toBeNull();
     expect(graph.hasEdge(toInletNodeId!, toSpecNodeId!)).toBe(true);
   });
+
+  it("should ensure nodes are created and retrieved correctly", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: [] },
+        outputDefSet: { tags: [] },
+      },
+    });
+    const nodeId = graph.ensureNode("TestNode", {
+      nodeType: "spec",
+      specName: "TestSpec",
+      label: "TestNode",
+    });
+    expect(nodeId).not.toBeNull();
+    const retrievedNode = graph.getNodeAttributes(nodeId);
+    expect(retrievedNode).toEqual({
+      nodeType: "spec",
+      specName: "TestSpec",
+      label: "TestNode",
+    });
+
+    // Ensure the same node is retrieved when called again with the same id
+    const sameNodeId = graph.ensureNode("TestNode", {
+      nodeType: "spec",
+      specName: "TestSpec",
+      label: "TestNode",
+    });
+    expect(sameNodeId).toEqual(nodeId);
+  });
 });
