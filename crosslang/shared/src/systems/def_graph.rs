@@ -152,6 +152,8 @@ impl DefGraph {
             }
         })
     }
+impl DefGraph {
+    // ... (other methods) ...
 
     pub fn ensure_inlet_and_stream(
         &mut self,
@@ -159,6 +161,7 @@ impl DefGraph {
         tag: &str,
         has_transform: bool,
     ) -> (NodeIndex, NodeIndex) {
+        let spec_id = unique_spec_identifier(spec_name, None);
         let spec_id = unique_spec_identifier(spec_name, None);
         let spec_node_id = self.ensure_node(
             &spec_id,
@@ -175,6 +178,10 @@ impl DefGraph {
             },
         );
 
+        // ... (rest of the method) ...
+    }
+
+    // ... (other methods) ...
         let inlet_node_id = self.ensure_node(
             &format!("{}_{}", spec_id, tag),
             DefGraphNode {
@@ -218,6 +225,7 @@ impl DefGraph {
         tag: &str,
     ) -> (NodeIndex, NodeIndex) {
         let spec_id = unique_spec_identifier(spec_name, None);
+        let spec_id = unique_spec_identifier(spec_name, None);
         let spec_node_id = self.ensure_node(
             &spec_id,
             DefGraphNode {
@@ -233,6 +241,10 @@ impl DefGraph {
             },
         );
 
+        // ... (rest of the method) ...
+    }
+
+    // ... (other methods) ...
         let outlet_node_id = self.ensure_node(
             &format!("{}_{}", spec_id, tag),
             DefGraphNode {
