@@ -43,6 +43,25 @@ describe("DefGraph", () => {
     expect(graph.hasEdge(toInletNodeId!, toSpecNodeId!)).toBe(true);
   });
 
+  it("should return spec node IDs", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: [] },
+        outputDefSet: { tags: [] },
+      },
+    });
+    // Add a spec node
+    const specNodeId = graph.ensureNode("SpecA", {
+      nodeType: "spec",
+      specName: "SpecA",
+      label: "SpecA",
+    });
+    // Retrieve spec node IDs
+    const specNodeIds = graph.getSpecNodeIds();
+    expect(specNodeIds).toContain(specNodeId);
+  });
+
   it("should ensure nodes are created and retrieved correctly", () => {
     const graph = new DefGraph({
       root: {
