@@ -1,8 +1,5 @@
 use assert_matches::assert_matches;
-use livestack_shared::systems::def_graph::DefGraph;
-use livestack_shared::systems::def_graph::DefGraphNode;
-use livestack_shared::systems::def_graph::NodeType;
-use petgraph::graph::NodeIndex;
+use livestack_shared::systems::def_graph::{DefGraph, DefGraphNode, NodeType, SpecBase};
 
 #[cfg(test)]
 mod tests {
