@@ -36,11 +36,34 @@ impl DefGraph {
             .filter_map(|inlet_node_id| {
                 if let Some(inlet_node) = self.graph.node_weight(inlet_node_id) {
                     if inlet_node.node_type == NodeType::Inlet {
-                        let stream_node_id = self.graph
+                        let stream_node_id = self
+                            .graph
                             .neighbors_directed(inlet_node_id, petgraph::Incoming)
                             .next() // Assuming there is only one stream node connected to the inlet
                             .expect("Inlet node should have an incoming stream node");
                         Some((inlet_node_id, stream_node_id))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    pub fn get_outbound_node_sets(&self, spec_node_id: NodeIndex) -> Vec<(NodeIndex, NodeIndex)> {
+        self.graph
+            .neighbors_directed(spec_node_id, petgraph::Outgoing)
+            .filter_map(|outlet_node_id| {
+                if let Some(outlet_node) = self.graph.node_weight(outlet_node_id) {
+                    if outlet_node.node_type == NodeType::Outlet {
+                        let stream_node_id = self
+                            .graph
+                            .neighbors_directed(outlet_node_id, petgraph::Outgoing)
+                            .next() // Assuming there is only one stream node connected to the outlet
+                            .expect("Outlet node should have an outgoing stream node");
+                        Some((outlet_node_id, stream_node_id))
                     } else {
                         None
                     }
