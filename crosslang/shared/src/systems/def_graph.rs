@@ -38,7 +38,8 @@ impl DefGraph {
     }
 
     pub fn get_spec_node_ids(&self) -> Vec<NodeIndex> {
-        self.graph.node_indices()
+        self.graph
+            .node_indices()
             .filter(|&index| {
                 if let Some(node) = self.graph.node_weight(index) {
                     node.node_type == NodeType::Spec
@@ -67,7 +68,7 @@ impl DefGraph {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use petgraph::dot::{Dot, Config};
+    use petgraph::dot::{Config, Dot};
 
     #[test]
     fn test_get_spec_node_ids() {
@@ -100,7 +101,6 @@ mod tests {
             label: "StreamA".to_string(),
         };
         let non_spec_node_id = graph.ensure_node("StreamA", non_spec_node_data);
-        graph.ensure_node("StreamA", non_spec_node_data);
 
         // Retrieve spec node IDs
         let spec_node_ids = graph.get_spec_node_ids();
