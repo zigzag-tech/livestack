@@ -159,23 +159,24 @@ impl DefGraph {
         tag: &str,
         has_transform: bool,
     ) -> (NodeIndex, NodeIndex) {
+        let spec_id = unique_spec_identifier(spec_name, None);
         let spec_node_id = self.ensure_node(
-            spec_name,
+            &spec_id,
             DefGraphNode {
                 node_type: NodeType::Spec,
-                spec_name: Some(spec_name.to_string()),
+                spec_name: Some(spec_id.clone()),
                 unique_spec_label: None,
                 tag: None,
                 has_transform: None,
                 stream_def_id: None,
                 alias: None,
                 direction: None,
-                label: spec_name.to_string(),
+                label: spec_id.clone(),
             },
         );
 
         let inlet_node_id = self.ensure_node(
-            &format!("{}_{}", spec_name, tag),
+            &format!("{}_{}", spec_id, tag),
             DefGraphNode {
                 node_type: NodeType::Inlet,
                 spec_name: None,
@@ -185,13 +186,13 @@ impl DefGraph {
                 stream_def_id: None,
                 alias: None,
                 direction: None,
-                label: format!("{}_{}", spec_name, tag),
+                label: format!("{}_{}", spec_id, tag),
             },
         );
 
         let stream_def_id = format!("{}_{}_stream", spec_name, tag);
         let stream_node_id = self.ensure_node(
-            &stream_def_id,
+            &format!("{}_{}_stream", spec_id, tag),
             DefGraphNode {
                 node_type: NodeType::StreamDef,
                 spec_name: None,
@@ -201,7 +202,7 @@ impl DefGraph {
                 stream_def_id: Some(stream_def_id.clone()),
                 alias: None,
                 direction: None,
-                label: stream_def_id.clone(),
+                label: format!("{}_{}_stream", spec_id, tag),
             },
         );
 
@@ -217,10 +218,10 @@ impl DefGraph {
         tag: &str,
     ) -> (NodeIndex, NodeIndex) {
         let spec_node_id = self.ensure_node(
-            spec_name,
+            &spec_id,
             DefGraphNode {
                 node_type: NodeType::Spec,
-                spec_name: Some(spec_name.to_string()),
+                spec_name: Some(spec_id.clone()),
                 unique_spec_label: None,
                 tag: None,
                 has_transform: None,
@@ -248,7 +249,7 @@ impl DefGraph {
 
         let stream_def_id = format!("{}_{}_stream", spec_name, tag);
         let stream_node_id = self.ensure_node(
-            &stream_def_id,
+            &format!("{}_{}_stream", spec_id, tag),
             DefGraphNode {
                 node_type: NodeType::StreamDef,
                 spec_name: None,
