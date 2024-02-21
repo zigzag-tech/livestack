@@ -109,15 +109,20 @@ impl DefGraph {
         type_: &str,
         tag: &str,
     ) {
-        let spec_node_id = self.find_node(|node| {
-            node.node_type == NodeType::Spec
-                && node.spec_name.as_deref() == Some(spec_name)
-                && node.unique_spec_label.as_deref() == unique_spec_label
-        }).expect("Spec node not found");
+        let spec_node_id = self
+            .find_node(|node| {
+                node.node_type == NodeType::Spec
+                    && node.spec_name.as_deref() == Some(spec_name)
+                    && node.unique_spec_label.as_deref() == unique_spec_label
+            })
+            .expect("Spec node not found");
 
-        let root_spec_node_id = self.find_node(|node| {
-            node.node_type == NodeType::RootSpec && node.spec_name.as_deref() == Some(root_spec_name)
-        }).expect("Root spec node not found");
+        let root_spec_node_id = self
+            .find_node(|node| {
+                node.node_type == NodeType::RootSpec
+                    && node.spec_name.as_deref() == Some(root_spec_name)
+            })
+            .expect("Root spec node not found");
 
         let alias_id = format!("{}/{}", root_spec_name, alias);
         let alias_node_id = self.ensure_node(
@@ -137,19 +142,23 @@ impl DefGraph {
 
         match type_ {
             "in" => {
-                let inlet_node_id = self.find_inbound_neighbor(spec_node_id, |node| {
-                    node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
-                }).expect("Inlet node not found");
-                self.ensure_edge(&inlet_node_id, &alias_node_id);
-                self.ensure_edge(&alias_node_id, &root_spec_node_id);
-            },
+                let inlet_node_id = self
+                    .find_inbound_neighbor(spec_node_id, |node| {
+                        node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
+                    })
+                    .expect("Inlet node not found");
+                self.ensure_edge(inlet_node_id, alias_node_id);
+                self.ensure_edge(alias_node_id, root_spec_node_id);
+            }
             "out" => {
-                let outlet_node_id = self.find_outbound_neighbor(spec_node_id, |node| {
-                    node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
-                }).expect("Outlet node not found");
-                self.ensure_edge(&root_spec_node_id, &alias_node_id);
-                self.ensure_edge(&alias_node_id, &outlet_node_id);
-            },
+                let outlet_node_id = self
+                    .find_outbound_neighbor(spec_node_id, |node| {
+                        node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
+                    })
+                    .expect("Outlet node not found");
+                self.ensure_edge(root_spec_node_id, alias_node_id);
+                self.ensure_edge(alias_node_id, outlet_node_id);
+            }
             _ => panic!("Invalid direction type"),
         }
     }
@@ -215,19 +224,9 @@ impl DefGraph {
             })
             .collect()
     }
-    pub fn ensure_edge(&mut self, from_id: &str, to_id: &str) {
-        let from_index = self.node_indices.get(from_id);
-        let to_index = self.node_indices.get(to_id);
-
-        if let (Some(&from_index), Some(&to_index)) = (from_index, to_index) {
-            if !self.graph.contains_edge(from_index, to_index) {
-                self.graph.add_edge(from_index, to_index, ());
-            }
-        } else {
-            panic!(
-                "One or both nodes not found for IDs: {} -> {}",
-                from_id, to_id
-            );
+    pub fn ensure_edge(&mut self, from_index: NodeIndex, to_index: NodeIndex) {
+        if !self.graph.contains_edge(from_index, to_index) {
+            self.graph.add_edge(from_index, to_index, ());
         }
     }
     pub fn find_node<F>(&self, mut condition: F) -> Option<NodeIndex>
