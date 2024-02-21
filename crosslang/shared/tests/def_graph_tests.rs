@@ -239,6 +239,27 @@ mod tests {
     }
 
     #[test]
+    fn should_assign_an_alias_and_be_able_to_look_it_up() {
+        let mut graph = DefGraph::new();
+        let spec_name = "SpecA";
+        let root_spec_name = "RootSpec";
+        let alias = "AliasA";
+        let tag = "input1";
+        let direction = "in";
+
+        // Ensure inlet and stream nodes are created for SpecA
+        graph.ensure_inlet_and_stream(spec_name, tag, false);
+
+        // Assign an alias to the inlet node
+        graph.assign_alias(alias, spec_name, root_spec_name, direction, tag);
+
+        // Look up the alias
+        let found_alias = graph.lookup_root_spec_alias(spec_name, tag, direction);
+
+        assert_eq!(found_alias, Some(alias.to_string()));
+    }
+
+    #[test]
     fn test_filter_inbound_neighbors() {
         let mut graph = DefGraph::new();
         let spec_name = "TestSpec";
