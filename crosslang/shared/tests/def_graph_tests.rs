@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(new_graph.graph.edge_count(), graph.graph.edge_count());
 
         // Ensure that all nodes and edges are equal
-        for index in graph.graph.node_indices() {
+        for index in graph.get_all_node_indices() {
             let node_weight = graph.graph.node_weight(index).unwrap();
             let new_node_weight = new_graph.graph.node_weight(index).unwrap();
             assert_eq!(node_weight, new_node_weight);
