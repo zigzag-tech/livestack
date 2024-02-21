@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use petgraph::graph::NodeIndex;
-
 /// Generates a unique identifier for a stream with optional unique labels for source and destination.
 pub fn unique_stream_identifier(
     from_spec_name: Option<&str>,

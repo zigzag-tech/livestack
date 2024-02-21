@@ -1,3 +1,3 @@
 #!/bin/bash
 
-RUST_BACKTRACE=1 cargo test --package livestack-shared
+cargo watch -x test --workdir shared
