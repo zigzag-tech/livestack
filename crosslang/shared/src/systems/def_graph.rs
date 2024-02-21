@@ -30,6 +30,21 @@ pub struct DefGraph {
 }
 
 impl DefGraph {
+    pub fn ensure_edge(&mut self, from_id: &str, to_id: &str) {
+        let from_index = self.node_indices.get(from_id);
+        let to_index = self.node_indices.get(to_id);
+
+        if let (Some(&from_index), Some(&to_index)) = (from_index, to_index) {
+            if !self.graph.contains_edge(from_index, to_index) {
+                self.graph.add_edge(from_index, to_index, ());
+            }
+        } else {
+            panic!("One or both nodes not found for IDs: {} -> {}", from_id, to_id);
+        }
+    }
+}
+
+impl DefGraph {
     pub fn find_node<F>(&self, mut condition: F) -> Option<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
