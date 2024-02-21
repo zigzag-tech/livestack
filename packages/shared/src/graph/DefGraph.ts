@@ -656,8 +656,10 @@ export class DefGraph extends Graph<DefGraphNode> {
     );
 
     return outletNodeIds.map((outletNodeId) => {
-      const [oe] = this.outboundEdges(outletNodeId) as (string | undefined)[];
-      const streamNodeId = this.target(oe);
+      const streamNodeId = this.filterOutNeighbors(
+        outletNodeId,
+        (nid) => this.getNodeAttributes(nid).nodeType === "stream-def"
+      )[0];
       return {
         outletNode: {
           ...(this.getNodeAttributes(outletNodeId) as OutletNode),
