@@ -57,6 +57,10 @@ impl DefGraph {
     pub fn raw_edges(&self) -> Vec<(NodeIndex, NodeIndex)> {
         self.graph.raw_edges().iter().map(|edge| (edge.source(), edge.target())).collect()
     }
+
+    pub fn contains_edge(&self, from: NodeIndex, to: NodeIndex) -> bool {
+        self.graph.contains_edge(from, to)
+    }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpecBase {
