@@ -585,16 +585,7 @@ export class DefGraph extends Graph<DefGraphNode> {
     };
   }
 
-  public ensureParentChildRelation(
-    parentSpecNodeId: string,
-    childSpecNodeId: string
-  ) {
-    this.ensureEdge(childSpecNodeId, parentSpecNodeId, {
-      type: "parent-child",
-    });
-  }
-
-  private ensureEdge(from: string, to: string, attributes: Attributes = {}) {
+  public ensureEdge(from: string, to: string, attributes: Attributes = {}) {
     if (!super.hasEdge(from, to)) {
       super.addEdge(from, to, attributes);
     } else {
