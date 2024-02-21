@@ -12,7 +12,7 @@ pub fn sum_as_string(a: i32, b: i32) -> String {
 }
 
 #[napi]
-pub fn def_graph(root: SpecBase) -> DefGraph {
-  DefGraph::new(root)
+pub fn def_graph(root_spec_name: String, input_tags: Vec<String>, output_tags: Vec<String>) -> DefGraph {
+  DefGraph::new(root_spec_name, input_tags, output_tags)
 }
 

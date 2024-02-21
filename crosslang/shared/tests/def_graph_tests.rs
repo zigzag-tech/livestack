@@ -7,12 +7,13 @@ mod tests {
 
     #[test]
     fn test_get_inbound_node_sets() {
-        let root_spec = SpecBase {
-            name: "RootSpec".to_string(),
-            input_tags: vec![],
-            output_tags: vec![],
-        };
-        let mut graph = DefGraph::new(root_spec);
+        let root_spec_name = "RootSpec".to_string();
+        let input_tags = vec![];
+        let output_tags = vec![];
+        let mut graph = DefGraph::new(root_spec_name, input_tags, output_tags);
+        // ... (rest of the test remains unchanged)
+    }
+    // ... (rest of the tests are updated similarly)
         let spec_name = "TestSpec";
         let tag = "inputTag";
         let has_transform = true;

@@ -46,12 +46,6 @@ pub struct DefGraph {
 
 
 #[napi(constructor)]
-pub struct SpecBase {
-    pub name: String,
-    pub input_tags: Vec<String>,
-    pub output_tags: Vec<String>,
-}
-
 
 #[napi]
 impl DefGraph {
@@ -590,14 +584,14 @@ impl DefGraph {
     }
 
     #[napi(constructor)]
-    pub fn new(root: SpecBase) -> Self {
+    pub fn new(root_spec_name: String, input_tags: Vec<String>, output_tags: Vec<String>) -> Self {
         let mut graph = DiGraph::<DefGraphNode, ()>::new();
         let mut node_indices = HashMap::new();
 
-        let root_spec_id = unique_spec_identifier(&root.name, None);
+        let root_spec_id = unique_spec_identifier(&root_spec_name, None);
         let root_spec_node_id = graph.add_node(DefGraphNode {
             node_type: NodeType::RootSpec,
-            spec_name: Some(root.name.clone()),
+            spec_name: Some(root_spec_name.clone()),
             unique_spec_label: None,
             tag: None,
             has_transform: None,
@@ -609,7 +603,7 @@ impl DefGraph {
         node_indices.insert(root_spec_id.clone(), root_spec_node_id);
 
         // Add inlet and outlet nodes, their edges, and the connected stream node and edges
-        for tag in root.input_tags.iter() {
+        for tag in input_tags.iter() {
             let inlet_node_id = graph.add_node(DefGraphNode {
                 node_type: NodeType::Inlet,
                 spec_name: None,
@@ -638,7 +632,7 @@ impl DefGraph {
             graph.add_edge(inlet_node_id, root_spec_node_id, ());
         }
 
-        for tag in root.output_tags.iter() {
+        for tag in output_tags.iter() {
             let outlet_node_id = graph.add_node(DefGraphNode {
                 node_type: NodeType::Outlet,
                 spec_name: None,
