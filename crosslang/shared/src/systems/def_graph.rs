@@ -41,9 +41,16 @@ pub struct DefGraphNode {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DefGraph {
     pub graph: DiGraph<DefGraphNode, ()>,
-    pub node_indices: HashMap<String, NodeIndex>,
+    node_indices: HashMap<String, NodeIndex>,
 }
 
+impl DefGraph {
+    /// Retrieves all node indices.
+    pub fn get_all_node_indices(&self) -> Vec<NodeIndex> {
+        self.node_indices.values().cloned().collect()
+    }
+    // ... (rest of the existing methods)
+}
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpecBase {
     pub name: String,
