@@ -263,6 +263,7 @@ mod tests {
     fn test_filter_inbound_neighbors() {
         let mut graph = DefGraph::new();
         let spec_name = "TestSpec";
+
         let tag = "inputTag";
         let has_transform = true;
         // Ensure inlet and stream nodes are created
@@ -273,7 +274,12 @@ mod tests {
         let (_, other_stream_node_id) =
             graph.ensure_inlet_and_stream(spec_name, other_tag, has_transform);
         // Filter inbound neighbors for the spec node with a specific tag
-        let filtered_inbound_neighbors = graph.filter_inbound_neighbors(spec_name, |node| {
+        let spec_node_id = graph
+            .find_node(|attrs| {
+                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
+            })
+            .expect("Spec node should exist");
+        let filtered_inbound_neighbors = graph.filter_inbound_neighbors(spec_node_id, |node| {
             node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
         });
         assert_eq!(filtered_inbound_neighbors.len(), 1);
