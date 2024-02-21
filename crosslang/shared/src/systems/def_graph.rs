@@ -45,7 +45,6 @@ pub struct DefGraph {
 }
 
 
-#[napi(constructor)]
 
 #[napi]
 impl DefGraph {
@@ -616,7 +615,7 @@ impl DefGraph {
                 label: format!("{}/{}", root_spec_id, tag),
             });
             let stream_def_id =
-                unique_stream_identifier(None, Some(tag), None, Some(&root.name), Some(tag), None);
+                unique_stream_identifier(None, Some(tag), None, Some(&root_spec_name), Some(tag), None);
             let stream_node_id = graph.add_node(DefGraphNode {
                 node_type: NodeType::StreamDef,
                 spec_name: None,
@@ -645,7 +644,7 @@ impl DefGraph {
                 label: format!("{}/{}", root_spec_id, tag),
             });
             let stream_def_id =
-                unique_stream_identifier(Some(&root.name), Some(tag), None, None, Some(tag), None);
+                unique_stream_identifier(Some(&root_spec_name), Some(tag), None, None, Some(tag), None);
             let stream_node_id = graph.add_node(DefGraphNode {
                 node_type: NodeType::StreamDef,
                 spec_name: None,
