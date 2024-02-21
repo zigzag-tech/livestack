@@ -400,7 +400,8 @@ impl DefGraph {
                 direction: None,
                 label: format!("{}/{}", root_spec_id, tag),
             });
-            let stream_def_id = unique_stream_identifier(None, Some(tag), None, Some(&root.name), Some(tag), None);
+            let stream_def_id =
+                unique_stream_identifier(None, Some(tag), None, Some(&root.name), Some(tag), None);
             let stream_node_id = graph.add_node(DefGraphNode {
                 node_type: NodeType::StreamDef,
                 spec_name: None,
@@ -428,7 +429,8 @@ impl DefGraph {
                 direction: None,
                 label: format!("{}/{}", root_spec_id, tag),
             });
-            let stream_def_id = unique_stream_identifier(Some(&root.name), Some(tag), None, None, Some(tag), None);
+            let stream_def_id =
+                unique_stream_identifier(Some(&root.name), Some(tag), None, None, Some(tag), None);
             let stream_node_id = graph.add_node(DefGraphNode {
                 node_type: NodeType::StreamDef,
                 spec_name: None,
@@ -444,10 +446,6 @@ impl DefGraph {
             graph.add_edge(outlet_node_id, stream_node_id, ());
         }
 
-        DefGraph {
-            graph,
-            node_indices,
-        }
         DefGraph {
             graph: DiGraph::<DefGraphNode, ()>::new(),
             node_indices: HashMap::new(),
