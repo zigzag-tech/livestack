@@ -237,6 +237,8 @@ mod tests {
             "There should only be one edge from FromNode to ToNode"
         );
     }
+
+    #[test]
     fn test_filter_inbound_neighbors() {
         let mut graph = DefGraph::new();
         let spec_name = "TestSpec";
@@ -257,5 +259,27 @@ mod tests {
         assert_eq!(filtered_inbound_neighbors[0], inlet_node_id);
         // Ensure that the other inlet node is not included
         assert!(!filtered_inbound_neighbors.contains(&other_stream_node_id));
+    }
+    #[test]
+    fn test_get_outbound_node_sets() {
+        let mut graph = DefGraph::new();
+        let spec_name = "TestSpec";
+        let tag = "outputTag";
+
+        // Ensure outlet and stream nodes are created
+        let (outlet_node_id, stream_node_id) = graph.ensure_outlet_and_stream(spec_name, tag);
+
+        // Retrieve outbound node sets for the spec node
+        let spec_node_id = graph
+            .find_node(|attrs| {
+                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
+            })
+            .expect("Spec node should exist");
+
+        let outbound_node_sets = graph.get_outbound_node_sets(spec_node_id);
+
+        // Ensure that the correct outlet and stream nodes are included
+        assert_eq!(outbound_node_sets.len(), 1);
+        assert!(outbound_node_sets.contains(&(outlet_node_id, stream_node_id)));
     }
 }
