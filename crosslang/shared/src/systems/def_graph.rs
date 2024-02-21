@@ -36,7 +36,7 @@ pub struct DefGraphNode {
     pub direction: Option<String>,
     pub label: String,
 }
-
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DefGraph {
     pub graph: DiGraph<DefGraphNode, ()>,
     pub node_indices: HashMap<String, NodeIndex>,
@@ -49,48 +49,19 @@ pub struct SpecBase {
     pub output_tags: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct SerializedDefGraph {
-    pub graph: Vec<DefGraphNode>,
-    pub node_indices: HashMap<String, NodeIndex>,
-}
-
 impl DefGraph {
     /// Deserializes a `DefGraph` from a JSON string.
     pub fn load_from_json(json_str: &str) -> Result<Self, serde_json::Error> {
         // Deserialize the JSON string to a SerializedDefGraph
-        let serialized_graph: SerializedDefGraph = serde_json::from_str(json_str)?;
+        let graph: DefGraph = serde_json::from_str(json_str)?;
 
-        // Reconstruct the graph from the serialized form
-        let mut graph = DiGraph::<DefGraphNode, ()>::new();
-        let mut node_indices = HashMap::new();
-
-        for node in serialized_graph.graph {
-            let index = graph.add_node(node.clone());
-            node_indices.insert(node.label.clone(), index);
-        }
-
-        // TODO: Reconstruct edges if necessary
-
-        Ok(DefGraph {
-            graph,
-            node_indices,
-        })
+        Ok(graph)
     }
     /// Serializes the `DefGraph` to a JSON string.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        // Convert the graph into a serializable form
-        let serialized_graph = SerializedDefGraph {
-            graph: self
-                .graph
-                .raw_nodes()
-                .iter()
-                .map(|node| node.weight.clone())
-                .collect(),
-            node_indices: self.node_indices.clone(),
-        };
+       
         // Serialize it to a JSON string
-        serde_json::to_string(&serialized_graph)
+        serde_json::to_string(&self)
     }
     pub fn get_all_alias_node_ids(&self) -> Vec<NodeIndex> {
         self.graph
