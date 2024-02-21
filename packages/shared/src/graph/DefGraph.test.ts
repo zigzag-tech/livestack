@@ -242,3 +242,33 @@ describe("DefGraph", () => {
     expect(inboundNodeSets[1].inletNode).toHaveProperty("tag", "input2");
     expect(inboundNodeSets[1].inletNode).toHaveProperty("hasTransform", true);
   });
+  it("should return outbound node sets for a spec node", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: [] },
+        outputDefSet: { tags: ["output1", "output2"] },
+      },
+    });
+    const specNodeId = graph.ensureNode("SpecA", {
+      nodeType: "spec",
+      specName: "SpecA",
+      label: "SpecA",
+    });
+    // Ensure outlet and stream nodes are created for SpecA
+    graph.ensureOutletAndStream({
+      specName: "SpecA",
+      tag: "output1",
+    });
+    graph.ensureOutletAndStream({
+      specName: "SpecA",
+      tag: "output2",
+    });
+    // Retrieve outbound node sets
+    const outboundNodeSets = graph.getOutboundNodeSets(specNodeId);
+    expect(outboundNodeSets).toHaveLength(2);
+    expect(outboundNodeSets[0]).toHaveProperty("outletNode");
+    expect(outboundNodeSets[0]).toHaveProperty("streamNode");
+    expect(outboundNodeSets[0].outletNode).toHaveProperty("tag", "output1");
+    expect(outboundNodeSets[1].outletNode).toHaveProperty("tag", "output2");
+  });
