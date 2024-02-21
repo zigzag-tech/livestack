@@ -217,6 +217,7 @@ impl DefGraph {
         spec_name: &str,
         tag: &str,
     ) -> (NodeIndex, NodeIndex) {
+        let spec_id = unique_spec_identifier(spec_name, None);
         let spec_node_id = self.ensure_node(
             &spec_id,
             DefGraphNode {
@@ -228,12 +229,12 @@ impl DefGraph {
                 stream_def_id: None,
                 alias: None,
                 direction: None,
-                label: spec_name.to_string(),
+                label: spec_id.clone(),
             },
         );
 
         let outlet_node_id = self.ensure_node(
-            &format!("{}_{}", spec_name, tag),
+            &format!("{}_{}", spec_id, tag),
             DefGraphNode {
                 node_type: NodeType::Outlet,
                 spec_name: None,
@@ -243,7 +244,7 @@ impl DefGraph {
                 stream_def_id: None,
                 alias: None,
                 direction: None,
-                label: format!("{}_{}", spec_name, tag),
+                label: format!("{}_{}", spec_id, tag),
             },
         );
 
@@ -259,7 +260,7 @@ impl DefGraph {
                 stream_def_id: Some(stream_def_id.clone()),
                 alias: None,
                 direction: None,
-                label: stream_def_id.clone(),
+                label: format!("{}_{}_stream", spec_id, tag),
             },
         );
 
@@ -269,6 +270,7 @@ impl DefGraph {
         (outlet_node_id, stream_node_id)
     }
 
+    // ... (other methods) ...
     pub fn new() -> Self {
         DefGraph {
             graph: DiGraph::<DefGraphNode, ()>::new(),
