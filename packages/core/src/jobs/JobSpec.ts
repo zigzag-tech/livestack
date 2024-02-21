@@ -1000,20 +1000,20 @@ export class JobSpec<
   ): T extends "input" ? keyof IMap : keyof OMap {
     // naive implementation: find spec node with only one input
     // or output which is not connected to another spec, and return its tag
-    const dg = this.getDefGraph();
-    let specNodeIds = dg.getSpecNodeIds();
+    const defG = this.getDefGraph();
+    let specNodeIds = defG.getSpecNodeIds();
     if (specNodeIds.length === 0) {
-      const rootSpecNodeId = dg.getRootSpecNodeId();
+      const rootSpecNodeId = defG.getRootSpecNodeId();
       specNodeIds = [rootSpecNodeId];
     } else {
-      specNodeIds = dg.getSpecNodeIds();
+      specNodeIds = defG.getSpecNodeIds();
     }
 
     const pass0 = specNodeIds.map((specNodeId) => {
-      const specNode = dg.getNodeAttributes(specNodeId) as SpecNode;
+      const specNode = defG.getNodeAttributes(specNodeId) as SpecNode;
       if (type === "input") {
         return {
-          conns: dg.getInboundNodeSets(specNodeId).map((s) => ({
+          conns: defG.getInboundNodeSets(specNodeId).map((s) => ({
             specName: specNode.specName,
             uniqueSpecLabel: specNode.uniqueSpecLabel,
             type: "in" as const,
@@ -1025,7 +1025,7 @@ export class JobSpec<
         };
       } else {
         return {
-          conns: dg.getOutboundNodeSets(specNodeId).map((s) => ({
+          conns: defG.getOutboundNodeSets(specNodeId).map((s) => ({
             specName: specNode.specName,
             uniqueSpecLabel: specNode.uniqueSpecLabel,
             type: "out" as const,
@@ -1042,10 +1042,10 @@ export class JobSpec<
       .filter(({ conns }) => {
         const conn = conns[0];
         if (type === "input") {
-          const { source } = getNodesConnectedToStream(dg, conn.streamNodeId);
+          const { source } = getNodesConnectedToStream(defG, conn.streamNodeId);
           return !source;
         } else {
-          const { targets } = getNodesConnectedToStream(dg, conn.streamNodeId);
+          const { targets } = getNodesConnectedToStream(defG, conn.streamNodeId);
           return targets.length === 0;
         }
       })
