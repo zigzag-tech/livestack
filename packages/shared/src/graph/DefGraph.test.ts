@@ -57,9 +57,16 @@ describe("DefGraph", () => {
       specName: "SpecA",
       label: "SpecA",
     });
+    // Add a non-spec node
+    const nonSpecNodeId = graph.ensureNode("StreamA", {
+      nodeType: "stream-def",
+      streamDefId: "StreamA",
+      label: "StreamA",
+    });
     // Retrieve spec node IDs
     const specNodeIds = graph.getSpecNodeIds();
     expect(specNodeIds).toContain(specNodeId);
+    expect(specNodeIds).not.toContain(nonSpecNodeId);
   });
 
   it("should ensure nodes are created and retrieved correctly", () => {
