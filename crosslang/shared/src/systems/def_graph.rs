@@ -39,7 +39,10 @@ impl DefGraph {
                 self.graph.add_edge(from_index, to_index, ());
             }
         } else {
-            panic!("One or both nodes not found for IDs: {} -> {}", from_id, to_id);
+            panic!(
+                "One or both nodes not found for IDs: {} -> {}",
+                from_id, to_id
+            );
         }
     }
 }
@@ -364,17 +367,6 @@ mod tests {
             "Stream node should be connected to the outlet node"
         );
     }
-}
-    pub fn ensure_edge(&mut self, from_id: &str, to_id: &str) {
-        let from_index = *self.node_indices.get(from_id)
-            .expect("From node ID not found in ensure_edge");
-        let to_index = *self.node_indices.get(to_id)
-            .expect("To node ID not found in ensure_edge");
-
-        if !self.graph.contains_edge(from_index, to_index) {
-            self.graph.add_edge(from_index, to_index, ());
-        }
-    }
 
     #[test]
     fn test_ensure_edge() {
@@ -404,8 +396,16 @@ mod tests {
         let from_index = graph.ensure_node("FromNode", from_node);
         let to_index = graph.ensure_node("ToNode", to_node);
         graph.ensure_edge("FromNode", "ToNode");
-        assert!(graph.graph.contains_edge(from_index, to_index), "Edge should exist from FromNode to ToNode");
+        assert!(
+            graph.graph.contains_edge(from_index, to_index),
+            "Edge should exist from FromNode to ToNode"
+        );
         graph.ensure_edge("FromNode", "ToNode");
         let edges: Vec<_> = graph.graph.edges_connecting(from_index, to_index).collect();
-        assert_eq!(edges.len(), 1, "There should only be one edge from FromNode to ToNode");
+        assert_eq!(
+            edges.len(),
+            1,
+            "There should only be one edge from FromNode to ToNode"
+        );
     }
+}
