@@ -176,3 +176,35 @@ describe("DefGraph", () => {
     expect(graph.hasEdge(specNodeId, outletNodeId)).toBe(true);
     expect(graph.hasEdge(outletNodeId, streamNodeId)).toBe(true);
   });
+  it("should ensure edges are created and retrieved correctly", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: [] },
+        outputDefSet: { tags: [] },
+      },
+    });
+    const fromNodeId = graph.ensureNode("FromNode", {
+      nodeType: "spec",
+      specName: "FromSpec",
+      label: "FromNode",
+    });
+    const toNodeId = graph.ensureNode("ToNode", {
+      nodeType: "spec",
+      specName: "ToSpec",
+      label: "ToNode",
+    });
+
+    // Ensure edge is created
+    graph.ensureEdge(fromNodeId, toNodeId);
+    expect(graph.hasEdge(fromNodeId, toNodeId)).toBe(true);
+
+    // Ensure edge is not duplicated
+    graph.ensureEdge(fromNodeId, toNodeId);
+    expect(graph.edges().length).toBe(1);
+
+    // Ensure edge attributes are updated
+    graph.ensureEdge(fromNodeId, toNodeId, { weight: 10 });
+    const edgeAttributes = graph.getEdgeAttributes(fromNodeId, toNodeId);
+    expect(edgeAttributes).toHaveProperty("weight", 10);
+  });
