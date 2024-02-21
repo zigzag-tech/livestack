@@ -3,7 +3,7 @@ use petgraph::graph::DiGraph;
 // use petgraph::graph::Node;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-// use napi_derive::napi;
+use napi_derive::napi;
 
 use std::collections::HashMap;
 
@@ -43,6 +43,7 @@ pub struct DefGraph {
     node_indices: HashMap<String, NodeIndex>,
 }
 
+#[napi]
 impl DefGraph {
     /// Retrieves all node indices.
     pub fn get_all_node_indices(&self) -> Vec<NodeIndex> {
