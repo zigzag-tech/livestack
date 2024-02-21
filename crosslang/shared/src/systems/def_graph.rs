@@ -1,5 +1,6 @@
 use crate::systems::def_graph_utils::{unique_spec_identifier, unique_stream_identifier};
 use petgraph::graph::DiGraph;
+use petgraph::graph::Node;
 use petgraph::graph::NodeIndex;
 use std::collections::HashMap;
 
@@ -38,33 +39,37 @@ impl DefGraph {
         tag: &str,
         direction: &str,
     ) -> Option<String> {
-        let spec_node_id = self.node_indices.get(spec_name)?;
+        let spec_node_id = self.find_node(|node| {
+            node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(spec_name)
+        })?;
         let alias_node_id = match direction {
             "in" => {
-                let inlet_node_id = self.find_inbound_neighbor(spec_name, |node| {
+                let inlet_node_id = self.find_inbound_neighbor(spec_node_id, |node| {
                     node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
                 })?;
-                self.find_outbound_neighbor(&inlet_node_id.to_string(), |node| {
-                    node.node_type == NodeType::Alias
-                })
+                self.find_outbound_neighbor(inlet_node_id, |node| node.node_type == NodeType::Alias)
             }
             "out" => {
-                let outlet_node_id = self.find_outbound_neighbor(spec_name, |node| {
+                let outlet_node_id = self.find_outbound_neighbor(spec_node_id, |node| {
                     node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
                 })?;
-                self.find_inbound_neighbor(&outlet_node_id.to_string(), |node| {
-                    node.node_type == NodeType::Alias
-                })
+                self.find_inbound_neighbor(outlet_node_id, |node| node.node_type == NodeType::Alias)
             }
             _ => return None,
         };
 
         alias_node_id.and_then(|id| {
-            self.graph.node_weight(id).and_then(|node| node.alias.clone())
+            self.graph
+                .node_weight(id)
+                .and_then(|node| node.alias.clone())
         })
     }
 
-    pub fn find_inbound_neighbor<F>(&self, node_id: &str, mut condition: F) -> Option<NodeIndex>
+    pub fn find_inbound_neighbor<F>(
+        &self,
+        node_id: NodeIndex,
+        mut condition: F,
+    ) -> Option<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
     {
@@ -73,7 +78,11 @@ impl DefGraph {
             .next()
     }
 
-    pub fn find_outbound_neighbor<F>(&self, node_id: &str, mut condition: F) -> Option<NodeIndex>
+    pub fn find_outbound_neighbor<F>(
+        &self,
+        node_id: NodeIndex,
+        mut condition: F,
+    ) -> Option<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
     {
@@ -191,26 +200,22 @@ impl DefGraph {
             .collect()
     }
 
-    pub fn filter_inbound_neighbors<F>(&self, node_id: &str, mut condition: F) -> Vec<NodeIndex>
+    pub fn filter_inbound_neighbors<F>(&self, index: NodeIndex, mut condition: F) -> Vec<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
     {
-        if let Some(&index) = self.node_indices.get(node_id) {
-            self.graph
-                .neighbors_directed(index, petgraph::Incoming)
-                .filter_map(|neighbor_index| {
-                    self.graph.node_weight(neighbor_index).and_then(|node| {
-                        if condition(node) {
-                            Some(neighbor_index)
-                        } else {
-                            None
-                        }
-                    })
+        self.graph
+            .neighbors_directed(index, petgraph::Incoming)
+            .filter_map(|neighbor_index| {
+                self.graph.node_weight(neighbor_index).and_then(|node| {
+                    if condition(node) {
+                        Some(neighbor_index)
+                    } else {
+                        None
+                    }
                 })
-                .collect()
-        } else {
-            vec![]
-        }
+            })
+            .collect()
     }
     pub fn ensure_edge(&mut self, from_id: &str, to_id: &str) {
         let from_index = self.node_indices.get(from_id);
@@ -357,7 +362,6 @@ impl DefGraph {
         (outlet_node_id, stream_node_id)
     }
 
-    // ... (other methods) ...
     pub fn new() -> Self {
         DefGraph {
             graph: DiGraph::<DefGraphNode, ()>::new(),
@@ -389,25 +393,21 @@ impl DefGraph {
         }
     }
 
-    pub fn filter_outbound_neighbors<F>(&self, node_id: &str, mut condition: F) -> Vec<NodeIndex>
+    pub fn filter_outbound_neighbors<F>(&self, index: NodeIndex, mut condition: F) -> Vec<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
     {
-        if let Some(&index) = self.node_indices.get(node_id) {
-            self.graph
-                .neighbors_directed(index, petgraph::Outgoing)
-                .filter_map(|neighbor_index| {
-                    self.graph.node_weight(neighbor_index).and_then(|node| {
-                        if condition(node) {
-                            Some(neighbor_index)
-                        } else {
-                            None
-                        }
-                    })
+        self.graph
+            .neighbors_directed(index, petgraph::Outgoing)
+            .filter_map(|neighbor_index| {
+                self.graph.node_weight(neighbor_index).and_then(|node| {
+                    if condition(node) {
+                        Some(neighbor_index)
+                    } else {
+                        None
+                    }
                 })
-                .collect()
-        } else {
-            vec![]
-        }
+            })
+            .collect()
     }
 }
