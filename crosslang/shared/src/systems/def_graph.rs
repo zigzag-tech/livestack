@@ -32,6 +32,13 @@ pub struct DefGraph {
     pub node_indices: HashMap<String, NodeIndex>,
 }
 
+#[derive(Clone, Debug)]
+pub struct SpecBase {
+    pub name: String,
+    pub input_tags: Vec<String>,
+    pub output_tags: Vec<String>,
+}
+
 impl DefGraph {
     pub fn lookup_root_spec_alias(
         &self,
@@ -362,7 +369,85 @@ impl DefGraph {
         (outlet_node_id, stream_node_id)
     }
 
-    pub fn new() -> Self {
+    pub fn new(root: SpecBase) -> Self {
+        let mut graph = DiGraph::<DefGraphNode, ()>::new();
+        let mut node_indices = HashMap::new();
+
+        let root_spec_id = unique_spec_identifier(&root.name, None);
+        let root_spec_node_id = graph.add_node(DefGraphNode {
+            node_type: NodeType::RootSpec,
+            spec_name: Some(root.name.clone()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: root_spec_id.clone(),
+        });
+        node_indices.insert(root_spec_id.clone(), root_spec_node_id);
+
+        // Add inlet and outlet nodes, their edges, and the connected stream node and edges
+        for tag in root.input_tags.iter() {
+            let inlet_node_id = graph.add_node(DefGraphNode {
+                node_type: NodeType::Inlet,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: Some(tag.clone()),
+                has_transform: Some(false), // This might be overwritten when instantiated
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: format!("{}/{}", root_spec_id, tag),
+            });
+            let stream_def_id = unique_stream_identifier(None, Some(tag), None, Some(&root.name), Some(tag), None);
+            let stream_node_id = graph.add_node(DefGraphNode {
+                node_type: NodeType::StreamDef,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: None,
+                has_transform: None,
+                stream_def_id: Some(stream_def_id.clone()),
+                alias: None,
+                direction: None,
+                label: stream_def_id.clone(),
+            });
+            graph.add_edge(stream_node_id, inlet_node_id, ());
+            graph.add_edge(inlet_node_id, root_spec_node_id, ());
+        }
+
+        for tag in root.output_tags.iter() {
+            let outlet_node_id = graph.add_node(DefGraphNode {
+                node_type: NodeType::Outlet,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: Some(tag.clone()),
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: format!("{}/{}", root_spec_id, tag),
+            });
+            let stream_def_id = unique_stream_identifier(Some(&root.name), Some(tag), None, None, Some(tag), None);
+            let stream_node_id = graph.add_node(DefGraphNode {
+                node_type: NodeType::StreamDef,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: None,
+                has_transform: None,
+                stream_def_id: Some(stream_def_id.clone()),
+                alias: None,
+                direction: None,
+                label: stream_def_id.clone(),
+            });
+            graph.add_edge(root_spec_node_id, outlet_node_id, ());
+            graph.add_edge(outlet_node_id, stream_node_id, ());
+        }
+
+        DefGraph {
+            graph,
+            node_indices,
+        }
         DefGraph {
             graph: DiGraph::<DefGraphNode, ()>::new(),
             node_indices: HashMap::new(),
