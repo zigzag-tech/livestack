@@ -10,6 +10,7 @@ mod tests {
     use petgraph::dot::{Config, Dot};
 
     use petgraph::graph::DiGraph;
+    use serde_json;
 
     #[test]
     fn test_get_inbound_node_sets() {
@@ -423,5 +424,68 @@ mod tests {
         let result = graph.lookup_spec_and_tag_by_alias(alias, direction);
 
         assert_eq!(result, Some((spec_name.to_string(), tag.to_string(), None)));
+    }
+    #[test]
+    fn should_serialize_and_deserialize_a_def_graph_resulting_in_an_identical_graph() {
+        let root_spec = SpecBase {
+            name: "RootSpec".to_string(),
+            input_tags: vec!["input1".to_string(), "input2".to_string()],
+            output_tags: vec!["output1".to_string(), "output2".to_string()],
+        };
+        let mut graph = DefGraph::new(root_spec);
+
+        // Add some nodes and edges to the graph
+        let spec_node_a = DefGraphNode {
+            node_type: NodeType::Spec,
+            spec_name: Some("SpecA".to_string()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "SpecA".to_string(),
+        };
+        let spec_node_a_id = graph.ensure_node("SpecA", spec_node_a);
+
+        let spec_node_b = DefGraphNode {
+            node_type: NodeType::Spec,
+            spec_name: Some("SpecB".to_string()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "SpecB".to_string(),
+        };
+        let spec_node_b_id = graph.ensure_node("SpecB", spec_node_b);
+
+        graph.ensure_edge(spec_node_a_id, spec_node_b_id);
+
+        // Serialize the graph to JSON
+        let json = graph.to_json().unwrap();
+
+        // Deserialize the JSON back into a graph
+        let new_graph = DefGraph::load_from_json(&json).unwrap();
+
+        // Compare the original graph with the deserialized graph
+        assert_eq!(new_graph.graph.node_count(), graph.graph.node_count());
+        assert_eq!(new_graph.graph.edge_count(), graph.graph.edge_count());
+
+        // Ensure that all nodes and edges are equal
+        for index in graph.graph.node_indices() {
+            let node_weight = graph.graph.node_weight(index).unwrap();
+            let new_node_weight = new_graph.graph.node_weight(index).unwrap();
+            assert_eq!(node_weight, new_node_weight);
+        }
+
+        for edge in graph.graph.raw_edges() {
+            let new_edge = new_graph
+                .graph
+                .find_edge(edge.source(), edge.target())
+                .and_then(|e| new_graph.graph.edge_weight(e));
+            assert!(new_edge.is_some());
+        }
     }
 }
