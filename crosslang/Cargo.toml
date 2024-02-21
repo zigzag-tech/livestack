@@ -1,0 +1,3 @@
+[workspace]
+
+members = ["shared-py", "shared", "shared-ts"]
