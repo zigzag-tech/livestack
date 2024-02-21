@@ -365,3 +365,47 @@ mod tests {
         );
     }
 }
+    pub fn ensure_edge(&mut self, from_id: &str, to_id: &str) {
+        let from_index = *self.node_indices.get(from_id)
+            .expect("From node ID not found in ensure_edge");
+        let to_index = *self.node_indices.get(to_id)
+            .expect("To node ID not found in ensure_edge");
+
+        if !self.graph.contains_edge(from_index, to_index) {
+            self.graph.add_edge(from_index, to_index, ());
+        }
+    }
+
+    #[test]
+    fn test_ensure_edge() {
+        let mut graph = DefGraph::new();
+        let from_node = DefGraphNode {
+            node_type: NodeType::Spec,
+            spec_name: Some("FromSpec".to_string()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "FromNode".to_string(),
+        };
+        let to_node = DefGraphNode {
+            node_type: NodeType::Spec,
+            spec_name: Some("ToSpec".to_string()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "ToNode".to_string(),
+        };
+        let from_index = graph.ensure_node("FromNode", from_node);
+        let to_index = graph.ensure_node("ToNode", to_node);
+        graph.ensure_edge("FromNode", "ToNode");
+        assert!(graph.graph.contains_edge(from_index, to_index), "Edge should exist from FromNode to ToNode");
+        graph.ensure_edge("FromNode", "ToNode");
+        let edges: Vec<_> = graph.graph.edges_connecting(from_index, to_index).collect();
+        assert_eq!(edges.len(), 1, "There should only be one edge from FromNode to ToNode");
+    }
