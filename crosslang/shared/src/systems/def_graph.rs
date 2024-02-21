@@ -30,6 +30,27 @@ pub struct DefGraph {
 }
 
 impl DefGraph {
+    pub fn get_inbound_node_sets(&self, spec_node_id: NodeIndex) -> Vec<(NodeIndex, NodeIndex)> {
+        self.graph
+            .neighbors_directed(spec_node_id, petgraph::Incoming)
+            .filter_map(|inlet_node_id| {
+                if let Some(inlet_node) = self.graph.node_weight(inlet_node_id) {
+                    if inlet_node.node_type == NodeType::Inlet {
+                        let stream_node_id = self.graph
+                            .neighbors_directed(inlet_node_id, petgraph::Incoming)
+                            .next() // Assuming there is only one stream node connected to the inlet
+                            .expect("Inlet node should have an incoming stream node");
+                        Some((inlet_node_id, stream_node_id))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     pub fn filter_inbound_neighbors<F>(&self, node_id: &str, mut condition: F) -> Vec<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,

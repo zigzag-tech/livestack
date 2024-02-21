@@ -12,6 +12,37 @@ mod tests {
     use assert_matches::assert_matches;
     use petgraph::dot::{Config, Dot};
 
+    use petgraph::graph::DiGraph;
+
+    #[test]
+    fn test_get_inbound_node_sets() {
+        let mut graph = DefGraph::new();
+        let spec_name = "TestSpec";
+        let tag = "inputTag";
+        let has_transform = true;
+
+        // Ensure inlet and stream nodes are created
+        let (inlet_node_id, stream_node_id) =
+            graph.ensure_inlet_and_stream(spec_name, tag, has_transform);
+
+        // Add another inlet node with a different tag
+        let other_tag = "otherInputTag";
+        let (_, other_stream_node_id) =
+            graph.ensure_inlet_and_stream(spec_name, other_tag, has_transform);
+
+        // Retrieve inbound node sets for the spec node
+        let spec_node_id = graph.find_node(|attrs| {
+            attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
+        }).expect("Spec node should exist");
+
+        let inbound_node_sets = graph.get_inbound_node_sets(spec_node_id);
+
+        // Ensure that the correct inlet and stream nodes are included
+        assert_eq!(inbound_node_sets.len(), 2);
+        assert!(inbound_node_sets.contains(&(inlet_node_id, stream_node_id)));
+        assert!(inbound_node_sets.contains(&(_, other_stream_node_id)));
+    }
+
     #[test]
     fn test_ensure_inlet_and_stream() {
         let mut graph = DefGraph::new();
