@@ -30,6 +30,19 @@ pub struct DefGraph {
 }
 
 impl DefGraph {
+    pub fn find_node<F>(&self, mut condition: F) -> Option<NodeIndex>
+    where
+        F: FnMut(&DefGraphNode) -> bool,
+    {
+        self.graph.node_indices().find(|&index| {
+            if let Some(node) = self.graph.node_weight(index) {
+                condition(node)
+            } else {
+                false
+            }
+        })
+    }
+
     pub fn ensure_inlet_and_stream(
         &mut self,
         spec_name: &str,
@@ -141,18 +154,20 @@ mod tests {
 
         // Check if the spec node is created
         let spec_node_id = graph
-            .find_node(|_, attrs| {
+            .find_node(|attrs| {
                 attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
             })
             .expect("Spec node should exist");
 
-        // Check if the inlet node is created and connected to the spec node
+        // Check if the inlet node is created
         assert_matches!(graph.graph.node_weight(inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag) && node.has_transform == Some(has_transform));
-        assert!(graph.graph.contains_edge(inlet_node_id, spec_node_id));
+
+        // Check if the inlet node is connected to the spec node
+        assert!(graph.graph.contains_edge(inlet_node_id, spec_node_id), "Inlet node should be connected to the spec node");
 
         // Check if the stream node is created and connected to the inlet node
         assert_matches!(graph.graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("{}_{}_stream", spec_name, tag)));
-        assert!(graph.graph.contains_edge(stream_node_id, inlet_node_id));
+        assert!(graph.graph.contains_edge(stream_node_id, inlet_node_id), "Stream node should be connected to the inlet node");
     }
 
     #[test]
