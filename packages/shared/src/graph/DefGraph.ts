@@ -246,11 +246,6 @@ export class DefGraph extends Graph<DefGraphNode> {
     uniqueSpecLabel?: string;
     type: "in" | "out";
   }) {
-    const rootSpecNodeId = this.findNode((nId) => {
-      const attrs = this.getNodeAttributes(nId);
-      return attrs.nodeType === "root-spec" && attrs.specName === specName;
-    });
-
     const specNodeId = this.findNode((nId) => {
       const attrs = this.getNodeAttributes(nId);
       return (
