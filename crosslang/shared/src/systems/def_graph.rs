@@ -30,6 +30,50 @@ pub struct DefGraph {
 }
 
 impl DefGraph {
+    pub fn ensure_inlet_and_stream(&mut self, spec_name: &str, tag: &str, has_transform: bool) -> (NodeIndex, NodeIndex) {
+        let spec_node_id = self.ensure_node(spec_name, DefGraphNode {
+            node_type: NodeType::Spec,
+            spec_name: Some(spec_name.to_string()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: spec_name.to_string(),
+        });
+
+        let inlet_node_id = self.ensure_node(&format!("{}_{}", spec_name, tag), DefGraphNode {
+            node_type: NodeType::Inlet,
+            spec_name: None,
+            unique_spec_label: None,
+            tag: Some(tag.to_string()),
+            has_transform: Some(has_transform),
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: format!("{}_{}", spec_name, tag),
+        });
+
+        let stream_def_id = format!("{}_{}_stream", spec_name, tag);
+        let stream_node_id = self.ensure_node(&stream_def_id, DefGraphNode {
+            node_type: NodeType::StreamDef,
+            spec_name: None,
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: Some(stream_def_id.clone()),
+            alias: None,
+            direction: None,
+            label: stream_def_id,
+        });
+
+        self.graph.add_edge(stream_node_id, inlet_node_id, ());
+        self.graph.add_edge(inlet_node_id, spec_node_id, ());
+
+        (inlet_node_id, stream_node_id)
+    }
+
     pub fn new() -> Self {
         DefGraph {
             graph: DiGraph::<DefGraphNode, ()>::new(),
