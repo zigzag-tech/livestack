@@ -310,3 +310,54 @@ describe("DefGraph", () => {
 
     expect(foundAlias).toEqual(alias);
   });
+  it("should add connected dual specs and ensure correct connections", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: [] },
+        outputDefSet: { tags: [] },
+      },
+    });
+    const from = {
+      specName: "SpecA",
+      output: "outputA",
+      uniqueSpecLabel: "uniqueA",
+    };
+    const to = {
+      specName: "SpecB",
+      input: "inputB",
+      hasTransform: true,
+      uniqueSpecLabel: "uniqueB",
+    };
+
+    // Add connected dual specs
+    const { fromSpecNodeId, toSpecNodeId, streamNodeId, fromOutletNodeId, toInletNodeId } = graph.addConnectedDualSpecs(from, to);
+
+    // Verify the nodes and connections
+    expect(graph.getNodeAttributes(fromSpecNodeId)).toMatchObject({
+      nodeType: "spec",
+      specName: from.specName,
+      uniqueSpecLabel: from.uniqueSpecLabel,
+    });
+    expect(graph.getNodeAttributes(toSpecNodeId)).toMatchObject({
+      nodeType: "spec",
+      specName: to.specName,
+      uniqueSpecLabel: to.uniqueSpecLabel,
+    });
+    expect(graph.getNodeAttributes(streamNodeId).nodeType).toBe("stream-def");
+    expect(graph.getNodeAttributes(fromOutletNodeId)).toMatchObject({
+      nodeType: "outlet",
+      tag: from.output,
+    });
+    expect(graph.getNodeAttributes(toInletNodeId)).toMatchObject({
+      nodeType: "inlet",
+      tag: to.input,
+      hasTransform: to.hasTransform,
+    });
+
+    // Verify the edges
+    expect(graph.hasEdge(fromSpecNodeId, fromOutletNodeId)).toBe(true);
+    expect(graph.hasEdge(fromOutletNodeId, streamNodeId)).toBe(true);
+    expect(graph.hasEdge(streamNodeId, toInletNodeId)).toBe(true);
+    expect(graph.hasEdge(toInletNodeId, toSpecNodeId)).toBe(true);
+  });
