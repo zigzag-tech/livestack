@@ -11,3 +11,12 @@ pub fn sum_as_string(a: i32, b: i32) -> String {
   return sum_as_string_impl(a as usize, b as usize);
 }
 
+#[napi]
+pub fn def_graph() -> DefGraph {
+  DefGraph::new(SpecBase {
+    name: "DefaultRootSpec".to_string(),
+    input_tags: vec![],
+    output_tags: vec![],
+  })
+}
+
