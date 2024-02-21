@@ -580,16 +580,9 @@ export class DefGraph extends Graph<DefGraphNode> {
     };
   }
 
-  public ensureEdge(from: string, to: string, attributes: Attributes = {}) {
+  public ensureEdge(from: string, to: string) {
     if (!super.hasEdge(from, to)) {
-      super.addEdge(from, to, attributes);
-    } else {
-      const edge = this.getEdgeAttributes(from, to);
-      for (const [k, v] of Object.entries(attributes)) {
-        if (edge[k] !== v) {
-          edge[k] = v;
-        }
-      }
+      super.addEdge(from, to);
     }
   }
 
