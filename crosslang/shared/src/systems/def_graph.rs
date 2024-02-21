@@ -38,6 +38,7 @@ pub struct DefGraphNode {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[napi]
 pub struct DefGraph {
      graph: DiGraph<DefGraphNode, ()>,
     node_indices: HashMap<String, NodeIndex>,
@@ -78,6 +79,7 @@ pub struct SpecBase {
     pub output_tags: Vec<String>,
 }
 
+#[napi]
 impl DefGraph {
     /// Deserializes a `DefGraph` from a JSON string.
     pub fn load_from_json(json_str: &str) -> Result<Self, serde_json::Error> {
