@@ -208,3 +208,37 @@ describe("DefGraph", () => {
     const edgeAttributes = graph.getEdgeAttributes(fromNodeId, toNodeId);
     expect(edgeAttributes).toHaveProperty("weight", 10);
   });
+  it("should return inbound node sets for a spec node", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: ["input1", "input2"] },
+        outputDefSet: { tags: [] },
+      },
+    });
+    const specNodeId = graph.ensureNode("SpecA", {
+      nodeType: "spec",
+      specName: "SpecA",
+      label: "SpecA",
+    });
+    // Ensure inlet and stream nodes are created for SpecA
+    graph.ensureInletAndStream({
+      specName: "SpecA",
+      tag: "input1",
+      hasTransform: false,
+    });
+    graph.ensureInletAndStream({
+      specName: "SpecA",
+      tag: "input2",
+      hasTransform: true,
+    });
+    // Retrieve inbound node sets
+    const inboundNodeSets = graph.getInboundNodeSets(specNodeId);
+    expect(inboundNodeSets).toHaveLength(2);
+    expect(inboundNodeSets[0]).toHaveProperty("inletNode");
+    expect(inboundNodeSets[0]).toHaveProperty("streamNode");
+    expect(inboundNodeSets[0].inletNode).toHaveProperty("tag", "input1");
+    expect(inboundNodeSets[0].inletNode).toHaveProperty("hasTransform", false);
+    expect(inboundNodeSets[1].inletNode).toHaveProperty("tag", "input2");
+    expect(inboundNodeSets[1].inletNode).toHaveProperty("hasTransform", true);
+  });
