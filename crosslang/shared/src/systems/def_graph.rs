@@ -40,6 +40,109 @@ pub struct SpecBase {
 }
 
 impl DefGraph {
+    pub fn add_connected_dual_specs(
+        &mut self,
+        from: (&str, &str, Option<&str>), // (spec_name, output, unique_spec_label)
+        to: (&str, &str, bool, Option<&str>), // (spec_name, input, has_transform, unique_spec_label)
+    ) -> (NodeIndex, NodeIndex, NodeIndex, NodeIndex, NodeIndex) {
+        let from_spec_id = unique_spec_identifier(from.0, from.2);
+        let from_spec_node_id = self.ensure_node(
+            &from_spec_id,
+            DefGraphNode {
+                node_type: NodeType::Spec,
+                spec_name: Some(from_spec_id.clone()),
+                unique_spec_label: from.2.map(String::from),
+                tag: None,
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: from_spec_id.clone(),
+            },
+        );
+
+        let from_outlet_node_id = self.ensure_node(
+            &format!("{}_{}", from_spec_id, from.1),
+            DefGraphNode {
+                node_type: NodeType::Outlet,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: Some(from.1.to_string()),
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: format!("{}_{}", from_spec_id, from.1),
+            },
+        );
+
+        let to_spec_id = unique_spec_identifier(to.0, to.3);
+        let to_spec_node_id = self.ensure_node(
+            &to_spec_id,
+            DefGraphNode {
+                node_type: NodeType::Spec,
+                spec_name: Some(to_spec_id.clone()),
+                unique_spec_label: to.3.map(String::from),
+                tag: None,
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: to_spec_id.clone(),
+            },
+        );
+
+        let to_inlet_node_id = self.ensure_node(
+            &format!("{}_{}", to_spec_id, to.1),
+            DefGraphNode {
+                node_type: NodeType::Inlet,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: Some(to.1.to_string()),
+                has_transform: Some(to.2),
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: format!("{}_{}", to_spec_id, to.1),
+            },
+        );
+
+        let stream_def_id = unique_stream_identifier(
+            Some(from.0),
+            Some(from.1),
+            from.2,
+            Some(to.0),
+            Some(to.1),
+            to.3,
+        );
+        let stream_node_id = self.ensure_node(
+            &stream_def_id,
+            DefGraphNode {
+                node_type: NodeType::StreamDef,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: None,
+                has_transform: None,
+                stream_def_id: Some(stream_def_id.clone()),
+                alias: None,
+                direction: None,
+                label: stream_def_id.clone(),
+            },
+        );
+
+        self.ensure_edge(from_spec_node_id, from_outlet_node_id);
+        self.ensure_edge(from_outlet_node_id, stream_node_id);
+        self.ensure_edge(stream_node_id, to_inlet_node_id);
+        self.ensure_edge(to_inlet_node_id, to_spec_node_id);
+
+        (
+            from_spec_node_id,
+            to_spec_node_id,
+            stream_node_id,
+            from_outlet_node_id,
+            to_inlet_node_id,
+        )
+    }
     pub fn get_root_spec_node_id(&self) -> Option<NodeIndex> {
         self.graph.node_indices().find(|&index| {
             if let Some(node) = self.graph.node_weight(index) {
@@ -110,6 +213,109 @@ impl DefGraph {
 }
 
 impl DefGraph {
+    pub fn add_connected_dual_specs(
+        &mut self,
+        from: (&str, &str, Option<&str>), // (spec_name, output, unique_spec_label)
+        to: (&str, &str, bool, Option<&str>), // (spec_name, input, has_transform, unique_spec_label)
+    ) -> (NodeIndex, NodeIndex, NodeIndex, NodeIndex, NodeIndex) {
+        let from_spec_id = unique_spec_identifier(from.0, from.2);
+        let from_spec_node_id = self.ensure_node(
+            &from_spec_id,
+            DefGraphNode {
+                node_type: NodeType::Spec,
+                spec_name: Some(from_spec_id.clone()),
+                unique_spec_label: from.2.map(String::from),
+                tag: None,
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: from_spec_id.clone(),
+            },
+        );
+
+        let from_outlet_node_id = self.ensure_node(
+            &format!("{}_{}", from_spec_id, from.1),
+            DefGraphNode {
+                node_type: NodeType::Outlet,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: Some(from.1.to_string()),
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: format!("{}_{}", from_spec_id, from.1),
+            },
+        );
+
+        let to_spec_id = unique_spec_identifier(to.0, to.3);
+        let to_spec_node_id = self.ensure_node(
+            &to_spec_id,
+            DefGraphNode {
+                node_type: NodeType::Spec,
+                spec_name: Some(to_spec_id.clone()),
+                unique_spec_label: to.3.map(String::from),
+                tag: None,
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: to_spec_id.clone(),
+            },
+        );
+
+        let to_inlet_node_id = self.ensure_node(
+            &format!("{}_{}", to_spec_id, to.1),
+            DefGraphNode {
+                node_type: NodeType::Inlet,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: Some(to.1.to_string()),
+                has_transform: Some(to.2),
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: format!("{}_{}", to_spec_id, to.1),
+            },
+        );
+
+        let stream_def_id = unique_stream_identifier(
+            Some(from.0),
+            Some(from.1),
+            from.2,
+            Some(to.0),
+            Some(to.1),
+            to.3,
+        );
+        let stream_node_id = self.ensure_node(
+            &stream_def_id,
+            DefGraphNode {
+                node_type: NodeType::StreamDef,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: None,
+                has_transform: None,
+                stream_def_id: Some(stream_def_id.clone()),
+                alias: None,
+                direction: None,
+                label: stream_def_id.clone(),
+            },
+        );
+
+        self.ensure_edge(from_spec_node_id, from_outlet_node_id);
+        self.ensure_edge(from_outlet_node_id, stream_node_id);
+        self.ensure_edge(stream_node_id, to_inlet_node_id);
+        self.ensure_edge(to_inlet_node_id, to_spec_node_id);
+
+        (
+            from_spec_node_id,
+            to_spec_node_id,
+            stream_node_id,
+            from_outlet_node_id,
+            to_inlet_node_id,
+        )
+    }
     pub fn assign_alias(
         &mut self,
         alias: &str,
