@@ -46,24 +46,25 @@ impl DefGraph {
         self.filter_outbound_neighbors(node_id, condition).into_iter().next()
     }
 
+impl DefGraph {
     pub fn lookup_root_spec_alias(
         &self,
         spec_name: &str,
         tag: &str,
         direction: &str,
     ) -> Option<String> {
-        let spec_node_id = self.find_node(|node| {
+        let spec_node_id = self.node_indices.get(spec_name)?;
             node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(spec_name)
         })?;
 
         let alias_node_id = match direction {
             "in" => {
-                let inlet_node_id = self.find_node(|node| {
-                    node.node_type == NodeType::Inlet
-                        && node.tag.as_deref() == Some(tag)
-                        && self.graph.contains_edge(node.id, spec_node_id)
+                let inlet_node_id = self.find_inbound_neighbor(spec_name, |node| {
+                    node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
                 })?;
-                self.graph.neighbors_directed(inlet_node_id, petgraph::Outgoing)
+                self.find_outbound_neighbor(&inlet_node_id.to_string(), |node| {
+                    node.node_type == NodeType::Alias
+                })
                     .find(|&neighbor_id| {
                         if let Some(node) = self.graph.node_weight(neighbor_id) {
                             node.node_type == NodeType::Alias
@@ -73,12 +74,12 @@ impl DefGraph {
                     })
             }
             "out" => {
-                let outlet_node_id = self.find_node(|node| {
-                    node.node_type == NodeType::Outlet
-                        && node.tag.as_deref() == Some(tag)
-                        && self.graph.contains_edge(spec_node_id, node.id)
+                let outlet_node_id = self.find_outbound_neighbor(spec_name, |node| {
+                    node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
                 })?;
-                self.graph.neighbors_directed(outlet_node_id, petgraph::Incoming)
+                self.find_inbound_neighbor(&outlet_node_id.to_string(), |node| {
+                    node.node_type == NodeType::Alias
+                })
                     .find(|&neighbor_id| {
                         if let Some(node) = self.graph.node_weight(neighbor_id) {
                             node.node_type == NodeType::Alias
@@ -95,6 +96,7 @@ impl DefGraph {
         })
     }
 
+    // ... (other methods) ...
     pub fn assign_alias(
         &mut self,
         alias: &str,
