@@ -44,6 +44,15 @@ pub struct DefGraph {
     node_indices: HashMap<String, NodeIndex>,
 }
 
+
+#[napi(constructor)]
+pub struct SpecBase {
+    pub name: String,
+    pub input_tags: Vec<String>,
+    pub output_tags: Vec<String>,
+}
+
+
 #[napi]
 impl DefGraph {
     /// Retrieves all node indices.
@@ -73,14 +82,8 @@ impl DefGraph {
 }
 
 #[napi]
-pub struct SpecBase {
-    pub name: String,
-    pub input_tags: Vec<String>,
-    pub output_tags: Vec<String>,
-}
-
-#[napi]
 impl DefGraph {
+
     /// Deserializes a `DefGraph` from a JSON string.
     pub fn load_from_json(json_str: &str) -> Result<Self, serde_json::Error> {
         // Deserialize the JSON string to a SerializedDefGraph
@@ -586,6 +589,7 @@ impl DefGraph {
         (outlet_node_id, stream_node_id)
     }
 
+    #[napi(constructor)]
     pub fn new(root: SpecBase) -> Self {
         let mut graph = DiGraph::<DefGraphNode, ()>::new();
         let mut node_indices = HashMap::new();
@@ -663,7 +667,7 @@ impl DefGraph {
             graph.add_edge(outlet_node_id, stream_node_id, ());
         }
 
-        DefGraph {
+        Self {
             graph,
             node_indices,
         }
