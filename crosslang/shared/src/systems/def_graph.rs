@@ -132,7 +132,6 @@ impl DefGraph {
         has_transform: bool,
     ) -> (NodeIndex, NodeIndex) {
         let spec_id = unique_spec_identifier(spec_name, None);
-        let spec_id = unique_spec_identifier(spec_name, None);
         let spec_node_id = self.ensure_node(
             &spec_id,
             DefGraphNode {
@@ -190,7 +189,6 @@ impl DefGraph {
         spec_name: &str,
         tag: &str,
     ) -> (NodeIndex, NodeIndex) {
-        let spec_id = unique_spec_identifier(spec_name, None);
         let spec_id = unique_spec_identifier(spec_name, None);
         let spec_node_id = self.ensure_node(
             &spec_id,
