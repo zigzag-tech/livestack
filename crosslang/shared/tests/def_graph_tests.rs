@@ -16,7 +16,12 @@ mod tests {
 
     #[test]
     fn test_get_inbound_node_sets() {
-        let mut graph = DefGraph::new();
+        let root_spec = SpecBase {
+            name: "RootSpec".to_string(),
+            input_tags: vec![],
+            output_tags: vec![],
+        };
+        let mut graph = DefGraph::new(root_spec);
         let spec_name = "TestSpec";
         let tag = "inputTag";
         let has_transform = true;
@@ -47,7 +52,12 @@ mod tests {
 
     #[test]
     fn test_ensure_inlet_and_stream() {
-        let mut graph = DefGraph::new();
+        let root_spec = SpecBase {
+            name: "RootSpec".to_string(),
+            input_tags: vec![],
+            output_tags: vec![],
+        };
+        let mut graph = DefGraph::new(root_spec);
         let spec_name = "TestSpec";
         let tag = "inputTag";
         let has_transform = true;
@@ -82,7 +92,12 @@ mod tests {
 
     #[test]
     fn test_get_spec_node_ids() {
-        let mut graph = DefGraph::new();
+        let root_spec = SpecBase {
+            name: "RootSpec".to_string(),
+            input_tags: vec![],
+            output_tags: vec![],
+        };
+        let mut graph = DefGraph::new(root_spec);
 
         // Add a spec node
         let spec_node_data = DefGraphNode {
@@ -120,7 +135,12 @@ mod tests {
 
     #[test]
     fn test_ensure_node() {
-        let mut graph = DefGraph::new();
+        let root_spec = SpecBase {
+            name: "RootSpec".to_string(),
+            input_tags: vec![],
+            output_tags: vec![],
+        };
+        let mut graph = DefGraph::new(root_spec);
         // ... (rest of the test_ensure_node)
 
         // Ensure a node is created
@@ -166,7 +186,12 @@ mod tests {
 
     #[test]
     fn test_ensure_outlet_and_stream() {
-        let mut graph = DefGraph::new();
+        let root_spec = SpecBase {
+            name: "RootSpec".to_string(),
+            input_tags: vec![],
+            output_tags: vec![],
+        };
+        let mut graph = DefGraph::new(root_spec);
         let spec_name = "TestSpec";
         let tag = "outputTag";
 
@@ -199,7 +224,12 @@ mod tests {
 
     #[test]
     fn test_ensure_edge() {
-        let mut graph = DefGraph::new();
+        let root_spec = SpecBase {
+            name: "RootSpec".to_string(),
+            input_tags: vec![],
+            output_tags: vec![],
+        };
+        let mut graph = DefGraph::new(root_spec);
         let from_node = DefGraphNode {
             node_type: NodeType::Spec,
             spec_name: Some("FromSpec".to_string()),
@@ -240,7 +270,12 @@ mod tests {
 
     #[test]
     fn should_assign_an_alias_and_be_able_to_look_it_up() {
-        let mut graph = DefGraph::new();
+        let root_spec = SpecBase {
+            name: "RootSpec".to_string(),
+            input_tags: vec!["input1".to_string()],
+            output_tags: vec!["output1".to_string()],
+        };
+        let mut graph = DefGraph::new(root_spec);
         let spec_name = "SpecA";
         let root_spec_name = "RootSpec";
         let alias = "AliasA";
@@ -261,7 +296,12 @@ mod tests {
 
     #[test]
     fn test_filter_inbound_neighbors() {
-        let mut graph = DefGraph::new();
+        let root_spec = SpecBase {
+            name: "RootSpec".to_string(),
+            input_tags: vec![],
+            output_tags: vec![],
+        };
+        let mut graph = DefGraph::new(root_spec);
         let spec_name = "TestSpec";
 
         let tag = "inputTag";
@@ -289,7 +329,12 @@ mod tests {
     }
     #[test]
     fn test_get_outbound_node_sets() {
-        let mut graph = DefGraph::new();
+        let root_spec = SpecBase {
+            name: "RootSpec".to_string(),
+            input_tags: vec![],
+            output_tags: vec![],
+        };
+        let mut graph = DefGraph::new(root_spec);
         let spec_name = "TestSpec";
         let tag = "outputTag";
 
