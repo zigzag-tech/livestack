@@ -32,6 +32,55 @@ pub struct DefGraph {
 }
 
 impl DefGraph {
+    pub fn lookup_root_spec_alias(
+        &self,
+        spec_name: &str,
+        tag: &str,
+        direction: &str,
+    ) -> Option<String> {
+        let spec_node_id = self.find_node(|node| {
+            node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(spec_name)
+        })?;
+
+        let alias_node_id = match direction {
+            "in" => {
+                let inlet_node_id = self.find_node(|node| {
+                    node.node_type == NodeType::Inlet
+                        && node.tag.as_deref() == Some(tag)
+                        && self.graph.contains_edge(node.id, spec_node_id)
+                })?;
+                self.graph.neighbors_directed(inlet_node_id, petgraph::Outgoing)
+                    .find(|&neighbor_id| {
+                        if let Some(node) = self.graph.node_weight(neighbor_id) {
+                            node.node_type == NodeType::Alias
+                        } else {
+                            false
+                        }
+                    })
+            }
+            "out" => {
+                let outlet_node_id = self.find_node(|node| {
+                    node.node_type == NodeType::Outlet
+                        && node.tag.as_deref() == Some(tag)
+                        && self.graph.contains_edge(spec_node_id, node.id)
+                })?;
+                self.graph.neighbors_directed(outlet_node_id, petgraph::Incoming)
+                    .find(|&neighbor_id| {
+                        if let Some(node) = self.graph.node_weight(neighbor_id) {
+                            node.node_type == NodeType::Alias
+                        } else {
+                            false
+                        }
+                    })
+            }
+            _ => return None,
+        };
+
+        alias_node_id.and_then(|id| {
+            self.graph.node_weight(id).and_then(|node| node.alias.clone())
+        })
+    }
+
     pub fn assign_alias(
         &mut self,
         alias: &str,
