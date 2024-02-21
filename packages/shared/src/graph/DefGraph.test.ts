@@ -272,3 +272,41 @@ describe("DefGraph", () => {
     expect(outboundNodeSets[0].outletNode).toHaveProperty("tag", "output1");
     expect(outboundNodeSets[1].outletNode).toHaveProperty("tag", "output2");
   });
+  it("should assign an alias and be able to look it up", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: ["input1"] },
+        outputDefSet: { tags: ["output1"] },
+      },
+    });
+    const specName = "SpecA";
+    const alias = "AliasA";
+    const tag = "input1";
+    const type = "in";
+
+    // Ensure inlet and stream nodes are created for SpecA
+    graph.ensureInletAndStream({
+      specName,
+      tag,
+      hasTransform: false,
+    });
+
+    // Assign an alias to the inlet node
+    graph.assignAlias({
+      alias,
+      specName,
+      rootSpecName: "RootSpec",
+      type,
+      tag,
+    });
+
+    // Look up the alias
+    const foundAlias = graph.lookupRootSpecAlias({
+      specName,
+      tag,
+      type,
+    });
+
+    expect(foundAlias).toEqual(alias);
+  });
