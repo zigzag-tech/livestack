@@ -1,6 +1,14 @@
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
+/// Generates a unique identifier for a spec with an optional unique label.
+pub fn unique_spec_identifier(spec_name: &str, unique_spec_label: Option<&str>) -> String {
+    match unique_spec_label {
+        Some(label) => format!("{}[{}]", spec_name, label),
+        None => spec_name.to_string(),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum NodeType {
     RootSpec,
