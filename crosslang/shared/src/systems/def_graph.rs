@@ -99,12 +99,13 @@ mod tests {
             direction: None,
             label: "StreamA".to_string(),
         };
+        let non_spec_node_id = graph.ensure_node("StreamA", non_spec_node_data);
         graph.ensure_node("StreamA", non_spec_node_data);
 
         // Retrieve spec node IDs
         let spec_node_ids = graph.get_spec_node_ids();
         assert!(spec_node_ids.contains(&spec_node_id));
-        assert_eq!(spec_node_ids.len(), 1);
+        assert!(!spec_node_ids.contains(&non_spec_node_id));
     }
 
     #[test]
