@@ -152,8 +152,6 @@ impl DefGraph {
             }
         })
     }
-impl DefGraph {
-    // ... (other methods) ...
 
     pub fn ensure_inlet_and_stream(
         &mut self,
@@ -178,10 +176,6 @@ impl DefGraph {
             },
         );
 
-        // ... (rest of the method) ...
-    }
-
-    // ... (other methods) ...
         let inlet_node_id = self.ensure_node(
             &format!("{}_{}", spec_id, tag),
             DefGraphNode {
@@ -241,10 +235,6 @@ impl DefGraph {
             },
         );
 
-        // ... (rest of the method) ...
-    }
-
-    // ... (other methods) ...
         let outlet_node_id = self.ensure_node(
             &format!("{}_{}", spec_id, tag),
             DefGraphNode {
