@@ -70,7 +70,8 @@ impl DefGraph {
         self.graph.edge_count()
     }
 }
-#[derive(Serialize, Deserialize, Clone, Debug)]
+
+#[napi]
 pub struct SpecBase {
     pub name: String,
     pub input_tags: Vec<String>,
