@@ -11,7 +11,7 @@ pub enum NodeType {
     Alias,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DefGraphNode {
     pub node_type: NodeType,
     pub spec_name: Option<String>,
@@ -24,15 +24,15 @@ pub struct DefGraphNode {
     pub label: String,
 }
 
-pub struct DefGraph<N> {
+pub struct DefGraph {
     graph: DiGraph<DefGraphNode, ()>,
     node_indices: HashMap<String, NodeIndex>,
 }
 
-impl<N> DefGraph<N> {
+impl DefGraph {
     pub fn new() -> Self {
         DefGraph {
-            graph: DiGraph::<DefGraphNode>::new(),
+            graph: DiGraph::<DefGraphNode, ()>::new(),
             node_indices: HashMap::new(),
         }
     }
@@ -80,15 +80,24 @@ mod tests {
         assert_eq!(node_id, same_node_id);
 
         // Ensure the node data is not overwritten if the same ID is used
+        // assign a different value to the `label` field
         let different_test_node = DefGraphNode {
-            label: "TestNode".to_string(),
-            ..test_node
+            label: "DifferentTestNode".to_string(),
+            ..test_node.clone()
         };
-        let same_node_id_with_different_data = graph.ensure_node("TestNode", different_test_node);
-        assert_matches!(graph.graph.node_weight(same_node_id_with_different_data), Some(node) if node == &test_node);
+
+        let same_node_id_with_different_data =
+            graph.ensure_node("TestNode", different_test_node.clone());
+        assert_eq!(
+            node_id, same_node_id_with_different_data,
+            "The node data should not be overwritten if the same ID is used",
+        );
+        let node_data = graph.graph.node_weight(same_node_id_with_different_data);
+
         assert_matches!(
-            graph.graph.node_weight(same_node_id_with_different_data),
-            Some(&"TestData")
+            node_data,
+            Some(node) if node == &test_node,
+            "The node data should not be overwritten if the same ID is used",
         );
     }
 }
