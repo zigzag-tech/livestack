@@ -404,4 +404,36 @@ describe("DefGraph", () => {
       type: type,
     });
   });
+
+  it("should serialize and deserialize a DefGraph, resulting in an identical graph", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: ["input1", "input2"] },
+        outputDefSet: { tags: ["output1", "output2"] },
+      },
+    });
+
+    // Add some nodes and edges to the graph
+    const nodeIdA = graph.ensureNode("SpecA", {
+      nodeType: "spec",
+      specName: "SpecA",
+      label: "SpecA",
+    });
+    const nodeIdB = graph.ensureNode("SpecB", {
+      nodeType: "spec",
+      specName: "SpecB",
+      label: "SpecB",
+    });
+    graph.ensureEdge(nodeIdA, nodeIdB);
+
+    // Serialize the graph to JSON
+    const json = graph.toJSON();
+
+    // Deserialize the JSON back into a graph
+    const newGraph = DefGraph.loadFromJSON(json);
+
+    // Compare the original graph with the deserialized graph
+    expect(newGraph).toEqual(graph);
+  });
 });
