@@ -37,6 +37,18 @@ impl DefGraph {
         }
     }
 
+    pub fn get_spec_node_ids(&self) -> Vec<NodeIndex> {
+        self.graph.node_indices()
+            .filter(|&index| {
+                if let Some(node) = self.graph.node_weight(index) {
+                    node.node_type == NodeType::Spec
+                } else {
+                    false
+                }
+            })
+            .collect()
+    }
+
     pub fn ensure_node(&mut self, id: &str, data: DefGraphNode) -> NodeIndex {
         match self.node_indices.get(id) {
             Some(&index) => index,
@@ -55,10 +67,50 @@ impl DefGraph {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use petgraph::dot::{Dot, Config};
+
+    #[test]
+    fn test_get_spec_node_ids() {
+        let mut graph = DefGraph::new();
+
+        // Add a spec node
+        let spec_node_data = DefGraphNode {
+            node_type: NodeType::Spec,
+            spec_name: Some("SpecA".to_string()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "SpecA".to_string(),
+        };
+        let spec_node_id = graph.ensure_node("SpecA", spec_node_data);
+
+        // Add a non-spec node
+        let non_spec_node_data = DefGraphNode {
+            node_type: NodeType::StreamDef,
+            spec_name: None,
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: Some("StreamA".to_string()),
+            alias: None,
+            direction: None,
+            label: "StreamA".to_string(),
+        };
+        graph.ensure_node("StreamA", non_spec_node_data);
+
+        // Retrieve spec node IDs
+        let spec_node_ids = graph.get_spec_node_ids();
+        assert!(spec_node_ids.contains(&spec_node_id));
+        assert_eq!(spec_node_ids.len(), 1);
+    }
 
     #[test]
     fn test_ensure_node() {
         let mut graph = DefGraph::new();
+        // ... (rest of the test_ensure_node)
 
         // Ensure a node is created
         let test_node = DefGraphNode {
