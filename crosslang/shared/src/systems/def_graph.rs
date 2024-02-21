@@ -437,8 +437,8 @@ impl DefGraph {
         }
 
         DefGraph {
-            graph: DiGraph::<DefGraphNode, ()>::new(),
-            node_indices: HashMap::new(),
+            graph,
+            node_indices,
         }
     }
 
