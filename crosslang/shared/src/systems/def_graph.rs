@@ -1,4 +1,3 @@
-pub struct DefGraph {
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
@@ -7,7 +6,6 @@ pub struct DefGraph<N> {
     node_indices: HashMap<String, NodeIndex>,
 }
 
-impl DefGraph {
 impl<N> DefGraph<N> {
     pub fn new() -> Self {
         DefGraph {
