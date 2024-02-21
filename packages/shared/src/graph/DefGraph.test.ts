@@ -363,3 +363,45 @@ it("should add connected dual specs and ensure correct connections", () => {
   expect(graph.hasEdge(streamNodeId, toInletNodeId)).toBe(true);
   expect(graph.hasEdge(toInletNodeId, toSpecNodeId)).toBe(true);
 });
+it("should lookup spec and tag by alias", () => {
+  const graph = new DefGraph({
+    root: {
+      name: "RootSpec",
+      inputDefSet: { tags: ["input1"] },
+      outputDefSet: { tags: ["output1"] },
+    },
+  });
+  const specName = "SpecA";
+  const alias = "AliasA";
+  const tag = "input1";
+  const type = "in";
+
+  // Ensure inlet and stream nodes are created for SpecA
+  graph.ensureInletAndStream({
+    specName,
+    tag,
+    hasTransform: false,
+  });
+
+  // Assign an alias to the inlet node
+  graph.assignAlias({
+    alias,
+    specName,
+    rootSpecName: "RootSpec",
+    type,
+    tag,
+  });
+
+  // Look up the spec and tag by alias
+  const result = graph.lookupSpecAndTagByAlias({
+    type,
+    alias,
+  });
+
+  expect(result).toEqual({
+    specName: specName,
+    tag: tag,
+    uniqueSpecLabel: undefined,
+    type: type,
+  });
+});
