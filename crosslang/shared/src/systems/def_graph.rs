@@ -32,6 +32,20 @@ pub struct DefGraph {
 }
 
 impl DefGraph {
+    pub fn find_inbound_neighbor<F>(&self, node_id: &str, mut condition: F) -> Option<NodeIndex>
+    where
+        F: FnMut(&DefGraphNode) -> bool,
+    {
+        self.filter_inbound_neighbors(node_id, condition).into_iter().next()
+    }
+
+    pub fn find_outbound_neighbor<F>(&self, node_id: &str, mut condition: F) -> Option<NodeIndex>
+    where
+        F: FnMut(&DefGraphNode) -> bool,
+    {
+        self.filter_outbound_neighbors(node_id, condition).into_iter().next()
+    }
+
     pub fn lookup_root_spec_alias(
         &self,
         spec_name: &str,
