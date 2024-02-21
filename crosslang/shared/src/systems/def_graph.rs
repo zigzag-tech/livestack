@@ -39,7 +39,8 @@ pub struct SpecBase {
     pub output_tags: Vec<String>,
 }
 
-impl DefGraph {    pub fn get_all_alias_node_ids(&self) -> Vec<NodeIndex> {
+impl DefGraph {
+    pub fn get_all_alias_node_ids(&self) -> Vec<NodeIndex> {
         self.graph
             .node_indices()
             .filter(|&index| {
@@ -60,6 +61,55 @@ impl DefGraph {    pub fn get_all_alias_node_ids(&self) -> Vec<NodeIndex> {
                 false
             }
         })
+    }
+    pub fn lookup_spec_and_tag_by_alias(
+        &self,
+        alias: &str,
+        direction: &str,
+    ) -> Option<(String, String, Option<String>)> {
+        let root_spec_node_id = self.get_root_spec_node_id()?;
+        let alias_node_id = match direction {
+            "in" => self.find_inbound_neighbor(root_spec_node_id, |node| {
+                node.node_type == NodeType::Alias && node.alias.as_deref() == Some(alias)
+            }),
+            "out" => self.find_outbound_neighbor(root_spec_node_id, |node| {
+                node.node_type == NodeType::Alias && node.alias.as_deref() == Some(alias)
+            }),
+            _ => None,
+        }?;
+
+        let (spec_node_id, tag) = match direction {
+            "in" => {
+                let inlet_node_id = self.find_inbound_neighbor(alias_node_id, |node| {
+                    node.node_type == NodeType::Inlet
+                })?;
+                let spec_node_id = self.find_outbound_neighbor(inlet_node_id, |node| {
+                    node.node_type == NodeType::Spec
+                })?;
+                let tag = self.graph.node_weight(inlet_node_id)?.tag.clone()?;
+                (spec_node_id, tag)
+            }
+            "out" => {
+                let outlet_node_id = self.find_outbound_neighbor(alias_node_id, |node| {
+                    node.node_type == NodeType::Outlet
+                })?;
+                let spec_node_id = self.find_inbound_neighbor(outlet_node_id, |node| {
+                    node.node_type == NodeType::Spec
+                })?;
+                let tag = self.graph.node_weight(outlet_node_id)?.tag.clone()?;
+                (spec_node_id, tag)
+            }
+            _ => return None,
+        };
+
+        let spec_name = self.graph.node_weight(spec_node_id)?.spec_name.clone()?;
+        let unique_spec_label = self
+            .graph
+            .node_weight(spec_node_id)?
+            .unique_spec_label
+            .clone();
+
+        Some((spec_name, tag, unique_spec_label))
     }
 
     pub fn lookup_root_spec_alias(
