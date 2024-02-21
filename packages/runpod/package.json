@@ -10,7 +10,8 @@
     "dist/**/*"
   ],
   "peerDependencies": {
-    "@livestack/core": "*"
+    "@livestack/core": "*",
+    "zod": "^3"
   },
   "devDependencies": {
     "@preconstruct/cli": "^2.8.3",
