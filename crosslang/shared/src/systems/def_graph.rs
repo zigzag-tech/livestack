@@ -101,6 +101,63 @@ impl DefGraph {
         (inlet_node_id, stream_node_id)
     }
 
+    pub fn ensure_outlet_and_stream(
+        &mut self,
+        spec_name: &str,
+        tag: &str,
+    ) -> (NodeIndex, NodeIndex) {
+        let spec_node_id = self.ensure_node(
+            spec_name,
+            DefGraphNode {
+                node_type: NodeType::Spec,
+                spec_name: Some(spec_name.to_string()),
+                unique_spec_label: None,
+                tag: None,
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: spec_name.to_string(),
+            },
+        );
+
+        let outlet_node_id = self.ensure_node(
+            &format!("{}_{}", spec_name, tag),
+            DefGraphNode {
+                node_type: NodeType::Outlet,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: Some(tag.to_string()),
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: format!("{}_{}", spec_name, tag),
+            },
+        );
+
+        let stream_def_id = format!("{}_{}_stream", spec_name, tag);
+        let stream_node_id = self.ensure_node(
+            &stream_def_id,
+            DefGraphNode {
+                node_type: NodeType::StreamDef,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: None,
+                has_transform: None,
+                stream_def_id: Some(stream_def_id.clone()),
+                alias: None,
+                direction: None,
+                label: stream_def_id.clone(),
+            },
+        );
+
+        self.graph.add_edge(spec_node_id, outlet_node_id, ());
+        self.graph.add_edge(outlet_node_id, stream_node_id, ());
+
+        (outlet_node_id, stream_node_id)
+    }
+
     pub fn new() -> Self {
         DefGraph {
             graph: DiGraph::<DefGraphNode, ()>::new(),
@@ -163,11 +220,17 @@ mod tests {
         assert_matches!(graph.graph.node_weight(inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag) && node.has_transform == Some(has_transform));
 
         // Check if the inlet node is connected to the spec node
-        assert!(graph.graph.contains_edge(inlet_node_id, spec_node_id), "Inlet node should be connected to the spec node");
+        assert!(
+            graph.graph.contains_edge(inlet_node_id, spec_node_id),
+            "Inlet node should be connected to the spec node"
+        );
 
         // Check if the stream node is created and connected to the inlet node
         assert_matches!(graph.graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("{}_{}_stream", spec_name, tag)));
-        assert!(graph.graph.contains_edge(stream_node_id, inlet_node_id), "Stream node should be connected to the inlet node");
+        assert!(
+            graph.graph.contains_edge(stream_node_id, inlet_node_id),
+            "Stream node should be connected to the inlet node"
+        );
     }
 
     #[test]
@@ -253,63 +316,6 @@ mod tests {
             "The node data should not be overwritten if the same ID is used",
         );
     }
-}
-    pub fn ensure_outlet_and_stream(
-        &mut self,
-        spec_name: &str,
-        tag: &str,
-    ) -> (NodeIndex, NodeIndex) {
-        let spec_node_id = self.ensure_node(
-            spec_name,
-            DefGraphNode {
-                node_type: NodeType::Spec,
-                spec_name: Some(spec_name.to_string()),
-                unique_spec_label: None,
-                tag: None,
-                has_transform: None,
-                stream_def_id: None,
-                alias: None,
-                direction: None,
-                label: spec_name.to_string(),
-            },
-        );
-
-        let outlet_node_id = self.ensure_node(
-            &format!("{}_{}", spec_name, tag),
-            DefGraphNode {
-                node_type: NodeType::Outlet,
-                spec_name: None,
-                unique_spec_label: None,
-                tag: Some(tag.to_string()),
-                has_transform: None,
-                stream_def_id: None,
-                alias: None,
-                direction: None,
-                label: format!("{}_{}", spec_name, tag),
-            },
-        );
-
-        let stream_def_id = format!("{}_{}_stream", spec_name, tag);
-        let stream_node_id = self.ensure_node(
-            &stream_def_id,
-            DefGraphNode {
-                node_type: NodeType::StreamDef,
-                spec_name: None,
-                unique_spec_label: None,
-                tag: None,
-                has_transform: None,
-                stream_def_id: Some(stream_def_id.clone()),
-                alias: None,
-                direction: None,
-                label: stream_def_id.clone(),
-            },
-        );
-
-        self.graph.add_edge(spec_node_id, outlet_node_id, ());
-        self.graph.add_edge(outlet_node_id, stream_node_id, ());
-
-        (outlet_node_id, stream_node_id)
-    }
 
     #[test]
     fn test_ensure_outlet_and_stream() {
@@ -318,8 +324,7 @@ mod tests {
         let tag = "outputTag";
 
         // Ensure outlet and stream nodes are created
-        let (outlet_node_id, stream_node_id) =
-            graph.ensure_outlet_and_stream(spec_name, tag);
+        let (outlet_node_id, stream_node_id) = graph.ensure_outlet_and_stream(spec_name, tag);
 
         // Check if the spec node is created
         let spec_node_id = graph
@@ -332,9 +337,16 @@ mod tests {
         assert_matches!(graph.graph.node_weight(outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag));
 
         // Check if the outlet node is connected to the spec node
-        assert!(graph.graph.contains_edge(spec_node_id, outlet_node_id), "Outlet node should be connected to the spec node");
+        assert!(
+            graph.graph.contains_edge(spec_node_id, outlet_node_id),
+            "Outlet node should be connected to the spec node"
+        );
 
         // Check if the stream node is created and connected to the outlet node
         assert_matches!(graph.graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("{}_{}_stream", spec_name, tag)));
-        assert!(graph.graph.contains_edge(outlet_node_id, stream_node_id), "Stream node should be connected to the outlet node");
+        assert!(
+            graph.graph.contains_edge(outlet_node_id, stream_node_id),
+            "Stream node should be connected to the outlet node"
+        );
     }
+}
