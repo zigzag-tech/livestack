@@ -271,8 +271,8 @@ export class WorkflowSpec extends JobSpec<
             hasTransform: !!conn.transform,
           }
         );
-        g.ensureParentChildRelation(parentSpecNodeId, fromSpecNodeId);
-        g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
+        // g.ensureParentChildRelation(parentSpecNodeId, fromSpecNodeId);
+        // g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
 
         if (conn.transform) {
           TransformRegistry.registerTransform({
