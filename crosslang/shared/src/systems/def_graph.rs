@@ -245,4 +245,26 @@ impl DefGraph {
             }
         }
     }
+
+    pub fn filter_outbound_neighbors<F>(&self, node_id: &str, mut condition: F) -> Vec<NodeIndex>
+    where
+        F: FnMut(&DefGraphNode) -> bool,
+    {
+        if let Some(&index) = self.node_indices.get(node_id) {
+            self.graph
+                .neighbors_directed(index, petgraph::Outgoing)
+                .filter_map(|neighbor_index| {
+                    self.graph.node_weight(neighbor_index).and_then(|node| {
+                        if condition(node) {
+                            Some(neighbor_index)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        } else {
+            vec![]
+        }
+    }
 }
