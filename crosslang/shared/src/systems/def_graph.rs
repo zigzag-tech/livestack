@@ -1,13 +1,29 @@
 pub struct DefGraph {
-    // This struct will replicate the functionality of the TypeScript version of DefGraph
-    // For now, it's a skeleton that needs to be filled in with actual implementation.
+use petgraph::graph::{DiGraph, NodeIndex};
+use std::collections::HashMap;
+
+pub struct DefGraph<N> {
+    graph: DiGraph<N, ()>,
+    node_indices: HashMap<String, NodeIndex>,
 }
 
 impl DefGraph {
-    // Here we will add methods that correspond to those in the TypeScript version.
-    // For example:
-    // pub fn new() -> Self { ... }
-    // pub fn add_node(&mut self, node: Node) { ... }
-    // pub fn add_edge(&mut self, from: Node, to: Node) { ... }
-    // And so on...
+impl<N> DefGraph<N> {
+    pub fn new() -> Self {
+        DefGraph {
+            graph: DiGraph::new(),
+            node_indices: HashMap::new(),
+        }
+    }
+
+    pub fn ensure_node(&mut self, id: &str, data: N) -> NodeIndex {
+        match self.node_indices.get(id) {
+            Some(&index) => index,
+            None => {
+                let index = self.graph.add_node(data);
+                self.node_indices.insert(id.to_string(), index);
+                index
+            }
+        }
+    }
 }
