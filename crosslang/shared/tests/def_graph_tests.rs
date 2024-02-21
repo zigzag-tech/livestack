@@ -351,31 +351,47 @@ mod tests {
         assert_eq!(found_alias, Some(alias.to_string()));
     }
 }
-    #[test]
-    fn should_add_connected_dual_specs_and_ensure_correct_connections() {
-        let root_spec = SpecBase {
-            name: "RootSpec".to_string(),
-            input_tags: vec![],
-            output_tags: vec![],
-        };
-        let mut graph = DefGraph::new(root_spec);
-        let from = ("SpecA", "outputA", Some("uniqueA"));
-        let to = ("SpecB", "inputB", true, Some("uniqueB"));
+#[test]
+fn should_add_connected_dual_specs_and_ensure_correct_connections() {
+    let root_spec = SpecBase {
+        name: "RootSpec".to_string(),
+        input_tags: vec![],
+        output_tags: vec![],
+    };
+    let mut graph = DefGraph::new(root_spec);
+    let from = ("SpecA", "outputA", Some("uniqueA"));
+    let to = ("SpecB", "inputB", true, Some("uniqueB"));
 
-        // Add connected dual specs
-        let (from_spec_node_id, to_spec_node_id, stream_node_id, from_outlet_node_id, to_inlet_node_id) =
-            graph.add_connected_dual_specs(from, to);
+    // Add connected dual specs
+    let (from_spec_node_id, to_spec_node_id, stream_node_id, from_outlet_node_id, to_inlet_node_id) =
+        graph.add_connected_dual_specs(from, to);
 
-        // Verify the nodes and connections
-        assert_matches!(graph.graph.node_weight(from_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(from.0) && node.unique_spec_label == from.2.map(String::from));
-        assert_matches!(graph.graph.node_weight(to_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(to.0) && node.unique_spec_label == to.3.map(String::from));
-        assert_matches!(graph.graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef);
-        assert_matches!(graph.graph.node_weight(from_outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(from.1));
-        assert_matches!(graph.graph.node_weight(to_inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(to.1) && node.has_transform == Some(to.2));
+    // Verify the nodes and connections
+    assert_matches!(graph.graph.node_weight(from_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(from.0) && node.unique_spec_label == from.2.map(String::from));
+    assert_matches!(graph.graph.node_weight(to_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(to.0) && node.unique_spec_label == to.3.map(String::from));
+    assert_matches!(graph.graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef);
+    assert_matches!(graph.graph.node_weight(from_outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(from.1));
+    assert_matches!(graph.graph.node_weight(to_inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(to.1) && node.has_transform == Some(to.2));
 
-        // Verify the edges
-        assert!(graph.graph.contains_edge(from_spec_node_id, from_outlet_node_id), "Edge should exist from from_spec_node_id to from_outlet_node_id");
-        assert!(graph.graph.contains_edge(from_outlet_node_id, stream_node_id), "Edge should exist from from_outlet_node_id to stream_node_id");
-        assert!(graph.graph.contains_edge(stream_node_id, to_inlet_node_id), "Edge should exist from stream_node_id to to_inlet_node_id");
-        assert!(graph.graph.contains_edge(to_inlet_node_id, to_spec_node_id), "Edge should exist from to_inlet_node_id to to_spec_node_id");
-    }
+    // Verify the edges
+    assert!(
+        graph
+            .graph
+            .contains_edge(from_spec_node_id, from_outlet_node_id),
+        "Edge should exist from from_spec_node_id to from_outlet_node_id"
+    );
+    assert!(
+        graph
+            .graph
+            .contains_edge(from_outlet_node_id, stream_node_id),
+        "Edge should exist from from_outlet_node_id to stream_node_id"
+    );
+    assert!(
+        graph.graph.contains_edge(stream_node_id, to_inlet_node_id),
+        "Edge should exist from stream_node_id to to_inlet_node_id"
+    );
+    assert!(
+        graph.graph.contains_edge(to_inlet_node_id, to_spec_node_id),
+        "Edge should exist from to_inlet_node_id to to_spec_node_id"
+    );
+}
