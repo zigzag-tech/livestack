@@ -30,87 +30,57 @@ pub struct DefGraph {
 }
 
 impl DefGraph {
-    pub fn ensure_inlet_and_stream(&mut self, spec_name: &str, tag: &str, has_transform: bool) -> (NodeIndex, NodeIndex) {
-        let spec_node_id = self.ensure_node(spec_name, DefGraphNode {
-            node_type: NodeType::Spec,
-            spec_name: Some(spec_name.to_string()),
-            unique_spec_label: None,
-            tag: None,
-            has_transform: None,
-            stream_def_id: None,
-            alias: None,
-            direction: None,
-            label: spec_name.to_string(),
-        });
+    pub fn ensure_inlet_and_stream(
+        &mut self,
+        spec_name: &str,
+        tag: &str,
+        has_transform: bool,
+    ) -> (NodeIndex, NodeIndex) {
+        let spec_node_id = self.ensure_node(
+            spec_name,
+            DefGraphNode {
+                node_type: NodeType::Spec,
+                spec_name: Some(spec_name.to_string()),
+                unique_spec_label: None,
+                tag: None,
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: spec_name.to_string(),
+            },
+        );
 
-        let inlet_node_id = self.ensure_node(&format!("{}_{}", spec_name, tag), DefGraphNode {
-            node_type: NodeType::Inlet,
-            spec_name: None,
-            unique_spec_label: None,
-            tag: Some(tag.to_string()),
-            has_transform: Some(has_transform),
-            stream_def_id: None,
-            alias: None,
-            direction: None,
-            label: format!("{}_{}", spec_name, tag),
-        });
-
-        let stream_def_id = format!("{}_{}_stream", spec_name, tag);
-        let stream_node_id = self.ensure_node(&stream_def_id, DefGraphNode {
-            node_type: NodeType::StreamDef,
-            spec_name: None,
-            unique_spec_label: None,
-            tag: None,
-            has_transform: None,
-            stream_def_id: Some(stream_def_id.clone()),
-            alias: None,
-            direction: None,
-            label: stream_def_id,
-        });
-
-        self.graph.add_edge(stream_node_id, inlet_node_id, ());
-        self.graph.add_edge(inlet_node_id, spec_node_id, ());
-
-        (inlet_node_id, stream_node_id)
-    }
-
-    pub fn ensure_inlet_and_stream(&mut self, spec_name: &str, tag: &str, has_transform: bool) -> (NodeIndex, NodeIndex) {
-        let spec_node_id = self.ensure_node(spec_name, DefGraphNode {
-            node_type: NodeType::Spec,
-            spec_name: Some(spec_name.to_string()),
-            unique_spec_label: None,
-            tag: None,
-            has_transform: None,
-            stream_def_id: None,
-            alias: None,
-            direction: None,
-            label: spec_name.to_string(),
-        });
-
-        let inlet_node_id = self.ensure_node(&format!("{}_{}", spec_name, tag), DefGraphNode {
-            node_type: NodeType::Inlet,
-            spec_name: None,
-            unique_spec_label: None,
-            tag: Some(tag.to_string()),
-            has_transform: Some(has_transform),
-            stream_def_id: None,
-            alias: None,
-            direction: None,
-            label: format!("{}_{}", spec_name, tag),
-        });
+        let inlet_node_id = self.ensure_node(
+            &format!("{}_{}", spec_name, tag),
+            DefGraphNode {
+                node_type: NodeType::Inlet,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: Some(tag.to_string()),
+                has_transform: Some(has_transform),
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: format!("{}_{}", spec_name, tag),
+            },
+        );
 
         let stream_def_id = format!("{}_{}_stream", spec_name, tag);
-        let stream_node_id = self.ensure_node(&stream_def_id, DefGraphNode {
-            node_type: NodeType::StreamDef,
-            spec_name: None,
-            unique_spec_label: None,
-            tag: None,
-            has_transform: None,
-            stream_def_id: Some(stream_def_id.clone()),
-            alias: None,
-            direction: None,
-            label: stream_def_id,
-        });
+        let stream_node_id = self.ensure_node(
+            &stream_def_id,
+            DefGraphNode {
+                node_type: NodeType::StreamDef,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: None,
+                has_transform: None,
+                stream_def_id: Some(stream_def_id.clone()),
+                alias: None,
+                direction: None,
+                label: stream_def_id.clone(),
+            },
+        );
 
         self.graph.add_edge(stream_node_id, inlet_node_id, ());
         self.graph.add_edge(inlet_node_id, spec_node_id, ());
@@ -166,12 +136,15 @@ mod tests {
         let has_transform = true;
 
         // Ensure inlet and stream nodes are created
-        let (inlet_node_id, stream_node_id) = graph.ensure_inlet_and_stream(spec_name, tag, has_transform);
+        let (inlet_node_id, stream_node_id) =
+            graph.ensure_inlet_and_stream(spec_name, tag, has_transform);
 
         // Check if the spec node is created
-        let spec_node_id = graph.find_node(
-            |_, attrs| attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
-        ).expect("Spec node should exist");
+        let spec_node_id = graph
+            .find_node(|_, attrs| {
+                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
+            })
+            .expect("Spec node should exist");
 
         // Check if the inlet node is created and connected to the spec node
         assert_matches!(graph.graph.node_weight(inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag) && node.has_transform == Some(has_transform));
