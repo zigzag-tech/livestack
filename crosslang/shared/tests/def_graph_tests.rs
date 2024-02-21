@@ -481,10 +481,9 @@ mod tests {
             assert_eq!(node_weight, new_node_weight);
         }
 
-        for edge in graph.graph.raw_edges() {
+        for edge in graph.raw_edges() {
             let new_edge = new_graph
-                .graph
-                .find_edge(edge.source(), edge.target())
+                .find_edge(edge.0, edge.1)
                 .and_then(|e| new_graph.graph.edge_weight(e));
             assert!(new_edge.is_some());
         }
