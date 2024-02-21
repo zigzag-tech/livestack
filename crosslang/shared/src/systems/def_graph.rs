@@ -39,7 +39,19 @@ pub struct SpecBase {
     pub output_tags: Vec<String>,
 }
 
-impl DefGraph {
+impl DefGraph {    pub fn get_all_alias_node_ids(&self) -> Vec<NodeIndex> {
+        self.graph
+            .node_indices()
+            .filter(|&index| {
+                if let Some(node) = self.graph.node_weight(index) {
+                    node.node_type == NodeType::Alias
+                } else {
+                    false
+                }
+            })
+            .collect()
+    }
+
     pub fn get_root_spec_node_id(&self) -> Option<NodeIndex> {
         self.graph.node_indices().find(|&index| {
             if let Some(node) = self.graph.node_weight(index) {
