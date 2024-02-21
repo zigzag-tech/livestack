@@ -40,6 +40,16 @@ pub struct SpecBase {
 }
 
 impl DefGraph {
+    pub fn get_root_spec_node_id(&self) -> Option<NodeIndex> {
+        self.graph.node_indices().find(|&index| {
+            if let Some(node) = self.graph.node_weight(index) {
+                node.node_type == NodeType::RootSpec
+            } else {
+                false
+            }
+        })
+    }
+
     pub fn lookup_root_spec_alias(
         &self,
         spec_name: &str,
