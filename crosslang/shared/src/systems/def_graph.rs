@@ -49,6 +49,10 @@ impl DefGraph {
     pub fn get_all_node_indices(&self) -> Vec<NodeIndex> {
         self.node_indices.values().cloned().collect()
     }
+
+        pub fn node_weight(&self, index: NodeIndex) -> Option<&DefGraphNode> {
+                self.graph.node_weight(index)
+            }
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpecBase {
