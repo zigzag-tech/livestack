@@ -118,7 +118,7 @@ impl DefGraph {
             &from_spec_id,
             DefGraphNode {
                 node_type: NodeType::Spec,
-                spec_name: Some(from_spec_id.clone()),
+                spec_name: Some(from.0.to_string()),
                 unique_spec_label: from.2.map(String::from),
                 tag: None,
                 has_transform: None,
@@ -149,7 +149,7 @@ impl DefGraph {
             &to_spec_id,
             DefGraphNode {
                 node_type: NodeType::Spec,
-                spec_name: Some(to_spec_id.clone()),
+                spec_name: Some(to.0.to_string()),
                 unique_spec_label: to.3.map(String::from),
                 tag: None,
                 has_transform: None,
