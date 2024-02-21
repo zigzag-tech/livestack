@@ -27,20 +27,22 @@ mod tests {
 
         // Add another inlet node with a different tag
         let other_tag = "otherInputTag";
-        let (_, other_stream_node_id) =
+        let (other_inlet_node_id, other_stream_node_id) =
             graph.ensure_inlet_and_stream(spec_name, other_tag, has_transform);
 
         // Retrieve inbound node sets for the spec node
-        let spec_node_id = graph.find_node(|attrs| {
-            attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
-        }).expect("Spec node should exist");
+        let spec_node_id = graph
+            .find_node(|attrs| {
+                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
+            })
+            .expect("Spec node should exist");
 
         let inbound_node_sets = graph.get_inbound_node_sets(spec_node_id);
 
         // Ensure that the correct inlet and stream nodes are included
         assert_eq!(inbound_node_sets.len(), 2);
         assert!(inbound_node_sets.contains(&(inlet_node_id, stream_node_id)));
-        assert!(inbound_node_sets.contains(&(_, other_stream_node_id)));
+        assert!(inbound_node_sets.contains(&(other_inlet_node_id, other_stream_node_id)));
     }
 
     #[test]
