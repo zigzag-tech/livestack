@@ -2,9 +2,12 @@ use crate::systems::def_graph_utils::{unique_spec_identifier, unique_stream_iden
 use petgraph::graph::DiGraph;
 use petgraph::graph::Node;
 use petgraph::graph::NodeIndex;
+use serde::{Deserialize, Serialize};
+use serde_json::to_string;
+
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub enum NodeType {
     RootSpec,
     Spec,
@@ -14,15 +17,22 @@ pub enum NodeType {
     Alias,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct DefGraphNode {
     pub node_type: NodeType,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub spec_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub unique_spec_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub has_transform: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_def_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<String>,
     pub label: String,
 }
@@ -32,14 +42,34 @@ pub struct DefGraph {
     pub node_indices: HashMap<String, NodeIndex>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Clone, Debug)]
 pub struct SpecBase {
     pub name: String,
     pub input_tags: Vec<String>,
     pub output_tags: Vec<String>,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct SerializedDefGraph {
+    pub graph: Vec<DefGraphNode>,
+    pub node_indices: HashMap<String, NodeIndex>,
+}
 impl DefGraph {
+    /// Serializes the `DefGraph` to a JSON string.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        // Convert the graph into a serializable form
+        let serialized_graph = SerializedDefGraph {
+            graph: self
+                .graph
+                .raw_nodes()
+                .iter()
+                .map(|node| node.weight.clone())
+                .collect(),
+            node_indices: self.node_indices.clone(),
+        };
+        // Serialize it to a JSON string
+        serde_json::to_string(&serialized_graph)
+    }
     pub fn get_all_alias_node_ids(&self) -> Vec<NodeIndex> {
         self.graph
             .node_indices()
