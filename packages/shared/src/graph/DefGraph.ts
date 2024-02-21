@@ -607,7 +607,7 @@ export class DefGraph extends Graph<DefGraphNode> {
     }
   }
 
-  private ensureNode<T extends DefNodeType>(
+  public ensureNode<T extends DefNodeType>(
     id: string,
     data: InferNodeData<T>
   ): string {
