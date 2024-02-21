@@ -32,6 +32,70 @@ pub struct DefGraph {
 }
 
 impl DefGraph {
+    pub fn assign_alias(
+        &mut self,
+        alias: &str,
+        spec_name: &str,
+        root_spec_name: &str,
+        direction: &str,
+        tag: &str,
+    ) {
+        let root_spec_id = unique_spec_identifier(root_spec_name, None);
+        let root_spec_node_id = self
+            .find_node(|node| {
+                node.node_type == NodeType::RootSpec && node.spec_name.as_deref() == Some(root_spec_name)
+            })
+            .expect("Root spec node not found");
+
+        let spec_id = unique_spec_identifier(spec_name, None);
+        let spec_node_id = self
+            .find_node(|node| {
+                node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(spec_name)
+            })
+            .expect("Spec node not found");
+
+        let alias_node_id = self.ensure_node(
+            &format!("{}_{}", root_spec_id, alias),
+            DefGraphNode {
+                node_type: NodeType::Alias,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: None,
+                has_transform: None,
+                stream_def_id: None,
+                alias: Some(alias.to_string()),
+                direction: Some(direction.to_string()),
+                label: format!("{}_{}", root_spec_id, alias),
+            },
+        );
+
+        match direction {
+            "in" => {
+                let inlet_node_id = self
+                    .find_node(|node| {
+                        node.node_type == NodeType::Inlet
+                            && node.spec_name.as_deref() == Some(spec_name)
+                            && node.tag.as_deref() == Some(tag)
+                    })
+                    .expect("Inlet node not found");
+                self.graph.add_edge(inlet_node_id, alias_node_id, ());
+                self.graph.add_edge(alias_node_id, root_spec_node_id, ());
+            }
+            "out" => {
+                let outlet_node_id = self
+                    .find_node(|node| {
+                        node.node_type == NodeType::Outlet
+                            && node.spec_name.as_deref() == Some(spec_name)
+                            && node.tag.as_deref() == Some(tag)
+                    })
+                    .expect("Outlet node not found");
+                self.graph.add_edge(root_spec_node_id, alias_node_id, ());
+                self.graph.add_edge(alias_node_id, outlet_node_id, ());
+            }
+            _ => panic!("Invalid direction for alias assignment"),
+        }
+    }
+
     pub fn get_inbound_node_sets(&self, spec_node_id: NodeIndex) -> Vec<(NodeIndex, NodeIndex)> {
         self.graph
             .neighbors_directed(spec_node_id, petgraph::Incoming)
