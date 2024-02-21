@@ -1,16 +1,9 @@
-use assert_matches::assert_matches;
 use livestack_shared::systems::def_graph::{DefGraph, DefGraphNode, NodeType, SpecBase};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use super::*;
     use assert_matches::assert_matches;
-    use petgraph::dot::{Config, Dot};
-
-    use petgraph::graph::DiGraph;
-    use serde_json;
 
     #[test]
     fn test_get_inbound_node_sets() {
@@ -126,7 +119,6 @@ mod tests {
         let non_spec_node_id = graph.ensure_node("StreamA", non_spec_node_data);
 
         // Retrieve spec node IDs
-        let spec_node_ids = graph.get_all_node_indices();
         let spec_node_ids = graph.get_spec_node_ids();
         assert!(spec_node_ids.contains(&spec_node_id));
         assert!(!spec_node_ids.contains(&non_spec_node_id));
@@ -280,7 +272,7 @@ mod tests {
         let tag = "inputTag";
         let has_transform = true;
         // Ensure inlet and stream nodes are created
-        let (inlet_node_id, stream_node_id) =
+        let (inlet_node_id, _) =
             graph.ensure_inlet_and_stream(spec_name, tag, has_transform);
         // Add another inlet node with a different tag
         let other_tag = "otherInputTag";

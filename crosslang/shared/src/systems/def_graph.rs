@@ -1,10 +1,9 @@
 use crate::systems::def_graph_utils::{unique_spec_identifier, unique_stream_identifier};
 use petgraph::graph::DiGraph;
-use petgraph::graph::Node;
+// use petgraph::graph::Node;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use serde_json::to_string;
-use napi_derive::napi;
+// use napi_derive::napi;
 
 use std::collections::HashMap;
 
@@ -190,7 +189,7 @@ impl DefGraph {
     pub fn find_inbound_neighbor<F>(
         &self,
         node_id: NodeIndex,
-        mut condition: F,
+        condition: F,
     ) -> Option<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
@@ -203,7 +202,7 @@ impl DefGraph {
     pub fn find_outbound_neighbor<F>(
         &self,
         node_id: NodeIndex,
-        mut condition: F,
+        condition: F,
     ) -> Option<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
