@@ -251,12 +251,12 @@ mod tests {
         };
         let from_index = graph.ensure_node("FromNode", from_node);
         let to_index = graph.ensure_node("ToNode", to_node);
-        graph.ensure_edge("FromNode", "ToNode");
+        graph.ensure_edge(from_index, to_index);
         assert!(
             graph.graph.contains_edge(from_index, to_index),
             "Edge should exist from FromNode to ToNode"
         );
-        graph.ensure_edge("FromNode", "ToNode");
+        graph.ensure_edge(from_index, to_index);
         let edges: Vec<_> = graph.graph.edges_connecting(from_index, to_index).collect();
         assert_eq!(
             edges.len(),
