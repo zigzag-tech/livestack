@@ -4,6 +4,7 @@ use petgraph::graph::Node;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 use serde_json::to_string;
+use napi_derive::napi;
 
 use std::collections::HashMap;
 
@@ -36,7 +37,8 @@ pub struct DefGraphNode {
     pub direction: Option<String>,
     pub label: String,
 }
-#[derive(Serialize, Deserialize, Clone, Debug)]
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct DefGraph {
     pub graph: DiGraph<DefGraphNode, ()>,
     pub node_indices: HashMap<String, NodeIndex>,
