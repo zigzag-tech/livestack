@@ -632,8 +632,10 @@ export class DefGraph extends Graph<DefGraphNode> {
     );
 
     return inletNodeIds.map((inletNodeId) => {
-      const [ie] = this.inboundEdges(inletNodeId) as (string | undefined)[];
-      const streamNodeId = this.source(ie);
+      const streamNodeId = this.filterInboundNeighbors(
+        inletNodeId,
+        (nid) => this.getNodeAttributes(nid).nodeType === "stream-def"
+      )[0];
       return {
         inletNode: {
           ...(this.getNodeAttributes(inletNodeId) as InletNode),
