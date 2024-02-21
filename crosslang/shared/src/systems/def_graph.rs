@@ -100,6 +100,60 @@ impl DefGraph {
 }
 
 impl DefGraph {
+    pub fn assign_alias(
+        &mut self,
+        alias: &str,
+        spec_name: &str,
+        root_spec_name: &str,
+        unique_spec_label: Option<&str>,
+        type_: &str,
+        tag: &str,
+    ) {
+        let spec_node_id = self.find_node(|node| {
+            node.node_type == NodeType::Spec
+                && node.spec_name.as_deref() == Some(spec_name)
+                && node.unique_spec_label.as_deref() == unique_spec_label
+        }).expect("Spec node not found");
+
+        let root_spec_node_id = self.find_node(|node| {
+            node.node_type == NodeType::RootSpec && node.spec_name.as_deref() == Some(root_spec_name)
+        }).expect("Root spec node not found");
+
+        let alias_id = format!("{}/{}", root_spec_name, alias);
+        let alias_node_id = self.ensure_node(
+            &alias_id,
+            DefGraphNode {
+                node_type: NodeType::Alias,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: None,
+                has_transform: None,
+                stream_def_id: None,
+                alias: Some(alias.to_string()),
+                direction: Some(type_.to_string()),
+                label: alias_id.clone(),
+            },
+        );
+
+        match type_ {
+            "in" => {
+                let inlet_node_id = self.find_inbound_neighbor(spec_node_id, |node| {
+                    node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
+                }).expect("Inlet node not found");
+                self.ensure_edge(&inlet_node_id, &alias_node_id);
+                self.ensure_edge(&alias_node_id, &root_spec_node_id);
+            },
+            "out" => {
+                let outlet_node_id = self.find_outbound_neighbor(spec_node_id, |node| {
+                    node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
+                }).expect("Outlet node not found");
+                self.ensure_edge(&root_spec_node_id, &alias_node_id);
+                self.ensure_edge(&alias_node_id, &outlet_node_id);
+            },
+            _ => panic!("Invalid direction type"),
+        }
+    }
+
     pub fn get_inbound_node_sets(&self, spec_node_id: NodeIndex) -> Vec<(NodeIndex, NodeIndex)> {
         self.graph
             .neighbors_directed(spec_node_id, petgraph::Incoming)
