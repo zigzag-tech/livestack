@@ -72,7 +72,7 @@ mod tests {
             .expect("Spec node should exist");
 
         // Check if the inlet node is created
-        assert_matches!(graph.graph.node_weight(inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag) && node.has_transform == Some(has_transform));
+        assert_matches!(graph.node_weight(inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag) && node.has_transform == Some(has_transform));
 
         // Check if the inlet node is connected to the spec node
         assert!(
@@ -81,7 +81,7 @@ mod tests {
         );
 
         // Check if the stream node is created and connected to the inlet node
-        assert_matches!(graph.graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("{}_{}_stream", spec_name, tag)));
+        assert_matches!(graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("{}_{}_stream", spec_name, tag)));
         assert!(
             graph.graph.contains_edge(stream_node_id, inlet_node_id),
             "Stream node should be connected to the inlet node"
@@ -155,7 +155,7 @@ mod tests {
             label: "TestNode".to_string(),
         };
         let node_id = graph.ensure_node("TestNode", test_node.clone());
-        assert_matches!(graph.graph.node_weight(node_id), Some(node) if node == &test_node);
+        assert_matches!(graph.node_weight(node_id), Some(node) if node == &test_node);
 
         // Ensure the same node is retrieved with the same ID
         let same_node_id = graph.ensure_node("TestNode", test_node.clone());
@@ -174,7 +174,7 @@ mod tests {
             node_id, same_node_id_with_different_data,
             "The node data should not be overwritten if the same ID is used",
         );
-        let node_data = graph.graph.node_weight(same_node_id_with_different_data);
+        let node_data = graph.node_weight(same_node_id_with_different_data);
 
         assert_matches!(
             node_data,
@@ -205,7 +205,7 @@ mod tests {
             .expect("Spec node should exist");
 
         // Check if the outlet node is created
-        assert_matches!(graph.graph.node_weight(outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag));
+        assert_matches!(graph.node_weight(outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag));
 
         // Check if the outlet node is connected to the spec node
         assert!(
@@ -214,7 +214,7 @@ mod tests {
         );
 
         // Check if the stream node is created and connected to the outlet node
-        assert_matches!(graph.graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("{}_{}_stream", spec_name, tag)));
+        assert_matches!(graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("{}_{}_stream", spec_name, tag)));
         assert!(
             graph.graph.contains_edge(outlet_node_id, stream_node_id),
             "Stream node should be connected to the outlet node"
@@ -373,11 +373,11 @@ mod tests {
         ) = graph.add_connected_dual_specs(from, to);
 
         // Verify the nodes and connections
-        assert_matches!(graph.graph.node_weight(from_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(from.0) && node.unique_spec_label == from.2.map(String::from));
-        assert_matches!(graph.graph.node_weight(to_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(to.0) && node.unique_spec_label == to.3.map(String::from));
-        assert_matches!(graph.graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef);
-        assert_matches!(graph.graph.node_weight(from_outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(from.1));
-        assert_matches!(graph.graph.node_weight(to_inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(to.1) && node.has_transform == Some(to.2));
+        assert_matches!(graph.node_weight(from_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(from.0) && node.unique_spec_label == from.2.map(String::from));
+        assert_matches!(graph.node_weight(to_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(to.0) && node.unique_spec_label == to.3.map(String::from));
+        assert_matches!(graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef);
+        assert_matches!(graph.node_weight(from_outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(from.1));
+        assert_matches!(graph.node_weight(to_inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(to.1) && node.has_transform == Some(to.2));
 
         // Verify the edges
         assert!(
@@ -476,8 +476,8 @@ mod tests {
 
         // Ensure that all nodes and edges are equal
         for index in graph.get_all_node_indices() {
-            let node_weight = graph.graph.node_weight(index).unwrap();
-            let new_node_weight = new_graph.graph.node_weight(index).unwrap();
+            let node_weight = graph.node_weight(index).unwrap();
+            let new_node_weight = new_graph.node_weight(index).unwrap();
             assert_eq!(node_weight, new_node_weight);
         }
 
