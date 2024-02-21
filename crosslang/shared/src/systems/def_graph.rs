@@ -49,7 +49,6 @@ impl DefGraph {
     pub fn get_all_node_indices(&self) -> Vec<NodeIndex> {
         self.node_indices.values().cloned().collect()
     }
-    // ... (rest of the existing methods)
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpecBase {
