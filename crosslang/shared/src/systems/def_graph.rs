@@ -30,6 +30,27 @@ pub struct DefGraph {
 }
 
 impl DefGraph {
+    pub fn filter_inbound_neighbors<F>(&self, node_id: &str, mut condition: F) -> Vec<NodeIndex>
+    where
+        F: FnMut(&DefGraphNode) -> bool,
+    {
+        if let Some(&index) = self.node_indices.get(node_id) {
+            self.graph
+                .neighbors_directed(index, petgraph::Incoming)
+                .filter_map(|neighbor_index| {
+                    self.graph.node_weight(neighbor_index).and_then(|node| {
+                        if condition(node) {
+                            Some(neighbor_index)
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        } else {
+            vec![]
+        }
+    }
     pub fn ensure_edge(&mut self, from_id: &str, to_id: &str) {
         let from_index = self.node_indices.get(from_id);
         let to_index = self.node_indices.get(to_id);
@@ -45,9 +66,6 @@ impl DefGraph {
             );
         }
     }
-}
-
-impl DefGraph {
     pub fn find_node<F>(&self, mut condition: F) -> Option<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
@@ -407,5 +425,26 @@ mod tests {
             1,
             "There should only be one edge from FromNode to ToNode"
         );
+    }
+    fn test_filter_inbound_neighbors() {
+        let mut graph = DefGraph::new();
+        let spec_name = "TestSpec";
+        let tag = "inputTag";
+        let has_transform = true;
+        // Ensure inlet and stream nodes are created
+        let (inlet_node_id, stream_node_id) =
+            graph.ensure_inlet_and_stream(spec_name, tag, has_transform);
+        // Add another inlet node with a different tag
+        let other_tag = "otherInputTag";
+        let (_, other_stream_node_id) =
+            graph.ensure_inlet_and_stream(spec_name, other_tag, has_transform);
+        // Filter inbound neighbors for the spec node with a specific tag
+        let filtered_inbound_neighbors = graph.filter_inbound_neighbors(spec_name, |node| {
+            node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
+        });
+        assert_eq!(filtered_inbound_neighbors.len(), 1);
+        assert_eq!(filtered_inbound_neighbors[0], inlet_node_id);
+        // Ensure that the other inlet node is not included
+        assert!(!filtered_inbound_neighbors.contains(&other_stream_node_id));
     }
 }
