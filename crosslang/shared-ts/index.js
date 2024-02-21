@@ -295,6 +295,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { sumAsString } = nativeBinding
+const { sumAsString, defGraph } = nativeBinding
 
 module.exports.sumAsString = sumAsString
+module.exports.defGraph = defGraph
