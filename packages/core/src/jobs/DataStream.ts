@@ -263,7 +263,15 @@ export class DataStream<T extends object> {
 
       return messageId;
     } catch (error) {
-      console.error("Error publishing to stream:", error);
+      console.error(
+        "Error publishing to stream:",
+        error,
+        "data: ",
+        JSON.stringify(parsed, null, 2),
+        "original: ",
+        JSON.stringify(message, null, 2)
+      );
+
       throw error;
     }
   }
