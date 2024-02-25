@@ -24,6 +24,9 @@ class StreamServiceByProject implements StreamServiceImplementation {
     const messageId: string = await pubClient.sendCommand([
       "XADD",
       channelId,
+      "MAXLEN",
+      "~",
+      "1000",
       "*",
       "data",
       dataStr,
