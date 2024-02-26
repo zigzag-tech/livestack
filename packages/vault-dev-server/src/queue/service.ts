@@ -148,7 +148,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
           await worker.waitUntilReady();
 
           context.signal.onabort = () => {
-            // console.debug("worker stopped", workerId);
+            console.debug("worker stopped", workerId);
             worker.close();
           };
 
