@@ -1,3 +1,4 @@
+import { vaultClient } from "@livestack/vault-client";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Stream } from "stream";
 import { z } from "zod";
@@ -8,7 +9,7 @@ interface EnvParams {
 
 export class ZZEnv implements EnvParams {
   public readonly storageProvider?: IStorageProvider;
-  public readonly projectId: string;
+  private readonly _projectId: string;
   private static _zzEnv: ZZEnv | null = null;
 
   static global() {
@@ -16,7 +17,7 @@ export class ZZEnv implements EnvParams {
   }
 
   static setGlobal(env: ZZEnv) {
-    console.info("Global project ID set to ", env.projectId);
+    console.info("Global project ID set to ", env._projectId);
 
     ZZEnv._zzEnv = env;
   }
@@ -36,7 +37,36 @@ export class ZZEnv implements EnvParams {
       );
       // fs.writeFileSync("PROJECT_ID", projectId);
     }
-    this.projectId = projectId;
+
+    this._projectId = projectId;
+  }
+
+  get projectId() {
+    this.printLiveDevUrlOnce();
+    return this._projectId;
+  }
+
+  private _cachedInstanceId: string | null = null;
+  private livePrinted = false;
+
+  private printLiveDevUrlOnce() {
+    if (!this.livePrinted) {
+      console.info(
+        `\x1b[43m\x1b[30m🦓 Watch live jobs here: https://live.dev/p/test-user/${this._projectId}.\x1b[0m`
+      );
+
+      this.livePrinted = true;
+    }
+  }
+
+  public async getInstanceId() {
+    if (!this._cachedInstanceId) {
+      const r = await vaultClient.queue.initInstance({
+        projectId: this._projectId,
+      });
+      this._cachedInstanceId = r.instanceId;
+    }
+    return this._cachedInstanceId;
   }
 
   public derive(newP: Partial<EnvParams>) {
