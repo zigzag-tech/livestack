@@ -8,6 +8,15 @@ import "google/protobuf/empty.proto";
 service QueueService {
   rpc AddJob(QueueJob) returns (google.protobuf.Empty);
   rpc ReportAsWorker(stream FromWorker) returns (stream ToWorker);
+  rpc InitInstance(InitInstanceParams) returns (InitInstanceResponse);
+}
+
+message InitInstanceParams {
+  string projectId = 1;
+}
+
+message InitInstanceResponse {
+  string instanceId = 1;
 }
 
 message QueueJob {

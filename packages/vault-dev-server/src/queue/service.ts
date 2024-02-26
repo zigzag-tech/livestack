@@ -1,14 +1,14 @@
 import {
   QueueServiceImplementation,
   QueueJob,
-} from "@livestack/vault-interface";
-import {
   FromWorker,
   ToWorker,
-} from "@livestack/vault-interface/src/generated/queue";
+} from "@livestack/vault-interface";
+import { InitInstanceParams } from "@livestack/vault-interface/src/generated/queue";
 import { Queue, Worker } from "bullmq";
 import { genPromiseCycle, genManuallyFedIterator } from "@livestack/shared";
 import { CallContext } from "nice-grpc";
+import { v4 } from "uuid";
 
 const _rawQueueBySpecName = new Map<string, Queue>();
 
@@ -17,6 +17,14 @@ class QueueServiceByProject implements QueueServiceImplementation {
   //   constructor({ projectId }: { projectId: string }) {
   //     this.projectId = projectId;
   //   }
+
+  async initInstance(
+    request: InitInstanceParams,
+    context: CallContext
+  ): Promise<{ instanceId?: string | undefined }> {
+    const instanceId = v4();
+    return { instanceId };
+  }
 
   async addJob(job: QueueJob) {
     // if (job.projectId !== this.projectId) {
