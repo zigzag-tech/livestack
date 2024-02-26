@@ -1,6 +1,8 @@
 import { vaultClient } from "@livestack/vault-client";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Stream } from "stream";
+import chalk, { green, inverse, red, yellow } from "ansis";
+
 import { z } from "zod";
 interface EnvParams {
   readonly storageProvider?: IStorageProvider;
@@ -52,7 +54,7 @@ export class ZZEnv implements EnvParams {
   private printLiveDevUrlOnce() {
     if (!this.livePrinted) {
       console.info(
-        `\x1b[43m\x1b[30m🦓 Watch live jobs here: https://live.dev/p/test-user/${this._projectId}.\x1b[0m`
+        yellow`${inverse` 🔴 LIVE 🦓🦓 https://live.dev/p/test-user/${this._projectId}`}${inverse``}`
       );
 
       this.livePrinted = true;
