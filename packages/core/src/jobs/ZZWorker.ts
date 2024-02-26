@@ -135,8 +135,9 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
 
     // create async iterator to report duty
     const { iterator: iterParams, resolveNext: resolveNext } =
-      genManuallyFedIterator<FromWorker>();
-
+      genManuallyFedIterator<FromWorker>((v) => {
+        // console.info(`DUTY REPORT: ${JSON.stringify(v)}`);
+      });
     const iter = vaultClient.queue.reportAsWorker(iterParams);
 
     this.logger.info(`WORKER STARTED: ${this.workerName}.`);
@@ -220,12 +221,12 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
         }
       }
     })();
-    // console.log(
-    //   "worker ready to sign up",
-    //   that.workerId,
-    //   that.zzEnv.projectId,
-    //   that.jobSpec.name
-    // );
+    console.log(
+      "worker ready to sign up",
+      that.workerId,
+      that.zzEnv.projectId,
+      that.jobSpec.name
+    );
     resolveNext({
       signUp: {
         projectId: that.zzEnv.projectId,
