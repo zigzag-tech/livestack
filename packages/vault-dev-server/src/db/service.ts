@@ -250,6 +250,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     return { records: r };
   },
   appendJobStatusRec: async ({ projectId, specName, jobId, jobStatus }) => {
+    // console.debug("appendJobStatusRec", specName, jobId, jobStatus);
     await appendJobStatusRec({
       projectId,
       specName,
@@ -257,6 +258,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       dbConn,
       jobStatus: jobStatus as ZZJobStatus,
     });
+    // console.debug("appendJobStatusRec done", specName, jobId, jobStatus);
 
     return {};
   },

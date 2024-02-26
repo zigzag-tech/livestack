@@ -61,7 +61,7 @@ export function genManuallyFedIterator<T>() {
   };
   return {
     iterator: iter,
-    resolveNext: g.resolveNext,
-    rejectNext: g.rejectNext,
+    resolveNext: (v: T) => g.resolveNext(v),
+    rejectNext: (reason?: any) => g.rejectNext(reason),
   };
 }
