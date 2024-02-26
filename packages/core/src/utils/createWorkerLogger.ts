@@ -1,5 +1,5 @@
 import winston, { format } from "winston";
-import chalk from "chalk";
+import chalk from "ansis";
 
 const { combine, timestamp, label, printf, simple, splat } = format;
 
