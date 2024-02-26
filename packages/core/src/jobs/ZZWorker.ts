@@ -139,15 +139,8 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
 
     const iter = vaultClient.queue.reportAsWorker(iterParams);
 
-    resolveNext({
-      signUp: {
-        projectId: that.zzEnv.projectId,
-        specName: that.jobSpec.name,
-      },
-      workerId: that.workerId,
-    });
-
     this.logger.info(`WORKER STARTED: ${this.workerName}.`);
+    // console.info(`WORKER STARTED: ${this.workerName}.`);
 
     const doIt = async ({ jobId, jobOptionsStr }: QueueJob) => {
       const jobOptions = JSON.parse(jobOptionsStr);
@@ -181,14 +174,21 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
 
       return await zzJ.beginProcessing(this.def.processor.bind(zzJ) as any);
     };
+
     (async () => {
       for await (const { job } of iter) {
+        // console.log("picked up job: ", job);
         if (!job) {
           throw new Error("Job is null");
         }
 
         try {
           await doIt(job);
+          // console.log("jobCompleted", {
+          //   jobId: job.jobId,
+          //   projectId: that.zzEnv.projectId,
+          //   specName: that.jobSpec.name,
+          // });
           resolveNext({
             jobCompleted: {
               jobId: job.jobId,
@@ -199,6 +199,12 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
           });
           that.logger.info(`JOB COMPLETED: ${job.jobId}`);
         } catch (err) {
+          console.error("jobFailed", err, {
+            jobId: job.jobId,
+            projectId: that.zzEnv.projectId,
+            specName: that.jobSpec.name,
+            errorStr: JSON.stringify(err),
+          });
           resolveNext({
             jobFailed: {
               jobId: job.jobId,
@@ -214,6 +220,19 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
         }
       }
     })();
+    // console.log(
+    //   "worker ready to sign up",
+    //   that.workerId,
+    //   that.zzEnv.projectId,
+    //   that.jobSpec.name
+    // );
+    resolveNext({
+      signUp: {
+        projectId: that.zzEnv.projectId,
+        specName: that.jobSpec.name,
+      },
+      workerId: that.workerId,
+    });
   }
 
   public static define<P, I, O, WP extends object, IMap, OMap>(

@@ -19,7 +19,7 @@ class StreamServiceByProject implements StreamServiceImplementation {
     const { projectId, uniqueName, dataStr } = request;
     const channelId = `${projectId}/${uniqueName}`;
     const pubClient = await createClient().connect();
-
+    // console.debug("pubbing", "to", channelId, "data", dataStr);
     // Publish the message to the Redis stream
     const messageId: string = await pubClient.sendCommand([
       "XADD",
