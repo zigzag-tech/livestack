@@ -21,6 +21,7 @@ import pLimit from "p-limit";
 import { Observable } from "rxjs";
 import { z } from "zod";
 import { TagMaps, TagObj } from "../orchestrations/Workflow";
+import { Metadata } from "nice-grpc-common";
 import {
   ByTagInput,
   ByTagOutput,
@@ -640,17 +641,21 @@ export class JobSpec<
     }
 
     jobOptions = jobOptions || ({} as P);
-
-    await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
-      projectId: this.zzEnvEnsured.projectId,
-      specName: this.name,
-      jobId,
-      jobOptionsStr: JSON.stringify(jobOptions),
-      parentJobId: p?.parentJobId,
-      uniqueSpecLabel: p?.uniqueSpecLabel,
-      inputStreamIdOverridesByTag: inputStreamIdOverridesByTag || {},
-      outputStreamIdOverridesByTag: outputStreamIdOverridesByTag || {},
-    });
+    // const metadata = new Metadata();
+    // metadata.set("auth", "123");
+    await vaultClient.db.ensureJobAndStatusAndConnectorRecs(
+      {
+        projectId: this.zzEnvEnsured.projectId,
+        specName: this.name,
+        jobId,
+        jobOptionsStr: JSON.stringify(jobOptions),
+        parentJobId: p?.parentJobId,
+        uniqueSpecLabel: p?.uniqueSpecLabel,
+        inputStreamIdOverridesByTag: inputStreamIdOverridesByTag || {},
+        outputStreamIdOverridesByTag: outputStreamIdOverridesByTag || {},
+      }
+      // { metadata }
+    );
 
     const j = await vaultClient.queue.addJob({
       projectId,
@@ -1045,7 +1050,10 @@ export class JobSpec<
           const { source } = getNodesConnectedToStream(defG, conn.streamNodeId);
           return !source;
         } else {
-          const { targets } = getNodesConnectedToStream(defG, conn.streamNodeId);
+          const { targets } = getNodesConnectedToStream(
+            defG,
+            conn.streamNodeId
+          );
           return targets.length === 0;
         }
       })
