@@ -108,7 +108,7 @@ function resetToConnected({
     status: "connected" as const,
     jobConn: connection,
     initiateDeferredClose: () => {
-      console.log("Closing connection");
+      // console.debug("Closing", specName, uniqueSpecLabel);
       const timeout = setTimeout(async () => {
         (await connection).close();
         DEFERRED_CLOSED_CONN_CACHE[
@@ -121,7 +121,7 @@ function resetToConnected({
       ] = {
         status: "closing",
         cancelClose: async () => {
-          console.log("Cancelling close");
+          // console.debug("Cancelling close", specName, uniqueSpecLabel);
           clearTimeout(timeout);
           resetToConnected({ specName, uniqueSpecLabel, connection });
           return connection;
