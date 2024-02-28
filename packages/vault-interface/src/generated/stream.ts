@@ -46,7 +46,7 @@ export interface StreamPubMessage {
 }
 
 export interface StreamPubResult {
-  messageId: string;
+  chunkId: string;
 }
 
 export interface SubRequest {
@@ -57,7 +57,7 @@ export interface SubRequest {
 
 export interface StreamDatapoint {
   timestamp: number;
-  messageId: string;
+  chunkId: string;
   dataStr: string;
 }
 
@@ -87,7 +87,10 @@ function createBaseStreamPubMessage(): StreamPubMessage {
 }
 
 export const StreamPubMessage = {
-  encode(message: StreamPubMessage, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+  encode(
+    message: StreamPubMessage,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
     if (message.projectId !== "") {
       writer.uint32(10).string(message.projectId);
     }
@@ -101,7 +104,8 @@ export const StreamPubMessage = {
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): StreamPubMessage {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseStreamPubMessage();
     while (reader.pos < end) {
@@ -139,8 +143,12 @@ export const StreamPubMessage = {
 
   fromJSON(object: any): StreamPubMessage {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
+      projectId: isSet(object.projectId)
+        ? globalThis.String(object.projectId)
+        : "",
+      uniqueName: isSet(object.uniqueName)
+        ? globalThis.String(object.uniqueName)
+        : "",
       dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
     };
   },
@@ -172,19 +180,23 @@ export const StreamPubMessage = {
 };
 
 function createBaseStreamPubResult(): StreamPubResult {
-  return { messageId: "" };
+  return { chunkId: "" };
 }
 
 export const StreamPubResult = {
-  encode(message: StreamPubResult, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.messageId !== "") {
-      writer.uint32(10).string(message.messageId);
+  encode(
+    message: StreamPubResult,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.chunkId !== "") {
+      writer.uint32(10).string(message.chunkId);
     }
     return writer;
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): StreamPubResult {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseStreamPubResult();
     while (reader.pos < end) {
@@ -195,7 +207,7 @@ export const StreamPubResult = {
             break;
           }
 
-          message.messageId = reader.string();
+          message.chunkId = reader.string();
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -207,13 +219,15 @@ export const StreamPubResult = {
   },
 
   fromJSON(object: any): StreamPubResult {
-    return { messageId: isSet(object.messageId) ? globalThis.String(object.messageId) : "" };
+    return {
+      chunkId: isSet(object.chunkId) ? globalThis.String(object.chunkId) : "",
+    };
   },
 
   toJSON(message: StreamPubResult): unknown {
     const obj: any = {};
-    if (message.messageId !== "") {
-      obj.messageId = message.messageId;
+    if (message.chunkId !== "") {
+      obj.chunkId = message.chunkId;
     }
     return obj;
   },
@@ -223,7 +237,7 @@ export const StreamPubResult = {
   },
   fromPartial(object: DeepPartial<StreamPubResult>): StreamPubResult {
     const message = createBaseStreamPubResult();
-    message.messageId = object.messageId ?? "";
+    message.chunkId = object.chunkId ?? "";
     return message;
   },
 };
@@ -233,7 +247,10 @@ function createBaseSubRequest(): SubRequest {
 }
 
 export const SubRequest = {
-  encode(message: SubRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+  encode(
+    message: SubRequest,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
     if (message.projectId !== "") {
       writer.uint32(10).string(message.projectId);
     }
@@ -247,7 +264,8 @@ export const SubRequest = {
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): SubRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseSubRequest();
     while (reader.pos < end) {
@@ -285,8 +303,12 @@ export const SubRequest = {
 
   fromJSON(object: any): SubRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
+      projectId: isSet(object.projectId)
+        ? globalThis.String(object.projectId)
+        : "",
+      uniqueName: isSet(object.uniqueName)
+        ? globalThis.String(object.uniqueName)
+        : "",
       subType: isSet(object.subType) ? subTypeFromJSON(object.subType) : 0,
     };
   },
@@ -318,7 +340,7 @@ export const SubRequest = {
 };
 
 function createBaseStreamDatapoint(): StreamDatapoint {
-  return { timestamp: 0, messageId: "", dataStr: "" };
+  return { timestamp: 0, chunkId: "", dataStr: "" };
 }
 
 export const StreamDatapoint = {
@@ -326,8 +348,8 @@ export const StreamDatapoint = {
     if (message.timestamp !== 0) {
       writer.uint32(8).uint64(message.timestamp);
     }
-    if (message.messageId !== "") {
-      writer.uint32(18).string(message.messageId);
+    if (message.chunkId !== "") {
+      writer.uint32(18).string(message.chunkId);
     }
     if (message.dataStr !== "") {
       writer.uint32(26).string(message.dataStr);
@@ -354,7 +376,7 @@ export const StreamDatapoint = {
             break;
           }
 
-          message.messageId = reader.string();
+          message.chunkId = reader.string();
           continue;
         case 3:
           if (tag !== 26) {
@@ -374,8 +396,10 @@ export const StreamDatapoint = {
 
   fromJSON(object: any): StreamDatapoint {
     return {
-      timestamp: isSet(object.timestamp) ? globalThis.Number(object.timestamp) : 0,
-      messageId: isSet(object.messageId) ? globalThis.String(object.messageId) : "",
+      timestamp: isSet(object.timestamp)
+        ? globalThis.Number(object.timestamp)
+        : 0,
+      chunkId: isSet(object.chunkId) ? globalThis.String(object.chunkId) : "",
       dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
     };
   },
@@ -385,8 +409,8 @@ export const StreamDatapoint = {
     if (message.timestamp !== 0) {
       obj.timestamp = Math.round(message.timestamp);
     }
-    if (message.messageId !== "") {
-      obj.messageId = message.messageId;
+    if (message.chunkId !== "") {
+      obj.chunkId = message.chunkId;
     }
     if (message.dataStr !== "") {
       obj.dataStr = message.dataStr;
@@ -400,7 +424,7 @@ export const StreamDatapoint = {
   fromPartial(object: DeepPartial<StreamDatapoint>): StreamDatapoint {
     const message = createBaseStreamDatapoint();
     message.timestamp = object.timestamp ?? 0;
-    message.messageId = object.messageId ?? "";
+    message.chunkId = object.chunkId ?? "";
     message.dataStr = object.dataStr ?? "";
     return message;
   },

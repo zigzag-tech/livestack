@@ -164,7 +164,7 @@ export class DataStream<T extends object> {
       return {
         ...restored,
         timestamp: datapoint.timestamp,
-        messageId: datapoint.messageId,
+        chunkId: datapoint.chunkId,
       } as WithTimestamp<T>;
     } else {
       throw new Error("Unexpected response from lastValue");
@@ -244,7 +244,7 @@ export class DataStream<T extends object> {
       //   JSON.stringify(parsed)
       // );
 
-      const [_, { messageId }] = await Promise.all([
+      const [_, { chunkId }] = await Promise.all([
         vaultClient.db.addDatapoint({
           streamId: this.uniqueName,
           projectId: this.zzEnv.projectId,
@@ -261,7 +261,7 @@ export class DataStream<T extends object> {
 
       // console.debug("DataStream pub", this.uniqueName, parsed);
 
-      return messageId;
+      return chunkId;
     } catch (error) {
       console.error(
         "Error publishing to stream:",
@@ -313,7 +313,7 @@ export class DataStreamDef<T> {
 
 export type WithTimestamp<T extends object> = T & {
   timestamp: number;
-  messageId: string;
+  chunkId: string;
 };
 
 export class DataStreamSubscriber<T extends object> {
@@ -387,7 +387,7 @@ export class DataStreamSubscriber<T extends object> {
         subscriber.next({
           ...restored,
           timestamp: message.timestamp,
-          messageId: message.messageId,
+          chunkId: message.chunkId,
         });
       }
     } catch (error) {

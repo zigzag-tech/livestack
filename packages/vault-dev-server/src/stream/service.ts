@@ -15,13 +15,13 @@ class StreamServiceByProject implements StreamServiceImplementation {
   async pub(
     request: StreamPubMessage,
     context: CallContext
-  ): Promise<{ messageId: string }> {
+  ): Promise<{ chunkId: string }> {
     const { projectId, uniqueName, dataStr } = request;
     const channelId = `${projectId}/${uniqueName}`;
     const pubClient = await createClient().connect();
     // console.debug("pubbing", "to", channelId, "data", dataStr);
     // Publish the message to the Redis stream
-    const messageId: string = await pubClient.sendCommand([
+    const chunkId: string = await pubClient.sendCommand([
       "XADD",
       channelId,
       "MAXLEN",
@@ -33,19 +33,19 @@ class StreamServiceByProject implements StreamServiceImplementation {
     ]);
 
     await pubClient.disconnect();
-    return { messageId };
+    return { chunkId };
   }
   sub(
     request: SubRequest,
     context: CallContext
   ): ServerStreamingMethodResult<{
     timestamp?: number | undefined;
-    messageId?: string | undefined;
+    chunkId?: string | undefined;
     dataStr?: string | undefined;
   }> {
     const { iterator, resolveNext } = genManuallyFedIterator<{
       timestamp: number | undefined;
-      messageId: string | undefined;
+      chunkId: string | undefined;
       dataStr: string | undefined;
     }>();
 
@@ -80,7 +80,7 @@ class StreamServiceByProject implements StreamServiceImplementation {
             resolveNext({
               timestamp,
               dataStr,
-              messageId: cursor,
+              chunkId: cursor,
             });
           }
         }
@@ -96,7 +96,7 @@ class StreamServiceByProject implements StreamServiceImplementation {
     datapoint?:
       | {
           timestamp?: number | undefined;
-          messageId?: string | undefined;
+          chunkId?: string | undefined;
           dataStr?: string | undefined;
         }
       | undefined;
@@ -128,7 +128,7 @@ class StreamServiceByProject implements StreamServiceImplementation {
             datapoint: {
               timestamp,
               dataStr,
-              messageId: message[0],
+              chunkId: message[0],
             },
           };
         }
@@ -147,7 +147,7 @@ class StreamServiceByProject implements StreamServiceImplementation {
     datapoint?:
       | {
           timestamp?: number | undefined;
-          messageId?: string | undefined;
+          chunkId?: string | undefined;
           dataStr?: string | undefined;
         }
       | undefined;
@@ -178,7 +178,7 @@ class StreamServiceByProject implements StreamServiceImplementation {
             datapoint: {
               timestamp,
               dataStr,
-              messageId: message[0],
+              chunkId: message[0],
             },
           };
         }

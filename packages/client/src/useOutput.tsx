@@ -43,7 +43,7 @@ export function useStream<O>({
   const [output, setOutput] = useState<{
     data: O;
     timestamp: number;
-    messageId: string;
+    chunkId: string;
     tag?: string;
   } | null>(null);
 
