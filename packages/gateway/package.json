@@ -14,7 +14,7 @@
     "socket.io": "^4"
   },
   "devDependencies": {
-    "typescript": "5.4.0-beta"
+    "typescript": "5.4.1-rc"
   },
   "main": "dist/livestack-gateway.cjs.js",
   "types": "dist/livestack-gateway.cjs.d.ts",
