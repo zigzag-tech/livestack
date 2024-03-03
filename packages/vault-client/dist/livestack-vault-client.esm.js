@@ -1,0 +1,1 @@
+/home/ubuntu/echoes-of-sentience/livestack/packages/vault-client/src/index.ts

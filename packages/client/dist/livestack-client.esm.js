@@ -1,0 +1,1 @@
+/home/ubuntu/echoes-of-sentience/livestack/packages/client/src/index.ts
