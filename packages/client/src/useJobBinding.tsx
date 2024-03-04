@@ -5,6 +5,13 @@ import {
   bindNewJobToSocketIO,
 } from "./JobSocketIOClient";
 
+export type JobInfo = {
+  specName?: string;
+  uniqueSpecLabel?: string;
+  jobId?: string;
+  connRef: React.MutableRefObject<Promise<JobSocketIOConnection> | undefined>;
+};
+
 type DeferredClosedConn =
   | {
       status: "connected";
@@ -30,7 +37,7 @@ export function useJobBinding({
 }: ClientConnParams & {
   specName: string;
   uniqueSpecLabel?: string;
-}) {
+}): JobInfo {
   const [status, setStatus] = useState<JobStatus>({
     status: "connecting",
   });

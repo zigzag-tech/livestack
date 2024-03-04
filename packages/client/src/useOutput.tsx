@@ -1,18 +1,13 @@
 import { useEffect, useState } from "react";
-import { JobSocketIOConnection } from "./JobSocketIOClient";
 import { z } from "zod";
+import { JobInfo } from "./useJobBinding";
 
 export function useOutput<O>({
   job: { specName, uniqueSpecLabel, jobId, connRef },
   tag,
   def,
 }: {
-  job: {
-    specName?: string;
-    uniqueSpecLabel?: string;
-    jobId?: string;
-    connRef: React.MutableRefObject<Promise<JobSocketIOConnection> | undefined>;
-  };
+  job: JobInfo;
   tag?: string;
   def?: z.ZodType<O>;
 }) {
@@ -27,15 +22,9 @@ export function useOutput<O>({
 export function useStream<O>({
   job: { specName, uniqueSpecLabel, jobId, connRef },
   tag,
-  def,
   type,
 }: {
-  job: {
-    specName?: string;
-    uniqueSpecLabel?: string;
-    jobId?: string;
-    connRef: React.MutableRefObject<Promise<JobSocketIOConnection> | undefined>;
-  };
+  job: JobInfo;
   type: "input" | "output";
   tag?: string;
   def?: z.ZodType<O>;
