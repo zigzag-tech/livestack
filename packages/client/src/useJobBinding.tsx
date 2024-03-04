@@ -4,16 +4,18 @@ import {
   JobSocketIOConnection,
   bindNewJobToSocketIO,
 } from "./JobSocketIOClient";
-
+const DEFAULT_AUTH_TOKEN = "foo"
 export function useJobBinding({
   socketIOURI,
   socketIOPath,
   socketIOClient,
   specName,
   uniqueSpecLabel,
+  authToken = DEFAULT_AUTH_TOKEN,
 }: ClientConnParams & {
   specName: string;
   uniqueSpecLabel?: string;
+  authToken?: string;
 }) {
   const [status, setStatus] = useState<JobStatus>({
     status: "connecting",
@@ -30,6 +32,7 @@ export function useJobBinding({
           socketIOClient,
           specName,
           uniqueSpecLabel,
+          authToken,
         });
         clientRef.current = connection;
         connection.then((c) => {

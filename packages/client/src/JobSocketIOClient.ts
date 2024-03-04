@@ -198,7 +198,8 @@ function getClient({
   socketIOClient,
   socketIOURI,
   socketIOPath,
-}: ClientConnParams) {
+  authToken
+}: ClientConnParams& { authToken?: String }) {
   // resolve as follows: if socketIOClient is provided, use it. Otherwise, if socketIOURI is provided, use it. Otherwise, use default (i.e. empty string)
 
   if (socketIOClient) {
@@ -212,10 +213,18 @@ function getClient({
         ? io(socketIOURI, {
             path: socketIOPath || "/livestack.socket.io",
             autoConnect: true,
+            
+            auth: {
+              token: authToken, // Pass the authentication token here
+            },
           })
         : io({
             path: socketIOPath || "/livestack.socket.io",
             autoConnect: true,
+            auth: {
+              token: authToken, // Pass the authentication token here
+
+            },
           });
     }
     return {
@@ -228,10 +237,12 @@ function getClient({
 export async function bindNewJobToSocketIO({
   specName,
   uniqueSpecLabel,
+  authToken,
   ...connParams
 }: Omit<RequestAndBindType, "requestIdentifier"> &
-  ClientConnParams): Promise<JobSocketIOConnection> {
-  const { newClient, conn } = getClient(connParams);
+  ClientConnParams & { authToken?: String }): Promise<JobSocketIOConnection> {
+    const { newClient, conn } = getClient({...connParams,authToken // Pass the authToken to getClient
+    });
 
   // await getConnReadyPromise(conn!);
   const requestBindingData: RequestAndBindType = {

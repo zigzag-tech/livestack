@@ -24,6 +24,15 @@ export function initJobBinding({
       methods: ["GET", "POST"],
     },
   });
+  io.use(async (socket, next) => {
+    const token = socket.handshake.auth.token; // Assuming the client sends authToken in the auth object
+    const isValid = (token == "foo"); // Verify the authToken
+    if (isValid) {
+      next();
+    } else {
+      next(new Error("Authentication error")); // Reject the connection if authToken is invalid
+    }
+  });
 
   io.on("connection", async (socket) => {
     console.info(`🦓 Socket client connected: ${socket.id}.`);
