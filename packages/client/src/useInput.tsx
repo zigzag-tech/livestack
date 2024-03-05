@@ -1,17 +1,12 @@
-import { JobSocketIOConnection } from "./JobSocketIOClient";
 import { z } from "zod";
+import { JobInfo } from "./useJobBinding";
 
 export function useInput<T>({
-  job: { specName, uniqueSpecLabel, jobId, connRef },
+  job: { specName, jobId, connRef },
   tag,
   def,
 }: {
-  job: {
-    specName?: string;
-    uniqueSpecLabel?: string;
-    jobId?: string;
-    connRef: React.MutableRefObject<Promise<JobSocketIOConnection> | undefined>;
-  };
+  job: JobInfo;
   tag?: string;
   def?: z.ZodType<T>;
 }) {
