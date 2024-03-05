@@ -14,7 +14,7 @@ import {
 import { vaultClient } from "@livestack/vault-client";
 import { v4 } from "uuid";
 import { getLogger } from "../utils/createWorkerLogger";
-import longStringTruncator from "../utils/longStringTruncator";
+import { longStringTruncator } from "../utils/longStringTruncator";
 import { WrapWithTimestamp } from "./../utils/io";
 import { ZZWorkerDef, ZZWorkerDefParams } from "./ZZWorker";
 import pLimit from "p-limit";
