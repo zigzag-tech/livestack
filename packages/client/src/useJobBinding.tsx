@@ -34,9 +34,11 @@ export function useJobBinding({
   socketIOClient,
   specName,
   uniqueSpecLabel,
+  authToken,
 }: ClientConnParams & {
   specName: string;
   uniqueSpecLabel?: string;
+  authToken?: string;
 }): JobInfo {
   const [status, setStatus] = useState<JobStatus>({
     status: "connecting",
@@ -48,6 +50,15 @@ export function useJobBinding({
     if (!clientRef.current) {
       try {
         setStatus({ status: "connecting" });
+        const connection = bindNewJobToSocketIO({
+          socketIOURI,
+          socketIOPath,
+          socketIOClient,
+          specName,
+          uniqueSpecLabel,
+          authToken,
+        });
+        clientRef.current = connection;
 
         const existing =
           DEFERRED_CLOSED_CONN_CACHE[
