@@ -4,14 +4,14 @@ import {
   JobSocketIOConnection,
   bindNewJobToSocketIO,
 } from "./JobSocketIOClient";
-const DEFAULT_AUTH_TOKEN = "foo"
+
 export function useJobBinding({
   socketIOURI,
   socketIOPath,
   socketIOClient,
   specName,
   uniqueSpecLabel,
-  authToken = DEFAULT_AUTH_TOKEN,
+  authToken = "DEFAULT_AUTH_TOKEN",
 }: ClientConnParams & {
   specName: string;
   uniqueSpecLabel?: string;

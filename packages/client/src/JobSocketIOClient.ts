@@ -27,12 +27,14 @@ export class JobSocketIOConnection {
     uniqueSpecLabel,
     socketIOClient,
     isConnDedicated,
+    onError,
   }: {
     jobInfo: JobInfoType;
     specName: string;
     uniqueSpecLabel?: string;
     socketIOClient: Socket;
     isConnDedicated: boolean;
+    onError?: (error: Error) => void; // Define the onError callback type
   }) {
     this.jobId = jobId;
     this.socketIOClient = socketIOClient;
@@ -42,6 +44,13 @@ export class JobSocketIOConnection {
 
     this.specName = specName;
     this.uniqueSpecLabel = uniqueSpecLabel;
+
+    this.socketIOClient.on('connect_error', (err) => {
+      console.error('Connection failed:', err.message);
+      if (onError) {
+        onError(new Error('Connection failed due to authentication error: ' + err.message));
+      }
+  });
   }
 
   private localObservablesByTag: Record<
@@ -180,6 +189,7 @@ export class JobSocketIOConnection {
     }
     this.subscribedOutputKeys = [];
     if (this.isConnDedicated) {
+      this.socketIOClient.off('connect_error');
       this.socketIOClient.close();
     }
     this.closed = true;
