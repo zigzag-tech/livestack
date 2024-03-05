@@ -5,6 +5,14 @@ import { Empty } from "./google/protobuf/empty";
 
 export const protobufPackage = "livestack";
 
+export interface InitInstanceParams {
+  projectId: string;
+}
+
+export interface InitInstanceResponse {
+  instanceId: string;
+}
+
 export interface QueueJob {
   projectId: string;
   specName: string;
@@ -56,6 +64,120 @@ export interface ToWorker {
   workerId: string;
   job: QueueJob | undefined;
 }
+
+function createBaseInitInstanceParams(): InitInstanceParams {
+  return { projectId: "" };
+}
+
+export const InitInstanceParams = {
+  encode(message: InitInstanceParams, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): InitInstanceParams {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseInitInstanceParams();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.projectId = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): InitInstanceParams {
+    return { projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "" };
+  },
+
+  toJSON(message: InitInstanceParams): unknown {
+    const obj: any = {};
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<InitInstanceParams>): InitInstanceParams {
+    return InitInstanceParams.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<InitInstanceParams>): InitInstanceParams {
+    const message = createBaseInitInstanceParams();
+    message.projectId = object.projectId ?? "";
+    return message;
+  },
+};
+
+function createBaseInitInstanceResponse(): InitInstanceResponse {
+  return { instanceId: "" };
+}
+
+export const InitInstanceResponse = {
+  encode(message: InitInstanceResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.instanceId !== "") {
+      writer.uint32(10).string(message.instanceId);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): InitInstanceResponse {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseInitInstanceResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.instanceId = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): InitInstanceResponse {
+    return { instanceId: isSet(object.instanceId) ? globalThis.String(object.instanceId) : "" };
+  },
+
+  toJSON(message: InitInstanceResponse): unknown {
+    const obj: any = {};
+    if (message.instanceId !== "") {
+      obj.instanceId = message.instanceId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<InitInstanceResponse>): InitInstanceResponse {
+    return InitInstanceResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<InitInstanceResponse>): InitInstanceResponse {
+    const message = createBaseInitInstanceResponse();
+    message.instanceId = object.instanceId ?? "";
+    return message;
+  },
+};
 
 function createBaseQueueJob(): QueueJob {
   return { projectId: "", specName: "", jobId: "", contextId: undefined, jobOptionsStr: "" };
@@ -867,6 +989,14 @@ export const QueueServiceDefinition = {
       responseStream: true,
       options: {},
     },
+    initInstance: {
+      name: "InitInstance",
+      requestType: InitInstanceParams,
+      requestStream: false,
+      responseType: InitInstanceResponse,
+      responseStream: false,
+      options: {},
+    },
   },
 } as const;
 
@@ -876,6 +1006,10 @@ export interface QueueServiceImplementation<CallContextExt = {}> {
     request: AsyncIterable<FromWorker>,
     context: CallContext & CallContextExt,
   ): ServerStreamingMethodResult<DeepPartial<ToWorker>>;
+  initInstance(
+    request: InitInstanceParams,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<InitInstanceResponse>>;
 }
 
 export interface QueueServiceClient<CallOptionsExt = {}> {
@@ -884,6 +1018,10 @@ export interface QueueServiceClient<CallOptionsExt = {}> {
     request: AsyncIterable<DeepPartial<FromWorker>>,
     options?: CallOptions & CallOptionsExt,
   ): AsyncIterable<ToWorker>;
+  initInstance(
+    request: DeepPartial<InitInstanceParams>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<InitInstanceResponse>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

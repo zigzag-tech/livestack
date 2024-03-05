@@ -101,7 +101,7 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
           await output("status").emit("waiting");
 
           await sleep(1500);
-          logger.info(`Checking status for job ${runpodResult.id}...`);
+          // logger.info(`Checking status for job ${runpodResult.id}...`);
           const respP = await fetch(statusUrl, {
             method: "GET",
             headers: {

@@ -310,7 +310,7 @@ export class ZZJob<
     return this._parentRec;
   };
 
-  private _ensureInputStreamFn<K extends keyof IMap>(tag?: K) {
+  private _ensureInputStreamFn = <K extends keyof IMap>(tag?: K) => {
     if (this.spec.inputTags.length === 0) {
       throw new Error("inputDefs is empty for spec " + this.spec.name);
     }
@@ -387,7 +387,7 @@ export class ZZJob<
       };
     }
     return this.inputStreamFnsByTag[tag as K]!;
-  }
+  };
 
   public beginProcessing = async (
     processor: ZZProcessor<P, I, O, WP, IMap, OMap>

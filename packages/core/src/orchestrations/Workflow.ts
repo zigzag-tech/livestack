@@ -249,16 +249,16 @@ export class WorkflowSpec extends JobSpec<
   private workflowGraphCreated: boolean = false;
 
   public override getDefGraph() {
-    const g = super.getDefGraph();
+    const defG = super.getDefGraph();
     if (!this.workflowGraphCreated) {
-      const parentSpecNodeId = g.getRootSpecNodeId();
+      const parentSpecNodeId = defG.getRootSpecNodeId();
       if (!parentSpecNodeId) {
         throw new Error("No parent spec node id found");
       }
 
       // pass1
       for (const conn of this.connections) {
-        const { fromSpecNodeId, toSpecNodeId } = g.addConnectedDualSpecs(
+        const { fromSpecNodeId, toSpecNodeId } = defG.addConnectedDualSpecs(
           {
             specName: conn.from.spec.name,
             uniqueSpecLabel: conn.from.uniqueSpecLabel,
@@ -271,8 +271,8 @@ export class WorkflowSpec extends JobSpec<
             hasTransform: !!conn.transform,
           }
         );
-        g.ensureParentChildRelation(parentSpecNodeId, fromSpecNodeId);
-        g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
+        // g.ensureParentChildRelation(parentSpecNodeId, fromSpecNodeId);
+        // g.ensureParentChildRelation(parentSpecNodeId, toSpecNodeId);
 
         if (conn.transform) {
           TransformRegistry.registerTransform({
@@ -290,7 +290,7 @@ export class WorkflowSpec extends JobSpec<
         for (const c of [conn.from, conn.to]) {
           const spec = c.spec;
           for (const tag of spec.inputTags) {
-            g.ensureInletAndStream({
+            defG.ensureInletAndStream({
               specName: spec.name,
               tag,
               uniqueSpecLabel: c.uniqueSpecLabel,
@@ -298,7 +298,7 @@ export class WorkflowSpec extends JobSpec<
             });
           }
           for (const tag of spec.outputTags) {
-            g.ensureOutletAndStream({
+            defG.ensureOutletAndStream({
               specName: spec.name,
               tag,
               uniqueSpecLabel: c.uniqueSpecLabel,
@@ -324,7 +324,7 @@ export class WorkflowSpec extends JobSpec<
               `Input alias "${alias}" already used for input "${inputAliasesSoFar[alias].tag}" of spec "${inputAliasesSoFar[alias].specName}"`
             );
           }
-          g.assignAlias({
+          defG.assignAlias({
             alias,
             tag: specTag,
             specName: exposure.specName,
@@ -344,7 +344,7 @@ export class WorkflowSpec extends JobSpec<
               `Output alias "${alias}" already used for output "${outputAliasesSoFar[alias].tag}" of spec "${outputAliasesSoFar[alias].specName}"`
             );
           }
-          g.assignAlias({
+          defG.assignAlias({
             alias,
             tag: specTag,
             specName: exposure.specName,
@@ -362,7 +362,7 @@ export class WorkflowSpec extends JobSpec<
 
       this.workflowGraphCreated = true;
     }
-    return g;
+    return defG;
   }
 
   private orchestrationWorkerDef: ZZWorkerDef<
@@ -523,11 +523,11 @@ export class WorkflowSpec extends JobSpec<
   }
   public override get inputTags() {
     // traverse the def graph and get tags from alias nodes
-    const g = this.getDefGraph();
-    const aliasNodeIds = g.getAllAliasNodeIds();
+    const defG = this.getDefGraph();
+    const aliasNodeIds = defG.getAllAliasNodeIds();
     return [
       ...aliasNodeIds
-        .map((n) => g.getNodeAttributes(n) as AliasNode)
+        .map((n) => defG.getNodeAttributes(n) as AliasNode)
         .filter((n) => n.direction === "in")
         .map((n) => n.alias),
     ];
@@ -535,11 +535,11 @@ export class WorkflowSpec extends JobSpec<
 
   public override get outputTags() {
     // traverse the def graph and get tags from alias nodes
-    const g = this.getDefGraph();
-    const aliasNodeIds = g.getAllAliasNodeIds();
+    const defG = this.getDefGraph();
+    const aliasNodeIds = defG.getAllAliasNodeIds();
     return [
       ...aliasNodeIds
-        .map((n) => g.getNodeAttributes(n) as AliasNode)
+        .map((n) => defG.getNodeAttributes(n) as AliasNode)
         .filter((n) => n.direction === "out")
         .map((n) => n.alias),
     ];
@@ -556,7 +556,8 @@ export class WorkflowSpec extends JobSpec<
     uniqueSpecLabel?: string;
     type: "in" | "out";
   }) {
-    const existingAlias = this.getDefGraph().lookupRootSpecAlias({
+    const defG  = this.getDefGraph();
+    const existingAlias = defG.lookupRootSpecAlias({
       specName,
       tag,
       uniqueSpecLabel,
@@ -564,7 +565,8 @@ export class WorkflowSpec extends JobSpec<
     });
     if (!existingAlias) {
       const alias = `${specName}[${uniqueSpecLabel || ""}]::${type}/${tag}`;
-      this.getDefGraph().assignAlias({
+      const defG = this.getDefGraph();
+      defG.assignAlias({
         alias,
         specName,
         tag,
@@ -598,7 +600,8 @@ export class WorkflowSpec extends JobSpec<
         uniqueSpecLabel: undefined,
       };
     } else {
-      const r = this.getDefGraph().lookupSpecAndTagByAlias({
+      const defG = this.getDefGraph();
+      const r = defG.lookupSpecAndTagByAlias({
         alias: alias.toString(),
         type,
       });

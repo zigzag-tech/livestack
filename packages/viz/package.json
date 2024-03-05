@@ -9,7 +9,7 @@
     "dist/**/*"
   ],
   "devDependencies": {
-    "typescript": "5.4.0-beta"
+    "typescript": "5.4.1-rc"
   },
   "peerDependencies": {
     "@livestack/core": "*"
