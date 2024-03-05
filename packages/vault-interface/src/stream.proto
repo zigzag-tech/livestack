@@ -20,7 +20,7 @@ message StreamPubMessage {
 }
 
 message StreamPubResult {
-  string messageId = 1;
+  string chunkId = 1;
 }
 
 enum SubType {
@@ -36,7 +36,7 @@ message SubRequest {
 
 message StreamDatapoint {
   uint64 timestamp = 1;
-  string messageId = 2;
+  string chunkId = 2;
   string dataStr = 3;
 }
 

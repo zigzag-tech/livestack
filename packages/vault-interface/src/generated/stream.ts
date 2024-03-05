@@ -46,7 +46,7 @@ export interface StreamPubMessage {
 }
 
 export interface StreamPubResult {
-  messageId: string;
+  chunkId: string;
 }
 
 export interface SubRequest {
@@ -57,7 +57,7 @@ export interface SubRequest {
 
 export interface StreamDatapoint {
   timestamp: number;
-  messageId: string;
+  chunkId: string;
   dataStr: string;
 }
 
@@ -172,13 +172,13 @@ export const StreamPubMessage = {
 };
 
 function createBaseStreamPubResult(): StreamPubResult {
-  return { messageId: "" };
+  return { chunkId: "" };
 }
 
 export const StreamPubResult = {
   encode(message: StreamPubResult, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.messageId !== "") {
-      writer.uint32(10).string(message.messageId);
+    if (message.chunkId !== "") {
+      writer.uint32(10).string(message.chunkId);
     }
     return writer;
   },
@@ -195,7 +195,7 @@ export const StreamPubResult = {
             break;
           }
 
-          message.messageId = reader.string();
+          message.chunkId = reader.string();
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -207,13 +207,13 @@ export const StreamPubResult = {
   },
 
   fromJSON(object: any): StreamPubResult {
-    return { messageId: isSet(object.messageId) ? globalThis.String(object.messageId) : "" };
+    return { chunkId: isSet(object.chunkId) ? globalThis.String(object.chunkId) : "" };
   },
 
   toJSON(message: StreamPubResult): unknown {
     const obj: any = {};
-    if (message.messageId !== "") {
-      obj.messageId = message.messageId;
+    if (message.chunkId !== "") {
+      obj.chunkId = message.chunkId;
     }
     return obj;
   },
@@ -223,7 +223,7 @@ export const StreamPubResult = {
   },
   fromPartial(object: DeepPartial<StreamPubResult>): StreamPubResult {
     const message = createBaseStreamPubResult();
-    message.messageId = object.messageId ?? "";
+    message.chunkId = object.chunkId ?? "";
     return message;
   },
 };
@@ -318,7 +318,7 @@ export const SubRequest = {
 };
 
 function createBaseStreamDatapoint(): StreamDatapoint {
-  return { timestamp: 0, messageId: "", dataStr: "" };
+  return { timestamp: 0, chunkId: "", dataStr: "" };
 }
 
 export const StreamDatapoint = {
@@ -326,8 +326,8 @@ export const StreamDatapoint = {
     if (message.timestamp !== 0) {
       writer.uint32(8).uint64(message.timestamp);
     }
-    if (message.messageId !== "") {
-      writer.uint32(18).string(message.messageId);
+    if (message.chunkId !== "") {
+      writer.uint32(18).string(message.chunkId);
     }
     if (message.dataStr !== "") {
       writer.uint32(26).string(message.dataStr);
@@ -354,7 +354,7 @@ export const StreamDatapoint = {
             break;
           }
 
-          message.messageId = reader.string();
+          message.chunkId = reader.string();
           continue;
         case 3:
           if (tag !== 26) {
@@ -375,7 +375,7 @@ export const StreamDatapoint = {
   fromJSON(object: any): StreamDatapoint {
     return {
       timestamp: isSet(object.timestamp) ? globalThis.Number(object.timestamp) : 0,
-      messageId: isSet(object.messageId) ? globalThis.String(object.messageId) : "",
+      chunkId: isSet(object.chunkId) ? globalThis.String(object.chunkId) : "",
       dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
     };
   },
@@ -385,8 +385,8 @@ export const StreamDatapoint = {
     if (message.timestamp !== 0) {
       obj.timestamp = Math.round(message.timestamp);
     }
-    if (message.messageId !== "") {
-      obj.messageId = message.messageId;
+    if (message.chunkId !== "") {
+      obj.chunkId = message.chunkId;
     }
     if (message.dataStr !== "") {
       obj.dataStr = message.dataStr;
@@ -400,7 +400,7 @@ export const StreamDatapoint = {
   fromPartial(object: DeepPartial<StreamDatapoint>): StreamDatapoint {
     const message = createBaseStreamDatapoint();
     message.timestamp = object.timestamp ?? 0;
-    message.messageId = object.messageId ?? "";
+    message.chunkId = object.chunkId ?? "";
     message.dataStr = object.dataStr ?? "";
     return message;
   },

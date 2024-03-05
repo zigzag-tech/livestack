@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 export type TS<T, Other> = {
   data: T;
   timestamp: number;
-  messageId: string;
+  chunkId: string;
 } & Other;
 export type TSOrNull<T, Other> = TS<T, Other> | null;
 
@@ -55,16 +55,16 @@ export function useCumulative<
   >([]);
 
   useEffect(() => {
-    // compare messageId of last cumulative and new data
+    // compare chunkId of last cumulative and new data
     // if they are the same, then it's a duplicate, so ignore
     // otherwise, add to cumulative
     const candidates = (Array.isArray(d) ? d : [d]).filter((d) => !!d);
     for (const c of candidates) {
-      // check if cumulative already has this messageId
+      // check if cumulative already has this chunkId
       // and if not, insert it into cumulative, sorted by timestamp
       if (
         cumulative.length === 0 ||
-        !cumulative.reverse().some((c2) => c2.messageId === c!.messageId)
+        !cumulative.reverse().some((c2) => c2.chunkId === c!.chunkId)
       ) {
         const sorted = [...cumulative, c!].sort(
           (a, b) => a.timestamp - b.timestamp

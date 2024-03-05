@@ -79,7 +79,9 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
   ensureStreamRec: async (rec) => {
     return await ensureStreamRec(dbConn, rec);
   },
-  ensureJobAndStatusAndConnectorRecs: async (rec) => {
+  ensureJobAndStatusAndConnectorRecs: async (rec, ctx) => {
+    // console.log(ctx.metadata.get("auth"));
+
     const {
       projectId,
       specName,
@@ -147,15 +149,10 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     });
     return {};
   },
-  getJobDatapoints: async ({
-    projectId,
-    jobId,
-    specName,
-    ioType,
-    key,
-    order,
-    limit,
-  }) => {
+  getJobDatapoints: async (
+    { projectId, jobId, specName, ioType, key, order, limit },
+    ctx
+  ) => {
     const r = await dbConn("zz_datapoints")
       .where("zz_datapoints.project_id", "=", projectId)
       .andWhere("zz_datapoints.job_id", "=", jobId)
@@ -250,6 +247,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     return { records: r };
   },
   appendJobStatusRec: async ({ projectId, specName, jobId, jobStatus }) => {
+    // console.debug("appendJobStatusRec", specName, jobId, jobStatus);
     await appendJobStatusRec({
       projectId,
       specName,
@@ -257,6 +255,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       dbConn,
       jobStatus: jobStatus as ZZJobStatus,
     });
+    // console.debug("appendJobStatusRec done", specName, jobId, jobStatus);
 
     return {};
   },

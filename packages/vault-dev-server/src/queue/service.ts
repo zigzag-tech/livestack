@@ -1,13 +1,14 @@
 import {
   QueueServiceImplementation,
   QueueJob,
-} from "@livestack/vault-interface";
-import {
   FromWorker,
   ToWorker,
-} from "@livestack/vault-interface/src/generated/queue";
+} from "@livestack/vault-interface";
+import { InitInstanceParams } from "@livestack/vault-interface/src/generated/queue";
 import { Queue, Worker } from "bullmq";
 import { genPromiseCycle, genManuallyFedIterator } from "@livestack/shared";
+import { CallContext } from "nice-grpc";
+import { v4 } from "uuid";
 
 const _rawQueueBySpecName = new Map<string, Queue>();
 
@@ -16,6 +17,14 @@ class QueueServiceByProject implements QueueServiceImplementation {
   //   constructor({ projectId }: { projectId: string }) {
   //     this.projectId = projectId;
   //   }
+
+  async initInstance(
+    request: InitInstanceParams,
+    context: CallContext
+  ): Promise<{ instanceId?: string | undefined }> {
+    const instanceId = v4();
+    return { instanceId };
+  }
 
   async addJob(job: QueueJob) {
     // if (job.projectId !== this.projectId) {
@@ -78,7 +87,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     }
   > = {};
 
-  reportAsWorker(request: AsyncIterable<FromWorker>) {
+  reportAsWorker(request: AsyncIterable<FromWorker>, context: CallContext) {
     const { iterator: iter, resolveNext: resolveJobPromise } =
       genManuallyFedIterator<ToWorker>();
 
@@ -89,6 +98,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
       job: QueueJob;
       workerId: string;
     }) => {
+      // console.debug("sendJob", workerId, job);
       resolveJobPromise({ job, workerId }); // Resolve the current job promise with the job data
     };
 
@@ -115,7 +125,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
               this.workerBundleById[workerId].jobCompleteCycleByJobId[job.id!] =
                 jobCompleteCycle;
 
-              sendJob({
+              await sendJob({
                 workerId,
                 job: {
                   projectId: projectId,
@@ -127,7 +137,6 @@ class QueueServiceByProject implements QueueServiceImplementation {
               });
 
               updateProgress = job.updateProgress.bind(job);
-
               return await jobCompleteCycle.promise;
             },
             {
@@ -146,6 +155,11 @@ class QueueServiceByProject implements QueueServiceImplementation {
           };
           await worker.waitUntilReady();
 
+          context.signal.onabort = () => {
+            console.debug("worker stopped for", specName, ", id:", workerId);
+            worker.close();
+          };
+
           // TODO
         } else if (progressUpdate) {
           if (!updateProgress) {
@@ -159,6 +173,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
           if (!this.workerBundleById[workerId]) {
             throw new Error("resolveWorkerCompletePromise not initialized");
           }
+          // console.debug("jobCompleted", jobCompleted);
           this.workerBundleById[workerId].jobCompleteCycleByJobId[
             jobCompleted.jobId
           ].resolveNext(void 0);

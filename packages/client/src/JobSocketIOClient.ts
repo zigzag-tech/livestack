@@ -56,13 +56,13 @@ export class JobSocketIOConnection {
       observable: Observable<{
         data: any;
         tag: string;
-        messageId: string;
+        chunkId: string;
         timestamp: number;
       }>;
       subj: Subject<{
         data: any;
         tag: string;
-        messageId: string;
+        chunkId: string;
         timestamp: number;
       }>;
     }
@@ -93,7 +93,7 @@ export class JobSocketIOConnection {
       const subj = new Subject<{
         data: T;
         tag: string;
-        messageId: string;
+        chunkId: string;
         timestamp: number;
       }>();
       const observable = subj.asObservable();
@@ -103,7 +103,7 @@ export class JobSocketIOConnection {
       data,
       tag,
       timestamp: Date.now(),
-      messageId: Math.random().toString(),
+      chunkId: Math.random().toString(),
     });
   }
 
@@ -114,7 +114,7 @@ export class JobSocketIOConnection {
     callback: (data: {
       data: T;
       tag: string;
-      messageId: string;
+      chunkId: string;
       timestamp: number;
     }) => void
   ) {
@@ -152,7 +152,7 @@ export class JobSocketIOConnection {
         const subj = new Subject<{
           data: T;
           tag: string;
-          messageId: string;
+          chunkId: string;
           timestamp: number;
         }>();
         const observable = subj.asObservable();

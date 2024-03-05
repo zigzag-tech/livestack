@@ -19,6 +19,6 @@ export {
   JobRec,
   Order,
 } from "./generated/db";
-export { FromWorker, QueueJob } from "./generated/queue";
+export { FromWorker, ToWorker, QueueJob } from "./generated/queue";
 
 export * from "./wrapNullResponse";

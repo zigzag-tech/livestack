@@ -65,7 +65,7 @@ export function wrapIfSingle<
 >(def: T): TMap {
   if (!def) {
     return {} as TMap;
-  } else if (def instanceof z.ZodType) {
+  } else if (def instanceof z.ZodType || (def as any)._def?.typeName) {
     return {
       default: def!,
     } as TMap;

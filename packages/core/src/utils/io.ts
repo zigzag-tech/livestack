@@ -34,7 +34,7 @@ export type WrapTerminatorAndDataId<T> =
 export type WrapWithTimestamp<T> = {
   data: T;
   timestamp: number;
-  messageId: string;
+  chunkId: string;
 };
 
 export function wrapTerminatorAndDataId<T>(t: z.ZodType<T>) {
@@ -65,7 +65,7 @@ export function wrapStreamSubscriberWithTermination<T>(
               subscriber.next({
                 data: v.data,
                 timestamp: v.timestamp,
-                messageId: v.messageId,
+                chunkId: v.chunkId,
               });
             }
           },
@@ -96,7 +96,7 @@ export function wrapStreamSubscriberWithTermination<T>(
       return {
         data: nextValue.data,
         timestamp: nextValue.timestamp,
-        messageId: nextValue.messageId,
+        chunkId: nextValue.chunkId,
       };
     }
   };
@@ -120,14 +120,14 @@ export function wrapStreamSubscriberWithTermination<T>(
           return {
             data: secondMostRecent.data,
             timestamp: secondMostRecent.timestamp,
-            messageId: secondMostRecent.messageId,
+            chunkId: secondMostRecent.chunkId,
           };
         }
       } else {
         return {
           data: mostRecent.data,
           timestamp: mostRecent.timestamp,
-          messageId: mostRecent.messageId,
+          chunkId: mostRecent.chunkId,
         };
       }
     }

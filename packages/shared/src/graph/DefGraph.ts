@@ -246,11 +246,6 @@ export class DefGraph extends Graph<DefGraphNode> {
     uniqueSpecLabel?: string;
     type: "in" | "out";
   }) {
-    const rootSpecNodeId = this.findNode((nId) => {
-      const attrs = this.getNodeAttributes(nId);
-      return attrs.nodeType === "root-spec" && attrs.specName === specName;
-    });
-
     const specNodeId = this.findNode((nId) => {
       const attrs = this.getNodeAttributes(nId);
       return (
@@ -585,29 +580,13 @@ export class DefGraph extends Graph<DefGraphNode> {
     };
   }
 
-  public ensureParentChildRelation(
-    parentSpecNodeId: string,
-    childSpecNodeId: string
-  ) {
-    this.ensureEdge(childSpecNodeId, parentSpecNodeId, {
-      type: "parent-child",
-    });
-  }
-
-  private ensureEdge(from: string, to: string, attributes: Attributes = {}) {
+  public ensureEdge(from: string, to: string) {
     if (!super.hasEdge(from, to)) {
-      super.addEdge(from, to, attributes);
-    } else {
-      const edge = this.getEdgeAttributes(from, to);
-      for (const [k, v] of Object.entries(attributes)) {
-        if (edge[k] !== v) {
-          edge[k] = v;
-        }
-      }
+      super.addEdge(from, to);
     }
   }
 
-  private ensureNode<T extends DefNodeType>(
+  public ensureNode<T extends DefNodeType>(
     id: string,
     data: InferNodeData<T>
   ): string {
@@ -641,8 +620,10 @@ export class DefGraph extends Graph<DefGraphNode> {
     );
 
     return inletNodeIds.map((inletNodeId) => {
-      const [ie] = this.inboundEdges(inletNodeId) as (string | undefined)[];
-      const streamNodeId = this.source(ie);
+      const streamNodeId = this.filterInboundNeighbors(
+        inletNodeId,
+        (nid) => this.getNodeAttributes(nid).nodeType === "stream-def"
+      )[0];
       return {
         inletNode: {
           ...(this.getNodeAttributes(inletNodeId) as InletNode),
@@ -663,8 +644,10 @@ export class DefGraph extends Graph<DefGraphNode> {
     );
 
     return outletNodeIds.map((outletNodeId) => {
-      const [oe] = this.outboundEdges(outletNodeId) as (string | undefined)[];
-      const streamNodeId = this.target(oe);
+      const streamNodeId = this.filterOutNeighbors(
+        outletNodeId,
+        (nid) => this.getNodeAttributes(nid).nodeType === "stream-def"
+      )[0];
       return {
         outletNode: {
           ...(this.getNodeAttributes(outletNodeId) as OutletNode),

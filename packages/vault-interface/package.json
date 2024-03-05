@@ -21,7 +21,7 @@
     "@types/node": "^20.11.0",
     "eslint": "^8.56.0",
     "ts-proto": "^1.167.3",
-    "typescript": "5.4.0-beta"
+    "typescript": "5.4.1-rc"
   },
   "types": "dist/livestack-vault-interface.cjs.d",
   "module": "dist/livestack-vault-interface.esm.js",
