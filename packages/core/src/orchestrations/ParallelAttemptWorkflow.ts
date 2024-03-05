@@ -3,7 +3,7 @@ import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { WrapWithTimestamp } from "../utils/io";
-import sleep from "../utils/sleep";
+import { sleep } from "../utils/sleep";
 type TriggerCheckContext = {
   totalTimeElapsed: number;
   attemptStats: {

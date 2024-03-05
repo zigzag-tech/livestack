@@ -19,5 +19,5 @@ export * from "./orchestrations/ParallelAttemptWorkflow";
 export * from "./orchestrations/ProgressiveAdaptiveTryWorkerDef";
 export * from "./storage/cloudStorage";
 export * from "./utils/createWorkerLogger";
-import longStringTruncator from "./utils/longStringTruncator";
+import { longStringTruncator } from "./utils/longStringTruncator";
 export { longStringTruncator };

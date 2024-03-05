@@ -12,7 +12,7 @@ import {
 import { IStorageProvider, getPublicCdnUrl } from "../storage/cloudStorage";
 import { getLogger } from "../utils/createWorkerLogger";
 import { WrapTerminatorAndDataId } from "../utils/io";
-import longStringTruncator from "../utils/longStringTruncator";
+import { longStringTruncator } from "../utils/longStringTruncator";
 import { DataStream } from "./DataStream";
 import { JobSpec } from "./JobSpec";
 import { ZZEnv } from "./ZZEnv";
