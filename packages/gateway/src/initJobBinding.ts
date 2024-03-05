@@ -10,12 +10,14 @@ export function initJobBinding({
   onConnect,
   allowedSpecsForBinding = [],
   zzEnv,
+  authToken,
 }: {
   httpServer: HTTPServer;
   socketPath?: string;
   onConnect?: (conn: LiveGatewayConn) => void;
   allowedSpecsForBinding: SpecOrName[];
   zzEnv?: ZZEnv | null;
+  authToken?: string;
 }) {
   const io = new SocketIOServer(httpServer, {
     path: socketPath,
@@ -24,13 +26,12 @@ export function initJobBinding({
       methods: ["GET", "POST"],
     },
   });
-  io.use(async (socket, next) => {
-    const token = socket.handshake.auth.token; // Assuming the client sends authToken in the auth object
-    const isValid = (token == "foo"); // Verify the authToken
-    if (isValid) {
+  io.use((socket, next) => {
+    const token = socket.handshake.auth.authToken;
+    if (token === authToken) {
       next();
     } else {
-      next(new Error("Authentication error")); // Reject the connection if authToken is invalid
+      next(new Error("Authentication failed: Token is invalid."));
     }
   });
 
