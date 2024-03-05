@@ -46,10 +46,9 @@ export class JobSocketIOConnection {
     this.uniqueSpecLabel = uniqueSpecLabel;
 
     this.socketIOClient.on('connect_error', (err) => {
+      const error = new Error('Connection failed due to authentication error: ' + err.message);
       console.error('Connection failed:', err.message);
-      if (onError) {
-        onError(new Error('Connection failed due to authentication error: ' + err.message));
-      }
+      throw error;
   });
   }
 
