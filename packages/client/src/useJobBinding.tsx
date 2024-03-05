@@ -11,7 +11,7 @@ export function useJobBinding({
   socketIOClient,
   specName,
   uniqueSpecLabel,
-  authToken = "",
+  authToken,
 }: ClientConnParams & {
   specName: string;
   uniqueSpecLabel?: string;

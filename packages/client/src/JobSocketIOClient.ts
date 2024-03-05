@@ -27,14 +27,12 @@ export class JobSocketIOConnection {
     uniqueSpecLabel,
     socketIOClient,
     isConnDedicated,
-    onError,
   }: {
     jobInfo: JobInfoType;
     specName: string;
     uniqueSpecLabel?: string;
     socketIOClient: Socket;
     isConnDedicated: boolean;
-    onError?: (error: Error) => void; // Define the onError callback type
   }) {
     this.jobId = jobId;
     this.socketIOClient = socketIOClient;
