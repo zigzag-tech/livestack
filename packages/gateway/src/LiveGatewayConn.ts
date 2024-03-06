@@ -49,7 +49,8 @@ export class LiveGatewayConn {
         if (
           !this.allowedSpecsForBinding.some(
             (s) =>
-              s.specName === specName && s.uniqueSpecLabel === uniqueSpecLabel
+              s.specName === specName &&
+              (!s.uniqueSpecLabel || s.uniqueSpecLabel === uniqueSpecLabel)
           )
         ) {
           throw new Error(
