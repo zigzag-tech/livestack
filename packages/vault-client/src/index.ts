@@ -3,6 +3,7 @@ import {
   DBServiceDefinition,
   StreamServiceDefinition,
   QueueServiceDefinition,
+  CacapcityServiceDefinition,
 } from "@livestack/vault-interface";
 
 export const vaultClient = findSuitableVaultServer();
@@ -36,5 +37,9 @@ export function findSuitableVaultServer() {
       createChannel(vaultServerURL)
     ),
     queue: createClient(QueueServiceDefinition, createChannel(vaultServerURL)),
+    capacity: createClient(
+      CacapcityServiceDefinition,
+      createChannel(vaultServerURL)
+    ),
   };
 }

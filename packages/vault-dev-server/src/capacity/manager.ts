@@ -15,7 +15,7 @@ class CapacityManager implements CacapcityServiceImplementation {
 
   resolveByInstanceId: Record<string, (value: CommandToInstance) => void> = {};
 
-  reportInstance(
+  reportAsInstance(
     request: AsyncIterable<FromInstance>,
     context: CallContext
   ): ServerStreamingMethodResult<{
@@ -32,20 +32,21 @@ class CapacityManager implements CacapcityServiceImplementation {
       genManuallyFedIterator<CommandToInstance>();
 
     (async () => {
-      for await (const { reportCapacityAvailability } of request) {
+      for await (const {
+        reportCapacityAvailability,
+        instanceId,
+        projectId,
+      } of request) {
         if (reportCapacityAvailability) {
-          this.resolveByInstanceId[reportCapacityAvailability.instanceId] =
-            resolveJobPromise;
+          this.resolveByInstanceId[instanceId] = resolveJobPromise;
           const { maxCapacity } = reportCapacityAvailability;
           console.debug(
-            `reportCapacityAvailability: ${reportCapacityAvailability.instanceId} ${reportCapacityAvailability.projectId} ${reportCapacityAvailability.specName} ${maxCapacity}`
+            `reportCapacityAvailability: ${instanceId} ${projectId} ${reportCapacityAvailability.specName} ${maxCapacity}`
           );
           const client = await this.redisClient.connect();
-          const projectIdN = escapeColon(reportCapacityAvailability.projectId);
+          const projectIdN = escapeColon(projectId);
           const specNameN = escapeColon(reportCapacityAvailability.specName);
-          const instanceIdN = escapeColon(
-            reportCapacityAvailability.instanceId
-          );
+          const instanceIdN = escapeColon(instanceId);
           await client.sendCommand([
             "HSET",
             `zz_maxcapacity:${projectIdN}:${specNameN}`,
