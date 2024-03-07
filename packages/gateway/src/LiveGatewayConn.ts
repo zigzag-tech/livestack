@@ -19,7 +19,6 @@ export class LiveGatewayConn {
     specName: string;
     uniqueSpecLabel?: string;
   }[];
-  zzEnv: ZZEnv;
 
   constructor({
     zzEnv,
@@ -35,11 +34,6 @@ export class LiveGatewayConn {
   }) {
     this.socket = socket;
     this.allowedSpecsForBinding = allowedSpecsForBinding;
-    zzEnv = zzEnv || ZZEnv.global();
-    if (!zzEnv) {
-      throw new Error("ZZEnv not found.");
-    }
-    this.zzEnv = zzEnv;
 
     addMethodResponder({
       socket: this.socket,
@@ -59,6 +53,7 @@ export class LiveGatewayConn {
         }
         const spec = JobSpec.lookupByName(specName);
         const jobOutput = await spec.enqueueJob({});
+
         this.jobFnsById[jobOutput.jobId] = jobOutput;
         const data: JobInfoType = {
           jobId: jobOutput.jobId,

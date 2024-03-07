@@ -43,11 +43,13 @@ export class JobSocketIOConnection {
     this.specName = specName;
     this.uniqueSpecLabel = uniqueSpecLabel;
 
-    this.socketIOClient.on('connect_error', (err) => {
-      const error = new Error('Connection failed due to authentication error: ' + err.message);
-      console.error('Connection failed:', err.message);
+    this.socketIOClient.on("connect_error", (err) => {
+      const error = new Error(
+        "Connection failed due to authentication error: " + err.message
+      );
+      console.error("Connection failed:", err.message);
       throw error;
-  });
+    });
   }
 
   private localObservablesByTag: Record<
@@ -186,7 +188,7 @@ export class JobSocketIOConnection {
     }
     this.subscribedOutputKeys = [];
     if (this.isConnDedicated) {
-      this.socketIOClient.off('connect_error');
+      this.socketIOClient.off("connect_error");
       this.socketIOClient.close();
     }
     this.closed = true;
@@ -205,8 +207,8 @@ function getClient({
   socketIOClient,
   socketIOURI,
   socketIOPath,
-  authToken
-}: ClientConnParams& { authToken?: String }) {
+  authToken,
+}: ClientConnParams & { authToken?: String }) {
   // resolve as follows: if socketIOClient is provided, use it. Otherwise, if socketIOURI is provided, use it. Otherwise, use default (i.e. empty string)
 
   if (socketIOClient) {
@@ -220,7 +222,7 @@ function getClient({
         ? io(socketIOURI, {
             path: socketIOPath || "/livestack.socket.io",
             autoConnect: true,
-            
+
             auth: {
               token: authToken, // Pass the authentication token here
             },
@@ -230,7 +232,6 @@ function getClient({
             autoConnect: true,
             auth: {
               token: authToken, // Pass the authentication token here
-
             },
           });
     }
@@ -248,8 +249,10 @@ export async function bindNewJobToSocketIO({
   ...connParams
 }: Omit<RequestAndBindType, "requestIdentifier"> &
   ClientConnParams & { authToken?: String }): Promise<JobSocketIOConnection> {
-    const { newClient, conn } = getClient({...connParams,authToken // Pass the authToken to getClient
-    });
+  const { newClient, conn } = getClient({
+    ...connParams,
+    authToken, // Pass the authToken to getClient
+  });
 
   // await getConnReadyPromise(conn!);
   const requestBindingData: RequestAndBindType = {

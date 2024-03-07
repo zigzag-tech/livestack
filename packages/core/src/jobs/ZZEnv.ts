@@ -12,16 +12,26 @@ interface EnvParams {
 export class ZZEnv implements EnvParams {
   public readonly storageProvider?: IStorageProvider;
   private readonly _projectId: string;
-  private static _zzEnv: ZZEnv | null = null;
 
-  static global() {
-    return ZZEnv._zzEnv;
+  public static _initialize() {
+    if (!ZZEnv._zzEnvP) {
+      ZZEnv._zzEnvP = new Promise((resolve) => {
+        ZZEnv._resolveGlobal = resolve;
+      });
+    }
+  }
+  private static _zzEnvP: Promise<ZZEnv> | null = null;
+  private static _resolveGlobal: ((env: ZZEnv) => void) | null = null;
+
+  static globalP() {
+    ZZEnv._initialize();
+    return ZZEnv._zzEnvP!;
   }
 
   static setGlobal(env: ZZEnv) {
+    ZZEnv._initialize();
     console.info("Global project ID set to ", env._projectId);
-
-    ZZEnv._zzEnv = env;
+    ZZEnv._resolveGlobal!(env);
   }
 
   constructor({
@@ -62,6 +72,7 @@ export class ZZEnv implements EnvParams {
   }
 
   public static async getInstanceId() {
+    ZZEnv._initialize();
     if (!this._cachedInstanceId) {
       const r = await vaultClient.queue.initInstance({});
       this._cachedInstanceId = r.instanceId;
@@ -76,6 +87,7 @@ export class ZZEnv implements EnvParams {
     });
   }
 }
+
 
 export const fileOrBufferSchema = z.custom<Buffer | Stream>((data) => {
   return data instanceof Buffer || data instanceof Stream;

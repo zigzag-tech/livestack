@@ -222,12 +222,12 @@ class QueueServiceByProject implements QueueServiceImplementation {
                 ])
               ) || 0
             );
-
-            this.workerBundleById[workerId].jobCompleteCycleByJobId[
-              this.currentJobByWorkerId[workerId].jobId
-            ].rejectNext({
-              message: "Worker disconnected from vault server.",
-            });
+            this.currentJobByWorkerId[workerId] &&
+              this.workerBundleById[workerId].jobCompleteCycleByJobId[
+                this.currentJobByWorkerId[workerId].jobId
+              ].rejectNext({
+                message: "Worker disconnected from vault server.",
+              });
 
             await worker.close();
           };

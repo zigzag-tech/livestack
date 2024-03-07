@@ -117,7 +117,28 @@ export class JobSpec<
     //   this.logger.warn(`No output defined for job spec ${this.name}.`);
     // }
     JobSpec._registryBySpecName[this.name] = this;
+
+    if (zzEnv) {
+      this.zzEnvP = Promise.resolve(zzEnv);
+    } else {
+      this.zzEnvP = Promise.race([ZZEnv.globalP()]);
+    }
+    this.zzEnvPWithTimeout = Promise.race([
+      this.zzEnvP,
+      new Promise<ZZEnv>((_, reject) => {
+        setTimeout(() => {
+          reject(
+            new Error(
+              "Livestack waited for ZZEnv to be set for over 10s, but is still not set. Please provide zzEnv either in the constructor of jobSpec, or globally with ZZEnv.setGlobalP."
+            )
+          );
+        }, 1000 * 10);
+      }),
+    ]);
   }
+
+  public zzEnvP: Promise<ZZEnv>;
+  public zzEnvPWithTimeout: Promise<ZZEnv>;
 
   public static lookupByName(specName: string) {
     if (!JobSpec._registryBySpecName[specName]) {
@@ -149,20 +170,6 @@ export class JobSpec<
       ...newP,
       name: newP.name,
     } as ConstructorParameters<typeof JobSpec<P & NewP, NewI & I, NewO & O, IMap & NewIMap, OMap & NewOMap>>[0]);
-  }
-
-  public get zzEnv() {
-    const resolved = this._zzEnv || ZZEnv.global();
-    return resolved;
-  }
-
-  public get zzEnvEnsured() {
-    if (!this.zzEnv) {
-      throw new Error(
-        `ZZEnv is not configured in Spec ${this.name}. \nPlease either pass it when constructing Spec or set it globally using ZZEnv.setGlobal().`
-      );
-    }
-    return this.zzEnv;
   }
 
   public async enqueueJobAndWaitOnSingleResults<K extends keyof OMap>({
@@ -206,7 +213,7 @@ export class JobSpec<
     const instaG = await resolveInstantiatedGraph({
       specName: this.name,
       jobId,
-      zzEnv: this.zzEnvEnsured,
+      zzEnv: await this.zzEnvPWithTimeout,
     });
 
     return new JobManager<P, I, O, IMap, OMap>({
@@ -355,7 +362,7 @@ export class JobSpec<
     const instaG = await resolveInstantiatedGraph({
       specName: this.name,
       jobId,
-      zzEnv: this.zzEnvEnsured,
+      zzEnv: await this.zzEnvPWithTimeout,
     });
 
     const streamNodeId = instaG.findStreamNodeIdConnectedToJob({
@@ -440,7 +447,7 @@ export class JobSpec<
         const instaG = await resolveInstantiatedGraph({
           specName: this.name,
           jobId,
-          zzEnv: this.zzEnvEnsured,
+          zzEnv: await this.zzEnvPWithTimeout,
         });
         // console.log(
         //   "streamSourceSpecTypeByStreamId",
@@ -541,7 +548,7 @@ export class JobSpec<
         uniqueName: streamId,
         def,
         logger: connectedSpec.logger,
-        zzEnv: connectedSpec.zzEnv,
+        zzEnv: await connectedSpec.zzEnvPWithTimeout,
       });
 
       return stream as DataStream<WrapTerminatorAndDataId<T>>;
@@ -599,7 +606,7 @@ export class JobSpec<
     outputStreamIdOverridesByTag?: Partial<Record<keyof OMap, string>>;
   }) {
     let {
-      jobId = "j-" + this.name + "-" + v4(),
+      jobId = p?.jobId || "j-" + this.name + "-" + v4(),
       jobOptions,
       inputStreamIdOverridesByTag,
       outputStreamIdOverridesByTag,
@@ -607,7 +614,7 @@ export class JobSpec<
 
     // console.debug("Spec._enqueueJob", jobId, jobOptions);
 
-    const projectId = this.zzEnvEnsured.projectId;
+    const projectId = (await this.zzEnvPWithTimeout).projectId;
     if (!this.streamIdOverridesByTagByTypeByJobId[jobId]) {
       this.streamIdOverridesByTagByTypeByJobId[jobId] = {
         in: null,
@@ -626,9 +633,10 @@ export class JobSpec<
     jobOptions = jobOptions || ({} as P);
     // const metadata = new Metadata();
     // metadata.set("auth", "123");
+
     await vaultClient.db.ensureJobAndStatusAndConnectorRecs(
       {
-        projectId: this.zzEnvEnsured.projectId,
+        projectId: (await this.zzEnvPWithTimeout).projectId,
         specName: this.name,
         jobId,
         jobOptionsStr: JSON.stringify(jobOptions),
@@ -648,11 +656,12 @@ export class JobSpec<
       contextId: p?.parentJobId,
     });
     this.logger.info(
-      `Added job with ID ${jobId} to jobSpec: ` +
+      `Added job with ID ${jobId} to jobSpec with params ` +
         `${JSON.stringify(jobOptions, longStringTruncator)}`
     );
 
-    return await this.getJobManager(jobId);
+    const m = await this.getJobManager(jobId);
+    return m;
   }
 
   public enqueueAndGetResult = async <
