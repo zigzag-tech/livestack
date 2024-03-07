@@ -9,26 +9,30 @@ service CacapcityService {
 }
 
 message ReportCapacityAvailability {
-  string instanceId = 1;
-  string specName = 2;
-  int32 maxCapacity = 3;
+  string projectId = 1;
+  string instanceId = 2;
+  string specName = 3;
+  int32 maxCapacity = 4;
 }
 
 message FromInstance {
-  string instanceId = 1;
+  string projectId = 1;
+  string instanceId = 2;
   oneof value {
-    ReportCapacityAvailability reportCapacityAvailability = 2;
+    ReportCapacityAvailability reportCapacityAvailability = 3;
   }
 }
 
 message Provision {
-  string specName = 1;
-  int32 numberOfWorkersNeeded = 2;
+  string projectId = 1;
+  string specName = 2;
+  int32 numberOfWorkersNeeded = 3;
 }
 
 message CommandToInstance {
-  string instanceId = 1;
+  string projectId = 1;
+  string instanceId = 2;
   oneof value {
-    Provision provision = 2;
+    Provision provision = 3;
   }
 }
