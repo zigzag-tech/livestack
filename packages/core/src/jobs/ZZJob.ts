@@ -8,12 +8,12 @@ import { TransformRegistry } from "../orchestrations/TransformRegistry";
 import {
   createLazyNextValueGenerator,
   createTrackedObservable,
-} from "../realtime/pubsub";
+} from "./pubsub";
 import { IStorageProvider, getPublicCdnUrl } from "../storage/cloudStorage";
 import { getLogger } from "../utils/createWorkerLogger";
 import { WrapTerminatorAndDataId } from "../utils/io";
 import { longStringTruncator } from "../utils/longStringTruncator";
-import { DataStream } from "./DataStream";
+import { DataStream } from "../streams/DataStream";
 import { JobSpec } from "./JobSpec";
 import { ZZEnv } from "./ZZEnv";
 import { identifyLargeFilesToSave } from "../files/file-ops";

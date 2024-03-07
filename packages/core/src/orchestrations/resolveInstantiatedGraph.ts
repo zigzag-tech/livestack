@@ -6,10 +6,10 @@ import {
 } from "@livestack/shared";
 import { vaultClient } from "@livestack/vault-client";
 import { ConnectorType } from "@livestack/vault-interface";
-import { TransformRegistry } from "../orchestrations/TransformRegistry";
+import { TransformRegistry } from "./TransformRegistry";
 import { lruCacheFn } from "../utils/lruCacheFn";
-import { JobSpec } from "./JobSpec";
-import { ZZEnv } from "./ZZEnv";
+import { JobSpec } from "../jobs/JobSpec";
+import { ZZEnv } from "../jobs/ZZEnv";
 
 // TODO: cache this
 export const resolveInstantiatedGraph = lruCacheFn(

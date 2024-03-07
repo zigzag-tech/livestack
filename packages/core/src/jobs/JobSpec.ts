@@ -29,9 +29,13 @@ import {
   wrapStreamSubscriberWithTermination,
   wrapTerminatorAndDataId,
 } from "../utils/io";
-import { DataStream, DataStreamSubscriber, WithTimestamp } from "./DataStream";
+import {
+  DataStream,
+  DataStreamSubscriber,
+  WithTimestamp,
+} from "../streams/DataStream";
 import { ZZEnv } from "./ZZEnv";
-import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
+import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
 import { lruCacheFn } from "../utils/lruCacheFn";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
