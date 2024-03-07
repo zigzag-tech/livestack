@@ -165,27 +165,6 @@ export class JobSpec<
     return this.zzEnv;
   }
 
-  public async getJobRec(jobId: string) {
-    const r = await vaultClient.db.getJobRec({
-      specName: this.name,
-      projectId: this.zzEnvEnsured.projectId,
-      jobId,
-    });
-    if (r.null_response) {
-      return null;
-    } else {
-      return {
-        ...r.rec!.rec,
-        status: r.rec!.status,
-      };
-    }
-  }
-
-  public async getJobStatus(jobId: string) {
-    const job = await this.getJobRec(jobId);
-    return job?.status || null;
-  }
-
   public async enqueueJobAndWaitOnSingleResults<K extends keyof OMap>({
     jobId: jobId,
     jobOptions,

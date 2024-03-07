@@ -8,7 +8,7 @@ import { ZZEnv } from "./ZZEnv";
 import { z } from "zod";
 import { JobId } from "@livestack/shared";
 import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
-import { QueueJob, FromWorker } from "@livestack/vault-interface";
+import { QueueJob, FromWorker, FromInstance } from "@livestack/vault-interface";
 import { v4 } from "uuid";
 import { genManuallyFedIterator } from "@livestack/shared";
 import { vaultClient } from "@livestack/vault-client";
@@ -22,13 +22,14 @@ export type ZZWorkerDefParams<P, I, O, WP extends object, IMap, OMap> = {
   instanceParamsDef?: z.ZodType<WP>;
   zzEnv?: ZZEnv;
   workerPrefix?: string;
+  maxNumWorkers?: number;
 };
 
 export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
   public readonly jobSpec: JobSpec<P, I, O, IMap, OMap>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
   public readonly processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
-  public readonly zzEnv: ZZEnv | null = null;
+  public readonly _zzEnv: ZZEnv | null = null;
   public readonly workerPrefix?: string;
 
   constructor({
@@ -37,26 +38,87 @@ export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
     instanceParamsDef,
     zzEnv,
     workerPrefix,
+    maxNumWorkers = 1000,
   }: ZZWorkerDefParams<P, I, O, WP, IMap, OMap>) {
     this.jobSpec = jobSpec;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
-    this.zzEnv = zzEnv || jobSpec.zzEnv;
+    this._zzEnv = zzEnv || jobSpec.zzEnv;
     this.workerPrefix = workerPrefix;
+
+    this.reportInstanceCapacityLazy();
   }
 
-  public async startWorker(p?: {
-    concurrency?: number;
-    instanceParams?: WP;
-    zzEnv?: ZZEnv;
-  }) {
+  public get zzEnv() {
+    const resolved = this._zzEnv || this.jobSpec.zzEnv || ZZEnv.global();
+    return resolved;
+  }
+
+  public get zzEnvEnsured() {
+    if (!this.zzEnv) {
+      throw new Error(
+        `ZZEnv is not configured in Spec ${this.jobSpec.name}. \nPlease either pass it when constructing Spec or set it globally using ZZEnv.setGlobal().`
+      );
+    }
+    return this.zzEnv;
+  }
+
+  private getProjectIdLazy() {
+    if (this._zzEnv) {
+      return this._zzEnv.projectId;
+    } else {
+    }
+  }
+
+  private async reportInstanceCapacityLazy() {
+    const projectId = this.zzEnvEnsured.projectId;
+    const instanceId = await ZZEnv.getInstanceId();
+    const { iterator, resolveNext: reportNext } =
+      genManuallyFedIterator<FromInstance>((v) => {
+        // console.info(`INSTANCE REPORT: ${JSON.stringify(v)}`);
+      });
+    const iter = vaultClient.capacity.reportAsInstance(iterator);
+    reportNext({
+      instanceId,
+      projectId,
+      reportCapacityAvailability: {
+        specName: this.jobSpec.name,
+        maxCapacity: 1000,
+      },
+    });
+    for await (const cmd of iter) {
+      const { instanceId, provision } = cmd;
+      if (provision) {
+        const { projectId, specName, numberOfWorkersNeeded } = provision;
+        console.info(
+          `Provisioning request received: ${projectId} ${specName} ${numberOfWorkersNeeded}`
+        );
+
+        if (specName !== this.jobSpec.name) {
+          console.error("Unexpected specName", specName);
+          throw new Error("Unexpected specName");
+        }
+
+        for (let i = 0; i < numberOfWorkersNeeded; i++) {
+          this.startWorker({
+            concurrency: 1,
+          });
+        }
+      } else {
+        console.error("Unexpected command", cmd);
+        throw new Error("Unexpected command");
+      }
+    }
+  }
+
+  public async startWorker(p?: { concurrency?: number; instanceParams?: WP }) {
     const { concurrency, instanceParams } = p || {};
 
     const worker = new ZZWorker<P, I, O, WP, IMap, OMap>({
       def: this,
       concurrency,
       instanceParams: instanceParams || ({} as WP),
-      zzEnv: p?.zzEnv || this.zzEnv,
+      zzEnv: this._zzEnv,
     });
     // this.workers.push(worker);
     // await worker.waitUntilReady();
@@ -221,7 +283,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
         }
       }
     })();
-    console.log(
+    console.debug(
       "worker ready to sign up",
       that.workerId,
       that.zzEnv.projectId,

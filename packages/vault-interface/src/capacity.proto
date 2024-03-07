@@ -5,12 +5,10 @@ package livestack;
 // import "google/protobuf/empty.proto"; 
 
 service CacapcityService {
-  rpc ReportInstance(stream FromInstance) returns (stream CommandToInstance);
+  rpc ReportAsInstance(stream FromInstance) returns (stream CommandToInstance);
 }
 
 message ReportCapacityAvailability {
-  string projectId = 1;
-  string instanceId = 2;
   string specName = 3;
   int32 maxCapacity = 4;
 }

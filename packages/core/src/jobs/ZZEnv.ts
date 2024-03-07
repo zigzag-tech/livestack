@@ -48,7 +48,7 @@ export class ZZEnv implements EnvParams {
     return this._projectId;
   }
 
-  private _cachedInstanceId: string | null = null;
+  private static _cachedInstanceId: string | null = null;
   private livePrinted = false;
 
   private printLiveDevUrlOnce() {
@@ -61,11 +61,9 @@ export class ZZEnv implements EnvParams {
     }
   }
 
-  public async getInstanceId() {
+  public static async getInstanceId() {
     if (!this._cachedInstanceId) {
-      const r = await vaultClient.queue.initInstance({
-        projectId: this._projectId,
-      });
+      const r = await vaultClient.queue.initInstance({});
       this._cachedInstanceId = r.instanceId;
     }
     return this._cachedInstanceId;
