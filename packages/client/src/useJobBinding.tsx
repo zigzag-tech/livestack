@@ -42,6 +42,8 @@ export function useJobBinding({
 }): JobInfo {
   const [status, setStatus] = useState<JobStatus>({
     status: "connecting",
+    specName,
+    uniqueSpecLabel,
   });
   const clientRef = useRef<Promise<JobSocketIOConnection>>();
   const deferredCloseRef = useRef<() => void>();
@@ -49,7 +51,11 @@ export function useJobBinding({
   useEffect(() => {
     if (!clientRef.current) {
       try {
-        setStatus({ status: "connecting" });
+        setStatus({
+          status: "connecting",
+          specName,
+          uniqueSpecLabel,
+        });
 
         const existing =
           DEFERRED_CLOSED_CONN_CACHE[
@@ -100,7 +106,6 @@ export function useJobBinding({
       clientRef.current = undefined;
     };
   }, [socketIOURI, socketIOPath, specName, uniqueSpecLabel]);
-
   return { ...status, connRef: clientRef };
 }
 
@@ -147,6 +152,8 @@ function resetToConnected({
 type JobStatus =
   | {
       status: "connecting";
+      specName: string;
+      uniqueSpecLabel?: string;
     }
   | {
       status: "connected";
