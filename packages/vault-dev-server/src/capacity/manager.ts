@@ -113,15 +113,19 @@ class CapacityManager implements CacapcityServiceImplementation {
       "HGETALL",
       `zz_maxcapacity:${projectIdN}:${specNameN}`,
     ])) as string[];
-    const maxCapacityByInstanceId = Object.fromEntries(
+    if (instanceIdsAndMaxCapacities.length === 0) {
+      console.warn(`No instances found for ${projectId}:${specName}`);
+      return;
+    }
+    const maxCapacitiesByInstanceId = Object.fromEntries(
       instanceIdsAndMaxCapacities.map(
         (v, i) => [v, Number(instanceIdsAndMaxCapacities[i + 1])] as const
       )
     );
 
     // choose the instance with the most capacity
-    const instanceId = Object.entries(maxCapacityByInstanceId).reduce((a, b) =>
-      a[1] > b[1] ? a : b
+    const instanceId = Object.entries(maxCapacitiesByInstanceId).reduce(
+      (a, b) => (a[1] > b[1] ? a : b)
     )[0];
 
     // nudge the instance to increase capacity
