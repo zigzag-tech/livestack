@@ -19,7 +19,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
   //   constructor({ projectId }: { projectId: string }) {
   //     this.projectId = projectId;
   //   }
-  redisClient = createClient();
+  private redisClientP = createClient().connect();
 
   async initInstance(
     request: InitInstanceParams,
@@ -37,7 +37,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     const c = await queue.getActiveCount();
 
     // get current capacity
-    const client = await this.redisClient.connect();
+    const client = await this.redisClientP;
     const projectIdN = escapeColon(job.projectId);
     const specNameN = escapeColon(job.specName);
     const capacity =
@@ -184,7 +184,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
             jobCompleteCycleByJobId: {},
           };
 
-          const client = await this.redisClient.connect();
+          const client = await this.redisClientP;
           // increment the capacity for this worker by 1
           await client.sendCommand([
             "HINCRBY",

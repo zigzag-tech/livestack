@@ -10,7 +10,7 @@ import { CallContext } from "nice-grpc";
 import { createClient } from "redis";
 
 class CapacityManager implements CacapcityServiceImplementation {
-  redisClient = createClient();
+  private redisClientP = createClient().connect();
   constructor() {}
 
   resolveByInstanceId: Record<string, (value: CommandToInstance) => void> = {};
@@ -43,7 +43,8 @@ class CapacityManager implements CacapcityServiceImplementation {
           console.debug(
             `reportCapacityAvailability: ${instanceId} ${projectId} ${reportCapacityAvailability.specName} ${maxCapacity}`
           );
-          const client = await this.redisClient.connect();
+
+          const client = await this.redisClientP;
           const projectIdN = escapeColon(projectId);
           const specNameN = escapeColon(reportCapacityAvailability.specName);
           const instanceIdN = escapeColon(instanceId);
@@ -104,7 +105,7 @@ class CapacityManager implements CacapcityServiceImplementation {
     by: number;
   }) {
     // set the relevant capacity in redis
-    const client = await this.redisClient.connect();
+    const client = await this.redisClientP;
     const projectIdN = escapeColon(projectId);
     const specNameN = escapeColon(specName);
     // get all instances (keys) for this projectId:specName
