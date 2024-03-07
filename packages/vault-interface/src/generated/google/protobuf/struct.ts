@@ -184,11 +184,10 @@ export const Struct = {
 
   wrap(object: { [key: string]: any } | undefined): Struct {
     const struct = createBaseStruct();
-
     if (object !== undefined) {
-      for (const key of Object.keys(object)) {
+      Object.keys(object).forEach((key) => {
         struct.fields[key] = object[key];
-      }
+      });
     }
     return struct;
   },
@@ -196,9 +195,9 @@ export const Struct = {
   unwrap(message: Struct): { [key: string]: any } {
     const object: { [key: string]: any } = {};
     if (message.fields) {
-      for (const key of Object.keys(message.fields)) {
+      Object.keys(message.fields).forEach((key) => {
         object[key] = message.fields[key];
-      }
+      });
     }
     return object;
   },
