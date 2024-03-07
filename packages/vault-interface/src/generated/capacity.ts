@@ -5,40 +5,47 @@ import _m0 from "protobufjs/minimal";
 export const protobufPackage = "livestack";
 
 export interface ReportCapacityAvailability {
+  projectId: string;
   instanceId: string;
   specName: string;
   maxCapacity: number;
 }
 
 export interface FromInstance {
+  projectId: string;
   instanceId: string;
   reportCapacityAvailability?: ReportCapacityAvailability | undefined;
 }
 
 export interface Provision {
+  projectId: string;
   specName: string;
   numberOfWorkersNeeded: number;
 }
 
 export interface CommandToInstance {
+  projectId: string;
   instanceId: string;
   provision?: Provision | undefined;
 }
 
 function createBaseReportCapacityAvailability(): ReportCapacityAvailability {
-  return { instanceId: "", specName: "", maxCapacity: 0 };
+  return { projectId: "", instanceId: "", specName: "", maxCapacity: 0 };
 }
 
 export const ReportCapacityAvailability = {
   encode(message: ReportCapacityAvailability, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
+    }
     if (message.instanceId !== "") {
-      writer.uint32(10).string(message.instanceId);
+      writer.uint32(18).string(message.instanceId);
     }
     if (message.specName !== "") {
-      writer.uint32(18).string(message.specName);
+      writer.uint32(26).string(message.specName);
     }
     if (message.maxCapacity !== 0) {
-      writer.uint32(24).int32(message.maxCapacity);
+      writer.uint32(32).int32(message.maxCapacity);
     }
     return writer;
   },
@@ -55,17 +62,24 @@ export const ReportCapacityAvailability = {
             break;
           }
 
-          message.instanceId = reader.string();
+          message.projectId = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
             break;
           }
 
-          message.specName = reader.string();
+          message.instanceId = reader.string();
           continue;
         case 3:
-          if (tag !== 24) {
+          if (tag !== 26) {
+            break;
+          }
+
+          message.specName = reader.string();
+          continue;
+        case 4:
+          if (tag !== 32) {
             break;
           }
 
@@ -82,6 +96,7 @@ export const ReportCapacityAvailability = {
 
   fromJSON(object: any): ReportCapacityAvailability {
     return {
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       instanceId: isSet(object.instanceId) ? globalThis.String(object.instanceId) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
       maxCapacity: isSet(object.maxCapacity) ? globalThis.Number(object.maxCapacity) : 0,
@@ -90,6 +105,9 @@ export const ReportCapacityAvailability = {
 
   toJSON(message: ReportCapacityAvailability): unknown {
     const obj: any = {};
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
+    }
     if (message.instanceId !== "") {
       obj.instanceId = message.instanceId;
     }
@@ -107,6 +125,7 @@ export const ReportCapacityAvailability = {
   },
   fromPartial(object: DeepPartial<ReportCapacityAvailability>): ReportCapacityAvailability {
     const message = createBaseReportCapacityAvailability();
+    message.projectId = object.projectId ?? "";
     message.instanceId = object.instanceId ?? "";
     message.specName = object.specName ?? "";
     message.maxCapacity = object.maxCapacity ?? 0;
@@ -115,16 +134,19 @@ export const ReportCapacityAvailability = {
 };
 
 function createBaseFromInstance(): FromInstance {
-  return { instanceId: "", reportCapacityAvailability: undefined };
+  return { projectId: "", instanceId: "", reportCapacityAvailability: undefined };
 }
 
 export const FromInstance = {
   encode(message: FromInstance, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
+    }
     if (message.instanceId !== "") {
-      writer.uint32(10).string(message.instanceId);
+      writer.uint32(18).string(message.instanceId);
     }
     if (message.reportCapacityAvailability !== undefined) {
-      ReportCapacityAvailability.encode(message.reportCapacityAvailability, writer.uint32(18).fork()).ldelim();
+      ReportCapacityAvailability.encode(message.reportCapacityAvailability, writer.uint32(26).fork()).ldelim();
     }
     return writer;
   },
@@ -141,10 +163,17 @@ export const FromInstance = {
             break;
           }
 
-          message.instanceId = reader.string();
+          message.projectId = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
+            break;
+          }
+
+          message.instanceId = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
             break;
           }
 
@@ -161,6 +190,7 @@ export const FromInstance = {
 
   fromJSON(object: any): FromInstance {
     return {
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       instanceId: isSet(object.instanceId) ? globalThis.String(object.instanceId) : "",
       reportCapacityAvailability: isSet(object.reportCapacityAvailability)
         ? ReportCapacityAvailability.fromJSON(object.reportCapacityAvailability)
@@ -170,6 +200,9 @@ export const FromInstance = {
 
   toJSON(message: FromInstance): unknown {
     const obj: any = {};
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
+    }
     if (message.instanceId !== "") {
       obj.instanceId = message.instanceId;
     }
@@ -184,6 +217,7 @@ export const FromInstance = {
   },
   fromPartial(object: DeepPartial<FromInstance>): FromInstance {
     const message = createBaseFromInstance();
+    message.projectId = object.projectId ?? "";
     message.instanceId = object.instanceId ?? "";
     message.reportCapacityAvailability =
       (object.reportCapacityAvailability !== undefined && object.reportCapacityAvailability !== null)
@@ -194,16 +228,19 @@ export const FromInstance = {
 };
 
 function createBaseProvision(): Provision {
-  return { specName: "", numberOfWorkersNeeded: 0 };
+  return { projectId: "", specName: "", numberOfWorkersNeeded: 0 };
 }
 
 export const Provision = {
   encode(message: Provision, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
+    }
     if (message.specName !== "") {
-      writer.uint32(10).string(message.specName);
+      writer.uint32(18).string(message.specName);
     }
     if (message.numberOfWorkersNeeded !== 0) {
-      writer.uint32(16).int32(message.numberOfWorkersNeeded);
+      writer.uint32(24).int32(message.numberOfWorkersNeeded);
     }
     return writer;
   },
@@ -220,10 +257,17 @@ export const Provision = {
             break;
           }
 
-          message.specName = reader.string();
+          message.projectId = reader.string();
           continue;
         case 2:
-          if (tag !== 16) {
+          if (tag !== 18) {
+            break;
+          }
+
+          message.specName = reader.string();
+          continue;
+        case 3:
+          if (tag !== 24) {
             break;
           }
 
@@ -240,6 +284,7 @@ export const Provision = {
 
   fromJSON(object: any): Provision {
     return {
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
       numberOfWorkersNeeded: isSet(object.numberOfWorkersNeeded) ? globalThis.Number(object.numberOfWorkersNeeded) : 0,
     };
@@ -247,6 +292,9 @@ export const Provision = {
 
   toJSON(message: Provision): unknown {
     const obj: any = {};
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
+    }
     if (message.specName !== "") {
       obj.specName = message.specName;
     }
@@ -261,6 +309,7 @@ export const Provision = {
   },
   fromPartial(object: DeepPartial<Provision>): Provision {
     const message = createBaseProvision();
+    message.projectId = object.projectId ?? "";
     message.specName = object.specName ?? "";
     message.numberOfWorkersNeeded = object.numberOfWorkersNeeded ?? 0;
     return message;
@@ -268,16 +317,19 @@ export const Provision = {
 };
 
 function createBaseCommandToInstance(): CommandToInstance {
-  return { instanceId: "", provision: undefined };
+  return { projectId: "", instanceId: "", provision: undefined };
 }
 
 export const CommandToInstance = {
   encode(message: CommandToInstance, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
+    }
     if (message.instanceId !== "") {
-      writer.uint32(10).string(message.instanceId);
+      writer.uint32(18).string(message.instanceId);
     }
     if (message.provision !== undefined) {
-      Provision.encode(message.provision, writer.uint32(18).fork()).ldelim();
+      Provision.encode(message.provision, writer.uint32(26).fork()).ldelim();
     }
     return writer;
   },
@@ -294,10 +346,17 @@ export const CommandToInstance = {
             break;
           }
 
-          message.instanceId = reader.string();
+          message.projectId = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
+            break;
+          }
+
+          message.instanceId = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
             break;
           }
 
@@ -314,6 +373,7 @@ export const CommandToInstance = {
 
   fromJSON(object: any): CommandToInstance {
     return {
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       instanceId: isSet(object.instanceId) ? globalThis.String(object.instanceId) : "",
       provision: isSet(object.provision) ? Provision.fromJSON(object.provision) : undefined,
     };
@@ -321,6 +381,9 @@ export const CommandToInstance = {
 
   toJSON(message: CommandToInstance): unknown {
     const obj: any = {};
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
+    }
     if (message.instanceId !== "") {
       obj.instanceId = message.instanceId;
     }
@@ -335,6 +398,7 @@ export const CommandToInstance = {
   },
   fromPartial(object: DeepPartial<CommandToInstance>): CommandToInstance {
     const message = createBaseCommandToInstance();
+    message.projectId = object.projectId ?? "";
     message.instanceId = object.instanceId ?? "";
     message.provision = (object.provision !== undefined && object.provision !== null)
       ? Provision.fromPartial(object.provision)

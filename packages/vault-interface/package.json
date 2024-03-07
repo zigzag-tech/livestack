@@ -4,7 +4,8 @@
   "packageManager": "yarn@4.0.2",
   "private": true,
   "scripts": {
-    "build": "./build_proto.bash && preconstruct build",
+    "gen": "./build_proto.bash",
+    "build": "yarn gen && preconstruct build",
     "postinstall": "preconstruct dev"
   },
   "author": "",
