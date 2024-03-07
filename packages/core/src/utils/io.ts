@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DataStreamSubscriber, WithTimestamp } from "../jobs/DataStream";
+import { DataStreamSubscriber, WithTimestamp } from "../streams/DataStream";
 import { Observable } from "rxjs";
 export interface ByTagOutput<T> {
   [Symbol.asyncIterator]: () => AsyncIterableIterator<{
