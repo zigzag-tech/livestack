@@ -33,6 +33,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     // if (job.projectId !== this.projectId) {
     //   throw new Error("Invalid projectId " + job.projectId);
     // }
+
     const queue = this.getQueue(job);
     const c = await queue.getActiveCount();
 
@@ -51,7 +52,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
 
     if (c >= capacity) {
       console.debug(
-        `Queue ${job.specName} for project ${job.projectId} is at capacity ${c}. Trying to increase capacity.`
+        `Queue ${job.specName} for project ${job.projectId} has ${c} active jobs, while capacity is at ${capacity}. Trying to increase capacity.`
       );
       await getCapacityManager().increaseCapacity({
         projectId: job.projectId,
@@ -117,6 +118,8 @@ class QueueServiceByProject implements QueueServiceImplementation {
     }
   > = {};
 
+  private currentJobByWorkerId: Record<string, QueueJob> = {};
+
   reportAsWorker(request: AsyncIterable<FromWorker>, context: CallContext) {
     const { iterator: iter, resolveNext: resolveJobPromise } =
       genManuallyFedIterator<ToWorker>();
@@ -130,6 +133,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     }) => {
       // console.debug("sendJob", workerId, job);
       resolveJobPromise({ job, workerId }); // Resolve the current job promise with the job data
+      this.currentJobByWorkerId[workerId] = job;
     };
 
     let updateProgress: null | ((progress: number) => Promise<void>) = null;
@@ -196,7 +200,6 @@ class QueueServiceByProject implements QueueServiceImplementation {
           await worker.waitUntilReady();
 
           context.signal.onabort = async () => {
-            console.debug("worker stopped for", specName, ", id:", workerId);
             // decrement the capacity for this worker by 1
             await client.sendCommand([
               "HINCRBY",
@@ -204,6 +207,27 @@ class QueueServiceByProject implements QueueServiceImplementation {
               `${projectId}:${specName}`,
               "-1",
             ]);
+
+            console.debug(
+              "worker stopped for",
+              specName,
+              ", id:",
+              workerId,
+              ". capacity count reduced to ",
+              Number(
+                await client.sendCommand([
+                  "HGET",
+                  `zz_capacity`,
+                  `${projectId}:${specName}`,
+                ])
+              ) || 0
+            );
+
+            this.workerBundleById[workerId].jobCompleteCycleByJobId[
+              this.currentJobByWorkerId[workerId].jobId
+            ].rejectNext({
+              message: "Worker disconnected from vault server.",
+            });
 
             await worker.close();
           };
@@ -224,14 +248,16 @@ class QueueServiceByProject implements QueueServiceImplementation {
           // console.debug("jobCompleted", jobCompleted);
           this.workerBundleById[workerId].jobCompleteCycleByJobId[
             jobCompleted.jobId
-          ].resolveNext(void 0);
+          ].resolveNext({});
         } else if (jobFailed) {
           if (!this.workerBundleById[workerId]) {
             throw new Error("rejectWorkerCompletePromise not initialized");
           }
           this.workerBundleById[workerId].jobCompleteCycleByJobId[
             jobFailed.jobId
-          ].rejectNext(void 0);
+          ].rejectNext({
+            message: jobFailed.errorStr,
+          });
         } else if (workerStopped) {
           if (!workerId) {
             throw new Error("workerId not initialized");
