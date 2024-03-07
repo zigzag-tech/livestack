@@ -40,16 +40,16 @@ export class DataStream<T extends object> {
   public readonly def: ZodType<T> | null;
   public readonly uniqueName: string;
   // public readonly hash: string;
-  private _zzEnv: ZZEnv | null = null;
-  baseWorkingRelativePath: string;
+  public readonly zzEnvP: Promise<ZZEnv>;
+  baseWorkingRelativePathP: Promise<string>;
 
-  public get zzEnv() {
-    const resolved = this._zzEnv || ZZEnv.global();
-    if (!resolved) {
-      throw new Error("zzEnv not set.");
-    }
-    return resolved;
-  }
+  // public get zzEnv() {
+  //   const resolved = this._zzEnv || ZZEnv.global();
+  //   if (!resolved) {
+  //     throw new Error("zzEnv not set.");
+  //   }
+  //   return resolved;
+  // }
   private logger: ReturnType<typeof getLogger>;
 
   protected static globalRegistry: { [key: string]: DataStream<any> } = {};
@@ -65,8 +65,8 @@ export class DataStream<T extends object> {
     zzEnv?: ZZEnv | null;
     logger?: ReturnType<typeof getLogger>;
   }): Promise<DataStream<T>> {
-    if (!zzEnv) {
-      zzEnv = ZZEnv.global();
+    if (zzEnv) {
+      zzEnv = await ZZEnv.globalP();
     }
     if (DataStream.globalRegistry[uniqueName]) {
       const existing = DataStream.globalRegistry[uniqueName];
@@ -118,7 +118,12 @@ export class DataStream<T extends object> {
   }) {
     this.def = def;
     this.uniqueName = uniqueName;
-    this._zzEnv = zzEnv || null;
+    if (zzEnv) {
+      this.zzEnvP = Promise.resolve(zzEnv);
+    } else {
+      this.zzEnvP = ZZEnv.globalP();
+    }
+
     // this.hash = hashDef(this.def);
     this.logger = logger;
     // console.debug(
@@ -126,16 +131,15 @@ export class DataStream<T extends object> {
     //   this.uniqueName,
     //   JSON.stringify(zodToJsonSchema(this.def), null, 2)
     // );
-    this.baseWorkingRelativePath = path.join(
-      this.zzEnv.projectId,
-      this.uniqueName
+    this.baseWorkingRelativePathP = this.zzEnvP.then((zzEnv) =>
+      path.join(zzEnv.projectId, this.uniqueName)
     );
   }
 
   public valueByReverseIndex = async (index: number) => {
     const { null_response, datapoint } =
       await vaultClient.stream.valueByReverseIndex({
-        projectId: this.zzEnv.projectId,
+        projectId: (await this.zzEnvP).projectId,
         uniqueName: this.uniqueName,
         index,
       });
@@ -148,7 +152,8 @@ export class DataStream<T extends object> {
       const { largeFilesToRestore, newObj } = identifyLargeFilesToRestore(data);
 
       if (largeFilesToRestore.length > 0) {
-        if (!this.zzEnv.storageProvider) {
+        const zzEnv = await this.zzEnvP;
+        if (!zzEnv.storageProvider) {
           throw new Error(
             "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
           );
@@ -156,8 +161,8 @@ export class DataStream<T extends object> {
           restored = (await restoreLargeValues({
             obj_: newObj,
             largeFilesToRestore,
-            basePath: this.baseWorkingRelativePath,
-            fetcher: this.zzEnv.storageProvider.fetchFromStorage,
+            basePath: await this.baseWorkingRelativePathP,
+            fetcher: zzEnv.storageProvider.fetchFromStorage,
           })) as T;
         }
       }
@@ -207,11 +212,12 @@ export class DataStream<T extends object> {
     }
 
     let { largeFilesToSave, newObj } = identifyLargeFilesToSave(parsed);
-
-    if (this.zzEnv.storageProvider) {
+    const zzEnv = await this.zzEnvP;
+    if (zzEnv.storageProvider) {
+      const basePath = await this.baseWorkingRelativePathP;
       const fullPathLargeFilesToSave = largeFilesToSave.map((x) => ({
         ...x,
-        path: path.join(this.baseWorkingRelativePath, x.path),
+        path: path.join(basePath, x.path),
       }));
 
       if (fullPathLargeFilesToSave.length > 0) {
@@ -222,7 +228,7 @@ export class DataStream<T extends object> {
         // );
         await saveLargeFilesToStorage(
           fullPathLargeFilesToSave,
-          this.zzEnv.storageProvider
+          zzEnv.storageProvider
         );
         parsed = newObj;
       }
@@ -247,13 +253,13 @@ export class DataStream<T extends object> {
       const [_, { chunkId }] = await Promise.all([
         vaultClient.db.addDatapoint({
           streamId: this.uniqueName,
-          projectId: this.zzEnv.projectId,
+          projectId: (await this.zzEnvP).projectId,
           jobInfo: jobInfo,
           dataStr: JSON.stringify(parsed),
           datapointId,
         }),
         vaultClient.stream.pub({
-          projectId: this.zzEnv.projectId,
+          projectId: (await this.zzEnvP).projectId,
           uniqueName: this.uniqueName,
           dataStr: customStringify(parsed),
         }),
@@ -279,7 +285,7 @@ export class DataStream<T extends object> {
   public subFromNow() {
     return new DataStreamSubscriber({
       stream: this,
-      zzEnv: this.zzEnv,
+      zzEnvP: this.zzEnvP,
       initialCursor: "$",
       subType: SubType.fromNow,
     });
@@ -288,7 +294,7 @@ export class DataStream<T extends object> {
   public subFromBeginning() {
     return new DataStreamSubscriber({
       stream: this,
-      zzEnv: this.zzEnv,
+      zzEnvP: this.zzEnvP,
       initialCursor: "0",
       subType: SubType.fromStart,
     });
@@ -317,7 +323,7 @@ export type WithTimestamp<T extends object> = T & {
 };
 
 export class DataStreamSubscriber<T extends object> {
-  private zzEnv: ZZEnv;
+  private zzEnvP: Promise<ZZEnv>;
   public readonly stream: DataStream<T>;
   private cursor: `${string}-${string}` | "$" | "0";
   private _valueObservable: Observable<WithTimestamp<T>> | null = null;
@@ -327,17 +333,17 @@ export class DataStreamSubscriber<T extends object> {
 
   constructor({
     stream,
-    zzEnv,
+    zzEnvP,
     initialCursor,
     subType,
   }: {
     stream: DataStream<T>;
-    zzEnv: ZZEnv;
+    zzEnvP: Promise<ZZEnv>;
     initialCursor: "0" | "$";
     subType: SubType;
   }) {
     this.stream = stream;
-    this.zzEnv = zzEnv;
+    this.zzEnvP = zzEnvP;
     this.cursor = initialCursor;
     this.subType = subType;
   }
@@ -353,7 +359,7 @@ export class DataStreamSubscriber<T extends object> {
   private async readStream(subscriber: Subscriber<WithTimestamp<T>>) {
     try {
       const iter = vaultClient.stream.sub({
-        projectId: this.zzEnv.projectId,
+        projectId: (await this.zzEnvP).projectId,
         uniqueName: this.stream.uniqueName,
         subType: this.subType,
       });
@@ -370,7 +376,8 @@ export class DataStreamSubscriber<T extends object> {
           identifyLargeFilesToRestore(data);
 
         if (largeFilesToRestore.length > 0) {
-          if (!this.zzEnv.storageProvider) {
+          const zzEnv = await this.zzEnvP;
+          if (!zzEnv.storageProvider) {
             throw new Error(
               "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
             );
@@ -378,8 +385,8 @@ export class DataStreamSubscriber<T extends object> {
             restored = (await restoreLargeValues({
               obj_: newObj,
               largeFilesToRestore,
-              basePath: this.stream.baseWorkingRelativePath,
-              fetcher: this.zzEnv.storageProvider.fetchFromStorage,
+              basePath: await this.stream.baseWorkingRelativePathP,
+              fetcher: zzEnv.storageProvider.fetchFromStorage,
             })) as T;
           }
         }

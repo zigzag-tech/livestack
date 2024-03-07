@@ -406,8 +406,9 @@ export class WorkflowSpec extends JobSpec<
       jobSpec: this,
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;
+
         const { rec: parentRec } = await vaultClient.db.getParentJobRec({
-          projectId: this.zzEnvEnsured.projectId,
+          projectId: (await this.zzEnvPWithTimeout).projectId,
           childJobId: groupId,
         });
         const inletHasTransformOverridesByTag: Record<string, boolean> = {};
@@ -556,7 +557,7 @@ export class WorkflowSpec extends JobSpec<
     uniqueSpecLabel?: string;
     type: "in" | "out";
   }) {
-    const defG  = this.getDefGraph();
+    const defG = this.getDefGraph();
     const existingAlias = defG.lookupRootSpecAlias({
       specName,
       tag,
@@ -723,7 +724,7 @@ export class Workflow {
     if (!this._graphP) {
       this._graphP = (async () => {
         const { rec: parentRec } = await vaultClient.db.getParentJobRec({
-          projectId: that.jobGroupDef.zzEnvEnsured.projectId,
+          projectId: (await that.jobGroupDef.zzEnvPWithTimeout).projectId,
           childJobId: this.contextId,
         });
         const inletHasTransformOverridesByTag: Record<string, boolean> = {};
