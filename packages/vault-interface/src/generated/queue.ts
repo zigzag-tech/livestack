@@ -6,7 +6,6 @@ import { Empty } from "./google/protobuf/empty";
 export const protobufPackage = "livestack";
 
 export interface InitInstanceParams {
-  projectId: string;
 }
 
 export interface InitInstanceResponse {
@@ -66,14 +65,11 @@ export interface ToWorker {
 }
 
 function createBaseInitInstanceParams(): InitInstanceParams {
-  return { projectId: "" };
+  return {};
 }
 
 export const InitInstanceParams = {
-  encode(message: InitInstanceParams, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
-    }
+  encode(_: InitInstanceParams, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     return writer;
   },
 
@@ -84,13 +80,6 @@ export const InitInstanceParams = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.projectId = reader.string();
-          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -100,24 +89,20 @@ export const InitInstanceParams = {
     return message;
   },
 
-  fromJSON(object: any): InitInstanceParams {
-    return { projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "" };
+  fromJSON(_: any): InitInstanceParams {
+    return {};
   },
 
-  toJSON(message: InitInstanceParams): unknown {
+  toJSON(_: InitInstanceParams): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
-    }
     return obj;
   },
 
   create(base?: DeepPartial<InitInstanceParams>): InitInstanceParams {
     return InitInstanceParams.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<InitInstanceParams>): InitInstanceParams {
+  fromPartial(_: DeepPartial<InitInstanceParams>): InitInstanceParams {
     const message = createBaseInitInstanceParams();
-    message.projectId = object.projectId ?? "";
     return message;
   },
 };
