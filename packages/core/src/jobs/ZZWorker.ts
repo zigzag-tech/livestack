@@ -7,7 +7,7 @@ import { ZZProcessor } from "./ZZJob";
 import { ZZEnv } from "./ZZEnv";
 import { z } from "zod";
 import { JobId } from "@livestack/shared";
-import { resolveInstantiatedGraph } from "./resolveInstantiatedGraph";
+import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
 import { QueueJob, FromWorker } from "@livestack/vault-interface";
 import { v4 } from "uuid";
 import { genManuallyFedIterator } from "@livestack/shared";

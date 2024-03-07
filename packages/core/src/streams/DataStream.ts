@@ -1,6 +1,6 @@
 import { ZodType } from "zod";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
-import { ZZEnv } from "./ZZEnv";
+import { ZZEnv } from "../jobs/ZZEnv";
 // import { createHash } from "crypto";
 import path from "path";
 import { v4 } from "uuid";
@@ -34,7 +34,7 @@ export namespace DataStream {
 import { vaultClient } from "@livestack/vault-client";
 import { SubType } from "@livestack/vault-interface/src/generated/stream";
 import { Observable, Subscriber } from "rxjs";
-import { createLazyNextValueGenerator } from "../realtime/pubsub";
+import { createLazyNextValueGenerator } from "../jobs/pubsub";
 
 export class DataStream<T extends object> {
   public readonly def: ZodType<T> | null;
