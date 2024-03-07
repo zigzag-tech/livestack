@@ -5,8 +5,6 @@ import _m0 from "protobufjs/minimal";
 export const protobufPackage = "livestack";
 
 export interface ReportCapacityAvailability {
-  projectId: string;
-  instanceId: string;
   specName: string;
   maxCapacity: number;
 }
@@ -30,17 +28,11 @@ export interface CommandToInstance {
 }
 
 function createBaseReportCapacityAvailability(): ReportCapacityAvailability {
-  return { projectId: "", instanceId: "", specName: "", maxCapacity: 0 };
+  return { specName: "", maxCapacity: 0 };
 }
 
 export const ReportCapacityAvailability = {
   encode(message: ReportCapacityAvailability, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
-    }
-    if (message.instanceId !== "") {
-      writer.uint32(18).string(message.instanceId);
-    }
     if (message.specName !== "") {
       writer.uint32(26).string(message.specName);
     }
@@ -57,20 +49,6 @@ export const ReportCapacityAvailability = {
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.projectId = reader.string();
-          continue;
-        case 2:
-          if (tag !== 18) {
-            break;
-          }
-
-          message.instanceId = reader.string();
-          continue;
         case 3:
           if (tag !== 26) {
             break;
@@ -96,8 +74,6 @@ export const ReportCapacityAvailability = {
 
   fromJSON(object: any): ReportCapacityAvailability {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      instanceId: isSet(object.instanceId) ? globalThis.String(object.instanceId) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
       maxCapacity: isSet(object.maxCapacity) ? globalThis.Number(object.maxCapacity) : 0,
     };
@@ -105,12 +81,6 @@ export const ReportCapacityAvailability = {
 
   toJSON(message: ReportCapacityAvailability): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
-    }
-    if (message.instanceId !== "") {
-      obj.instanceId = message.instanceId;
-    }
     if (message.specName !== "") {
       obj.specName = message.specName;
     }
@@ -125,8 +95,6 @@ export const ReportCapacityAvailability = {
   },
   fromPartial(object: DeepPartial<ReportCapacityAvailability>): ReportCapacityAvailability {
     const message = createBaseReportCapacityAvailability();
-    message.projectId = object.projectId ?? "";
-    message.instanceId = object.instanceId ?? "";
     message.specName = object.specName ?? "";
     message.maxCapacity = object.maxCapacity ?? 0;
     return message;
@@ -412,8 +380,8 @@ export const CacapcityServiceDefinition = {
   name: "CacapcityService",
   fullName: "livestack.CacapcityService",
   methods: {
-    reportInstance: {
-      name: "ReportInstance",
+    reportAsInstance: {
+      name: "ReportAsInstance",
       requestType: FromInstance,
       requestStream: true,
       responseType: CommandToInstance,
@@ -424,14 +392,14 @@ export const CacapcityServiceDefinition = {
 } as const;
 
 export interface CacapcityServiceImplementation<CallContextExt = {}> {
-  reportInstance(
+  reportAsInstance(
     request: AsyncIterable<FromInstance>,
     context: CallContext & CallContextExt,
   ): ServerStreamingMethodResult<DeepPartial<CommandToInstance>>;
 }
 
 export interface CacapcityServiceClient<CallOptionsExt = {}> {
-  reportInstance(
+  reportAsInstance(
     request: AsyncIterable<DeepPartial<FromInstance>>,
     options?: CallOptions & CallOptionsExt,
   ): AsyncIterable<CommandToInstance>;
