@@ -9,6 +9,8 @@ import { Queue, Worker } from "bullmq";
 import { genPromiseCycle, genManuallyFedIterator } from "@livestack/shared";
 import { CallContext } from "nice-grpc";
 import { v4 } from "uuid";
+import { createClient } from "redis";
+import { escapeColon, getCapacityManager } from "../capacity/manager";
 
 const _rawQueueBySpecName = new Map<string, Queue>();
 
@@ -17,6 +19,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
   //   constructor({ projectId }: { projectId: string }) {
   //     this.projectId = projectId;
   //   }
+  redisClient = createClient();
 
   async initInstance(
     request: InitInstanceParams,
@@ -31,13 +34,40 @@ class QueueServiceByProject implements QueueServiceImplementation {
     //   throw new Error("Invalid projectId " + job.projectId);
     // }
     const queue = this.getQueue(job);
-    const workers = await queue.getWorkers();
-    if (workers.length === 0) {
-      // TODO: use logger
-      console.warn(
-        `No worker for queue ${queue.name}; job ${job.jobId} might be be stuck.`
+    const c = await queue.getActiveCount();
+
+    // get current capacity
+    const client = await this.redisClient.connect();
+    const projectIdN = escapeColon(job.projectId);
+    const specNameN = escapeColon(job.specName);
+    const capacity =
+      Number(
+        await client.sendCommand([
+          "HGET",
+          `zz_capacity`,
+          `${projectIdN}:${specNameN}`,
+        ])
+      ) || 0;
+
+    if (c >= capacity) {
+      console.debug(
+        `Queue ${job.specName} for project ${job.projectId} is at capacity ${c}. Trying to increase capacity.`
       );
+      await getCapacityManager().increaseCapacity({
+        projectId: job.projectId,
+        specName: job.specName,
+        by: 1,
+      });
     }
+
+    // const workers = await queue.getWorkers();
+
+    // if (workers.length === 0) {
+    //   // TODO: use logger
+    //   console.warn(
+    //     `No worker for queue ${queue.name}; job ${job.jobId} might be be stuck.`
+    //   );
+    // }
     await queue.add(
       job.jobId,
       {
@@ -153,11 +183,29 @@ class QueueServiceByProject implements QueueServiceImplementation {
             updateProgress,
             jobCompleteCycleByJobId: {},
           };
+
+          const client = await this.redisClient.connect();
+          // increment the capacity for this worker by 1
+          await client.sendCommand([
+            "HINCRBY",
+            `zz_capacity`,
+            `${projectId}:${specName}`,
+            "1",
+          ]);
+
           await worker.waitUntilReady();
 
-          context.signal.onabort = () => {
+          context.signal.onabort = async () => {
             console.debug("worker stopped for", specName, ", id:", workerId);
-            worker.close();
+            // decrement the capacity for this worker by 1
+            await client.sendCommand([
+              "HINCRBY",
+              `zz_capacity`,
+              `${projectId}:${specName}`,
+              "-1",
+            ]);
+
+            await worker.close();
           };
 
           // TODO
