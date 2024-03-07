@@ -12,7 +12,6 @@ service QueueService {
 }
 
 message InitInstanceParams {
-  string projectId = 1;
 }
 
 message InitInstanceResponse {
