@@ -63,7 +63,9 @@ class CapacityManager implements CacapcityServiceImplementation {
 
           // clear all capacities on disconnect
           context.signal.onabort = async () => {
-            console.debug("reportInstance disconnected.");
+            console.debug(
+              `Capacity disconnected: from instance ${instanceId}: ${projectId} ${reportCapacityAvailability.specName} ${maxCapacity}`
+            );
             // get the set of reported projectId:specName and clear capacity for each
             const porjectIdSpecNamePairs = (await client.sendCommand([
               "SMEMBERS",
