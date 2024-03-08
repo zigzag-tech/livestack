@@ -251,7 +251,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
 
     (async () => {
       for await (const { job } of iter) {
-        console.log("picked up job: ", job);
+        // console.debug("picked up job: ", job);
         if (!job) {
           throw new Error("Job is null");
         }
