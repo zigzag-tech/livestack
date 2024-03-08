@@ -36,31 +36,11 @@ class QueueServiceByProject implements QueueServiceImplementation {
 
     const queue = this.getQueue(job);
     // console.debug("addjob", queue.name, job);
-    const c = await queue.getActiveCount();
 
     // get current capacity
     const client = await this.redisClientP;
     const projectIdN = escapeColon(job.projectId);
     const specNameN = escapeColon(job.specName);
-    const capacity =
-      Number(
-        await client.sendCommand([
-          "HGET",
-          `zz_capacity`,
-          `${projectIdN}:${specNameN}`,
-        ])
-      ) || 0;
-
-    if (c > 0 && c >= capacity) {
-      console.debug(
-        `Queue ${job.specName} for project ${job.projectId} has ${c} active jobs, while capacity is at ${capacity}. Attempting to increase capacity.`
-      );
-      await getCapacityManager().increaseCapacity({
-        projectId: job.projectId,
-        specName: job.specName,
-        by: 1,
-      });
-    }
 
     // const workers = await queue.getWorkers();
 
@@ -83,6 +63,28 @@ class QueueServiceByProject implements QueueServiceImplementation {
         jobId: job.jobId,
       }
     );
+    const c = (await queue.getWaitingCount()) + (await queue.getActiveCount());
+
+    const capacity =
+      Number(
+        await client.sendCommand([
+          "HGET",
+          `zz_capacity`,
+          `${projectIdN}:${specNameN}`,
+        ])
+      ) || 0;
+
+    if (c > 0 && c >= capacity) {
+      console.debug(
+        `Queue ${job.specName} for project ${job.projectId} has ${c} waiting+active jobs, while capacity is at ${capacity}. Attempting to increase capacity.`
+      );
+      await getCapacityManager().increaseCapacity({
+        projectId: job.projectId,
+        specName: job.specName,
+        by: 1,
+      });
+    }
+
     return {};
   }
 
