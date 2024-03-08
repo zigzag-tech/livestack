@@ -74,15 +74,18 @@ class QueueServiceByProject implements QueueServiceImplementation {
         ])
       ) || 0;
 
-    if (c > 0 && c >= capacity) {
+    if (c > 0 && c > capacity) {
+      const diff = c - capacity;
       console.debug(
-        `Queue ${job.specName} for project ${job.projectId} has ${c} waiting+active jobs, while capacity is at ${capacity}. Attempting to increase capacity.`
+        `Queue ${job.specName} for project ${job.projectId} has ${c} waiting+active jobs, while capacity is at ${capacity}. Attempting to increase capacity by ${diff}.`
       );
-      await getCapacityManager().increaseCapacity({
-        projectId: job.projectId,
-        specName: job.specName,
-        by: 1,
-      });
+      for (let i = 0; i < diff; i++) {
+        await getCapacityManager().increaseCapacity({
+          projectId: job.projectId,
+          specName: job.specName,
+          by: 1,
+        });
+      }
     }
 
     return {};
@@ -213,11 +216,13 @@ class QueueServiceByProject implements QueueServiceImplementation {
             ]);
 
             console.debug(
-              "worker stopped for",
+              "Worker stopped for",
               specName,
               ", id:",
               workerId,
-              ". capacity count reduced to ",
+              ". capacity for ",
+              worker.name,
+              " reduced to ",
               Number(
                 await client.sendCommand([
                   "HGET",
