@@ -73,7 +73,7 @@ export class ZZJob<
   };
 
   storageProvider?: IStorageProvider;
-  readonly zzEnv: ZZEnv;
+  readonly zzEnvP: Promise<ZZEnv>;
   private _dummyProgressCount = 0;
   public workerInstanceParams: WP extends object ? WP : null =
     null as WP extends object ? WP : null;
@@ -138,7 +138,7 @@ export class ZZJob<
     }
 
     this.storageProvider = p.storageProvider;
-    this.zzEnv = p.jobSpec.zzEnvEnsured;
+    this.zzEnvP = p.jobSpec.zzEnvP;
     this.spec = p.jobSpec;
 
     this.inputStreamFnsByTag = {};
@@ -293,7 +293,7 @@ export class ZZJob<
   private getParentRec = async () => {
     if (this._parentRec === "uninitialized") {
       const { null_response, rec } = await vaultClient.db.getParentJobRec({
-        projectId: this.zzEnv.projectId,
+        projectId: (await this.zzEnvP).projectId,
         childJobId: this.jobId,
       });
       if (!rec) {
@@ -395,11 +395,11 @@ export class ZZJob<
     const jId = {
       specName: this.spec.name,
       jobId: this.jobId,
-      projectId: this.zzEnv.projectId,
+      projectId: (await this.zzEnvP).projectId,
     };
 
     const logger = this.logger;
-    const projectId = this.zzEnv.projectId;
+    const projectId = (await this.zzEnvP).projectId;
 
     logger.info(
       `Job started. Job ID: ${this.jobId}.` +
@@ -510,7 +510,7 @@ export class ZZJob<
       throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
     } else {
       return getPublicCdnUrl({
-        projectId: this.zzEnv.projectId,
+        projectId: (await this.zzEnvP).projectId,
         jobId: this.jobId,
         key: String(key),
         storageProvider: this.storageProvider,
