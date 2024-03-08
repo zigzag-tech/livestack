@@ -296,12 +296,12 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     })();
 
     (async () => {
-      console.debug(
-        "worker ready to sign up",
-        that.workerId,
-        (await that.zzEnvP).projectId,
-        that.jobSpec.name
-      );
+      // console.debug(
+      //   "worker ready to sign up",
+      //   that.workerId,
+      //   (await that.zzEnvP).projectId,
+      //   that.jobSpec.name
+      // );
       sendNextActivity({
         signUp: {
           projectId: (await that.zzEnvP).projectId,
