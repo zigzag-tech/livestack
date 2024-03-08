@@ -35,6 +35,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     // }
 
     const queue = this.getQueue(job);
+    console.debug("addjob", queue.name, job);
     const c = await queue.getActiveCount();
 
     // get current capacity
@@ -50,9 +51,9 @@ class QueueServiceByProject implements QueueServiceImplementation {
         ])
       ) || 0;
 
-    if (c >= capacity) {
+    if (c > 0 && c >= capacity) {
       console.debug(
-        `Queue ${job.specName} for project ${job.projectId} has ${c} active jobs, while capacity is at ${capacity}. Trying to increase capacity.`
+        `Queue ${job.specName} for project ${job.projectId} has ${c} active jobs, while capacity is at ${capacity}. Attempting to increase capacity.`
       );
       await getCapacityManager().increaseCapacity({
         projectId: job.projectId,
@@ -69,6 +70,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     //     `No worker for queue ${queue.name}; job ${job.jobId} might be be stuck.`
     //   );
     // }
+
     await queue.add(
       job.jobId,
       {
@@ -152,13 +154,13 @@ class QueueServiceByProject implements QueueServiceImplementation {
           //   if (projectId !== this.projectId) {
           //     throw new Error("Invalid projectId " + projectId);
           //   }
+          // console.debug("Adding worker", `${projectId}/${specName}`);
           const worker = new Worker(
             `${projectId}/${specName}`,
             async (job) => {
               const jobCompleteCycle = genPromiseCycle();
               this.workerBundleById[workerId].jobCompleteCycleByJobId[job.id!] =
                 jobCompleteCycle;
-
               await sendJob({
                 workerId,
                 job: {
@@ -222,8 +224,9 @@ class QueueServiceByProject implements QueueServiceImplementation {
                 ])
               ) || 0
             );
+
             this.currentJobByWorkerId[workerId] &&
-              this.workerBundleById[workerId].jobCompleteCycleByJobId[
+              this.workerBundleById[workerId]?.jobCompleteCycleByJobId[
                 this.currentJobByWorkerId[workerId].jobId
               ].rejectNext({
                 message: "Worker disconnected from vault server.",
