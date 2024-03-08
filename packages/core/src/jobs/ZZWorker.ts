@@ -204,7 +204,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     const that = this;
 
     // create async iterator to report duty
-    const { iterator: iterParams, resolveNext: resolveNext } =
+    const { iterator: iterParams, resolveNext: sendNextActivity } =
       genManuallyFedIterator<FromWorker>((v) => {
         // console.info(`DUTY REPORT: ${JSON.stringify(v)}`);
       });
@@ -216,7 +216,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
 
     // console.info(`WORKER STARTED: ${this.workerName}.`);
 
-    const doIt = async ({ jobId, jobOptionsStr }: QueueJob) => {
+    const processJob = async ({ jobId, jobOptionsStr }: QueueJob) => {
       const jobOptions = JSON.parse(jobOptionsStr);
       const localG = await resolveInstantiatedGraph({
         jobId,
@@ -234,7 +234,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
         workerName: await that.workerNameP,
         graph: localG,
         updateProgress: async (progress): Promise<void> => {
-          resolveNext({
+          sendNextActivity({
             progressUpdate: {
               jobId,
               progress,
@@ -251,19 +251,19 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
 
     (async () => {
       for await (const { job } of iter) {
-        // console.log("picked up job: ", job);
+        console.log("picked up job: ", job);
         if (!job) {
           throw new Error("Job is null");
         }
 
         try {
-          await doIt(job);
+          await processJob(job);
           // console.log("jobCompleted", {
           //   jobId: job.jobId,
           //   projectId: that.zzEnv.projectId,
           //   specName: that.jobSpec.name,
           // });
-          resolveNext({
+          sendNextActivity({
             jobCompleted: {
               jobId: job.jobId,
               projectId: (await that.zzEnvP).projectId,
@@ -279,7 +279,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
             specName: that.jobSpec.name,
             errorStr: JSON.stringify(err),
           });
-          resolveNext({
+          sendNextActivity({
             jobFailed: {
               jobId: job.jobId,
               projectId: (await that.zzEnvP).projectId,
@@ -293,14 +293,16 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
           );
         }
       }
+    })();
 
+    (async () => {
       console.debug(
         "worker ready to sign up",
         that.workerId,
         (await that.zzEnvP).projectId,
         that.jobSpec.name
       );
-      resolveNext({
+      sendNextActivity({
         signUp: {
           projectId: (await that.zzEnvP).projectId,
           specName: that.jobSpec.name,
