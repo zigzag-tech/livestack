@@ -41,7 +41,7 @@ class CapacityManager implements CacapcityServiceImplementation {
           this.resolveByInstanceId[instanceId] = resolveJobPromise;
           const { maxCapacity } = reportCapacityAvailability;
           console.debug(
-            `reportCapacityAvailability: ${instanceId} ${projectId} ${reportCapacityAvailability.specName} ${maxCapacity}`
+            `reportCapacityAvailability from instance ${instanceId}: ${projectId} ${reportCapacityAvailability.specName} ${maxCapacity}`
           );
 
           const client = await this.redisClientP;
