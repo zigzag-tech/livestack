@@ -35,7 +35,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     // }
 
     const queue = this.getQueue(job);
-    console.debug("addjob", queue.name, job);
+    // console.debug("addjob", queue.name, job);
     const c = await queue.getActiveCount();
 
     // get current capacity
