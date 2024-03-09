@@ -21,3 +21,4 @@ export * from "./storage/cloudStorage";
 export * from "./utils/createWorkerLogger";
 import { longStringTruncator } from "./utils/longStringTruncator";
 export { longStringTruncator };
+export { sleep } from "./utils/sleep";
