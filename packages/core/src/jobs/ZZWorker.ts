@@ -246,7 +246,9 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
         },
       });
 
-      return await zzJ.beginProcessing(this.def.processor.bind(zzJ) as any);
+      const r = await zzJ.beginProcessing(this.def.processor.bind(zzJ) as any);
+
+      return r;
     };
 
     (async () => {
