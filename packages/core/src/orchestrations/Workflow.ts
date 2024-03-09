@@ -443,78 +443,90 @@ export class WorkflowSpec extends JobSpec<
           return node.jobId !== `[${groupId}]${this.name}`;
         });
 
-        for (let i = 0; i < jobNodesExceptSelf.length; i++) {
-          const jobNodeId = jobNodesExceptSelf[i];
-          const jobNode = instG.getNodeAttributes(jobNodeId) as JobNode;
+        const managers = await Promise.all(
+          jobNodesExceptSelf.map(async (jobNodeId) => {
+            const jobNode = instG.getNodeAttributes(jobNodeId) as JobNode;
 
-          //calculate input and output overrides
-          const inputStreamIdOverridesByTag: Record<string, string> = {};
-          const outputStreamIdOverridesByTag: Record<string, string> = {};
+            //calculate input and output overrides
+            const inputStreamIdOverridesByTag: Record<string, string> = {};
+            const outputStreamIdOverridesByTag: Record<string, string> = {};
 
-          // get the stream id overrides for the input
-          const inboundEdges = instG.inboundEdges(jobNodeId);
-          const inletEdgeIds = inboundEdges.filter((e) => {
-            const node = instG.getNodeAttributes(instG.source(e));
-            return node.nodeType === "inlet";
-          });
-          const inletNodeIds = inletEdgeIds.map((e) => instG.source(e));
-          for (const inletNodeId of inletNodeIds) {
-            const inletNode = instG.getNodeAttributes(inletNodeId);
-            if (inletNode.nodeType !== "inlet") {
-              throw new Error("Expected inlet node");
-            }
-            const streamToInpetEdgeId = instG.inboundEdges(inletNodeId)[0];
-            const streamNodeId = instG.source(streamToInpetEdgeId);
-            const streamNode = instG.getNodeAttributes(streamNodeId);
-            if (streamNode.nodeType !== "stream") {
-              throw new Error("Expected stream node");
-            }
-            const streamId = streamNode.streamId;
-            inputStreamIdOverridesByTag[inletNode.tag] = streamId;
-          }
-
-          // get the stream id overrides for the output
-          const outboundEdges = instG.outboundEdges(jobNodeId);
-          const outletEdgeIds = outboundEdges.filter((e) => {
-            const node = instG.getNodeAttributes(instG.target(e));
-            return node.nodeType === "outlet";
-          });
-          const outletNodeIds = outletEdgeIds.map((e) => instG.target(e));
-
-          for (const outletNodeId of outletNodeIds) {
-            const outletNode = instG.getNodeAttributes(outletNodeId);
-            if (outletNode.nodeType !== "outlet") {
-              throw new Error("Expected outlet node");
+            // get the stream id overrides for the input
+            const inboundEdges = instG.inboundEdges(jobNodeId);
+            const inletEdgeIds = inboundEdges.filter((e) => {
+              const node = instG.getNodeAttributes(instG.source(e));
+              return node.nodeType === "inlet";
+            });
+            const inletNodeIds = inletEdgeIds.map((e) => instG.source(e));
+            for (const inletNodeId of inletNodeIds) {
+              const inletNode = instG.getNodeAttributes(inletNodeId);
+              if (inletNode.nodeType !== "inlet") {
+                throw new Error("Expected inlet node");
+              }
+              const streamToInpetEdgeId = instG.inboundEdges(inletNodeId)[0];
+              const streamNodeId = instG.source(streamToInpetEdgeId);
+              const streamNode = instG.getNodeAttributes(streamNodeId);
+              if (streamNode.nodeType !== "stream") {
+                throw new Error("Expected stream node");
+              }
+              const streamId = streamNode.streamId;
+              inputStreamIdOverridesByTag[inletNode.tag] = streamId;
             }
 
-            const streamFromOutputEdgeId = instG.outboundEdges(outletNodeId)[0];
-            const streamNodeId = instG.target(streamFromOutputEdgeId);
-            const streamNode = instG.getNodeAttributes(streamNodeId);
-            if (streamNode.nodeType !== "stream") {
-              throw new Error("Expected stream node");
+            // get the stream id overrides for the output
+            const outboundEdges = instG.outboundEdges(jobNodeId);
+            const outletEdgeIds = outboundEdges.filter((e) => {
+              const node = instG.getNodeAttributes(instG.target(e));
+              return node.nodeType === "outlet";
+            });
+            const outletNodeIds = outletEdgeIds.map((e) => instG.target(e));
+
+            for (const outletNodeId of outletNodeIds) {
+              const outletNode = instG.getNodeAttributes(outletNodeId);
+              if (outletNode.nodeType !== "outlet") {
+                throw new Error("Expected outlet node");
+              }
+
+              const streamFromOutputEdgeId =
+                instG.outboundEdges(outletNodeId)[0];
+              const streamNodeId = instG.target(streamFromOutputEdgeId);
+              const streamNode = instG.getNodeAttributes(streamNodeId);
+              if (streamNode.nodeType !== "stream") {
+                throw new Error("Expected stream node");
+              }
+              const streamId = streamNode.streamId;
+              outputStreamIdOverridesByTag[outletNode.tag] = streamId;
             }
-            const streamId = streamNode.streamId;
-            outputStreamIdOverridesByTag[outletNode.tag] = streamId;
-          }
 
-          const childSpecName = jobNode.specName;
-          const childJobSpec = JobSpec.lookupByName(childSpecName);
+            const childSpecName = jobNode.specName;
+            const childJobSpec = JobSpec.lookupByName(childSpecName);
 
-          await childJobSpec.enqueueJob({
-            jobId: jobNode.jobId,
-            parentJobId: groupId,
-            uniqueSpecLabel: jobNode.uniqueSpecLabel,
-            jobOptions: childrenJobOptions?.find(({ spec: specQuery }) => {
-              const specInfo = resolveUniqueSpec(specQuery);
-              return (
-                specInfo.spec.name === childSpecName &&
-                specInfo.uniqueSpecLabel === jobNode.uniqueSpecLabel
-              );
-            })?.params,
-            inputStreamIdOverridesByTag,
-            outputStreamIdOverridesByTag,
-          });
-        }
+            return await childJobSpec.enqueueJob({
+              jobId: jobNode.jobId,
+              parentJobId: groupId,
+              uniqueSpecLabel: jobNode.uniqueSpecLabel,
+              jobOptions: childrenJobOptions?.find(({ spec: specQuery }) => {
+                const specInfo = resolveUniqueSpec(specQuery);
+                return (
+                  specInfo.spec.name === childSpecName &&
+                  specInfo.uniqueSpecLabel === jobNode.uniqueSpecLabel
+                );
+              })?.params,
+              inputStreamIdOverridesByTag,
+              outputStreamIdOverridesByTag,
+            });
+          })
+        );
+
+        // TODO: wait for all the child jobs to finish
+
+        // await Promise.all(
+        //   managers.map(async (m) => {
+        //     const out = await m.output("__zz_job_status");
+        //     const r = await out.nextValue();
+        //     return r;
+        //   })
+        // );
 
         await output("__zz_workflow_status").emit({
           __zz_workflow_status: "finished",
