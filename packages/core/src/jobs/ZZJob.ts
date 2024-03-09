@@ -454,6 +454,8 @@ export class ZZJob<
       //   return processedR;
       // }
     } catch (e: any) {
+      console.error("Error while running job: ", this.jobId, e);
+      
       await vaultClient.db.appendJobStatusRec({
         projectId,
         specName: this.spec.name,
