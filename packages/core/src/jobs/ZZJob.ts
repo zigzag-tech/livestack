@@ -411,18 +411,19 @@ export class ZZJob<
         ...jId,
         jobStatus: "running",
       });
-      const allInputUnsubscribed = Promise.all(
+      const unsubs = Promise.all(
         (
           _.values(
             this.inputStreamFnsByTag
           ) as (typeof this.inputStreamFnsByTag)[keyof IMap][]
-        ).map(async (x) => {
-          await new Promise<void>((resolve) => {
-            x!.subscriberCountObservable
+        ).map((x) => {
+          return new Promise<void>((resolve) => {
+            const unsub = x!.subscriberCountObservable
               .pipe(takeUntil(x!.inputObservableUntracked))
               .subscribe((count) => {
-                console.log("count", count);
+                // console.log("count", count);
                 if (count === 0) {
+                  unsub.unsubscribe();
                   resolve();
                 }
               });
@@ -433,7 +434,7 @@ export class ZZJob<
       // console.debug("processed", this.jobId);
 
       // wait as long as there are still subscribers
-      await allInputUnsubscribed;
+      await unsubs;
 
       if (processedR && this.spec.isOutputSingle) {
         await this.output.emit(processedR);
