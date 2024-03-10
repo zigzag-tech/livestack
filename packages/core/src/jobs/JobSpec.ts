@@ -593,7 +593,6 @@ export class JobSpec<
       });
     });
     const streamIdP = streamP.then((stream) => stream.uniqueName);
-
     return wrapStreamSubscriberWithTermination(streamIdP, subuscriberP);
   }
 
@@ -882,6 +881,7 @@ export class JobSpec<
                 const input = await subscriber.nextValue();
                 if (!input) {
                   subs.complete();
+                  subs.unsubscribe();
                   break;
                 }
                 subs.next(input);
@@ -889,6 +889,7 @@ export class JobSpec<
             });
             return () => {
               subs.complete();
+              subs.unsubscribe();
             };
           }
         ),
