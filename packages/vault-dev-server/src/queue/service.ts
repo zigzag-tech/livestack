@@ -205,8 +205,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
           ]);
 
           await worker.waitUntilReady();
-
-          context.signal.onabort = async () => {
+          const abortListener = async () => {
             // decrement the capacity for this worker by 1
             await client.sendCommand([
               "HINCRBY",
@@ -240,7 +239,9 @@ class QueueServiceByProject implements QueueServiceImplementation {
               });
 
             await worker.close();
+            context.signal.removeEventListener("abort", abortListener);
           };
+          context.signal.addEventListener("abort", abortListener); 
 
           // TODO
         } else if (progressUpdate) {
