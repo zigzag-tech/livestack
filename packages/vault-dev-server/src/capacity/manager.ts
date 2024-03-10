@@ -62,7 +62,7 @@ class CapacityManager implements CacapcityServiceImplementation {
           ]);
 
           // clear all capacities on disconnect
-          context.signal.onabort = async () => {
+          const abortListener = async () => {
             console.debug(
               `Capacity gone: from instance ${instanceId}: ${projectId} ${reportCapacityAvailability.specName} ${maxCapacity}`
             );
@@ -87,7 +87,9 @@ class CapacityManager implements CacapcityServiceImplementation {
                 instanceIdN,
               ]);
               delete this.resolveByInstanceId[instanceIdN];
+              context.signal.removeEventListener("abort", abortListener);
             }
+            context.signal.addEventListener("abort", abortListener);
           };
         } else {
           throw new Error("Invalid command");
