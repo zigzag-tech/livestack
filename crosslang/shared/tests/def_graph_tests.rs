@@ -323,7 +323,9 @@ mod tests {
         graph.assign_alias(alias, spec_name, "RootSpec", None, type_, tag);
 
         // Look up the alias
-        let found_alias = graph.lookup_root_spec_alias(spec_name, tag, type_);
+        let found_alias = graph.lookup_root_spec_alias(
+            spec_name.to_string(), tag.to_string(), type_.to_string()
+        );
 
         assert_eq!(found_alias, Some(alias.to_string()));
     }
