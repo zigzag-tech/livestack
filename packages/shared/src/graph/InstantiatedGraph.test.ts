@@ -42,9 +42,9 @@ describe("InstantiatedGraph", () => {
     // Check if all nodes from the DefGraph are present in the InstantiatedGraph
     const nodes = instantiatedGraph.nodes();
     expect(nodes).toContain("rootJob");
+    expect(nodes).toContain("[testContext](*)>>RootSpec/input1");
+    expect(nodes).toContain("[testContext](*)>>RootSpec/input2");
     expect(nodes).toContain("[testContext]SpecA");
-    expect(nodes).toContain("[testContext]input1");
-    expect(nodes).toContain("[testContext]output1");
 
     // Check if all edges from the DefGraph are present in the InstantiatedGraph
     const edges = instantiatedGraph.edges();
