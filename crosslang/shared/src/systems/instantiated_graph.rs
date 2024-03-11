@@ -58,8 +58,7 @@ impl InstantiatedGraph {
     ) -> Self {
         let graph = DiGraph::<InstantiatedGraphNode, ()>::new();
         let node_indices = HashMap::new();
-        let mut instantiated_graph = InstantiatedGraph {
-        InstantiatedGraph {
+        let mut instantiated_graph =        InstantiatedGraph {
             graph,
             node_indices,
             context_id,
@@ -92,8 +91,6 @@ impl InstantiatedGraph {
         //     connect the corresponding nodes in instantiated_graph
         // Note: The actual Rust code will need to handle the specifics of node and edge creation
         // and will likely require additional helper methods to be defined.
-    }
-        }
     }
 
     // Methods to manipulate the graph will be added here
