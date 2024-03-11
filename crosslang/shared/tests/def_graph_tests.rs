@@ -379,10 +379,10 @@ mod tests {
 
         // Verify the nodes and connections
         
-        assert_matches!(graph.node_weight(from_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name == Some(from.spec_name) && node.unique_spec_label.as_deref() == Some(from.output.as_str()));
+        assert_matches!(graph.node_weight(from_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name == Some(from.spec_name) && node.unique_spec_label == from.unique_spec_label);
         assert_matches!(graph.node_weight(to_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name == Some(to.spec_name) && node.unique_spec_label == to.unique_spec_label);
         assert_matches!(graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef);
-        assert_matches!(graph.node_weight(from_outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(from.output.as_str()));
+        assert_matches!(graph.node_weight(from_outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag == Some(from.output));
         assert_matches!(graph.node_weight(to_inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag == Some(to.input) && node.has_transform == Some(to.has_transform));
 
         // Verify the edges
