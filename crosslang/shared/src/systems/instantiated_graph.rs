@@ -58,6 +58,7 @@ impl InstantiatedGraph {
     ) -> Self {
         let graph = DiGraph::<InstantiatedGraphNode, ()>::new();
         let node_indices = HashMap::new();
+        let mut instantiated_graph = InstantiatedGraph {
         InstantiatedGraph {
             graph,
             node_indices,
@@ -67,6 +68,31 @@ impl InstantiatedGraph {
             inlet_has_transform_overrides_by_tag,
             stream_source_spec_type_by_stream_id,
             def_graph,
+        };
+        instantiated_graph.instantiate();
+        instantiated_graph
+    }
+
+    // Additional methods to manipulate the graph will be added here
+
+    fn instantiate(&mut self) {
+        // Logic to instantiate the graph based on the def_graph
+        // This will involve iterating over the nodes and edges of the def_graph
+        // and creating corresponding nodes and edges in the instantiated graph.
+        // The logic will be similar to the TypeScript version of the instantiate method.
+        // Pseudocode:
+        // for each node in def_graph:
+        //     if node is a spec node:
+        //         create a job node in instantiated_graph
+        //     else if node is a stream-def node:
+        //         create a stream node in instantiated_graph
+        //     else:
+        //         create the same type of node in instantiated_graph
+        // for each edge in def_graph:
+        //     connect the corresponding nodes in instantiated_graph
+        // Note: The actual Rust code will need to handle the specifics of node and edge creation
+        // and will likely require additional helper methods to be defined.
+    }
         }
     }
 
