@@ -78,40 +78,53 @@ impl DefGraph {
 impl DefGraph {
 
     /// Deserializes a `DefGraph` from a JSON string.
-    pub fn load_from_json(json_str: &str) -> Result<Self, serde_json::Error> {
+    #[napi(factory)]
+    pub fn load_from_json(json_str: String) -> Self {
         // Deserialize the JSON string to a SerializedDefGraph
-        let graph: DefGraph = serde_json::from_str(json_str)?;
+        let graph: DefGraph = serde_json::from_str(&json_str)
+            .expect("Failed to deserialize the JSON string to a DefGraph");
 
-        Ok(graph)
+        graph
     }
     /// Serializes the `DefGraph` to a JSON string.
-    pub fn to_json(&self) -> Result<String, serde_json::Error> {
-       
-        // Serialize it to a JSON string
+    #[napi]
+    pub fn to_json(&self) -> napi::Result<String> {
         serde_json::to_string(&self)
+            .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("JSON serialization error: {}", e)))
     }
-    pub fn get_all_alias_node_ids(&self) -> Vec<NodeIndex> {
+
+    #[napi]
+    pub fn get_all_alias_node_ids(&self) -> Vec<u32> {
         self.graph
             .node_indices()
-            .filter(|&index| {
+            .filter_map(|index| {
                 if let Some(node) = self.graph.node_weight(index) {
-                    node.node_type == NodeType::Alias
+                    if node.node_type == NodeType::Alias {
+                        // Cast usize to u32 here
+                        Some(index.index() as u32)
+                    } else {
+                        None
+                    }
                 } else {
-                    false
+                    None
                 }
             })
             .collect()
+           
     }
 
-    pub fn get_root_spec_node_id(&self) -> Option<NodeIndex> {
+    #[napi]
+    pub fn get_root_spec_node_id(&self) -> Option<u32> {
         self.graph.node_indices().find(|&index| {
             if let Some(node) = self.graph.node_weight(index) {
                 node.node_type == NodeType::RootSpec
             } else {
                 false
             }
-        })
+        }).map(|index| index.index() as u32) // Convert NodeIndex to u32
     }
+
+    
     pub fn lookup_spec_and_tag_by_alias(
         &self,
         alias: &str,
@@ -126,27 +139,29 @@ impl DefGraph {
                 node.node_type == NodeType::Alias && node.alias.as_deref() == Some(alias)
             }),
             _ => None,
-        }?;
+        }?.index() as u32;
 
         let (spec_node_id, tag) = match direction {
             "in" => {
-                let inlet_node_id = self.find_inbound_neighbor(alias_node_id, |node| {
+                let inlet_node_id_idx = self.find_inbound_neighbor(alias_node_id, |node| {
                     node.node_type == NodeType::Inlet
                 })?;
+                let inlet_node_id = inlet_node_id_idx.index() as u32;
                 let spec_node_id = self.find_outbound_neighbor(inlet_node_id, |node| {
                     node.node_type == NodeType::Spec
                 })?;
-                let tag = self.graph.node_weight(inlet_node_id)?.tag.clone()?;
+                let tag = self.graph.node_weight(inlet_node_id_idx)?.tag.clone()?;
                 (spec_node_id, tag)
             }
             "out" => {
-                let outlet_node_id = self.find_outbound_neighbor(alias_node_id, |node| {
+                let outlet_node_id_idx = self.find_outbound_neighbor(alias_node_id, |node| {
                     node.node_type == NodeType::Outlet
                 })?;
+                let outlet_node_id = outlet_node_id_idx.index() as u32;
                 let spec_node_id = self.find_inbound_neighbor(outlet_node_id, |node| {
                     node.node_type == NodeType::Spec
                 })?;
-                let tag = self.graph.node_weight(outlet_node_id)?.tag.clone()?;
+                let tag = self.graph.node_weight(outlet_node_id_idx)?.tag.clone()?;
                 (spec_node_id, tag)
             }
             _ => return None,
@@ -170,18 +185,18 @@ impl DefGraph {
     ) -> Option<String> {
         let spec_node_id = self.find_node(|node| {
             node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(spec_name)
-        })?;
+        })?.index() as u32;
         let alias_node_id = match direction {
             "in" => {
                 let inlet_node_id = self.find_inbound_neighbor(spec_node_id, |node| {
                     node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
-                })?;
+                })?.index() as u32;
                 self.find_outbound_neighbor(inlet_node_id, |node| node.node_type == NodeType::Alias)
             }
             "out" => {
                 let outlet_node_id = self.find_outbound_neighbor(spec_node_id, |node| {
                     node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
-                })?;
+                })?.index() as u32;
                 self.find_inbound_neighbor(outlet_node_id, |node| node.node_type == NodeType::Alias)
             }
             _ => return None,
@@ -196,26 +211,28 @@ impl DefGraph {
 
     pub fn find_inbound_neighbor<F>(
         &self,
-        node_id: NodeIndex,
+        node_id: u32,
         condition: F,
     ) -> Option<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
     {
-        self.filter_inbound_neighbors(node_id, condition)
+        let node_id_index = NodeIndex::new(node_id as usize);
+        self.filter_inbound_neighbors(node_id_index, condition)
             .into_iter()
             .next()
     }
 
     pub fn find_outbound_neighbor<F>(
         &self,
-        node_id: NodeIndex,
+        node_id: u32,
         condition: F,
     ) -> Option<NodeIndex>
     where
         F: FnMut(&DefGraphNode) -> bool,
     {
-        self.filter_outbound_neighbors(node_id, condition)
+        let node_id_index = NodeIndex::new(node_id as usize);
+        self.filter_outbound_neighbors(node_id_index, condition)
             .into_iter()
             .next()
     }
@@ -363,10 +380,12 @@ impl DefGraph {
             },
         );
 
+        let spec_node_id_index = spec_node_id.index() as u32;
+
         match type_ {
             "in" => {
                 let inlet_node_id = self
-                    .find_inbound_neighbor(spec_node_id, |node| {
+                    .find_inbound_neighbor(spec_node_id_index, |node| {
                         node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
                     })
                     .expect("Inlet node not found");
@@ -375,7 +394,7 @@ impl DefGraph {
             }
             "out" => {
                 let outlet_node_id = self
-                    .find_outbound_neighbor(spec_node_id, |node| {
+                    .find_outbound_neighbor(spec_node_id_index, |node| {
                         node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
                     })
                     .expect("Outlet node not found");
