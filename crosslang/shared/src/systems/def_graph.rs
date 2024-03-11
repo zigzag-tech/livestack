@@ -1,7 +1,7 @@
 use crate::systems::def_graph_utils::{unique_spec_identifier, unique_stream_identifier};
 use petgraph::graph::DiGraph;
 // use petgraph::graph::Node;
-use napi_derive::napi;
+// use napi_derive::napi;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
@@ -9,8 +9,8 @@ use std::collections::HashMap;
 
 use super::def_graph_utils::{FromSpecAndTag, SpecTagInfo, ToSpecAndTag};
 
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-#[napi]
+#[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
+// #[napi]
 pub enum NodeType {
     RootSpec,
     Spec,
@@ -42,17 +42,17 @@ pub struct DefGraphNode {
 
 
 #[derive(Serialize, Deserialize, Debug)]
-#[napi]
+// #[napi]
 pub struct DefGraph {
     graph: DiGraph<DefGraphNode, ()>,
     node_indices: HashMap<String, NodeIndex>,
 }
 
-#[napi]
+// #[napi]
 impl DefGraph {
    
     /// Deserializes a `DefGraph` from a JSON string.
-    #[napi(factory)]
+    // #[napi(factory)]
     pub fn load_from_json(json_str: String) -> Self {
         // Deserialize the JSON string to a SerializedDefGraph
         let graph: DefGraph = serde_json::from_str(&json_str)
@@ -61,14 +61,9 @@ impl DefGraph {
         graph
     }
     /// Serializes the `DefGraph` to a JSON string.
-    #[napi]
-    pub fn to_json(&self) -> napi::Result<String> {
-        serde_json::to_string(&self).map_err(|e| {
-            napi::Error::new(
-                napi::Status::GenericFailure,
-                format!("JSON serialization error: {}", e),
-            )
-        })
+    // #[napi]
+    pub fn to_json(&self) -> Result<String, serde_json::Error>{
+        serde_json::to_string(&self)
     }
 
      /// Retrieves all node indices.
@@ -76,7 +71,8 @@ impl DefGraph {
         self.node_indices.values().cloned().collect()
     }
 
-    pub fn node_weight(&self, index: NodeIndex) -> Option<DefGraphNode> {
+    pub fn node_weight(&self, index: u32) -> Option<DefGraphNode> {
+        let index = NodeIndex::new(index as usize);
         let w = self.graph.node_weight(index);
         if let Some(w) = w {
             Some(DefGraphNode {
@@ -103,7 +99,9 @@ impl DefGraph {
             .collect()
     }
 
-    pub fn contains_edge(&self, from: NodeIndex, to: NodeIndex) -> bool {
+    pub fn contains_edge(&self, from: u32, to: u32) -> bool {
+        let from = NodeIndex::new(from as usize);
+        let to = NodeIndex::new(to as usize);
         self.graph.contains_edge(from, to)
     }
 
@@ -116,7 +114,7 @@ impl DefGraph {
     }
 
 
-    #[napi]
+    // #[napi]
     pub fn get_all_alias_node_ids(&self) -> Vec<u32> {
         self.graph
             .node_indices()
@@ -135,7 +133,7 @@ impl DefGraph {
             .collect()
     }
 
-    #[napi]
+    // #[napi]
     pub fn get_root_spec_node_id(&self) -> Option<u32> {
         self.graph
             .node_indices()
@@ -149,7 +147,7 @@ impl DefGraph {
             .map(|index| index.index() as u32) // Convert NodeIndex to u32
     }
 
-    #[napi]
+    // #[napi]
     pub fn lookup_spec_and_tag_by_alias(
         &self,
         alias: String,
@@ -210,7 +208,7 @@ impl DefGraph {
         })
     }
 
-    #[napi]
+    // #[napi]
     pub fn lookup_root_spec_alias(
         &self,
         spec_name: String,
@@ -390,8 +388,9 @@ impl DefGraph {
         type_: &str,
         tag: &str,
     ) {
+        
         let spec_node_id = self
-            .find_node(|node| {
+            .find_node( |node| {
                 Ok(node.node_type == NodeType::Spec
                     && node.spec_name.as_deref() == Some(spec_name)
                     && node.unique_spec_label.as_deref() == unique_spec_label)
@@ -434,6 +433,7 @@ impl DefGraph {
             "out" => {
                 let outlet_node_id = self
                     .find_outbound_neighbor(spec_node_id, |node| {
+                        
                         Ok(node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag))
                     })
                     .expect("Outlet node not found");
@@ -552,13 +552,12 @@ impl DefGraph {
     
     pub fn ensure_inlet_and_stream(
         &mut self,
-        spec_name: String,
-        tag: String,
+        spec_name: &str,
+        tag: &str,
         has_transform: bool,
     ) -> (u32, u32) {
-        let spec_name_c = spec_name.clone();
 
-        let spec_id = unique_spec_identifier(spec_name, None);
+        let spec_id = unique_spec_identifier(spec_name.to_string(), None);
         let spec_node_id = self.ensure_node(
             &spec_id,
             DefGraphNode {
@@ -590,7 +589,7 @@ impl DefGraph {
         );
 
 
-        let stream_def_id = format!("{}_{}_stream", spec_name_c, tag);
+        let stream_def_id = format!("{}_{}_stream", spec_name.to_string(), tag);
         let stream_node_id = self.ensure_node(
             &format!("{}_{}_stream", spec_id, tag),
             DefGraphNode {
@@ -617,9 +616,8 @@ impl DefGraph {
     }
 
     
-    pub fn ensure_outlet_and_stream(&mut self, spec_name: String, tag: String) -> (u32, u32) {
-        let spec_name_c = spec_name.clone();
-        let spec_id = unique_spec_identifier(spec_name, None);
+    pub fn ensure_outlet_and_stream(&mut self, spec_name: &str, tag: &str) -> (u32, u32) {
+        let spec_id = unique_spec_identifier(spec_name.to_string(), None);
         let spec_node_id = self.ensure_node(
             &spec_id,
             DefGraphNode {
@@ -650,7 +648,7 @@ impl DefGraph {
             },
         );
 
-        let stream_def_id = format!("{}_{}_stream", spec_name_c, tag);
+        let stream_def_id = format!("{}_{}_stream", spec_name, tag);
         let stream_node_id = self.ensure_node(
             &format!("{}_{}_stream", spec_id, tag),
             DefGraphNode {
@@ -676,7 +674,7 @@ impl DefGraph {
         (outlet_node_id, stream_node_id)
     }
 
-    #[napi(constructor)]
+    // #[napi(constructor)]
     pub fn new(root_spec_name: String, input_tags: Vec<String>, output_tags: Vec<String>) -> Self {
         let root_spec_name_c0: String = root_spec_name.clone();
         let root_spec_name_c1 = root_spec_name.clone();
