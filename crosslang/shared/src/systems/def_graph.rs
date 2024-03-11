@@ -189,25 +189,26 @@ impl DefGraph {
         })
     }
 
+    #[napi]
     pub fn lookup_root_spec_alias(
         &self,
-        spec_name: &str,
-        tag: &str,
-        direction: &str,
+        spec_name: String,
+        tag: String,
+        direction: String,
     ) -> Option<String> {
         let spec_node_id = self.find_node(|node| {
-            node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(spec_name)
+            node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(spec_name.as_str())
         })?.index() as u32;
-        let alias_node_id = match direction {
+        let alias_node_id = match direction.as_str() {
             "in" => {
                 let inlet_node_id = self.find_inbound_neighbor(spec_node_id, |node| {
-                    node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
+                    node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag.as_str())
                 })?.index() as u32;
                 self.find_outbound_neighbor(inlet_node_id, |node| node.node_type == NodeType::Alias)
             }
             "out" => {
                 let outlet_node_id = self.find_outbound_neighbor(spec_node_id, |node| {
-                    node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
+                    node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag.as_str())
                 })?.index() as u32;
                 self.find_inbound_neighbor(outlet_node_id, |node| node.node_type == NodeType::Alias)
             }
