@@ -1,7 +1,7 @@
 use crate::systems::def_graph::{DefGraph, DefGraphNode, NodeType};
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, ops::Deref};
+use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub enum InstantiatedNodeType {
