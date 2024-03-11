@@ -12,5 +12,11 @@ export class DefGraph {
   toJson(): string
   getAllAliasNodeIds(): Array<number>
   getRootSpecNodeId(): number | null
+  lookupSpecAndTagByAlias(alias: string, direction: string): SpecTagInfo | null
   constructor(rootSpecName: string, inputTags: Array<string>, outputTags: Array<string>)
+}
+export class SpecTagInfo {
+  specName: string
+  tag: string
+  uniqueSpecLabel?: string
 }
