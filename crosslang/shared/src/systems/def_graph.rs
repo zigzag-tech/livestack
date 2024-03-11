@@ -44,6 +44,14 @@ pub struct DefGraph {
     node_indices: HashMap<String, NodeIndex>,
 }
 
+#[derive(Serialize,Debug, PartialEq)]
+#[napi]
+pub struct SpecTagInfo {
+    pub spec_name: String,
+    pub tag: String,
+    pub  unique_spec_label: Option<String>,
+}
+
 
 
 #[napi]
@@ -124,24 +132,24 @@ impl DefGraph {
         }).map(|index| index.index() as u32) // Convert NodeIndex to u32
     }
 
-    
+    #[napi]
     pub fn lookup_spec_and_tag_by_alias(
         &self,
-        alias: &str,
-        direction: &str,
-    ) -> Option<(String, String, Option<String>)> {
+        alias: String,
+        direction: String,
+    ) -> Option<SpecTagInfo> {
         let root_spec_node_id = self.get_root_spec_node_id()?;
-        let alias_node_id = match direction {
+        let alias_node_id = match direction.as_str() {
             "in" => self.find_inbound_neighbor(root_spec_node_id, |node| {
-                node.node_type == NodeType::Alias && node.alias.as_deref() == Some(alias)
+                node.node_type == NodeType::Alias && node.alias.as_deref() == Some(&alias)
             }),
             "out" => self.find_outbound_neighbor(root_spec_node_id, |node| {
-                node.node_type == NodeType::Alias && node.alias.as_deref() == Some(alias)
+                node.node_type == NodeType::Alias && node.alias.as_deref() == Some(&alias)
             }),
             _ => None,
         }?.index() as u32;
 
-        let (spec_node_id, tag) = match direction {
+        let (spec_node_id, tag) = match direction.as_str() {
             "in" => {
                 let inlet_node_id_idx = self.find_inbound_neighbor(alias_node_id, |node| {
                     node.node_type == NodeType::Inlet
@@ -174,7 +182,11 @@ impl DefGraph {
             .unique_spec_label
             .clone();
 
-        Some((spec_name, tag, unique_spec_label))
+        Some(SpecTagInfo {
+            spec_name,
+            tag,
+            unique_spec_label,
+        })
     }
 
     pub fn lookup_root_spec_alias(

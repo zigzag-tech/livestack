@@ -4,6 +4,7 @@ use livestack_shared::systems::def_graph::{DefGraph, DefGraphNode, NodeType};
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use livestack_shared::systems::def_graph::SpecTagInfo;
 
     #[test]
     fn test_get_inbound_node_sets() {
@@ -390,9 +391,16 @@ mod tests {
         graph.assign_alias(alias, spec_name, "RootSpec", None, direction, tag);
 
         // Look up the spec and tag by alias
-        let result = graph.lookup_spec_and_tag_by_alias(alias, direction);
+        let result = graph.lookup_spec_and_tag_by_alias(alias.to_string(), direction.to_string());
 
-        assert_eq!(result, Some((spec_name.to_string(), tag.to_string(), None)));
+        assert_eq!(
+            result,
+            Some(SpecTagInfo {
+                spec_name: spec_name.to_string(),
+                tag: tag.to_string(),
+                unique_spec_label: None
+            })
+        );
     }
     #[test]
     fn should_serialize_and_deserialize_a_def_graph_resulting_in_an_identical_graph() {
@@ -434,7 +442,7 @@ mod tests {
         let json = graph.to_json().unwrap();
 
         // Deserialize the JSON back into a graph
-        let new_graph = DefGraph::load_from_json(&json).unwrap();
+        let new_graph = DefGraph::load_from_json(json);
 
         // Compare the original graph with the deserialized graph
         assert_eq!(new_graph.node_count(), graph.node_count());
