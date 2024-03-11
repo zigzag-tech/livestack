@@ -41,10 +41,10 @@ pub struct DefGraphNode {
 }
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 // #[napi]
 pub struct DefGraph {
-    graph: DiGraph<DefGraphNode, ()>,
+    pub graph: DiGraph<DefGraphNode, ()>,
     node_indices: HashMap<String, NodeIndex>,
 }
 

@@ -1,7 +1,7 @@
+use crate::systems::def_graph::{DefGraph, DefGraphNode, NodeType};
 use petgraph::graph::{DiGraph, NodeIndex};
 use serde::{Deserialize, Serialize};
-use crate::systems::def_graph::{DefGraph, DefGraphNode, NodeType};
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Deref};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub enum InstantiatedNodeType {
@@ -37,14 +37,14 @@ pub struct InstantiatedGraphNode {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct InstantiatedGraph {
-    graph: DiGraph<InstantiatedGraphNode, ()>,
+    pub graph: DiGraph<InstantiatedGraphNode, ()>,
     node_indices: HashMap<String, NodeIndex>,
+    pub def_graph: DefGraph,
     pub context_id: String,
     pub root_job_id: String,
     pub stream_id_overrides: HashMap<String, String>,
     pub inlet_has_transform_overrides_by_tag: HashMap<String, bool>,
     pub stream_source_spec_type_by_stream_id: HashMap<String, (String, String)>,
-    pub def_graph: DefGraph,
 }
 
 impl InstantiatedGraph {
@@ -54,11 +54,11 @@ impl InstantiatedGraph {
         stream_id_overrides: HashMap<String, String>,
         inlet_has_transform_overrides_by_tag: HashMap<String, bool>,
         stream_source_spec_type_by_stream_id: HashMap<String, (String, String)>,
-        def_graph: DefGraph,
+        def_graph: &DefGraph,
     ) -> Self {
         let graph = DiGraph::<InstantiatedGraphNode, ()>::new();
         let node_indices = HashMap::new();
-        let mut instantiated_graph =        InstantiatedGraph {
+        let mut instantiated_graph = InstantiatedGraph {
             graph,
             node_indices,
             context_id,
@@ -66,22 +66,26 @@ impl InstantiatedGraph {
             stream_id_overrides,
             inlet_has_transform_overrides_by_tag,
             stream_source_spec_type_by_stream_id,
-            def_graph,
+            def_graph: def_graph.clone(),
         };
         instantiated_graph.instantiate();
         instantiated_graph
     }
 
-    // Additional methods to manipulate the graph will be added here
-impl InstantiatedGraph {
-    // ... (constructor and other methods)
-
     fn instantiate(&mut self) {
-        let def_nodes = self.def_graph.graph.node_indices().map(|index| {
-            (index, self.def_graph.graph.node_weight(index).unwrap().clone())
-        }).collect::<Vec<_>>();
+        let def_nodes = self
+            .def_graph
+            .graph
+            .node_indices()
+            .map(|index| {
+                (
+                    index,
+                    self.def_graph.graph.node_weight(index).unwrap().clone(),
+                )
+            })
+            .collect::<Vec<_>>();
 
-        for (index, node) in def_nodes {
+        for (_, node) in def_nodes {
             let instantiated_node = match node.node_type {
                 NodeType::RootSpec => InstantiatedGraphNode {
                     node_type: InstantiatedNodeType::RootJob,
@@ -109,9 +113,11 @@ impl InstantiatedGraph {
                         direction: None,
                         label: job_id,
                     }
-                },
+                }
                 NodeType::StreamDef => {
-                    let stream_id = self.stream_id_overrides.get(&node.label)
+                    let stream_id = self
+                        .stream_id_overrides
+                        .get(&node.label)
                         .cloned()
                         .unwrap_or_else(|| format!("[{}]{}", self.context_id, node.label));
                     InstantiatedGraphNode {
@@ -126,12 +132,13 @@ impl InstantiatedGraph {
                         direction: None,
                         label: stream_id,
                     }
-                },
+                }
                 _ => node.clone().into(),
             };
 
             let instantiated_index = self.graph.add_node(instantiated_node);
-            self.node_indices.insert(node.label.clone(), instantiated_index);
+            self.node_indices
+                .insert(node.label.clone(), instantiated_index);
         }
 
         for edge in self.def_graph.graph.raw_edges() {
