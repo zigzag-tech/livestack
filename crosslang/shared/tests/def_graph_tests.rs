@@ -4,7 +4,8 @@ use livestack_shared::systems::def_graph::{DefGraph, DefGraphNode, NodeType};
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use livestack_shared::systems::def_graph::SpecTagInfo;
+    use livestack_shared::systems::def_graph_utils::{FromSpecAndTag, SpecTagInfo, ToSpecAndTag};
+    use petgraph::graph::NodeIndex;
 
     #[test]
     fn test_get_inbound_node_sets() {
@@ -29,13 +30,18 @@ mod tests {
         // Retrieve inbound node sets for the spec node
         let spec_node_id = graph
             .find_node(|attrs| {
-                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
+                Ok(attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name))
             })
             .expect("Spec node should exist");
+        let spec_node_id =NodeIndex::new(spec_node_id as usize);
 
         let inbound_node_sets = graph.get_inbound_node_sets(spec_node_id);
 
         // Ensure that the correct inlet and stream nodes are included
+        let inlet_node_id = NodeIndex::new(inlet_node_id as usize);
+        let other_inlet_node_id = NodeIndex::new(other_inlet_node_id as usize);
+        let stream_node_id = NodeIndex::new(stream_node_id as usize);
+        let other_stream_node_id = NodeIndex::new(other_stream_node_id as usize);
         assert_eq!(inbound_node_sets.len(), 2);
         assert!(inbound_node_sets.contains(&(inlet_node_id, stream_node_id)));
         assert!(inbound_node_sets.contains(&(other_inlet_node_id, other_stream_node_id)));
@@ -54,11 +60,12 @@ mod tests {
         // Ensure inlet and stream nodes are created
         let (inlet_node_id, stream_node_id) =
             graph.ensure_inlet_and_stream(spec_name, tag, has_transform);
+        
 
         // Check if the spec node is created
         let spec_node_id = graph
             .find_node(|attrs| {
-                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
+                Ok(attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name))
             })
             .expect("Spec node should exist");
 
@@ -116,6 +123,8 @@ mod tests {
 
         // Retrieve spec node IDs
         let spec_node_ids = graph.get_spec_node_ids();
+        let spec_node_id = NodeIndex::new(spec_node_id as usize);
+        let non_spec_node_id = NodeIndex::new(non_spec_node_id as usize);
         assert!(spec_node_ids.contains(&spec_node_id));
         assert!(!spec_node_ids.contains(&non_spec_node_id));
     }
@@ -140,7 +149,8 @@ mod tests {
             label: "TestNode".to_string(),
         };
         let node_id = graph.ensure_node("TestNode", test_node.clone());
-        assert_matches!(graph.node_weight(node_id), Some(node) if node == &test_node);
+        
+        assert_matches!(graph.node_weight(node_id), Some(node) if &node == &test_node);
 
         // Ensure the same node is retrieved with the same ID
         let same_node_id = graph.ensure_node("TestNode", test_node.clone());
@@ -163,7 +173,7 @@ mod tests {
 
         assert_matches!(
             node_data,
-            Some(node) if node == &test_node,
+            Some(node) if &node == &test_node,
             "The node data should not be overwritten if the same ID is used",
         );
     }
@@ -179,11 +189,12 @@ mod tests {
 
         // Ensure outlet and stream nodes are created
         let (outlet_node_id, stream_node_id) = graph.ensure_outlet_and_stream(spec_name, tag);
+        
 
         // Check if the spec node is created
         let spec_node_id = graph
             .find_node(|attrs| {
-                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
+                Ok(attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name))
             })
             .expect("Spec node should exist");
 
@@ -234,7 +245,9 @@ mod tests {
         };
         let from_index = graph.ensure_node("FromNode", from_node);
         let to_index = graph.ensure_node("ToNode", to_node);
+
         graph.ensure_edge(from_index, to_index);
+        
         assert!(
             graph.contains_edge(from_index, to_index),
             "Edge should exist from FromNode to ToNode"
@@ -250,10 +263,10 @@ mod tests {
 
     #[test]
     fn test_filter_inbound_neighbors() {
-        let root_spec_name = "RootSpec".to_string();
+        let root_spec_name = "RootSpec";
         let input_tags = vec![];
         let output_tags = vec![];
-        let mut graph = DefGraph::new(root_spec_name, input_tags, output_tags);
+        let mut graph = DefGraph::new(root_spec_name.to_string(), input_tags, output_tags);
         let spec_name = "TestSpec";
 
         let tag = "inputTag";
@@ -261,6 +274,7 @@ mod tests {
         // Ensure inlet and stream nodes are created
         let (inlet_node_id, _) =
             graph.ensure_inlet_and_stream(spec_name, tag, has_transform);
+            
         // Add another inlet node with a different tag
         let other_tag = "otherInputTag";
         let (_, other_stream_node_id) =
@@ -268,15 +282,17 @@ mod tests {
         // Filter inbound neighbors for the spec node with a specific tag
         let spec_node_id = graph
             .find_node(|attrs| {
-                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
+                Ok(attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name))
             })
             .expect("Spec node should exist");
         let filtered_inbound_neighbors = graph.filter_inbound_neighbors(spec_node_id, |node| {
-            node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
+            Ok(node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag))
         });
         assert_eq!(filtered_inbound_neighbors.len(), 1);
+        let inlet_node_id = NodeIndex::new(inlet_node_id as usize);
         assert_eq!(filtered_inbound_neighbors[0], inlet_node_id);
         // Ensure that the other inlet node is not included
+        let other_stream_node_id = NodeIndex::new(other_stream_node_id as usize);
         assert!(!filtered_inbound_neighbors.contains(&other_stream_node_id));
     }
     #[test]
@@ -294,14 +310,17 @@ mod tests {
         // Retrieve outbound node sets for the spec node
         let spec_node_id = graph
             .find_node(|attrs| {
-                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
+                Ok(attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name))
             })
             .expect("Spec node should exist");
+        let spec_node_id = NodeIndex::new(spec_node_id as usize);
 
         let outbound_node_sets = graph.get_outbound_node_sets(spec_node_id);
 
         // Ensure that the correct outlet and stream nodes are included
         assert_eq!(outbound_node_sets.len(), 1);
+        let outlet_node_id = NodeIndex::new(outlet_node_id as usize);
+        let stream_node_id = NodeIndex::new(stream_node_id as usize);
         assert!(outbound_node_sets.contains(&(outlet_node_id, stream_node_id)));
     }
 
@@ -335,8 +354,19 @@ mod tests {
         let input_tags = vec![];
         let output_tags = vec![];
         let mut graph = DefGraph::new(root_spec_name, input_tags, output_tags);
-        let from = ("SpecA", "outputA", Some("uniqueA"));
-        let to = ("SpecB", "inputB", true, Some("uniqueB"));
+        // let from = ("SpecA", "outputA", Some("uniqueA"));
+        // let to = ("SpecB", "inputB", true, Some("uniqueB"));
+        let from = FromSpecAndTag {
+            spec_name: "SpecA".to_string(),
+            output: "outputA".to_string(),
+            unique_spec_label: Some("uniqueA".to_string()),
+        };
+        let to = ToSpecAndTag {
+            spec_name: "SpecB".to_string(),
+            input: "inputB".to_string(),
+            has_transform: true,
+            unique_spec_label: Some("uniqueB".to_string()),
+        };
 
         // Add connected dual specs
         let (
@@ -345,14 +375,15 @@ mod tests {
             stream_node_id,
             from_outlet_node_id,
             to_inlet_node_id,
-        ) = graph.add_connected_dual_specs(from, to);
+        ) = graph.add_connected_dual_specs(&from, &to);
 
         // Verify the nodes and connections
-        assert_matches!(graph.node_weight(from_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(from.0) && node.unique_spec_label == from.2.map(String::from));
-        assert_matches!(graph.node_weight(to_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(to.0) && node.unique_spec_label == to.3.map(String::from));
+        
+        assert_matches!(graph.node_weight(from_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name == Some(from.spec_name) && node.unique_spec_label.as_deref() == Some(from.output.as_str()));
+        assert_matches!(graph.node_weight(to_spec_node_id), Some(node) if node.node_type == NodeType::Spec && node.spec_name == Some(to.spec_name) && node.unique_spec_label == to.unique_spec_label);
         assert_matches!(graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef);
-        assert_matches!(graph.node_weight(from_outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(from.1));
-        assert_matches!(graph.node_weight(to_inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(to.1) && node.has_transform == Some(to.2));
+        assert_matches!(graph.node_weight(from_outlet_node_id), Some(node) if node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(from.output.as_str()));
+        assert_matches!(graph.node_weight(to_inlet_node_id), Some(node) if node.node_type == NodeType::Inlet && node.tag == Some(to.input) && node.has_transform == Some(to.has_transform));
 
         // Verify the edges
         assert!(
@@ -452,6 +483,7 @@ mod tests {
 
         // Ensure that all nodes and edges are equal
         for index in graph.get_all_node_indices() {
+            let index = index.index() as u32;
             let node_weight = graph.node_weight(index).unwrap();
             let new_node_weight = new_graph.node_weight(index).unwrap();
             assert_eq!(node_weight, new_node_weight);
