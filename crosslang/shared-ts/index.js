@@ -295,9 +295,12 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { DefGraph, SpecTagInfo, sumAsString, defGraph } = nativeBinding
+const { NodeType, DefGraph, SpecTagInfo, FromSpecAndTag, ToSpecAndTag, sumAsString, defGraph } = nativeBinding
 
+module.exports.NodeType = NodeType
 module.exports.DefGraph = DefGraph
 module.exports.SpecTagInfo = SpecTagInfo
+module.exports.FromSpecAndTag = FromSpecAndTag
+module.exports.ToSpecAndTag = ToSpecAndTag
 module.exports.sumAsString = sumAsString
 module.exports.defGraph = defGraph

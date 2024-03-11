@@ -1,13 +1,16 @@
 use crate::systems::def_graph_utils::{unique_spec_identifier, unique_stream_identifier};
 use petgraph::graph::DiGraph;
 // use petgraph::graph::Node;
+use napi_derive::napi;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
-use napi_derive::napi;
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+use super::def_graph_utils::{FromSpecAndTag, SpecTagInfo, ToSpecAndTag};
+
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[napi]
 pub enum NodeType {
     RootSpec,
     Spec,
@@ -37,36 +40,67 @@ pub struct DefGraphNode {
     pub label: String,
 }
 
+
 #[derive(Serialize, Deserialize, Debug)]
 #[napi]
 pub struct DefGraph {
-     graph: DiGraph<DefGraphNode, ()>,
+    graph: DiGraph<DefGraphNode, ()>,
     node_indices: HashMap<String, NodeIndex>,
 }
 
-#[derive(Serialize,Debug, PartialEq)]
-#[napi]
-pub struct SpecTagInfo {
-    pub spec_name: String,
-    pub tag: String,
-    pub  unique_spec_label: Option<String>,
-}
-
-
-
 #[napi]
 impl DefGraph {
-    /// Retrieves all node indices.
+   
+    /// Deserializes a `DefGraph` from a JSON string.
+    #[napi(factory)]
+    pub fn load_from_json(json_str: String) -> Self {
+        // Deserialize the JSON string to a SerializedDefGraph
+        let graph: DefGraph = serde_json::from_str(&json_str)
+            .expect("Failed to deserialize the JSON string to a DefGraph");
+
+        graph
+    }
+    /// Serializes the `DefGraph` to a JSON string.
+    #[napi]
+    pub fn to_json(&self) -> napi::Result<String> {
+        serde_json::to_string(&self).map_err(|e| {
+            napi::Error::new(
+                napi::Status::GenericFailure,
+                format!("JSON serialization error: {}", e),
+            )
+        })
+    }
+
+     /// Retrieves all node indices.
     pub fn get_all_node_indices(&self) -> Vec<NodeIndex> {
         self.node_indices.values().cloned().collect()
     }
 
-    pub fn node_weight(&self, index: NodeIndex) -> Option<&DefGraphNode> {
-        self.graph.node_weight(index)
+    pub fn node_weight(&self, index: NodeIndex) -> Option<DefGraphNode> {
+        let w = self.graph.node_weight(index);
+        if let Some(w) = w {
+            Some(DefGraphNode {
+                node_type: w.node_type.clone(),
+                spec_name: w.spec_name.clone(),
+                unique_spec_label: w.unique_spec_label.clone(),
+                tag: w.tag.clone(),
+                has_transform: w.has_transform.clone(),
+                stream_def_id: w.stream_def_id.clone(),
+                alias: w.alias.clone(),
+                direction: w.direction.clone(),
+                label: w.label.clone(),
+            })
+        } else {
+            None
+        }
     }
 
     pub fn raw_edges(&self) -> Vec<(NodeIndex, NodeIndex)> {
-        self.graph.raw_edges().iter().map(|edge| (edge.source(), edge.target())).collect()
+        self.graph
+            .raw_edges()
+            .iter()
+            .map(|edge| (edge.source(), edge.target()))
+            .collect()
     }
 
     pub fn contains_edge(&self, from: NodeIndex, to: NodeIndex) -> bool {
@@ -80,26 +114,7 @@ impl DefGraph {
     pub fn edge_count(&self) -> usize {
         self.graph.edge_count()
     }
-}
 
-#[napi]
-impl DefGraph {
-
-    /// Deserializes a `DefGraph` from a JSON string.
-    #[napi(factory)]
-    pub fn load_from_json(json_str: String) -> Self {
-        // Deserialize the JSON string to a SerializedDefGraph
-        let graph: DefGraph = serde_json::from_str(&json_str)
-            .expect("Failed to deserialize the JSON string to a DefGraph");
-
-        graph
-    }
-    /// Serializes the `DefGraph` to a JSON string.
-    #[napi]
-    pub fn to_json(&self) -> napi::Result<String> {
-        serde_json::to_string(&self)
-            .map_err(|e| napi::Error::new(napi::Status::GenericFailure, format!("JSON serialization error: {}", e)))
-    }
 
     #[napi]
     pub fn get_all_alias_node_ids(&self) -> Vec<u32> {
@@ -118,18 +133,20 @@ impl DefGraph {
                 }
             })
             .collect()
-           
     }
 
     #[napi]
     pub fn get_root_spec_node_id(&self) -> Option<u32> {
-        self.graph.node_indices().find(|&index| {
-            if let Some(node) = self.graph.node_weight(index) {
-                node.node_type == NodeType::RootSpec
-            } else {
-                false
-            }
-        }).map(|index| index.index() as u32) // Convert NodeIndex to u32
+        self.graph
+            .node_indices()
+            .find(|&index| {
+                if let Some(node) = self.graph.node_weight(index) {
+                    node.node_type == NodeType::RootSpec
+                } else {
+                    false
+                }
+            })
+            .map(|index| index.index() as u32) // Convert NodeIndex to u32
     }
 
     #[napi]
@@ -141,44 +158,48 @@ impl DefGraph {
         let root_spec_node_id = self.get_root_spec_node_id()?;
         let alias_node_id = match direction.as_str() {
             "in" => self.find_inbound_neighbor(root_spec_node_id, |node| {
-                node.node_type == NodeType::Alias && node.alias.as_deref() == Some(&alias)
+                Ok(node.node_type == NodeType::Alias && node.alias.as_deref() == Some(&alias))
             }),
             "out" => self.find_outbound_neighbor(root_spec_node_id, |node| {
-                node.node_type == NodeType::Alias && node.alias.as_deref() == Some(&alias)
+                Ok(node.node_type == NodeType::Alias && node.alias.as_deref() == Some(&alias))
             }),
             _ => None,
-        }?.index() as u32;
+        }?;
 
         let (spec_node_id, tag) = match direction.as_str() {
             "in" => {
-                let inlet_node_id_idx = self.find_inbound_neighbor(alias_node_id, |node| {
-                    node.node_type == NodeType::Inlet
+                let inlet_node_id = self.find_inbound_neighbor(alias_node_id, |node| {
+                    Ok(node.node_type == NodeType::Inlet)
                 })?;
-                let inlet_node_id = inlet_node_id_idx.index() as u32;
                 let spec_node_id = self.find_outbound_neighbor(inlet_node_id, |node| {
-                    node.node_type == NodeType::Spec
+                    Ok(node.node_type == NodeType::Spec)
                 })?;
+                let inlet_node_id_idx = NodeIndex::new(inlet_node_id as usize);
                 let tag = self.graph.node_weight(inlet_node_id_idx)?.tag.clone()?;
                 (spec_node_id, tag)
             }
             "out" => {
-                let outlet_node_id_idx = self.find_outbound_neighbor(alias_node_id, |node| {
-                    node.node_type == NodeType::Outlet
+                let outlet_node_id = self.find_outbound_neighbor(alias_node_id, |node| {
+                    Ok(node.node_type == NodeType::Outlet)
                 })?;
-                let outlet_node_id = outlet_node_id_idx.index() as u32;
+                let outlet_node_id_idx = NodeIndex::new(outlet_node_id as usize);
                 let spec_node_id = self.find_inbound_neighbor(outlet_node_id, |node| {
-                    node.node_type == NodeType::Spec
+                    Ok(node.node_type == NodeType::Spec)
                 })?;
                 let tag = self.graph.node_weight(outlet_node_id_idx)?.tag.clone()?;
                 (spec_node_id, tag)
             }
             _ => return None,
         };
-
-        let spec_name = self.graph.node_weight(spec_node_id)?.spec_name.clone()?;
+        let spec_node_id_idx = NodeIndex::new(spec_node_id as usize);
+        let spec_name = self
+            .graph
+            .node_weight(spec_node_id_idx)?
+            .spec_name
+            .clone()?;
         let unique_spec_label = self
             .graph
-            .node_weight(spec_node_id)?
+            .node_weight(spec_node_id_idx)?
             .unique_spec_label
             .clone();
 
@@ -197,71 +218,74 @@ impl DefGraph {
         direction: String,
     ) -> Option<String> {
         let spec_node_id = self.find_node(|node| {
-            node.node_type == NodeType::Spec && node.spec_name.as_deref() == Some(spec_name.as_str())
-        })?.index() as u32;
+            Ok(node.node_type == NodeType::Spec
+                && node.spec_name.as_deref() == Some(spec_name.as_str()))
+        })?;
+
         let alias_node_id = match direction.as_str() {
             "in" => {
                 let inlet_node_id = self.find_inbound_neighbor(spec_node_id, |node| {
-                    node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag.as_str())
-                })?.index() as u32;
-                self.find_outbound_neighbor(inlet_node_id, |node| node.node_type == NodeType::Alias)
+                    Ok(node.node_type == NodeType::Inlet
+                        && node.tag.as_deref() == Some(tag.as_str()))
+                })?;
+                self.find_outbound_neighbor(inlet_node_id, |node| {
+                    Ok(node.node_type == NodeType::Alias)
+                })
             }
             "out" => {
                 let outlet_node_id = self.find_outbound_neighbor(spec_node_id, |node| {
-                    node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag.as_str())
-                })?.index() as u32;
-                self.find_inbound_neighbor(outlet_node_id, |node| node.node_type == NodeType::Alias)
+                    Ok(node.node_type == NodeType::Outlet
+                        && node.tag.as_deref() == Some(tag.as_str()))
+                })?;
+                self.find_inbound_neighbor(outlet_node_id, |node| {
+                    Ok(node.node_type == NodeType::Alias)
+                })
             }
             _ => return None,
         };
 
         alias_node_id.and_then(|id| {
+            let id_idx = NodeIndex::new(id as usize);
             self.graph
-                .node_weight(id)
+                .node_weight(id_idx)
                 .and_then(|node| node.alias.clone())
         })
     }
 
-    pub fn find_inbound_neighbor<F>(
-        &self,
-        node_id: u32,
-        condition: F,
-    ) -> Option<NodeIndex>
+    
+    pub fn find_inbound_neighbor<F>(&self, node_id: u32, condition: F) -> Option<u32>
     where
-        F: FnMut(&DefGraphNode) -> bool,
+        F: FnMut(&DefGraphNode) -> Result<bool, napi::Error>,
     {
-        let node_id_index = NodeIndex::new(node_id as usize);
-        self.filter_inbound_neighbors(node_id_index, condition)
+        self.filter_inbound_neighbors(node_id, condition)
             .into_iter()
             .next()
+            .map(|index| index.index() as u32)
     }
 
-    pub fn find_outbound_neighbor<F>(
-        &self,
-        node_id: u32,
-        condition: F,
-    ) -> Option<NodeIndex>
+    pub fn find_outbound_neighbor<F>(&self, node_id: u32, condition: F) -> Option<u32>
     where
-        F: FnMut(&DefGraphNode) -> bool,
+        F: FnMut(&DefGraphNode) -> Result<bool, napi::Error>,
     {
-        let node_id_index = NodeIndex::new(node_id as usize);
-        self.filter_outbound_neighbors(node_id_index, condition)
+        // let node_id_index = NodeIndex::new(node_id as usize);
+        self.filter_outbound_neighbors(node_id, condition)
             .into_iter()
             .next()
+            .map(|index| index)
     }
 
     pub fn add_connected_dual_specs(
         &mut self,
-        from: (&str, &str, Option<&str>), // (spec_name, output, unique_spec_label)
-        to: (&str, &str, bool, Option<&str>), // (spec_name, input, has_transform, unique_spec_label)
-    ) -> (NodeIndex, NodeIndex, NodeIndex, NodeIndex, NodeIndex) {
-        let from_spec_id = unique_spec_identifier(from.0, from.2);
+        from: &FromSpecAndTag, // (spec_name, output, unique_spec_label)
+        to: &ToSpecAndTag,     // (spec_name, input, has_transform, unique_spec_label)
+    ) -> (u32, u32, u32, u32, u32) {
+        let from_spec_id = unique_spec_identifier(from.spec_name.clone(), from.unique_spec_label.clone());
         let from_spec_node_id = self.ensure_node(
             &from_spec_id,
             DefGraphNode {
                 node_type: NodeType::Spec,
-                spec_name: Some(from.0.to_string()),
-                unique_spec_label: from.2.map(String::from),
+                spec_name: Some(from.spec_name.clone()),
+                unique_spec_label: from.unique_spec_label.clone(),
                 tag: None,
                 has_transform: None,
                 stream_def_id: None,
@@ -272,27 +296,27 @@ impl DefGraph {
         );
 
         let from_outlet_node_id = self.ensure_node(
-            &format!("{}_{}", from_spec_id, from.1),
+            &format!("{}_{}", from_spec_id, from.output),
             DefGraphNode {
                 node_type: NodeType::Outlet,
                 spec_name: None,
                 unique_spec_label: None,
-                tag: Some(from.1.to_string()),
+                tag: Some(from.output.clone()),
                 has_transform: None,
                 stream_def_id: None,
                 alias: None,
                 direction: None,
-                label: format!("{}_{}", from_spec_id, from.1),
+                label: format!("{}_{}", from_spec_id, from.output),
             },
         );
 
-        let to_spec_id = unique_spec_identifier(to.0, to.3);
+        let to_spec_id = unique_spec_identifier(to.spec_name.clone(), to.unique_spec_label.clone());
         let to_spec_node_id = self.ensure_node(
             &to_spec_id,
             DefGraphNode {
                 node_type: NodeType::Spec,
-                spec_name: Some(to.0.to_string()),
-                unique_spec_label: to.3.map(String::from),
+                spec_name: Some(to.spec_name.clone()),
+                unique_spec_label: to.unique_spec_label.clone(),
                 tag: None,
                 has_transform: None,
                 stream_def_id: None,
@@ -303,27 +327,31 @@ impl DefGraph {
         );
 
         let to_inlet_node_id = self.ensure_node(
-            &format!("{}_{}", to_spec_id, to.1),
+            &format!("{}_{}", to_spec_id, to.input),
             DefGraphNode {
                 node_type: NodeType::Inlet,
                 spec_name: None,
                 unique_spec_label: None,
-                tag: Some(to.1.to_string()),
-                has_transform: Some(to.2),
+                tag: Some(to.input.clone()),
+                has_transform: Some(to.has_transform),
                 stream_def_id: None,
                 alias: None,
                 direction: None,
-                label: format!("{}_{}", to_spec_id, to.1),
+                label: format!("{}_{}", to_spec_id, to.input),
             },
         );
 
         let stream_def_id = unique_stream_identifier(
-            Some(from.0),
-            Some(from.1),
-            from.2,
-            Some(to.0),
-            Some(to.1),
-            to.3,
+            Some(SpecTagInfo {
+                spec_name: from.spec_name.clone(),
+                tag: from.output.clone(),
+                unique_spec_label: from.unique_spec_label.clone(),
+            }),
+            Some(SpecTagInfo {
+                spec_name: to.spec_name.clone(),
+                tag: to.input.clone(),
+                unique_spec_label: to.unique_spec_label.clone(),
+            }),
         );
         let stream_node_id = self.ensure_node(
             &stream_def_id,
@@ -364,16 +392,16 @@ impl DefGraph {
     ) {
         let spec_node_id = self
             .find_node(|node| {
-                node.node_type == NodeType::Spec
+                Ok(node.node_type == NodeType::Spec
                     && node.spec_name.as_deref() == Some(spec_name)
-                    && node.unique_spec_label.as_deref() == unique_spec_label
+                    && node.unique_spec_label.as_deref() == unique_spec_label)
             })
             .expect("Spec node not found");
 
         let root_spec_node_id = self
             .find_node(|node| {
-                node.node_type == NodeType::RootSpec
-                    && node.spec_name.as_deref() == Some(root_spec_name)
+                Ok(node.node_type == NodeType::RootSpec
+                    && node.spec_name.as_deref() == Some(root_spec_name))
             })
             .expect("Root spec node not found");
 
@@ -393,13 +421,11 @@ impl DefGraph {
             },
         );
 
-        let spec_node_id_index = spec_node_id.index() as u32;
-
         match type_ {
             "in" => {
                 let inlet_node_id = self
-                    .find_inbound_neighbor(spec_node_id_index, |node| {
-                        node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
+                    .find_inbound_neighbor(spec_node_id, |node| {
+                        Ok(node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag))
                     })
                     .expect("Inlet node not found");
                 self.ensure_edge(inlet_node_id, alias_node_id);
@@ -407,8 +433,8 @@ impl DefGraph {
             }
             "out" => {
                 let outlet_node_id = self
-                    .find_outbound_neighbor(spec_node_id_index, |node| {
-                        node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
+                    .find_outbound_neighbor(spec_node_id, |node| {
+                        Ok(node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag))
                     })
                     .expect("Outlet node not found");
                 self.ensure_edge(root_spec_node_id, alias_node_id);
@@ -462,15 +488,26 @@ impl DefGraph {
             .collect()
     }
 
-    pub fn filter_inbound_neighbors<F>(&self, index: NodeIndex, mut condition: F) -> Vec<NodeIndex>
+    pub fn filter_inbound_neighbors<F>(&self, index: u32, mut condition: F) -> Vec<NodeIndex>
     where
-        F: FnMut(&DefGraphNode) -> bool,
+        F: FnMut(&DefGraphNode) -> Result<bool, napi::Error>,
     {
+        let index = NodeIndex::new(index as usize);
         self.graph
             .neighbors_directed(index, petgraph::Incoming)
             .filter_map(|neighbor_index| {
                 self.graph.node_weight(neighbor_index).and_then(|node| {
-                    if condition(node) {
+                    if condition(&DefGraphNode {
+                        node_type: node.node_type.clone(),
+                        spec_name: node.spec_name.clone(),
+                        unique_spec_label: node.unique_spec_label.clone(),
+                        tag: node.tag.clone(),
+                        has_transform: node.has_transform.clone(),
+                        stream_def_id: node.stream_def_id.clone(),
+                        alias: node.alias.clone(),
+                        direction: node.direction.clone(),
+                        label: node.label.clone(),
+                    }).unwrap() {
                         Some(neighbor_index)
                     } else {
                         None
@@ -479,30 +516,48 @@ impl DefGraph {
             })
             .collect()
     }
-    pub fn ensure_edge(&mut self, from_index: NodeIndex, to_index: NodeIndex) {
+    pub fn ensure_edge(&mut self, from_index: u32, to_index: u32) {
+        let from_index = NodeIndex::new(from_index as usize);
+        let to_index = NodeIndex::new(to_index as usize);
         if !self.graph.contains_edge(from_index, to_index) {
             self.graph.add_edge(from_index, to_index, ());
         }
     }
-    pub fn find_node<F>(&self, mut condition: F) -> Option<NodeIndex>
+    pub fn find_node<F>(&self, mut condition: F) -> Option<u32>
     where
-        F: FnMut(&DefGraphNode) -> bool,
+        F: FnMut(&DefGraphNode) -> Result<bool, napi::Error>,
     {
-        self.graph.node_indices().find(|&index| {
-            if let Some(node) = self.graph.node_weight(index) {
-                condition(node)
-            } else {
-                false
-            }
-        })
+        self.graph
+            .node_indices()
+            .find(|&index| {
+                if let Some(node) = self.graph.node_weight(index) {
+                    condition(&DefGraphNode {
+                        node_type: node.node_type.clone(),
+                        spec_name: node.spec_name.clone(),
+                        unique_spec_label: node.unique_spec_label.clone(),
+                        tag: node.tag.clone(),
+                        has_transform: node.has_transform.clone(),
+                        stream_def_id: node.stream_def_id.clone(),
+                        alias: node.alias.clone(),
+                        direction: node.direction.clone(),
+                        label: node.label.clone(),
+                    }).unwrap()
+                } else {
+                    false
+                }
+            })
+            .map(|index| index.index() as u32)
     }
 
+    
     pub fn ensure_inlet_and_stream(
         &mut self,
-        spec_name: &str,
-        tag: &str,
+        spec_name: String,
+        tag: String,
         has_transform: bool,
-    ) -> (NodeIndex, NodeIndex) {
+    ) -> (u32, u32) {
+        let spec_name_c = spec_name.clone();
+
         let spec_id = unique_spec_identifier(spec_name, None);
         let spec_node_id = self.ensure_node(
             &spec_id,
@@ -534,7 +589,8 @@ impl DefGraph {
             },
         );
 
-        let stream_def_id = format!("{}_{}_stream", spec_name, tag);
+
+        let stream_def_id = format!("{}_{}_stream", spec_name_c, tag);
         let stream_node_id = self.ensure_node(
             &format!("{}_{}_stream", spec_id, tag),
             DefGraphNode {
@@ -549,18 +605,20 @@ impl DefGraph {
                 label: format!("{}_{}_stream", spec_id, tag),
             },
         );
+        let stream_node_id_index = NodeIndex::new(stream_node_id as usize);
+        let inlet_node_id_index = NodeIndex::new(inlet_node_id as usize);
+        let spec_node_id_index = NodeIndex::new(spec_node_id as usize);
 
-        self.graph.add_edge(stream_node_id, inlet_node_id, ());
-        self.graph.add_edge(inlet_node_id, spec_node_id, ());
+
+        self.graph.add_edge(stream_node_id_index, inlet_node_id_index, ());
+        self.graph.add_edge(inlet_node_id_index, spec_node_id_index, ());
 
         (inlet_node_id, stream_node_id)
     }
 
-    pub fn ensure_outlet_and_stream(
-        &mut self,
-        spec_name: &str,
-        tag: &str,
-    ) -> (NodeIndex, NodeIndex) {
+    
+    pub fn ensure_outlet_and_stream(&mut self, spec_name: String, tag: String) -> (u32, u32) {
+        let spec_name_c = spec_name.clone();
         let spec_id = unique_spec_identifier(spec_name, None);
         let spec_node_id = self.ensure_node(
             &spec_id,
@@ -592,7 +650,7 @@ impl DefGraph {
             },
         );
 
-        let stream_def_id = format!("{}_{}_stream", spec_name, tag);
+        let stream_def_id = format!("{}_{}_stream", spec_name_c, tag);
         let stream_node_id = self.ensure_node(
             &format!("{}_{}_stream", spec_id, tag),
             DefGraphNode {
@@ -607,22 +665,27 @@ impl DefGraph {
                 label: format!("{}_{}_stream", spec_id, tag),
             },
         );
-
-        self.graph.add_edge(spec_node_id, outlet_node_id, ());
-        self.graph.add_edge(outlet_node_id, stream_node_id, ());
+        let spec_node_id_index = NodeIndex::new(spec_node_id as usize);
+        let outlet_node_id_index = NodeIndex::new(outlet_node_id as usize);
+        let stream_node_id_index = NodeIndex::new(stream_node_id as usize);
+        self.graph
+            .add_edge(spec_node_id_index, outlet_node_id_index, ());
+        self.graph
+            .add_edge(outlet_node_id_index, stream_node_id_index, ());
 
         (outlet_node_id, stream_node_id)
     }
 
     #[napi(constructor)]
     pub fn new(root_spec_name: String, input_tags: Vec<String>, output_tags: Vec<String>) -> Self {
+        let root_spec_name_c0: String = root_spec_name.clone();
+        let root_spec_name_c1 = root_spec_name.clone();
         let mut graph = DiGraph::<DefGraphNode, ()>::new();
         let mut node_indices = HashMap::new();
-
-        let root_spec_id = unique_spec_identifier(&root_spec_name, None);
+        let root_spec_id = unique_spec_identifier(root_spec_name, None);
         let root_spec_node_id = graph.add_node(DefGraphNode {
             node_type: NodeType::RootSpec,
-            spec_name: Some(root_spec_name.clone()),
+            spec_name: Some(root_spec_name_c0),
             unique_spec_label: None,
             tag: None,
             has_transform: None,
@@ -646,8 +709,15 @@ impl DefGraph {
                 direction: None,
                 label: format!("{}/{}", root_spec_id, tag),
             });
-            let stream_def_id =
-                unique_stream_identifier(None, Some(tag), None, Some(&root_spec_name), Some(tag), None);
+            let stream_def_id = unique_stream_identifier(
+                None,
+                Some(SpecTagInfo {
+                    spec_name: root_spec_name_c1.clone(),
+                    tag: tag.clone(),
+                    unique_spec_label: None,
+                }),
+            );
+
             let stream_node_id = graph.add_node(DefGraphNode {
                 node_type: NodeType::StreamDef,
                 spec_name: None,
@@ -675,8 +745,15 @@ impl DefGraph {
                 direction: None,
                 label: format!("{}/{}", root_spec_id, tag),
             });
-            let stream_def_id =
-                unique_stream_identifier(Some(&root_spec_name), Some(tag), None, None, Some(tag), None);
+            let stream_def_id = unique_stream_identifier(
+                Some(
+                    SpecTagInfo {
+                        spec_name: root_spec_name_c1.clone(),
+                        tag: tag.clone(),
+                        unique_spec_label: None,
+                    },
+                ),None
+            );
             let stream_node_id = graph.add_node(DefGraphNode {
                 node_type: NodeType::StreamDef,
                 spec_name: None,
@@ -711,27 +788,48 @@ impl DefGraph {
             .collect()
     }
 
-    pub fn ensure_node(&mut self, id: &str, data: DefGraphNode) -> NodeIndex {
+    pub fn ensure_node(&mut self, id: &str, data: DefGraphNode) -> u32 {
         match self.node_indices.get(id) {
-            Some(&index) => index,
+            Some(&index) => index.index() as u32,
             None => {
-                let index = self.graph.add_node(data);
+                let index = self.graph.add_node(DefGraphNode {
+                    node_type: data.node_type,
+                    spec_name: data.spec_name.clone(),
+                    unique_spec_label: data.unique_spec_label.clone(),
+                    tag: data.tag.clone(),
+                    has_transform: data.has_transform,
+                    stream_def_id: data.stream_def_id.clone(),
+                    alias: data.alias.clone(),
+                    direction: data.direction.clone(),
+                    label: data.label.clone(),
+                });
                 self.node_indices.insert(id.to_string(), index);
-                index
+                index.index() as u32
             }
         }
     }
 
-    pub fn filter_outbound_neighbors<F>(&self, index: NodeIndex, mut condition: F) -> Vec<NodeIndex>
+    pub fn filter_outbound_neighbors<F>(&self, index: u32, mut condition: F) -> Vec<u32>
     where
-        F: FnMut(&DefGraphNode) -> bool,
+        F: FnMut(&DefGraphNode) -> Result<bool, napi::Error>,
     {
+        let index = NodeIndex::new(index as usize);
         self.graph
             .neighbors_directed(index, petgraph::Outgoing)
             .filter_map(|neighbor_index| {
                 self.graph.node_weight(neighbor_index).and_then(|node| {
-                    if condition(node) {
-                        Some(neighbor_index)
+                    if condition(&DefGraphNode {
+                        node_type: node.node_type.clone(),
+                        spec_name: node.spec_name.clone(),
+                        unique_spec_label: node.unique_spec_label.clone(),
+                        tag: node.tag.clone(),
+                        has_transform: node.has_transform.clone(),
+                        stream_def_id: node.stream_def_id.clone(),
+                        alias: node.alias.clone(),
+                        direction: node.direction.clone(),
+                        label: node.label.clone(),
+                    }).unwrap() {
+                        Some(neighbor_index.index() as u32)
                     } else {
                         None
                     }
