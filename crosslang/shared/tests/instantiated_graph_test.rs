@@ -1,6 +1,5 @@
-use crate::systems::def_graph::{DefGraph, DefGraphNode, NodeType};
-use crate::systems::instantiated_graph::{InstantiatedGraph, InstantiatedGraphNode, InstantiatedNodeType};
-use petgraph::graph::NodeIndex;
+use livestack_shared::systems::def_graph::{DefGraph, DefGraphNode, NodeType};
+use livestack_shared::systems::instantiated_graph::InstantiatedGraph;
 use std::collections::HashMap;
 
 #[cfg(test)]
@@ -12,7 +11,7 @@ mod tests {
         let root_spec_name = "RootSpec".to_string();
         let input_tags = vec!["input1".to_string(), "input2".to_string()];
         let output_tags = vec!["output1".to_string(), "output2".to_string()];
-        let def_graph = DefGraph::new(root_spec_name.clone(), input_tags, output_tags);
+        let mut def_graph = DefGraph::new(root_spec_name.clone(), input_tags, output_tags);
 
         // Add a spec node to the DefGraph
         let spec_node_data = DefGraphNode {
@@ -35,18 +34,25 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
-            def_graph,
+            &def_graph,
         );
 
         // Check if all nodes from the DefGraph are present in the InstantiatedGraph
-        let nodes = instantiated_graph.graph.node_indices().map(|index| {
-            instantiated_graph.graph.node_weight(index).unwrap().clone()
-        }).collect::<Vec<_>>();
-        assert!(nodes.iter().any(|node| node.job_id.as_deref() == Some("rootJob")));
-        assert!(nodes.iter().any(|node| node.job_id.as_deref() == Some("[testContext]SpecA")));
+        let nodes = instantiated_graph
+            .graph
+            .node_indices()
+            .map(|index| instantiated_graph.graph.node_weight(index).unwrap().clone())
+            .collect::<Vec<_>>();
+        assert!(nodes
+            .iter()
+            .any(|node| node.job_id.as_deref() == Some("rootJob")));
+        assert!(nodes
+            .iter()
+            .any(|node| node.job_id.as_deref() == Some("[testContext]SpecA")));
 
         // Check if all edges from the DefGraph are present in the InstantiatedGraph
-        let edges = instantiated_graph.graph.raw_edges();
-        assert_eq!(edges.len(), def_graph.graph.edge_count());
+        let edge_count_in_instantiated_graph = instantiated_graph.graph.edge_count();
+        let edge_count_in_def_graph = def_graph.graph.edge_count();
+        assert_eq!(edge_count_in_instantiated_graph, edge_count_in_def_graph);
     }
 }
