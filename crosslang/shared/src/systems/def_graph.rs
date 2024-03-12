@@ -1,7 +1,7 @@
 use crate::systems::def_graph_utils::{unique_spec_identifier, unique_stream_identifier};
 use petgraph::graph::DiGraph;
 // use petgraph::graph::Node;
-// use napi_derive::napi;
+use napi_derive::napi;
 use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
@@ -9,8 +9,8 @@ use std::collections::HashMap;
 
 use super::def_graph_utils::{FromSpecAndTag, SpecTagInfo, ToSpecAndTag};
 
-#[derive(Debug, PartialEq, Serialize, Deserialize,Clone)]
-// #[napi]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+#[napi]
 pub enum NodeType {
     RootSpec,
     Spec,
