@@ -77,7 +77,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     if (c > 0 && c > capacity) {
       const diff = c - capacity;
       console.debug(
-        `Queue ${job.specName} for project ${job.projectId} has ${c} waiting+active jobs, while capacity is at ${capacity}. Attempting to increase capacity by ${diff}.`
+        `Queue ${job.specName} for project ${job.projectId} has ${c} waiting+active jobs, while capacity is at ${capacity}. \nAttempting to increase capacity by ${diff}.`
       );
       for (let i = 0; i < diff; i++) {
         await getCapacityManager().increaseCapacity({

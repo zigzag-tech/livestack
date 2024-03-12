@@ -1,5 +1,6 @@
 import Graph from "graphology";
 import { Attributes } from "graphology-types";
+import { uniqueSpecIdentifier } from "livestack-shared-crosslang-js";
 
 export type SpecNode = {
   nodeType: "spec";
@@ -78,9 +79,7 @@ export class DefGraph extends Graph<DefGraphNode> {
   }
 
   private addSingleRootSpec({ root }: { root: SpecBase }) {
-    const specIdentifier = uniqueSpecIdentifier({
-      spec: root,
-    });
+    const specIdentifier = uniqueSpecIdentifier(root.name);
 
     const specNodeId = this.ensureNode(specIdentifier, {
       nodeType: "root-spec",
@@ -404,10 +403,7 @@ export class DefGraph extends Graph<DefGraphNode> {
     uniqueSpecLabel?: string;
     hasTransform: boolean;
   }) {
-    const specIdentifier = uniqueSpecIdentifier({
-      specName,
-      uniqueSpecLabel,
-    });
+    const specIdentifier = uniqueSpecIdentifier(specName, uniqueSpecLabel);
 
     const specNodeId = this.ensureNode(specIdentifier, {
       specName,
@@ -457,10 +453,7 @@ export class DefGraph extends Graph<DefGraphNode> {
     uniqueSpecLabel?: string;
     tag: string | symbol | number;
   }) {
-    const specIdentifier = uniqueSpecIdentifier({
-      specName,
-      uniqueSpecLabel,
-    });
+    const specIdentifier = uniqueSpecIdentifier(specName, uniqueSpecLabel);
 
     const specNodeId = this.ensureNode(specIdentifier, {
       specName,
@@ -504,7 +497,10 @@ export class DefGraph extends Graph<DefGraphNode> {
     from: CanonicalConnectionFrom,
     to: CanonicalConnectionTo
   ) {
-    const fromSpecIdentifier = uniqueSpecIdentifier(from);
+    const fromSpecIdentifier = uniqueSpecIdentifier(
+      from.specName,
+      from.uniqueSpecLabel
+    );
 
     const fromSpecNodeId = this.ensureNode(fromSpecIdentifier, {
       specName: from.specName,
@@ -523,7 +519,10 @@ export class DefGraph extends Graph<DefGraphNode> {
       }
     );
 
-    const toSpecIdentifier = uniqueSpecIdentifier(to);
+    const toSpecIdentifier = uniqueSpecIdentifier(
+      to.specName,
+      to.uniqueSpecLabel
+    );
     const id = `${toSpecIdentifier}/${to.input}`;
     const toInletNodeId = this.ensureNode(id, {
       nodeType: "inlet",
@@ -680,21 +679,7 @@ export class DefGraph extends Graph<DefGraphNode> {
 }
 export type TransformFunction<T1 = any, T2 = any> = (o: T1) => T2 | Promise<T2>;
 
-export function uniqueSpecIdentifier({
-  specName,
-  spec,
-  uniqueSpecLabel,
-}: {
-  specName?: string;
-  spec?: { name: string };
-  uniqueSpecLabel?: string;
-}) {
-  specName = specName ?? spec?.name;
-  if (!specName) {
-    throw new Error("specName or spec must be provided");
-  }
-  return `${specName}${uniqueSpecLabel ? `[${uniqueSpecLabel}]` : ""}`;
-}
+
 export function uniqueStreamIdentifier({
   from,
   to,
