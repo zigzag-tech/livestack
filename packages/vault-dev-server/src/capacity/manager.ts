@@ -112,15 +112,25 @@ class CapacityManager implements CacapcityServiceImplementation {
     const client = await this.redisClientP;
     const projectIdN = escapeColon(projectId);
     const specNameN = escapeColon(specName);
-    // get all instances (keys) for this projectId:specName
-    const instanceIdsAndMaxCapacities = (await client.sendCommand([
-      "HGETALL",
-      `zz_maxcapacity:${projectIdN}:${specNameN}`,
-    ])) as string[];
-    if (instanceIdsAndMaxCapacities.length === 0) {
-      console.warn(`No instances found for ${projectId}:${specName}`);
-      return;
+
+    let instanceIdsAndMaxCapacities: string[] = [];
+
+    // keep checking until we find an instance with capacity
+    while (true) {
+      // get all instances (keys) for this projectId:specName
+      instanceIdsAndMaxCapacities = (await client.sendCommand([
+        "HGETALL",
+        `zz_maxcapacity:${projectIdN}:${specNameN}`,
+      ])) as string[];
+      if (instanceIdsAndMaxCapacities.length === 0) {
+        console.warn(`No instances found for ${projectId}:${specName}.`);
+        await new Promise((r) => setTimeout(r, 200));
+        continue;
+      } else {
+        break;
+      }
     }
+
     const maxCapacitiesByInstanceId = Object.fromEntries(
       instanceIdsAndMaxCapacities.map(
         (v, i) => [v, Number(instanceIdsAndMaxCapacities[i + 1])] as const
