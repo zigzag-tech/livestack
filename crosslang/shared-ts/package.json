@@ -1,10 +1,10 @@
 {
-  "name": "livestack-shared-crosslang-ts",
+  "name": "livestack-shared-crosslang-js",
   "version": "0.0.0",
   "main": "index.js",
   "types": "index.d.ts",
   "napi": {
-    "name": "livestack-shared-crosslang-ts",
+    "name": "livestack-shared-crosslang-js",
     "triples": {
       "additional": [
         "aarch64-apple-darwin",

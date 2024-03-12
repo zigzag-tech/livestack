@@ -1,5 +1,5 @@
 {
-  "name": "livestack-shared-crosslang-ts-darwin-arm64",
+  "name": "livestack-shared-crosslang-js-darwin-arm64",
   "version": "0.0.0",
   "os": [
     "darwin"
@@ -7,9 +7,9 @@
   "cpu": [
     "arm64"
   ],
-  "main": "livestack-shared-crosslang-ts.darwin-arm64.node",
+  "main": "livestack-shared-crosslang-js.darwin-arm64.node",
   "files": [
-    "livestack-shared-crosslang-ts.darwin-arm64.node"
+    "livestack-shared-crosslang-js.darwin-arm64.node"
   ],
   "license": "MIT",
   "engines": {

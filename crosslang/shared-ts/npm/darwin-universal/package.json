@@ -1,12 +1,12 @@
 {
-  "name": "livestack-shared-crosslang-ts-darwin-universal",
+  "name": "livestack-shared-crosslang-js-darwin-universal",
   "version": "0.0.0",
   "os": [
     "darwin"
   ],
-  "main": "livestack-shared-crosslang-ts.darwin-universal.node",
+  "main": "livestack-shared-crosslang-js.darwin-universal.node",
   "files": [
-    "livestack-shared-crosslang-ts.darwin-universal.node"
+    "livestack-shared-crosslang-js.darwin-universal.node"
   ],
   "license": "MIT",
   "engines": {
