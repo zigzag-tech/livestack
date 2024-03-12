@@ -30,7 +30,7 @@ mod tests {
         // Retrieve inbound node sets for the spec node
         let spec_node_id = graph
             .find_node(|attrs| {
-                Ok(attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name))
+                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
             })
             .expect("Spec node should exist");
         let spec_node_id =NodeIndex::new(spec_node_id as usize);
@@ -65,7 +65,7 @@ mod tests {
         // Check if the spec node is created
         let spec_node_id = graph
             .find_node(|attrs| {
-                Ok(attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name))
+                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
             })
             .expect("Spec node should exist");
 
@@ -194,7 +194,7 @@ mod tests {
         // Check if the spec node is created
         let spec_node_id = graph
             .find_node(|attrs| {
-                Ok(attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name))
+                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
             })
             .expect("Spec node should exist");
 
@@ -282,11 +282,11 @@ mod tests {
         // Filter inbound neighbors for the spec node with a specific tag
         let spec_node_id = graph
             .find_node(|attrs| {
-                Ok(attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name))
+                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
             })
             .expect("Spec node should exist");
         let filtered_inbound_neighbors = graph.filter_inbound_neighbors(spec_node_id, |node| {
-            Ok(node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag))
+            node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
         });
         assert_eq!(filtered_inbound_neighbors.len(), 1);
         let inlet_node_id = NodeIndex::new(inlet_node_id as usize);
@@ -310,7 +310,7 @@ mod tests {
         // Retrieve outbound node sets for the spec node
         let spec_node_id = graph
             .find_node(|attrs| {
-                Ok(attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name))
+                attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
             })
             .expect("Spec node should exist");
         let spec_node_id = NodeIndex::new(spec_node_id as usize);

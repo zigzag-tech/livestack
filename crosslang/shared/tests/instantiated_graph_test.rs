@@ -38,21 +38,19 @@ mod tests {
         );
 
         // Check if all nodes from the DefGraph are present in the InstantiatedGraph
-        let nodes = instantiated_graph
-            .graph
-            .node_indices()
-            .map(|index| instantiated_graph.graph.node_weight(index).unwrap().clone())
-            .collect::<Vec<_>>();
-        assert!(nodes
+        let node_indices = instantiated_graph
+            .node_indices();
+
+        assert!(node_indices
             .iter()
-            .any(|node| node.job_id.as_deref() == Some("rootJob")));
-        assert!(nodes
+            .any(|node_id| instantiated_graph.node_weight(*node_id).unwrap().job_id.as_deref() == Some("rootJob")));
+        assert!(node_indices
             .iter()
-            .any(|node| node.job_id.as_deref() == Some("[testContext]SpecA")));
+            .any(|node_id| instantiated_graph.node_weight(*node_id).unwrap().job_id.as_deref() == Some("[testContext]SpecA")));
 
         // Check if all edges from the DefGraph are present in the InstantiatedGraph
-        let edge_count_in_instantiated_graph = instantiated_graph.graph.edge_count();
-        let edge_count_in_def_graph = def_graph.graph.edge_count();
+        let edge_count_in_instantiated_graph = instantiated_graph.edge_count();
+        let edge_count_in_def_graph = def_graph.edge_count();
         assert_eq!(edge_count_in_instantiated_graph, edge_count_in_def_graph);
     }
 }
