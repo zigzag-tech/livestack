@@ -37,7 +37,7 @@ pub struct InstantiatedGraphNode {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct InstantiatedGraph {
-    pub graph: DiGraph<InstantiatedGraphNode, ()>,
+    graph: DiGraph<InstantiatedGraphNode, ()>,
     node_indices: HashMap<String, NodeIndex>,
     pub def_graph: DefGraph,
     pub context_id: String,
@@ -73,14 +73,15 @@ impl InstantiatedGraph {
     }
 
     fn instantiate(&mut self) {
-        let def_nodes = self
+        let def_node_indices = self
             .def_graph
-            .graph
-            .node_indices()
+            .node_indices();
+        let def_nodes = def_node_indices
+            .iter()
             .map(|index| {
                 (
                     index,
-                    self.def_graph.graph.node_weight(index).unwrap().clone(),
+                    self.def_graph.node_weight(*index).unwrap().clone(),
                 )
             })
             .collect::<Vec<_>>();
@@ -141,13 +142,26 @@ impl InstantiatedGraph {
                 .insert(node.label.clone(), instantiated_index);
         }
 
-        for edge in self.def_graph.graph.raw_edges() {
-            let source_label = &self.def_graph.graph[edge.source()].label;
-            let target_label = &self.def_graph.graph[edge.target()].label;
+        for edge in self.def_graph.raw_edges() {
+            let source_label = &self.def_graph.node_weight(edge.0).unwrap().label;
+            let target_label = &self.def_graph.node_weight(edge.1).unwrap().label;
             let source_index = *self.node_indices.get(source_label).unwrap();
             let target_index = *self.node_indices.get(target_label).unwrap();
             self.graph.add_edge(source_index, target_index, ());
         }
+    }
+
+    pub fn node_weight(&self, index: u32) -> Option<&InstantiatedGraphNode> {
+        let index = NodeIndex::new(index as usize);
+        self.graph.node_weight(index)
+    }
+
+    pub fn edge_count(&self) -> usize {
+        self.graph.edge_count()
+    }
+
+    pub fn node_indices(&self) -> Vec<u32> {
+        self.graph.node_indices().map(|index| index.index() as u32).collect()
     }
 
     // Methods to manipulate the graph will be added here

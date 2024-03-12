@@ -1,7 +1,6 @@
-use napi_derive::napi;
 use serde::{Serialize};
 #[derive(Serialize, Debug, PartialEq, Clone)]
-#[napi]
+// #[napi]
 pub struct SpecTagInfo {
     pub spec_name: String,
     pub tag: String,
@@ -9,7 +8,7 @@ pub struct SpecTagInfo {
 }
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
-#[napi]
+// #[napi]
 pub struct FromSpecAndTag {
     pub spec_name: String,
     pub output: String,
@@ -17,7 +16,7 @@ pub struct FromSpecAndTag {
 }
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
-#[napi]
+// #[napi]
 pub struct ToSpecAndTag {
     pub spec_name: String,
     pub input: String,
