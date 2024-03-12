@@ -14,6 +14,7 @@
   "dependencies": {
     "graphology": "^0.25.4",
     "graphology-types": "^0.24.7",
+    "livestack-shared-crosslang-js": "*",
     "zod": "^3"
   },
   "devDependencies": {
