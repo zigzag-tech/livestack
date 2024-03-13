@@ -350,6 +350,7 @@ impl DefGraph {
                     label: stream_def_id.clone(),
                 },
             );
+            self.ensure_edge(from_spec_node_id, from_outlet_node_id);
             self.ensure_edge(from_outlet_node_id, stream_node_id);
         }
 
