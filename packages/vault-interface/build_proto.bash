@@ -10,4 +10,4 @@ protoc --plugin=$(npm root)/.bin/protoc-gen-ts_proto \
  --ts_proto_opt=snakeToCamel=false \
  --ts_proto_opt=useAbortSignal=true \
  --ts_proto_opt=addGrpcMetadata=true \
- -I=src/ src/*.proto
+ -I=proto/ proto/*.proto
