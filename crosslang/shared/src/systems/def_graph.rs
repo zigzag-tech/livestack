@@ -311,37 +311,6 @@ impl DefGraph {
             },
         );
 
-        let to_spec_id = unique_spec_identifier(to.spec_name.clone(), to.unique_spec_label.clone());
-        let to_spec_node_id = self.ensure_node(
-            &to_spec_id,
-            DefGraphNode {
-                node_type: NodeType::Spec,
-                spec_name: Some(to.spec_name.clone()),
-                unique_spec_label: to.unique_spec_label.clone(),
-                tag: None,
-                has_transform: None,
-                stream_def_id: None,
-                alias: None,
-                direction: None,
-                label: to_spec_id.clone(),
-            },
-        );
-
-        let to_inlet_node_id = self.ensure_node(
-            &format!("{}_{}", to_spec_id, to.input),
-            DefGraphNode {
-                node_type: NodeType::Inlet,
-                spec_name: None,
-                unique_spec_label: None,
-                tag: Some(to.input.clone()),
-                has_transform: Some(to.has_transform),
-                stream_def_id: None,
-                alias: None,
-                direction: None,
-                label: format!("{}_{}", to_spec_id, to.input),
-            },
-        );
-
         let existing_stream_def_id = self.filter_outbound_neighbors(from_outlet_node_id, |node| {
             node.node_type == NodeType::StreamDef
         });
@@ -384,8 +353,41 @@ impl DefGraph {
             self.ensure_edge(from_outlet_node_id, stream_node_id);
         }
 
+        let to_spec_id = unique_spec_identifier(to.spec_name.clone(), to.unique_spec_label.clone());
+        let to_spec_node_id = self.ensure_node(
+            &to_spec_id,
+            DefGraphNode {
+                node_type: NodeType::Spec,
+                spec_name: Some(to.spec_name.clone()),
+                unique_spec_label: to.unique_spec_label.clone(),
+                tag: None,
+                has_transform: None,
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: to_spec_id.clone(),
+            },
+        );
+
+        let to_inlet_node_id = self.ensure_node(
+            &format!("{}_{}", to_spec_id, to.input),
+            DefGraphNode {
+                node_type: NodeType::Inlet,
+                spec_name: None,
+                unique_spec_label: None,
+                tag: Some(to.input.clone()),
+                has_transform: Some(to.has_transform),
+                stream_def_id: None,
+                alias: None,
+                direction: None,
+                label: format!("{}_{}", to_spec_id, to.input),
+            },
+        );
+
         self.ensure_edge(stream_node_id, to_inlet_node_id);
         self.ensure_edge(to_inlet_node_id, to_spec_node_id);
+
+        
 
         (
             from_spec_node_id,

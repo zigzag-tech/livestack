@@ -561,9 +561,7 @@ export class DefGraph extends Graph<DefGraphNode> {
       to.uniqueSpecLabel
     );
     const id = `${toSpecIdentifier}/${to.input}`;
-
     const toUniqueLabel = to.uniqueSpecLabel;
-
     const toInletNodeId = this.ensureNode(id, {
       nodeType: "inlet",
       tag: to.input,
