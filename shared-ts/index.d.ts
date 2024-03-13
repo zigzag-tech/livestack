@@ -6,6 +6,7 @@
 /** Generates a unique identifier for a spec with an optional unique label. */
 export function uniqueSpecIdentifier(specName: string, uniqueSpecLabel?: string | undefined | null): string
 export function sumAsString(a: number, b: number): string
+export function uniqueSpecIdentifier(a: string, b?: string | undefined | null): string
 export class SpecTagInfo {
   specName: string
   tag: string
