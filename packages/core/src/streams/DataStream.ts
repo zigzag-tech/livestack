@@ -11,26 +11,6 @@ import {
   restoreLargeValues,
 } from "../files/file-ops";
 import { getLogger } from "../utils/createWorkerLogger";
-
-export type InferStreamDef<T> = T extends DataStream<infer P> ? P : never;
-
-export namespace DataStream {
-  export type single<ZT> = ZT extends ZodType<infer T>
-    ? {
-        default: T;
-      }
-    : never;
-
-  export type multi<ZTMap> = ZTMap extends {
-    [K in keyof ZTMap]: ZodType<ZTMap[K]>;
-  }
-    ? {
-        [K in keyof ZTMap]: ZTMap[K];
-      }
-    : never;
-}
-
-// cursor based redis stream subscriber
 import { vaultClient } from "@livestack/vault-client";
 
 export class DataStream<T extends object> {
@@ -48,9 +28,7 @@ export class DataStream<T extends object> {
   //   return resolved;
   // }
   private logger: ReturnType<typeof getLogger>;
-
   protected static globalRegistry: { [key: string]: DataStream<any> } = {};
-
   public static async getOrCreate<T extends object>({
     uniqueName,
     def,
