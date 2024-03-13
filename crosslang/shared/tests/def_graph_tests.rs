@@ -499,7 +499,7 @@ mod tests {
             assert_eq!(edge, new_edge);
         }
     }
-}
+
     #[test]
     fn should_reuse_existing_stream_def_node_if_outlet_already_connected() {
         let root_spec_name = "RootSpec".to_string();
@@ -537,3 +537,4 @@ mod tests {
         // Verify that the from_outlet_node_id is connected to the reused stream_node_id
         assert!(graph.contains_edge(from_outlet_node_id, stream_node_id_first));
     }
+}
