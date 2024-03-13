@@ -29,11 +29,8 @@ import {
   wrapStreamSubscriberWithTermination,
   wrapTerminatorAndDataId,
 } from "../utils/io";
-import {
-  DataStream,
-  DataStreamSubscriber,
-  WithTimestamp,
-} from "../streams/DataStream";
+import { DataStream, WithTimestamp } from "../streams/DataStream";
+import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
 import { ZZEnv } from "./ZZEnv";
 import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
 import { lruCacheFn } from "../utils/lruCacheFn";
@@ -582,9 +579,9 @@ export class JobSpec<
         // console.debug("Output collector for stream", stream.uniqueName);
         let subscriber: DataStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>;
         if (from === "beginning") {
-          subscriber = stream.subFromBeginning();
+          subscriber = DataStreamSubscriber.subFromBeginning(stream);
         } else if (from === "now") {
-          subscriber = stream.subFromNow();
+          subscriber = DataStreamSubscriber.subFromNow(stream);
         } else {
           reject(new Error(`Invalid "from" ${from}`));
           return undefined;
