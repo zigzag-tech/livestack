@@ -28,7 +28,7 @@
     "@preconstruct/cli": "^2.8.3",
     "@types/lodash": "^4.14.201",
     "@types/uuid": "^9.0.7",
-    "typescript": "5.4.1-rc"
+    "typescript": "5.4.2"
   },
   "optionalDependencies": {
     "@google-cloud/storage": "^7.x",
