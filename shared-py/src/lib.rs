@@ -11,7 +11,7 @@ fn unique_spec_identifier(a: String, b: Option<String>) -> PyResult<String> {
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn shared(_py: Python, m: &PyModule) -> PyResult<()> {
+fn shared_py(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(unique_spec_identifier, m)?)?;
     Ok(())
 }
