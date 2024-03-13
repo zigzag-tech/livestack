@@ -519,11 +519,51 @@ export class DefGraph extends Graph<DefGraphNode> {
       }
     );
 
+    let streamNodeId: string;
+    let streamDefId: string;
+
+    // check existing stream def node
+    const existingStreamDefId = this.outboundNeighbors(fromOutletNodeId);
+    if (existingStreamDefId.length > 1) {
+      throw new Error(
+        `Expected exactly one stream def node, got ${existingStreamDefId.length}.`
+      );
+    } else if (existingStreamDefId.length === 1) {
+      // stream def node already exists; reuse it
+      streamNodeId = existingStreamDefId[0];
+      streamDefId = (this.getNodeAttributes(streamNodeId) as StreamDefNode)
+        .streamDefId;
+    } else {
+      streamDefId = uniqueStreamIdentifier({
+        from: {
+          specName: from.specName,
+          uniqueSpecLabel: from.uniqueSpecLabel,
+          tag: from.output,
+        },
+        to: {
+          specName: to.specName,
+          uniqueSpecLabel: to.uniqueSpecLabel,
+          tag: to.input,
+        },
+      });
+
+      streamNodeId = this.ensureNode(streamDefId, {
+        nodeType: "stream-def",
+        label: streamDefId,
+        streamDefId,
+      });
+
+      this.ensureEdge(fromSpecNodeId, fromOutletNodeId);
+      this.ensureEdge(fromOutletNodeId, streamNodeId);
+    }
     const toSpecIdentifier = uniqueSpecIdentifier(
       to.specName,
       to.uniqueSpecLabel
     );
     const id = `${toSpecIdentifier}/${to.input}`;
+
+    const toUniqueLabel = to.uniqueSpecLabel;
+
     const toInletNodeId = this.ensureNode(id, {
       nodeType: "inlet",
       tag: to.input,
@@ -531,7 +571,6 @@ export class DefGraph extends Graph<DefGraphNode> {
       hasTransform: !!to.hasTransform,
     });
 
-    const toUniqueLabel = to.uniqueSpecLabel;
     const toSpecNodeId = this.ensureNode(toSpecIdentifier, {
       specName: to.specName,
       ...(toUniqueLabel ? { uniqueSpecLabel: toUniqueLabel } : {}),
@@ -539,27 +578,6 @@ export class DefGraph extends Graph<DefGraphNode> {
       label: toSpecIdentifier,
     });
 
-    const streamDefId = uniqueStreamIdentifier({
-      from: {
-        specName: from.specName,
-        uniqueSpecLabel: from.uniqueSpecLabel,
-        tag: from.output,
-      },
-      to: {
-        specName: to.specName,
-        uniqueSpecLabel: to.uniqueSpecLabel,
-        tag: to.input,
-      },
-    });
-
-    const streamNodeId = this.ensureNode(streamDefId, {
-      nodeType: "stream-def",
-      label: streamDefId,
-      streamDefId,
-    });
-
-    this.ensureEdge(fromSpecNodeId, fromOutletNodeId);
-    this.ensureEdge(fromOutletNodeId, streamNodeId);
     this.ensureEdge(streamNodeId, toInletNodeId);
     this.ensureEdge(toInletNodeId, toSpecNodeId);
 
@@ -678,7 +696,6 @@ export class DefGraph extends Graph<DefGraphNode> {
   }
 }
 export type TransformFunction<T1 = any, T2 = any> = (o: T1) => T2 | Promise<T2>;
-
 
 export function uniqueStreamIdentifier({
   from,
