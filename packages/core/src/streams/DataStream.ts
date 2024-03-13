@@ -32,9 +32,6 @@ export namespace DataStream {
 
 // cursor based redis stream subscriber
 import { vaultClient } from "@livestack/vault-client";
-import { SubType } from "@livestack/vault-interface/src/generated/stream";
-import { Observable, Subscriber } from "rxjs";
-import { createLazyNextValueGenerator } from "../jobs/pubsub";
 
 export class DataStream<T extends object> {
   public readonly def: ZodType<T> | null;
@@ -282,24 +279,6 @@ export class DataStream<T extends object> {
     }
   }
 
-  public subFromNow() {
-    return new DataStreamSubscriber({
-      stream: this,
-      zzEnvP: this.zzEnvP,
-      initialCursor: "$",
-      subType: SubType.fromNow,
-    });
-  }
-
-  public subFromBeginning() {
-    return new DataStreamSubscriber({
-      stream: this,
-      zzEnvP: this.zzEnvP,
-      initialCursor: "0",
-      subType: SubType.fromStart,
-    });
-  }
-
   public static define<T extends object>(
     ...p: ConstructorParameters<typeof DataStreamDef<T>>
   ) {
@@ -322,122 +301,6 @@ export type WithTimestamp<T extends object> = T & {
   chunkId: string;
 };
 
-export class DataStreamSubscriber<T extends object> {
-  private zzEnvP: Promise<ZZEnv>;
-  public readonly stream: DataStream<T>;
-  private cursor: `${string}-${string}` | "$" | "0";
-  private _valueObservable: Observable<WithTimestamp<T>> | null = null;
-  private isUnsubscribed: boolean = false;
-  private _nextValue: (() => Promise<WithTimestamp<T>>) | null = null;
-  private subType: SubType;
-
-  constructor({
-    stream,
-    zzEnvP,
-    initialCursor,
-    subType,
-  }: {
-    stream: DataStream<T>;
-    zzEnvP: Promise<ZZEnv>;
-    initialCursor: "0" | "$";
-    subType: SubType;
-  }) {
-    this.stream = stream;
-    this.zzEnvP = zzEnvP;
-    this.cursor = initialCursor;
-    this.subType = subType;
-  }
-
-  private initializeObservable() {
-    this._valueObservable = new Observable(
-      (subscriber: Subscriber<WithTimestamp<T>>) => {
-        this.readStream(subscriber);
-      }
-    );
-  }
-
-  private async readStream(subscriber: Subscriber<WithTimestamp<T>>) {
-    try {
-      const iter = vaultClient.stream.sub({
-        projectId: (await this.zzEnvP).projectId,
-        uniqueName: this.stream.uniqueName,
-        subType: this.subType,
-      });
-      // console.debug("DataStreamSubscriber readStream", this.stream.uniqueName);
-      for await (const message of iter) {
-        // console.debug(
-        //   "DataStreamSubscriber message",
-        //   this.stream.uniqueName,
-        //   message
-        // );
-        const data: T = customParse(message.dataStr);
-        let restored = data;
-        const { largeFilesToRestore, newObj } =
-          identifyLargeFilesToRestore(data);
-
-        if (largeFilesToRestore.length > 0) {
-          const zzEnv = await this.zzEnvP;
-          if (!zzEnv.storageProvider) {
-            throw new Error(
-              "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
-            );
-          } else {
-            restored = (await restoreLargeValues({
-              obj_: newObj,
-              largeFilesToRestore,
-              basePath: await this.stream.baseWorkingRelativePathP,
-              fetcher: zzEnv.storageProvider.fetchFromStorage,
-            })) as T;
-          }
-        }
-
-        subscriber.next({
-          ...restored,
-          timestamp: message.timestamp,
-          chunkId: message.chunkId,
-        });
-      }
-    } catch (error) {
-      subscriber.error(error);
-    } finally {
-      // Perform cleanup here if necessary
-      subscriber.complete();
-    }
-  }
-
-  public get valueObservable(): Observable<WithTimestamp<T>> {
-    if (!this._valueObservable) {
-      this.initializeObservable();
-    }
-    return this._valueObservable!;
-  }
-
-  public unsubscribe = () => {
-    this.isUnsubscribed = true;
-    // Perform any additional cleanup or resource release here if necessary
-  };
-
-  public nextValue = () => {
-    if (!this._nextValue) {
-      const { nextValue } = createLazyNextValueGenerator(this.valueObservable);
-      this._nextValue = () => nextValue();
-    }
-    return this._nextValue();
-  };
-
-  async *[Symbol.asyncIterator]() {
-    while (true) {
-      const input = await this.nextValue();
-
-      // Assuming nextInput returns null or a similar value to indicate completion
-      if (!input) {
-        break;
-      }
-      yield input;
-    }
-  }
-}
-
 // TODO: make internal
 
 function customStringify(obj: any): string {
@@ -450,7 +313,7 @@ function customStringify(obj: any): string {
   return JSON.stringify(obj, replacer);
 }
 
-function customParse(json: string): any {
+export function customParse(json: string): any {
   function reviver(key: string, value: any): any {
     if (value && value.type === "Buffer") {
       return Buffer.from(value.data, "base64");
