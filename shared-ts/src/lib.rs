@@ -19,6 +19,11 @@ pub fn sum_as_string(a: i32, b: i32) -> String {
   return sum_as_string_impl(a as usize, b as usize);
 }
 
+#[napi]
+pub fn unique_spec_identifier(a: String, b: Option<String>) -> String {
+  return unique_spec_identifier_impl(a, b);
+}
+
 
 
 // #[napi]

@@ -1,7 +1,5 @@
 use serde::{Serialize};
-use napi_derive::napi;
 #[derive(Serialize, Debug, PartialEq, Clone)]
-#[napi]
 pub struct SpecTagInfo {
     pub spec_name: String,
     pub tag: String,
@@ -9,7 +7,6 @@ pub struct SpecTagInfo {
 }
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
-#[napi]
 pub struct FromSpecAndTag {
     pub spec_name: String,
     pub output: String,
@@ -17,7 +14,6 @@ pub struct FromSpecAndTag {
 }
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
-#[napi]
 pub struct ToSpecAndTag {
     pub spec_name: String,
     pub input: String,
@@ -108,7 +104,6 @@ pub fn unique_stream_identifier(from: Option<SpecTagInfo>, to: Option<SpecTagInf
 
 
 /// Generates a unique identifier for a spec with an optional unique label.
-#[napi]
 pub fn unique_spec_identifier(spec_name: String, unique_spec_label: Option<String>) -> String {
     format!(
         "{}{}",

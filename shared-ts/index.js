@@ -295,10 +295,11 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { SpecTagInfo, FromSpecAndTag, ToSpecAndTag, uniqueSpecIdentifier, sumAsString } = nativeBinding
+const { SpecTagInfo, FromSpecAndTag, ToSpecAndTag, uniqueSpecIdentifier, sumAsString, uniqueSpecIdentifier } = nativeBinding
 
 module.exports.SpecTagInfo = SpecTagInfo
 module.exports.FromSpecAndTag = FromSpecAndTag
 module.exports.ToSpecAndTag = ToSpecAndTag
 module.exports.uniqueSpecIdentifier = uniqueSpecIdentifier
 module.exports.sumAsString = sumAsString
+module.exports.uniqueSpecIdentifier = uniqueSpecIdentifier
