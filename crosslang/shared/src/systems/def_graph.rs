@@ -296,7 +296,6 @@ impl DefGraph {
                 label: from_spec_id.clone(),
             },
         );
-
         let from_outlet_node_id = self.ensure_node(
             &format!("{}_{}", from_spec_id, from.output),
             DefGraphNode {
@@ -343,35 +342,48 @@ impl DefGraph {
             },
         );
 
-        let stream_def_id = unique_stream_identifier(
-            Some(SpecTagInfo {
-                spec_name: from.spec_name.clone(),
-                tag: from.output.clone(),
-                unique_spec_label: from.unique_spec_label.clone(),
-            }),
-            Some(SpecTagInfo {
-                spec_name: to.spec_name.clone(),
-                tag: to.input.clone(),
-                unique_spec_label: to.unique_spec_label.clone(),
-            }),
-        );
-        let stream_node_id = self.ensure_node(
-            &stream_def_id,
-            DefGraphNode {
-                node_type: NodeType::StreamDef,
-                spec_name: None,
-                unique_spec_label: None,
-                tag: None,
-                has_transform: None,
-                stream_def_id: Some(stream_def_id.clone()),
-                alias: None,
-                direction: None,
-                label: stream_def_id.clone(),
-            },
-        );
+        let existing_stream_def_id = self.filter_outbound_neighbors(from_outlet_node_id, |node| {
+            node.node_type == NodeType::StreamDef
+        });
+        let stream_node_id: u32;
+        let stream_def_id: String;
+        if let Some(existing_id) = existing_stream_def_id.first() {
+            stream_node_id = *existing_id;
+            stream_def_id = self.graph.node_weight(NodeIndex::new(*existing_id as usize))
+                .expect("StreamDef node must exist")
+                .stream_def_id
+                .clone()
+                .expect("StreamDef node must have a stream_def_id");
+        } else {
+            stream_def_id = unique_stream_identifier(
+                Some(SpecTagInfo {
+                    spec_name: from.spec_name.clone(),
+                    tag: from.output.clone(),
+                    unique_spec_label: from.unique_spec_label.clone(),
+                }),
+                Some(SpecTagInfo {
+                    spec_name: to.spec_name.clone(),
+                    tag: to.input.clone(),
+                    unique_spec_label: to.unique_spec_label.clone(),
+                }),
+            );
+            stream_node_id = self.ensure_node(
+                &stream_def_id,
+                DefGraphNode {
+                    node_type: NodeType::StreamDef,
+                    spec_name: None,
+                    unique_spec_label: None,
+                    tag: None,
+                    has_transform: None,
+                    stream_def_id: Some(stream_def_id.clone()),
+                    alias: None,
+                    direction: None,
+                    label: stream_def_id.clone(),
+                },
+            );
+            self.ensure_edge(from_outlet_node_id, stream_node_id);
+        }
 
-        self.ensure_edge(from_spec_node_id, from_outlet_node_id);
-        self.ensure_edge(from_outlet_node_id, stream_node_id);
         self.ensure_edge(stream_node_id, to_inlet_node_id);
         self.ensure_edge(to_inlet_node_id, to_spec_node_id);
 
