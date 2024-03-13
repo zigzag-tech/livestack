@@ -16,7 +16,7 @@
   "devDependencies": {
     "@preconstruct/cli": "^2.8.3",
     "@types/node": "^20.11.0",
-    "typescript": "5.4.1-rc"
+    "typescript": "5.4.2"
   },
   "main": "dist/livestack-vault-client.cjs.js",
   "types": "dist/livestack-vault-client.cjs.d.ts",
