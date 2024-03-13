@@ -1,9 +1,7 @@
-use livestack_shared::models::ModelA;
 use pyo3::prelude::*;
 // use shared::systems::system_a:: { do_stuff_from_system_a }; // or (1)
 // use shared::systems::system_a::*; // or this one (1)
 use livestack_shared::systems::system_a::sum_as_string_impl;
-use livestack_shared::systems::*; // or this one (2) // or (1)
 /// Formats the sum of two numbers as string.
 
 #[pyfunction]

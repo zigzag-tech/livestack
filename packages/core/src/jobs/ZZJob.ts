@@ -14,6 +14,7 @@ import { getLogger } from "../utils/createWorkerLogger";
 import { WrapTerminatorAndDataId } from "../utils/io";
 import { longStringTruncator } from "../utils/longStringTruncator";
 import { DataStream } from "../streams/DataStream";
+import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
 import { JobSpec } from "./JobSpec";
 import { ZZEnv } from "./ZZEnv";
 import { identifyLargeFilesToSave } from "../files/file-ops";
@@ -335,7 +336,7 @@ export class ZZJob<
 
       const inputObservableUntracked = new Observable<IMap[K] | null>((s) => {
         Promise.all([streamP, parentRecP]).then(([stream, parentRec]) => {
-          const sub = stream.subFromBeginning();
+          const sub = DataStreamSubscriber.subFromBeginning(stream);
           const obs = sub.valueObservable.pipe(
             map((x) => (x.terminate ? null : x.data))
           );
@@ -456,7 +457,7 @@ export class ZZJob<
       // }
     } catch (e: any) {
       console.error("Error while running job: ", this.jobId, e);
-      
+
       await vaultClient.db.appendJobStatusRec({
         projectId,
         specName: this.spec.name,
