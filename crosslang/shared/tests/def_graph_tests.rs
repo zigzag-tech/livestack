@@ -500,3 +500,40 @@ mod tests {
         }
     }
 }
+    #[test]
+    fn should_reuse_existing_stream_def_node_if_outlet_already_connected() {
+        let root_spec_name = "RootSpec".to_string();
+        let input_tags = vec![];
+        let output_tags = vec!["outputA".to_string()];
+        let mut graph = DefGraph::new(root_spec_name, input_tags, output_tags);
+        let from = FromSpecAndTag {
+            spec_name: "SpecA".to_string(),
+            output: "outputA".to_string(),
+            unique_spec_label: None,
+        };
+        let to_first = ToSpecAndTag {
+            spec_name: "SpecB".to_string(),
+            input: "inputB".to_string(),
+            has_transform: false,
+            unique_spec_label: None,
+        };
+        let to_second = ToSpecAndTag {
+            spec_name: "SpecC".to_string(),
+            input: "inputC".to_string(),
+            has_transform: false,
+            unique_spec_label: None,
+        };
+
+        // Connect SpecA to SpecB
+        let (_, _, stream_node_id_first, from_outlet_node_id, _) =
+            graph.add_connected_dual_specs(&from, &to_first);
+
+        // Connect SpecA to SpecC, which should reuse the existing stream def node
+        let (_, _, stream_node_id_second, _, _) =
+            graph.add_connected_dual_specs(&from, &to_second);
+
+        // The stream node IDs should be the same, indicating reuse of the stream def node
+        assert_eq!(stream_node_id_first, stream_node_id_second);
+        // Verify that the from_outlet_node_id is connected to the reused stream_node_id
+        assert!(graph.contains_edge(from_outlet_node_id, stream_node_id_first));
+    }
