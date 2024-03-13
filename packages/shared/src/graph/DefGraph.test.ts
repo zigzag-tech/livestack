@@ -466,3 +466,33 @@ describe("DefGraph", () => {
     expect(newGraph).toEqual(graph);
   });
 });
+  it("should reuse an existing stream def node if outlet node is already connected", () => {
+    const graph = new DefGraph({
+      root: {
+        name: "RootSpec",
+        inputDefSet: { tags: [] },
+        outputDefSet: { tags: ["outputA"] },
+      },
+    });
+    const from = { specName: "SpecA", output: "outputA" };
+    const toFirst = { specName: "SpecB", input: "inputB", hasTransform: false };
+    const toSecond = { specName: "SpecC", input: "inputC", hasTransform: false };
+
+    // Connect SpecA to SpecB
+    graph.addConnectedDualSpecs(from, toFirst);
+    // Retrieve the stream node ID connected to SpecA's outlet
+    const fromOutletNodeId = graph.findNode(
+      (_, attrs) =>
+        attrs.nodeType === "outlet" && attrs.tag === from.output
+    );
+    const streamNodeIdFirst = graph.outboundNeighbors(fromOutletNodeId!)[0];
+
+    // Connect SpecA to SpecC, which should reuse the existing stream def node
+    graph.addConnectedDualSpecs(from, toSecond);
+    const streamNodeIdSecond = graph.outboundNeighbors(fromOutletNodeId!)[0];
+
+    // The stream node IDs should be the same, indicating reuse of the stream def node
+    expect(streamNodeIdFirst).toEqual(streamNodeIdSecond);
+    // Verify that the streamNodeIdBySpecIdentifierTypeAndTag cache has the correct entry
+    expect(graph['streamNodeIdBySpecIdentifierTypeAndTag'][`${from.specName}::out/${from.output}`]).toEqual(streamNodeIdFirst);
+  });
