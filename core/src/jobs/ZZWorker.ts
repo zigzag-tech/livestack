@@ -6,7 +6,7 @@ import { IStorageProvider } from "../storage/cloudStorage";
 import { ZZProcessor } from "./ZZJob";
 import { ZZEnv } from "./ZZEnv";
 import { z } from "zod";
-import { JobId } from "@livestack/shared";
+import { JobId } from "../graph/InstantiatedGraph";
 import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
 import { QueueJob, FromWorker, FromInstance } from "@livestack/vault-interface";
 import { v4 } from "uuid";
