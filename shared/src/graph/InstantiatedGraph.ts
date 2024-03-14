@@ -1,8 +1,13 @@
 import Graph from "graphology";
-import { InletNode, OutletNode, AliasNode, DefGraph } from "./DefGraph";
+import { InletNode, OutletNode, AliasNode } from "./DefGraph";
 import { Attributes } from "graphology-types";
 import { SpecNode, RootSpecNode } from "./DefGraph";
-import { genSpecIdentifier } from "livestack-shared-crosslang-js";
+import {
+  DefGraph,
+  NodeType,
+  genSpecIdentifier,
+  loadDefGraphFromJson,
+} from "livestack-shared-crosslang-js";
 
 export type JobId = `[${string}]${string}`;
 export type RootJobNode = {
@@ -85,33 +90,37 @@ export class InstantiatedGraph extends Graph<
       this.inletHasTransformOverridesByTag;
     const defGraph = this.defGraph;
 
-    const nodes = defGraph.nodes();
+    const nodeIds = defGraph.nodes();
     const childJobNodeIdBySpecNodeId: { [k: string]: string } = {};
     const streamNodeIdByStreamId: { [k: string]: string } = {};
 
-    for (const nodeId of nodes) {
+    for (const nodeId of nodeIds) {
       const node = defGraph.getNodeAttributes(nodeId);
-      if (node.nodeType === "root-spec") {
+      if (node.nodeType === NodeType.RootSpec) {
         this.addNode(rootJobId, {
-          ...node,
+          ...(node as RootSpecNode & {
+            label: string;
+          }),
           nodeType: "root-job",
           jobId: rootJobId,
         });
-      } else if (node.nodeType === "spec") {
+      } else if (node.nodeType === NodeType.Spec) {
         const jobId: JobId = `[${contextId}]${genSpecIdentifier(
-          node.specName,
+          node.specName!,
           node.uniqueSpecLabel
         )}`;
         this.addNode(jobId, {
-          ...node,
+          ...(node as SpecNode & {
+            label: string;
+          }),
           nodeType: "job",
           jobId,
         });
         childJobNodeIdBySpecNodeId[nodeId] = jobId;
-      } else if (node.nodeType === "stream-def") {
+      } else if (node.nodeType === NodeType.StreamDef) {
         let streamId: string | null = null;
         const { source, targets } = getNodesConnectedToStream(defGraph, nodeId);
-        if (source?.origin.nodeType === "root-spec") {
+        if (source?.origin.nodeType === NodeType.RootSpec) {
           const tag = source.outletNode.tag;
           const streamIdOverride = streamIdOverrides[`out/${tag}`];
           if (streamIdOverride) {
@@ -140,40 +149,40 @@ export class InstantiatedGraph extends Graph<
           });
         }
         streamNodeIdByStreamId[nodeId] = streamId;
-      } else if (node.nodeType === "inlet") {
+      } else if (node.nodeType === NodeType.Inlet) {
         this.addNode(nodeId, {
-          ...node,
-          hasTransform: inletHasTransformOverridesByTag[node.tag],
+          ...(node as InletNode & {
+            label: string;
+          }),
+          hasTransform: inletHasTransformOverridesByTag[node.tag!],
         });
       } else {
         if (!this.hasNode(nodeId)) {
-          this.addNode(nodeId, node);
+          this.addNode(nodeId, node as OutletNode & { label: string });
         }
       }
     }
 
     const edges = defGraph.edges();
 
-    for (const edgeId of edges) {
-      const from = defGraph.source(edgeId);
-      const to = defGraph.target(edgeId);
+    for (const { source: from, target: to } of edges) {
       const fromNode = defGraph.getNodeAttributes(from);
       const toNode = defGraph.getNodeAttributes(to);
 
       const newFrom =
-        fromNode.nodeType === "spec"
+        fromNode.nodeType === NodeType.Spec
           ? childJobNodeIdBySpecNodeId[from]
-          : fromNode.nodeType === "root-spec"
+          : fromNode.nodeType === NodeType.RootSpec
           ? rootJobId
-          : fromNode.nodeType === "stream-def"
+          : fromNode.nodeType === NodeType.StreamDef
           ? streamNodeIdByStreamId[from]
           : from;
       const newTo =
-        toNode.nodeType === "spec"
+        toNode.nodeType === NodeType.Spec
           ? childJobNodeIdBySpecNodeId[to]
-          : toNode.nodeType === "root-spec"
+          : toNode.nodeType === NodeType.RootSpec
           ? rootJobId
-          : toNode.nodeType === "stream-def"
+          : toNode.nodeType === NodeType.StreamDef
           ? streamNodeIdByStreamId[to]
           : to;
       if (!this.hasEdge(newFrom, newTo)) {
@@ -228,7 +237,7 @@ export class InstantiatedGraph extends Graph<
       streamIdOverrides: this.streamIdOverrides,
       inletHasTransformOverridesByTag: this.inletHasTransformOverridesByTag,
       streamSourceSpecTypeByStreamId: this.streamSourceSpecTypeByStreamId,
-      defGraph: this.defGraph.toJSON(),
+      defGraph: this.defGraph.toJson(),
     };
     return newJ;
   }
@@ -236,7 +245,7 @@ export class InstantiatedGraph extends Graph<
   static loadFromJSON(json: ReturnType<InstantiatedGraph["toJSON"]>) {
     return new InstantiatedGraph({
       contextId: json.contextId,
-      defGraph: DefGraph.loadFromJSON(json.defGraph),
+      defGraph: loadDefGraphFromJson(json.defGraph),
       rootJobId: json.rootJobId,
       streamIdOverrides: json.streamIdOverrides,
       inletHasTransformOverridesByTag: json.inletHasTransformOverridesByTag,
@@ -251,7 +260,7 @@ export type StreamIdOverridesForRootSpec = {
 
 export function getTargetSpecNodesConnectedToStream<
   G extends DefGraph | InstantiatedGraph
->(g: G, streamNodeId: string) {
+>(g: G, streamNodeId: number | string) {
   // one source, multiple targets
   type NT = G extends DefGraph ? SpecNode | RootSpecNode : JobNode;
 
@@ -259,17 +268,26 @@ export function getTargetSpecNodesConnectedToStream<
     inletNode: InletNode;
     destination: G extends DefGraph ? SpecNode | RootSpecNode : JobNode;
   }[] = [];
-  const inletNodeIds = g.outboundNeighbors(streamNodeId) as (
-    | string
-    | undefined
-  )[];
+  const inletNodeIds = g
+    .outboundNeighbors(streamNodeId as number)
+    .filter(
+      (nId) => g.getNodeAttributes(nId as number).nodeType === NodeType.Inlet
+    ) as (string | number | undefined)[];
 
   inletNodeIds.forEach((inletNodeId) => {
     if (inletNodeId) {
-      const inletNode = g.getNodeAttributes(inletNodeId) as InletNode;
-      const [targetSpecNodeId] = g.outboundNeighbors(inletNodeId);
+      const inletNode = g.getNodeAttributes(inletNodeId as number) as InletNode;
+      const [targetSpecNodeId] = g
+        .outboundNeighbors(inletNodeId as number)
+        .filter(
+          (nId) =>
+            g.getNodeAttributes(nId as number).nodeType === NodeType.Spec ||
+            g.getNodeAttributes(nId as number).nodeType === NodeType.RootSpec ||
+            g.getNodeAttributes(nId as number).nodeType === "job" ||
+            g.getNodeAttributes(nId as number).nodeType === "root-job"
+        ) as (string | number | undefined)[];
       const targetSpecNode = g.getNodeAttributes(
-        targetSpecNodeId
+        targetSpecNodeId as number
       ) as Attributes as NT;
       targets.push({
         destination: targetSpecNode,
@@ -283,21 +301,37 @@ export function getTargetSpecNodesConnectedToStream<
 
 export function getSourceSpecNodeConnectedToStream<
   G extends DefGraph | InstantiatedGraph
->(g: G, streamNodeId: string) {
+>(g: G, streamNodeId: number | string) {
   // one source, multiple targets
   type NT = G extends DefGraph ? SpecNode | RootSpecNode : JobNode;
   let source: {
     origin: NT;
     outletNode: OutletNode;
   } | null = null;
-  const [outletNodeId] = g.inboundNeighbors(streamNodeId);
+  const [outletNodeId] = g
+    .inboundNeighbors(streamNodeId as number)
+    .filter(
+      (nId) => g.getNodeAttributes(nId as number).nodeType === NodeType.Outlet
+    );
   if (!outletNodeId) {
     source = null;
   } else {
-    const outletNode = g.getNodeAttributes(outletNodeId) as OutletNode;
-    const [sourceSpecNodeId] = g.inboundNeighbors(outletNodeId);
+    const outletNode = g.getNodeAttributes(
+      outletNodeId as number
+    ) as OutletNode;
+
+    const [sourceSpecNodeId] = g
+      .inboundNeighbors(outletNodeId as number)
+      .filter(
+        (nId) =>
+          g.getNodeAttributes(nId as number).nodeType === NodeType.Spec ||
+          g.getNodeAttributes(nId as number).nodeType === NodeType.RootSpec ||
+          g.getNodeAttributes(nId as number).nodeType === "job" ||
+          g.getNodeAttributes(nId as number).nodeType === "root-job"
+      );
+
     const sourceSpecNode = g.getNodeAttributes(
-      sourceSpecNodeId
+      sourceSpecNodeId as number
     ) as Attributes as NT;
     source = {
       origin: sourceSpecNode,
@@ -310,7 +344,7 @@ export function getSourceSpecNodeConnectedToStream<
 
 export function getNodesConnectedToStream<
   G extends DefGraph | InstantiatedGraph
->(g: G, streamNodeId: string) {
+>(g: G, streamNodeId: number | string) {
   // one source, multiple targets
   const source = getSourceSpecNodeConnectedToStream(g, streamNodeId);
   const targets = getTargetSpecNodesConnectedToStream(g, streamNodeId);

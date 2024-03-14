@@ -1,5 +1,5 @@
 use napi::Error;
-use tonic::{transport::Server, Request, Response, Status};
+// use tonic::{transport::Server, Request, Response, Status};
 
 
 pub mod livestack {
@@ -7,7 +7,7 @@ pub mod livestack {
 }
 
 
-use livestack::stream_service_client::StreamServiceClient;
+// use livestack::stream_service_client::StreamServiceClient;
 use napi_derive::napi;
 
 #[napi]
