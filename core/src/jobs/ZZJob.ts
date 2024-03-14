@@ -2,7 +2,7 @@ import { InstantiatedGraph, JobId } from "../graph/InstantiatedGraph";
 import { InferTMap } from "@livestack/shared";
 import { vaultClient } from "@livestack/vault-client";
 import _ from "lodash";
-import { Observable, map, takeUntil } from "rxjs";
+import { Observable, map, merge, takeUntil } from "rxjs";
 import { z } from "zod";
 import { TransformRegistry } from "../orchestrations/TransformRegistry";
 import {
@@ -26,6 +26,7 @@ export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
 export interface ByTagCallable<TMap> {
   <K extends keyof TMap>(key?: K): {
     nextValue: () => Promise<TMap[K] | null>;
+    observable: () => Observable<TMap[K] | null>;
     [Symbol.asyncIterator](): AsyncGenerator<TMap[K]>;
   };
 }
@@ -53,6 +54,18 @@ export class ZZJob<
       ) => {
         nextValue: () => Promise<IMap[K] | null>;
         [Symbol.asyncIterator](): AsyncGenerator<IMap[K]>;
+      };
+      merge: <K extends keyof IMap>(
+        ...tags: [K[]] | K[]
+      ) => {
+        nextValue: () => Promise<{
+          tag: keyof IMap;
+          data: IMap[keyof IMap];
+        } | null>;
+        [Symbol.asyncIterator](): AsyncGenerator<{
+          tag: keyof IMap;
+          data: IMap[keyof IMap];
+        }>;
       };
     };
 
@@ -172,8 +185,45 @@ export class ZZJob<
       };
 
       const obj = this.genInputObject();
-      Object.assign(func, obj);
 
+      func.tags = obj.tags;
+      func.observable = obj.observable;
+      func.nextValue = obj.nextValue;
+      func[Symbol.asyncIterator] = obj[Symbol.asyncIterator];
+
+      func.merge = <K extends keyof IMap>(...tags: [K[]] | K[]) => {
+        let flattened: K[];
+        if (Array.isArray(tags[0])) {
+          flattened = tags[0] as K[];
+        } else {
+          // check if every element is a string
+          if (tags.every((x) => typeof x === "string")) {
+            flattened = tags as K[];
+          } else {
+            throw new Error(
+              "Invalid input to merge. Syntax: merge('tag1', 'tag2') or merge(['tag1', 'tag2'])"
+            );
+          }
+        }
+        // dedupe tags
+        const deduped = Array.from(new Set(flattened));
+        const obs = deduped.map((tag) => {
+          return this.genInputObjectByTag(tag)
+            .observable()
+            .pipe(
+              map((data) => {
+                return {
+                  tag,
+                  data,
+                };
+              })
+            );
+        });
+        const merged = merge(...obs);
+        return createLazyNextValueGenerator(merged);
+      };
+
+      // Object.assign(func, obj);
       return func as any;
     })();
 
@@ -256,12 +306,12 @@ export class ZZJob<
     };
     return {
       nextValue,
-      // getObservable() {
-      //   if (!tag) {
-      //     tag = that.spec.getSingleInputTag() as K;
-      //   }
-      //   return that._ensureInputStreamFn(tag).trackedObservable;
-      // },
+      observable() {
+        if (!tag) {
+          tag = that.spec.getSingleInputTag() as K;
+        }
+        return that._ensureInputStreamFn(tag).trackedObservable;
+      },
       async *[Symbol.asyncIterator]() {
         if (!tag) {
           tag = that.spec.getSingleInputTag() as K;

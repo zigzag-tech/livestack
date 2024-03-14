@@ -53,9 +53,17 @@ export function createLazyNextValueGenerator<T>(observable: Observable<T>) {
     return value;
   };
 
-
-  return { nextValue };
+  const obj = {
+    nextValue,
+    [Symbol.asyncIterator]: async function* () {
+      while (true) {
+        yield nextValue();
+      }
+    },
+  };
+  return obj;
 }
+  
 
 export function createTrackedObservable<T>(observable: Observable<T>) {
   let subscriberCount = 0;
