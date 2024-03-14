@@ -113,8 +113,12 @@ interface Connection<
   K1Out extends keyof OMap1 = keyof OMap1,
   K2In extends keyof IMap2 = keyof IMap2
 > {
-  from: SpecAndOutput<P1, I1, O1, IMap1, OMap1, K1Out>;
-  to: SpecAndInput<P2, I2, O2, IMap2, OMap2, K2In>;
+  from:
+    | SpecAndOutput<P1, I1, O1, IMap1, OMap1, K1Out>
+    | SpecOrName<P1, I1, O1, IMap1, OMap1>;
+  to:
+    | SpecAndInput<P2, I2, O2, IMap2, OMap2, K2In>
+    | SpecOrName<P2, I2, O2, IMap2, OMap2>;
   transform?: NoInfer<TransformFunction<OMap1[K1Out], IMap2[K2In]>>;
 }
 
@@ -166,19 +170,33 @@ export function conn<
 >(
   p: Connection<P1, I1, O1, IMap1, OMap1, P2, I2, O2, IMap2, OMap2, K1Out, K2In>
 ): CanonicalConnection<P1, I1, O1, IMap1, OMap1, P2, I2, O2, IMap2, OMap2> {
-  const from = resolveUniqueSpec(p.from.spec);
-  const to = resolveUniqueSpec(p.to.spec);
+  const from = resolveUniqueSpec(
+    typeof p.from === "string" || JobSpec.isJobSpec(p.from)
+      ? p.from
+      : (p.from as SpecAndOutput<P1, I1, O1, IMap1, OMap1, K1Out>).spec
+  );
+  const to = resolveUniqueSpec(
+    typeof p.to === "string" || JobSpec.isJobSpec(p.to)
+      ? p.to
+      : (p.to as SpecAndInput<P2, I2, O2, IMap2, OMap2, K2In>).spec
+  );
+  const fromOutput = !(typeof p.from === "string" || JobSpec.isJobSpec(p.from))
+    ? p.from.output
+    : null;
+  const toInput = !(typeof p.to === "string" || JobSpec.isJobSpec(p.to))
+    ? p.to.input
+    : null;
   return {
     from: {
       ...from,
       output: (
-        p.from.output || (from.spec.getSingleOutputTag() as K1Out)
+        fromOutput || (from.spec.getSingleOutputTag() as K1Out)
       ).toString(),
       tagInSpecType: "output",
     },
     to: {
       ...to,
-      input: (p.to.input || (to.spec.getSingleInputTag() as K2In)).toString(),
+      input: (toInput || (to.spec.getSingleInputTag() as K2In)).toString(),
       tagInSpecType: "input",
     },
     transform:
