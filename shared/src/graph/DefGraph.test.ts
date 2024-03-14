@@ -1,4 +1,5 @@
-import { DefGraph, uniqueStreamIdentifier } from "./DefGraph";
+import { uniqueStreamIdentifier } from "livestack-shared-crosslang-js";
+import { DefGraph } from "./DefGraph";
 
 describe("DefGraph", () => {
   it("should create a root spec node", () => {

@@ -5,7 +5,17 @@
 
 /** Generates a unique identifier for a spec with an optional unique label. */
 export function uniqueSpecIdentifier(specName: string, uniqueSpecLabel?: string | undefined | null): string
-export function genSpecIdentifier(a: string, b?: string | undefined | null): string
+export function genSpecIdentifier(specName: string, uniqueSpecLabel?: string | undefined | null): string
+export interface SpecTagInfoParams {
+  specName: string
+  uniqueSpecLabel?: string
+  tag: string
+}
+export interface UniqueStreamIdentifierParams {
+  from?: SpecTagInfoParams
+  to?: SpecTagInfoParams
+}
+export function uniqueStreamIdentifier(p: UniqueStreamIdentifierParams): string
 export class SpecTagInfo {
   specName: string
   tag: string
