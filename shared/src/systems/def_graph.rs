@@ -281,7 +281,7 @@ impl DefGraph {
         to: &ToSpecAndTag,     // (spec_name, input, has_transform, unique_spec_label)
     ) -> (u32, u32, u32, u32, u32) {
         let from_spec_id =
-            unique_spec_identifier(from.spec_name.clone(), from.unique_spec_label.clone());
+        unique_spec_identifier(from.spec_name.clone(), from.unique_spec_label.clone());
         let from_spec_node_id = self.ensure_node(
             &from_spec_id,
             DefGraphNode {

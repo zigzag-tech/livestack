@@ -21,41 +21,6 @@ pub struct ToSpecAndTag {
     pub unique_spec_label: Option<String>,
 }
 
-/*
-JS implementation for reference:
-export function uniqueStreamIdentifier({
-    from,
-    to,
-  }: {
-    from?: {
-      specName: string;
-      tag: string;
-      uniqueSpecLabel?: string;
-    };
-    to?: {
-      specName: string;
-      tag: string;
-      uniqueSpecLabel?: string;
-    };
-  }) {
-    const fromStr = !!from
-      ? `${from.specName}${
-          from.uniqueSpecLabel && from.uniqueSpecLabel !== "default_label"
-            ? `(${from.uniqueSpecLabel})`
-            : ""
-        }/${from.tag}`
-      : "(*)";
-    const toStr = !!to
-      ? `${to.specName}${
-          to.uniqueSpecLabel && to.uniqueSpecLabel !== "default_label"
-            ? `(${to.uniqueSpecLabel})`
-            : ""
-        }/${to.tag}`
-      : "(*)";
-    return `${fromStr}>>${toStr}`;
-  }
-   */
-
 /// Generates a unique identifier for a stream with optional unique labels for source and destination.
 // #[napi]
 pub fn unique_stream_identifier(from: Option<SpecTagInfo>, to: Option<SpecTagInfo>) -> String {
@@ -103,7 +68,7 @@ pub fn unique_stream_identifier(from: Option<SpecTagInfo>, to: Option<SpecTagInf
 }
 
 
-/// Generates a unique identifier for a spec with an optional unique label.
+/// Generateszz a unique identifier for a spec with an optional unique label.
 pub fn unique_spec_identifier(spec_name: String, unique_spec_label: Option<String>) -> String {
     format!(
         "{}{}",
@@ -115,23 +80,3 @@ pub fn unique_spec_identifier(spec_name: String, unique_spec_label: Option<Strin
     )
 }
 
-
-/*
-JS implementation for reference:
-export function uniqueSpecIdentifier({
-  specName,
-  spec,
-  uniqueSpecLabel,
-}: {
-  specName?: string;
-  spec?: { name: string };
-  uniqueSpecLabel?: string;
-}) {
-  specName = specName ?? spec?.name;
-  if (!specName) {
-    throw new Error("specName or spec must be provided");
-  }
-  return `${specName}${uniqueSpecLabel ? `[${uniqueSpecLabel}]` : ""}`;
-}
-
-*/
