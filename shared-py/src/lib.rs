@@ -4,14 +4,14 @@ use pyo3::prelude::*;
 use livestack_shared::systems::def_graph_utils::{unique_spec_identifier as unique_spec_identifier_impl};
 /// Formats the sum of two numbers as string.
 
-#[pyfunction]
-fn unique_spec_identifier(a: String, b: Option<String>) -> PyResult<String> {
-    Ok(unique_spec_identifier_impl(a, b))
-}
+// #[pyfunction]
+// fn unique_spec_identifier(a: String, b: Option<String>) -> PyResult<String> {
+//     Ok(unique_spec_identifier_impl(a, b))
+// }
 
-/// A Python module implemented in Rust.
-#[pymodule]
-fn shared_py(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(unique_spec_identifier, m)?)?;
-    Ok(())
-}
+// /// A Python module implemented in Rust.
+// #[pymodule]
+// fn shared_py(_py: Python, m: &PyModule) -> PyResult<()> {
+//     m.add_function(wrap_pyfunction!(unique_spec_identifier, m)?)?;
+//     Ok(())
+// }

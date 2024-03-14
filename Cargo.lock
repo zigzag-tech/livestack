@@ -487,9 +487,6 @@ name = "livestack-shared"
 version = "0.1.0"
 dependencies = [
  "assert_matches",
- "napi",
- "napi-build",
- "napi-derive",
  "petgraph",
  "serde",
  "serde_json",

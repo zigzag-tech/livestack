@@ -2,7 +2,7 @@ import Graph from "graphology";
 import { InletNode, OutletNode, AliasNode, DefGraph } from "./DefGraph";
 import { Attributes } from "graphology-types";
 import { SpecNode, RootSpecNode } from "./DefGraph";
-import { uniqueSpecIdentifier } from "livestack-shared-crosslang-js";
+import { genSpecIdentifier } from "livestack-shared-crosslang-js";
 
 export type JobId = `[${string}]${string}`;
 export type RootJobNode = {
@@ -98,7 +98,7 @@ export class InstantiatedGraph extends Graph<
           jobId: rootJobId,
         });
       } else if (node.nodeType === "spec") {
-        const jobId: JobId = `[${contextId}]${uniqueSpecIdentifier(
+        const jobId: JobId = `[${contextId}]${genSpecIdentifier(
           node.specName,
           node.uniqueSpecLabel
         )}`;
