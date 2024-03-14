@@ -1,6 +1,5 @@
 import Graph from "graphology";
-import { Attributes } from "graphology-types";
-import { uniqueSpecIdentifier } from "livestack-shared-crosslang-js";
+import { genSpecIdentifier } from "livestack-shared-crosslang-js";
 
 export type SpecNode = {
   nodeType: "spec";
@@ -79,7 +78,7 @@ export class DefGraph extends Graph<DefGraphNode> {
   }
 
   private addSingleRootSpec({ root }: { root: SpecBase }) {
-    const specIdentifier = uniqueSpecIdentifier(root.name);
+    const specIdentifier = genSpecIdentifier(root.name);
 
     const specNodeId = this.ensureNode(specIdentifier, {
       nodeType: "root-spec",
@@ -403,7 +402,7 @@ export class DefGraph extends Graph<DefGraphNode> {
     uniqueSpecLabel?: string;
     hasTransform: boolean;
   }) {
-    const specIdentifier = uniqueSpecIdentifier(specName, uniqueSpecLabel);
+    const specIdentifier = genSpecIdentifier(specName, uniqueSpecLabel);
 
     const specNodeId = this.ensureNode(specIdentifier, {
       specName,
@@ -453,7 +452,7 @@ export class DefGraph extends Graph<DefGraphNode> {
     uniqueSpecLabel?: string;
     tag: string | symbol | number;
   }) {
-    const specIdentifier = uniqueSpecIdentifier(specName, uniqueSpecLabel);
+    const specIdentifier = genSpecIdentifier(specName, uniqueSpecLabel);
 
     const specNodeId = this.ensureNode(specIdentifier, {
       specName,
@@ -497,7 +496,7 @@ export class DefGraph extends Graph<DefGraphNode> {
     from: CanonicalConnectionFrom,
     to: CanonicalConnectionTo
   ) {
-    const fromSpecIdentifier = uniqueSpecIdentifier(
+    const fromSpecIdentifier = genSpecIdentifier(
       from.specName,
       from.uniqueSpecLabel
     );
@@ -556,10 +555,7 @@ export class DefGraph extends Graph<DefGraphNode> {
       this.ensureEdge(fromSpecNodeId, fromOutletNodeId);
       this.ensureEdge(fromOutletNodeId, streamNodeId);
     }
-    const toSpecIdentifier = uniqueSpecIdentifier(
-      to.specName,
-      to.uniqueSpecLabel
-    );
+    const toSpecIdentifier = genSpecIdentifier(to.specName, to.uniqueSpecLabel);
     const id = `${toSpecIdentifier}/${to.input}`;
     const toUniqueLabel = to.uniqueSpecLabel;
     const toInletNodeId = this.ensureNode(id, {
