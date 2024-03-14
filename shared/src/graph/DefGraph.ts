@@ -1,5 +1,8 @@
 import Graph from "graphology";
-import { genSpecIdentifier } from "livestack-shared-crosslang-js";
+import {
+  genSpecIdentifier,
+  uniqueStreamIdentifier,
+} from "livestack-shared-crosslang-js";
 
 export type SpecNode = {
   nodeType: "spec";
@@ -690,35 +693,3 @@ export class DefGraph extends Graph<DefGraphNode> {
   }
 }
 export type TransformFunction<T1 = any, T2 = any> = (o: T1) => T2 | Promise<T2>;
-
-export function uniqueStreamIdentifier({
-  from,
-  to,
-}: {
-  from?: {
-    specName: string;
-    tag: string;
-    uniqueSpecLabel?: string;
-  };
-  to?: {
-    specName: string;
-    tag: string;
-    uniqueSpecLabel?: string;
-  };
-}) {
-  const fromStr = !!from
-    ? `${from.specName}${
-        from.uniqueSpecLabel && from.uniqueSpecLabel !== "default_label"
-          ? `(${from.uniqueSpecLabel})`
-          : ""
-      }/${from.tag}`
-    : "(*)";
-  const toStr = !!to
-    ? `${to.specName}${
-        to.uniqueSpecLabel && to.uniqueSpecLabel !== "default_label"
-          ? `(${to.uniqueSpecLabel})`
-          : ""
-      }/${to.tag}`
-    : "(*)";
-  return `${fromStr}>>${toStr}`;
-}
