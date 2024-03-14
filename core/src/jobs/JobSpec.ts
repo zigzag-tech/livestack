@@ -1127,7 +1127,6 @@ export class JobSpec<
   //   return { spec: childSpec, jobId };
   // }
 
-  // toString
   public toString() {
     return this.name;
   }
@@ -1136,7 +1135,7 @@ export class JobSpec<
     return this.name;
   }
 
-  // convenient function
+  // convenience function
   public defineWorker<WP extends object>(
     p: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec">
   ) {
@@ -1164,6 +1163,10 @@ export class JobSpec<
   ) {
     return new JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>(p);
   }
+
+  static isJobSpec = (x: any): x is JobSpec<any, any, any, any, any> => {
+    return x instanceof JobSpec;
+  };
 }
 
 export class JobManager<P, I, O, IMap, OMap> {
