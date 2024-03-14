@@ -295,7 +295,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { SpecTagInfo, FromSpecAndTag, ToSpecAndTag, uniqueSpecIdentifier, genSpecIdentifier, uniqueStreamIdentifier } = nativeBinding
+const { SpecTagInfo, FromSpecAndTag, ToSpecAndTag, uniqueSpecIdentifier, genSpecIdentifier, uniqueStreamIdentifier, DefGraph, NodeType, loadDefGraphFromJson } = nativeBinding
 
 module.exports.SpecTagInfo = SpecTagInfo
 module.exports.FromSpecAndTag = FromSpecAndTag
@@ -303,3 +303,6 @@ module.exports.ToSpecAndTag = ToSpecAndTag
 module.exports.uniqueSpecIdentifier = uniqueSpecIdentifier
 module.exports.genSpecIdentifier = genSpecIdentifier
 module.exports.uniqueStreamIdentifier = uniqueStreamIdentifier
+module.exports.DefGraph = DefGraph
+module.exports.NodeType = NodeType
+module.exports.loadDefGraphFromJson = loadDefGraphFromJson

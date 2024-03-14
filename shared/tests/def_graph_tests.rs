@@ -1,4 +1,4 @@
-use livestack_shared::systems::def_graph::{DefGraph, DefGraphNode, NodeType};
+use livestack_shared::systems::def_graph::{DefGraph, DefGraphNode, NodeType,load_from_json};
 
 #[cfg(test)]
 mod tests {
@@ -20,12 +20,23 @@ mod tests {
 
         // Ensure inlet and stream nodes are created
         let (inlet_node_id, stream_node_id) =
-            graph.ensure_inlet_and_stream(spec_name, tag, has_transform);
+            graph.ensure_inlet_and_stream(
+                SpecTagInfo {
+                    spec_name: spec_name.to_string(),
+                    tag: tag.to_string(),
+                    unique_spec_label: None,
+                },
+                has_transform);
 
         // Add another inlet node with a different tag
         let other_tag = "otherInputTag";
         let (other_inlet_node_id, other_stream_node_id) =
-            graph.ensure_inlet_and_stream(spec_name, other_tag, has_transform);
+            graph.ensure_inlet_and_stream(SpecTagInfo {
+                spec_name: spec_name.to_string(),
+                tag: other_tag.to_string(),
+                unique_spec_label: None,
+            
+            }, has_transform);
 
         // Retrieve inbound node sets for the spec node
         let spec_node_id = graph
@@ -33,15 +44,10 @@ mod tests {
                 attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
             })
             .expect("Spec node should exist");
-        let spec_node_id =NodeIndex::new(spec_node_id as usize);
 
         let inbound_node_sets = graph.get_inbound_node_sets(spec_node_id);
 
         // Ensure that the correct inlet and stream nodes are included
-        let inlet_node_id = NodeIndex::new(inlet_node_id as usize);
-        let other_inlet_node_id = NodeIndex::new(other_inlet_node_id as usize);
-        let stream_node_id = NodeIndex::new(stream_node_id as usize);
-        let other_stream_node_id = NodeIndex::new(other_stream_node_id as usize);
         assert_eq!(inbound_node_sets.len(), 2);
         assert!(inbound_node_sets.contains(&(inlet_node_id, stream_node_id)));
         assert!(inbound_node_sets.contains(&(other_inlet_node_id, other_stream_node_id)));
@@ -59,7 +65,13 @@ mod tests {
 
         // Ensure inlet and stream nodes are created
         let (inlet_node_id, stream_node_id) =
-            graph.ensure_inlet_and_stream(spec_name, tag, has_transform);
+            graph.ensure_inlet_and_stream(
+                SpecTagInfo {
+                    spec_name: spec_name.to_string(),
+                    tag: tag.to_string(),
+                    unique_spec_label: None,
+                }
+                , has_transform);
         
 
         // Check if the spec node is created
@@ -79,7 +91,7 @@ mod tests {
         );
 
         // Check if the stream node is created and connected to the inlet node
-        assert_matches!(graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("{}_{}_stream", spec_name, tag)));
+        assert_matches!(graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("(*)>>{}/{}", spec_name, tag)));
         assert!(
             graph.contains_edge(stream_node_id, inlet_node_id),
             "Stream node should be connected to the inlet node"
@@ -123,8 +135,6 @@ mod tests {
 
         // Retrieve spec node IDs
         let spec_node_ids = graph.get_spec_node_ids();
-        let spec_node_id = NodeIndex::new(spec_node_id as usize);
-        let non_spec_node_id = NodeIndex::new(non_spec_node_id as usize);
         assert!(spec_node_ids.contains(&spec_node_id));
         assert!(!spec_node_ids.contains(&non_spec_node_id));
     }
@@ -188,7 +198,13 @@ mod tests {
         let tag = "outputTag";
 
         // Ensure outlet and stream nodes are created
-        let (outlet_node_id, stream_node_id) = graph.ensure_outlet_and_stream(spec_name, tag);
+        let (outlet_node_id, stream_node_id) = graph.ensure_outlet_and_stream(
+            SpecTagInfo {
+                spec_name: spec_name.to_string(),
+                tag: tag.to_string(),
+                unique_spec_label: None,
+            },
+        );
         
 
         // Check if the spec node is created
@@ -208,7 +224,7 @@ mod tests {
         );
 
         // Check if the stream node is created and connected to the outlet node
-        assert_matches!(graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("{}_{}_stream", spec_name, tag)));
+        assert_matches!(graph.node_weight(stream_node_id), Some(node) if node.node_type == NodeType::StreamDef && node.stream_def_id == Some(format!("{}/{}>>(*)", spec_name, tag)));
         assert!(
             graph.contains_edge(outlet_node_id, stream_node_id),
             "Stream node should be connected to the outlet node"
@@ -273,12 +289,22 @@ mod tests {
         let has_transform = true;
         // Ensure inlet and stream nodes are created
         let (inlet_node_id, _) =
-            graph.ensure_inlet_and_stream(spec_name, tag, has_transform);
+            graph.ensure_inlet_and_stream(
+                SpecTagInfo {
+                    spec_name: spec_name.to_string(),
+                    tag: tag.to_string(),
+                    unique_spec_label: None,
+                }
+                , has_transform);
             
         // Add another inlet node with a different tag
         let other_tag = "otherInputTag";
         let (_, other_stream_node_id) =
-            graph.ensure_inlet_and_stream(spec_name, other_tag, has_transform);
+            graph.ensure_inlet_and_stream(SpecTagInfo{
+                spec_name: spec_name.to_string(),
+                tag: other_tag.to_string(),
+                unique_spec_label: None,
+            }, has_transform);
         // Filter inbound neighbors for the spec node with a specific tag
         let spec_node_id = graph
             .find_node(|attrs| {
@@ -305,7 +331,13 @@ mod tests {
         let tag = "outputTag";
 
         // Ensure outlet and stream nodes are created
-        let (outlet_node_id, stream_node_id) = graph.ensure_outlet_and_stream(spec_name, tag);
+        let (outlet_node_id, stream_node_id) = graph.ensure_outlet_and_stream(
+            SpecTagInfo {
+                spec_name: spec_name.to_string(),
+                tag: tag.to_string(),
+                unique_spec_label: None,
+            },
+        );
 
         // Retrieve outbound node sets for the spec node
         let spec_node_id = graph
@@ -313,14 +345,12 @@ mod tests {
                 attrs.node_type == NodeType::Spec && attrs.spec_name.as_deref() == Some(spec_name)
             })
             .expect("Spec node should exist");
-        let spec_node_id = NodeIndex::new(spec_node_id as usize);
 
         let outbound_node_sets = graph.get_outbound_node_sets(spec_node_id);
 
         // Ensure that the correct outlet and stream nodes are included
         assert_eq!(outbound_node_sets.len(), 1);
-        let outlet_node_id = NodeIndex::new(outlet_node_id as usize);
-        let stream_node_id = NodeIndex::new(stream_node_id as usize);
+
         assert!(outbound_node_sets.contains(&(outlet_node_id, stream_node_id)));
     }
 
@@ -336,14 +366,23 @@ mod tests {
         let type_ = "in";
 
         // Ensure inlet and stream nodes are created for SpecA
-        graph.ensure_inlet_and_stream(spec_name, tag, false);
+        graph.ensure_inlet_and_stream(
+            SpecTagInfo {
+                spec_name: spec_name.to_string(),
+                tag: tag.to_string(),
+                unique_spec_label: None,
+            }
+            , false);
 
         // Assign an alias to the inlet node
         graph.assign_alias(alias, spec_name, "RootSpec", None, type_, tag);
 
         // Look up the alias
         let found_alias = graph.lookup_root_spec_alias(
-            spec_name.to_string(), tag.to_string(), type_.to_string()
+            spec_name.to_string(),
+            None,
+             tag.to_string(), 
+             type_.to_string()
         );
 
         assert_eq!(found_alias, Some(alias.to_string()));
@@ -418,13 +457,18 @@ mod tests {
         let direction = "in";
 
         // Ensure inlet and stream nodes are created for SpecA
-        graph.ensure_inlet_and_stream(spec_name, tag, false);
+        graph.ensure_inlet_and_stream(SpecTagInfo{
+            spec_name: spec_name.to_string(),
+            tag: tag.to_string(),
+            unique_spec_label: None,
+        
+        }, false);
 
         // Assign an alias to the inlet node
         graph.assign_alias(alias, spec_name, "RootSpec", None, direction, tag);
 
         // Look up the spec and tag by alias
-        let result = graph.lookup_spec_and_tag_by_alias(alias.to_string(), direction.to_string());
+        let result = graph.lookup_spec_and_tag_by_alias(alias.to_string(), direction);
 
         assert_eq!(
             result,
@@ -475,7 +519,7 @@ mod tests {
         let json = graph.to_json().unwrap();
 
         // Deserialize the JSON back into a graph
-        let new_graph = DefGraph::load_from_json(json);
+        let new_graph = load_from_json(json);
 
         // Compare the original graph with the deserialized graph
         assert_eq!(new_graph.node_count(), graph.node_count());
@@ -536,5 +580,18 @@ mod tests {
         assert_eq!(stream_node_id_first, stream_node_id_second);
         // Verify that the from_outlet_node_id is connected to the reused stream_node_id
         assert!(graph.contains_edge(from_outlet_node_id, stream_node_id_first));
+    }
+
+    #[test]
+    fn should_get_root_spec_node_id_after_initialization() {
+        let root_spec_name = "RootSpec".to_string();
+        let input_tags = vec!["input1".to_string()];
+        let output_tags = vec!["output1".to_string()];
+        let graph = DefGraph::new(root_spec_name, input_tags, output_tags);
+
+        let root_spec_node_id = graph.get_root_spec_node_id();
+
+
+        assert!(root_spec_node_id.is_some());
     }
 }

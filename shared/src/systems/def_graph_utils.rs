@@ -1,4 +1,4 @@
-use serde::{Serialize};
+use serde::Serialize;
 #[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct SpecTagInfo {
     pub spec_name: String,
@@ -27,12 +27,12 @@ pub fn unique_stream_identifier(from: Option<SpecTagInfo>, to: Option<SpecTagInf
     let from_str = match from {
         Some(from) => {
             format!(
-                "{}{}{}",
+                "{}{}/{}",
                 from.spec_name,
                 match from.unique_spec_label {
                     Some(label) => {
                         if label != "default_label" {
-                            format!("({})", label)
+                            format!("[{})", label)
                         } else {
                             "".to_string()
                         }
@@ -47,7 +47,7 @@ pub fn unique_stream_identifier(from: Option<SpecTagInfo>, to: Option<SpecTagInf
     let to_str = match to {
         Some(to) => {
             format!(
-                "{}{}{}",
+                "{}{}/{}",
                 to.spec_name,
                 match to.unique_spec_label {
                     Some(label) => {

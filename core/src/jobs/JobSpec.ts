@@ -34,6 +34,7 @@ import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
 import { ZZEnv } from "./ZZEnv";
 import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
 import { lruCacheFn } from "../utils/lruCacheFn";
+import { NodeType } from "livestack-shared-crosslang-js";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -80,7 +81,7 @@ export class JobSpec<
   public getDefGraph() {
     if (!this._defGraph) {
       this._defGraph = new DefGraph({
-        root: this,
+        root: this as any,
       });
     }
     return this._defGraph;
@@ -480,7 +481,7 @@ export class JobSpec<
 
           const inletNodeId = instaG.findNode((nId) => {
             const n = instaG.getNodeAttributes(nId);
-            if (n.nodeType !== "inlet") {
+            if (n.nodeType !== NodeType.Inlet) {
               return false;
             } else {
               const ee = instaG.findOutboundEdge((eId) => {
@@ -979,13 +980,13 @@ export class JobSpec<
   }): {
     specName: string;
     tag: string;
-    type: "in" | "out";
+    direction: "in" | "out";
     uniqueSpecLabel?: string;
   } {
     return {
       specName: this.name,
       tag: alias.toString(),
-      type,
+      direction: type,
       uniqueSpecLabel: undefined as string | undefined,
     };
   }
@@ -1012,7 +1013,7 @@ export class JobSpec<
             specName: specNode.specName,
             uniqueSpecLabel: specNode.uniqueSpecLabel,
             type: "in" as const,
-            tag: s.inletNode.tag,
+            tag: s.inletNode.tag!,
             inletNodeId: s.inletNode.id,
             streamNodeId: s.streamNode.id,
           })),
@@ -1024,7 +1025,7 @@ export class JobSpec<
             specName: specNode.specName,
             uniqueSpecLabel: specNode.uniqueSpecLabel,
             type: "out" as const,
-            tag: s.outletNode.tag,
+            tag: s.outletNode.tag!,
             outletNodeId: s.outletNode.id,
             streamNodeId: s.streamNode.id,
           })),
