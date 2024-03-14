@@ -1,16 +1,16 @@
 import {
   InferStreamSetType,
-  InletNode,
-  SpecNode,
+  IOSpec,
+  InferTMap,
+  wrapIfSingle,
+} from "@livestack/shared";
+import { InletNode, SpecNode, DefGraph } from "../graph/DefGraph";
+import {
   StreamNode,
   getNodesConnectedToStream,
   getSourceSpecNodeConnectedToStream,
-  DefGraph,
-  IOSpec,
-  InferTMap,
   InstantiatedGraph,
-  wrapIfSingle,
-} from "@livestack/shared";
+} from "../graph/InstantiatedGraph";
 import { vaultClient } from "@livestack/vault-client";
 import { v4 } from "uuid";
 import { getLogger } from "../utils/createWorkerLogger";
