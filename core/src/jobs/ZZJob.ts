@@ -31,6 +31,12 @@ export interface ByTagCallable<TMap> {
   };
 }
 
+type SmarterNextValue<IMap, T> = T extends { tag: infer Tag }
+  ? Tag extends keyof IMap
+    ? { tag: Tag; data: IMap[Tag] }
+    : never
+  : never;
+
 export class ZZJob<
   P,
   I,
@@ -55,17 +61,26 @@ export class ZZJob<
         nextValue: () => Promise<IMap[K] | null>;
         [Symbol.asyncIterator](): AsyncGenerator<IMap[K]>;
       };
+
       merge: <K extends keyof IMap>(
         ...tags: [K[]] | K[]
       ) => {
-        nextValue: () => Promise<{
-          tag: keyof IMap;
-          data: IMap[keyof IMap];
-        } | null>;
-        [Symbol.asyncIterator](): AsyncGenerator<{
-          tag: keyof IMap;
-          data: IMap[keyof IMap];
-        }>;
+        nextValue: <K extends keyof IMap>() => Promise<SmarterNextValue<
+          IMap,
+          {
+            tag: K;
+            data: IMap[K];
+          }
+        > | null>;
+        [Symbol.asyncIterator]<K extends keyof IMap>(): AsyncGenerator<
+          SmarterNextValue<
+            IMap,
+            {
+              tag: K;
+              data: IMap[K];
+            }
+          >
+        >;
       };
     };
 
