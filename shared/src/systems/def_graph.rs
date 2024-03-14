@@ -6,7 +6,6 @@ use petgraph::graph::NodeIndex;
 use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
-use std::ops::Deref;
 
 use super::def_graph_utils::{FromSpecAndTag, SpecTagInfo, ToSpecAndTag};
 

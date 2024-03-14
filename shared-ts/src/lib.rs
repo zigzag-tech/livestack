@@ -1,5 +1,4 @@
 #![deny(clippy::all)]
-use napi::Error;
 use napi_derive::napi;
 
 
