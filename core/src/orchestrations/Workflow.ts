@@ -5,13 +5,14 @@ import {
   SpecOrName,
   convertSpecOrName,
 } from "../jobs/JobSpec";
-import { AliasNode, IOSpec, InferTMap } from "@livestack/shared";
+import { IOSpec, InferTMap } from "@livestack/shared";
+import { AliasNode } from "../graph/DefGraph";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
-import { JobNode, InstantiatedGraph } from "@livestack/shared";
-import { TransformFunction } from "@livestack/shared";
+import { JobNode, InstantiatedGraph } from "../graph/InstantiatedGraph";
+import { TransformFunction } from "../graph/DefGraph";
 import { TransformRegistry } from "./TransformRegistry";
 import { NodeType } from "livestack-shared-crosslang-js";
 
