@@ -1,32 +1,31 @@
-import { NodeType } from "livestack-shared-crosslang-js";
-export { DefGraph } from "livestack-shared-wasm";
+export { DefGraph, NodeType } from "livestack-shared-wasm";
 
 export type SpecNode = {
-  nodeType: NodeType.Spec;
+  nodeType: "Spec";
   specName: string;
   uniqueSpecLabel?: string;
 };
 export type RootSpecNode = {
-  nodeType: NodeType.RootSpec;
+  nodeType: "RootSpec";
   specName: string;
 };
 
 export type OutletNode = {
-  nodeType: NodeType.Outlet;
+  nodeType: "Outlet";
   tag: string;
 };
 
 export type InletNode = {
-  nodeType: NodeType.Inlet;
+  nodeType: "Inlet";
   tag: string;
   hasTransform: boolean;
 };
 export type StreamDefNode = {
-  nodeType: NodeType.StreamDef;
+  nodeType: "StreamDef";
   streamDefId: string;
 };
 export type AliasNode = {
-  nodeType: NodeType.Alias;
+  nodeType: "Alias";
   alias: string;
   direction: "in" | "out";
 };

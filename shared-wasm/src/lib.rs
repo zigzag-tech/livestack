@@ -4,6 +4,8 @@ mod utils;
 
 use livestack_shared::systems::def_graph::{
     load_from_json as load_from_json_impl, DefGraph as DefGraphImpl,
+    NodeType as NodeTypeImpl,
+
 };
 use livestack_shared::systems::def_graph_utils::unique_spec_identifier as unique_spec_identifier_impl;
 use livestack_shared::systems::def_graph_utils::{
@@ -16,16 +18,29 @@ use serde_wasm_bindgen;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
 
-// Define all the structs and enums that will be used in the wasm interface
+
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+pub enum NodeType {
+    RootSpec,
+    Spec,
+    StreamDef,
+    Inlet,
+    Outlet,
+    Alias,
+}
+
+#[derive(Tsify, Serialize, Deserialize)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct DefGraphParams {
     pub root: DefGraphSpecParams,
 }
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct DefGraphSpecParams {
     pub name: String,
     pub input_def_set: DefSetParams,
@@ -34,12 +49,14 @@ pub struct DefGraphSpecParams {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct DefSetParams {
     pub tags: Vec<String>,
 }
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct SpecTagInfoParams {
     pub spec_name: String,
     pub unique_spec_label: Option<String>,
@@ -48,6 +65,7 @@ pub struct SpecTagInfoParams {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct SpecAndTagInfoAndDirection {
     pub spec_name: String,
     pub tag: String,
@@ -57,9 +75,10 @@ pub struct SpecAndTagInfoAndDirection {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct DefGraphNode {
     pub id: u32,
-    pub node_type: String,
+    pub node_type: NodeType,
     pub spec_name: Option<String>,
     pub unique_spec_label: Option<String>,
     pub tag: Option<String>,
@@ -72,6 +91,7 @@ pub struct DefGraphNode {
 
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct DefGraph {
     // Fields corresponding to DefGraphImpl
     def_graph: DefGraphImpl,
@@ -79,6 +99,7 @@ pub struct DefGraph {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct UniqueStreamIdentifierParams {
     pub from: Option<SpecTagInfoParams>,
     pub to: Option<SpecTagInfoParams>,
@@ -86,6 +107,7 @@ pub struct UniqueStreamIdentifierParams {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct GetInboundNodeSetsResultSingle {
     pub inlet_node: DefGraphNode,
     pub stream_node: DefGraphNode,
@@ -93,12 +115,14 @@ pub struct GetInboundNodeSetsResultSingle {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct GetInboundNodeSetsResult {
     results: Vec<GetInboundNodeSetsResultSingle>,
 }
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct GetOutboundNodeSetsResultSingle {
     pub outlet_node: DefGraphNode,
     pub stream_node: DefGraphNode,
@@ -106,12 +130,14 @@ pub struct GetOutboundNodeSetsResultSingle {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct GetOutboundNodeSetsResult {
     results: Vec<GetOutboundNodeSetsResultSingle>,
 }
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct RawEdge {
     pub source: u32,
     pub target: u32,
@@ -119,12 +145,14 @@ pub struct RawEdge {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct EdgesResults {
     results: Vec<RawEdge>,
 }
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct FromSpecAndTag {
     pub spec_name: String,
     pub output: String,
@@ -133,6 +161,7 @@ pub struct FromSpecAndTag {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct ToSpecAndTag {
     pub spec_name: String,
     pub input: String,
@@ -142,6 +171,7 @@ pub struct ToSpecAndTag {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct SpecAndTag {
     pub spec_name: String,
     pub tag: String,
@@ -150,6 +180,7 @@ pub struct SpecAndTag {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct AssignAliasParams {
     pub alias: String,
     pub tag: String,
@@ -161,6 +192,7 @@ pub struct AssignAliasParams {
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct LookUpRootSpecAliasParams {
     pub spec_name: String,
     pub tag: String,
@@ -181,7 +213,7 @@ impl DefGraph {
         Ok(DefGraph { def_graph })
     }
 
-    #[wasm_bindgen(js_name = to_json)]
+    #[wasm_bindgen(js_name = toJson)]
     pub fn to_json(&self) -> String {
         return self
             .def_graph
@@ -209,16 +241,16 @@ impl DefGraph {
         match node {
             Some(node) => {
                 let node_type = match node.node_type {
-                    livestack_shared::systems::def_graph::NodeType::RootSpec => "RootSpec",
-                    livestack_shared::systems::def_graph::NodeType::Spec => "Spec",
-                    livestack_shared::systems::def_graph::NodeType::StreamDef => "StreamDef",
-                    livestack_shared::systems::def_graph::NodeType::Inlet => "Inlet",
-                    livestack_shared::systems::def_graph::NodeType::Outlet => "Outlet",
-                    livestack_shared::systems::def_graph::NodeType::Alias => "Alias",
+                    NodeTypeImpl::RootSpec => NodeType::RootSpec,
+                    NodeTypeImpl::Spec => NodeType::Spec,
+                    NodeTypeImpl::StreamDef => NodeType::StreamDef,
+                    NodeTypeImpl::Inlet => NodeType::Inlet,
+                    NodeTypeImpl::Outlet => NodeType::Outlet,
+                    NodeTypeImpl::Alias => NodeType::Alias,
                 };
                 return DefGraphNode {
                     id: node_id,
-                    node_type: node_type.to_string(),
+                    node_type: node_type,
                     spec_name: node.spec_name.clone(),
                     unique_spec_label: node.unique_spec_label.clone(),
                     tag: node.tag.clone(),
@@ -251,7 +283,7 @@ impl DefGraph {
             results.push(GetInboundNodeSetsResultSingle {
                 inlet_node: DefGraphNode {
                     id: inlet_node_id,
-                    node_type: "Inlet".to_string(),
+                    node_type: NodeType::Inlet,
                     spec_name: inlet_node.spec_name.clone(),
                     unique_spec_label: inlet_node.unique_spec_label.clone(),
                     tag: inlet_node.tag.clone(),
@@ -263,7 +295,7 @@ impl DefGraph {
                 },
                 stream_node: DefGraphNode {
                     id: stream_node_id,
-                    node_type: "StreamDef".to_string(),
+                    node_type: NodeType::StreamDef,
                     spec_name: stream_node.spec_name.clone(),
                     unique_spec_label: stream_node.unique_spec_label.clone(),
                     tag: stream_node.tag.clone(),
@@ -295,7 +327,7 @@ impl DefGraph {
             results.push(GetOutboundNodeSetsResultSingle {
                 outlet_node: DefGraphNode {
                     id: outlet_node_id,
-                    node_type: "Outlet".to_string(),
+                    node_type: NodeType::Outlet,
                     spec_name: outlet_node.spec_name.clone(),
                     unique_spec_label: outlet_node.unique_spec_label.clone(),
                     tag: outlet_node.tag.clone(),
@@ -307,7 +339,7 @@ impl DefGraph {
                 },
                 stream_node: DefGraphNode {
                     id: stream_node_id,
-                    node_type: "StreamDef".to_string(),
+                    node_type: NodeType::StreamDef,
                     spec_name: stream_node.spec_name.clone(),
                     unique_spec_label: stream_node.unique_spec_label.clone(),
                     tag: stream_node.tag.clone(),

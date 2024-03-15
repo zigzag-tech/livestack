@@ -2,14 +2,9 @@ import Graph from "graphology";
 import { InletNode, OutletNode, AliasNode } from "./DefGraph";
 import { Attributes } from "graphology-types";
 import { SpecNode, RootSpecNode } from "./DefGraph";
-import {
-  DefGraph,
-  NodeType,
-  loadDefGraphFromJson,
-} from "livestack-shared-crosslang-js";
+import { DefGraph, loadDefGraphFromJson } from "livestack-shared-wasm";
 
 import { genSpecIdentifier } from "livestack-shared-wasm";
-
 
 export type JobId = `[${string}]${string}`;
 export type RootJobNode = {
@@ -98,7 +93,7 @@ export class InstantiatedGraph extends Graph<
 
     for (const nodeId of nodeIds) {
       const node = defGraph.getNodeAttributes(nodeId);
-      if (node.nodeType === NodeType.RootSpec) {
+      if (node.nodeType === "RootSpec") {
         this.addNode(rootJobId, {
           ...(node as RootSpecNode & {
             label: string;
@@ -106,10 +101,10 @@ export class InstantiatedGraph extends Graph<
           nodeType: "root-job",
           jobId: rootJobId,
         });
-      } else if (node.nodeType === NodeType.Spec) {
+      } else if (node.nodeType === "Spec") {
         const jobId: JobId = `[${contextId}]${genSpecIdentifier(
           node.specName!,
-          node.uniqueSpecLabel
+          node.uniqueSpecLabel || undefined
         )}`;
         this.addNode(jobId, {
           ...(node as SpecNode & {
@@ -119,10 +114,10 @@ export class InstantiatedGraph extends Graph<
           jobId,
         });
         childJobNodeIdBySpecNodeId[nodeId] = jobId;
-      } else if (node.nodeType === NodeType.StreamDef) {
+      } else if (node.nodeType === "StreamDef") {
         let streamId: string | null = null;
         const { source, targets } = getNodesConnectedToStream(defGraph, nodeId);
-        if (source?.origin.nodeType === NodeType.RootSpec) {
+        if (source?.origin.nodeType === "RootSpec") {
           const tag = source.outletNode.tag;
           const streamIdOverride = streamIdOverrides[`out/${tag}`];
           if (streamIdOverride) {
@@ -151,7 +146,7 @@ export class InstantiatedGraph extends Graph<
           });
         }
         streamNodeIdByStreamId[nodeId] = streamId;
-      } else if (node.nodeType === NodeType.Inlet) {
+      } else if (node.nodeType === "Inlet") {
         this.addNode(nodeId, {
           ...(node as InletNode & {
             label: string;
@@ -165,26 +160,26 @@ export class InstantiatedGraph extends Graph<
       }
     }
 
-    const edges = defGraph.edges();
+    const edges = defGraph.edges().results;
 
     for (const { source: from, target: to } of edges) {
       const fromNode = defGraph.getNodeAttributes(from);
       const toNode = defGraph.getNodeAttributes(to);
 
       const newFrom =
-        fromNode.nodeType === NodeType.Spec
+        fromNode.nodeType === "Spec"
           ? childJobNodeIdBySpecNodeId[from]
-          : fromNode.nodeType === NodeType.RootSpec
+          : fromNode.nodeType === "RootSpec"
           ? rootJobId
-          : fromNode.nodeType === NodeType.StreamDef
+          : fromNode.nodeType === "StreamDef"
           ? streamNodeIdByStreamId[from]
           : from;
       const newTo =
-        toNode.nodeType === NodeType.Spec
+        toNode.nodeType === "Spec"
           ? childJobNodeIdBySpecNodeId[to]
-          : toNode.nodeType === NodeType.RootSpec
+          : toNode.nodeType === "RootSpec"
           ? rootJobId
-          : toNode.nodeType === NodeType.StreamDef
+          : toNode.nodeType === "StreamDef"
           ? streamNodeIdByStreamId[to]
           : to;
       if (!this.hasEdge(newFrom, newTo)) {
@@ -273,7 +268,7 @@ export function getTargetSpecNodesConnectedToStream<
   const inletNodeIds = g
     .outboundNeighbors(streamNodeId as number)
     .filter(
-      (nId) => g.getNodeAttributes(nId as number).nodeType === NodeType.Inlet
+      (nId) => g.getNodeAttributes(nId as number).nodeType === "Inlet"
     ) as (string | number | undefined)[];
 
   inletNodeIds.forEach((inletNodeId) => {
@@ -283,8 +278,8 @@ export function getTargetSpecNodesConnectedToStream<
         .outboundNeighbors(inletNodeId as number)
         .filter(
           (nId) =>
-            g.getNodeAttributes(nId as number).nodeType === NodeType.Spec ||
-            g.getNodeAttributes(nId as number).nodeType === NodeType.RootSpec ||
+            g.getNodeAttributes(nId as number).nodeType === "Spec" ||
+            g.getNodeAttributes(nId as number).nodeType === "RootSpec" ||
             g.getNodeAttributes(nId as number).nodeType === "job" ||
             g.getNodeAttributes(nId as number).nodeType === "root-job"
         ) as (string | number | undefined)[];
@@ -312,9 +307,7 @@ export function getSourceSpecNodeConnectedToStream<
   } | null = null;
   const [outletNodeId] = g
     .inboundNeighbors(streamNodeId as number)
-    .filter(
-      (nId) => g.getNodeAttributes(nId as number).nodeType === NodeType.Outlet
-    );
+    .filter((nId) => g.getNodeAttributes(nId as number).nodeType === "Outlet");
   if (!outletNodeId) {
     source = null;
   } else {
@@ -326,8 +319,8 @@ export function getSourceSpecNodeConnectedToStream<
       .inboundNeighbors(outletNodeId as number)
       .filter(
         (nId) =>
-          g.getNodeAttributes(nId as number).nodeType === NodeType.Spec ||
-          g.getNodeAttributes(nId as number).nodeType === NodeType.RootSpec ||
+          g.getNodeAttributes(nId as number).nodeType === "Spec" ||
+          g.getNodeAttributes(nId as number).nodeType === "RootSpec" ||
           g.getNodeAttributes(nId as number).nodeType === "job" ||
           g.getNodeAttributes(nId as number).nodeType === "root-job"
       );
