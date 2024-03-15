@@ -295,10 +295,8 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { genSpecIdentifier, uniqueStreamIdentifier, DefGraph, NodeType, loadDefGraphFromJson } = nativeBinding
+const { DefGraph, NodeType, loadDefGraphFromJson } = nativeBinding
 
-module.exports.genSpecIdentifier = genSpecIdentifier
-module.exports.uniqueStreamIdentifier = uniqueStreamIdentifier
 module.exports.DefGraph = DefGraph
 module.exports.NodeType = NodeType
 module.exports.loadDefGraphFromJson = loadDefGraphFromJson
