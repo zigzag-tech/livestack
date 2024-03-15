@@ -1,10 +1,15 @@
 import Graph from "graphology";
-import { InletNode, OutletNode, AliasNode } from "./DefGraph";
+import {
+  InletNode,
+  OutletNode,
+  AliasNode,
+  loadDefGraphFromJson,
+  SpecNode,
+  RootSpecNode,
+  genSpecIdentifier,
+} from "./DefGraph";
 import { Attributes } from "graphology-types";
-import { SpecNode, RootSpecNode } from "./DefGraph";
-import { DefGraph, loadDefGraphFromJson } from "livestack-shared-wasm";
-
-import { genSpecIdentifier } from "livestack-shared-wasm";
+import type { DefGraph } from "../graph_wasm/livestack_shared_wasm";
 
 export type JobId = `[${string}]${string}`;
 export type RootJobNode = {
@@ -47,6 +52,8 @@ export class InstantiatedGraph extends Graph<
   >;
   public defGraph: DefGraph;
 
+  public readonly initPromise: Promise<void>;
+
   constructor({
     contextId,
     defGraph,
@@ -76,10 +83,10 @@ export class InstantiatedGraph extends Graph<
     this.streamSourceSpecTypeByStreamId = streamSourceSpecTypeByStreamId;
     this.defGraph = defGraph;
 
-    this.instantiate();
+    this.initPromise = this.instantiate();
   }
 
-  private instantiate() {
+  private async instantiate() {
     const contextId = this.contextId;
     const rootJobId = this.rootJobId;
     const streamIdOverrides = this.streamIdOverrides;
@@ -102,7 +109,7 @@ export class InstantiatedGraph extends Graph<
           jobId: rootJobId,
         });
       } else if (node.nodeType === "Spec") {
-        const jobId: JobId = `[${contextId}]${genSpecIdentifier(
+        const jobId: JobId = `[${contextId}]${await genSpecIdentifier(
           node.specName!,
           node.uniqueSpecLabel || undefined
         )}`;
@@ -239,15 +246,17 @@ export class InstantiatedGraph extends Graph<
     return newJ;
   }
 
-  static loadFromJSON(json: ReturnType<InstantiatedGraph["toJSON"]>) {
-    return new InstantiatedGraph({
+  static async loadFromJSON(json: ReturnType<InstantiatedGraph["toJSON"]>) {
+    const g = new InstantiatedGraph({
       contextId: json.contextId,
-      defGraph: loadDefGraphFromJson(json.defGraph),
+      defGraph: await loadDefGraphFromJson(json.defGraph),
       rootJobId: json.rootJobId,
       streamIdOverrides: json.streamIdOverrides,
       inletHasTransformOverridesByTag: json.inletHasTransformOverridesByTag,
       streamSourceSpecTypeByStreamId: json.streamSourceSpecTypeByStreamId,
     });
+    await g.initPromise;
+    return g;
   }
 }
 

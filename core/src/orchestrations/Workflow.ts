@@ -6,13 +6,16 @@ import {
   convertSpecOrName,
 } from "../jobs/JobSpec";
 import { IOSpec, InferTMap } from "@livestack/shared";
-import { AliasNode } from "../graph/DefGraph";
+import { AliasNode } from "@livestack/shared/src/graph/DefGraph";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
 import { ZZWorkerDef } from "../jobs/ZZWorker";
-import { JobNode, InstantiatedGraph } from "../graph/InstantiatedGraph";
-import { TransformFunction } from "../graph/DefGraph";
+import {
+  JobNode,
+  InstantiatedGraph,
+} from "@livestack/shared/src/graph/InstantiatedGraph";
+import { TransformFunction } from "@livestack/shared/src/graph/DefGraph";
 import { TransformRegistry } from "./TransformRegistry";
 
 type UniqueSpecQuery<P = any, I = any, O = any, IMap = any, OMap = any> =
@@ -457,6 +460,7 @@ export class WorkflowSpec extends JobSpec<
           streamSourceSpecTypeByStreamId: {},
           inletHasTransformOverridesByTag,
         });
+        await instG.initPromise;
 
         const allJobNodes = instG
           .nodes()
@@ -779,7 +783,7 @@ export class Workflow {
             }
           }
         }
-        return new InstantiatedGraph({
+        const g = new InstantiatedGraph({
           defGraph: this.jobGroupDef.getDefGraph(),
           contextId: this.contextId,
           rootJobId: this.contextId,
@@ -787,6 +791,8 @@ export class Workflow {
           streamSourceSpecTypeByStreamId: {},
           inletHasTransformOverridesByTag,
         });
+        await g.initPromise;
+        return g;
       })();
     }
     return this._graphP;

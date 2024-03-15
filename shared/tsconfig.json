@@ -1,5 +1,12 @@
 {
-  "include": ["missing-modules.d.ts", "**/*.ts", "**/*.tsx", "*.ts", "*.tsx"],
+  "include": [
+    "missing-modules.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "*.ts",
+    "*.tsx",
+    "src/index.ts"
+  ],
   "compilerOptions": {
     "module": "CommonJS",
     // "types": ["reflect-metadata"],

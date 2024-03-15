@@ -3,14 +3,15 @@ import {
   IOSpec,
   InferTMap,
   wrapIfSingle,
+  initDefGraph,
 } from "@livestack/shared";
-import { InletNode, SpecNode, DefGraph } from "../graph/DefGraph";
+import { InletNode, SpecNode, DefGraph } from "@livestack/shared";
 import {
   StreamNode,
   getNodesConnectedToStream,
   getSourceSpecNodeConnectedToStream,
   InstantiatedGraph,
-} from "../graph/InstantiatedGraph";
+} from "@livestack/shared/src/graph/InstantiatedGraph";
 import { vaultClient } from "@livestack/vault-client";
 import { v4 } from "uuid";
 import { getLogger } from "../utils/createWorkerLogger";
@@ -79,15 +80,11 @@ export class JobSpec<
 
   public getDefGraph() {
     if (!this._defGraph) {
-      this._defGraph = new DefGraph({
+      this._defGraph = initDefGraph({
         root: {
           name: this.name,
-          inputDefSet: {
-            tags: this.inputDefSet.tags.map((t) => t.toString()),
-          },
-          outputDefSet: {
-            tags: this.outputDefSet.tags.map((t) => t.toString()),
-          },
+          inputTags: this.inputDefSet.tags.map((t) => t.toString()),
+          outputTags: this.outputDefSet.tags.map((t) => t.toString()),
         },
       });
     }

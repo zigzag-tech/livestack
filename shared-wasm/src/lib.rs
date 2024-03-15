@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen;
 use tsify::Tsify;
 use wasm_bindgen::prelude::*;
-
+use utils::set_panic_hook;
 
 
 #[derive(Tsify, Serialize, Deserialize)]
@@ -476,6 +476,7 @@ impl DefGraph {
 
 #[wasm_bindgen(js_name = loadDefGraphFromJson)]
 pub fn load_def_graph_from_json(json: String) -> DefGraph {
+  set_panic_hook();
     return DefGraph {
         def_graph: load_from_json_impl(json),
     };
