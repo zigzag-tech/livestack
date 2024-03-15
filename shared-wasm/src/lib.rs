@@ -11,6 +11,8 @@ use livestack_shared::systems::def_graph_utils::{
     FromSpecAndTag as FromSpecAndTagImpl,
     ToSpecAndTag as ToSpecAndTagImpl,
 };
+use livestack_shared::systems::def_graph::DefGraph as DefGraphImpl;
+use tsify::Tsify;
 use livestack_shared::systems::def_graph_utils::{
     unique_spec_identifier as unique_spec_identifier_impl,
 };
@@ -22,16 +24,47 @@ use tsify::Tsify;
 
 // Define all the structs and enums that will be used in the wasm interface
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DefGraphParams {
+    pub root: DefGraphSpecParams,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DefGraphSpecParams {
+    pub name: String,
+    pub input_def_set: DefSetParams,
+    pub output_def_set: DefSetParams,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DefSetParams {
+    pub tags: Vec<String>,
+}
+
 #[wasm_bindgen]
 #[derive(Serialize, Deserialize)]
 pub struct DefGraph {
     // Fields corresponding to DefGraphImpl
+    def_graph: DefGraphImpl,
 }
 
 // ... (Other structs and enums go here, similar to the napi version)
 
 #[wasm_bindgen]
 impl DefGraph {
+    #[wasm_bindgen(constructor)]
+    pub fn new(params: JsValue) -> Result<DefGraph, JsValue> {
+        let params: DefGraphParams = serde_wasm_bindgen::from_value(params)?;
+        let def_graph = DefGraphImpl::new(
+            params.root.name,
+            params.root.input_def_set.tags,
+            params.root.output_def_set.tags,
+        );
+        Ok(DefGraph { def_graph })
+    }
     // ... (Existing methods and constructor)
 }
 
