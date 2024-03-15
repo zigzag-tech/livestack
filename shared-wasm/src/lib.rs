@@ -9,6 +9,9 @@ use livestack_shared::systems::def_graph::{
     // Other necessary imports from def_graph
 };
 use livestack_shared::systems::def_graph_utils::{
+    unique_spec_identifier as unique_spec_identifier_impl,
+};
+use livestack_shared::systems::def_graph_utils::{
     // Necessary imports from def_graph_utils
 };
 
@@ -30,6 +33,15 @@ impl DefGraph {
     // }
 
     // ... (Other methods go here, similar to the napi version)
+
+#[wasm_bindgen]
+impl DefGraph {
+    // ... (Existing methods and constructor)
+}
+
+#[wasm_bindgen]
+pub fn gen_spec_identifier(spec_name: String, unique_spec_label: Option<String>) -> String {
+    unique_spec_identifier_impl(spec_name, unique_spec_label)
 }
 
 // ... (Other functions go here, similar to the napi version)
