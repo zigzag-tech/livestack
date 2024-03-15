@@ -1,7 +1,7 @@
 // import {
 //   NodeType,
 //   uniqueStreamIdentifier,
-// } from "livestack-shared-crosslang-js";
+// } from "livestack-shared-wasm";
 // import { DefGraph } from "./DefGraph";
 
 // describe("DefGraph", () => {
