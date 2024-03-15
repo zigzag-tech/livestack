@@ -1,4 +1,4 @@
 [workspace]
 
-members = ["shared-py", "shared", "shared-ts", "vault-interface"]
+members = ["shared-py", "shared", "shared-ts", "vault-interface", "shared-wasm"]
 
