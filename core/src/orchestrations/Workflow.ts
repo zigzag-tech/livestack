@@ -378,7 +378,6 @@ export class WorkflowSpec extends JobSpec<
             direction: "out",
             rootSpecName: this.name,
           });
-          console.log("z2");
           outputAliasesSoFar[alias] = {
             specName: exposure.specName,
             uniqueSpecLabel: exposure.uniqueSpecLabel,
