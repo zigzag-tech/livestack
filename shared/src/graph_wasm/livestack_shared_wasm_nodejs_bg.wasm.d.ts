@@ -1,0 +1,30 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export function __wbg_defgraph_free(a: number): void;
+export function defgraph_new(a: number, b: number): void;
+export function defgraph_toJson(a: number, b: number): void;
+export function defgraph_getSpecNodeIds(a: number, b: number): void;
+export function defgraph_getRootSpecNodeId(a: number): number;
+export function defgraph_getNodeAttributes(a: number, b: number): number;
+export function defgraph_getInboundNodeSets(a: number, b: number): number;
+export function defgraph_getOutboundNodeSets(a: number, b: number): number;
+export function defgraph_nodes(a: number, b: number): void;
+export function defgraph_inboundNeighbors(a: number, b: number, c: number): void;
+export function defgraph_outboundNeighbors(a: number, b: number, c: number): void;
+export function defgraph_edges(a: number): number;
+export function defgraph_addConnectedDualSpecs(a: number, b: number, c: number): void;
+export function defgraph_ensureOutletAndStream(a: number, b: number): void;
+export function defgraph_ensureInletAndStream(a: number, b: number, c: number): void;
+export function defgraph_assignAlias(a: number, b: number): void;
+export function defgraph_getAllAliasNodeIds(a: number, b: number): void;
+export function defgraph_lookupRootSpecAlias(a: number, b: number, c: number): void;
+export function defgraph_lookupSpecAndTagByAlias(a: number, b: number, c: number, d: number, e: number): number;
+export function loadDefGraphFromJson(a: number, b: number): number;
+export function genSpecIdentifier(a: number, b: number, c: number, d: number, e: number): void;
+export function uniqueStreamIdentifier(a: number, b: number): void;
+export function __wbindgen_malloc(a: number, b: number): number;
+export function __wbindgen_realloc(a: number, b: number, c: number, d: number): number;
+export function __wbindgen_add_to_stack_pointer(a: number): number;
+export function __wbindgen_free(a: number, b: number, c: number): void;
+export function __wbindgen_exn_store(a: number): void;

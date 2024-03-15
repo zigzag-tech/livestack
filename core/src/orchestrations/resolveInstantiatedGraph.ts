@@ -3,7 +3,7 @@ import {
   StreamIdOverridesForRootSpec,
   StreamNode,
   getSourceSpecNodeConnectedToStream,
-} from "../graph/InstantiatedGraph";
+} from "@livestack/shared/src/graph/InstantiatedGraph";
 import { vaultClient } from "@livestack/vault-client";
 import { ConnectorType } from "@livestack/vault-interface";
 import { TransformRegistry } from "./TransformRegistry";
@@ -104,6 +104,7 @@ export const resolveInstantiatedGraph = lruCacheFn(
       streamSourceSpecTypeByStreamId,
     });
 
+    await instaG.initPromise;
     return instaG;
   }
 );

@@ -5,10 +5,15 @@
   ],
   "version": "0.1.0",
   "files": [
-    "dist/livestack_shared_wasm_bg.wasm",
-    "dist/livestack_shared_wasm.js",
-    "dist/livestack_shared_wasm.d.ts"
+    "livestack_shared_wasm_bg.wasm",
+    "livestack_shared_wasm.js",
+    "livestack_shared_wasm_bg.js",
+    "livestack_shared_wasm.d.ts"
   ],
-  "main": "dist/livestack_shared_wasm.js",
-  "types": "dist/livestack_shared_wasm.d.ts"
+  "module": "livestack_shared_wasm.js",
+  "types": "livestack_shared_wasm.d.ts",
+  "sideEffects": [
+    "./livestack_shared_wasm.js",
+    "./snippets/*"
+  ]
 }
