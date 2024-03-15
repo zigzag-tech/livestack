@@ -14,7 +14,6 @@ import { ZZWorkerDef } from "../jobs/ZZWorker";
 import { JobNode, InstantiatedGraph } from "../graph/InstantiatedGraph";
 import { TransformFunction } from "../graph/DefGraph";
 import { TransformRegistry } from "./TransformRegistry";
-import { NodeType } from "livestack-shared-crosslang-js";
 
 type UniqueSpecQuery<P = any, I = any, O = any, IMap = any, OMap = any> =
   | SpecOrNameOrTagged<P, I, O, IMap, OMap>
@@ -282,12 +281,12 @@ export class WorkflowSpec extends JobSpec<
         const s = defG.addConnectedDualSpecs(
           {
             specName: conn.from.spec.name,
-            uniqueSpecLabel: conn.from.uniqueSpecLabel,
+            uniqueSpecLabel: conn.from.uniqueSpecLabel || null,
             output: conn.from.output,
           },
           {
             specName: conn.to.spec.name,
-            uniqueSpecLabel: conn.to.uniqueSpecLabel,
+            uniqueSpecLabel: conn.to.uniqueSpecLabel || null,
             input: conn.to.input,
             hasTransform: !!conn.transform,
           }
@@ -315,7 +314,7 @@ export class WorkflowSpec extends JobSpec<
               {
                 specName: spec.name,
                 tag: tag.toString(),
-                uniqueSpecLabel: c.uniqueSpecLabel,
+                uniqueSpecLabel: c.uniqueSpecLabel || null,
               },
               false
             );
@@ -324,7 +323,7 @@ export class WorkflowSpec extends JobSpec<
             defG.ensureOutletAndStream({
               specName: spec.name,
               tag: tag.toString(),
-              uniqueSpecLabel: c.uniqueSpecLabel,
+              uniqueSpecLabel: c.uniqueSpecLabel || null,
             });
           }
         }
@@ -351,7 +350,7 @@ export class WorkflowSpec extends JobSpec<
             alias,
             tag: specTag,
             specName: exposure.specName,
-            uniqueSpecLabel: exposure.uniqueSpecLabel,
+            uniqueSpecLabel: exposure.uniqueSpecLabel || null,
             direction: "in",
             rootSpecName: this.name,
           });
@@ -372,7 +371,7 @@ export class WorkflowSpec extends JobSpec<
             alias,
             tag: specTag,
             specName: exposure.specName,
-            uniqueSpecLabel: exposure.uniqueSpecLabel,
+            uniqueSpecLabel: exposure.uniqueSpecLabel || null,
             direction: "out",
             rootSpecName: this.name,
           });
@@ -480,12 +479,12 @@ export class WorkflowSpec extends JobSpec<
             const inboundEdges = instG.inboundEdges(jobNodeId);
             const inletEdgeIds = inboundEdges.filter((e) => {
               const node = instG.getNodeAttributes(instG.source(e));
-              return node.nodeType === NodeType.Inlet;
+              return node.nodeType === "Inlet";
             });
             const inletNodeIds = inletEdgeIds.map((e) => instG.source(e));
             for (const inletNodeId of inletNodeIds) {
               const inletNode = instG.getNodeAttributes(inletNodeId);
-              if (inletNode.nodeType !== NodeType.Inlet) {
+              if (inletNode.nodeType !== "Inlet") {
                 throw new Error("Expected inlet node");
               }
               const streamToInpetEdgeId = instG.inboundEdges(inletNodeId)[0];
@@ -502,13 +501,13 @@ export class WorkflowSpec extends JobSpec<
             const outboundEdges = instG.outboundEdges(jobNodeId);
             const outletEdgeIds = outboundEdges.filter((e) => {
               const node = instG.getNodeAttributes(instG.target(e));
-              return node.nodeType === NodeType.Outlet;
+              return node.nodeType === "Outlet";
             });
             const outletNodeIds = outletEdgeIds.map((e) => instG.target(e));
 
             for (const outletNodeId of outletNodeIds) {
               const outletNode = instG.getNodeAttributes(outletNodeId);
-              if (outletNode.nodeType !== NodeType.Outlet) {
+              if (outletNode.nodeType !== "Outlet") {
                 throw new Error("Expected outlet node");
               }
 
@@ -562,7 +561,7 @@ export class WorkflowSpec extends JobSpec<
   public override get inputTags() {
     // traverse the def graph and get tags from alias nodes
     const defG = this.getDefGraph();
-    const aliasNodeIds = defG.getAllAliasNodeIds();
+    const aliasNodeIds = Array.from(defG.getAllAliasNodeIds());
     return [
       ...aliasNodeIds
         .map((n) => defG.getNodeAttributes(n) as AliasNode)
@@ -574,7 +573,7 @@ export class WorkflowSpec extends JobSpec<
   public override get outputTags() {
     // traverse the def graph and get tags from alias nodes
     const defG = this.getDefGraph();
-    const aliasNodeIds = defG.getAllAliasNodeIds();
+    const aliasNodeIds = Array.from(defG.getAllAliasNodeIds());
     return [
       ...aliasNodeIds
         .map((n) => defG.getNodeAttributes(n) as AliasNode)
@@ -598,7 +597,7 @@ export class WorkflowSpec extends JobSpec<
     const existingAlias = defG.lookupRootSpecAlias({
       specName,
       tag,
-      uniqueSpecLabel,
+      uniqueSpecLabel: uniqueSpecLabel || null,
       direction: type,
     });
     if (!existingAlias) {
@@ -608,7 +607,7 @@ export class WorkflowSpec extends JobSpec<
         alias,
         specName,
         tag,
-        uniqueSpecLabel,
+        uniqueSpecLabel: uniqueSpecLabel || null,
         direction: type,
         rootSpecName: this.name,
       });
