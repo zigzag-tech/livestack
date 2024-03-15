@@ -22,4 +22,7 @@ export * from "./utils/createWorkerLogger";
 import { longStringTruncator } from "./utils/longStringTruncator";
 export { longStringTruncator };
 export { sleep } from "./utils/sleep";
+
+export { InstantiatedGraph } from "./graph/InstantiatedGraph";
+export { DefGraph } from "./graph/DefGraph";
 // export { createLazyNextValueGenerator } from "./jobs/pubsub";  
