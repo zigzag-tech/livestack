@@ -1,7 +1,6 @@
 import Graph from "graphology";
 import {
   NodeType,
-  genSpecIdentifier,
   uniqueStreamIdentifier,
 } from "livestack-shared-crosslang-js";
 export { DefGraph } from "livestack-shared-crosslang-js";
