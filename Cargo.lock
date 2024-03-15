@@ -531,16 +531,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "livestack-shared-crosslang-js"
-version = "0.0.0"
-dependencies = [
- "livestack-shared",
- "napi",
- "napi-build",
- "napi-derive",
-]
-
-[[package]]
 name = "livestack-shared-wasm"
 version = "0.1.0"
 dependencies = [
