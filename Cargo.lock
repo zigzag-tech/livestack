@@ -528,6 +528,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "livestack-shared-wasm"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "livestack-shared",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+]
+
+[[package]]
 name = "livestack-vault-interface"
 version = "0.1.0"
 dependencies = [
@@ -1090,18 +1102,6 @@ version = "0.1.0"
 dependencies = [
  "livestack-shared",
  "pyo3",
-]
-
-[[package]]
-name = "shared-wasm"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "livestack-shared",
- "serde",
- "serde-wasm-bindgen",
- "wasm-bindgen",
- "wasm-bindgen-test",
 ]
 
 [[package]]
