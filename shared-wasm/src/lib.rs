@@ -27,15 +27,6 @@ pub struct DefGraph {
 
 #[wasm_bindgen]
 impl DefGraph {
-    // #[wasm_bindgen(constructor)]
-    // pub fn new(/* parameters */) -> DefGraph {
-    //     // Method body
-    // }
-
-    // ... (Other methods go here, similar to the napi version)
-
-#[wasm_bindgen]
-impl DefGraph {
     // ... (Existing methods and constructor)
 }
 
