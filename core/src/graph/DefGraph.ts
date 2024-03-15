@@ -1,5 +1,5 @@
 import { NodeType } from "livestack-shared-crosslang-js";
-export { DefGraph } from "livestack-shared-crosslang-js";
+export { DefGraph } from "livestack-shared-wasm";
 
 export type SpecNode = {
   nodeType: NodeType.Spec;
