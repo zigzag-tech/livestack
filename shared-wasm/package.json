@@ -1,0 +1,14 @@
+{
+  "name": "livestack-shared-wasm",
+  "collaborators": [
+    "Xiyang Chen <xiyang@zztech.io>"
+  ],
+  "version": "0.1.0",
+  "files": [
+    "dist/livestack_shared_wasm_bg.wasm",
+    "dist/livestack_shared_wasm.js",
+    "dist/livestack_shared_wasm.d.ts"
+  ],
+  "main": "dist/livestack_shared_wasm.js",
+  "types": "dist/livestack_shared_wasm.d.ts"
+}
