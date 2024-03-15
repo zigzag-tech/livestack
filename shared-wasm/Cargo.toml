@@ -13,6 +13,8 @@ default = ["console_error_panic_hook"]
 [dependencies]
 wasm-bindgen = "0.2.92"
 livestack-shared = { path = "../shared" }
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6.5"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
