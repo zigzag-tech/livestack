@@ -34,7 +34,6 @@ import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
 import { ZZEnv } from "./ZZEnv";
 import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
 import { lruCacheFn } from "../utils/lruCacheFn";
-import { NodeType } from "livestack-shared-crosslang-js";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -81,7 +80,15 @@ export class JobSpec<
   public getDefGraph() {
     if (!this._defGraph) {
       this._defGraph = new DefGraph({
-        root: this as any,
+        root: {
+          name: this.name,
+          inputDefSet: {
+            tags: this.inputDefSet.tags.map((t) => t.toString()),
+          },
+          outputDefSet: {
+            tags: this.outputDefSet.tags.map((t) => t.toString()),
+          },
+        },
       });
     }
     return this._defGraph;
@@ -481,7 +488,7 @@ export class JobSpec<
 
           const inletNodeId = instaG.findNode((nId) => {
             const n = instaG.getNodeAttributes(nId);
-            if (n.nodeType !== NodeType.Inlet) {
+            if (n.nodeType !== "Inlet") {
               return false;
             } else {
               const ee = instaG.findOutboundEdge((eId) => {
@@ -997,19 +1004,20 @@ export class JobSpec<
     // naive implementation: find spec node with only one input
     // or output which is not connected to another spec, and return its tag
     const defG = this.getDefGraph();
-    let specNodeIds = defG.getSpecNodeIds();
+    // convert Uint32Array to number[]
+    let specNodeIds = Array.from(defG.getSpecNodeIds());
     if (specNodeIds.length === 0) {
       const rootSpecNodeId = defG.getRootSpecNodeId();
       specNodeIds = [rootSpecNodeId];
     } else {
-      specNodeIds = defG.getSpecNodeIds();
+      specNodeIds = Array.from(defG.getSpecNodeIds());
     }
 
     const pass0 = specNodeIds.map((specNodeId) => {
       const specNode = defG.getNodeAttributes(specNodeId) as SpecNode;
       if (type === "input") {
         return {
-          conns: defG.getInboundNodeSets(specNodeId).map((s) => ({
+          conns: defG.getInboundNodeSets(specNodeId).results.map((s) => ({
             specName: specNode.specName,
             uniqueSpecLabel: specNode.uniqueSpecLabel,
             type: "in" as const,
@@ -1021,7 +1029,7 @@ export class JobSpec<
         };
       } else {
         return {
-          conns: defG.getOutboundNodeSets(specNodeId).map((s) => ({
+          conns: defG.getOutboundNodeSets(specNodeId).results.map((s) => ({
             specName: specNode.specName,
             uniqueSpecLabel: specNode.uniqueSpecLabel,
             type: "out" as const,
