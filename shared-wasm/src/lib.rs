@@ -24,10 +24,10 @@ pub struct DefGraph {
 
 #[wasm_bindgen]
 impl DefGraph {
-    #[wasm_bindgen(constructor)]
-    pub fn new(/* parameters */) -> DefGraph {
-        // Method body
-    }
+    // #[wasm_bindgen(constructor)]
+    // pub fn new(/* parameters */) -> DefGraph {
+    //     // Method body
+    // }
 
     // ... (Other methods go here, similar to the napi version)
 }
@@ -35,10 +35,10 @@ impl DefGraph {
 // ... (Other functions go here, similar to the napi version)
 
 // Utility functions for serialization and deserialization if needed
-fn serialize<T: Serialize>(value: &T) -> JsValue {
-    serde_wasm_bindgen::to_value(value).unwrap()
-}
+// fn serialize<T: Serialize>(value: &T) -> JsValue {
+//     serde_wasm_bindgen::to_value(value).unwrap()
+// }
 
-fn deserialize<'a, T: Deserialize<'a>>(value: &JsValue) -> T {
-    serde_wasm_bindgen::from_value(value.clone()).unwrap()
-}
+// fn deserialize<'a, T: Deserialize<'a>>(value: &JsValue) -> T {
+//     serde_wasm_bindgen::from_value(value.clone()).unwrap()
+// }
