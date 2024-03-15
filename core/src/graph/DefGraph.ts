@@ -1,8 +1,4 @@
-import Graph from "graphology";
-import {
-  NodeType,
-  uniqueStreamIdentifier,
-} from "livestack-shared-crosslang-js";
+import { NodeType } from "livestack-shared-crosslang-js";
 export { DefGraph } from "livestack-shared-crosslang-js";
 
 export type SpecNode = {
