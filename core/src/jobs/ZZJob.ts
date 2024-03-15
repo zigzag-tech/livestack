@@ -1,4 +1,7 @@
-import { InstantiatedGraph, JobId } from "../graph/InstantiatedGraph";
+import {
+  InstantiatedGraph,
+  JobId,
+} from "@livestack/shared/src/graph/InstantiatedGraph";
 import { InferTMap } from "@livestack/shared";
 import { vaultClient } from "@livestack/vault-client";
 import _ from "lodash";
