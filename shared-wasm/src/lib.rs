@@ -19,7 +19,6 @@ use livestack_shared::systems::def_graph_utils::{
 use livestack_shared::systems::def_graph_utils::{
     // Necessary imports from def_graph_utils
 };
-use tsify::Tsify;
 
 
 // Define all the structs and enums that will be used in the wasm interface
