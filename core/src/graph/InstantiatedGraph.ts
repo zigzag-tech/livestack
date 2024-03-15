@@ -5,9 +5,11 @@ import { SpecNode, RootSpecNode } from "./DefGraph";
 import {
   DefGraph,
   NodeType,
-  genSpecIdentifier,
   loadDefGraphFromJson,
 } from "livestack-shared-crosslang-js";
+
+import { genSpecIdentifier } from "livestack-shared-wasm";
+
 
 export type JobId = `[${string}]${string}`;
 export type RootJobNode = {

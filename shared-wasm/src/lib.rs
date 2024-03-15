@@ -30,7 +30,7 @@ impl DefGraph {
     // ... (Existing methods and constructor)
 }
 
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = genSpecIdentifier)]
 pub fn gen_spec_identifier(spec_name: String, unique_spec_label: Option<String>) -> String {
     unique_spec_identifier_impl(spec_name, unique_spec_label)
 }
