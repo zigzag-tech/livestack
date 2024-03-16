@@ -517,6 +517,9 @@ export class ZZJob<
       // await job.updateProgress(processedR as object);
       // console.debug("signalOutputEnd", this.jobId);
       for (const tag of this.spec.outputDefSet.tags) {
+        // console.debug(
+        //   `${this.spec.name}: Signaling output end for tag ${tag.toString()}`
+        // );
         await this.signalOutputEnd(tag);
       }
 
