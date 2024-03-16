@@ -2,6 +2,7 @@ export const REQUEST_AND_BIND_CMD = "request_and_bind";
 export type RequestAndBindType = {
   specName: string;
   uniqueSpecLabel?: string;
+  jobId?: string;
 };
 
 export const MSG_JOB_INFO = "job_info";
