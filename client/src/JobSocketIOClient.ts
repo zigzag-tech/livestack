@@ -199,6 +199,7 @@ export interface ClientConnParams {
   socketIOClient?: Socket;
   socketIOURI?: string | null;
   socketIOPath?: string | null;
+  jobId?: string;
 }
 
 const connCacheBySocketIOURIAndPath: Record<`${string}/${string}`, Socket> = {};
@@ -258,6 +259,7 @@ export async function bindNewJobToSocketIO({
   const requestBindingData: RequestAndBindType = {
     specName,
     ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
+    jobId: connParams.jobId,
   };
   const { jobId, availableInputs, availableOutputs } =
     await requestAndGetResponse<RequestAndBindType, JobInfoType>({

@@ -9,7 +9,7 @@ import {
   JobInfoType,
 } from "@livestack/shared";
 import { Subscription } from "rxjs";
-import { ZZEnv, JobSpec } from "@livestack/core";
+import { ZZEnv, JobSpec, JobManager } from "@livestack/core";
 import { Socket } from "socket.io";
 import { JobInput, JobOutput } from "@livestack/core";
 
@@ -39,7 +39,11 @@ export class LiveGatewayConn {
       socket: this.socket,
       req: { method: REQUEST_AND_BIND_CMD },
       res: { method: MSG_JOB_INFO },
-      fn: async ({ specName, uniqueSpecLabel }: RequestAndBindType) => {
+      fn: async ({
+        specName,
+        uniqueSpecLabel,
+        jobId: requestedJobId,
+      }: RequestAndBindType) => {
         if (
           !this.allowedSpecsForBinding.some(
             (s) =>
@@ -52,7 +56,12 @@ export class LiveGatewayConn {
           );
         }
         const spec = JobSpec.lookupByName(specName);
-        const jobOutput = await spec.enqueueJob({});
+        let jobOutput: JobManager<any, any, any, any, any>;
+        if (requestedJobId) {
+          jobOutput = await spec.getJobManager(requestedJobId);
+        } else {
+          jobOutput = await spec.enqueueJob({});
+        }
 
         this.jobFnsById[jobOutput.jobId] = jobOutput;
         const data: JobInfoType = {
