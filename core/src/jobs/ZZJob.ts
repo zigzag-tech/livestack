@@ -22,7 +22,7 @@ import { JobSpec } from "./JobSpec";
 import { ZZEnv } from "./ZZEnv";
 import { identifyLargeFilesToSave } from "../files/file-ops";
 
-export type ZZProcessor<P, I, O, WP extends object, IMap, OMap> = (
+export type ZZProcessor<P, I, O, WP extends object | undefined, IMap, OMap> = (
   j: ZZJob<P, I, O, WP, IMap, OMap>
 ) => Promise<OMap[keyof OMap] | void>;
 
@@ -44,7 +44,7 @@ export class ZZJob<
   P,
   I,
   O,
-  WP extends object = {},
+  WP extends object | undefined = {},
   IMap = InferTMap<I>,
   OMap = InferTMap<O>
 > {

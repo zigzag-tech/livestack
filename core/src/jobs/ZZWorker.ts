@@ -15,7 +15,14 @@ import { vaultClient } from "@livestack/vault-client";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
-export type ZZWorkerDefParams<P, I, O, WP extends object, IMap, OMap> = {
+export type ZZWorkerDefParams<
+  P,
+  I,
+  O,
+  WP extends object | undefined,
+  IMap,
+  OMap
+> = {
   concurrency?: number;
   jobSpec: JobSpec<P, I, O, IMap, OMap>;
   processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
@@ -25,7 +32,7 @@ export type ZZWorkerDefParams<P, I, O, WP extends object, IMap, OMap> = {
   maxNumWorkers?: number;
 };
 
-export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
+export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
   public readonly jobSpec: JobSpec<P, I, O, IMap, OMap>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
   public readonly processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
@@ -134,14 +141,14 @@ export class ZZWorkerDef<P, I, O, WP extends object, IMap, OMap> {
     return this.jobSpec.enqueueAndGetResult(p);
   };
 
-  public static define<P, I, O, WP extends object, IMap, OMap>(
+  public static define<P, I, O, WP extends object | undefined, IMap, OMap>(
     p: Parameters<typeof defineWorker<P, I, O, WP, IMap, OMap>>[0]
   ) {
     return defineWorker(p);
   }
 }
 
-function defineWorker<P, I, O, WP extends object, IMap, OMap>(
+function defineWorker<P, I, O, WP extends object | undefined, IMap, OMap>(
   p: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec"> & {
     jobSpec: JobSpec<P, I, O, IMap, OMap>;
   }
@@ -153,7 +160,7 @@ function defineWorker<P, I, O, WP extends object, IMap, OMap>(
   return spec.defineWorker(p);
 }
 
-export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
+export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
   public readonly jobSpec: JobSpec<P, I, O, IMap, OMap>;
   protected readonly zzEnvP: Promise<ZZEnv>;
   protected readonly storageProvider?: IStorageProvider;
@@ -314,7 +321,7 @@ export class ZZWorker<P, I, O, WP extends object, IMap, OMap> {
     })();
   }
 
-  public static define<P, I, O, WP extends object, IMap, OMap>(
+  public static define<P, I, O, WP extends object | undefined, IMap, OMap>(
     p: Parameters<typeof defineWorker<P, I, O, WP, IMap, OMap>>[0]
   ) {
     return defineWorker(p);
