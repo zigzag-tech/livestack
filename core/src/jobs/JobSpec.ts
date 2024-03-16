@@ -1141,7 +1141,7 @@ export class JobSpec<
   }
 
   // convenience function
-  public defineWorker<WP extends object>(
+  public defineWorker<WP extends object | undefined>(
     p: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec">
   ) {
     return new ZZWorkerDef<P, I, O, WP, IMap, OMap>({
@@ -1150,7 +1150,7 @@ export class JobSpec<
     });
   }
 
-  public async defineWorkerAndStart<WP extends object>({
+  public async defineWorkerAndStart<WP extends object | undefined>({
     instanceParams,
     ...p
   }: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec"> & {
