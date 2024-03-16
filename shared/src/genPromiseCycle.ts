@@ -50,21 +50,42 @@ export function genPromiseCycle<T>() {
 }
 
 export function genManuallyFedIterator<T>(onNext?: (v: T) => void) {
-  const g = genPromiseCycle<T>();
+  const g = genPromiseCycle<
+    | {
+        terminate: false;
+        data: T;
+      }
+    | {
+        terminate: true;
+      }
+  >();
+  const terminate = () => {
+    g.resolveNext({
+      terminate: true,
+    });
+  };
   const iter = {
     async *[Symbol.asyncIterator]() {
       while (true) {
         const d = await g.promise;
-        if (onNext) {
-          onNext(d);
+        if (d.terminate) {
+          break;
         }
-        yield d;
+        if (onNext) {
+          onNext(d.data);
+        }
+        yield d.data;
       }
     },
   };
   return {
     iterator: iter,
-    resolveNext: (v: T) => g.resolveNext(v),
+    resolveNext: (v: T) =>
+      g.resolveNext({
+        terminate: false,
+        data: v,
+      }),
     rejectNext: (reason?: any) => g.rejectNext(reason),
+    terminate,
   };
 }
