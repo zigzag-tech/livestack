@@ -744,7 +744,7 @@ export const StreamServiceDefinition = {
       requestStream: false,
       responseType: StreamDatapoint,
       responseStream: true,
-      options: {},
+      options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
     valueByReverseIndex: {
       name: "valueByReverseIndex",
