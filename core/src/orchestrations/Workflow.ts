@@ -641,7 +641,6 @@ export class WorkflowSpec extends JobSpec<
       };
     } else {
       const defG = this.getDefGraph();
-      console.log("z1", alias, type);
       const r = defG.lookupSpecAndTagByAlias(alias.toString(), type)! as {
         specName: string;
         tag: string;
