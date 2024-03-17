@@ -2442,7 +2442,7 @@ export const DBServiceDefinition = {
       requestStream: false,
       responseType: GetJobRecResponse,
       responseStream: false,
-      options: {},
+      options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
     ensureStreamRec: {
       name: "EnsureStreamRec",
@@ -2466,7 +2466,7 @@ export const DBServiceDefinition = {
       requestStream: false,
       responseType: GetJobDatapointsResponse,
       responseStream: false,
-      options: {},
+      options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
     addDatapoint: {
       name: "AddDatapoint",
@@ -2482,7 +2482,7 @@ export const DBServiceDefinition = {
       requestStream: false,
       responseType: GetJobStreamConnectorRecsResponse,
       responseStream: false,
-      options: {},
+      options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
     appendJobStatusRec: {
       name: "AppendJobStatusRec",
@@ -2498,7 +2498,7 @@ export const DBServiceDefinition = {
       requestStream: false,
       responseType: GetParentJobRecResponse,
       responseStream: false,
-      options: {},
+      options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
   },
 } as const;
