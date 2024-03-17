@@ -8,14 +8,22 @@ import "google/protobuf/empty.proto";
 // import "google/protobuf/any.proto";
 
 service DBService {
-  rpc GetJobRec(GetJobRecRequest) returns (GetJobRecResponse);
+  rpc GetJobRec(GetJobRecRequest) returns (GetJobRecResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  };
   rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
   rpc EnsureJobAndStatusAndConnectorRecs(EnsureJobAndStatusAndConnectorRecsRequest) returns (google.protobuf.Empty);
-  rpc GetJobDatapoints(GetJobDatapointsRequest) returns (GetJobDatapointsResponse);
+  rpc GetJobDatapoints(GetJobDatapointsRequest) returns (GetJobDatapointsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  };
   rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
-  rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (GetJobStreamConnectorRecsResponse);
+  rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (GetJobStreamConnectorRecsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  };
   rpc AppendJobStatusRec(AppendJobStatusRecRequest) returns (google.protobuf.Empty);
-  rpc GetParentJobRec(GetParentJobRecRequest) returns (GetParentJobRecResponse);
+  rpc GetParentJobRec(GetParentJobRecRequest) returns (GetParentJobRecResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  };
 }
 
 
