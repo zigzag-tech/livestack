@@ -752,7 +752,7 @@ export const StreamServiceDefinition = {
       requestStream: false,
       responseType: ValueByReverseIndexResponse,
       responseStream: false,
-      options: {},
+      options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
     lastValue: {
       name: "lastValue",
@@ -760,7 +760,7 @@ export const StreamServiceDefinition = {
       requestStream: false,
       responseType: LastValueResponse,
       responseStream: false,
-      options: {},
+      options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
   },
 } as const;
