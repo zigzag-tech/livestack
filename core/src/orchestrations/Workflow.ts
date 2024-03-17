@@ -641,12 +641,20 @@ export class WorkflowSpec extends JobSpec<
       };
     } else {
       const defG = this.getDefGraph();
+      console.log("z1", alias, type);
       const r = defG.lookupSpecAndTagByAlias(alias.toString(), type)! as {
         specName: string;
         tag: string;
         uniqueSpecLabel: string | undefined;
         direction: "in" | "out";
       };
+      if (!r) {
+        throw new Error(
+          `No spec and tag of type ${
+            type === "in" ? "input" : "output"
+          } found for alias ${alias.toString()}.`
+        );
+      }
       return r;
     }
   }
