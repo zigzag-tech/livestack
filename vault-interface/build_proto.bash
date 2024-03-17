@@ -3,7 +3,7 @@
 
 OUT_DIR="./src/generated"
 
-protoc --plugin=$(npm root)/.bin/protoc-gen-ts_proto \
+protoc --plugin=$(npx which protoc-gen-ts_proto) \
  --ts_proto_out="${OUT_DIR}" \
  --ts_proto_opt=outputServices=nice-grpc,outputServices=generic-definitions,useExactTypes=false \
  --ts_proto_opt=esModuleInterop=true \

@@ -1,14 +1,17 @@
-import { createChannel, createClient } from "nice-grpc";
+import { createChannel, createClientFactory } from "nice-grpc";
 import {
   DBServiceDefinition,
   StreamServiceDefinition,
   QueueServiceDefinition,
   CacapcityServiceDefinition,
 } from "@livestack/vault-interface";
+import { retryMiddleware } from "nice-grpc-client-middleware-retry";
 
 export const vaultClient = findSuitableVaultServer();
 
 export function findSuitableVaultServer() {
+  const clientFactory = createClientFactory().use(retryMiddleware);
+
   let vaultServerURL: string;
   if (process.env.LIVESTACK_VALULT_SERVER_URL) {
     vaultServerURL = process.env.LIVESTACK_VALULT_SERVER_URL;
@@ -31,13 +34,19 @@ export function findSuitableVaultServer() {
   console.info("Using vault server at:", vaultServerURL);
 
   return {
-    db: createClient(DBServiceDefinition, createChannel(vaultServerURL)),
-    stream: createClient(
+    db: clientFactory.create(
+      DBServiceDefinition,
+      createChannel(vaultServerURL)
+    ),
+    stream: clientFactory.create(
       StreamServiceDefinition,
       createChannel(vaultServerURL)
     ),
-    queue: createClient(QueueServiceDefinition, createChannel(vaultServerURL)),
-    capacity: createClient(
+    queue: clientFactory.create(
+      QueueServiceDefinition,
+      createChannel(vaultServerURL)
+    ),
+    capacity: clientFactory.create(
       CacapcityServiceDefinition,
       createChannel(vaultServerURL)
     ),

@@ -7,7 +7,9 @@ import "google/protobuf/empty.proto";
 
 service StreamService {
   rpc Pub(StreamPubMessage) returns (StreamPubResult);
-  rpc Sub(SubRequest) returns (stream StreamDatapoint);
+  rpc Sub(SubRequest) returns (stream StreamDatapoint) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   rpc valueByReverseIndex(ValueByReverseIndexRequest) returns (ValueByReverseIndexResponse);
   rpc lastValue(LastValueRequest) returns (LastValueResponse);
 }
