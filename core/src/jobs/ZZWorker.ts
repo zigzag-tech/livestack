@@ -11,7 +11,7 @@ import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedG
 import { QueueJob, FromWorker, FromInstance } from "@livestack/vault-interface";
 import { v4 } from "uuid";
 import { genManuallyFedIterator } from "@livestack/shared";
-import { vaultClient } from "@livestack/vault-client";
+import { genAuthorizedVaultClient } from "@livestack/vault-client";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -82,7 +82,9 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
       genManuallyFedIterator<FromInstance>((v) => {
         // console.info(`INSTANCE REPORT: ${JSON.stringify(v)}`);
       });
-    const iter = vaultClient.capacity.reportAsInstance(iterator);
+    const iter = (await ZZEnv.vaultClient()).capacity.reportAsInstance(
+      iterator
+    );
     reportNext({
       instanceId,
       projectId,
@@ -215,9 +217,9 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
       genManuallyFedIterator<FromWorker>((v) => {
         // console.info(`DUTY REPORT: ${JSON.stringify(v)}`);
       });
-    const iter = vaultClient.queue.reportAsWorker(iterParams);
 
     (async () => {
+      await (await that.zzEnvP).getAuthToken();
       (await that.loggerP).info(`WORKER STARTED: ${await that.workerNameP}.`);
     })();
 
@@ -259,6 +261,8 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     };
 
     (async () => {
+      const iter = (await ZZEnv.vaultClient()).queue.reportAsWorker(iterParams);
+
       for await (const { job } of iter) {
         // console.debug("picked up job: ", job);
         if (!job) {

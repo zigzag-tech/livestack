@@ -12,7 +12,10 @@ import {
   getSourceSpecNodeConnectedToStream,
   InstantiatedGraph,
 } from "@livestack/shared/src/graph/InstantiatedGraph";
-import { vaultClient } from "@livestack/vault-client";
+import {
+  AuthorizedGRPCClient,
+  genAuthorizedVaultClient,
+} from "@livestack/vault-client";
 import { v4 } from "uuid";
 import { getLogger } from "../utils/createWorkerLogger";
 import { longStringTruncator } from "../utils/longStringTruncator";
@@ -635,22 +638,17 @@ export class JobSpec<
     }
 
     jobOptions = jobOptions || ({} as P);
-    // const metadata = new Metadata();
-    // metadata.set("auth", "123");
-
-    await vaultClient.db.ensureJobAndStatusAndConnectorRecs(
-      {
-        projectId: (await this.zzEnvPWithTimeout).projectId,
-        specName: this.name,
-        jobId,
-        jobOptionsStr: JSON.stringify(jobOptions),
-        parentJobId: p?.parentJobId,
-        uniqueSpecLabel: p?.uniqueSpecLabel,
-        inputStreamIdOverridesByTag: inputStreamIdOverridesByTag || {},
-        outputStreamIdOverridesByTag: outputStreamIdOverridesByTag || {},
-      }
-      // { metadata }
-    );
+    const vaultClient = await ZZEnv.vaultClient();
+    await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
+      projectId: (await this.zzEnvPWithTimeout).projectId,
+      specName: this.name,
+      jobId,
+      jobOptionsStr: JSON.stringify(jobOptions),
+      parentJobId: p?.parentJobId,
+      uniqueSpecLabel: p?.uniqueSpecLabel,
+      inputStreamIdOverridesByTag: inputStreamIdOverridesByTag || {},
+      outputStreamIdOverridesByTag: outputStreamIdOverridesByTag || {},
+    });
 
     const j = await vaultClient.queue.addJob({
       projectId,

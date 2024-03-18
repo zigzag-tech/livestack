@@ -1,4 +1,3 @@
-import { vaultClient } from "@livestack/vault-client";
 import {
   CheckSpec,
   JobSpec,
@@ -433,7 +432,9 @@ export class WorkflowSpec extends JobSpec<
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;
 
-        const { rec: parentRec } = await vaultClient.db.getParentJobRec({
+        const { rec: parentRec } = await(
+          await ZZEnv.vaultClient()
+        ).db.getParentJobRec({
           projectId: (await this.zzEnvPWithTimeout).projectId,
           childJobId: groupId,
         });
@@ -772,7 +773,9 @@ export class Workflow {
     const that = this;
     if (!this._graphP) {
       this._graphP = (async () => {
-        const { rec: parentRec } = await vaultClient.db.getParentJobRec({
+        const { rec: parentRec } = await(
+          await ZZEnv.vaultClient()
+        ).db.getParentJobRec({
           projectId: (await that.jobGroupDef.zzEnvPWithTimeout).projectId,
           childJobId: this.contextId,
         });

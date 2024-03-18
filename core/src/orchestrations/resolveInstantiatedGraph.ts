@@ -4,7 +4,6 @@ import {
   StreamNode,
   getSourceSpecNodeConnectedToStream,
 } from "@livestack/shared/src/graph/InstantiatedGraph";
-import { vaultClient } from "@livestack/vault-client";
 import { ConnectorType } from "@livestack/vault-interface";
 import { TransformRegistry } from "./TransformRegistry";
 import { lruCacheFn } from "../utils/lruCacheFn";
@@ -24,7 +23,7 @@ export const resolveInstantiatedGraph = lruCacheFn(
     jobId: string;
   }): Promise<InstantiatedGraph> => {
     const spec = JobSpec.lookupByName(specName);
-    const { records: streams } = await getJobStreamConnectorRecsCached({
+    const { records: streams } = await(await getJobStreamConnectorRecsCachedP)({
       projectId: zzEnv.projectId,
       jobId,
     });
@@ -40,7 +39,7 @@ export const resolveInstantiatedGraph = lruCacheFn(
         })
     );
 
-    const parentRec = await getParentRecCached({
+    const parentRec = await(await getParentRecCachedP)({
       projectId: zzEnv.projectId,
       childJobId: jobId,
     });
@@ -109,12 +108,17 @@ export const resolveInstantiatedGraph = lruCacheFn(
   }
 );
 
-const getParentRecCached = lruCacheFn(
-  ((rec: any) => `${rec.project_id}/${rec.childJobId}`) as any,
-  vaultClient.db.getParentJobRec.bind(vaultClient.db)
+const getParentRecCachedP = ZZEnv.vaultClient().then((vaultClient) =>
+  lruCacheFn(
+    ((rec: any) => `${rec.project_id}/${rec.childJobId}`) as any,
+    vaultClient.db.getParentJobRec.bind(vaultClient.db)
+  )
 );
 
-const getJobStreamConnectorRecsCached = lruCacheFn(
-  ((rec: any) => `${rec.projectId}/${rec.jobId}`) as any,
-  vaultClient.db.getJobStreamConnectorRecs.bind(vaultClient.db)
+const getJobStreamConnectorRecsCachedP = ZZEnv.vaultClient().then(
+  (vaultClient) =>
+    lruCacheFn(
+      ((rec: any) => `${rec.projectId}/${rec.jobId}`) as any,
+      vaultClient.db.getJobStreamConnectorRecs.bind(vaultClient.db)
+    )
 );

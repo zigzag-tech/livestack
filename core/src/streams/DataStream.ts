@@ -11,7 +11,6 @@ import {
   restoreLargeValues,
 } from "../files/file-ops";
 import { getLogger } from "../utils/createWorkerLogger";
-import { vaultClient } from "@livestack/vault-client";
 
 export class DataStream<T extends object> {
   public readonly def: ZodType<T> | null;
@@ -70,7 +69,9 @@ export class DataStream<T extends object> {
       });
       // async
       if (zzEnv) {
-        await vaultClient.db.ensureStreamRec({
+        await (
+          await ZZEnv.vaultClient()
+        ).db.ensureStreamRec({
           project_id: zzEnv.projectId,
           stream_id: uniqueName,
         });
@@ -112,12 +113,13 @@ export class DataStream<T extends object> {
   }
 
   public valueByReverseIndex = async (index: number) => {
-    const { null_response, datapoint } =
-      await vaultClient.stream.valueByReverseIndex({
-        projectId: (await this.zzEnvP).projectId,
-        uniqueName: this.uniqueName,
-        index,
-      });
+    const { null_response, datapoint } = await (
+      await ZZEnv.vaultClient()
+    ).stream.valueByReverseIndex({
+      projectId: (await this.zzEnvP).projectId,
+      uniqueName: this.uniqueName,
+      index,
+    });
     if (null_response) {
       return null;
     } else if (datapoint) {
@@ -226,14 +228,18 @@ export class DataStream<T extends object> {
       // );
 
       const [_, { chunkId }] = await Promise.all([
-        vaultClient.db.addDatapoint({
+        (
+          await ZZEnv.vaultClient()
+        ).db.addDatapoint({
           streamId: this.uniqueName,
           projectId: (await this.zzEnvP).projectId,
           jobInfo: jobInfo,
           dataStr: JSON.stringify(parsed),
           datapointId,
         }),
-        vaultClient.stream.pub({
+        (
+          await ZZEnv.vaultClient()
+        ).stream.pub({
           projectId: (await this.zzEnvP).projectId,
           uniqueName: this.uniqueName,
           dataStr: customStringify(parsed),

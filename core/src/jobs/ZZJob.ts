@@ -3,7 +3,6 @@ import {
   JobId,
 } from "@livestack/shared/src/graph/InstantiatedGraph";
 import { InferTMap } from "@livestack/shared";
-import { vaultClient } from "@livestack/vault-client";
 import _ from "lodash";
 import { Observable, map, merge, takeUntil } from "rxjs";
 import { z } from "zod";
@@ -21,6 +20,7 @@ import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
 import { JobSpec } from "./JobSpec";
 import { ZZEnv } from "./ZZEnv";
 import { identifyLargeFilesToSave } from "../files/file-ops";
+import { AuthorizedGRPCClient } from "@livestack/vault-client";
 
 export type ZZProcessor<P, I, O, WP extends object | undefined, IMap, OMap> = (
   j: ZZJob<P, I, O, WP, IMap, OMap>
@@ -350,7 +350,9 @@ export class ZZJob<
   private _parentRec:
     | (Omit<
         NonNullable<
-          Awaited<ReturnType<typeof vaultClient.db.getParentJobRec>>["rec"]
+          Awaited<
+            ReturnType<AuthorizedGRPCClient["db"]["getParentJobRec"]>
+          >["rec"]
         >,
         "job_params_str"
       > & {
@@ -361,7 +363,9 @@ export class ZZJob<
 
   private getParentRec = async () => {
     if (this._parentRec === "uninitialized") {
-      const { null_response, rec } = await vaultClient.db.getParentJobRec({
+      const { null_response, rec } = await(
+        await ZZEnv.vaultClient()
+      ).db.getParentJobRec({
         projectId: (await this.zzEnvP).projectId,
         childJobId: this.jobId,
       });
@@ -477,7 +481,7 @@ export class ZZJob<
     );
 
     try {
-      await vaultClient.db.appendJobStatusRec({
+      await(await ZZEnv.vaultClient()).db.appendJobStatusRec({
         ...jId,
         jobStatus: "running",
       });
@@ -510,7 +514,7 @@ export class ZZJob<
         await this.output.emit(processedR);
       }
 
-      await vaultClient.db.appendJobStatusRec({
+      await(await ZZEnv.vaultClient()).db.appendJobStatusRec({
         ...jId,
         jobStatus: "completed",
       });
@@ -530,7 +534,9 @@ export class ZZJob<
     } catch (e: any) {
       console.error("Error while running job: ", this.jobId, e);
 
-      await vaultClient.db.appendJobStatusRec({
+      await(
+        await ZZEnv.vaultClient()
+      ).db.appendJobStatusRec({
         projectId,
         specName: this.spec.name,
         jobId: this.jobId,
