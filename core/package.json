@@ -32,7 +32,7 @@
     "typescript": "5.4.2"
   },
   "optionalDependencies": {
-    "@google-cloud/storage": "^7.x",
+    "@google-cloud/storage": "^7.8.0",
     "@livestack/vault-dev-server": "*"
   },
   "module": "dist/livestack-core.esm.js",
