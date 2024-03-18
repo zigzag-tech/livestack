@@ -62,10 +62,11 @@ export class ZZEnv implements EnvParams {
   private static _cachedInstanceId: string | null = null;
   private livePrinted = false;
 
-  private printLiveDevUrlOnce() {
+  private async printLiveDevUrlOnce() {
+    const userId = await this.getUserId();
     if (!this.livePrinted) {
       console.info(
-        yellow`${inverse` 🔴 LIVE 🦓🦓 https://live.dev/p/test-user/${this._projectId}`}${inverse``}`
+        yellow`${inverse` 🔴 LIVE 🦓🦓 https://live.dev/p/${userId}/${this._projectId}`}${inverse``}`
       );
 
       this.livePrinted = true;
@@ -93,7 +94,7 @@ export class ZZEnv implements EnvParams {
       userId = require("uuid").v4();
       fs.writeFileSync(filename, userId!);
     }
-    return userId;
+    return userId!;
   }
 
   public derive(newP: Partial<EnvParams>) {
