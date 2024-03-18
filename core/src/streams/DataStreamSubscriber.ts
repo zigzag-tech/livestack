@@ -3,7 +3,6 @@ import {
   identifyLargeFilesToRestore,
   restoreLargeValues,
 } from "../files/file-ops";
-import { vaultClient } from "@livestack/vault-client";
 import { SubType } from "@livestack/vault-interface/src/generated/stream";
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../jobs/pubsub";
@@ -63,7 +62,7 @@ export class DataStreamSubscriber<T extends object> {
 
   private async readStream(subscriber: Subscriber<WithTimestamp<T>>) {
     try {
-      const iter = vaultClient.stream.sub({
+      const iter = (await ZZEnv.vaultClient()).stream.sub({
         projectId: (await this.zzEnvP).projectId,
         uniqueName: this.stream.uniqueName,
         subType: this.subType,
