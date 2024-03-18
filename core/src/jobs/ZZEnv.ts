@@ -2,6 +2,7 @@ import { vaultClient } from "@livestack/vault-client";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Stream } from "stream";
 import chalk, { green, inverse, red, yellow } from "ansis";
+import fs from "fs";
 
 import { z } from "zod";
 interface EnvParams {
@@ -78,6 +79,21 @@ export class ZZEnv implements EnvParams {
       this._cachedInstanceId = r.instanceId;
     }
     return this._cachedInstanceId;
+  }
+
+  public async getUserId() {
+    // read from file .livestack_user_id
+    // if it doesn't exist, create it with a random uuid
+    // return the uuid
+    const filename = ".livestack_user_id";
+    let userId: string | null = null;
+    try {
+      userId = fs.readFileSync(filename, "utf-8");
+    } catch (e) {
+      userId = require("uuid").v4();
+      fs.writeFileSync(filename, userId!);
+    }
+    return userId;
   }
 
   public derive(newP: Partial<EnvParams>) {
