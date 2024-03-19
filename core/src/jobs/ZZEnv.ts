@@ -38,7 +38,7 @@ export class ZZEnv implements EnvParams {
       ]).then(([env]) => env);
       ZZEnv._vaultClientP = ZZEnv._zzEnvP.then((zzEnv) =>
         zzEnv
-          .getAuthToken()
+          .getAuthToken(zzEnv)
           .then((authToken) => genAuthorizedVaultClient(authToken))
       );
     }
@@ -85,7 +85,7 @@ export class ZZEnv implements EnvParams {
   private livePrinted = false;
 
   private async printLiveDevUrlOnce() {
-    const userId = await this.getAuthToken();
+    const userId = await this.getAuthToken(this);
     if (!this.livePrinted) {
       console.info(
         yellow`${inverse` 🔴 LIVE 🦓🦓 https://live.dev/p/${userId}/${this._projectId}`}${inverse``}`
@@ -99,13 +99,13 @@ export class ZZEnv implements EnvParams {
     ZZEnv._ensureInitialized();
 
     if (!this._cachedInstanceId) {
-      const r = await(await ZZEnv.vaultClient()).queue.initInstance({});
+      const r = await (await ZZEnv.vaultClient()).queue.initInstance({});
       this._cachedInstanceId = r.instanceId;
     }
     return this._cachedInstanceId;
   }
 
-  public getAuthToken = () => {
+  public getAuthToken = (zzEnvP: Promise<ZZEnv> | ZZEnv) => {
     return limiter(async () => {
       // read from file .livestack_auth
       // if it doesn't exist, request credentials by printing a URL
@@ -114,7 +114,7 @@ export class ZZEnv implements EnvParams {
       try {
         userId = fs.readFileSync(filename, "utf-8");
       } catch (e) {
-        const cliTempToken = await getCliTempToken();
+        const cliTempToken = await getCliTempToken(zzEnvP);
         const inBoxStr = ` >>> ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} <<< `;
         const boxWidth = inBoxStr.length;
         const boxBorder = "╔" + "═".repeat(boxWidth) + "╗";
@@ -126,13 +126,17 @@ export class ZZEnv implements EnvParams {
         console.info(blueBright`${boxSides}${inBoxStr}${boxSides}`);
         console.info(blueBright(boxBottom));
         console.info(yellow`(Or copy & paste the link in a browser)`);
-        const { userToken, username } = await waitUntilCredentialsAreResolved(
-          cliTempToken
-        );
+        const { userToken, projectId, userDisplayName } =
+          await waitUntilCredentialsAreResolved(cliTempToken);
+        if (projectId !== this.projectId) {
+          throw new Error("Project ID mismatch");
+        }
         fs.writeFileSync(filename, userToken, "utf-8");
         // print welcome message
         console.info(
-          green`🦓 Welcome to Livestack, ${username}! Your token has been saved to ${filename}.`
+          green`🦓 Welcome to Livestack${
+            userDisplayName ? `, ${userDisplayName}` : ""
+          }! Your token has been saved to ${filename}.`
         );
       }
       return userId!;
@@ -147,7 +151,7 @@ export class ZZEnv implements EnvParams {
   }
 }
 
-async function getCliTempToken() {
+async function getCliTempToken(zzEnvP: Promise<ZZEnv> | ZZEnv) {
   const randomTokenResp = await fetch(
     `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/cli-tokens`,
     {
@@ -155,6 +159,9 @@ async function getCliTempToken() {
       headers: {
         "Content-Type": "application/json",
       },
+      body: JSON.stringify({
+        projectId: (await zzEnvP).projectId,
+      }),
     }
   );
   const { cliTempToken } = await randomTokenResp.json();
@@ -202,7 +209,8 @@ async function getClITempTokenStatus(cliTempToken: string): Promise<
   | {
       status: "resolved";
       userToken: string;
-      username: string;
+      projectId: string;
+      userDisplayName: string | null;
     }
 > {
   const resp = await fetch(
