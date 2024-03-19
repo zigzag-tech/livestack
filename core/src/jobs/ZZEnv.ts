@@ -115,11 +115,16 @@ export class ZZEnv implements EnvParams {
         userId = fs.readFileSync(filename, "utf-8");
       } catch (e) {
         const cliTempToken = await getCliTempToken();
-        const inBoxStr = `│ >>> ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} <<< │`;
-        console.info(yellow`To contine, get a Livestack token here:`);
-        console.info(blueBright`┌${Array(inBoxStr.length - 1).join("─")}┐`);
-        console.info(blueBright`${inBoxStr}`);
-        console.info(blueBright`└${Array(inBoxStr.length - 1).join("─")}┘`);
+        const inBoxStr = ` >>> ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} <<< `;
+        const boxWidth = inBoxStr.length;
+        const boxBorder = "╔" + "═".repeat(boxWidth) + "╗";
+        const boxSides = "║";
+        const boxBottom = "╚" + "═".repeat(boxWidth) + "╝";
+
+        console.info(yellow`To continue, get a Livestack token here:`);
+        console.info(blueBright(boxBorder));
+        // console.info(blueBright`${boxSides}${inBoxStr}${boxSides}`);
+        console.info(blueBright(boxBottom));
         console.info(yellow`(Or copy & paste the link in a browser)`);
         const { userToken, username } = await waitUntilCredentialsAreResolved(
           cliTempToken
