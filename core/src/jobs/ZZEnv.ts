@@ -4,7 +4,7 @@ import {
 } from "@livestack/vault-client";
 import { IStorageProvider } from "../storage/cloudStorage";
 import { Stream } from "stream";
-import chalk, { green, inverse, red, yellow } from "ansis";
+import chalk, { blueBright, green, inverse, red, yellow } from "ansis";
 import fs from "fs";
 
 import { z } from "zod";
@@ -114,14 +114,12 @@ export class ZZEnv implements EnvParams {
       try {
         userId = fs.readFileSync(filename, "utf-8");
       } catch (e) {
-        return "fake";
-        // TODO: use more robust random string
         const cliTempToken = await getCliTempToken();
-        // console.info(yellow`No local livestack dashboard credentials found.`);
+        const inBoxStr = `│ >>> ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} <<< │`;
         console.info(yellow`To contine, get a Livestack token here:`);
-        console.info(
-          green`>>> ${LIVESTACK_DASHBOARD_URL_ROOT}/start-cli?t=${cliTempToken} <<<`
-        );
+        console.info(blueBright`┌${Array(inBoxStr.length - 1).join("─")}┐`);
+        console.info(blueBright`${inBoxStr}`);
+        console.info(blueBright`└${Array(inBoxStr.length - 1).join("─")}┘`);
         console.info(yellow`(Or copy & paste the link in a browser)`);
         const { userToken, username } = await waitUntilCredentialsAreResolved(
           cliTempToken
@@ -187,7 +185,7 @@ function genZebraLine(step: number) {
 
   // Generate the line with zebras
   let line = Array.from({ length: LINE_LENGTH }, (_, i) =>
-    i === zebra1Pos || i === zebra2Pos ? "🦓" : "-"
+    i === zebra1Pos || i === zebra2Pos ? "🦓" : "―"
   ).join("");
 
   return line;
