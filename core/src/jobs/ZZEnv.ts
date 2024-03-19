@@ -149,7 +149,7 @@ export class ZZEnv implements EnvParams {
 
 async function getCliTempToken() {
   const randomTokenResp = await fetch(
-    `${LIVESTACK_DASHBOARD_URL_ROOT}/cli-tokens`,
+    `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/cli-tokens`,
     {
       method: "POST",
       headers: {
@@ -206,7 +206,7 @@ async function getClITempTokenStatus(cliTempToken: string): Promise<
     }
 > {
   const resp = await fetch(
-    `${LIVESTACK_DASHBOARD_URL_ROOT}/cli-tokens/${cliTempToken}`,
+    `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/cli-tokens/${cliTempToken}`,
     {
       method: "GET",
       headers: {
