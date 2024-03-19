@@ -123,7 +123,7 @@ export class ZZEnv implements EnvParams {
 
         console.info(yellow`To continue, get a Livestack token here:`);
         console.info(blueBright(boxBorder));
-        // console.info(blueBright`${boxSides}${inBoxStr}${boxSides}`);
+        console.info(blueBright`${boxSides}${inBoxStr}${boxSides}`);
         console.info(blueBright(boxBottom));
         console.info(yellow`(Or copy & paste the link in a browser)`);
         const { userToken, username } = await waitUntilCredentialsAreResolved(
