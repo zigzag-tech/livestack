@@ -7,7 +7,7 @@
 <img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat" alt="npm version" />
 </p>
 
-<p align="center">A realtime, end-to-end AI framework for JavaScript developers. <br />From concept to deployment in hours. </p>
+<p align="center">A full stack, realtime AI framework for JavaScript developers. <br />From concept to deployment in hours. </p>
 
 <p align="center">
 <img src="_misc/assets/intro.gif"
@@ -24,23 +24,27 @@ Livestack, designed from the ground up, aims to democratize this process, making
 
 We look forward to seeing your next idea come to life with Livestack!
 
-## Features
+## Features (current)
 
 Livestack aims at providing:
 
-- Native support for stream-based, realtime orchestration.
-- Fullstack, end-to-end templates for both frontend and backend.
-- Fully typed with zod and TypeScript support for better developer experience.
-- Built-in queue system that automatically scales AI project to many machines.
-- Complete graph-based workflows for better reasoning, visual inspection and debugging:
-  - Multiple input/output streams for each job node (commonly encountered in modern AI components)
-  - Intuitive workflow query language for easy inspection and debugging.
-- Built-in data persistence of all in-app activities for easy debugging and model tuning.
-- (WIP) Common realtime AI components, patterns and guidelines for rapid prototyping, including:
-  -  live speech transcription.
-  -  live RAG workflow.
+- Stream & workflow based architecture.
+- Tools and patterns for realtime orchestration.
+- Simple, hassle-free bootstrap & deployment process for new AI project.
+- Graph-based workflows for better reasoning, visual inspection and debugging:
+  - Support for multiple input & output streams for every processing node 
+  - Visualization for easy inspection and debugging (as part of Livestack Cloud).
+- Built-in data persistence & validation of all in-app activities for easy inspection and model training.
+- Provisioning system that automatically scales your AI project to many machines with zero configuration.
+- Support for hybrid local and cloud deployment.
+
+## Features (planned)
+- (WIP) full-stack realtime AI compnents, patterns and guidelines for rapid prototyping, including:
+  - live speech transcription.
+  - live RAG workflow.
+  - [Game development](https://github.com/zigzag-tech/echoes-of-sentience)
   -  realtime image generation.
-- (WIP) Simple bootstrap process for new AI project.
+
 
 
 ## Quickstart
