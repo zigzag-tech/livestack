@@ -44,16 +44,10 @@ pub struct DefGraphParams {
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct DefGraphSpecParams {
     pub name: String,
-    pub input_def_set: DefSetParams,
-    pub output_def_set: DefSetParams,
+    pub input_tags: Vec<String>,
+    pub output_tags: Vec<String>,
 }
 
-#[derive(Tsify, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
-#[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
-pub struct DefSetParams {
-    pub tags: Vec<String>,
-}
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
@@ -208,8 +202,8 @@ impl DefGraph {
         // let params: DefGraphParams = serde_wasm_bindgen::from_value(params)?;
         let def_graph = DefGraphImpl::new(
             params.root.name,
-            params.root.input_def_set.tags,
-            params.root.output_def_set.tags,
+            params.root.input_tags,
+            params.root.output_tags,
         );
         Ok(DefGraph { def_graph })
     }

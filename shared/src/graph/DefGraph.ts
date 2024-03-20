@@ -57,8 +57,8 @@ export const initDefGraph = ({
   const d: DefGraph = new DefGraph({
     root: {
       name: root.name,
-      inputDefSet: { tags: root.inputTags },
-      outputDefSet: { tags: root.outputTags },
+      inputTags: root.inputTags,
+      outputTags: root.outputTags,
     },
   });
   return d;
@@ -126,8 +126,8 @@ export type DefNodeType = DefGraphNode["nodeType"];
 
 type SpecBase = {
   name: string;
-  inputDefSet: { tags: (string | number | symbol)[] };
-  outputDefSet: { tags: (string | number | symbol)[] };
+  input: { tags: (string | number | symbol)[] };
+  output: { tags: (string | number | symbol)[] };
 };
 
 // class DefGraph_ extends Graph<DefGraphNode> {
