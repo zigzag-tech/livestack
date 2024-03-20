@@ -119,30 +119,38 @@ export class ZZEnv implements EnvParams {
       try {
         userId = fs.readFileSync(filename, "utf-8");
       } catch (e) {
-        const cliTempToken = await getCliTempToken(zzEnvP);
-        const inBoxStr = ` >>> ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} <<< `;
-        const boxWidth = inBoxStr.length;
-        const boxBorder = "╔" + "═".repeat(boxWidth) + "╗";
-        const boxSides = "║";
-        const boxBottom = "╚" + "═".repeat(boxWidth) + "╝";
+        try {
+          const cliTempToken = await getCliTempToken(zzEnvP);
 
-        console.info(yellow`To continue, get a Livestack token here:`);
-        console.info(blueBright(boxBorder));
-        console.info(blueBright`${boxSides}${inBoxStr}${boxSides}`);
-        console.info(blueBright(boxBottom));
-        console.info(yellow`(Or copy & paste the link in a browser)`);
-        const { userToken, projectId, userDisplayName } =
-          await waitUntilCredentialsAreResolved(cliTempToken);
-        if (projectId !== this.projectId) {
-          throw new Error("Project ID mismatch");
+          const inBoxStr = ` >>> ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} <<< `;
+          const boxWidth = inBoxStr.length;
+          const boxBorder = "╔" + "═".repeat(boxWidth) + "╗";
+          const boxSides = "║";
+          const boxBottom = "╚" + "═".repeat(boxWidth) + "╝";
+
+          console.info(yellow`To continue, get a Livestack token here:`);
+          console.info(blueBright(boxBorder));
+          console.info(blueBright`${boxSides}${inBoxStr}${boxSides}`);
+          console.info(blueBright(boxBottom));
+          console.info(yellow`(Or copy & paste the link in a browser)`);
+          const { userToken, projectId, userDisplayName } =
+            await waitUntilCredentialsAreResolved(cliTempToken);
+          if (projectId !== this.projectId) {
+            throw new Error("Project ID mismatch");
+          }
+          fs.writeFileSync(filename, userToken, "utf-8");
+          // print welcome message
+          console.info(
+            green`🦓 Welcome to Livestack${
+              userDisplayName ? `, ${userDisplayName}` : ""
+            }! Your token has been saved to ${filename}.`
+          );
+        } catch (e) {
+          console.error(
+            red`Failed to communicate with Livestack Cloud server. Please contact ZigZag support.`
+          );
+          throw e;
         }
-        fs.writeFileSync(filename, userToken, "utf-8");
-        // print welcome message
-        console.info(
-          green`🦓 Welcome to Livestack${
-            userDisplayName ? `, ${userDisplayName}` : ""
-          }! Your token has been saved to ${filename}.`
-        );
       }
       return userId!;
     });
