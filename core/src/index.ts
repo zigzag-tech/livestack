@@ -23,5 +23,5 @@ import { longStringTruncator } from "./utils/longStringTruncator";
 export { longStringTruncator };
 export { sleep } from "./utils/sleep";
 
-export * from "./onboarding/CliOnboarding";
+export type * from "./onboarding/CliOnboarding";
 // export { createLazyNextValueGenerator } from "./jobs/pubsub";  
