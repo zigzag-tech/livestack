@@ -1,12 +1,13 @@
-import { StreamDefSet, InferDefMap } from "./StreamDefSet";
+import { StreamDefSet, InferDefMap, createStreamDefSet } from "./StreamDefSet";
 import { ZodType, z } from "zod";
 
 export abstract class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
   public readonly name: string;
-  public readonly inputDefSet: StreamDefSet<IMap>;
-  public readonly outputDefSet: StreamDefSet<OMap>;
-  public readonly input: InferDefMap<IMap>;
-  public readonly output: InferDefMap<OMap>;
+  public readonly input: StreamDefSet<IMap>;
+  public readonly output: StreamDefSet<OMap>;
+
+  protected readonly __inputDef: InferDefMap<IMap>;
+  protected readonly __outputDef: InferDefMap<OMap>;
   public abstract get inputTags(): (keyof IMap)[];
   public abstract get outputTags(): (keyof OMap)[];
 
@@ -20,30 +21,30 @@ export abstract class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
     output: O;
   }) {
     this.name = name;
-    this.input = wrapIfSingle(input);
-    this.output = wrapIfSingle(output);
+    this.__inputDef = wrapIfSingle(input);
+    this.__outputDef = wrapIfSingle(output);
     if (!input) {
-      this.inputDefSet = new StreamDefSet({
+      ({ streamDefSet: this.input } = createStreamDefSet({
         defs: {} as InferDefMap<IMap>,
-      });
+      }));
     } else {
-      this.inputDefSet = new StreamDefSet({
-        defs: this.input,
-      });
+      ({ streamDefSet: this.input } = createStreamDefSet({
+        defs: this.__inputDef,
+      }));
     }
     if (!output) {
-      this.outputDefSet = new StreamDefSet({
+      ({ streamDefSet: this.output } = createStreamDefSet({
         defs: {} as InferDefMap<OMap>,
-      });
+      }));
     } else {
-      this.outputDefSet = new StreamDefSet({
-        defs: this.output,
-      });
+      ({ streamDefSet: this.output } = createStreamDefSet({
+        defs: this.__outputDef,
+      }));
     }
   }
 }
 export type InferTMap<T> = T extends z.ZodType
-  ? { [t in NoInfer<"default"> as string]: z.infer<T> }
+  ? { default: z.infer<T> }
   : T extends Record<string, ZodType>
   ? {
       [K in keyof T]: z.infer<T[K]>;
@@ -53,7 +54,7 @@ export function wrapIfSingle<
   T,
   TMap = T extends z.ZodType<infer TMap>
     ? {
-        [t in NoInfer<"default"> as string]: z.ZodType<TMap>;
+        default: z.ZodType<TMap>;
       }
     : T extends {
         [key: string]: z.ZodType<any>;

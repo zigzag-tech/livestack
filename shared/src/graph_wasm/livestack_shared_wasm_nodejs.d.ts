@@ -24,12 +24,8 @@ export interface DefGraphParams {
 
 export interface DefGraphSpecParams {
     name: string;
-    inputDefSet: DefSetParams;
-    outputDefSet: DefSetParams;
-}
-
-export interface DefSetParams {
-    tags: string[];
+    inputTags: string[];
+    outputTags: string[];
 }
 
 export interface SpecTagInfoParams {
