@@ -53,13 +53,13 @@ export type CheckSpec<SP> = SP extends JobSpec<
 export type InferOutputType<
   Spec,
   K,
-  OMap = InferStreamSetType<CheckSpec<Spec>["outputDefSet"]>
+  OMap = InferStreamSetType<CheckSpec<Spec>["output"]>
 > = OMap[K extends keyof OMap ? K : never] | null;
 
 export type InferInputType<
   Spec,
   K,
-  IMap = InferStreamSetType<CheckSpec<Spec>["inputDefSet"]>
+  IMap = InferStreamSetType<CheckSpec<Spec>["input"]>
 > = IMap[K extends keyof IMap ? K : never] | null;
 
 export class JobSpec<
@@ -83,8 +83,8 @@ export class JobSpec<
       this._defGraph = initDefGraph({
         root: {
           name: this.name,
-          inputTags: this.inputDefSet.tags.map((t) => t.toString()),
-          outputTags: this.outputDefSet.tags.map((t) => t.toString()),
+          inputTags: Object.keys(this.input).map((t) => t.toString()),
+          outputTags: Object.keys(this.output).map((t) => t.toString()),
         },
       });
     }
@@ -169,6 +169,8 @@ export class JobSpec<
       OMap & NewOMap
     >({
       ...(this as any),
+      input: this.__inputDef,
+      output: this.__outputDef,
       ...newP,
       name: newP.name,
     } as ConstructorParameters<typeof JobSpec<P & NewP, NewI & I, NewO & O, IMap & NewIMap, OMap & NewOMap>>[0]);
@@ -439,10 +441,10 @@ export class JobSpec<
       let def: z.ZodType<WrapTerminatorAndDataId<T>> | null;
       if (type === "out") {
         def = wrapTerminatorAndDataId(
-          connectedSpec.outputDefSet.getDef(
+          connectedSpec.output[
             (specTagInfo.tag ||
               connectedSpec.getSingleOutputTag()) as keyof OMap
-          )
+          ].def
         ) as z.ZodType<WrapTerminatorAndDataId<T>>;
       } else if (type === "in") {
         // in principle, always try to find the source of the stream and use its def first
@@ -460,9 +462,10 @@ export class JobSpec<
           const sourceSpec = JobSpec.lookupByName(
             instaG.streamSourceSpecTypeByStreamId[streamId].specName
           );
-          const source = sourceSpec.outputDefSet.getDef(
-            instaG.streamSourceSpecTypeByStreamId[streamId].tag
-          );
+          const source =
+            sourceSpec.output[
+              instaG.streamSourceSpecTypeByStreamId[streamId].tag
+            ].def;
           def = wrapTerminatorAndDataId(source) as z.ZodType<
             WrapTerminatorAndDataId<T>
           >;
@@ -499,10 +502,10 @@ export class JobSpec<
           if (!inletNode.hasTransform) {
             // no transform; proceed as usual
             def = wrapTerminatorAndDataId(
-              connectedSpec.inputDefSet.getDef(
+              connectedSpec.input[
                 (specTagInfo.tag ||
                   connectedSpec.getSingleInputTag()) as keyof IMap
-              )
+              ].def
             ) as z.ZodType<WrapTerminatorAndDataId<T>>;
           } else {
             // try to find source of the stream
@@ -531,10 +534,10 @@ export class JobSpec<
                 source.origin.specName
               );
               def = wrapTerminatorAndDataId(
-                responsibleSpec.outputDefSet.getDef(
+                responsibleSpec.input[
                   (source.outletNode.tag ||
                     responsibleSpec.getSingleOutputTag()) as keyof OMap
-                )
+                ].def
               ) as z.ZodType<WrapTerminatorAndDataId<T>>;
             }
           }
@@ -808,10 +811,10 @@ export class JobSpec<
   };
 
   protected _getInputTags() {
-    return this.inputDefSet.tags;
+    return Object.keys(this.input) as (keyof IMap)[];
   }
   protected _getOutputTags() {
-    return this.outputDefSet.tags;
+    return Object.keys(this.output) as (keyof OMap)[];
   }
 
   public get inputTags() {
@@ -1038,6 +1041,7 @@ export class JobSpec<
         };
       }
     });
+
     const pass1 = pass0.filter(({ conns }) => conns.length === 1);
     const pass2 = pass1
       .filter(({ conns }) => {

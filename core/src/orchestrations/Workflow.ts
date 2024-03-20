@@ -629,9 +629,10 @@ export class WorkflowSpec extends JobSpec<
   }) {
     // from the root spec level
     if (
-      (type === "in" ? this.inputDefSet.tags : this.outputDefSet.tags).includes(
-        alias.toString()
-      )
+      (type === "in"
+        ? Object.keys(this.input)
+        : Object.keys(this.output)
+      ).includes(alias.toString())
     ) {
       return {
         specName: this.name,
