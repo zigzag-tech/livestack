@@ -1,10 +1,18 @@
+type ResolvedCliTokenStatus = {
+  status: "resolved";
+  projectId: string;
+  userDisplayName: string | null;
+};
+
+export type WaitingTorResolveCliTokenStatus = {
+  status: "waiting-to-resolve";
+  projectId: string;
+};
+
 export type CLITempTokenStatus =
-  | {
-      status: "waiting-to-resolve";
-    }
-  | {
-      status: "resolved";
-      userToken: string;
-      projectId: string;
-      userDisplayName: string | null;
-    };
+  | WaitingTorResolveCliTokenStatus
+  | ResolvedCliTokenStatus;
+
+export type ResolvedCliTokenStatusWithUserToken = ResolvedCliTokenStatus & {
+  userToken: string;
+};
