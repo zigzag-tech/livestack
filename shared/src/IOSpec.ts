@@ -3,8 +3,20 @@ import { ZodType, z } from "zod";
 
 export abstract class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
   public readonly name: string;
-  public readonly input: StreamDefSet<IMap>;
-  public readonly output: StreamDefSet<OMap>;
+  public readonly input: StreamDefSet<
+    IMap,
+    {
+      spec: IOSpec<I, O, IMap, OMap>;
+      type: "input";
+    }
+  >;
+  public readonly output: StreamDefSet<
+    OMap,
+    {
+      spec: IOSpec<I, O, IMap, OMap>;
+      type: "output";
+    }
+  >;
 
   protected readonly __inputDef: InferDefMap<IMap>;
   protected readonly __outputDef: InferDefMap<OMap>;
@@ -26,19 +38,35 @@ export abstract class IOSpec<I, O, IMap = InferTMap<I>, OMap = InferTMap<O>> {
     if (!input) {
       ({ streamDefSet: this.input } = createStreamDefSet({
         defs: {} as InferDefMap<IMap>,
+        extraFields: {
+          spec: this,
+          type: "input" as const,
+        },
       }));
     } else {
       ({ streamDefSet: this.input } = createStreamDefSet({
         defs: this.__inputDef,
+        extraFields: {
+          spec: this,
+          type: "input" as const,
+        },
       }));
     }
     if (!output) {
       ({ streamDefSet: this.output } = createStreamDefSet({
         defs: {} as InferDefMap<OMap>,
+        extraFields: {
+          spec: this,
+          type: "output" as const,
+        },
       }));
     } else {
       ({ streamDefSet: this.output } = createStreamDefSet({
         defs: this.__outputDef,
+        extraFields: {
+          spec: this,
+          type: "output" as const,
+        },
       }));
     }
   }
