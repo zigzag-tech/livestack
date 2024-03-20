@@ -11,7 +11,11 @@ import { z } from "zod";
 import { v4 } from "uuid";
 import { sleep } from "../utils/sleep";
 import limit from "p-limit";
-import { CLITempTokenStatus } from "../onboarding/CliOnboarding";
+import {
+  CLITempTokenStatus,
+  ResolvedCliTokenStatusWithUserToken,
+  WaitingTorResolveCliTokenStatus,
+} from "../onboarding/CliOnboarding";
 const limiter = limit(1);
 const LIVESTACK_DASHBOARD_URL_ROOT =
   process.env.LIVESTACK_DASHBOARD_URL_ROOT || "https://live.dev";
@@ -205,7 +209,9 @@ function genZebraLine(step: number) {
 }
 async function getClITempTokenStatus(
   cliTempToken: string
-): Promise<CLITempTokenStatus> {
+): Promise<
+  WaitingTorResolveCliTokenStatus | ResolvedCliTokenStatusWithUserToken
+> {
   const resp = await fetch(
     `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/cli-tokens/${cliTempToken}`,
     {
@@ -215,7 +221,9 @@ async function getClITempTokenStatus(
       },
     }
   );
-  const s = (await resp.json()) as CLITempTokenStatus;
+  const s = (await resp.json()) as
+    | WaitingTorResolveCliTokenStatus
+    | ResolvedCliTokenStatusWithUserToken;
   return s;
 }
 
