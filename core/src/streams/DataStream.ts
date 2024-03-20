@@ -168,7 +168,6 @@ export class DataStream<T extends object> {
       try {
         parsed = this.def.parse(message) as T;
       } catch (err) {
-        this.logger.error("Data validation error" + JSON.stringify(err));
         console.error(
           this.uniqueName,
           " errornous output: ",
@@ -178,9 +177,10 @@ export class DataStream<T extends object> {
           "Expected type: " + JSON.stringify(zodToJsonSchema(this.def), null, 2)
         );
         this.logger.error(
-          `Data point error for stream ${
-            this.uniqueName
-          }: data provided is invalid: ${JSON.stringify(err)}`
+          "Error while validating data points on stream " +
+            this.uniqueName +
+            ": " +
+            JSON.stringify(err)
         );
         throw err;
       }
