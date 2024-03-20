@@ -405,11 +405,12 @@ export class ZZJob<
       const inputObservableUntracked = new Observable<IMap[K] | null>((s) => {
         Promise.all([streamP, parentRecP]).then(([stream, parentRec]) => {
           const sub = DataStreamSubscriber.subFromBeginning(stream);
-          const obs = sub.valueObservable.pipe(
-            map((x) => (x.terminate ? null : x.data))
-          );
+          // const obs = sub.valueObservable.pipe(
+          //   map((x) => (x.terminate ? null : x.data))
+          // );
+          const obs = sub.valueObservable;
           obs.subscribe((n) => {
-            if (n) {
+            if (!n.terminate) {
               let r: IMap[K];
 
               // find any transform function defined for this input
@@ -425,9 +426,9 @@ export class ZZJob<
                       parentRec.unique_spec_label || null,
                   });
               if (transform) {
-                r = transform(n);
+                r = transform(n.data);
               } else {
-                r = n as IMap[K];
+                r = n.data as IMap[K];
               }
               s.next(r);
             } else {
