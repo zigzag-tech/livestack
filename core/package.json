@@ -12,11 +12,11 @@
   "license": "MIT",
   "dependencies": {
     "@livestack/shared": "*",
+    "@livestack/shared-wasm": "*",
     "@livestack/vault-client": "*",
     "@livestack/vault-interface": "*",
     "ansis": "^2.3.0",
     "dotenv": "^16.x",
-    "livestack-shared-wasm": "*",
     "lodash": "^4.17.21",
     "lru-cache": "^10.2.0",
     "p-limit": "^3",
