@@ -9,7 +9,7 @@ import {
   genSpecIdentifier,
 } from "./DefGraph";
 import { Attributes } from "graphology-types";
-import type { DefGraph } from "../graph_wasm/livestack_shared_wasm";
+import type { DefGraph } from "./wasm/livestack_shared_wasm";
 
 export type JobId = `[${string}]${string}`;
 export type RootJobNode = {
