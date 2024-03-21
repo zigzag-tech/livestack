@@ -1,5 +1,5 @@
 {
-  "name": "livestack-shared-wasm",
+  "name": "@livestack/shared-wasm",
   "collaborators": [
     "Xiyang Chen <xiyang@zztech.io>"
   ],
