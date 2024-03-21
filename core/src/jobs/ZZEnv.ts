@@ -43,7 +43,7 @@ export class ZZEnv implements EnvParams {
       ]).then(([env]) => env);
       ZZEnv._vaultClientP = ZZEnv._zzEnvP.then((zzEnv) =>
         zzEnv
-          .getAuthToken(zzEnv)
+          .getAuthToken()
           .then((authToken) => genAuthorizedVaultClient(authToken))
       );
     }
