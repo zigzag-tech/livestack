@@ -13,7 +13,6 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@livestack/shared-wasm": "*",
     "graphology": "^0.25.4",
     "graphology-types": "^0.24.7",
     "zod": "^3.22.4"
