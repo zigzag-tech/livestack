@@ -219,7 +219,6 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
       });
 
     (async () => {
-      await (await that.zzEnvP).getAuthToken();
       (await that.loggerP).info(`WORKER STARTED: ${await that.workerNameP}.`);
     })();
 
