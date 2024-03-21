@@ -1,8 +1,8 @@
 const isBrowser = typeof window !== "undefined";
-const pkgP = isBrowser ? import("../graph_wasm/livestack_shared_wasm") : null;
+const pkgP = isBrowser ? import("./wasm/livestack_shared_wasm") : null;
 
-import type { DefGraph } from "../graph_wasm/livestack_shared_wasm_nodejs";
-export type { DefGraph } from "../graph_wasm/livestack_shared_wasm_nodejs";
+import type { DefGraph } from "./wasm/livestack_shared_wasm_nodejs";
+export type { DefGraph } from "./wasm/livestack_shared_wasm_nodejs";
 
 async function ensureInit() {
   const pkg = await pkgP;
@@ -26,7 +26,7 @@ export const loadDefGraphFromJson = async (json: string) => {
   } else {
     const {
       loadDefGraphFromJson,
-    } = require("../graph_wasm/livestack_shared_wasm_nodejs");
+    } = require("./wasm/livestack_shared_wasm_nodejs");
     return loadDefGraphFromJson(json) as DefGraph;
   }
 };
@@ -38,7 +38,7 @@ export const genSpecIdentifier = async (name: string, uniqueLabel?: string) => {
   } else {
     const {
       genSpecIdentifier,
-    } = require("../graph_wasm/livestack_shared_wasm_nodejs");
+    } = require("./wasm/livestack_shared_wasm_nodejs");
     return genSpecIdentifier(name, uniqueLabel) as string;
   }
 };
@@ -53,7 +53,7 @@ export const initDefGraph = ({
   };
 }) => {
   ensureNodeJSOnly();
-  const { DefGraph } = require("../graph_wasm/livestack_shared_wasm_nodejs");
+  const { DefGraph } = require("./wasm/livestack_shared_wasm_nodejs");
   const d: DefGraph = new DefGraph({
     root: {
       name: root.name,
