@@ -1,10 +1,10 @@
 
-<h1 align="center">🦓&nbsp;Livestack
+<h1 align="center">Livestack&nbsp;🦓
 </h1>
 
 <p align="center">
 <img src="https://img.shields.io/github/license/zigzag-tech/livestack?style=flat-square" alt="GitHub license" />
-<img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat-square" alt="npm version" />
+<a href="https://www.npmjs.com/@livestack/core"><img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat-square" alt="npm version" /></a>
 </p>
 
 <p align="center">A full stack, realtime AI framework for JavaScript developers. <br />From concept to deployment in hours. </p>
