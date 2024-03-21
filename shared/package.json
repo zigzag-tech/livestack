@@ -1,6 +1,6 @@
 {
   "name": "@livestack/shared",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Shared core Livestack logic for both frontend and backend.",
   "scripts": {
     "build": "preconstruct build",
