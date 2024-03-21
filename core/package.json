@@ -12,7 +12,6 @@
   "license": "MIT",
   "dependencies": {
     "@livestack/shared": "*",
-    "@livestack/shared-wasm": "*",
     "@livestack/vault-client": "*",
     "@livestack/vault-interface": "*",
     "ansis": "^2.3.0",
