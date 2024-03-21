@@ -1,9 +1,9 @@
 {
   "name": "@livestack/shared",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Shared core Livestack logic for both frontend and backend.",
   "scripts": {
-    "build": "preconstruct build",
+    "build": "preconstruct build && cp -r src/graph/wasm dist/",
     "postinstall": "preconstruct dev",
     "test": "jest",
     "test:watch": "jest --watch"
