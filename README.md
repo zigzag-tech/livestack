@@ -3,8 +3,8 @@
 </h1>
 
 <p align="center">
-<img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="GitHub license" />
-<img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat" alt="npm version" />
+<img src="https://img.shields.io/github/license/zigzag-tech/livestack?style=flat-square" alt="GitHub license" />
+<img src="https://img.shields.io/npm/v/@livestack/core.svg?style=flat-square" alt="npm version" />
 </p>
 
 <p align="center">A full stack, realtime AI framework for JavaScript developers. <br />From concept to deployment in hours. </p>
