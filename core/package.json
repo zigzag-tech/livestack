@@ -9,6 +9,7 @@
   "files": [
     "dist/**/*"
   ],
+  "license": "MIT",
   "dependencies": {
     "@livestack/shared": "*",
     "@livestack/vault-client": "*",
