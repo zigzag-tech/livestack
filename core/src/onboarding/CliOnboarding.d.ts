@@ -2,6 +2,7 @@ type ResolvedCliTokenStatus = {
   status: "resolved";
   projectId: string;
   userDisplayName: string | null;
+  userId: string;
 };
 
 export type WaitingTorResolveCliTokenStatus = {
