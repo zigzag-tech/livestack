@@ -90,7 +90,7 @@ export class ZZEnv implements EnvParams {
   private livePrinted = false;
 
   private async printLiveDevUrlOnce() {
-    const userId = await this.getAuthToken(this);
+    const userId = await this.getAuthToken();
     if (!this.livePrinted) {
       console.info(
         yellow`${inverse` 🔴 LIVE 🦓🦓 https://live.dev/p/${userId}/${this._projectId}`}${inverse``}`
@@ -110,7 +110,7 @@ export class ZZEnv implements EnvParams {
     return this._cachedInstanceId;
   }
 
-  public getAuthToken = (zzEnvP: Promise<ZZEnv> | ZZEnv) => {
+  public getAuthToken = () => {
     return limiter(async () => {
       // read from file .livestack_auth
       // if it doesn't exist, request credentials by printing a URL
@@ -120,7 +120,7 @@ export class ZZEnv implements EnvParams {
         userId = fs.readFileSync(filename, "utf-8");
       } catch (e) {
         try {
-          const cliTempToken = await getCliTempToken(zzEnvP);
+          const cliTempToken = await getCliTempToken(this);
 
           const inBoxStr = ` >>> ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} <<< `;
           const boxWidth = inBoxStr.length;
