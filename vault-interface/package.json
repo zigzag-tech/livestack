@@ -1,8 +1,7 @@
 {
   "name": "@livestack/vault-interface",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "packageManager": "yarn@4.0.2",
-  "private": true,
   "scripts": {
     "gen": "./build_proto.bash",
     "build": "yarn gen && preconstruct build",
