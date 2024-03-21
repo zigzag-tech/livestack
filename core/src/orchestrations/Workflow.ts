@@ -4,7 +4,7 @@ import {
   SpecOrName,
   convertSpecOrName,
 } from "../jobs/JobSpec";
-import { IOSpec, InferTMap } from "@livestack/shared";
+import { IOSpec, InferTMap, TaggedStreamDef } from "@livestack/shared";
 import { AliasNode } from "@livestack/shared/src/graph/DefGraph";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
@@ -219,15 +219,28 @@ interface CanonicalExposure {
   output: Record<string, string>;
 }
 
-export function expose<P, I, O, IMap, OMap>(
-  p: Exposure<P, I, O, IMap, OMap>
+export function expose<K, T, I, O, IMap, OMap>(
+  p: TaggedStreamDef<
+    K,
+    T,
+    { spec: IOSpec<I, O, IMap, OMap>; type: "input" | "output" }
+  >,
+  alias: string
 ): CanonicalExposure {
-  const resolvedSpec = resolveUniqueSpec(p.spec);
+  const resolvedSpec = resolveUniqueSpec(
+    p.spec as JobSpec<any, I, O, IMap, OMap>
+  );
   return {
     specName: resolvedSpec.spec.name,
     uniqueSpecLabel: resolvedSpec.uniqueSpecLabel,
-    input: (p.input || {}) as Record<string, string>,
-    output: (p.output || {}) as Record<string, string>,
+    input: (p.type === "input" ? { [p.tag as string]: alias } : {}) as Record<
+      string,
+      string
+    >,
+    output: (p.type === "output" ? { [p.tag as string]: alias } : {}) as Record<
+      string,
+      string
+    >,
   };
 }
 
@@ -432,7 +445,7 @@ export class WorkflowSpec extends JobSpec<
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;
 
-        const { rec: parentRec } = await(
+        const { rec: parentRec } = await (
           await ZZEnv.vaultClient()
         ).db.getParentJobRec({
           projectId: (await this.zzEnvPWithTimeout).projectId,
@@ -773,7 +786,7 @@ export class Workflow {
     const that = this;
     if (!this._graphP) {
       this._graphP = (async () => {
-        const { rec: parentRec } = await(
+        const { rec: parentRec } = await (
           await ZZEnv.vaultClient()
         ).db.getParentJobRec({
           projectId: (await that.jobGroupDef.zzEnvPWithTimeout).projectId,
