@@ -227,6 +227,9 @@ export function expose<K, T, I, O, IMap, OMap>(
   >,
   alias: string
 ): CanonicalExposure {
+  if (!p.spec || !p.type) {
+    throw new Error("spec and type are required.");
+  }
   const resolvedSpec = resolveUniqueSpec(
     p.spec as JobSpec<any, I, O, IMap, OMap>
   );
