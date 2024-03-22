@@ -152,7 +152,7 @@ export class DataStream<T extends object> {
       throw new Error("Unexpected response from lastValue");
     }
   };
-
+// todo: change to p2p
   public async pub({
     message,
     jobInfo,
