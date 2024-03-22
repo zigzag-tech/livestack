@@ -16,7 +16,9 @@ service DBService {
   rpc GetJobDatapoints(GetJobDatapointsRequest) returns (GetJobDatapointsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   };
-  rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse);
+  rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse) {
+    option idempotency_level = IDEMPOTENT;
+  }
   rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (GetJobStreamConnectorRecsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   };

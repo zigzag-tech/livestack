@@ -206,16 +206,19 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
             [ARRAY_KEY]: any;
           }
       >
-    >("zz_datapoints").insert({
-      project_id: projectId,
-      stream_id: streamId,
-      datapoint_id: datapointId,
-      data: handlePrimitiveOrArray(data),
-      job_id: jobInfo?.jobId || null,
-      job_output_key: jobInfo?.outputTag || null,
-      connector_type: jobInfo ? "out" : null,
-      time_created: new Date(),
-    });
+    >("zz_datapoints")
+      .insert({
+        project_id: projectId,
+        stream_id: streamId,
+        datapoint_id: datapointId,
+        data: handlePrimitiveOrArray(data),
+        job_id: jobInfo?.jobId || null,
+        job_output_key: jobInfo?.outputTag || null,
+        connector_type: jobInfo ? "out" : null,
+        time_created: new Date(),
+      })
+      .onConflict(["project_id", "stream_id", "datapoint_id"])
+      .ignore();
 
     return { datapointId };
   },

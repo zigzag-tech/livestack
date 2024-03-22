@@ -2474,7 +2474,7 @@ export const DBServiceDefinition = {
       requestStream: false,
       responseType: AddDatapointResponse,
       responseStream: false,
-      options: {},
+      options: { idempotencyLevel: "IDEMPOTENT" },
     },
     getJobStreamConnectorRecs: {
       name: "GetJobStreamConnectorRecs",
