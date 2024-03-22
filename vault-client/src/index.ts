@@ -3,6 +3,8 @@ import {
   Metadata,
   createChannel,
   createClientFactory,
+  Status,
+  ClientError,
 } from "nice-grpc";
 import {
   DBServiceDefinition,
@@ -10,7 +12,10 @@ import {
   QueueServiceDefinition,
   CacapcityServiceDefinition,
 } from "@livestack/vault-interface";
-import { retryMiddleware } from "nice-grpc-client-middleware-retry";
+import {
+  RetryOptions,
+  retryMiddleware,
+} from "nice-grpc-client-middleware-retry";
 
 export const genAuthorizedVaultClient = (authToken: string) =>
   findSuitableVaultServer(authToken);
@@ -104,17 +109,41 @@ export function findSuitableVaultServer(authToken: string) {
   };
 }
 
-function genAuthorizedGRPCFn<REQ extends object, CallContextExt extends {}, R>(
+type RetryExt = RetryOptions;
+
+function genAuthorizedGRPCFn<REQ extends object, R>(
   authToken: string,
-  fn: (req: REQ, ctx?: CallContext & CallContextExt) => R
+  fn: (req: REQ, ctx?: Partial<CallContext> & RetryExt) => R,
+  opts?: { retry: boolean }
 ) {
-  return (req: REQ, ctx?: CallContext & CallContextExt): R => {
+  const { retry } = { retry: true, ...opts };
+  return (req: REQ, ctx?: Partial<CallContext> & RetryExt): R => {
     const metadata = ctx?.metadata || new Metadata();
     metadata.set("authorization", "Bearer " + authToken);
 
     return fn(req, {
-      ...(ctx || ({} as CallContext & CallContextExt)),
+      ...(ctx || ({} as Partial<CallContext> & RetryExt)),
       metadata,
+      ...(retry
+        ? {
+            // not needed if the method is marked as idempotent in Protobuf
+            retry: true,
+            // defaults to 1
+            retryMaxAttempts: 5,
+            // defaults to [UNKNOWN, INTERNAL, UNAVAILABLE, CANCELLED]
+            retryableStatuses: [Status.UNAVAILABLE],
+            onRetryableError(
+              error: ClientError,
+              attempt: number,
+              delayMs: number
+            ) {
+              console.error(
+                error,
+                `Call failed (${attempt}), retrying in ${delayMs}ms`
+              );
+            },
+          }
+        : {}),
     });
   };
 }
