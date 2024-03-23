@@ -93,7 +93,7 @@ export class ZZEnv implements EnvParams {
     const userId = await this.getAuthToken();
     if (!this.livePrinted) {
       console.info(
-        yellow`${inverse` 🔴 LIVE 🦓🦓 https://live.dev/p/${userId}/${this._projectId}`}${inverse``}`
+        yellow`${inverse` 🔴 LIVE 🦓🦓 ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${this._projectId}`}${inverse``}`
       );
 
       this.livePrinted = true;
