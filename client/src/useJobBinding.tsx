@@ -39,8 +39,8 @@ export function useJobBinding<P>({
   uniqueSpecLabel,
   authToken,
   jobOptions,
-  jobOptionsDef,
-}: ClientConnParams & {
+  jobId,
+}: ClientConnParams<P> & {
   specName: string;
   uniqueSpecLabel?: string;
   authToken?: string;
