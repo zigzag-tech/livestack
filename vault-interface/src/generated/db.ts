@@ -124,7 +124,6 @@ export interface EnsureJobAndStatusAndConnectorRecsRequest {
   jobOptionsStr: string;
   parentJobId?: string | undefined;
   uniqueSpecLabel?: string | undefined;
-  instantGraphStr?: string | undefined;
   inputStreamIdOverridesByTag: { [key: string]: string };
   outputStreamIdOverridesByTag: { [key: string]: string };
 }
@@ -137,6 +136,13 @@ export interface EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverride
 export interface EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
   key: string;
   value: string;
+}
+
+export interface UpdateJobInstantiatedGraphRequest {
+  projectId: string;
+  specName: string;
+  jobId: string;
+  instantiatedGraphStr: string;
 }
 
 export interface GetJobDatapointsRequest {
@@ -813,7 +819,6 @@ function createBaseEnsureJobAndStatusAndConnectorRecsRequest(): EnsureJobAndStat
     jobOptionsStr: "",
     parentJobId: undefined,
     uniqueSpecLabel: undefined,
-    instantGraphStr: undefined,
     inputStreamIdOverridesByTag: {},
     outputStreamIdOverridesByTag: {},
   };
@@ -839,19 +844,16 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
     if (message.uniqueSpecLabel !== undefined) {
       writer.uint32(50).string(message.uniqueSpecLabel);
     }
-    if (message.instantGraphStr !== undefined) {
-      writer.uint32(58).string(message.instantGraphStr);
-    }
     Object.entries(message.inputStreamIdOverridesByTag).forEach(([key, value]) => {
       EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.encode(
         { key: key as any, value },
-        writer.uint32(66).fork(),
+        writer.uint32(58).fork(),
       ).ldelim();
     });
     Object.entries(message.outputStreamIdOverridesByTag).forEach(([key, value]) => {
       EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.encode(
         { key: key as any, value },
-        writer.uint32(74).fork(),
+        writer.uint32(66).fork(),
       ).ldelim();
     });
     return writer;
@@ -911,32 +913,25 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
             break;
           }
 
-          message.instantGraphStr = reader.string();
+          const entry7 = EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.decode(
+            reader,
+            reader.uint32(),
+          );
+          if (entry7.value !== undefined) {
+            message.inputStreamIdOverridesByTag[entry7.key] = entry7.value;
+          }
           continue;
         case 8:
           if (tag !== 66) {
             break;
           }
 
-          const entry8 = EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.decode(
+          const entry8 = EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.decode(
             reader,
             reader.uint32(),
           );
           if (entry8.value !== undefined) {
-            message.inputStreamIdOverridesByTag[entry8.key] = entry8.value;
-          }
-          continue;
-        case 9:
-          if (tag !== 74) {
-            break;
-          }
-
-          const entry9 = EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.decode(
-            reader,
-            reader.uint32(),
-          );
-          if (entry9.value !== undefined) {
-            message.outputStreamIdOverridesByTag[entry9.key] = entry9.value;
+            message.outputStreamIdOverridesByTag[entry8.key] = entry8.value;
           }
           continue;
       }
@@ -956,7 +951,6 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
       jobOptionsStr: isSet(object.jobOptionsStr) ? globalThis.String(object.jobOptionsStr) : "",
       parentJobId: isSet(object.parentJobId) ? globalThis.String(object.parentJobId) : undefined,
       uniqueSpecLabel: isSet(object.uniqueSpecLabel) ? globalThis.String(object.uniqueSpecLabel) : undefined,
-      instantGraphStr: isSet(object.instantGraphStr) ? globalThis.String(object.instantGraphStr) : undefined,
       inputStreamIdOverridesByTag: isObject(object.inputStreamIdOverridesByTag)
         ? Object.entries(object.inputStreamIdOverridesByTag).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
@@ -992,9 +986,6 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
     if (message.uniqueSpecLabel !== undefined) {
       obj.uniqueSpecLabel = message.uniqueSpecLabel;
     }
-    if (message.instantGraphStr !== undefined) {
-      obj.instantGraphStr = message.instantGraphStr;
-    }
     if (message.inputStreamIdOverridesByTag) {
       const entries = Object.entries(message.inputStreamIdOverridesByTag);
       if (entries.length > 0) {
@@ -1029,7 +1020,6 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
     message.jobOptionsStr = object.jobOptionsStr ?? "";
     message.parentJobId = object.parentJobId ?? undefined;
     message.uniqueSpecLabel = object.uniqueSpecLabel ?? undefined;
-    message.instantGraphStr = object.instantGraphStr ?? undefined;
     message.inputStreamIdOverridesByTag = Object.entries(object.inputStreamIdOverridesByTag ?? {}).reduce<
       { [key: string]: string }
     >((acc, [key, value]) => {
@@ -1214,6 +1204,110 @@ export const EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesBy
     const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseUpdateJobInstantiatedGraphRequest(): UpdateJobInstantiatedGraphRequest {
+  return { projectId: "", specName: "", jobId: "", instantiatedGraphStr: "" };
+}
+
+export const UpdateJobInstantiatedGraphRequest = {
+  encode(message: UpdateJobInstantiatedGraphRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectId !== "") {
+      writer.uint32(10).string(message.projectId);
+    }
+    if (message.specName !== "") {
+      writer.uint32(18).string(message.specName);
+    }
+    if (message.jobId !== "") {
+      writer.uint32(26).string(message.jobId);
+    }
+    if (message.instantiatedGraphStr !== "") {
+      writer.uint32(34).string(message.instantiatedGraphStr);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateJobInstantiatedGraphRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseUpdateJobInstantiatedGraphRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.projectId = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.specName = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.jobId = reader.string();
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.instantiatedGraphStr = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): UpdateJobInstantiatedGraphRequest {
+    return {
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
+      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
+      instantiatedGraphStr: isSet(object.instantiatedGraphStr) ? globalThis.String(object.instantiatedGraphStr) : "",
+    };
+  },
+
+  toJSON(message: UpdateJobInstantiatedGraphRequest): unknown {
+    const obj: any = {};
+    if (message.projectId !== "") {
+      obj.projectId = message.projectId;
+    }
+    if (message.specName !== "") {
+      obj.specName = message.specName;
+    }
+    if (message.jobId !== "") {
+      obj.jobId = message.jobId;
+    }
+    if (message.instantiatedGraphStr !== "") {
+      obj.instantiatedGraphStr = message.instantiatedGraphStr;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<UpdateJobInstantiatedGraphRequest>): UpdateJobInstantiatedGraphRequest {
+    return UpdateJobInstantiatedGraphRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<UpdateJobInstantiatedGraphRequest>): UpdateJobInstantiatedGraphRequest {
+    const message = createBaseUpdateJobInstantiatedGraphRequest();
+    message.projectId = object.projectId ?? "";
+    message.specName = object.specName ?? "";
+    message.jobId = object.jobId ?? "";
+    message.instantiatedGraphStr = object.instantiatedGraphStr ?? "";
     return message;
   },
 };
@@ -2477,6 +2571,14 @@ export const DBServiceDefinition = {
       responseStream: false,
       options: {},
     },
+    updateJobInstantiatedGraph: {
+      name: "UpdateJobInstantiatedGraph",
+      requestType: UpdateJobInstantiatedGraphRequest,
+      requestStream: false,
+      responseType: Empty,
+      responseStream: false,
+      options: {},
+    },
     getJobDatapoints: {
       name: "GetJobDatapoints",
       requestType: GetJobDatapointsRequest,
@@ -2527,6 +2629,10 @@ export interface DBServiceImplementation<CallContextExt = {}> {
     request: EnsureJobAndStatusAndConnectorRecsRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<Empty>>;
+  updateJobInstantiatedGraph(
+    request: UpdateJobInstantiatedGraphRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<Empty>>;
   getJobDatapoints(
     request: GetJobDatapointsRequest,
     context: CallContext & CallContextExt,
@@ -2554,6 +2660,10 @@ export interface DBServiceClient<CallOptionsExt = {}> {
   ensureStreamRec(request: DeepPartial<EnsureStreamRecRequest>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
   ensureJobAndStatusAndConnectorRecs(
     request: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<Empty>;
+  updateJobInstantiatedGraph(
+    request: DeepPartial<UpdateJobInstantiatedGraphRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<Empty>;
   getJobDatapoints(
