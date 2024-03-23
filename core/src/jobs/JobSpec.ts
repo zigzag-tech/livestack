@@ -649,14 +649,20 @@ export class JobSpec<
       inputStreamIdOverridesByTag: inputStreamIdOverridesByTag || {},
       outputStreamIdOverridesByTag: outputStreamIdOverridesByTag || {},
     });
-
+    const instaG = await resolveInstantiatedGraph({
+      specName: this.name,
+      jobId,
+      zzEnv: await this.zzEnvPWithTimeout,
+    });
     const j = await vaultClient.queue.addJob({
       projectId,
       specName: this.name,
       jobId,
       jobOptionsStr: JSON.stringify(jobOptions as any),
       contextId: p?.parentJobId,
+      instantGraphStr: JSON.stringify(instaG),
     });
+
     this.logger.info(
       `Added job with ID ${jobId} to jobSpec with params ` +
         `${JSON.stringify(jobOptions, longStringTruncator)}`
