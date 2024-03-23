@@ -124,6 +124,7 @@ export interface EnsureJobAndStatusAndConnectorRecsRequest {
   jobOptionsStr: string;
   parentJobId?: string | undefined;
   uniqueSpecLabel?: string | undefined;
+  instantGraphStr?: string | undefined;
   inputStreamIdOverridesByTag: { [key: string]: string };
   outputStreamIdOverridesByTag: { [key: string]: string };
 }
@@ -812,6 +813,7 @@ function createBaseEnsureJobAndStatusAndConnectorRecsRequest(): EnsureJobAndStat
     jobOptionsStr: "",
     parentJobId: undefined,
     uniqueSpecLabel: undefined,
+    instantGraphStr: undefined,
     inputStreamIdOverridesByTag: {},
     outputStreamIdOverridesByTag: {},
   };
@@ -837,16 +839,19 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
     if (message.uniqueSpecLabel !== undefined) {
       writer.uint32(50).string(message.uniqueSpecLabel);
     }
+    if (message.instantGraphStr !== undefined) {
+      writer.uint32(58).string(message.instantGraphStr);
+    }
     Object.entries(message.inputStreamIdOverridesByTag).forEach(([key, value]) => {
       EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.encode(
         { key: key as any, value },
-        writer.uint32(58).fork(),
+        writer.uint32(66).fork(),
       ).ldelim();
     });
     Object.entries(message.outputStreamIdOverridesByTag).forEach(([key, value]) => {
       EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.encode(
         { key: key as any, value },
-        writer.uint32(66).fork(),
+        writer.uint32(74).fork(),
       ).ldelim();
     });
     return writer;
@@ -906,25 +911,32 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
             break;
           }
 
-          const entry7 = EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.decode(
-            reader,
-            reader.uint32(),
-          );
-          if (entry7.value !== undefined) {
-            message.inputStreamIdOverridesByTag[entry7.key] = entry7.value;
-          }
+          message.instantGraphStr = reader.string();
           continue;
         case 8:
           if (tag !== 66) {
             break;
           }
 
-          const entry8 = EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.decode(
+          const entry8 = EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.decode(
             reader,
             reader.uint32(),
           );
           if (entry8.value !== undefined) {
-            message.outputStreamIdOverridesByTag[entry8.key] = entry8.value;
+            message.inputStreamIdOverridesByTag[entry8.key] = entry8.value;
+          }
+          continue;
+        case 9:
+          if (tag !== 74) {
+            break;
+          }
+
+          const entry9 = EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.decode(
+            reader,
+            reader.uint32(),
+          );
+          if (entry9.value !== undefined) {
+            message.outputStreamIdOverridesByTag[entry9.key] = entry9.value;
           }
           continue;
       }
@@ -944,6 +956,7 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
       jobOptionsStr: isSet(object.jobOptionsStr) ? globalThis.String(object.jobOptionsStr) : "",
       parentJobId: isSet(object.parentJobId) ? globalThis.String(object.parentJobId) : undefined,
       uniqueSpecLabel: isSet(object.uniqueSpecLabel) ? globalThis.String(object.uniqueSpecLabel) : undefined,
+      instantGraphStr: isSet(object.instantGraphStr) ? globalThis.String(object.instantGraphStr) : undefined,
       inputStreamIdOverridesByTag: isObject(object.inputStreamIdOverridesByTag)
         ? Object.entries(object.inputStreamIdOverridesByTag).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
@@ -979,6 +992,9 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
     if (message.uniqueSpecLabel !== undefined) {
       obj.uniqueSpecLabel = message.uniqueSpecLabel;
     }
+    if (message.instantGraphStr !== undefined) {
+      obj.instantGraphStr = message.instantGraphStr;
+    }
     if (message.inputStreamIdOverridesByTag) {
       const entries = Object.entries(message.inputStreamIdOverridesByTag);
       if (entries.length > 0) {
@@ -1013,6 +1029,7 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
     message.jobOptionsStr = object.jobOptionsStr ?? "";
     message.parentJobId = object.parentJobId ?? undefined;
     message.uniqueSpecLabel = object.uniqueSpecLabel ?? undefined;
+    message.instantGraphStr = object.instantGraphStr ?? undefined;
     message.inputStreamIdOverridesByTag = Object.entries(object.inputStreamIdOverridesByTag ?? {}).reduce<
       { [key: string]: string }
     >((acc, [key, value]) => {

@@ -91,6 +91,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       jobOptionsStr,
       inputStreamIdOverridesByTag,
       outputStreamIdOverridesByTag,
+      instantGraphStr,
     } = rec;
     const jobOptions = JSON.parse(jobOptionsStr);
     await dbConn.transaction(async (trx) => {
@@ -100,6 +101,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
         jobId,
         dbConn: trx,
         jobOptions,
+        instantGraphStr,
       });
 
       if (parentJobId) {
@@ -332,9 +334,11 @@ export async function ensureJobAndInitStatusRec<T>({
   jobId,
   dbConn,
   jobOptions,
+  instantGraphStr,
 }: JobUniqueId & {
   dbConn: Knex;
   jobOptions: T;
+  instantGraphStr?: string | null;
 }) {
   // await dbConn.transaction(async (trx) => {
   const q = dbConn("zz_jobs")
@@ -343,6 +347,7 @@ export async function ensureJobAndInitStatusRec<T>({
       spec_name: specName,
       job_id: jobId,
       job_params: handlePrimitiveOrArray(jobOptions),
+      instagraph_str: instantGraphStr,
     })
     .onConflict(["project_id", "spec_name", "job_id"])
     .ignore();

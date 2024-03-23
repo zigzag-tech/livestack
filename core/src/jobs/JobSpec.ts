@@ -638,6 +638,11 @@ export class JobSpec<
     }
 
     jobOptions = jobOptions || ({} as P);
+    const instaG = await resolveInstantiatedGraph({
+      specName: this.name,
+      jobId,
+      zzEnv: await this.zzEnvPWithTimeout,
+    });
     const vaultClient = await ZZEnv.vaultClient();
     await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
       projectId: (await this.zzEnvPWithTimeout).projectId,
@@ -648,19 +653,15 @@ export class JobSpec<
       uniqueSpecLabel: p?.uniqueSpecLabel,
       inputStreamIdOverridesByTag: inputStreamIdOverridesByTag || {},
       outputStreamIdOverridesByTag: outputStreamIdOverridesByTag || {},
+      instantGraphStr: JSON.stringify(instaG.toJSON()),
     });
-    const instaG = await resolveInstantiatedGraph({
-      specName: this.name,
-      jobId,
-      zzEnv: await this.zzEnvPWithTimeout,
-    });
+
     const j = await vaultClient.queue.addJob({
       projectId,
       specName: this.name,
       jobId,
       jobOptionsStr: JSON.stringify(jobOptions as any),
       contextId: p?.parentJobId,
-      instantGraphStr: JSON.stringify(instaG),
     });
 
     this.logger.info(
