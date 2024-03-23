@@ -67,6 +67,10 @@ export function findSuitableVaultServer(authToken: string) {
         authToken,
         dbClient.ensureJobAndStatusAndConnectorRecs.bind(dbClient)
       ).bind(dbClient),
+      updateJobInstantiatedGraph: genAuthorizedGRPCFn(
+        authToken,
+        dbClient.updateJobInstantiatedGraph.bind(dbClient)
+      ).bind(dbClient),
       getParentJobRec: genAuthorizedGRPCFn(
         authToken,
         dbClient.getParentJobRec.bind(dbClient)
