@@ -153,16 +153,19 @@ class QueueServiceByProject implements QueueServiceImplementation {
       workerId: string;
     }) => {
       // console.debug("sendJob", workerId, job);
-      resolveJobPromise({ job, workerId }); // Resolve the current job promise with the job data
       this.currentJobByWorkerId[workerId] = job;
       if (this.onJobAssignedToWorker) {
         await this.onJobAssignedToWorker(job, context);
       }
+      resolveJobPromise({ job, workerId }); // Resolve the current job promise with the job data
     };
 
     let updateProgress: null | ((progress: number) => Promise<void>) = null;
 
     (async () => {
+      if (this.authMiddleware) {
+        await this.authMiddleware(context);
+      }
       for await (const {
         workerId,
         signUp,
@@ -191,7 +194,6 @@ class QueueServiceByProject implements QueueServiceImplementation {
                   specName,
                   jobOptionsStr: JSON.stringify(job.data.jobOptions),
                   contextId: job.data.contextId || undefined,
-                  instantGraphStr: job.data.instantGraphStr || undefined,
                 },
               });
 

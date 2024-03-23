@@ -18,7 +18,6 @@ export interface QueueJob {
   jobId: string;
   contextId?: string | undefined;
   jobOptionsStr: string;
-  instantGraphStr: string;
 }
 
 export interface SignUp {
@@ -166,7 +165,7 @@ export const InitInstanceResponse = {
 };
 
 function createBaseQueueJob(): QueueJob {
-  return { projectId: "", specName: "", jobId: "", contextId: undefined, jobOptionsStr: "", instantGraphStr: "" };
+  return { projectId: "", specName: "", jobId: "", contextId: undefined, jobOptionsStr: "" };
 }
 
 export const QueueJob = {
@@ -185,9 +184,6 @@ export const QueueJob = {
     }
     if (message.jobOptionsStr !== "") {
       writer.uint32(42).string(message.jobOptionsStr);
-    }
-    if (message.instantGraphStr !== "") {
-      writer.uint32(50).string(message.instantGraphStr);
     }
     return writer;
   },
@@ -234,13 +230,6 @@ export const QueueJob = {
 
           message.jobOptionsStr = reader.string();
           continue;
-        case 6:
-          if (tag !== 50) {
-            break;
-          }
-
-          message.instantGraphStr = reader.string();
-          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -257,7 +246,6 @@ export const QueueJob = {
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
       contextId: isSet(object.contextId) ? globalThis.String(object.contextId) : undefined,
       jobOptionsStr: isSet(object.jobOptionsStr) ? globalThis.String(object.jobOptionsStr) : "",
-      instantGraphStr: isSet(object.instantGraphStr) ? globalThis.String(object.instantGraphStr) : "",
     };
   },
 
@@ -278,9 +266,6 @@ export const QueueJob = {
     if (message.jobOptionsStr !== "") {
       obj.jobOptionsStr = message.jobOptionsStr;
     }
-    if (message.instantGraphStr !== "") {
-      obj.instantGraphStr = message.instantGraphStr;
-    }
     return obj;
   },
 
@@ -294,7 +279,6 @@ export const QueueJob = {
     message.jobId = object.jobId ?? "";
     message.contextId = object.contextId ?? undefined;
     message.jobOptionsStr = object.jobOptionsStr ?? "";
-    message.instantGraphStr = object.instantGraphStr ?? "";
     return message;
   },
 };
