@@ -43,6 +43,7 @@ export class LiveGatewayConn {
         specName,
         uniqueSpecLabel,
         jobId: requestedJobId,
+        jobOptions,
       }: RequestAndBindType) => {
         if (
           !this.allowedSpecsForBinding.some(
@@ -60,7 +61,9 @@ export class LiveGatewayConn {
         if (requestedJobId) {
           jobOutput = await spec.getJobManager(requestedJobId);
         } else {
-          jobOutput = await spec.enqueueJob({});
+          jobOutput = await spec.enqueueJob({
+            jobOptions,
+          });
         }
 
         this.jobFnsById[jobOutput.jobId] = jobOutput;
