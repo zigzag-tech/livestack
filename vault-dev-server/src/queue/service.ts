@@ -16,9 +16,17 @@ const _rawQueueBySpecName = new Map<string, Queue>();
 
 class QueueServiceByProject implements QueueServiceImplementation {
   //   projectId: string;
-  //   constructor({ projectId }: { projectId: string }) {
-  //     this.projectId = projectId;
-  //   }
+  authMiddleware?: (context: CallContext) => Promise<void>;
+  onJobAssignedToWorker?: (job: QueueJob, ctx: CallContext) => Promise<void>;
+  constructor(p?: {
+    authMiddleware?: (context: CallContext) => Promise<void>;
+    onJobAssignedToWorker?: (job: QueueJob, ctx: CallContext) => Promise<void>;
+  }) {
+    const { authMiddleware } = p || {};
+    // this.projectId = projectId;
+    this.authMiddleware = authMiddleware;
+    this.onJobAssignedToWorker = p?.onJobAssignedToWorker;
+  }
   private redisClientP = createClient().connect();
 
   async initInstance(
@@ -29,10 +37,14 @@ class QueueServiceByProject implements QueueServiceImplementation {
     return { instanceId };
   }
 
-  async addJob(job: QueueJob) {
+  async addJob(job: QueueJob, context: CallContext) {
     // if (job.projectId !== this.projectId) {
     //   throw new Error("Invalid projectId " + job.projectId);
     // }
+
+    if (this.authMiddleware) {
+      await this.authMiddleware(context);
+    }
 
     const queue = this.getQueue(job);
     // console.debug("addjob", queue.name, job);
@@ -143,6 +155,9 @@ class QueueServiceByProject implements QueueServiceImplementation {
       // console.debug("sendJob", workerId, job);
       resolveJobPromise({ job, workerId }); // Resolve the current job promise with the job data
       this.currentJobByWorkerId[workerId] = job;
+      if (this.onJobAssignedToWorker) {
+        await this.onJobAssignedToWorker(job, context);
+      }
     };
 
     let updateProgress: null | ((progress: number) => Promise<void>) = null;
@@ -176,6 +191,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
                   specName,
                   jobOptionsStr: JSON.stringify(job.data.jobOptions),
                   contextId: job.data.contextId || undefined,
+                  instantGraphStr: job.data.instantGraphStr || undefined,
                 },
               });
 
@@ -243,7 +259,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
             await worker.close();
             context.signal.removeEventListener("abort", abortListener);
           };
-          context.signal.addEventListener("abort", abortListener); 
+          context.signal.addEventListener("abort", abortListener);
 
           // TODO
         } else if (progressUpdate) {
@@ -289,9 +305,12 @@ class QueueServiceByProject implements QueueServiceImplementation {
 
 const _projectServiceMap: Record<string, QueueServiceByProject> = {};
 
-export const getQueueService = () => {
+export const getQueueService = (p?: {
+  authMiddleware?: (context: CallContext) => Promise<void>;
+  onJobAssignedToWorker?: (job: QueueJob, ctx: CallContext) => Promise<void>;
+}) => {
   if (!_projectServiceMap["default"]) {
-    _projectServiceMap["default"] = new QueueServiceByProject();
+    _projectServiceMap["default"] = new QueueServiceByProject(p);
   }
   return _projectServiceMap["default"];
 };
