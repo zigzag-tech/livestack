@@ -203,7 +203,7 @@ export interface ClientConnParams<P> {
   socketIOClient?: Socket;
   socketIOURI?: string | null;
   socketIOPath?: string | null;
-  jobId?: string;
+  jobId?: string | null | undefined;
   jobOptions?: P;
   jobOptionsDef?: z.ZodType<P>;
 }
