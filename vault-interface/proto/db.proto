@@ -13,6 +13,7 @@ service DBService {
   };
   rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
   rpc EnsureJobAndStatusAndConnectorRecs(EnsureJobAndStatusAndConnectorRecsRequest) returns (google.protobuf.Empty);
+  rpc UpdateJobInstantiatedGraph(UpdateJobInstantiatedGraphRequest) returns (google.protobuf.Empty);
   rpc GetJobDatapoints(GetJobDatapointsRequest) returns (GetJobDatapointsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   };
@@ -82,14 +83,17 @@ message EnsureJobAndStatusAndConnectorRecsRequest {
   string jobOptionsStr = 4;
   optional string parentJobId = 5;
   optional string uniqueSpecLabel = 6;
-  optional string instantGraphStr = 7;
-  map<string, string> inputStreamIdOverridesByTag = 8;
-  map<string, string> outputStreamIdOverridesByTag = 9;
-
+  map<string, string> inputStreamIdOverridesByTag = 7;
+  map<string, string> outputStreamIdOverridesByTag = 8;
 }
 
 
-
+message UpdateJobInstantiatedGraphRequest {
+  string projectId = 1;
+  string specName = 2;
+  string jobId = 3;
+  string instantiatedGraphStr = 4;
+}
 
 enum Order {
   ASC = 0;

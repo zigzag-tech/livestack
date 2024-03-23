@@ -91,7 +91,6 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       jobOptionsStr,
       inputStreamIdOverridesByTag,
       outputStreamIdOverridesByTag,
-      instantGraphStr,
     } = rec;
     const jobOptions = JSON.parse(jobOptionsStr);
     await dbConn.transaction(async (trx) => {
@@ -101,7 +100,6 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
         jobId,
         dbConn: trx,
         jobOptions,
-        instantGraphStr,
       });
 
       if (parentJobId) {
@@ -149,6 +147,21 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       }
       await trx.commit();
     });
+    return {};
+  },
+  updateJobInstantiatedGraph: async ({
+    projectId,
+    jobId,
+    instantiatedGraphStr,
+  }) => {
+    await dbConn("zz_jobs")
+      .where({
+        project_id: projectId,
+        job_id: jobId,
+      })
+      .update({
+        instagraph_str: instantiatedGraphStr,
+      });
     return {};
   },
   getJobDatapoints: async (
