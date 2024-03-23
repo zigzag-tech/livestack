@@ -61,6 +61,8 @@ class QueueServiceByProject implements QueueServiceImplementation {
       {
         // force job id to be the same as name
         jobId: job.jobId,
+        removeOnComplete: true,
+        removeOnFail: true,
       }
     );
     const c = (await queue.getWaitingCount()) + (await queue.getActiveCount());
