@@ -11,7 +11,7 @@ import {
   UnbindParams,
 } from "@livestack/shared";
 import { requestAndGetResponse } from "./requestAndGetResponse";
-
+import { z } from "zod";
 export class JobSocketIOConnection {
   public readonly jobId: string;
   public readonly availableInputs: JobInfoType["availableInputs"];
@@ -199,22 +199,23 @@ export class JobSocketIOConnection {
   }
 }
 
-export interface ClientConnParams {
+export interface ClientConnParams<P> {
   socketIOClient?: Socket;
   socketIOURI?: string | null;
   socketIOPath?: string | null;
   jobId?: string;
-  jobOptions?: any;
+  jobOptions?: P;
+  jobOptionsDef?: z.ZodType<P>;
 }
 
 const connCacheBySocketIOURIAndPath: Record<`${string}/${string}`, Socket> = {};
 
-function getClient({
+function getClient<P>({
   socketIOClient,
   socketIOURI,
   socketIOPath,
   authToken,
-}: ClientConnParams & { authToken?: String }) {
+}: ClientConnParams<P> & { authToken?: String }) {
   // resolve as follows: if socketIOClient is provided, use it. Otherwise, if socketIOURI is provided, use it. Otherwise, use default (i.e. empty string)
 
   if (socketIOClient) {
@@ -248,14 +249,17 @@ function getClient({
   }
 }
 
-export async function bindNewJobToSocketIO({
+export async function bindNewJobToSocketIO<P>({
   specName,
   uniqueSpecLabel,
   authToken,
   jobOptions,
+  jobOptionsDef,
   ...connParams
 }: Omit<RequestAndBindType, "requestIdentifier"> &
-  ClientConnParams & { authToken?: String }): Promise<JobSocketIOConnection> {
+  ClientConnParams<P> & {
+    authToken?: String;
+  }): Promise<JobSocketIOConnection> {
   const { newClient, conn } = getClient({
     ...connParams,
     authToken, // Pass the authToken to getClient
@@ -281,21 +285,5 @@ export async function bindNewJobToSocketIO({
     specName,
     uniqueSpecLabel,
     jobOptions,
-  });
-}
-
-function getConnReadyPromise(conn: Socket) {
-  return new Promise<void>((resolve, reject) => {
-    if (conn.connected) {
-      resolve();
-    }
-
-    conn.on("connection", () => {
-      resolve();
-    });
-    conn.on("error", (err) => {
-      console.error(err);
-      reject(err);
-    });
   });
 }
