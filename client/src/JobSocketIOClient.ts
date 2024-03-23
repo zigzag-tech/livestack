@@ -20,6 +20,7 @@ export class JobSocketIOConnection {
   private readonly isConnDedicated: boolean;
   public readonly specName: string;
   public readonly uniqueSpecLabel: string | undefined;
+  public readonly jobOptions?: any;
 
   constructor({
     jobInfo: { jobId, availableInputs, availableOutputs },
@@ -27,18 +28,21 @@ export class JobSocketIOConnection {
     uniqueSpecLabel,
     socketIOClient,
     isConnDedicated,
+    jobOptions,
   }: {
     jobInfo: JobInfoType;
     specName: string;
     uniqueSpecLabel?: string;
     socketIOClient: Socket;
     isConnDedicated: boolean;
+    jobOptions?: any;
   }) {
     this.jobId = jobId;
     this.socketIOClient = socketIOClient;
     this.isConnDedicated = isConnDedicated;
     this.availableInputs = availableInputs;
     this.availableOutputs = availableOutputs;
+    this.jobOptions = jobOptions;
 
     this.specName = specName;
     this.uniqueSpecLabel = uniqueSpecLabel;
@@ -200,6 +204,7 @@ export interface ClientConnParams {
   socketIOURI?: string | null;
   socketIOPath?: string | null;
   jobId?: string;
+  jobOptions?: any;
 }
 
 const connCacheBySocketIOURIAndPath: Record<`${string}/${string}`, Socket> = {};
@@ -247,6 +252,7 @@ export async function bindNewJobToSocketIO({
   specName,
   uniqueSpecLabel,
   authToken,
+  jobOptions,
   ...connParams
 }: Omit<RequestAndBindType, "requestIdentifier"> &
   ClientConnParams & { authToken?: String }): Promise<JobSocketIOConnection> {
@@ -260,6 +266,7 @@ export async function bindNewJobToSocketIO({
     specName,
     ...(uniqueSpecLabel ? { uniqueSpecLabel } : {}),
     jobId: connParams.jobId,
+    jobOptions,
   };
   const { jobId, availableInputs, availableOutputs } =
     await requestAndGetResponse<RequestAndBindType, JobInfoType>({
@@ -273,6 +280,7 @@ export async function bindNewJobToSocketIO({
     isConnDedicated: newClient,
     specName,
     uniqueSpecLabel,
+    jobOptions,
   });
 }
 

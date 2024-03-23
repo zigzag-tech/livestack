@@ -4,11 +4,14 @@ import {
   JobSocketIOConnection,
   bindNewJobToSocketIO,
 } from "./JobSocketIOClient";
+import { z } from "zod";
 
-export type JobInfo = {
+export type JobInfo<P> = {
   specName?: string;
   uniqueSpecLabel?: string;
-  jobId?: string;
+  jobId?: string | null;
+  jobOptions?: P;
+  jobOptionsDef?: z.ZodType<P>;
   connRef: React.MutableRefObject<Promise<JobSocketIOConnection> | undefined>;
 };
 
@@ -28,18 +31,20 @@ const DEFERRED_CLOSED_CONN_CACHE: Record<
   DeferredClosedConn | undefined
 > = {};
 
-export function useJobBinding({
+export function useJobBinding<P>({
   socketIOURI,
   socketIOPath,
   socketIOClient,
   specName,
   uniqueSpecLabel,
   authToken,
+  jobOptions,
+  jobOptionsDef,
 }: ClientConnParams & {
   specName: string;
   uniqueSpecLabel?: string;
   authToken?: string;
-}): JobInfo {
+}): JobInfo<P> {
   const [status, setStatus] = useState<JobStatus>({
     status: "connecting",
     specName,
@@ -76,6 +81,7 @@ export function useJobBinding({
             socketIOClient,
             specName,
             uniqueSpecLabel,
+            jobOptions,
           });
           const { initiateDeferredClose } = resetToConnected({
             specName,
