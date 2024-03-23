@@ -24,6 +24,7 @@ message QueueJob {
   string jobId = 3;
   optional string contextId = 4;
   string jobOptionsStr = 5;
+  string instantGraphStr = 6;
 }
 
 message SignUp {
