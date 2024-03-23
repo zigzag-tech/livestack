@@ -122,15 +122,31 @@ export class ZZEnv implements EnvParams {
         try {
           const cliTempToken = await getCliTempToken(this);
 
-          const inBoxStr = ` >>> ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} <<< `;
+          const inBoxStr = `    ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken}     `;
           const boxWidth = inBoxStr.length;
           const boxBorder = "╔" + "═".repeat(boxWidth) + "╗";
           const boxSides = "║";
           const boxBottom = "╚" + "═".repeat(boxWidth) + "╝";
-
-          console.info(yellow`To continue, get a Livestack token here:`);
+          const toContinueMsg = `To continue, get your Livestack token here:`;
           console.info(blueBright(boxBorder));
+          console.info(
+            blueBright`${boxSides}${Array(
+              Math.floor((inBoxStr.length + 2 - toContinueMsg.length) / 2)
+            ).join(" ")}${toContinueMsg}${Array(
+              Math.ceil((inBoxStr.length + 2 - toContinueMsg.length) / 2)
+            ).join(" ")}${boxSides}`
+          );
+          console.info(
+            blueBright`${boxSides}${Array(inBoxStr.length + 1).join(
+              " "
+            )}${boxSides}`
+          );
           console.info(blueBright`${boxSides}${inBoxStr}${boxSides}`);
+          console.info(
+            blueBright`${boxSides}${Array(inBoxStr.length + 1).join(
+              " "
+            )}${boxSides}`
+          );
           console.info(blueBright(boxBottom));
           console.info(yellow`(Or copy & paste the link in a browser)`);
           const { userToken, projectId, userDisplayName } =
@@ -141,10 +157,23 @@ export class ZZEnv implements EnvParams {
           fs.writeFileSync(filename, userToken, "utf-8");
           // print welcome message
           console.info(
-            green`🦓 Welcome to Livestack${
+            green`\n🦓 Welcome to Livestack${
               userDisplayName ? `, ${userDisplayName}` : ""
             }! Your token has been saved to ${filename}.`
           );
+          console.info("Press any key to continue...");
+          // wait for key press
+          process.stdin.setRawMode(true);
+          process.stdin.resume();
+          process.stdin.setEncoding("utf8");
+          await new Promise<void>((resolve) =>
+            process.stdin.once("data", () => {
+              resolve();
+            })
+          );
+          process.stdin.setRawMode(false);
+          process.stdin.pause();
+
         } catch (e) {
           console.error(
             red`Failed to communicate with Livestack Cloud server. Please contact ZigZag support.`
