@@ -254,7 +254,6 @@ export async function bindNewJobToSocketIO<P>({
   uniqueSpecLabel,
   authToken,
   jobOptions,
-  jobOptionsDef,
   ...connParams
 }: Omit<RequestAndBindType, "requestIdentifier"> &
   ClientConnParams<P> & {
