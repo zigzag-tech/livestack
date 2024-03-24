@@ -88,6 +88,10 @@ class QueueServiceByProject implements QueueServiceImplementation {
         ])
       ) || 0;
 
+      console.debug(
+        `Queue ${job.specName} for project ${job.projectId} has ${c} waiting+active jobs, while capacity is at ${capacity}.`
+      );
+
     if (c > 0 && c > capacity) {
       const diff = c - capacity;
       console.debug(

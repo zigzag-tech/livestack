@@ -8,7 +8,7 @@ service CacapcityService {
   rpc ReportAsInstance(stream FromInstance) returns (stream CommandToInstance);
 }
 
-message ReportCapacityAvailability {
+message ReportSpecAvailability {
   string specName = 3;
   int32 maxCapacity = 4;
 }
@@ -17,7 +17,7 @@ message FromInstance {
   string projectId = 1;
   string instanceId = 2;
   oneof value {
-    ReportCapacityAvailability reportCapacityAvailability = 3;
+    ReportSpecAvailability reportSpecAvailability = 3;
   }
 }
 

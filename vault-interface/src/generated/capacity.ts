@@ -4,7 +4,7 @@ import _m0 from "protobufjs/minimal";
 
 export const protobufPackage = "livestack";
 
-export interface ReportCapacityAvailability {
+export interface ReportSpecAvailability {
   specName: string;
   maxCapacity: number;
 }
@@ -12,7 +12,7 @@ export interface ReportCapacityAvailability {
 export interface FromInstance {
   projectId: string;
   instanceId: string;
-  reportCapacityAvailability?: ReportCapacityAvailability | undefined;
+  reportSpecAvailability?: ReportSpecAvailability | undefined;
 }
 
 export interface Provision {
@@ -27,12 +27,15 @@ export interface CommandToInstance {
   provision?: Provision | undefined;
 }
 
-function createBaseReportCapacityAvailability(): ReportCapacityAvailability {
+function createBaseReportSpecAvailability(): ReportSpecAvailability {
   return { specName: "", maxCapacity: 0 };
 }
 
-export const ReportCapacityAvailability = {
-  encode(message: ReportCapacityAvailability, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const ReportSpecAvailability = {
+  encode(
+    message: ReportSpecAvailability,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
     if (message.specName !== "") {
       writer.uint32(26).string(message.specName);
     }
@@ -42,10 +45,14 @@ export const ReportCapacityAvailability = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): ReportCapacityAvailability {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): ReportSpecAvailability {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseReportCapacityAvailability();
+    const message = createBaseReportSpecAvailability();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -72,14 +79,18 @@ export const ReportCapacityAvailability = {
     return message;
   },
 
-  fromJSON(object: any): ReportCapacityAvailability {
+  fromJSON(object: any): ReportSpecAvailability {
     return {
-      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
-      maxCapacity: isSet(object.maxCapacity) ? globalThis.Number(object.maxCapacity) : 0,
+      specName: isSet(object.specName)
+        ? globalThis.String(object.specName)
+        : "",
+      maxCapacity: isSet(object.maxCapacity)
+        ? globalThis.Number(object.maxCapacity)
+        : 0,
     };
   },
 
-  toJSON(message: ReportCapacityAvailability): unknown {
+  toJSON(message: ReportSpecAvailability): unknown {
     const obj: any = {};
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -90,11 +101,13 @@ export const ReportCapacityAvailability = {
     return obj;
   },
 
-  create(base?: DeepPartial<ReportCapacityAvailability>): ReportCapacityAvailability {
-    return ReportCapacityAvailability.fromPartial(base ?? {});
+  create(base?: DeepPartial<ReportSpecAvailability>): ReportSpecAvailability {
+    return ReportSpecAvailability.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<ReportCapacityAvailability>): ReportCapacityAvailability {
-    const message = createBaseReportCapacityAvailability();
+  fromPartial(
+    object: DeepPartial<ReportSpecAvailability>
+  ): ReportSpecAvailability {
+    const message = createBaseReportSpecAvailability();
     message.specName = object.specName ?? "";
     message.maxCapacity = object.maxCapacity ?? 0;
     return message;
@@ -102,25 +115,32 @@ export const ReportCapacityAvailability = {
 };
 
 function createBaseFromInstance(): FromInstance {
-  return { projectId: "", instanceId: "", reportCapacityAvailability: undefined };
+  return { projectId: "", instanceId: "", reportSpecAvailability: undefined };
 }
 
 export const FromInstance = {
-  encode(message: FromInstance, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+  encode(
+    message: FromInstance,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
     if (message.projectId !== "") {
       writer.uint32(10).string(message.projectId);
     }
     if (message.instanceId !== "") {
       writer.uint32(18).string(message.instanceId);
     }
-    if (message.reportCapacityAvailability !== undefined) {
-      ReportCapacityAvailability.encode(message.reportCapacityAvailability, writer.uint32(26).fork()).ldelim();
+    if (message.reportSpecAvailability !== undefined) {
+      ReportSpecAvailability.encode(
+        message.reportSpecAvailability,
+        writer.uint32(26).fork()
+      ).ldelim();
     }
     return writer;
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): FromInstance {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseFromInstance();
     while (reader.pos < end) {
@@ -145,7 +165,10 @@ export const FromInstance = {
             break;
           }
 
-          message.reportCapacityAvailability = ReportCapacityAvailability.decode(reader, reader.uint32());
+          message.reportSpecAvailability = ReportSpecAvailability.decode(
+            reader,
+            reader.uint32()
+          );
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -158,10 +181,14 @@ export const FromInstance = {
 
   fromJSON(object: any): FromInstance {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      instanceId: isSet(object.instanceId) ? globalThis.String(object.instanceId) : "",
-      reportCapacityAvailability: isSet(object.reportCapacityAvailability)
-        ? ReportCapacityAvailability.fromJSON(object.reportCapacityAvailability)
+      projectId: isSet(object.projectId)
+        ? globalThis.String(object.projectId)
+        : "",
+      instanceId: isSet(object.instanceId)
+        ? globalThis.String(object.instanceId)
+        : "",
+      reportSpecAvailability: isSet(object.reportSpecAvailability)
+        ? ReportSpecAvailability.fromJSON(object.reportSpecAvailability)
         : undefined,
     };
   },
@@ -174,8 +201,10 @@ export const FromInstance = {
     if (message.instanceId !== "") {
       obj.instanceId = message.instanceId;
     }
-    if (message.reportCapacityAvailability !== undefined) {
-      obj.reportCapacityAvailability = ReportCapacityAvailability.toJSON(message.reportCapacityAvailability);
+    if (message.reportSpecAvailability !== undefined) {
+      obj.reportSpecAvailability = ReportSpecAvailability.toJSON(
+        message.reportSpecAvailability
+      );
     }
     return obj;
   },
@@ -187,9 +216,10 @@ export const FromInstance = {
     const message = createBaseFromInstance();
     message.projectId = object.projectId ?? "";
     message.instanceId = object.instanceId ?? "";
-    message.reportCapacityAvailability =
-      (object.reportCapacityAvailability !== undefined && object.reportCapacityAvailability !== null)
-        ? ReportCapacityAvailability.fromPartial(object.reportCapacityAvailability)
+    message.reportSpecAvailability =
+      object.reportSpecAvailability !== undefined &&
+      object.reportSpecAvailability !== null
+        ? ReportSpecAvailability.fromPartial(object.reportSpecAvailability)
         : undefined;
     return message;
   },
