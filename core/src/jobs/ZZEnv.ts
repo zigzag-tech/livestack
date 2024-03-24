@@ -6,7 +6,6 @@ import { IStorageProvider } from "../storage/cloudStorage";
 import { Stream } from "stream";
 import chalk, { blueBright, green, inverse, red, yellow } from "ansis";
 import fs from "fs";
-
 import { z } from "zod";
 import { v4 } from "uuid";
 import { sleep } from "../utils/sleep";
@@ -16,6 +15,10 @@ import {
   ResolvedCliTokenStatusWithUserToken,
   WaitingTorResolveCliTokenStatus,
 } from "../onboarding/CliOnboarding";
+import { parse, stringify } from "@ltd/j-toml";
+import path from "path";
+import os from "os";
+
 const limiter = limit(1);
 const LIVESTACK_DASHBOARD_URL_ROOT =
   process.env.LIVESTACK_DASHBOARD_URL_ROOT || "https://live.dev";
@@ -112,17 +115,26 @@ export class ZZEnv implements EnvParams {
 
   public getAuthToken = () => {
     return limiter(async () => {
-      // read from file .livestack_auth
-      // if it doesn't exist, request credentials by printing a URL
-      const filename = ".livestack_auth";
-      let userId: string | null = null;
+      const configDir = path.join(os.homedir(), ".livestack");
+      const configFile = path.join(configDir, "config.toml");
+
+      let config: any = {};
       try {
-        userId = fs.readFileSync(filename, "utf-8");
+        const configData = fs.readFileSync(configFile, "utf-8");
+        config = parse(configData);
       } catch (e) {
+        // Config file doesn't exist, create it later
+      }
+
+      const hostRoot = LIVESTACK_DASHBOARD_URL_ROOT;
+      let userId: string | null = null;
+
+      if (config[hostRoot] && config[hostRoot].auth_token) {
+        userId = config[hostRoot].auth_token;
+      } else {
         try {
           const cliTempToken = await getCliTempToken(this);
-
-          const inBoxStr = `    ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken}     `;
+          const inBoxStr = ` ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} `;
           const boxWidth = inBoxStr.length;
           const boxBorder = "╔" + "═".repeat(boxWidth) + "╗";
           const boxSides = "║";
@@ -149,20 +161,43 @@ export class ZZEnv implements EnvParams {
           );
           console.info(blueBright(boxBottom));
           console.info(yellow`(Or copy & paste the link in a browser)`);
+
           const { userToken, projectId, userDisplayName } =
             await waitUntilCredentialsAreResolved(cliTempToken);
+
           if (projectId !== this.projectId) {
             throw new Error("Project ID mismatch");
           }
-          fs.writeFileSync(filename, userToken, "utf-8");
-          // print welcome message
+
+          // Create the config directory if it doesn't exist
+          if (!fs.existsSync(configDir)) {
+            fs.mkdirSync(configDir);
+          }
+
+          // Update the config object with the new auth token
+          config[hostRoot] = {
+            auth_token: userToken,
+          };
+          // Write the updated config to the file
+          let configStrOrArr = stringify(config);
+          let configStr: string;
+          if (Array.isArray(configStrOrArr)) {
+            configStr = configStrOrArr.join("\n");
+          } else {
+            configStr = configStrOrArr;
+          }
+
+          fs.writeFileSync(configFile, configStr, "utf-8");
+
+          // Print welcome message
           console.info(
             green`\n🦓 Welcome to Livestack${
               userDisplayName ? `, ${userDisplayName}` : ""
-            }! Your token has been saved to ${filename}.`
+            }! Your token has been saved to ${configFile}.`
           );
           console.info("Press any key to continue...");
-          // wait for key press
+
+          // Wait for key press
           process.stdin.setRawMode(true);
           process.stdin.resume();
           process.stdin.setEncoding("utf8");
@@ -173,7 +208,6 @@ export class ZZEnv implements EnvParams {
           );
           process.stdin.setRawMode(false);
           process.stdin.pause();
-
         } catch (e) {
           console.error(
             red`Failed to communicate with Livestack Cloud server. Please contact ZigZag support.`
@@ -181,6 +215,7 @@ export class ZZEnv implements EnvParams {
           throw e;
         }
       }
+
       return userId!;
     });
   };
