@@ -37,6 +37,10 @@ export class ZZEnv implements EnvParams {
     return await ZZEnv._vaultClientP;
   }
 
+  public async vaultClient() {
+    return await ZZEnv.vaultClient();
+  }
+
   public static _ensureInitialized() {
     if (!ZZEnv._zzEnvP) {
       ZZEnv._zzEnvP = Promise.all([
@@ -45,9 +49,9 @@ export class ZZEnv implements EnvParams {
         }),
       ]).then(([env]) => env);
       ZZEnv._vaultClientP = ZZEnv._zzEnvP.then((zzEnv) =>
-        zzEnv
-          .getAuthToken()
-          .then((authToken) => genAuthorizedVaultClient(authToken))
+        zzEnv.getAuthToken().then((authToken) => {
+          return genAuthorizedVaultClient(authToken);
+        })
       );
     }
   }
@@ -113,7 +117,7 @@ export class ZZEnv implements EnvParams {
     return this._cachedInstanceId;
   }
 
-  public getAuthToken = () => {
+  public getAuthToken: () => Promise<string> = () => {
     return limiter(async () => {
       const configDir = path.join(os.homedir(), ".livestack");
       const configFile = path.join(configDir, "config.toml");
@@ -127,10 +131,10 @@ export class ZZEnv implements EnvParams {
       }
 
       const hostRoot = LIVESTACK_DASHBOARD_URL_ROOT;
-      let userId: string | null = null;
+      // let authToken: string | null = null;
 
       if (config[hostRoot] && config[hostRoot].auth_token) {
-        userId = config[hostRoot].auth_token;
+        return config[hostRoot].auth_token;
       } else {
         try {
           const cliTempToken = await getCliTempToken(this);
@@ -190,24 +194,29 @@ export class ZZEnv implements EnvParams {
           fs.writeFileSync(configFile, configStr, "utf-8");
 
           // Print welcome message
+          // empty line
+          console.info("");
           console.info(
-            green`\n🦓 Welcome to Livestack${
+            green`🦓 Welcome to Livestack${
               userDisplayName ? `, ${userDisplayName}` : ""
             }! Your token has been saved to ${configFile}.`
           );
-          console.info("Press any key to continue...");
 
-          // Wait for key press
-          process.stdin.setRawMode(true);
-          process.stdin.resume();
-          process.stdin.setEncoding("utf8");
-          await new Promise<void>((resolve) =>
-            process.stdin.once("data", () => {
-              resolve();
-            })
-          );
-          process.stdin.setRawMode(false);
-          process.stdin.pause();
+          return userToken;
+
+          // console.info("Press any key to continue...");
+
+          // // Wait for key press
+          // process.stdin.setRawMode(true);
+          // process.stdin.resume();
+          // process.stdin.setEncoding("utf8");
+          // await new Promise<void>((resolve) =>
+          //   process.stdin.once("data", () => {
+          //     resolve();
+          //   })
+          // );
+          // process.stdin.setRawMode(false);
+          // process.stdin.pause();
         } catch (e) {
           console.error(
             red`Failed to communicate with Livestack Cloud server. Please contact ZigZag support.`
@@ -215,8 +224,6 @@ export class ZZEnv implements EnvParams {
           throw e;
         }
       }
-
-      return userId!;
     });
   };
 

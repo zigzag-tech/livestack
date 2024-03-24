@@ -638,8 +638,7 @@ export class JobSpec<
     }
 
     jobOptions = jobOptions || ({} as P);
-
-    const vaultClient = await ZZEnv.vaultClient();
+    const vaultClient = await(await this.zzEnvP).vaultClient();
     await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
       projectId: (await this.zzEnvPWithTimeout).projectId,
       specName: this.name,
