@@ -3,15 +3,15 @@
 | Features                                                           | Langchain/<br />LangGraph | Llamaindex | ComfyUI | Livestack |
 | ------------------------------------------------------------------ | ------------------------- | ---------- | ------- | --------- |
 | Graph/DAG based workflow                                           | ✅                        | ✅         | ✅      | ✅        |
-| Data streaming                                                     | 🔶                        | 🔶         | ❌      | ✅        |
+| Full-stack support                                                 | ❌                        | ❌         | ❌      | ✅        |
+| Data streaming                                                     | 🔶                       | 🔶        | ❌      | ✅        |
 | Native support for multiple input/output <br />per processing node | ❌                        | ❌         | ✅      | ✅        |
 | Hybrid/Cross-lingual<br /> Workflows (Python + JS)                 | ✅                        | ❌         | ❌      | ✅        |
 | Swarm deployment   (local + cloud hybrid)                          | ❌                        | ❌         | ❌      | ✅        |
 | Native data persistency solution                                   | ❌                        | ❌         | ❌      | ✅        |
-| Full-stack support                                                 | ❌                        | ❌         | ❌      | ✅        |
-| Arbitrary modality as input/output                                 | ❌                        | ❌         | ❌      | 🚧       |
-| Audio Input & output                                               | ❌                        | ❌         | ❌      | 🚧       |
-| Image as output                                                    | ❌                        | ❌         | ✅      | 🚧       |
+| Any modality as input/output                                       | ❌                        | ❌         | ❌      | ✅        |
+| Official audio Input & output support                              | ❌                        | ❌         | ❌      | 🚧       |
+| Official Image as output                                           | ❌                        | ❌         | ✅      | 🚧       |
 
 Legend:
 - ✅: Supported
