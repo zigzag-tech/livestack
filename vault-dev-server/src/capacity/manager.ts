@@ -32,21 +32,17 @@ class CapacityManager implements CacapcityServiceImplementation {
       genManuallyFedIterator<CommandToInstance>();
 
     (async () => {
-      for await (const {
-        reportCapacityAvailability,
-        instanceId,
-        projectId,
-      } of request) {
-        if (reportCapacityAvailability) {
+      for await (const { reportSpecAvailability, instanceId, projectId }; of request) {
+        if (reportSpecAvailability) {
           this.resolveByInstanceId[instanceId] = resolveJobPromise;
-          const { maxCapacity } = reportCapacityAvailability;
+          const { maxCapacity } = reportSpecAvailability;
           console.debug(
-            `reportCapacityAvailability from instance ${instanceId}: ${projectId} ${reportCapacityAvailability.specName} ${maxCapacity}`
+            `reportSpecAvailability from instance ${instanceId}: ${projectId} ${reportSpecAvailability.specName} ${maxCapacity}`
           );
 
           const client = await this.redisClientP;
           const projectIdN = escapeColon(projectId);
-          const specNameN = escapeColon(reportCapacityAvailability.specName);
+          const specNameN = escapeColon(reportSpecAvailability.specName);
           const instanceIdN = escapeColon(instanceId);
           await client.sendCommand([
             "HSET",
@@ -64,7 +60,7 @@ class CapacityManager implements CacapcityServiceImplementation {
           // clear all capacities on disconnect
           const abortListener = async () => {
             console.debug(
-              `Capacity gone: from instance ${instanceId}: ${projectId} ${reportCapacityAvailability.specName} ${maxCapacity}`
+              `Capacity gone: from instance ${instanceId}: ${projectId} ${reportSpecAvailability.specName} ${maxCapacity}`
             );
             // get the set of reported projectId:specName and clear capacity for each
             const porjectIdSpecNamePairs = (await client.sendCommand([

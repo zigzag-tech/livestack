@@ -88,7 +88,7 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     reportNext({
       instanceId,
       projectId,
-      reportCapacityAvailability: {
+      reportSpecAvailability: {
         specName: this.jobSpec.name,
         maxCapacity: 1000,
       },
