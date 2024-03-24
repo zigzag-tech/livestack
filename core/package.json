@@ -14,6 +14,7 @@
     "@livestack/shared": "*",
     "@livestack/vault-client": "*",
     "@livestack/vault-interface": "*",
+    "@ltd/j-toml": "^1.38.0",
     "ansis": "^2.3.0",
     "dotenv": "^16.x",
     "lodash": "^4.17.21",
