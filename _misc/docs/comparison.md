@@ -1,13 +1,20 @@
-# Comparison with other frameworks
+# Comparing Livestack with other frameworks
 
-## Langchain/LangGraph
-WIP
+| Features                                                           | Langchain/<br />LangGraph | Llamaindex | ComfyUI | Livestack |
+| ------------------------------------------------------------------ | ------------------------- | ---------- | ------- | --------- |
+| Graph/DAG based workflow                                           | ✅                        | ✅         | ✅      | ✅        |
+| Data streaming                                                     | 🔶                        | 🔶         | ❌      | ✅        |
+| Native support for multiple input/output <br />per processing node | ❌                        | ❌         | ✅      | ✅        |
+| Hybrid/Cross-lingual<br /> Workflows (Python + JS)                 | ✅                        | ❌         | ❌      | ✅        |
+| Swarm deployment   (local + cloud hybrid)                          | ❌                        | ❌         | ❌      | ✅        |
+| Native data persistency solution                                   | ❌                        | ❌         | ❌      | ✅        |
+| Full-stack support                                                 | ❌                        | ❌         | ❌      | ✅        |
+| Arbitrary modality as input/output                                 | ❌                        | ❌         | ❌      | 🚧       |
+| Audio Input & output                                               | ❌                        | ❌         | ❌      | 🚧       |
+| Image as output                                                    | ❌                        | ❌         | ✅      | 🚧       |
 
-## Llamaindex
-WIP
-
-## ComfyUI
-WIP
-
-## DSPy
-
+Legend:
+- ✅: Supported
+- ❌: Not supported
+- 🔶: Partially supported
+- 🚧: Work in progress
