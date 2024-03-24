@@ -32,7 +32,11 @@ class CapacityManager implements CacapcityServiceImplementation {
       genManuallyFedIterator<CommandToInstance>();
 
     (async () => {
-      for await (const { reportSpecAvailability, instanceId, projectId }; of request) {
+      for await (const {
+        reportSpecAvailability,
+        instanceId,
+        projectId,
+      } of request) {
         if (reportSpecAvailability) {
           this.resolveByInstanceId[instanceId] = resolveJobPromise;
           const { maxCapacity } = reportSpecAvailability;
