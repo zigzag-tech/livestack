@@ -263,6 +263,9 @@ class QueueServiceByProject implements QueueServiceImplementation {
               });
 
             await worker.close();
+            delete this.workerBundleById[workerId];
+            delete this.currentJobByWorkerId[workerId];
+            
             context.signal.removeEventListener("abort", abortListener);
           };
           context.signal.addEventListener("abort", abortListener);
