@@ -671,7 +671,7 @@ export class JobSpec<
     });
 
     this.logger.info(
-      `Added job with ID ${jobId} to jobSpec with params ` +
+      `Added job with ID ${jobId} to jobSpec ${this.name} with params ` +
         `${JSON.stringify(jobOptions, longStringTruncator)}`
     );
 
