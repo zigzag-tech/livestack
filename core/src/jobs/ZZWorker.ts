@@ -90,7 +90,7 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
       projectId,
       reportSpecAvailability: {
         specName: this.jobSpec.name,
-        maxCapacity: 1000,
+        maxCapacity: 100,
       },
     });
     for await (const cmd of iter) {
