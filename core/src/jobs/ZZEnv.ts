@@ -107,14 +107,19 @@ export class ZZEnv implements EnvParams {
     }
   }
 
-  public static async getInstanceId() {
-    ZZEnv._ensureInitialized();
+  static getInstanceLimiter = limit(1);
 
-    if (!this._cachedInstanceId) {
-      const r = await (await ZZEnv.vaultClient()).queue.initInstance({});
-      this._cachedInstanceId = r.instanceId;
-    }
-    return this._cachedInstanceId;
+  public static async getInstanceId() {
+    return ZZEnv.getInstanceLimiter(async () => {
+      ZZEnv._ensureInitialized();
+
+      if (!this._cachedInstanceId) {
+        const r = await(await ZZEnv.vaultClient()).queue.initInstance({});
+        this._cachedInstanceId = r.instanceId;
+        console.info("Instance ID set to ", this._cachedInstanceId);
+      }
+      return this._cachedInstanceId;
+    });
   }
 
   public getAuthToken: () => Promise<string> = () => {
