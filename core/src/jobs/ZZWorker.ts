@@ -102,7 +102,12 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
         );
 
         if (specName !== this.jobSpec.name) {
-          console.error("Unexpected specName", specName);
+          console.error(
+            "Unexpected specName",
+            specName,
+            "expected",
+            this.jobSpec.name
+          );
           throw new Error("Unexpected specName");
         }
 
