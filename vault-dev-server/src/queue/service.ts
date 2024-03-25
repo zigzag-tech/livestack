@@ -79,18 +79,17 @@ class QueueServiceByProject implements QueueServiceImplementation {
     );
     const c = (await queue.getWaitingCount()) + (await queue.getActiveCount());
 
-    const capacity =
-      Number(
-        await client.sendCommand([
-          "HGET",
-          `zz_capacity`,
-          `${projectIdN}:${specNameN}`,
-        ])
-      ) || 0;
+    // const capacity =
+    //   Number(
+    //     await client.sendCommand([
+    //       "HGET",
+    //       `zz_capacity`,
+    //       `${projectIdN}:${specNameN}`,
+    //     ])
+    //   ) || 0;
 
-      console.debug(
-        `Queue ${job.specName} for project ${job.projectId} has ${c} waiting+active jobs, while capacity is at ${capacity}.`
-      );
+    const workers = await queue.getWorkers();
+    const capacity = workers.length;
 
     if (c > 0 && c > capacity) {
       const diff = c - capacity;
