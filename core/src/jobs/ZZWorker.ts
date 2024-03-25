@@ -95,6 +95,9 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     });
     for await (const cmd of iter) {
       const { instanceId, provision } = cmd;
+      if (instanceId !== await(await this.zzEnvP).getInstanceId()) {
+        throw new Error("Unexpected instanceId");
+      }
       if (provision) {
         const { projectId, specName, numberOfWorkersNeeded } = provision;
         console.info(
