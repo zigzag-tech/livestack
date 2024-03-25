@@ -1,3 +1,4 @@
+import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   InferStreamSetType,
   IOSpec,
@@ -537,7 +538,7 @@ export class JobSpec<
                 source.origin.specName
               );
               def = wrapTerminatorAndDataId(
-                responsibleSpec.input[
+                responsibleSpec.output[
                   (source.outletNode.tag ||
                     responsibleSpec.getSingleOutputTag()) as keyof OMap
                 ].def
