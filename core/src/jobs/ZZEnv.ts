@@ -114,12 +114,16 @@ export class ZZEnv implements EnvParams {
       ZZEnv._ensureInitialized();
 
       if (!this._cachedInstanceId) {
-        const r = await(await ZZEnv.vaultClient()).queue.initInstance({});
+        const r = await (await ZZEnv.vaultClient()).queue.initInstance({});
         this._cachedInstanceId = r.instanceId;
         console.info("Instance ID set to ", this._cachedInstanceId);
       }
       return this._cachedInstanceId;
     });
+  }
+
+  public async getInstanceId() {
+    return ZZEnv.getInstanceId();
   }
 
   public getAuthToken: () => Promise<string> = () => {
