@@ -13,7 +13,10 @@ class CapacityManager implements CacapcityServiceImplementation {
   private redisClientP = createClient().connect();
   constructor() {}
 
-  resolveByInstanceId: Record<string, (value: CommandToInstance) => void> = {};
+  resolveByInstanceIAndSpecName: Record<
+    string,
+    Record<string, (value: CommandToInstance) => void>
+  > = {};
 
   reportAsInstance(
     request: AsyncIterable<FromInstance>,
@@ -38,7 +41,13 @@ class CapacityManager implements CacapcityServiceImplementation {
         projectId,
       } of request) {
         if (reportSpecAvailability) {
-          this.resolveByInstanceId[instanceId] = resolveJobPromise;
+          const existing = this.resolveByInstanceIAndSpecName[instanceId];
+          if (!existing) {
+            this.resolveByInstanceIAndSpecName[instanceId] = {};
+          }
+          this.resolveByInstanceIAndSpecName[instanceId][
+            reportSpecAvailability.specName
+          ] = resolveJobPromise;
           const { maxCapacity } = reportSpecAvailability;
           console.debug(
             `reportSpecAvailability from instance ${instanceId}: ${projectId} ${reportSpecAvailability.specName} ${maxCapacity}`
@@ -86,7 +95,7 @@ class CapacityManager implements CacapcityServiceImplementation {
                 `zz_maxcapacity:${projectIdN}:${specNameN}`,
                 instanceIdN,
               ]);
-              delete this.resolveByInstanceId[instanceIdN];
+              delete this.resolveByInstanceIAndSpecName[instanceIdN][specNameN];
               context.signal.removeEventListener("abort", abortListener);
             }
             context.signal.addEventListener("abort", abortListener);
@@ -144,8 +153,10 @@ class CapacityManager implements CacapcityServiceImplementation {
       (a, b) => (a[1] > b[1] ? a : b)
     )[0];
 
+    console.log("Chosen instanceId: ", instanceId);
+
     // nudge the instance to increase capacity
-    const resolve = this.resolveByInstanceId[instanceId];
+    const resolve = this.resolveByInstanceIAndSpecName[instanceId][specName];
     if (!resolve) {
       throw new Error(`No instance found for ${projectId}:${specName}`);
     }
