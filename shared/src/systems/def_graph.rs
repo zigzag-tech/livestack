@@ -834,12 +834,12 @@ impl DefGraph {
                 },
                 None => {
                     let stream_def_id = unique_stream_identifier(
+                        None,
                         Some(SpecTagInfo {
                             spec_name: root_spec_name_c1.clone(),
                             tag: tag.clone(),
                             unique_spec_label: None,
                         }),
-                        None,
                     );
                    
                     let stream_def_id0 = stream_def_id.clone();
