@@ -56,7 +56,7 @@ WIP
 
 | Features                                                   | Livestack | Langchain/<br />LangGraph | Llamaindex | ComfyUI |
 | ---------------------------------------------------------- | :-------: | :-----------------------: | :--------: | :-----: |
-| Graph/DAG based workflow                                   |    ✅     |            ✅             |     ✅     |   ✅    |
+| DAG based workflow                                         |    ✅     |            ✅             |     ✅     |   ✅    |
 | Full-stack app scaffolding                                 |    ✅     |            ❌             |     ❌     |   ❌    |
 | Local/cloud autoscaling                                    |    ✅     |            ❌             |     ❌     |   ❌    |
 | Any modality as input/output <br />(e.g. text/image/audio) |    ✅     |            ❌             |     ❌     |   ❌    |
@@ -64,9 +64,9 @@ WIP
 | Streaming input/output                                     |    ✅     |            🔶            |    🔶     |   ❌    |
 | Long running stream processing                             |    ✅     |            ❌             |     ❌     |   ❌    |
 | Cloud+on-prem mixed deployment (local + cloud hybrid)      |    ✅     |            ❌             |     ❌     |   ❌    |
-| Data persistency by default                                |    ✅     |            ❌             |     ❌     |   ❌    |
+| Out-of-the-box Data logging                                |    ✅     |            ❌             |     ❌     |   ❌    |
 | Hybrid language workflows (Python + JS)                    |    🚧    |            ✅             |     ❌     |   ❌    |
-| Official audio Input & output support                      |    🚧    |            ❌             |     ❌     |   ❌    |
+| Official support audio Input & output                      |    🚧    |            ❌             |     ❌     |   ❌    |
 | Official support for Image as output                       |    🚧    |            ❌             |     ❌     |   ✅    |
 
 Legend:
