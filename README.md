@@ -51,7 +51,7 @@ Livestack aims at providing:
 
 WIP
 
-# Comparing Livestack with other frameworks
+## Comparism with other frameworks
 
 
 | Features                                                   | Livestack | Langchain/<br />LangGraph | Llamaindex | ComfyUI |
