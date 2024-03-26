@@ -58,10 +58,10 @@ WIP
 | ----------------------------------------------------------- | :-------: | :-----------------------: | :--------: | :-----: |
 | DAG based workflow                                          |    ✅     |            ✅             |     ✅     |   ✅    |
 | Full-stack app scaffolding                                  |    ✅     |            ❌             |     ❌     |   ❌    |
-| Local/cloud autoscaling                                     |    ✅     |            ❌             |     ❌     |   ❌    |
+| Worker autoscaling                                          |    ✅     |            ❌             |     ❌     |   ❌    |
 | Any modality as input/output <br />(e.g. text/image/audio)  |    ✅     |            ❌             |     ❌     |   ❌    |
 | Allow any number of input/output <br />per processing node  |    ✅     |            ❌             |     ❌     |   ✅    |
-| Streaming input/output                                      |    ✅     |            🔶            |    🔶     |   ❌    |
+| Streaming & async input/output                              |    ✅     |            🔶            |    🔶     |   ❌    |
 | Long running stream processing                              |    ✅     |            ❌             |     ❌     |   ❌    |
 | Cloud+on-prem mixed deployment <br />(local + cloud hybrid) |    ✅     |            ❌             |     ❌     |   ❌    |
 | Out-of-the-box data logging                                 |    ✅     |            ❌             |     ❌     |   ❌    |
