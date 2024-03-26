@@ -58,6 +58,7 @@ WIP
 | ---------------------------------------------------------- | :-------: | :-----------------------: | :--------: | :-----: |
 | Graph/DAG based workflow                                   |    ✅     |            ✅             |     ✅     |   ✅    |
 | Full-stack app scaffolding                                 |    ✅     |            ❌             |     ❌     |   ❌    |
+| Local/cloud autoscaling                                    |    ✅     |            ❌             |     ❌     |   ❌    |
 | Any modality as input/output <br />(e.g. text/image/audio) |    ✅     |            ❌             |     ❌     |   ❌    |
 | Allow any number of input/output <br />per processing node |    ✅     |            ❌             |     ❌     |   ✅    |
 | Streaming input/output                                     |    ✅     |            🔶            |    🔶     |   ❌    |
