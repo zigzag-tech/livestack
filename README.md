@@ -64,7 +64,7 @@ WIP
 | Long running stream processing                             |    ✅     |            ❌             |     ❌     |   ❌    |
 | Cloud+on-prem mixed deployment (local + cloud hybrid)      |    ✅     |            ❌             |     ❌     |   ❌    |
 | Data persistency by default                                |    ✅     |            ❌             |     ❌     |   ❌    |
-| Hybrid workflows (Python + JS)                             |    🚧    |            ✅             |     ❌     |   ❌    |
+| Hybrid language workflows (Python + JS)                    |    🚧    |            ✅             |     ❌     |   ❌    |
 | Official audio Input & output support                      |    🚧    |            ❌             |     ❌     |   ❌    |
 | Official support for Image as output                       |    🚧    |            ❌             |     ❌     |   ✅    |
 
