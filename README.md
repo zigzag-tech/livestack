@@ -54,20 +54,20 @@ WIP
 ## Comparism with other frameworks
 
 
-| Features                                                   | Livestack | Langchain/<br />LangGraph | Llamaindex | ComfyUI |
-| ---------------------------------------------------------- | :-------: | :-----------------------: | :--------: | :-----: |
-| DAG based workflow                                         |    ✅     |            ✅             |     ✅     |   ✅    |
-| Full-stack app scaffolding                                 |    ✅     |            ❌             |     ❌     |   ❌    |
-| Local/cloud autoscaling                                    |    ✅     |            ❌             |     ❌     |   ❌    |
-| Any modality as input/output <br />(e.g. text/image/audio) |    ✅     |            ❌             |     ❌     |   ❌    |
-| Allow any number of input/output <br />per processing node |    ✅     |            ❌             |     ❌     |   ✅    |
-| Streaming input/output                                     |    ✅     |            🔶            |    🔶     |   ❌    |
-| Long running stream processing                             |    ✅     |            ❌             |     ❌     |   ❌    |
-| Cloud+on-prem mixed deployment (local + cloud hybrid)      |    ✅     |            ❌             |     ❌     |   ❌    |
-| Out-of-the-box Data logging                                |    ✅     |            ❌             |     ❌     |   ❌    |
-| Hybrid language workflows (Python + JS)                    |    🚧    |            ✅             |     ❌     |   ❌    |
-| Official support audio Input & output                      |    🚧    |            ❌             |     ❌     |   ❌    |
-| Official support for Image as output                       |    🚧    |            ❌             |     ❌     |   ✅    |
+| Features                                                    | Livestack | Langchain/<br />LangGraph | Llamaindex | ComfyUI |
+| ----------------------------------------------------------- | :-------: | :-----------------------: | :--------: | :-----: |
+| DAG based workflow                                          |    ✅     |            ✅             |     ✅     |   ✅    |
+| Full-stack app scaffolding                                  |    ✅     |            ❌             |     ❌     |   ❌    |
+| Local/cloud autoscaling                                     |    ✅     |            ❌             |     ❌     |   ❌    |
+| Any modality as input/output <br />(e.g. text/image/audio)  |    ✅     |            ❌             |     ❌     |   ❌    |
+| Allow any number of input/output <br />per processing node  |    ✅     |            ❌             |     ❌     |   ✅    |
+| Streaming input/output                                      |    ✅     |            🔶            |    🔶     |   ❌    |
+| Long running stream processing                              |    ✅     |            ❌             |     ❌     |   ❌    |
+| Cloud+on-prem mixed deployment <br />(local + cloud hybrid) |    ✅     |            ❌             |     ❌     |   ❌    |
+| Out-of-the-box data logging                                 |    ✅     |            ❌             |     ❌     |   ❌    |
+| Hybrid language workflows (Python + JS)                     |    🚧    |            ✅             |     ❌     |   ❌    |
+| Official support audio Input & output                       |    🚧    |            ❌             |     ❌     |   ❌    |
+| Official support for Image as output                        |    🚧    |            ❌             |     ❌     |   ✅    |
 
 Legend:
 - ✅: Fully supported
