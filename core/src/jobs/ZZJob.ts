@@ -586,6 +586,7 @@ export class ZZJob<
       message: {
         terminate: true,
       },
+      parentDatapoints: [],
     });
   };
 
