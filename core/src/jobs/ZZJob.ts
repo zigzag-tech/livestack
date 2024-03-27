@@ -268,8 +268,9 @@ export class ZZJob<
           data: o,
           terminate: false,
         },
-        // parentDatapoints: [],
+        parentDatapoints: [...this.relevantInputDatapoints],
       });
+      this.currentRelevantInputLinked = true;
 
       await this.updateProgress(this._dummyProgressCount++);
     };
@@ -429,9 +430,16 @@ export class ZZJob<
                 thatJob.relevantInputDatapoints = [
                   {
                     streamId: stream.uniqueName,
-                    datapointId: n.chunkId,
+                    datapointId: n.datapointId,
                   },
                 ];
+                thatJob.currentRelevantInputLinked = false;
+              } else {
+                // append 
+                thatJob.relevantInputDatapoints.push({
+                  streamId: stream.uniqueName,
+                  datapointId: n.datapointId,
+                });
               }
 
               let r: IMap[K];
