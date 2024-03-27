@@ -17,9 +17,7 @@ service DBService {
   rpc GetJobDatapoints(GetJobDatapointsRequest) returns (GetJobDatapointsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   };
-  rpc AddDatapoint(AddDatapointRequest) returns (AddDatapointResponse) {
-    option idempotency_level = IDEMPOTENT;
-  }
+
   rpc GetJobStreamConnectorRecs(GetJobStreamConnectorRecsRequest) returns (GetJobStreamConnectorRecsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   };
@@ -119,30 +117,12 @@ message GetJobDatapointsResponse {
   repeated DatapointRecord points = 1;
 }
 
-message JobInfo {
-  string jobId = 1;
-  string outputTag = 2;
-}
-
-message AddDatapointRequest {
-  string projectId = 1;
-  string streamId = 2;
-  string datapointId = 3;
-  string dataStr = 4;
-  optional JobInfo jobInfo = 5;
-}
-
-message AddDatapointResponse {
-  string datapointId = 1;
-}
-
 message GetJobStreamConnectorRecsRequest {
   string projectId = 1;
   string jobId = 2;
   optional string key = 3;
   optional ConnectorType connectorType = 4;
 }
-
 
 message JobStreamConnectorRecord {
   string project_id = 1;

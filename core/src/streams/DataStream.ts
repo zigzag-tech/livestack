@@ -227,22 +227,14 @@ export class DataStream<T extends object> {
       //   JSON.stringify(parsed)
       // );
 
-      const [_, { chunkId }] = await Promise.all([
+      const [{ chunkId, datapointId }] = await Promise.all([
         (
           await ZZEnv.vaultClient()
-        ).db.addDatapoint({
+        ).stream.pub({
           streamId: this.uniqueName,
           projectId: (await this.zzEnvP).projectId,
           jobInfo: jobInfo,
           dataStr: JSON.stringify(parsed),
-          datapointId,
-        }),
-        (
-          await ZZEnv.vaultClient()
-        ).stream.pub({
-          projectId: (await this.zzEnvP).projectId,
-          uniqueName: this.uniqueName,
-          dataStr: customStringify(parsed),
         }),
       ]);
 

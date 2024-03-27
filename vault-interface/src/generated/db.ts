@@ -164,23 +164,6 @@ export interface GetJobDatapointsResponse {
   points: DatapointRecord[];
 }
 
-export interface JobInfo {
-  jobId: string;
-  outputTag: string;
-}
-
-export interface AddDatapointRequest {
-  projectId: string;
-  streamId: string;
-  datapointId: string;
-  dataStr: string;
-  jobInfo?: JobInfo | undefined;
-}
-
-export interface AddDatapointResponse {
-  datapointId: string;
-}
-
 export interface GetJobStreamConnectorRecsRequest {
   projectId: string;
   jobId: string;
@@ -1596,258 +1579,6 @@ export const GetJobDatapointsResponse = {
   },
 };
 
-function createBaseJobInfo(): JobInfo {
-  return { jobId: "", outputTag: "" };
-}
-
-export const JobInfo = {
-  encode(message: JobInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.jobId !== "") {
-      writer.uint32(10).string(message.jobId);
-    }
-    if (message.outputTag !== "") {
-      writer.uint32(18).string(message.outputTag);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): JobInfo {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseJobInfo();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.jobId = reader.string();
-          continue;
-        case 2:
-          if (tag !== 18) {
-            break;
-          }
-
-          message.outputTag = reader.string();
-          continue;
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skipType(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): JobInfo {
-    return {
-      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
-      outputTag: isSet(object.outputTag) ? globalThis.String(object.outputTag) : "",
-    };
-  },
-
-  toJSON(message: JobInfo): unknown {
-    const obj: any = {};
-    if (message.jobId !== "") {
-      obj.jobId = message.jobId;
-    }
-    if (message.outputTag !== "") {
-      obj.outputTag = message.outputTag;
-    }
-    return obj;
-  },
-
-  create(base?: DeepPartial<JobInfo>): JobInfo {
-    return JobInfo.fromPartial(base ?? {});
-  },
-  fromPartial(object: DeepPartial<JobInfo>): JobInfo {
-    const message = createBaseJobInfo();
-    message.jobId = object.jobId ?? "";
-    message.outputTag = object.outputTag ?? "";
-    return message;
-  },
-};
-
-function createBaseAddDatapointRequest(): AddDatapointRequest {
-  return { projectId: "", streamId: "", datapointId: "", dataStr: "", jobInfo: undefined };
-}
-
-export const AddDatapointRequest = {
-  encode(message: AddDatapointRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
-    }
-    if (message.streamId !== "") {
-      writer.uint32(18).string(message.streamId);
-    }
-    if (message.datapointId !== "") {
-      writer.uint32(26).string(message.datapointId);
-    }
-    if (message.dataStr !== "") {
-      writer.uint32(34).string(message.dataStr);
-    }
-    if (message.jobInfo !== undefined) {
-      JobInfo.encode(message.jobInfo, writer.uint32(42).fork()).ldelim();
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AddDatapointRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAddDatapointRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.projectId = reader.string();
-          continue;
-        case 2:
-          if (tag !== 18) {
-            break;
-          }
-
-          message.streamId = reader.string();
-          continue;
-        case 3:
-          if (tag !== 26) {
-            break;
-          }
-
-          message.datapointId = reader.string();
-          continue;
-        case 4:
-          if (tag !== 34) {
-            break;
-          }
-
-          message.dataStr = reader.string();
-          continue;
-        case 5:
-          if (tag !== 42) {
-            break;
-          }
-
-          message.jobInfo = JobInfo.decode(reader, reader.uint32());
-          continue;
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skipType(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): AddDatapointRequest {
-    return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      streamId: isSet(object.streamId) ? globalThis.String(object.streamId) : "",
-      datapointId: isSet(object.datapointId) ? globalThis.String(object.datapointId) : "",
-      dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
-      jobInfo: isSet(object.jobInfo) ? JobInfo.fromJSON(object.jobInfo) : undefined,
-    };
-  },
-
-  toJSON(message: AddDatapointRequest): unknown {
-    const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
-    }
-    if (message.streamId !== "") {
-      obj.streamId = message.streamId;
-    }
-    if (message.datapointId !== "") {
-      obj.datapointId = message.datapointId;
-    }
-    if (message.dataStr !== "") {
-      obj.dataStr = message.dataStr;
-    }
-    if (message.jobInfo !== undefined) {
-      obj.jobInfo = JobInfo.toJSON(message.jobInfo);
-    }
-    return obj;
-  },
-
-  create(base?: DeepPartial<AddDatapointRequest>): AddDatapointRequest {
-    return AddDatapointRequest.fromPartial(base ?? {});
-  },
-  fromPartial(object: DeepPartial<AddDatapointRequest>): AddDatapointRequest {
-    const message = createBaseAddDatapointRequest();
-    message.projectId = object.projectId ?? "";
-    message.streamId = object.streamId ?? "";
-    message.datapointId = object.datapointId ?? "";
-    message.dataStr = object.dataStr ?? "";
-    message.jobInfo = (object.jobInfo !== undefined && object.jobInfo !== null)
-      ? JobInfo.fromPartial(object.jobInfo)
-      : undefined;
-    return message;
-  },
-};
-
-function createBaseAddDatapointResponse(): AddDatapointResponse {
-  return { datapointId: "" };
-}
-
-export const AddDatapointResponse = {
-  encode(message: AddDatapointResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.datapointId !== "") {
-      writer.uint32(10).string(message.datapointId);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): AddDatapointResponse {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseAddDatapointResponse();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.datapointId = reader.string();
-          continue;
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skipType(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): AddDatapointResponse {
-    return { datapointId: isSet(object.datapointId) ? globalThis.String(object.datapointId) : "" };
-  },
-
-  toJSON(message: AddDatapointResponse): unknown {
-    const obj: any = {};
-    if (message.datapointId !== "") {
-      obj.datapointId = message.datapointId;
-    }
-    return obj;
-  },
-
-  create(base?: DeepPartial<AddDatapointResponse>): AddDatapointResponse {
-    return AddDatapointResponse.fromPartial(base ?? {});
-  },
-  fromPartial(object: DeepPartial<AddDatapointResponse>): AddDatapointResponse {
-    const message = createBaseAddDatapointResponse();
-    message.datapointId = object.datapointId ?? "";
-    return message;
-  },
-};
-
 function createBaseGetJobStreamConnectorRecsRequest(): GetJobStreamConnectorRecsRequest {
   return { projectId: "", jobId: "", key: undefined, connectorType: undefined };
 }
@@ -2587,14 +2318,6 @@ export const DBServiceDefinition = {
       responseStream: false,
       options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
-    addDatapoint: {
-      name: "AddDatapoint",
-      requestType: AddDatapointRequest,
-      requestStream: false,
-      responseType: AddDatapointResponse,
-      responseStream: false,
-      options: { idempotencyLevel: "IDEMPOTENT" },
-    },
     getJobStreamConnectorRecs: {
       name: "GetJobStreamConnectorRecs",
       requestType: GetJobStreamConnectorRecsRequest,
@@ -2637,10 +2360,6 @@ export interface DBServiceImplementation<CallContextExt = {}> {
     request: GetJobDatapointsRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<GetJobDatapointsResponse>>;
-  addDatapoint(
-    request: AddDatapointRequest,
-    context: CallContext & CallContextExt,
-  ): Promise<DeepPartial<AddDatapointResponse>>;
   getJobStreamConnectorRecs(
     request: GetJobStreamConnectorRecsRequest,
     context: CallContext & CallContextExt,
@@ -2670,10 +2389,6 @@ export interface DBServiceClient<CallOptionsExt = {}> {
     request: DeepPartial<GetJobDatapointsRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<GetJobDatapointsResponse>;
-  addDatapoint(
-    request: DeepPartial<AddDatapointRequest>,
-    options?: CallOptions & CallOptionsExt,
-  ): Promise<AddDatapointResponse>;
   getJobStreamConnectorRecs(
     request: DeepPartial<GetJobStreamConnectorRecsRequest>,
     options?: CallOptions & CallOptionsExt,

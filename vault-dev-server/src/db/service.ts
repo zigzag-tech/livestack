@@ -199,44 +199,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       })),
     };
   },
-  addDatapoint: async ({
-    projectId,
-    streamId,
-    datapointId,
-    jobInfo,
-    dataStr,
-  }) => {
-    await ensureStreamRec(dbConn, {
-      project_id: projectId,
-      stream_id: streamId,
-    });
-    const data = JSON.parse(dataStr);
-    await dbConn<
-      ZZDatapointRec<
-        | any
-        | {
-            [PRIMTIVE_KEY]: any;
-          }
-        | {
-            [ARRAY_KEY]: any;
-          }
-      >
-    >("zz_datapoints")
-      .insert({
-        project_id: projectId,
-        stream_id: streamId,
-        datapoint_id: datapointId,
-        data: handlePrimitiveOrArray(data),
-        job_id: jobInfo?.jobId || null,
-        job_output_key: jobInfo?.outputTag || null,
-        connector_type: jobInfo ? "out" : null,
-        time_created: new Date(),
-      })
-      .onConflict(["project_id", "stream_id", "datapoint_id"])
-      .ignore();
 
-    return { datapointId };
-  },
   getJobStreamConnectorRecs: async ({
     projectId,
     jobId,
@@ -300,7 +263,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
   },
 });
 
-async function ensureStreamRec(
+export async function ensureStreamRec(
   dbConn: Knex,
   rec: { project_id: string; stream_id: string }
 ) {
