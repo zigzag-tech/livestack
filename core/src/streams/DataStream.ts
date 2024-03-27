@@ -156,12 +156,17 @@ export class DataStream<T extends object> {
   public async pub({
     message,
     jobInfo,
+    parentDatapoints,
   }: {
     message: T;
     jobInfo?: {
       jobId: string;
       outputTag: string;
     };
+    parentDatapoints: {
+      streamId: string;
+      datapointId: string;
+    }[];
   }) {
     let parsed: T;
     if (!this.def) {
@@ -217,8 +222,6 @@ export class DataStream<T extends object> {
       }
     }
 
-    const datapointId = v4();
-
     try {
       // Publish the data to the stream
       // console.debug(
@@ -235,6 +238,7 @@ export class DataStream<T extends object> {
           projectId: (await this.zzEnvP).projectId,
           jobInfo: jobInfo,
           dataStr: JSON.stringify(parsed),
+          parentDatapoints,
         }),
       ]);
 
