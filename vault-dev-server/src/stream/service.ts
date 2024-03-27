@@ -96,6 +96,8 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
             "~",
             "1000",
             "*",
+            "datapointId",
+            datapointId,
             "data",
             dataStr,
           ]);
@@ -112,12 +114,14 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
     ): ServerStreamingMethodResult<{
       timestamp?: number | undefined;
       chunkId?: string | undefined;
+      datapointId?: string | undefined;
       dataStr?: string | undefined;
     }> {
       const { iterator, resolveNext } = genManuallyFedIterator<{
         timestamp: number | undefined;
         chunkId: string | undefined;
         dataStr: string | undefined;
+        datapointId: string | undefined;
       }>();
 
       (async () => {
@@ -147,11 +151,14 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
               cursor = message[0] as `${string}-${string}`;
               const [timestampStr, _] = cursor.split("-");
               const timestamp = Number(timestampStr);
-              const dataStr = parseMessageDataStr(message[1]);
+              const { jsonDataStr: dataStr, datapointId } = parseMessageDataStr(
+                message[1]
+              );
               resolveNext({
                 timestamp,
                 dataStr,
                 chunkId: cursor,
+                datapointId,
               });
             }
           }
@@ -169,6 +176,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
             timestamp?: number | undefined;
             chunkId?: string | undefined;
             dataStr?: string | undefined;
+            datapointId?: string | undefined;
           }
         | undefined;
       null_response?: {} | undefined;
@@ -194,12 +202,14 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
             const cursor = message[0] as `${string}-${string}`;
             const [timestampStr, _] = cursor.split("-");
             const timestamp = Number(timestampStr);
-            const dataStr = parseMessageDataStr(messages);
+            const { jsonDataStr: dataStr, datapointId } =
+              parseMessageDataStr(messages);
             return {
               datapoint: {
                 timestamp,
                 dataStr,
                 chunkId: message[0],
+                datapointId,
               },
             };
           }
@@ -219,6 +229,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
             timestamp?: number | undefined;
             chunkId?: string | undefined;
             dataStr?: string | undefined;
+            datapointId?: string | undefined;
           }
         | undefined;
       null_response?: {} | undefined;
@@ -243,12 +254,14 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
             const cursor = message[0] as `${string}-${string}`;
             const [timestampStr, _] = cursor.split("-");
             const timestamp = Number(timestampStr);
-            const dataStr = parseMessageDataStr(messages);
+            const { jsonDataStr: dataStr, datapointId } =
+              parseMessageDataStr(messages);
             return {
               datapoint: {
                 timestamp,
                 dataStr,
                 chunkId: message[0],
+                datapointId,
               },
             };
           }
@@ -271,15 +284,26 @@ export function getStreamService(dbConn: Knex) {
   return _projectServiceMap["default"];
 }
 
-function parseMessageDataStr<T>(data: Array<any>): string {
+function parseMessageDataStr<T>(data: Array<any>): {
+  jsonDataStr: string;
+  datapointId: string;
+} {
   // Look for the 'data' key and its subsequent value in the flattened array
   const dataIdx = data.indexOf("data");
   if (dataIdx === -1 || dataIdx === data.length - 1) {
     console.error("data:", data);
     throw new Error("Data key not found in stream message or is malformed");
   }
-
   const jsonDataStr = data[dataIdx + 1] as string;
 
-  return jsonDataStr;
+  const datapointIdIdx = data.indexOf("datapointId");
+  if (datapointIdIdx === -1 || datapointIdIdx === data.length - 1) {
+    console.error("data:", data);
+    throw new Error(
+      "DatapointId key not found in stream message or is malformed"
+    );
+  }
+  const datapointId = data[datapointIdIdx + 1] as string;
+
+  return { jsonDataStr, datapointId };
 }
