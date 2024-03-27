@@ -32,10 +32,7 @@ function createBaseReportSpecAvailability(): ReportSpecAvailability {
 }
 
 export const ReportSpecAvailability = {
-  encode(
-    message: ReportSpecAvailability,
-    writer: _m0.Writer = _m0.Writer.create()
-  ): _m0.Writer {
+  encode(message: ReportSpecAvailability, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.specName !== "") {
       writer.uint32(26).string(message.specName);
     }
@@ -45,12 +42,8 @@ export const ReportSpecAvailability = {
     return writer;
   },
 
-  decode(
-    input: _m0.Reader | Uint8Array,
-    length?: number
-  ): ReportSpecAvailability {
-    const reader =
-      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(input: _m0.Reader | Uint8Array, length?: number): ReportSpecAvailability {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseReportSpecAvailability();
     while (reader.pos < end) {
@@ -81,12 +74,8 @@ export const ReportSpecAvailability = {
 
   fromJSON(object: any): ReportSpecAvailability {
     return {
-      specName: isSet(object.specName)
-        ? globalThis.String(object.specName)
-        : "",
-      maxCapacity: isSet(object.maxCapacity)
-        ? globalThis.Number(object.maxCapacity)
-        : 0,
+      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
+      maxCapacity: isSet(object.maxCapacity) ? globalThis.Number(object.maxCapacity) : 0,
     };
   },
 
@@ -104,9 +93,7 @@ export const ReportSpecAvailability = {
   create(base?: DeepPartial<ReportSpecAvailability>): ReportSpecAvailability {
     return ReportSpecAvailability.fromPartial(base ?? {});
   },
-  fromPartial(
-    object: DeepPartial<ReportSpecAvailability>
-  ): ReportSpecAvailability {
+  fromPartial(object: DeepPartial<ReportSpecAvailability>): ReportSpecAvailability {
     const message = createBaseReportSpecAvailability();
     message.specName = object.specName ?? "";
     message.maxCapacity = object.maxCapacity ?? 0;
@@ -119,10 +106,7 @@ function createBaseFromInstance(): FromInstance {
 }
 
 export const FromInstance = {
-  encode(
-    message: FromInstance,
-    writer: _m0.Writer = _m0.Writer.create()
-  ): _m0.Writer {
+  encode(message: FromInstance, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.projectId !== "") {
       writer.uint32(10).string(message.projectId);
     }
@@ -130,17 +114,13 @@ export const FromInstance = {
       writer.uint32(18).string(message.instanceId);
     }
     if (message.reportSpecAvailability !== undefined) {
-      ReportSpecAvailability.encode(
-        message.reportSpecAvailability,
-        writer.uint32(26).fork()
-      ).ldelim();
+      ReportSpecAvailability.encode(message.reportSpecAvailability, writer.uint32(26).fork()).ldelim();
     }
     return writer;
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): FromInstance {
-    const reader =
-      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseFromInstance();
     while (reader.pos < end) {
@@ -165,10 +145,7 @@ export const FromInstance = {
             break;
           }
 
-          message.reportSpecAvailability = ReportSpecAvailability.decode(
-            reader,
-            reader.uint32()
-          );
+          message.reportSpecAvailability = ReportSpecAvailability.decode(reader, reader.uint32());
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -181,12 +158,8 @@ export const FromInstance = {
 
   fromJSON(object: any): FromInstance {
     return {
-      projectId: isSet(object.projectId)
-        ? globalThis.String(object.projectId)
-        : "",
-      instanceId: isSet(object.instanceId)
-        ? globalThis.String(object.instanceId)
-        : "",
+      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      instanceId: isSet(object.instanceId) ? globalThis.String(object.instanceId) : "",
       reportSpecAvailability: isSet(object.reportSpecAvailability)
         ? ReportSpecAvailability.fromJSON(object.reportSpecAvailability)
         : undefined,
@@ -202,9 +175,7 @@ export const FromInstance = {
       obj.instanceId = message.instanceId;
     }
     if (message.reportSpecAvailability !== undefined) {
-      obj.reportSpecAvailability = ReportSpecAvailability.toJSON(
-        message.reportSpecAvailability
-      );
+      obj.reportSpecAvailability = ReportSpecAvailability.toJSON(message.reportSpecAvailability);
     }
     return obj;
   },
@@ -217,8 +188,7 @@ export const FromInstance = {
     message.projectId = object.projectId ?? "";
     message.instanceId = object.instanceId ?? "";
     message.reportSpecAvailability =
-      object.reportSpecAvailability !== undefined &&
-      object.reportSpecAvailability !== null
+      (object.reportSpecAvailability !== undefined && object.reportSpecAvailability !== null)
         ? ReportSpecAvailability.fromPartial(object.reportSpecAvailability)
         : undefined;
     return message;

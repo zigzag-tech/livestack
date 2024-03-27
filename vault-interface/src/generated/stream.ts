@@ -39,14 +39,21 @@ export function subTypeToJSON(object: SubType): string {
   }
 }
 
+export interface JobInfo {
+  jobId: string;
+  outputTag: string;
+}
+
 export interface StreamPubMessage {
   projectId: string;
-  uniqueName: string;
+  streamId: string;
   dataStr: string;
+  jobInfo?: JobInfo | undefined;
 }
 
 export interface StreamPubResult {
   chunkId: string;
+  datapointId: string;
 }
 
 export interface SubRequest {
@@ -82,8 +89,82 @@ export interface LastValueResponse {
   null_response?: Empty | undefined;
 }
 
+function createBaseJobInfo(): JobInfo {
+  return { jobId: "", outputTag: "" };
+}
+
+export const JobInfo = {
+  encode(message: JobInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.jobId !== "") {
+      writer.uint32(10).string(message.jobId);
+    }
+    if (message.outputTag !== "") {
+      writer.uint32(18).string(message.outputTag);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): JobInfo {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseJobInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.jobId = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.outputTag = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): JobInfo {
+    return {
+      jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
+      outputTag: isSet(object.outputTag) ? globalThis.String(object.outputTag) : "",
+    };
+  },
+
+  toJSON(message: JobInfo): unknown {
+    const obj: any = {};
+    if (message.jobId !== "") {
+      obj.jobId = message.jobId;
+    }
+    if (message.outputTag !== "") {
+      obj.outputTag = message.outputTag;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<JobInfo>): JobInfo {
+    return JobInfo.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<JobInfo>): JobInfo {
+    const message = createBaseJobInfo();
+    message.jobId = object.jobId ?? "";
+    message.outputTag = object.outputTag ?? "";
+    return message;
+  },
+};
+
 function createBaseStreamPubMessage(): StreamPubMessage {
-  return { projectId: "", uniqueName: "", dataStr: "" };
+  return { projectId: "", streamId: "", dataStr: "", jobInfo: undefined };
 }
 
 export const StreamPubMessage = {
@@ -91,11 +172,14 @@ export const StreamPubMessage = {
     if (message.projectId !== "") {
       writer.uint32(10).string(message.projectId);
     }
-    if (message.uniqueName !== "") {
-      writer.uint32(18).string(message.uniqueName);
+    if (message.streamId !== "") {
+      writer.uint32(18).string(message.streamId);
     }
     if (message.dataStr !== "") {
       writer.uint32(26).string(message.dataStr);
+    }
+    if (message.jobInfo !== undefined) {
+      JobInfo.encode(message.jobInfo, writer.uint32(34).fork()).ldelim();
     }
     return writer;
   },
@@ -119,7 +203,7 @@ export const StreamPubMessage = {
             break;
           }
 
-          message.uniqueName = reader.string();
+          message.streamId = reader.string();
           continue;
         case 3:
           if (tag !== 26) {
@@ -127,6 +211,13 @@ export const StreamPubMessage = {
           }
 
           message.dataStr = reader.string();
+          continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.jobInfo = JobInfo.decode(reader, reader.uint32());
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -140,8 +231,9 @@ export const StreamPubMessage = {
   fromJSON(object: any): StreamPubMessage {
     return {
       projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
+      streamId: isSet(object.streamId) ? globalThis.String(object.streamId) : "",
       dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
+      jobInfo: isSet(object.jobInfo) ? JobInfo.fromJSON(object.jobInfo) : undefined,
     };
   },
 
@@ -150,11 +242,14 @@ export const StreamPubMessage = {
     if (message.projectId !== "") {
       obj.projectId = message.projectId;
     }
-    if (message.uniqueName !== "") {
-      obj.uniqueName = message.uniqueName;
+    if (message.streamId !== "") {
+      obj.streamId = message.streamId;
     }
     if (message.dataStr !== "") {
       obj.dataStr = message.dataStr;
+    }
+    if (message.jobInfo !== undefined) {
+      obj.jobInfo = JobInfo.toJSON(message.jobInfo);
     }
     return obj;
   },
@@ -165,20 +260,26 @@ export const StreamPubMessage = {
   fromPartial(object: DeepPartial<StreamPubMessage>): StreamPubMessage {
     const message = createBaseStreamPubMessage();
     message.projectId = object.projectId ?? "";
-    message.uniqueName = object.uniqueName ?? "";
+    message.streamId = object.streamId ?? "";
     message.dataStr = object.dataStr ?? "";
+    message.jobInfo = (object.jobInfo !== undefined && object.jobInfo !== null)
+      ? JobInfo.fromPartial(object.jobInfo)
+      : undefined;
     return message;
   },
 };
 
 function createBaseStreamPubResult(): StreamPubResult {
-  return { chunkId: "" };
+  return { chunkId: "", datapointId: "" };
 }
 
 export const StreamPubResult = {
   encode(message: StreamPubResult, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.chunkId !== "") {
       writer.uint32(10).string(message.chunkId);
+    }
+    if (message.datapointId !== "") {
+      writer.uint32(18).string(message.datapointId);
     }
     return writer;
   },
@@ -197,6 +298,13 @@ export const StreamPubResult = {
 
           message.chunkId = reader.string();
           continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.datapointId = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -207,13 +315,19 @@ export const StreamPubResult = {
   },
 
   fromJSON(object: any): StreamPubResult {
-    return { chunkId: isSet(object.chunkId) ? globalThis.String(object.chunkId) : "" };
+    return {
+      chunkId: isSet(object.chunkId) ? globalThis.String(object.chunkId) : "",
+      datapointId: isSet(object.datapointId) ? globalThis.String(object.datapointId) : "",
+    };
   },
 
   toJSON(message: StreamPubResult): unknown {
     const obj: any = {};
     if (message.chunkId !== "") {
       obj.chunkId = message.chunkId;
+    }
+    if (message.datapointId !== "") {
+      obj.datapointId = message.datapointId;
     }
     return obj;
   },
@@ -224,6 +338,7 @@ export const StreamPubResult = {
   fromPartial(object: DeepPartial<StreamPubResult>): StreamPubResult {
     const message = createBaseStreamPubResult();
     message.chunkId = object.chunkId ?? "";
+    message.datapointId = object.datapointId ?? "";
     return message;
   },
 };

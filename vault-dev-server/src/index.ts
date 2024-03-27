@@ -19,7 +19,7 @@ export async function launchVaultDevServer(port?: string | number) {
   const server = createServer();
   server.add(DBServiceDefinition, dbService(db));
   server.add(QueueServiceDefinition, getQueueService());
-  server.add(StreamServiceDefinition, getStreamService());
+  server.add(StreamServiceDefinition, getStreamService(db));
   server.add(CacapcityServiceDefinition, getCapacityManager());
 
   const HOST = process.env.VAULT_SERVER_LOCAL_DEV_SERVER_HOST || "0.0.0.0";
