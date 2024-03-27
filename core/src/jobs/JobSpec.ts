@@ -262,6 +262,7 @@ export class JobSpec<
     tag,
     type,
     data: d,
+    parentDatapoints,
   }: {
     jobId: string;
     tag: T extends "in" ? keyof IMap : keyof OMap;
@@ -269,6 +270,10 @@ export class JobSpec<
     data: WrapTerminatorAndDataId<
       T extends "in" ? IMap[keyof IMap] : OMap[keyof OMap]
     >;
+    parentDatapoints: {
+      streamId: string;
+      datapointId: string;
+    }[];
   }) {
     if (!this._sendFnsByJobIdAndKey[jobId]) {
       this._sendFnsByJobIdAndKey[jobId] = {};
@@ -330,6 +335,7 @@ export class JobSpec<
 
       await stream.pub({
         message: d,
+        parentDatapoints,
         ...(type === "out"
           ? {
               jobInfo: {
@@ -750,6 +756,8 @@ export class JobSpec<
                   data,
                   terminate: false,
                 },
+                // input datapoints are oirin points; no parent datapoints
+                parentDatapoints: [],
               });
             },
             terminate: async () => {
@@ -773,6 +781,8 @@ export class JobSpec<
                 data: {
                   terminate: true,
                 },
+                // termination points have no parents
+                parentDatapoints: [],
               });
             },
             getStreamId: async () => {

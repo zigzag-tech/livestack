@@ -10,7 +10,11 @@ import {
 } from "@livestack/vault-interface/src/generated/stream";
 import { CallContext } from "nice-grpc-common";
 import { createClient } from "redis";
-import { ZZDatapointRec, ensureStreamRec } from "../db/service";
+import {
+  ZZDatapointRec,
+  ensureStreamRec,
+  ensureDatapointRelationRec,
+} from "../db/service";
 import { Knex } from "knex";
 import {
   ARRAY_KEY,
@@ -26,6 +30,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
     datapointId,
     jobInfo,
     dataStr,
+    parentDatapoints,
   }: {
     projectId: string;
     streamId: string;
@@ -35,35 +40,51 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       outputTag: string;
     };
     dataStr: string;
+    parentDatapoints: {
+      streamId: string;
+      datapointId: string;
+    }[];
   }) => {
     await ensureStreamRec(dbConn, {
       project_id: projectId,
       stream_id: streamId,
     });
-    const data = JSON.parse(dataStr);
-    await dbConn<
-      ZZDatapointRec<
-        | any
-        | {
-            [PRIMTIVE_KEY]: any;
-          }
-        | {
-            [ARRAY_KEY]: any;
-          }
-      >
-    >("zz_datapoints")
-      .insert({
-        project_id: projectId,
-        stream_id: streamId,
-        datapoint_id: datapointId,
-        data: handlePrimitiveOrArray(data),
-        job_id: jobInfo?.jobId || null,
-        job_output_key: jobInfo?.outputTag || null,
-        connector_type: jobInfo ? "out" : null,
-        time_created: new Date(),
-      })
-      .onConflict(["project_id", "stream_id", "datapoint_id"])
-      .ignore();
+    await dbConn.transaction(async (trx) => {
+      const data = JSON.parse(dataStr);
+      await trx<
+        ZZDatapointRec<
+          | any
+          | {
+              [PRIMTIVE_KEY]: any;
+            }
+          | {
+              [ARRAY_KEY]: any;
+            }
+        >
+      >("zz_datapoints")
+        .insert({
+          project_id: projectId,
+          stream_id: streamId,
+          datapoint_id: datapointId,
+          data: handlePrimitiveOrArray(data),
+          job_id: jobInfo?.jobId || null,
+          job_output_key: jobInfo?.outputTag || null,
+          connector_type: jobInfo ? "out" : null,
+          time_created: new Date(),
+        })
+        .onConflict(["project_id", "stream_id", "datapoint_id"])
+        .ignore();
+
+      for (const parentDatapoint of parentDatapoints) {
+        await ensureDatapointRelationRec(trx, {
+          project_id: projectId,
+          source_datapoint_id: parentDatapoint.datapointId,
+          source_stream_id: parentDatapoint.streamId,
+          target_datapoint_id: datapointId,
+          target_stream_id: streamId,
+        });
+      }
+    });
 
     return { datapointId };
   };
@@ -73,7 +94,8 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       request: StreamPubMessage,
       context: CallContext
     ): Promise<{ chunkId: string; datapointId: string }> {
-      const { projectId, streamId, dataStr, jobInfo } = request;
+      const { projectId, streamId, dataStr, jobInfo, parentDatapoints } =
+        request;
       const datapointId = v4();
       const channelId = `${projectId}/${streamId}`;
       const pubClient = await createClient().connect();
@@ -87,6 +109,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
           datapointId,
           jobInfo,
           dataStr,
+          parentDatapoints,
         }),
         (async () => {
           const chunkId: string = await pubClient.sendCommand([

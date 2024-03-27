@@ -23,16 +23,22 @@ message JobInfo {
   string outputTag = 2;
 }
 
+message ParentDataPointInfo {
+  string streamId = 1;
+  string datapointId = 2;
+}
+
 message StreamPubMessage {
   string projectId = 1;
   string streamId = 2;
   string dataStr = 3;
-  optional JobInfo jobInfo = 4;
+  repeated ParentDataPointInfo parentDatapoints = 4;
+  optional JobInfo jobInfo = 5;
 }
 
 message StreamPubResult {
   string chunkId = 1;
-    string datapointId = 2;
+  string datapointId = 2;
 }
 
 enum SubType {

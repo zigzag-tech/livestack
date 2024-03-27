@@ -283,6 +283,28 @@ export async function ensureStreamRec(
   return { null_response: {} };
 }
 
+export async function ensureDatapointRelationRec(
+  dbConn: Knex,
+  rec: {
+    project_id: string;
+    source_datapoint_id: string;
+    source_stream_id: string;
+    target_datapoint_id: string;
+    target_stream_id: string;
+  }
+) {
+  await dbConn("zz_datapoint_relations")
+    .insert(rec)
+    .onConflict([
+      "project_id",
+      "source_datapoint_id",
+      "source_stream_id",
+      "target_datapoint_id",
+      "target_stream_id",
+    ])
+    .ignore();
+}
+
 async function appendJobStatusRec({
   projectId,
   specName,

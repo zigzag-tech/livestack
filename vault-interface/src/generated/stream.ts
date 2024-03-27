@@ -44,10 +44,16 @@ export interface JobInfo {
   outputTag: string;
 }
 
+export interface ParentDataPointInfo {
+  streamId: string;
+  datapointId: string;
+}
+
 export interface StreamPubMessage {
   projectId: string;
   streamId: string;
   dataStr: string;
+  parentDatapoints: ParentDataPointInfo[];
   jobInfo?: JobInfo | undefined;
 }
 
@@ -164,8 +170,82 @@ export const JobInfo = {
   },
 };
 
+function createBaseParentDataPointInfo(): ParentDataPointInfo {
+  return { streamId: "", datapointId: "" };
+}
+
+export const ParentDataPointInfo = {
+  encode(message: ParentDataPointInfo, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.streamId !== "") {
+      writer.uint32(10).string(message.streamId);
+    }
+    if (message.datapointId !== "") {
+      writer.uint32(18).string(message.datapointId);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ParentDataPointInfo {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseParentDataPointInfo();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.streamId = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.datapointId = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ParentDataPointInfo {
+    return {
+      streamId: isSet(object.streamId) ? globalThis.String(object.streamId) : "",
+      datapointId: isSet(object.datapointId) ? globalThis.String(object.datapointId) : "",
+    };
+  },
+
+  toJSON(message: ParentDataPointInfo): unknown {
+    const obj: any = {};
+    if (message.streamId !== "") {
+      obj.streamId = message.streamId;
+    }
+    if (message.datapointId !== "") {
+      obj.datapointId = message.datapointId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ParentDataPointInfo>): ParentDataPointInfo {
+    return ParentDataPointInfo.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ParentDataPointInfo>): ParentDataPointInfo {
+    const message = createBaseParentDataPointInfo();
+    message.streamId = object.streamId ?? "";
+    message.datapointId = object.datapointId ?? "";
+    return message;
+  },
+};
+
 function createBaseStreamPubMessage(): StreamPubMessage {
-  return { projectId: "", streamId: "", dataStr: "", jobInfo: undefined };
+  return { projectId: "", streamId: "", dataStr: "", parentDatapoints: [], jobInfo: undefined };
 }
 
 export const StreamPubMessage = {
@@ -179,8 +259,11 @@ export const StreamPubMessage = {
     if (message.dataStr !== "") {
       writer.uint32(26).string(message.dataStr);
     }
+    for (const v of message.parentDatapoints) {
+      ParentDataPointInfo.encode(v!, writer.uint32(34).fork()).ldelim();
+    }
     if (message.jobInfo !== undefined) {
-      JobInfo.encode(message.jobInfo, writer.uint32(34).fork()).ldelim();
+      JobInfo.encode(message.jobInfo, writer.uint32(42).fork()).ldelim();
     }
     return writer;
   },
@@ -218,6 +301,13 @@ export const StreamPubMessage = {
             break;
           }
 
+          message.parentDatapoints.push(ParentDataPointInfo.decode(reader, reader.uint32()));
+          continue;
+        case 5:
+          if (tag !== 42) {
+            break;
+          }
+
           message.jobInfo = JobInfo.decode(reader, reader.uint32());
           continue;
       }
@@ -234,6 +324,9 @@ export const StreamPubMessage = {
       projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
       streamId: isSet(object.streamId) ? globalThis.String(object.streamId) : "",
       dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
+      parentDatapoints: globalThis.Array.isArray(object?.parentDatapoints)
+        ? object.parentDatapoints.map((e: any) => ParentDataPointInfo.fromJSON(e))
+        : [],
       jobInfo: isSet(object.jobInfo) ? JobInfo.fromJSON(object.jobInfo) : undefined,
     };
   },
@@ -249,6 +342,9 @@ export const StreamPubMessage = {
     if (message.dataStr !== "") {
       obj.dataStr = message.dataStr;
     }
+    if (message.parentDatapoints?.length) {
+      obj.parentDatapoints = message.parentDatapoints.map((e) => ParentDataPointInfo.toJSON(e));
+    }
     if (message.jobInfo !== undefined) {
       obj.jobInfo = JobInfo.toJSON(message.jobInfo);
     }
@@ -263,6 +359,7 @@ export const StreamPubMessage = {
     message.projectId = object.projectId ?? "";
     message.streamId = object.streamId ?? "";
     message.dataStr = object.dataStr ?? "";
+    message.parentDatapoints = object.parentDatapoints?.map((e) => ParentDataPointInfo.fromPartial(e)) || [];
     message.jobInfo = (object.jobInfo !== undefined && object.jobInfo !== null)
       ? JobInfo.fromPartial(object.jobInfo)
       : undefined;
