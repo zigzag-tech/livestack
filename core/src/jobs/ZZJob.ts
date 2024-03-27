@@ -121,6 +121,12 @@ export class ZZJob<
     };
   }>;
   private updateProgress: (count: number) => Promise<void>;
+  private relevantInputDatapoints: {
+    streamId: string;
+    datapointId: string;
+  }[] = [];
+
+  private currentRelevantInputLinked = false;
 
   constructor(p: {
     logger: ReturnType<typeof getLogger>;
@@ -262,6 +268,7 @@ export class ZZJob<
           data: o,
           terminate: false,
         },
+        // parentDatapoints: [],
       });
 
       await this.updateProgress(this._dummyProgressCount++);
@@ -384,6 +391,7 @@ export class ZZJob<
   };
 
   private _ensureInputStreamFn = <K extends keyof IMap>(tag?: K) => {
+    const thatJob = this;
     if (this.spec.inputTags.length === 0) {
       throw new Error("inputDefs is empty for spec " + this.spec.name);
     }
@@ -415,6 +423,17 @@ export class ZZJob<
           const obs = sub.valueObservable;
           obs.subscribe((n) => {
             if (!n.terminate) {
+              // relevant input store and flush logic
+              if (thatJob.currentRelevantInputLinked) {
+                // flush
+                thatJob.relevantInputDatapoints = [
+                  {
+                    streamId: stream.uniqueName,
+                    datapointId: n.chunkId,
+                  },
+                ];
+              }
+
               let r: IMap[K];
 
               // find any transform function defined for this input
@@ -534,9 +553,7 @@ export class ZZJob<
     } catch (e: any) {
       console.error("Error while running job: ", this.jobId, e);
 
-      await(
-        await ZZEnv.vaultClient()
-      ).db.appendJobStatusRec({
+      await(await ZZEnv.vaultClient()).db.appendJobStatusRec({
         projectId,
         specName: this.spec.name,
         jobId: this.jobId,

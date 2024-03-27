@@ -50,6 +50,7 @@ message StreamDatapoint {
   uint64 timestamp = 1;
   string chunkId = 2;
   string dataStr = 3;
+  string datapointId = 4;
 }
 
 message ValueByReverseIndexRequest {

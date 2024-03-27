@@ -275,6 +275,7 @@ export class DataStreamDef<T> {
 export type WithTimestamp<T extends object> = T & {
   timestamp: number;
   chunkId: string;
+  datapointId: string;
 };
 
 // TODO: make internal
