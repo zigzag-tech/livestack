@@ -66,6 +66,7 @@ export interface StreamDatapoint {
   timestamp: number;
   chunkId: string;
   dataStr: string;
+  datapointId: string;
 }
 
 export interface ValueByReverseIndexRequest {
@@ -433,7 +434,7 @@ export const SubRequest = {
 };
 
 function createBaseStreamDatapoint(): StreamDatapoint {
-  return { timestamp: 0, chunkId: "", dataStr: "" };
+  return { timestamp: 0, chunkId: "", dataStr: "", datapointId: "" };
 }
 
 export const StreamDatapoint = {
@@ -446,6 +447,9 @@ export const StreamDatapoint = {
     }
     if (message.dataStr !== "") {
       writer.uint32(26).string(message.dataStr);
+    }
+    if (message.datapointId !== "") {
+      writer.uint32(34).string(message.datapointId);
     }
     return writer;
   },
@@ -478,6 +482,13 @@ export const StreamDatapoint = {
 
           message.dataStr = reader.string();
           continue;
+        case 4:
+          if (tag !== 34) {
+            break;
+          }
+
+          message.datapointId = reader.string();
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -492,6 +503,7 @@ export const StreamDatapoint = {
       timestamp: isSet(object.timestamp) ? globalThis.Number(object.timestamp) : 0,
       chunkId: isSet(object.chunkId) ? globalThis.String(object.chunkId) : "",
       dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
+      datapointId: isSet(object.datapointId) ? globalThis.String(object.datapointId) : "",
     };
   },
 
@@ -506,6 +518,9 @@ export const StreamDatapoint = {
     if (message.dataStr !== "") {
       obj.dataStr = message.dataStr;
     }
+    if (message.datapointId !== "") {
+      obj.datapointId = message.datapointId;
+    }
     return obj;
   },
 
@@ -517,6 +532,7 @@ export const StreamDatapoint = {
     message.timestamp = object.timestamp ?? 0;
     message.chunkId = object.chunkId ?? "";
     message.dataStr = object.dataStr ?? "";
+    message.datapointId = object.datapointId ?? "";
     return message;
   },
 };

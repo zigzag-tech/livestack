@@ -99,6 +99,7 @@ export class DataStreamSubscriber<T extends object> {
           ...restored,
           timestamp: message.timestamp,
           chunkId: message.chunkId,
+          datapointId: message.datapointId,
         });
       }
     } catch (error) {
