@@ -79,18 +79,31 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       const pubClient = await createClient().connect();
       // console.debug("pubbing", "to", channelId, "data", dataStr);
       // Publish the message to the Redis stream
-      const chunkId: string = await pubClient.sendCommand([
-        "XADD",
-        channelId,
-        "MAXLEN",
-        "~",
-        "1000",
-        "*",
-        "data",
-        dataStr,
+
+      const [_, chunkId] = await Promise.all([
+        addDatapoint({
+          projectId,
+          streamId,
+          datapointId,
+          jobInfo,
+          dataStr,
+        }),
+        (async () => {
+          const chunkId: string = await pubClient.sendCommand([
+            "XADD",
+            channelId,
+            "MAXLEN",
+            "~",
+            "1000",
+            "*",
+            "data",
+            dataStr,
+          ]);
+          await pubClient.disconnect();
+          return chunkId;
+        })(),
       ]);
 
-      await pubClient.disconnect();
       return { chunkId, datapointId };
     },
     sub(
