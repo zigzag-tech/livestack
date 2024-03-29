@@ -6,9 +6,6 @@ export {
   ConnectorType,
   GetJobDatapointsRequest,
   DatapointRecord,
-  JobInfo,
-  AddDatapointRequest,
-  AddDatapointResponse,
   Order,
 } from "./generated/db";
 export {
