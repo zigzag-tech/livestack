@@ -6,7 +6,7 @@ import {
 } from "@livestack/shared/src/graph/InstantiatedGraph";
 import { ConnectorType } from "@livestack/vault-interface";
 import { TransformRegistry } from "./TransformRegistry";
-import { lruCacheFn } from "../utils/lruCacheFn";
+import { lruCacheFn } from "@livestack/shared";
 import { JobSpec } from "../jobs/JobSpec";
 import { ZZEnv } from "../jobs/ZZEnv";
 

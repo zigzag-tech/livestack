@@ -76,9 +76,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       },
     };
   },
-  ensureStreamRec: async (rec) => {
-    return await ensureStreamRec(dbConn, rec);
-  },
+
   ensureJobAndStatusAndConnectorRecs: async (rec, ctx) => {
     // console.log(ctx.metadata.get("auth"));
 
@@ -265,21 +263,29 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
 
 export async function ensureStreamRec(
   dbConn: Knex,
-  rec: { project_id: string; stream_id: string }
+  rec: {
+    project_id: string;
+    stream_id: string;
+    json_schema_str?: string | null | undefined;
+  }
 ) {
-  const { project_id, stream_id } = rec;
+  const { project_id, stream_id, json_schema_str } = rec;
   await dbConn<
     EnsureStreamRecRequest & {
       time_created: Date;
+      json_schema_str: string | null;
     }
   >("zz_streams")
     .insert({
       project_id,
       stream_id,
+      json_schema_str: json_schema_str || null,
       time_created: new Date(),
     })
-    .onConflict(["project_id", "stream_id"])
-    .ignore();
+    .onConflict(
+      dbConn.raw("(project_id, stream_id) where json_schema_str is not null")
+    )
+    .merge();
   return { null_response: {} };
 }
 

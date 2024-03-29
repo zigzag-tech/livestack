@@ -16,7 +16,19 @@ service StreamService {
   rpc lastValue(LastValueRequest) returns (LastValueResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   };
+
+  rpc EnsureStream(EnsureStreamRequest) returns (google.protobuf.Empty) {
+    option idempotency_level = IDEMPOTENT;
+  }
 }
+
+
+message EnsureStreamRequest {
+  string project_id = 1;
+  string stream_id = 2;
+  optional string json_schema_str = 3;
+}
+
 
 message JobInfo {
   string jobId = 1;
@@ -36,9 +48,21 @@ message StreamPubMessage {
   optional JobInfo jobInfo = 5;
 }
 
-message StreamPubResult {
+message StreamPubSuccessResult {
   string chunkId = 1;
   string datapointId = 2;
+}
+
+message StreamPubValidationFailure {
+  string errorMessage = 1;
+  string datapointId = 2;
+}
+
+message StreamPubResult {
+  oneof result {
+    StreamPubSuccessResult success = 1;
+    StreamPubValidationFailure validationFailure = 2;
+  }
 }
 
 enum SubType {

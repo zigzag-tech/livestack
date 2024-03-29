@@ -11,7 +11,6 @@ service DBService {
   rpc GetJobRec(GetJobRecRequest) returns (GetJobRecResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   };
-  rpc EnsureStreamRec(EnsureStreamRecRequest) returns (google.protobuf.Empty);
   rpc EnsureJobAndStatusAndConnectorRecs(EnsureJobAndStatusAndConnectorRecsRequest) returns (google.protobuf.Empty);
   rpc UpdateJobInstantiatedGraph(UpdateJobInstantiatedGraphRequest) returns (google.protobuf.Empty);
   rpc GetJobDatapoints(GetJobDatapointsRequest) returns (GetJobDatapointsResponse) {

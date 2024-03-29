@@ -53,6 +53,11 @@ export function findSuitableVaultServer(authToken: string) {
     QueueServiceDefinition,
     createChannel(vaultServerURL)
   );
+
+  const streamClient = clientFactory.create(
+    StreamServiceDefinition,
+    createChannel(vaultServerURL)
+  );
   return {
     db: {
       getJobDatapoints: genAuthorizedGRPCFn(
@@ -79,15 +84,29 @@ export function findSuitableVaultServer(authToken: string) {
         authToken,
         dbClient.getJobStreamConnectorRecs.bind(dbClient)
       ).bind(dbClient),
-      ensureStreamRec: genAuthorizedGRPCFn(
-        authToken,
-        dbClient.ensureStreamRec.bind(dbClient)
-      ).bind(dbClient),
     },
-    stream: clientFactory.create(
-      StreamServiceDefinition,
-      createChannel(vaultServerURL)
-    ),
+    stream: {
+      pub: genAuthorizedGRPCFn(
+        authToken,
+        streamClient.pub.bind(streamClient)
+      ).bind(streamClient),
+      sub: genAuthorizedGRPCFn(
+        authToken,
+        streamClient.sub.bind(streamClient)
+      ).bind(streamClient),
+      valueByReverseIndex: genAuthorizedGRPCFn(
+        authToken,
+        streamClient.valueByReverseIndex.bind(streamClient)
+      ).bind(streamClient),
+      lastValue: genAuthorizedGRPCFn(
+        authToken,
+        streamClient.lastValue.bind(streamClient)
+      ).bind(streamClient),
+      ensureStream: genAuthorizedGRPCFn(
+        authToken,
+        streamClient.ensureStream.bind(streamClient)
+      ).bind(streamClient),
+    },
     queue: {
       addJob: genAuthorizedGRPCFn(
         authToken,
