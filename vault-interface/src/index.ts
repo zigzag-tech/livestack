@@ -17,7 +17,6 @@ export {
   ConnectorType,
   DatapointRecord,
   EnsureJobAndStatusAndConnectorRecsRequest,
-  EnsureStreamRecRequest,
   GetJobDatapointsRequest,
   JobRec,
   Order,
