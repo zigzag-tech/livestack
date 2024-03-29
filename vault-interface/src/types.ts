@@ -2,7 +2,6 @@ export {
   DBServiceDefinition,
   JobRec,
   EnsureJobAndStatusAndConnectorRecsRequest,
-  EnsureStreamRecRequest,
   ConnectorType,
   GetJobDatapointsRequest,
   DatapointRecord,

@@ -135,8 +135,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         project_id: projectId,
         stream_id: streamId,
         datapoint_id: datapointId,
-        is_valid: validationResult.valid,
-        validation_result_str: JSON.stringify(validationResult.toString()),
+        validation_failed: !validationResult.valid,
       })
       .onConflict(["project_id", "stream_id", "datapoint_id"])
       .ignore();

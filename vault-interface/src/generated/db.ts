@@ -112,11 +112,6 @@ export interface GetZZJobTestResponse {
   jobId: string;
 }
 
-export interface EnsureStreamRecRequest {
-  project_id: string;
-  stream_id: string;
-}
-
 export interface EnsureJobAndStatusAndConnectorRecsRequest {
   projectId: string;
   specName: string;
@@ -716,80 +711,6 @@ export const GetZZJobTestResponse = {
     message.projectId = object.projectId ?? "";
     message.pipeName = object.pipeName ?? "";
     message.jobId = object.jobId ?? "";
-    return message;
-  },
-};
-
-function createBaseEnsureStreamRecRequest(): EnsureStreamRecRequest {
-  return { project_id: "", stream_id: "" };
-}
-
-export const EnsureStreamRecRequest = {
-  encode(message: EnsureStreamRecRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.project_id !== "") {
-      writer.uint32(10).string(message.project_id);
-    }
-    if (message.stream_id !== "") {
-      writer.uint32(18).string(message.stream_id);
-    }
-    return writer;
-  },
-
-  decode(input: _m0.Reader | Uint8Array, length?: number): EnsureStreamRecRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseEnsureStreamRecRequest();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.project_id = reader.string();
-          continue;
-        case 2:
-          if (tag !== 18) {
-            break;
-          }
-
-          message.stream_id = reader.string();
-          continue;
-      }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
-      }
-      reader.skipType(tag & 7);
-    }
-    return message;
-  },
-
-  fromJSON(object: any): EnsureStreamRecRequest {
-    return {
-      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
-      stream_id: isSet(object.stream_id) ? globalThis.String(object.stream_id) : "",
-    };
-  },
-
-  toJSON(message: EnsureStreamRecRequest): unknown {
-    const obj: any = {};
-    if (message.project_id !== "") {
-      obj.project_id = message.project_id;
-    }
-    if (message.stream_id !== "") {
-      obj.stream_id = message.stream_id;
-    }
-    return obj;
-  },
-
-  create(base?: DeepPartial<EnsureStreamRecRequest>): EnsureStreamRecRequest {
-    return EnsureStreamRecRequest.fromPartial(base ?? {});
-  },
-  fromPartial(object: DeepPartial<EnsureStreamRecRequest>): EnsureStreamRecRequest {
-    const message = createBaseEnsureStreamRecRequest();
-    message.project_id = object.project_id ?? "";
-    message.stream_id = object.stream_id ?? "";
     return message;
   },
 };
@@ -2338,64 +2259,58 @@ export const DBServiceDefinition = {
 } as const;
 
 export interface DBServiceImplementation<CallContextExt = {}> {
-  getJobRec(
-    request: GetJobRecRequest,
-    context: CallContext & CallContextExt
-  ): Promise<DeepPartial<GetJobRecResponse>>;
+  getJobRec(request: GetJobRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<GetJobRecResponse>>;
   ensureJobAndStatusAndConnectorRecs(
     request: EnsureJobAndStatusAndConnectorRecsRequest,
-    context: CallContext & CallContextExt
+    context: CallContext & CallContextExt,
   ): Promise<DeepPartial<Empty>>;
   updateJobInstantiatedGraph(
     request: UpdateJobInstantiatedGraphRequest,
-    context: CallContext & CallContextExt
+    context: CallContext & CallContextExt,
   ): Promise<DeepPartial<Empty>>;
   getJobDatapoints(
     request: GetJobDatapointsRequest,
-    context: CallContext & CallContextExt
+    context: CallContext & CallContextExt,
   ): Promise<DeepPartial<GetJobDatapointsResponse>>;
   getJobStreamConnectorRecs(
     request: GetJobStreamConnectorRecsRequest,
-    context: CallContext & CallContextExt
+    context: CallContext & CallContextExt,
   ): Promise<DeepPartial<GetJobStreamConnectorRecsResponse>>;
   appendJobStatusRec(
     request: AppendJobStatusRecRequest,
-    context: CallContext & CallContextExt
+    context: CallContext & CallContextExt,
   ): Promise<DeepPartial<Empty>>;
   getParentJobRec(
     request: GetParentJobRecRequest,
-    context: CallContext & CallContextExt
+    context: CallContext & CallContextExt,
   ): Promise<DeepPartial<GetParentJobRecResponse>>;
 }
 
 export interface DBServiceClient<CallOptionsExt = {}> {
-  getJobRec(
-    request: DeepPartial<GetJobRecRequest>,
-    options?: CallOptions & CallOptionsExt
-  ): Promise<GetJobRecResponse>;
+  getJobRec(request: DeepPartial<GetJobRecRequest>, options?: CallOptions & CallOptionsExt): Promise<GetJobRecResponse>;
   ensureJobAndStatusAndConnectorRecs(
     request: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>,
-    options?: CallOptions & CallOptionsExt
+    options?: CallOptions & CallOptionsExt,
   ): Promise<Empty>;
   updateJobInstantiatedGraph(
     request: DeepPartial<UpdateJobInstantiatedGraphRequest>,
-    options?: CallOptions & CallOptionsExt
+    options?: CallOptions & CallOptionsExt,
   ): Promise<Empty>;
   getJobDatapoints(
     request: DeepPartial<GetJobDatapointsRequest>,
-    options?: CallOptions & CallOptionsExt
+    options?: CallOptions & CallOptionsExt,
   ): Promise<GetJobDatapointsResponse>;
   getJobStreamConnectorRecs(
     request: DeepPartial<GetJobStreamConnectorRecsRequest>,
-    options?: CallOptions & CallOptionsExt
+    options?: CallOptions & CallOptionsExt,
   ): Promise<GetJobStreamConnectorRecsResponse>;
   appendJobStatusRec(
     request: DeepPartial<AppendJobStatusRecRequest>,
-    options?: CallOptions & CallOptionsExt
+    options?: CallOptions & CallOptionsExt,
   ): Promise<Empty>;
   getParentJobRec(
     request: DeepPartial<GetParentJobRecRequest>,
-    options?: CallOptions & CallOptionsExt
+    options?: CallOptions & CallOptionsExt,
   ): Promise<GetParentJobRecResponse>;
 }
 
