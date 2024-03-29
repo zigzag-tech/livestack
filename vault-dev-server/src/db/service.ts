@@ -9,7 +9,6 @@ import {
 import {
   DBServiceImplementation,
   JobRec,
-  EnsureStreamRecRequest,
   Order,
   ConnectorType,
 } from "@livestack/vault-interface";
@@ -270,22 +269,36 @@ export async function ensureStreamRec(
   }
 ) {
   const { project_id, stream_id, json_schema_str } = rec;
-  await dbConn<
-    EnsureStreamRecRequest & {
-      time_created: Date;
-      json_schema_str: string | null;
-    }
-  >("zz_streams")
+
+  await dbConn("zz_streams")
     .insert({
       project_id,
       stream_id,
-      json_schema_str: json_schema_str || null,
+      json_schema_str: json_schema_str || null, // Ensure null if undefined
       time_created: new Date(),
     })
-    .onConflict(
-      dbConn.raw("(project_id, stream_id) where json_schema_str is not null")
-    )
-    .merge();
+    .onConflict(["project_id", "stream_id"]) // Handle conflict on composite key
+    .ignore();
+
+  const existing = await dbConn("zz_streams")
+    .where({
+      project_id,
+      stream_id,
+    })
+    .first();
+
+  // update json_schema_str if the existing column is null but the passed value is not
+  if (!existing.json_schema_str && json_schema_str) {
+    await dbConn("zz_streams")
+      .where({
+        project_id,
+        stream_id,
+      })
+      .update({
+        json_schema_str,
+      });
+  }
+
   return { null_response: {} };
 }
 

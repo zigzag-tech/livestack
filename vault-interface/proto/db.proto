@@ -63,10 +63,6 @@ message GetZZJobTestResponse {
   string jobId = 3;
 }
 
-message EnsureStreamRecRequest {
-  string project_id = 1;
-  string stream_id = 2;
-}
 
 enum ConnectorType {
   IN = 0;
