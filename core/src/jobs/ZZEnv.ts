@@ -227,6 +227,7 @@ export class ZZEnv implements EnvParams {
           // process.stdin.setRawMode(false);
           // process.stdin.pause();
         } catch (e) {
+          console.error(e);
           console.error(
             red`Failed to communicate with Livestack Cloud server. Please contact ZigZag support.`
           );
