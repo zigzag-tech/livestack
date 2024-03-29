@@ -116,6 +116,32 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
     return { datapointId };
   };
 
+  const addValidationResultRec = async ({
+    projectId,
+    streamId,
+    datapointId,
+    validationResult,
+  }: {
+    projectId: string;
+    streamId: string;
+    datapointId: string;
+    validationResult: {
+      valid: boolean;
+      errors: any[];
+    };
+  }) => {
+    await dbConn("zz_data_validation_results")
+      .insert({
+        project_id: projectId,
+        stream_id: streamId,
+        datapoint_id: datapointId,
+        is_valid: validationResult.valid,
+        validation_result_str: JSON.stringify(validationResult.toString()),
+      })
+      .onConflict(["project_id", "stream_id", "datapoint_id"])
+      .ignore();
+  };
+
   return {
     ensureStream: async (rec) => {
       return await ensureStreamRec(dbConn, rec);
@@ -195,6 +221,12 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       ]);
 
       if (!res.valid) {
+        await addValidationResultRec({
+          projectId,
+          streamId,
+          datapointId,
+          validationResult: res,
+        });
         return {
           validationFailure: {
             errorMessage: res.toString(),
