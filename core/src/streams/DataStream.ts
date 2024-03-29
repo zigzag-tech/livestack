@@ -1,6 +1,7 @@
-import { ZodType } from "zod";
+import type { ZodType } from "zod";
+import chalk, { blueBright, green, inverse, red, yellow } from "ansis";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
-import { ZZEnv } from "../jobs/ZZEnv";
+import { ZZEnv, LIVESTACK_DASHBOARD_URL_ROOT } from "../jobs/ZZEnv";
 // import { createHash } from "crypto";
 import path from "path";
 import { v4 } from "uuid";
@@ -69,11 +70,15 @@ export class DataStream<T extends object> {
       });
       // async
       if (zzEnv) {
-        await (
-          await ZZEnv.vaultClient()
-        ).db.ensureStreamRec({
+        let jsonSchemaStr: string | undefined = undefined;
+        if (def) {
+          const jsonSchema = zodToJsonSchema(def);
+          jsonSchemaStr = JSON.stringify(jsonSchema);
+        }
+        await(await ZZEnv.vaultClient()).stream.ensureStream({
           project_id: zzEnv.projectId,
           stream_id: uniqueName,
+          json_schema_str: jsonSchemaStr,
         });
       }
       DataStream.globalRegistry[uniqueName] = stream;
@@ -169,29 +174,30 @@ export class DataStream<T extends object> {
     }[];
   }) {
     let parsed: T;
-    if (!this.def) {
-      parsed = message;
-    } else {
-      try {
-        parsed = this.def.parse(message) as T;
-      } catch (err) {
-        console.error(
-          this.uniqueName,
-          " errornous output: ",
-          JSON.stringify(message, null, 2)
-        );
-        this.logger.error(
-          "Expected type: " + JSON.stringify(zodToJsonSchema(this.def), null, 2)
-        );
-        this.logger.error(
-          "Error while validating data points on stream " +
-            this.uniqueName +
-            ": " +
-            JSON.stringify(err)
-        );
-        throw err;
-      }
-    }
+    parsed = message;
+    // if (!this.def) {
+    //   parsed = message;
+    // } else {
+    //   try {
+    //     parsed = this.def.parse(message) as T;
+    //   } catch (err) {
+    //     console.error(
+    //       this.uniqueName,
+    //       " errornous output: ",
+    //       JSON.stringify(message, null, 2)
+    //     );
+    //     this.logger.error(
+    //       "Expected type: " + JSON.stringify(zodToJsonSchema(this.def), null, 2)
+    //     );
+    //     this.logger.error(
+    //       "Error while validating data points on stream " +
+    //         this.uniqueName +
+    //         ": " +
+    //         JSON.stringify(err)
+    //     );
+    //     throw err;
+    //   }
+    // }
 
     let { largeFilesToSave, newObj } = identifyLargeFilesToSave(parsed);
     const zzEnv = await this.zzEnvP;
@@ -229,30 +235,42 @@ export class DataStream<T extends object> {
       //   this.uniqueName,
       //   JSON.stringify(parsed)
       // );
+      const vaultClient = await ZZEnv.vaultClient();
+      const { success, validationFailure } = await vaultClient.stream.pub({
+        streamId: this.uniqueName,
+        projectId: (await this.zzEnvP).projectId,
+        jobInfo: jobInfo,
+        dataStr: JSON.stringify(parsed),
+        parentDatapoints,
+      });
 
-      const [{ chunkId, datapointId }] = await Promise.all([
-        (
-          await ZZEnv.vaultClient()
-        ).stream.pub({
-          streamId: this.uniqueName,
-          projectId: (await this.zzEnvP).projectId,
-          jobInfo: jobInfo,
-          dataStr: JSON.stringify(parsed),
-          parentDatapoints,
-        }),
-      ]);
+      if (validationFailure) {
+        console.error(
+          "Error publishing to stream:",
+          validationFailure,
+          "; Data being sent: ",
+          JSON.stringify((parsed as any).data || parsed, null, 2)
+        );
+        const { datapointId, errorMessage } = validationFailure;
+        console.error("Error message: ", errorMessage);
 
-      // console.debug("DataStream pub", this.uniqueName, parsed);
+        const { userId } = await(await this.zzEnvP).getUserCredentials();
+        const inspectMessage = ` 🔍🔴 Inspect Error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
+          (await this.zzEnvP).projectId
+        }/datapoints/${datapointId}`;
+        console.info(inspectMessage);
 
-      return chunkId;
+        throw new Error(`Validation failed. ${inspectMessage}`);
+      } else if (success) {
+        const { chunkId, datapointId } = success;
+        return chunkId;
+      }
     } catch (error) {
       console.error(
         "Error publishing to stream:",
         error,
         "data: ",
-        JSON.stringify(parsed, null, 2),
-        "original: ",
-        JSON.stringify(message, null, 2)
+        JSON.stringify(parsed, null, 2)
       );
 
       throw error;

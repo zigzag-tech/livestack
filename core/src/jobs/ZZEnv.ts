@@ -20,7 +20,7 @@ import path from "path";
 import os from "os";
 
 const limiter = limit(1);
-const LIVESTACK_DASHBOARD_URL_ROOT =
+export const LIVESTACK_DASHBOARD_URL_ROOT =
   process.env.LIVESTACK_DASHBOARD_URL_ROOT || "https://live.dev";
 interface EnvParams {
   readonly storageProvider?: IStorageProvider;
@@ -49,7 +49,7 @@ export class ZZEnv implements EnvParams {
         }),
       ]).then(([env]) => env);
       ZZEnv._vaultClientP = ZZEnv._zzEnvP.then((zzEnv) =>
-        zzEnv.getAuthToken().then((authToken) => {
+        zzEnv.getUserCredentials().then(({ authToken }) => {
           return genAuthorizedVaultClient(authToken);
         })
       );
@@ -97,7 +97,7 @@ export class ZZEnv implements EnvParams {
   private livePrinted = false;
 
   private async printLiveDevUrlOnce() {
-    const userId = await this.getAuthToken();
+    const { userId } = await this.getUserCredentials();
     if (!this.livePrinted) {
       console.info(
         yellow`${inverse` 🔴 LIVE 🦓🦓 ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${this._projectId}`}${inverse``}`
@@ -126,7 +126,10 @@ export class ZZEnv implements EnvParams {
     return ZZEnv.getInstanceId();
   }
 
-  public getAuthToken: () => Promise<string> = () => {
+  public getUserCredentials: () => Promise<{
+    authToken: string;
+    userId: string;
+  }> = () => {
     return limiter(async () => {
       const configDir = path.join(os.homedir(), ".livestack");
       const configFile = path.join(configDir, "config.toml");
@@ -143,7 +146,10 @@ export class ZZEnv implements EnvParams {
       // let authToken: string | null = null;
 
       if (config[hostRoot] && config[hostRoot].auth_token) {
-        return config[hostRoot].auth_token;
+        return {
+          authToken: config[hostRoot].auth_token,
+          userId: config[hostRoot].user_id,
+        };
       } else {
         try {
           const cliTempToken = await getCliTempToken(this);
@@ -175,8 +181,12 @@ export class ZZEnv implements EnvParams {
           console.info(blueBright(boxBottom));
           console.info(yellow`(Or copy & paste the link in a browser)`);
 
-          const { userToken, projectId, userDisplayName } =
-            await waitUntilCredentialsAreResolved(cliTempToken);
+          const {
+            userToken: authToken,
+            projectId,
+            userDisplayName,
+            userId,
+          } = await waitUntilCredentialsAreResolved(cliTempToken);
 
           if (projectId !== this.projectId) {
             throw new Error("Project ID mismatch");
@@ -189,7 +199,8 @@ export class ZZEnv implements EnvParams {
 
           // Update the config object with the new auth token
           config[hostRoot] = {
-            auth_token: userToken,
+            auth_token: authToken,
+            user_id: userId,
           };
           // Write the updated config to the file
           let configStrOrArr = stringify(config);
@@ -211,7 +222,10 @@ export class ZZEnv implements EnvParams {
             }! Your token has been saved to ${configFile}.`
           );
 
-          return userToken;
+          return {
+            authToken,
+            userId,
+          };
 
           // console.info("Press any key to continue...");
 

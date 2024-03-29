@@ -2286,14 +2286,6 @@ export const DBServiceDefinition = {
       responseStream: false,
       options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
-    ensureStreamRec: {
-      name: "EnsureStreamRec",
-      requestType: EnsureStreamRecRequest,
-      requestStream: false,
-      responseType: Empty,
-      responseStream: false,
-      options: {},
-    },
     ensureJobAndStatusAndConnectorRecs: {
       name: "EnsureJobAndStatusAndConnectorRecs",
       requestType: EnsureJobAndStatusAndConnectorRecsRequest,
@@ -2346,60 +2338,64 @@ export const DBServiceDefinition = {
 } as const;
 
 export interface DBServiceImplementation<CallContextExt = {}> {
-  getJobRec(request: GetJobRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<GetJobRecResponse>>;
-  ensureStreamRec(request: EnsureStreamRecRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
+  getJobRec(
+    request: GetJobRecRequest,
+    context: CallContext & CallContextExt
+  ): Promise<DeepPartial<GetJobRecResponse>>;
   ensureJobAndStatusAndConnectorRecs(
     request: EnsureJobAndStatusAndConnectorRecsRequest,
-    context: CallContext & CallContextExt,
+    context: CallContext & CallContextExt
   ): Promise<DeepPartial<Empty>>;
   updateJobInstantiatedGraph(
     request: UpdateJobInstantiatedGraphRequest,
-    context: CallContext & CallContextExt,
+    context: CallContext & CallContextExt
   ): Promise<DeepPartial<Empty>>;
   getJobDatapoints(
     request: GetJobDatapointsRequest,
-    context: CallContext & CallContextExt,
+    context: CallContext & CallContextExt
   ): Promise<DeepPartial<GetJobDatapointsResponse>>;
   getJobStreamConnectorRecs(
     request: GetJobStreamConnectorRecsRequest,
-    context: CallContext & CallContextExt,
+    context: CallContext & CallContextExt
   ): Promise<DeepPartial<GetJobStreamConnectorRecsResponse>>;
   appendJobStatusRec(
     request: AppendJobStatusRecRequest,
-    context: CallContext & CallContextExt,
+    context: CallContext & CallContextExt
   ): Promise<DeepPartial<Empty>>;
   getParentJobRec(
     request: GetParentJobRecRequest,
-    context: CallContext & CallContextExt,
+    context: CallContext & CallContextExt
   ): Promise<DeepPartial<GetParentJobRecResponse>>;
 }
 
 export interface DBServiceClient<CallOptionsExt = {}> {
-  getJobRec(request: DeepPartial<GetJobRecRequest>, options?: CallOptions & CallOptionsExt): Promise<GetJobRecResponse>;
-  ensureStreamRec(request: DeepPartial<EnsureStreamRecRequest>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
+  getJobRec(
+    request: DeepPartial<GetJobRecRequest>,
+    options?: CallOptions & CallOptionsExt
+  ): Promise<GetJobRecResponse>;
   ensureJobAndStatusAndConnectorRecs(
     request: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>,
-    options?: CallOptions & CallOptionsExt,
+    options?: CallOptions & CallOptionsExt
   ): Promise<Empty>;
   updateJobInstantiatedGraph(
     request: DeepPartial<UpdateJobInstantiatedGraphRequest>,
-    options?: CallOptions & CallOptionsExt,
+    options?: CallOptions & CallOptionsExt
   ): Promise<Empty>;
   getJobDatapoints(
     request: DeepPartial<GetJobDatapointsRequest>,
-    options?: CallOptions & CallOptionsExt,
+    options?: CallOptions & CallOptionsExt
   ): Promise<GetJobDatapointsResponse>;
   getJobStreamConnectorRecs(
     request: DeepPartial<GetJobStreamConnectorRecsRequest>,
-    options?: CallOptions & CallOptionsExt,
+    options?: CallOptions & CallOptionsExt
   ): Promise<GetJobStreamConnectorRecsResponse>;
   appendJobStatusRec(
     request: DeepPartial<AppendJobStatusRecRequest>,
-    options?: CallOptions & CallOptionsExt,
+    options?: CallOptions & CallOptionsExt
   ): Promise<Empty>;
   getParentJobRec(
     request: DeepPartial<GetParentJobRecRequest>,
-    options?: CallOptions & CallOptionsExt,
+    options?: CallOptions & CallOptionsExt
   ): Promise<GetParentJobRecResponse>;
 }
 

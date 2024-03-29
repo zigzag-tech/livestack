@@ -39,6 +39,12 @@ export function subTypeToJSON(object: SubType): string {
   }
 }
 
+export interface EnsureStreamRequest {
+  project_id: string;
+  stream_id: string;
+  json_schema_str?: string | undefined;
+}
+
 export interface JobInfo {
   jobId: string;
   outputTag: string;
@@ -57,9 +63,19 @@ export interface StreamPubMessage {
   jobInfo?: JobInfo | undefined;
 }
 
-export interface StreamPubResult {
+export interface StreamPubSuccessResult {
   chunkId: string;
   datapointId: string;
+}
+
+export interface StreamPubValidationFailure {
+  errorMessage: string;
+  datapointId: string;
+}
+
+export interface StreamPubResult {
+  success?: StreamPubSuccessResult | undefined;
+  validationFailure?: StreamPubValidationFailure | undefined;
 }
 
 export interface SubRequest {
@@ -95,6 +111,95 @@ export interface LastValueResponse {
   datapoint?: StreamDatapoint | undefined;
   null_response?: Empty | undefined;
 }
+
+function createBaseEnsureStreamRequest(): EnsureStreamRequest {
+  return { project_id: "", stream_id: "", json_schema_str: undefined };
+}
+
+export const EnsureStreamRequest = {
+  encode(message: EnsureStreamRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.project_id !== "") {
+      writer.uint32(10).string(message.project_id);
+    }
+    if (message.stream_id !== "") {
+      writer.uint32(18).string(message.stream_id);
+    }
+    if (message.json_schema_str !== undefined) {
+      writer.uint32(26).string(message.json_schema_str);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): EnsureStreamRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseEnsureStreamRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.project_id = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.stream_id = reader.string();
+          continue;
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.json_schema_str = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): EnsureStreamRequest {
+    return {
+      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
+      stream_id: isSet(object.stream_id) ? globalThis.String(object.stream_id) : "",
+      json_schema_str: isSet(object.json_schema_str) ? globalThis.String(object.json_schema_str) : undefined,
+    };
+  },
+
+  toJSON(message: EnsureStreamRequest): unknown {
+    const obj: any = {};
+    if (message.project_id !== "") {
+      obj.project_id = message.project_id;
+    }
+    if (message.stream_id !== "") {
+      obj.stream_id = message.stream_id;
+    }
+    if (message.json_schema_str !== undefined) {
+      obj.json_schema_str = message.json_schema_str;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<EnsureStreamRequest>): EnsureStreamRequest {
+    return EnsureStreamRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<EnsureStreamRequest>): EnsureStreamRequest {
+    const message = createBaseEnsureStreamRequest();
+    message.project_id = object.project_id ?? "";
+    message.stream_id = object.stream_id ?? "";
+    message.json_schema_str = object.json_schema_str ?? undefined;
+    return message;
+  },
+};
 
 function createBaseJobInfo(): JobInfo {
   return { jobId: "", outputTag: "" };
@@ -367,12 +472,12 @@ export const StreamPubMessage = {
   },
 };
 
-function createBaseStreamPubResult(): StreamPubResult {
+function createBaseStreamPubSuccessResult(): StreamPubSuccessResult {
   return { chunkId: "", datapointId: "" };
 }
 
-export const StreamPubResult = {
-  encode(message: StreamPubResult, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const StreamPubSuccessResult = {
+  encode(message: StreamPubSuccessResult, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.chunkId !== "") {
       writer.uint32(10).string(message.chunkId);
     }
@@ -382,10 +487,10 @@ export const StreamPubResult = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): StreamPubResult {
+  decode(input: _m0.Reader | Uint8Array, length?: number): StreamPubSuccessResult {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseStreamPubResult();
+    const message = createBaseStreamPubSuccessResult();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -412,14 +517,14 @@ export const StreamPubResult = {
     return message;
   },
 
-  fromJSON(object: any): StreamPubResult {
+  fromJSON(object: any): StreamPubSuccessResult {
     return {
       chunkId: isSet(object.chunkId) ? globalThis.String(object.chunkId) : "",
       datapointId: isSet(object.datapointId) ? globalThis.String(object.datapointId) : "",
     };
   },
 
-  toJSON(message: StreamPubResult): unknown {
+  toJSON(message: StreamPubSuccessResult): unknown {
     const obj: any = {};
     if (message.chunkId !== "") {
       obj.chunkId = message.chunkId;
@@ -430,13 +535,167 @@ export const StreamPubResult = {
     return obj;
   },
 
+  create(base?: DeepPartial<StreamPubSuccessResult>): StreamPubSuccessResult {
+    return StreamPubSuccessResult.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<StreamPubSuccessResult>): StreamPubSuccessResult {
+    const message = createBaseStreamPubSuccessResult();
+    message.chunkId = object.chunkId ?? "";
+    message.datapointId = object.datapointId ?? "";
+    return message;
+  },
+};
+
+function createBaseStreamPubValidationFailure(): StreamPubValidationFailure {
+  return { errorMessage: "", datapointId: "" };
+}
+
+export const StreamPubValidationFailure = {
+  encode(message: StreamPubValidationFailure, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.errorMessage !== "") {
+      writer.uint32(10).string(message.errorMessage);
+    }
+    if (message.datapointId !== "") {
+      writer.uint32(18).string(message.datapointId);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): StreamPubValidationFailure {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStreamPubValidationFailure();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.errorMessage = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.datapointId = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StreamPubValidationFailure {
+    return {
+      errorMessage: isSet(object.errorMessage) ? globalThis.String(object.errorMessage) : "",
+      datapointId: isSet(object.datapointId) ? globalThis.String(object.datapointId) : "",
+    };
+  },
+
+  toJSON(message: StreamPubValidationFailure): unknown {
+    const obj: any = {};
+    if (message.errorMessage !== "") {
+      obj.errorMessage = message.errorMessage;
+    }
+    if (message.datapointId !== "") {
+      obj.datapointId = message.datapointId;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<StreamPubValidationFailure>): StreamPubValidationFailure {
+    return StreamPubValidationFailure.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<StreamPubValidationFailure>): StreamPubValidationFailure {
+    const message = createBaseStreamPubValidationFailure();
+    message.errorMessage = object.errorMessage ?? "";
+    message.datapointId = object.datapointId ?? "";
+    return message;
+  },
+};
+
+function createBaseStreamPubResult(): StreamPubResult {
+  return { success: undefined, validationFailure: undefined };
+}
+
+export const StreamPubResult = {
+  encode(message: StreamPubResult, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.success !== undefined) {
+      StreamPubSuccessResult.encode(message.success, writer.uint32(10).fork()).ldelim();
+    }
+    if (message.validationFailure !== undefined) {
+      StreamPubValidationFailure.encode(message.validationFailure, writer.uint32(18).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): StreamPubResult {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseStreamPubResult();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.success = StreamPubSuccessResult.decode(reader, reader.uint32());
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.validationFailure = StreamPubValidationFailure.decode(reader, reader.uint32());
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): StreamPubResult {
+    return {
+      success: isSet(object.success) ? StreamPubSuccessResult.fromJSON(object.success) : undefined,
+      validationFailure: isSet(object.validationFailure)
+        ? StreamPubValidationFailure.fromJSON(object.validationFailure)
+        : undefined,
+    };
+  },
+
+  toJSON(message: StreamPubResult): unknown {
+    const obj: any = {};
+    if (message.success !== undefined) {
+      obj.success = StreamPubSuccessResult.toJSON(message.success);
+    }
+    if (message.validationFailure !== undefined) {
+      obj.validationFailure = StreamPubValidationFailure.toJSON(message.validationFailure);
+    }
+    return obj;
+  },
+
   create(base?: DeepPartial<StreamPubResult>): StreamPubResult {
     return StreamPubResult.fromPartial(base ?? {});
   },
   fromPartial(object: DeepPartial<StreamPubResult>): StreamPubResult {
     const message = createBaseStreamPubResult();
-    message.chunkId = object.chunkId ?? "";
-    message.datapointId = object.datapointId ?? "";
+    message.success = (object.success !== undefined && object.success !== null)
+      ? StreamPubSuccessResult.fromPartial(object.success)
+      : undefined;
+    message.validationFailure = (object.validationFailure !== undefined && object.validationFailure !== null)
+      ? StreamPubValidationFailure.fromPartial(object.validationFailure)
+      : undefined;
     return message;
   },
 };
@@ -990,6 +1249,14 @@ export const StreamServiceDefinition = {
       responseStream: false,
       options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
+    ensureStream: {
+      name: "EnsureStream",
+      requestType: EnsureStreamRequest,
+      requestStream: false,
+      responseType: Empty,
+      responseStream: false,
+      options: { idempotencyLevel: "IDEMPOTENT" },
+    },
   },
 } as const;
 
@@ -1004,6 +1271,7 @@ export interface StreamServiceImplementation<CallContextExt = {}> {
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<ValueByReverseIndexResponse>>;
   lastValue(request: LastValueRequest, context: CallContext & CallContextExt): Promise<DeepPartial<LastValueResponse>>;
+  ensureStream(request: EnsureStreamRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
 }
 
 export interface StreamServiceClient<CallOptionsExt = {}> {
@@ -1014,6 +1282,7 @@ export interface StreamServiceClient<CallOptionsExt = {}> {
     options?: CallOptions & CallOptionsExt,
   ): Promise<ValueByReverseIndexResponse>;
   lastValue(request: DeepPartial<LastValueRequest>, options?: CallOptions & CallOptionsExt): Promise<LastValueResponse>;
+  ensureStream(request: DeepPartial<EnsureStreamRequest>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
 }
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;

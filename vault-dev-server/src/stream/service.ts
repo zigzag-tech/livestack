@@ -1,4 +1,4 @@
-import { genManuallyFedIterator } from "@livestack/shared";
+import { genManuallyFedIterator, lruCacheFn } from "@livestack/shared";
 import { StreamServiceImplementation } from "@livestack/vault-interface";
 import {
   StreamPubMessage,
@@ -22,8 +22,35 @@ import {
   handlePrimitiveOrArray,
 } from "../db/primitives";
 import { v4 } from "uuid";
+import { validate } from "jsonschema";
 
 export const streamService = (dbConn: Knex): StreamServiceImplementation => {
+  const jsonSchemaByStreamId = lruCacheFn(
+    ({ projectId, streamId }) => `${projectId}/${streamId}`,
+    async ({
+      projectId,
+      streamId,
+    }: {
+      projectId: string;
+      streamId: string;
+    }) => {
+      const rec = await dbConn("zz_streams")
+        .where("project_id", projectId)
+        .andWhere("stream_id", streamId)
+        .first<{
+          json_schema_str: string;
+        }>(["json_schema_str"]);
+      if (!rec) {
+        throw new Error("Stream not found");
+      }
+      if (!rec.json_schema_str) {
+        return null;
+      } else {
+        return JSON.parse(rec.json_schema_str) as any;
+      }
+    }
+  );
+
   const addDatapoint = async ({
     projectId,
     streamId,
@@ -90,10 +117,19 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
   };
 
   return {
+    ensureStream: async (rec) => {
+      return await ensureStreamRec(dbConn, rec);
+    },
     async pub(
       request: StreamPubMessage,
       context: CallContext
-    ): Promise<{ chunkId: string; datapointId: string }> {
+    ): Promise<{
+      success?: { chunkId: string; datapointId: string };
+      validationFailure?: {
+        errorMessage: string;
+        datapointId: string;
+      };
+    }> {
       const { projectId, streamId, dataStr, jobInfo, parentDatapoints } =
         request;
       const datapointId = v4();
@@ -101,6 +137,35 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       const pubClient = await createClient().connect();
       // console.debug("pubbing", "to", channelId, "data", dataStr);
       // Publish the message to the Redis stream
+
+      const jsonSchema = await jsonSchemaByStreamId({
+        projectId,
+        streamId,
+      });
+
+      let res = { valid: true, errors: [] as any[] };
+      const data = JSON.parse(dataStr) as
+        | {
+            terminate: true;
+          }
+        | {
+            terminate: false;
+            data: any;
+          };
+      // bypass {terminate: true} layer and validate the just data
+      if (jsonSchema && data.terminate === false && jsonSchema["anyOf"]) {
+        // sample schema
+        // {"anyOf":[{"type":"object","properties":{"data":{"type":"object","properties":{"summarized":{"type":"string"}},"required":["summarized"],"additionalProperties":false},"terminate":{"type":"boolean","const":false}},"required":["data","terminate"],"additionalProperties":false},{"type":"object","properties":{"terminate":{"type":"boolean","const":true}},"required":["terminate"],"additionalProperties":false}],"$schema":"http://json-schema.org/draft-07/schema#"}
+        let actualSchema = (jsonSchema["anyOf"] as any[]).find((s: any) => {
+          return !!s.properties.data;
+        }).properties.data;
+        Object.assign(actualSchema, {
+          $schema: jsonSchema["$schema"],
+        });
+        res = validate(data.data, actualSchema, {
+          throwError: false,
+        });
+      }
 
       const [_, chunkId] = await Promise.all([
         addDatapoint({
@@ -129,7 +194,21 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         })(),
       ]);
 
-      return { chunkId, datapointId };
+      if (!res.valid) {
+        return {
+          validationFailure: {
+            errorMessage: res.toString(),
+            datapointId,
+          },
+        };
+      }
+
+      return {
+        success: {
+          chunkId,
+          datapointId,
+        },
+      };
     },
     sub(
       request: SubRequest,

@@ -38,7 +38,7 @@ import { DataStream, WithTimestamp } from "../streams/DataStream";
 import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
 import { ZZEnv } from "./ZZEnv";
 import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
-import { lruCacheFn } from "../utils/lruCacheFn";
+import { lruCacheFn } from "@livestack/shared";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -333,7 +333,7 @@ export class JobSpec<
       //   JSON.stringify(d, longStringTruncator)
       // );
 
-      await stream.pub({
+      const r = await stream.pub({
         message: d,
         parentDatapoints,
         ...(type === "out"
@@ -345,6 +345,7 @@ export class JobSpec<
             }
           : {}),
       });
+
       return {
         streamId: stream.uniqueName,
       };
@@ -645,7 +646,7 @@ export class JobSpec<
     }
 
     jobOptions = jobOptions || ({} as P);
-    const vaultClient = await(await this.zzEnvP).vaultClient();
+    const vaultClient = await (await this.zzEnvP).vaultClient();
     await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
       projectId: (await this.zzEnvPWithTimeout).projectId,
       specName: this.name,
