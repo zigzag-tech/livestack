@@ -1,4 +1,4 @@
-import Graph from "graphology";
+import { DirectedGraph } from "graphology";
 import {
   InletNode,
   OutletNode,
@@ -29,7 +29,7 @@ export type StreamNode = {
   streamId: string;
 };
 
-export class InstantiatedGraph extends Graph<
+export class InstantiatedGraph extends DirectedGraph<
   { label: string } & (
     | RootJobNode
     | JobNode
