@@ -16,7 +16,12 @@ import { v4 } from "uuid";
 import { getLogger } from "../utils/createWorkerLogger";
 import { longStringTruncator } from "../utils/longStringTruncator";
 import { WrapWithTimestamp } from "./../utils/io";
-import { ZZWorkerDef, ZZWorkerDefParams } from "./ZZWorker";
+import {
+  InferDefaultOrSingleKey,
+  InferDefaultOrSingleValue,
+  ZZWorkerDef,
+  ZZWorkerDefParams,
+} from "./ZZWorker";
 import pLimit from "p-limit";
 import { Observable } from "rxjs";
 import { z } from "zod";
@@ -183,14 +188,17 @@ export class JobSpec<
     jobId?: string;
     jobOptions?: P;
     outputTag?: K;
-  }): Promise<{ data: OMap[K]; timestamp: number } | null> {
+  }): Promise<{
+    data: OMap[K | InferDefaultOrSingleKey<OMap>];
+    timestamp: number;
+  } | null> {
     if (!jobId) {
       jobId = `${this.name}-${v4()}`;
     }
 
-    if (!outputTag) {
-      outputTag = this.getSingleTag("output", true) as K;
-    }
+    const resolvedTag: K | InferDefaultOrSingleKey<OMap> =
+      outputTag ||
+      (this.getSingleTag("output", true) as K | InferDefaultOrSingleKey<OMap>);
 
     this.logger.info(
       `Enqueueing job ${jobId} with data: ${JSON.stringify(jobOptions)}.`
@@ -201,7 +209,7 @@ export class JobSpec<
       jobOptions,
     });
 
-    const r = await output(outputTag).nextValue();
+    const r = await output(resolvedTag).nextValue();
     input.tags.forEach((k) => {
       input.terminate(k);
     });
@@ -230,10 +238,10 @@ export class JobSpec<
   async feedJobInput<K extends keyof IMap>({
     jobId,
     data,
-    tag = this.getSingleTag("input", true) as K,
+    tag = this.getSingleTag("input", true) as K | InferDefaultOrSingleKey<IMap>,
   }: {
     jobId: string;
-    data: IMap[K];
+    data: IMap[K extends never ? InferDefaultOrSingleKey<IMap> : K];
     tag?: K;
   }) {
     return this._deriveInputsForJob(jobId)(tag).feed(data);
@@ -579,18 +587,25 @@ export class JobSpec<
     jobId: string;
     tag?: K;
     from?: "beginning" | "now";
-  }): ByTagOutput<OMap[K]> {
-    const tagToWatch = tag || (this.getSingleTag("output", true) as K);
+  }): ByTagOutput<OMap[K extends never ? InferDefaultOrSingleKey<OMap> : K]> {
+    const tagToWatch = tag || this.getSingleTag("output", true);
     const streamP = this.getOutputJobStream({
       jobId,
       tag: tagToWatch,
     });
     const subuscriberP = new Promise<
-      DataStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>
+      DataStreamSubscriber<
+        WrapTerminatorAndDataId<
+          OMap[K extends never ? InferDefaultOrSingleKey<OMap> : K]
+        >
+      >
     >((resolve, reject) => {
       streamP.then((stream) => {
         // console.debug("Output collector for stream", stream.uniqueName);
-        let subscriber: DataStreamSubscriber<WrapTerminatorAndDataId<OMap[K]>>;
+        let subscriber: DataStreamSubscriber<
+          // TODO: fix tying
+          WrapTerminatorAndDataId<OMap[any]>
+        >;
         if (from === "beginning") {
           subscriber = DataStreamSubscriber.subFromBeginning(stream);
         } else if (from === "now") {
@@ -692,7 +707,7 @@ export class JobSpec<
   }: {
     jobId?: string;
     jobOptions?: P;
-    input: IMap[KI];
+    input: IMap[KI extends never ? InferDefaultOrSingleKey<IMap> : KI];
     inputTag?: KI;
     outputTag?: KO;
   }) => {
@@ -726,10 +741,15 @@ export class JobSpec<
     const that = this;
     return (() => {
       const genByTagFn = () => {
-        return <K extends keyof IMap>(tag?: K) => {
-          const resolvedTag = tag || (that.getSingleTag("input", true) as K);
+        return <K extends keyof IMap>(tag: K) => {
+          let resolvedTag: K | InferDefaultOrSingleKey<IMap> | undefined = tag;
           return {
             feed: async (data: IMap[K]) => {
+              if (!resolvedTag) {
+                resolvedTag = that.getSingleTag("input", true) as
+                  | K
+                  | InferDefaultOrSingleKey<IMap>;
+              }
               const specTagInfo = that.convertWorkflowAliasToSpecTag({
                 alias: resolvedTag,
                 type: "in",
@@ -756,6 +776,9 @@ export class JobSpec<
               });
             },
             terminate: async () => {
+              if (!resolvedTag) {
+                resolvedTag = that.getSingleTag("input", true);
+              }
               const specTagInfo = that.convertWorkflowAliasToSpecTag({
                 alias: resolvedTag,
                 type: "in",
@@ -781,6 +804,11 @@ export class JobSpec<
               });
             },
             getStreamId: async () => {
+              if (!resolvedTag) {
+                resolvedTag = that.getSingleTag("input", true) as
+                  | K
+                  | InferDefaultOrSingleKey<IMap>;
+              }
               const specTagInfo = that.convertWorkflowAliasToSpecTag({
                 alias: resolvedTag,
                 type: "in",
@@ -808,19 +836,19 @@ export class JobSpec<
       byTagFn.byTag = genByTagFn();
       byTagFn.tags = this.inputTags;
 
-      byTagFn.feed = async (data: IMap[keyof IMap]) => {
+      byTagFn.feed = async (data: IMap[InferDefaultOrSingleKey<IMap>]) => {
         const tag = that.getSingleTag("input", true);
         if (!tag) {
           throw new Error(
             `Cannot find any input to feed to for spec ${this.name}.`
           );
         }
-        return await byTagFn(tag).feed(data);
+        return await byTagFn(tag).feed(data as IMap[any]);
       };
 
       byTagFn.terminate = async <K extends keyof IMap>(tag?: K) => {
-        tag = tag || (that.getSingleTag("input", true) as K);
-        return await byTagFn(tag).terminate();
+        const resolvedTag = tag || that.getSingleTag("input", true);
+        return await byTagFn(resolvedTag).terminate();
       };
       return byTagFn;
     })();
@@ -929,12 +957,12 @@ export class JobSpec<
     };
 
     let subscriberByDefaultTag: Awaited<
-      ReturnType<typeof singletonSubscriberByTag>
+      ReturnType<typeof singletonSubscriberByTag<InferDefaultOrSingleKey<OMap>>>
     > | null = null;
 
-    const nextValue = async <K extends keyof OMap>() => {
+    const nextValue = async () => {
       if (subscriberByDefaultTag === null) {
-        const tag = this.getSingleTag("output", true) as K;
+        const tag = this.getSingleTag("output", true);
         subscriberByDefaultTag = await singletonSubscriberByTag(tag);
       }
       return await subscriberByDefaultTag.nextValue();
@@ -942,16 +970,14 @@ export class JobSpec<
 
     return (() => {
       const func = (<K extends keyof OMap>(tag?: K) => {
-        if (!tag) {
-          tag = this.getSingleTag("output", true) as K;
-        }
-        return singletonSubscriberByTag(tag);
+        const resolvedTag = tag || this.getSingleTag("output", true);
+        return singletonSubscriberByTag(resolvedTag);
       }) as JobOutput<OMap>;
       func.byTag = singletonSubscriberByTag;
       func.tags = this.outputTags;
       func.nextValue = nextValue;
       (func.valueObservable = new Observable<
-        WrapWithTimestamp<OMap[keyof OMap]>
+        WrapWithTimestamp<OMap[InferDefaultOrSingleKey<OMap>]>
       >((subscriber) => {
         while (true) {
           const next = nextValue();
@@ -1014,7 +1040,9 @@ export class JobSpec<
     type: T,
     throwError: ThrowErr
   ):
-    | (T extends "input" ? keyof IMap : keyof OMap)
+    | (T extends "input"
+        ? InferDefaultOrSingleKey<IMap>
+        : InferDefaultOrSingleKey<OMap>)
     | (ThrowErr extends true
         ? never
         : {
@@ -1129,8 +1157,9 @@ export class JobSpec<
         // the user didn't give a public tag; auto-register
       }
       const t =
-        (qualifiedC.alias as T extends "input" ? keyof IMap : keyof OMap) ||
-        null;
+        (qualifiedC.alias as T extends "input"
+          ? InferDefaultOrSingleKey<IMap>
+          : InferDefaultOrSingleKey<OMap>) || null;
 
       if (!t) {
         throw new Error(
@@ -1251,16 +1280,6 @@ export class JobManager<P, I, O, IMap, OMap> {
     // this._finishedPromise = this._genWaitUntilFinishPromise();
   }
 
-  submitAndWait: <KI extends keyof IMap, KO extends keyof OMap>(p: {
-    input: IMap[KI];
-    inputTag?: KI;
-    outputTag?: KO;
-  }) => Promise<{ data: OMap[KO]; timestamp: number } | null> = async (p) => {
-    const { input: inputData, inputTag, outputTag } = p;
-    await this.input.feed(inputData, inputTag);
-    return await this.output(outputTag).nextValue();
-  };
-
   private _genWaitUntilFinishPromise = async () => {
     const outputsToWaitOn: (keyof OMap)[] = [];
 
@@ -1298,9 +1317,11 @@ export class JobManager<P, I, O, IMap, OMap> {
   };
 }
 export interface JobInput<IMap> {
-  <K extends keyof IMap>(tag?: K): ByTagInput<IMap[K]>;
+  <K extends keyof IMap>(tag?: K): ByTagInput<
+    IMap[K extends never ? InferDefaultOrSingleKey<IMap> : K]
+  >;
   tags: (keyof IMap)[];
-  feed: <K extends keyof IMap>(data: IMap[K], tag?: K) => Promise<void>;
+  feed: (data: IMap[InferDefaultOrSingleKey<IMap>]) => Promise<void>;
   terminate: <K extends keyof IMap>(tag?: K) => Promise<void>;
   byTag: <K extends keyof IMap>(tag: K) => ByTagInput<IMap[K]>;
 }
@@ -1309,9 +1330,15 @@ export interface JobOutput<OMap> {
   <K extends keyof OMap>(tag?: K): ByTagOutput<OMap[K]>;
   tags: (keyof OMap)[];
   byTag: <K extends keyof OMap>(tag: K) => ByTagOutput<OMap[K]>;
-  nextValue: () => Promise<WrapWithTimestamp<OMap[keyof OMap]> | null>;
-  mostRecentValue: () => Promise<WrapWithTimestamp<OMap[keyof OMap]> | null>;
-  valueObservable: Observable<WrapWithTimestamp<OMap[keyof OMap]> | null>;
+  nextValue: () => Promise<WrapWithTimestamp<
+    OMap[InferDefaultOrSingleKey<OMap>]
+  > | null>;
+  mostRecentValue: () => Promise<WrapWithTimestamp<
+    OMap[InferDefaultOrSingleKey<OMap>]
+  > | null>;
+  valueObservable: Observable<WrapWithTimestamp<
+    OMap[InferDefaultOrSingleKey<OMap>]
+  > | null>;
 
   [Symbol.asyncIterator]: () => AsyncIterableIterator<{
     data: OMap[keyof OMap];
