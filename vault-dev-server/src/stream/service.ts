@@ -188,14 +188,23 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
           $schema: jsonSchema["$schema"],
         });
         try {
-          res = validate(data.data, actualSchema, {
+          // res = validate(data.data, actualSchema, {
+          //   throwError: false,
+          // });
+          res = validate(data, jsonSchema, {
             throwError: false,
           });
         } catch (e) {
-          console.warn("Error occurred validating data", e);
+          console.warn("Error occurred validating data: ", e);
+          console.debug("actualSchema: ", JSON.stringify(actualSchema));
+          console.debug("data: ", JSON.stringify(data.data));
           res = {
             valid: false,
-            errors: [],
+            errors: [
+              {
+                message: "Error occurred validating data",
+              },
+            ],
           };
         }
       }
