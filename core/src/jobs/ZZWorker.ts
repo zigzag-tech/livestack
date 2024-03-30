@@ -338,3 +338,56 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     return defineWorker(p);
   }
 }
+
+
+
+export type InferDefaultOrSingleKey<T> = "default" extends keyof T
+  ? "default"
+  : InferSingleKey<T>;
+
+type InferSingleKey<T> = keyof T extends infer U
+  ? U extends keyof T
+    ? [U] extends [keyof T]
+      ? keyof T extends U
+        ? U
+        : never
+      : never
+    : never
+  : never;
+
+export type InferDefaultOrSingleValue<T> = "default" extends keyof T
+  ? T["default"]
+  : InferSingleValue<T>;
+
+type InferSingleValue<T> = keyof T extends infer U
+  ? U extends keyof T
+    ? [U] extends [keyof T]
+      ? keyof T extends U
+        ? T[U]
+        : never
+      : never
+    : never
+  : never;
+
+// type IMap1 = {
+//   key1: string;
+// };
+
+// type IMap2 = {
+//   key1: number;
+//   key2: number;
+// };
+
+// type IMap3 = {
+//   default: string;
+// };
+
+// type IMap4 = {
+//   default: string;
+//   key1: number;
+// };
+
+// type SingleKey = InferDefaultOrSingleKey<IMap1>; // true
+// type MultipleKeys = InferDefaultOrSingleKey<IMap2>; // false
+// type DefaultKey = InferDefaultOrSingleKey<IMap3>; // true
+// type DefaultAndOtherKeys = InferDefaultOrSingleKey<IMap4>;
