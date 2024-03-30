@@ -187,9 +187,17 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         Object.assign(actualSchema, {
           $schema: jsonSchema["$schema"],
         });
-        res = validate(data.data, actualSchema, {
-          throwError: false,
-        });
+        try {
+          res = validate(data.data, actualSchema, {
+            throwError: false,
+          });
+        } catch (e) {
+          console.warn("Error occurred validating data", e);
+          res = {
+            valid: false,
+            errors: [],
+          };
+        }
       }
 
       const [_, chunkId] = await Promise.all([
