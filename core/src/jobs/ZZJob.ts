@@ -21,6 +21,7 @@ import { JobSpec } from "./JobSpec";
 import { ZZEnv } from "./ZZEnv";
 import { identifyLargeFilesToSave } from "../files/file-ops";
 import { AuthorizedGRPCClient } from "@livestack/vault-client";
+import { InferDefaultOrSingleKey, InferDefaultOrSingleValue } from "./ZZWorker";
 
 export type ZZProcessor<P, I, O, WP extends object | undefined, IMap, OMap> = (
   j: ZZJob<P, I, O, WP, IMap, OMap>
@@ -90,8 +91,10 @@ export class ZZJob<
   // New properties for subscriber tracking
 
   readonly output: {
-    <K extends keyof OMap>(key?: K): {
-      emit: (o: OMap[K]) => Promise<void>;
+    <K extends keyof OMap>(tag?: K): {
+      emit: (
+        o: OMap[K extends never ? InferDefaultOrSingleKey<OMap> : K]
+      ) => Promise<void>;
       getStreamId: () => Promise<string>;
     };
     emit: (o: OMap[keyof OMap]) => Promise<void>;
@@ -103,6 +106,12 @@ export class ZZJob<
       getStreamId: () => Promise<string>;
     };
   };
+
+  readonly invoke: <P, I, O, IMap, OMap>(
+    jobSpec: JobSpec<P, I, O, IMap, OMap>,
+    inputParams: IMap[InferDefaultOrSingleKey<IMap>],
+    jobOptions?: P
+  ) => Promise<OMap[InferDefaultOrSingleKey<OMap>]>;
 
   storageProvider?: IStorageProvider;
   readonly zzEnvP: Promise<ZZEnv>;
@@ -252,18 +261,20 @@ export class ZZJob<
     })();
 
     const emitOutput = async <K extends keyof OMap>(
-      o: OMap[K],
-      tag = this.spec.getSingleTag("output", true) as K
+      o: OMap[K extends never ? InferDefaultOrSingleKey<OMap> : K],
+      tag?: K
     ) => {
       // this.logger.info(
       //   `Emitting output: ${this.jobId}, ${this.def.name} ` +
       //     JSON.stringify(o, longStringTruncator)
       // );
 
+      const resolvedTag = tag || this.spec.getSingleTag("output", true);
+
       await this.spec._getStreamAndSendDataToPLimited({
         jobId: this.jobId,
         type: "out",
-        tag: tag,
+        tag: resolvedTag,
         data: {
           data: o,
           terminate: false,
@@ -275,22 +286,45 @@ export class ZZJob<
       await this.updateProgress(this._dummyProgressCount++);
     };
     const that = this;
-    this.output = (() => {
-      const func = <K extends keyof OMap>(tag?: K) => ({
-        emit: (o: OMap[K]) => emitOutput(o, tag),
-        async getStreamId() {
-          if (!tag) {
-            tag = that.spec.getSingleTag("output", true) as K;
-          }
-          const s = await that.spec.getOutputJobStream({
-            jobId: that.jobId,
-            tag,
-          });
-          return s.uniqueName;
-        },
+
+    this.invoke = async <P, I, O, IMap, OMap>(
+      jobSpec: JobSpec<P, I, O, IMap, OMap>,
+      inputParams: IMap[InferDefaultOrSingleKey<IMap>],
+      jobOptions?: P
+    ): Promise<OMap[InferDefaultOrSingleKey<OMap>]> => {
+      const { input, output } = await jobSpec.enqueueJob({
+        jobOptions,
       });
+      await input.feed(inputParams);
+      const data = await output.nextValue();
+      if (!data) {
+        throw new Error("Output is null");
+      }
+
+      return data.data;
+    };
+
+    this.output = (() => {
+      const func = <K extends keyof OMap>(tag?: K) => {
+        let resolvedTag: K | InferDefaultOrSingleKey<OMap> | undefined = tag;
+        return {
+          emit: (
+            o: OMap[K extends never ? InferDefaultOrSingleKey<OMap> : K]
+          ) => emitOutput(o as OMap[any], resolvedTag),
+          async getStreamId() {
+            if (!resolvedTag) {
+              resolvedTag = that.spec.getSingleTag("output", true) as K;
+            }
+            const s = await that.spec.getOutputJobStream({
+              jobId: that.jobId,
+              tag: resolvedTag,
+            });
+            return s.uniqueName;
+          },
+        };
+      };
       func.byTag = <K extends keyof OMap>(tag: K) => ({
-        emit: (o: OMap[K]) => emitOutput(o, tag),
+        emit: (o: OMap[K]) => emitOutput(o as OMap[any], tag),
         async getStreamId() {
           const s = await that.spec.getOutputJobStream({
             jobId: that.jobId,
@@ -301,7 +335,7 @@ export class ZZJob<
       });
       func.emit = (o: OMap[keyof OMap]) => {
         const tag = this.spec.getSingleTag("output", true);
-        return emitOutput(o, tag as keyof OMap);
+        return emitOutput(o as OMap[any], tag as keyof OMap);
       };
       func.getStreamId = async () => {
         const tag = this.spec.getSingleTag("output", true);
@@ -324,23 +358,29 @@ export class ZZJob<
     };
   };
 
-  private readonly genInputObjectByTag = <K extends keyof IMap>(tag?: K) => {
+  private readonly genInputObjectByTag = <K extends keyof IMap>(_tag?: K) => {
     const that = this;
+    let resolvedTag: K | InferDefaultOrSingleKey<IMap> | undefined = _tag;
     const nextValue = async () => {
-      const r = await (await that._ensureInputStreamFn(tag)).nextValue();
+      if (!resolvedTag) {
+        resolvedTag = that.spec.getSingleTag("input", true) as K;
+      }
+      const r = await (
+        await that._ensureInputStreamFn(resolvedTag)
+      ).nextValue();
       return r as IMap[K] | null;
     };
     return {
       nextValue,
       observable() {
-        if (!tag) {
-          tag = that.spec.getSingleTag("input", true) as K;
+        if (!resolvedTag) {
+          resolvedTag = that.spec.getSingleTag("input", true) as K;
         }
-        return that._ensureInputStreamFn(tag).trackedObservable;
+        return that._ensureInputStreamFn(resolvedTag as K).trackedObservable;
       },
       async *[Symbol.asyncIterator]() {
-        if (!tag) {
-          tag = that.spec.getSingleTag("input", true) as K;
+        if (!resolvedTag) {
+          resolvedTag = that.spec.getSingleTag("input", true) as K;
         }
         while (true) {
           const input = await nextValue();
@@ -371,7 +411,7 @@ export class ZZJob<
 
   private getParentRec = async () => {
     if (this._parentRec === "uninitialized") {
-      const { null_response, rec } = await(
+      const { null_response, rec } = await (
         await ZZEnv.vaultClient()
       ).db.getParentJobRec({
         projectId: (await this.zzEnvP).projectId,
@@ -391,15 +431,16 @@ export class ZZJob<
     return this._parentRec;
   };
 
-  private _ensureInputStreamFn = <K extends keyof IMap>(tag?: K) => {
+  private _ensureInputStreamFn = <K extends keyof IMap>(_tag?: K) => {
     const thatJob = this;
+    let resolvedTag: K | InferDefaultOrSingleKey<IMap> | undefined = _tag;
     if (this.spec.inputTags.length === 0) {
       throw new Error("inputDefs is empty for spec " + this.spec.name);
     }
     if (this.spec.isInputSingle) {
-      tag = this.spec.getSingleTag("input", true) as K;
+      resolvedTag = this.spec.getSingleTag("input", true) as K;
     } else {
-      if (!tag) {
+      if (!resolvedTag) {
         throw new Error(
           `inputDefs consists of multiple streams ${this.spec.inputTags.join(
             ", "
@@ -408,10 +449,10 @@ export class ZZJob<
       }
     }
 
-    if (!this.inputStreamFnsByTag[tag!]) {
+    if (!this.inputStreamFnsByTag[resolvedTag!]) {
       const streamP = this.spec.getInputJobStream({
         jobId: this.jobId,
-        tag: tag!,
+        tag: resolvedTag!,
       }) as Promise<DataStream<WrapTerminatorAndDataId<IMap[K] | unknown>>>;
       const parentRecP = this.getParentRec();
 
@@ -435,7 +476,7 @@ export class ZZJob<
                 ];
                 thatJob.currentRelevantInputLinked = false;
               } else {
-                // append 
+                // append
                 thatJob.relevantInputDatapoints.push({
                   streamId: stream.uniqueName,
                   datapointId: n.datapointId,
@@ -451,7 +492,7 @@ export class ZZJob<
                 ? null
                 : TransformRegistry.getTransform({
                     receivingSpecName: this.spec.name,
-                    tag: tag!.toString(),
+                    tag: resolvedTag!.toString(),
                     workflowSpecName: parentRec.spec_name,
                     receivingSpecUniqueLabel:
                       parentRec.unique_spec_label || null,
@@ -479,7 +520,7 @@ export class ZZJob<
 
       const { nextValue } = createLazyNextValueGenerator(trackedObservable);
 
-      this.inputStreamFnsByTag[tag as K] = {
+      this.inputStreamFnsByTag[resolvedTag as K] = {
         nextValue,
         // inputStream: stream,
         inputObservableUntracked,
@@ -487,7 +528,7 @@ export class ZZJob<
         subscriberCountObservable,
       };
     }
-    return this.inputStreamFnsByTag[tag as K]!;
+    return this.inputStreamFnsByTag[resolvedTag as K]!;
   };
 
   public beginProcessing = async (
@@ -508,7 +549,9 @@ export class ZZJob<
     );
 
     try {
-      await(await ZZEnv.vaultClient()).db.appendJobStatusRec({
+      await (
+        await ZZEnv.vaultClient()
+      ).db.appendJobStatusRec({
         ...jId,
         jobStatus: "running",
       });
@@ -540,7 +583,9 @@ export class ZZJob<
         await this.output.emit(processedR);
       }
 
-      await(await ZZEnv.vaultClient()).db.appendJobStatusRec({
+      await (
+        await ZZEnv.vaultClient()
+      ).db.appendJobStatusRec({
         ...jId,
         jobStatus: "completed",
       });
@@ -560,7 +605,9 @@ export class ZZJob<
     } catch (e: any) {
       console.error("Error while running job: ", this.jobId, e);
 
-      await(await ZZEnv.vaultClient()).db.appendJobStatusRec({
+      await (
+        await ZZEnv.vaultClient()
+      ).db.appendJobStatusRec({
         projectId,
         specName: this.spec.name,
         jobId: this.jobId,
