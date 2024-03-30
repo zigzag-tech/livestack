@@ -255,9 +255,12 @@ export class DataStream<T extends object> {
         console.error("Error message: ", errorMessage);
 
         const { userId } = await(await this.zzEnvP).getUserCredentials();
-        const inspectMessage = ` 🔍🔴 Inspect Error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
+        // const inspectMessage = ` 🔍🔴 Inspect error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
+        //   (await this.zzEnvP).projectId
+        // }/datapoints/${datapointId}`;
+        const inspectMessage = ` 🔍🔴 Inspect error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
           (await this.zzEnvP).projectId
-        }/datapoints/${datapointId}`;
+        }`;
         console.info(inspectMessage);
 
         throw new Error(`Validation failed. ${inspectMessage}`);
