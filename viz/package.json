@@ -1,0 +1,25 @@
+{
+  "name": "@livestack/viz",
+  "version": "0.0.2",
+  "description": "Realtime livestack visualization.",
+  "scripts": {
+    "build": "tsc"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "devDependencies": {
+    "typescript": "5.4.2"
+  },
+  "peerDependencies": {
+    "@livestack/core": "*"
+  },
+  "main": "dist/livestack-viz.cjs.js",
+  "types": "dist/livestack-viz.cjs.d.ts",
+  "module": "dist/livestack-viz.esm.js",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@livestack/vault-client",
+  "version": "0.0.1",
+  "packageManager": "yarn@4.0.2",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "build": "preconstruct build",
+    "postinstall": "preconstruct dev"
+  },
+  "dependencies": {
+    "@livestack/vault-interface": "*",
+    "nice-grpc": "^2.1.7",
+    "nice-grpc-client-middleware-retry": "^3.1.7"
+  },
+  "devDependencies": {
+    "@preconstruct/cli": "^2.8.3",
+    "@types/node": "^20.11.0",
+    "typescript": "5.4.2"
+  },
+  "main": "dist/livestack-vault-client.cjs.js",
+  "types": "dist/livestack-vault-client.cjs.d.ts",
+  "module": "dist/livestack-vault-client.esm.js",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
+}
