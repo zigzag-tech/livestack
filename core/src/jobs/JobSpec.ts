@@ -26,7 +26,6 @@ import pLimit from "p-limit";
 import { Observable } from "rxjs";
 import { z } from "zod";
 import { TagMaps, TagObj } from "../orchestrations/Workflow";
-import { Metadata } from "nice-grpc-common";
 import {
   ByTagInput,
   ByTagOutput,
