@@ -1,0 +1,48 @@
+{
+  "name": "@livestack/core",
+  "version": "0.0.2",
+  "description": "Orchestration, in real-time.",
+  "scripts": {
+    "build": "preconstruct build",
+    "postinstall": "preconstruct dev"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@livestack/shared": "*",
+    "@livestack/vault-client": "*",
+    "@livestack/vault-interface": "*",
+    "@ltd/j-toml": "^1.38.0",
+    "ansis": "^2.3.0",
+    "dotenv": "^16.x",
+    "lodash": "^4.17.21",
+    "lru-cache": "^10.2.0",
+    "p-limit": "^3",
+    "rxjs": "^7",
+    "uuid": "^9",
+    "winston": "^3.12.0",
+    "zod": "^3.22.4",
+    "zod-to-json-schema": "^3.22.4"
+  },
+  "devDependencies": {
+    "@preconstruct/cli": "^2.8.3",
+    "@types/lodash": "^4.14.201",
+    "@types/uuid": "^9.0.7",
+    "typescript": "5.4.2"
+  },
+  "optionalDependencies": {
+    "@google-cloud/storage": "^7.8.0",
+    "@livestack/vault-dev-server": "*"
+  },
+  "module": "dist/livestack-core.esm.js",
+  "main": "dist/livestack-core.cjs.js",
+  "types": "dist/livestack-core.cjs.d.ts",
+  "preconstruct": {
+    "entrypoints": [
+      "index.ts"
+    ]
+  },
+  "author": ""
+}

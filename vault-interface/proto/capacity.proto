@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package livestack;
+
+// import "google/protobuf/empty.proto"; 
+
+service CacapcityService {
+  rpc ReportAsInstance(stream FromInstance) returns (stream CommandToInstance);
+}
+
+message ReportSpecAvailability {
+  string specName = 3;
+  int32 maxCapacity = 4;
+}
+
+message FromInstance {
+  string projectId = 1;
+  string instanceId = 2;
+  oneof value {
+    ReportSpecAvailability reportSpecAvailability = 3;
+  }
+}
+
+message Provision {
+  string projectId = 1;
+  string specName = 2;
+  int32 numberOfWorkersNeeded = 3;
+}
+
+message CommandToInstance {
+  string projectId = 1;
+  string instanceId = 2;
+  oneof value {
+    Provision provision = 3;
+  }
+}

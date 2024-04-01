@@ -1,0 +1,30 @@
+{
+  "name": "@livestack/replicate",
+  "version": "0.0.2",
+  "description": "Livestack replicate connectors.",
+  "scripts": {
+    "build": "preconstruct build",
+    "postinstall": "preconstruct dev"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "dependencies": {
+    "replicate": "^0.21"
+  },
+  "peerDependencies": {
+    "@livestack/core": "*"
+  },
+  "devDependencies": {
+    "@preconstruct/cli": "^2.8.3",
+    "typescript": "5.4.2"
+  },
+  "main": "dist/livestack-replicate.cjs.js",
+  "types": "dist/livestack-replicate.cjs.d.ts",
+  "module": "dist/livestack-replicate.esm.js",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
+}

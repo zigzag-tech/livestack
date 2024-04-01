@@ -1,0 +1,43 @@
+{
+  "name": "@livestack/vault-dev-server",
+  "version": "0.0.1",
+  "packageManager": "yarn@4.0.2",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "dev": "preconstruct dev && ts-node src/index.ts --transpile-only --project tsconfig.json",
+    "build": "preconstruct build",
+    "postinstall": "preconstruct dev"
+  },
+  "dependencies": {
+    "@livestack/shared": "*",
+    "@livestack/vault-interface": "*",
+    "better-sqlite3": "^9.4.0",
+    "bullmq": "^4.x",
+    "dotenv": "^16.x",
+    "get-port": "^7.0.0",
+    "jsonschema": "^1.4.1",
+    "knex": "^2.x",
+    "lodash": "^4.x",
+    "nice-grpc": "^2.1",
+    "redis": "^4",
+    "uuid": "^9"
+  },
+  "devDependencies": {
+    "@preconstruct/cli": "^2.8.3",
+    "@types/node": "^20.11.0",
+    "ts-node": "^10.9.2",
+    "typescript": "5.4.2"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "dist/livestack-vault-dev-server.cjs.js",
+  "types": "dist/livestack-vault-dev-server.d.ts",
+  "module": "dist/livestack-vault-dev-server.esm.js",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
+}
