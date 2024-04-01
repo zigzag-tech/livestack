@@ -3,7 +3,9 @@ import { Server as SocketIOServer } from "socket.io";
 import { Server as HTTPServer } from "http";
 import { LiveGatewayConn } from "./LiveGatewayConn";
 import { SpecOrName, resolveUniqueSpec } from "@livestack/core";
+import jwt from 'jsonwebtoken';
 
+const JWT_SECRET = 'jwt_secret';
 export function initJobBinding({
   httpServer,
   socketPath = "/livestack.socket.io",
@@ -27,11 +29,18 @@ export function initJobBinding({
     },
   });
   io.use((socket, next) => {
-    const token = socket.handshake.auth.authToken;
-    if (token === authToken) {
-      next();
+    if (authToken) {
+      jwt.verify(authToken, JWT_SECRET, (err: Error | null, decoded: any) => {
+        if (err) {
+          console.log('Global authToken verification failed:', err.message);
+          return next(new Error('Global authToken verification failed.'));
+        }
+        console.log('Global authToken verified successfully');
+        (socket as any).decoded = decoded; // Attach decoded information to the socket
+        return next();
+      });
     } else {
-      next(new Error("Authentication failed: Token is invalid."));
+      return next();
     }
   });
 
