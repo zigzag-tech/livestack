@@ -33,7 +33,7 @@ export function initJobBinding({
       jwt.verify(authToken, JWT_SECRET, (err: Error | null, decoded: any) => {
         if (err) {
           console.log('Global authToken verification failed:', err.message);
-          return next(new Error('Global authToken verification failed'));
+          return next(new Error('Global authToken verification failed.'));
         }
         console.log('Global authToken verified successfully');
         (socket as any).decoded = decoded; // Attach decoded information to the socket
