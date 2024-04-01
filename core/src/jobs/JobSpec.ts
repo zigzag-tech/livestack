@@ -1,4 +1,3 @@
-import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   InferStreamSetType,
   IOSpec,
@@ -13,10 +12,6 @@ import {
   getSourceSpecNodeConnectedToStream,
   InstantiatedGraph,
 } from "@livestack/shared/src/graph/InstantiatedGraph";
-import {
-  AuthorizedGRPCClient,
-  genAuthorizedVaultClient,
-} from "@livestack/vault-client";
 import { v4 } from "uuid";
 import { getLogger } from "../utils/createWorkerLogger";
 import { longStringTruncator } from "../utils/longStringTruncator";
@@ -33,7 +28,7 @@ import {
   wrapStreamSubscriberWithTermination,
   wrapTerminatorAndDataId,
 } from "../utils/io";
-import { DataStream, WithTimestamp } from "../streams/DataStream";
+import { DataStream } from "../streams/DataStream";
 import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
 import { ZZEnv } from "./ZZEnv";
 import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
