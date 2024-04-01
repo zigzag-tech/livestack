@@ -1,1 +1,3 @@
 .aider*
+/target
+.DS_Store
