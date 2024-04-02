@@ -12,7 +12,6 @@
   "dependencies": {
     "@livestack/shared": "*",
     "rxjs": "^7",
-    "use-deep-compare-effect": "^1.8.1",
     "uuid": "^9"
   },
   "devDependencies": {
