@@ -8,7 +8,7 @@ import path from "path";
 import _, { isUndefined } from "lodash";
 const OBJ_REF_VALUE = `__zz_obj_ref__`;
 import { Readable } from "stream";
-const LARGE_VALUE_THRESHOLD = 1024 * 10;
+const LARGE_VALUE_THRESHOLD = 1024 * 1024 * 2;
 
 export type OriginalType =
   | Exclude<ReturnType<typeof detectBinaryLikeObject>, false>
