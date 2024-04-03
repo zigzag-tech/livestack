@@ -490,7 +490,10 @@ impl DefGraph {
         };
     }
 
-    pub fn get_inbound_node_sets(&self, spec_node_id: u32) -> Vec<(u32, u32)> {
+
+    //
+
+    pub fn get_inbound_stream_nodes(&self, spec_node_id: u32) -> Vec<(u32, u32)> {
         let spec_node_id = NodeIndex::new(spec_node_id as usize);
         self.graph
             .neighbors_directed(spec_node_id, petgraph::Incoming)
@@ -515,7 +518,7 @@ impl DefGraph {
             .collect()
     }
 
-    pub fn get_outbound_node_sets(&self, spec_node_id: u32) -> Vec<(u32, u32)> {
+    pub fn get_outbound_stream_nodes(&self, spec_node_id: u32) -> Vec<(u32, u32)> {
         let spec_node_id = NodeIndex::new(spec_node_id as usize);
         self.graph
             .neighbors_directed(spec_node_id, petgraph::Outgoing)
