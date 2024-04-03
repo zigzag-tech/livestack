@@ -7,7 +7,7 @@ export function useOutput<O>({
   tag,
   def,
 }: {
-  job: JobInfo;
+  job: JobInfo<any>;
   tag?: string;
   def?: z.ZodType<O>;
 }) {
@@ -24,7 +24,7 @@ export function useStream<O>({
   tag,
   type,
 }: {
-  job: JobInfo;
+  job: JobInfo<any>;
   type: "input" | "output";
   tag?: string;
   def?: z.ZodType<O>;
