@@ -191,13 +191,15 @@ export function conn<
     from: {
       ...from,
       output: (
-        fromOutput || (from.spec.getSingleOutputTag() as K1Out)
+        fromOutput || (from.spec.getSingleTag("output", true) as K1Out)
       ).toString(),
       tagInSpecType: "output",
     },
     to: {
       ...to,
-      input: (toInput || (to.spec.getSingleInputTag() as K2In)).toString(),
+      input: (
+        toInput || (to.spec.getSingleTag("input", true) as K2In)
+      ).toString(),
       tagInSpecType: "input",
     },
     transform:
@@ -448,7 +450,7 @@ export class WorkflowSpec extends JobSpec<
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;
 
-        const { rec: parentRec } = await (
+        const { rec: parentRec } = await(
           await ZZEnv.vaultClient()
         ).db.getParentJobRec({
           projectId: (await this.zzEnvPWithTimeout).projectId,
@@ -562,19 +564,33 @@ export class WorkflowSpec extends JobSpec<
           })
         );
 
+        await output("__zz_workflow_status").emit({
+          __zz_workflow_status: "finished",
+        });
+
         // TODO: wait for all the child jobs to finish
 
         // await Promise.all(
         //   managers.map(async (m) => {
-        //     const out = await m.output("__zz_job_status");
-        //     const r = await out.nextValue();
-        //     return r;
+        //     const outputsToWaitOn: string[] = [];
+
+        //     const maybeSingleOutputTag = m.spec.getSingleTag("output", false);
+        //     if (typeof maybeSingleOutputTag === "string") {
+        //       outputsToWaitOn.push(maybeSingleOutputTag);
+        //     } else {
+        //       // wait on all outputs
+        //       outputsToWaitOn.push(...m.output.tags.map((t) => t.toString()));
+        //     }
+
+        //     return await Promise.all(
+        //       outputsToWaitOn.map(async (outputTag) => {
+        //         for await (const _ of m.output(outputTag)) {
+        //           // do nothing until loop ends
+        //         }
+        //       })
+        //     );
         //   })
         // );
-
-        await output("__zz_workflow_status").emit({
-          __zz_workflow_status: "finished",
-        });
       },
     });
   }
@@ -945,7 +961,7 @@ function _tagObj<P, I, O, IMap, OMap, IKs, OKs>(
       const tm = aliasMaps as TagMaps<I, O, IMap, OMap, IKs | Ks, OKs>;
       if (typeof tagOrMap === "string") {
         if (specAndLabel.spec.inputTags.length === 1) {
-          const tag = specAndLabel.spec.getSingleInputTag();
+          const tag = specAndLabel.spec.getSingleTag("input", true);
           tm.inputTag[tag] = tagOrMap;
         } else if (!specAndLabel.spec.inputTags.includes(tagOrMap as any)) {
           throw new Error(
@@ -966,7 +982,7 @@ function _tagObj<P, I, O, IMap, OMap, IKs, OKs>(
       const tm = aliasMaps as TagMaps<I, O, IMap, OMap, IKs, OKs | Ks>;
       if (typeof tagOrMap === "string") {
         if (specAndLabel.spec.outputTags.length === 1) {
-          const tag = specAndLabel.spec.getSingleOutputTag();
+          const tag = specAndLabel.spec.getSingleTag("output", true);
           tm.outputTag[tag] = tagOrMap;
         } else if (!specAndLabel.spec.outputTags.includes(tagOrMap as any)) {
           throw new Error(
@@ -1021,3 +1037,4 @@ export function resolveUniqueSpec<P, I, O, IMap, OMap>(
     };
   }
 }
+

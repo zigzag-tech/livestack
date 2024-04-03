@@ -189,7 +189,7 @@ export class JobSpec<
     }
 
     if (!outputTag) {
-      outputTag = this.getSingleOutputTag() as K;
+      outputTag = this.getSingleTag("output", true) as K;
     }
 
     this.logger.info(
@@ -230,7 +230,7 @@ export class JobSpec<
   async feedJobInput<K extends keyof IMap>({
     jobId,
     data,
-    tag = this.getSingleInputTag() as K,
+    tag = this.getSingleTag("input", true) as K,
   }: {
     jobId: string;
     data: IMap[K];
@@ -448,7 +448,7 @@ export class JobSpec<
         def = wrapTerminatorAndDataId(
           connectedSpec.output[
             (specTagInfo.tag ||
-              connectedSpec.getSingleOutputTag()) as keyof OMap
+              connectedSpec.getSingleTag("output", true)) as keyof OMap
           ].def
         ) as z.ZodType<WrapTerminatorAndDataId<T>>;
       } else if (type === "in") {
@@ -509,7 +509,7 @@ export class JobSpec<
             def = wrapTerminatorAndDataId(
               connectedSpec.input[
                 (specTagInfo.tag ||
-                  connectedSpec.getSingleInputTag()) as keyof IMap
+                  connectedSpec.getSingleTag("input", true)) as keyof IMap
               ].def
             ) as z.ZodType<WrapTerminatorAndDataId<T>>;
           } else {
@@ -541,7 +541,7 @@ export class JobSpec<
               def = wrapTerminatorAndDataId(
                 responsibleSpec.output[
                   (source.outletNode.tag ||
-                    responsibleSpec.getSingleOutputTag()) as keyof OMap
+                    responsibleSpec.getSingleTag("output", true)) as keyof OMap
                 ].def
               ) as z.ZodType<WrapTerminatorAndDataId<T>>;
             }
@@ -580,7 +580,7 @@ export class JobSpec<
     tag?: K;
     from?: "beginning" | "now";
   }): ByTagOutput<OMap[K]> {
-    const tagToWatch = tag || (this.getSingleOutputTag() as K);
+    const tagToWatch = tag || (this.getSingleTag("output", true) as K);
     const streamP = this.getOutputJobStream({
       jobId,
       tag: tagToWatch,
@@ -727,7 +727,7 @@ export class JobSpec<
     return (() => {
       const genByTagFn = () => {
         return <K extends keyof IMap>(tag?: K) => {
-          const resolvedTag = tag || (that.getSingleInputTag() as K);
+          const resolvedTag = tag || (that.getSingleTag("input", true) as K);
           return {
             feed: async (data: IMap[K]) => {
               const specTagInfo = that.convertWorkflowAliasToSpecTag({
@@ -809,7 +809,7 @@ export class JobSpec<
       byTagFn.tags = this.inputTags;
 
       byTagFn.feed = async (data: IMap[keyof IMap]) => {
-        const tag = that.getSingleInputTag();
+        const tag = that.getSingleTag("input", true);
         if (!tag) {
           throw new Error(
             `Cannot find any input to feed to for spec ${this.name}.`
@@ -819,7 +819,7 @@ export class JobSpec<
       };
 
       byTagFn.terminate = async <K extends keyof IMap>(tag?: K) => {
-        tag = tag || (that.getSingleInputTag() as K);
+        tag = tag || (that.getSingleTag("input", true) as K);
         return await byTagFn(tag).terminate();
       };
       return byTagFn;
@@ -934,7 +934,7 @@ export class JobSpec<
 
     const nextValue = async <K extends keyof OMap>() => {
       if (subscriberByDefaultTag === null) {
-        const tag = this.getSingleOutputTag() as K;
+        const tag = this.getSingleTag("output", true) as K;
         subscriberByDefaultTag = await singletonSubscriberByTag(tag);
       }
       return await subscriberByDefaultTag.nextValue();
@@ -943,7 +943,7 @@ export class JobSpec<
     return (() => {
       const func = (<K extends keyof OMap>(tag?: K) => {
         if (!tag) {
-          tag = this.getSingleOutputTag() as K;
+          tag = this.getSingleTag("output", true) as K;
         }
         return singletonSubscriberByTag(tag);
       }) as JobOutput<OMap>;
@@ -976,13 +976,6 @@ export class JobSpec<
     })();
   };
 
-  public getSingleInputTag() {
-    return this.getSingleTag("input");
-  }
-  public getSingleOutputTag() {
-    return this.getSingleTag("output");
-  }
-
   protected convertSpecTagToWorkflowAlias({
     tag,
   }: {
@@ -1014,9 +1007,19 @@ export class JobSpec<
     };
   }
 
-  private getSingleTag<T extends "input" | "output">(
-    type: T
-  ): T extends "input" ? keyof IMap : keyof OMap {
+  public getSingleTag<
+    T extends "input" | "output",
+    ThrowErr extends true | false
+  >(
+    type: T,
+    throwError: ThrowErr
+  ):
+    | (T extends "input" ? keyof IMap : keyof OMap)
+    | (ThrowErr extends true
+        ? never
+        : {
+            error: "cannot-find-tag" | "multiple-tags-found";
+          }) {
     // naive implementation: find spec node with only one input
     // or output which is not connected to another spec, and return its tag
     const defG = this.getDefGraph();
@@ -1033,35 +1036,43 @@ export class JobSpec<
       const specNode = defG.getNodeAttributes(specNodeId) as SpecNode;
       if (type === "input") {
         return {
-          conns: defG.getInboundNodeSets(specNodeId).results.map((s) => ({
-            specName: specNode.specName,
-            uniqueSpecLabel: specNode.uniqueSpecLabel,
-            type: "in" as const,
-            tag: s.inletNode.tag!,
-            inletNodeId: s.inletNode.id,
-            streamNodeId: s.streamNode.id,
-          })),
+          connectedStreamNodes: defG
+            .getInboundStreamNodes(specNodeId)
+            .results.map((s) => ({
+              specName: specNode.specName,
+              uniqueSpecLabel: specNode.uniqueSpecLabel,
+              type: "in" as const,
+              tag: s.inletNode.tag!,
+              inletNodeId: s.inletNode.id,
+              streamNodeId: s.streamNode.id,
+            })),
           specNodeId,
         };
       } else {
         return {
-          conns: defG.getOutboundNodeSets(specNodeId).results.map((s) => ({
-            specName: specNode.specName,
-            uniqueSpecLabel: specNode.uniqueSpecLabel,
-            type: "out" as const,
-            tag: s.outletNode.tag!,
-            outletNodeId: s.outletNode.id,
-            streamNodeId: s.streamNode.id,
-          })),
+          connectedStreamNodes: defG
+            .getOutboundStreamNodes(specNodeId)
+            .results.map((s) => ({
+              specName: specNode.specName,
+              uniqueSpecLabel: specNode.uniqueSpecLabel,
+              type: "out" as const,
+              tag: s.outletNode.tag!,
+              outletNodeId: s.outletNode.id,
+              streamNodeId: s.streamNode.id,
+            })),
           specNodeId,
         };
       }
     });
 
-    const pass1 = pass0.filter(({ conns }) => conns.length === 1);
+    const pass1 = pass0.filter(
+      ({ connectedStreamNodes }) =>
+        connectedStreamNodes.length === 1 ||
+        connectedStreamNodes.some((c) => c.tag === "default")
+    );
     const pass2 = pass1
-      .filter(({ conns }) => {
-        const conn = conns[0];
+      .filter(({ connectedStreamNodes }) => {
+        const conn = connectedStreamNodes[0];
         if (type === "input") {
           const { source } = getNodesConnectedToStream(defG, conn.streamNodeId);
           return !source;
@@ -1075,13 +1086,14 @@ export class JobSpec<
       })
       .map((qualified) => ({
         ...qualified,
-        conns: qualified.conns.map((c) => ({
+        connectedStreamNodes: qualified.connectedStreamNodes.map((c) => ({
           ...c,
           alias: this.convertSpecTagToWorkflowAlias(c),
         })),
       }));
     const qualified = pass2;
     if (qualified.length === 0) {
+      // if (throwError) {
       throw new Error(
         `Cannot identify a single unambiguous ${type} for spec "${
           this.name
@@ -1093,19 +1105,32 @@ export class JobSpec<
           .map((s) => `"${s.toString()}"`)
           .join(", ")}]}`
       );
+      // } else {
+      //   return { error: "cannot-find-tag" } as ThrowErr extends true
+      //     ? never
+      //     : { error: "cannot-find-tag" };
+      // }
     } else if (qualified.length > 1) {
+      // if (throwError) {
       throw new Error(
         `Ambiguous ${type} for spec "${this.name}"; found more than two child specs with a single ${type}. \nPlease specify which one to use with "${type}(tagName)".`
       );
+      // } else {
+      //   return { error: "multiple-tags-found" } as ThrowErr extends true
+      //     ? never
+      //     : { error: "multiple-tags-found" };
+      // }
     } else {
-      const qualifiedC = qualified[0].conns[0];
+      const qualifiedC =
+        qualified[0].connectedStreamNodes.length === 1
+          ? qualified[0].connectedStreamNodes[0]
+          : qualified[0].connectedStreamNodes.find((c) => c.tag === "default")!;
       if (!qualifiedC.alias) {
         // the user didn't give a public tag; auto-register
       }
       const t =
-        (qualified[0].conns[0].alias as T extends "input"
-          ? keyof IMap
-          : keyof OMap) || null;
+        (qualifiedC.alias as T extends "input" ? keyof IMap : keyof OMap) ||
+        null;
 
       if (!t) {
         throw new Error(

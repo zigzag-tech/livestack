@@ -253,7 +253,7 @@ export class ZZJob<
 
     const emitOutput = async <K extends keyof OMap>(
       o: OMap[K],
-      tag = this.spec.getSingleOutputTag() as K
+      tag = this.spec.getSingleTag("output", true) as K
     ) => {
       // this.logger.info(
       //   `Emitting output: ${this.jobId}, ${this.def.name} ` +
@@ -280,7 +280,7 @@ export class ZZJob<
         emit: (o: OMap[K]) => emitOutput(o, tag),
         async getStreamId() {
           if (!tag) {
-            tag = that.spec.getSingleOutputTag() as K;
+            tag = that.spec.getSingleTag("output", true) as K;
           }
           const s = await that.spec.getOutputJobStream({
             jobId: that.jobId,
@@ -300,11 +300,11 @@ export class ZZJob<
         },
       });
       func.emit = (o: OMap[keyof OMap]) => {
-        const tag = this.spec.getSingleOutputTag();
+        const tag = this.spec.getSingleTag("output", true);
         return emitOutput(o, tag as keyof OMap);
       };
       func.getStreamId = async () => {
-        const tag = this.spec.getSingleOutputTag();
+        const tag = this.spec.getSingleTag("output", true);
 
         const s = await that.spec.getOutputJobStream({
           jobId: that.jobId,
@@ -334,13 +334,13 @@ export class ZZJob<
       nextValue,
       observable() {
         if (!tag) {
-          tag = that.spec.getSingleInputTag() as K;
+          tag = that.spec.getSingleTag("input", true) as K;
         }
         return that._ensureInputStreamFn(tag).trackedObservable;
       },
       async *[Symbol.asyncIterator]() {
         if (!tag) {
-          tag = that.spec.getSingleInputTag() as K;
+          tag = that.spec.getSingleTag("input", true) as K;
         }
         while (true) {
           const input = await nextValue();
@@ -397,7 +397,7 @@ export class ZZJob<
       throw new Error("inputDefs is empty for spec " + this.spec.name);
     }
     if (this.spec.isInputSingle) {
-      tag = this.spec.getSingleInputTag() as K;
+      tag = this.spec.getSingleTag("input", true) as K;
     } else {
       if (!tag) {
         throw new Error(
@@ -536,7 +536,6 @@ export class ZZJob<
 
       // wait as long as there are still subscribers
       await unsubs;
-
       if (processedR && this.spec.isOutputSingle) {
         await this.output.emit(processedR);
       }
@@ -580,7 +579,7 @@ export class ZZJob<
     // });
     const outputStream = await this.spec.getOutputJobStream({
       jobId: this.jobId,
-      tag: tag || this.spec.getSingleOutputTag(),
+      tag: tag || this.spec.getSingleTag("output", true),
     });
     await outputStream.pub({
       message: {

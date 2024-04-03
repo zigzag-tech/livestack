@@ -297,16 +297,16 @@ class DefGraph {
     * @param {number} node_id
     * @returns {GetInboundNodeSetsResult}
     */
-    getInboundNodeSets(node_id) {
-        const ret = wasm.defgraph_getInboundNodeSets(this.__wbg_ptr, node_id);
+    getInboundStreamNodes(node_id) {
+        const ret = wasm.defgraph_getInboundStreamNodes(this.__wbg_ptr, node_id);
         return takeObject(ret);
     }
     /**
     * @param {number} node_id
     * @returns {GetOutboundNodeSetsResult}
     */
-    getOutboundNodeSets(node_id) {
-        const ret = wasm.defgraph_getOutboundNodeSets(this.__wbg_ptr, node_id);
+    getOutboundStreamNodes(node_id) {
+        const ret = wasm.defgraph_getOutboundStreamNodes(this.__wbg_ptr, node_id);
         return takeObject(ret);
     }
     /**
