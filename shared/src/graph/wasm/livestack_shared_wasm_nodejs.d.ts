@@ -150,12 +150,12 @@ export class DefGraph {
 * @param {number} node_id
 * @returns {GetInboundNodeSetsResult}
 */
-  getInboundNodeSets(node_id: number): GetInboundNodeSetsResult;
+  getInboundStreamNodes(node_id: number): GetInboundNodeSetsResult;
 /**
 * @param {number} node_id
 * @returns {GetOutboundNodeSetsResult}
 */
-  getOutboundNodeSets(node_id: number): GetOutboundNodeSetsResult;
+  getOutboundStreamNodes(node_id: number): GetOutboundNodeSetsResult;
 /**
 * @returns {Uint32Array}
 */

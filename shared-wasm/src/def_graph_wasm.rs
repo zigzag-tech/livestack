@@ -262,10 +262,10 @@ impl DefGraph {
         }
     }
 
-    #[wasm_bindgen(js_name = getInboundNodeSets)]
-    pub fn get_inbound_node_sets(&self, node_id: u32) -> GetInboundNodeSetsResult {
+    #[wasm_bindgen(js_name = getInboundStreamNodes)]
+    pub fn get_inbound_stream_nodes(&self, node_id: u32) -> GetInboundNodeSetsResult {
         let mut results = vec![];
-        let inbound_node_sets = self.def_graph.get_inbound_node_sets(node_id);
+        let inbound_node_sets = self.def_graph.get_inbound_stream_nodes(node_id);
         for (inlet_node_id, stream_node_id) in inbound_node_sets {
             let inlet_node = self
                 .def_graph
@@ -306,10 +306,10 @@ impl DefGraph {
         return GetInboundNodeSetsResult { results: results };
     }
 
-    #[wasm_bindgen(js_name = getOutboundNodeSets)]
-    pub fn get_outbound_node_sets(&self, node_id: u32) -> GetOutboundNodeSetsResult {
+    #[wasm_bindgen(js_name = getOutboundStreamNodes)]
+    pub fn get_outbound_stream_nodes(&self, node_id: u32) -> GetOutboundNodeSetsResult {
         let mut results = vec![];
-        let outbound_node_sets = self.def_graph.get_outbound_node_sets(node_id);
+        let outbound_node_sets = self.def_graph.get_outbound_stream_nodes(node_id);
         for (outlet_node_id, stream_node_id) in outbound_node_sets {
             let outlet_node = self
                 .def_graph

@@ -150,12 +150,12 @@ export class DefGraph {
 * @param {number} node_id
 * @returns {GetInboundNodeSetsResult}
 */
-  getInboundNodeSets(node_id: number): GetInboundNodeSetsResult;
+  getInboundStreamNodes(node_id: number): GetInboundNodeSetsResult;
 /**
 * @param {number} node_id
 * @returns {GetOutboundNodeSetsResult}
 */
-  getOutboundNodeSets(node_id: number): GetOutboundNodeSetsResult;
+  getOutboundStreamNodes(node_id: number): GetOutboundNodeSetsResult;
 /**
 * @returns {Uint32Array}
 */
@@ -219,8 +219,8 @@ export interface InitOutput {
   readonly defgraph_getSpecNodeIds: (a: number, b: number) => void;
   readonly defgraph_getRootSpecNodeId: (a: number) => number;
   readonly defgraph_getNodeAttributes: (a: number, b: number) => number;
-  readonly defgraph_getInboundNodeSets: (a: number, b: number) => number;
-  readonly defgraph_getOutboundNodeSets: (a: number, b: number) => number;
+  readonly defgraph_getInboundStreamNodes: (a: number, b: number) => number;
+  readonly defgraph_getOutboundStreamNodes: (a: number, b: number) => number;
   readonly defgraph_nodes: (a: number, b: number) => void;
   readonly defgraph_inboundNeighbors: (a: number, b: number, c: number) => void;
   readonly defgraph_outboundNeighbors: (a: number, b: number, c: number) => void;

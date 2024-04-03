@@ -8,7 +8,7 @@ mod tests {
     use petgraph::graph::NodeIndex;
 
     #[test]
-    fn test_get_inbound_node_sets() {
+    fn test_get_inbound_stream_nodes() {
         let root_spec_name = "RootSpec".to_string();
         let input_tags = vec![];
         let output_tags = vec![];
@@ -45,7 +45,7 @@ mod tests {
             })
             .expect("Spec node should exist");
 
-        let inbound_node_sets = graph.get_inbound_node_sets(spec_node_id);
+        let inbound_node_sets = graph.get_inbound_stream_nodes(spec_node_id);
 
         // Ensure that the correct inlet and stream nodes are included
         assert_eq!(inbound_node_sets.len(), 2);
@@ -322,7 +322,7 @@ mod tests {
         assert!(!filtered_inbound_neighbors.contains(&other_stream_node_id));
     }
     #[test]
-    fn test_get_outbound_node_sets() {
+    fn test_get_outbound_stream_nodes() {
         let root_spec_name = "RootSpec".to_string();
         let input_tags = vec![];
         let output_tags = vec![];
@@ -346,7 +346,7 @@ mod tests {
             })
             .expect("Spec node should exist");
 
-        let outbound_node_sets = graph.get_outbound_node_sets(spec_node_id);
+        let outbound_node_sets = graph.get_outbound_stream_nodes(spec_node_id);
 
         // Ensure that the correct outlet and stream nodes are included
         assert_eq!(outbound_node_sets.len(), 1);
