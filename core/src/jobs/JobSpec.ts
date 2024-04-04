@@ -1227,6 +1227,8 @@ export class JobManager<P, I, O, IMap, OMap> {
   public readonly graph: InstantiatedGraph;
   public readonly spec: JobSpec<P, I, O, IMap, OMap>;
 
+  private _finishedPromise: Promise<void> | null = null;
+
   constructor({
     spec,
     jobId,
@@ -1246,6 +1248,7 @@ export class JobManager<P, I, O, IMap, OMap> {
     this.output = output;
     this.jobId = jobId;
     this.spec = spec;
+    // this._finishedPromise = this._genWaitUntilFinishPromise();
   }
 
   submitAndWait: <KI extends keyof IMap, KO extends keyof OMap>(p: {
@@ -1256,6 +1259,42 @@ export class JobManager<P, I, O, IMap, OMap> {
     const { input: inputData, inputTag, outputTag } = p;
     await this.input.feed(inputData, inputTag);
     return await this.output(outputTag).nextValue();
+  };
+
+  private _genWaitUntilFinishPromise = async () => {
+    const outputsToWaitOn: (keyof OMap)[] = [];
+
+    const maybeSingleOutputTag = this.spec.getSingleTag("output", false);
+    if (typeof maybeSingleOutputTag === "string") {
+      outputsToWaitOn.push(maybeSingleOutputTag);
+    } else {
+      // wait on all outputs
+      outputsToWaitOn.push(
+        ...this.output.tags.map((t) => t.toString() as keyof OMap)
+      );
+    }
+    // console.log(
+    //   "JobManager: ",
+    //   this.jobId,
+    //   "waiting on outputs",
+    //   outputsToWaitOn
+    // );
+    await Promise.all(
+      outputsToWaitOn.map(async (outputTag) => {
+        for await (const _ of this.output(outputTag)) {
+          // do nothing until loop ends
+        }
+      })
+    );
+
+    // console.log("JobManager: Job finished", this.jobId);
+  };
+
+  public waitUntilFinish = () => {
+    if (!this._finishedPromise) {
+      this._finishedPromise = this._genWaitUntilFinishPromise();
+    }
+    return this._finishedPromise;
   };
 }
 export interface JobInput<IMap> {
