@@ -570,11 +570,11 @@ export class WorkflowSpec extends JobSpec<
 
         // TODO: wait for all the child jobs to finish
 
-        await Promise.all(
-          managers.map((m) => {
-            return m.waitUntilFinish();
-          })
-        );
+        // await Promise.all(
+        //   managers.map((m) => {
+        //     return m.waitUntilFinish();
+        //   })
+        // );
       },
     });
   }
