@@ -238,13 +238,16 @@ export class JobSpec<
   async feedJobInput<K extends keyof IMap>({
     jobId,
     data,
-    tag = this.getSingleTag("input", true) as K | InferDefaultOrSingleKey<IMap>,
+    tag,
   }: {
     jobId: string;
     data: IMap[K extends never ? InferDefaultOrSingleKey<IMap> : K];
     tag?: K;
   }) {
-    return this._deriveInputsForJob(jobId)(tag).feed(data);
+    const resolvedTag =
+      tag ||
+      (this.getSingleTag("input", true) as K | InferDefaultOrSingleKey<IMap>);
+    return this._deriveInputsForJob(jobId)(resolvedTag).feed(data as any);
   }
 
   private _sendFnsByJobIdAndKey: {
