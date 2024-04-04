@@ -76,34 +76,33 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       project_id: projectId,
       stream_id: streamId,
     });
-    await dbConn.transaction(async (trx) => {
-      const data = JSON.parse(dataStr);
-      await trx<
-        ZZDatapointRec<
-          | any
-          | {
-              [PRIMTIVE_KEY]: any;
-            }
-          | {
-              [ARRAY_KEY]: any;
-            }
-        >
-      >("zz_datapoints")
-        .insert({
-          project_id: projectId,
-          stream_id: streamId,
-          datapoint_id: datapointId,
-          data: handlePrimitiveOrArray(data),
-          job_id: jobInfo?.jobId || null,
-          job_output_key: jobInfo?.outputTag || null,
-          connector_type: jobInfo ? "out" : null,
-          time_created: new Date(),
-        })
-        .onConflict(["project_id", "stream_id", "datapoint_id"])
-        .ignore();
+    const data = JSON.parse(dataStr);
+    await dbConn<
+      ZZDatapointRec<
+        | any
+        | {
+            [PRIMTIVE_KEY]: any;
+          }
+        | {
+            [ARRAY_KEY]: any;
+          }
+      >
+    >("zz_datapoints")
+      .insert({
+        project_id: projectId,
+        stream_id: streamId,
+        datapoint_id: datapointId,
+        data: handlePrimitiveOrArray(data),
+        job_id: jobInfo?.jobId || null,
+        job_output_key: jobInfo?.outputTag || null,
+        connector_type: jobInfo ? "out" : null,
+        time_created: new Date(),
+      })
+      .onConflict(["project_id", "stream_id", "datapoint_id"])
+      .ignore();
 
       for (const parentDatapoint of parentDatapoints) {
-        await ensureDatapointRelationRec(trx, {
+        await ensureDatapointRelationRec(dbConn, {
           project_id: projectId,
           source_datapoint_id: parentDatapoint.datapointId,
           source_stream_id: parentDatapoint.streamId,
@@ -111,7 +110,6 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
           target_stream_id: streamId,
         });
       }
-    });
 
     return { datapointId };
   };
