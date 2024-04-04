@@ -570,27 +570,11 @@ export class WorkflowSpec extends JobSpec<
 
         // TODO: wait for all the child jobs to finish
 
-        // await Promise.all(
-        //   managers.map(async (m) => {
-        //     const outputsToWaitOn: string[] = [];
-
-        //     const maybeSingleOutputTag = m.spec.getSingleTag("output", false);
-        //     if (typeof maybeSingleOutputTag === "string") {
-        //       outputsToWaitOn.push(maybeSingleOutputTag);
-        //     } else {
-        //       // wait on all outputs
-        //       outputsToWaitOn.push(...m.output.tags.map((t) => t.toString()));
-        //     }
-
-        //     return await Promise.all(
-        //       outputsToWaitOn.map(async (outputTag) => {
-        //         for await (const _ of m.output(outputTag)) {
-        //           // do nothing until loop ends
-        //         }
-        //       })
-        //     );
-        //   })
-        // );
+        await Promise.all(
+          managers.map((m) => {
+            return m.waitUntilFinish();
+          })
+        );
       },
     });
   }
