@@ -313,7 +313,10 @@ export class ZZJob<
           ) => emitOutput(o as OMap[any], resolvedTag),
           async getStreamId() {
             if (!resolvedTag) {
-              resolvedTag = that.spec.getSingleTag("output", true) as K;
+              resolvedTag = that.spec.getSingleTag(
+                "output",
+                true
+              ) as InferDefaultOrSingleKey<OMap>;
             }
             const s = await that.spec.getOutputJobStream({
               jobId: that.jobId,
@@ -363,7 +366,10 @@ export class ZZJob<
     let resolvedTag: K | InferDefaultOrSingleKey<IMap> | undefined = _tag;
     const nextValue = async () => {
       if (!resolvedTag) {
-        resolvedTag = that.spec.getSingleTag("input", true) as K;
+        resolvedTag = that.spec.getSingleTag(
+          "input",
+          true
+        ) as InferDefaultOrSingleKey<IMap>;
       }
       const r = await (
         await that._ensureInputStreamFn(resolvedTag)
@@ -374,13 +380,19 @@ export class ZZJob<
       nextValue,
       observable() {
         if (!resolvedTag) {
-          resolvedTag = that.spec.getSingleTag("input", true) as K;
+          resolvedTag = that.spec.getSingleTag(
+            "input",
+            true
+          ) as InferDefaultOrSingleKey<IMap>;
         }
         return that._ensureInputStreamFn(resolvedTag as K).trackedObservable;
       },
       async *[Symbol.asyncIterator]() {
         if (!resolvedTag) {
-          resolvedTag = that.spec.getSingleTag("input", true) as K;
+          resolvedTag = that.spec.getSingleTag(
+            "input",
+            true
+          ) as InferDefaultOrSingleKey<IMap>;
         }
         while (true) {
           const input = await nextValue();
@@ -438,7 +450,10 @@ export class ZZJob<
       throw new Error("inputDefs is empty for spec " + this.spec.name);
     }
     if (this.spec.isInputSingle) {
-      resolvedTag = this.spec.getSingleTag("input", true) as K;
+      resolvedTag = this.spec.getSingleTag(
+        "input",
+        true
+      ) as InferDefaultOrSingleKey<IMap>;
     } else {
       if (!resolvedTag) {
         throw new Error(
