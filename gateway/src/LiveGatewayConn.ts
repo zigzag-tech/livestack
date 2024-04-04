@@ -96,7 +96,11 @@ export class LiveGatewayConn {
     };
     this.socket.on(CMD_FEED, feedListener);
     const unbindListener = async ({ jobId }: UnbindParams) => {
-      const input = this.jobFnsById[jobId].input;
+      const input = this.jobFnsById[jobId]?.input;
+      if (!input) {
+        console.error("No input found for job ", jobId);
+        return;
+      }
 
       for (const key of input.tags) {
         try {
