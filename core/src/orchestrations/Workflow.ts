@@ -9,7 +9,7 @@ import { AliasNode } from "@livestack/shared/src/graph/DefGraph";
 import { z } from "zod";
 import { ZZEnv } from "../jobs/ZZEnv";
 import _ from "lodash";
-import { ZZWorkerDef } from "../jobs/ZZWorker";
+import { InferDefaultOrSingleKey, ZZWorkerDef } from "../jobs/ZZWorker";
 import {
   JobNode,
   InstantiatedGraph,
@@ -166,8 +166,8 @@ export function conn<
   O2,
   IMap2,
   OMap2,
-  K1Out extends keyof OMap1,
-  K2In extends keyof IMap2
+  K1Out extends keyof OMap1 = InferDefaultOrSingleKey<OMap1>,
+  K2In extends keyof IMap2 = InferDefaultOrSingleKey<IMap2>
 >(
   p: Connection<P1, I1, O1, IMap1, OMap1, P2, I2, O2, IMap2, OMap2, K1Out, K2In>
 ): CanonicalConnection<P1, I1, O1, IMap1, OMap1, P2, I2, O2, IMap2, OMap2> {
