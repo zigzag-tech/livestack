@@ -157,7 +157,6 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         request;
       const datapointId = v4();
       const channelId = `${projectId}/${streamId}`;
-      const pubClient = await createClient().connect();
       // console.debug("pubbing", "to", channelId, "data", dataStr);
       // Publish the message to the Redis stream
 
@@ -207,33 +206,38 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         }
       }
 
-      const [_, chunkId] = await Promise.all([
-        addDatapoint({
-          projectId,
-          streamId,
-          datapointId,
-          jobInfo,
-          dataStr,
-          parentDatapoints,
-        }),
-        (async () => {
-          const chunkId: string = await pubClient.sendCommand([
-            "XADD",
-            channelId,
-            "MAXLEN",
-            "~",
-            "1000",
-            "*",
-            "datapointId",
-            datapointId,
-            "data",
-            dataStr,
-          ]);
-          await pubClient.disconnect();
-          return chunkId;
-        })(),
-      ]);
+      await addDatapoint({
+        projectId,
+        streamId,
+        datapointId,
+        jobInfo,
+        dataStr,
+        parentDatapoints,
+      });
 
+      let chunkId: string;
+      const pubClient = await createClient().connect();
+
+      try {
+        chunkId = await pubClient.sendCommand([
+          "XADD",
+          channelId,
+          "MAXLEN",
+          "~",
+          "1000",
+          "*",
+          "datapointId",
+          datapointId,
+          "data",
+          dataStr,
+        ]);
+      } catch (e) {
+        throw e;
+      } finally {
+        await pubClient.disconnect();
+      }
+      
+    
       if (!res.valid) {
         await addValidationResultRec({
           projectId,
