@@ -6,7 +6,7 @@ import {
 import { SubType } from "@livestack/vault-interface/src/generated/stream";
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../jobs/pubsub";
-import { DataStream, WithTimestamp, customParse } from "./DataStream";
+import { DataStream, WithTimestamp } from "./DataStream";
 
 export class DataStreamSubscriber<T extends object> {
   private zzEnvP: Promise<ZZEnv>;
@@ -74,7 +74,7 @@ export class DataStreamSubscriber<T extends object> {
         //   this.stream.uniqueName,
         //   message
         // );
-        const data: T = customParse(message.dataStr);
+        const data: T = JSON.parse(message.dataStr);
         let restored = data;
         const { largeFilesToRestore, newObj } =
           identifyLargeFilesToRestore(data);
