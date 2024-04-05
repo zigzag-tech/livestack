@@ -1,10 +1,7 @@
 import type { ZodType } from "zod";
-import chalk, { blueBright, green, inverse, red, yellow } from "ansis";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
 import { ZZEnv, LIVESTACK_DASHBOARD_URL_ROOT } from "../jobs/ZZEnv";
-// import { createHash } from "crypto";
 import path from "path";
-import { v4 } from "uuid";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   identifyLargeFilesToRestore,
@@ -16,17 +13,9 @@ import { getLogger } from "../utils/createWorkerLogger";
 export class DataStream<T extends object> {
   public readonly def: ZodType<T> | null;
   public readonly uniqueName: string;
-  // public readonly hash: string;
   public readonly zzEnvP: Promise<ZZEnv>;
   baseWorkingRelativePathP: Promise<string>;
 
-  // public get zzEnv() {
-  //   const resolved = this._zzEnv || ZZEnv.global();
-  //   if (!resolved) {
-  //     throw new Error("zzEnv not set.");
-  //   }
-  //   return resolved;
-  // }
   private logger: ReturnType<typeof getLogger>;
   protected static globalRegistry: { [key: string]: DataStream<any> } = {};
   public static async getOrCreate<T extends object>({
@@ -105,13 +94,7 @@ export class DataStream<T extends object> {
       this.zzEnvP = ZZEnv.globalP();
     }
 
-    // this.hash = hashDef(this.def);
     this.logger = logger;
-    // console.debug(
-    //   "DataStream created",
-    //   this.uniqueName,
-    //   JSON.stringify(zodToJsonSchema(this.def), null, 2)
-    // );
     this.baseWorkingRelativePathP = this.zzEnvP.then((zzEnv) =>
       path.join(zzEnv.projectId, this.uniqueName)
     );
@@ -128,7 +111,7 @@ export class DataStream<T extends object> {
     if (null_response) {
       return null;
     } else if (datapoint) {
-      const data = customParse(datapoint.dataStr);
+      const data = JSON.parse(datapoint.dataStr);
 
       let restored = data;
       const { largeFilesToRestore, newObj } = identifyLargeFilesToRestore(data);
@@ -255,9 +238,6 @@ export class DataStream<T extends object> {
         console.error("Error message: ", errorMessage);
 
         const { userId } = await(await this.zzEnvP).getUserCredentials();
-        // const inspectMessage = ` 🔍🔴 Inspect error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
-        //   (await this.zzEnvP).projectId
-        // }/datapoints/${datapointId}`;
         const inspectMessage = ` 🔍🔴 Inspect error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
           (await this.zzEnvP).projectId
         }`;
@@ -302,31 +282,3 @@ export type WithTimestamp<T extends object> = T & {
   chunkId: string;
   datapointId: string;
 };
-
-// TODO: make internal
-
-function customStringify(obj: any): string {
-  function replacer(key: string, value: any): any {
-    if (value instanceof Buffer) {
-      return { type: "Buffer", data: value.toString("base64") };
-    }
-    return value;
-  }
-  return JSON.stringify(obj, replacer);
-}
-
-export function customParse(json: string): any {
-  function reviver(key: string, value: any): any {
-    if (value && value.type === "Buffer") {
-      return Buffer.from(value.data, "base64");
-    } else {
-      return value;
-    }
-  }
-  return JSON.parse(json, reviver);
-}
-
-// export function hashDef(def: ZodType<unknown>) {
-//   const str = JSON.stringify(zodToJsonSchema(def));
-//   return createHash("sha256").update(str).digest("hex");
-// }
