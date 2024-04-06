@@ -1,14 +1,11 @@
+import { GenerateResponse } from "ollama";
 export async function wrapWithTransientStdout(
-  response: AsyncIterable<{
-    message: { content: string };
-  }>
+  response: AsyncGenerator<GenerateResponse>
 ) {
   let message = "";
   for await (const part of response) {
-    process.stdout.write(
-      part.message.content.replace("\n", " ").replace("\r", " ")
-    );
-    message += part.message.content;
+    process.stdout.write(part.response.replace("\n", " ").replace("\r", " "));
+    message += part.response;
   }
   // erase all of what was written
   // Move the cursor to the beginning of the line
