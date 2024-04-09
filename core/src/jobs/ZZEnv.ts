@@ -7,11 +7,9 @@ import { Stream } from "stream";
 import chalk, { blueBright, green, inverse, red, yellow } from "ansis";
 import fs from "fs";
 import { z } from "zod";
-import { v4 } from "uuid";
 import { sleep } from "../utils/sleep";
 import limit from "p-limit";
 import {
-  CLITempTokenStatus,
   ResolvedCliTokenStatusWithUserToken,
   WaitingTorResolveCliTokenStatus,
 } from "../onboarding/CliOnboarding";
@@ -24,7 +22,10 @@ export const LIVESTACK_DASHBOARD_URL_ROOT =
   process.env.LIVESTACK_DASHBOARD_URL_ROOT || "https://live.dev";
 interface EnvParams {
   readonly storageProvider?: IStorageProvider;
-  readonly projectId: string;
+  // two types of project IDs are supported:
+  // 1. "@<userId>/<projectId>"
+  // 2. "<projectId>", in which case the userId is assumed to be the current user's
+  readonly projectId: string | `@${string}/${string}`;
 }
 
 export class ZZEnv implements EnvParams {
