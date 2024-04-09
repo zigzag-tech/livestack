@@ -218,27 +218,34 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       let chunkId: string;
       const pubClient = await createClient().connect();
 
-      try {
-        chunkId = await pubClient.sendCommand([
-          "XADD",
-          channelId,
-          "MAXLEN",
-          "~",
-          "1000",
-          "*",
-          "datapointId",
-          datapointId,
-          "data",
-          dataStr,
-        ]);
-      } catch (e) {
-        throw e;
-      } finally {
-        await pubClient.disconnect();
+      if (res.valid) {
+        try {
+          chunkId = await pubClient.sendCommand([
+            "XADD",
+            channelId,
+            "MAXLEN",
+            "~",
+            "1000",
+            "*",
+            "datapointId",
+            datapointId,
+            "data",
+            dataStr,
+          ]);
+        } catch (e) {
+          throw e;
+        } finally {
+          await pubClient.disconnect();
+        }
+        return {
+          success: {
+            chunkId,
+            datapointId,
+          },
+        };
       }
-      
-    
-      if (!res.valid) {
+      // not valid
+      else {
         await addValidationResultRec({
           projectId,
           streamId,
@@ -252,13 +259,6 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
           },
         };
       }
-
-      return {
-        success: {
-          chunkId,
-          datapointId,
-        },
-      };
     },
     sub(
       request: SubRequest,
