@@ -13,7 +13,7 @@ export interface InitInstanceResponse {
 }
 
 export interface QueueJob {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   jobId: string;
   contextId?: string | undefined;
@@ -21,30 +21,30 @@ export interface QueueJob {
 }
 
 export interface SignUp {
-  projectId: string;
+  projectUuid: string;
   specName: string;
 }
 
 export interface WorkerStopped {
-  projectId: string;
+  projectUuid: string;
   specName: string;
 }
 
 export interface ProgressUpdate {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   jobId: string;
   progress: number;
 }
 
 export interface JobCompleted {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   jobId: string;
 }
 
 export interface JobFailed {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   jobId: string;
   errorStr: string;
@@ -165,13 +165,13 @@ export const InitInstanceResponse = {
 };
 
 function createBaseQueueJob(): QueueJob {
-  return { projectId: "", specName: "", jobId: "", contextId: undefined, jobOptionsStr: "" };
+  return { projectUuid: "", specName: "", jobId: "", contextId: undefined, jobOptionsStr: "" };
 }
 
 export const QueueJob = {
   encode(message: QueueJob, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -200,7 +200,7 @@ export const QueueJob = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -241,7 +241,7 @@ export const QueueJob = {
 
   fromJSON(object: any): QueueJob {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
       contextId: isSet(object.contextId) ? globalThis.String(object.contextId) : undefined,
@@ -251,8 +251,8 @@ export const QueueJob = {
 
   toJSON(message: QueueJob): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -274,7 +274,7 @@ export const QueueJob = {
   },
   fromPartial(object: DeepPartial<QueueJob>): QueueJob {
     const message = createBaseQueueJob();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
     message.contextId = object.contextId ?? undefined;
@@ -284,13 +284,13 @@ export const QueueJob = {
 };
 
 function createBaseSignUp(): SignUp {
-  return { projectId: "", specName: "" };
+  return { projectUuid: "", specName: "" };
 }
 
 export const SignUp = {
   encode(message: SignUp, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -310,7 +310,7 @@ export const SignUp = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -330,15 +330,15 @@ export const SignUp = {
 
   fromJSON(object: any): SignUp {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
     };
   },
 
   toJSON(message: SignUp): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -351,20 +351,20 @@ export const SignUp = {
   },
   fromPartial(object: DeepPartial<SignUp>): SignUp {
     const message = createBaseSignUp();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     return message;
   },
 };
 
 function createBaseWorkerStopped(): WorkerStopped {
-  return { projectId: "", specName: "" };
+  return { projectUuid: "", specName: "" };
 }
 
 export const WorkerStopped = {
   encode(message: WorkerStopped, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -384,7 +384,7 @@ export const WorkerStopped = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -404,15 +404,15 @@ export const WorkerStopped = {
 
   fromJSON(object: any): WorkerStopped {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
     };
   },
 
   toJSON(message: WorkerStopped): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -425,20 +425,20 @@ export const WorkerStopped = {
   },
   fromPartial(object: DeepPartial<WorkerStopped>): WorkerStopped {
     const message = createBaseWorkerStopped();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     return message;
   },
 };
 
 function createBaseProgressUpdate(): ProgressUpdate {
-  return { projectId: "", specName: "", jobId: "", progress: 0 };
+  return { projectUuid: "", specName: "", jobId: "", progress: 0 };
 }
 
 export const ProgressUpdate = {
   encode(message: ProgressUpdate, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -464,7 +464,7 @@ export const ProgressUpdate = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -498,7 +498,7 @@ export const ProgressUpdate = {
 
   fromJSON(object: any): ProgressUpdate {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
       progress: isSet(object.progress) ? globalThis.Number(object.progress) : 0,
@@ -507,8 +507,8 @@ export const ProgressUpdate = {
 
   toJSON(message: ProgressUpdate): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -527,7 +527,7 @@ export const ProgressUpdate = {
   },
   fromPartial(object: DeepPartial<ProgressUpdate>): ProgressUpdate {
     const message = createBaseProgressUpdate();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
     message.progress = object.progress ?? 0;
@@ -536,13 +536,13 @@ export const ProgressUpdate = {
 };
 
 function createBaseJobCompleted(): JobCompleted {
-  return { projectId: "", specName: "", jobId: "" };
+  return { projectUuid: "", specName: "", jobId: "" };
 }
 
 export const JobCompleted = {
   encode(message: JobCompleted, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -565,7 +565,7 @@ export const JobCompleted = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -592,7 +592,7 @@ export const JobCompleted = {
 
   fromJSON(object: any): JobCompleted {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
     };
@@ -600,8 +600,8 @@ export const JobCompleted = {
 
   toJSON(message: JobCompleted): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -617,7 +617,7 @@ export const JobCompleted = {
   },
   fromPartial(object: DeepPartial<JobCompleted>): JobCompleted {
     const message = createBaseJobCompleted();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
     return message;
@@ -625,13 +625,13 @@ export const JobCompleted = {
 };
 
 function createBaseJobFailed(): JobFailed {
-  return { projectId: "", specName: "", jobId: "", errorStr: "" };
+  return { projectUuid: "", specName: "", jobId: "", errorStr: "" };
 }
 
 export const JobFailed = {
   encode(message: JobFailed, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -657,7 +657,7 @@ export const JobFailed = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -691,7 +691,7 @@ export const JobFailed = {
 
   fromJSON(object: any): JobFailed {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
       errorStr: isSet(object.errorStr) ? globalThis.String(object.errorStr) : "",
@@ -700,8 +700,8 @@ export const JobFailed = {
 
   toJSON(message: JobFailed): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -720,7 +720,7 @@ export const JobFailed = {
   },
   fromPartial(object: DeepPartial<JobFailed>): JobFailed {
     const message = createBaseJobFailed();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
     message.errorStr = object.errorStr ?? "";

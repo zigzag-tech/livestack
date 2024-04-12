@@ -14,7 +14,7 @@ message ReportSpecAvailability {
 }
 
 message FromInstance {
-  string projectId = 1;
+  string projectUuid = 1;
   string instanceId = 2;
   oneof value {
     ReportSpecAvailability reportSpecAvailability = 3;
@@ -22,13 +22,13 @@ message FromInstance {
 }
 
 message Provision {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
   int32 numberOfWorkersNeeded = 3;
 }
 
 message CommandToInstance {
-  string projectId = 1;
+  string projectUuid = 1;
   string instanceId = 2;
   oneof value {
     Provision provision = 3;

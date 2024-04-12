@@ -24,7 +24,7 @@ service StreamService {
 
 
 message EnsureStreamRequest {
-  string project_id = 1;
+  string project_uuid = 1;
   string stream_id = 2;
   optional string json_schema_str = 3;
 }
@@ -41,7 +41,7 @@ message ParentDataPointInfo {
 }
 
 message StreamPubMessage {
-  string projectId = 1;
+  string projectUuid = 1;
   string streamId = 2;
   string dataStr = 3;
   repeated ParentDataPointInfo parentDatapoints = 4;
@@ -71,7 +71,7 @@ enum SubType {
 }
 
 message SubRequest {
-  string projectId = 1;
+  string projectUuid = 1;
   string uniqueName = 2;
   SubType subType = 5;
 }
@@ -84,7 +84,7 @@ message StreamDatapoint {
 }
 
 message ValueByReverseIndexRequest {
-  string projectId = 1;
+  string projectUuid = 1;
   string uniqueName = 2;
   uint64 index = 3;
 }
@@ -97,7 +97,7 @@ message ValueByReverseIndexResponse {
 }
 
 message LastValueRequest {
-  string projectId = 1;
+  string projectUuid = 1;
   string uniqueName = 2;
 }
 

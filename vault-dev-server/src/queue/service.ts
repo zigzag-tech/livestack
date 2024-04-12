@@ -15,7 +15,7 @@ import { escapeColon, getCapacityManager } from "../capacity/manager";
 const _rawQueueBySpecName = new Map<string, Queue>();
 
 class QueueServiceByProject implements QueueServiceImplementation {
-  //   projectId: string;
+  //   projectUuid: string;
   authMiddleware?: (context: CallContext) => Promise<void>;
   onJobAssignedToWorker?: (job: QueueJob, ctx: CallContext) => Promise<void>;
   constructor(p?: {
@@ -23,7 +23,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     onJobAssignedToWorker?: (job: QueueJob, ctx: CallContext) => Promise<void>;
   }) {
     const { authMiddleware } = p || {};
-    // this.projectId = projectId;
+    // this.projectUuid = projectUuid;
     this.authMiddleware = authMiddleware;
     this.onJobAssignedToWorker = p?.onJobAssignedToWorker;
   }
@@ -38,8 +38,8 @@ class QueueServiceByProject implements QueueServiceImplementation {
   }
 
   async addJob(job: QueueJob, context: CallContext) {
-    // if (job.projectId !== this.projectId) {
-    //   throw new Error("Invalid projectId " + job.projectId);
+    // if (job.projectUuid !== this.projectUuid) {
+    //   throw new Error("Invalid projectUuid " + job.projectUuid);
     // }
 
     if (this.authMiddleware) {
@@ -51,7 +51,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
 
     // get current capacity
     const client = await this.redisClientP;
-    const projectIdN = escapeColon(job.projectId);
+    const projectUuidN = escapeColon(job.projectUuid);
     const specNameN = escapeColon(job.specName);
 
     // const workers = await queue.getWorkers();
@@ -84,7 +84,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     //     await client.sendCommand([
     //       "HGET",
     //       `zz_capacity`,
-    //       `${projectIdN}:${specNameN}`,
+    //       `${projectUuidN}:${specNameN}`,
     //     ])
     //   ) || 0;
 
@@ -94,11 +94,11 @@ class QueueServiceByProject implements QueueServiceImplementation {
     if (c > 0 && c > capacity) {
       const diff = c - capacity;
       console.debug(
-        `Queue ${job.specName} for project ${job.projectId} has ${c} waiting+active jobs, while capacity is at ${capacity}. \nAttempting to increase capacity by ${diff}.`
+        `Queue ${job.specName} for project ${job.projectUuid} has ${c} waiting+active jobs, while capacity is at ${capacity}. \nAttempting to increase capacity by ${diff}.`
       );
       for (let i = 0; i < diff; i++) {
         await getCapacityManager().increaseCapacity({
-          projectId: job.projectId,
+          projectUuid: job.projectUuid,
           specName: job.specName,
           by: 1,
         });
@@ -110,12 +110,12 @@ class QueueServiceByProject implements QueueServiceImplementation {
 
   private getQueue({
     specName,
-    projectId,
+    projectUuid,
   }: {
     specName: string;
-    projectId: string;
+    projectUuid: string;
   }) {
-    const queueId = `${projectId}/${specName}`;
+    const queueId = `${projectUuid}/${specName}`;
     if (!_rawQueueBySpecName.has(queueId)) {
       _rawQueueBySpecName.set(
         queueId,
@@ -178,13 +178,13 @@ class QueueServiceByProject implements QueueServiceImplementation {
         workerStopped,
       } of request) {
         if (signUp) {
-          const { projectId, specName } = signUp;
-          //   if (projectId !== this.projectId) {
-          //     throw new Error("Invalid projectId " + projectId);
+          const { projectUuid, specName } = signUp;
+          //   if (projectUuid !== this.projectUuid) {
+          //     throw new Error("Invalid projectUuid " + projectUuid);
           //   }
-          // console.debug("Adding worker", `${projectId}/${specName}`);
+          // console.debug("Adding worker", `${projectUuid}/${specName}`);
           const worker = new Worker(
-            `${projectId}/${specName}`,
+            `${projectUuid}/${specName}`,
             async (job) => {
               const jobCompleteCycle = genPromiseCycle();
               this.workerBundleById[workerId].jobCompleteCycleByJobId[job.id!] =
@@ -192,7 +192,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
               await sendJob({
                 workerId,
                 job: {
-                  projectId: projectId,
+                  projectUuid: projectUuid,
                   jobId: job.id!,
                   specName,
                   jobOptionsStr: JSON.stringify(job.data.jobOptions),
@@ -223,7 +223,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
           await client.sendCommand([
             "HINCRBY",
             `zz_capacity`,
-            `${projectId}:${specName}`,
+            `${projectUuid}:${specName}`,
             "1",
           ]);
 
@@ -233,7 +233,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
             await client.sendCommand([
               "HINCRBY",
               `zz_capacity`,
-              `${projectId}:${specName}`,
+              `${projectUuid}:${specName}`,
               "-1",
             ]);
 
@@ -249,7 +249,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
                 await client.sendCommand([
                   "HGET",
                   `zz_capacity`,
-                  `${projectId}:${specName}`,
+                  `${projectUuid}:${specName}`,
                 ])
               ) || 0
             );
@@ -264,7 +264,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
             await worker.close();
             delete this.workerBundleById[workerId];
             delete this.currentJobByWorkerId[workerId];
-            
+
             context.signal.removeEventListener("abort", abortListener);
           };
           context.signal.addEventListener("abort", abortListener);

@@ -35,12 +35,12 @@ export const saveLargeFilesToStorage = async (
 };
 
 export function getPublicCdnUrl({
-  projectId,
+  projectUuid,
   jobId,
   key,
   storageProvider,
 }: {
-  projectId: string;
+  projectUuid: string;
   jobId: string;
   key: string;
   storageProvider: IStorageProvider;
@@ -48,6 +48,6 @@ export function getPublicCdnUrl({
   if (!storageProvider.getPublicUrl) {
     throw new Error("storageProvider.getPublicUrl is not provided");
   }
-  const fullPath = `/${projectId}/jobs/${jobId}/large-values/${key}`;
+  const fullPath = `/${projectUuid}/jobs/${jobId}/large-values/${key}`;
   return storageProvider.getPublicUrl(fullPath);
 }
