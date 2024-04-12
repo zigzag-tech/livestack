@@ -174,7 +174,7 @@ async function resolveProjectInfo(projectId: string) {
   } else if (!resp.ok) {
     throw new Error("Failed to fetch project.");
   } else {
-    const { projectUuid } = (await resp.json()) as { projectUuid: string };
+    const [{ projectUuid }] = (await resp.json()) as [{ projectUuid: string }];
     return { projectUuid, userId, localProjectId, authToken };
   }
 }
