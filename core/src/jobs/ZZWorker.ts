@@ -11,7 +11,6 @@ import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedG
 import { QueueJob, FromWorker, FromInstance } from "@livestack/vault-interface";
 import { v4 } from "uuid";
 import { genManuallyFedIterator } from "@livestack/shared";
-import { genAuthorizedVaultClient } from "@livestack/vault-client";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
@@ -76,18 +75,18 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
   // }
 
   private async reportInstanceCapacityLazy() {
-    const projectId = (await this.zzEnvP).projectId;
-    const instanceId = await ZZEnv.getInstanceId();
+    const projectUuid = (await this.zzEnvP).projectUuid;
+    const instanceId = await (await this.zzEnvP).getInstanceId();
     const { iterator, resolveNext: reportNext } =
       genManuallyFedIterator<FromInstance>((v) => {
         // console.info(`INSTANCE REPORT: ${JSON.stringify(v)}`);
       });
-    const iter = (await ZZEnv.vaultClient()).capacity.reportAsInstance(
+    const iter = (await this.zzEnvP).vaultClient.capacity.reportAsInstance(
       iterator
     );
     reportNext({
       instanceId,
-      projectId,
+      projectUuid,
       reportSpecAvailability: {
         specName: this.jobSpec.name,
         maxCapacity: 100,
@@ -95,13 +94,13 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     });
     for await (const cmd of iter) {
       const { instanceId, provision } = cmd;
-      if (instanceId !== await(await this.zzEnvP).getInstanceId()) {
+      if (instanceId !== (await (await this.zzEnvP).getInstanceId())) {
         throw new Error("Unexpected instanceId");
       }
       if (provision) {
-        const { projectId, specName, numberOfWorkersNeeded } = provision;
+        const { projectUuid, specName, numberOfWorkersNeeded } = provision;
         console.info(
-          `Provisioning request received: ${projectId}/${specName} for ${numberOfWorkersNeeded}`
+          `Provisioning request received: ${projectUuid}/${specName} for ${numberOfWorkersNeeded}`
         );
 
         if (specName !== this.jobSpec.name) {
@@ -210,7 +209,7 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
       this.workerNameP = this.zzEnvP.then((zzEnv) => {
         return (
           "wkr:" +
-          `${zzEnv.projectId}/${
+          `${zzEnv.projectUuid}/${
             this.def.workerPrefix ? `(${this.def.workerPrefix})` : ""
           }${this.def.jobSpec.name}`
         );
@@ -254,7 +253,7 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
             progressUpdate: {
               jobId,
               progress,
-              projectId: (await that.zzEnvP).projectId,
+              projectUuid: (await that.zzEnvP).projectUuid,
               specName: that.jobSpec.name,
             },
             workerId: that.workerId,
@@ -267,8 +266,8 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
       return r;
     };
 
-    (async () => {
-      const iter = (await ZZEnv.vaultClient()).queue.reportAsWorker(iterParams);
+    this.zzEnvP.then(async (zzEnv) => {
+      const iter = zzEnv.vaultClient.queue.reportAsWorker(iterParams);
 
       for await (const { job } of iter) {
         // console.debug("picked up job: ", job);
@@ -280,13 +279,13 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
           await processJob(job);
           // console.log("jobCompleted", {
           //   jobId: job.jobId,
-          //   projectId: that.zzEnv.projectId,
+          //   projectUuid: that.zzEnv.projectUuid,
           //   specName: that.jobSpec.name,
           // });
           sendNextActivity({
             jobCompleted: {
               jobId: job.jobId,
-              projectId: (await that.zzEnvP).projectId,
+              projectUuid: (await that.zzEnvP).projectUuid,
               specName: that.jobSpec.name,
             },
             workerId: that.workerId,
@@ -295,14 +294,14 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
         } catch (err) {
           console.error("jobFailed", err, {
             jobId: job.jobId,
-            projectId: (await that.zzEnvP).projectId,
+            projectUuid: (await that.zzEnvP).projectUuid,
             specName: that.jobSpec.name,
             errorStr: JSON.stringify(err),
           });
           sendNextActivity({
             jobFailed: {
               jobId: job.jobId,
-              projectId: (await that.zzEnvP).projectId,
+              projectUuid: (await that.zzEnvP).projectUuid,
               specName: that.jobSpec.name,
               errorStr: JSON.stringify(err),
             },
@@ -313,18 +312,18 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
           );
         }
       }
-    })();
+    });
 
     (async () => {
       // console.debug(
       //   "worker ready to sign up",
       //   that.workerId,
-      //   (await that.zzEnvP).projectId,
+      //   (await that.zzEnvP).projectUuid,
       //   that.jobSpec.name
       // );
       sendNextActivity({
         signUp: {
-          projectId: (await that.zzEnvP).projectId,
+          projectUuid: (await that.zzEnvP).projectUuid,
           specName: that.jobSpec.name,
         },
         workerId: that.workerId,

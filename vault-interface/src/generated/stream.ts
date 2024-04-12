@@ -40,7 +40,7 @@ export function subTypeToJSON(object: SubType): string {
 }
 
 export interface EnsureStreamRequest {
-  project_id: string;
+  project_uuid: string;
   stream_id: string;
   json_schema_str?: string | undefined;
 }
@@ -56,7 +56,7 @@ export interface ParentDataPointInfo {
 }
 
 export interface StreamPubMessage {
-  projectId: string;
+  projectUuid: string;
   streamId: string;
   dataStr: string;
   parentDatapoints: ParentDataPointInfo[];
@@ -79,7 +79,7 @@ export interface StreamPubResult {
 }
 
 export interface SubRequest {
-  projectId: string;
+  projectUuid: string;
   uniqueName: string;
   subType: SubType;
 }
@@ -92,7 +92,7 @@ export interface StreamDatapoint {
 }
 
 export interface ValueByReverseIndexRequest {
-  projectId: string;
+  projectUuid: string;
   uniqueName: string;
   index: number;
 }
@@ -103,7 +103,7 @@ export interface ValueByReverseIndexResponse {
 }
 
 export interface LastValueRequest {
-  projectId: string;
+  projectUuid: string;
   uniqueName: string;
 }
 
@@ -113,13 +113,13 @@ export interface LastValueResponse {
 }
 
 function createBaseEnsureStreamRequest(): EnsureStreamRequest {
-  return { project_id: "", stream_id: "", json_schema_str: undefined };
+  return { project_uuid: "", stream_id: "", json_schema_str: undefined };
 }
 
 export const EnsureStreamRequest = {
   encode(message: EnsureStreamRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.project_id !== "") {
-      writer.uint32(10).string(message.project_id);
+    if (message.project_uuid !== "") {
+      writer.uint32(10).string(message.project_uuid);
     }
     if (message.stream_id !== "") {
       writer.uint32(18).string(message.stream_id);
@@ -142,7 +142,7 @@ export const EnsureStreamRequest = {
             break;
           }
 
-          message.project_id = reader.string();
+          message.project_uuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -169,7 +169,7 @@ export const EnsureStreamRequest = {
 
   fromJSON(object: any): EnsureStreamRequest {
     return {
-      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
+      project_uuid: isSet(object.project_uuid) ? globalThis.String(object.project_uuid) : "",
       stream_id: isSet(object.stream_id) ? globalThis.String(object.stream_id) : "",
       json_schema_str: isSet(object.json_schema_str) ? globalThis.String(object.json_schema_str) : undefined,
     };
@@ -177,8 +177,8 @@ export const EnsureStreamRequest = {
 
   toJSON(message: EnsureStreamRequest): unknown {
     const obj: any = {};
-    if (message.project_id !== "") {
-      obj.project_id = message.project_id;
+    if (message.project_uuid !== "") {
+      obj.project_uuid = message.project_uuid;
     }
     if (message.stream_id !== "") {
       obj.stream_id = message.stream_id;
@@ -194,7 +194,7 @@ export const EnsureStreamRequest = {
   },
   fromPartial(object: DeepPartial<EnsureStreamRequest>): EnsureStreamRequest {
     const message = createBaseEnsureStreamRequest();
-    message.project_id = object.project_id ?? "";
+    message.project_uuid = object.project_uuid ?? "";
     message.stream_id = object.stream_id ?? "";
     message.json_schema_str = object.json_schema_str ?? undefined;
     return message;
@@ -350,13 +350,13 @@ export const ParentDataPointInfo = {
 };
 
 function createBaseStreamPubMessage(): StreamPubMessage {
-  return { projectId: "", streamId: "", dataStr: "", parentDatapoints: [], jobInfo: undefined };
+  return { projectUuid: "", streamId: "", dataStr: "", parentDatapoints: [], jobInfo: undefined };
 }
 
 export const StreamPubMessage = {
   encode(message: StreamPubMessage, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.streamId !== "") {
       writer.uint32(18).string(message.streamId);
@@ -385,7 +385,7 @@ export const StreamPubMessage = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -426,7 +426,7 @@ export const StreamPubMessage = {
 
   fromJSON(object: any): StreamPubMessage {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       streamId: isSet(object.streamId) ? globalThis.String(object.streamId) : "",
       dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
       parentDatapoints: globalThis.Array.isArray(object?.parentDatapoints)
@@ -438,8 +438,8 @@ export const StreamPubMessage = {
 
   toJSON(message: StreamPubMessage): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.streamId !== "") {
       obj.streamId = message.streamId;
@@ -461,7 +461,7 @@ export const StreamPubMessage = {
   },
   fromPartial(object: DeepPartial<StreamPubMessage>): StreamPubMessage {
     const message = createBaseStreamPubMessage();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.streamId = object.streamId ?? "";
     message.dataStr = object.dataStr ?? "";
     message.parentDatapoints = object.parentDatapoints?.map((e) => ParentDataPointInfo.fromPartial(e)) || [];
@@ -701,13 +701,13 @@ export const StreamPubResult = {
 };
 
 function createBaseSubRequest(): SubRequest {
-  return { projectId: "", uniqueName: "", subType: 0 };
+  return { projectUuid: "", uniqueName: "", subType: 0 };
 }
 
 export const SubRequest = {
   encode(message: SubRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.uniqueName !== "") {
       writer.uint32(18).string(message.uniqueName);
@@ -730,7 +730,7 @@ export const SubRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -757,7 +757,7 @@ export const SubRequest = {
 
   fromJSON(object: any): SubRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
       subType: isSet(object.subType) ? subTypeFromJSON(object.subType) : 0,
     };
@@ -765,8 +765,8 @@ export const SubRequest = {
 
   toJSON(message: SubRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.uniqueName !== "") {
       obj.uniqueName = message.uniqueName;
@@ -782,7 +782,7 @@ export const SubRequest = {
   },
   fromPartial(object: DeepPartial<SubRequest>): SubRequest {
     const message = createBaseSubRequest();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.uniqueName = object.uniqueName ?? "";
     message.subType = object.subType ?? 0;
     return message;
@@ -894,13 +894,13 @@ export const StreamDatapoint = {
 };
 
 function createBaseValueByReverseIndexRequest(): ValueByReverseIndexRequest {
-  return { projectId: "", uniqueName: "", index: 0 };
+  return { projectUuid: "", uniqueName: "", index: 0 };
 }
 
 export const ValueByReverseIndexRequest = {
   encode(message: ValueByReverseIndexRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.uniqueName !== "") {
       writer.uint32(18).string(message.uniqueName);
@@ -923,7 +923,7 @@ export const ValueByReverseIndexRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -950,7 +950,7 @@ export const ValueByReverseIndexRequest = {
 
   fromJSON(object: any): ValueByReverseIndexRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
       index: isSet(object.index) ? globalThis.Number(object.index) : 0,
     };
@@ -958,8 +958,8 @@ export const ValueByReverseIndexRequest = {
 
   toJSON(message: ValueByReverseIndexRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.uniqueName !== "") {
       obj.uniqueName = message.uniqueName;
@@ -975,7 +975,7 @@ export const ValueByReverseIndexRequest = {
   },
   fromPartial(object: DeepPartial<ValueByReverseIndexRequest>): ValueByReverseIndexRequest {
     const message = createBaseValueByReverseIndexRequest();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.uniqueName = object.uniqueName ?? "";
     message.index = object.index ?? 0;
     return message;
@@ -1061,13 +1061,13 @@ export const ValueByReverseIndexResponse = {
 };
 
 function createBaseLastValueRequest(): LastValueRequest {
-  return { projectId: "", uniqueName: "" };
+  return { projectUuid: "", uniqueName: "" };
 }
 
 export const LastValueRequest = {
   encode(message: LastValueRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.uniqueName !== "") {
       writer.uint32(18).string(message.uniqueName);
@@ -1087,7 +1087,7 @@ export const LastValueRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -1107,15 +1107,15 @@ export const LastValueRequest = {
 
   fromJSON(object: any): LastValueRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
     };
   },
 
   toJSON(message: LastValueRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.uniqueName !== "") {
       obj.uniqueName = message.uniqueName;
@@ -1128,7 +1128,7 @@ export const LastValueRequest = {
   },
   fromPartial(object: DeepPartial<LastValueRequest>): LastValueRequest {
     const message = createBaseLastValueRequest();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.uniqueName = object.uniqueName ?? "";
     return message;
   },

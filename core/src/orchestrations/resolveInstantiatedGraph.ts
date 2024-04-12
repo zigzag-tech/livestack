@@ -23,8 +23,24 @@ export const resolveInstantiatedGraph = lruCacheFn(
     jobId: string;
   }): Promise<InstantiatedGraph> => {
     const spec = JobSpec.lookupByName(specName);
+
+    if (
+      getJobStreamConnectorRecsCachedPByProjectUuid[zzEnv.projectUuid] ===
+      undefined
+    ) {
+      getJobStreamConnectorRecsCachedPByProjectUuid[zzEnv.projectUuid] =
+        lruCacheFn(
+          ((rec: any) => `${rec.projectUuid}/${rec.jobId}`) as any,
+          zzEnv.vaultClient.db.getJobStreamConnectorRecs.bind(
+            zzEnv.vaultClient.db
+          )
+        );
+    }
+
+    const getJobStreamConnectorRecsCachedP =
+      getJobStreamConnectorRecsCachedPByProjectUuid[zzEnv.projectUuid];
     const { records: streams } = await(await getJobStreamConnectorRecsCachedP)({
-      projectId: zzEnv.projectId,
+      projectUuid: zzEnv.projectUuid,
       jobId,
     });
 
@@ -39,8 +55,18 @@ export const resolveInstantiatedGraph = lruCacheFn(
         })
     );
 
+    if (cacgetParentRecCachedPByProjectUuid[zzEnv.projectUuid] === undefined) {
+      cacgetParentRecCachedPByProjectUuid[zzEnv.projectUuid] = lruCacheFn(
+        ((rec: any) => `${rec.project_uuid}/${rec.childJobId}`) as any,
+        zzEnv.vaultClient.db.getParentJobRec.bind(zzEnv.vaultClient.db)
+      );
+    }
+
+    const getParentRecCachedP =
+      cacgetParentRecCachedPByProjectUuid[zzEnv.projectUuid];
+
     const parentRec = await(await getParentRecCachedP)({
-      projectId: zzEnv.projectId,
+      projectUuid: zzEnv.projectUuid,
       childJobId: jobId,
     });
 
@@ -108,17 +134,12 @@ export const resolveInstantiatedGraph = lruCacheFn(
   }
 );
 
-const getParentRecCachedP = ZZEnv.vaultClient().then((vaultClient) =>
-  lruCacheFn(
-    ((rec: any) => `${rec.project_id}/${rec.childJobId}`) as any,
-    vaultClient.db.getParentJobRec.bind(vaultClient.db)
-  )
-);
+const cacgetParentRecCachedPByProjectUuid: Record<
+  string,
+  ZZEnv["vaultClient"]["db"]["getParentJobRec"]
+> = {};
+const getJobStreamConnectorRecsCachedPByProjectUuid: Record<
+  string,
+  ZZEnv["vaultClient"]["db"]["getJobStreamConnectorRecs"]
+> = {};
 
-const getJobStreamConnectorRecsCachedP = ZZEnv.vaultClient().then(
-  (vaultClient) =>
-    lruCacheFn(
-      ((rec: any) => `${rec.projectId}/${rec.jobId}`) as any,
-      vaultClient.db.getJobStreamConnectorRecs.bind(vaultClient.db)
-    )
-);

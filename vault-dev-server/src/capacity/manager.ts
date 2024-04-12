@@ -25,7 +25,7 @@ class CapacityManager implements CacapcityServiceImplementation {
     instanceId?: string | undefined;
     provision?:
       | {
-          projectId?: string | undefined;
+          projectUuid?: string | undefined;
           specName?: string | undefined;
           numberOfWorkersNeeded?: number | undefined;
         }
@@ -38,7 +38,7 @@ class CapacityManager implements CacapcityServiceImplementation {
       for await (const {
         reportSpecAvailability,
         instanceId,
-        projectId,
+        projectUuid,
       } of request) {
         if (reportSpecAvailability) {
           const existing = this.resolveByInstanceIAndSpecName[instanceId];
@@ -50,16 +50,16 @@ class CapacityManager implements CacapcityServiceImplementation {
           ] = resolveJobPromise;
           const { maxCapacity } = reportSpecAvailability;
           console.debug(
-            `reportSpecAvailability from instance ${instanceId}: ${projectId} ${reportSpecAvailability.specName} ${maxCapacity}`
+            `reportSpecAvailability from instance ${instanceId}: ${projectUuid} ${reportSpecAvailability.specName} ${maxCapacity}`
           );
 
           const client = await this.redisClientP;
-          const projectIdN = escapeColon(projectId);
+          const projectUuidN = escapeColon(projectUuid);
           const specNameN = escapeColon(reportSpecAvailability.specName);
           const instanceIdN = escapeColon(instanceId);
           await client.sendCommand([
             "HSET",
-            `zz_maxcapacity:${projectIdN}:${specNameN}`,
+            `zz_maxcapacity:${projectUuidN}:${specNameN}`,
             instanceIdN,
             maxCapacity.toString(),
           ]);
@@ -67,32 +67,32 @@ class CapacityManager implements CacapcityServiceImplementation {
           await client.sendCommand([
             "SADD",
             `zz_instance:${instanceIdN}`,
-            `${projectIdN}:${specNameN}`,
+            `${projectUuidN}:${specNameN}`,
           ]);
 
           // clear all capacities on disconnect
           const abortListener = async () => {
             console.debug(
-              `Capacity gone: from instance ${instanceId}: ${projectId} ${reportSpecAvailability.specName} ${maxCapacity}`
+              `Capacity gone: from instance ${instanceId}: ${projectUuid} ${reportSpecAvailability.specName} ${maxCapacity}`
             );
-            // get the set of reported projectId:specName and clear capacity for each
+            // get the set of reported projectUuid:specName and clear capacity for each
             const porjectIdSpecNamePairs = (await client.sendCommand([
               "SMEMBERS",
               `zz_instance:${instanceIdN}`,
             ])) as `${string}:${string}`[];
 
             for (const pair of porjectIdSpecNamePairs) {
-              const [projectIdN, specNameN] = pair.split(":");
+              const [projectUuidN, specNameN] = pair.split(":");
               await client.sendCommand([
                 "HDEL",
-                `zz_maxcapacity:${projectIdN}:${specNameN}`,
+                `zz_maxcapacity:${projectUuidN}:${specNameN}`,
                 instanceIdN,
               ]);
 
               // remove capacity hash values
               await client.sendCommand([
                 "HDEL",
-                `zz_maxcapacity:${projectIdN}:${specNameN}`,
+                `zz_maxcapacity:${projectUuidN}:${specNameN}`,
                 instanceIdN,
               ]);
               delete this.resolveByInstanceIAndSpecName[instanceIdN][specNameN];
@@ -109,31 +109,31 @@ class CapacityManager implements CacapcityServiceImplementation {
   }
 
   async increaseCapacity({
-    projectId,
+    projectUuid,
     specName,
     by,
   }: {
-    projectId: string;
+    projectUuid: string;
     specName: string;
     by: number;
   }) {
     // set the relevant capacity in redis
     const client = await this.redisClientP;
-    const projectIdN = escapeColon(projectId);
+    const projectUuidN = escapeColon(projectUuid);
     const specNameN = escapeColon(specName);
 
     let instanceIdsAndMaxCapacities: string[] = [];
 
     // keep checking until we find an instance with capacity
     while (true) {
-      // get all instances (keys) for this projectId:specName
+      // get all instances (keys) for this projectUuid:specName
       instanceIdsAndMaxCapacities = (await client.sendCommand([
         "HGETALL",
-        `zz_maxcapacity:${projectIdN}:${specNameN}`,
+        `zz_maxcapacity:${projectUuidN}:${specNameN}`,
       ])) as string[];
       if (instanceIdsAndMaxCapacities.length === 0) {
         console.warn(
-          `No instances found for ${projectId}:${specName}. Will retry in 200ms.`
+          `No instances found for ${projectUuid}:${specName}. Will retry in 200ms.`
         );
         await new Promise((r) => setTimeout(r, 200));
         continue;
@@ -158,13 +158,13 @@ class CapacityManager implements CacapcityServiceImplementation {
     // nudge the instance to increase capacity
     const resolve = this.resolveByInstanceIAndSpecName[instanceId][specName];
     if (!resolve) {
-      throw new Error(`No instance found for ${projectId}:${specName}`);
+      throw new Error(`No instance found for ${projectUuid}:${specName}`);
     }
     resolve({
-      projectId,
+      projectUuid,
       instanceId,
       provision: {
-        projectId,
+        projectUuid,
         specName,
         numberOfWorkersNeeded: by,
       },
@@ -172,13 +172,13 @@ class CapacityManager implements CacapcityServiceImplementation {
   }
 }
 
-const _capacityManagerByProjectId: Record<string, CapacityManager> = {};
+const _capacityManagerByProjectUuid: Record<string, CapacityManager> = {};
 
 export const getCapacityManager = () => {
-  if (!_capacityManagerByProjectId["default"]) {
-    _capacityManagerByProjectId["default"] = new CapacityManager();
+  if (!_capacityManagerByProjectUuid["default"]) {
+    _capacityManagerByProjectUuid["default"] = new CapacityManager();
   }
-  return _capacityManagerByProjectId["default"]!;
+  return _capacityManagerByProjectUuid["default"]!;
 };
 
 export function escapeColon(s: string) {

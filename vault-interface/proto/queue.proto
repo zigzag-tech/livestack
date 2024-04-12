@@ -19,7 +19,7 @@ message InitInstanceResponse {
 }
 
 message QueueJob {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
   string jobId = 3;
   optional string contextId = 4;
@@ -27,30 +27,30 @@ message QueueJob {
 }
 
 message SignUp {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
 }
 
 message WorkerStopped {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
 }
 
 message ProgressUpdate {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
   string jobId = 3;
   int32 progress = 4;
 }
 
 message JobCompleted {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
   string jobId = 3;
 }
 
 message JobFailed {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
   string jobId = 3;
   string errorStr = 4;

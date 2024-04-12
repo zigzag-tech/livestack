@@ -26,16 +26,16 @@ import { validate } from "jsonschema";
 
 export const streamService = (dbConn: Knex): StreamServiceImplementation => {
   const jsonSchemaByStreamId = lruCacheFn(
-    ({ projectId, streamId }) => `${projectId}/${streamId}`,
+    ({ projectUuid, streamId }) => `${projectUuid}/${streamId}`,
     async ({
-      projectId,
+      projectUuid,
       streamId,
     }: {
-      projectId: string;
+      projectUuid: string;
       streamId: string;
     }) => {
       const rec = await dbConn("zz_streams")
-        .where("project_id", projectId)
+        .where("project_uuid", projectUuid)
         .andWhere("stream_id", streamId)
         .first<{
           json_schema_str: string;
@@ -52,14 +52,14 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
   );
 
   const addDatapoint = async ({
-    projectId,
+    projectUuid,
     streamId,
     datapointId,
     jobInfo,
     dataStr,
     parentDatapoints,
   }: {
-    projectId: string;
+    projectUuid: string;
     streamId: string;
     datapointId: string;
     jobInfo?: {
@@ -73,7 +73,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
     }[];
   }) => {
     await ensureStreamRec(dbConn, {
-      project_id: projectId,
+      project_uuid: projectUuid,
       stream_id: streamId,
     });
     const data = JSON.parse(dataStr);
@@ -89,7 +89,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       >
     >("zz_datapoints")
       .insert({
-        project_id: projectId,
+        project_uuid: projectUuid,
         stream_id: streamId,
         datapoint_id: datapointId,
         data: handlePrimitiveOrArray(data),
@@ -98,29 +98,29 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         connector_type: jobInfo ? "out" : null,
         time_created: new Date(),
       })
-      .onConflict(["project_id", "stream_id", "datapoint_id"])
+      .onConflict(["project_uuid", "stream_id", "datapoint_id"])
       .ignore();
 
-      for (const parentDatapoint of parentDatapoints) {
-        await ensureDatapointRelationRec(dbConn, {
-          project_id: projectId,
-          source_datapoint_id: parentDatapoint.datapointId,
-          source_stream_id: parentDatapoint.streamId,
-          target_datapoint_id: datapointId,
-          target_stream_id: streamId,
-        });
-      }
+    for (const parentDatapoint of parentDatapoints) {
+      await ensureDatapointRelationRec(dbConn, {
+        project_uuid: projectUuid,
+        source_datapoint_id: parentDatapoint.datapointId,
+        source_stream_id: parentDatapoint.streamId,
+        target_datapoint_id: datapointId,
+        target_stream_id: streamId,
+      });
+    }
 
     return { datapointId };
   };
 
   const addValidationResultRec = async ({
-    projectId,
+    projectUuid,
     streamId,
     datapointId,
     validationResult,
   }: {
-    projectId: string;
+    projectUuid: string;
     streamId: string;
     datapointId: string;
     validationResult: {
@@ -130,12 +130,12 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
   }) => {
     await dbConn("zz_data_validation_results")
       .insert({
-        project_id: projectId,
+        project_uuid: projectUuid,
         stream_id: streamId,
         datapoint_id: datapointId,
         validation_failed: !validationResult.valid,
       })
-      .onConflict(["project_id", "stream_id", "datapoint_id"])
+      .onConflict(["project_uuid", "stream_id", "datapoint_id"])
       .ignore();
   };
 
@@ -153,15 +153,15 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         datapointId: string;
       };
     }> {
-      const { projectId, streamId, dataStr, jobInfo, parentDatapoints } =
+      const { projectUuid, streamId, dataStr, jobInfo, parentDatapoints } =
         request;
       const datapointId = v4();
-      const channelId = `${projectId}/${streamId}`;
+      const channelId = `${projectUuid}/${streamId}`;
       // console.debug("pubbing", "to", channelId, "data", dataStr);
       // Publish the message to the Redis stream
 
       const jsonSchema = await jsonSchemaByStreamId({
-        projectId,
+        projectUuid,
         streamId,
       });
 
@@ -207,7 +207,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       }
 
       await addDatapoint({
-        projectId,
+        projectUuid,
         streamId,
         datapointId,
         jobInfo,
@@ -247,7 +247,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       // not valid
       else {
         await addValidationResultRec({
-          projectId,
+          projectUuid,
           streamId,
           datapointId,
           validationResult: res,
@@ -277,10 +277,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       }>();
 
       (async () => {
-        const { projectId, uniqueName, subType } = request;
+        const { projectUuid, uniqueName, subType } = request;
         let cursor: `${string}-${string}` | "$" | "0" =
           subType === SubType.fromNow ? "$" : "0";
-        const channelId = `${projectId}/${uniqueName}`;
+        const channelId = `${projectUuid}/${uniqueName}`;
         const subClient = await createClient().connect();
 
         while (context.signal.aborted === false) {
@@ -333,8 +333,8 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         | undefined;
       null_response?: {} | undefined;
     }> {
-      const { projectId, uniqueName } = request;
-      const channelId = `${projectId}/${uniqueName}`;
+      const { projectUuid, uniqueName } = request;
+      const channelId = `${projectUuid}/${uniqueName}`;
       const subClient = await createClient().connect();
 
       const s = (await subClient.sendCommand([
@@ -386,8 +386,8 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         | undefined;
       null_response?: {} | undefined;
     }> {
-      const { projectId, uniqueName, index = 0 } = request;
-      const channelId = `${projectId}/${uniqueName}`;
+      const { projectUuid, uniqueName, index = 0 } = request;
+      const channelId = `${projectUuid}/${uniqueName}`;
       const subClient = await createClient().connect();
       const s = (await subClient.sendCommand([
         "XREVRANGE",

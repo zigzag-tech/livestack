@@ -64,8 +64,8 @@ export class DataStream<T extends object> {
           const jsonSchema = zodToJsonSchema(def);
           jsonSchemaStr = JSON.stringify(jsonSchema);
         }
-        await(await ZZEnv.vaultClient()).stream.ensureStream({
-          project_id: zzEnv.projectId,
+        await(await ZZEnv.globalP()).vaultClient.stream.ensureStream({
+          project_uuid: zzEnv.projectUuid,
           stream_id: uniqueName,
           json_schema_str: jsonSchemaStr,
         });
@@ -96,15 +96,15 @@ export class DataStream<T extends object> {
 
     this.logger = logger;
     this.baseWorkingRelativePathP = this.zzEnvP.then((zzEnv) =>
-      path.join(zzEnv.projectId, this.uniqueName)
+      path.join(zzEnv.projectUuid, this.uniqueName)
     );
   }
 
   public valueByReverseIndex = async (index: number) => {
-    const { null_response, datapoint } = await (
-      await ZZEnv.vaultClient()
+    const { null_response, datapoint } = await(
+      await(await ZZEnv.globalP()).vaultClient
     ).stream.valueByReverseIndex({
-      projectId: (await this.zzEnvP).projectId,
+      projectUuid: (await this.zzEnvP).projectUuid,
       uniqueName: this.uniqueName,
       index,
     });
@@ -218,10 +218,10 @@ export class DataStream<T extends object> {
       //   this.uniqueName,
       //   JSON.stringify(parsed)
       // );
-      const vaultClient = await ZZEnv.vaultClient();
+      const vaultClient = await(await ZZEnv.globalP()).vaultClient;
       const { success, validationFailure } = await vaultClient.stream.pub({
         streamId: this.uniqueName,
-        projectId: (await this.zzEnvP).projectId,
+        projectUuid: (await this.zzEnvP).projectUuid,
         jobInfo: jobInfo,
         dataStr: JSON.stringify(parsed),
         parentDatapoints,
@@ -237,9 +237,9 @@ export class DataStream<T extends object> {
         const { datapointId, errorMessage } = validationFailure;
         console.error("Error message: ", errorMessage);
 
-        const { userId } = await(await this.zzEnvP).getUserCredentials();
+        const { userId } = await(await this.zzEnvP);
         const inspectMessage = ` 🔍🔴 Inspect error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
-          (await this.zzEnvP).projectId
+          (await this.zzEnvP).projectUuid
         }`;
         console.info(inspectMessage);
 

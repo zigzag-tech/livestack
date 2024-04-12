@@ -1,14 +1,14 @@
 import { Knex } from "knex";
 
 export async function ensureJobStreamConnectorRec({
-  projectId,
+  projectUuid,
   streamId,
   dbConn,
   jobId,
   key,
   connectorType,
 }: {
-  projectId: string;
+  projectUuid: string;
   dbConn: Knex;
   streamId: string;
   jobId: string;
@@ -17,7 +17,7 @@ export async function ensureJobStreamConnectorRec({
 }) {
   await dbConn<ZZJobStreamConnectorRec>("zz_job_stream_connectors")
     .insert({
-      project_id: projectId,
+      project_uuid: projectUuid,
       job_id: jobId,
       stream_id: streamId,
       key,
@@ -25,7 +25,7 @@ export async function ensureJobStreamConnectorRec({
       time_created: new Date(),
     })
     .onConflict<keyof ZZJobStreamConnectorRec>([
-      "project_id",
+      "project_uuid",
       "job_id",
       "key",
       "connector_type",
@@ -34,13 +34,13 @@ export async function ensureJobStreamConnectorRec({
 }
 
 export interface DataStreamRec {
-  project_id: string;
+  project_uuid: string;
   stream_id: string;
   time_created: Date;
 }
 
 export interface ZZJobStreamConnectorRec {
-  project_id: string;
+  project_uuid: string;
   job_id: string;
   stream_id: string;
   key: string;

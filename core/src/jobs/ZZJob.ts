@@ -423,10 +423,10 @@ export class ZZJob<
 
   private getParentRec = async () => {
     if (this._parentRec === "uninitialized") {
-      const { null_response, rec } = await (
-        await ZZEnv.vaultClient()
+      const { null_response, rec } = await(
+        await(await this.zzEnvP).vaultClient
       ).db.getParentJobRec({
-        projectId: (await this.zzEnvP).projectId,
+        projectUuid: (await this.zzEnvP).projectUuid,
         childJobId: this.jobId,
       });
       if (!rec) {
@@ -552,11 +552,11 @@ export class ZZJob<
     const jId = {
       specName: this.spec.name,
       jobId: this.jobId,
-      projectId: (await this.zzEnvP).projectId,
+      projectUuid: (await this.zzEnvP).projectUuid,
     };
 
     const logger = this.logger;
-    const projectId = (await this.zzEnvP).projectId;
+    const projectUuid = (await this.zzEnvP).projectUuid;
 
     logger.info(
       `Job started. Job ID: ${this.jobId}.` +
@@ -564,9 +564,7 @@ export class ZZJob<
     );
 
     try {
-      await (
-        await ZZEnv.vaultClient()
-      ).db.appendJobStatusRec({
+      await(await(await this.zzEnvP).vaultClient).db.appendJobStatusRec({
         ...jId,
         jobStatus: "running",
       });
@@ -598,9 +596,7 @@ export class ZZJob<
         await this.output.emit(processedR);
       }
 
-      await (
-        await ZZEnv.vaultClient()
-      ).db.appendJobStatusRec({
+      await(await(await this.zzEnvP).vaultClient).db.appendJobStatusRec({
         ...jId,
         jobStatus: "completed",
       });
@@ -620,10 +616,8 @@ export class ZZJob<
     } catch (e: any) {
       console.error("Error while running job: ", this.jobId, e);
 
-      await (
-        await ZZEnv.vaultClient()
-      ).db.appendJobStatusRec({
-        projectId,
+      await((await this.zzEnvP).vaultClient).db.appendJobStatusRec({
+        projectUuid,
         specName: this.spec.name,
         jobId: this.jobId,
         jobStatus: "failed",
@@ -679,7 +673,7 @@ export class ZZJob<
       throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
     } else {
       return getPublicCdnUrl({
-        projectId: (await this.zzEnvP).projectId,
+        projectUuid: (await this.zzEnvP).projectUuid,
         jobId: this.jobId,
         key: String(key),
         storageProvider: this.storageProvider,
