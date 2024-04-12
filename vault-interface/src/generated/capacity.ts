@@ -10,19 +10,19 @@ export interface ReportSpecAvailability {
 }
 
 export interface FromInstance {
-  projectId: string;
+  projectUuid: string;
   instanceId: string;
   reportSpecAvailability?: ReportSpecAvailability | undefined;
 }
 
 export interface Provision {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   numberOfWorkersNeeded: number;
 }
 
 export interface CommandToInstance {
-  projectId: string;
+  projectUuid: string;
   instanceId: string;
   provision?: Provision | undefined;
 }
@@ -102,13 +102,13 @@ export const ReportSpecAvailability = {
 };
 
 function createBaseFromInstance(): FromInstance {
-  return { projectId: "", instanceId: "", reportSpecAvailability: undefined };
+  return { projectUuid: "", instanceId: "", reportSpecAvailability: undefined };
 }
 
 export const FromInstance = {
   encode(message: FromInstance, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.instanceId !== "") {
       writer.uint32(18).string(message.instanceId);
@@ -131,7 +131,7 @@ export const FromInstance = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -158,7 +158,7 @@ export const FromInstance = {
 
   fromJSON(object: any): FromInstance {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       instanceId: isSet(object.instanceId) ? globalThis.String(object.instanceId) : "",
       reportSpecAvailability: isSet(object.reportSpecAvailability)
         ? ReportSpecAvailability.fromJSON(object.reportSpecAvailability)
@@ -168,8 +168,8 @@ export const FromInstance = {
 
   toJSON(message: FromInstance): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.instanceId !== "") {
       obj.instanceId = message.instanceId;
@@ -185,7 +185,7 @@ export const FromInstance = {
   },
   fromPartial(object: DeepPartial<FromInstance>): FromInstance {
     const message = createBaseFromInstance();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.instanceId = object.instanceId ?? "";
     message.reportSpecAvailability =
       (object.reportSpecAvailability !== undefined && object.reportSpecAvailability !== null)
@@ -196,13 +196,13 @@ export const FromInstance = {
 };
 
 function createBaseProvision(): Provision {
-  return { projectId: "", specName: "", numberOfWorkersNeeded: 0 };
+  return { projectUuid: "", specName: "", numberOfWorkersNeeded: 0 };
 }
 
 export const Provision = {
   encode(message: Provision, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -225,7 +225,7 @@ export const Provision = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -252,7 +252,7 @@ export const Provision = {
 
   fromJSON(object: any): Provision {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
       numberOfWorkersNeeded: isSet(object.numberOfWorkersNeeded) ? globalThis.Number(object.numberOfWorkersNeeded) : 0,
     };
@@ -260,8 +260,8 @@ export const Provision = {
 
   toJSON(message: Provision): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -277,7 +277,7 @@ export const Provision = {
   },
   fromPartial(object: DeepPartial<Provision>): Provision {
     const message = createBaseProvision();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     message.numberOfWorkersNeeded = object.numberOfWorkersNeeded ?? 0;
     return message;
@@ -285,13 +285,13 @@ export const Provision = {
 };
 
 function createBaseCommandToInstance(): CommandToInstance {
-  return { projectId: "", instanceId: "", provision: undefined };
+  return { projectUuid: "", instanceId: "", provision: undefined };
 }
 
 export const CommandToInstance = {
   encode(message: CommandToInstance, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.instanceId !== "") {
       writer.uint32(18).string(message.instanceId);
@@ -314,7 +314,7 @@ export const CommandToInstance = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -341,7 +341,7 @@ export const CommandToInstance = {
 
   fromJSON(object: any): CommandToInstance {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       instanceId: isSet(object.instanceId) ? globalThis.String(object.instanceId) : "",
       provision: isSet(object.provision) ? Provision.fromJSON(object.provision) : undefined,
     };
@@ -349,8 +349,8 @@ export const CommandToInstance = {
 
   toJSON(message: CommandToInstance): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.instanceId !== "") {
       obj.instanceId = message.instanceId;
@@ -366,7 +366,7 @@ export const CommandToInstance = {
   },
   fromPartial(object: DeepPartial<CommandToInstance>): CommandToInstance {
     const message = createBaseCommandToInstance();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.instanceId = object.instanceId ?? "";
     message.provision = (object.provision !== undefined && object.provision !== null)
       ? Provision.fromPartial(object.provision)

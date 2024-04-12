@@ -130,15 +130,15 @@ export class JobSpec<
     }
     this.zzEnvPWithTimeout = Promise.race([
       this.zzEnvP,
-      new Promise<ZZEnv>((_, reject) => {
-        setTimeout(() => {
-          reject(
-            new Error(
-              "Livestack waited for ZZEnv to be set for over 10s, but is still not set. Please provide zzEnv either in the constructor of jobSpec, or globally with ZZEnv.setGlobalP."
-            )
-          );
-        }, 1000 * 10);
-      }),
+      // new Promise<ZZEnv>((_, reject) => {
+      //   setTimeout(() => {
+      //     reject(
+      //       new Error(
+      //         "Livestack waited for ZZEnv to be set for over 10s, but is still not set. Please provide zzEnv either in the constructor of jobSpec, or globally with ZZEnv.setGlobalP."
+      //       )
+      //     );
+      //   }, 1000 * 10);
+      // }),
     ]);
   }
 
@@ -641,7 +641,7 @@ export class JobSpec<
 
     // console.debug("Spec._enqueueJob", jobId, jobOptions);
 
-    const projectId = (await this.zzEnvPWithTimeout).projectId;
+    const projectUuid = (await this.zzEnvPWithTimeout).projectUuid;
     if (!this.streamIdOverridesByTagByTypeByJobId[jobId]) {
       this.streamIdOverridesByTagByTypeByJobId[jobId] = {
         in: null,
@@ -658,9 +658,9 @@ export class JobSpec<
     }
 
     jobOptions = jobOptions || ({} as P);
-    const vaultClient = await (await this.zzEnvP).vaultClient();
+    const vaultClient = await(await this.zzEnvP).vaultClient;
     await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
-      projectId: (await this.zzEnvPWithTimeout).projectId,
+      projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
       specName: this.name,
       jobId,
       jobOptionsStr: JSON.stringify(jobOptions),
@@ -671,7 +671,7 @@ export class JobSpec<
     });
 
     const j = await vaultClient.queue.addJob({
-      projectId,
+      projectUuid,
       specName: this.name,
       jobId,
       jobOptionsStr: JSON.stringify(jobOptions as any),
@@ -683,7 +683,7 @@ export class JobSpec<
       zzEnv: await this.zzEnvPWithTimeout,
     });
     await vaultClient.db.updateJobInstantiatedGraph({
-      projectId: (await this.zzEnvPWithTimeout).projectId,
+      projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
       jobId,
       specName: this.name,
       instantiatedGraphStr: JSON.stringify(instaG),

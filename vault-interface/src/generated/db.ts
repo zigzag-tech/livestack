@@ -74,7 +74,7 @@ export function orderToJSON(object: Order): string {
 }
 
 export interface JobRec {
-  project_id: string;
+  project_uuid: string;
   /** Align with jobs.ts */
   spec_name: string;
   job_id: string;
@@ -83,7 +83,7 @@ export interface JobRec {
 }
 
 export interface GetJobRecRequest {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   jobId: string;
 }
@@ -95,9 +95,7 @@ export interface JobRecAndStatus {
 
 export interface GetJobRecResponse {
   /** The actual response data */
-  rec?:
-    | JobRecAndStatus
-    | undefined;
+  rec?: JobRecAndStatus | undefined;
   /** Signal that the response is null */
   null_response?: Empty | undefined;
 }
@@ -107,13 +105,13 @@ export interface GetZZJobTestRequest {
 }
 
 export interface GetZZJobTestResponse {
-  projectId: string;
+  projectUuid: string;
   pipeName: string;
   jobId: string;
 }
 
 export interface EnsureJobAndStatusAndConnectorRecsRequest {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   jobId: string;
   jobOptionsStr: string;
@@ -134,14 +132,14 @@ export interface EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverrid
 }
 
 export interface UpdateJobInstantiatedGraphRequest {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   jobId: string;
   instantiatedGraphStr: string;
 }
 
 export interface GetJobDatapointsRequest {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   jobId: string;
   key: string;
@@ -160,14 +158,14 @@ export interface GetJobDatapointsResponse {
 }
 
 export interface GetJobStreamConnectorRecsRequest {
-  projectId: string;
+  projectUuid: string;
   jobId: string;
   key?: string | undefined;
   connectorType?: ConnectorType | undefined;
 }
 
 export interface JobStreamConnectorRecord {
-  project_id: string;
+  project_uuid: string;
   job_id: string;
   time_created: Date | undefined;
   stream_id: string;
@@ -180,19 +178,19 @@ export interface GetJobStreamConnectorRecsResponse {
 }
 
 export interface AppendJobStatusRecRequest {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   jobId: string;
   jobStatus: string;
 }
 
 export interface GetParentJobRecRequest {
-  projectId: string;
+  projectUuid: string;
   childJobId: string;
 }
 
 export interface ParentJobRec {
-  project_id: string;
+  project_uuid: string;
   parent_job_id: string;
   spec_name: string;
   unique_spec_label?: string | undefined;
@@ -202,21 +200,28 @@ export interface ParentJobRec {
 
 export interface GetParentJobRecResponse {
   /** The actual response data */
-  rec?:
-    | ParentJobRec
-    | undefined;
+  rec?: ParentJobRec | undefined;
   /** Signal that the response is null */
   null_response?: Empty | undefined;
 }
 
 function createBaseJobRec(): JobRec {
-  return { project_id: "", spec_name: "", job_id: "", time_created: undefined, job_params: undefined };
+  return {
+    project_uuid: "",
+    spec_name: "",
+    job_id: "",
+    time_created: undefined,
+    job_params: undefined,
+  };
 }
 
 export const JobRec = {
-  encode(message: JobRec, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.project_id !== "") {
-      writer.uint32(10).string(message.project_id);
+  encode(
+    message: JobRec,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.project_uuid !== "") {
+      writer.uint32(10).string(message.project_uuid);
     }
     if (message.spec_name !== "") {
       writer.uint32(18).string(message.spec_name);
@@ -225,16 +230,23 @@ export const JobRec = {
       writer.uint32(26).string(message.job_id);
     }
     if (message.time_created !== undefined) {
-      Timestamp.encode(toTimestamp(message.time_created), writer.uint32(34).fork()).ldelim();
+      Timestamp.encode(
+        toTimestamp(message.time_created),
+        writer.uint32(34).fork()
+      ).ldelim();
     }
     if (message.job_params !== undefined) {
-      Struct.encode(Struct.wrap(message.job_params), writer.uint32(42).fork()).ldelim();
+      Struct.encode(
+        Struct.wrap(message.job_params),
+        writer.uint32(42).fork()
+      ).ldelim();
     }
     return writer;
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): JobRec {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseJobRec();
     while (reader.pos < end) {
@@ -245,7 +257,7 @@ export const JobRec = {
             break;
           }
 
-          message.project_id = reader.string();
+          message.project_uuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -266,14 +278,18 @@ export const JobRec = {
             break;
           }
 
-          message.time_created = fromTimestamp(Timestamp.decode(reader, reader.uint32()));
+          message.time_created = fromTimestamp(
+            Timestamp.decode(reader, reader.uint32())
+          );
           continue;
         case 5:
           if (tag !== 42) {
             break;
           }
 
-          message.job_params = Struct.unwrap(Struct.decode(reader, reader.uint32()));
+          message.job_params = Struct.unwrap(
+            Struct.decode(reader, reader.uint32())
+          );
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -286,18 +302,24 @@ export const JobRec = {
 
   fromJSON(object: any): JobRec {
     return {
-      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
-      spec_name: isSet(object.spec_name) ? globalThis.String(object.spec_name) : "",
+      project_uuid: isSet(object.project_uuid)
+        ? globalThis.String(object.project_uuid)
+        : "",
+      spec_name: isSet(object.spec_name)
+        ? globalThis.String(object.spec_name)
+        : "",
       job_id: isSet(object.job_id) ? globalThis.String(object.job_id) : "",
-      time_created: isSet(object.time_created) ? fromJsonTimestamp(object.time_created) : undefined,
+      time_created: isSet(object.time_created)
+        ? fromJsonTimestamp(object.time_created)
+        : undefined,
       job_params: isObject(object.job_params) ? object.job_params : undefined,
     };
   },
 
   toJSON(message: JobRec): unknown {
     const obj: any = {};
-    if (message.project_id !== "") {
-      obj.project_id = message.project_id;
+    if (message.project_uuid !== "") {
+      obj.project_uuid = message.project_uuid;
     }
     if (message.spec_name !== "") {
       obj.spec_name = message.spec_name;
@@ -319,7 +341,7 @@ export const JobRec = {
   },
   fromPartial(object: DeepPartial<JobRec>): JobRec {
     const message = createBaseJobRec();
-    message.project_id = object.project_id ?? "";
+    message.project_uuid = object.project_uuid ?? "";
     message.spec_name = object.spec_name ?? "";
     message.job_id = object.job_id ?? "";
     message.time_created = object.time_created ?? undefined;
@@ -329,13 +351,16 @@ export const JobRec = {
 };
 
 function createBaseGetJobRecRequest(): GetJobRecRequest {
-  return { projectId: "", specName: "", jobId: "" };
+  return { projectUuid: "", specName: "", jobId: "" };
 }
 
 export const GetJobRecRequest = {
-  encode(message: GetJobRecRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+  encode(
+    message: GetJobRecRequest,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -347,7 +372,8 @@ export const GetJobRecRequest = {
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): GetJobRecRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseGetJobRecRequest();
     while (reader.pos < end) {
@@ -358,7 +384,7 @@ export const GetJobRecRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -385,16 +411,20 @@ export const GetJobRecRequest = {
 
   fromJSON(object: any): GetJobRecRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
+      projectUuid: isSet(object.projectUuid)
+        ? globalThis.String(object.projectUuid)
+        : "",
+      specName: isSet(object.specName)
+        ? globalThis.String(object.specName)
+        : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
     };
   },
 
   toJSON(message: GetJobRecRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -410,7 +440,7 @@ export const GetJobRecRequest = {
   },
   fromPartial(object: DeepPartial<GetJobRecRequest>): GetJobRecRequest {
     const message = createBaseGetJobRecRequest();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
     return message;
@@ -627,13 +657,16 @@ export const GetZZJobTestRequest = {
 };
 
 function createBaseGetZZJobTestResponse(): GetZZJobTestResponse {
-  return { projectId: "", pipeName: "", jobId: "" };
+  return { projectUuid: "", pipeName: "", jobId: "" };
 }
 
 export const GetZZJobTestResponse = {
-  encode(message: GetZZJobTestResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+  encode(
+    message: GetZZJobTestResponse,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.pipeName !== "") {
       writer.uint32(18).string(message.pipeName);
@@ -644,8 +677,12 @@ export const GetZZJobTestResponse = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetZZJobTestResponse {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): GetZZJobTestResponse {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseGetZZJobTestResponse();
     while (reader.pos < end) {
@@ -656,7 +693,7 @@ export const GetZZJobTestResponse = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -683,16 +720,20 @@ export const GetZZJobTestResponse = {
 
   fromJSON(object: any): GetZZJobTestResponse {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      pipeName: isSet(object.pipeName) ? globalThis.String(object.pipeName) : "",
+      projectUuid: isSet(object.projectUuid)
+        ? globalThis.String(object.projectUuid)
+        : "",
+      pipeName: isSet(object.pipeName)
+        ? globalThis.String(object.pipeName)
+        : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
     };
   },
 
   toJSON(message: GetZZJobTestResponse): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.pipeName !== "") {
       obj.pipeName = message.pipeName;
@@ -708,7 +749,7 @@ export const GetZZJobTestResponse = {
   },
   fromPartial(object: DeepPartial<GetZZJobTestResponse>): GetZZJobTestResponse {
     const message = createBaseGetZZJobTestResponse();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.pipeName = object.pipeName ?? "";
     message.jobId = object.jobId ?? "";
     return message;
@@ -717,7 +758,7 @@ export const GetZZJobTestResponse = {
 
 function createBaseEnsureJobAndStatusAndConnectorRecsRequest(): EnsureJobAndStatusAndConnectorRecsRequest {
   return {
-    projectId: "",
+    projectUuid: "",
     specName: "",
     jobId: "",
     jobOptionsStr: "",
@@ -729,9 +770,12 @@ function createBaseEnsureJobAndStatusAndConnectorRecsRequest(): EnsureJobAndStat
 }
 
 export const EnsureJobAndStatusAndConnectorRecsRequest = {
-  encode(message: EnsureJobAndStatusAndConnectorRecsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+  encode(
+    message: EnsureJobAndStatusAndConnectorRecsRequest,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -748,23 +792,31 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
     if (message.uniqueSpecLabel !== undefined) {
       writer.uint32(50).string(message.uniqueSpecLabel);
     }
-    Object.entries(message.inputStreamIdOverridesByTag).forEach(([key, value]) => {
-      EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.encode(
-        { key: key as any, value },
-        writer.uint32(58).fork(),
-      ).ldelim();
-    });
-    Object.entries(message.outputStreamIdOverridesByTag).forEach(([key, value]) => {
-      EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.encode(
-        { key: key as any, value },
-        writer.uint32(66).fork(),
-      ).ldelim();
-    });
+    Object.entries(message.inputStreamIdOverridesByTag).forEach(
+      ([key, value]) => {
+        EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.encode(
+          { key: key as any, value },
+          writer.uint32(58).fork()
+        ).ldelim();
+      }
+    );
+    Object.entries(message.outputStreamIdOverridesByTag).forEach(
+      ([key, value]) => {
+        EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.encode(
+          { key: key as any, value },
+          writer.uint32(66).fork()
+        ).ldelim();
+      }
+    );
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): EnsureJobAndStatusAndConnectorRecsRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): EnsureJobAndStatusAndConnectorRecsRequest {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest();
     while (reader.pos < end) {
@@ -775,7 +827,7 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -817,10 +869,11 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
             break;
           }
 
-          const entry7 = EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.decode(
-            reader,
-            reader.uint32(),
-          );
+          const entry7 =
+            EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.decode(
+              reader,
+              reader.uint32()
+            );
           if (entry7.value !== undefined) {
             message.inputStreamIdOverridesByTag[entry7.key] = entry7.value;
           }
@@ -830,10 +883,11 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
             break;
           }
 
-          const entry8 = EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.decode(
-            reader,
-            reader.uint32(),
-          );
+          const entry8 =
+            EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.decode(
+              reader,
+              reader.uint32()
+            );
           if (entry8.value !== undefined) {
             message.outputStreamIdOverridesByTag[entry8.key] = entry8.value;
           }
@@ -849,31 +903,47 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
 
   fromJSON(object: any): EnsureJobAndStatusAndConnectorRecsRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
+      projectUuid: isSet(object.projectUuid)
+        ? globalThis.String(object.projectUuid)
+        : "",
+      specName: isSet(object.specName)
+        ? globalThis.String(object.specName)
+        : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
-      jobOptionsStr: isSet(object.jobOptionsStr) ? globalThis.String(object.jobOptionsStr) : "",
-      parentJobId: isSet(object.parentJobId) ? globalThis.String(object.parentJobId) : undefined,
-      uniqueSpecLabel: isSet(object.uniqueSpecLabel) ? globalThis.String(object.uniqueSpecLabel) : undefined,
+      jobOptionsStr: isSet(object.jobOptionsStr)
+        ? globalThis.String(object.jobOptionsStr)
+        : "",
+      parentJobId: isSet(object.parentJobId)
+        ? globalThis.String(object.parentJobId)
+        : undefined,
+      uniqueSpecLabel: isSet(object.uniqueSpecLabel)
+        ? globalThis.String(object.uniqueSpecLabel)
+        : undefined,
       inputStreamIdOverridesByTag: isObject(object.inputStreamIdOverridesByTag)
-        ? Object.entries(object.inputStreamIdOverridesByTag).reduce<{ [key: string]: string }>((acc, [key, value]) => {
-          acc[key] = String(value);
-          return acc;
-        }, {})
+        ? Object.entries(object.inputStreamIdOverridesByTag).reduce<{
+            [key: string]: string;
+          }>((acc, [key, value]) => {
+            acc[key] = String(value);
+            return acc;
+          }, {})
         : {},
-      outputStreamIdOverridesByTag: isObject(object.outputStreamIdOverridesByTag)
-        ? Object.entries(object.outputStreamIdOverridesByTag).reduce<{ [key: string]: string }>((acc, [key, value]) => {
-          acc[key] = String(value);
-          return acc;
-        }, {})
+      outputStreamIdOverridesByTag: isObject(
+        object.outputStreamIdOverridesByTag
+      )
+        ? Object.entries(object.outputStreamIdOverridesByTag).reduce<{
+            [key: string]: string;
+          }>((acc, [key, value]) => {
+            acc[key] = String(value);
+            return acc;
+          }, {})
         : {},
     };
   },
 
   toJSON(message: EnsureJobAndStatusAndConnectorRecsRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -911,30 +981,32 @@ export const EnsureJobAndStatusAndConnectorRecsRequest = {
     return obj;
   },
 
-  create(base?: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>): EnsureJobAndStatusAndConnectorRecsRequest {
+  create(
+    base?: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>
+  ): EnsureJobAndStatusAndConnectorRecsRequest {
     return EnsureJobAndStatusAndConnectorRecsRequest.fromPartial(base ?? {});
   },
   fromPartial(
-    object: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>,
+    object: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest>
   ): EnsureJobAndStatusAndConnectorRecsRequest {
     const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
     message.jobOptionsStr = object.jobOptionsStr ?? "";
     message.parentJobId = object.parentJobId ?? undefined;
     message.uniqueSpecLabel = object.uniqueSpecLabel ?? undefined;
-    message.inputStreamIdOverridesByTag = Object.entries(object.inputStreamIdOverridesByTag ?? {}).reduce<
-      { [key: string]: string }
-    >((acc, [key, value]) => {
+    message.inputStreamIdOverridesByTag = Object.entries(
+      object.inputStreamIdOverridesByTag ?? {}
+    ).reduce<{ [key: string]: string }>((acc, [key, value]) => {
       if (value !== undefined) {
         acc[key] = globalThis.String(value);
       }
       return acc;
     }, {});
-    message.outputStreamIdOverridesByTag = Object.entries(object.outputStreamIdOverridesByTag ?? {}).reduce<
-      { [key: string]: string }
-    >((acc, [key, value]) => {
+    message.outputStreamIdOverridesByTag = Object.entries(
+      object.outputStreamIdOverridesByTag ?? {}
+    ).reduce<{ [key: string]: string }>((acc, [key, value]) => {
       if (value !== undefined) {
         acc[key] = globalThis.String(value);
       }
@@ -948,178 +1020,201 @@ function createBaseEnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverri
   return { key: "", value: "" };
 }
 
-export const EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry = {
-  encode(
-    message: EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry,
-    writer: _m0.Writer = _m0.Writer.create(),
-  ): _m0.Writer {
-    if (message.key !== "") {
-      writer.uint32(10).string(message.key);
-    }
-    if (message.value !== "") {
-      writer.uint32(18).string(message.value);
-    }
-    return writer;
-  },
-
-  decode(
-    input: _m0.Reader | Uint8Array,
-    length?: number,
-  ): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.key = reader.string();
-          continue;
-        case 2:
-          if (tag !== 18) {
-            break;
-          }
-
-          message.value = reader.string();
-          continue;
+export const EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry =
+  {
+    encode(
+      message: EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry,
+      writer: _m0.Writer = _m0.Writer.create()
+    ): _m0.Writer {
+      if (message.key !== "") {
+        writer.uint32(10).string(message.key);
       }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
+      if (message.value !== "") {
+        writer.uint32(18).string(message.value);
       }
-      reader.skipType(tag & 7);
-    }
-    return message;
-  },
+      return writer;
+    },
 
-  fromJSON(object: any): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
-    return {
-      key: isSet(object.key) ? globalThis.String(object.key) : "",
-      value: isSet(object.value) ? globalThis.String(object.value) : "",
-    };
-  },
+    decode(
+      input: _m0.Reader | Uint8Array,
+      length?: number
+    ): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
+      const reader =
+        input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+      let end = length === undefined ? reader.len : reader.pos + length;
+      const message =
+        createBaseEnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1:
+            if (tag !== 10) {
+              break;
+            }
 
-  toJSON(message: EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry): unknown {
-    const obj: any = {};
-    if (message.key !== "") {
-      obj.key = message.key;
-    }
-    if (message.value !== "") {
-      obj.value = message.value;
-    }
-    return obj;
-  },
+            message.key = reader.string();
+            continue;
+          case 2:
+            if (tag !== 18) {
+              break;
+            }
 
-  create(
-    base?: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry>,
-  ): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
-    return EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.fromPartial(base ?? {});
-  },
-  fromPartial(
-    object: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry>,
-  ): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
-    const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry();
-    message.key = object.key ?? "";
-    message.value = object.value ?? "";
-    return message;
-  },
-};
+            message.value = reader.string();
+            continue;
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skipType(tag & 7);
+      }
+      return message;
+    },
+
+    fromJSON(
+      object: any
+    ): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
+      return {
+        key: isSet(object.key) ? globalThis.String(object.key) : "",
+        value: isSet(object.value) ? globalThis.String(object.value) : "",
+      };
+    },
+
+    toJSON(
+      message: EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry
+    ): unknown {
+      const obj: any = {};
+      if (message.key !== "") {
+        obj.key = message.key;
+      }
+      if (message.value !== "") {
+        obj.value = message.value;
+      }
+      return obj;
+    },
+
+    create(
+      base?: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry>
+    ): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
+      return EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry.fromPartial(
+        base ?? {}
+      );
+    },
+    fromPartial(
+      object: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry>
+    ): EnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry {
+      const message =
+        createBaseEnsureJobAndStatusAndConnectorRecsRequest_InputStreamIdOverridesByTagEntry();
+      message.key = object.key ?? "";
+      message.value = object.value ?? "";
+      return message;
+    },
+  };
 
 function createBaseEnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry(): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
   return { key: "", value: "" };
 }
 
-export const EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry = {
-  encode(
-    message: EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry,
-    writer: _m0.Writer = _m0.Writer.create(),
-  ): _m0.Writer {
-    if (message.key !== "") {
-      writer.uint32(10).string(message.key);
-    }
-    if (message.value !== "") {
-      writer.uint32(18).string(message.value);
-    }
-    return writer;
-  },
-
-  decode(
-    input: _m0.Reader | Uint8Array,
-    length?: number,
-  ): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
-    let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry();
-    while (reader.pos < end) {
-      const tag = reader.uint32();
-      switch (tag >>> 3) {
-        case 1:
-          if (tag !== 10) {
-            break;
-          }
-
-          message.key = reader.string();
-          continue;
-        case 2:
-          if (tag !== 18) {
-            break;
-          }
-
-          message.value = reader.string();
-          continue;
+export const EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry =
+  {
+    encode(
+      message: EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry,
+      writer: _m0.Writer = _m0.Writer.create()
+    ): _m0.Writer {
+      if (message.key !== "") {
+        writer.uint32(10).string(message.key);
       }
-      if ((tag & 7) === 4 || tag === 0) {
-        break;
+      if (message.value !== "") {
+        writer.uint32(18).string(message.value);
       }
-      reader.skipType(tag & 7);
-    }
-    return message;
-  },
+      return writer;
+    },
 
-  fromJSON(object: any): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
-    return {
-      key: isSet(object.key) ? globalThis.String(object.key) : "",
-      value: isSet(object.value) ? globalThis.String(object.value) : "",
-    };
-  },
+    decode(
+      input: _m0.Reader | Uint8Array,
+      length?: number
+    ): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
+      const reader =
+        input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+      let end = length === undefined ? reader.len : reader.pos + length;
+      const message =
+        createBaseEnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry();
+      while (reader.pos < end) {
+        const tag = reader.uint32();
+        switch (tag >>> 3) {
+          case 1:
+            if (tag !== 10) {
+              break;
+            }
 
-  toJSON(message: EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry): unknown {
-    const obj: any = {};
-    if (message.key !== "") {
-      obj.key = message.key;
-    }
-    if (message.value !== "") {
-      obj.value = message.value;
-    }
-    return obj;
-  },
+            message.key = reader.string();
+            continue;
+          case 2:
+            if (tag !== 18) {
+              break;
+            }
 
-  create(
-    base?: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry>,
-  ): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
-    return EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.fromPartial(base ?? {});
-  },
-  fromPartial(
-    object: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry>,
-  ): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
-    const message = createBaseEnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry();
-    message.key = object.key ?? "";
-    message.value = object.value ?? "";
-    return message;
-  },
-};
+            message.value = reader.string();
+            continue;
+        }
+        if ((tag & 7) === 4 || tag === 0) {
+          break;
+        }
+        reader.skipType(tag & 7);
+      }
+      return message;
+    },
+
+    fromJSON(
+      object: any
+    ): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
+      return {
+        key: isSet(object.key) ? globalThis.String(object.key) : "",
+        value: isSet(object.value) ? globalThis.String(object.value) : "",
+      };
+    },
+
+    toJSON(
+      message: EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry
+    ): unknown {
+      const obj: any = {};
+      if (message.key !== "") {
+        obj.key = message.key;
+      }
+      if (message.value !== "") {
+        obj.value = message.value;
+      }
+      return obj;
+    },
+
+    create(
+      base?: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry>
+    ): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
+      return EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry.fromPartial(
+        base ?? {}
+      );
+    },
+    fromPartial(
+      object: DeepPartial<EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry>
+    ): EnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry {
+      const message =
+        createBaseEnsureJobAndStatusAndConnectorRecsRequest_OutputStreamIdOverridesByTagEntry();
+      message.key = object.key ?? "";
+      message.value = object.value ?? "";
+      return message;
+    },
+  };
 
 function createBaseUpdateJobInstantiatedGraphRequest(): UpdateJobInstantiatedGraphRequest {
-  return { projectId: "", specName: "", jobId: "", instantiatedGraphStr: "" };
+  return { projectUuid: "", specName: "", jobId: "", instantiatedGraphStr: "" };
 }
 
 export const UpdateJobInstantiatedGraphRequest = {
-  encode(message: UpdateJobInstantiatedGraphRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+  encode(
+    message: UpdateJobInstantiatedGraphRequest,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -1133,8 +1228,12 @@ export const UpdateJobInstantiatedGraphRequest = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): UpdateJobInstantiatedGraphRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): UpdateJobInstantiatedGraphRequest {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseUpdateJobInstantiatedGraphRequest();
     while (reader.pos < end) {
@@ -1145,7 +1244,7 @@ export const UpdateJobInstantiatedGraphRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -1179,17 +1278,23 @@ export const UpdateJobInstantiatedGraphRequest = {
 
   fromJSON(object: any): UpdateJobInstantiatedGraphRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
+      projectUuid: isSet(object.projectUuid)
+        ? globalThis.String(object.projectUuid)
+        : "",
+      specName: isSet(object.specName)
+        ? globalThis.String(object.specName)
+        : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
-      instantiatedGraphStr: isSet(object.instantiatedGraphStr) ? globalThis.String(object.instantiatedGraphStr) : "",
+      instantiatedGraphStr: isSet(object.instantiatedGraphStr)
+        ? globalThis.String(object.instantiatedGraphStr)
+        : "",
     };
   },
 
   toJSON(message: UpdateJobInstantiatedGraphRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -1203,12 +1308,16 @@ export const UpdateJobInstantiatedGraphRequest = {
     return obj;
   },
 
-  create(base?: DeepPartial<UpdateJobInstantiatedGraphRequest>): UpdateJobInstantiatedGraphRequest {
+  create(
+    base?: DeepPartial<UpdateJobInstantiatedGraphRequest>
+  ): UpdateJobInstantiatedGraphRequest {
     return UpdateJobInstantiatedGraphRequest.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<UpdateJobInstantiatedGraphRequest>): UpdateJobInstantiatedGraphRequest {
+  fromPartial(
+    object: DeepPartial<UpdateJobInstantiatedGraphRequest>
+  ): UpdateJobInstantiatedGraphRequest {
     const message = createBaseUpdateJobInstantiatedGraphRequest();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
     message.instantiatedGraphStr = object.instantiatedGraphStr ?? "";
@@ -1217,13 +1326,24 @@ export const UpdateJobInstantiatedGraphRequest = {
 };
 
 function createBaseGetJobDatapointsRequest(): GetJobDatapointsRequest {
-  return { projectId: "", specName: "", jobId: "", key: "", ioType: 0, order: undefined, limit: undefined };
+  return {
+    projectUuid: "",
+    specName: "",
+    jobId: "",
+    key: "",
+    ioType: 0,
+    order: undefined,
+    limit: undefined,
+  };
 }
 
 export const GetJobDatapointsRequest = {
-  encode(message: GetJobDatapointsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+  encode(
+    message: GetJobDatapointsRequest,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -1246,8 +1366,12 @@ export const GetJobDatapointsRequest = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetJobDatapointsRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): GetJobDatapointsRequest {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseGetJobDatapointsRequest();
     while (reader.pos < end) {
@@ -1258,7 +1382,7 @@ export const GetJobDatapointsRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -1313,8 +1437,12 @@ export const GetJobDatapointsRequest = {
 
   fromJSON(object: any): GetJobDatapointsRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
+      projectUuid: isSet(object.projectUuid)
+        ? globalThis.String(object.projectUuid)
+        : "",
+      specName: isSet(object.specName)
+        ? globalThis.String(object.specName)
+        : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
       key: isSet(object.key) ? globalThis.String(object.key) : "",
       ioType: isSet(object.ioType) ? connectorTypeFromJSON(object.ioType) : 0,
@@ -1325,8 +1453,8 @@ export const GetJobDatapointsRequest = {
 
   toJSON(message: GetJobDatapointsRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -1352,9 +1480,11 @@ export const GetJobDatapointsRequest = {
   create(base?: DeepPartial<GetJobDatapointsRequest>): GetJobDatapointsRequest {
     return GetJobDatapointsRequest.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<GetJobDatapointsRequest>): GetJobDatapointsRequest {
+  fromPartial(
+    object: DeepPartial<GetJobDatapointsRequest>
+  ): GetJobDatapointsRequest {
     const message = createBaseGetJobDatapointsRequest();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
     message.key = object.key ?? "";
@@ -1370,7 +1500,10 @@ function createBaseDatapointRecord(): DatapointRecord {
 }
 
 export const DatapointRecord = {
-  encode(message: DatapointRecord, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+  encode(
+    message: DatapointRecord,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
     if (message.datapointId !== "") {
       writer.uint32(10).string(message.datapointId);
     }
@@ -1381,7 +1514,8 @@ export const DatapointRecord = {
   },
 
   decode(input: _m0.Reader | Uint8Array, length?: number): DatapointRecord {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseDatapointRecord();
     while (reader.pos < end) {
@@ -1412,7 +1546,9 @@ export const DatapointRecord = {
 
   fromJSON(object: any): DatapointRecord {
     return {
-      datapointId: isSet(object.datapointId) ? globalThis.String(object.datapointId) : "",
+      datapointId: isSet(object.datapointId)
+        ? globalThis.String(object.datapointId)
+        : "",
       dataStr: isSet(object.dataStr) ? globalThis.String(object.dataStr) : "",
     };
   },
@@ -1444,15 +1580,22 @@ function createBaseGetJobDatapointsResponse(): GetJobDatapointsResponse {
 }
 
 export const GetJobDatapointsResponse = {
-  encode(message: GetJobDatapointsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+  encode(
+    message: GetJobDatapointsResponse,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
     for (const v of message.points) {
       DatapointRecord.encode(v!, writer.uint32(10).fork()).ldelim();
     }
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetJobDatapointsResponse {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): GetJobDatapointsResponse {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseGetJobDatapointsResponse();
     while (reader.pos < end) {
@@ -1490,24 +1633,37 @@ export const GetJobDatapointsResponse = {
     return obj;
   },
 
-  create(base?: DeepPartial<GetJobDatapointsResponse>): GetJobDatapointsResponse {
+  create(
+    base?: DeepPartial<GetJobDatapointsResponse>
+  ): GetJobDatapointsResponse {
     return GetJobDatapointsResponse.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<GetJobDatapointsResponse>): GetJobDatapointsResponse {
+  fromPartial(
+    object: DeepPartial<GetJobDatapointsResponse>
+  ): GetJobDatapointsResponse {
     const message = createBaseGetJobDatapointsResponse();
-    message.points = object.points?.map((e) => DatapointRecord.fromPartial(e)) || [];
+    message.points =
+      object.points?.map((e) => DatapointRecord.fromPartial(e)) || [];
     return message;
   },
 };
 
 function createBaseGetJobStreamConnectorRecsRequest(): GetJobStreamConnectorRecsRequest {
-  return { projectId: "", jobId: "", key: undefined, connectorType: undefined };
+  return {
+    projectUuid: "",
+    jobId: "",
+    key: undefined,
+    connectorType: undefined,
+  };
 }
 
 export const GetJobStreamConnectorRecsRequest = {
-  encode(message: GetJobStreamConnectorRecsRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+  encode(
+    message: GetJobStreamConnectorRecsRequest,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.jobId !== "") {
       writer.uint32(18).string(message.jobId);
@@ -1521,8 +1677,12 @@ export const GetJobStreamConnectorRecsRequest = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetJobStreamConnectorRecsRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): GetJobStreamConnectorRecsRequest {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseGetJobStreamConnectorRecsRequest();
     while (reader.pos < end) {
@@ -1533,7 +1693,7 @@ export const GetJobStreamConnectorRecsRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -1567,17 +1727,21 @@ export const GetJobStreamConnectorRecsRequest = {
 
   fromJSON(object: any): GetJobStreamConnectorRecsRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
+      projectUuid: isSet(object.projectUuid)
+        ? globalThis.String(object.projectUuid)
+        : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
       key: isSet(object.key) ? globalThis.String(object.key) : undefined,
-      connectorType: isSet(object.connectorType) ? connectorTypeFromJSON(object.connectorType) : undefined,
+      connectorType: isSet(object.connectorType)
+        ? connectorTypeFromJSON(object.connectorType)
+        : undefined,
     };
   },
 
   toJSON(message: GetJobStreamConnectorRecsRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.jobId !== "") {
       obj.jobId = message.jobId;
@@ -1591,12 +1755,16 @@ export const GetJobStreamConnectorRecsRequest = {
     return obj;
   },
 
-  create(base?: DeepPartial<GetJobStreamConnectorRecsRequest>): GetJobStreamConnectorRecsRequest {
+  create(
+    base?: DeepPartial<GetJobStreamConnectorRecsRequest>
+  ): GetJobStreamConnectorRecsRequest {
     return GetJobStreamConnectorRecsRequest.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<GetJobStreamConnectorRecsRequest>): GetJobStreamConnectorRecsRequest {
+  fromPartial(
+    object: DeepPartial<GetJobStreamConnectorRecsRequest>
+  ): GetJobStreamConnectorRecsRequest {
     const message = createBaseGetJobStreamConnectorRecsRequest();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.jobId = object.jobId ?? "";
     message.key = object.key ?? undefined;
     message.connectorType = object.connectorType ?? undefined;
@@ -1605,19 +1773,32 @@ export const GetJobStreamConnectorRecsRequest = {
 };
 
 function createBaseJobStreamConnectorRecord(): JobStreamConnectorRecord {
-  return { project_id: "", job_id: "", time_created: undefined, stream_id: "", key: "", connector_type: 0 };
+  return {
+    project_uuid: "",
+    job_id: "",
+    time_created: undefined,
+    stream_id: "",
+    key: "",
+    connector_type: 0,
+  };
 }
 
 export const JobStreamConnectorRecord = {
-  encode(message: JobStreamConnectorRecord, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.project_id !== "") {
-      writer.uint32(10).string(message.project_id);
+  encode(
+    message: JobStreamConnectorRecord,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.project_uuid !== "") {
+      writer.uint32(10).string(message.project_uuid);
     }
     if (message.job_id !== "") {
       writer.uint32(18).string(message.job_id);
     }
     if (message.time_created !== undefined) {
-      Timestamp.encode(toTimestamp(message.time_created), writer.uint32(26).fork()).ldelim();
+      Timestamp.encode(
+        toTimestamp(message.time_created),
+        writer.uint32(26).fork()
+      ).ldelim();
     }
     if (message.stream_id !== "") {
       writer.uint32(34).string(message.stream_id);
@@ -1631,8 +1812,12 @@ export const JobStreamConnectorRecord = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): JobStreamConnectorRecord {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): JobStreamConnectorRecord {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseJobStreamConnectorRecord();
     while (reader.pos < end) {
@@ -1643,7 +1828,7 @@ export const JobStreamConnectorRecord = {
             break;
           }
 
-          message.project_id = reader.string();
+          message.project_uuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -1657,7 +1842,9 @@ export const JobStreamConnectorRecord = {
             break;
           }
 
-          message.time_created = fromTimestamp(Timestamp.decode(reader, reader.uint32()));
+          message.time_created = fromTimestamp(
+            Timestamp.decode(reader, reader.uint32())
+          );
           continue;
         case 4:
           if (tag !== 34) {
@@ -1691,19 +1878,27 @@ export const JobStreamConnectorRecord = {
 
   fromJSON(object: any): JobStreamConnectorRecord {
     return {
-      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
+      project_uuid: isSet(object.project_uuid)
+        ? globalThis.String(object.project_uuid)
+        : "",
       job_id: isSet(object.job_id) ? globalThis.String(object.job_id) : "",
-      time_created: isSet(object.time_created) ? fromJsonTimestamp(object.time_created) : undefined,
-      stream_id: isSet(object.stream_id) ? globalThis.String(object.stream_id) : "",
+      time_created: isSet(object.time_created)
+        ? fromJsonTimestamp(object.time_created)
+        : undefined,
+      stream_id: isSet(object.stream_id)
+        ? globalThis.String(object.stream_id)
+        : "",
       key: isSet(object.key) ? globalThis.String(object.key) : "",
-      connector_type: isSet(object.connector_type) ? connectorTypeFromJSON(object.connector_type) : 0,
+      connector_type: isSet(object.connector_type)
+        ? connectorTypeFromJSON(object.connector_type)
+        : 0,
     };
   },
 
   toJSON(message: JobStreamConnectorRecord): unknown {
     const obj: any = {};
-    if (message.project_id !== "") {
-      obj.project_id = message.project_id;
+    if (message.project_uuid !== "") {
+      obj.project_uuid = message.project_uuid;
     }
     if (message.job_id !== "") {
       obj.job_id = message.job_id;
@@ -1723,12 +1918,16 @@ export const JobStreamConnectorRecord = {
     return obj;
   },
 
-  create(base?: DeepPartial<JobStreamConnectorRecord>): JobStreamConnectorRecord {
+  create(
+    base?: DeepPartial<JobStreamConnectorRecord>
+  ): JobStreamConnectorRecord {
     return JobStreamConnectorRecord.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<JobStreamConnectorRecord>): JobStreamConnectorRecord {
+  fromPartial(
+    object: DeepPartial<JobStreamConnectorRecord>
+  ): JobStreamConnectorRecord {
     const message = createBaseJobStreamConnectorRecord();
-    message.project_id = object.project_id ?? "";
+    message.project_uuid = object.project_uuid ?? "";
     message.job_id = object.job_id ?? "";
     message.time_created = object.time_created ?? undefined;
     message.stream_id = object.stream_id ?? "";
@@ -1743,15 +1942,22 @@ function createBaseGetJobStreamConnectorRecsResponse(): GetJobStreamConnectorRec
 }
 
 export const GetJobStreamConnectorRecsResponse = {
-  encode(message: GetJobStreamConnectorRecsResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+  encode(
+    message: GetJobStreamConnectorRecsResponse,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
     for (const v of message.records) {
       JobStreamConnectorRecord.encode(v!, writer.uint32(10).fork()).ldelim();
     }
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetJobStreamConnectorRecsResponse {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): GetJobStreamConnectorRecsResponse {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseGetJobStreamConnectorRecsResponse();
     while (reader.pos < end) {
@@ -1762,7 +1968,9 @@ export const GetJobStreamConnectorRecsResponse = {
             break;
           }
 
-          message.records.push(JobStreamConnectorRecord.decode(reader, reader.uint32()));
+          message.records.push(
+            JobStreamConnectorRecord.decode(reader, reader.uint32())
+          );
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -1784,29 +1992,39 @@ export const GetJobStreamConnectorRecsResponse = {
   toJSON(message: GetJobStreamConnectorRecsResponse): unknown {
     const obj: any = {};
     if (message.records?.length) {
-      obj.records = message.records.map((e) => JobStreamConnectorRecord.toJSON(e));
+      obj.records = message.records.map((e) =>
+        JobStreamConnectorRecord.toJSON(e)
+      );
     }
     return obj;
   },
 
-  create(base?: DeepPartial<GetJobStreamConnectorRecsResponse>): GetJobStreamConnectorRecsResponse {
+  create(
+    base?: DeepPartial<GetJobStreamConnectorRecsResponse>
+  ): GetJobStreamConnectorRecsResponse {
     return GetJobStreamConnectorRecsResponse.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<GetJobStreamConnectorRecsResponse>): GetJobStreamConnectorRecsResponse {
+  fromPartial(
+    object: DeepPartial<GetJobStreamConnectorRecsResponse>
+  ): GetJobStreamConnectorRecsResponse {
     const message = createBaseGetJobStreamConnectorRecsResponse();
-    message.records = object.records?.map((e) => JobStreamConnectorRecord.fromPartial(e)) || [];
+    message.records =
+      object.records?.map((e) => JobStreamConnectorRecord.fromPartial(e)) || [];
     return message;
   },
 };
 
 function createBaseAppendJobStatusRecRequest(): AppendJobStatusRecRequest {
-  return { projectId: "", specName: "", jobId: "", jobStatus: "" };
+  return { projectUuid: "", specName: "", jobId: "", jobStatus: "" };
 }
 
 export const AppendJobStatusRecRequest = {
-  encode(message: AppendJobStatusRecRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+  encode(
+    message: AppendJobStatusRecRequest,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.specName !== "") {
       writer.uint32(18).string(message.specName);
@@ -1820,8 +2038,12 @@ export const AppendJobStatusRecRequest = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): AppendJobStatusRecRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): AppendJobStatusRecRequest {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseAppendJobStatusRecRequest();
     while (reader.pos < end) {
@@ -1832,7 +2054,7 @@ export const AppendJobStatusRecRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -1866,17 +2088,23 @@ export const AppendJobStatusRecRequest = {
 
   fromJSON(object: any): AppendJobStatusRecRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      specName: isSet(object.specName) ? globalThis.String(object.specName) : "",
+      projectUuid: isSet(object.projectUuid)
+        ? globalThis.String(object.projectUuid)
+        : "",
+      specName: isSet(object.specName)
+        ? globalThis.String(object.specName)
+        : "",
       jobId: isSet(object.jobId) ? globalThis.String(object.jobId) : "",
-      jobStatus: isSet(object.jobStatus) ? globalThis.String(object.jobStatus) : "",
+      jobStatus: isSet(object.jobStatus)
+        ? globalThis.String(object.jobStatus)
+        : "",
     };
   },
 
   toJSON(message: AppendJobStatusRecRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.specName !== "") {
       obj.specName = message.specName;
@@ -1890,12 +2118,16 @@ export const AppendJobStatusRecRequest = {
     return obj;
   },
 
-  create(base?: DeepPartial<AppendJobStatusRecRequest>): AppendJobStatusRecRequest {
+  create(
+    base?: DeepPartial<AppendJobStatusRecRequest>
+  ): AppendJobStatusRecRequest {
     return AppendJobStatusRecRequest.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<AppendJobStatusRecRequest>): AppendJobStatusRecRequest {
+  fromPartial(
+    object: DeepPartial<AppendJobStatusRecRequest>
+  ): AppendJobStatusRecRequest {
     const message = createBaseAppendJobStatusRecRequest();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.specName = object.specName ?? "";
     message.jobId = object.jobId ?? "";
     message.jobStatus = object.jobStatus ?? "";
@@ -1904,13 +2136,16 @@ export const AppendJobStatusRecRequest = {
 };
 
 function createBaseGetParentJobRecRequest(): GetParentJobRecRequest {
-  return { projectId: "", childJobId: "" };
+  return { projectUuid: "", childJobId: "" };
 }
 
 export const GetParentJobRecRequest = {
-  encode(message: GetParentJobRecRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.projectId !== "") {
-      writer.uint32(10).string(message.projectId);
+  encode(
+    message: GetParentJobRecRequest,
+    writer: _m0.Writer = _m0.Writer.create()
+  ): _m0.Writer {
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
     }
     if (message.childJobId !== "") {
       writer.uint32(18).string(message.childJobId);
@@ -1918,8 +2153,12 @@ export const GetParentJobRecRequest = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetParentJobRecRequest {
-    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+  decode(
+    input: _m0.Reader | Uint8Array,
+    length?: number
+  ): GetParentJobRecRequest {
+    const reader =
+      input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
     const message = createBaseGetParentJobRecRequest();
     while (reader.pos < end) {
@@ -1930,7 +2169,7 @@ export const GetParentJobRecRequest = {
             break;
           }
 
-          message.projectId = reader.string();
+          message.projectUuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -1950,15 +2189,19 @@ export const GetParentJobRecRequest = {
 
   fromJSON(object: any): GetParentJobRecRequest {
     return {
-      projectId: isSet(object.projectId) ? globalThis.String(object.projectId) : "",
-      childJobId: isSet(object.childJobId) ? globalThis.String(object.childJobId) : "",
+      projectUuid: isSet(object.projectUuid)
+        ? globalThis.String(object.projectUuid)
+        : "",
+      childJobId: isSet(object.childJobId)
+        ? globalThis.String(object.childJobId)
+        : "",
     };
   },
 
   toJSON(message: GetParentJobRecRequest): unknown {
     const obj: any = {};
-    if (message.projectId !== "") {
-      obj.projectId = message.projectId;
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
     }
     if (message.childJobId !== "") {
       obj.childJobId = message.childJobId;
@@ -1969,9 +2212,11 @@ export const GetParentJobRecRequest = {
   create(base?: DeepPartial<GetParentJobRecRequest>): GetParentJobRecRequest {
     return GetParentJobRecRequest.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<GetParentJobRecRequest>): GetParentJobRecRequest {
+  fromPartial(
+    object: DeepPartial<GetParentJobRecRequest>
+  ): GetParentJobRecRequest {
     const message = createBaseGetParentJobRecRequest();
-    message.projectId = object.projectId ?? "";
+    message.projectUuid = object.projectUuid ?? "";
     message.childJobId = object.childJobId ?? "";
     return message;
   },
@@ -1979,7 +2224,7 @@ export const GetParentJobRecRequest = {
 
 function createBaseParentJobRec(): ParentJobRec {
   return {
-    project_id: "",
+    project_uuid: "",
     parent_job_id: "",
     spec_name: "",
     unique_spec_label: undefined,
@@ -1990,8 +2235,8 @@ function createBaseParentJobRec(): ParentJobRec {
 
 export const ParentJobRec = {
   encode(message: ParentJobRec, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
-    if (message.project_id !== "") {
-      writer.uint32(10).string(message.project_id);
+    if (message.project_uuid !== "") {
+      writer.uint32(10).string(message.project_uuid);
     }
     if (message.parent_job_id !== "") {
       writer.uint32(18).string(message.parent_job_id);
@@ -2023,7 +2268,7 @@ export const ParentJobRec = {
             break;
           }
 
-          message.project_id = reader.string();
+          message.project_uuid = reader.string();
           continue;
         case 2:
           if (tag !== 18) {
@@ -2071,19 +2316,31 @@ export const ParentJobRec = {
 
   fromJSON(object: any): ParentJobRec {
     return {
-      project_id: isSet(object.project_id) ? globalThis.String(object.project_id) : "",
-      parent_job_id: isSet(object.parent_job_id) ? globalThis.String(object.parent_job_id) : "",
-      spec_name: isSet(object.spec_name) ? globalThis.String(object.spec_name) : "",
-      unique_spec_label: isSet(object.unique_spec_label) ? globalThis.String(object.unique_spec_label) : undefined,
-      time_created: isSet(object.time_created) ? fromJsonTimestamp(object.time_created) : undefined,
-      job_params_str: isSet(object.job_params_str) ? globalThis.String(object.job_params_str) : undefined,
+      project_uuid: isSet(object.project_uuid)
+        ? globalThis.String(object.project_uuid)
+        : "",
+      parent_job_id: isSet(object.parent_job_id)
+        ? globalThis.String(object.parent_job_id)
+        : "",
+      spec_name: isSet(object.spec_name)
+        ? globalThis.String(object.spec_name)
+        : "",
+      unique_spec_label: isSet(object.unique_spec_label)
+        ? globalThis.String(object.unique_spec_label)
+        : undefined,
+      time_created: isSet(object.time_created)
+        ? fromJsonTimestamp(object.time_created)
+        : undefined,
+      job_params_str: isSet(object.job_params_str)
+        ? globalThis.String(object.job_params_str)
+        : undefined,
     };
   },
 
   toJSON(message: ParentJobRec): unknown {
     const obj: any = {};
-    if (message.project_id !== "") {
-      obj.project_id = message.project_id;
+    if (message.project_uuid !== "") {
+      obj.project_uuid = message.project_uuid;
     }
     if (message.parent_job_id !== "") {
       obj.parent_job_id = message.parent_job_id;
@@ -2108,7 +2365,7 @@ export const ParentJobRec = {
   },
   fromPartial(object: DeepPartial<ParentJobRec>): ParentJobRec {
     const message = createBaseParentJobRec();
-    message.project_id = object.project_id ?? "";
+    message.project_uuid = object.project_uuid ?? "";
     message.parent_job_id = object.parent_job_id ?? "";
     message.spec_name = object.spec_name ?? "";
     message.unique_spec_label = object.unique_spec_label ?? undefined;

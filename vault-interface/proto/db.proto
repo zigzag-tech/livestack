@@ -28,7 +28,7 @@ service DBService {
 
 
 message JobRec {
-  string project_id = 1;
+  string project_uuid = 1;
   string spec_name = 2; // Align with jobs.ts
   string job_id = 3;
   google.protobuf.Timestamp time_created = 4;
@@ -36,7 +36,7 @@ message JobRec {
 }
 
 message GetJobRecRequest {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
   string jobId = 3;
 }
@@ -58,7 +58,7 @@ message GetZZJobTestRequest {
 }
 
 message GetZZJobTestResponse {
-  string projectId = 1;
+  string projectUuid = 1;
   string pipeName = 2;
   string jobId = 3;
 }
@@ -70,7 +70,7 @@ enum ConnectorType {
 }
 
 message EnsureJobAndStatusAndConnectorRecsRequest {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
   string jobId = 3;
   string jobOptionsStr = 4;
@@ -82,7 +82,7 @@ message EnsureJobAndStatusAndConnectorRecsRequest {
 
 
 message UpdateJobInstantiatedGraphRequest {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
   string jobId = 3;
   string instantiatedGraphStr = 4;
@@ -94,7 +94,7 @@ enum Order {
 }
 
 message GetJobDatapointsRequest {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
   string jobId = 3;
   string key = 4;
@@ -113,14 +113,14 @@ message GetJobDatapointsResponse {
 }
 
 message GetJobStreamConnectorRecsRequest {
-  string projectId = 1;
+  string projectUuid = 1;
   string jobId = 2;
   optional string key = 3;
   optional ConnectorType connectorType = 4;
 }
 
 message JobStreamConnectorRecord {
-  string project_id = 1;
+  string project_uuid = 1;
   string job_id = 2;
   google.protobuf.Timestamp time_created = 3;
   string stream_id = 4;
@@ -134,19 +134,19 @@ message GetJobStreamConnectorRecsResponse {
 
 
 message AppendJobStatusRecRequest {
-  string projectId = 1;
+  string projectUuid = 1;
   string specName = 2;
   string jobId = 3;
   string jobStatus = 4;
 }
 
 message GetParentJobRecRequest {
-  string projectId = 1;
+  string projectUuid = 1;
   string childJobId = 2;
 }
 
 message ParentJobRec {
-  string project_id = 1;
+  string project_uuid = 1;
   string parent_job_id = 2;
   string spec_name = 3;
   optional string unique_spec_label = 4;

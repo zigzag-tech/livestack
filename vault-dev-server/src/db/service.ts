@@ -20,7 +20,7 @@ import {
 } from "./streams";
 
 export interface ZZJobUniqueId {
-  project_id: string;
+  project_uuid: string;
   spec_name: string;
   job_id: string;
 }
@@ -38,15 +38,15 @@ export interface ZZJobStatusRec extends ZZJobUniqueId {
 }
 
 export const dbService = (dbConn: Knex): DBServiceImplementation => ({
-  async getJobRec({ projectId, specName, jobId }) {
+  async getJobRec({ projectUuid, specName, jobId }) {
     const r = (await dbConn("zz_jobs")
       .select(["zz_jobs.*", "zz_job_status.status"])
       .leftJoin("zz_job_status", function () {
         this.on("zz_jobs.job_id", "=", "zz_job_status.job_id");
-        this.on("zz_jobs.project_id", "=", "zz_job_status.project_id");
+        this.on("zz_jobs.project_uuid", "=", "zz_job_status.project_uuid");
         this.on("zz_jobs.spec_name", "=", "zz_job_status.spec_name");
       })
-      .where("zz_jobs.project_id", "=", projectId)
+      .where("zz_jobs.project_uuid", "=", projectUuid)
       .andWhere("zz_jobs.spec_name", "=", specName)
       .andWhere("zz_jobs.job_id", "=", jobId)
       .orderBy("zz_job_status.time_created", "desc")
@@ -80,7 +80,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     // console.log(ctx.metadata.get("auth"));
 
     const {
-      projectId,
+      projectUuid,
       specName,
       jobId,
       parentJobId,
@@ -92,7 +92,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     const jobOptions = JSON.parse(jobOptionsStr);
     await dbConn.transaction(async (trx) => {
       await ensureJobAndInitStatusRec({
-        projectId,
+        projectUuid,
         specName,
         jobId,
         dbConn: trx,
@@ -101,7 +101,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
 
       if (parentJobId) {
         await ensureJobRelationRec({
-          projectId: projectId,
+          projectUuid: projectUuid,
           parentJobId: parentJobId,
           childJobId: jobId,
           dbConn: trx,
@@ -112,11 +112,11 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       if (inputStreamIdOverridesByTag) {
         for (const [key, streamId] of _.entries(inputStreamIdOverridesByTag)) {
           await ensureStreamRec(dbConn, {
-            project_id: projectId,
+            project_uuid: projectUuid,
             stream_id: streamId as string,
           });
           await ensureJobStreamConnectorRec({
-            projectId,
+            projectUuid,
             streamId: streamId as string,
             jobId,
             key,
@@ -129,11 +129,11 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       if (outputStreamIdOverridesByTag) {
         for (const [key, streamId] of _.entries(outputStreamIdOverridesByTag)) {
           await ensureStreamRec(dbConn, {
-            project_id: projectId,
+            project_uuid: projectUuid,
             stream_id: streamId as string,
           });
           await ensureJobStreamConnectorRec({
-            projectId,
+            projectUuid,
             streamId: streamId as string,
             jobId,
             key,
@@ -147,13 +147,13 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     return {};
   },
   updateJobInstantiatedGraph: async ({
-    projectId,
+    projectUuid,
     jobId,
     instantiatedGraphStr,
   }) => {
     await dbConn("zz_jobs")
       .where({
-        project_id: projectId,
+        project_uuid: projectUuid,
         job_id: jobId,
       })
       .update({
@@ -162,11 +162,11 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     return {};
   },
   getJobDatapoints: async (
-    { projectId, jobId, specName, ioType, key, order, limit },
+    { projectUuid, jobId, specName, ioType, key, order, limit },
     ctx
   ) => {
     const r = await dbConn("zz_datapoints")
-      .where("zz_datapoints.project_id", "=", projectId)
+      .where("zz_datapoints.project_uuid", "=", projectUuid)
       .andWhere("zz_datapoints.job_id", "=", jobId)
       .andWhere("zz_datapoints.job_output_key", "=", key)
       .orderBy(
@@ -198,7 +198,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
   },
 
   getJobStreamConnectorRecs: async ({
-    projectId,
+    projectUuid,
     jobId,
     key,
     connectorType,
@@ -208,7 +208,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     }
 
     const q = dbConn<ZZJobStreamConnectorRec>("zz_job_stream_connectors")
-      .where("project_id", "=", projectId)
+      .where("project_uuid", "=", projectUuid)
       .andWhere("job_id", "=", jobId);
     if (key) {
       q.andWhere("key", "=", key);
@@ -224,10 +224,10 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
     }));
     return { records: r };
   },
-  appendJobStatusRec: async ({ projectId, specName, jobId, jobStatus }) => {
+  appendJobStatusRec: async ({ projectUuid, specName, jobId, jobStatus }) => {
     // console.debug("appendJobStatusRec", specName, jobId, jobStatus);
     await appendJobStatusRec({
-      projectId,
+      projectUuid,
       specName,
       jobId,
       dbConn,
@@ -237,9 +237,9 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
 
     return {};
   },
-  getParentJobRec: async ({ projectId, childJobId }) => {
+  getParentJobRec: async ({ projectUuid, childJobId }) => {
     const r = await getParentJobRec({
-      projectId,
+      projectUuid,
       childJobId,
       dbConn,
     });
@@ -263,26 +263,26 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
 export async function ensureStreamRec(
   dbConn: Knex,
   rec: {
-    project_id: string;
+    project_uuid: string;
     stream_id: string;
     json_schema_str?: string | null | undefined;
   }
 ) {
-  const { project_id, stream_id, json_schema_str } = rec;
+  const { project_uuid, stream_id, json_schema_str } = rec;
 
   await dbConn("zz_streams")
     .insert({
-      project_id,
+      project_uuid,
       stream_id,
       json_schema_str: json_schema_str || null, // Ensure null if undefined
       time_created: new Date(),
     })
-    .onConflict(["project_id", "stream_id"]) // Handle conflict on composite key
+    .onConflict(["project_uuid", "stream_id"]) // Handle conflict on composite key
     .ignore();
 
   const existing = await dbConn("zz_streams")
     .where({
-      project_id,
+      project_uuid,
       stream_id,
     })
     .first();
@@ -291,7 +291,7 @@ export async function ensureStreamRec(
   if (!existing.json_schema_str && json_schema_str) {
     await dbConn("zz_streams")
       .where({
-        project_id,
+        project_uuid,
         stream_id,
       })
       .update({
@@ -305,7 +305,7 @@ export async function ensureStreamRec(
 export async function ensureDatapointRelationRec(
   dbConn: Knex,
   rec: {
-    project_id: string;
+    project_uuid: string;
     source_datapoint_id: string;
     source_stream_id: string;
     target_datapoint_id: string;
@@ -315,7 +315,7 @@ export async function ensureDatapointRelationRec(
   await dbConn("zz_datapoint_relations")
     .insert(rec)
     .onConflict([
-      "project_id",
+      "project_uuid",
       "source_datapoint_id",
       "source_stream_id",
       "target_datapoint_id",
@@ -325,7 +325,7 @@ export async function ensureDatapointRelationRec(
 }
 
 async function appendJobStatusRec({
-  projectId,
+  projectUuid,
   specName,
   jobId,
   dbConn,
@@ -336,7 +336,7 @@ async function appendJobStatusRec({
 }) {
   const q = dbConn("zz_job_status").insert<ZZJobStatusRec>({
     status_id: v4(),
-    project_id: projectId,
+    project_uuid: projectUuid,
     spec_name: specName,
     job_id: jobId,
     status: jobStatus,
@@ -346,7 +346,7 @@ async function appendJobStatusRec({
 }
 
 export async function ensureJobAndInitStatusRec<T>({
-  projectId,
+  projectUuid,
   specName,
   jobId,
   dbConn,
@@ -360,20 +360,20 @@ export async function ensureJobAndInitStatusRec<T>({
   // await dbConn.transaction(async (trx) => {
   const q = dbConn("zz_jobs")
     .insert<JobRec>({
-      project_id: projectId,
+      project_uuid: projectUuid,
       spec_name: specName,
       job_id: jobId,
       job_params: handlePrimitiveOrArray(jobOptions),
       instagraph_str: instantGraphStr,
     })
-    .onConflict(["project_id", "spec_name", "job_id"])
+    .onConflict(["project_uuid", "spec_name", "job_id"])
     .ignore();
 
   // console.log(q.toString());
   await q;
 
   await appendJobStatusRec({
-    projectId,
+    projectUuid,
     specName,
     jobId,
     dbConn,
@@ -382,13 +382,13 @@ export async function ensureJobAndInitStatusRec<T>({
   // });
 }
 export type JobUniqueId = {
-  projectId: string;
+  projectUuid: string;
   specName: string;
   jobId: string;
 };
 
 export interface ZZDatapointRec<T> {
-  project_id: string;
+  project_uuid: string;
   stream_id: string;
   datapoint_id: string;
   data: T;

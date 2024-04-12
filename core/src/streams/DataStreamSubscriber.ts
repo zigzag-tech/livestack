@@ -62,8 +62,8 @@ export class DataStreamSubscriber<T extends object> {
 
   private async readStream(subscriber: Subscriber<WithTimestamp<T>>) {
     try {
-      const iter = (await ZZEnv.vaultClient()).stream.sub({
-        projectId: (await this.zzEnvP).projectId,
+      const iter = (await ZZEnv.globalP()).vaultClient.stream.sub({
+        projectUuid: (await this.zzEnvP).projectUuid,
         uniqueName: this.stream.uniqueName,
         subType: this.subType,
       });

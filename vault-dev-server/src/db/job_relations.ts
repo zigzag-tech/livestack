@@ -3,13 +3,13 @@ import { convertMaybePrimtiveOrArrayBack } from "./primitives";
 import { JobRec } from "@livestack/vault-interface";
 
 export async function ensureJobRelationRec({
-  projectId,
+  projectUuid,
   parentJobId,
   childJobId,
   dbConn,
   uniqueSpecLabel,
 }: {
-  projectId: string;
+  projectUuid: string;
   parentJobId: string;
   childJobId: string;
   dbConn: Knex;
@@ -17,14 +17,14 @@ export async function ensureJobRelationRec({
 }) {
   await dbConn("zz_job_relations")
     .insert<ZZJobRelationRec>({
-      project_id: projectId,
+      project_uuid: projectUuid,
       parent_job_id: parentJobId,
       child_job_id: childJobId,
       time_created: new Date(),
       unique_spec_label: uniqueSpecLabel || "null",
     })
     .onConflict([
-      "project_id",
+      "project_uuid",
       "parent_job_id",
       "child_job_id",
       "unique_spec_label",
@@ -33,11 +33,11 @@ export async function ensureJobRelationRec({
 }
 
 // export async function getChildJobs({
-//   projectId,
+//   projectUuid,
 //   parentJobId,
 //   dbConn,
 // }: {
-//   projectId: string;
+//   projectUuid: string;
 //   parentJobId: string;
 //   dbConn: Knex;
 // }) {
@@ -50,9 +50,9 @@ export async function ensureJobRelationRec({
 //     >(["zz_jobs.*", "zz_job_relations.unique_spec_label"])
 //     .leftJoin("zz_jobs", function () {
 //       this.on("zz_job_relations.child_job_id", "=", "zz_jobs.job_id");
-//       this.on("zz_job_relations.project_id", "=", "zz_jobs.project_id");
+//       this.on("zz_job_relations.project_uuid", "=", "zz_jobs.project_uuid");
 //     })
-//     .where("zz_job_relations.project_id", "=", projectId)
+//     .where("zz_job_relations.project_uuid", "=", projectUuid)
 //     .andWhere("zz_job_relations.parent_job_id", "=", parentJobId);
 //   return r.map((rec) => ({
 //     ...rec,
@@ -63,11 +63,11 @@ export async function ensureJobRelationRec({
 // }
 
 export async function getParentJobRec({
-  projectId,
+  projectUuid,
   childJobId,
   dbConn,
 }: {
-  projectId: string;
+  projectUuid: string;
   childJobId: string;
   dbConn: Knex;
 }) {
@@ -84,9 +84,9 @@ export async function getParentJobRec({
     ])
     .leftJoin("zz_jobs", function () {
       this.on("zz_job_relations.parent_job_id", "=", "zz_jobs.job_id");
-      this.on("zz_job_relations.project_id", "=", "zz_jobs.project_id");
+      this.on("zz_job_relations.project_uuid", "=", "zz_jobs.project_uuid");
     })
-    .where("zz_job_relations.project_id", "=", projectId)
+    .where("zz_job_relations.project_uuid", "=", projectUuid)
     .andWhere("zz_job_relations.child_job_id", "=", childJobId);
   if (!rec) {
     return null;
@@ -100,7 +100,7 @@ export async function getParentJobRec({
   }
 }
 export interface ZZJobRelationRec {
-  project_id: string;
+  project_uuid: string;
   parent_job_id: string;
   child_job_id: string;
   time_created: Date;
