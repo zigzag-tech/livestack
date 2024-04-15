@@ -23,7 +23,9 @@ export interface ParallelAttempt<ParentIMap, ParentOMap, I, O, IMap, OMap> {
     | NoInfer<IMap[InferDefaultOrSingleKey<IMap>]>;
   transformOutput: <K extends keyof OMap>(
     output: OMap[K]
-  ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
+  ) =>
+    | Promise<ParentOMap[InferDefaultOrSingleKey<ParentOMap>]>
+    | ParentOMap[InferDefaultOrSingleKey<ParentOMap>];
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
 
@@ -70,7 +72,9 @@ export class ParallelAttemptWorkflow<
         error: boolean;
         name: string;
       }[]
-    ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
+    ) =>
+      | Promise<ParentOMap[InferDefaultOrSingleKey<ParentOMap>]>
+      | ParentOMap[InferDefaultOrSingleKey<ParentOMap>];
     attempts:
       | AttemptsUpTo5<
           ParentIMap,
@@ -150,7 +154,7 @@ export class ParallelAttemptWorkflow<
           timeStarted: number;
           isResolved: () => boolean;
           getResult: () =>
-            | WrapWithTimestamp<ParentOMap[keyof ParentOMap]>
+            | WrapWithTimestamp<ParentOMap[InferDefaultOrSingleKey<ParentOMap>]>
             | undefined;
         }[] = [];
 
@@ -188,7 +192,9 @@ export class ParallelAttemptWorkflow<
             const { setResolved, isResolved } = genResolvedTracker();
 
             let result:
-              | WrapWithTimestamp<ParentOMap[keyof ParentOMap]>
+              | WrapWithTimestamp<
+                  ParentOMap[InferDefaultOrSingleKey<ParentOMap>]
+                >
               | undefined = undefined;
             const fn = genRetryFunction(nextAttempt);
             logger.info(`Started attempt ${nextAttempt.jobSpec.name}.`);
