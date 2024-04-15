@@ -1,7 +1,6 @@
-import { CheckSpec, JobSpec } from "../jobs/JobSpec";
-import { ZZWorkerDef } from "../jobs/ZZWorker";
+import { JobSpec } from "../jobs/JobSpec";
+import { InferDefaultOrSingleKey, ZZWorkerDef } from "../jobs/ZZWorker";
 import _ from "lodash";
-import { InferStreamSetType, InferTMap } from "@livestack/shared";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { genTimeoutPromise } from "../utils/genTimeoutPromise";
 
@@ -10,7 +9,9 @@ export interface AttemptDef<ParentIMap, ParentOMap, I, O, IMap, OMap> {
   timeout?: number;
   transformInput: <K extends keyof ParentIMap>(
     data: ParentIMap[K]
-  ) => Promise<IMap[keyof IMap]> | IMap[keyof IMap];
+  ) =>
+    | Promise<IMap[InferDefaultOrSingleKey<IMap>]>
+    | IMap[InferDefaultOrSingleKey<IMap>];
   transformOutput: <K extends keyof OMap>(
     output: OMap[K]
   ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
@@ -122,7 +123,7 @@ export class ProgressiveAdaptiveTryWorkerDef<
               parentJobId: jobId,
             });
             const transformed = await transformInput(inpt);
-            await jo.input.feed(transformed as IMap[keyof IMap]);
+            await jo.input.feed(transformed);
 
             const o = await jo.output.nextValue();
             if (!o) {
