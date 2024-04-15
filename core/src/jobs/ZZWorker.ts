@@ -29,6 +29,7 @@ export type ZZWorkerDefParams<
   zzEnv?: ZZEnv;
   workerPrefix?: string;
   maxNumWorkers?: number;
+  doNotReportCapacity?: boolean;
 };
 
 export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
@@ -45,6 +46,7 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     zzEnv,
     workerPrefix,
     maxNumWorkers = 1000,
+    doNotReportCapacity = false,
   }: ZZWorkerDefParams<P, I, O, WP, IMap, OMap>) {
     this.jobSpec = jobSpec;
     this.instanceParamsDef = instanceParamsDef || z.object({});
@@ -56,8 +58,9 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     }
 
     this.workerPrefix = workerPrefix;
-
-    this.reportInstanceCapacityLazy();
+    if (!doNotReportCapacity) {
+      this.reportInstanceCapacityLazy();
+    }
   }
 
   // public get zzEnv() {
