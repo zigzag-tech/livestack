@@ -4,6 +4,7 @@ import {
   InferTMap,
   wrapIfSingle,
   initDefGraph,
+  OutletNode,
 } from "@livestack/shared";
 import { InletNode, SpecNode, DefGraph } from "@livestack/shared";
 import {
@@ -642,19 +643,68 @@ export class JobSpec<
     // console.debug("Spec._enqueueJob", jobId, jobOptions);
 
     const projectUuid = (await this.zzEnvPWithTimeout).projectUuid;
+
+    // construct streamIdOverridesByTagByTypeByJobId[jobId] from the graph
+
+    const instG = await resolveInstantiatedGraph({
+      specName: this.name,
+      jobId,
+      zzEnv: await this.zzEnvPWithTimeout,
+    });
+
     if (!this.streamIdOverridesByTagByTypeByJobId[jobId]) {
+      const inletEdgeIds = instG.inboundEdges(instG.rootJobId).filter((e) => {
+        const node = instG.getNodeAttributes(instG.source(e));
+        return node.nodeType === "Inlet";
+      });
+      const inletNodeIds = inletEdgeIds.map((e) => instG.source(e));
+      const _in = Object.fromEntries(
+        inletNodeIds.map((nId) => {
+          const node = instG.getNodeAttributes(nId) as InletNode;
+          const streamToInletEdgeId = instG.inboundEdges(nId)[0];
+          const streamNodeId = instG.source(streamToInletEdgeId);
+          const streamNode = instG.getNodeAttributes(
+            streamNodeId
+          ) as StreamNode;
+
+          return [node.tag, streamNode.streamId];
+        })
+      ) as Record<keyof IMap, string>;
+
+      const outletEdgeIds = instG.outboundEdges(instG.rootJobId).filter((e) => {
+        const node = instG.getNodeAttributes(instG.target(e));
+        return node.nodeType === "Outlet";
+      });
+      const outletNodeIds = outletEdgeIds.map((e) => instG.target(e));
+      const _out = Object.fromEntries(
+        outletNodeIds.map((nId) => {
+          const node = instG.getNodeAttributes(nId) as OutletNode;
+          const streamToOutletEdgeId = instG.outboundEdges(nId)[0];
+          const streamNodeId = instG.target(streamToOutletEdgeId);
+          const streamNode = instG.getNodeAttributes(
+            streamNodeId
+          ) as StreamNode;
+
+          return [node.tag, streamNode.streamId];
+        })
+      ) as Record<keyof OMap, string>;
+
       this.streamIdOverridesByTagByTypeByJobId[jobId] = {
-        in: null,
-        out: null,
+        in: _in,
+        out: _out,
       };
     }
     if (inputStreamIdOverridesByTag) {
-      this.streamIdOverridesByTagByTypeByJobId[jobId]["in"] =
-        inputStreamIdOverridesByTag;
+      Object.assign(
+        this.streamIdOverridesByTagByTypeByJobId[jobId]["in"]!,
+        inputStreamIdOverridesByTag
+      );
     }
     if (outputStreamIdOverridesByTag) {
-      this.streamIdOverridesByTagByTypeByJobId[jobId]["out"] =
-        outputStreamIdOverridesByTag;
+      Object.assign(
+        this.streamIdOverridesByTagByTypeByJobId[jobId]["out"]!,
+        outputStreamIdOverridesByTag
+      );
     }
 
     jobOptions = jobOptions || ({} as P);
@@ -666,8 +716,10 @@ export class JobSpec<
       jobOptionsStr: JSON.stringify(jobOptions),
       parentJobId: p?.parentJobId,
       uniqueSpecLabel: p?.uniqueSpecLabel,
-      inputStreamIdOverridesByTag: inputStreamIdOverridesByTag || {},
-      outputStreamIdOverridesByTag: outputStreamIdOverridesByTag || {},
+      inputStreamIdOverridesByTag:
+        this.streamIdOverridesByTagByTypeByJobId[jobId]["in"]!,
+      outputStreamIdOverridesByTag:
+        this.streamIdOverridesByTagByTypeByJobId[jobId]["out"]!,
     });
 
     const j = await vaultClient.queue.addJob({
@@ -677,16 +729,12 @@ export class JobSpec<
       jobOptionsStr: JSON.stringify(jobOptions as any),
       contextId: p?.parentJobId,
     });
-    const instaG = await resolveInstantiatedGraph({
-      specName: this.name,
-      jobId,
-      zzEnv: await this.zzEnvPWithTimeout,
-    });
+
     await vaultClient.db.updateJobInstantiatedGraph({
       projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
       jobId,
       specName: this.name,
-      instantiatedGraphStr: JSON.stringify(instaG),
+      instantiatedGraphStr: JSON.stringify(instG),
     });
 
     this.logger.info(
