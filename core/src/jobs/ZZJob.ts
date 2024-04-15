@@ -25,7 +25,7 @@ import { InferDefaultOrSingleKey, InferDefaultOrSingleValue } from "./ZZWorker";
 
 export type ZZProcessor<P, I, O, WP extends object | undefined, IMap, OMap> = (
   j: ZZJob<P, I, O, WP, IMap, OMap>
-) => Promise<OMap[keyof OMap] | void>;
+) => Promise<OMap[InferDefaultOrSingleKey<OMap>] | void>;
 
 export interface ByTagCallable<TMap> {
   <K extends keyof TMap>(key?: K): {
