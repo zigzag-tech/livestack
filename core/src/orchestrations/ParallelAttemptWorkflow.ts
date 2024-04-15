@@ -1,6 +1,6 @@
 import { InferStreamSetType, InferTMap } from "@livestack/shared";
 import { CheckSpec, JobSpec } from "../jobs/JobSpec";
-import { ZZWorkerDef } from "../jobs/ZZWorker";
+import { InferDefaultOrSingleKey, ZZWorkerDef } from "../jobs/ZZWorker";
 import { ZZEnv } from "../jobs/ZZEnv";
 import { WrapWithTimestamp } from "../utils/io";
 import { sleep } from "../utils/sleep";
@@ -18,7 +18,9 @@ export interface ParallelAttempt<ParentIMap, ParentOMap, I, O, IMap, OMap> {
   timeout?: number;
   transformInput: <K extends keyof ParentIMap>(
     params: ParentIMap[K]
-  ) => Promise<NoInfer<IMap[keyof IMap]>> | NoInfer<IMap[keyof IMap]>;
+  ) =>
+    | Promise<NoInfer<IMap[InferDefaultOrSingleKey<IMap>]>>
+    | NoInfer<IMap[InferDefaultOrSingleKey<IMap>]>;
   transformOutput: <K extends keyof OMap>(
     output: OMap[K]
   ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
@@ -117,7 +119,7 @@ export class ParallelAttemptWorkflow<
               throw new Error("no input");
             }
 
-            await input.feed((await transformInput(inp)) as IMap[keyof IMap]);
+            await input.feed(await transformInput(inp));
 
             const o = await output.nextValue();
             if (!o) {
