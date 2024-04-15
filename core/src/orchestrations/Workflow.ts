@@ -509,8 +509,8 @@ export class WorkflowSpec extends JobSpec<
               if (inletNode.nodeType !== "Inlet") {
                 throw new Error("Expected inlet node");
               }
-              const streamToInpetEdgeId = instG.inboundEdges(inletNodeId)[0];
-              const streamNodeId = instG.source(streamToInpetEdgeId);
+              const streamToInletEdgeId = instG.inboundEdges(inletNodeId)[0];
+              const streamNodeId = instG.source(streamToInletEdgeId);
               const streamNode = instG.getNodeAttributes(streamNodeId);
               if (streamNode.nodeType !== "stream") {
                 throw new Error("Expected stream node");
