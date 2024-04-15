@@ -103,7 +103,9 @@ export class ProgressiveAdaptiveTryWorkerDef<
           OMap5
         >
       | AttemptDef<ParentIMap, ParentOMap, any, any, any, any>;
-    ultimateFallback?: () => Promise<ParentOMap[keyof ParentOMap]>;
+    ultimateFallback?: () => Promise<
+      ParentOMap[InferDefaultOrSingleKey<ParentOMap>]
+    >;
   }) {
     super({
       jobSpec,
@@ -135,7 +137,7 @@ export class ProgressiveAdaptiveTryWorkerDef<
               error: false as const,
               result: (await transformOutput(
                 o.data
-              )) as ParentOMap[keyof ParentOMap],
+              )) as ParentOMap[InferDefaultOrSingleKey<ParentOMap>],
             };
           };
           return fn;
