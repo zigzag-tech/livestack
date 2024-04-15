@@ -14,7 +14,9 @@ export interface AttemptDef<ParentIMap, ParentOMap, I, O, IMap, OMap> {
     | IMap[InferDefaultOrSingleKey<IMap>];
   transformOutput: <K extends keyof OMap>(
     output: OMap[K]
-  ) => Promise<ParentOMap[keyof ParentOMap]> | ParentOMap[keyof ParentOMap];
+  ) =>
+    | Promise<ParentOMap[InferDefaultOrSingleKey<ParentOMap>]>
+    | ParentOMap[InferDefaultOrSingleKey<ParentOMap>];
 }
 
 export class ProgressiveAdaptiveTryWorkerDef<
