@@ -631,7 +631,7 @@ export class JobSpec<
     uniqueSpecLabel?: string;
     inputStreamIdOverridesByTag?: Partial<Record<keyof IMap, string>>;
     outputStreamIdOverridesByTag?: Partial<Record<keyof OMap, string>>;
-  }) {
+  }): Promise<JobManager<P, I, O, IMap, OMap>> {
     let {
       jobId = p?.jobId || "j-" + this.name + "-" + v4(),
       jobOptions,
@@ -658,7 +658,7 @@ export class JobSpec<
     }
 
     jobOptions = jobOptions || ({} as P);
-    const vaultClient = await(await this.zzEnvP).vaultClient;
+    const vaultClient = await (await this.zzEnvP).vaultClient;
     await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
       projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
       specName: this.name,
