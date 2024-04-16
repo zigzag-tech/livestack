@@ -51,15 +51,6 @@ export class ZZEnv {
     authToken: string;
   }) {
     this.storageProvider = storageProvider;
-    if (!projectUuid) {
-      projectUuid = "live-project-" + new Date().getTime();
-      console.warn(
-        "No projectUuid provided to ZZEnv. Giving it a default one: ",
-        projectUuid
-      );
-      // fs.writeFileSync("project_uuid", projectUuid);
-    }
-
     this.projectUuid = projectUuid;
     this.localProjectId = localProjectId;
     this.userId = userId;
