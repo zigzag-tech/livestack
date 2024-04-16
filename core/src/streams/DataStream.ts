@@ -239,7 +239,7 @@ export class DataStream<T extends object> {
 
         const { userId } = await(await this.zzEnvP);
         const inspectMessage = ` 🔍🔴 Inspect error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
-          (await this.zzEnvP).projectUuid
+          (await this.zzEnvP).localProjectId
         }`;
         console.info(inspectMessage);
 
