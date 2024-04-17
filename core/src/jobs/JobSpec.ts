@@ -441,7 +441,7 @@ export class JobSpec<
         type,
       });
 
-      // connected spec may not be the spec responsible for the stream's shape
+      // connected spec may not be the spec responsible for the stream's construct
       const connectedSpec = JobSpec.lookupByName(specTagInfo.specName);
 
       const connectedJobId = await this.lookUpChildJobIdByGroupIDAndSpecTag({
@@ -455,6 +455,7 @@ export class JobSpec<
         p: specTagInfo,
       });
 
+      // obtain the def of the stream
       let def: z.ZodType<WrapTerminatorAndDataId<T>> | null;
       if (type === "out") {
         def = wrapTerminatorAndDataId(
@@ -646,24 +647,28 @@ export class JobSpec<
 
     // construct streamIdOverridesByTagByTypeByJobId[jobId] from the graph
 
-    const instG = await resolveInstantiatedGraph({
-      specName: this.name,
-      jobId,
-      zzEnv: await this.zzEnvPWithTimeout,
+    // construct a local instantiated graph to get default streamIdOverridesByTagByTypeByJobId
+    const localG = new InstantiatedGraph({
+      defGraph: this.getDefGraph(),
+      contextId: jobId,
+      rootJobId: jobId,
+      streamIdOverrides: {},
+      inletHasTransformOverridesByTag: {},
+      streamSourceSpecTypeByStreamId: {},
     });
 
     if (!this.streamIdOverridesByTagByTypeByJobId[jobId]) {
-      const inletEdgeIds = instG.inboundEdges(instG.rootJobId).filter((e) => {
-        const node = instG.getNodeAttributes(instG.source(e));
+      const inletEdgeIds = localG.inboundEdges(localG.rootJobId).filter((e) => {
+        const node = localG.getNodeAttributes(localG.source(e));
         return node.nodeType === "Inlet";
       });
-      const inletNodeIds = inletEdgeIds.map((e) => instG.source(e));
+      const inletNodeIds = inletEdgeIds.map((e) => localG.source(e));
       const _in = Object.fromEntries(
         inletNodeIds.map((nId) => {
-          const node = instG.getNodeAttributes(nId) as InletNode;
-          const streamToInletEdgeId = instG.inboundEdges(nId)[0];
-          const streamNodeId = instG.source(streamToInletEdgeId);
-          const streamNode = instG.getNodeAttributes(
+          const node = localG.getNodeAttributes(nId) as InletNode;
+          const streamToInletEdgeId = localG.inboundEdges(nId)[0];
+          const streamNodeId = localG.source(streamToInletEdgeId);
+          const streamNode = localG.getNodeAttributes(
             streamNodeId
           ) as StreamNode;
 
@@ -671,17 +676,19 @@ export class JobSpec<
         })
       ) as Record<keyof IMap, string>;
 
-      const outletEdgeIds = instG.outboundEdges(instG.rootJobId).filter((e) => {
-        const node = instG.getNodeAttributes(instG.target(e));
-        return node.nodeType === "Outlet";
-      });
-      const outletNodeIds = outletEdgeIds.map((e) => instG.target(e));
+      const outletEdgeIds = localG
+        .outboundEdges(localG.rootJobId)
+        .filter((e) => {
+          const node = localG.getNodeAttributes(localG.target(e));
+          return node.nodeType === "Outlet";
+        });
+      const outletNodeIds = outletEdgeIds.map((e) => localG.target(e));
       const _out = Object.fromEntries(
         outletNodeIds.map((nId) => {
-          const node = instG.getNodeAttributes(nId) as OutletNode;
-          const streamToOutletEdgeId = instG.outboundEdges(nId)[0];
-          const streamNodeId = instG.target(streamToOutletEdgeId);
-          const streamNode = instG.getNodeAttributes(
+          const node = localG.getNodeAttributes(nId) as OutletNode;
+          const streamToOutletEdgeId = localG.outboundEdges(nId)[0];
+          const streamNodeId = localG.target(streamToOutletEdgeId);
+          const streamNode = localG.getNodeAttributes(
             streamNodeId
           ) as StreamNode;
 
@@ -708,7 +715,7 @@ export class JobSpec<
     }
 
     jobOptions = jobOptions || ({} as P);
-    const vaultClient = await (await this.zzEnvP).vaultClient;
+    const vaultClient = await(await this.zzEnvP).vaultClient;
     await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
       projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
       specName: this.name,
@@ -734,7 +741,7 @@ export class JobSpec<
       projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
       jobId,
       specName: this.name,
-      instantiatedGraphStr: JSON.stringify(instG),
+      instantiatedGraphStr: JSON.stringify(localG),
     });
 
     this.logger.info(
