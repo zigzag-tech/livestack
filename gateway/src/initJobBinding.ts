@@ -46,6 +46,7 @@ export function initJobBinding({
 
   io.on("connection", async (socket) => {
     console.info(`🦓 Socket client connected: ${socket.id}.`);
+    
     const conn = new LiveGatewayConn({
       socket,
       allowedSpecsForBinding: allowedSpecsForBinding
@@ -56,6 +57,7 @@ export function initJobBinding({
         })),
       zzEnv,
     });
+    
     if (onConnect) {
       onConnect(conn);
     }
