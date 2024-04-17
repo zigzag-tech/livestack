@@ -20,6 +20,8 @@ export class LiveGatewayConn {
     uniqueSpecLabel?: string;
   }[];
 
+  static bindSessionIdsByJobId: Record<string, Set<string>> = {};
+
   constructor({
     zzEnv,
     socket,
@@ -66,6 +68,13 @@ export class LiveGatewayConn {
           });
         }
 
+        LiveGatewayConn.bindSessionIdsByJobId[jobOutput.jobId] =
+          LiveGatewayConn.bindSessionIdsByJobId[jobOutput.jobId] || new Set();
+
+        LiveGatewayConn.bindSessionIdsByJobId[jobOutput.jobId].add(
+          this.socket.id
+        );
+
         this.jobFnsById[jobOutput.jobId] = jobOutput;
         const data: JobInfoType = {
           jobId: jobOutput.jobId,
@@ -81,6 +90,7 @@ export class LiveGatewayConn {
     });
 
     const that = this;
+
     const feedListener = async <K extends keyof any>({
       data,
       tag,
@@ -102,19 +112,7 @@ export class LiveGatewayConn {
         return;
       }
 
-      for (const key of input.tags) {
-        try {
-          await input.byTag(key).terminate();
-        } catch (err) {
-          console.error(err);
-        }
-      }
-
-      const subs = this.subsByJobId[jobId];
-
-      for (const sub of subs) {
-        sub.unsubscribe();
-      }
+      await this.disassociateAndMaybeTerminate(jobId);
 
       cleanup();
       this.socket.off(CMD_FEED, feedListener);
@@ -122,6 +120,7 @@ export class LiveGatewayConn {
     };
     this.socket.on(CMD_UNBIND, unbindListener);
   }
+
   private subsByJobId: Record<string, Subscription[]> = {};
 
   private jobFnsById: Record<
@@ -131,6 +130,25 @@ export class LiveGatewayConn {
       output: JobOutput<any>;
     }
   > = {};
+
+  private disassociateAndMaybeTerminate = async (jobId: string) => {
+    const input = this.jobFnsById[jobId].input;
+    LiveGatewayConn.bindSessionIdsByJobId[jobId]!.delete(this.socket.id);
+    if (LiveGatewayConn.bindSessionIdsByJobId[jobId]!.size === 0) {
+      for (const key of input.tags) {
+        try {
+          await input.byTag(key).terminate();
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    }
+    const subs = this.subsByJobId[jobId];
+
+    for (const sub of subs) {
+      sub.unsubscribe();
+    }
+  };
 
   public onDisconnect = async (cb: () => void) => {
     this.socket.on("disconnect", cb);
@@ -145,7 +163,7 @@ export class LiveGatewayConn {
 
     jobSpec: JobSpec<P, I, O, IMap, OMap>;
   }) => {
-    const { input, output } = this.jobFnsById[jobId];
+    const { output } = this.jobFnsById[jobId];
 
     const subs: Subscription[] = [];
     console.info("Tags to transmit for job ", jobId, ":", output.tags);
@@ -157,18 +175,8 @@ export class LiveGatewayConn {
     }
     this.subsByJobId[jobId] = subs;
 
-    this.onDisconnect(() => {
-      for (const key of input.tags) {
-        try {
-          input.byTag(key).terminate();
-        } catch (err) {
-          console.error(err);
-        }
-      }
-
-      for (const sub of subs) {
-        sub.unsubscribe();
-      }
+    this.onDisconnect(async () => {
+      await this.disassociateAndMaybeTerminate(jobId);
       delete this.subsByJobId[jobId];
       delete this.jobFnsById[jobId];
     });
