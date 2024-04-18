@@ -25,6 +25,8 @@ export type UnbindParams = {
 };
 
 export const CMD_FEED = "feed";
+export const CMD_SUB_TO_STREAM = "sub_to_stream";
+export const CMD_UNSUB_TO_STREAM = "unsub_to_stream";
 
 export type FeedParams<K, T> = {
   data: T;

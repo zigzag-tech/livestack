@@ -37,13 +37,14 @@ export function useStream<O>({
   } | null>(null);
 
   useEffect(() => {
+    let unsubP: Promise<() => void> | null = null;
     if (specName && jobId) {
       const conn = connRef.current;
       if (!conn) {
         throw new Error(`Connection not found with jobId "${jobId}".`);
       }
 
-      conn.then((conn) =>
+      unsubP = conn.then((conn) =>
         conn.subToStream<O>(
           {
             tag,
@@ -55,6 +56,12 @@ export function useStream<O>({
         )
       );
     }
+
+    return () => {
+      if (unsubP) {
+        unsubP.then((unsub) => unsub());
+      }
+    };
   }, [specName, uniqueSpecLabel, jobId, tag]);
 
   return output;

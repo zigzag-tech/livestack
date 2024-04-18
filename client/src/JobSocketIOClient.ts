@@ -8,7 +8,9 @@ import {
   CMD_FEED,
   FeedParams,
   CMD_UNBIND,
+  CMD_UNSUB_TO_STREAM,
   UnbindParams,
+  CMD_SUB_TO_STREAM,
 } from "@livestack/shared";
 import { requestAndGetResponse } from "./requestAndGetResponse";
 import { z } from "zod";
@@ -138,10 +140,30 @@ export class JobSocketIOConnection {
       tag = this.availableOutputs[0];
     }
     if (type === "output" && this.availableOutputs.some((t) => t === tag)) {
+      requestAndGetResponse({
+        req: {
+          data: { jobId: this.jobId, tag, type: "output" },
+          method: CMD_SUB_TO_STREAM,
+        },
+        conn: this.socketIOClient,
+      });
+
       this.socketIOClient.on(`stream:${this.jobId}/${tag}`, callback);
       this.subscribedOutputKeys.push(tag);
 
-      const unsub = () => {
+      const unsub = async () => {
+        requestAndGetResponse({
+          req: {
+            data: { jobId: this.jobId, tag, type: "output" },
+            method: CMD_UNSUB_TO_STREAM,
+          },
+          conn: this.socketIOClient,
+        });
+        // this.socketIOClient.emit(CMD_UNSUB_TO_STREAM, {
+        //   tag,
+        //   jobId: this.jobId,
+        //   type: "output",
+        // });
         this.socketIOClient.off(`stream:${this.jobId}/${tag}`, callback);
         this.subscribedOutputKeys = this.subscribedOutputKeys.filter(
           (k) => k !== tag
