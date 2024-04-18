@@ -7,6 +7,8 @@ import {
   FeedParams,
   MSG_JOB_INFO,
   JobInfoType,
+  CMD_SUB_TO_STREAM,
+  CMD_UNSUB_TO_STREAM,
 } from "@livestack/shared";
 import { Subscription } from "rxjs";
 import { ZZEnv, JobSpec, JobManager } from "@livestack/core";
@@ -37,7 +39,7 @@ export class LiveGatewayConn {
     this.socket = socket;
     this.allowedSpecsForBinding = allowedSpecsForBinding;
 
-    const cleanup = addMethodResponder({
+    const stopRespondingToBindCmd = addMethodResponder({
       socket: this.socket,
       req: { method: REQUEST_AND_BIND_CMD },
       res: { method: MSG_JOB_INFO },
@@ -89,6 +91,70 @@ export class LiveGatewayConn {
       },
     });
 
+    const stopRespondingToSubToStreamCmd = addMethodResponder({
+      socket: this.socket,
+      req: { method: CMD_SUB_TO_STREAM },
+      res: { method: "stream" },
+      fn: async ({
+        jobId,
+        tag,
+        type,
+      }: {
+        jobId: string;
+        tag: string;
+        type: "input" | "output";
+      }) => {
+        if (type === "output") {
+          if (!this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`]) {
+            this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`] = 0;
+            const { output } = this.jobFnsById[jobId];
+            const mostRecentVal = await output.byTag(tag).mostRecentValue();
+            if (mostRecentVal) {
+              this.socket.emit(`stream:${jobId}/${String(tag)}`, mostRecentVal);
+            }
+            const sub = output.byTag(tag).valueObservable.subscribe((data) => {
+              this.socket.emit(`stream:${jobId}/${String(tag)}`, data);
+            });
+            this.subsByJobId[jobId] = this.subsByJobId[jobId] || [];
+            this.subsByJobId[jobId].push(sub);
+          }
+          this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`]++;
+        } else {
+          throw new Error("Input streams not yet supported.");
+        }
+      },
+    });
+
+    const stopRespondingToUnsubToStreamCmd = addMethodResponder({
+      socket: this.socket,
+      req: { method: CMD_UNSUB_TO_STREAM },
+      res: { method: "stream" },
+      fn: async ({
+        jobId,
+        tag,
+        type,
+      }: {
+        jobId: string;
+        tag: string;
+        type: "input" | "output";
+      }) => {
+        if (type === "output") {
+          this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`]--;
+
+          if (this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`] === 0) {
+            const subs = this.subsByJobId[jobId];
+            for (const sub of subs) {
+              sub.unsubscribe();
+            }
+            delete this.subsByJobId[jobId];
+            delete this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`];
+          }
+        } else {
+          throw new Error("Input streams not yet supported.");
+        }
+      },
+    });
+
     const that = this;
 
     const feedListener = async <K extends keyof any>({
@@ -114,7 +180,10 @@ export class LiveGatewayConn {
 
       await this.disassociateAndMaybeTerminate(jobId);
 
-      cleanup();
+      stopRespondingToBindCmd();
+      stopRespondingToSubToStreamCmd();
+      stopRespondingToUnsubToStreamCmd();
+
       this.socket.off(CMD_FEED, feedListener);
       this.socket.off(CMD_UNBIND, unbindListener);
     };
@@ -154,6 +223,11 @@ export class LiveGatewayConn {
     this.socket.on("disconnect", cb);
   };
 
+  private subscriberCountByJobIdAndTag: Record<
+    `${string}::${"in" | "out"}/${string}`,
+    number
+  > = {};
+
   public bindToNewJob = async <P, I, O, IMap, OMap>({
     jobSpec,
 
@@ -163,21 +237,21 @@ export class LiveGatewayConn {
 
     jobSpec: JobSpec<P, I, O, IMap, OMap>;
   }) => {
-    const { output } = this.jobFnsById[jobId];
+    // const { output } = this.jobFnsById[jobId];
 
-    const subs: Subscription[] = [];
-    console.info("Tags to transmit for job ", jobId, ":", output.tags);
-    for (const tag of output.tags) {
-      const mostRecentVal = await output.byTag(tag).mostRecentValue();
-      if (mostRecentVal) {
-        this.socket.emit(`stream:${jobId}/${String(tag)}`, mostRecentVal);
-      }
-      const sub = output.byTag(tag).valueObservable.subscribe((data) => {
-        this.socket.emit(`stream:${jobId}/${String(tag)}`, data);
-      });
-      subs.push(sub);
-    }
-    this.subsByJobId[jobId] = subs;
+    // const subs: Subscription[] = [];
+    // console.info("Tags to transmit for job ", jobId, ":", output.tags);
+    // for (const tag of output.tags) {
+    //   const mostRecentVal = await output.byTag(tag).mostRecentValue();
+    //   if (mostRecentVal) {
+    //     this.socket.emit(`stream:${jobId}/${String(tag)}`, mostRecentVal);
+    //   }
+    //   const sub = output.byTag(tag).valueObservable.subscribe((data) => {
+    //     this.socket.emit(`stream:${jobId}/${String(tag)}`, data);
+    //   });
+    //   subs.push(sub);
+    // }
+    // this.subsByJobId[jobId] = subs;
 
     this.onDisconnect(async () => {
       await this.disassociateAndMaybeTerminate(jobId);
@@ -196,7 +270,7 @@ function addMethodResponder<P, R>({
   req: {
     method: string;
   };
-  res: {
+  res?: {
     method: string;
   };
   socket: Socket;
@@ -204,6 +278,7 @@ function addMethodResponder<P, R>({
 }) {
   const listener = async (arg: { data: P; requestIdentifier: string }) => {
     const result = await fn(arg.data);
+    if (!res) return;
     socket.emit(res.method, {
       data: result,
       requestIdentifier: arg.requestIdentifier,

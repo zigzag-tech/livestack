@@ -10,7 +10,7 @@ export async function requestAndGetResponse<T, R>({
     method: string;
     data: T;
   };
-  res: {
+  res?: {
     method: string;
   };
   conn: Socket;
@@ -33,6 +33,8 @@ export async function requestAndGetResponse<T, R>({
         resolve(data);
       }
     };
-    conn.on(res.method, listener);
+    if (res) {
+      conn.on(res.method, listener);
+    }
   });
 }
