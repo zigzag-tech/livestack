@@ -976,30 +976,27 @@ export class JobSpec<
         }]/${specTagInfo.tag.toString()}`
       ] as Promise<ByTagOutput<OMap[K]>>;
 
+      const valueObservable = new Observable<WrapWithTimestamp<OMap[K]> | null>(
+        (subs) => {
+          (async () => {
+            const subscriber = await subscriberP;
+            subscriber.valueObservable.subscribe((v) => {
+              if (v) {
+                subs.next(v);
+              } else {
+                subs.complete();
+              }
+            });
+          })();
+        }
+      );
+
       return {
         getStreamId: async () => await (await subscriberP).getStreamId(),
         nextValue: async () => await (await subscriberP).nextValue(),
         mostRecentValue: async () =>
           await (await subscriberP).mostRecentValue(),
-        valueObservable: new Observable<WrapWithTimestamp<OMap[K]> | null>(
-          (subs) => {
-            subscriberP.then(async (subscriber) => {
-              while (true) {
-                const input = await subscriber.nextValue();
-                if (!input) {
-                  subs.complete();
-                  subs.unsubscribe();
-                  break;
-                }
-                subs.next(input);
-              }
-            });
-            return () => {
-              subs.complete();
-              subs.unsubscribe();
-            };
-          }
-        ),
+        valueObservable,
         async *[Symbol.asyncIterator]() {
           while (true) {
             const input = await (await subscriberP).nextValue();
@@ -1023,39 +1020,49 @@ export class JobSpec<
         const tag = this.getSingleTag("output", true);
         subscriberByDefaultTag = await singletonSubscriberByTag(tag);
       }
+
       return await subscriberByDefaultTag.nextValue();
     };
+
+    const valueObservable = new Observable<
+      WrapWithTimestamp<OMap[InferDefaultOrSingleKey<OMap>]>
+    >((subscriber) => {
+      (async () => {
+        if (subscriberByDefaultTag === null) {
+          const tag = this.getSingleTag("output", true);
+          subscriberByDefaultTag = await singletonSubscriberByTag(tag);
+        }
+
+        subscriberByDefaultTag.valueObservable.subscribe((v) => {
+          if (v) {
+            subscriber.next(v);
+          } else {
+            subscriber.complete();
+          }
+        });
+      })();
+    });
 
     return (() => {
       const func = (<K extends keyof OMap>(tag?: K) => {
         const resolvedTag = tag || this.getSingleTag("output", true);
-        return singletonSubscriberByTag(resolvedTag);
+        return singletonSubscriberByTag(resolvedTag) as any;
       }) as JobOutput<OMap>;
       func.byTag = singletonSubscriberByTag;
       func.tags = this.outputTags;
       func.nextValue = nextValue;
-      (func.valueObservable = new Observable<
-        WrapWithTimestamp<OMap[InferDefaultOrSingleKey<OMap>]>
-      >((subscriber) => {
+      func.valueObservable = valueObservable;
+      func[Symbol.asyncIterator] = async function* () {
         while (true) {
-          const next = nextValue();
-          if (!next) {
+          const input = await nextValue();
+
+          // Assuming nextInput returns null or a similar value to indicate completion
+          if (!input) {
             break;
           }
-          subscriber.complete();
+          yield input;
         }
-      })),
-        (func[Symbol.asyncIterator] = async function* () {
-          while (true) {
-            const input = await nextValue();
-
-            // Assuming nextInput returns null or a similar value to indicate completion
-            if (!input) {
-              break;
-            }
-            yield input;
-          }
-        });
+      };
       return func;
     })();
   };
@@ -1397,7 +1404,6 @@ export interface JobOutput<OMap> {
   valueObservable: Observable<WrapWithTimestamp<
     OMap[InferDefaultOrSingleKey<OMap>]
   > | null>;
-
   [Symbol.asyncIterator]: () => AsyncIterableIterator<{
     data: OMap[keyof OMap];
     timestamp: number;
