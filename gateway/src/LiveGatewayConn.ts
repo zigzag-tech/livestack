@@ -105,8 +105,7 @@ export class LiveGatewayConn {
         type: "input" | "output";
       }) => {
         if (type === "output") {
-          if (!this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`]) {
-            this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`] = 0;
+          if (!this.subByJobIdAndTag[`${jobId}::out/${tag}`]) {
             const { output } = this.jobFnsById[jobId];
             const mostRecentVal = await output.byTag(tag).mostRecentValue();
             if (mostRecentVal) {
@@ -115,10 +114,12 @@ export class LiveGatewayConn {
             const sub = output.byTag(tag).valueObservable.subscribe((data) => {
               this.socket.emit(`stream:${jobId}/${String(tag)}`, data);
             });
-            this.subsByJobId[jobId] = this.subsByJobId[jobId] || [];
-            this.subsByJobId[jobId].push(sub);
+            this.subByJobIdAndTag[`${jobId}::out/${tag}`] = {
+              sub,
+              count: 0,
+            };
           }
-          this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`]++;
+          this.subByJobIdAndTag[`${jobId}::out/${tag}`].count++;
         } else {
           throw new Error("Input streams not yet supported.");
         }
@@ -139,15 +140,11 @@ export class LiveGatewayConn {
         type: "input" | "output";
       }) => {
         if (type === "output") {
-          this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`]--;
+          this.subByJobIdAndTag[`${jobId}::out/${tag}`]!.count--;
 
-          if (this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`] === 0) {
-            const subs = this.subsByJobId[jobId];
-            for (const sub of subs) {
-              sub.unsubscribe();
-            }
-            delete this.subsByJobId[jobId];
-            delete this.subscriberCountByJobIdAndTag[`${jobId}::out/${tag}`];
+          if (this.subByJobIdAndTag[`${jobId}::out/${tag}`]!.count === 0) {
+            this.subByJobIdAndTag[`${jobId}::out/${tag}`]!.sub.unsubscribe();
+            delete this.subByJobIdAndTag[`${jobId}::out/${tag}`];
           }
         } else {
           throw new Error("Input streams not yet supported.");
@@ -190,7 +187,13 @@ export class LiveGatewayConn {
     this.socket.on(CMD_UNBIND, unbindListener);
   }
 
-  private subsByJobId: Record<string, Subscription[]> = {};
+  private subByJobIdAndTag: Record<
+    `${string}::${"in" | "out"}/${string}`,
+    {
+      sub: Subscription;
+      count: number;
+    }
+  > = {};
 
   private jobFnsById: Record<
     string,
@@ -212,21 +215,18 @@ export class LiveGatewayConn {
         }
       }
     }
-    const subs = this.subsByJobId[jobId];
-
-    for (const sub of subs) {
-      sub.unsubscribe();
+    const relevantKeys = Object.keys(this.subByJobIdAndTag).filter((k) =>
+      k.startsWith(jobId)
+    ) as Array<keyof typeof this.subByJobIdAndTag>;
+    for (const k of relevantKeys) {
+      this.subByJobIdAndTag[k].sub.unsubscribe();
+      delete this.subByJobIdAndTag[k];
     }
   };
 
   public onDisconnect = async (cb: () => void) => {
     this.socket.on("disconnect", cb);
   };
-
-  private subscriberCountByJobIdAndTag: Record<
-    `${string}::${"in" | "out"}/${string}`,
-    number
-  > = {};
 
   public bindToNewJob = async <P, I, O, IMap, OMap>({
     jobSpec,
@@ -255,7 +255,6 @@ export class LiveGatewayConn {
 
     this.onDisconnect(async () => {
       await this.disassociateAndMaybeTerminate(jobId);
-      delete this.subsByJobId[jobId];
       delete this.jobFnsById[jobId];
     });
   };
