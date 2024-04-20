@@ -9,10 +9,7 @@ export interface ByTagOutput<T> {
   }>;
   nextValue: () => Promise<WrapWithTimestamp<T> | null>;
   mostRecentValue: () => Promise<WrapWithTimestamp<T> | null>;
-  valueObservable: Observable<{
-    data: T;
-    timestamp: number;
-  } | null>;
+  valueObservable: Observable<WrapWithTimestamp<T> | null>;
   getStreamId: () => Promise<string>;
 }
 
