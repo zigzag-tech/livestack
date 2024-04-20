@@ -130,12 +130,7 @@ export class ZZJob<
     };
   }>;
   private updateProgress: (count: number) => Promise<void>;
-  private relevantInputDatapoints: {
-    streamId: string;
-    datapointId: string;
-  }[] = [];
-
-  private currentRelevantInputLinked = false;
+  private trackerByTag: Record<keyof IMap, AssociationTracker>;
 
   constructor(p: {
     logger: ReturnType<typeof getLogger>;
@@ -155,6 +150,10 @@ export class ZZJob<
     this.spec = p.jobSpec;
     this.graph = p.graph;
     this.updateProgress = p.updateProgress;
+    this.trackerByTag = this.spec.inputTags.reduce((acc, tag) => {
+      acc[tag] = new AssociationTracker();
+      return acc;
+    }, {} as Record<keyof IMap, AssociationTracker>);
 
     try {
       this.jobOptions = p.jobSpec.jobOptions.parse(p.jobOptions) as P;
@@ -271,6 +270,12 @@ export class ZZJob<
 
       const resolvedTag = tag || this.spec.getSingleTag("output", true);
 
+      const relevantDatapoints: { streamId: string; datapointId: string }[] =
+        [];
+      for (const tag of this.spec.inputTags) {
+        relevantDatapoints.push(...this.trackerByTag[tag].dispense());
+      }
+
       await this.spec._getStreamAndSendDataToPLimited({
         jobId: this.jobId,
         type: "out",
@@ -279,9 +284,8 @@ export class ZZJob<
           data: o,
           terminate: false,
         },
-        parentDatapoints: [...this.relevantInputDatapoints],
+        parentDatapoints: [...relevantDatapoints],
       });
-      this.currentRelevantInputLinked = true;
 
       await this.updateProgress(this._dummyProgressCount++);
     };
@@ -481,22 +485,10 @@ export class ZZJob<
           obs.subscribe((n) => {
             if (!n.terminate) {
               // relevant input store and flush logic
-              if (thatJob.currentRelevantInputLinked) {
-                // flush
-                thatJob.relevantInputDatapoints = [
-                  {
-                    streamId: stream.uniqueName,
-                    datapointId: n.datapointId,
-                  },
-                ];
-                thatJob.currentRelevantInputLinked = false;
-              } else {
-                // append
-                thatJob.relevantInputDatapoints.push({
-                  streamId: stream.uniqueName,
-                  datapointId: n.datapointId,
-                });
-              }
+              thatJob.trackerByTag[resolvedTag].intake({
+                streamId: stream.uniqueName,
+                datapointId: n.datapointId,
+              });
 
               let r: IMap[K];
 
@@ -616,7 +608,7 @@ export class ZZJob<
     } catch (e: any) {
       console.error("Error while running job: ", this.jobId, e);
 
-      await((await this.zzEnvP).vaultClient).db.appendJobStatusRec({
+      await(await this.zzEnvP).vaultClient.db.appendJobStatusRec({
         projectUuid,
         specName: this.spec.name,
         jobId: this.jobId,
@@ -678,6 +670,39 @@ export class ZZJob<
         key: String(key),
         storageProvider: this.storageProvider,
       });
+    }
+  };
+}
+
+class AssociationTracker {
+  private _currentDispensed = false;
+  private _store: {
+    streamId: string;
+    datapointId: string;
+  }[] = [];
+
+  private _prevStore: {
+    streamId: string;
+    datapointId: string;
+  }[] = [];
+
+  intake = (x: { streamId: string; datapointId: string }) => {
+    if (this._currentDispensed && this._store.length > 0) {
+      this._store = [];
+      this._currentDispensed = false;
+    }
+    this._store.push(x);
+  };
+
+  dispense = () => {
+    if (this._currentDispensed && this._store.length === 0) {
+      return [...this._prevStore];
+    } else {
+      this._currentDispensed = true;
+      this._prevStore = [...this._store];
+      const r = [...this._store];
+      this._store = [];
+      return r;
     }
   };
 }
