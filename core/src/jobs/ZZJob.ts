@@ -140,7 +140,10 @@ export class ZZJob<
     };
   }>;
   private updateProgress: (count: number) => Promise<void>;
-  private trackerByTag: Record<keyof IMap, AssociationTracker>;
+  private trackerByInputOutputTag: Record<
+    keyof IMap,
+    Record<keyof OMap, AssociationTracker>
+  >;
 
   constructor(p: {
     logger: ReturnType<typeof getLogger>;
@@ -160,10 +163,16 @@ export class ZZJob<
     this.spec = p.jobSpec;
     this.graph = p.graph;
     this.updateProgress = p.updateProgress;
-    this.trackerByTag = this.spec.inputTags.reduce((acc, tag) => {
-      acc[tag] = new AssociationTracker();
-      return acc;
-    }, {} as Record<keyof IMap, AssociationTracker>);
+
+    this.trackerByInputOutputTag = {} as any;
+
+    for (const inputTag of this.spec.inputTags) {
+      this.trackerByInputOutputTag[inputTag] = {} as any;
+      for (const outputTag of this.spec.outputTags) {
+        const tracker = new AssociationTracker();
+        this.trackerByInputOutputTag[inputTag][outputTag] = tracker;
+      }
+    }
 
     try {
       this.jobOptions = p.jobSpec.jobOptions.parse(p.jobOptions) as P;
@@ -293,17 +302,20 @@ export class ZZJob<
 
       const relevantDatapoints: { streamId: string; datapointId: string }[] =
         [];
-      for (const tag of this.spec.inputTags) {
+      for (const itag of this.spec.inputTags) {
         const stream = await this.spec.getInputJobStream({
           jobId: this.jobId,
-          tag,
+          tag: itag,
         });
         const streamId = stream.uniqueName;
-        relevantDatapoints.push(
-          ...this.trackerByTag[tag]
-            .dispense()
-            .map((x) => ({ streamId, datapointId: x.datapointId }))
-        );
+        if (this.trackerByInputOutputTag[itag][resolvedTag]) {
+          // TODO: this is hacky. this.trackerByInputOutputTag[itag][resolvedTag] is null when we are in a workflow
+          relevantDatapoints.push(
+            ...this.trackerByInputOutputTag[itag][resolvedTag]
+              .dispense()
+              .map((x) => ({ streamId, datapointId: x.datapointId }))
+          );
+        }
       }
 
       await this.spec._getStreamAndSendDataToPLimited({
@@ -410,9 +422,11 @@ export class ZZJob<
       ).nextValue();
       // track
       if (r) {
-        that.trackerByTag[resolvedTag].intake({
-          datapointId: r.datapointId,
-        });
+        for (const otag of that.spec.outputTags) {
+          that.trackerByInputOutputTag[resolvedTag][otag].intake({
+            datapointId: r.datapointId,
+          });
+        }
       }
       return r?.data || (null as IMap[K] | null);
     };
@@ -435,9 +449,12 @@ export class ZZJob<
               s.next(null);
               s.complete();
             } else {
-              that.trackerByTag[resolvedTag as K].intake({
-                datapointId: x.datapointId,
-              });
+              for (const otag of that.spec.outputTags) {
+                that.trackerByInputOutputTag[resolvedTag as K][otag].intake({
+                  datapointId: x.datapointId,
+                });
+              }
+
               s.next(x.data);
             }
           });
