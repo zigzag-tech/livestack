@@ -4,7 +4,7 @@ import path from "path";
 import _, { isUndefined } from "lodash";
 
 import { Readable } from "stream";
-const LARGE_VALUE_THRESHOLD = 1024 * 1024 * 2;
+const LARGE_VALUE_THRESHOLD = 1024 * 32;
 
 export type OriginalType =
   | Exclude<ReturnType<typeof detectBinaryLikeObject>, false>
