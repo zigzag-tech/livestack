@@ -13,9 +13,13 @@ import {
 } from "./pubsub";
 import { IStorageProvider, getPublicCdnUrl } from "../storage/cloudStorage";
 import { getLogger } from "../utils/createWorkerLogger";
-import { WrapTerminatorAndDataId } from "../utils/io";
+import {
+  WrapTerminateFalse,
+  WrapTerminatorAndDataId,
+  WrapWithTimestamp,
+} from "../utils/io";
 import { longStringTruncator } from "../utils/longStringTruncator";
-import { DataStream } from "../streams/DataStream";
+import { DataStream, WithTimestamp } from "../streams/DataStream";
 import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
 import { JobSpec } from "./JobSpec";
 import { ZZEnv } from "./ZZEnv";
@@ -122,10 +126,16 @@ export class ZZJob<
   public readonly workerName;
   private readonly inputStreamFnsByTag: Partial<{
     [K in keyof IMap]: {
-      nextValue: () => Promise<IMap[K] | null>;
+      nextValue: () => Promise<WithTimestamp<
+        WrapTerminateFalse<IMap[K]>
+      > | null>;
       // inputStream: DataStream<WrapTerminatorAndDataId<IMap[K]>>;
-      inputObservableUntracked: Observable<IMap[K] | null>;
-      trackedObservable: Observable<IMap[K] | null>;
+      inputObservableUntracked: Observable<WithTimestamp<
+        WrapTerminateFalse<IMap[K]>
+      > | null>;
+      trackedObservable: Observable<WithTimestamp<
+        WrapTerminateFalse<IMap[K]>
+      > | null>;
       subscriberCountObservable: Observable<number>;
     };
   }>;
@@ -202,6 +212,7 @@ export class ZZJob<
     //     sub.unsubscribe();
     //   });
     // };
+    const thatJob = this;
 
     this.input = (() => {
       const func = <K extends keyof IMap>(tag: K) => {
@@ -219,8 +230,18 @@ export class ZZJob<
       const obj = this.genInputObject();
 
       func.tags = obj.tags;
-      func.observable = obj.observable;
+      func.observable = new Observable<IMap[keyof IMap] | null>((s) => {
+        obj.observable().subscribe((x) => {
+          if (!x) {
+            s.next(null);
+            s.complete();
+          } else {
+            s.next(x);
+          }
+        });
+      });
       func.nextValue = obj.nextValue;
+
       func[Symbol.asyncIterator] = obj[Symbol.asyncIterator];
 
       func.merge = <K extends keyof IMap>(...tags: [K[]] | K[]) => {
@@ -273,7 +294,16 @@ export class ZZJob<
       const relevantDatapoints: { streamId: string; datapointId: string }[] =
         [];
       for (const tag of this.spec.inputTags) {
-        relevantDatapoints.push(...this.trackerByTag[tag].dispense());
+        const stream = await this.spec.getInputJobStream({
+          jobId: this.jobId,
+          tag,
+        });
+        const streamId = stream.uniqueName;
+        relevantDatapoints.push(
+          ...this.trackerByTag[tag]
+            .dispense()
+            .map((x) => ({ streamId, datapointId: x.datapointId }))
+        );
       }
 
       await this.spec._getStreamAndSendDataToPLimited({
@@ -378,7 +408,13 @@ export class ZZJob<
       const r = await (
         await that._ensureInputStreamFn(resolvedTag)
       ).nextValue();
-      return r as IMap[K] | null;
+      // track
+      if (r) {
+        that.trackerByTag[resolvedTag].intake({
+          datapointId: r.datapointId,
+        });
+      }
+      return r?.data || (null as IMap[K] | null);
     };
     return {
       nextValue,
@@ -389,7 +425,23 @@ export class ZZJob<
             true
           ) as InferDefaultOrSingleKey<IMap>;
         }
-        return that._ensureInputStreamFn(resolvedTag as K).trackedObservable;
+        const obs = that._ensureInputStreamFn(
+          resolvedTag as K
+        ).trackedObservable;
+        // wrap observable with tracking
+        return new Observable<IMap[K] | null>((s) => {
+          obs.subscribe((x) => {
+            if (!x) {
+              s.next(null);
+              s.complete();
+            } else {
+              that.trackerByTag[resolvedTag as K].intake({
+                datapointId: x.datapointId,
+              });
+              s.next(x.data);
+            }
+          });
+        });
       },
       async *[Symbol.asyncIterator]() {
         if (!resolvedTag) {
@@ -427,8 +479,10 @@ export class ZZJob<
 
   private getParentRec = async () => {
     if (this._parentRec === "uninitialized") {
-      const { null_response, rec } = await(
-        await(await this.zzEnvP).vaultClient
+      const { null_response, rec } = await (
+        await (
+          await this.zzEnvP
+        ).vaultClient
       ).db.getParentJobRec({
         projectUuid: (await this.zzEnvP).projectUuid,
         childJobId: this.jobId,
@@ -475,7 +529,9 @@ export class ZZJob<
       }) as Promise<DataStream<WrapTerminatorAndDataId<IMap[K] | unknown>>>;
       const parentRecP = this.getParentRec();
 
-      const inputObservableUntracked = new Observable<IMap[K] | null>((s) => {
+      const inputObservableUntracked = new Observable<WithTimestamp<
+        WrapTerminateFalse<IMap[K]>
+      > | null>((s) => {
         Promise.all([streamP, parentRecP]).then(([stream, parentRec]) => {
           const sub = DataStreamSubscriber.subFromBeginning(stream);
           // const obs = sub.valueObservable.pipe(
@@ -484,13 +540,9 @@ export class ZZJob<
           const obs = sub.valueObservable;
           obs.subscribe((n) => {
             if (!n.terminate) {
-              // relevant input store and flush logic
-              thatJob.trackerByTag[resolvedTag].intake({
-                streamId: stream.uniqueName,
-                datapointId: n.datapointId,
-              });
-
-              let r: IMap[K];
+              let r: WithTimestamp<WrapTerminateFalse<IMap[K]>> = {
+                ...(n as WithTimestamp<WrapTerminateFalse<IMap[K]>>),
+              };
 
               // find any transform function defined for this input
               // and apply it if found
@@ -505,9 +557,7 @@ export class ZZJob<
                       parentRec.unique_spec_label || null,
                   });
               if (transform) {
-                r = transform(n.data);
-              } else {
-                r = n.data as IMap[K];
+                r.data = transform(r.data);
               }
               s.next(r);
             } else {
@@ -556,7 +606,11 @@ export class ZZJob<
     );
 
     try {
-      await(await(await this.zzEnvP).vaultClient).db.appendJobStatusRec({
+      await (
+        await (
+          await this.zzEnvP
+        ).vaultClient
+      ).db.appendJobStatusRec({
         ...jId,
         jobStatus: "running",
       });
@@ -588,7 +642,11 @@ export class ZZJob<
         await this.output.emit(processedR);
       }
 
-      await(await(await this.zzEnvP).vaultClient).db.appendJobStatusRec({
+      await (
+        await (
+          await this.zzEnvP
+        ).vaultClient
+      ).db.appendJobStatusRec({
         ...jId,
         jobStatus: "completed",
       });
@@ -608,7 +666,9 @@ export class ZZJob<
     } catch (e: any) {
       console.error("Error while running job: ", this.jobId, e);
 
-      await(await this.zzEnvP).vaultClient.db.appendJobStatusRec({
+      await (
+        await this.zzEnvP
+      ).vaultClient.db.appendJobStatusRec({
         projectUuid,
         specName: this.spec.name,
         jobId: this.jobId,
@@ -677,16 +737,14 @@ export class ZZJob<
 class AssociationTracker {
   private _currentDispensed = false;
   private _store: {
-    streamId: string;
     datapointId: string;
   }[] = [];
 
   private _prevStore: {
-    streamId: string;
     datapointId: string;
   }[] = [];
 
-  intake = (x: { streamId: string; datapointId: string }) => {
+  intake = (x: { datapointId: string }) => {
     if (this._currentDispensed && this._store.length > 0) {
       this._store = [];
       this._currentDispensed = false;
