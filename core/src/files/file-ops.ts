@@ -1,12 +1,8 @@
-import { IStorageProvider } from "../storage/cloudStorage";
 import { detectBinaryLikeObject } from "../utils/isBinaryLikeObject";
-import { TEMP_DIR } from "../storage/temp-dirs";
-import fs from "fs";
 import { join as pathJoin } from "path";
-import { ensurePathExists } from "../storage/ensurePathExists";
 import path from "path";
 import _, { isUndefined } from "lodash";
-const OBJ_REF_VALUE = `__zz_obj_ref__`;
+
 import { Readable } from "stream";
 const LARGE_VALUE_THRESHOLD = 1024 * 1024 * 2;
 
@@ -51,7 +47,7 @@ export const identifyLargeFilesToSave = (
       return {
         newObj: {
           [OBJ_REF_VALUE]: true,
-          originalType: "string",
+          originalType: type,
         },
         largeFilesToSave,
       };
@@ -116,6 +112,7 @@ export type LargeFileWithoutValue<T extends OriginalType> = Omit<
   "value"
 >;
 import pLimit from "p-limit";
+import { OBJ_REF_VALUE } from "@livestack/shared";
 
 export type InferRestoredFileType<T extends OriginalType> = T extends "string"
   ? string
