@@ -194,40 +194,9 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
           // res = validate(data.data, actualSchema, {
           //   throwError: false,
           // });
-          res = validate(_.cloneDeep(data), jsonSchema, {
+
+          res = validate(replaceRefWithDummyData(data), jsonSchema, {
             throwError: false,
-            preValidateProperty: (instance, key, schema, options) => {
-              const value = instance[key];
-              if (typeof value === "object" && value[OBJ_REF_VALUE]) {
-                // create dummy value to pass validation
-                // possible types:
-                // | "array-buffer" | "stream" | "blob" | "file" | "buffer" | "string"
-                switch (value.originalType) {
-                  case "array-buffer":
-                    instance[key] = new ArrayBuffer(1);
-                    break;
-                  case "stream":
-                    instance[key] = new Readable();
-                    break;
-                  case "blob":
-                    instance[key] = new Blob();
-                    break;
-                  case "file":
-                    instance[key] = new File([], "dummy");
-                    break;
-                  case "buffer":
-                    instance[key] = Buffer.from([]);
-                    break;
-                  case "string":
-                    instance[key] = "";
-                    break;
-                  default:
-                    throw new Error(
-                      `Unknown originalType: ${value.originalType}`
-                    );
-                }
-              }
-            },
           });
         } catch (e) {
           console.warn("Error occurred validating data: ", e);
@@ -498,26 +467,39 @@ function parseMessageDataStr<T>(data: Array<any>): {
   return { jsonDataStr, datapointId };
 }
 
-function modifySchema(schema: any): any {
-  if (typeof schema === "object" && schema !== null) {
-    if (schema.type === "string") {
-      schema.anyOf = [
-        { type: "string" },
-        {
-          type: "object",
-          properties: { __string_replaced: { type: "boolean", enum: [true] } },
-          required: ["__string_replaced"],
-          additionalProperties: false,
-        },
-      ];
-      delete schema.type;
+// resursively replace objects that has [OBJ_REF_VALUE] with dummy data
+// clone the object before modifying
+function replaceRefWithDummyData(obj: any): any {
+  if (typeof obj === "object" && obj !== null && !Array.isArray(obj)) {
+    if (obj[OBJ_REF_VALUE]) {
+      switch (obj.originalType) {
+        case "array-buffer":
+          return new ArrayBuffer(1);
+        case "stream":
+          return new Readable();
+        case "blob":
+          return new Blob();
+        case "file":
+          return new File([], "dummy");
+        case "buffer":
+          return Buffer.from([]);
+        case "string":
+          return "";
+        default:
+          throw new Error(`Unknown originalType: ${obj.originalType}`);
+      }
     } else {
-      for (const key in schema) {
-        if (schema.hasOwnProperty(key)) {
-          schema[key] = modifySchema(schema[key]);
+      const newObj = { ...obj };
+      for (const key in obj) {
+        if (obj.hasOwnProperty(key)) {
+          newObj[key] = replaceRefWithDummyData(obj[key]);
         }
       }
+      return newObj;
     }
+  } else if (Array.isArray(obj)) {
+    return obj.map((item) => replaceRefWithDummyData(item));
+  } else {
+    return obj;
   }
-  return schema;
 }
