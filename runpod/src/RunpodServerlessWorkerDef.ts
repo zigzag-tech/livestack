@@ -22,7 +22,7 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
     outputSchema,
     zzEnv,
     name,
-    doNotReportCapacity = false,
+    autostartWorker = true,
   }: {
     serverlessEndpointId: string;
     runpodApiKey: string;
@@ -30,7 +30,7 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
     outputSchema: z.ZodType<O>;
     name: string;
     zzEnv?: ZZEnv;
-    doNotReportCapacity?: boolean;
+    autostartWorker?: boolean;
   }) {
     const jobSpec = JobSpec.define({
       name: name,
@@ -45,7 +45,7 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
     super({
       jobSpec,
       zzEnv,
-      doNotReportCapacity,
+      autostartWorker,
       processor: async ({ input, output, logger }) => {
         await output("status").emit("initiated");
         const runUrl = `https://api.runpod.ai/v2/${this._endpointId}/runsync`;
