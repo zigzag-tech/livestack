@@ -14,14 +14,7 @@ import { genManuallyFedIterator } from "@livestack/shared";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
-export type ZZWorkerDefParams<
-  P,
-  I,
-  O,
-  WP extends object | undefined,
-  IMap,
-  OMap
-> = {
+export type ZZWorkerDefParams<P, I, O, WP extends object | undefined, IMap, OMap> = {
   concurrency?: number;
   jobSpec: JobSpec<P, I, O, IMap, OMap>;
   processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
@@ -29,7 +22,7 @@ export type ZZWorkerDefParams<
   zzEnv?: ZZEnv;
   workerPrefix?: string;
   maxNumWorkers?: number;
-  doNotReportCapacity?: boolean;
+  autostartWorker?: boolean;
 };
 
 export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
@@ -46,7 +39,7 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     zzEnv,
     workerPrefix,
     maxNumWorkers = 1000,
-    doNotReportCapacity = false,
+    autostartWorker = true,
   }: ZZWorkerDefParams<P, I, O, WP, IMap, OMap>) {
     this.jobSpec = jobSpec;
     this.instanceParamsDef = instanceParamsDef || z.object({});
@@ -58,7 +51,7 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     }
 
     this.workerPrefix = workerPrefix;
-    if (!doNotReportCapacity) {
+    if (!autostartWorker === true) {
       this.reportInstanceCapacityLazy();
     }
   }
