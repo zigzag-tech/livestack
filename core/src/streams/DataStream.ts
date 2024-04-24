@@ -232,16 +232,16 @@ export class DataStream<T extends object> {
           `Error publishing to stream ${this.uniqueName}:`,
           validationFailure,
           "; Data being sent: ",
-          JSON.stringify((parsed as any).data || parsed, null, 2)
+          JSON.stringify((parsed as any).data || parsed, null, 2).slice(0, 500)
         );
         const { datapointId, errorMessage } = validationFailure;
-        console.error("Error message: ", errorMessage);
 
         const { userId } = await(await this.zzEnvP);
         const inspectMessage = ` 🔍🔴 Inspect error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
           (await this.zzEnvP).localProjectId
         }`;
         console.info(inspectMessage);
+        console.error("Error message: ", errorMessage);
 
         throw new Error(`Validation failed. ${inspectMessage}`);
       } else if (success) {
