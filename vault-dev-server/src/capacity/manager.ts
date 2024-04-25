@@ -149,26 +149,34 @@ class CapacityManager implements CacapcityServiceImplementation {
     );
 
     // choose the instance with the most capacity
-    const instanceId = Object.entries(maxCapacitiesByInstanceId).reduce(
-      (a, b) => (a[1] > b[1] ? a : b)
-    )[0];
+    const sorted = Object.entries(maxCapacitiesByInstanceId).sort(
+      ([, a], [, b]) => b - a
+    );
 
-    console.log("Chosen instanceId: ", instanceId);
+    let nextBestInstanceId: string;
 
-    // nudge the instance to increase capacity
-    const resolve = this.resolveByInstanceIAndSpecName[instanceId][specName];
-    if (!resolve) {
-      throw new Error(`No instance found for ${projectUuid}:${specName}`);
-    }
-    resolve({
-      projectUuid,
-      instanceId,
-      provision: {
+    while (true) {
+      nextBestInstanceId = sorted.shift()?.[0]!;
+      // nudge the instance to increase capacity
+      const resolve =
+        this.resolveByInstanceIAndSpecName[nextBestInstanceId]?.[specName];
+      if (!resolve) {
+        continue;
+      }
+      resolve({
         projectUuid,
-        specName,
-        numberOfWorkersNeeded: by,
-      },
-    });
+        instanceId: nextBestInstanceId,
+        provision: {
+          projectUuid,
+          specName,
+          numberOfWorkersNeeded: by,
+        },
+      });
+      break;
+    }
+    
+
+    
   }
 }
 
