@@ -270,65 +270,65 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
         if (!job) {
           throw new Error("Job is null");
         }
-            const gracefulShutdown = async (signal: string) => {
-              (await that.loggerP).info(
-                `Received ${signal}. Shutting down gracefully.`
-              );
-              sendNextActivity({
-                jobFailed: {
-                  jobId: job.jobId,
-                  projectUuid: (await that.zzEnvP).projectUuid,
-                  specName: that.jobSpec.name,
-                  errorStr: `${signal} received. Worker shutting down.`,
-                },
-                workerId: that.workerId,
-              });
-              await new Promise((r) => setTimeout(r, 1000));
-              // process.exit();
-            };
+        // const gracefulShutdown = async (signal: string) => {
+        //   (await that.loggerP).info(
+        //     `Received ${signal}. Shutting down gracefully.`
+        //   );
+        //   sendNextActivity({
+        //     jobFailed: {
+        //       jobId: job.jobId,
+        //       projectUuid: (await that.zzEnvP).projectUuid,
+        //       specName: that.jobSpec.name,
+        //       errorStr: `${signal} received. Worker shutting down.`,
+        //     },
+        //     workerId: that.workerId,
+        //   });
+        //   await new Promise((r) => setTimeout(r, 1000));
+        //   process.exit();
+        // };
 
-            process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-            process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+        // process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+        // process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-            try {
-              await processJob(job);
-              // console.log("jobCompleted", {
-              //   jobId: job.jobId,
-              //   projectUuid: that.zzEnv.projectUuid,
-              //   specName: that.jobSpec.name,
-              // });
-              sendNextActivity({
-                jobCompleted: {
-                  jobId: job.jobId,
-                  projectUuid: (await that.zzEnvP).projectUuid,
-                  specName: that.jobSpec.name,
-                },
-                workerId: that.workerId,
-              });
-              (await that.loggerP).info(`JOB COMPLETED: ${job.jobId}`);
-            } catch (err) {
-              console.error("jobFailed", err, {
-                jobId: job.jobId,
-                projectUuid: (await that.zzEnvP).projectUuid,
-                specName: that.jobSpec.name,
-                errorStr: JSON.stringify(err),
-              });
-              sendNextActivity({
-                jobFailed: {
-                  jobId: job.jobId,
-                  projectUuid: (await that.zzEnvP).projectUuid,
-                  specName: that.jobSpec.name,
-                  errorStr: JSON.stringify(err),
-                },
-                workerId: that.workerId,
-              });
-              (await that.loggerP).error(
-                `JOB FAILED: ID: ${job.jobId}, spec: ${that.jobSpec.name}, message: ${err}`
-              );
-            } finally {
-              process.off("SIGTERM", () => gracefulShutdown("SIGTERM"));
-              process.off("SIGINT", () => gracefulShutdown("SIGINT"));
-            }
+        try {
+          await processJob(job);
+          // console.log("jobCompleted", {
+          //   jobId: job.jobId,
+          //   projectUuid: that.zzEnv.projectUuid,
+          //   specName: that.jobSpec.name,
+          // });
+          sendNextActivity({
+            jobCompleted: {
+              jobId: job.jobId,
+              projectUuid: (await that.zzEnvP).projectUuid,
+              specName: that.jobSpec.name,
+            },
+            workerId: that.workerId,
+          });
+          (await that.loggerP).info(`JOB COMPLETED: ${job.jobId}`);
+        } catch (err) {
+          console.error("jobFailed", err, {
+            jobId: job.jobId,
+            projectUuid: (await that.zzEnvP).projectUuid,
+            specName: that.jobSpec.name,
+            errorStr: JSON.stringify(err),
+          });
+          sendNextActivity({
+            jobFailed: {
+              jobId: job.jobId,
+              projectUuid: (await that.zzEnvP).projectUuid,
+              specName: that.jobSpec.name,
+              errorStr: JSON.stringify(err),
+            },
+            workerId: that.workerId,
+          });
+          (await that.loggerP).error(
+            `JOB FAILED: ID: ${job.jobId}, spec: ${that.jobSpec.name}, message: ${err}`
+          );
+        } finally {
+          // process.off("SIGTERM", () => gracefulShutdown("SIGTERM"));
+          // process.off("SIGINT", () => gracefulShutdown("SIGINT"));
+        }
       }
     });
 
