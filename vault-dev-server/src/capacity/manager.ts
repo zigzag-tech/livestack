@@ -153,10 +153,16 @@ class CapacityManager implements CacapcityServiceImplementation {
       ([, a], [, b]) => b - a
     );
 
-    let nextBestInstanceId: string;
+    let nextBestInstanceId: string | undefined;
 
     while (true) {
-      nextBestInstanceId = sorted.shift()?.[0]!;
+      nextBestInstanceId = sorted.shift()?.[0];
+      if (!nextBestInstanceId) {
+        console.warn(
+          `No instances found for ${projectUuid}:${specName}. Exiting.`
+        );
+        break;
+      }
       // nudge the instance to increase capacity
       const resolve =
         this.resolveByInstanceIAndSpecName[nextBestInstanceId]?.[specName];
