@@ -127,14 +127,10 @@ class CapacityManager implements CacapcityServiceImplementation {
     // keep checking until we find an instance with capacity
     while (true) {
       // get all instances (keys) for this projectUuid:specName
-      instanceIdsAndMaxCapacities = (
-        (await client.sendCommand([
-          "HGETALL",
-          `zz_maxcapacity:${projectUuidN}:${specNameN}`,
-        ])) as string[]
-      ).filter(
-        (inst) => !!this.resolveByInstanceIAndSpecName[inst]?.[specName]
-      );
+      instanceIdsAndMaxCapacities = (await client.sendCommand([
+        "HGETALL",
+        `zz_maxcapacity:${projectUuidN}:${specNameN}`,
+      ])) as string[];
       if (instanceIdsAndMaxCapacities.length === 0) {
         console.warn(
           `No instances found for ${projectUuid}:${specName}. Will retry in 200ms.`
