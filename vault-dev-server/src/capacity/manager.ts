@@ -35,7 +35,7 @@ class CapacityManager implements CacapcityServiceImplementation {
       genManuallyFedIterator<CommandToInstance>();
 
     (async () => {
-      for await (const {
+      outer: for await (const {
         reportSpecAvailability,
         instanceId,
         projectUuid,
@@ -127,10 +127,14 @@ class CapacityManager implements CacapcityServiceImplementation {
     // keep checking until we find an instance with capacity
     while (true) {
       // get all instances (keys) for this projectUuid:specName
-      instanceIdsAndMaxCapacities = (await client.sendCommand([
-        "HGETALL",
-        `zz_maxcapacity:${projectUuidN}:${specNameN}`,
-      ])) as string[];
+      instanceIdsAndMaxCapacities = (
+        (await client.sendCommand([
+          "HGETALL",
+          `zz_maxcapacity:${projectUuidN}:${specNameN}`,
+        ])) as string[]
+      ).filter(
+        (inst) => !!this.resolveByInstanceIAndSpecName[inst]?.[specName]
+      );
       if (instanceIdsAndMaxCapacities.length === 0) {
         console.warn(
           `No instances found for ${projectUuid}:${specName}. Will retry in 200ms.`
