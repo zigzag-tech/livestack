@@ -12,9 +12,15 @@ import { kadDHT } from "@libp2p/kad-dht";
 import { pubsubPeerDiscovery } from "@libp2p/pubsub-peer-discovery";
 import { toString as uint8ArrayToString } from "uint8arrays/to-string";
 import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
+import { bootstrap } from "@libp2p/bootstrap";
 import { concat } from "uint8arrays/concat";
 
-export async function getP2PStorageProvider(): Promise<IStorageProvider> {
+export async function getP2PStorageProvider(
+  networkId: string
+): Promise<IStorageProvider> {
+  const bootstrapMultiaddr =
+    "/ip4/192.168.0.100/tcp/4001/p2p/QmBootstrapNodeID";
+
   const node = await createLibp2p({
     addresses: {
       listen: ["/ip4/0.0.0.0/tcp/0"],
@@ -23,9 +29,19 @@ export async function getP2PStorageProvider(): Promise<IStorageProvider> {
     streamMuxers: [mplex()],
     connectionEncryption: [noise()],
 
-    peerDiscovery: [pubsubPeerDiscovery()],
+    peerDiscovery: [
+      bootstrap({
+        list: [bootstrapMultiaddr],
+        tagName: `myapp-${networkId}`,
+      }),
+      pubsubPeerDiscovery({
+        topics: [`${networkId}.storage-p2p`],
+      }),
+    ],
     services: {
-      dht: kadDHT({}),
+      dht: kadDHT({
+        // protocolPrefix: `/myapp-${networkId}/kad/1.0.0`,
+      }),
     },
   });
 

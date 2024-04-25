@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@chainsafe/libp2p-noise": "^15.0.0",
+    "@libp2p/bootstrap": "^10.0.21",
     "@libp2p/kad-dht": "^12.0.14",
     "@libp2p/mplex": "^10.0.21",
     "@libp2p/pubsub-peer-discovery": "^10.0.2",
