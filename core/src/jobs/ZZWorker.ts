@@ -51,7 +51,7 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     }
 
     this.workerPrefix = workerPrefix;
-    if (!autostartWorker === true) {
+    if (autostartWorker === true) {
       this.reportInstanceCapacityLazy();
     }
   }
