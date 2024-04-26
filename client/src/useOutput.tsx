@@ -1,21 +1,25 @@
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { JobInfo } from "./useJobBinding";
+import { StreamQuery } from "./JobSocketIOClient";
 
 export function useOutput<O>({
   job: { specName, uniqueSpecLabel, jobId, connRef },
   tag,
   def,
+  query = { type: "lastN", n: 1 },
 }: {
   job: JobInfo<any>;
   tag?: string;
   def?: z.ZodType<O>;
+  query?: StreamQuery;
 }) {
   return useStream<O>({
     job: { specName, uniqueSpecLabel, jobId, connRef },
     tag,
     def,
     type: "output",
+    query,
   });
 }
 
@@ -23,11 +27,13 @@ export function useStream<O>({
   job: { specName, uniqueSpecLabel, jobId, connRef },
   tag,
   type,
+  query,
 }: {
   job: JobInfo<any>;
   type: "input" | "output";
   tag?: string;
   def?: z.ZodType<O>;
+  query: StreamQuery;
 }) {
   const [output, setOutput] = useState<{
     data: O;
@@ -49,6 +55,7 @@ export function useStream<O>({
           {
             tag,
             type,
+            // query,
           },
           (data) => {
             setOutput({ ...data, tag });
