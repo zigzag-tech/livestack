@@ -218,6 +218,18 @@ export class JobSpec<
   }
 
   async getJobManager(jobId: string) {
+    //TODO: check if job actually exists
+
+    const zzEnv = await this.zzEnvPWithTimeout;
+    const jobRecResp = await zzEnv.vaultClient.db.getJobRec({
+      projectUuid: zzEnv.projectUuid,
+      jobId,
+    });
+
+    if (!!jobRecResp.null_response) {
+      throw new Error(`Job ${jobId} not found.`);
+    }
+
     const input = this._deriveInputsForJob(jobId);
     const output = this._deriveOutputsForJob(jobId);
 
