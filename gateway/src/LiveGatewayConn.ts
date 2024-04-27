@@ -106,20 +106,27 @@ export class LiveGatewayConn {
       }) => {
         if (type === "output") {
           if (!this.subByJobIdAndTag[`${jobId}::out/${tag}`]) {
-            const { output } = this.jobFnsById[jobId];
-            const mostRecentVal = await output.byTag(tag).mostRecentValue();
-            if (mostRecentVal) {
-              this.socket.emit(`stream:${jobId}/${String(tag)}`, mostRecentVal);
-            }
-            const sub = output.byTag(tag).valueObservable.subscribe((data) => {
-              this.socket.emit(`stream:${jobId}/${String(tag)}`, data);
-            });
-            this.subByJobIdAndTag[`${jobId}::out/${tag}`] = {
-              sub,
-              count: 0,
-            };
+            this.subByJobIdAndTag[`${jobId}::out/${tag}`] = (async () => {
+              const { output } = this.jobFnsById[jobId];
+              const mostRecentVal = await output.byTag(tag).mostRecentValue();
+              if (mostRecentVal) {
+                this.socket.emit(
+                  `stream:${jobId}/${String(tag)}`,
+                  mostRecentVal
+                );
+              }
+              const sub = output
+                .byTag(tag)
+                .valueObservable.subscribe((data) => {
+                  this.socket.emit(`stream:${jobId}/${String(tag)}`, data);
+                });
+              return {
+                sub,
+                count: 0,
+              };
+            })();
           }
-          this.subByJobIdAndTag[`${jobId}::out/${tag}`].count++;
+          (await this.subByJobIdAndTag[`${jobId}::out/${tag}`]).count++;
         } else {
           throw new Error("Input streams not yet supported.");
         }
@@ -140,10 +147,14 @@ export class LiveGatewayConn {
         type: "input" | "output";
       }) => {
         if (type === "output") {
-          this.subByJobIdAndTag[`${jobId}::out/${tag}`]!.count--;
+          (await this.subByJobIdAndTag[`${jobId}::out/${tag}`]!).count--;
 
-          if (this.subByJobIdAndTag[`${jobId}::out/${tag}`]!.count === 0) {
-            this.subByJobIdAndTag[`${jobId}::out/${tag}`]!.sub.unsubscribe();
+          if (
+            (await this.subByJobIdAndTag[`${jobId}::out/${tag}`]!).count === 0
+          ) {
+            (
+              await this.subByJobIdAndTag[`${jobId}::out/${tag}`]!
+            ).sub.unsubscribe();
             delete this.subByJobIdAndTag[`${jobId}::out/${tag}`];
           }
         } else {
@@ -189,10 +200,10 @@ export class LiveGatewayConn {
 
   private subByJobIdAndTag: Record<
     `${string}::${"in" | "out"}/${string}`,
-    {
+    Promise<{
       sub: Subscription;
       count: number;
-    }
+    }>
   > = {};
 
   private jobFnsById: Record<
@@ -219,7 +230,7 @@ export class LiveGatewayConn {
       k.startsWith(jobId)
     ) as Array<keyof typeof this.subByJobIdAndTag>;
     for (const k of relevantKeys) {
-      this.subByJobIdAndTag[k].sub.unsubscribe();
+      (await this.subByJobIdAndTag[k]).sub.unsubscribe();
       delete this.subByJobIdAndTag[k];
     }
   };

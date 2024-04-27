@@ -123,7 +123,11 @@ export class JobSocketIOConnection {
   private subscribedOutputKeys: string[] = [];
 
   public subToStream<T>(
-    { tag, type }: { tag?: string; type: "input" | "output" },
+    {
+      tag,
+      type,
+      query,
+    }: { tag?: string; type: "input" | "output"; query: StreamQuery },
     callback: (data: {
       data: T;
       tag: string;
@@ -147,7 +151,7 @@ export class JobSocketIOConnection {
     if (type === "output" && this.availableOutputs.some((t) => t === tag)) {
       requestAndGetResponse({
         req: {
-          data: { jobId: this.jobId, tag, type: "output" },
+          data: { jobId: this.jobId, tag, type: "output", query },
           method: CMD_SUB_TO_STREAM,
         },
         conn: this.socketIOClient,
