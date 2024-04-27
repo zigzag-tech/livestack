@@ -133,8 +133,16 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
           console.error(runpodResult);
           throw new Error(`Runpod job ${runpodResult.id} failed.`);
         }
+
+        if (runpodResult.status !== "COMPLETED") {
+          throw new Error(`Unexpected status: ${(runpodResult as any).status}`);
+        }
+
         logger.info(
-          `Result obtained from runpod serverless endpoint ${this._endpointId}.`
+          `Result obtained from runpod serverless endpoint ${
+            this._endpointId
+          }. Bytes received: ${JSON.stringify(runpodResult.output).length}.
+            `
         );
         // await update({
         //   incrementalData: {
@@ -143,7 +151,7 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
         //   } as Partial<TJobData & { status: "FINISH"; runpodResult: TJobResult }>,
         // });
 
-        await output("default").emit(runpodResult.output);
+        await output.emit(runpodResult.output);
         await output("status").emit("completed");
       },
     });
