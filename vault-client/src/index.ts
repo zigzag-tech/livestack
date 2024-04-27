@@ -60,6 +60,10 @@ export function findSuitableVaultServer(authToken: string) {
   );
   return {
     db: {
+      getJobRec: genAuthorizedGRPCFn(
+        authToken,
+        dbClient.getJobRec.bind(dbClient)
+      ).bind(dbClient),
       getJobDatapoints: genAuthorizedGRPCFn(
         authToken,
         dbClient.getJobDatapoints.bind(dbClient)
