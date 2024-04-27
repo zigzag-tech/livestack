@@ -55,7 +55,7 @@ export function useStream<O>({
           {
             tag,
             type,
-            // query,
+            query,
           },
           (data) => {
             setOutput({ ...data, tag });
