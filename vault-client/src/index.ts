@@ -98,9 +98,9 @@ export function findSuitableVaultServer(authToken: string) {
         authToken,
         streamClient.sub.bind(streamClient)
       ).bind(streamClient),
-      valueByReverseIndex: genAuthorizedGRPCFn(
+      valuesByReverseIndex: genAuthorizedGRPCFn(
         authToken,
-        streamClient.valueByReverseIndex.bind(streamClient)
+        streamClient.valuesByReverseIndex.bind(streamClient)
       ).bind(streamClient),
       lastValue: genAuthorizedGRPCFn(
         authToken,

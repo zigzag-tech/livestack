@@ -64,7 +64,9 @@ export class DataStream<T extends object> {
           const jsonSchema = zodToJsonSchema(def);
           jsonSchemaStr = JSON.stringify(jsonSchema);
         }
-        await(await ZZEnv.globalP()).vaultClient.stream.ensureStream({
+        await (
+          await ZZEnv.globalP()
+        ).vaultClient.stream.ensureStream({
           project_uuid: zzEnv.projectUuid,
           stream_id: uniqueName,
           json_schema_str: jsonSchemaStr,
@@ -100,45 +102,55 @@ export class DataStream<T extends object> {
     );
   }
 
-  public valueByReverseIndex = async (index: number) => {
-    const { null_response, datapoint } = await(
-      await(await ZZEnv.globalP()).vaultClient
-    ).stream.valueByReverseIndex({
+  public valuesByReverseIndex = async (lastN: number) => {
+    const { datapoints } = await (
+      await (
+        await ZZEnv.globalP()
+      ).vaultClient
+    ).stream.valuesByReverseIndex({
       projectUuid: (await this.zzEnvP).projectUuid,
       uniqueName: this.uniqueName,
-      index,
+      lastN,
     });
-    if (null_response) {
-      return null;
-    } else if (datapoint) {
-      const data = JSON.parse(datapoint.dataStr);
 
-      let restored = data;
-      const { largeFilesToRestore, newObj } = identifyLargeFilesToRestore(data);
+    const wLargeValues = await Promise.all(
+      datapoints.map(async ({ datapoint, null_response }) => {
+        if (null_response) {
+          return null;
+        } else if (datapoint) {
+          const data = JSON.parse(datapoint.dataStr);
 
-      if (largeFilesToRestore.length > 0) {
-        const zzEnv = await this.zzEnvP;
-        if (!zzEnv.storageProvider) {
-          throw new Error(
-            "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
-          );
+          let restored = data;
+          const { largeFilesToRestore, newObj } =
+            identifyLargeFilesToRestore(data);
+
+          if (largeFilesToRestore.length > 0) {
+            const zzEnv = await this.zzEnvP;
+            if (!zzEnv.storageProvider) {
+              throw new Error(
+                "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
+              );
+            } else {
+              restored = (await restoreLargeValues({
+                obj_: newObj,
+                largeFilesToRestore,
+                basePath: await this.baseWorkingRelativePathP,
+                fetcher: zzEnv.storageProvider.fetchFromStorage,
+              })) as T;
+            }
+          }
+          return {
+            ...restored,
+            timestamp: datapoint.timestamp,
+            chunkId: datapoint.chunkId,
+          } as WithTimestamp<T>;
         } else {
-          restored = (await restoreLargeValues({
-            obj_: newObj,
-            largeFilesToRestore,
-            basePath: await this.baseWorkingRelativePathP,
-            fetcher: zzEnv.storageProvider.fetchFromStorage,
-          })) as T;
+          throw new Error("Unexpected response from lastValue");
         }
-      }
-      return {
-        ...restored,
-        timestamp: datapoint.timestamp,
-        chunkId: datapoint.chunkId,
-      } as WithTimestamp<T>;
-    } else {
-      throw new Error("Unexpected response from lastValue");
-    }
+      })
+    );
+
+    return wLargeValues;
   };
 
   public async pub({
@@ -218,7 +230,7 @@ export class DataStream<T extends object> {
       //   this.uniqueName,
       //   JSON.stringify(parsed)
       // );
-      const vaultClient = await(await ZZEnv.globalP()).vaultClient;
+      const vaultClient = await (await ZZEnv.globalP()).vaultClient;
       const { success, validationFailure } = await vaultClient.stream.pub({
         streamId: this.uniqueName,
         projectUuid: (await this.zzEnvP).projectUuid,
@@ -236,7 +248,7 @@ export class DataStream<T extends object> {
         );
         const { datapointId, errorMessage } = validationFailure;
 
-        const { userId } = await(await this.zzEnvP);
+        const { userId } = await await this.zzEnvP;
         const inspectMessage = ` 🔍🔴 Inspect error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
           (await this.zzEnvP).localProjectId
         }`;

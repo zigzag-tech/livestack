@@ -10,7 +10,7 @@ service StreamService {
   rpc Sub(SubRequest) returns (stream StreamDatapoint) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
-  rpc valueByReverseIndex(ValueByReverseIndexRequest) returns (ValueByReverseIndexResponse) {
+  rpc valuesByReverseIndex(ValuesByReverseIndexRequest) returns (ValuesByReverseIndexResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   };
   rpc lastValue(LastValueRequest) returns (LastValueResponse) {
@@ -83,17 +83,21 @@ message StreamDatapoint {
   string datapointId = 4;
 }
 
-message ValueByReverseIndexRequest {
+message ValuesByReverseIndexRequest {
   string projectUuid = 1;
   string uniqueName = 2;
-  uint64 index = 3;
+  uint64 lastN = 3;
 }
 
-message ValueByReverseIndexResponse {
+message DataPointOrNull {
   oneof value {
     StreamDatapoint datapoint = 1;
     google.protobuf.Empty null_response = 2;
   }
+}
+
+message ValuesByReverseIndexResponse {
+  repeated DataPointOrNull datapoints = 1;
 }
 
 message LastValueRequest {

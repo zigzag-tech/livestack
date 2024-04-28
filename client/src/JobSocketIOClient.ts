@@ -11,14 +11,12 @@ import {
   CMD_UNSUB_TO_STREAM,
   UnbindParams,
   CMD_SUB_TO_STREAM,
+  StreamQuery,
 } from "@livestack/shared";
 import { requestAndGetResponse } from "./requestAndGetResponse";
 import { z } from "zod";
 
-export type StreamQuery = {
-  type: "lastN";
-  n: number;
-};
+
 export class JobSocketIOConnection {
   public readonly jobId: string;
   public readonly availableInputs: JobInfoType["availableInputs"];

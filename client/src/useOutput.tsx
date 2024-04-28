@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { z } from "zod";
 import { JobInfo } from "./useJobBinding";
-import { StreamQuery } from "./JobSocketIOClient";
+import { StreamQuery } from "@livestack/shared";
 
 export function useOutput<O>({
   job: { specName, uniqueSpecLabel, jobId, connRef },
