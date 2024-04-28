@@ -218,7 +218,7 @@ export class DataStream<T extends object> {
     //   }
     // }
 
-    let { largeFilesToSave, newObj } = identifyLargeFilesToSave(parsed);
+    let { largeFilesToSave, newObj } = await identifyLargeFilesToSave(parsed);
     const zzEnv = await this.zzEnvP;
     if (zzEnv.storageProvider) {
       const basePath = await this.baseWorkingRelativePathP;

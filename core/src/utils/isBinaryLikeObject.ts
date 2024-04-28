@@ -1,21 +1,42 @@
 import { Stream } from "stream";
-export const detectBinaryLikeObject = (
+import { calculateHash } from "../storage/cloudStorage";
+export const detectBinaryLikeObject = async (
   obj: any
-): false | "array-buffer" | "stream" | "blob" | "file" | "buffer" => {
+): Promise<
+  | {
+      type: "array-buffer" | "stream" | "blob" | "file" | "buffer";
+      hash?: string;
+    }
+  | false
+> => {
   if (obj instanceof ArrayBuffer) {
-    return "array-buffer";
+    return {
+      type: "array-buffer",
+      hash: await calculateHash(obj),
+    };
   }
   if (obj instanceof Stream) {
-    return "stream";
+    return {
+      type: "stream",
+    };
   }
   if (typeof Blob !== "undefined" && obj instanceof Blob) {
-    return "blob";
+    return {
+      type: "blob",
+      hash: await calculateHash(obj),
+    };
   }
   if (typeof File !== "undefined" && obj instanceof File) {
-    return "file";
+    return {
+      type: "file",
+      hash: await calculateHash(obj),
+    };
   }
   if (typeof Buffer !== "undefined" && Buffer.isBuffer(obj)) {
-    return "buffer";
+    return {
+      type: "buffer",
+      hash: await calculateHash(obj),
+    };
   }
   return false;
 };

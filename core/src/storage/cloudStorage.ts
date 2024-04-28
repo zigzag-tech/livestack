@@ -4,6 +4,7 @@ import {
   LargeFileWithoutValue,
   OriginalType,
 } from "../files/file-ops";
+import crypto from "crypto";
 
 export interface IStorageProvider<ResourceId = string> {
   putToStorage: (
@@ -51,4 +52,25 @@ export function getPublicCdnUrl({
   }
   const fullPath = `/${projectUuid}/jobs/${jobId}/large-values/${key}`;
   return storageProvider.getPublicUrl(fullPath);
+}
+
+export async function calculateHash(
+  data: Buffer | string | ArrayBuffer | Blob | File
+): Promise<string> {
+  const hasher = crypto.createHash("sha256");
+  if (data instanceof Buffer) {
+    hasher.update(data);
+  } else if (data instanceof ArrayBuffer) {
+    hasher.update(Buffer.from(data));
+  } else if (data instanceof File || data instanceof Blob) {
+    const arrayBuffer = await new Promise<ArrayBuffer>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.readAsArrayBuffer(data);
+    });
+    hasher.update(Buffer.from(arrayBuffer));
+  } else {
+    hasher.update(data.toString());
+  }
+  return hasher.digest("hex");
 }

@@ -744,7 +744,7 @@ export class ZZJob<
     if (!this.storageProvider.getPublicUrl) {
       throw new Error("storageProvider.getPublicUrl is not provided");
     }
-    const { largeFilesToSave } = identifyLargeFilesToSave(obj);
+    const { largeFilesToSave } = await identifyLargeFilesToSave(obj);
     const found = largeFilesToSave.find((x) => x.path === key);
     if (!found) {
       console.error("Available keys: ", Object.keys(obj));
