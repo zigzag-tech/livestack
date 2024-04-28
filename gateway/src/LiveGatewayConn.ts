@@ -9,6 +9,7 @@ import {
   JobInfoType,
   CMD_SUB_TO_STREAM,
   CMD_UNSUB_TO_STREAM,
+  StreamQuery,
 } from "@livestack/shared";
 import { Subscription } from "rxjs";
 import { ZZEnv, JobSpec, JobManager } from "@livestack/core";
@@ -99,16 +100,18 @@ export class LiveGatewayConn {
         jobId,
         tag,
         type,
+        query,
       }: {
         jobId: string;
         tag: string;
         type: "input" | "output";
+        query: StreamQuery;
       }) => {
         if (type === "output") {
           if (!this.subByJobIdAndTag[`${jobId}::out/${tag}`]) {
             this.subByJobIdAndTag[`${jobId}::out/${tag}`] = (async () => {
               const { output } = this.jobFnsById[jobId];
-              const mostRecentVal = await output.byTag(tag).mostRecentValue();
+              const mostRecentVal = await output.byTag(tag).mostRecent();
               if (mostRecentVal) {
                 this.socket.emit(
                   `stream:${jobId}/${String(tag)}`,
@@ -253,7 +256,7 @@ export class LiveGatewayConn {
     // const subs: Subscription[] = [];
     // console.info("Tags to transmit for job ", jobId, ":", output.tags);
     // for (const tag of output.tags) {
-    //   const mostRecentVal = await output.byTag(tag).mostRecentValue();
+    //   const mostRecentVal = await output.byTag(tag).mostRecent();
     //   if (mostRecentVal) {
     //     this.socket.emit(`stream:${jobId}/${String(tag)}`, mostRecentVal);
     //   }

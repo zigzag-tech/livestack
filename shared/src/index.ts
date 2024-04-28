@@ -10,3 +10,4 @@ export * from "./graph/DefGraph";
 export type { DefGraph } from "./graph/wasm/livestack_shared_wasm";
 
 export * from "./std-utils";
+export * from "./client-server/interface";

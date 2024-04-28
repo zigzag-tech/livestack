@@ -91,15 +91,19 @@ export interface StreamDatapoint {
   datapointId: string;
 }
 
-export interface ValueByReverseIndexRequest {
+export interface ValuesByReverseIndexRequest {
   projectUuid: string;
   uniqueName: string;
-  index: number;
+  lastN: number;
 }
 
-export interface ValueByReverseIndexResponse {
+export interface DataPointOrNull {
   datapoint?: StreamDatapoint | undefined;
   null_response?: Empty | undefined;
+}
+
+export interface ValuesByReverseIndexResponse {
+  datapoints: DataPointOrNull[];
 }
 
 export interface LastValueRequest {
@@ -893,28 +897,28 @@ export const StreamDatapoint = {
   },
 };
 
-function createBaseValueByReverseIndexRequest(): ValueByReverseIndexRequest {
-  return { projectUuid: "", uniqueName: "", index: 0 };
+function createBaseValuesByReverseIndexRequest(): ValuesByReverseIndexRequest {
+  return { projectUuid: "", uniqueName: "", lastN: 0 };
 }
 
-export const ValueByReverseIndexRequest = {
-  encode(message: ValueByReverseIndexRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const ValuesByReverseIndexRequest = {
+  encode(message: ValuesByReverseIndexRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.projectUuid !== "") {
       writer.uint32(10).string(message.projectUuid);
     }
     if (message.uniqueName !== "") {
       writer.uint32(18).string(message.uniqueName);
     }
-    if (message.index !== 0) {
-      writer.uint32(24).uint64(message.index);
+    if (message.lastN !== 0) {
+      writer.uint32(24).uint64(message.lastN);
     }
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): ValueByReverseIndexRequest {
+  decode(input: _m0.Reader | Uint8Array, length?: number): ValuesByReverseIndexRequest {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseValueByReverseIndexRequest();
+    const message = createBaseValuesByReverseIndexRequest();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -937,7 +941,7 @@ export const ValueByReverseIndexRequest = {
             break;
           }
 
-          message.index = longToNumber(reader.uint64() as Long);
+          message.lastN = longToNumber(reader.uint64() as Long);
           continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
@@ -948,15 +952,15 @@ export const ValueByReverseIndexRequest = {
     return message;
   },
 
-  fromJSON(object: any): ValueByReverseIndexRequest {
+  fromJSON(object: any): ValuesByReverseIndexRequest {
     return {
       projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
-      index: isSet(object.index) ? globalThis.Number(object.index) : 0,
+      lastN: isSet(object.lastN) ? globalThis.Number(object.lastN) : 0,
     };
   },
 
-  toJSON(message: ValueByReverseIndexRequest): unknown {
+  toJSON(message: ValuesByReverseIndexRequest): unknown {
     const obj: any = {};
     if (message.projectUuid !== "") {
       obj.projectUuid = message.projectUuid;
@@ -964,30 +968,30 @@ export const ValueByReverseIndexRequest = {
     if (message.uniqueName !== "") {
       obj.uniqueName = message.uniqueName;
     }
-    if (message.index !== 0) {
-      obj.index = Math.round(message.index);
+    if (message.lastN !== 0) {
+      obj.lastN = Math.round(message.lastN);
     }
     return obj;
   },
 
-  create(base?: DeepPartial<ValueByReverseIndexRequest>): ValueByReverseIndexRequest {
-    return ValueByReverseIndexRequest.fromPartial(base ?? {});
+  create(base?: DeepPartial<ValuesByReverseIndexRequest>): ValuesByReverseIndexRequest {
+    return ValuesByReverseIndexRequest.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<ValueByReverseIndexRequest>): ValueByReverseIndexRequest {
-    const message = createBaseValueByReverseIndexRequest();
+  fromPartial(object: DeepPartial<ValuesByReverseIndexRequest>): ValuesByReverseIndexRequest {
+    const message = createBaseValuesByReverseIndexRequest();
     message.projectUuid = object.projectUuid ?? "";
     message.uniqueName = object.uniqueName ?? "";
-    message.index = object.index ?? 0;
+    message.lastN = object.lastN ?? 0;
     return message;
   },
 };
 
-function createBaseValueByReverseIndexResponse(): ValueByReverseIndexResponse {
+function createBaseDataPointOrNull(): DataPointOrNull {
   return { datapoint: undefined, null_response: undefined };
 }
 
-export const ValueByReverseIndexResponse = {
-  encode(message: ValueByReverseIndexResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const DataPointOrNull = {
+  encode(message: DataPointOrNull, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.datapoint !== undefined) {
       StreamDatapoint.encode(message.datapoint, writer.uint32(10).fork()).ldelim();
     }
@@ -997,10 +1001,10 @@ export const ValueByReverseIndexResponse = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): ValueByReverseIndexResponse {
+  decode(input: _m0.Reader | Uint8Array, length?: number): DataPointOrNull {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseValueByReverseIndexResponse();
+    const message = createBaseDataPointOrNull();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -1027,14 +1031,14 @@ export const ValueByReverseIndexResponse = {
     return message;
   },
 
-  fromJSON(object: any): ValueByReverseIndexResponse {
+  fromJSON(object: any): DataPointOrNull {
     return {
       datapoint: isSet(object.datapoint) ? StreamDatapoint.fromJSON(object.datapoint) : undefined,
       null_response: isSet(object.null_response) ? Empty.fromJSON(object.null_response) : undefined,
     };
   },
 
-  toJSON(message: ValueByReverseIndexResponse): unknown {
+  toJSON(message: DataPointOrNull): unknown {
     const obj: any = {};
     if (message.datapoint !== undefined) {
       obj.datapoint = StreamDatapoint.toJSON(message.datapoint);
@@ -1045,17 +1049,78 @@ export const ValueByReverseIndexResponse = {
     return obj;
   },
 
-  create(base?: DeepPartial<ValueByReverseIndexResponse>): ValueByReverseIndexResponse {
-    return ValueByReverseIndexResponse.fromPartial(base ?? {});
+  create(base?: DeepPartial<DataPointOrNull>): DataPointOrNull {
+    return DataPointOrNull.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<ValueByReverseIndexResponse>): ValueByReverseIndexResponse {
-    const message = createBaseValueByReverseIndexResponse();
+  fromPartial(object: DeepPartial<DataPointOrNull>): DataPointOrNull {
+    const message = createBaseDataPointOrNull();
     message.datapoint = (object.datapoint !== undefined && object.datapoint !== null)
       ? StreamDatapoint.fromPartial(object.datapoint)
       : undefined;
     message.null_response = (object.null_response !== undefined && object.null_response !== null)
       ? Empty.fromPartial(object.null_response)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseValuesByReverseIndexResponse(): ValuesByReverseIndexResponse {
+  return { datapoints: [] };
+}
+
+export const ValuesByReverseIndexResponse = {
+  encode(message: ValuesByReverseIndexResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    for (const v of message.datapoints) {
+      DataPointOrNull.encode(v!, writer.uint32(10).fork()).ldelim();
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): ValuesByReverseIndexResponse {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseValuesByReverseIndexResponse();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.datapoints.push(DataPointOrNull.decode(reader, reader.uint32()));
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): ValuesByReverseIndexResponse {
+    return {
+      datapoints: globalThis.Array.isArray(object?.datapoints)
+        ? object.datapoints.map((e: any) => DataPointOrNull.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: ValuesByReverseIndexResponse): unknown {
+    const obj: any = {};
+    if (message.datapoints?.length) {
+      obj.datapoints = message.datapoints.map((e) => DataPointOrNull.toJSON(e));
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<ValuesByReverseIndexResponse>): ValuesByReverseIndexResponse {
+    return ValuesByReverseIndexResponse.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<ValuesByReverseIndexResponse>): ValuesByReverseIndexResponse {
+    const message = createBaseValuesByReverseIndexResponse();
+    message.datapoints = object.datapoints?.map((e) => DataPointOrNull.fromPartial(e)) || [];
     return message;
   },
 };
@@ -1233,11 +1298,11 @@ export const StreamServiceDefinition = {
       responseStream: true,
       options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
-    valueByReverseIndex: {
-      name: "valueByReverseIndex",
-      requestType: ValueByReverseIndexRequest,
+    valuesByReverseIndex: {
+      name: "valuesByReverseIndex",
+      requestType: ValuesByReverseIndexRequest,
       requestStream: false,
-      responseType: ValueByReverseIndexResponse,
+      responseType: ValuesByReverseIndexResponse,
       responseStream: false,
       options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
@@ -1266,10 +1331,10 @@ export interface StreamServiceImplementation<CallContextExt = {}> {
     request: SubRequest,
     context: CallContext & CallContextExt,
   ): ServerStreamingMethodResult<DeepPartial<StreamDatapoint>>;
-  valueByReverseIndex(
-    request: ValueByReverseIndexRequest,
+  valuesByReverseIndex(
+    request: ValuesByReverseIndexRequest,
     context: CallContext & CallContextExt,
-  ): Promise<DeepPartial<ValueByReverseIndexResponse>>;
+  ): Promise<DeepPartial<ValuesByReverseIndexResponse>>;
   lastValue(request: LastValueRequest, context: CallContext & CallContextExt): Promise<DeepPartial<LastValueResponse>>;
   ensureStream(request: EnsureStreamRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
 }
@@ -1277,10 +1342,10 @@ export interface StreamServiceImplementation<CallContextExt = {}> {
 export interface StreamServiceClient<CallOptionsExt = {}> {
   pub(request: DeepPartial<StreamPubMessage>, options?: CallOptions & CallOptionsExt): Promise<StreamPubResult>;
   sub(request: DeepPartial<SubRequest>, options?: CallOptions & CallOptionsExt): AsyncIterable<StreamDatapoint>;
-  valueByReverseIndex(
-    request: DeepPartial<ValueByReverseIndexRequest>,
+  valuesByReverseIndex(
+    request: DeepPartial<ValuesByReverseIndexRequest>,
     options?: CallOptions & CallOptionsExt,
-  ): Promise<ValueByReverseIndexResponse>;
+  ): Promise<ValuesByReverseIndexResponse>;
   lastValue(request: DeepPartial<LastValueRequest>, options?: CallOptions & CallOptionsExt): Promise<LastValueResponse>;
   ensureStream(request: DeepPartial<EnsureStreamRequest>, options?: CallOptions & CallOptionsExt): Promise<Empty>;
 }
