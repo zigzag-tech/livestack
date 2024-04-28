@@ -7,22 +7,23 @@ import { Readable } from "stream";
 const LARGE_VALUE_THRESHOLD = 1024 * 32;
 
 export type OriginalType =
-  | Exclude<ReturnType<typeof detectBinaryLikeObject>, false>
+  | Exclude<Awaited<ReturnType<typeof detectBinaryLikeObject>>, false>["type"]
   | "string";
 
 type LargeFileToSave<T extends OriginalType> = {
   path: string;
   value: any;
   originalType: T;
+  hash?: string;
 };
 
-export const identifyLargeFilesToSave = (
+export const identifyLargeFilesToSave = async (
   obj: any,
   path = ""
-): {
+): Promise<{
   newObj: any;
   largeFilesToSave: LargeFileToSave<any>[];
-} => {
+}> => {
   if (obj === null || isUndefined(obj)) {
     return { newObj: obj, largeFilesToSave: [] };
   }
@@ -32,22 +33,27 @@ export const identifyLargeFilesToSave = (
       path,
       value: obj,
       originalType: "string",
+      hash: await calculateHash(obj),
     });
     return {
       newObj: {
         [OBJ_REF_VALUE]: true,
         originalType: "string",
+        hash: await calculateHash(obj),
       },
       largeFilesToSave,
     };
   } else {
-    const type = detectBinaryLikeObject(obj);
-    if (type) {
-      largeFilesToSave.push({ path, value: obj, originalType: type });
+    const r = await detectBinaryLikeObject(obj);
+
+    if (r) {
+      const { type, hash } = r;
+      largeFilesToSave.push({ path, value: obj, originalType: type, hash });
       return {
         newObj: {
           [OBJ_REF_VALUE]: true,
           originalType: type,
+          hash,
         },
         largeFilesToSave,
       };
@@ -57,7 +63,7 @@ export const identifyLargeFilesToSave = (
   if (typeof obj === "object") {
     for (const [key, value] of _.entries(obj)) {
       const currentPath = path ? pathJoin(path, key) : key;
-      const result = identifyLargeFilesToSave(value, currentPath);
+      const result = await identifyLargeFilesToSave(value, currentPath);
       newObj[key] = result.newObj;
       largeFilesToSave.push(...result.largeFilesToSave);
     }
@@ -90,6 +96,7 @@ export function identifyLargeFilesToRestore(
     largeFilesToRestore.push({
       originalType: obj.originalType,
       path: path,
+      hash: obj.hash,
     });
     return { largeFilesToRestore, newObj: obj };
   }
@@ -113,6 +120,7 @@ export type LargeFileWithoutValue<T extends OriginalType> = Omit<
 >;
 import pLimit from "p-limit";
 import { OBJ_REF_VALUE } from "@livestack/shared";
+import { calculateHash } from "../storage/cloudStorage";
 
 export type InferRestoredFileType<T extends OriginalType> = T extends "string"
   ? string
@@ -136,7 +144,11 @@ export async function restoreLargeValues({
 }: {
   obj_: any;
   basePath?: string;
-  largeFilesToRestore: { path: string; originalType: OriginalType }[];
+  largeFilesToRestore: {
+    path: string;
+    originalType: OriginalType;
+    hash?: string;
+  }[];
   fetcher: <T extends OriginalType>(
     v: LargeFileWithoutValue<T>
   ) => Promise<InferRestoredFileType<T>>;
