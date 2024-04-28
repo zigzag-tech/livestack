@@ -8,7 +8,7 @@ export interface ByTagOutput<T> {
     timestamp: number;
   }>;
   nextValue: () => Promise<WrapWithTimestamp<T> | null>;
-  mostRecentValue: () => Promise<WrapWithTimestamp<T> | null>;
+  mostRecent: (n?: number) => Promise<(WrapWithTimestamp<T> | null)[]>;
   valueObservable: Observable<WrapWithTimestamp<T> | null>;
   getStreamId: () => Promise<string>;
 }
@@ -99,34 +99,33 @@ export function wrapStreamSubscriberWithTermination<T>(
     }
   };
 
-  const mostRecentValue = async () => {
+  const mostRecent = async (n: number = 1) => {
     const subscriber = await subscriberP;
-    const mostRecent = (await subscriber.stream.valueByReverseIndex(
-      0
-    )) as WithTimestamp<WrapTerminatorAndDataId<T>> | null;
-    if (!mostRecent) {
-      return null;
+    let results = (await subscriber.stream.valuesByReverseIndex(
+      n + 1
+    )) as (WithTimestamp<WrapTerminatorAndDataId<T>> | null)[];
+
+    if (!results[results.length - 1]) {
+      return [];
     } else {
-      if (mostRecent.terminate) {
-        // try get second most recent
-        const secondMostRecent = (await subscriber.stream.valueByReverseIndex(
-          1
-        )) as WithTimestamp<WrapTerminateFalse<T>> | null;
-        if (!secondMostRecent) {
-          return null;
-        } else {
+      if (results[results.length - 1]!.terminate) {
+        // skip last one
+        return results.slice(0, results.length - 1).map((v) => {
           return {
-            data: secondMostRecent.data,
-            timestamp: secondMostRecent.timestamp,
-            chunkId: secondMostRecent.chunkId,
+            data: (v as WithTimestamp<WrapTerminateFalse<T>>).data,
+            timestamp: v!.timestamp,
+            chunkId: v!.chunkId,
           };
-        }
+        });
       } else {
-        return {
-          data: mostRecent.data,
-          timestamp: mostRecent.timestamp,
-          chunkId: mostRecent.chunkId,
-        };
+        // skip first one
+        return results.slice(1).map((v) => {
+          return {
+            data: (v as WithTimestamp<WrapTerminateFalse<T>>)!.data,
+            timestamp: v!.timestamp,
+            chunkId: v!.chunkId,
+          };
+        });
       }
     }
   };
@@ -139,7 +138,7 @@ export function wrapStreamSubscriberWithTermination<T>(
     getStreamId,
     valueObservable: newValueObservable,
     nextValue: newNextValue,
-    mostRecentValue: mostRecentValue,
+    mostRecent: mostRecent,
     async *[Symbol.asyncIterator]() {
       let nextValue = await newNextValue();
       while (nextValue !== null) {

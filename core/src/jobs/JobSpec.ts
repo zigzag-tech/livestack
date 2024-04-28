@@ -319,7 +319,7 @@ export class JobSpec<
       });
 
       if (!d.terminate) {
-        const lastV = await stream.valueByReverseIndex(0);
+        const [lastV] = await stream.valuesByReverseIndex(0);
         if (lastV?.terminate) {
           this.logger.error(
             `Cannot send ${
@@ -726,7 +726,7 @@ export class JobSpec<
     }
 
     jobOptions = jobOptions || ({} as P);
-    const vaultClient = await(await this.zzEnvP).vaultClient;
+    const vaultClient = await (await this.zzEnvP).vaultClient;
     await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
       projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
       specName: this.name,
@@ -1005,8 +1005,7 @@ export class JobSpec<
       return {
         getStreamId: async () => await (await subscriberP).getStreamId(),
         nextValue: async () => await (await subscriberP).nextValue(),
-        mostRecentValue: async () =>
-          await (await subscriberP).mostRecentValue(),
+        mostRecent: async () => await (await subscriberP).mostRecent(),
         valueObservable,
         async *[Symbol.asyncIterator]() {
           while (true) {
@@ -1409,7 +1408,7 @@ export interface JobOutput<OMap> {
   nextValue: () => Promise<WrapWithTimestamp<
     OMap[InferDefaultOrSingleKey<OMap>]
   > | null>;
-  mostRecentValue: () => Promise<WrapWithTimestamp<
+  mostRecent: () => Promise<WrapWithTimestamp<
     OMap[InferDefaultOrSingleKey<OMap>]
   > | null>;
   valueObservable: Observable<WrapWithTimestamp<

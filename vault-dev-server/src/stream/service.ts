@@ -9,7 +9,7 @@ import {
   SubRequest,
   ServerStreamingMethodResult,
   SubType,
-  ValueByReverseIndexRequest,
+  ValuesByReverseIndexRequest,
   LastValueRequest,
 } from "@livestack/vault-interface/src/generated/stream";
 import { CallContext } from "nice-grpc-common";
@@ -379,21 +379,23 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       }
       return { null_response: {} };
     },
-    async valueByReverseIndex(
-      request: ValueByReverseIndexRequest,
+    async valuesByReverseIndex(
+      request: ValuesByReverseIndexRequest,
       context: CallContext
     ): Promise<{
-      datapoint?:
-        | {
-            timestamp?: number | undefined;
-            chunkId?: string | undefined;
-            dataStr?: string | undefined;
-            datapointId?: string | undefined;
-          }
-        | undefined;
-      null_response?: {} | undefined;
+      datapoints: {
+        datapoint?:
+          | {
+              timestamp?: number | undefined;
+              chunkId?: string | undefined;
+              dataStr?: string | undefined;
+              datapointId?: string | undefined;
+            }
+          | undefined;
+        null_response?: {} | undefined;
+      }[];
     }> {
-      const { projectUuid, uniqueName, index = 0 } = request;
+      const { projectUuid, uniqueName, lastN } = request;
       const channelId = `${projectUuid}/${uniqueName}`;
       const subClient = await createClient().connect();
       const s = (await subClient.sendCommand([
@@ -402,34 +404,60 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         "+",
         "-",
         "COUNT",
-        `${index + 1}`,
+        `${lastN}`,
       ])) as [string, ...[string, string][]][];
       try {
         if (s && s.length > 0) {
-          const p = s[index];
-          const messages = p[1]; // Assuming single stream
-          const message = p[0];
-          if (messages.length > 0) {
-            const cursor = message[0] as `${string}-${string}`;
-            const [timestampStr, _] = cursor.split("-");
-            const timestamp = Number(timestampStr);
-            const { jsonDataStr: dataStr, datapointId } =
-              parseMessageDataStr(messages);
-            return {
-              datapoint: {
-                timestamp,
-                dataStr,
-                chunkId: message[0],
-                datapointId,
-              },
-            };
-          }
+          return {
+            datapoints: s.map((p) => {
+              const messages = p[1]; // Assuming single stream
+              const message = p[0];
+              if (messages.length > 0) {
+                const cursor = message[0] as `${string}-${string}`;
+                const [timestampStr, _] = cursor.split("-");
+                const timestamp = Number(timestampStr);
+                const { jsonDataStr: dataStr, datapointId } =
+                  parseMessageDataStr(messages);
+                return {
+                  datapoint: {
+                    timestamp,
+                    dataStr,
+                    chunkId: message[0],
+                    datapointId,
+                  },
+                };
+              } else {
+                return { null_response: {} };
+              }
+            }),
+          };
+
+          // const p = s[index];
+          // const messages = p[1]; // Assuming single stream
+          // const message = p[0];
+          // if (messages.length > 0) {
+          //   const cursor = message[0] as `${string}-${string}`;
+          //   const [timestampStr, _] = cursor.split("-");
+          //   const timestamp = Number(timestampStr);
+          //   const { jsonDataStr: dataStr, datapointId } =
+          //     parseMessageDataStr(messages);
+          //   return {
+          //     datapoint: {
+          //       timestamp,
+          //       dataStr,
+          //       chunkId: message[0],
+          //       datapointId,
+          //     },
+          //   };
+          // }
         }
       } catch (e) {
         console.error(e);
         throw e;
       }
-      return { null_response: {} };
+      return {
+        datapoints: [],
+      };
     },
   };
 };
