@@ -35,12 +35,21 @@ export function useStream<O>({
   def?: z.ZodType<O>;
   query: StreamQuery;
 }) {
-  const [output, setOutput] = useState<{
-    data: O;
-    timestamp: number;
-    chunkId: string;
-    tag?: string;
-  } | null>(null);
+  const [output, setOutput] = useState<
+    {
+      data: O;
+      timestamp: number;
+      chunkId: string;
+      tag?: string;
+    }[] & {
+      last: {
+        data: O;
+        timestamp: number;
+        chunkId: string;
+        tag?: string;
+      } | null;
+    }
+  >(Object.assign([], { last: null }));
 
   useEffect(() => {
     let unsubP: Promise<() => void> | null = null;
@@ -58,7 +67,22 @@ export function useStream<O>({
             query,
           },
           (data) => {
-            setOutput({ ...data, tag });
+            if (query.type === "lastN") {
+              setOutput((prev) => {
+                if (prev.length >= query.n) {
+                  return Object.assign([...prev.slice(1), data], {
+                    last: data,
+                  });
+                }
+                return Object.assign([...prev, data], { last: data });
+              });
+            } else if (query.type === "all") {
+              setOutput((prev) =>
+                Object.assign([...prev, data], { last: data })
+              );
+            } else {
+              throw new Error(`Unsupported query type "${query.type}".`);
+            }
           }
         )
       );

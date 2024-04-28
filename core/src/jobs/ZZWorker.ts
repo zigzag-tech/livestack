@@ -110,9 +110,7 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
         }
 
         for (let i = 0; i < numberOfWorkersNeeded; i++) {
-          this.startWorker({
-            concurrency: 1,
-          });
+          this.startWorker({});
         }
       } else {
         console.error("Unexpected command", cmd);
@@ -121,12 +119,11 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     }
   }
 
-  public async startWorker(p?: { concurrency?: number; instanceParams?: WP }) {
-    const { concurrency, instanceParams } = p || {};
+  public async startWorker(p?: { instanceParams?: WP }) {
+    const { instanceParams } = p || {};
 
     const worker = new ZZWorker<P, I, O, WP, IMap, OMap>({
       def: this,
-      concurrency,
       instanceParams: instanceParams || ({} as WP),
       zzEnv: await this.zzEnvP,
     });
@@ -179,13 +176,11 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     instanceParams,
     def,
     workerName,
-    concurrency = 3,
     zzEnv,
   }: {
     def: ZZWorkerDef<P, I, O, WP, IMap, OMap>;
     instanceParams?: WP;
     workerName?: string;
-    concurrency?: number;
     zzEnv?: ZZEnv | null;
   }) {
     // if worker name is not provided, use random string

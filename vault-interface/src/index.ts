@@ -25,3 +25,4 @@ export { FromWorker, ToWorker, QueueJob } from "./generated/queue";
 export { FromInstance, CommandToInstance } from "./generated/capacity";
 
 export * from "./wrapNullResponse";
+export * from "./generated/google/protobuf/empty";

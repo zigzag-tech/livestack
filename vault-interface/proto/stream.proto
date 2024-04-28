@@ -10,10 +10,15 @@ service StreamService {
   rpc Sub(SubRequest) returns (stream StreamDatapoint) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
-  rpc valuesByReverseIndex(ValuesByReverseIndexRequest) returns (ValuesByReverseIndexResponse) {
+  rpc ValuesByReverseIndex(ValuesByReverseIndexRequest) returns (ValuesByReverseIndexResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   };
-  rpc lastValue(LastValueRequest) returns (LastValueResponse) {
+
+  rpc AllValues(AllValuesRequest) returns (ValuesByReverseIndexResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  };
+
+  rpc LastValue(LastValueRequest) returns (LastValueResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   };
 
@@ -81,6 +86,11 @@ message StreamDatapoint {
   string chunkId = 2;
   string dataStr = 3;
   string datapointId = 4;
+}
+
+message AllValuesRequest {
+  string projectUuid = 1;
+  string uniqueName = 2;
 }
 
 message ValuesByReverseIndexRequest {
