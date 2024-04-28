@@ -17,6 +17,7 @@ import { parse, stringify } from "@ltd/j-toml";
 import path from "path";
 import os from "os";
 
+const CONN_FAILED_MSG = "Please make sure you are connected to the internet.";
 
 const limiter = limit(1);
 export const LIVESTACK_DASHBOARD_URL_ROOT =
@@ -146,27 +147,38 @@ async function resolveProjectInfo(projectId: string) {
       localProjectId
     ));
   }
-
-  const resp = await fetch(
-    `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/projects?userId=${userId}&localProjectId=${localProjectId}`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
-    }
-  );
-
-  if (resp.status === 404) {
-    throw new Error(
-      `Project ${localProjectId} under user ${userId} not found.`
+  const errMsg =
+    `Failed to fetch project from ${LIVESTACK_DASHBOARD_URL_ROOT}. ` +
+    CONN_FAILED_MSG;
+  try {
+    const resp = await fetch(
+      `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/projects?userId=${userId}&localProjectId=${localProjectId}`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+      }
     );
-  } else if (!resp.ok) {
-    throw new Error("Failed to fetch project.");
-  } else {
-    const [{ projectUuid }] = (await resp.json()) as [{ projectUuid: string }];
-    return { projectUuid, userId, localProjectId, authToken };
+
+    if (resp.status === 404) {
+      throw new Error(
+        `Project ${localProjectId} under user ${userId} not found.`
+      );
+    } else if (!resp.ok) {
+      throw new Error(
+        `Failed to fetch project from ${LIVESTACK_DASHBOARD_URL_ROOT}. Response status: ${resp.status}.`
+      );
+    } else {
+      const [{ projectUuid }] = (await resp.json()) as [
+        { projectUuid: string }
+      ];
+      return { projectUuid, userId, localProjectId, authToken };
+    }
+  } catch (e) {
+    console.error(e);
+    throw new Error(errMsg);
   }
 }
 
@@ -291,20 +303,27 @@ const getOrPromptForUserCredentials: (localProjectId: string) => Promise<{
 };
 
 async function getCliTempToken(localProjectId: string) {
-  const randomTokenResp = await fetch(
-    `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/cli-tokens`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        localProjectId,
-      }),
-    }
-  );
-  const { cliTempToken } = await randomTokenResp.json();
-  return cliTempToken;
+  try {
+    const randomTokenResp = await fetch(
+      `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/cli-tokens`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          localProjectId,
+        }),
+      }
+    );
+    const { cliTempToken } = await randomTokenResp.json();
+    return cliTempToken;
+  } catch (e) {
+    console.error(e);
+    throw new Error(
+      `Failed to contact ${LIVESTACK_DASHBOARD_URL_ROOT}.` + CONN_FAILED_MSG
+    );
+  }
 }
 
 async function waitUntilCredentialsAreResolved(cliTempToken: string) {
@@ -346,19 +365,26 @@ async function getClITempTokenStatus(
 ): Promise<
   WaitingTorResolveCliTokenStatus | ResolvedCliTokenStatusWithUserToken
 > {
-  const resp = await fetch(
-    `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/cli-tokens/${cliTempToken}`,
-    {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
-    }
-  );
-  const s = (await resp.json()) as
-    | WaitingTorResolveCliTokenStatus
-    | ResolvedCliTokenStatusWithUserToken;
-  return s;
+  try {
+    const resp = await fetch(
+      `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/cli-tokens/${cliTempToken}`,
+      {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+    const s = (await resp.json()) as
+      | WaitingTorResolveCliTokenStatus
+      | ResolvedCliTokenStatusWithUserToken;
+    return s;
+  } catch (e) {
+    console.error(e);
+    throw new Error(
+      `Failed to contact ${LIVESTACK_DASHBOARD_URL_ROOT}. ` + CONN_FAILED_MSG
+    );
+  }
 }
 
 export const fileOrBufferSchema = z.custom<Buffer | Stream>((data) => {
