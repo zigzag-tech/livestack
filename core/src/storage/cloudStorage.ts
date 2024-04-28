@@ -21,6 +21,7 @@ export interface IStorageProvider<ResourceId = string> {
   fetchFromStorage: <T extends OriginalType>(f: {
     path: ResourceId;
     originalType: T;
+    hash?: string;
   }) => Promise<InferRestoredFileType<T>>;
   getPublicUrl?: (path: ResourceId) => string;
 }
