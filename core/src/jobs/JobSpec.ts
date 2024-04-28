@@ -1005,7 +1005,8 @@ export class JobSpec<
       return {
         getStreamId: async () => await (await subscriberP).getStreamId(),
         nextValue: async () => await (await subscriberP).nextValue(),
-        mostRecent: async () => await (await subscriberP).mostRecent(),
+        mostRecent: async (n?: number) =>
+          await (await subscriberP).mostRecent(n),
         allValues: async () => await (await subscriberP).allValues(),
         valueObservable,
         async *[Symbol.asyncIterator]() {
@@ -1054,6 +1055,15 @@ export class JobSpec<
       })();
     });
 
+    const mostRecent = async (n?: number) => {
+      if (subscriberByDefaultTag === null) {
+        const tag = this.getSingleTag("output", true);
+        subscriberByDefaultTag = await singletonSubscriberByTag(tag);
+      }
+
+      return await subscriberByDefaultTag.mostRecent(n);
+    };
+
     return (() => {
       const func = (<K extends keyof OMap>(tag?: K) => {
         const resolvedTag = tag || this.getSingleTag("output", true);
@@ -1062,6 +1072,7 @@ export class JobSpec<
       func.byTag = singletonSubscriberByTag;
       func.tags = this.outputTags;
       func.nextValue = nextValue;
+      func.mostRecent = mostRecent;
       func.valueObservable = valueObservable;
       func[Symbol.asyncIterator] = async function* () {
         while (true) {
