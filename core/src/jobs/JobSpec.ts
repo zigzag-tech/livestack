@@ -1411,7 +1411,7 @@ export interface JobOutput<OMap> {
   > | null>;
   mostRecent: (
     n?: number
-  ) => Promise<WrapWithTimestamp<OMap[InferDefaultOrSingleKey<OMap>]> | null>;
+  ) => Promise<WrapWithTimestamp<OMap[InferDefaultOrSingleKey<OMap>]>[]>;
   allValues: () => Promise<WrapWithTimestamp<OMap[keyof OMap]>[]>;
   valueObservable: Observable<WrapWithTimestamp<
     OMap[InferDefaultOrSingleKey<OMap>]
