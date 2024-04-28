@@ -9,7 +9,7 @@ export interface IStorageProvider<ResourceId = string> {
   putToStorage: (
     destination: ResourceId,
     data: Buffer | string | Stream | File | Blob | ArrayBuffer
-  ) => Promise<void>;
+  ) => Promise<{ hash: string } | void>;
   // uploadFromLocalPath: (p: {
   //   localPath: string;
   //   destination: string;
