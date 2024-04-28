@@ -169,9 +169,7 @@ class CapacityManager implements CacapcityServiceImplementation {
       if (!resolve) {
         continue;
       }
-      console.debug(
-        `Increasing capacity for ${projectUuid}:${specName} by ${by} on ${nextBestInstanceId}`
-      );
+
       resolve({
         projectUuid,
         instanceId: nextBestInstanceId,
