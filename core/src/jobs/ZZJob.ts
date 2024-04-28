@@ -111,8 +111,16 @@ export class ZZJob<
     };
   };
 
-  readonly invoke: <P, I, O, IMap, OMap>(
+  readonly invoke: <
+    P,
+    I,
+    O,
+    IMap,
+    OMap,
+    T extends keyof IMap = InferDefaultOrSingleKey<IMap>
+  >(
     jobSpec: JobSpec<P, I, O, IMap, OMap>,
+    inputTag: T,
     inputParams: IMap[InferDefaultOrSingleKey<IMap>],
     jobOptions?: P
   ) => Promise<OMap[InferDefaultOrSingleKey<OMap>]>;
@@ -333,15 +341,16 @@ export class ZZJob<
     };
     const that = this;
 
-    this.invoke = async <P, I, O, IMap, OMap>(
+    this.invoke = async <P, I, O, IMap, OMap, T extends keyof IMap>(
       jobSpec: JobSpec<P, I, O, IMap, OMap>,
+      inputTag: T,
       inputParams: IMap[InferDefaultOrSingleKey<IMap>],
       jobOptions?: P
     ): Promise<OMap[InferDefaultOrSingleKey<OMap>]> => {
       const { input, output } = await jobSpec.enqueueJob({
         jobOptions,
       });
-      await input.feed(inputParams);
+      input.feed(inputParams);
       const data = await output.nextValue();
       if (!data) {
         throw new Error("Output is null");
