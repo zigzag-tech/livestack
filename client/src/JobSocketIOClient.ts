@@ -126,7 +126,7 @@ export class JobSocketIOConnection {
       type,
       query,
     }: { tag?: string; type: "input" | "output"; query: StreamQuery },
-    callback: (data: {
+    callback: (datapoint: {
       data: T;
       tag: string;
       chunkId: string;
@@ -146,6 +146,7 @@ export class JobSocketIOConnection {
       }
       tag = this.availableOutputs[0];
     }
+
     if (type === "output" && this.availableOutputs.some((t) => t === tag)) {
       requestAndGetResponse({
         req: {

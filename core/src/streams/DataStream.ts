@@ -9,6 +9,8 @@ import {
   restoreLargeValues,
 } from "../files/file-ops";
 import { getLogger } from "../utils/createWorkerLogger";
+import { StreamDatapoint } from "@livestack/vault-interface/src/generated/stream";
+import { Empty } from "@livestack/vault-interface";
 
 export class DataStream<T extends object> {
   public readonly def: ZodType<T> | null;
@@ -102,6 +104,61 @@ export class DataStream<T extends object> {
     );
   }
 
+  private async processDatapoint(resp: {
+    datapoint?: StreamDatapoint;
+    null_response?: Empty;
+  }) {
+    const { datapoint, null_response } = resp;
+    if (null_response) {
+      return null;
+    } else if (datapoint) {
+      const data = JSON.parse(datapoint.dataStr);
+
+      let restored = data;
+      const { largeFilesToRestore, newObj } = identifyLargeFilesToRestore(data);
+
+      if (largeFilesToRestore.length > 0) {
+        const zzEnv = await this.zzEnvP;
+        if (!zzEnv.storageProvider) {
+          throw new Error(
+            "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
+          );
+        } else {
+          restored = (await restoreLargeValues({
+            obj_: newObj,
+            largeFilesToRestore,
+            basePath: await this.baseWorkingRelativePathP,
+            fetcher: zzEnv.storageProvider.fetchFromStorage,
+          })) as T;
+        }
+      }
+      return {
+        ...restored,
+        timestamp: datapoint.timestamp,
+        chunkId: datapoint.chunkId,
+      } as WithTimestamp<T>;
+    } else {
+      throw new Error("Unexpected response from lastValue");
+    }
+  }
+
+  public allValues = async () => {
+    const { datapoints } = await (
+      await (
+        await ZZEnv.globalP()
+      ).vaultClient
+    ).stream.allValues({
+      projectUuid: (await this.zzEnvP).projectUuid,
+      uniqueName: this.uniqueName,
+    });
+
+    const wLargeValues = await Promise.all(
+      datapoints.map(this.processDatapoint.bind(this))
+    );
+
+    return wLargeValues;
+  };
+
   public valuesByReverseIndex = async (lastN: number) => {
     const { datapoints } = await (
       await (
@@ -114,40 +171,7 @@ export class DataStream<T extends object> {
     });
 
     const wLargeValues = await Promise.all(
-      datapoints.map(async ({ datapoint, null_response }) => {
-        if (null_response) {
-          return null;
-        } else if (datapoint) {
-          const data = JSON.parse(datapoint.dataStr);
-
-          let restored = data;
-          const { largeFilesToRestore, newObj } =
-            identifyLargeFilesToRestore(data);
-
-          if (largeFilesToRestore.length > 0) {
-            const zzEnv = await this.zzEnvP;
-            if (!zzEnv.storageProvider) {
-              throw new Error(
-                "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
-              );
-            } else {
-              restored = (await restoreLargeValues({
-                obj_: newObj,
-                largeFilesToRestore,
-                basePath: await this.baseWorkingRelativePathP,
-                fetcher: zzEnv.storageProvider.fetchFromStorage,
-              })) as T;
-            }
-          }
-          return {
-            ...restored,
-            timestamp: datapoint.timestamp,
-            chunkId: datapoint.chunkId,
-          } as WithTimestamp<T>;
-        } else {
-          throw new Error("Unexpected response from lastValue");
-        }
-      })
+      datapoints.map(this.processDatapoint.bind(this))
     );
 
     return wLargeValues;
