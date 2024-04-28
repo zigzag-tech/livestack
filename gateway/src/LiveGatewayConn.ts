@@ -111,11 +111,23 @@ export class LiveGatewayConn {
           if (!this.subByJobIdAndTag[`${jobId}::out/${tag}`]) {
             this.subByJobIdAndTag[`${jobId}::out/${tag}`] = (async () => {
               const { output } = this.jobFnsById[jobId];
-              const mostRecentVal = await output.byTag(tag).mostRecent();
-              if (mostRecentVal) {
-                this.socket.emit(
-                  `stream:${jobId}/${String(tag)}`,
-                  mostRecentVal
+              if (query.type === "lastN") {
+                const lastN = await output.byTag(tag).mostRecent(query.n);
+                for (const val of lastN) {
+                  if (val) {
+                    this.socket.emit(`stream:${jobId}/${String(tag)}`, val);
+                  }
+                }
+              } else if (query.type === "all") {
+                const allValues = await output.byTag(tag).allValues();
+                for (const val of allValues) {
+                  if (val) {
+                    this.socket.emit(`stream:${jobId}/${String(tag)}`, val);
+                  }
+                }
+              } else {
+                throw new Error(
+                  "Query type \n" + query.type + "\n not yet supported."
                 );
               }
               const sub = output

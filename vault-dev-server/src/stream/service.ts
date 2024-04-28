@@ -1,3 +1,4 @@
+import { AllValuesRequest } from "./../../../vault-interface/src/generated/stream";
 import {
   OBJ_REF_VALUE,
   genManuallyFedIterator,
@@ -143,6 +144,28 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       })
       .onConflict(["project_uuid", "stream_id", "datapoint_id"])
       .ignore();
+  };
+
+  const processRawDatapoint = (p: [string, ...[string, string][]]) => {
+    const messages = p[1]; // Assuming single stream
+    const message = p[0];
+    if (messages.length > 0) {
+      const cursor = message[0] as `${string}-${string}`;
+      const [timestampStr, _] = cursor.split("-");
+      const timestamp = Number(timestampStr);
+      const { jsonDataStr: dataStr, datapointId } =
+        parseMessageDataStr(messages);
+      return {
+        datapoint: {
+          timestamp,
+          dataStr,
+          chunkId: message[0],
+          datapointId,
+        },
+      };
+    } else {
+      return { null_response: {} };
+    }
   };
 
   return {
@@ -379,6 +402,48 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       }
       return { null_response: {} };
     },
+    async allValues(
+      request: AllValuesRequest,
+      context: CallContext
+    ): Promise<{
+      datapoints: {
+        datapoint?:
+          | {
+              timestamp?: number | undefined;
+              chunkId?: string | undefined;
+              dataStr?: string | undefined;
+              datapointId?: string | undefined;
+            }
+          | undefined;
+        null_response?: {} | undefined;
+      }[];
+    }> {
+      const { projectUuid, uniqueName } = request;
+      const channelId = `${projectUuid}/${uniqueName}`;
+      const subClient = await createClient().connect();
+      // get all values from the stream
+
+      const s = (await subClient.sendCommand([
+        "XRANGE",
+        channelId,
+        "-",
+        "+",
+      ])) as [string, ...[string, string][]][];
+
+      try {
+        if (s && s.length > 0) {
+          return {
+            datapoints: s.map(processRawDatapoint),
+          };
+        }
+      } catch (e) {
+        console.error(e);
+        throw e;
+      }
+      return {
+        datapoints: [],
+      };
+    },
     async valuesByReverseIndex(
       request: ValuesByReverseIndexRequest,
       context: CallContext
@@ -409,47 +474,8 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       try {
         if (s && s.length > 0) {
           return {
-            datapoints: s.map((p) => {
-              const messages = p[1]; // Assuming single stream
-              const message = p[0];
-              if (messages.length > 0) {
-                const cursor = message[0] as `${string}-${string}`;
-                const [timestampStr, _] = cursor.split("-");
-                const timestamp = Number(timestampStr);
-                const { jsonDataStr: dataStr, datapointId } =
-                  parseMessageDataStr(messages);
-                return {
-                  datapoint: {
-                    timestamp,
-                    dataStr,
-                    chunkId: message[0],
-                    datapointId,
-                  },
-                };
-              } else {
-                return { null_response: {} };
-              }
-            }),
+            datapoints: s.map(processRawDatapoint),
           };
-
-          // const p = s[index];
-          // const messages = p[1]; // Assuming single stream
-          // const message = p[0];
-          // if (messages.length > 0) {
-          //   const cursor = message[0] as `${string}-${string}`;
-          //   const [timestampStr, _] = cursor.split("-");
-          //   const timestamp = Number(timestampStr);
-          //   const { jsonDataStr: dataStr, datapointId } =
-          //     parseMessageDataStr(messages);
-          //   return {
-          //     datapoint: {
-          //       timestamp,
-          //       dataStr,
-          //       chunkId: message[0],
-          //       datapointId,
-          //     },
-          //   };
-          // }
         }
       } catch (e) {
         console.error(e);

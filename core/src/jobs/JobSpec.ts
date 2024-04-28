@@ -1006,6 +1006,7 @@ export class JobSpec<
         getStreamId: async () => await (await subscriberP).getStreamId(),
         nextValue: async () => await (await subscriberP).nextValue(),
         mostRecent: async () => await (await subscriberP).mostRecent(),
+        allValues: async () => await (await subscriberP).allValues(),
         valueObservable,
         async *[Symbol.asyncIterator]() {
           while (true) {
@@ -1408,9 +1409,10 @@ export interface JobOutput<OMap> {
   nextValue: () => Promise<WrapWithTimestamp<
     OMap[InferDefaultOrSingleKey<OMap>]
   > | null>;
-  mostRecent: () => Promise<WrapWithTimestamp<
-    OMap[InferDefaultOrSingleKey<OMap>]
-  > | null>;
+  mostRecent: (
+    n?: number
+  ) => Promise<WrapWithTimestamp<OMap[InferDefaultOrSingleKey<OMap>]> | null>;
+  allValues: () => Promise<WrapWithTimestamp<OMap[keyof OMap]>[]>;
   valueObservable: Observable<WrapWithTimestamp<
     OMap[InferDefaultOrSingleKey<OMap>]
   > | null>;

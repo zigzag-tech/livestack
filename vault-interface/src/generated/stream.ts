@@ -91,6 +91,11 @@ export interface StreamDatapoint {
   datapointId: string;
 }
 
+export interface AllValuesRequest {
+  projectUuid: string;
+  uniqueName: string;
+}
+
 export interface ValuesByReverseIndexRequest {
   projectUuid: string;
   uniqueName: string;
@@ -897,6 +902,80 @@ export const StreamDatapoint = {
   },
 };
 
+function createBaseAllValuesRequest(): AllValuesRequest {
+  return { projectUuid: "", uniqueName: "" };
+}
+
+export const AllValuesRequest = {
+  encode(message: AllValuesRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.projectUuid !== "") {
+      writer.uint32(10).string(message.projectUuid);
+    }
+    if (message.uniqueName !== "") {
+      writer.uint32(18).string(message.uniqueName);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): AllValuesRequest {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseAllValuesRequest();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 1:
+          if (tag !== 10) {
+            break;
+          }
+
+          message.projectUuid = reader.string();
+          continue;
+        case 2:
+          if (tag !== 18) {
+            break;
+          }
+
+          message.uniqueName = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): AllValuesRequest {
+    return {
+      projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
+      uniqueName: isSet(object.uniqueName) ? globalThis.String(object.uniqueName) : "",
+    };
+  },
+
+  toJSON(message: AllValuesRequest): unknown {
+    const obj: any = {};
+    if (message.projectUuid !== "") {
+      obj.projectUuid = message.projectUuid;
+    }
+    if (message.uniqueName !== "") {
+      obj.uniqueName = message.uniqueName;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<AllValuesRequest>): AllValuesRequest {
+    return AllValuesRequest.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<AllValuesRequest>): AllValuesRequest {
+    const message = createBaseAllValuesRequest();
+    message.projectUuid = object.projectUuid ?? "";
+    message.uniqueName = object.uniqueName ?? "";
+    return message;
+  },
+};
+
 function createBaseValuesByReverseIndexRequest(): ValuesByReverseIndexRequest {
   return { projectUuid: "", uniqueName: "", lastN: 0 };
 }
@@ -1299,15 +1378,23 @@ export const StreamServiceDefinition = {
       options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
     valuesByReverseIndex: {
-      name: "valuesByReverseIndex",
+      name: "ValuesByReverseIndex",
       requestType: ValuesByReverseIndexRequest,
       requestStream: false,
       responseType: ValuesByReverseIndexResponse,
       responseStream: false,
       options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
     },
+    allValues: {
+      name: "AllValues",
+      requestType: AllValuesRequest,
+      requestStream: false,
+      responseType: ValuesByReverseIndexResponse,
+      responseStream: false,
+      options: { idempotencyLevel: "NO_SIDE_EFFECTS" },
+    },
     lastValue: {
-      name: "lastValue",
+      name: "LastValue",
       requestType: LastValueRequest,
       requestStream: false,
       responseType: LastValueResponse,
@@ -1335,6 +1422,10 @@ export interface StreamServiceImplementation<CallContextExt = {}> {
     request: ValuesByReverseIndexRequest,
     context: CallContext & CallContextExt,
   ): Promise<DeepPartial<ValuesByReverseIndexResponse>>;
+  allValues(
+    request: AllValuesRequest,
+    context: CallContext & CallContextExt,
+  ): Promise<DeepPartial<ValuesByReverseIndexResponse>>;
   lastValue(request: LastValueRequest, context: CallContext & CallContextExt): Promise<DeepPartial<LastValueResponse>>;
   ensureStream(request: EnsureStreamRequest, context: CallContext & CallContextExt): Promise<DeepPartial<Empty>>;
 }
@@ -1344,6 +1435,10 @@ export interface StreamServiceClient<CallOptionsExt = {}> {
   sub(request: DeepPartial<SubRequest>, options?: CallOptions & CallOptionsExt): AsyncIterable<StreamDatapoint>;
   valuesByReverseIndex(
     request: DeepPartial<ValuesByReverseIndexRequest>,
+    options?: CallOptions & CallOptionsExt,
+  ): Promise<ValuesByReverseIndexResponse>;
+  allValues(
+    request: DeepPartial<AllValuesRequest>,
     options?: CallOptions & CallOptionsExt,
   ): Promise<ValuesByReverseIndexResponse>;
   lastValue(request: DeepPartial<LastValueRequest>, options?: CallOptions & CallOptionsExt): Promise<LastValueResponse>;
