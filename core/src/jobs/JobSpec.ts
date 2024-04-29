@@ -24,7 +24,7 @@ import {
   ZZWorkerDefParams,
 } from "./ZZWorker";
 import pLimit from "p-limit";
-import { Observable } from "rxjs";
+import { Observable, Subscription } from "rxjs";
 import { z } from "zod";
 import { TagMaps, TagObj } from "../orchestrations/Workflow";
 import {
@@ -989,16 +989,29 @@ export class JobSpec<
 
       const valueObservable = new Observable<WrapWithTimestamp<OMap[K]> | null>(
         (subs) => {
-          (async () => {
+          let innerSubscription: Subscription | null = null;
+          const initAsync = async () => {
             const subscriber = await subscriberP;
-            subscriber.valueObservable.subscribe((v) => {
-              if (v) {
-                subs.next(v);
-              } else {
-                subs.complete();
-              }
+            innerSubscription = subscriber.valueObservable.subscribe({
+              next: (v) => {
+                if (v) {
+                  subs.next(v);
+                } else {
+                  subs.complete();
+                }
+              },
+              error: (err) => subs.error(err),
+              complete: () => subs.complete(),
             });
-          })();
+          };
+          initAsync();
+
+          return () => {
+            // This function is called when the observable is unsubscribed
+            if (innerSubscription) {
+              innerSubscription.unsubscribe();
+            }
+          };
         }
       );
 
@@ -1039,20 +1052,34 @@ export class JobSpec<
     const valueObservable = new Observable<
       WrapWithTimestamp<OMap[InferDefaultOrSingleKey<OMap>]>
     >((subscriber) => {
-      (async () => {
+      const initAsync = async () => {
         if (subscriberByDefaultTag === null) {
           const tag = this.getSingleTag("output", true);
           subscriberByDefaultTag = await singletonSubscriberByTag(tag);
         }
 
-        subscriberByDefaultTag.valueObservable.subscribe((v) => {
-          if (v) {
-            subscriber.next(v);
-          } else {
-            subscriber.complete();
-          }
-        });
-      })();
+        const innerSubscription =
+          subscriberByDefaultTag.valueObservable.subscribe({
+            next: (v) => {
+              if (v) {
+                subscriber.next(v);
+              } else {
+                subscriber.complete();
+              }
+            },
+            error: (err) => subscriber.error(err),
+            complete: () => subscriber.complete(),
+          });
+
+        return innerSubscription; // return this for cleanup
+      };
+
+      const subscriptionPromise = initAsync();
+
+      return () => {
+        // This function is called when the observable is unsubscribed
+        subscriptionPromise.then((subscription) => subscription.unsubscribe());
+      };
     });
 
     const mostRecent = async (n?: number) => {

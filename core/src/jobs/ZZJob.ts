@@ -4,7 +4,21 @@ import {
 } from "@livestack/shared/src/graph/InstantiatedGraph";
 import { InferTMap } from "@livestack/shared";
 import _ from "lodash";
-import { Observable, Subscription, map, merge, takeUntil } from "rxjs";
+import {
+  Observable,
+  Subscription,
+  map,
+  merge,
+  takeUntil,
+  tap,
+  takeWhile,
+  catchError,
+  finalize,
+  of,
+  first,
+  filter,
+  EMPTY,
+} from "rxjs";
 import { z } from "zod";
 import { TransformRegistry } from "../orchestrations/TransformRegistry";
 import {
@@ -243,16 +257,15 @@ export class ZZJob<
       const obj = this.genInputObject();
 
       func.tags = obj.tags;
-      func.observable = new Observable<IMap[keyof IMap] | null>((s) => {
-        obj.observable().subscribe((x) => {
-          if (!x) {
-            s.next(null);
-            s.complete();
-          } else {
-            s.next(x);
-          }
-        });
-      });
+      func.observable = obj.observable().pipe(
+        map((x) => x || null), // Maps falsy values (like undefined) to null
+        first(), // Automatically complete after the first emission
+        catchError((err) => {
+          // Handle any errors that may occur
+          console.error("Error in observable stream:", err);
+          return of(null); // Optionally continue the stream with a null value
+        })
+      );
       func.nextValue = obj.nextValue;
 
       func[Symbol.asyncIterator] = obj[Symbol.asyncIterator];
@@ -448,23 +461,27 @@ export class ZZJob<
           resolvedTag as K
         ).trackedObservable;
         // wrap observable with tracking
-        return new Observable<IMap[K] | null>((s) => {
-          const sub = obs.subscribe((x) => {
-            if (!x) {
-              s.next(null);
-              s.complete();
-              sub.unsubscribe();
-            } else {
-              for (const otag of that.spec.outputTags) {
-                that.trackerByInputOutputTag[resolvedTag as K][otag].intake({
-                  datapointId: x.datapointId,
-                });
-              }
-
-              s.next(x.data);
+        return obs.pipe(
+          takeWhile((x) => !!x), // Only take values that are not falsy (similar to your if (!x))
+          tap((x) => {
+            // Assuming x can never be falsy here because of the takeWhile
+            for (const otag of that.spec.outputTags) {
+              that.trackerByInputOutputTag[resolvedTag as K][otag].intake({
+                datapointId: x!.datapointId,
+              });
             }
-          });
-        });
+          }),
+          map((x) => x!.data),
+          catchError((err) => {
+            // Handle any errors that occur in the above operations
+            console.error("Error processing observable stream:", err);
+            return of(null); // Continue the stream with a null value or use throwError to re-throw the error
+          }),
+          finalize(() => {
+            // This will execute when the consumer unsubscribes or the stream completes naturally
+            console.log("Observable stream ended or unsubscribed");
+          })
+        );
       },
       async *[Symbol.asyncIterator]() {
         if (!resolvedTag) {
@@ -669,19 +686,24 @@ export class ZZJob<
             this.inputStreamFnsByTag
           ) as (typeof this.inputStreamFnsByTag)[keyof IMap][]
         ).map((x) => {
-          return new Promise<void>((resolve) => {
-            const unsub = x!.subscriberCountObservable
-              .pipe(takeUntil(x!.inputObservableUntracked))
-              .subscribe((count) => {
-                // console.log("count", count);
-                if (count === 0) {
-                  unsub.unsubscribe();
-                  resolve();
-                }
-              });
+          return new Promise<void>((resolve, reject) => {
+            x!.subscriberCountObservable
+              .pipe(
+                takeUntil(x!.inputObservableUntracked),
+                filter((count) => count === 0), // Only proceed when count is zero
+                first(), // Ensure we only resolve once, the first time count reaches zero
+                catchError((err) => {
+                  console.error("Error in subscriber count tracking", err);
+                  reject(err); // Properly handle and forward errors
+                  return EMPTY; // Prevent further emissions and complete the stream
+                }),
+                finalize(() => resolve()) // Resolve the promise when the stream completes
+              )
+              .subscribe();
           });
         })
       );
+
       const processedR = await processor(this);
       // console.debug("processed", this.jobId);
 
