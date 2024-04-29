@@ -72,7 +72,7 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
 
   private async reportInstanceCapacityLazy() {
     const projectUuid = (await this.zzEnvP).projectUuid;
-    const instanceId = await (await this.zzEnvP).getInstanceId();
+    const instanceId = await(await this.zzEnvP).getInstanceId();
     const { iterator, resolveNext: reportNext } =
       genManuallyFedIterator<FromInstance>((v) => {
         // console.info(`INSTANCE REPORT: ${JSON.stringify(v)}`);
@@ -88,13 +88,13 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
         maxCapacity: 100,
       },
     });
-    console.debug("Reported capacity for", this.jobSpec.name);
+    // console.debug("Reported capacity for", this.jobSpec.name);
     for await (const cmd of iter) {
       const { instanceId, provision } = cmd;
       if (instanceId !== await(await this.zzEnvP).getInstanceId()) {
         throw new Error("Unexpected instanceId");
       }
-      console.debug("Received command", cmd);
+      // console.debug("Received command", cmd);
       if (provision) {
         const { projectUuid, specName, numberOfWorkersNeeded } = provision;
         console.info(

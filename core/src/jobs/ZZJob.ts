@@ -257,15 +257,16 @@ export class ZZJob<
       const obj = this.genInputObject();
 
       func.tags = obj.tags;
-      func.observable = obj.observable().pipe(
-        map((x) => x || null), // Maps falsy values (like undefined) to null
-        first(), // Automatically complete after the first emission
-        catchError((err) => {
-          // Handle any errors that may occur
-          console.error("Error in observable stream:", err);
-          return of(null); // Optionally continue the stream with a null value
-        })
-      );
+      func.observable = () =>
+        obj.observable().pipe(
+          map((x) => x || null), // Maps falsy values (like undefined) to null
+          first(), // Automatically complete after the first emission
+          catchError((err) => {
+            // Handle any errors that may occur
+            console.error("Error in observable stream:", err);
+            return of(null); // Optionally continue the stream with a null value
+          })
+        );
       func.nextValue = obj.nextValue;
 
       func[Symbol.asyncIterator] = obj[Symbol.asyncIterator];
