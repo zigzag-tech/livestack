@@ -35,6 +35,9 @@ class CapacityManager implements CacapcityServiceImplementation {
       genManuallyFedIterator<CommandToInstance>();
 
     (async () => {
+      let knownInstanceId: string | null = null;
+      let knownProjectUuid: string | null = null;
+
       outer: for await (const {
         reportSpecAvailability,
         instanceId,
@@ -83,11 +86,11 @@ class CapacityManager implements CacapcityServiceImplementation {
 
             for (const pair of porjectIdSpecNamePairs) {
               const [projectUuidN, specNameN] = pair.split(":");
-              await client.sendCommand([
-                "HDEL",
-                `zz_maxcapacity:${projectUuidN}:${specNameN}`,
-                instanceIdN,
-              ]);
+              // await client.sendCommand([
+              //   "HDEL",
+              //   `zz_maxcapacity:${projectUuidN}:${specNameN}`,
+              //   instanceIdN,
+              // ]);
 
               // remove capacity hash values
               await client.sendCommand([
@@ -98,8 +101,9 @@ class CapacityManager implements CacapcityServiceImplementation {
               delete this.resolveByInstanceIAndSpecName[instanceIdN][specNameN];
               context.signal.removeEventListener("abort", abortListener);
             }
-            context.signal.addEventListener("abort", abortListener);
           };
+
+          context.signal.addEventListener("abort", abortListener);
         } else {
           throw new Error("Invalid command");
         }
