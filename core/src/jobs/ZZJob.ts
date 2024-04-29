@@ -4,7 +4,7 @@ import {
 } from "@livestack/shared/src/graph/InstantiatedGraph";
 import { InferTMap } from "@livestack/shared";
 import _ from "lodash";
-import { Observable, map, merge, takeUntil } from "rxjs";
+import { Observable, Subscription, map, merge, takeUntil } from "rxjs";
 import { z } from "zod";
 import { TransformRegistry } from "../orchestrations/TransformRegistry";
 import {
@@ -449,10 +449,11 @@ export class ZZJob<
         ).trackedObservable;
         // wrap observable with tracking
         return new Observable<IMap[K] | null>((s) => {
-          obs.subscribe((x) => {
+          const sub = obs.subscribe((x) => {
             if (!x) {
               s.next(null);
               s.complete();
+              sub.unsubscribe();
             } else {
               for (const otag of that.spec.outputTags) {
                 that.trackerByInputOutputTag[resolvedTag as K][otag].intake({
@@ -560,7 +561,7 @@ export class ZZJob<
           //   map((x) => (x.terminate ? null : x.data))
           // );
           const obs = sub.valueObservable;
-          obs.subscribe((n) => {
+          const subscription = obs.subscribe((n) => {
             if (!n.terminate) {
               let r: WithTimestamp<WrapTerminateFalse<IMap[K]>> = {
                 ...(n as WithTimestamp<WrapTerminateFalse<IMap[K]>>),
@@ -587,10 +588,14 @@ export class ZZJob<
               s.complete();
             }
           });
+
+          // Store the subscription to be able to unsubscribe later
+          thatJob.storeSubscription(resolvedTag!.toString(), subscription);
         });
 
         return () => {
           s.unsubscribe();
+          thatJob.unsubscribeFromInput(resolvedTag!.toString());
         };
       });
 
@@ -609,6 +614,28 @@ export class ZZJob<
     }
     return this.inputStreamFnsByTag[resolvedTag as K]!;
   };
+
+  // Store subscriptions to allow cleanup
+  private subscriptions: Record<string, Subscription> = {};
+
+  private storeSubscription(tag: string, subscription: Subscription) {
+    this.subscriptions[tag] = subscription;
+  }
+
+  private unsubscribeFromInput(tag: string) {
+    if (this.subscriptions[tag]) {
+      this.subscriptions[tag].unsubscribe();
+      delete this.subscriptions[tag];
+    }
+  }
+
+  // Call this method to clean up all subscriptions when the job is done
+  private cleanupSubscriptions() {
+    Object.values(this.subscriptions).forEach((subscription) => {
+      subscription.unsubscribe();
+    });
+    this.subscriptions = {};
+  }
 
   public beginProcessing = async (
     processor: ZZProcessor<P, I, O, WP, IMap, OMap>
@@ -698,6 +725,8 @@ export class ZZJob<
       });
       // throw e;
       // }
+    } finally {
+      this.cleanupSubscriptions();
     }
   };
 
