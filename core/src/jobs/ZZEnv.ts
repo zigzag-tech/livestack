@@ -27,7 +27,7 @@ interface ZZEnvConfig {
   // two types of project IDs are supported:
   // 1. "@<userId>/<projectUuid>"
   // 2. "<projectUuid>", in which case the userId is assumed to be the current user's
-  readonly projectId: string | `@${string}/${string}`;
+  readonly projectId?: string | `@${string}/${string}`;
 }
 
 export class ZZEnv {
@@ -61,8 +61,18 @@ export class ZZEnv {
   }
 
   static async create(config: ZZEnvConfig) {
+    let projectId = config.projectId;
+    if (!projectId) {
+      projectId = process.env.LIVESTACK_PROJECT_ID;
+    }
+
+    if (!projectId) {
+      throw new Error(
+        "Project ID is not provided. Please provide a project ID with ZZEnv.create({ projectId: '...' }) or set the LIVESTACK_PROJECT_ID environment variable."
+      );
+    }
     const { projectUuid, localProjectId, userId, authToken } =
-      await resolveProjectInfo(config.projectId);
+      await resolveProjectInfo(projectId);
 
     return new ZZEnv({
       storageProvider: config.storageProvider,
