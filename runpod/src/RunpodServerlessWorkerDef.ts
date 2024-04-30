@@ -144,7 +144,7 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
           logger.info(
             `Result obtained from runpod serverless endpoint ${
               this._endpointId
-            }. Bytes received: ${JSON.stringify(runpodResult.output).length}.
+            }. Bytes received: ${JSON.stringify(runpodResult.output)?.length}.
             `
           );
           // await update({
