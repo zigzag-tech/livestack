@@ -374,6 +374,7 @@ export class ZZJob<
       input(inputTag).feed(inputParams);
       const data = await output(outputTag).nextValue();
       if (!data) {
+        console.error("Output is null. Input: ", JSON.stringify(inputParams));
         throw new Error("Output is null");
       }
 

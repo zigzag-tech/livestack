@@ -153,8 +153,14 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
           //     status: "FINISH",
           //   } as Partial<TJobData & { status: "FINISH"; runpodResult: TJobResult }>,
           // });
-
-          await output.emit(runpodResult.output);
+          try {
+            await output.emit(runpodResult.output);
+          } catch (e) {
+            console.error("Error while emtting output", e);
+            console.error("Output", JSON.stringify(runpodResult));
+            await output("status").emit("failed");
+          }
+          
           await output("status").emit("completed");
         } catch (e) {
           console.error(e);
