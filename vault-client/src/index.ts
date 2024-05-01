@@ -21,7 +21,15 @@ export const genAuthorizedVaultClient = (authToken: string) =>
   findSuitableVaultServer(authToken);
 
 export type AuthorizedGRPCClient = ReturnType<typeof findSuitableVaultServer>;
+const ONE_THOUSAND_YEARS = 1000 * 60 * 60 * 24 * 365 * 1000;
 
+const connOpts = {
+  "grpc.keepalive_time_ms": 1000 * 10,
+  "grpc.keepalive_timeout_ms": 1000 * 60 * 30,
+  "grpc.max_connection_age_ms": ONE_THOUSAND_YEARS,
+  "grpc.client_idle_timeout_ms": ONE_THOUSAND_YEARS,
+  "grpc.keepalive_permit_without_calls": 1,
+};
 export function findSuitableVaultServer(authToken: string) {
   const clientFactory = createClientFactory().use(retryMiddleware);
 
@@ -45,18 +53,19 @@ export function findSuitableVaultServer(authToken: string) {
     vaultServerURL = "livedev.zztech.io:50504";
   }
   console.info("Using vault server at:", vaultServerURL);
+
   const dbClient = clientFactory.create(
     DBServiceDefinition,
-    createChannel(vaultServerURL)
+    createChannel(vaultServerURL, undefined, connOpts)
   );
   const queueClient = clientFactory.create(
     QueueServiceDefinition,
-    createChannel(vaultServerURL)
+    createChannel(vaultServerURL, undefined, connOpts)
   );
 
   const streamClient = clientFactory.create(
     StreamServiceDefinition,
-    createChannel(vaultServerURL)
+    createChannel(vaultServerURL, undefined, connOpts)
   );
   return {
     db: {
@@ -131,7 +140,7 @@ export function findSuitableVaultServer(authToken: string) {
     },
     capacity: clientFactory.create(
       CacapcityServiceDefinition,
-      createChannel(vaultServerURL)
+      createChannel(vaultServerURL, undefined, connOpts)
     ),
   };
 }
