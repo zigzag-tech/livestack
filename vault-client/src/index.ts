@@ -21,13 +21,13 @@ export const genAuthorizedVaultClient = (authToken: string) =>
   findSuitableVaultServer(authToken);
 
 export type AuthorizedGRPCClient = ReturnType<typeof findSuitableVaultServer>;
-const ONE_THOUSAND_YEARS = 1000 * 60 * 60 * 24 * 365 * 1000;
+const ONE_YEAR = 1000 * 60 * 60 * 24 * 365 * 1;
 
 const connOpts = {
   "grpc.keepalive_time_ms": 1000 * 10,
   "grpc.keepalive_timeout_ms": 1000 * 60 * 30,
-  "grpc.max_connection_age_ms": ONE_THOUSAND_YEARS,
-  "grpc.client_idle_timeout_ms": ONE_THOUSAND_YEARS,
+  "grpc.max_connection_age_ms": ONE_YEAR,
+  "grpc.client_idle_timeout_ms": ONE_YEAR,
   "grpc.keepalive_permit_without_calls": 1,
 };
 export function findSuitableVaultServer(authToken: string) {
