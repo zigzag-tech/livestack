@@ -26,8 +26,8 @@ const ONE_YEAR = 1000 * 60 * 60 * 24 * 365 * 1;
 const connOpts = {
   "grpc.keepalive_time_ms": 1000 * 10,
   "grpc.keepalive_timeout_ms": 1000 * 60 * 30,
-  "grpc.max_connection_age_ms": ONE_YEAR,
-  "grpc.client_idle_timeout_ms": ONE_YEAR,
+  // "grpc.max_connection_age_ms": ONE_YEAR,
+  // "grpc.client_idle_timeout_ms": ONE_YEAR,
   "grpc.keepalive_permit_without_calls": 1,
 };
 export function findSuitableVaultServer(authToken: string) {
