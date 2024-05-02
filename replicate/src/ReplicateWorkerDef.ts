@@ -2,6 +2,7 @@ import Replicate from "replicate";
 import { JobSpec } from "@livestack/core";
 import { ZZWorkerDef } from "@livestack/core";
 import { ZZEnv } from "@livestack/core";
+import { InferDefaultOrSingleKey } from "@livestack/core/src/jobs/ZZWorker";
 
 const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
 
@@ -23,6 +24,7 @@ export class ReplicateWorkerDef<
     replicateToken,
     inputTag,
     outputTag,
+    autostartWorker = true,
   }: {
     jobSpec: JobSpec<any, I, O, IMap, OMap>;
     endpoint: `${string}/${string}:${string}`;
@@ -31,11 +33,13 @@ export class ReplicateWorkerDef<
     replicateToken?: string;
     inputTag?: KI;
     outputTag?: KO;
+    autostartWorker?: boolean;
   }) {
     super({
       zzEnv,
       jobSpec,
       concurrency,
+      autostartWorker,
       processor: async ({ logger, input, output, workerInstanceParams }) => {
         const replicateToken =
           workerInstanceParams?.replicateToken ||
@@ -52,7 +56,9 @@ export class ReplicateWorkerDef<
         const params = (await input(inputTag).nextValue())!;
         const repR = replicate.run(this._endpoint, {
           input: params,
-        }) as Promise<unknown> as Promise<OMap[KO]>;
+        }) as Promise<unknown> as Promise<
+          OMap[KO extends never ? InferDefaultOrSingleKey<OMap> : KO]
+        >;
         logger.info("Sending request to replicate endpoint...");
         const result = await Promise.race([
           repR,
