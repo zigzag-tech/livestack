@@ -14,7 +14,14 @@ import { genManuallyFedIterator } from "@livestack/shared";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
-export type ZZWorkerDefParams<P, I, O, WP extends object | undefined, IMap, OMap> = {
+export type ZZWorkerDefParams<
+  P,
+  I,
+  O,
+  WP extends object | undefined,
+  IMap,
+  OMap
+> = {
   concurrency?: number;
   jobSpec: JobSpec<P, I, O, IMap, OMap>;
   processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
@@ -260,71 +267,77 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     };
 
     this.zzEnvP.then(async (zzEnv) => {
-      const iter = zzEnv.vaultClient.queue.reportAsWorker(iterParams);
-
-      for await (const { job } of iter) {
-        // console.debug("picked up job: ", job);
-        if (!job) {
-          throw new Error("Job is null");
-        }
-        // const gracefulShutdown = async (signal: string) => {
-        //   (await that.loggerP).info(
-        //     `Received ${signal}. Shutting down gracefully.`
-        //   );
-        //   sendNextActivity({
-        //     jobFailed: {
-        //       jobId: job.jobId,
-        //       projectUuid: (await that.zzEnvP).projectUuid,
-        //       specName: that.jobSpec.name,
-        //       errorStr: `${signal} received. Worker shutting down.`,
-        //     },
-        //     workerId: that.workerId,
-        //   });
-        //   await new Promise((r) => setTimeout(r, 1000));
-        //   process.exit();
-        // };
-
-        // process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-        // process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-
+      while (true) {
         try {
-          await processJob(job);
-          // console.log("jobCompleted", {
-          //   jobId: job.jobId,
-          //   projectUuid: that.zzEnv.projectUuid,
-          //   specName: that.jobSpec.name,
-          // });
-          sendNextActivity({
-            jobCompleted: {
-              jobId: job.jobId,
-              projectUuid: (await that.zzEnvP).projectUuid,
-              specName: that.jobSpec.name,
-            },
-            workerId: that.workerId,
-          });
-          (await that.loggerP).info(`JOB COMPLETED: ${job.jobId}`);
-        } catch (err) {
-          console.error("jobFailed", err, {
-            jobId: job.jobId,
-            projectUuid: (await that.zzEnvP).projectUuid,
-            specName: that.jobSpec.name,
-            errorStr: JSON.stringify(err),
-          });
-          sendNextActivity({
-            jobFailed: {
-              jobId: job.jobId,
-              projectUuid: (await that.zzEnvP).projectUuid,
-              specName: that.jobSpec.name,
-              errorStr: JSON.stringify(err),
-            },
-            workerId: that.workerId,
-          });
-          (await that.loggerP).error(
-            `JOB FAILED: ID: ${job.jobId}, spec: ${that.jobSpec.name}, message: ${err}`
-          );
-        } finally {
-          // process.off("SIGTERM", () => gracefulShutdown("SIGTERM"));
-          // process.off("SIGINT", () => gracefulShutdown("SIGINT"));
+          const iter = zzEnv.vaultClient.queue.reportAsWorker(iterParams);
+          for await (const { job } of iter) {
+            // console.debug("picked up job: ", job);
+            if (!job) {
+              throw new Error("Job is null");
+            }
+            // const gracefulShutdown = async (signal: string) => {
+            //   (await that.loggerP).info(
+            //     `Received ${signal}. Shutting down gracefully.`
+            //   );
+            //   sendNextActivity({
+            //     jobFailed: {
+            //       jobId: job.jobId,
+            //       projectUuid: (await that.zzEnvP).projectUuid,
+            //       specName: that.jobSpec.name,
+            //       errorStr: `${signal} received. Worker shutting down.`,
+            //     },
+            //     workerId: that.workerId,
+            //   });
+            //   await new Promise((r) => setTimeout(r, 1000));
+            //   process.exit();
+            // };
+
+            // process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+            // process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+
+            try {
+              await processJob(job);
+              // console.log("jobCompleted", {
+              //   jobId: job.jobId,
+              //   projectUuid: that.zzEnv.projectUuid,
+              //   specName: that.jobSpec.name,
+              // });
+              sendNextActivity({
+                jobCompleted: {
+                  jobId: job.jobId,
+                  projectUuid: (await that.zzEnvP).projectUuid,
+                  specName: that.jobSpec.name,
+                },
+                workerId: that.workerId,
+              });
+              (await that.loggerP).info(`JOB COMPLETED: ${job.jobId}`);
+            } catch (err) {
+              console.error("jobFailed", err, {
+                jobId: job.jobId,
+                projectUuid: (await that.zzEnvP).projectUuid,
+                specName: that.jobSpec.name,
+                errorStr: JSON.stringify(err),
+              });
+              sendNextActivity({
+                jobFailed: {
+                  jobId: job.jobId,
+                  projectUuid: (await that.zzEnvP).projectUuid,
+                  specName: that.jobSpec.name,
+                  errorStr: JSON.stringify(err),
+                },
+                workerId: that.workerId,
+              });
+              (await that.loggerP).error(
+                `JOB FAILED: ID: ${job.jobId}, spec: ${that.jobSpec.name}, message: ${err}`
+              );
+            } finally {
+              // process.off("SIGTERM", () => gracefulShutdown("SIGTERM"));
+              // process.off("SIGINT", () => gracefulShutdown("SIGINT"));
+            }
+          }
+        } catch (e) {
+          console.error("Error in reportAsWorker iterator: ", e);
+          await new Promise((resolve) => setTimeout(resolve, 5000)); // Wait for 5 seconds before retrying
         }
       }
     });
@@ -352,8 +365,6 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     return defineWorker(p);
   }
 }
-
-
 
 export type InferDefaultOrSingleKey<T> = "default" extends keyof T
   ? "default"
