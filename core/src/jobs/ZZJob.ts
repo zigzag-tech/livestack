@@ -435,6 +435,13 @@ export class ZZJob<
     return {
       ...this.genInputObjectByTag(),
       tags: this.spec.inputTags,
+    } as Omit<
+      ReturnType<typeof this.genInputObjectByTag>,
+      "nextValue" | "observable"
+    > & {
+      nextValue: () => Promise<IMap[InferDefaultOrSingleKey<IMap>] | null>;
+      observable: () => Observable<IMap[InferDefaultOrSingleKey<IMap>] | null>;
+      tags: (keyof IMap)[];
     };
   };
 
