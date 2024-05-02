@@ -16,13 +16,13 @@ type TriggerCheckContext = {
 export interface ParallelAttempt<ParentIMap, ParentOMap, I, O, IMap, OMap> {
   jobSpec: JobSpec<any, I, O, IMap, OMap>;
   timeout?: number;
-  transformInput: <K extends keyof ParentIMap>(
-    params: ParentIMap[K]
+  transformInput: (
+    params: ParentIMap[InferDefaultOrSingleKey<ParentIMap>]
   ) =>
     | Promise<NoInfer<IMap[InferDefaultOrSingleKey<IMap>]>>
     | NoInfer<IMap[InferDefaultOrSingleKey<IMap>]>;
-  transformOutput: <K extends keyof OMap>(
-    output: OMap[K]
+  transformOutput: (
+    output: OMap[InferDefaultOrSingleKey<OMap>]
   ) =>
     | Promise<ParentOMap[InferDefaultOrSingleKey<ParentOMap>]>
     | ParentOMap[InferDefaultOrSingleKey<ParentOMap>];
