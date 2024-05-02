@@ -180,6 +180,7 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
   public readonly def: ZZWorkerDef<P, I, O, WP, IMap, OMap>;
   private readonly workerId = v4();
   protected readonly loggerP: Promise<ReturnType<typeof getLogger>>;
+  protected _workerStatus: "running" | "stopping" | "stopped" = "running";
 
   constructor({
     instanceParams,
@@ -267,7 +268,7 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     };
 
     this.zzEnvP.then(async (zzEnv) => {
-      while (true) {
+      while (that._workerStatus === "running") {
         try {
           const iter = zzEnv.vaultClient.queue.reportAsWorker(iterParams);
           for await (const { job } of iter) {
@@ -363,6 +364,11 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     p: Parameters<typeof defineWorker<P, I, O, WP, IMap, OMap>>[0]
   ) {
     return defineWorker(p);
+  }
+
+  public async stop() {
+    // TODO: Implement graceful shutdown
+    throw new Error("Not implemented");
   }
 }
 
