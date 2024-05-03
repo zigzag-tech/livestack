@@ -422,12 +422,15 @@ export class WorkflowSpec extends JobSpec<
     exposures,
     name,
     zzEnv,
+    autostartWorkflow = true,
   }: {
     name: string;
     zzEnv?: ZZEnv;
+    autostartWorkflow?: boolean;
   } & WorkflowParams) {
     super({
       name,
+
       jobOptions: WorkflowChildJobOptionsSanitized,
       zzEnv,
       output: {
@@ -447,11 +450,14 @@ export class WorkflowSpec extends JobSpec<
     this.orchestrationWorkerDef = new ZZWorkerDef({
       workerPrefix: "workflow",
       jobSpec: this,
+      autostartWorker: autostartWorkflow,
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;
 
-        const { rec: parentRec } = await(
-          await(await ZZEnv.globalP()).vaultClient
+        const { rec: parentRec } = await (
+          await (
+            await ZZEnv.globalP()
+          ).vaultClient
         ).db.getParentJobRec({
           projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
           childJobId: groupId,
