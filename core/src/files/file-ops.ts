@@ -153,9 +153,8 @@ export type InferRestoredFileType<T extends OriginalType> = T extends "string"
       v: LargeFileWithoutValue<T>
     ) => Promise<InferRestoredFileType<T>>;
   }) {
-    // iterate over the large files to restore, and replace the value in the path
-    // with the value returned from the fetcher.
-    // use p-limit to limit the number of concurrent fetches
+    const delimiter = "__zz__|||__zz__"; // Choose a custom delimiter that is unlikely to appear in path names
+
     const limit = pLimit(3);
     const promises = largeFilesToRestore.map((largeFile) =>
       limit(async () => {
@@ -163,24 +162,19 @@ export type InferRestoredFileType<T extends OriginalType> = T extends "string"
           ...largeFile,
           path: path.join(basePath, largeFile.path),
         });
-        // Use an array of segments to handle paths with dots correctly
-        const pathSegments = largeFile.path
-          .split("/")
-          .map((segment) => segment.replace(/\./g, "\\."));
-        if (
-          pathSegments.length === 0 ||
-          (pathSegments.length === 1 && pathSegments[0] === "")
-        ) {
+        // Replace slash with the custom delimiter in path before setting the value
+        const p = largeFile.path.replace(/\//g, delimiter);
+        if (p === "") {
           obj_ = value;
         } else {
-          _.set(obj_, pathSegments, value);
+          _.set(obj_, p.split(delimiter), value);
         }
       })
     );
     await Promise.all(promises);
     return obj_;
   }
-  
+
 // export async function ensureLocalSourceFileExists(
 //   storageProvider: IStorageProvider,
 //   filePath: string
