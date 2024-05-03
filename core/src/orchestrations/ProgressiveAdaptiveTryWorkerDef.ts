@@ -76,9 +76,11 @@ export class ProgressiveAdaptiveTryWorkerDef<
     attempts,
     ultimateFallback,
     jobSpec,
+    autostartWorker = true,
   }: {
     zzEnv?: ZZEnv;
     jobSpec: JobSpec<any, ParentI, ParentO, ParentIMap, ParentOMap>;
+    autostartWorker?: boolean;
     attempts:
       | AttemptsUpTo5<
           ParentIMap,
@@ -112,6 +114,7 @@ export class ProgressiveAdaptiveTryWorkerDef<
     super({
       jobSpec,
       zzEnv,
+      autostartWorker,
       workerPrefix: "prog-adaptive-try",
       processor: async ({ input, jobId }) => {
         const genRetryFunction = <I, O, IMap, OMap>({
