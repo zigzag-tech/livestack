@@ -60,9 +60,11 @@ export class ParallelAttemptWorkflow<
     globalTimeoutCondition,
     transformCombinedOutput,
     jobSpec: parentJobSpec,
+    autostartWorker = true,
     zzEnv,
   }: {
     zzEnv?: ZZEnv;
+    autostartWorker?: boolean;
     jobSpec: JobSpec<any, ParentI, ParentO, ParentIMap, ParentOMap>;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
     transformCombinedOutput: (
@@ -105,6 +107,7 @@ export class ParallelAttemptWorkflow<
     super({
       zzEnv,
       jobSpec: parentJobSpec,
+      autostartWorker,
       workerPrefix: "paral-try",
       processor: async ({ logger, input: parentInput, jobId }) => {
         const genRetryFunction = <I, O, IMap, OMap>({
