@@ -136,46 +136,51 @@ export type InferRestoredFileType<T extends OriginalType> = T extends "string"
   ? ArrayBuffer
   : never;
 
-export async function restoreLargeValues({
-  obj_,
-  largeFilesToRestore,
-  basePath = "",
-  fetcher,
-}: {
-  obj_: any;
-  basePath?: string;
-  largeFilesToRestore: {
-    path: string;
-    originalType: OriginalType;
-    hash?: string;
-  }[];
-  fetcher: <T extends OriginalType>(
-    v: LargeFileWithoutValue<T>
-  ) => Promise<InferRestoredFileType<T>>;
-}) {
-  // iterate over the large files to restore, and replace the value in the path
-  // with the value returned from the fetcher.
-  // use p-limit to limit the number of concurrent fetches
-  const limit = pLimit(3);
-  const promises = largeFilesToRestore.map((largeFile) =>
-    limit(async () => {
-      const value = await fetcher({
-        ...largeFile,
-        path: path.join(basePath, largeFile.path),
-      });
-      // replace slash with dot in path before setting the value
-      const p = largeFile.path.replace(/\//g, ".");
-      if (p === "") {
-        obj_ = value;
-      } else {
-        _.set(obj_, p, value);
-      }
-    })
-  );
-  await Promise.all(promises);
-  return obj_;
-}
-
+  export async function restoreLargeValues({
+    obj_,
+    largeFilesToRestore,
+    basePath = "",
+    fetcher,
+  }: {
+    obj_: any;
+    basePath?: string;
+    largeFilesToRestore: {
+      path: string;
+      originalType: OriginalType;
+      hash?: string;
+    }[];
+    fetcher: <T extends OriginalType>(
+      v: LargeFileWithoutValue<T>
+    ) => Promise<InferRestoredFileType<T>>;
+  }) {
+    // iterate over the large files to restore, and replace the value in the path
+    // with the value returned from the fetcher.
+    // use p-limit to limit the number of concurrent fetches
+    const limit = pLimit(3);
+    const promises = largeFilesToRestore.map((largeFile) =>
+      limit(async () => {
+        const value = await fetcher({
+          ...largeFile,
+          path: path.join(basePath, largeFile.path),
+        });
+        // Use an array of segments to handle paths with dots correctly
+        const pathSegments = largeFile.path
+          .split("/")
+          .map((segment) => segment.replace(/\./g, "\\."));
+        if (
+          pathSegments.length === 0 ||
+          (pathSegments.length === 1 && pathSegments[0] === "")
+        ) {
+          obj_ = value;
+        } else {
+          _.set(obj_, pathSegments, value);
+        }
+      })
+    );
+    await Promise.all(promises);
+    return obj_;
+  }
+  
 // export async function ensureLocalSourceFileExists(
 //   storageProvider: IStorageProvider,
 //   filePath: string
