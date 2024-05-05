@@ -116,10 +116,29 @@ interface Connection<
 > {
   from:
     | SpecAndOutput<P1, I1, O1, IMap1, OMap1, K1Out>
-    | SpecOrName<P1, I1, O1, IMap1, OMap1>;
+    | SpecOrName<P1, I1, O1, IMap1, OMap1>
+    | TaggedStreamDef<
+        K1Out,
+        OMap1[K1Out],
+        {
+          spec: IOSpec<I1, O1, IMap1, OMap1>;
+          type: "input" | "output";
+          uniqueSpecLabel?: string;
+        }
+      >;
+
   to:
     | SpecAndInput<P2, I2, O2, IMap2, OMap2, K2In>
-    | SpecOrName<P2, I2, O2, IMap2, OMap2>;
+    | SpecOrName<P2, I2, O2, IMap2, OMap2>
+    | TaggedStreamDef<
+        K2In,
+        IMap2[K2In],
+        {
+          spec: IOSpec<I2, O2, IMap2, OMap2>;
+          type: "input" | "output";
+          uniqueSpecLabel?: string;
+        }
+      >;
   transform?: NoInfer<TransformFunction<OMap1[K1Out], IMap2[K2In]>>;
 }
 
@@ -174,18 +193,28 @@ export function conn<
   const from = resolveUniqueSpec(
     typeof p.from === "string" || JobSpec.isJobSpec(p.from)
       ? p.from
+      : p.from instanceof TaggedStreamDef
+      ? ((p.from as TaggedStreamDef<K1Out, OMap1[K1Out], any>).extraFields
+          .spec as JobSpec<P1, I1, O1, IMap1, OMap1>)
       : (p.from as SpecAndOutput<P1, I1, O1, IMap1, OMap1, K1Out>).spec
   );
   const to = resolveUniqueSpec(
     typeof p.to === "string" || JobSpec.isJobSpec(p.to)
       ? p.to
+      : p.to instanceof TaggedStreamDef
+      ? ((p.to as TaggedStreamDef<K2In, IMap2[K2In], any>).extraFields
+          .spec as JobSpec<P2, I2, O2, IMap2, OMap2>)
       : (p.to as SpecAndInput<P2, I2, O2, IMap2, OMap2, K2In>).spec
   );
   const fromOutput = !(typeof p.from === "string" || JobSpec.isJobSpec(p.from))
-    ? p.from.output
+    ? p.from instanceof TaggedStreamDef
+      ? p.from.tag
+      : (p.from.output as K1Out)
     : null;
   const toInput = !(typeof p.to === "string" || JobSpec.isJobSpec(p.to))
-    ? p.to.input
+    ? p.to instanceof TaggedStreamDef
+      ? p.to.tag
+      : (p.to.input as K2In)
     : null;
   return {
     from: {
@@ -208,12 +237,6 @@ export function conn<
   };
 }
 
-interface Exposure<P = any, I = any, O = any, IMap = any, OMap = any> {
-  spec: UniqueSpecQuery<P, I, O, IMap, OMap>;
-  input?: Partial<Record<keyof IMap, string>>;
-  output?: Partial<Record<keyof OMap, string>>;
-}
-
 interface CanonicalExposure {
   specName: string;
   uniqueSpecLabel?: string;
@@ -229,20 +252,20 @@ export function expose<K, T, I, O, IMap, OMap>(
   >,
   alias: string
 ): CanonicalExposure {
-  if (!p.spec || !p.type) {
+  if (!p.extraFields.spec || !p.extraFields.type) {
     throw new Error("spec and type are required.");
   }
   const resolvedSpec = resolveUniqueSpec(
-    p.spec as JobSpec<any, I, O, IMap, OMap>
+    p.extraFields.spec as JobSpec<any, I, O, IMap, OMap>
   );
   return {
     specName: resolvedSpec.spec.name,
     uniqueSpecLabel: resolvedSpec.uniqueSpecLabel,
-    input: (p.type === "input" ? { [p.tag as string]: alias } : {}) as Record<
+    input: (p.extraFields.type === "input" ? { [p.tag as string]: alias } : {}) as Record<
       string,
       string
     >,
-    output: (p.type === "output" ? { [p.tag as string]: alias } : {}) as Record<
+    output: (p.extraFields.type === "output" ? { [p.tag as string]: alias } : {}) as Record<
       string,
       string
     >,
