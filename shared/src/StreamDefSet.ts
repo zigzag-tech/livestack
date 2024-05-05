@@ -50,10 +50,11 @@ export function createStreamDefSet<TMap, ExtraFields>({
   const tags = Object.keys(defs) as (keyof TMap)[];
   const streamDefSet = {} as StreamDefSet<TMap, ExtraFields>;
   for (const tag of tags) {
-    streamDefSet[tag] = { tag, def: defs[tag], ...extraFields } as StreamDefSet<
-      TMap,
-      ExtraFields
-    >[keyof TMap];
+    streamDefSet[tag] = new TaggedStreamDef({
+      tag,
+      def: defs[tag],
+      extraFields,
+    }) as StreamDefSet<TMap, ExtraFields>[keyof TMap];
   }
   return { streamDefSet, tags };
 }
@@ -62,7 +63,19 @@ export type StreamDefSet<TMap, ExtraFields = {}> = {
   [K in keyof TMap]: TaggedStreamDef<K, TMap[K], ExtraFields>;
 };
 
-export type TaggedStreamDef<K, T, ExtraFields> = {
-  tag: K;
-  def: z.ZodType<T>;
-} & ExtraFields;
+// export type TaggedStreamDef<K, T, ExtraFields> = {
+//   tag: K;
+//   def: z.ZodType<T>;
+// } & ExtraFields;
+
+export class TaggedStreamDef<K, T, ExtraFields> {
+  public readonly tag: K;
+  public readonly def: z.ZodType<T>;
+  public readonly extraFields: ExtraFields;
+
+  constructor({ tag, def, extraFields }: TaggedStreamDef<K, T, ExtraFields>) {
+    this.tag = tag;
+    this.def = def;
+    this.extraFields = extraFields;
+  }
+}
