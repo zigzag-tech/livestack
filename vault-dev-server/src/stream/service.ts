@@ -1,31 +1,29 @@
-import { AllValuesRequest } from "./../../../vault-interface/src/generated/stream";
-import {
-  OBJ_REF_VALUE,
-  genManuallyFedIterator,
-  lruCacheFn,
-} from "@livestack/shared";
-import { StreamServiceImplementation } from "@livestack/vault-interface";
-import {
+import type {
+  AllValuesRequest,
+  ServerStreamingMethodResult,
   StreamPubMessage,
   SubRequest,
-  ServerStreamingMethodResult,
-  SubType,
   ValuesByReverseIndexRequest,
   LastValueRequest,
-} from "@livestack/vault-interface/src/generated/stream";
+} from "@livestack/vault-interface//src/generated/stream.js";
+import sharedPkg from "@livestack/shared";
+const { OBJ_REF_VALUE, genManuallyFedIterator, lruCacheFn } = sharedPkg;
+import { StreamServiceImplementation } from "@livestack/vault-interface";
+import streamPkg from "@livestack/vault-interface/src/generated/stream.js";
+const { SubType } = streamPkg;
 import { CallContext } from "nice-grpc-common";
 import { createClient } from "redis";
 import {
   ZZDatapointRec,
   ensureStreamRec,
   ensureDatapointRelationRec,
-} from "../db/service";
+} from "../db/service.js";
 import { Knex } from "knex";
 import {
   ARRAY_KEY,
   PRIMTIVE_KEY,
   handlePrimitiveOrArray,
-} from "../db/primitives";
+} from "../db/primitives.js";
 import { v4 } from "uuid";
 import { validate } from "jsonschema";
 import _ from "lodash";
