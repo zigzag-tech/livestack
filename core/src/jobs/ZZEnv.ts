@@ -23,7 +23,7 @@ const limiter = limit(1);
 export const LIVESTACK_DASHBOARD_URL_ROOT =
   process.env.LIVESTACK_DASHBOARD_URL_ROOT || "https://live.dev";
 interface ZZEnvConfig {
-  readonly storageProvider?: Promise<IStorageProvider>;
+  readonly storageProvider?: Promise<IStorageProvider> | IStorageProvider;
   // two types of project IDs are supported:
   // 1. "@<userId>/<projectUuid>"
   // 2. "<projectUuid>", in which case the userId is assumed to be the current user's
