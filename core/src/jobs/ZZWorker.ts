@@ -187,11 +187,13 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     def,
     workerName,
     zzEnv,
+    terminateOutputsOnJobEnd = true,
   }: {
     def: ZZWorkerDef<P, I, O, WP, IMap, OMap>;
     instanceParams?: WP;
     workerName?: string;
     zzEnv?: ZZEnv | null;
+    terminateOutputsOnJobEnd?: boolean;
   }) {
     // if worker name is not provided, use random string
 
@@ -262,7 +264,9 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
         },
       });
 
-      const r = await zzJ.beginProcessing(this.def.processor.bind(zzJ) as any);
+      const r = await zzJ.beginProcessing(this.def.processor.bind(zzJ) as any, {
+        terminateOutputsOnJobEnd,
+      });
 
       return r;
     };
