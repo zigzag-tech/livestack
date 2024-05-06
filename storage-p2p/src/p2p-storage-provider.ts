@@ -4,15 +4,15 @@ import type {
   LargeFileWithoutValue,
   OriginalType,
 } from "@livestack/core";
-// import { createLibp2p } from "libp2p";
-// import { tcp } from "@libp2p/tcp";
-// import { mplex } from "@libp2p/mplex";
-// import { noise } from "@chainsafe/libp2p-noise";
-// import { kadDHT } from "@libp2p/kad-dht";
+import { createLibp2p } from "libp2p";
+import { tcp } from "@libp2p/tcp";
+import { mplex } from "@libp2p/mplex";
+import { noise } from "@chainsafe/libp2p-noise";
+import { kadDHT } from "@libp2p/kad-dht";
 // import { pubsubPeerDiscovery } from "@libp2p/pubsub-peer-discovery";
 // import { toString as uint8ArrayToString } from "uint8arrays/to-string.node";
 // import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
-// import { bootstrap } from "@libp2p/bootstrap";
+import { bootstrap } from "@libp2p/bootstrap";
 // import { concat } from "uint8arrays/concat";
 
 let vaultServerURL = "localhost:50504";
@@ -26,13 +26,13 @@ const vaultServerHost = vaultServerURL.split(":")[0];
 export async function getP2PStorageProvider(
   networkId: string
 ): Promise<IStorageProvider> {
-  const { createLibp2p } = await import("libp2p");
-  const { tcp } = await import("@libp2p/tcp");
-  const { mplex } = await import("@libp2p/mplex");
-  const { noise } = await import("@chainsafe/libp2p-noise");
-  const { kadDHT } = await import("@libp2p/kad-dht");
+  // const { createLibp2p } = await import("libp2p");
+  // const { tcp } = await import("@libp2p/tcp");
+  // const { mplex } = await import("@libp2p/mplex");
+  // const { noise } = await import("@chainsafe/libp2p-noise");
+  // const { kadDHT } = await import("@libp2p/kad-dht");
   // const { pubsubPeerDiscovery } = await import("@libp2p/pubsub-peer-discovery");
-  const { bootstrap } = await import("@libp2p/bootstrap");
+  // const { bootstrap } = await import("@libp2p/bootstrap");
   const uint8arrays = (await import("uint8arrays")).default;
 
   // const { fromString: uint8ArrayFromString } = await import(
@@ -56,7 +56,7 @@ export async function getP2PStorageProvider(
     peerDiscovery: [
       bootstrap({
         list: [bootstrapMultiaddr],
-        tagName: `myapp-${networkId}`,
+        // tagName: `myapp-${networkId}`,
       }),
       // pubsubPeerDiscovery({
       //   topics: [`${networkId}.storage-p2p`],
