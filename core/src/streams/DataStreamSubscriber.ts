@@ -81,7 +81,8 @@ export class DataStreamSubscriber<T extends object> {
 
         if (largeFilesToRestore.length > 0) {
           const zzEnv = await this.zzEnvP;
-          if (!zzEnv.storageProvider) {
+          const storageProvider = await zzEnv.storageProvider;
+          if (!storageProvider) {
             throw new Error(
               "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
             );
@@ -90,7 +91,7 @@ export class DataStreamSubscriber<T extends object> {
               obj_: newObj,
               largeFilesToRestore,
               basePath: await this.stream.baseWorkingRelativePathP,
-              fetcher: zzEnv.storageProvider.fetchFromStorage,
+              fetcher: storageProvider.fetchFromStorage,
             })) as T;
           }
         }

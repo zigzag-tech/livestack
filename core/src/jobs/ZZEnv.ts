@@ -23,7 +23,7 @@ const limiter = limit(1);
 export const LIVESTACK_DASHBOARD_URL_ROOT =
   process.env.LIVESTACK_DASHBOARD_URL_ROOT || "https://live.dev";
 interface ZZEnvConfig {
-  readonly storageProvider?: IStorageProvider;
+  readonly storageProvider?: Promise<IStorageProvider>;
   // two types of project IDs are supported:
   // 1. "@<userId>/<projectUuid>"
   // 2. "<projectUuid>", in which case the userId is assumed to be the current user's
@@ -31,7 +31,7 @@ interface ZZEnvConfig {
 }
 
 export class ZZEnv {
-  public readonly storageProvider?: IStorageProvider;
+  public readonly storageProvider?: Promise<IStorageProvider | undefined>;
   public readonly vaultClient: AuthorizedGRPCClient;
   public readonly projectUuid: string;
   public readonly localProjectId: string;
@@ -45,13 +45,13 @@ export class ZZEnv {
     userId,
     authToken,
   }: {
-    storageProvider?: IStorageProvider;
+    storageProvider?: IStorageProvider | Promise<IStorageProvider>;
     projectUuid: string;
     localProjectId: string;
     userId: string;
     authToken: string;
   }) {
-    this.storageProvider = storageProvider;
+    this.storageProvider = Promise.resolve(storageProvider);
     this.projectUuid = projectUuid;
     this.localProjectId = localProjectId;
     this.userId = userId;

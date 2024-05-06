@@ -15,11 +15,18 @@ import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
 import { bootstrap } from "@libp2p/bootstrap";
 import { concat } from "uint8arrays/concat";
 
+let vaultServerURL = "localhost:50504";
+
+if (process.env.LIVESTACK_VALULT_SERVER_URL) {
+  vaultServerURL = process.env.LIVESTACK_VALULT_SERVER_URL;
+}
+
+const vaultServerHost = vaultServerURL.split(":")[0];
+
 export async function getP2PStorageProvider(
   networkId: string
 ): Promise<IStorageProvider> {
-  const bootstrapMultiaddr =
-    "/ip4/192.168.0.100/tcp/65448/p2p/QmBootstrapNodeID";
+  const bootstrapMultiaddr = `/ip4/${vaultServerHost}/tcp/65448/p2p/QmBootstrapNodeID`;
 
   const node = await createLibp2p({
     addresses: {
