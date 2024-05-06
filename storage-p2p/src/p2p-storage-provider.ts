@@ -13,6 +13,10 @@ import { kadDHT } from "@libp2p/kad-dht";
 // import { toString as uint8ArrayToString } from "uint8arrays/to-string.node";
 // import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
 import { bootstrap } from "@libp2p/bootstrap";
+import { multiaddr } from "multiaddr";
+import corePkg from "@livestack/core";
+const { calculateHash } = corePkg;
+import dns from "dns";
 // import { concat } from "uint8arrays/concat";
 
 let vaultServerURL = "localhost:50504";
@@ -21,11 +25,21 @@ if (process.env.LIVESTACK_VALULT_SERVER_URL) {
   vaultServerURL = process.env.LIVESTACK_VALULT_SERVER_URL;
 }
 
-const vaultServerHost = vaultServerURL.split(":")[0];
-
 export async function getP2PStorageProvider(
   networkId: string
 ): Promise<IStorageProvider> {
+  const vaultServerHost = await new Promise<string>((resolve, reject) => {
+    const [host, port] = vaultServerURL.split(":");
+    dns.lookup(host, 4, (err, address) => {
+      if (err) {
+        reject(err);
+      } else {
+        resolve(address);
+      }
+    });
+  });
+  console.log("vaultServerHost resolved to", vaultServerHost);
+
   // const { createLibp2p } = await import("libp2p");
   // const { tcp } = await import("@libp2p/tcp");
   // const { mplex } = await import("@libp2p/mplex");
@@ -33,7 +47,7 @@ export async function getP2PStorageProvider(
   // const { kadDHT } = await import("@libp2p/kad-dht");
   // const { pubsubPeerDiscovery } = await import("@libp2p/pubsub-peer-discovery");
   // const { bootstrap } = await import("@libp2p/bootstrap");
-  const uint8arrays = (await import("uint8arrays")).default;
+  const uint8arrays = await import("uint8arrays");
 
   // const { fromString: uint8ArrayFromString } = await import(
   //   "uint8arrays/from-string"
@@ -43,8 +57,8 @@ export async function getP2PStorageProvider(
   // );
   const { concat } = await import("uint8arrays/concat");
 
-  const bootstrapMultiaddr = `/ip4/${vaultServerHost}/tcp/65448/p2p/QmBootstrapNodeID`;
-
+  const bootstrapMultiaddr = `/ip4/${vaultServerHost}/tcp/65448/p2p/QmYJyUMAcXEw1b5bFfbBbzYu5wyyjLMRHXGUkCXpag74Fu`;
+  console.log("bootstrapMultiaddr", "'" + bootstrapMultiaddr + "'");
   const node = await createLibp2p({
     addresses: {
       listen: ["/ip4/0.0.0.0/tcp/0"],
@@ -52,7 +66,6 @@ export async function getP2PStorageProvider(
     transports: [tcp()],
     streamMuxers: [mplex()],
     connectionEncryption: [noise()],
-
     peerDiscovery: [
       bootstrap({
         list: [bootstrapMultiaddr],
@@ -70,14 +83,23 @@ export async function getP2PStorageProvider(
   });
 
   await node.start();
+  await node.dial(multiaddr(bootstrapMultiaddr));
+
+  console.log("P2P client storage node started.");
+  console.log("Listening on:");
+  node.getMultiaddrs().forEach((addr) => {
+    console.log(addr.toString());
+  });
 
   return {
     putToStorage: async (destination, data) => {
       const encodedData = uint8arrays.fromString(data.toString());
-      await node.contentRouting.put(
-        uint8arrays.fromString(destination),
-        encodedData
-      );
+      console.log("putToStorage", destination, encodedData.length);
+      const destUint = uint8arrays.fromString(destination);
+      await node.contentRouting.put(destUint, encodedData);
+      const hash = await calculateHash(data.toString());
+      console.log(hash);
+      return { hash };
     },
     fetchFromStorage: async <T extends OriginalType>(
       f: LargeFileWithoutValue<T>

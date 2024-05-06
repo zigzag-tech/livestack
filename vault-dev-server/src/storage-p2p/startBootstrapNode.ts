@@ -1,6 +1,6 @@
 import { webSockets } from "@libp2p/websockets";
 import { multiaddr } from "@multiformats/multiaddr";
-const bootstrapMultiaddr = `/ip4/0.0.0.0/tcp/65448/p2p/QmBootstrapNodeID`;
+const bootstrapMultiaddr = `/ip4/0.0.0.0/tcp/65448/p2p/QmYJyUMAcXEw1b5bFfbBbzYu5wyyjLMRHXGUkCXpag74Fu`;
 
 export async function startBootstrapNode() {
   try {
@@ -38,6 +38,18 @@ export async function startBootstrapNode() {
     console.log("Listening on:");
     node.getMultiaddrs().forEach((addr) => {
       console.log(addr.toString());
+    });
+
+    // Event listener for peer connection
+    node.addEventListener("peer:connect", (event) => {
+      const peer = event.detail.toString();
+      console.log(`Connected to peer: ${peer}`);
+    });
+
+    // Optionally, log discoveries too
+    node.addEventListener("peer:discovery", (event) => {
+      const peer = event.detail.id;
+      console.log(`Discovered peer: ${peer.toString()}`);
     });
   } catch (err) {
     console.error("Error starting the node", err);
