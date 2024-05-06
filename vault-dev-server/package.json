@@ -10,6 +10,11 @@
     "postinstall": "preconstruct dev"
   },
   "dependencies": {
+    "@chainsafe/libp2p-noise": "^15.0.0",
+    "@libp2p/kad-dht": "^12.0.15",
+    "@libp2p/mplex": "^10.0.22",
+    "@libp2p/tcp": "^9.0.24",
+    "@libp2p/websockets": "^8.0.22",
     "@livestack/shared": "*",
     "@livestack/vault-interface": "*",
     "better-sqlite3": "^9.4.0",
@@ -18,6 +23,7 @@
     "get-port": "^7.0.0",
     "jsonschema": "^1.4.1",
     "knex": "^2.x",
+    "libp2p": "^1.5.1",
     "lodash": "^4.x",
     "nice-grpc": "^2.1",
     "redis": "^4",
@@ -32,6 +38,7 @@
   "files": [
     "dist"
   ],
+  "type": "module",
   "main": "dist/livestack-vault-dev-server.cjs.js",
   "types": "dist/livestack-vault-dev-server.d.ts",
   "module": "dist/livestack-vault-dev-server.esm.js",

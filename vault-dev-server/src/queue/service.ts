@@ -4,13 +4,14 @@ import {
   FromWorker,
   ToWorker,
 } from "@livestack/vault-interface";
-import { InitInstanceParams } from "@livestack/vault-interface/src/generated/queue";
+import { InitInstanceParams } from "@livestack/vault-interface/src/generated/queue.js";
 import { Queue, Worker } from "bullmq";
-import { genPromiseCycle, genManuallyFedIterator } from "@livestack/shared";
+import sharedPkg from "@livestack/shared";
+const { genPromiseCycle, genManuallyFedIterator } = sharedPkg;
 import { CallContext } from "nice-grpc";
 import { v4 } from "uuid";
 import { createClient } from "redis";
-import { escapeColon, getCapacityManager } from "../capacity/manager";
+import { escapeColon, getCapacityManager } from "../capacity/manager.js";
 
 const _rawQueueBySpecName = new Map<string, Queue>();
 

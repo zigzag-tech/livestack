@@ -1,5 +1,12 @@
 {
-  "include": ["missing-modules.d.ts", "**/*.ts", "**/*.tsx", "*.ts", "*.tsx"],
+  "include": [
+    "missing-modules.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "*.ts",
+    "*.tsx",
+    "src/db/primitives.ts"
+  ],
   "compilerOptions": {
     "module": "NodeNext",
     // "types": ["reflect-metadata"],

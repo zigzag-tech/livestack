@@ -19,7 +19,7 @@ export async function getP2PStorageProvider(
   networkId: string
 ): Promise<IStorageProvider> {
   const bootstrapMultiaddr =
-    "/ip4/192.168.0.100/tcp/4001/p2p/QmBootstrapNodeID";
+    "/ip4/192.168.0.100/tcp/65448/p2p/QmBootstrapNodeID";
 
   const node = await createLibp2p({
     addresses: {
