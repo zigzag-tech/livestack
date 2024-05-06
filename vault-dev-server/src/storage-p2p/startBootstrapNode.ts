@@ -1,5 +1,6 @@
 import { webSockets } from "@libp2p/websockets";
 import { multiaddr } from "@multiformats/multiaddr";
+const bootstrapMultiaddr = `/ip4/0.0.0.0/tcp/65448/p2p/QmBootstrapNodeID`;
 
 export async function startBootstrapNode() {
   try {
@@ -9,6 +10,7 @@ export async function startBootstrapNode() {
     const { noise } = await import("@chainsafe/libp2p-noise");
     const { kadDHT } = await import("@libp2p/kad-dht");
     // const { webSockets } = await import("libp2p/websockets");
+    const { bootstrap } = await import("@libp2p/bootstrap");
 
     const node = await libP2p.createLibp2p({
       addresses: {
@@ -23,6 +25,12 @@ export async function startBootstrapNode() {
       services: {
         dht: kadDHT({}),
       },
+      peerDiscovery: [
+        bootstrap({
+          list: [bootstrapMultiaddr],
+          // tagName: `myapp-${networkId}`, // Adding tagName similar to the client's config
+        }),
+      ],
     });
 
     await node.start();
