@@ -248,7 +248,7 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
         jobSpec: that.jobSpec,
         jobOptions: jobOptions,
         workerInstanceParams: that.instanceParams,
-        storageProvider: (await that.zzEnvP).storageProvider,
+        storageProvider: await(await that.zzEnvP).storageProvider,
         workerName: await that.workerNameP,
         graph: localG,
         updateProgress: async (progress): Promise<void> => {

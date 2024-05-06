@@ -119,7 +119,8 @@ export class DataStream<T extends object> {
 
       if (largeFilesToRestore.length > 0) {
         const zzEnv = await this.zzEnvP;
-        if (!zzEnv.storageProvider) {
+        const storageProvider = await zzEnv.storageProvider;
+        if (!storageProvider) {
           throw new Error(
             "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
           );
@@ -128,7 +129,7 @@ export class DataStream<T extends object> {
             obj_: newObj,
             largeFilesToRestore,
             basePath: await this.baseWorkingRelativePathP,
-            fetcher: zzEnv.storageProvider.fetchFromStorage,
+            fetcher: storageProvider.fetchFromStorage,
           })) as T;
         }
       }
@@ -220,7 +221,8 @@ export class DataStream<T extends object> {
 
     let { largeFilesToSave, newObj } = await identifyLargeFilesToSave(parsed);
     const zzEnv = await this.zzEnvP;
-    if (zzEnv.storageProvider) {
+    const storageProvider = await zzEnv.storageProvider;
+    if (storageProvider) {
       const basePath = await this.baseWorkingRelativePathP;
       const fullPathLargeFilesToSave = largeFilesToSave.map((x) => ({
         ...x,
@@ -235,7 +237,7 @@ export class DataStream<T extends object> {
         // );
         await saveLargeFilesToStorage(
           fullPathLargeFilesToSave,
-          zzEnv.storageProvider
+          storageProvider
         );
         parsed = newObj;
       }
