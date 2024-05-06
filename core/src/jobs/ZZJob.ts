@@ -675,7 +675,8 @@ export class ZZJob<
   }
 
   public beginProcessing = async (
-    processor: ZZProcessor<P, I, O, WP, IMap, OMap>
+    processor: ZZProcessor<P, I, O, WP, IMap, OMap>,
+    { terminateOutputsOnJobEnd }: { terminateOutputsOnJobEnd: boolean }
   ): Promise<void> => {
     const jId = {
       specName: this.spec.name,
@@ -744,11 +745,13 @@ export class ZZJob<
 
       // await job.updateProgress(processedR as object);
       // console.debug("signalOutputEnd", this.jobId);
-      for (const tag of Object.keys(this.spec.output) as (keyof OMap)[]) {
-        // console.debug(
-        //   `${this.spec.name}: Signaling output end for tag ${tag.toString()}`
-        // );
-        await this.signalOutputEnd(tag);
+      if (terminateOutputsOnJobEnd) {
+        for (const tag of Object.keys(this.spec.output) as (keyof OMap)[]) {
+          // console.debug(
+          //   `${this.spec.name}: Signaling output end for tag ${tag.toString()}`
+          // );
+          await this.signalOutputEnd(tag);
+        }
       }
 
       // if (processedR) {
