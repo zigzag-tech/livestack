@@ -5,19 +5,19 @@ import {
   PRIMTIVE_KEY,
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
-} from "./primitives";
-import {
+} from "./primitives.js";
+import pkg from "@livestack/vault-interface";
+import type {
   DBServiceImplementation,
   JobRec,
-  Order,
-  ConnectorType,
 } from "@livestack/vault-interface";
+const { Order, ConnectorType } = pkg;
 import _ from "lodash";
-import { ensureJobRelationRec, getParentJobRec } from "./job_relations";
+import { ensureJobRelationRec, getParentJobRec } from "./job_relations.js";
 import {
   ZZJobStreamConnectorRec,
   ensureJobStreamConnectorRec,
-} from "./streams";
+} from "./streams.js";
 
 export interface ZZJobUniqueId {
   project_uuid: string;

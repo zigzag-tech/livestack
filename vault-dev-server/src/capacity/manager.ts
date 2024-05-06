@@ -1,11 +1,12 @@
-import { genManuallyFedIterator } from "@livestack/shared";
+import pkg from "@livestack/shared";
+const { genManuallyFedIterator } = pkg;
 import {
   CacapcityServiceImplementation,
   FromInstance,
   FromWorker,
   CommandToInstance,
 } from "@livestack/vault-interface";
-import { ServerStreamingMethodResult } from "@livestack/vault-interface/src/generated/capacity";
+import { ServerStreamingMethodResult } from "@livestack/vault-interface/src/generated/capacity.js";
 import { CallContext } from "nice-grpc";
 import { createClient } from "redis";
 
@@ -185,9 +186,6 @@ class CapacityManager implements CacapcityServiceImplementation {
       });
       break;
     }
-    
-
-    
   }
 }
 
