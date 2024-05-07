@@ -78,7 +78,8 @@ class QueueServiceByProject implements QueueServiceImplementation {
         removeOnFail: true,
       }
     );
-    const c = (await queue.getWaitingCount()) + (await queue.getActiveCount());
+    const countOfTotalJobsRequiringCapacity =
+      (await queue.getWaitingCount()) + (await queue.getActiveCount());
 
     // const capacity =
     //   Number(
@@ -92,10 +93,13 @@ class QueueServiceByProject implements QueueServiceImplementation {
     const workers = await queue.getWorkers();
     const capacity = workers.length;
 
-    if (c > 0 && c > capacity) {
-      const diff = c - capacity;
+    if (
+      countOfTotalJobsRequiringCapacity > 0 &&
+      countOfTotalJobsRequiringCapacity > capacity
+    ) {
+      const diff = countOfTotalJobsRequiringCapacity - capacity;
       console.debug(
-        `Queue ${job.specName} for project ${job.projectUuid} has ${c} waiting+active jobs, while capacity is at ${capacity}. \nAttempting to increase capacity by ${diff}.`
+        `Queue ${job.specName} for project ${job.projectUuid} has ${countOfTotalJobsRequiringCapacity} waiting+active jobs, while capacity is at ${capacity}. \nAttempting to increase capacity by ${diff}.`
       );
       for (let i = 0; i < diff; i++) {
         await getCapacityManager().increaseCapacity({
@@ -146,7 +150,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
   private currentJobByWorkerId: Record<string, QueueJob> = {};
 
   reportAsWorker(request: AsyncIterable<FromWorker>, context: CallContext) {
-    const { iterator: iter, resolveNext: resolveJobPromise } =
+    const { iterator: iterServerMsg, resolveNext: resolveJobPromise } =
       genManuallyFedIterator<ToWorker>();
 
     const sendJob = async ({
@@ -308,7 +312,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
       }
     })();
 
-    return iter;
+    return iterServerMsg;
   }
 }
 
