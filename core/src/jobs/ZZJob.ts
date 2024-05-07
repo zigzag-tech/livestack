@@ -3,7 +3,7 @@ import {
   JobId,
 } from "@livestack/shared/src/graph/InstantiatedGraph";
 import { InferTMap } from "@livestack/shared";
-import _ from "lodash";
+import * as _ from "lodash";
 import {
   Observable,
   Subscription,
@@ -361,20 +361,26 @@ export class ZZJob<
       OMap,
       TI extends keyof IMap,
       TO extends keyof OMap
-    >(
-      jobSpec: JobSpec<P, I, O, IMap, OMap>,
-      inputTag: TI,
-      inputParams: IMap[TI extends never ? InferDefaultOrSingleKey<IMap> : TI],
-      outputTag: TO,
-      jobOptions?: P
-    ): Promise<OMap[TO]> => {
-      const { input, output } = await jobSpec.enqueueJob({
+    >({
+      spec,
+      inputData,
+      inputTag,
+      outputTag,
+      jobOptions,
+    }: {
+      spec: JobSpec<P, I, O, IMap, OMap>;
+      inputTag?: TI;
+      inputData: IMap[TI extends never ? InferDefaultOrSingleKey<IMap> : TI];
+      outputTag?: TO;
+      jobOptions?: P;
+    }): Promise<OMap[TO]> => {
+      const { input, output } = await spec.enqueueJob({
         jobOptions,
       });
-      input(inputTag).feed(inputParams);
+      input(inputTag).feed(inputData);
       const data = await output(outputTag).nextValue();
       if (!data) {
-        console.error("Output is null. Input: ", JSON.stringify(inputParams));
+        console.error("Output is null. Input: ", JSON.stringify(inputData));
         throw new Error("Output is null");
       }
 
