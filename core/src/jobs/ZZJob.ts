@@ -129,13 +129,13 @@ export class ZZJob<
     OMap,
     TI extends keyof IMap = InferDefaultOrSingleKey<IMap>,
     TO extends keyof OMap = InferDefaultOrSingleKey<OMap>
-  >(
-    jobSpec: JobSpec<P, I, O, IMap, OMap>,
-    inputTag: TI,
-    inputParams: IMap[TI extends never ? InferDefaultOrSingleKey<IMap> : TI],
-    outputTag: TO,
-    jobOptions?: P
-  ) => Promise<OMap[TO]>;
+  >(p: {
+    spec: JobSpec<P, I, O, IMap, OMap>;
+    inputTag?: TI;
+    inputData: IMap[TI extends never ? InferDefaultOrSingleKey<IMap> : TI];
+    outputTag?: TO;
+    jobOptions?: P;
+  }) => Promise<OMap[TO]>;
 
   storageProvider?: IStorageProvider;
   readonly zzEnvP: Promise<ZZEnv>;
