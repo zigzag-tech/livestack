@@ -136,15 +136,15 @@ class CapacityManager implements CacapcityServiceImplementation {
         "HGETALL",
         `zz_maxcapacity:${projectUuidN}:${specNameN}`,
       ])) as string[];
-      // if (instanceIdsAndMaxCapacities.length === 0) {
-      // console.warn(
-      //   `No instances found for ${projectUuid}:${specName}. Will retry in 200ms.`
-      // );
-      // await new Promise((r) => setTimeout(r, 200));
-      // continue;
-      // } else {
-      break;
-      // }
+      if (instanceIdsAndMaxCapacities.length === 0) {
+        console.warn(
+          `No instances found for ${projectUuid}:${specName}. Will retry again in 2000ms.`
+        );
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      } else {
+        break;
+      }
     }
 
     const maxCapacitiesByInstanceId = Object.fromEntries(
