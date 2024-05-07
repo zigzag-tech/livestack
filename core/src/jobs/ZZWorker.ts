@@ -223,7 +223,7 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     const that = this;
 
     // create async iterator to report duty
-    const { iterator: iterParams, resolveNext: sendNextActivity } =
+    const { iterator: clientMsgIter, resolveNext: sendNextActivity } =
       genManuallyFedIterator<FromWorker>((v) => {
         // console.info(`DUTY REPORT: ${JSON.stringify(v)}`);
       });
@@ -248,7 +248,7 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
         jobSpec: that.jobSpec,
         jobOptions: jobOptions,
         workerInstanceParams: that.instanceParams,
-        storageProvider: await(await that.zzEnvP).storageProvider,
+        storageProvider: await (await that.zzEnvP).storageProvider,
         workerName: await that.workerNameP,
         graph: localG,
         updateProgress: async (progress): Promise<void> => {
@@ -274,8 +274,9 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     this.zzEnvP.then(async (zzEnv) => {
       while (that._workerStatus === "running") {
         try {
-          const iter = zzEnv.vaultClient.queue.reportAsWorker(iterParams);
-          for await (const { job } of iter) {
+          const serverMsgIter =
+            zzEnv.vaultClient.queue.reportAsWorker(clientMsgIter);
+          for await (const { job } of serverMsgIter) {
             // console.debug("picked up job: ", job);
             if (!job) {
               throw new Error("Job is null");
