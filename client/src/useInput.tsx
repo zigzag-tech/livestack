@@ -7,7 +7,7 @@ export function useInput<T>({
   tag,
   def,
 }: {
-  job: JobInfo;
+  job: JobInfo<any>;
   tag?: string;
   def?: z.ZodType<T>;
 }) {
