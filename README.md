@@ -42,7 +42,7 @@ Livestack aims at providing:
 - (WIP) full-stack realtime AI compnents, patterns and guidelines for rapid prototyping, including:
   - live speech transcription.
   - live RAG workflow.
-  - [Game development](https://github.com/zigzag-tech/echoes-of-sentience)
+  - [Game development](https://github.com/zigzag-tech/ready-agent-one)
   -  realtime image generation.
 
 
