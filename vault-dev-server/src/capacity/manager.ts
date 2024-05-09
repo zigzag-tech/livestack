@@ -117,10 +117,12 @@ class CapacityManager implements CacapcityServiceImplementation {
     projectUuid,
     specName,
     by,
+    conditionStillMet,
   }: {
     projectUuid: string;
     specName: string;
     by: number;
+    conditionStillMet: () => Promise<boolean>;
   }) {
     // set the relevant capacity in redis
     const client = await this.redisClientP;
@@ -130,7 +132,7 @@ class CapacityManager implements CacapcityServiceImplementation {
     let instanceIdsAndMaxCapacities: string[] = [];
 
     // keep checking until we find an instance with capacity
-    while (true) {
+    while (await conditionStillMet()) {
       // get all instances (keys) for this projectUuid:specName
       instanceIdsAndMaxCapacities = (await client.sendCommand([
         "HGETALL",
