@@ -106,6 +106,12 @@ class QueueServiceByProject implements QueueServiceImplementation {
           projectUuid: job.projectUuid,
           specName: job.specName,
           by: 1,
+          conditionStillMet: async () => {
+            const countOfTotalJobsRequiringCapacity =
+              (await queue.getWaitingCount()) + (await queue.getActiveCount());
+            const workers = await queue.getWorkers();
+            return workers.length < countOfTotalJobsRequiringCapacity;
+          },
         });
       }
     }
