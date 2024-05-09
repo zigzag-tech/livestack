@@ -10,9 +10,11 @@ import { ServerStreamingMethodResult } from "@livestack/vault-interface/src/gene
 import { CallContext } from "nice-grpc";
 import { createClient } from "redis";
 import _ from "lodash";
+import { v4 } from "uuid";
 
 class CapacityManager implements CacapcityServiceImplementation {
   private redisClientP = createClient().connect();
+  public readonly sessionId = v4();
   constructor() {}
 
   resolveByInstanceIAndSpecName: Record<
@@ -46,6 +48,10 @@ class CapacityManager implements CacapcityServiceImplementation {
         projectUuid,
       } of request) {
         if (reportSpecAvailability) {
+          context.signal.addEventListener("abort", (e) => {
+            console.log("aborting", e);
+          });
+
           const existing = this.resolveByInstanceIAndSpecName[instanceId];
           if (!existing) {
             this.resolveByInstanceIAndSpecName[instanceId] = {};
@@ -64,14 +70,14 @@ class CapacityManager implements CacapcityServiceImplementation {
           const instanceIdN = escapeColon(instanceId);
           await client.sendCommand([
             "HSET",
-            `zz_maxcapacity:${projectUuidN}:${specNameN}`,
+            `livestack/${this.sessionId}/zz_maxcapacity:${projectUuidN}:${specNameN}`,
             instanceIdN,
             maxCapacity.toString(),
           ]);
 
           await client.sendCommand([
             "SADD",
-            `zz_instance:${instanceIdN}`,
+            `livestack/${this.sessionId}/zz_instance:${instanceIdN}`,
             `${projectUuidN}:${specNameN}`,
           ]);
 
@@ -83,21 +89,21 @@ class CapacityManager implements CacapcityServiceImplementation {
             // get the set of reported projectUuid:specName and clear capacity for each
             const porjectIdSpecNamePairs = (await client.sendCommand([
               "SMEMBERS",
-              `zz_instance:${instanceIdN}`,
+              `livestack/${this.sessionId}/zz_instance:${instanceIdN}`,
             ])) as `${string}:${string}`[];
 
             for (const pair of porjectIdSpecNamePairs) {
               const [projectUuidN, specNameN] = pair.split(":");
               // await client.sendCommand([
               //   "HDEL",
-              //   `zz_maxcapacity:${projectUuidN}:${specNameN}`,
+              //   `livestack/${this.sessionId}/zz_maxcapacity:${projectUuidN}:${specNameN}`,
               //   instanceIdN,
               // ]);
 
               // remove capacity hash values
               await client.sendCommand([
                 "HDEL",
-                `zz_maxcapacity:${projectUuidN}:${specNameN}`,
+                `livestack/${this.sessionId}/zz_maxcapacity:${projectUuidN}:${specNameN}`,
                 instanceIdN,
               ]);
               delete this.resolveByInstanceIAndSpecName[instanceIdN][specNameN];
@@ -137,7 +143,7 @@ class CapacityManager implements CacapcityServiceImplementation {
       // get all instances (keys) for this projectUuid:specName
       instanceIdsAndMaxCapacities = (await client.sendCommand([
         "HGETALL",
-        `zz_maxcapacity:${projectUuidN}:${specNameN}`,
+        `livestack/${this.sessionId}/zz_maxcapacity:${projectUuidN}:${specNameN}`,
       ])) as string[];
       if (instanceIdsAndMaxCapacities.length === 0) {
         // console.warn(
@@ -150,10 +156,10 @@ class CapacityManager implements CacapcityServiceImplementation {
       }
     }
 
-    console.log(
-      `instanceIdsAndMaxCapacities: for ${projectUuid}:${specName}: `,
-      instanceIdsAndMaxCapacities
-    );
+    // console.log(
+    //   `instanceIdsAndMaxCapacities: for ${projectUuid}:${specName}: `,
+    //   instanceIdsAndMaxCapacities
+    // );
 
     const maxCapacitiesByInstanceId = Object.fromEntries(
       _.chunk(instanceIdsAndMaxCapacities, 2).map(
@@ -162,10 +168,10 @@ class CapacityManager implements CacapcityServiceImplementation {
       )
     );
 
-    console.log(
-      `maxCapacitiesByInstanceId: for ${projectUuid}:${specName}: `,
-      maxCapacitiesByInstanceId
-    );
+    // console.log(
+    //   `maxCapacitiesByInstanceId: for ${projectUuid}:${specName}: `,
+    //   maxCapacitiesByInstanceId
+    // );
 
     // choose the instance with the most capacity
     const sorted = Object.entries(maxCapacitiesByInstanceId).sort(
