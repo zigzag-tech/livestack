@@ -85,7 +85,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     //   Number(
     //     await client.sendCommand([
     //       "HGET",
-    //       `zz_capacity`,
+    //       `livestack/${this.sessionId}/zz_capacity`,
     //       `${projectUuidN}:${specNameN}`,
     //     ])
     //   ) || 0;
@@ -233,7 +233,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
           // increment the capacity for this worker by 1
           await client.sendCommand([
             "HINCRBY",
-            `zz_capacity`,
+            `livestack/${(await getCapacityManager()).sessionId}/zz_capacity`,
             `${projectUuid}:${specName}`,
             "1",
           ]);
@@ -243,7 +243,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
             // decrement the capacity for this worker by 1
             await client.sendCommand([
               "HINCRBY",
-              `zz_capacity`,
+              `livestack/${await getCapacityManager()}/zz_capacity`,
               `${projectUuid}:${specName}`,
               "-1",
             ]);
@@ -259,7 +259,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
               Number(
                 await client.sendCommand([
                   "HGET",
-                  `zz_capacity`,
+                  `livestack/${this.sessionId}/zz_capacity`,
                   `${projectUuid}:${specName}`,
                 ])
               ) || 0
