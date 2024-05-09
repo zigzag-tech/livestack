@@ -156,7 +156,7 @@ class CapacityManager implements CacapcityServiceImplementation {
     );
 
     const maxCapacitiesByInstanceId = Object.fromEntries(
-      _.chunk(instanceIdsAndMaxCapacities).map(
+      _.chunk(instanceIdsAndMaxCapacities, 2).map(
         ([instanceId, capacityStr]) =>
           [instanceId, Number(capacityStr)] as const
       )
