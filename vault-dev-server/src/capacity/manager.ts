@@ -139,9 +139,9 @@ class CapacityManager implements CacapcityServiceImplementation {
         `zz_maxcapacity:${projectUuidN}:${specNameN}`,
       ])) as string[];
       if (instanceIdsAndMaxCapacities.length === 0) {
-        console.warn(
-          `No instances found for ${projectUuid}:${specName}. Will retry again in 2000ms.`
-        );
+        // console.warn(
+        //   `No instances found for ${projectUuid}:${specName}. Will retry again in 2000ms.`
+        // );
         await new Promise((r) => setTimeout(r, 2000));
         continue;
       } else {
