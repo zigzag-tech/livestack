@@ -9,6 +9,7 @@ import {
 import { ServerStreamingMethodResult } from "@livestack/vault-interface/src/generated/capacity.js";
 import { CallContext } from "nice-grpc";
 import { createClient } from "redis";
+import _ from "lodash";
 
 class CapacityManager implements CacapcityServiceImplementation {
   private redisClientP = createClient().connect();
@@ -148,16 +149,22 @@ class CapacityManager implements CacapcityServiceImplementation {
         break;
       }
     }
-    
+
     console.log(
       `instanceIdsAndMaxCapacities: for ${projectUuid}:${specName}: `,
       instanceIdsAndMaxCapacities
     );
 
     const maxCapacitiesByInstanceId = Object.fromEntries(
-      instanceIdsAndMaxCapacities.map(
-        (v, i) => [v, Number(instanceIdsAndMaxCapacities[i + 1])] as const
+      _.chunk(instanceIdsAndMaxCapacities).map(
+        ([instanceId, capacityStr]) =>
+          [instanceId, Number(capacityStr)] as const
       )
+    );
+
+    console.log(
+      `maxCapacitiesByInstanceId: for ${projectUuid}:${specName}: `,
+      maxCapacitiesByInstanceId
     );
 
     // choose the instance with the most capacity
