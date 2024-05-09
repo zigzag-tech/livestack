@@ -148,6 +148,11 @@ class CapacityManager implements CacapcityServiceImplementation {
         break;
       }
     }
+    
+    console.log(
+      `instanceIdsAndMaxCapacities: for ${projectUuid}:${specName}: `,
+      instanceIdsAndMaxCapacities
+    );
 
     const maxCapacitiesByInstanceId = Object.fromEntries(
       instanceIdsAndMaxCapacities.map(
