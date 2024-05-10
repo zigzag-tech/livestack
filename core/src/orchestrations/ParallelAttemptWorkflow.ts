@@ -1,7 +1,7 @@
 import { InferStreamSetType, InferTMap } from "@livestack/shared";
 import { CheckSpec, JobSpec } from "../jobs/JobSpec";
-import { InferDefaultOrSingleKey, ZZWorkerDef } from "../jobs/ZZWorker";
-import { ZZEnv } from "../jobs/ZZEnv";
+import { InferDefaultOrSingleKey, LiveWorkerDef } from "../jobs/LiveWorker";
+import { LiveEnv } from "../jobs/LiveEnv";
 import { WrapWithTimestamp } from "../utils/io";
 import { sleep } from "../utils/sleep";
 type TriggerCheckContext = {
@@ -54,16 +54,16 @@ export class ParallelAttemptWorkflow<
   O5 = never,
   IMap5 = never,
   OMap5 = never
-> extends ZZWorkerDef<any, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
+> extends LiveWorkerDef<any, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
   constructor({
     attempts,
     globalTimeoutCondition,
     transformCombinedOutput,
     jobSpec: parentJobSpec,
     autostartWorker = true,
-    zzEnv,
+    liveEnv,
   }: {
-    zzEnv?: ZZEnv;
+    liveEnv?: LiveEnv;
     autostartWorker?: boolean;
     jobSpec: JobSpec<any, ParentI, ParentO, ParentIMap, ParentOMap>;
     globalTimeoutCondition?: (c: TriggerCheckContext) => boolean;
@@ -105,7 +105,7 @@ export class ParallelAttemptWorkflow<
       | ParallelAttempt<ParentIMap, ParentOMap, any, any, any, any>;
   }) {
     super({
-      zzEnv,
+      liveEnv,
       jobSpec: parentJobSpec,
       autostartWorker,
       workerPrefix: "paral-try",

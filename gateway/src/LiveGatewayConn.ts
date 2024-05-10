@@ -12,7 +12,7 @@ import {
   StreamQuery,
 } from "@livestack/shared";
 import { Subscription } from "rxjs";
-import { ZZEnv, JobSpec, JobManager } from "@livestack/core";
+import { LiveEnv, JobSpec, JobManager } from "@livestack/core";
 import { Socket } from "socket.io";
 import { JobInput, JobOutput } from "@livestack/core";
 
@@ -26,11 +26,11 @@ export class LiveGatewayConn {
   static bindSessionIdsByJobId: Record<string, Set<string>> = {};
 
   constructor({
-    zzEnv,
+    liveEnv,
     socket,
     allowedSpecsForBinding = [],
   }: {
-    zzEnv?: ZZEnv | null;
+    liveEnv?: LiveEnv | null;
     socket: Socket;
     allowedSpecsForBinding?: {
       specName: string;

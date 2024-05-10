@@ -1,9 +1,9 @@
 import { getLogger } from "../utils/createWorkerLogger";
-import { ZZJob } from "./ZZJob";
+import { LiveJob } from "./LiveJob";
 import { JobSpec } from "./JobSpec";
 import { IStorageProvider } from "../storage/cloudStorage";
-import { ZZProcessor } from "./ZZJob";
-import { ZZEnv } from "./ZZEnv";
+import { ZZProcessor } from "./LiveJob";
+import { LiveEnv } from "./LiveEnv";
 import { z } from "zod";
 import { JobId } from "@livestack/shared/src/graph/InstantiatedGraph";
 import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
@@ -13,7 +13,7 @@ import { genManuallyFedIterator } from "@livestack/shared";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
-export type ZZWorkerDefParams<
+export type LiveWorkerDefParams<
   P,
   I,
   O,
@@ -25,22 +25,22 @@ export type ZZWorkerDefParams<
   jobSpec: JobSpec<P, I, O, IMap, OMap>;
   processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
   instanceParamsDef?: z.ZodType<WP>;
-  zzEnv?: ZZEnv;
+  liveEnv?: LiveEnv;
   workerPrefix?: string;
   maxNumWorkers?: number;
   autostartWorker?: boolean;
 };
 
-export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
+export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
   public readonly jobSpec: JobSpec<P, I, O, IMap, OMap>;
   public readonly instanceParamsDef?: z.ZodType<WP | {}>;
   public readonly processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
-  public readonly zzEnvP: Promise<ZZEnv>;
+  public readonly liveEnvP: Promise<LiveEnv>;
   public readonly workerPrefix?: string;
 
   public static registeredWorkerDefsBySpecName: Record<
     string,
-    ZZWorkerDef<any, any, any, any, any, any>
+    LiveWorkerDef<any, any, any, any, any, any>
   > = {};
 
   private static instanceReported = false;
@@ -49,61 +49,61 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     jobSpec,
     processor,
     instanceParamsDef,
-    zzEnv,
+    liveEnv,
     workerPrefix,
     maxNumWorkers = 1000,
     autostartWorker = true,
-  }: ZZWorkerDefParams<P, I, O, WP, IMap, OMap>) {
+  }: LiveWorkerDefParams<P, I, O, WP, IMap, OMap>) {
     this.jobSpec = jobSpec;
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
-    if (zzEnv) {
-      this.zzEnvP = Promise.resolve(zzEnv);
+    if (liveEnv) {
+      this.liveEnvP = Promise.resolve(liveEnv);
     } else {
-      this.zzEnvP = this.jobSpec.zzEnvPWithTimeout;
+      this.liveEnvP = this.jobSpec.liveEnvPWithTimeout;
     }
 
     this.workerPrefix = workerPrefix;
 
-    if (ZZWorkerDef.registeredWorkerDefsBySpecName[jobSpec.name]) {
+    if (LiveWorkerDef.registeredWorkerDefsBySpecName[jobSpec.name]) {
       throw new Error(
         `Worker definition for ${jobSpec.name} already exists. Did you define it twice?`
       );
     } else {
-      ZZWorkerDef.registeredWorkerDefsBySpecName[jobSpec.name] = this;
+      LiveWorkerDef.registeredWorkerDefsBySpecName[jobSpec.name] = this;
     }
 
-    if (!ZZWorkerDef.instanceReported) {
-      ZZWorkerDef.instanceReported = true;
+    if (!LiveWorkerDef.instanceReported) {
+      LiveWorkerDef.instanceReported = true;
       if (autostartWorker === true) {
         this.reportInstanceCapacityLazy();
       }
     }
   }
 
-  // public get zzEnv() {
-  //   const resolved = this._zzEnv || this.jobSpec.zzEnv || ZZEnv.global();
+  // public get liveEnv() {
+  //   const resolved = this._liveEnv || this.jobSpec.liveEnv || LiveEnv.global();
   //   return resolved;
   // }
 
-  // public get zzEnvEnsured() {
-  //   if (!this.zzEnv) {
+  // public get liveEnvEnsured() {
+  //   if (!this.liveEnv) {
   //     throw new Error(
-  //       `ZZEnv is not configured in Spec ${this.jobSpec.name}. \nPlease either pass it when constructing Spec or set it globally using ZZEnv.setGlobal().`
+  //       `LiveEnv is not configured in Spec ${this.jobSpec.name}. \nPlease either pass it when constructing Spec or set it globally using LiveEnv.setGlobal().`
   //     );
   //   }
-  //   return this.zzEnv;
+  //   return this.liveEnv;
   // }
 
   private async reportInstanceCapacityLazy() {
-    const projectUuid = (await this.zzEnvP).projectUuid;
-    const instanceId = await(await this.zzEnvP).getInstanceId();
+    const projectUuid = (await this.liveEnvP).projectUuid;
+    const instanceId = await (await this.liveEnvP).getInstanceId();
     // const { iterator: respToVaultIter, resolveNext: reportNext } =
     //   genManuallyFedIterator<FromInstance>((v) => {
     //     // console.info(`INSTANCE REPORT: ${JSON.stringify(v)}`);
     //   });
     const cmdFromVault = (
-      await this.zzEnvP
+      await this.liveEnvP
     ).vaultClient.capacity.reportAsInstance({
       projectUuid,
       instanceId,
@@ -119,17 +119,17 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
         queryCapacity,
         noCapacityWarning,
       } = cmd;
-      if (projectUuid !== (await this.zzEnvP).projectUuid) {
+      if (projectUuid !== (await this.liveEnvP).projectUuid) {
         throw new Error(
           `Unexpected projectUuid. Expected: "${projectUuid}" got "${
-            (await this.zzEnvP).projectUuid
+            (await this.liveEnvP).projectUuid
           }".`
         );
       }
-      if (instanceId !== await(await this.zzEnvP).getInstanceId()) {
+      if (instanceId !== (await (await this.liveEnvP).getInstanceId())) {
         throw new Error(
-          `Unexpected instanceId. Expected: "${instanceId}" got "${await(
-            await this.zzEnvP
+          `Unexpected instanceId. Expected: "${instanceId}" got "${await (
+            await this.liveEnvP
           ).getInstanceId()}".`
         );
       }
@@ -137,11 +137,13 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
       if (queryCapacity) {
         // console.info("Capacity query received: ", queryCapacity);
         const specNames = Object.keys(
-          ZZWorkerDef.registeredWorkerDefsBySpecName
+          LiveWorkerDef.registeredWorkerDefsBySpecName
         );
         const capacity = 10;
 
-        await(await this.zzEnvP).vaultClient.capacity.respondToCapacityQuery({
+        await (
+          await this.liveEnvP
+        ).vaultClient.capacity.respondToCapacityQuery({
           correlationId,
           projectUuid,
           instanceId,
@@ -158,7 +160,8 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
           `Provisioning request received: ${projectUuid}/${specName} for ${numberOfWorkersNeeded}`
         );
 
-        const workerDef = ZZWorkerDef.registeredWorkerDefsBySpecName[specName];
+        const workerDef =
+          LiveWorkerDef.registeredWorkerDefsBySpecName[specName];
         if (!workerDef) {
           throw new Error(`Worker definition not found for ${specName}`);
         }
@@ -167,7 +170,9 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
           workerDef.startWorker({});
         }
 
-        await(await this.zzEnvP).vaultClient.capacity.respondToProvision({
+        await (
+          await this.liveEnvP
+        ).vaultClient.capacity.respondToProvision({
           correlationId,
           projectUuid,
           instanceId,
@@ -191,10 +196,10 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
   public async startWorker(p?: { instanceParams?: WP }) {
     const { instanceParams } = p || {};
 
-    const worker = new ZZWorker<P, I, O, WP, IMap, OMap>({
+    const worker = new LiveWorker<P, I, O, WP, IMap, OMap>({
       def: this,
       instanceParams: instanceParams || ({} as WP),
-      zzEnv: await this.zzEnvP,
+      liveEnv: await this.liveEnvP,
     });
     // this.workers.push(worker);
     // await worker.waitUntilReady();
@@ -220,7 +225,7 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
 }
 
 function defineWorker<P, I, O, WP extends object | undefined, IMap, OMap>(
-  p: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec"> & {
+  p: Omit<LiveWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec"> & {
     jobSpec: JobSpec<P, I, O, IMap, OMap>;
   }
 ) {
@@ -231,13 +236,13 @@ function defineWorker<P, I, O, WP extends object | undefined, IMap, OMap>(
   return spec.defineWorker(p);
 }
 
-export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
+export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
   public readonly jobSpec: JobSpec<P, I, O, IMap, OMap>;
-  protected readonly zzEnvP: Promise<ZZEnv>;
+  protected readonly liveEnvP: Promise<LiveEnv>;
   protected readonly storageProvider?: IStorageProvider;
   public readonly instanceParams?: WP;
   public readonly workerNameP: Promise<string>;
-  public readonly def: ZZWorkerDef<P, I, O, WP, IMap, OMap>;
+  public readonly def: LiveWorkerDef<P, I, O, WP, IMap, OMap>;
   private readonly workerId = v4();
   protected readonly loggerP: Promise<ReturnType<typeof getLogger>>;
   protected _workerStatus: "running" | "stopping" | "stopped" = "running";
@@ -246,22 +251,22 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     instanceParams,
     def,
     workerName,
-    zzEnv,
+    liveEnv,
     terminateOutputsOnJobEnd = true,
   }: {
-    def: ZZWorkerDef<P, I, O, WP, IMap, OMap>;
+    def: LiveWorkerDef<P, I, O, WP, IMap, OMap>;
     instanceParams?: WP;
     workerName?: string;
-    zzEnv?: ZZEnv | null;
+    liveEnv?: LiveEnv | null;
     terminateOutputsOnJobEnd?: boolean;
   }) {
     // if worker name is not provided, use random string
 
     this.jobSpec = def.jobSpec;
-    if (zzEnv) {
-      this.zzEnvP = Promise.resolve(zzEnv);
+    if (liveEnv) {
+      this.liveEnvP = Promise.resolve(liveEnv);
     } else {
-      this.zzEnvP = this.jobSpec.zzEnvP;
+      this.liveEnvP = this.jobSpec.liveEnvP;
     }
     this.instanceParams = instanceParams;
     this.def = def;
@@ -269,10 +274,10 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     if (workerName) {
       this.workerNameP = Promise.resolve(workerName);
     } else {
-      this.workerNameP = this.zzEnvP.then((zzEnv) => {
+      this.workerNameP = this.liveEnvP.then((liveEnv) => {
         return (
           "wkr:" +
-          `${zzEnv.projectUuid}/${
+          `${liveEnv.projectUuid}/${
             this.def.workerPrefix ? `(${this.def.workerPrefix})` : ""
           }${this.def.jobSpec.name}`
         );
@@ -298,17 +303,17 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
       const jobOptions = JSON.parse(jobOptionsStr);
       const localG = await resolveInstantiatedGraph({
         jobId,
-        zzEnv: await that.zzEnvP,
+        liveEnv: await that.liveEnvP,
         specName: that.jobSpec.name,
       });
 
-      const zzJ = new ZZJob({
+      const zzJ = new LiveJob({
         jobId: jobId as JobId,
         logger: await that.loggerP,
         jobSpec: that.jobSpec,
         jobOptions: jobOptions,
         workerInstanceParams: that.instanceParams,
-        storageProvider: await (await that.zzEnvP).storageProvider,
+        storageProvider: await (await that.liveEnvP).storageProvider,
         workerName: await that.workerNameP,
         graph: localG,
         updateProgress: async (progress): Promise<void> => {
@@ -316,7 +321,7 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
             progressUpdate: {
               jobId,
               progress,
-              projectUuid: (await that.zzEnvP).projectUuid,
+              projectUuid: (await that.liveEnvP).projectUuid,
               specName: that.jobSpec.name,
             },
             workerId: that.workerId,
@@ -331,11 +336,11 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
       return r;
     };
 
-    this.zzEnvP.then(async (zzEnv) => {
+    this.liveEnvP.then(async (liveEnv) => {
       while (that._workerStatus === "running") {
         try {
           const serverMsgIter =
-            zzEnv.vaultClient.queue.reportAsWorker(clientMsgIter);
+            liveEnv.vaultClient.queue.reportAsWorker(clientMsgIter);
           for await (const { job } of serverMsgIter) {
             // console.debug("picked up job: ", job);
             if (!job) {
@@ -348,7 +353,7 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
             //   sendNextActivity({
             //     jobFailed: {
             //       jobId: job.jobId,
-            //       projectUuid: (await that.zzEnvP).projectUuid,
+            //       projectUuid: (await that.liveEnvP).projectUuid,
             //       specName: that.jobSpec.name,
             //       errorStr: `${signal} received. Worker shutting down.`,
             //     },
@@ -365,13 +370,13 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
               await processJob(job);
               // console.log("jobCompleted", {
               //   jobId: job.jobId,
-              //   projectUuid: that.zzEnv.projectUuid,
+              //   projectUuid: that.liveEnv.projectUuid,
               //   specName: that.jobSpec.name,
               // });
               sendNextActivity({
                 jobCompleted: {
                   jobId: job.jobId,
-                  projectUuid: (await that.zzEnvP).projectUuid,
+                  projectUuid: (await that.liveEnvP).projectUuid,
                   specName: that.jobSpec.name,
                 },
                 workerId: that.workerId,
@@ -380,14 +385,14 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
             } catch (err) {
               console.error("jobFailed", err, {
                 jobId: job.jobId,
-                projectUuid: (await that.zzEnvP).projectUuid,
+                projectUuid: (await that.liveEnvP).projectUuid,
                 specName: that.jobSpec.name,
                 errorStr: JSON.stringify(err),
               });
               sendNextActivity({
                 jobFailed: {
                   jobId: job.jobId,
-                  projectUuid: (await that.zzEnvP).projectUuid,
+                  projectUuid: (await that.liveEnvP).projectUuid,
                   specName: that.jobSpec.name,
                   errorStr: JSON.stringify(err),
                 },
@@ -412,12 +417,12 @@ export class ZZWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
       // console.debug(
       //   "worker ready to sign up",
       //   that.workerId,
-      //   (await that.zzEnvP).projectUuid,
+      //   (await that.liveEnvP).projectUuid,
       //   that.jobSpec.name
       // );
       sendNextActivity({
         signUp: {
-          projectUuid: (await that.zzEnvP).projectUuid,
+          projectUuid: (await that.liveEnvP).projectUuid,
           specName: that.jobSpec.name,
         },
         workerId: that.workerId,

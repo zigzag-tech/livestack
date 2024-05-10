@@ -1,10 +1,13 @@
 import { JobSpec } from "@livestack/core";
-import { ZZEnv } from "@livestack/core";
-import { ZZWorkerDef } from "@livestack/core";
+import { LiveEnv } from "@livestack/core";
+import { LiveWorkerDef } from "@livestack/core";
 import { z } from "zod";
 
 const StatusSchema = z.enum(["initiated", "waiting", "completed", "failed"]);
-export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
+export class RunpodServerlessWorkerDef<
+  I extends object,
+  O
+> extends LiveWorkerDef<
   any,
   any,
   any,
@@ -20,7 +23,7 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
     runpodApiKey,
     inputSchema,
     outputSchema,
-    zzEnv,
+    liveEnv,
     name,
     autostartWorker = true,
   }: {
@@ -29,7 +32,7 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
     inputSchema: z.ZodType<I>;
     outputSchema: z.ZodType<O | null>;
     name: string;
-    zzEnv?: ZZEnv;
+    liveEnv?: LiveEnv;
     autostartWorker?: boolean;
   }) {
     const jobSpec = JobSpec.define({
@@ -39,12 +42,12 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
         default: outputSchema,
         status: StatusSchema,
       },
-      zzEnv,
+      liveEnv,
     });
 
     super({
       jobSpec,
-      zzEnv,
+      liveEnv,
       autostartWorker,
       processor: async ({ input, output, logger }) => {
         await output("status").emit("initiated");
@@ -160,7 +163,7 @@ export class RunpodServerlessWorkerDef<I extends object, O> extends ZZWorkerDef<
             console.error("Output", JSON.stringify(runpodResult));
             await output("status").emit("failed");
           }
-          
+
           await output("status").emit("completed");
         } catch (e) {
           console.error(e);

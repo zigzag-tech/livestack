@@ -7,9 +7,9 @@ import {
 import { IOSpec, InferTMap, TaggedStreamDef } from "@livestack/shared";
 import { AliasNode } from "@livestack/shared/src/graph/DefGraph";
 import { z } from "zod";
-import { ZZEnv } from "../jobs/ZZEnv";
+import { LiveEnv } from "../jobs/LiveEnv";
 import _ from "lodash";
-import { InferDefaultOrSingleKey, ZZWorkerDef } from "../jobs/ZZWorker";
+import { InferDefaultOrSingleKey, LiveWorkerDef } from "../jobs/LiveWorker";
 import {
   JobNode,
   InstantiatedGraph,
@@ -261,14 +261,12 @@ export function expose<K, T, I, O, IMap, OMap>(
   return {
     specName: resolvedSpec.spec.name,
     uniqueSpecLabel: resolvedSpec.uniqueSpecLabel,
-    input: (p.extraFields.type === "input" ? { [p.tag as string]: alias } : {}) as Record<
-      string,
-      string
-    >,
-    output: (p.extraFields.type === "output" ? { [p.tag as string]: alias } : {}) as Record<
-      string,
-      string
-    >,
+    input: (p.extraFields.type === "input"
+      ? { [p.tag as string]: alias }
+      : {}) as Record<string, string>,
+    output: (p.extraFields.type === "output"
+      ? { [p.tag as string]: alias }
+      : {}) as Record<string, string>,
   };
 }
 
@@ -431,7 +429,7 @@ export class WorkflowSpec extends JobSpec<
     return defG;
   }
 
-  private orchestrationWorkerDef: ZZWorkerDef<
+  private orchestrationWorkerDef: LiveWorkerDef<
     WorkflowChildJobOptionsSanitized,
     any,
     any,
@@ -444,18 +442,18 @@ export class WorkflowSpec extends JobSpec<
     connections,
     exposures,
     name,
-    zzEnv,
+    liveEnv,
     autostartWorkflow = true,
   }: {
     name: string;
-    zzEnv?: ZZEnv;
+    liveEnv?: LiveEnv;
     autostartWorkflow?: boolean;
   } & WorkflowParams) {
     super({
       name,
 
       jobOptions: WorkflowChildJobOptionsSanitized,
-      zzEnv,
+      liveEnv,
       output: {
         __zz_workflow_status: z.object({
           __zz_workflow_status: z.literal("finished"),
@@ -470,7 +468,7 @@ export class WorkflowSpec extends JobSpec<
 
     this._validateConnections();
 
-    this.orchestrationWorkerDef = new ZZWorkerDef({
+    this.orchestrationWorkerDef = new LiveWorkerDef({
       workerPrefix: "workflow",
       jobSpec: this,
       autostartWorker: autostartWorkflow,
@@ -479,10 +477,10 @@ export class WorkflowSpec extends JobSpec<
 
         const { rec: parentRec } = await (
           await (
-            await ZZEnv.globalP()
+            await LiveEnv.globalP()
           ).vaultClient
         ).db.getParentJobRec({
-          projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
+          projectUuid: (await this.liveEnvPWithTimeout).projectUuid,
           childJobId: groupId,
         });
         const inletHasTransformOverridesByTag: Record<string, boolean> = {};
@@ -819,9 +817,9 @@ export class Workflow {
     if (!this._graphP) {
       this._graphP = (async () => {
         const { rec: parentRec } = await(
-          await(await ZZEnv.globalP()).vaultClient
+          await(await LiveEnv.globalP()).vaultClient
         ).db.getParentJobRec({
-          projectUuid: (await that.jobGroupDef.zzEnvPWithTimeout).projectUuid,
+          projectUuid: (await that.jobGroupDef.liveEnvPWithTimeout).projectUuid,
           childJobId: this.contextId,
         });
         const inletHasTransformOverridesByTag: Record<string, boolean> = {};
