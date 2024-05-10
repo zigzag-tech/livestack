@@ -112,11 +112,12 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     // console.debug("Reported capacity for", this.jobSpec.name);
     for await (const cmd of cmdFromVault) {
       const {
+        correlationId,
         instanceId,
+        projectUuid,
         provision,
         queryCapacity,
-        projectUuid,
-        correlationId,
+        noCapacityWarning,
       } = cmd;
       if (projectUuid !== (await this.zzEnvP).projectUuid) {
         throw new Error(
@@ -173,6 +174,13 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
           specName,
           numberOfWorkersStarted: numberOfWorkersNeeded,
         });
+      } else if (noCapacityWarning) {
+        console.warn(
+          `WARNING: The orchestrator failed to start a worker of spec ${noCapacityWarning.specName}. Please make sure that: \n` +
+            `1. The worker is defined by at least one of your instances with WorkerDef.define()\n` +
+            `2. The worker has autoStartWorker set to true in WorkerDef.define(), OR \n` +
+            `3. You have started at least one of the worker manually using workerDef.startWorker()`
+        );
       } else {
         console.error("Unexpected command", cmd);
         throw new Error("Unexpected command");

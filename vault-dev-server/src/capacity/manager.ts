@@ -229,6 +229,22 @@ class CapacityManager implements CacapcityServiceImplementation {
       console.warn(
         `No instances with enough capacity found for ${projectUuid}:${specName}`
       );
+
+      for (const instanceId of instanceIds) {
+        const sendCmdToClient = this.resolveByInstanceId[instanceId];
+        if (!sendCmdToClient) {
+          throw new Error(`No instance found for ${instanceId}`);
+        }
+        const correlationId = v4();
+        sendCmdToClient({
+          projectUuid,
+          instanceId,
+          noCapacityWarning: {
+            specName,
+          },
+          correlationId,
+        });
+      }
     }
 
     const nextBestInstanceId = _.sample(qualifiedCapacities)!.instanceId;
