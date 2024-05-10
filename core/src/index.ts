@@ -1,4 +1,4 @@
-export { LiveJob as corePkg } from "./jobs/LiveJob";
+export { LiveJob } from "./jobs/LiveJob";
 export { LiveWorker, LiveWorkerDef } from "./jobs/LiveWorker";
 export { JobSpec } from "./jobs/JobSpec";
 export { LiveEnv } from "./jobs/LiveEnv";
