@@ -1,14 +1,13 @@
 import { Storage } from "@google-cloud/storage";
 import fs from "fs";
 import { Stream } from "stream";
-import { IStorageProvider, calculateHash } from "./cloudStorage";
 import {
+  IStorageProvider,
+  calculateHash,
   InferRestoredFileType,
-  LargeFileWithoutValue,
   OriginalType,
-} from "../files/file-ops";
+} from "@livestack/core";
 import { Readable } from "stream";
-
 
 export function getGoogleCloudStorageProvider({
   bucketName,
@@ -83,7 +82,8 @@ export function getGoogleCloudStorageProvider({
         }
       }
       type R = InferRestoredFileType<T>;
-      if (!result) throw new Error("No data returned from Google Cloud Storage");
+      if (!result)
+        throw new Error("No data returned from Google Cloud Storage");
 
       if (f.originalType === "string") {
         return result.toString("utf-8") as R;
