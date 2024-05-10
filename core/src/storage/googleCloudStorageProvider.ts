@@ -1,13 +1,14 @@
 import { Storage } from "@google-cloud/storage";
 import fs from "fs";
 import { Stream } from "stream";
-import { IStorageProvider } from "./cloudStorage";
+import { IStorageProvider, calculateHash } from "./cloudStorage";
 import {
   InferRestoredFileType,
   LargeFileWithoutValue,
   OriginalType,
 } from "../files/file-ops";
 import { Readable } from "stream";
+
 
 export function getGoogleCloudStorageProvider({
   bucketName,
