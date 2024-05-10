@@ -11,57 +11,99 @@ import { Readable } from "stream";
 
 export function getGoogleCloudStorageProvider({
   bucketName,
+  cdnPrefix,
 }: {
   bucketName: string;
+  cdnPrefix?: string;
 }): IStorageProvider {
   const bucket = getStorageBucket(bucketName);
-  const putToStorage: IStorageProvider["putToStorage"] = (path, data) => {
-    return putToGoogleCloudStorage(bucketName, path, data);
-  };
 
-  // const downloadFromStorage: IStorageProvider["downloadFromStorage"] = async ({
-  //   filePath,
-  //   destination,
-  // }) => {
-  //   await bucket.file(filePath).download({ destination });
-  // };
-
-  const fetchFromStorage: IStorageProvider["fetchFromStorage"] = async <
-    T extends OriginalType
-  >({
-    path,
-    originalType,
-  }: LargeFileWithoutValue<T>) => {
-    const [file, resp] = await bucket.file(path).download({});
-    type R = InferRestoredFileType<T>;
-    if (originalType === "string") {
-      return file.toString() as R;
-    } else if (originalType === "buffer") {
-      return data as R;
-    } else if (originalType === "array-buffer") {
-      return data.buffer as R;
-    } else if (originalType === "blob") {
-      return new Blob([data]) as R;
-    } else if (originalType === "file") {
-      return new File([data], path) as R;
-    } else if (originalType === "stream") {
-      return fs.createReadStream(path) as Readable as R;
-    } else {
-      throw new Error("Unsupported originalType " + originalType);
-    }
-  };
-
-  // const uploadFromLocalPath: IStorageProvider["uploadFromLocalPath"] = async ({
-  //   localPath,
-  //   destination,
-  // }) => {
-  //   await bucket.upload(localPath, { destination });
-  // };
   return {
-    putToStorage,
-    fetchFromStorage,
-    // downloadFromStorage,
-    // uploadFromLocalPath,
+    putToStorage: async (destination, data) => {
+      if (data instanceof Stream) {
+        // stream is not hashable, upload directly
+        const readable = data as Readable;
+        await bucket.file(destination).save(readable);
+        return;
+      }
+      const hash = await calculateHash(data);
+
+      // Check if a file with the same hash already exists
+      const hashRefPath = `__hash_refs/${hash}`;
+      try {
+        await bucket.file(hashRefPath).download();
+        // File with the same hash already exists, skip uploading
+        return { hash };
+      } catch (error: any) {
+        if (error.code !== 404) {
+          console.log("Error checking hash reference", error);
+          throw error;
+        }
+      }
+
+      // File with the same hash doesn't exist, proceed with uploading
+      const body = Buffer.isBuffer(data) ? data : Buffer.from(data.toString());
+      await bucket.file(destination).save(body);
+
+      // Store the hash reference file
+      await bucket.file(hashRefPath).save(Buffer.from(destination));
+
+      return { hash };
+    },
+
+    fetchFromStorage: async <T extends OriginalType>(f: {
+      path: string;
+      originalType: T;
+      hash?: string;
+    }) => {
+      let result;
+      try {
+        [result] = await bucket.file(f.path).download();
+      } catch (error: any) {
+        if (error.code === 404 && f.hash) {
+          // If the file is not found and a hash is provided, look up the hash reference
+          const hashRefPath = `__hash_refs/${f.hash}`;
+          try {
+            const [hashRefResult] = await bucket.file(hashRefPath).download();
+            const referencedPath = hashRefResult.toString();
+            if (!referencedPath) {
+              throw new Error("No data returned from Google Cloud Storage");
+            }
+            [result] = await bucket.file(referencedPath).download();
+          } catch (hashRefError: any) {
+            console.log(
+              "Error fetching hash reference",
+              `__hash_refs/${f.hash}`
+            );
+            throw hashRefError;
+          }
+        } else {
+          throw error;
+        }
+      }
+      type R = InferRestoredFileType<T>;
+      if (!result) throw new Error("No data returned from Google Cloud Storage");
+
+      if (f.originalType === "string") {
+        return result.toString("utf-8") as R;
+      } else if (f.originalType === "buffer") {
+        return result as R;
+      } else if (f.originalType === "array-buffer") {
+        return result.buffer as R;
+      } else if (f.originalType === "blob") {
+        return new Blob([result]) as R;
+      } else if (f.originalType === "file") {
+        return new File([result], f.path) as R;
+      } else if (f.originalType === "stream") {
+        return Readable.from(result) as Readable as R;
+      } else {
+        throw new Error("Unsupported originalType " + f.originalType);
+      }
+    },
+
+    getPublicUrl: (path: string) => {
+      throw new Error("Not implemented");
+    },
   };
 }
 const getStorageBucket = (bucketName: string) =>
