@@ -64,9 +64,6 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     }
 
     this.workerPrefix = workerPrefix;
-    if (autostartWorker === true) {
-      this.reportInstanceCapacityLazy();
-    }
 
     if (ZZWorkerDef.registeredWorkerDefsBySpecName[jobSpec.name]) {
       throw new Error(
@@ -78,7 +75,9 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
 
     if (!ZZWorkerDef.instanceReported) {
       ZZWorkerDef.instanceReported = true;
-      this.reportInstanceCapacityLazy();
+      if (autostartWorker === true) {
+        this.reportInstanceCapacityLazy();
+      }
     }
   }
 
