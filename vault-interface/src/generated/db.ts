@@ -5,7 +5,7 @@
 // source: db.proto
 
 /* eslint-disable */
-import { type CallContext, type CallOptions } from "nice-grpc-common";
+import type { CallContext, CallOptions } from "nice-grpc-common";
 import _m0 from "protobufjs/minimal";
 import { Empty } from "./google/protobuf/empty";
 import { Struct } from "./google/protobuf/struct";
@@ -108,11 +108,11 @@ export interface GetJobRecResponse {
   null_response?: Empty | undefined;
 }
 
-export interface GetZZJobTestRequest {
+export interface GetLiveJobTestRequest {
   id: string;
 }
 
-export interface GetZZJobTestResponse {
+export interface GetLiveJobTestResponse {
   projectUuid: string;
   pipeName: string;
   jobId: string;
@@ -575,22 +575,22 @@ export const GetJobRecResponse = {
   },
 };
 
-function createBaseGetZZJobTestRequest(): GetZZJobTestRequest {
+function createBaseGetLiveJobTestRequest(): GetLiveJobTestRequest {
   return { id: "" };
 }
 
-export const GetZZJobTestRequest = {
-  encode(message: GetZZJobTestRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const GetLiveJobTestRequest = {
+  encode(message: GetLiveJobTestRequest, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.id !== "") {
       writer.uint32(10).string(message.id);
     }
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetZZJobTestRequest {
+  decode(input: _m0.Reader | Uint8Array, length?: number): GetLiveJobTestRequest {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetZZJobTestRequest();
+    const message = createBaseGetLiveJobTestRequest();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -610,11 +610,11 @@ export const GetZZJobTestRequest = {
     return message;
   },
 
-  fromJSON(object: any): GetZZJobTestRequest {
+  fromJSON(object: any): GetLiveJobTestRequest {
     return { id: isSet(object.id) ? globalThis.String(object.id) : "" };
   },
 
-  toJSON(message: GetZZJobTestRequest): unknown {
+  toJSON(message: GetLiveJobTestRequest): unknown {
     const obj: any = {};
     if (message.id !== "") {
       obj.id = message.id;
@@ -622,22 +622,22 @@ export const GetZZJobTestRequest = {
     return obj;
   },
 
-  create(base?: DeepPartial<GetZZJobTestRequest>): GetZZJobTestRequest {
-    return GetZZJobTestRequest.fromPartial(base ?? {});
+  create(base?: DeepPartial<GetLiveJobTestRequest>): GetLiveJobTestRequest {
+    return GetLiveJobTestRequest.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<GetZZJobTestRequest>): GetZZJobTestRequest {
-    const message = createBaseGetZZJobTestRequest();
+  fromPartial(object: DeepPartial<GetLiveJobTestRequest>): GetLiveJobTestRequest {
+    const message = createBaseGetLiveJobTestRequest();
     message.id = object.id ?? "";
     return message;
   },
 };
 
-function createBaseGetZZJobTestResponse(): GetZZJobTestResponse {
+function createBaseGetLiveJobTestResponse(): GetLiveJobTestResponse {
   return { projectUuid: "", pipeName: "", jobId: "" };
 }
 
-export const GetZZJobTestResponse = {
-  encode(message: GetZZJobTestResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+export const GetLiveJobTestResponse = {
+  encode(message: GetLiveJobTestResponse, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
     if (message.projectUuid !== "") {
       writer.uint32(10).string(message.projectUuid);
     }
@@ -650,10 +650,10 @@ export const GetZZJobTestResponse = {
     return writer;
   },
 
-  decode(input: _m0.Reader | Uint8Array, length?: number): GetZZJobTestResponse {
+  decode(input: _m0.Reader | Uint8Array, length?: number): GetLiveJobTestResponse {
     const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
     let end = length === undefined ? reader.len : reader.pos + length;
-    const message = createBaseGetZZJobTestResponse();
+    const message = createBaseGetLiveJobTestResponse();
     while (reader.pos < end) {
       const tag = reader.uint32();
       switch (tag >>> 3) {
@@ -687,7 +687,7 @@ export const GetZZJobTestResponse = {
     return message;
   },
 
-  fromJSON(object: any): GetZZJobTestResponse {
+  fromJSON(object: any): GetLiveJobTestResponse {
     return {
       projectUuid: isSet(object.projectUuid) ? globalThis.String(object.projectUuid) : "",
       pipeName: isSet(object.pipeName) ? globalThis.String(object.pipeName) : "",
@@ -695,7 +695,7 @@ export const GetZZJobTestResponse = {
     };
   },
 
-  toJSON(message: GetZZJobTestResponse): unknown {
+  toJSON(message: GetLiveJobTestResponse): unknown {
     const obj: any = {};
     if (message.projectUuid !== "") {
       obj.projectUuid = message.projectUuid;
@@ -709,11 +709,11 @@ export const GetZZJobTestResponse = {
     return obj;
   },
 
-  create(base?: DeepPartial<GetZZJobTestResponse>): GetZZJobTestResponse {
-    return GetZZJobTestResponse.fromPartial(base ?? {});
+  create(base?: DeepPartial<GetLiveJobTestResponse>): GetLiveJobTestResponse {
+    return GetLiveJobTestResponse.fromPartial(base ?? {});
   },
-  fromPartial(object: DeepPartial<GetZZJobTestResponse>): GetZZJobTestResponse {
-    const message = createBaseGetZZJobTestResponse();
+  fromPartial(object: DeepPartial<GetLiveJobTestResponse>): GetLiveJobTestResponse {
+    const message = createBaseGetLiveJobTestResponse();
     message.projectUuid = object.projectUuid ?? "";
     message.pipeName = object.pipeName ?? "";
     message.jobId = object.jobId ?? "";

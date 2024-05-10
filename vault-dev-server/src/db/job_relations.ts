@@ -16,7 +16,7 @@ export async function ensureJobRelationRec({
   uniqueSpecLabel?: string;
 }) {
   await dbConn("zz_job_relations")
-    .insert<ZZJobRelationRec>({
+    .insert<LiveJobRelationRec>({
       project_uuid: projectUuid,
       parent_job_id: parentJobId,
       child_job_id: childJobId,
@@ -99,7 +99,7 @@ export async function getParentJobRec({
     };
   }
 }
-export interface ZZJobRelationRec {
+export interface LiveJobRelationRec {
   project_uuid: string;
   parent_job_id: string;
   child_job_id: string;

@@ -15,25 +15,25 @@ const { Order, ConnectorType } = pkg;
 import _ from "lodash";
 import { ensureJobRelationRec, getParentJobRec } from "./job_relations.js";
 import {
-  ZZJobStreamConnectorRec,
+  LiveJobStreamConnectorRec,
   ensureJobStreamConnectorRec,
 } from "./streams.js";
 
-export interface ZZJobUniqueId {
+export interface LiveJobUniqueId {
   project_uuid: string;
   spec_name: string;
   job_id: string;
 }
 
-export type ZZJobStatus =
+export type LiveJobStatus =
   | "requested"
   | "running"
   | "completed"
   | "failed"
   | "waiting_children";
 
-export interface ZZJobStatusRec extends ZZJobUniqueId {
-  status: ZZJobStatus;
+export interface LiveJobStatusRec extends LiveJobUniqueId {
+  status: LiveJobStatus;
   time_created: Date;
 }
 
@@ -50,7 +50,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       .andWhere("zz_jobs.spec_name", "=", specName)
       .andWhere("zz_jobs.job_id", "=", jobId)
       .orderBy("zz_job_status.time_created", "desc")
-      .first()) as (JobRec & Pick<ZZJobStatusRec, "status">) | null;
+      .first()) as (JobRec & Pick<LiveJobStatusRec, "status">) | null;
 
     // check if job status is what we want
     // if (jobStatus && r?.status !== jobStatus) {
@@ -207,7 +207,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       throw new Error("connectorType must be provided if key is provided");
     }
 
-    const q = dbConn<ZZJobStreamConnectorRec>("zz_job_stream_connectors")
+    const q = dbConn<LiveJobStreamConnectorRec>("zz_job_stream_connectors")
       .where("project_uuid", "=", projectUuid)
       .andWhere("job_id", "=", jobId);
     if (key) {
@@ -231,7 +231,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       specName,
       jobId,
       dbConn,
-      jobStatus: jobStatus as ZZJobStatus,
+      jobStatus: jobStatus as LiveJobStatus,
     });
     // console.debug("appendJobStatusRec done", specName, jobId, jobStatus);
 
@@ -332,9 +332,9 @@ async function appendJobStatusRec({
   jobStatus,
 }: JobUniqueId & {
   dbConn: Knex;
-  jobStatus: ZZJobStatus;
+  jobStatus: LiveJobStatus;
 }) {
-  const q = dbConn("zz_job_status").insert<ZZJobStatusRec>({
+  const q = dbConn("zz_job_status").insert<LiveJobStatusRec>({
     status_id: v4(),
     project_uuid: projectUuid,
     spec_name: specName,

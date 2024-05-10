@@ -1,8 +1,8 @@
 import Replicate from "replicate";
 import { JobSpec } from "@livestack/core";
-import { ZZWorkerDef } from "@livestack/core";
-import { ZZEnv } from "@livestack/core";
-import { InferDefaultOrSingleKey } from "@livestack/core/src/jobs/ZZWorker";
+import { LiveWorkerDef } from "@livestack/core";
+import { LiveEnv } from "@livestack/core";
+import { InferDefaultOrSingleKey } from "@livestack/core/src/jobs/LiveWorker";
 
 const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
 
@@ -13,14 +13,14 @@ export class ReplicateWorkerDef<
   OMap,
   KI extends keyof IMap,
   KO extends keyof OMap
-> extends ZZWorkerDef<any, I, O, { replicateToken?: string }, IMap, OMap> {
+> extends LiveWorkerDef<any, I, O, { replicateToken?: string }, IMap, OMap> {
   protected _endpoint: `${string}/${string}:${string}`;
   protected _replicateToken?: string;
   constructor({
     endpoint,
     concurrency = 3,
     jobSpec,
-    zzEnv,
+    liveEnv,
     replicateToken,
     inputTag,
     outputTag,
@@ -29,14 +29,14 @@ export class ReplicateWorkerDef<
     jobSpec: JobSpec<any, I, O, IMap, OMap>;
     endpoint: `${string}/${string}:${string}`;
     concurrency?: number;
-    zzEnv?: ZZEnv;
+    liveEnv?: LiveEnv;
     replicateToken?: string;
     inputTag?: KI;
     outputTag?: KO;
     autostartWorker?: boolean;
   }) {
     super({
-      zzEnv,
+      liveEnv,
       jobSpec,
       concurrency,
       autostartWorker,

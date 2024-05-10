@@ -1,4 +1,4 @@
-import { ZZEnv } from "../jobs/ZZEnv";
+import { LiveEnv } from "../jobs/LiveEnv";
 import {
   identifyLargeFilesToRestore,
   restoreLargeValues,
@@ -9,7 +9,7 @@ import { createLazyNextValueGenerator } from "../jobs/pubsub";
 import { DataStream, WithTimestamp } from "./DataStream";
 
 export class DataStreamSubscriber<T extends object> {
-  private zzEnvP: Promise<ZZEnv>;
+  private liveEnvP: Promise<LiveEnv>;
   public readonly stream: DataStream<T>;
   private cursor: `${string}-${string}` | "$" | "0";
   private _valueObservable: Observable<WithTimestamp<T>> | null = null;
@@ -19,17 +19,17 @@ export class DataStreamSubscriber<T extends object> {
 
   constructor({
     stream,
-    zzEnvP,
+    liveEnvP,
     initialCursor,
     subType,
   }: {
     stream: DataStream<T>;
-    zzEnvP: Promise<ZZEnv>;
+    liveEnvP: Promise<LiveEnv>;
     initialCursor: "0" | "$";
     subType: SubType;
   }) {
     this.stream = stream;
-    this.zzEnvP = zzEnvP;
+    this.liveEnvP = liveEnvP;
     this.cursor = initialCursor;
     this.subType = subType;
   }
@@ -37,7 +37,7 @@ export class DataStreamSubscriber<T extends object> {
   static subFromNow<T extends object>(stream: DataStream<T>) {
     return new DataStreamSubscriber({
       stream,
-      zzEnvP: stream.zzEnvP,
+      liveEnvP: stream.liveEnvP,
       initialCursor: "$",
       subType: SubType.fromNow,
     });
@@ -46,7 +46,7 @@ export class DataStreamSubscriber<T extends object> {
   static subFromBeginning<T extends object>(stream: DataStream<T>) {
     return new DataStreamSubscriber({
       stream,
-      zzEnvP: stream.zzEnvP,
+      liveEnvP: stream.liveEnvP,
       initialCursor: "0",
       subType: SubType.fromStart,
     });
@@ -62,8 +62,8 @@ export class DataStreamSubscriber<T extends object> {
 
   private async readStream(subscriber: Subscriber<WithTimestamp<T>>) {
     try {
-      const iter = (await ZZEnv.globalP()).vaultClient.stream.sub({
-        projectUuid: (await this.zzEnvP).projectUuid,
+      const iter = (await LiveEnv.globalP()).vaultClient.stream.sub({
+        projectUuid: (await this.liveEnvP).projectUuid,
         uniqueName: this.stream.uniqueName,
         subType: this.subType,
       });
@@ -80,8 +80,8 @@ export class DataStreamSubscriber<T extends object> {
           identifyLargeFilesToRestore(data);
 
         if (largeFilesToRestore.length > 0) {
-          const zzEnv = await this.zzEnvP;
-          const storageProvider = await zzEnv.storageProvider;
+          const liveEnv = await this.liveEnvP;
+          const storageProvider = await liveEnv.storageProvider;
           if (!storageProvider) {
             throw new Error(
               "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."

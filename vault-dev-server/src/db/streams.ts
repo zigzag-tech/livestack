@@ -15,7 +15,7 @@ export async function ensureJobStreamConnectorRec({
   key: string;
   connectorType: "in" | "out";
 }) {
-  await dbConn<ZZJobStreamConnectorRec>("zz_job_stream_connectors")
+  await dbConn<LiveJobStreamConnectorRec>("zz_job_stream_connectors")
     .insert({
       project_uuid: projectUuid,
       job_id: jobId,
@@ -24,7 +24,7 @@ export async function ensureJobStreamConnectorRec({
       connector_type: connectorType,
       time_created: new Date(),
     })
-    .onConflict<keyof ZZJobStreamConnectorRec>([
+    .onConflict<keyof LiveJobStreamConnectorRec>([
       "project_uuid",
       "job_id",
       "key",
@@ -39,7 +39,7 @@ export interface DataStreamRec {
   time_created: Date;
 }
 
-export interface ZZJobStreamConnectorRec {
+export interface LiveJobStreamConnectorRec {
   project_uuid: string;
   job_id: string;
   stream_id: string;

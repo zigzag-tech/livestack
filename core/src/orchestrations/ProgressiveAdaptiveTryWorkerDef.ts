@@ -1,7 +1,7 @@
 import { JobSpec } from "../jobs/JobSpec";
-import { InferDefaultOrSingleKey, ZZWorkerDef } from "../jobs/ZZWorker";
+import { InferDefaultOrSingleKey, LiveWorkerDef } from "../jobs/LiveWorker";
 import _ from "lodash";
-import { ZZEnv } from "../jobs/ZZEnv";
+import { LiveEnv } from "../jobs/LiveEnv";
 import { genTimeoutPromise } from "../utils/genTimeoutPromise";
 
 export interface AttemptDef<ParentIMap, ParentOMap, I, O, IMap, OMap> {
@@ -44,7 +44,7 @@ export class ProgressiveAdaptiveTryWorkerDef<
   O5 = never,
   IMap5 = never,
   OMap5 = never
-> extends ZZWorkerDef<any, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
+> extends LiveWorkerDef<any, ParentI, ParentO, {}, ParentIMap, ParentOMap> {
   attempts:
     | AttemptsUpTo5<
         ParentIMap,
@@ -72,13 +72,13 @@ export class ProgressiveAdaptiveTryWorkerDef<
       >
     | AttemptDef<ParentIMap, ParentOMap, any, any, any, any>;
   constructor({
-    zzEnv,
+    liveEnv,
     attempts,
     ultimateFallback,
     jobSpec,
     autostartWorker = true,
   }: {
-    zzEnv?: ZZEnv;
+    liveEnv?: LiveEnv;
     jobSpec: JobSpec<any, ParentI, ParentO, ParentIMap, ParentOMap>;
     autostartWorker?: boolean;
     attempts:
@@ -113,7 +113,7 @@ export class ProgressiveAdaptiveTryWorkerDef<
   }) {
     super({
       jobSpec,
-      zzEnv,
+      liveEnv,
       autostartWorker,
       workerPrefix: "prog-adaptive-try",
       processor: async ({ input, jobId }) => {

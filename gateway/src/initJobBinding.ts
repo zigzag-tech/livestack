@@ -1,24 +1,24 @@
-import { ZZEnv } from "@livestack/core";
+import { LiveEnv } from "@livestack/core";
 import { Server as SocketIOServer } from "socket.io";
 import { Server as HTTPServer } from "http";
 import { LiveGatewayConn } from "./LiveGatewayConn";
 import { SpecOrName, resolveUniqueSpec } from "@livestack/core";
-import jwt from 'jsonwebtoken';
+import jwt from "jsonwebtoken";
 
-const JWT_SECRET = 'jwt_secret';
+const JWT_SECRET = "jwt_secret";
 export function initJobBinding({
   httpServer,
   socketPath = "/livestack.socket.io",
   onConnect,
   allowedSpecsForBinding = [],
-  zzEnv,
+  liveEnv,
   authToken,
 }: {
   httpServer: HTTPServer;
   socketPath?: string;
   onConnect?: (conn: LiveGatewayConn) => void;
   allowedSpecsForBinding: SpecOrName[];
-  zzEnv?: ZZEnv | null;
+  liveEnv?: LiveEnv | null;
   authToken?: string;
 }) {
   const io = new SocketIOServer(httpServer, {
@@ -32,10 +32,10 @@ export function initJobBinding({
     if (authToken) {
       jwt.verify(authToken, JWT_SECRET, (err: Error | null, decoded: any) => {
         if (err) {
-          console.log('Global authToken verification failed:', err.message);
-          return next(new Error('Global authToken verification failed.'));
+          console.log("Global authToken verification failed:", err.message);
+          return next(new Error("Global authToken verification failed."));
         }
-        console.log('Global authToken verified successfully');
+        console.log("Global authToken verified successfully");
         (socket as any).decoded = decoded; // Attach decoded information to the socket
         return next();
       });
@@ -46,7 +46,7 @@ export function initJobBinding({
 
   io.on("connection", async (socket) => {
     console.info(`🦓 Socket client connected: ${socket.id}.`);
-    
+
     const conn = new LiveGatewayConn({
       socket,
       allowedSpecsForBinding: allowedSpecsForBinding
@@ -55,9 +55,9 @@ export function initJobBinding({
           specName: spec.name,
           uniqueSpecLabel,
         })),
-      zzEnv,
+      liveEnv,
     });
-    
+
     if (onConnect) {
       onConnect(conn);
     }

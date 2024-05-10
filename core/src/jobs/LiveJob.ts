@@ -32,13 +32,16 @@ import { longStringTruncator } from "../utils/longStringTruncator";
 import { DataStream, WithTimestamp } from "../streams/DataStream";
 import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
 import { JobSpec } from "./JobSpec";
-import { ZZEnv } from "./ZZEnv";
+import { LiveEnv } from "./LiveEnv";
 import { identifyLargeFilesToSave } from "../files/file-ops";
 import { AuthorizedGRPCClient } from "@livestack/vault-client";
-import { InferDefaultOrSingleKey, InferDefaultOrSingleValue } from "./ZZWorker";
+import {
+  InferDefaultOrSingleKey,
+  InferDefaultOrSingleValue,
+} from "./LiveWorker";
 
 export type ZZProcessor<P, I, O, WP extends object | undefined, IMap, OMap> = (
-  j: ZZJob<P, I, O, WP, IMap, OMap>
+  j: LiveJob<P, I, O, WP, IMap, OMap>
 ) => Promise<OMap[InferDefaultOrSingleKey<OMap>] | void>;
 
 export interface ByTagCallable<TMap> {
@@ -55,7 +58,7 @@ type SmarterNextValue<IMap, T> = T extends { tag: infer Tag }
     : never
   : never;
 
-export class ZZJob<
+export class LiveJob<
   P,
   I,
   O,
@@ -138,7 +141,7 @@ export class ZZJob<
   }) => Promise<OMap[TO]>;
 
   storageProvider?: IStorageProvider;
-  readonly zzEnvP: Promise<ZZEnv>;
+  readonly liveEnvP: Promise<LiveEnv>;
   private _dummyProgressCount = 0;
   public workerInstanceParams: WP extends object ? WP : null =
     null as WP extends object ? WP : null;
@@ -223,7 +226,7 @@ export class ZZJob<
     }
 
     this.storageProvider = p.storageProvider;
-    this.zzEnvP = p.jobSpec.zzEnvP;
+    this.liveEnvP = p.jobSpec.liveEnvP;
     this.spec = p.jobSpec;
 
     this.inputStreamFnsByTag = {};
@@ -547,10 +550,10 @@ export class ZZJob<
     if (this._parentRec === "uninitialized") {
       const { null_response, rec } = await (
         await (
-          await this.zzEnvP
+          await this.liveEnvP
         ).vaultClient
       ).db.getParentJobRec({
-        projectUuid: (await this.zzEnvP).projectUuid,
+        projectUuid: (await this.liveEnvP).projectUuid,
         childJobId: this.jobId,
       });
       if (!rec) {
@@ -687,11 +690,11 @@ export class ZZJob<
     const jId = {
       specName: this.spec.name,
       jobId: this.jobId,
-      projectUuid: (await this.zzEnvP).projectUuid,
+      projectUuid: (await this.liveEnvP).projectUuid,
     };
 
     const logger = this.logger;
-    const projectUuid = (await this.zzEnvP).projectUuid;
+    const projectUuid = (await this.liveEnvP).projectUuid;
 
     logger.info(
       `Job started. Job ID: ${this.jobId}.` +
@@ -701,7 +704,7 @@ export class ZZJob<
     try {
       await (
         await (
-          await this.zzEnvP
+          await this.liveEnvP
         ).vaultClient
       ).db.appendJobStatusRec({
         ...jId,
@@ -742,7 +745,7 @@ export class ZZJob<
 
       await (
         await (
-          await this.zzEnvP
+          await this.liveEnvP
         ).vaultClient
       ).db.appendJobStatusRec({
         ...jId,
@@ -767,7 +770,7 @@ export class ZZJob<
       console.error("Error while running job: ", this.jobId, e);
 
       await (
-        await this.zzEnvP
+        await this.liveEnvP
       ).vaultClient.db.appendJobStatusRec({
         projectUuid,
         specName: this.spec.name,
@@ -827,7 +830,7 @@ export class ZZJob<
       throw new Error(`Cannot find ${String(key)} in largeFilesToSave`);
     } else {
       return getPublicCdnUrl({
-        projectUuid: (await this.zzEnvP).projectUuid,
+        projectUuid: (await this.liveEnvP).projectUuid,
         jobId: this.jobId,
         key: String(key),
         storageProvider: this.storageProvider,
