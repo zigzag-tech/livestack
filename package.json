@@ -1,7 +1,13 @@
 {
   "name": "@livestack/root",
   "version": "0.0.2",
+  "scripts": {
+    "typedoc": "typedoc"
+  },
   "workspaces": [
     "*"
-  ]
+  ],
+  "dependencies": {
+    "typedoc": "^0.25.13"
+  }
 }
