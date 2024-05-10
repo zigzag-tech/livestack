@@ -66,10 +66,18 @@ export type InferInputType<
   IMap = InferStreamSetType<CheckSpec<Spec>["input"]>
 > = IMap[K extends keyof IMap ? K : never] | null;
 
+/**
+ * Defines a job specification including its input, output, and processing logic.
+ * @template P - The type of the job parameters.
+ * @template I - The type of the input stream set.
+ * @template O - The type of the output stream set. 
+ * @template IMap - The mapped type of the input stream set.
+ * @template OMap - The mapped type of the output stream set.
+ */
 export class JobSpec<
   P = {},
   I = never,
-  O = never,
+  O = never,  
   IMap = InferTMap<I>,
   OMap = InferTMap<O>
 > extends IOSpec<I, O, IMap, OMap> {
@@ -96,9 +104,18 @@ export class JobSpec<
   }
   readonly jobOptions: z.ZodType<P>;
 
+  /**
+   * Creates a new JobSpec instance.
+   * @param params - The parameters for constructing the JobSpec.
+   * @param params.name - The name of the job spec.
+   * @param params.jobOptions - Optional Zod schema defining the job options.
+   * @param params.liveEnv - Optional LiveEnv instance.
+   * @param params.input - Optional input stream set definition.
+   * @param params.output - Optional output stream set definition.
+   */
   constructor({
     liveEnv,
-    name,
+    name, 
     jobOptions,
     output,
     input,
@@ -108,7 +125,7 @@ export class JobSpec<
     liveEnv?: LiveEnv;
     concurrency?: number;
     input?: I;
-    output?: O;
+    output?: O;  
   }) {
     super({
       name,
@@ -180,12 +197,20 @@ export class JobSpec<
     } as ConstructorParameters<typeof JobSpec<P & NewP, NewI & I, NewO & O, IMap & NewIMap, OMap & NewOMap>>[0]);
   }
 
+  /**
+   * Enqueues a job and waits for a single result from a specific output tag.
+   * @template K - The key type of the output stream set.
+   * @param params - The parameters for enqueuing the job.
+   * @param params.jobId - Optional job ID. If not provided, a unique ID will be generated.
+   * @param params.jobOptions - Optional job options.
+   * @param params.outputTag - Optional output tag to wait for the result. If not provided, the default or single output tag will be used.
+   * @returns A promise that resolves to the job result containing the data and timestamp, or null if no result is available.
+   */
   public async enqueueJobAndWaitOnSingleResults<K extends keyof OMap>({
     jobId: jobId,
     jobOptions,
     outputTag,
-  }: // queueEventsOptions,
-  {
+  }: {
     jobId?: string;
     jobOptions?: P;
     outputTag?: K;
@@ -637,6 +662,17 @@ export class JobSpec<
     return wrapStreamSubscriberWithTermination(streamIdP, subuscriberP);
   }
 
+  /**
+   * Enqueues a new job with the given parameters.
+   * @param params - The parameters for enqueuing the job.
+   * @param params.jobId - Optional job ID. If not provided, a unique ID will be generated.
+   * @param params.jobOptions - Optional job options.
+   * @param params.parentJobId - Optional parent job ID.
+   * @param params.uniqueSpecLabel - Optional unique label for the job spec.
+   * @param params.inputStreamIdOverridesByTag - Optional overrides for input stream IDs by tag.
+   * @param params.outputStreamIdOverridesByTag - Optional overrides for output stream IDs by tag.
+   * @returns A promise that resolves to the JobManager instance for the enqueued job.
+   */
   public async enqueueJob(p?: {
     jobId?: string;
     jobOptions?: P;
@@ -764,9 +800,21 @@ export class JobSpec<
     return m;
   }
 
+  /**
+   * Enqueues a job with the given input, waits for the result, and returns it.
+   * @template KI - The key type of the input stream set.
+   * @template KO - The key type of the output stream set.
+   * @param params - The parameters for enqueuing the job and getting the result.
+   * @param params.jobId - Optional job ID. If not provided, a unique ID will be generated.
+   * @param params.jobOptions - Optional job options.
+   * @param params.input - The input data to feed into the job.
+   * @param params.inputTag - Optional input tag to feed the data. If not provided, the default or single input tag will be used.
+   * @param params.outputTag - Optional output tag to wait for the result. If not provided, the default or single output tag will be used.
+   * @returns A promise that resolves to the job result containing the data and timestamp, or null if no result is available.
+   */
   public enqueueAndGetResult = async <
     KI extends keyof IMap,
-    KO extends keyof OMap
+    KO extends keyof OMap  
   >({
     jobId,
     jobOptions,
@@ -1329,6 +1377,12 @@ export class JobSpec<
   }
 
   // convenience function
+  /**
+   * Defines a worker for the job spec.
+   * @template WP - The type of the worker parameters.
+   * @param params - The parameters for defining the worker, excluding the job spec.
+   * @returns The created LiveWorkerDef instance.
+   */
   public defineWorker<WP extends object | undefined>(
     p: Omit<LiveWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec">
   ) {
@@ -1338,6 +1392,13 @@ export class JobSpec<
     });
   }
 
+  /**
+   * Defines a worker for the job spec and starts it.
+   * @template WP - The type of the worker parameters.
+   * @param params - The parameters for defining and starting the worker.
+   * @param params.instanceParams - Optional instance parameters for the worker.
+   * @returns A promise that resolves to the created LiveWorkerDef instance.
+   */
   public async defineWorkerAndStart<WP extends object | undefined>({
     instanceParams,
     ...p
@@ -1349,9 +1410,17 @@ export class JobSpec<
     return workerDef;
   }
 
+  /**
+   * Creates a new JobSpec instance with the given parameters.
+   * @template P - The type of the job parameters.
+   * @template I - The type of the input stream set.
+   * @template O - The type of the output stream set.
+   * @param params - The parameters for constructing the JobSpec.
+   * @returns The created JobSpec instance.
+   */
   public static define<P, I, O>(
     p: ConstructorParameters<
-      typeof JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>
+      typeof JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>  
     >[0]
   ) {
     return new JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>(p);
