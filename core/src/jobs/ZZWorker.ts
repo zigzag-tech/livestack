@@ -1,4 +1,3 @@
-import _ from "lodash";
 import { getLogger } from "../utils/createWorkerLogger";
 import { ZZJob } from "./ZZJob";
 import { JobSpec } from "./JobSpec";
@@ -39,6 +38,13 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
   public readonly zzEnvP: Promise<ZZEnv>;
   public readonly workerPrefix?: string;
 
+  public static registeredWorkerDefsBySpecName: Record<
+    string,
+    ZZWorkerDef<any, any, any, any, any, any>
+  > = {};
+
+  private static instanceReported = false;
+
   constructor({
     jobSpec,
     processor,
@@ -61,6 +67,19 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     if (autostartWorker === true) {
       this.reportInstanceCapacityLazy();
     }
+
+    if (ZZWorkerDef.registeredWorkerDefsBySpecName[jobSpec.name]) {
+      throw new Error(
+        `Worker definition for ${jobSpec.name} already exists. Did you define it twice?`
+      );
+    } else {
+      ZZWorkerDef.registeredWorkerDefsBySpecName[jobSpec.name] = this;
+    }
+
+    if (!ZZWorkerDef.instanceReported) {
+      ZZWorkerDef.instanceReported = true;
+      this.reportInstanceCapacityLazy();
+    }
   }
 
   // public get zzEnv() {
@@ -80,47 +99,81 @@ export class ZZWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
   private async reportInstanceCapacityLazy() {
     const projectUuid = (await this.zzEnvP).projectUuid;
     const instanceId = await(await this.zzEnvP).getInstanceId();
-    const { iterator, resolveNext: reportNext } =
-      genManuallyFedIterator<FromInstance>((v) => {
-        // console.info(`INSTANCE REPORT: ${JSON.stringify(v)}`);
-      });
-    const iter = (await this.zzEnvP).vaultClient.capacity.reportAsInstance(
-      iterator
-    );
-    reportNext({
-      instanceId,
+    // const { iterator: respToVaultIter, resolveNext: reportNext } =
+    //   genManuallyFedIterator<FromInstance>((v) => {
+    //     // console.info(`INSTANCE REPORT: ${JSON.stringify(v)}`);
+    //   });
+    const cmdFromVault = (
+      await this.zzEnvP
+    ).vaultClient.capacity.reportAsInstance({
       projectUuid,
-      reportSpecAvailability: {
-        specName: this.jobSpec.name,
-        maxCapacity: 100,
-      },
+      instanceId,
     });
+
     // console.debug("Reported capacity for", this.jobSpec.name);
-    for await (const cmd of iter) {
-      const { instanceId, provision } = cmd;
-      if (instanceId !== await(await this.zzEnvP).getInstanceId()) {
-        throw new Error("Unexpected instanceId");
+    for await (const cmd of cmdFromVault) {
+      const {
+        instanceId,
+        provision,
+        queryCapacity,
+        projectUuid,
+        correlationId,
+      } = cmd;
+      if (projectUuid !== (await this.zzEnvP).projectUuid) {
+        throw new Error(
+          `Unexpected projectUuid. Expected: "${projectUuid}" got "${
+            (await this.zzEnvP).projectUuid
+          }".`
+        );
       }
-      // console.debug("Received command", cmd);
-      if (provision) {
-        const { projectUuid, specName, numberOfWorkersNeeded } = provision;
+      if (instanceId !== await(await this.zzEnvP).getInstanceId()) {
+        throw new Error(
+          `Unexpected instanceId. Expected: "${instanceId}" got "${await(
+            await this.zzEnvP
+          ).getInstanceId()}".`
+        );
+      }
+
+      if (queryCapacity) {
+        // console.info("Capacity query received: ", queryCapacity);
+        const specNames = Object.keys(
+          ZZWorkerDef.registeredWorkerDefsBySpecName
+        );
+        const capacity = 10;
+
+        await(await this.zzEnvP).vaultClient.capacity.respondToCapacityQuery({
+          correlationId,
+          projectUuid,
+          instanceId,
+          specNameAndCapacity: specNames.map((specName) => {
+            return {
+              specName,
+              capacity,
+            };
+          }),
+        });
+      } else if (provision) {
+        const { specName, numberOfWorkersNeeded } = provision;
         console.info(
           `Provisioning request received: ${projectUuid}/${specName} for ${numberOfWorkersNeeded}`
         );
 
-        if (specName !== this.jobSpec.name) {
-          console.error(
-            "Unexpected specName",
-            specName,
-            "expected",
-            this.jobSpec.name
-          );
-          throw new Error("Unexpected specName");
+        const workerDef = ZZWorkerDef.registeredWorkerDefsBySpecName[specName];
+        if (!workerDef) {
+          throw new Error(`Worker definition not found for ${specName}`);
         }
 
         for (let i = 0; i < numberOfWorkersNeeded; i++) {
-          this.startWorker({});
+          workerDef.startWorker({});
         }
+
+        await(await this.zzEnvP).vaultClient.capacity.respondToProvision({
+          correlationId,
+          projectUuid,
+          instanceId,
+          specName,
+          numberOfWorkersStarted: numberOfWorkersNeeded,
+        });
       } else {
         console.error("Unexpected command", cmd);
         throw new Error("Unexpected command");

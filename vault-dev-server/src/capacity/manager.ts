@@ -6,7 +6,12 @@ import {
   FromWorker,
   CommandToInstance,
 } from "@livestack/vault-interface";
-import { ServerStreamingMethodResult } from "@livestack/vault-interface/src/generated/capacity.js";
+import {
+  InstanceResponseToCapacityQueryMessage,
+  InstanceResponseToProvisionMessage,
+  type ReportAsInstanceMessage,
+  type ServerStreamingMethodResult,
+} from "@livestack/vault-interface/src/generated/capacity.js";
 import { CallContext } from "nice-grpc";
 import { createClient } from "redis";
 import _ from "lodash";
@@ -17,195 +22,223 @@ class CapacityManager implements CacapcityServiceImplementation {
   public readonly sessionId = v4();
   constructor() {}
 
-  resolveByInstanceIAndSpecName: Record<
-    string,
-    Record<string, (value: CommandToInstance) => void>
-  > = {};
+  resolveByInstanceId: Record<string, (value: CommandToInstance) => void> = {};
+  pendingResponseToCapacityQueryResolveFnMap: Map<
+    `instances//${string}//projects//${string}\$\$${string}`,
+    (msg: InstanceResponseToCapacityQueryMessage) => void
+  > = new Map();
+  pendingResponseToProvisionResolveFnMap: Map<
+    `instanaces//${string}//projects//${string}//specs//${string}\$\$${string}`,
+    (msg: InstanceResponseToProvisionMessage) => void
+  > = new Map();
+
+  instanceIdsByProjectUuid: Record<string, string[]> = {};
 
   reportAsInstance(
-    request: AsyncIterable<FromInstance>,
+    request: ReportAsInstanceMessage,
     context: CallContext
   ): ServerStreamingMethodResult<{
+    projectUuid?: string | undefined;
     instanceId?: string | undefined;
     provision?:
       | {
-          projectUuid?: string | undefined;
           specName?: string | undefined;
           numberOfWorkersNeeded?: number | undefined;
         }
       | undefined;
+    queryCapacity?: {} | undefined;
   }> {
     const { iterator: iter, resolveNext: resolveJobPromise } =
       genManuallyFedIterator<CommandToInstance>();
 
-    (async () => {
-      let knownInstanceId: string | null = null;
-      let knownProjectUuid: string | null = null;
+    const { instanceId, projectUuid } = request;
+    context.signal.addEventListener("abort", (e) => {
+      console.log("aborting", e);
+    });
 
-      outer: for await (const {
-        reportSpecAvailability,
-        instanceId,
-        projectUuid,
-      } of request) {
-        if (reportSpecAvailability) {
-          context.signal.addEventListener("abort", (e) => {
-            console.log("aborting", e);
-          });
+    const existing = this.resolveByInstanceId[instanceId];
+    if (!existing) {
+      this.resolveByInstanceId[instanceId] = resolveJobPromise;
+    }
 
-          const existing = this.resolveByInstanceIAndSpecName[instanceId];
-          if (!existing) {
-            this.resolveByInstanceIAndSpecName[instanceId] = {};
-          }
-          this.resolveByInstanceIAndSpecName[instanceId][
-            reportSpecAvailability.specName
-          ] = resolveJobPromise;
-          const { maxCapacity } = reportSpecAvailability;
-          console.debug(
-            `reportSpecAvailability from instance ${instanceId}: ${projectUuid} ${reportSpecAvailability.specName} ${maxCapacity}`
-          );
+    console.debug(
+      `reportInstanceOnline from instance ${instanceId}: ${projectUuid}.`
+    );
 
-          const client = await this.redisClientP;
-          const projectUuidN = escapeColon(projectUuid);
-          const specNameN = escapeColon(reportSpecAvailability.specName);
-          const instanceIdN = escapeColon(instanceId);
-          await client.sendCommand([
-            "HSET",
-            `livestack/${this.sessionId}/zz_maxcapacity:${projectUuidN}:${specNameN}`,
-            instanceIdN,
-            maxCapacity.toString(),
-          ]);
+    this.instanceIdsByProjectUuid[projectUuid] =
+      this.instanceIdsByProjectUuid[projectUuid] || [];
 
-          await client.sendCommand([
-            "SADD",
-            `livestack/${this.sessionId}/zz_instance:${instanceIdN}`,
-            `${projectUuidN}:${specNameN}`,
-          ]);
+    this.instanceIdsByProjectUuid[projectUuid].push(instanceId);
 
-          // clear all capacities on disconnect
-          const abortListener = async () => {
-            console.debug(
-              `Capacity gone: from instance ${instanceId}: ${projectUuid} ${reportSpecAvailability.specName} ${maxCapacity}`
-            );
-            // get the set of reported projectUuid:specName and clear capacity for each
-            const porjectIdSpecNamePairs = (await client.sendCommand([
-              "SMEMBERS",
-              `livestack/${this.sessionId}/zz_instance:${instanceIdN}`,
-            ])) as `${string}:${string}`[];
+    // clear all capacities on disconnect
+    const abortListener = async () => {
+      console.debug(
+        `Instance gone: from instance ${instanceId}: ${projectUuid}.`
+      );
+      delete this.resolveByInstanceId[instanceId];
 
-            for (const pair of porjectIdSpecNamePairs) {
-              const [projectUuidN, specNameN] = pair.split(":");
-              // await client.sendCommand([
-              //   "HDEL",
-              //   `livestack/${this.sessionId}/zz_maxcapacity:${projectUuidN}:${specNameN}`,
-              //   instanceIdN,
-              // ]);
+      // remove instanceId from projectUuid lookup
+      this.instanceIdsByProjectUuid[projectUuid] =
+        this.instanceIdsByProjectUuid[projectUuid].filter(
+          (id) => id !== instanceId
+        );
 
-              // remove capacity hash values
-              await client.sendCommand([
-                "HDEL",
-                `livestack/${this.sessionId}/zz_maxcapacity:${projectUuidN}:${specNameN}`,
-                instanceIdN,
-              ]);
-              delete this.resolveByInstanceIAndSpecName[instanceIdN][specNameN];
-              context.signal.removeEventListener("abort", abortListener);
-            }
-          };
+      context.signal.removeEventListener("abort", abortListener);
+    };
 
-          context.signal.addEventListener("abort", abortListener);
-        } else {
-          throw new Error("Invalid command");
-        }
-      }
-    })();
+    context.signal.addEventListener("abort", abortListener);
+
     return iter;
+  }
+
+  async runCapacityQuery({
+    instanceId,
+    projectUuid,
+  }: {
+    instanceId: string;
+    projectUuid: string;
+  }): Promise<InstanceResponseToCapacityQueryMessage> {
+    // add a resolve function for this instanceId
+
+    const sendCmdToClient = this.resolveByInstanceId[instanceId];
+    if (!sendCmdToClient) {
+      throw new Error(`No instance found for ${instanceId}`);
+    }
+    const correlationId = v4();
+    sendCmdToClient({
+      projectUuid,
+      instanceId,
+      queryCapacity: {},
+      correlationId,
+    });
+
+    const promise = new Promise<InstanceResponseToCapacityQueryMessage>(
+      (resolve) => {
+        this.pendingResponseToCapacityQueryResolveFnMap.set(
+          `instances//${instanceId}//projects//${projectUuid}\$\$${correlationId}`,
+          resolve
+        );
+      }
+    );
+
+    return await promise;
+  }
+
+  async respondToCapacityQuery(
+    request: InstanceResponseToCapacityQueryMessage,
+    context: CallContext
+  ): Promise<{}> {
+    const { instanceId, projectUuid, correlationId } = request;
+    // console.info("respondToCapacityQuery received", request);
+    const resolveFn = this.pendingResponseToCapacityQueryResolveFnMap.get(
+      `instances//${instanceId}//projects//${projectUuid}\$\$${correlationId}`
+    );
+    if (!resolveFn) {
+      throw new Error(
+        `No pending response found for ${instanceId}:${projectUuid}`
+      );
+    }
+    resolveFn(request);
+    return {};
+  }
+
+  async runProvision({
+    projectUuid,
+    instanceId,
+    specName,
+    numberOfWorkersNeeded,
+  }: {
+    projectUuid: string;
+    instanceId: string;
+    specName: string;
+    numberOfWorkersNeeded: number;
+  }): Promise<InstanceResponseToProvisionMessage> {
+    // add a resolve function for this instanceId
+    const sendCmdToClient = this.resolveByInstanceId[instanceId];
+    if (!sendCmdToClient) {
+      throw new Error(`No instance found for ${instanceId}`);
+    }
+    const correlationId = v4();
+    sendCmdToClient({
+      projectUuid,
+      instanceId,
+      correlationId,
+      provision: {
+        specName,
+        numberOfWorkersNeeded,
+      },
+    });
+    let resolveFn: (msg: InstanceResponseToProvisionMessage) => void;
+
+    const promise = new Promise<InstanceResponseToProvisionMessage>(
+      (resolve) => {
+        resolveFn = resolve;
+        this.pendingResponseToProvisionResolveFnMap.set(
+          `instanaces//${instanceId}//projects//${projectUuid}//specs//${specName}\$\$${correlationId}`,
+          resolveFn
+        );
+      }
+    );
+
+    return await promise;
+  }
+
+  respondToProvision(
+    request: InstanceResponseToProvisionMessage,
+    context: CallContext
+  ): Promise<{}> {
+    const { instanceId, projectUuid, specName, correlationId } = request;
+    const resolveFn = this.pendingResponseToProvisionResolveFnMap.get(
+      `instanaces//${instanceId}//projects//${projectUuid}//specs//${specName}\$\$${correlationId}`
+    );
+    if (!resolveFn) {
+      throw new Error(
+        `No pending response found for ${instanceId}:${projectUuid}:${specName}`
+      );
+    }
+    resolveFn(request);
+    return Promise.resolve({});
   }
 
   async increaseCapacity({
     projectUuid,
     specName,
     by,
-    conditionStillMet,
   }: {
     projectUuid: string;
     specName: string;
     by: number;
-    conditionStillMet: () => Promise<boolean>;
   }) {
-    // set the relevant capacity in redis
-    const client = await this.redisClientP;
-    const projectUuidN = escapeColon(projectUuid);
-    const specNameN = escapeColon(specName);
+    const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
 
-    let instanceIdsAndMaxCapacities: string[] = [];
-
-    // keep checking until we find an instance with capacity
-    while (await conditionStillMet()) {
-      // get all instances (keys) for this projectUuid:specName
-      instanceIdsAndMaxCapacities = (await client.sendCommand([
-        "HGETALL",
-        `livestack/${this.sessionId}/zz_maxcapacity:${projectUuidN}:${specNameN}`,
-      ])) as string[];
-      if (instanceIdsAndMaxCapacities.length === 0) {
-        // console.warn(
-        //   `No instances found for ${projectUuid}:${specName}. Will retry again in 2000ms.`
-        // );
-        await new Promise((r) => setTimeout(r, 2000));
-        continue;
-      } else {
-        break;
-      }
-    }
-
-    // console.log(
-    //   `instanceIdsAndMaxCapacities: for ${projectUuid}:${specName}: `,
-    //   instanceIdsAndMaxCapacities
-    // );
-
-    const maxCapacitiesByInstanceId = Object.fromEntries(
-      _.chunk(instanceIdsAndMaxCapacities, 2).map(
-        ([instanceId, capacityStr]) =>
-          [instanceId, Number(capacityStr)] as const
+    const capacities = await Promise.all(
+      instanceIds.map((instanceId) =>
+        this.runCapacityQuery({ instanceId, projectUuid })
       )
     );
 
-    // console.log(
-    //   `maxCapacitiesByInstanceId: for ${projectUuid}:${specName}: `,
-    //   maxCapacitiesByInstanceId
-    // );
+    // console.debug("capacities", capacities);
 
-    // choose the instance with the most capacity
-    const sorted = Object.entries(maxCapacitiesByInstanceId).sort(
-      ([, a], [, b]) => b - a
+    const qualifiedCapacities = capacities.filter((c) =>
+      c.specNameAndCapacity.some(
+        (s) => s.specName === specName && s.capacity >= by
+      )
     );
 
-    let nextBestInstanceId: string | undefined;
-
-    while (true) {
-      nextBestInstanceId = sorted.shift()?.[0];
-      if (!nextBestInstanceId) {
-        console.warn(
-          `No instances found for ${projectUuid}:${specName}. Exiting.`
-        );
-        break;
-      }
-      // nudge the instance to increase capacity
-      const resolve =
-        this.resolveByInstanceIAndSpecName[nextBestInstanceId]?.[specName];
-      if (!resolve) {
-        continue;
-      }
-
-      resolve({
-        projectUuid,
-        instanceId: nextBestInstanceId,
-        provision: {
-          projectUuid,
-          specName,
-          numberOfWorkersNeeded: by,
-        },
-      });
-      break;
+    if (qualifiedCapacities.length === 0) {
+      console.warn(
+        `No instances with enough capacity found for ${projectUuid}:${specName}`
+      );
     }
+
+    const nextBestInstanceId = _.sample(qualifiedCapacities)!.instanceId;
+
+    await this.runProvision({
+      projectUuid,
+      instanceId: nextBestInstanceId,
+      specName,
+      numberOfWorkersNeeded: by,
+    });
   }
 }
 

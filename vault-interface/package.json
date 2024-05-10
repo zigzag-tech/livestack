@@ -20,7 +20,7 @@
     "@preconstruct/cli": "^2.8.3",
     "@types/node": "^20.11.0",
     "eslint": "^8.56.0",
-    "ts-proto": "^1.169.1",
+    "ts-proto": "^1.174.0",
     "typescript": "5.4.5"
   },
   "types": "dist/livestack-vault-interface.cjs.d",

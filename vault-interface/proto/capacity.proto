@@ -2,35 +2,57 @@ syntax = "proto3";
 
 package livestack;
 
-// import "google/protobuf/empty.proto"; 
+import "google/protobuf/empty.proto"; 
 
 service CacapcityService {
-  rpc ReportAsInstance(stream FromInstance) returns (stream CommandToInstance);
+  rpc ReportAsInstance(ReportAsInstanceMessage) returns (stream CommandToInstance);
+  rpc RespondToCapacityQuery(InstanceResponseToCapacityQueryMessage) returns (google.protobuf.Empty);;
+  rpc RespondToProvision(InstanceResponseToProvisionMessage) returns (google.protobuf.Empty);;
 }
 
-message ReportSpecAvailability {
-  string specName = 3;
-  int32 maxCapacity = 4;
-}
-
-message FromInstance {
+message ReportAsInstanceMessage {
   string projectUuid = 1;
   string instanceId = 2;
-  oneof value {
-    ReportSpecAvailability reportSpecAvailability = 3;
-  }
 }
 
-message Provision {
-  string projectUuid = 1;
-  string specName = 2;
-  int32 numberOfWorkersNeeded = 3;
+message SpecNameAndCapacity {
+  string specName = 1;
+  int32 capacity = 2;
+}
+
+message InstanceResponseToCapacityQueryMessage {
+  string correlationId = 1;
+  string projectUuid = 2;
+  string instanceId = 3;
+  repeated SpecNameAndCapacity specNameAndCapacity = 4;
+}
+
+message InstanceResponseToProvisionMessage {
+  string correlationId = 1;
+  string projectUuid = 2;
+  string instanceId = 3;
+  string specName = 4;
+    // status: 0: success, 1: partial success, 2: failed
+  int32 status = 5;
+  int32 numberOfWorkersStarted = 6;
+}
+
+
+message ProvisionCommand {
+  string specName = 1;
+  int32 numberOfWorkersNeeded = 2;
+}
+
+message QueryCapacityCommand {
+  
 }
 
 message CommandToInstance {
   string projectUuid = 1;
   string instanceId = 2;
+  string correlationId = 3;
   oneof value {
-    Provision provision = 3;
+    ProvisionCommand provision = 4;
+    QueryCapacityCommand queryCapacity = 5;
   }
 }

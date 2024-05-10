@@ -81,15 +81,6 @@ class QueueServiceByProject implements QueueServiceImplementation {
     const countOfTotalJobsRequiringCapacity =
       (await queue.getWaitingCount()) + (await queue.getActiveCount());
 
-    // const capacity =
-    //   Number(
-    //     await client.sendCommand([
-    //       "HGET",
-    //       `livestack/${this.sessionId}/zz_capacity`,
-    //       `${projectUuidN}:${specNameN}`,
-    //     ])
-    //   ) || 0;
-
     const workers = await queue.getWorkers();
     const capacity = workers.length;
 
@@ -106,12 +97,6 @@ class QueueServiceByProject implements QueueServiceImplementation {
           projectUuid: job.projectUuid,
           specName: job.specName,
           by: 1,
-          conditionStillMet: async () => {
-            const countOfTotalJobsRequiringCapacity =
-              (await queue.getWaitingCount()) + (await queue.getActiveCount());
-            const workers = await queue.getWorkers();
-            return workers.length < countOfTotalJobsRequiringCapacity;
-          },
         });
       }
     }
@@ -253,16 +238,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
               specName,
               ", id:",
               workerId,
-              ". capacity for ",
-              worker.name,
-              " reduced to ",
-              Number(
-                await client.sendCommand([
-                  "HGET",
-                  `livestack/${this.sessionId}/zz_capacity`,
-                  `${projectUuid}:${specName}`,
-                ])
-              ) || 0
+              "."
             );
 
             this.currentJobByWorkerId[workerId] &&
