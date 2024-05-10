@@ -2,7 +2,7 @@
   "name": "@livestack/root",
   "version": "0.0.2",
   "scripts": {
-    "typedoc": "typedoc"
+    "typedoc": "typedoc && cp -r _misc _docs/"
   },
   "workspaces": [
     "*"
