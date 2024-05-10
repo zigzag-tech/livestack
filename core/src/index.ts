@@ -1,4 +1,4 @@
-export { ZZJob } from "./jobs/ZZJob";
+export { ZZJob as corePkg } from "./jobs/ZZJob";
 export { ZZWorker, ZZWorkerDef } from "./jobs/ZZWorker";
 export { JobSpec } from "./jobs/JobSpec";
 export { ZZEnv } from "./jobs/ZZEnv";
@@ -25,4 +25,4 @@ export { longStringTruncator };
 export { sleep } from "./utils/sleep";
 
 export type * from "./onboarding/CliOnboarding";
-// export { createLazyNextValueGenerator } from "./jobs/pubsub";  
+// export { createLazyNextValueGenerator } from "./jobs/pubsub";
