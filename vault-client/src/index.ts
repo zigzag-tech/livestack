@@ -68,6 +68,11 @@ export function findSuitableVaultServer(authToken: string) {
     StreamServiceDefinition,
     createChannel(vaultServerURL, undefined, connOpts)
   );
+
+  const capacityClient = clientFactory.create(
+    CacapcityServiceDefinition,
+    createChannel(vaultServerURL, undefined, connOpts)
+  );
   return {
     db: {
       getJobRec: genAuthorizedGRPCFn(
@@ -139,10 +144,20 @@ export function findSuitableVaultServer(authToken: string) {
         queueClient.reportAsWorker.bind(queueClient)
       ).bind(queueClient),
     },
-    capacity: clientFactory.create(
-      CacapcityServiceDefinition,
-      createChannel(vaultServerURL, undefined, connOpts)
-    ),
+    capacity: {
+      reportAsInstance: genAuthorizedGRPCFn(
+        authToken,
+        capacityClient.reportAsInstance.bind(capacityClient)
+      ).bind(capacityClient),
+      respondToCapacityQuery: genAuthorizedGRPCFn(
+        authToken,
+        capacityClient.respondToCapacityQuery.bind(capacityClient)
+      ).bind(capacityClient),
+      respondToProvision: genAuthorizedGRPCFn(
+        authToken,
+        capacityClient.respondToProvision.bind(capacityClient)
+      ).bind(capacityClient),
+    },
   };
 }
 
