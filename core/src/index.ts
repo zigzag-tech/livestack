@@ -1,9 +1,9 @@
-export { ZZJob as corePkg } from "./jobs/ZZJob";
-export { ZZWorker, ZZWorkerDef } from "./jobs/ZZWorker";
+export { LiveJob as corePkg } from "./jobs/LiveJob";
+export { LiveWorker, LiveWorkerDef } from "./jobs/LiveWorker";
 export { JobSpec } from "./jobs/JobSpec";
-export { ZZEnv } from "./jobs/ZZEnv";
+export { LiveEnv } from "./jobs/LiveEnv";
 export { DataStream } from "./streams/DataStream";
-export { fileOrBufferSchema } from "./jobs/ZZEnv";
+export { fileOrBufferSchema } from "./jobs/LiveEnv";
 export {
   Workflow,
   WorkflowSpec,

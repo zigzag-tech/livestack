@@ -53,11 +53,11 @@ message GetJobRecResponse {
   }
 }
 
-message GetZZJobTestRequest {
+message GetLiveJobTestRequest {
   string id = 1;
 }
 
-message GetZZJobTestResponse {
+message GetLiveJobTestResponse {
   string projectUuid = 1;
   string pipeName = 2;
   string jobId = 3;

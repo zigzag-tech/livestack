@@ -8,39 +8,39 @@ import { ConnectorType } from "@livestack/vault-interface";
 import { TransformRegistry } from "./TransformRegistry";
 import { lruCacheFn } from "@livestack/shared";
 import { JobSpec } from "../jobs/JobSpec";
-import { ZZEnv } from "../jobs/ZZEnv";
+import { LiveEnv } from "../jobs/LiveEnv";
 
 // TODO: cache this
 export const resolveInstantiatedGraph = lruCacheFn(
   ({ specName, jobId }) => `${specName}/${jobId}`,
   async ({
-    zzEnv,
+    liveEnv,
     specName,
     jobId,
   }: {
-    zzEnv: ZZEnv;
+    liveEnv: LiveEnv;
     specName: string;
     jobId: string;
   }): Promise<InstantiatedGraph> => {
     const spec = JobSpec.lookupByName(specName);
 
     if (
-      getJobStreamConnectorRecsCachedPByProjectUuid[zzEnv.projectUuid] ===
+      getJobStreamConnectorRecsCachedPByProjectUuid[liveEnv.projectUuid] ===
       undefined
     ) {
-      getJobStreamConnectorRecsCachedPByProjectUuid[zzEnv.projectUuid] =
+      getJobStreamConnectorRecsCachedPByProjectUuid[liveEnv.projectUuid] =
         lruCacheFn(
           ((rec: any) => `${rec.projectUuid}/${rec.jobId}`) as any,
-          zzEnv.vaultClient.db.getJobStreamConnectorRecs.bind(
-            zzEnv.vaultClient.db
+          liveEnv.vaultClient.db.getJobStreamConnectorRecs.bind(
+            liveEnv.vaultClient.db
           )
         );
     }
 
     const getJobStreamConnectorRecsCachedP =
-      getJobStreamConnectorRecsCachedPByProjectUuid[zzEnv.projectUuid];
+      getJobStreamConnectorRecsCachedPByProjectUuid[liveEnv.projectUuid];
     const { records: streams } = await(await getJobStreamConnectorRecsCachedP)({
-      projectUuid: zzEnv.projectUuid,
+      projectUuid: liveEnv.projectUuid,
       jobId,
     });
 
@@ -55,18 +55,20 @@ export const resolveInstantiatedGraph = lruCacheFn(
         })
     );
 
-    if (cacgetParentRecCachedPByProjectUuid[zzEnv.projectUuid] === undefined) {
-      cacgetParentRecCachedPByProjectUuid[zzEnv.projectUuid] = lruCacheFn(
+    if (
+      cacgetParentRecCachedPByProjectUuid[liveEnv.projectUuid] === undefined
+    ) {
+      cacgetParentRecCachedPByProjectUuid[liveEnv.projectUuid] = lruCacheFn(
         ((rec: any) => `${rec.project_uuid}/${rec.childJobId}`) as any,
-        zzEnv.vaultClient.db.getParentJobRec.bind(zzEnv.vaultClient.db)
+        liveEnv.vaultClient.db.getParentJobRec.bind(liveEnv.vaultClient.db)
       );
     }
 
     const getParentRecCachedP =
-      cacgetParentRecCachedPByProjectUuid[zzEnv.projectUuid];
+      cacgetParentRecCachedPByProjectUuid[liveEnv.projectUuid];
 
     const parentRec = await(await getParentRecCachedP)({
-      projectUuid: zzEnv.projectUuid,
+      projectUuid: liveEnv.projectUuid,
       childJobId: jobId,
     });
 
@@ -82,7 +84,7 @@ export const resolveInstantiatedGraph = lruCacheFn(
     if (parentRec.rec) {
       const pRec = parentRec.rec;
       const parentInstaG = await resolveInstantiatedGraph({
-        zzEnv,
+        liveEnv,
         specName: pRec.spec_name,
         jobId: pRec.parent_job_id,
       });
@@ -136,10 +138,10 @@ export const resolveInstantiatedGraph = lruCacheFn(
 
 const cacgetParentRecCachedPByProjectUuid: Record<
   string,
-  ZZEnv["vaultClient"]["db"]["getParentJobRec"]
+  LiveEnv["vaultClient"]["db"]["getParentJobRec"]
 > = {};
 const getJobStreamConnectorRecsCachedPByProjectUuid: Record<
   string,
-  ZZEnv["vaultClient"]["db"]["getJobStreamConnectorRecs"]
+  LiveEnv["vaultClient"]["db"]["getJobStreamConnectorRecs"]
 > = {};
 

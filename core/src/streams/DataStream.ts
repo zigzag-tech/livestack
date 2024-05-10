@@ -1,6 +1,6 @@
 import type { ZodType } from "zod";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
-import { ZZEnv, LIVESTACK_DASHBOARD_URL_ROOT } from "../jobs/ZZEnv";
+import { LiveEnv, LIVESTACK_DASHBOARD_URL_ROOT } from "../jobs/LiveEnv";
 import path from "path";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
@@ -15,7 +15,7 @@ import { Empty } from "@livestack/vault-interface";
 export class DataStream<T extends object> {
   public readonly def: ZodType<T> | null;
   public readonly uniqueName: string;
-  public readonly zzEnvP: Promise<ZZEnv>;
+  public readonly liveEnvP: Promise<LiveEnv>;
   baseWorkingRelativePathP: Promise<string>;
 
   private logger: ReturnType<typeof getLogger>;
@@ -23,16 +23,16 @@ export class DataStream<T extends object> {
   public static async getOrCreate<T extends object>({
     uniqueName,
     def,
-    zzEnv,
+    liveEnv,
     logger,
   }: {
     uniqueName: string;
     def?: ZodType<T> | null;
-    zzEnv?: ZZEnv | null;
+    liveEnv?: LiveEnv | null;
     logger?: ReturnType<typeof getLogger>;
   }): Promise<DataStream<T>> {
-    if (zzEnv) {
-      zzEnv = await ZZEnv.globalP();
+    if (liveEnv) {
+      liveEnv = await LiveEnv.globalP();
     }
     if (DataStream.globalRegistry[uniqueName]) {
       const existing = DataStream.globalRegistry[uniqueName];
@@ -56,20 +56,20 @@ export class DataStream<T extends object> {
       const stream = new DataStream({
         uniqueName,
         def: def || null,
-        zzEnv,
+        liveEnv,
         logger,
       });
       // async
-      if (zzEnv) {
+      if (liveEnv) {
         let jsonSchemaStr: string | undefined = undefined;
         if (def) {
           const jsonSchema = zodToJsonSchema(def);
           jsonSchemaStr = JSON.stringify(jsonSchema);
         }
         await (
-          await ZZEnv.globalP()
+          await LiveEnv.globalP()
         ).vaultClient.stream.ensureStream({
-          project_uuid: zzEnv.projectUuid,
+          project_uuid: liveEnv.projectUuid,
           stream_id: uniqueName,
           json_schema_str: jsonSchemaStr,
         });
@@ -82,25 +82,25 @@ export class DataStream<T extends object> {
   protected constructor({
     uniqueName,
     def,
-    zzEnv,
+    liveEnv,
     logger,
   }: {
     uniqueName: string;
     def: ZodType<T> | null;
-    zzEnv?: ZZEnv | null;
+    liveEnv?: LiveEnv | null;
     logger: ReturnType<typeof getLogger>;
   }) {
     this.def = def;
     this.uniqueName = uniqueName;
-    if (zzEnv) {
-      this.zzEnvP = Promise.resolve(zzEnv);
+    if (liveEnv) {
+      this.liveEnvP = Promise.resolve(liveEnv);
     } else {
-      this.zzEnvP = ZZEnv.globalP();
+      this.liveEnvP = LiveEnv.globalP();
     }
 
     this.logger = logger;
-    this.baseWorkingRelativePathP = this.zzEnvP.then((zzEnv) =>
-      path.join(zzEnv.projectUuid, this.uniqueName)
+    this.baseWorkingRelativePathP = this.liveEnvP.then((liveEnv) =>
+      path.join(liveEnv.projectUuid, this.uniqueName)
     );
   }
 
@@ -118,8 +118,8 @@ export class DataStream<T extends object> {
       const { largeFilesToRestore, newObj } = identifyLargeFilesToRestore(data);
 
       if (largeFilesToRestore.length > 0) {
-        const zzEnv = await this.zzEnvP;
-        const storageProvider = await zzEnv.storageProvider;
+        const liveEnv = await this.liveEnvP;
+        const storageProvider = await liveEnv.storageProvider;
         if (!storageProvider) {
           throw new Error(
             "storageProvider is not provided, and not all parts can be saved to local storage because they are either too large or contains binary data."
@@ -146,10 +146,10 @@ export class DataStream<T extends object> {
   public allValues = async () => {
     const { datapoints } = await (
       await (
-        await ZZEnv.globalP()
+        await LiveEnv.globalP()
       ).vaultClient
     ).stream.allValues({
-      projectUuid: (await this.zzEnvP).projectUuid,
+      projectUuid: (await this.liveEnvP).projectUuid,
       uniqueName: this.uniqueName,
     });
 
@@ -163,10 +163,10 @@ export class DataStream<T extends object> {
   public valuesByReverseIndex = async (lastN: number) => {
     const { datapoints } = await (
       await (
-        await ZZEnv.globalP()
+        await LiveEnv.globalP()
       ).vaultClient
     ).stream.valuesByReverseIndex({
-      projectUuid: (await this.zzEnvP).projectUuid,
+      projectUuid: (await this.liveEnvP).projectUuid,
       uniqueName: this.uniqueName,
       lastN,
     });
@@ -220,8 +220,8 @@ export class DataStream<T extends object> {
     // }
 
     let { largeFilesToSave, newObj } = await identifyLargeFilesToSave(parsed);
-    const zzEnv = await this.zzEnvP;
-    const storageProvider = await zzEnv.storageProvider;
+    const liveEnv = await this.liveEnvP;
+    const storageProvider = await liveEnv.storageProvider;
     if (storageProvider) {
       const basePath = await this.baseWorkingRelativePathP;
       const fullPathLargeFilesToSave = largeFilesToSave.map((x) => ({
@@ -256,10 +256,10 @@ export class DataStream<T extends object> {
       //   this.uniqueName,
       //   JSON.stringify(parsed)
       // );
-      const vaultClient = await (await ZZEnv.globalP()).vaultClient;
+      const vaultClient = await(await LiveEnv.globalP()).vaultClient;
       const { success, validationFailure } = await vaultClient.stream.pub({
         streamId: this.uniqueName,
-        projectUuid: (await this.zzEnvP).projectUuid,
+        projectUuid: (await this.liveEnvP).projectUuid,
         jobInfo: jobInfo,
         dataStr: JSON.stringify(parsed),
         parentDatapoints,
@@ -274,9 +274,9 @@ export class DataStream<T extends object> {
         );
         const { datapointId, errorMessage } = validationFailure;
 
-        const { userId } = await await this.zzEnvP;
+        const { userId } = await await this.liveEnvP;
         const inspectMessage = ` 🔍🔴 Inspect error:  ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${userId}/${
-          (await this.zzEnvP).localProjectId
+          (await this.liveEnvP).localProjectId
         }`;
         console.info(inspectMessage);
         console.error("Error message: ", errorMessage);

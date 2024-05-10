@@ -22,7 +22,7 @@ const CONN_FAILED_MSG = "Please make sure you are connected to the internet.";
 const limiter = limit(1);
 export const LIVESTACK_DASHBOARD_URL_ROOT =
   process.env.LIVESTACK_DASHBOARD_URL_ROOT || "https://live.dev";
-interface ZZEnvConfig {
+interface LiveEnvConfig {
   readonly storageProvider?: Promise<IStorageProvider> | IStorageProvider;
   // two types of project IDs are supported:
   // 1. "@<userId>/<projectUuid>"
@@ -30,7 +30,7 @@ interface ZZEnvConfig {
   readonly projectId?: string | `@${string}/${string}`;
 }
 
-export class ZZEnv {
+export class LiveEnv {
   public readonly storageProvider?: Promise<IStorageProvider | undefined>;
   public readonly vaultClient: AuthorizedGRPCClient;
   public readonly projectUuid: string;
@@ -60,7 +60,7 @@ export class ZZEnv {
     this.printLiveDevUrlOnce();
   }
 
-  static async create(config: ZZEnvConfig) {
+  static async create(config: LiveEnvConfig) {
     let projectId = config.projectId;
     if (!projectId) {
       projectId = process.env.LIVESTACK_PROJECT_ID;
@@ -68,13 +68,13 @@ export class ZZEnv {
 
     if (!projectId) {
       throw new Error(
-        "Project ID is not provided. Please provide a project ID with ZZEnv.create({ projectId: '...' }) or set the LIVESTACK_PROJECT_ID environment variable."
+        "Project ID is not provided. Please provide a project ID with LiveEnv.create({ projectId: '...' }) or set the LIVESTACK_PROJECT_ID environment variable."
       );
     }
     const { projectUuid, localProjectId, userId, authToken } =
       await resolveProjectInfo(projectId);
 
-    return new ZZEnv({
+    return new LiveEnv({
       storageProvider: config.storageProvider,
       projectUuid,
       localProjectId,
@@ -83,31 +83,31 @@ export class ZZEnv {
     });
   }
 
-  private static _zzEnvP: Promise<ZZEnv> | null = null;
-  private static _resolveGlobal: ((env: ZZEnv) => void) | null = null;
+  private static _liveEnvP: Promise<LiveEnv> | null = null;
+  private static _resolveGlobal: ((env: LiveEnv) => void) | null = null;
 
   public static _ensureInitialized() {
-    if (!ZZEnv._zzEnvP) {
-      ZZEnv._zzEnvP = new Promise<ZZEnv>((resolve) => {
-        ZZEnv._resolveGlobal = resolve;
+    if (!LiveEnv._liveEnvP) {
+      LiveEnv._liveEnvP = new Promise<LiveEnv>((resolve) => {
+        LiveEnv._resolveGlobal = resolve;
       });
     }
   }
 
   static globalP() {
-    ZZEnv._ensureInitialized();
-    return ZZEnv._zzEnvP!;
+    LiveEnv._ensureInitialized();
+    return LiveEnv._liveEnvP!;
   }
 
-  static setGlobal(env: ZZEnv | Promise<ZZEnv>) {
-    ZZEnv._ensureInitialized();
-    if (env instanceof ZZEnv) {
+  static setGlobal(env: LiveEnv | Promise<LiveEnv>) {
+    LiveEnv._ensureInitialized();
+    if (env instanceof LiveEnv) {
       console.info("Global project ID set to ", env.projectUuid);
-      ZZEnv._resolveGlobal!(env);
+      LiveEnv._resolveGlobal!(env);
     } else {
       env.then((env) => {
         console.info("Global project ID set to ", env.projectUuid);
-        ZZEnv._resolveGlobal!(env);
+        LiveEnv._resolveGlobal!(env);
       });
     }
   }
@@ -128,7 +128,7 @@ export class ZZEnv {
   static getInstanceLimiter = limit(1);
 
   public async getInstanceId() {
-    return ZZEnv.getInstanceLimiter(async () => {
+    return LiveEnv.getInstanceLimiter(async () => {
       if (!this._cachedInstanceId) {
         const r = await this.vaultClient.queue.initInstance({});
         this._cachedInstanceId = r.instanceId;

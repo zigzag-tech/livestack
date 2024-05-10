@@ -20,9 +20,9 @@ import { WrapWithTimestamp } from "./../utils/io";
 import {
   InferDefaultOrSingleKey,
   InferDefaultOrSingleValue,
-  ZZWorkerDef,
-  ZZWorkerDefParams,
-} from "./ZZWorker";
+  LiveWorkerDef,
+  LiveWorkerDefParams,
+} from "./LiveWorker";
 import pLimit from "p-limit";
 import { Observable, Subscription } from "rxjs";
 import { z } from "zod";
@@ -36,7 +36,7 @@ import {
 } from "../utils/io";
 import { DataStream } from "../streams/DataStream";
 import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
-import { ZZEnv } from "./ZZEnv";
+import { LiveEnv } from "./LiveEnv";
 import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
 import { lruCacheFn } from "@livestack/shared";
 
@@ -73,7 +73,7 @@ export class JobSpec<
   IMap = InferTMap<I>,
   OMap = InferTMap<O>
 > extends IOSpec<I, O, IMap, OMap> {
-  private readonly _zzEnv: ZZEnv | null = null;
+  private readonly _liveEnv: LiveEnv | null = null;
   protected static _registryBySpecName: Record<
     string,
     JobSpec<any, any, any, any, any>
@@ -97,7 +97,7 @@ export class JobSpec<
   readonly jobOptions: z.ZodType<P>;
 
   constructor({
-    zzEnv,
+    liveEnv,
     name,
     jobOptions,
     output,
@@ -105,7 +105,7 @@ export class JobSpec<
   }: {
     name: string;
     jobOptions?: z.ZodType<P>;
-    zzEnv?: ZZEnv;
+    liveEnv?: LiveEnv;
     concurrency?: number;
     input?: I;
     output?: O;
@@ -117,25 +117,25 @@ export class JobSpec<
     });
 
     this.jobOptions = jobOptions || (z.object({}) as unknown as z.ZodType<P>);
-    this._zzEnv = zzEnv || null;
+    this._liveEnv = liveEnv || null;
     this.logger = getLogger(`spec:${this.name}`);
     // if (!output) {
     //   this.logger.warn(`No output defined for job spec ${this.name}.`);
     // }
     JobSpec._registryBySpecName[this.name] = this;
 
-    if (zzEnv) {
-      this.zzEnvP = Promise.resolve(zzEnv);
+    if (liveEnv) {
+      this.liveEnvP = Promise.resolve(liveEnv);
     } else {
-      this.zzEnvP = Promise.race([ZZEnv.globalP()]);
+      this.liveEnvP = Promise.race([LiveEnv.globalP()]);
     }
-    this.zzEnvPWithTimeout = Promise.race([
-      this.zzEnvP,
-      // new Promise<ZZEnv>((_, reject) => {
+    this.liveEnvPWithTimeout = Promise.race([
+      this.liveEnvP,
+      // new Promise<LiveEnv>((_, reject) => {
       //   setTimeout(() => {
       //     reject(
       //       new Error(
-      //         "Livestack waited for ZZEnv to be set for over 10s, but is still not set. Please provide zzEnv either in the constructor of jobSpec, or globally with ZZEnv.setGlobalP."
+      //         "Livestack waited for LiveEnv to be set for over 10s, but is still not set. Please provide liveEnv either in the constructor of jobSpec, or globally with LiveEnv.setGlobalP."
       //       )
       //     );
       //   }, 1000 * 10);
@@ -143,8 +143,8 @@ export class JobSpec<
     ]);
   }
 
-  public zzEnvP: Promise<ZZEnv>;
-  public zzEnvPWithTimeout: Promise<ZZEnv>;
+  public liveEnvP: Promise<LiveEnv>;
+  public liveEnvPWithTimeout: Promise<LiveEnv>;
 
   public static lookupByName(specName: string) {
     if (!JobSpec._registryBySpecName[specName]) {
@@ -218,9 +218,9 @@ export class JobSpec<
   }
 
   async getJobManager(jobId: string) {
-    const zzEnv = await this.zzEnvPWithTimeout;
-    const jobRecResp = await zzEnv.vaultClient.db.getJobRec({
-      projectUuid: zzEnv.projectUuid,
+    const liveEnv = await this.liveEnvPWithTimeout;
+    const jobRecResp = await liveEnv.vaultClient.db.getJobRec({
+      projectUuid: liveEnv.projectUuid,
       jobId,
       specName: this.name,
     });
@@ -235,7 +235,7 @@ export class JobSpec<
     const instaG = await resolveInstantiatedGraph({
       specName: this.name,
       jobId,
-      zzEnv: await this.zzEnvPWithTimeout,
+      liveEnv: await this.liveEnvPWithTimeout,
     });
 
     return new JobManager<P, I, O, IMap, OMap>({
@@ -336,7 +336,7 @@ export class JobSpec<
       }
 
       // await ensureStreamNotTerminated({
-      //   zzEnv: this.zzEnvEnsured,
+      //   liveEnv: this.liveEnvEnsured,
       //   logger: this.logger,
       //   jobId,
       //   type,
@@ -394,7 +394,7 @@ export class JobSpec<
     const instaG = await resolveInstantiatedGraph({
       specName: this.name,
       jobId,
-      zzEnv: await this.zzEnvPWithTimeout,
+      liveEnv: await this.liveEnvPWithTimeout,
     });
 
     const streamNodeId = instaG.findStreamNodeIdConnectedToJob({
@@ -480,7 +480,7 @@ export class JobSpec<
         const instaG = await resolveInstantiatedGraph({
           specName: this.name,
           jobId,
-          zzEnv: await this.zzEnvPWithTimeout,
+          liveEnv: await this.liveEnvPWithTimeout,
         });
         // console.log(
         //   "streamSourceSpecTypeByStreamId",
@@ -582,7 +582,7 @@ export class JobSpec<
         uniqueName: streamId,
         def,
         logger: connectedSpec.logger,
-        zzEnv: await connectedSpec.zzEnvPWithTimeout,
+        liveEnv: await connectedSpec.liveEnvPWithTimeout,
       });
 
       return stream as DataStream<WrapTerminatorAndDataId<T>>;
@@ -654,7 +654,7 @@ export class JobSpec<
 
     // console.debug("Spec._enqueueJob", jobId, jobOptions);
 
-    const projectUuid = (await this.zzEnvPWithTimeout).projectUuid;
+    const projectUuid = (await this.liveEnvPWithTimeout).projectUuid;
 
     // construct streamIdOverridesByTagByTypeByJobId[jobId] from the graph
 
@@ -726,9 +726,9 @@ export class JobSpec<
     }
 
     jobOptions = jobOptions || ({} as P);
-    const vaultClient = await (await this.zzEnvP).vaultClient;
+    const vaultClient = await (await this.liveEnvP).vaultClient;
     await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
-      projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
+      projectUuid: (await this.liveEnvPWithTimeout).projectUuid,
       specName: this.name,
       jobId,
       jobOptionsStr: JSON.stringify(jobOptions),
@@ -749,7 +749,7 @@ export class JobSpec<
     });
 
     await vaultClient.db.updateJobInstantiatedGraph({
-      projectUuid: (await this.zzEnvPWithTimeout).projectUuid,
+      projectUuid: (await this.liveEnvPWithTimeout).projectUuid,
       jobId,
       specName: this.name,
       instantiatedGraphStr: JSON.stringify(localG),
@@ -1330,9 +1330,9 @@ export class JobSpec<
 
   // convenience function
   public defineWorker<WP extends object | undefined>(
-    p: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec">
+    p: Omit<LiveWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec">
   ) {
-    return new ZZWorkerDef<P, I, O, WP, IMap, OMap>({
+    return new LiveWorkerDef<P, I, O, WP, IMap, OMap>({
       ...p,
       jobSpec: this,
     });
@@ -1341,7 +1341,7 @@ export class JobSpec<
   public async defineWorkerAndStart<WP extends object | undefined>({
     instanceParams,
     ...p
-  }: Omit<ZZWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec"> & {
+  }: Omit<LiveWorkerDefParams<P, I, O, WP, IMap, OMap>, "jobSpec"> & {
     instanceParams?: WP;
   }) {
     const workerDef = this.defineWorker(p);
