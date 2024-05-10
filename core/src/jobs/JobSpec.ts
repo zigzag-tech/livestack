@@ -23,7 +23,7 @@ import {
   LiveWorkerDef,
   LiveWorkerDefParams,
 } from "./LiveWorker";
-import pLimit from "p-limit";
+import * as pLimit from "p-limit";
 import { Observable, Subscription } from "rxjs";
 import { z } from "zod";
 import { TagMaps, TagObj } from "../orchestrations/Workflow";
