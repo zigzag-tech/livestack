@@ -46,12 +46,17 @@ export interface ProvisionCommand {
 export interface QueryCapacityCommand {
 }
 
+export interface NoCapacityWarning {
+  specName: string;
+}
+
 export interface CommandToInstance {
   projectUuid: string;
   instanceId: string;
   correlationId: string;
   provision?: ProvisionCommand | undefined;
   queryCapacity?: QueryCapacityCommand | undefined;
+  noCapacityWarning?: NoCapacityWarning | undefined;
 }
 
 function createBaseReportAsInstanceMessage(): ReportAsInstanceMessage {
@@ -561,8 +566,72 @@ export const QueryCapacityCommand = {
   },
 };
 
+function createBaseNoCapacityWarning(): NoCapacityWarning {
+  return { specName: "" };
+}
+
+export const NoCapacityWarning = {
+  encode(message: NoCapacityWarning, writer: _m0.Writer = _m0.Writer.create()): _m0.Writer {
+    if (message.specName !== "") {
+      writer.uint32(26).string(message.specName);
+    }
+    return writer;
+  },
+
+  decode(input: _m0.Reader | Uint8Array, length?: number): NoCapacityWarning {
+    const reader = input instanceof _m0.Reader ? input : _m0.Reader.create(input);
+    let end = length === undefined ? reader.len : reader.pos + length;
+    const message = createBaseNoCapacityWarning();
+    while (reader.pos < end) {
+      const tag = reader.uint32();
+      switch (tag >>> 3) {
+        case 3:
+          if (tag !== 26) {
+            break;
+          }
+
+          message.specName = reader.string();
+          continue;
+      }
+      if ((tag & 7) === 4 || tag === 0) {
+        break;
+      }
+      reader.skipType(tag & 7);
+    }
+    return message;
+  },
+
+  fromJSON(object: any): NoCapacityWarning {
+    return { specName: isSet(object.specName) ? globalThis.String(object.specName) : "" };
+  },
+
+  toJSON(message: NoCapacityWarning): unknown {
+    const obj: any = {};
+    if (message.specName !== "") {
+      obj.specName = message.specName;
+    }
+    return obj;
+  },
+
+  create(base?: DeepPartial<NoCapacityWarning>): NoCapacityWarning {
+    return NoCapacityWarning.fromPartial(base ?? {});
+  },
+  fromPartial(object: DeepPartial<NoCapacityWarning>): NoCapacityWarning {
+    const message = createBaseNoCapacityWarning();
+    message.specName = object.specName ?? "";
+    return message;
+  },
+};
+
 function createBaseCommandToInstance(): CommandToInstance {
-  return { projectUuid: "", instanceId: "", correlationId: "", provision: undefined, queryCapacity: undefined };
+  return {
+    projectUuid: "",
+    instanceId: "",
+    correlationId: "",
+    provision: undefined,
+    queryCapacity: undefined,
+    noCapacityWarning: undefined,
+  };
 }
 
 export const CommandToInstance = {
@@ -581,6 +650,9 @@ export const CommandToInstance = {
     }
     if (message.queryCapacity !== undefined) {
       QueryCapacityCommand.encode(message.queryCapacity, writer.uint32(42).fork()).ldelim();
+    }
+    if (message.noCapacityWarning !== undefined) {
+      NoCapacityWarning.encode(message.noCapacityWarning, writer.uint32(50).fork()).ldelim();
     }
     return writer;
   },
@@ -627,6 +699,13 @@ export const CommandToInstance = {
 
           message.queryCapacity = QueryCapacityCommand.decode(reader, reader.uint32());
           continue;
+        case 6:
+          if (tag !== 50) {
+            break;
+          }
+
+          message.noCapacityWarning = NoCapacityWarning.decode(reader, reader.uint32());
+          continue;
       }
       if ((tag & 7) === 4 || tag === 0) {
         break;
@@ -643,6 +722,9 @@ export const CommandToInstance = {
       correlationId: isSet(object.correlationId) ? globalThis.String(object.correlationId) : "",
       provision: isSet(object.provision) ? ProvisionCommand.fromJSON(object.provision) : undefined,
       queryCapacity: isSet(object.queryCapacity) ? QueryCapacityCommand.fromJSON(object.queryCapacity) : undefined,
+      noCapacityWarning: isSet(object.noCapacityWarning)
+        ? NoCapacityWarning.fromJSON(object.noCapacityWarning)
+        : undefined,
     };
   },
 
@@ -663,6 +745,9 @@ export const CommandToInstance = {
     if (message.queryCapacity !== undefined) {
       obj.queryCapacity = QueryCapacityCommand.toJSON(message.queryCapacity);
     }
+    if (message.noCapacityWarning !== undefined) {
+      obj.noCapacityWarning = NoCapacityWarning.toJSON(message.noCapacityWarning);
+    }
     return obj;
   },
 
@@ -679,6 +764,9 @@ export const CommandToInstance = {
       : undefined;
     message.queryCapacity = (object.queryCapacity !== undefined && object.queryCapacity !== null)
       ? QueryCapacityCommand.fromPartial(object.queryCapacity)
+      : undefined;
+    message.noCapacityWarning = (object.noCapacityWarning !== undefined && object.noCapacityWarning !== null)
+      ? NoCapacityWarning.fromPartial(object.noCapacityWarning)
       : undefined;
     return message;
   },

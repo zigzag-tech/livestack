@@ -47,6 +47,11 @@ message QueryCapacityCommand {
   
 }
 
+message NoCapacityWarning {
+
+  string specName = 3;
+}
+
 message CommandToInstance {
   string projectUuid = 1;
   string instanceId = 2;
@@ -54,5 +59,6 @@ message CommandToInstance {
   oneof value {
     ProvisionCommand provision = 4;
     QueryCapacityCommand queryCapacity = 5;
+    NoCapacityWarning noCapacityWarning = 6;
   }
 }
