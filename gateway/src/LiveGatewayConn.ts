@@ -3,7 +3,7 @@ import {
   type UnbindParams,
   REQUEST_AND_BIND_CMD,
   type RequestAndBindType,
-  type CMD_FEED,
+  CMD_FEED,
   type FeedParams,
   MSG_JOB_INFO,
   type JobInfoType,
