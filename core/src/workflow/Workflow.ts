@@ -438,6 +438,12 @@ export class WorkflowSpec extends JobSpec<
     any
   >;
 
+  /**
+   * Constructs a new Workflow instance.
+   *
+   * @param jobGroupDef - The job group definition for the workflow.
+   * @param jobGroupId - The ID of the job group.
+   */
   constructor({
     connections,
     exposures,
@@ -810,8 +816,19 @@ export class WorkflowSpec extends JobSpec<
   }
 }
 
+/**
+ * Represents a workflow that manages job groups and their execution.
+ */
 export class Workflow {
+  /**
+   * Promise resolving to the instantiated graph of the workflow.
+   */
   private _graphP: Promise<InstantiatedGraph> | null = null;
+  /**
+   * Gets the promise resolving to the instantiated graph of the workflow.
+   *
+   * @returns The promise resolving to the instantiated graph.
+   */
   public get graphP(): Promise<InstantiatedGraph> {
     const that = this;
     if (!this._graphP) {
@@ -850,8 +867,17 @@ export class Workflow {
     }
     return this._graphP;
   }
+  /**
+   * The job group definition for the workflow.
+   */
   public readonly jobGroupDef: WorkflowSpec;
+  /**
+   * The context ID of the workflow.
+   */
   public readonly contextId: string;
+  /**
+   * A record of workflows by their IDs.
+   */
   private static _workflowById: Record<string, Workflow> = {};
 
   constructor({
@@ -866,13 +892,25 @@ export class Workflow {
     Workflow._workflowById[jobGroupId] = this;
   }
 
+  /**
+   * Defines a new workflow specification.
+   *
+   * @param p - The parameters for defining the workflow specification.
+   * @returns The defined workflow specification.
+   */
   public static define(p: ConstructorParameters<typeof WorkflowSpec>[0]) {
     return new WorkflowSpec(p);
   }
 
-  public static lookupById(jobGroupId: string) {
-    const r = this._workflowById[jobGroupId] as Workflow | undefined;
-    return r || null;
+  /**
+   * Looks up a workflow by its ID.
+   *
+   * @param jobGroupId - The ID of the job group.
+   * @returns The workflow instance if found, otherwise null.
+   */
+  public static lookupById(jobGroupId: string): Workflow | null {
+    const workflow = this._workflowById[jobGroupId];
+    return workflow || null;
   }
 }
 
