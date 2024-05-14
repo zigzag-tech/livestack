@@ -18,8 +18,7 @@
     "sourceMap": true,
     "strict": true,
     "paths": {
-      "@livestack/core": ["./src"],
-      "@livestack/core/stream": ["./src/stream"]
+      "@livestack/core": ["./src"]
     },
     "strictNullChecks": true,
     "downlevelIteration": true,

@@ -39,8 +39,7 @@
   "types": "dist/livestack-core.cjs.d.ts",
   "preconstruct": {
     "entrypoints": [
-      "index.ts",
-      "stream.ts"
+      "index.ts"
     ]
   },
   "author": ""
