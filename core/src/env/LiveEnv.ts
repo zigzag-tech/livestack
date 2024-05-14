@@ -30,14 +30,44 @@ interface LiveEnvConfig {
   readonly projectId?: string | `@${string}/${string}`;
 }
 
+/**
+ * Represents the live environment for managing storage and vault client.
+ */
 export class LiveEnv {
+  /**
+   * Storage provider for handling large data storage.
+   */
   public readonly storageProvider?: Promise<IStorageProvider | undefined>;
+  /**
+   * Vault client for managing secure data.
+   */
   public readonly vaultClient: AuthorizedGRPCClient;
+  /**
+   * UUID of the project.
+   */
   public readonly projectUuid: string;
+  /**
+   * Local project ID.
+   */
   public readonly localProjectId: string;
+  /**
+   * User ID.
+   */
   public readonly userId: string;
+  /**
+   * Authentication token.
+   */
   public readonly authToken: string;
 
+  /**
+   * Constructs a new LiveEnv instance.
+   *
+   * @param storageProvider - The storage provider for handling large data storage.
+   * @param projectUuid - The UUID of the project.
+   * @param localProjectId - The local project ID.
+   * @param userId - The user ID.
+   * @param authToken - The authentication token.
+   */
   private constructor({
     storageProvider,
     projectUuid,
@@ -60,7 +90,13 @@ export class LiveEnv {
     this.printLiveDevUrlOnce();
   }
 
-  static async create(config: LiveEnvConfig) {
+  /**
+   * Creates a new LiveEnv instance.
+   *
+   * @param config - The configuration for the LiveEnv instance.
+   * @returns A promise resolving to the new LiveEnv instance.
+   */
+  static async create(config: LiveEnvConfig): Promise<LiveEnv> {
     let projectId = config.projectId;
     if (!projectId) {
       projectId = process.env.LIVESTACK_PROJECT_ID;
@@ -83,10 +119,19 @@ export class LiveEnv {
     });
   }
 
+  /**
+   * Promise resolving to the global LiveEnv instance.
+   */
   private static _liveEnvP: Promise<LiveEnv> | null = null;
+  /**
+   * Function to resolve the global LiveEnv instance.
+   */
   private static _resolveGlobal: ((env: LiveEnv) => void) | null = null;
 
-  public static _ensureInitialized() {
+  /**
+   * Ensures that the global LiveEnv instance is initialized.
+   */
+  public static _ensureInitialized(): void {
     if (!LiveEnv._liveEnvP) {
       LiveEnv._liveEnvP = new Promise<LiveEnv>((resolve) => {
         LiveEnv._resolveGlobal = resolve;
@@ -94,12 +139,22 @@ export class LiveEnv {
     }
   }
 
-  static globalP() {
+  /**
+   * Gets the promise resolving to the global LiveEnv instance.
+   *
+   * @returns The promise resolving to the global LiveEnv instance.
+   */
+  static globalP(): Promise<LiveEnv> {
     LiveEnv._ensureInitialized();
     return LiveEnv._liveEnvP!;
   }
 
-  static setGlobal(env: LiveEnv | Promise<LiveEnv>) {
+  /**
+   * Sets the global LiveEnv instance.
+   *
+   * @param env - The LiveEnv instance or a promise resolving to it.
+   */
+  static setGlobal(env: LiveEnv | Promise<LiveEnv>): void {
     LiveEnv._ensureInitialized();
     if (env instanceof LiveEnv) {
       console.info("Global project ID set to ", env.projectUuid);
@@ -112,10 +167,19 @@ export class LiveEnv {
     }
   }
 
+  /**
+   * Cached instance ID.
+   */
   private _cachedInstanceId: string | null = null;
+  /**
+   * Flag indicating whether the live URL has been printed.
+   */
   private livePrinted = false;
 
-  private async printLiveDevUrlOnce() {
+  /**
+   * Prints the live development URL once.
+   */
+  private async printLiveDevUrlOnce(): Promise<void> {
     if (!this.livePrinted) {
       console.info(
         yellow`${inverse` 🔴 LIVE 🦓🦓 ${LIVESTACK_DASHBOARD_URL_ROOT}/p/${this.userId}/${this.localProjectId}`}${inverse``}`
@@ -125,9 +189,17 @@ export class LiveEnv {
     }
   }
 
+  /**
+   * Limiter for ensuring a single instance.
+   */
   static getInstanceLimiter = limit(1);
 
-  public async getInstanceId() {
+  /**
+   * Gets the instance ID.
+   *
+   * @returns The instance ID.
+   */
+  public async getInstanceId(): Promise<string> {
     return LiveEnv.getInstanceLimiter(async () => {
       if (!this._cachedInstanceId) {
         const r = await this.vaultClient.queue.initInstance({});
@@ -139,7 +211,18 @@ export class LiveEnv {
   }
 }
 
-async function resolveProjectInfo(projectId: string) {
+/**
+ * Resolves project information based on the project ID.
+ *
+ * @param projectId - The project ID.
+ * @returns The resolved project information.
+ */
+async function resolveProjectInfo(projectId: string): Promise<{
+  projectUuid: string;
+  userId: string;
+  localProjectId: string;
+  authToken: string;
+}> {
   let userId: string;
   let localProjectId: string;
   let authToken: string;
@@ -192,6 +275,12 @@ async function resolveProjectInfo(projectId: string) {
   }
 }
 
+/**
+ * Gets or prompts for user credentials.
+ *
+ * @param localProjectId - The local project ID.
+ * @returns The user credentials.
+ */
 const getOrPromptForUserCredentials: (localProjectId: string) => Promise<{
   authToken: string;
   userId: string;
@@ -312,7 +401,13 @@ const getOrPromptForUserCredentials: (localProjectId: string) => Promise<{
   });
 };
 
-async function getCliTempToken(localProjectId: string) {
+/**
+ * Gets a temporary CLI token.
+ *
+ * @param localProjectId - The local project ID.
+ * @returns The temporary CLI token.
+ */
+async function getCliTempToken(localProjectId: string): Promise<string> {
   try {
     const randomTokenResp = await fetch(
       `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/cli-tokens`,
@@ -336,7 +431,13 @@ async function getCliTempToken(localProjectId: string) {
   }
 }
 
-async function waitUntilCredentialsAreResolved(cliTempToken: string) {
+/**
+ * Waits until the credentials are resolved.
+ *
+ * @param cliTempToken - The temporary CLI token.
+ * @returns The resolved credentials.
+ */
+async function waitUntilCredentialsAreResolved(cliTempToken: string): Promise<ResolvedCliTokenStatusWithUserToken> {
   // periodically make fetch request to see if the credentials have been fulfilled
   let secondsElapsed = 0;
   while (true) {
@@ -359,7 +460,13 @@ async function waitUntilCredentialsAreResolved(cliTempToken: string) {
 
 const LINE_LENGTH = 50; // Define the total length of the line
 
-function genZebraLine(step: number) {
+/**
+ * Generates a zebra line for CLI output.
+ *
+ * @param step - The current step.
+ * @returns The generated zebra line.
+ */
+function genZebraLine(step: number): string {
   let zebra1Pos = (LINE_LENGTH - step) % LINE_LENGTH; // Initial position for the first zebra
   let zebra2Pos = (zebra1Pos + Math.floor(LINE_LENGTH / 2)) % LINE_LENGTH; // Ensure the second zebra starts from the opposite side
 
@@ -370,6 +477,12 @@ function genZebraLine(step: number) {
 
   return line;
 }
+/**
+ * Gets the status of a temporary CLI token.
+ *
+ * @param cliTempToken - The temporary CLI token.
+ * @returns The status of the temporary CLI token.
+ */
 async function getClITempTokenStatus(
   cliTempToken: string
 ): Promise<
@@ -397,6 +510,9 @@ async function getClITempTokenStatus(
   }
 }
 
-export const fileOrBufferSchema = z.custom<Buffer | Stream>((data) => {
+/**
+ * Schema for validating data as Buffer or Stream.
+ */
+export const fileOrBufferSchema = z.custom<Buffer | Stream>((data): data is Buffer | Stream => {
   return data instanceof Buffer || data instanceof Stream;
 }, "Data is not an instance of a Buffer or a Stream.");
