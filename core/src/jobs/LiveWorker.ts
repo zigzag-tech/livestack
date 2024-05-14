@@ -236,7 +236,20 @@ function defineWorker<P, I, O, WP extends object | undefined, IMap, OMap>(
   return spec.defineWorker(p);
 }
 
+/**
+ * Represents a live worker that processes jobs.
+ *
+ * @template P - Job options type.
+ * @template I - Input type.
+ * @template O - Output type.
+ * @template WP - Worker parameters type.
+ * @template IMap - Input map type.
+ * @template OMap - Output map type.
+ */
 export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
+  /**
+   * Job specification containing input/output definitions and other metadata.
+   */
   public readonly jobSpec: JobSpec<P, I, O, IMap, OMap>;
   protected readonly liveEnvP: Promise<LiveEnv>;
   protected readonly storageProvider?: IStorageProvider;
