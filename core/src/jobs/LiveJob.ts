@@ -58,6 +58,16 @@ type SmarterNextValue<IMap, T> = T extends { tag: infer Tag }
     : never
   : never;
 
+/**
+ * Represents a live job that processes data streams.
+ *
+ * @template P - Job options type.
+ * @template I - Input type.
+ * @template O - Output type.
+ * @template WP - Worker parameters type.
+ * @template IMap - Input map type.
+ * @template OMap - Output map type.
+ */
 export class LiveJob<
   P,
   I,
@@ -66,13 +76,28 @@ export class LiveJob<
   IMap = InferTMap<I>,
   OMap = InferTMap<O>
 > {
+  /**
+   * Job options provided during job creation.
+   */
   readonly jobOptions: P;
 
+  /**
+   * Logger instance for logging job-related information.
+   */
   readonly logger: ReturnType<typeof getLogger>;
+  /**
+   * Job specification containing input/output definitions and other metadata.
+   */
   readonly spec: JobSpec<P, I, O, IMap, OMap>;
+  /**
+   * Graph representing the job's data flow.
+   */
   public graph: InstantiatedGraph;
 
   //async iterator
+  /**
+   * Input object for accessing job inputs by tag.
+   */
   readonly input: ReturnType<typeof this.genInputObject> &
     ByTagCallable<IMap> & {
       tags: (keyof IMap)[];
@@ -107,6 +132,9 @@ export class LiveJob<
 
   // New properties for subscriber tracking
 
+  /**
+   * Output object for emitting job outputs by tag.
+   */
   readonly output: {
     <K extends keyof OMap>(tag?: K): {
       emit: (
@@ -124,6 +152,17 @@ export class LiveJob<
     };
   };
 
+  /**
+   * Invokes a job with the specified parameters.
+   *
+   * @template P - Job options type.
+   * @template I - Input type.
+   * @template O - Output type.
+   * @template IMap - Input map type.
+   * @template OMap - Output map type.
+   * @template TI - Input tag type.
+   * @template TO - Output tag type.
+   */
   readonly invoke: <
     P,
     I,
@@ -140,13 +179,34 @@ export class LiveJob<
     jobOptions?: P;
   }) => Promise<OMap[TO]>;
 
+  /**
+   * Storage provider for handling large data storage.
+   */
   storageProvider?: IStorageProvider;
+  /**
+   * Promise resolving to the live environment.
+   */
   readonly liveEnvP: Promise<LiveEnv>;
+  /**
+   * Dummy progress count for tracking job progress.
+   */
   private _dummyProgressCount = 0;
+  /**
+   * Worker instance parameters.
+   */
   public workerInstanceParams: WP extends object ? WP : null =
     null as WP extends object ? WP : null;
+  /**
+   * Job ID.
+   */
   public jobId: JobId;
+  /**
+   * Worker name.
+   */
   public readonly workerName;
+  /**
+   * Input stream functions by tag.
+   */
   private readonly inputStreamFnsByTag: Partial<{
     [K in keyof IMap]: {
       nextValue: () => Promise<WithTimestamp<
@@ -162,12 +222,23 @@ export class LiveJob<
       subscriberCountObservable: Observable<number>;
     };
   }>;
+  /**
+   * Function to update job progress.
+   */
   private updateProgress: (count: number) => Promise<void>;
+  /**
+   * Tracker for input-output associations by tag.
+   */
   private trackerByInputOutputTag: Record<
     keyof IMap,
     Record<keyof OMap, AssociationTracker>
   >;
 
+  /**
+   * Constructs a new LiveJob instance.
+   *
+   * @param p - Parameters for constructing the LiveJob.
+   */
   constructor(p: {
     logger: ReturnType<typeof getLogger>;
     jobOptions: P;
@@ -440,6 +511,11 @@ export class LiveJob<
     })();
   }
 
+  /**
+   * Generates an input object for the job.
+   *
+   * @returns An object containing input-related methods and properties.
+   */
   private readonly genInputObject = () => {
     return {
       ...this.genInputObjectByTag(),
@@ -454,6 +530,12 @@ export class LiveJob<
     };
   };
 
+  /**
+   * Generates an input object for a specific tag.
+   *
+   * @param _tag - The tag for which to generate the input object.
+   * @returns An object containing input-related methods and properties for the specified tag.
+   */
   private readonly genInputObjectByTag = <K extends keyof IMap>(_tag?: K) => {
     const that = this;
     let resolvedTag: K | InferDefaultOrSingleKey<IMap> | undefined = _tag;
@@ -546,6 +628,11 @@ export class LiveJob<
     | null
     | "uninitialized" = "uninitialized";
 
+  /**
+   * Retrieves the parent job record.
+   *
+   * @returns The parent job record.
+   */
   private getParentRec = async () => {
     if (this._parentRec === "uninitialized") {
       const { null_response, rec } = await (
@@ -570,6 +657,12 @@ export class LiveJob<
     return this._parentRec;
   };
 
+  /**
+   * Ensures the input stream function for a specific tag.
+   *
+   * @param _tag - The tag for which to ensure the input stream function.
+   * @returns The input stream function for the specified tag.
+   */
   private _ensureInputStreamFn = <K extends keyof IMap>(_tag?: K) => {
     const thatJob = this;
     let resolvedTag: K | InferDefaultOrSingleKey<IMap> | undefined = _tag;
@@ -662,12 +755,26 @@ export class LiveJob<
   };
 
   // Store subscriptions to allow cleanup
+  /**
+   * Subscriptions for input streams.
+   */
   private subscriptions: Record<string, Subscription> = {};
 
+  /**
+   * Stores a subscription for a specific tag.
+   *
+   * @param tag - The tag for which to store the subscription.
+   * @param subscription - The subscription to store.
+   */
   private storeSubscription(tag: string, subscription: Subscription) {
     this.subscriptions[tag] = subscription;
   }
 
+  /**
+   * Unsubscribes from the input stream for a specific tag.
+   *
+   * @param tag - The tag for which to unsubscribe.
+   */
   private unsubscribeFromInput(tag: string) {
     if (this.subscriptions[tag]) {
       this.subscriptions[tag].unsubscribe();
@@ -676,6 +783,9 @@ export class LiveJob<
   }
 
   // Call this method to clean up all subscriptions when the job is done
+  /**
+   * Cleans up all subscriptions when the job is done.
+   */
   private cleanupSubscriptions() {
     Object.values(this.subscriptions).forEach((subscription) => {
       subscription.unsubscribe();
@@ -683,6 +793,12 @@ export class LiveJob<
     this.subscriptions = {};
   }
 
+  /**
+   * Begins processing the job.
+   *
+   * @param processor - The processor function to process the job.
+   * @param options - Options for processing the job.
+   */
   public beginProcessing = async (
     processor: ZZProcessor<P, I, O, WP, IMap, OMap>,
     { terminateOutputsOnJobEnd }: { terminateOutputsOnJobEnd: boolean }
@@ -784,6 +900,11 @@ export class LiveJob<
     }
   };
 
+  /**
+   * Signals the end of output for a specific tag.
+   *
+   * @param tag - The tag for which to signal the end of output.
+   */
   signalOutputEnd = async (tag?: keyof OMap) => {
     // console.debug("signalOutputEnd", {
     //   jobSpec: this.spec.name,
@@ -816,6 +937,13 @@ export class LiveJob<
   //   );
   // };
 
+  /**
+   * Gets the CDN URL for a large value.
+   *
+   * @param key - The key of the large value.
+   * @param obj - The object containing the large value.
+   * @returns The CDN URL for the large value.
+   */
   getLargeValueCdnUrl = async <T extends object>(key: keyof T, obj: T) => {
     if (!this.storageProvider) {
       throw new Error("storageProvider is not provided");
@@ -839,6 +967,9 @@ export class LiveJob<
   };
 }
 
+/**
+ * Tracks associations between input and output data points.
+ */
 class AssociationTracker {
   private _currentDispensed = false;
   private _store: {
@@ -849,6 +980,11 @@ class AssociationTracker {
     datapointId: string;
   }[] = [];
 
+  /**
+   * Intakes a data point.
+   *
+   * @param x - The data point to intake.
+   */
   intake = (x: { datapointId: string }) => {
     if (this._currentDispensed && this._store.length > 0) {
       this._store = [];
@@ -857,6 +993,11 @@ class AssociationTracker {
     this._store.push(x);
   };
 
+  /**
+   * Dispenses the stored data points.
+   *
+   * @returns The stored data points.
+   */
   dispense = () => {
     if (this._currentDispensed && this._store.length === 0) {
       return [...this._prevStore];
