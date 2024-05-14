@@ -7,7 +7,7 @@ import {
 import { IOSpec, InferTMap, TaggedStreamDef } from "@livestack/shared";
 import { AliasNode } from "@livestack/shared/src/graph/DefGraph";
 import { z } from "zod";
-import { LiveEnv } from "../jobs/LiveEnv";
+import { LiveEnv } from "../env/LiveEnv";
 import _ from "lodash";
 import { InferDefaultOrSingleKey, LiveWorkerDef } from "../jobs/LiveWorker";
 import {

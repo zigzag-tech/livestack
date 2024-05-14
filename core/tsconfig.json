@@ -17,6 +17,10 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "strict": true,
+    "paths": {
+      "@livestack/core": ["./src"],
+      "@livestack/core/stream": ["./src/stream"]
+    },
     "strictNullChecks": true,
     "downlevelIteration": true,
     "declaration": true,

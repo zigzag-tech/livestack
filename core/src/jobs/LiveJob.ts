@@ -20,7 +20,7 @@ import {
   EMPTY,
 } from "rxjs";
 import { z } from "zod";
-import { TransformRegistry } from "../orchestrations/TransformRegistry";
+import { TransformRegistry } from "../workflow/TransformRegistry";
 import {
   createLazyNextValueGenerator,
   createTrackedObservable,
@@ -29,10 +29,10 @@ import { IStorageProvider, getPublicCdnUrl } from "../storage/cloudStorage";
 import { getLogger } from "../utils/createWorkerLogger";
 import { WrapTerminateFalse, WrapTerminatorAndDataId } from "../utils/io";
 import { longStringTruncator } from "../utils/longStringTruncator";
-import { DataStream, WithTimestamp } from "../streams/DataStream";
-import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
+import { DataStream, WithTimestamp } from "../stream/DataStream";
+import { DataStreamSubscriber } from "../stream/DataStreamSubscriber";
 import { JobSpec } from "./JobSpec";
-import { LiveEnv } from "./LiveEnv";
+import { LiveEnv } from "../env/LiveEnv";
 import { identifyLargeFilesToSave } from "../files/file-ops";
 import { AuthorizedGRPCClient } from "@livestack/vault-client";
 import {
