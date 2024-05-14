@@ -1,7 +1,7 @@
 import { JobSpec } from "../jobs/JobSpec";
 import { InferDefaultOrSingleKey, LiveWorkerDef } from "../jobs/LiveWorker";
 import _ from "lodash";
-import { LiveEnv } from "../jobs/LiveEnv";
+import { LiveEnv } from "../env/LiveEnv";
 import { genTimeoutPromise } from "../utils/genTimeoutPromise";
 
 export interface AttemptDef<ParentIMap, ParentOMap, I, O, IMap, OMap> {
