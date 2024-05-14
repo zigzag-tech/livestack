@@ -1,7 +1,7 @@
 import { InferStreamSetType, InferTMap } from "@livestack/shared";
 import { CheckSpec, JobSpec } from "../jobs/JobSpec";
 import { InferDefaultOrSingleKey, LiveWorkerDef } from "../jobs/LiveWorker";
-import { LiveEnv } from "../jobs/LiveEnv";
+import { LiveEnv } from "../env/LiveEnv";
 import { WrapWithTimestamp } from "../utils/io";
 import { sleep } from "../utils/sleep";
 type TriggerCheckContext = {

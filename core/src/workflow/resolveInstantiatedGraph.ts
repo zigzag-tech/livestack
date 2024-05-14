@@ -8,7 +8,7 @@ import { ConnectorType } from "@livestack/vault-interface";
 import { TransformRegistry } from "./TransformRegistry";
 import { lruCacheFn } from "@livestack/shared";
 import { JobSpec } from "../jobs/JobSpec";
-import { LiveEnv } from "../jobs/LiveEnv";
+import { LiveEnv } from "../env/LiveEnv";
 
 // TODO: cache this
 export const resolveInstantiatedGraph = lruCacheFn(

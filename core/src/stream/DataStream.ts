@@ -1,6 +1,6 @@
 import type { ZodType } from "zod";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
-import { LiveEnv, LIVESTACK_DASHBOARD_URL_ROOT } from "../jobs/LiveEnv";
+import { LiveEnv, LIVESTACK_DASHBOARD_URL_ROOT } from "../env/LiveEnv";
 import path from "path";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {

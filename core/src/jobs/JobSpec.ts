@@ -26,7 +26,7 @@ import {
 import pLimit from "p-limit";
 import { Observable, Subscription } from "rxjs";
 import { z } from "zod";
-import { TagMaps, TagObj } from "../orchestrations/Workflow";
+import { TagMaps, TagObj } from "../workflow/Workflow";
 import {
   ByTagInput,
   ByTagOutput,
@@ -34,10 +34,10 @@ import {
   wrapStreamSubscriberWithTermination,
   wrapTerminatorAndDataId,
 } from "../utils/io";
-import { DataStream } from "../streams/DataStream";
-import { DataStreamSubscriber } from "../streams/DataStreamSubscriber";
-import { LiveEnv } from "./LiveEnv";
-import { resolveInstantiatedGraph } from "../orchestrations/resolveInstantiatedGraph";
+import { DataStream } from "../stream/DataStream";
+import { DataStreamSubscriber } from "../stream/DataStreamSubscriber";
+import { LiveEnv } from "../env/LiveEnv";
+import { resolveInstantiatedGraph } from "../workflow/resolveInstantiatedGraph";
 import { lruCacheFn } from "@livestack/shared";
 
 export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
