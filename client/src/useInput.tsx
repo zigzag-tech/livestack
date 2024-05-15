@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { JobInfo } from "./useJobBinding";
-import { useCallback, useEffect, useMemo } from "react";
+import { useMemo } from "react";
 
 export function useInput<T>({
   job: { specName, jobId, connRef },
