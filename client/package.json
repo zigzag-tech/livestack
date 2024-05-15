@@ -11,7 +11,6 @@
   ],
   "dependencies": {
     "@livestack/shared": "*",
-    "rxjs": "^7",
     "uuid": "^9"
   },
   "devDependencies": {

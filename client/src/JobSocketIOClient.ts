@@ -90,12 +90,14 @@ export class JobSocketIOConnection {
     if (!this.localCallbacksByTag[tag]) {
       this.localCallbacksByTag[tag] = [];
     }
-    this.localCallbacksByTag[tag].forEach(callback => callback({
-      data,
-      tag,
-      timestamp: Date.now(),
-      chunkId: Math.random().toString(),
-    });
+    this.localCallbacksByTag[tag].forEach((callback) =>
+      callback({
+        data,
+        tag,
+        timestamp: Date.now(),
+        chunkId: Math.random().toString(),
+      })
+    );
   }
 
   private subscribedOutputKeys: string[] = [];
