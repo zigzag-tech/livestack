@@ -1,4 +1,3 @@
-import { Observable, Subject } from "rxjs";
 import { Socket, io } from "socket.io-client";
 import {
   RequestAndBindType,
@@ -61,23 +60,12 @@ export class JobSocketIOConnection {
     });
   }
 
-  private localObservablesByTag: Record<
-    string,
-    {
-      observable: Observable<{
-        data: any;
-        tag: string;
-        chunkId: string;
-        timestamp: number;
-      }>;
-      subj: Subject<{
-        data: any;
-        tag: string;
-        chunkId: string;
-        timestamp: number;
-      }>;
-    }
-  > = {};
+  private localCallbacksByTag: Record<string, ((datapoint: {
+    data: any;
+    tag: string;
+    chunkId: string;
+    timestamp: number;
+  }) => void)[]> = {};
 
   public async feed<T>(data: T, tag?: string) {
     // await getConnReadyPromise(this.socketIOClient);
@@ -99,18 +87,10 @@ export class JobSocketIOConnection {
       jobId: this.jobId,
     };
     this.socketIOClient.emit(CMD_FEED, feedParams);
-    if (!this.localObservablesByTag[tag]) {
-      // create subject and observable
-      const subj = new Subject<{
-        data: T;
-        tag: string;
-        chunkId: string;
-        timestamp: number;
-      }>();
-      const observable = subj.asObservable();
-      this.localObservablesByTag[tag] = { subj, observable };
+    if (!this.localCallbacksByTag[tag]) {
+      this.localCallbacksByTag[tag] = [];
     }
-    this.localObservablesByTag[tag].subj.next({
+    this.localCallbacksByTag[tag].forEach(callback => callback({
       data,
       tag,
       timestamp: Date.now(),
@@ -184,20 +164,13 @@ export class JobSocketIOConnection {
       this.availableInputs.some((t) => t === tag)
     ) {
       // subscribe to local observable
-      if (!this.localObservablesByTag[tag]) {
-        const subj = new Subject<{
-          data: T;
-          tag: string;
-          chunkId: string;
-          timestamp: number;
-        }>();
-        const observable = subj.asObservable();
-        this.localObservablesByTag[tag] = { subj, observable };
+      if (!this.localCallbacksByTag[tag]) {
+        this.localCallbacksByTag[tag] = [];
       }
-      const sub =
-        this.localObservablesByTag[tag].observable.subscribe(callback);
+      this.localCallbacksByTag[tag].push(callback);
+      
       const unsub = () => {
-        sub.unsubscribe();
+        this.localCallbacksByTag[tag] = this.localCallbacksByTag[tag].filter(cb => cb !== callback);
       };
       return unsub;
     } else {
