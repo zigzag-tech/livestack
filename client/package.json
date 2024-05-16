@@ -14,7 +14,7 @@
     "uuid": "^9"
   },
   "devDependencies": {
-    "@preconstruct/cli": "^2.8.3",
+    "@preconstruct/cli": "^2.8.4",
     "@types/react": "^18",
     "typescript": "5.4.5"
   },

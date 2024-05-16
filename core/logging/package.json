@@ -1,0 +1,4 @@
+{
+  "main": "dist/livestack-core-logging.cjs.js",
+  "module": "dist/livestack-core-logging.esm.js"
+}
