@@ -1,0 +1,4 @@
+{
+  "main": "dist/livestack-core-onboarding.cjs.js",
+  "module": "dist/livestack-core-onboarding.esm.js"
+}
