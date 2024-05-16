@@ -1,6 +1,6 @@
 export {
-  ParallelAttempt,
-  ParallelAttemptWorkflow,
+  type ParallelAttempt,
+  type ParallelAttemptWorkflow,
 } from "./workflow/ParallelAttemptWorkflow";
 export { ProgressiveAdaptiveTryWorkerDef } from "./workflow/ProgressiveAdaptiveTryWorkerDef";
 export { resolveUniqueSpec } from "./workflow/Workflow";
