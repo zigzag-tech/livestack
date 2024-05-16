@@ -1,0 +1,4 @@
+{
+  "main": "dist/livestack-core-liveflow.cjs.js",
+  "module": "dist/livestack-core-liveflow.esm.js"
+}

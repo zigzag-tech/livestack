@@ -10,12 +10,12 @@ import {
   Transcripts,
 } from "@livestack/transcribe-client";
 import { useJobBinding, useOutput, useInput } from "@livestack/client";
-import { SPEECH_WORKFLOW_NAME } from "../common/defs";
+import { SPEECH_LIVEFLOW_NAME } from "../common/defs";
 import { translationOutputSchema } from "@livestack/lab-internal-common";
 
 export const SpeechComponents: React.FC = () => {
   const job = useJobBinding({
-    specName: SPEECH_WORKFLOW_NAME,
+    specName: SPEECH_LIVEFLOW_NAME,
   });
 
   const { feed } = useInput({
@@ -52,9 +52,7 @@ export const SpeechComponents: React.FC = () => {
   return (
     <div className="m-4 grid grid-cols-5 gap-2 divide-x">
       <div>
-        <h2 className="text-red-800">
-          1. Click on "Start Recording" button
-        </h2>
+        <h2 className="text-red-800">1. Click on "Start Recording" button</h2>
         <br />
         {job.jobId && (
           <RecordButton

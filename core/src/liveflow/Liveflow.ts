@@ -143,8 +143,8 @@ interface Connection<
 }
 
 /**Exampe:
-    const workflow = Workflow.define({
-    name: "fake-workflow",
+    const liveflow = Liveflow.define({
+    name: "fake-liveflow",
     connections: [
       conn({
         from: {
@@ -270,34 +270,34 @@ export function expose<K, T, I, O, IMap, OMap>(
   };
 }
 
-type WorkflowParams = {
+type LiveflowParams = {
   connections: CanonicalConnection[];
   exposures: CanonicalExposure[];
 };
 
-const WorkflowChildJobOptionsSanitized = z.array(
+const LiveflowChildJobOptionsSanitized = z.array(
   z.object({
     spec: z.string(),
     params: z.any(),
   })
 );
 
-type WorkflowChildJobOptionsSanitized = z.infer<
-  typeof WorkflowChildJobOptionsSanitized
+type LiveflowChildJobOptionsSanitized = z.infer<
+  typeof LiveflowChildJobOptionsSanitized
 >;
 
-const WorkflowJobOptionsSanitized = z.object({
+const LiveflowJobOptionsSanitized = z.object({
   groupId: z.string(),
-  jobOptions: WorkflowChildJobOptionsSanitized.optional(),
+  jobOptions: LiveflowChildJobOptionsSanitized.optional(),
 });
-type WorkflowJobOptionsSanitized = z.infer<typeof WorkflowJobOptionsSanitized>;
+type LiveflowJobOptionsSanitized = z.infer<typeof LiveflowJobOptionsSanitized>;
 
-export class WorkflowSpec extends JobSpec<
-  WorkflowChildJobOptionsSanitized,
+export class LiveflowSpec extends JobSpec<
+  LiveflowChildJobOptionsSanitized,
   any,
   {
-    __zz_workflow_status: z.ZodType<{
-      __zz_workflow_status: "finished";
+    __zz_liveflow_status: z.ZodType<{
+      __zz_liveflow_status: "finished";
     }>;
   },
   any,
@@ -305,11 +305,11 @@ export class WorkflowSpec extends JobSpec<
 > {
   public readonly connections: CanonicalConnection[];
   public readonly exposures: CanonicalExposure[];
-  private workflowGraphCreated: boolean = false;
+  private liveflowGraphCreated: boolean = false;
 
   public override getDefGraph() {
     const defG = super.getDefGraph();
-    if (!this.workflowGraphCreated) {
+    if (!this.liveflowGraphCreated) {
       const parentSpecNodeId = defG.getRootSpecNodeId();
 
       // if not number, then throw
@@ -337,7 +337,7 @@ export class WorkflowSpec extends JobSpec<
 
         if (conn.transform) {
           TransformRegistry.registerTransform({
-            workflowSpecName: this.name,
+            liveflowSpecName: this.name,
             receivingSpecName: conn.to.spec.name,
             receivingSpecUniqueLabel: conn.to.uniqueSpecLabel || null,
             tag: conn.to.input,
@@ -424,13 +424,13 @@ export class WorkflowSpec extends JobSpec<
         }
       }
 
-      this.workflowGraphCreated = true;
+      this.liveflowGraphCreated = true;
     }
     return defG;
   }
 
   private orchestrationWorkerDef: LiveWorkerDef<
-    WorkflowChildJobOptionsSanitized,
+    LiveflowChildJobOptionsSanitized,
     any,
     any,
     any,
@@ -439,9 +439,9 @@ export class WorkflowSpec extends JobSpec<
   >;
 
   /**
-   * Constructs a new Workflow instance.
+   * Constructs a new Liveflow instance.
    *
-   * @param jobGroupDef - The job group definition for the workflow.
+   * @param jobGroupDef - The job group definition for the liveflow.
    * @param jobGroupId - The ID of the job group.
    */
   constructor({
@@ -449,20 +449,20 @@ export class WorkflowSpec extends JobSpec<
     exposures,
     name,
     liveEnv,
-    autostartWorkflow = true,
+    autostartLiveflow = true,
   }: {
     name: string;
     liveEnv?: LiveEnv;
-    autostartWorkflow?: boolean;
-  } & WorkflowParams) {
+    autostartLiveflow?: boolean;
+  } & LiveflowParams) {
     super({
       name,
 
-      jobOptions: WorkflowChildJobOptionsSanitized,
+      jobOptions: LiveflowChildJobOptionsSanitized,
       liveEnv,
       output: {
-        __zz_workflow_status: z.object({
-          __zz_workflow_status: z.literal("finished"),
+        __zz_liveflow_status: z.object({
+          __zz_liveflow_status: z.literal("finished"),
         }),
       },
     });
@@ -475,9 +475,9 @@ export class WorkflowSpec extends JobSpec<
     this._validateConnections();
 
     this.orchestrationWorkerDef = new LiveWorkerDef({
-      workerPrefix: "workflow",
+      workerPrefix: "liveflow",
       jobSpec: this,
-      autostartWorker: autostartWorkflow,
+      autostartWorker: autostartLiveflow,
       processor: async ({ jobOptions: childrenJobOptions, jobId, output }) => {
         const groupId = jobId;
 
@@ -493,7 +493,7 @@ export class WorkflowSpec extends JobSpec<
         if (parentRec) {
           for (const tag of this.inputTags) {
             const transform = TransformRegistry.getTransform({
-              workflowSpecName: parentRec.spec_name,
+              liveflowSpecName: parentRec.spec_name,
               receivingSpecName: this.name,
               receivingSpecUniqueLabel: parentRec.unique_spec_label || null,
               tag: tag.toString(),
@@ -597,8 +597,8 @@ export class WorkflowSpec extends JobSpec<
           })
         );
 
-        await output("__zz_workflow_status").emit({
-          __zz_workflow_status: "finished",
+        await output("__zz_liveflow_status").emit({
+          __zz_liveflow_status: "finished",
         });
 
         // TODO: wait for all the child jobs to finish
@@ -635,7 +635,7 @@ export class WorkflowSpec extends JobSpec<
     ];
   }
 
-  protected override convertSpecTagToWorkflowAlias({
+  protected override convertSpecTagToLiveflowAlias({
     specName,
     tag,
     uniqueSpecLabel,
@@ -670,7 +670,7 @@ export class WorkflowSpec extends JobSpec<
     }
   }
 
-  protected override convertWorkflowAliasToSpecTag({
+  protected override convertLiveflowAliasToSpecTag({
     type,
     alias,
   }: {
@@ -753,15 +753,15 @@ export class WorkflowSpec extends JobSpec<
       uniqueSpecLabel?: string;
     };
   }) {
-    let workflow = Workflow.lookupById(groupId);
-    if (!workflow) {
-      workflow = new Workflow({
+    let liveflow = Liveflow.lookupById(groupId);
+    if (!liveflow) {
+      liveflow = new Liveflow({
         jobGroupId: groupId,
         jobGroupDef: this,
       });
     }
 
-    const instaG = await workflow.graphP;
+    const instaG = await liveflow.graphP;
 
     const childJobNodeId = instaG.findNode((n) => {
       const node = instaG.getNodeAttributes(n);
@@ -793,7 +793,7 @@ export class WorkflowSpec extends JobSpec<
 
   public async enqueueJob(p?: {
     jobId?: string;
-    jobOptions?: WorkflowChildJobOptionsSanitized;
+    jobOptions?: LiveflowChildJobOptionsSanitized;
   }) {
     let { jobOptions } = p || {};
 
@@ -808,7 +808,7 @@ export class WorkflowSpec extends JobSpec<
       jobOptions: childJobOptionsSanitized,
     });
 
-    const out = await manager.output("__zz_workflow_status");
+    const out = await manager.output("__zz_liveflow_status");
     // wait on output to finish
     const r = await out.nextValue();
 
@@ -817,15 +817,15 @@ export class WorkflowSpec extends JobSpec<
 }
 
 /**
- * Represents a workflow that manages job groups and their execution.
+ * Represents a liveflow that manages job groups and their execution.
  */
-export class Workflow {
+export class Liveflow {
   /**
-   * Promise resolving to the instantiated graph of the workflow.
+   * Promise resolving to the instantiated graph of the liveflow.
    */
   private _graphP: Promise<InstantiatedGraph> | null = null;
   /**
-   * Gets the promise resolving to the instantiated graph of the workflow.
+   * Gets the promise resolving to the instantiated graph of the liveflow.
    *
    * @returns The promise resolving to the instantiated graph.
    */
@@ -843,7 +843,7 @@ export class Workflow {
         if (parentRec) {
           for (const tag of that.jobGroupDef.inputTags) {
             const transform = TransformRegistry.getTransform({
-              workflowSpecName: parentRec.spec_name,
+              liveflowSpecName: parentRec.spec_name,
               receivingSpecName: that.jobGroupDef.name,
               receivingSpecUniqueLabel: parentRec.unique_spec_label || null,
               tag: tag.toString(),
@@ -868,49 +868,49 @@ export class Workflow {
     return this._graphP;
   }
   /**
-   * The job group definition for the workflow.
+   * The job group definition for the liveflow.
    */
-  public readonly jobGroupDef: WorkflowSpec;
+  public readonly jobGroupDef: LiveflowSpec;
   /**
-   * The context ID of the workflow.
+   * The context ID of the liveflow.
    */
   public readonly contextId: string;
   /**
-   * A record of workflows by their IDs.
+   * A record of liveflows by their IDs.
    */
-  private static _workflowById: Record<string, Workflow> = {};
+  private static _liveflowById: Record<string, Liveflow> = {};
 
   constructor({
     jobGroupDef,
     jobGroupId,
   }: {
     jobGroupId: string;
-    jobGroupDef: WorkflowSpec;
+    jobGroupDef: LiveflowSpec;
   }) {
     this.contextId = jobGroupId;
     this.jobGroupDef = jobGroupDef;
-    Workflow._workflowById[jobGroupId] = this;
+    Liveflow._liveflowById[jobGroupId] = this;
   }
 
   /**
-   * Defines a new workflow specification.
+   * Defines a new liveflow specification.
    *
-   * @param p - The parameters for defining the workflow specification.
-   * @returns The defined workflow specification.
+   * @param p - The parameters for defining the liveflow specification.
+   * @returns The defined liveflow specification.
    */
-  public static define(p: ConstructorParameters<typeof WorkflowSpec>[0]) {
-    return new WorkflowSpec(p);
+  public static define(p: ConstructorParameters<typeof LiveflowSpec>[0]) {
+    return new LiveflowSpec(p);
   }
 
   /**
-   * Looks up a workflow by its ID.
+   * Looks up a liveflow by its ID.
    *
    * @param jobGroupId - The ID of the job group.
-   * @returns The workflow instance if found, otherwise null.
+   * @returns The liveflow instance if found, otherwise null.
    */
-  public static lookupById(jobGroupId: string): Workflow | null {
-    const workflow = this._workflowById[jobGroupId];
-    return workflow || null;
+  public static lookupById(jobGroupId: string): Liveflow | null {
+    const liveflow = this._liveflowById[jobGroupId];
+    return liveflow || null;
   }
 }
 
