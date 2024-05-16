@@ -19,7 +19,6 @@ import { longStringTruncator } from "../utils/longStringTruncator";
 import { WrapWithTimestamp } from "./../utils/io";
 import {
   InferDefaultOrSingleKey,
-  InferDefaultOrSingleValue,
   LiveWorkerDef,
   LiveWorkerDefParams,
 } from "./LiveWorker";
