@@ -12,7 +12,7 @@ import {
   getNodesConnectedToStream,
   getSourceSpecNodeConnectedToStream,
   InstantiatedGraph,
-} from "@livestack/shared/src/graph/InstantiatedGraph";
+} from "@livestack/shared";
 import { v4 } from "uuid";
 import { getLogger } from "../utils/createWorkerLogger";
 import { longStringTruncator } from "../utils/longStringTruncator";

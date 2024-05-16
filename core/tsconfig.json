@@ -1,12 +1,12 @@
 {
   "include": ["missing-modules.d.ts", "**/*.ts", "**/*.tsx", "*.ts", "*.tsx"],
   "compilerOptions": {
-    "module": "CommonJS",
-    // "types": ["reflect-metadata"],
+    "module": "ES2020",
     "outDir": "dist",
-    "target": "ES5",
+    "target": "ES2020",
+    "rootDir": "src",
     "pretty": true,
-    "moduleResolution": "node",
+    "moduleResolution": "Bundler",
     "noEmit": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,

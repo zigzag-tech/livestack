@@ -9,7 +9,7 @@ import {
   restoreLargeValues,
 } from "../files/file-ops";
 import { getLogger } from "../utils/createWorkerLogger";
-import { StreamDatapoint } from "@livestack/vault-interface/src/generated/stream";
+import { StreamDatapoint } from "@livestack/vault-interface";
 import { Empty } from "@livestack/vault-interface";
 
 export class DataStream<T extends object> {

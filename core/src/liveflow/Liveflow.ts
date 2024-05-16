@@ -5,16 +5,13 @@ import {
   convertSpecOrName,
 } from "../jobs/JobSpec";
 import { IOSpec, InferTMap, TaggedStreamDef } from "@livestack/shared";
-import { AliasNode } from "@livestack/shared/src/graph/DefGraph";
+import { AliasNode } from "@livestack/shared";
 import { z } from "zod";
 import { LiveEnv } from "../env/LiveEnv";
 import _ from "lodash";
 import { InferDefaultOrSingleKey, LiveWorkerDef } from "../jobs/LiveWorker";
-import {
-  JobNode,
-  InstantiatedGraph,
-} from "@livestack/shared/src/graph/InstantiatedGraph";
-import { TransformFunction } from "@livestack/shared/src/graph/DefGraph";
+import { JobNode, InstantiatedGraph } from "@livestack/shared";
+import { TransformFunction } from "@livestack/shared";
 import { TransformRegistry } from "./TransformRegistry";
 
 type UniqueSpecQuery<P = any, I = any, O = any, IMap = any, OMap = any> =

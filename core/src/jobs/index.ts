@@ -4,4 +4,5 @@ export {
   LiveWorkerDef,
   InferDefaultOrSingleKey,
 } from "./LiveWorker";
-export { JobSpec, type JobInput, type JobOutput, JobManager } from "./JobSpec";
+export { JobSpec, JobManager } from "./JobSpec";
+export type { JobInput, JobOutput } from "./JobSpec";

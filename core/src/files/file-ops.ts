@@ -1,7 +1,7 @@
 import { detectBinaryLikeObject } from "../utils/isBinaryLikeObject";
 import { join as pathJoin } from "path";
 import path from "path";
-import _, { isUndefined } from "lodash";
+import _ from "lodash";
 
 import { Readable } from "stream";
 const LARGE_VALUE_THRESHOLD = 1024 * 32;
@@ -24,7 +24,7 @@ export const identifyLargeFilesToSave = async (
   newObj: any;
   largeFilesToSave: LargeFileToSave<any>[];
 }> => {
-  if (obj === null || isUndefined(obj)) {
+  if (obj === null || _.isUndefined(obj)) {
     return { newObj: obj, largeFilesToSave: [] };
   }
   const largeFilesToSave: LargeFileToSave<any>[] = [];
@@ -85,7 +85,7 @@ export function identifyLargeFilesToRestore(
   largeFilesToRestore: LargeFileWithoutValue<any>[];
   newObj: any;
 } {
-  if (obj === null || isUndefined(obj)) {
+  if (obj === null || _.isUndefined(obj)) {
     return {
       largeFilesToRestore: [],
       newObj: obj,

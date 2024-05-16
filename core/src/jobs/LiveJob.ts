@@ -1,9 +1,6 @@
-import {
-  InstantiatedGraph,
-  JobId,
-} from "@livestack/shared/src/graph/InstantiatedGraph";
+import { InstantiatedGraph, JobId } from "@livestack/shared";
 import { InferTMap } from "@livestack/shared";
-import * as _ from "lodash";
+import _ from "lodash";
 import {
   Observable,
   Subscription,

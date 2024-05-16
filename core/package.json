@@ -32,38 +32,26 @@
   "optionalDependencies": {
     "@livestack/vault-dev-server": "*"
   },
+  "type": "module",
   "module": "dist/livestack-core.esm.js",
   "main": "dist/livestack-core.cjs.js",
   "types": "dist/livestack-core.cjs.d.ts",
   "exports": {
-    ".": {
-      "module": "./dist/livestack-core.esm.js",
-      "default": "./dist/livestack-core.cjs.js"
-    },
-    "./utils": {
-      "module": "./utils/dist/livestack-core-utils.esm.js",
-      "default": "./utils/dist/livestack-core-utils.cjs.js"
-    },
-    "./logging": {
-      "module": "./logging/dist/livestack-core-logging.esm.js",
-      "default": "./logging/dist/livestack-core-logging.cjs.js"
-    },
-    "./storage": {
-      "module": "./storage/dist/livestack-core-storage.esm.js",
-      "default": "./storage/dist/livestack-core-storage.cjs.js"
-    },
-    "./liveflow": {
-      "module": "./liveflow/dist/livestack-core-liveflow.esm.js",
-      "default": "./liveflow/dist/livestack-core-liveflow.cjs.js"
-    },
-    "./onboarding": {
-      "module": "./onboarding/dist/livestack-core-onboarding.esm.js",
-      "default": "./onboarding/dist/livestack-core-onboarding.cjs.js"
-    },
+    ".": "./dist/livestack-core.js",
+    "./utils": "./dist/livestack-core-utils.js",
+    "./logging": "./dist/livestack-core-logging.js",
+    "./storage": "./dist/livestack-core-storage.js",
+    "./liveflow": "./dist/livestack-core-liveflow.js",
+    "./onboarding": "./dist/livestack-core-onboarding.js",
     "./package.json": "./package.json"
   },
   "preconstruct": {
     "exports": true,
+    "___experimentalFlags_WILL_CHANGE_IN_PATCH": {
+      "typeModule": true,
+      "distInRoot": true,
+      "importsConditions": true
+    },
     "entrypoints": [
       "index.ts",
       "storage.ts",
