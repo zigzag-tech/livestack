@@ -2,14 +2,14 @@ import {
   rawPCMToWavSpec,
   speechChunkToTextSpec,
 } from "@livestack/transcribe-server";
-import { Workflow, conn, expose } from "@livestack/core";
-import { SPEECH_WORKFLOW_NAME } from "../common/defs";
+import { Liveflow, conn, expose } from "@livestack/core";
+import { SPEECH_LIVEFLOW_NAME } from "../common/defs";
 import { translationSpec } from "@livestack/translate-server";
 import { titleSummarizerSepc } from "@livestack/lab-internal-server";
 import { textSplittingSpec } from "@livestack/lab-internal-server";
 
-export const speechWorkflow = Workflow.define({
-  name: SPEECH_WORKFLOW_NAME,
+export const speechLiveflow = Liveflow.define({
+  name: SPEECH_LIVEFLOW_NAME,
   connections: [
     conn({
       from: rawPCMToWavSpec,

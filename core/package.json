@@ -39,7 +39,7 @@
     "entrypoints": [
       "index.ts",
       "storage.ts",
-      "workflow.ts",
+      "liveflow.ts",
       "utils.ts",
       "logging.ts",
       "onboarding.ts"

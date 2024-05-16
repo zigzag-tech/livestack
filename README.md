@@ -28,10 +28,10 @@ We look forward to seeing your next idea come to life with Livestack!
 
 Livestack aims at providing:
 
-- Stream & workflow based architecture.
+- Stream & liveflow based architecture.
 - Tools and patterns for realtime orchestration.
 - Simple, hassle-free bootstrap & deployment process for new AI project.
-- Graph-based workflows for better reasoning, visual inspection and debugging:
+- Graph-based liveflows for better reasoning, visual inspection and debugging:
   - Support for multiple input & output streams for every processing node 
   - Visualization for easy inspection and debugging (as part of Livestack Cloud).
 - Built-in data persistence & validation of all in-app activities for easy inspection and model training.
@@ -41,7 +41,7 @@ Livestack aims at providing:
 ## Features (planned)
 - (WIP) full-stack realtime AI compnents, patterns and guidelines for rapid prototyping, including:
   - live speech transcription.
-  - live RAG workflow.
+  - live RAG liveflow.
   - [Game development](https://github.com/zigzag-tech/ready-agent-one)
   -  realtime image generation.
 
@@ -56,7 +56,7 @@ WIP
 
 | Features                                                    | Livestack | Langchain/<br />LangGraph | Llamaindex | ComfyUI |
 | ----------------------------------------------------------- | :-------: | :-----------------------: | :--------: | :-----: |
-| DAG based workflow                                          |    ✅     |            ✅             |     ✅     |   ✅    |
+| DAG based liveflow                                          |    ✅     |            ✅             |     ✅     |   ✅    |
 | Full-stack app scaffolding                                  |    ✅     |            ❌             |     ❌     |   ❌    |
 | Worker autoscaling                                          |    ✅     |            ❌             |     ❌     |   ❌    |
 | Any modality as input/output <br />(e.g. text/image/audio)  |    ✅     |            ❌             |     ❌     |   ❌    |
@@ -65,7 +65,7 @@ WIP
 | Long running stream processing                              |    ✅     |            ❌             |     ❌     |   ❌    |
 | Cloud+on-prem mixed deployment <br />(local + cloud hybrid) |    ✅     |            ❌             |     ❌     |   ❌    |
 | Out-of-the-box data logging                                 |    ✅     |            ❌             |     ❌     |   ❌    |
-| Hybrid language workflows (Python + JS)                     |    🚧    |            ✅             |     ❌     |   ❌    |
+| Hybrid language liveflows (Python + JS)                     |    🚧    |            ✅             |     ❌     |   ❌    |
 | Official support audio Input & output                       |    🚧    |            ❌             |     ❌     |   ❌    |
 | Official support for Image as output                        |    🚧    |            ❌             |     ❌     |   ✅    |
 

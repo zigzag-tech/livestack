@@ -25,7 +25,7 @@ import {
 import pLimit from "p-limit";
 import { Observable, Subscription } from "rxjs";
 import { z } from "zod";
-import { TagMaps, TagObj } from "../workflow/Workflow";
+import { TagMaps, TagObj } from "../liveflow/Liveflow";
 import {
   ByTagInput,
   ByTagOutput,
@@ -36,10 +36,10 @@ import {
 import { DataStream } from "../stream/DataStream";
 import { DataStreamSubscriber } from "../stream/DataStreamSubscriber";
 import { LiveEnv } from "../env/LiveEnv";
-import { resolveInstantiatedGraph } from "../workflow/resolveInstantiatedGraph";
+import { resolveInstantiatedGraph } from "../liveflow/resolveInstantiatedGraph";
 import { lruCacheFn } from "@livestack/shared";
 
- const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
+const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
@@ -69,14 +69,14 @@ export type InferInputType<
  * Defines a job specification including its input, output, and processing logic.
  * @template P - The type of the job parameters.
  * @template I - The type of the input stream set.
- * @template O - The type of the output stream set. 
+ * @template O - The type of the output stream set.
  * @template IMap - The mapped type of the input stream set.
  * @template OMap - The mapped type of the output stream set.
  */
 export class JobSpec<
   P = {},
   I = never,
-  O = never,  
+  O = never,
   IMap = InferTMap<I>,
   OMap = InferTMap<O>
 > extends IOSpec<I, O, IMap, OMap> {
@@ -114,7 +114,7 @@ export class JobSpec<
    */
   constructor({
     liveEnv,
-    name, 
+    name,
     jobOptions,
     output,
     input,
@@ -124,7 +124,7 @@ export class JobSpec<
     liveEnv?: LiveEnv;
     concurrency?: number;
     input?: I;
-    output?: O;  
+    output?: O;
   }) {
     super({
       name,
@@ -471,7 +471,7 @@ export class JobSpec<
 
       type T = TT extends "in" ? IMap[keyof IMap] : OMap[keyof OMap];
 
-      const specTagInfo = this.convertWorkflowAliasToSpecTag({
+      const specTagInfo = this.convertLiveflowAliasToSpecTag({
         alias: p.tag,
         type,
       });
@@ -813,7 +813,7 @@ export class JobSpec<
    */
   public enqueueAndGetResult = async <
     KI extends keyof IMap,
-    KO extends keyof OMap  
+    KO extends keyof OMap
   >({
     jobId,
     jobOptions,
@@ -866,7 +866,7 @@ export class JobSpec<
                   | K
                   | InferDefaultOrSingleKey<IMap>;
               }
-              const specTagInfo = that.convertWorkflowAliasToSpecTag({
+              const specTagInfo = that.convertLiveflowAliasToSpecTag({
                 alias: resolvedTag,
                 type: "in",
               });
@@ -895,7 +895,7 @@ export class JobSpec<
               if (!resolvedTag) {
                 resolvedTag = that.getSingleTag("input", true);
               }
-              const specTagInfo = that.convertWorkflowAliasToSpecTag({
+              const specTagInfo = that.convertLiveflowAliasToSpecTag({
                 alias: resolvedTag,
                 type: "in",
               });
@@ -925,7 +925,7 @@ export class JobSpec<
                   | K
                   | InferDefaultOrSingleKey<IMap>;
               }
-              const specTagInfo = that.convertWorkflowAliasToSpecTag({
+              const specTagInfo = that.convertLiveflowAliasToSpecTag({
                 alias: resolvedTag,
                 type: "in",
               });
@@ -997,7 +997,7 @@ export class JobSpec<
     jobId: string
   ) => {
     const singletonSubscriberByTag = <K extends keyof OMap>(tag: K) => {
-      const specTagInfo = this.convertWorkflowAliasToSpecTag({
+      const specTagInfo = this.convertLiveflowAliasToSpecTag({
         alias: tag,
         type: "out",
       });
@@ -1163,7 +1163,7 @@ export class JobSpec<
     })();
   };
 
-  protected convertSpecTagToWorkflowAlias({
+  protected convertSpecTagToLiveflowAlias({
     tag,
   }: {
     specName: string;
@@ -1174,7 +1174,7 @@ export class JobSpec<
     return tag;
   }
 
-  protected convertWorkflowAliasToSpecTag({
+  protected convertLiveflowAliasToSpecTag({
     type,
     alias,
   }: {
@@ -1277,7 +1277,7 @@ export class JobSpec<
         ...qualified,
         connectedStreamNodes: qualified.connectedStreamNodes.map((c) => ({
           ...c,
-          alias: this.convertSpecTagToWorkflowAlias(c),
+          alias: this.convertSpecTagToLiveflowAlias(c),
         })),
       }));
     const qualified = pass2;
@@ -1419,7 +1419,7 @@ export class JobSpec<
    */
   public static define<P, I, O>(
     p: ConstructorParameters<
-      typeof JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>  
+      typeof JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>
     >[0]
   ) {
     return new JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>(p);

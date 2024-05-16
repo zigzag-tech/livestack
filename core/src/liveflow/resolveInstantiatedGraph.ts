@@ -111,7 +111,7 @@ export const resolveInstantiatedGraph = lruCacheFn(
 
       for (const tag of spec.inputTags) {
         const transform = TransformRegistry.getTransform({
-          workflowSpecName: pRec.spec_name,
+          liveflowSpecName: pRec.spec_name,
           receivingSpecName: spec.name,
           receivingSpecUniqueLabel: pRec.unique_spec_label || null,
           tag: tag.toString(),

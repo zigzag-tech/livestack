@@ -20,7 +20,7 @@ import {
   EMPTY,
 } from "rxjs";
 import { z } from "zod";
-import { TransformRegistry } from "../workflow/TransformRegistry";
+import { TransformRegistry } from "../liveflow/TransformRegistry";
 import {
   createLazyNextValueGenerator,
   createTrackedObservable,
@@ -403,7 +403,7 @@ export class LiveJob<
         });
         const streamId = stream.uniqueName;
         if (this.trackerByInputOutputTag[itag][resolvedTag]) {
-          // TODO: this is hacky. this.trackerByInputOutputTag[itag][resolvedTag] is null when we are in a workflow
+          // TODO: this is hacky. this.trackerByInputOutputTag[itag][resolvedTag] is null when we are in a liveflow
           relevantDatapoints.push(
             ...this.trackerByInputOutputTag[itag][resolvedTag]
               .dispense()
@@ -714,7 +714,7 @@ export class LiveJob<
                 : TransformRegistry.getTransform({
                     receivingSpecName: this.spec.name,
                     tag: resolvedTag!.toString(),
-                    workflowSpecName: parentRec.spec_name,
+                    liveflowSpecName: parentRec.spec_name,
                     receivingSpecUniqueLabel:
                       parentRec.unique_spec_label || null,
                   });

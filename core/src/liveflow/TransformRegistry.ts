@@ -1,35 +1,35 @@
 import { TransformFunction } from "@livestack/shared/src/graph/DefGraph";
 
 export class TransformRegistry {
-  private static _transformsByWorkflowByReceivingSpecNameAndTag: Record<
+  private static _transformsByLiveflowByReceivingSpecNameAndTag: Record<
     string,
     Record<`${string}${`[${string}]` | ""}/${string}`, TransformFunction>
   > = {};
 
   public static registerTransform({
-    workflowSpecName,
+    liveflowSpecName,
     receivingSpecName,
     receivingSpecUniqueLabel,
     tag,
     transform,
   }: {
-    workflowSpecName: string;
+    liveflowSpecName: string;
     receivingSpecName: string;
     receivingSpecUniqueLabel: string | null;
     tag: string;
     transform: TransformFunction;
   }) {
     if (
-      !TransformRegistry._transformsByWorkflowByReceivingSpecNameAndTag[
-        workflowSpecName
+      !TransformRegistry._transformsByLiveflowByReceivingSpecNameAndTag[
+        liveflowSpecName
       ]
     ) {
-      TransformRegistry._transformsByWorkflowByReceivingSpecNameAndTag[
-        workflowSpecName
+      TransformRegistry._transformsByLiveflowByReceivingSpecNameAndTag[
+        liveflowSpecName
       ] = {};
     }
-    TransformRegistry._transformsByWorkflowByReceivingSpecNameAndTag[
-      workflowSpecName
+    TransformRegistry._transformsByLiveflowByReceivingSpecNameAndTag[
+      liveflowSpecName
     ][
       `${receivingSpecName}${
         receivingSpecUniqueLabel ? `[${receivingSpecUniqueLabel}]` : ""
@@ -38,19 +38,19 @@ export class TransformRegistry {
   }
 
   public static getTransform({
-    workflowSpecName,
+    liveflowSpecName,
     receivingSpecName,
     receivingSpecUniqueLabel,
     tag,
   }: {
-    workflowSpecName: string;
+    liveflowSpecName: string;
     receivingSpecName: string;
     receivingSpecUniqueLabel: string | null;
     tag: string;
   }) {
     return (
-      (TransformRegistry._transformsByWorkflowByReceivingSpecNameAndTag[
-        workflowSpecName
+      (TransformRegistry._transformsByLiveflowByReceivingSpecNameAndTag[
+        liveflowSpecName
       ]?.[
         `${receivingSpecName}${
           receivingSpecUniqueLabel ? `[${receivingSpecUniqueLabel}]` : ""

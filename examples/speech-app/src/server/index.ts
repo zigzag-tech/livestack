@@ -6,7 +6,7 @@ import path from "path";
 import bodyParser from "body-parser";
 import cors from "cors";
 import ViteExpress from "vite-express";
-import { speechWorkflow } from "./workflow.speech";
+import { speechLiveflow } from "./liveflow.speech";
 
 const liveEnvP = LiveEnv.create({
   projectId: "MY_LIVE_SPEECH_APP",
@@ -35,7 +35,7 @@ async function main() {
   // Initialize job binding for any incoming requests from the client
   initJobBinding({
     httpServer,
-    allowedSpecsForBinding: [speechWorkflow],
+    allowedSpecsForBinding: [speechLiveflow],
   });
 }
 
