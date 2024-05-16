@@ -16,7 +16,7 @@ import {
   InferRestoredFileType,
   OriginalType,
   calculateHash,
-} from "@livestack/core/storage";
+} from "@livestack/core";
 import { Readable, Stream } from "stream";
 
 export function getAWSS3StorageProvider({
