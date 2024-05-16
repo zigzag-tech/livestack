@@ -32,7 +32,6 @@
   "optionalDependencies": {
     "@livestack/vault-dev-server": "*"
   },
-  "type": "module",
   "module": "dist/livestack-core.esm.js",
   "main": "dist/livestack-core.cjs.js",
   "types": "dist/livestack-core.cjs.d.ts",
