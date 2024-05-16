@@ -662,6 +662,7 @@ export class LiveflowSpec extends JobSpec<
     if (!existingAlias) {
       const alias = `${specName}[${uniqueSpecLabel || ""}]::${type}/${tag}`;
       const defG = this.getDefGraph();
+
       defG.assignAlias({
         alias,
         specName,

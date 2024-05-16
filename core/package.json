@@ -32,36 +32,39 @@
   "optionalDependencies": {
     "@livestack/vault-dev-server": "*"
   },
+  "type": "module",
   "module": "dist/livestack-core.esm.js",
   "main": "dist/livestack-core.cjs.js",
   "types": "dist/livestack-core.cjs.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/livestack-core.esm.js",
-      "require": "./dist/livestack-core.cjs.js"
+      "module": "./dist/livestack-core.esm.js",
+      "default": "./dist/livestack-core.cjs.js"
     },
     "./utils": {
-      "import": "./utils/dist/livestack-core-utils.esm.js",
-      "require": "./utils/dist/livestack-core-utils.cjs.js"
-    },
-    "./storage": {
-      "import": "./storage/dist/livestack-core-storage.esm.js",
-      "require": "./storage/dist/livestack-core-storage.cjs.js"
-    },
-    "./liveflow": {
-      "import": "./liveflow/dist/livestack-core-liveflow.esm.js",
-      "require": "./liveflow/dist/livestack-core-liveflow.cjs.js"
+      "module": "./utils/dist/livestack-core-utils.esm.js",
+      "default": "./utils/dist/livestack-core-utils.cjs.js"
     },
     "./logging": {
-      "import": "./logging/dist/livestack-core-logging.esm.js",
-      "require": "./logging/dist/livestack-core-logging.cjs.js"
+      "module": "./logging/dist/livestack-core-logging.esm.js",
+      "default": "./logging/dist/livestack-core-logging.cjs.js"
+    },
+    "./storage": {
+      "module": "./storage/dist/livestack-core-storage.esm.js",
+      "default": "./storage/dist/livestack-core-storage.cjs.js"
+    },
+    "./liveflow": {
+      "module": "./liveflow/dist/livestack-core-liveflow.esm.js",
+      "default": "./liveflow/dist/livestack-core-liveflow.cjs.js"
     },
     "./onboarding": {
-      "import": "./onboarding/dist/livestack-core-onboarding.esm.js",
-      "require": "./onboarding/dist/livestack-core-onboarding.cjs.js"
-    }
+      "module": "./onboarding/dist/livestack-core-onboarding.esm.js",
+      "default": "./onboarding/dist/livestack-core-onboarding.cjs.js"
+    },
+    "./package.json": "./package.json"
   },
   "preconstruct": {
+    "exports": true,
     "entrypoints": [
       "index.ts",
       "storage.ts",
