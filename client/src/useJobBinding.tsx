@@ -82,7 +82,7 @@ export function useJobBinding<P>({
             specName,
             uniqueSpecLabel,
             jobOptions,
-            jobId,
+            jobId: jobId || undefined,
           });
           const { initiateDeferredClose } = resetToConnected({
             specName,
