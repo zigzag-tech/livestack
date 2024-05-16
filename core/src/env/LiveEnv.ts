@@ -12,7 +12,7 @@ import limit from "p-limit";
 import {
   ResolvedCliTokenStatusWithUserToken,
   WaitingTorResolveCliTokenStatus,
-} from "../onboarding/CliOnboarding";
+} from "../onboarding";
 import { parse, stringify } from "@ltd/j-toml";
 import path from "path";
 import os from "os";
