@@ -39,7 +39,7 @@ import { LiveEnv } from "../env/LiveEnv";
 import { resolveInstantiatedGraph } from "../workflow/resolveInstantiatedGraph";
 import { lruCacheFn } from "@livestack/shared";
 
-export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
+ const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
 // export type CheckTMap<T> = T extends Record<string, infer V> ? T : never;
 
@@ -1548,23 +1548,23 @@ export function convertSpecOrName(
     throw new Error("Invalid spec");
   }
 }
-export function resolveTagMapping(
-  p:
-    | {
-        _aliasMaps?: Partial<TagMaps<any, any, any, any, any, any>>;
-      }
-    | string
-    | any
-) {
-  let inputAliasMap: Record<string, string> = {};
-  let outputAliasMap: Record<string, string> = {};
+ function resolveTagMapping(
+   p:
+     | {
+         _aliasMaps?: Partial<TagMaps<any, any, any, any, any, any>>;
+       }
+     | string
+     | any
+ ) {
+   let inputAliasMap: Record<string, string> = {};
+   let outputAliasMap: Record<string, string> = {};
 
-  if (typeof p === "object" && !(p instanceof JobSpec) && p._aliasMaps) {
-    inputAliasMap = p._aliasMaps.inputTag || {};
-    outputAliasMap = p._aliasMaps.outputTag || {};
-  }
-  return {
-    inputAliasMap,
-    outputAliasMap,
-  };
-}
+   if (typeof p === "object" && !(p instanceof JobSpec) && p._aliasMaps) {
+     inputAliasMap = p._aliasMaps.inputTag || {};
+     outputAliasMap = p._aliasMaps.outputTag || {};
+   }
+   return {
+     inputAliasMap,
+     outputAliasMap,
+   };
+ }

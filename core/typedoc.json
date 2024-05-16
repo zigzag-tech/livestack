@@ -1,5 +1,11 @@
 {
-  "entryPoints": ["src/index.ts"],
+  "entryPoints": [
+    "src/index.ts",
+    "src/storage.ts",
+    "src/workflow.ts",
+    "src/logging.ts",
+    "src/utils.ts"
+  ],
   "excludePrivate": true,
   "excludeProtected": true,
   "excludeExternals": true

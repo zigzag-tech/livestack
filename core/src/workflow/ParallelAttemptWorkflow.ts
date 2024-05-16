@@ -1,5 +1,4 @@
-import { InferStreamSetType, InferTMap } from "@livestack/shared";
-import { CheckSpec, JobSpec } from "../jobs/JobSpec";
+import { JobSpec } from "../jobs/JobSpec";
 import { InferDefaultOrSingleKey, LiveWorkerDef } from "../jobs/LiveWorker";
 import { LiveEnv } from "../env/LiveEnv";
 import { WrapWithTimestamp } from "../utils/io";
