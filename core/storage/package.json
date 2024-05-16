@@ -1,4 +1,0 @@
-{
-  "main": "dist/livestack-core-storage.cjs.js",
-  "module": "dist/livestack-core-storage.esm.js"
-}

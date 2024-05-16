@@ -21,9 +21,20 @@
   "main": "dist/livestack-vault-client.cjs.js",
   "types": "dist/livestack-vault-client.cjs.d.ts",
   "module": "dist/livestack-vault-client.esm.js",
+  "exports": {
+    ".": "./dist/livestack-vault-client.js",
+    "./package.json": "./package.json"
+  },
+  "type": "module",
   "preconstruct": {
     "entrypoints": [
       "./index.ts"
-    ]
+    ],
+    "exports": true,
+    "___experimentalFlags_WILL_CHANGE_IN_PATCH": {
+      "typeModule": true,
+      "distInRoot": true,
+      "importsConditions": true
+    }
   }
 }

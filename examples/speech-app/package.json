@@ -1,11 +1,11 @@
 {
-  "name": "@zztech/live-test",
+  "name": "@livestack/speech-app-example",
   "version": "1.0.0",
   "description": "",
   "engines": {
     "node": ">=20.0.0 <22.0.0"
   },
-  "main": "src/index.ts",
+  "main": "dist/livestack-speech-app-example.cjs.js",
   "scripts": {
     "dev": "NODE_OPTIONS='-r dotenv/config' npx -q tsx --tsconfig tsconfig.json src/server/index.ts"
   },
@@ -52,5 +52,6 @@
     "tsx": "^4.7.1",
     "typescript": "5.4.5",
     "vite": "^5.1.6"
-  }
+  },
+  "type": "module"
 }

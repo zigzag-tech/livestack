@@ -3,13 +3,17 @@ import {
   StreamIdOverridesForRootSpec,
   StreamNode,
   getSourceSpecNodeConnectedToStream,
-} from "@livestack/shared/src/graph/InstantiatedGraph";
-import { ConnectorType } from "@livestack/vault-interface";
+} from "@livestack/shared";
+// import { ConnectorType } from "@livestack/vault-interface";
 import { TransformRegistry } from "./TransformRegistry";
 import { lruCacheFn } from "@livestack/shared";
 import { JobSpec } from "../jobs/JobSpec";
 import { LiveEnv } from "../env/LiveEnv";
-
+ enum ConnectorType {
+   IN = 0,
+   OUT = 1,
+   UNRECOGNIZED = -1,
+ }
 // TODO: cache this
 export const resolveInstantiatedGraph = lruCacheFn(
   ({ specName, jobId }) => `${specName}/${jobId}`,

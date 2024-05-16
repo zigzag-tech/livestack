@@ -3,17 +3,20 @@ import {
   identifyLargeFilesToRestore,
   restoreLargeValues,
 } from "../files/file-ops";
-import { SubType } from "@livestack/vault-interface/src/generated/stream";
+// import { SubType } from "@livestack/vault-interface";
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../jobs/pubsub";
 import { DataStream, WithTimestamp } from "./DataStream";
 
+enum SubType {
+  fromStart = 0,
+  fromNow = 1,
+  UNRECOGNIZED = -1,
+}
 export class DataStreamSubscriber<T extends object> {
   private liveEnvP: Promise<LiveEnv>;
   public readonly stream: DataStream<T>;
-  private cursor: `${string}-${string}` | "$" | "0";
   private _valueObservable: Observable<WithTimestamp<T>> | null = null;
-  private isUnsubscribed: boolean = false;
   private _nextValue: (() => Promise<WithTimestamp<T>>) | null = null;
   private subType: SubType;
 
@@ -30,7 +33,7 @@ export class DataStreamSubscriber<T extends object> {
   }) {
     this.stream = stream;
     this.liveEnvP = liveEnvP;
-    this.cursor = initialCursor;
+    // this.cursor = initialCursor;
     this.subType = subType;
   }
 
@@ -119,7 +122,7 @@ export class DataStreamSubscriber<T extends object> {
   }
 
   public unsubscribe = () => {
-    this.isUnsubscribed = true;
+    // this.isUnsubscribed = true;
     // Perform any additional cleanup or resource release here if necessary
   };
 

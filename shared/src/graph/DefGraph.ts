@@ -1,8 +1,11 @@
 const isBrowser = typeof window !== "undefined";
 const pkgP = isBrowser ? import("./wasm/livestack_shared_wasm") : null;
 
+import { createRequire } from "module";
 import type { DefGraph } from "./wasm/livestack_shared_wasm_nodejs";
 export type { DefGraph } from "./wasm/livestack_shared_wasm_nodejs";
+
+const require = createRequire(import.meta.url);
 
 async function ensureInit() {
   const pkg = await pkgP;

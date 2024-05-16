@@ -31,10 +31,21 @@
   "main": "dist/livestack-shared.cjs.js",
   "types": "dist/livestack-shared.cjs.d.ts",
   "module": "dist/livestack-shared.esm.js",
+  "type": "module",
+  "exports": {
+    ".": "./dist/livestack-shared.js",
+    "./package.json": "./package.json"
+  },
   "preconstruct": {
     "entrypoints": [
       "./index.ts"
-    ]
+    ],
+    "exports": true,
+    "___experimentalFlags_WILL_CHANGE_IN_PATCH": {
+      "typeModule": true,
+      "distInRoot": true,
+      "importsConditions": true
+    }
   },
   "author": ""
 }
