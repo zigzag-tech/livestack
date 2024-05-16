@@ -1,10 +1,7 @@
 {
-  "entryPoints": ["core", "shared", "vault-interface"],
+  "entryPoints": ["core", "client", "gateway"],
   "out": "_docs",
   "name": "Livestack",
   "theme": "default",
-  "entryPointStrategy": "packages",
-  "excludePrivate": true,
-  "excludeProtected": true,
-  "excludeExternals": true
+  "entryPointStrategy": "packages"
 }
