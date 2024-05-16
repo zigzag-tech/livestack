@@ -2,7 +2,7 @@ import { LiveEnv } from "@livestack/core";
 import { Server as SocketIOServer } from "socket.io";
 import { Server as HTTPServer } from "http";
 import { LiveGatewayConn } from "./LiveGatewayConn";
-import { SpecOrName, resolveUniqueSpec } from "@livestack/core/liveflow";
+import { SpecOrName, resolveUniqueSpec } from "@livestack/core";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = "jwt_secret";

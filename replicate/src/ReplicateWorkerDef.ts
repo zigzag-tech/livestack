@@ -2,7 +2,7 @@ import Replicate from "replicate";
 import { JobSpec } from "@livestack/core";
 import { LiveWorkerDef } from "@livestack/core";
 import { LiveEnv } from "@livestack/core";
-import { InferDefaultOrSingleKey } from "@livestack/core/src/jobs/LiveWorker";
+import { InferDefaultOrSingleKey } from "@livestack/core";
 
 const TIMEOUT_IN_SECONDS = 60 * 15; // 15 minutes
 

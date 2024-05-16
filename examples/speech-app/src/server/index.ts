@@ -1,5 +1,5 @@
 import { LiveEnv } from "@livestack/core";
-import { getLocalTempFileStorageProvider } from "@livestack/core/storage";
+import { getLocalTempFileStorageProvider } from "@livestack/core";
 import { initJobBinding } from "@livestack/gateway";
 import express from "express";
 import path from "path";
