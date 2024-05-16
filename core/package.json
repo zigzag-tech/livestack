@@ -6,9 +6,6 @@
     "build": "preconstruct build",
     "postinstall": "preconstruct dev"
   },
-  "files": [
-    "dist/**/*"
-  ],
   "license": "MIT",
   "dependencies": {
     "@livestack/shared": "*",
@@ -39,7 +36,8 @@
   "types": "dist/livestack-core.cjs.d.ts",
   "preconstruct": {
     "entrypoints": [
-      "index.ts"
+      "index.ts",
+      "onboarding.ts"
     ]
   },
   "author": ""
