@@ -35,6 +35,32 @@
   "module": "dist/livestack-core.esm.js",
   "main": "dist/livestack-core.cjs.js",
   "types": "dist/livestack-core.cjs.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/livestack-core.esm.js",
+      "require": "./dist/livestack-core.cjs.js"
+    },
+    "./utils": {
+      "import": "./utils/dist/livestack-core-utils.esm.js",
+      "require": "./utils/dist/livestack-core-utils.cjs.js"
+    },
+    "./storage": {
+      "import": "./storage/dist/livestack-core-storage.esm.js",
+      "require": "./storage/dist/livestack-core-storage.cjs.js"
+    },
+    "./liveflow": {
+      "import": "./liveflow/dist/livestack-core-liveflow.esm.js",
+      "require": "./liveflow/dist/livestack-core-liveflow.cjs.js"
+    },
+    "./logging": {
+      "import": "./logging/dist/livestack-core-logging.esm.js",
+      "require": "./logging/dist/livestack-core-logging.cjs.js"
+    },
+    "./onboarding": {
+      "import": "./onboarding/dist/livestack-core-onboarding.esm.js",
+      "require": "./onboarding/dist/livestack-core-onboarding.cjs.js"
+    }
+  },
   "preconstruct": {
     "entrypoints": [
       "index.ts",
