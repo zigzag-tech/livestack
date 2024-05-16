@@ -11,7 +11,7 @@ import { QueueJob, FromWorker } from "@livestack/vault-interface";
 import { v4 } from "uuid";
 import { genManuallyFedIterator } from "@livestack/shared";
 
-export const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
+const JOB_ALIVE_TIMEOUT = 1000 * 60 * 10;
 
 export type LiveWorkerDefParams<
   P,

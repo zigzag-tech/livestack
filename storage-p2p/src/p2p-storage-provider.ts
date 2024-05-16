@@ -3,7 +3,7 @@ import type {
   InferRestoredFileType,
   LargeFileWithoutValue,
   OriginalType,
-} from "@livestack/core";
+} from "@livestack/core/storage";
 import { createLibp2p } from "libp2p";
 import { tcp } from "@libp2p/tcp";
 import { mplex } from "@libp2p/mplex";
@@ -14,8 +14,8 @@ import { kadDHT } from "@libp2p/kad-dht";
 // import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
 import { bootstrap } from "@libp2p/bootstrap";
 import { multiaddr } from "multiaddr";
-import corePkg from "@livestack/core";
-const { calculateHash } = corePkg;
+import coreStoragePkg from "@livestack/core/storage";
+const { calculateHash } = coreStoragePkg;
 import dns from "dns";
 // import { concat } from "uint8arrays/concat";
 

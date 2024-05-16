@@ -6,7 +6,7 @@ import {
   calculateHash,
   InferRestoredFileType,
   OriginalType,
-} from "@livestack/core";
+} from "@livestack/core/storage";
 import { Readable } from "stream";
 
 export function getGoogleCloudStorageProvider({

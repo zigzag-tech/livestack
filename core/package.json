@@ -24,7 +24,7 @@
     "zod-to-json-schema": "^3.22.4"
   },
   "devDependencies": {
-    "@preconstruct/cli": "^2.8.3",
+    "@preconstruct/cli": "^2.8.4",
     "@types/lodash": "^4.14.201",
     "@types/uuid": "^9.0.7",
     "typescript": "5.4.5"
@@ -38,6 +38,10 @@
   "preconstruct": {
     "entrypoints": [
       "index.ts",
+      "storage.ts",
+      "workflow.ts",
+      "utils.ts",
+      "logging.ts",
       "onboarding.ts"
     ]
   },

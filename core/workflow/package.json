@@ -1,0 +1,4 @@
+{
+  "main": "dist/livestack-core-workflow.cjs.js",
+  "module": "dist/livestack-core-workflow.esm.js"
+}
