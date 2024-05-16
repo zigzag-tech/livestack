@@ -58,7 +58,7 @@ import bodyParser from "body-parser";
 import cors from "cors";
 import ViteExpress from "vite-express";
 import { liveEnvP } from "./liveEnv";
-import { speechWorkflow } from "./workers/workflow.speech";
+import { speechLiveflow } from "./workers/liveflow.speech";
 
 async function main() {
   LiveEnv.setGlobal(liveEnvP);
@@ -76,7 +76,7 @@ async function main() {
   initJobBinding({
     liveEnv: await liveEnvP,
     httpServer: server,
-    allowedSpecsForBinding: [speechWorkflow],
+    allowedSpecsForBinding: [speechLiveflow],
   });
 }
 
@@ -96,23 +96,23 @@ export const liveEnvP = LiveEnv.create({
 });
 ```
 
-## Step 4: Defining the Workflow
+## Step 4: Defining the Liveflow
 
-Create a new file `src/server/workers/workflow.speech.ts` and add the following code:
+Create a new file `src/server/workers/liveflow.speech.ts` and add the following code:
 
 ```typescript
 import {
   rawPCMToWavSpec,
   speechChunkToTextSpec,
 } from "@livestack/transcribe-server";
-import { Workflow, conn, expose } from "@livestack/core";
-import { SPEECH_WORKFLOW_NAME } from "../../common/defs";
+import { Liveflow, conn, expose } from "@livestack/core";
+import { SPEECH_LIVEFLOW_NAME } from "../../common/defs";
 import { translationSpec } from "@livestack/translate-server";
 import { titleSummarizerSepc } from "@livestack/lab-internal-server";
 import { textSplittingSpec } from "@livestack/lab-internal-server";
 
-export const speechWorkflow = Workflow.define({
-  name: SPEECH_WORKFLOW_NAME,
+export const speechLiveflow = Liveflow.define({
+  name: SPEECH_LIVEFLOW_NAME,
   connections: [
     conn({
       from: {
@@ -210,12 +210,12 @@ import {
   Transcripts,
 } from "@livestack/transcribe-client";
 import { useJobBinding, useOutput, useInput } from "@livestack/client";
-import { SPEECH_WORKFLOW_NAME } from "../../common/defs";
+import { SPEECH_LIVEFLOW_NAME } from "../../common/defs";
 import { translationOutputSchema } from "@livestack/lab-internal-common";
 
 export const AudioInput: React.FC = () => {
   const job = useJobBinding({
-    specName: SPEECH_WORKFLOW_NAME,
+    specName: SPEECH_LIVEFLOW_NAME,
   });
 
   const { feed } = useInput({

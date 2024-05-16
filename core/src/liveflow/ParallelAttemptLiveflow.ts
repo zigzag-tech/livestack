@@ -28,7 +28,7 @@ export interface ParallelAttempt<ParentIMap, ParentOMap, I, O, IMap, OMap> {
   triggerCondition: (c: TriggerCheckContext) => boolean;
 }
 
-export class ParallelAttemptWorkflow<
+export class ParallelAttemptLiveflow<
   ParentI,
   ParentO,
   ParentIMap,

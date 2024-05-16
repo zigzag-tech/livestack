@@ -1,5 +1,5 @@
 ## @livestack/viz
 
-Realtime Livestack workflow visualization.
+Realtime Livestack liveflow visualization.
 
 WIP

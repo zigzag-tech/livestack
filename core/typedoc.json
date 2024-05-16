@@ -2,7 +2,7 @@
   "entryPoints": [
     "src/index.ts",
     "src/storage.ts",
-    "src/workflow.ts",
+    "src/liveflow.ts",
     "src/logging.ts",
     "src/utils.ts"
   ],

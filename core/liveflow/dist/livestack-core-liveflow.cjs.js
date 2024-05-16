@@ -11,6 +11,6 @@
 let unregister = require("../../../../node_modules/@preconstruct/hook").___internalHook(typeof __dirname === 'undefined' ? undefined : __dirname, "../..", "../..");
 
 // this re-exports the source file
-module.exports = require("../../src/workflow.ts");
+module.exports = require("../../src/liveflow.ts");
 
 unregister();
