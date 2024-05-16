@@ -9,3 +9,4 @@ export * from "./stream";
 export * from "./onboarding";
 export * from "./logging";
 export * from "./liveflow";
+export * from "./jobs/LiveWorker";
