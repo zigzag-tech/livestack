@@ -444,6 +444,12 @@ export class LiveflowSpec extends JobSpec<
    * @param jobGroupDef - The job group definition for the liveflow.
    * @param jobGroupId - The ID of the job group.
    */
+  /**
+   * Constructs a new Liveflow instance.
+   *
+   * @param jobGroupDef - The job group definition for the liveflow.
+   * @param jobGroupId - The ID of the job group.
+   */
   constructor({
     connections,
     exposures,
@@ -819,11 +825,22 @@ export class LiveflowSpec extends JobSpec<
 /**
  * Represents a liveflow that manages job groups and their execution.
  */
+/**
+ * Represents a liveflow that manages job groups and their execution.
+ */
 export class Liveflow {
   /**
    * Promise resolving to the instantiated graph of the liveflow.
    */
+  /**
+   * Promise resolving to the instantiated graph of the liveflow.
+   */
   private _graphP: Promise<InstantiatedGraph> | null = null;
+  /**
+   * Gets the promise resolving to the instantiated graph of the liveflow.
+   *
+   * @returns The promise resolving to the instantiated graph.
+   */
   /**
    * Gets the promise resolving to the instantiated graph of the liveflow.
    *
@@ -870,11 +887,20 @@ export class Liveflow {
   /**
    * The job group definition for the liveflow.
    */
+  /**
+   * The job group definition for the liveflow.
+   */
   public readonly jobGroupDef: LiveflowSpec;
   /**
    * The context ID of the liveflow.
    */
+  /**
+   * The context ID of the liveflow.
+   */
   public readonly contextId: string;
+  /**
+   * A record of liveflows by their IDs.
+   */
   /**
    * A record of liveflows by their IDs.
    */
@@ -898,10 +924,22 @@ export class Liveflow {
    * @param p - The parameters for defining the liveflow specification.
    * @returns The defined liveflow specification.
    */
+  /**
+   * Defines a new liveflow specification.
+   *
+   * @param p - The parameters for defining the liveflow specification.
+   * @returns The defined liveflow specification.
+   */
   public static define(p: ConstructorParameters<typeof LiveflowSpec>[0]) {
     return new LiveflowSpec(p);
   }
 
+  /**
+   * Looks up a liveflow by its ID.
+   *
+   * @param jobGroupId - The ID of the job group.
+   * @returns The liveflow instance if found, otherwise null.
+   */
   /**
    * Looks up a liveflow by its ID.
    *
