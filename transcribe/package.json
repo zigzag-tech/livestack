@@ -1,0 +1,27 @@
+{
+  "name": "@livestack/transcribe",
+  "version": "0.0.1",
+  "peerDependencies": {
+    "@livestack/client": "*",
+    "@livestack/core": "*"
+  },
+  "module": "dist/livestack-transcribe-client.esm.js",
+  "exports": {
+    "./client": {
+      "module": "./client/dist/livestack-transcribe-client.esm.js",
+      "default": "./client/dist/livestack-transcribe-client.cjs.js"
+    },
+    "./server": {
+      "module": "./server/dist/livestack-transcribe-server.esm.js",
+      "default": "./server/dist/livestack-transcribe-server.cjs.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "preconstruct": {
+    "exports": true,
+    "entrypoints": [
+      "client/index.ts",
+      "server/index.ts"
+    ]
+  }
+}

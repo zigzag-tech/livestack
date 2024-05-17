@@ -20,7 +20,7 @@ npm install
 Install the necessary LiveStack packages:
 
 ```sh
-npm install @livestack/core @livestack/gateway @livestack/transcribe-server @livestack/lab-internal-server @livestack/summarizer
+npm install @livestack/core @livestack/gateway @livestack/transcribe @livestack/lab-internal-server @livestack/summarizer
 ```
 
 ## Step 2: Setting Up Client-side and Server-side Code
@@ -42,7 +42,7 @@ Create a new file `src/server/liveflow.speech.ts` and add the following code:
 import {
   rawPCMToWavSpec,
   speechChunkToTextSpec,
-} from "@livestack/transcribe-server";
+} from "@livestack/transcribe/server";
 import { Liveflow, conn, expose } from "@livestack/core";
 import { SPEECH_LIVEFLOW_NAME } from "../common/defs";
 import { translationSpec } from "@livestack/translate-server";
@@ -180,7 +180,7 @@ import {
   LiveTitle,
   rawPCMInput,
   Transcripts,
-} from "@livestack/transcribe-client";
+} from "@livestack/transcribe/client";
 import { useJobBinding, useOutput, useInput } from "@livestack/client";
 import { translationOutputSchema } from "@livestack/lab-internal-common";
 

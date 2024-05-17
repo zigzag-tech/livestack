@@ -1,7 +1,7 @@
 import {
   rawPCMToWavSpec,
   speechChunkToTextSpec,
-} from "@livestack/transcribe-server";
+} from "@livestack/transcribe/server";
 import { Liveflow, conn, expose } from "@livestack/core";
 import { SPEECH_LIVEFLOW_NAME } from "../common/defs";
 import { translationSpec } from "@livestack/translate-server";

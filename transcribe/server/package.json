@@ -1,0 +1,4 @@
+{
+  "main": "dist/livestack-transcribe-server.cjs.js",
+  "module": "dist/livestack-transcribe-server.esm.js"
+}
