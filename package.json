@@ -5,7 +5,8 @@
     "typedoc": "typedoc && cp -r _misc _docs/"
   },
   "workspaces": [
-    "*"
+    "*",
+    "examples/*"
   ],
   "dependencies": {
     "typedoc": "^0.25.13"
