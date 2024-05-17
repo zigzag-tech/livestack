@@ -6,15 +6,6 @@
     "build": "preconstruct build",
     "postinstall": "preconstruct dev"
   },
-  "files": [
-    "dist/**/*",
-    "utils/dist/**/*",
-    "logging/dist/**/*",
-    "storage/dist/**/*",
-    "liveflow/dist/**/*",
-    "onboarding/dist/**/*",
-    "package.json"
-  ],
   "license": "MIT",
   "dependencies": {
     "@livestack/shared": "*",
@@ -49,37 +40,12 @@
       "module": "./dist/livestack-core.esm.js",
       "default": "./dist/livestack-core.cjs.js"
     },
-    "./utils": {
-      "module": "./utils/dist/livestack-core-utils.esm.js",
-      "default": "./utils/dist/livestack-core-utils.cjs.js"
-    },
-    "./logging": {
-      "module": "./logging/dist/livestack-core-logging.esm.js",
-      "default": "./logging/dist/livestack-core-logging.cjs.js"
-    },
-    "./storage": {
-      "module": "./storage/dist/livestack-core-storage.esm.js",
-      "default": "./storage/dist/livestack-core-storage.cjs.js"
-    },
-    "./liveflow": {
-      "module": "./liveflow/dist/livestack-core-liveflow.esm.js",
-      "default": "./liveflow/dist/livestack-core-liveflow.cjs.js"
-    },
-    "./onboarding": {
-      "module": "./onboarding/dist/livestack-core-onboarding.esm.js",
-      "default": "./onboarding/dist/livestack-core-onboarding.cjs.js"
-    },
     "./package.json": "./package.json"
   },
   "preconstruct": {
     "exports": true,
     "entrypoints": [
-      "index.ts",
-      "storage.ts",
-      "liveflow.ts",
-      "utils.ts",
-      "logging.ts",
-      "onboarding.ts"
+      "index.ts"
     ]
   },
   "author": ""
