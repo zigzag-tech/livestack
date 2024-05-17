@@ -1,1 +1,0 @@
-/home/ubuntu/auto-live-lower-thirds/livestack/transcribe-server/src/index.ts

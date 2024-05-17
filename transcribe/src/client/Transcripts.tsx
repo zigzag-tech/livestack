@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { useOutput, JobInfo } from "@livestack/client";
-import { speechChunkToTextOutput } from "./defs";
+import { speechChunkToTextOutput } from "../common/defs";
 import { StreamQuery } from "@livestack/shared";
 
 export const Transcripts = ({

@@ -8,7 +8,7 @@ import {
   LiveTitle,
   rawPCMInput,
   Transcripts,
-} from "@livestack/transcribe-client";
+} from "@livestack/transcribe/client";
 import { useJobBinding, useOutput, useInput } from "@livestack/client";
 import { SPEECH_LIVEFLOW_NAME } from "../common/defs";
 import { translationOutputSchema } from "@livestack/lab-internal-common";
