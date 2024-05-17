@@ -1,0 +1,1 @@
+/home/ubuntu/auto-live-lower-thirds/livestack/lab-server/src/index.ts
