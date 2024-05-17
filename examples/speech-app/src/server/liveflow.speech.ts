@@ -8,23 +8,28 @@ import { translationSpec } from "@livestack/translate-server";
 import { titleSummarizerSepc } from "@livestack/lab-internal-server";
 import { textSplittingSpec } from "@livestack/lab-internal-server";
 
+// Define the speech liveflow
 export const speechLiveflow = Liveflow.define({
   name: SPEECH_LIVEFLOW_NAME,
   connections: [
+    // Connection from raw PCM to WAV
     conn({
       from: rawPCMToWavSpec,
       to: speechChunkToTextSpec,
     }),
+    // Connection from speech chunk to text
     conn({
       from: speechChunkToTextSpec,
       transform: ({ transcript }) => transcript,
       to: textSplittingSpec,
     }),
+    // Connection from text splitting to title summarizer
     conn({
       from: textSplittingSpec,
       transform: (chunkText) => ({ transcript: chunkText }),
       to: titleSummarizerSepc,
     }),
+    // Connection from text splitting to translation
     conn({
       from: textSplittingSpec,
       transform: (chunkText) => ({
@@ -35,9 +40,13 @@ export const speechLiveflow = Liveflow.define({
     }),
   ],
   exposures: [
+    // Expose the default input for raw PCM to WAV
     expose(rawPCMToWavSpec.input.default, "input-default"),
+    // Expose the default output for speech chunk to text
     expose(speechChunkToTextSpec.output.default, "transcription"),
+    // Expose the default output for title summarizer
     expose(titleSummarizerSepc.output.default, "summarized-title"),
+    // Expose the default output for translation
     expose(translationSpec.output.default, "translation"),
   ],
 });
