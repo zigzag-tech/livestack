@@ -6,6 +6,15 @@
     "build": "preconstruct build",
     "postinstall": "preconstruct dev"
   },
+  "files": [
+    "dist/**/*",
+    "utils/dist/**/*",
+    "logging/dist/**/*",
+    "storage/dist/**/*",
+    "liveflow/dist/**/*",
+    "onboarding/dist/**/*",
+    "package.json"
+  ],
   "license": "MIT",
   "dependencies": {
     "@livestack/shared": "*",
