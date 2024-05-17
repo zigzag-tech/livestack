@@ -1,7 +1,7 @@
 *.log
-/dist
 .env*
 node_modules
 .gcloud
 knexfile.js
 .aider*
+dist
