@@ -1,0 +1,17 @@
+{
+  "name": "@livestack/lab-internal-server",
+  "version": "0.0.1",
+  "dependencies": {
+    "@livestack/core": "*",
+    "@livestack/lab-internal-common": "*",
+    "langchain": "^0.1.36",
+    "lorem-ipsum": "^2.0.8"
+  },
+  "main": "dist/livestack-lab-internal-server.cjs.js",
+  "module": "dist/livestack-lab-internal-server.esm.js",
+  "preconstruct": {
+    "entrypoints": [
+      "index.ts"
+    ]
+  }
+}

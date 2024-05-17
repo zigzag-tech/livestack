@@ -1,0 +1,16 @@
+{
+  "name": "@livestack/translate-server",
+  "version": "0.0.1",
+  "dependencies": {
+    "@livestack/core": "*",
+    "@livestack/lab-internal-common": "*"
+  },
+  "module": "dist/livestack-translate-server.esm.js",
+  "main": "dist/livestack-translate-server.cjs.js",
+  "types": "dist/livestack-translate-server.cjs.d.ts",
+  "preconstruct": {
+    "entrypoints": [
+      "index.ts"
+    ]
+  }
+}

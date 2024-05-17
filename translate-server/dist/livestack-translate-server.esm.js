@@ -1,0 +1,1 @@
+/home/ubuntu/auto-live-lower-thirds/livestack/translate-server/src/index.ts
