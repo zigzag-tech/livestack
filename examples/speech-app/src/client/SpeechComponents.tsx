@@ -13,17 +13,21 @@ import { useJobBinding, useOutput, useInput } from "@livestack/client";
 import { SPEECH_LIVEFLOW_NAME } from "../common/defs";
 import { translationOutputSchema } from "@livestack/lab-internal-common";
 
+// SpeechComponents component
 export const SpeechComponents: React.FC = () => {
+  // Bind to a job using the specified live flow name
   const job = useJobBinding({
     specName: SPEECH_LIVEFLOW_NAME,
   });
 
+  // Set up input feed for raw PCM data
   const { feed } = useInput({
     tag: "input-default",
     def: rawPCMInput,
     job,
   });
 
+  // Set up output for translation data
   const translation = useOutput({
     tag: "translation",
     def: translationOutputSchema,
@@ -31,8 +35,10 @@ export const SpeechComponents: React.FC = () => {
     query: { type: "lastN", n: 10 },
   });
 
+  // State for volume level
   const [volume, setVolume] = React.useState<number>(0);
 
+  // Set up PCM recorder with handlers for data and volume changes
   const { startRecording, stopRecording, isRecording, cumulativeDataSent } =
     usePCMRecorder({
       onDataAvailable: async (data) => {
@@ -47,6 +53,7 @@ export const SpeechComponents: React.FC = () => {
       },
     });
 
+  // Toggle recording state
   const handleRecording = isRecording ? stopRecording : startRecording;
 
   return (
