@@ -3629,6 +3629,9 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/client@workspace:client"
   dependencies:
+    "@babel/core": "npm:^7.24.5"
+    "@babel/preset-env": "npm:^7.16.7"
+    "@babel/preset-typescript": "npm:^7.16.7"
     "@livestack/shared": "npm:^0.0.6"
     "@preconstruct/cli": "npm:^2.8.4"
     "@types/react": "npm:^18"
@@ -3719,9 +3722,14 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/gateway@workspace:gateway"
   dependencies:
+    "@babel/core": "npm:^7.24.5"
+    "@babel/preset-env": "npm:^7.16.7"
+    "@babel/preset-typescript": "npm:^7.16.7"
     "@livestack/core": "npm:^0.0.6"
     "@livestack/shared": "npm:^0.0.6"
-    "@types/jsonwebtoken": "npm:^9.0.6"
+    "@preconstruct/cli": "npm:^2.8.4"
+    "@types/lodash": "npm:^4.14.201"
+    "@types/uuid": "npm:^9.0.7"
     jsonwebtoken: "npm:^9.0.2"
     socket.io: "npm:^4"
     typescript: "npm:5.4.5"
@@ -3930,13 +3938,19 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/vault-interface@workspace:vault-interface"
   dependencies:
+    "@babel/core": "npm:^7.24.5"
+    "@babel/preset-env": "npm:^7.16.7"
+    "@babel/preset-typescript": "npm:^7.16.7"
     "@grpc/grpc-js": "npm:^1.10.6"
     "@grpc/proto-loader": "npm:^0.7.12"
     "@preconstruct/cli": "npm:^2.8.4"
+    "@types/lodash": "npm:^4.14.201"
     "@types/node": "npm:^20.11.0"
+    "@types/uuid": "npm:^9.0.7"
     eslint: "npm:^8.56.0"
     google-protobuf: "npm:^3.21.2"
     long: "npm:^5.2.3"
+    nice-grpc-common: "npm:^2.0.2"
     protobufjs: "npm:^7.2.6"
     ts-proto: "npm:^1.174.0"
     typescript: "npm:5.4.5"
@@ -5864,15 +5878,6 @@ __metadata:
   version: 0.0.29
   resolution: "@types/json5@npm:0.0.29"
   checksum: 10c0/6bf5337bc447b706bb5b4431d37686aa2ea6d07cfd6f79cc31de80170d6ff9b1c7384a9c0ccbc45b3f512bae9e9f75c2e12109806a15331dc94e8a8db6dbb4ac
-  languageName: node
-  linkType: hard
-
-"@types/jsonwebtoken@npm:^9.0.6":
-  version: 9.0.6
-  resolution: "@types/jsonwebtoken@npm:9.0.6"
-  dependencies:
-    "@types/node": "npm:*"
-  checksum: 10c0/9c29e3896e5fb6056e54d87514643e59e0cfb966ae25171a107776270195bba955f0373e98c8ed6450c145b18984f5df9cf0fcac360f382cec3c7c4d3510b202
   languageName: node
   linkType: hard
 
