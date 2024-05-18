@@ -1,6 +1,6 @@
 {
   "name": "@livestack/storage-gcloud",
-  "version": "0.0.2",
+  "version": "0.0.6",
   "description": "Livestack storage orchestration via Google Cloud Storage.",
   "scripts": {
     "build": "preconstruct build",

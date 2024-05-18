@@ -1,9 +1,9 @@
 {
   "name": "@livestack/summarizer",
-  "version": "0.0.1",
+  "version": "0.0.6",
   "dependencies": {
-    "@livestack/core": "*",
-    "@livestack/shared": "*",
+    "@livestack/core": "^0.0.6",
+    "@livestack/shared": "^0.0.6",
     "ollama": "^0.5",
     "zod": "^3.0.0"
   },
