@@ -1,1 +1,1 @@
-/home/ubuntu/auto-live-lower-thirds/livestack/transcribe/src/client/index.ts
+/Users/ubuntu/zigzag/livestack/transcribe/src/client/index.ts

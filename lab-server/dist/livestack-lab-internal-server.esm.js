@@ -1,1 +1,1 @@
-/home/ubuntu/auto-live-lower-thirds/livestack/lab-server/src/index.ts
+/Users/ubuntu/zigzag/livestack/lab-server/src/index.ts

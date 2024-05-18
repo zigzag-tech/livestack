@@ -4,9 +4,9 @@
     "baseUrl": "./src",
     "outDir": "dist",
     "pretty": true,
-    "module": "esnext",
+    "module": "CommonJS",
     "target": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "node",
     "noEmit": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
@@ -26,11 +26,6 @@
       "@server/*": ["./server/*"],
       "@common/*": ["./common/*"]
     }
-  },
-  "ts-node": {
-    "experimentalSpecifierResolution": "node",
-    "transpileOnly": true,
-    "esm": true
   },
   "exclude": ["node_modules", "dist"]
 }
