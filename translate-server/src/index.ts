@@ -1,1 +1,1 @@
-export * from "./translationWorker";
+export * from "./worker.translation";

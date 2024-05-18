@@ -2,8 +2,8 @@ import { summaryFewShotPromptMessages } from "./prompts";
 import { topicsSchema, trackedHistorySchema } from "./defs";
 import { z } from "zod";
 import { JobSpec } from "@livestack/core";
-import { generateSimpleResponseOllama } from "./ollama";
 import { Message } from "ollama";
+import { fewShotExamples, summarize } from "./utils";
 // How this works:
 // {
 //  "0": [{"text": "This is a test", "ids": [8]}],
@@ -62,7 +62,10 @@ export const historyTrackerWorkerDef = historyTrackerJobSpec.defineWorker({
           `${objsToSummarize.map((item) => item.text).join(" ")}`
         );
 
-        const summary = await generateSimpleResponseOllama(prompt);
+        const summary = await summarize({
+          useCloudSummarizer: false,
+          messages: prompt,
+        });
         if (!summary) {
           throw new Error("Failed to generate summary");
         }
@@ -102,7 +105,10 @@ export const historySummaryWorkerDef = historySummaryJobSpec.defineWorker({
       let prompt = summaryFewShotPromptMessages(
         `${baseObjsToSummarize.map((item) => item.text).join(" ")}`
       );
-      let summary = await generateSimpleResponseOllama(prompt);
+      let summary = await summarize({
+        useCloudSummarizer: false,
+        messages: prompt,
+      });
 
       console.log(Object.keys(memoryStore));
       const maxLevel = Object.keys(memoryStore).length - 1;
@@ -113,62 +119,14 @@ export const historySummaryWorkerDef = historySummaryJobSpec.defineWorker({
             .map((item) => item.text)
             .join(" ")}`
         );
-        summary = await generateSimpleResponseOllama(prompt);
+        summary = await summarize({
+          useCloudSummarizer: false,
+          messages: prompt,
+        });
         currLevel += 1;
       }
       const messages: Message[] = [
-        {
-          role: "system",
-          content: `
-You are a helpful assistant. Your job is to provide a list of topics based on the provided CONTENT.
-Instructions:
-- Write each topic in a new line.
-- Keep each topic under 5 words.
-- Response with a JSON object with a single key "topics" and an array of topics as the value, and nothing else.
-`,
-        },
-        {
-          role: "user",
-          content: `
-CONTENT:
-\`\`\`
-The recent landmark election, marked by record voter turnout and diverse candidate fields, signaled a pivotal moment in the nation's democratic history. With pressing issues at the forefront, voters delivered a decisive mandate for change, unseating incumbents and ushering in new leadership committed to transparency, accountability, and progress.
-\`\`\`
-`,
-        },
-        {
-          role: "assistant",
-          content: `
-{
-  "topics": [
-    "Record turnout and diversity",
-    "Decisive mandate for change",
-    "New leadership's commitment"
-  ]
-}
-`,
-        },
-        {
-          role: "user",
-          content: `
-CONTENT:
-\`\`\`
-Dr. Chen highlights AI's exciting advancements, especially in healthcare, where it's revolutionizing diagnostics. He emphasizes the need to address ethical concerns like privacy and bias as AI integrates further into daily life, stressing transparency and regulation.
-\`\`\`
-`,
-        },
-        {
-          role: "assistant",
-          content: `
-{
-  "topics": [
-    "AI advancements in healthcare",
-    "Ethical concerns in AI integration",
-    "Emphasis on transparency and regulation"
-  ]
-}
-`,
-        },
+        ...fewShotExamples,
         {
           role: "user",
           content: `
@@ -179,7 +137,10 @@ ${summary}
 `,
         },
       ];
-      const topicsRaw = await generateSimpleResponseOllama(messages);
+      const topicsRaw = await summarize({
+        useCloudSummarizer: false,
+        messages,
+      });
 
       const { topics } = JSON.parse(topicsRaw) as { topics: string[] };
       output.emit({

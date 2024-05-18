@@ -40,9 +40,13 @@ const translationExamples = [
 ];
 
 async function translate(
-  input: z.infer<typeof translationInputSchema> & {
-    llmType: "ollama" | "openai";
-  }
+  input: z.infer<typeof translationInputSchema> &
+    (
+      | {
+          llmType: "ollama";
+        }
+      | { llmType: "openai"; openai: OpenAI }
+    )
 ): Promise<z.infer<typeof translationOutputSchema>> {
   const { llmType, toLang, text } = input;
   const messages = [
@@ -56,9 +60,7 @@ async function translate(
     const response = await generateSimpleResponseOllama(messages, "llama3");
     return { translated: response };
   } else {
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
+    const { openai } = input;
     const response: any = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages: messages as any,
@@ -83,11 +85,28 @@ export const translationSpec = new JobSpec({
   output: translationOutputSchema,
 });
 
-export const translationWorker = translationSpec.defineWorker({
-  processor: async ({ input, output, jobOptions }) => {
-    const { llmType } = jobOptions;
+export const translationLocalWorker = translationSpec.defineWorker({
+  instanceParamsDef: z.object({ useCloudLLM: z.literal(false) }).optional(),
+  processor: async ({ input, output }) => {
     for await (const data of input) {
-      const translated = await translate({ ...data, llmType: llmType! });
+      const translated = await translate({ ...data, llmType: "ollama" });
+      await output.emit(translated);
+    }
+  },
+});
+
+export const translationOpenAIWorker = translationSpec.defineWorker({
+  instanceParamsDef: z.object({ useCloudLLM: z.literal(true) }),
+  processor: async ({ input, output }) => {
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+    for await (const data of input) {
+      const translated = await translate({
+        ...data,
+        llmType: "openai",
+        openai,
+      });
       await output.emit(translated);
     }
   },

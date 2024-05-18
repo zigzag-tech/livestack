@@ -27,7 +27,7 @@ const inputDef = z.object({
 });
 
 export const titleSummarizerSepc = new JobSpec({
-  name: "gpt-assistant",
+  name: "live-title-assistant",
   jobOptions: jobOptionsDef,
   input: { default: inputDef },
   output: { default: summarizedTitleDef },

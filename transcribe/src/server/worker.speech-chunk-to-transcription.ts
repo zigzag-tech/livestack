@@ -22,7 +22,7 @@ if (
 ) {
   throw new Error(`Invalid model specified: ${model}`);
 }
-export const speechChunkToTranscriptionCloudAICloudWorkerDef =
+export const speechChunkToTranscriptionLocalWhisperWorkerDef =
   speechChunkToTextSpec.defineWorker({
     instanceParamsDef: localWhisperConfigSchema,
     processor: async ({ output, input, workerInstanceParams }) => {
@@ -30,20 +30,51 @@ export const speechChunkToTranscriptionCloudAICloudWorkerDef =
       for await (const data of input) {
         const { wavb64Str } = data;
         console.log(
-          "Cloud whisper worker received input length: ",
+          "Local whisper worker received input length: ",
           wavb64Str.length
         );
         const audioData = Buffer.from(wavb64Str, "base64");
         const transcribedText = await transcribeAudioData({
           audioData,
-          // config: { useCloudWhisper: true, openai },
-          // merge with workerInstanceParams
           config: {
             useCloudWhisper: false,
             whisperEndpoint:
               process.env.WHISPER_ENDPOINT || "http://127.0.0.1:5500",
             model,
             ...workerInstanceParams,
+          },
+        });
+        console.debug("Transcribed text: ", transcribedText);
+
+        await output.emit({ transcript: transcribedText });
+      }
+
+      prev_input = "";
+
+      // return remaining prev_input if it's not empty string
+      if (prev_input) {
+        return { transcript: prev_input };
+      }
+    },
+  });
+
+export const speechChunkToTranscriptionOpenAIWorkerDef =
+  speechChunkToTextSpec.defineWorker({
+    processor: async ({ output, input }) => {
+      let prev_input = "";
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      for await (const data of input) {
+        const { wavb64Str } = data;
+        console.log(
+          "OpenAI worker received input length: ",
+          wavb64Str.length
+        );
+        const audioData = Buffer.from(wavb64Str, "base64");
+        const transcribedText = await transcribeAudioData({
+          audioData,
+          config: {
+            useCloudWhisper: true,
+            openai,
           },
         });
         console.debug("Transcribed text: ", transcribedText);
