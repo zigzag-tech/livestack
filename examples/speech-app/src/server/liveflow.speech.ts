@@ -35,6 +35,7 @@ export const speechLiveflow = Liveflow.define({
       transform: (chunkText) => ({
         toLang: "French",
         text: chunkText,
+        llmType: "openai",
       }),
       to: translationSpec,
     }),
