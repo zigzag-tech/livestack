@@ -1,3 +1,4 @@
+import { fewShotExamples } from "./ollamaUtils";
 import OpenAI from "openai";
 
 export const baseInstruction = `You are a helpful assistant that generates lower thirds. Your job is to write a screen title (TITLE) that summarizes each piece of the ORIGINAL TEXT provided to you. 
@@ -29,17 +30,18 @@ export async function executeOpenAILikeLLMAPIChat({
       model: modelId,
       temperature: 0.5,
       messages: [
-        { role: "system" as const, content: baseInstruction },
+        ...fewShotExamples,
         {
-          role: "user" as const,
-          content: `
-ORIGINAL TEXT
+          role: "user",
+          content: `ORIGINAL TEXT:
+\`\`\`
 ${prompt}
+\`\`\`
 
-TITLE
+JSON TITLE:
 `,
         },
-      ],
+      ] as any,
     });
 
     const message = completion.choices[0].message?.content;

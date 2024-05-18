@@ -4,8 +4,6 @@ import {
 } from "langchain/text_splitter";
 import { genManuallyFedIterator } from "@livestack/shared";
 
-
-
 export const getCharacterTextSplitter = ({
   chunkSize,
   chunkOverlap = 0,
@@ -98,12 +96,12 @@ export function genSplitterIterable({
 //     const text = `Hi.
 
 //   I'm Harrison.
-  
+
 //   How? Are? You? Okay then f f f f.
 //   This is a weird text to write, but gotta test the splittingggg some how.
-  
+
 //   Bye!
-  
+
 //   -H.`;
 //     const ipsum = new LoremIpsum({
 //       wordsPerSentence: {

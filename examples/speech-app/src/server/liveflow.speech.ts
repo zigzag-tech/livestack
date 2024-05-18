@@ -15,6 +15,7 @@ export const speechLiveflow = Liveflow.define({
     // Connection from raw PCM to WAV
     conn({
       from: rawPCMToWavSpec,
+      transform: ({ wavb64Str }) => ({ wavb64Str, llmType: "openai" }),
       to: speechChunkToTextSpec,
     }),
     // Connection from speech chunk to text
@@ -26,7 +27,7 @@ export const speechLiveflow = Liveflow.define({
     // Connection from text splitting to title summarizer
     conn({
       from: textSplittingSpec,
-      transform: (chunkText) => ({ transcript: chunkText }),
+      transform: (chunkText) => ({ transcript: chunkText, llmType: "openai"}),
       to: titleSummarizerSepc,
     }),
     // Connection from text splitting to translation
