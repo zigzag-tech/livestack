@@ -76,36 +76,85 @@ async function translate(
   }
 }
 
-export const translationSpec = new JobSpec({
-  name: "translation",
+const llmSelectorSpec = new JobSpec({
+  name: "llm-selector",
   jobOptions: z.object({
-    llmType: z.enum(["openai", "ollama"]).default("ollama").optional(),
+    llmType: z.enum(["openai", "ollama"]),
   }),
   input: translationInputSchema,
   output: translationOutputSchema,
 });
 
-export const translationLocalWorker = translationSpec.defineWorker({
-  instanceParamsDef: z.object({ useCloudLLM: z.literal(false) }).optional(),
+const localLLMTranslationSpec = new JobSpec({
+  name: "local-llm-translation",
+  input: translationInputSchema,
+  output: translationOutputSchema,
+});
+
+const openAILLMTranslationSpec = new JobSpec({
+  name: "openai-llm-translation",
+  input: translationInputSchema,
+  output: translationOutputSchema,
+});
+
+const localLLMTranslationWorker = localLLMTranslationSpec.defineWorker({
   processor: async ({ input, output }) => {
     for await (const data of input) {
-      const translated = await translate({ ...data, llmType: "ollama" });
-      await output.emit(translated);
+      const r = await translate({ ...data, llmType: "ollama" });
+      output.emit(r);
     }
   },
 });
 
-export const translationOpenAIWorker = translationSpec.defineWorker({
-  instanceParamsDef: z.object({ useCloudLLM: z.literal(true) }),
+const openAILLMTranslationWorker = openAILLMTranslationSpec.defineWorker({
   processor: async ({ input, output }) => {
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
     for await (const data of input) {
-      const translated = await translate({
-        ...data,
-        llmType: "openai",
-        openai,
+      const openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+      });
+      const r = await translate({ ...data, llmType: "openai", openai });
+      output.emit(r);
+    }
+  },
+});
+
+const llmSelectorWorker = llmSelectorSpec.defineWorker({
+  processor: async ({ input, output, jobOptions, invoke }) => {
+    const { llmType } = jobOptions;
+    for await (const data of input) {
+      if (llmType === "openai") {
+        const r = await invoke({
+          spec: openAILLMTranslationSpec,
+          inputData: data,
+        });
+        output.emit(r);
+      } else {
+        const r = await invoke({
+          spec: localLLMTranslationSpec,
+          inputData: data,
+        });
+        output.emit(r);
+      }
+    }
+  },
+});
+
+export const translationSpec = new JobSpec({
+  name: "translation",
+  input: translationInputSchema.extend({
+    llmType: z.enum(["openai", "ollama"]),
+  }),
+  output: translationOutputSchema,
+});
+
+export const translationWorker = translationSpec.defineWorker({
+  processor: async ({ input, output, invoke }) => {
+    for await (const data of input) {
+      const { llmType, text, toLang } = data;
+      const translated = await invoke({
+        spec: llmSelectorSpec,
+        inputData: { text, toLang },
+        jobOptions: { llmType },
       });
       await output.emit(translated);
     }
