@@ -1,5 +1,5 @@
 {
-  "name": "@zztech/live-test",
+  "name": "@livestack/example-speech-app",
   "version": "1.0.0",
   "description": "",
   "engines": {
@@ -10,7 +10,7 @@
     "dev": "NODE_OPTIONS='-r dotenv/config' npx -q tsx --tsconfig tsconfig.json src/server/index.ts"
   },
   "author": "",
-  "private": true,
+  "license": "MIT",
   "dependencies": {
     "@livestack/client": "*",
     "@livestack/core": "*",
