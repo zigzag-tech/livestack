@@ -1,20 +1,6 @@
 {
   "$schema": "../node_modules/lerna/schemas/lerna-schema.json",
-  "version": "0.0.0",
+  "version": "0.0.5",
   "npmClient": "yarn",
-  "packages": [
-    "core",
-    "client",
-    "gateway",
-    "replicate",
-    "runpod",
-    "shared",
-    "storage-gcloud",
-    "storage-p2p",
-    "storage-s3",
-    "vault-client",
-    "vault-dev-server",
-    "vault-interface",
-    "viz"
-  ]
+  "packages": ["*"]
 }
