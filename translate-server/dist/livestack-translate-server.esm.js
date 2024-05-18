@@ -1,1 +1,1 @@
-/home/ubuntu/auto-live-lower-thirds/livestack/translate-server/src/index.ts
+/Users/ubuntu/zigzag/livestack/translate-server/src/index.ts

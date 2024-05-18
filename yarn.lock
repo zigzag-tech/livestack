@@ -3699,14 +3699,17 @@ __metadata:
     body-parser: "npm:^1.20.2"
     classnames: "npm:^2.3.2"
     cors: "npm:^2.8.5"
+    dotenv: "npm:^16.4.5"
     eslint: "npm:^8"
     eslint-config-next: "npm:14.0.3"
-    express: "npm:^4"
+    express: "npm:^4.19.2"
     ollama: "npm:^0.5"
     openai: "npm:^4.29.1"
     postcss: "npm:^8"
+    pretty-bytes: "npm:^6.1.1"
     react: "npm:^18"
     react-dom: "npm:^18"
+    react-icons: "npm:^5.2.1"
     socket.io-client: "npm:^4.7.2"
     tailwindcss: "npm:^3"
     ts-node: "npm:^10.9.2"
@@ -3714,6 +3717,7 @@ __metadata:
     typescript: "npm:5.4.5"
     vite: "npm:^5.1.6"
     vite-express: "npm:^0.14.1"
+    vite-tsconfig-paths: "npm:^4.3.2"
     zod: "npm:^3.22.4"
   languageName: unknown
   linkType: soft
@@ -3777,6 +3781,7 @@ __metadata:
     "@babel/preset-typescript": "npm:^7.24.1"
     "@preconstruct/cli": "npm:^2.8.4"
     lerna: "npm:^8.1.3"
+    nx: "npm:^19.0.4"
     typedoc: "npm:^0.25.13"
     typescript: "npm:^5.4.5"
   languageName: unknown
@@ -3804,14 +3809,19 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/shared@workspace:shared"
   dependencies:
+    "@babel/preset-env": "npm:^7.16.7"
+    "@babel/preset-typescript": "npm:^7.16.7"
     "@preconstruct/cli": "npm:^2.8.4"
     "@types/chai": "npm:^4.3.12"
     "@types/jest": "npm:^29.5.12"
+    "@types/lodash": "npm:^4.14.201"
     "@types/mocha": "npm:^10.0.6"
     "@types/node": "npm:^16"
+    "@types/uuid": "npm:^9.0.7"
     graphology: "npm:^0.25.4"
     graphology-types: "npm:^0.24.7"
     jest: "npm:^29.7.0"
+    lru-cache: "npm:^10.2.2"
     ts-jest: "npm:^29.1.2"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.4.5"
@@ -3896,9 +3906,14 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/vault-client@workspace:vault-client"
   dependencies:
+    "@babel/core": "npm:^7.24.5"
+    "@babel/preset-env": "npm:^7.16.7"
+    "@babel/preset-typescript": "npm:^7.16.7"
     "@livestack/vault-interface": "npm:^0.0.6"
     "@preconstruct/cli": "npm:^2.8.4"
+    "@types/lodash": "npm:^4.14.201"
     "@types/node": "npm:^20.11.0"
+    "@types/uuid": "npm:^9.0.7"
     nice-grpc: "npm:^2.1.8"
     nice-grpc-client-middleware-retry: "npm:^3.1.7"
     typescript: "npm:5.4.5"
@@ -8355,7 +8370,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"dotenv@npm:^16.x":
+"dotenv@npm:^16.4.5, dotenv@npm:^16.x":
   version: 16.4.5
   resolution: "dotenv@npm:16.4.5"
   checksum: 10c0/48d92870076832af0418b13acd6e5a5a3e83bb00df690d9812e94b24aff62b88ade955ac99a05501305b8dc8f1b0ee7638b18493deb6fe93d680e5220936292f
@@ -9254,7 +9269,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"express@npm:^4":
+"express@npm:^4.19.2":
   version: 4.19.2
   resolution: "express@npm:4.19.2"
   dependencies:
@@ -10091,6 +10106,13 @@ __metadata:
     merge2: "npm:^1.4.1"
     slash: "npm:^3.0.0"
   checksum: 10c0/b39511b4afe4bd8a7aead3a27c4ade2b9968649abab0a6c28b1a90141b96ca68ca5db1302f7c7bd29eab66bf51e13916b8e0a3d0ac08f75e1e84a39b35691189
+  languageName: node
+  linkType: hard
+
+"globrex@npm:^0.1.2":
+  version: 0.1.2
+  resolution: "globrex@npm:0.1.2"
+  checksum: 10c0/a54c029520cf58bda1d8884f72bd49b4cd74e977883268d931fd83bcbd1a9eb96d57c7dbd4ad80148fb9247467ebfb9b215630b2ed7563b2a8de02e1ff7f89d1
   languageName: node
   linkType: hard
 
@@ -13066,7 +13088,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lru-cache@npm:^10.0.1, lru-cache@npm:^10.2.0":
+"lru-cache@npm:^10.0.1, lru-cache@npm:^10.2.0, lru-cache@npm:^10.2.2":
   version: 10.2.2
   resolution: "lru-cache@npm:10.2.2"
   checksum: 10c0/402d31094335851220d0b00985084288136136992979d0e015f0f1697e15d1c86052d7d53ae86b614e5b058425606efffc6969a31a091085d7a2b80a8a1e26d6
@@ -14254,7 +14276,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"nx@npm:19.0.4, nx@npm:>=17.1.2 < 20":
+"nx@npm:19.0.4, nx@npm:>=17.1.2 < 20, nx@npm:^19.0.4":
   version: 19.0.4
   resolution: "nx@npm:19.0.4"
   dependencies:
@@ -15125,6 +15147,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"pretty-bytes@npm:^6.1.1":
+  version: 6.1.1
+  resolution: "pretty-bytes@npm:6.1.1"
+  checksum: 10c0/c7a660b933355f3b4587ad3f001c266a8dd6afd17db9f89ebc50812354bb142df4b9600396ba5999bdb1f9717300387dc311df91895c5f0f2a1780e22495b5f8
+  languageName: node
+  linkType: hard
+
 "pretty-format@npm:^29.0.0, pretty-format@npm:^29.7.0":
   version: 29.7.0
   resolution: "pretty-format@npm:29.7.0"
@@ -15437,6 +15466,15 @@ __metadata:
   peerDependencies:
     react: ^18.3.1
   checksum: 10c0/a752496c1941f958f2e8ac56239172296fcddce1365ce45222d04a1947e0cc5547df3e8447f855a81d6d39f008d7c32eab43db3712077f09e3f67c4874973e85
+  languageName: node
+  linkType: hard
+
+"react-icons@npm:^5.2.1":
+  version: 5.2.1
+  resolution: "react-icons@npm:5.2.1"
+  peerDependencies:
+    react: "*"
+  checksum: 10c0/9d52b975afaf27dab07dcaefd50497ba43cc57076fc26ccac5142965e01c7fd0c503a62ea31c3bb710e0b2959a4620c2fed12c3c86960ad8ceb63de7f0085f3a
   languageName: node
   linkType: hard
 
@@ -17252,6 +17290,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"tsconfck@npm:^3.0.3":
+  version: 3.0.3
+  resolution: "tsconfck@npm:3.0.3"
+  peerDependencies:
+    typescript: ^5.0.0
+  peerDependenciesMeta:
+    typescript:
+      optional: true
+  bin:
+    tsconfck: bin/tsconfck.js
+  checksum: 10c0/d45009230c4caa5fc765bdded96f3b8703a7cdd44a1d63024914b0fb1c4dabf9e94d28cc9f9edccaef9baa7b99adc963502d34943d82fcb07b92e1161ee03c56
+  languageName: node
+  linkType: hard
+
 "tsconfig-paths@npm:^3.15.0":
   version: 3.15.0
   resolution: "tsconfig-paths@npm:3.15.0"
@@ -17792,6 +17844,22 @@ __metadata:
   dependencies:
     picocolors: "npm:^1.0.0"
   checksum: 10c0/80c920d8a321ce76028780c1c4af891264a6999a7ecad84c2434d89bb6303a53a590e4fcdc160744a09c4d22dd575911f08f3ccf49017495ef7aa2d9d681f12f
+  languageName: node
+  linkType: hard
+
+"vite-tsconfig-paths@npm:^4.3.2":
+  version: 4.3.2
+  resolution: "vite-tsconfig-paths@npm:4.3.2"
+  dependencies:
+    debug: "npm:^4.1.1"
+    globrex: "npm:^0.1.2"
+    tsconfck: "npm:^3.0.3"
+  peerDependencies:
+    vite: "*"
+  peerDependenciesMeta:
+    vite:
+      optional: true
+  checksum: 10c0/f390ac1d1c3992fc5ac50f9274c1090f8b55ab34a89ea88893db9a6924a3b26c9f64bc1163615150ad100749db73b6b2cf1d57f6cd60df6e762ceb5b8ad30024
   languageName: node
   linkType: hard
 

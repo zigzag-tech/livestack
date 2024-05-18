@@ -8,7 +8,7 @@
 // but you can still require this module and it'll be compiled
 
 // this bit of code imports the require hook and registers it
-let unregister = require("../../../node_modules/@preconstruct/hook").___internalHook(typeof __dirname === 'undefined' ? undefined : __dirname, "..", "..");
+let unregister = require("../../../../.nvm/versions/node/v20.11.0/lib/node_modules/@preconstruct/cli/node_modules/@preconstruct/hook").___internalHook(typeof __dirname === 'undefined' ? undefined : __dirname, "..", "..");
 
 // this re-exports the source file
 module.exports = require("../src/index.ts");
