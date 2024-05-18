@@ -1,12 +1,12 @@
 import {
   titleSummarizerSepc,
-  ollamaTitleSummarizerWorkerDef,
-} from "./llm-assistant-worker";
+  titleSummarizerWorker,
+} from "@livestack/lab-internal-server";
 import { v4 } from "uuid";
 
 async function main() {
   const jobId = Date.now().toString() + "_" + v4();
-  await ollamaTitleSummarizerWorkerDef.startWorker();
+  await titleSummarizerWorker.startWorker();
   await titleSummarizerSepc.enqueueJob({
     jobId,
     jobOptions: {
