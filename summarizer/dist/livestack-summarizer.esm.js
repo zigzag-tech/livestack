@@ -1,1 +1,1 @@
-/home/ubuntu/auto-live-lower-thirds/livestack/summarizer/src/index.ts
+/Users/ubuntu/zigzag/livestack/summarizer/src/index.ts

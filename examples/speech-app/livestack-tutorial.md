@@ -1044,7 +1044,6 @@ To run the application, navigate to your `package.json` and update `scripts` sec
   "name": "my-speech-app",
   "private": true,
   "version": "0.0.0",
-  "type": "module",
   "scripts": {
     "dev": "npx -q tsx --tsconfig tsconfig.json src/server/index.ts"
   },
