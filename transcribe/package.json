@@ -1,6 +1,6 @@
 {
   "name": "@livestack/transcribe",
-  "version": "0.0.1",
+  "version": "0.0.6",
   "peerDependencies": {
     "@livestack/client": "*",
     "@livestack/core": "*"

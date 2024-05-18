@@ -1,9 +1,9 @@
 {
   "name": "@livestack/translate-server",
-  "version": "0.0.1",
+  "version": "0.0.6",
   "dependencies": {
-    "@livestack/core": "*",
-    "@livestack/lab-internal-common": "*"
+    "@livestack/core": "^0.0.6",
+    "@livestack/lab-internal-common": "^0.0.6"
   },
   "module": "dist/livestack-translate-server.esm.js",
   "main": "dist/livestack-translate-server.cjs.js",
