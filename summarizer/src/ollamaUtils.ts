@@ -1,7 +1,38 @@
 import { wrapWithTransientStdout } from "@livestack/shared";
-import { baseInstruction } from "./leptonUtils";
+import { Message } from "ollama";
 
 const CONVO_MODEL = "llama3:instruct";
+
+export async function generateSimpleResponseOllama(
+  messages: Message[],
+  modelName?: string
+): Promise<string> {
+  const { Ollama } = await import("ollama");
+  const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
+  const ollama = new Ollama({ host: OLLAMA_HOST });
+
+  try {
+    const response = await ollama.chat({
+      stream: true,
+      model: modelName || CONVO_MODEL,
+      messages,
+    });
+    const message = wrapWithTransientStdout(response);
+
+    return message;
+  } catch (e) {
+    console.log(e);
+    return "Sorry, I am not able to respond right now. Please try again later.";
+  }
+}
+
+
+export const baseInstruction = `You are a helpful assistant that generates lower thirds. Your job is to write a screen title (TITLE) that summarizes each piece of the ORIGINAL TEXT provided to you. 
+Instructions:
+- Make the title short, engaging and eye-catching. 
+- The title should be no more than 40 characters.
+- Write only the JSON in the format { "title": "..." } and nothing else.
+`;
 
 export const fewShotExamples = [
   {
@@ -60,36 +91,3 @@ JSON TITLE:
     `,
   },
 ];
-
-export async function generateResponseOllama(prompt: string) {
-  const { Ollama } = await import("ollama");
-  const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
-  const ollama = new Ollama({ host: OLLAMA_HOST });
-
-  const messages = [
-    ...fewShotExamples,
-    {
-      role: "user",
-      content: `ORIGINAL TEXT:
-\`\`\`
-${prompt}
-\`\`\`
-
-JSON TITLE:
-`,
-    },
-  ];
-  try {
-    const response = await ollama.chat({
-      stream: true,
-      model: CONVO_MODEL,
-      messages,
-    });
-    const message = wrapWithTransientStdout(response);
-    // const message = response.message.content;
-    return message;
-  } catch (e) {
-    console.log(e);
-    return "Sorry, I am not able to respond right now. Please try again later.";
-  }
-}
