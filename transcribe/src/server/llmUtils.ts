@@ -50,10 +50,10 @@ async function transcribeAudioData({
   }
 }
 
-export const llmSelectorSpec = new JobSpec({
-  name: "llm-selector-transcription",
+export const transcriptionSelectorSpec = new JobSpec({
+  name: "transcription-selector",
   jobOptions: z.object({
-    llmType: z.enum(["openai", "ollama"]).default("ollama"),
+    whisperType: z.enum(["openai", "local"]).default("local"),
   }),
   input: speechChunkToTextInput,
   output: speechChunkToTextOutput,
@@ -117,11 +117,11 @@ const openAILLMTranscriptionWorker = openAILLMTranscriptionSpec.defineWorker({
   },
 });
 
-const llmSelectorWorker = llmSelectorSpec.defineWorker({
+const llmSelectorWorker = transcriptionSelectorSpec.defineWorker({
   processor: async ({ input, output, jobOptions, invoke }) => {
-    const { llmType } = jobOptions;
+    const { whisperType } = jobOptions;
     const job =
-      llmType === "openai"
+      whisperType === "openai"
         ? await openAILLMTranscriptionWorker.enqueueJob()
         : await localLLMTranscriptionWorker.enqueueJob({
             jobOptions: {

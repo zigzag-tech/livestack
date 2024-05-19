@@ -27,14 +27,21 @@ export const titleSummarizerSepc = new JobSpec({
 
 export const titleSummarizerWorker = titleSummarizerSepc.defineWorker({
   processor: async ({ input, output, invoke }) => {
+    const { input: childInput, output: childOutput } =
+      await llmSelectorSpec.enqueueJob({
+        jobOptions: {
+          llmType: "ollama",
+        },
+      });
+
     for await (const data of input) {
       const { transcript, llmType } = data;
-      const r = await invoke({
-        spec: llmSelectorSpec,
-        inputData: { transcript },
-        jobOptions: { llmType },
-      });
-      await output.emit(r);
+      await childInput.feed({ transcript });
+      const r = await childOutput.nextValue();
+      if (!r) {
+        throw new Error("No response from LLM");
+      }
+      await output.emit(r.data);
     }
   },
 });
