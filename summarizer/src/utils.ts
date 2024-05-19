@@ -1,5 +1,5 @@
 import { OpenAI } from "openai";
-import { generateSimpleResponseOllama } from "./ollama";
+import { generateSimpleResponseOllama } from "./ollamaUtils";
 import { Message } from "ollama";
 
 export const fewShotExamples = [

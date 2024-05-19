@@ -1,13 +1,6 @@
 import { fewShotExamples } from "./ollamaUtils";
 import OpenAI from "openai";
 
-export const baseInstruction = `You are a helpful assistant that generates lower thirds. Your job is to write a screen title (TITLE) that summarizes each piece of the ORIGINAL TEXT provided to you. 
-Instructions:
-- Make the title short, engaging and eye-catching. 
-- The title should be no more than 40 characters.
-- Write only the JSON in the format { "title": "..." } and nothing else.
-`;
-
 export const LLAMA2_13B_MODEL = "llama2-13b";
 export const LLAMA2_70B_MODEL = "llama2-70b";
 
