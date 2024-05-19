@@ -132,9 +132,10 @@ const llmSelectorWorker = llmSelectorSpec.defineWorker({
           spec: localLLMTranscriptionSpec,
           inputData: data,
           jobOptions: {
-            whisperEndpoint: "http://localhost:5500",
-            model: "large-v3",
-          }
+            whisperEndpoint:
+              process.env.WHISPER_ENDPOINT || "http://localhost:5500",
+            model: "large-v3" as const,
+          },
         });
         output.emit(r);
       }
