@@ -95,15 +95,15 @@ const localLLMTranscriptionWorker = localLLMTranscriptionSpec.defineWorker({
   },
 });
 
-const openAILLMTranslationWorker = openAILLMTranscriptionSpec.defineWorker({
+const openAILLMTranscriptionWorker = openAILLMTranscriptionSpec.defineWorker({
   processor: async ({ input, output }) => {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     for await (const { wavb64Str } of input) {
-        console.log(
-          "OpenAI whisper worker received input length: ",
-          wavb64Str.length
-        );
+      console.log(
+        "OpenAI whisper worker received input length: ",
+        wavb64Str.length
+      );
       const audioData = Buffer.from(wavb64Str, "base64");
       const transcript = await transcribeAudioData({
         audioData,
@@ -120,25 +120,45 @@ const openAILLMTranslationWorker = openAILLMTranscriptionSpec.defineWorker({
 const llmSelectorWorker = llmSelectorSpec.defineWorker({
   processor: async ({ input, output, jobOptions, invoke }) => {
     const { llmType } = jobOptions;
+    const job =
+      llmType === "openai"
+        ? await openAILLMTranscriptionWorker.enqueueJob()
+        : await localLLMTranscriptionWorker.enqueueJob({
+            jobOptions: {
+              whisperEndpoint:
+                process.env.WHISPER_ENDPOINT || "http://localhost:5500",
+              model: "large-v3" as const,
+            },
+          });
+    const { input: childInput, output: childOutput } = job;
+
     for await (const data of input) {
-      if (llmType === "openai") {
-        const r = await invoke({
-          spec: openAILLMTranscriptionSpec,
-          inputData: data,
-        });
-        output.emit(r);
-      } else {
-        const r = await invoke({
-          spec: localLLMTranscriptionSpec,
-          inputData: data,
-          jobOptions: {
-            whisperEndpoint:
-              process.env.WHISPER_ENDPOINT || "http://localhost:5500",
-            model: "large-v3" as const,
-          },
-        });
-        output.emit(r);
+      await childInput.feed(data);
+      const r = await childOutput.nextValue();
+
+      if (!r) {
+        throw new Error("No output from child worker");
       }
+      output.emit(r.data);
+
+      // if (llmType === "openai") {
+      // const r = await invoke({
+      //   spec: openAILLMTranscriptionSpec,
+      //   inputData: data,
+      // });
+      // output.emit(r);
+      // } else {
+      //   const r = await invoke({
+      //     spec: localLLMTranscriptionSpec,
+      //     inputData: data,
+      //     jobOptions: {
+      //       whisperEndpoint:
+      //         process.env.WHISPER_ENDPOINT || "http://localhost:5500",
+      //       model: "large-v3" as const,
+      //     },
+      //   });
+      //   output.emit(r);
+      // }
     }
   },
 });

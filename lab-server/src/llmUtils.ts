@@ -41,7 +41,7 @@ export const llmSelectorSpec = new JobSpec({
   output: summarizedTitleDef,
 });
 
-const LeptonLLMSummarizedTitleWorker =
+const leptonLLMSummarizedTitleWorker =
   leptonLLMSummarizedTitleSpec.defineWorker({
     processor: async ({ input, output }) => {
       for await (const data of input) {
@@ -119,26 +119,42 @@ JSON TITLE:
 const llmSelectorWorker = llmSelectorSpec.defineWorker({
   processor: async ({ input, output, jobOptions, invoke }) => {
     const { llmType } = jobOptions;
+    const job =
+      llmType === "openai"
+        ? await openAILLMSummarizedTitleWorker.enqueueJob()
+        : llmType === "lepton"
+        ? await leptonLLMSummarizedTitleWorker.enqueueJob()
+        : await localLLMSummarizedTitleWorker.enqueueJob();
+    const { input: childInput, output: childOutput } = job;
+
     for await (const data of input) {
-      if (llmType === "openai") {
-        const r = await invoke({
-          spec: openAILLMSummarizedTitleSpec,
-          inputData: data,
-        });
-        output.emit(r);
-      } else if (llmType === "lepton") {
-        const r = await invoke({
-          spec: leptonLLMSummarizedTitleSpec,
-          inputData: data,
-        });
-        output.emit(r);
-      } else {
-        const r = await invoke({
-          spec: localLLMSummarizedTitleSpec,
-          inputData: data,
-        });
-        output.emit(r);
+      await childInput.feed(data);
+      const r = await childOutput.nextValue();
+
+      if (!r) {
+        throw new Error("No output from child worker");
       }
+
+      output.emit(r.data);
+      // if (llmType === "openai") {
+      //   const r = await invoke({
+      //     spec: openAILLMSummarizedTitleSpec,
+      //     inputData: data,
+      //   });
+      //   output.emit(r);
+      // } else if (llmType === "lepton") {
+      //   const r = await invoke({
+      //     spec: leptonLLMSummarizedTitleSpec,
+      //     inputData: data,
+      //   });
+      //   output.emit(r);
+      // } else {
+      //   const r = await invoke({
+      //     spec: localLLMSummarizedTitleSpec,
+      //     inputData: data,
+      //   });
+      //   output.emit(r);
+      // }
     }
   },
 });
