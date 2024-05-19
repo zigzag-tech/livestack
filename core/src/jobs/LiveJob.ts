@@ -457,6 +457,7 @@ export class LiveJob<
         console.error("Output is null. Input: ", JSON.stringify(inputData));
         throw new Error("Output is null");
       }
+      await input(inputTag).terminate();
 
       return data.data;
     };
