@@ -121,20 +121,33 @@ const openAILLMTranslationWorker = openAILLMTranslationSpec.defineWorker({
 const llmSelectorWorker = llmSelectorSpec.defineWorker({
   processor: async ({ input, output, jobOptions, invoke }) => {
     const { llmType } = jobOptions;
+    const { input: childInput, output: childOutput } =
+      llmType === "ollama"
+        ? await localLLMTranslationSpec.enqueueJob()
+        : await openAILLMTranslationSpec.enqueueJob();
+
     for await (const data of input) {
-      if (llmType === "openai") {
-        const r = await invoke({
-          spec: openAILLMTranslationSpec,
-          inputData: data,
-        });
-        output.emit(r);
-      } else {
-        const r = await invoke({
-          spec: localLLMTranslationSpec,
-          inputData: data,
-        });
-        output.emit(r);
+      await childInput.feed(data);
+      const r = await childOutput.nextValue();
+
+      if (!r) {
+        throw new Error("No output from child worker");
       }
+      await output.emit(r.data);
+
+      // if (llmType === "openai") {
+      //   const r = await invoke({
+      //     spec: openAILLMTranslationSpec,
+      //     inputData: data,
+      //   });
+      //   output.emit(r);
+      // } else {
+      //   const r = await invoke({
+      //     spec: localLLMTranslationSpec,
+      //     inputData: data,
+      //   });
+      //   output.emit(r);
+      // }
     }
   },
 });

@@ -59,20 +59,20 @@ export const transcriptionSelectorSpec = new JobSpec({
   output: speechChunkToTextOutput,
 });
 
-const localLLMTranscriptionSpec = new JobSpec({
-  name: "local-llm-transcription",
+const localTranscriptionSpec = new JobSpec({
+  name: "local-transcription",
   jobOptions: localWhisperConfigSchema,
   input: speechChunkToTextInput,
   output: speechChunkToTextOutput,
 });
 
-const openAILLMTranscriptionSpec = new JobSpec({
-  name: "openai-llm-transcription",
+const openAITranscriptionSpec = new JobSpec({
+  name: "openai-transcription",
   input: speechChunkToTextInput,
   output: speechChunkToTextOutput,
 });
 
-const localLLMTranscriptionWorker = localLLMTranscriptionSpec.defineWorker({
+const localTranscriptionWorker = localTranscriptionSpec.defineWorker({
   processor: async ({ input, output, jobOptions }) => {
     const { whisperEndpoint, model } = jobOptions;
 
@@ -95,7 +95,7 @@ const localLLMTranscriptionWorker = localLLMTranscriptionSpec.defineWorker({
   },
 });
 
-const openAILLMTranscriptionWorker = openAILLMTranscriptionSpec.defineWorker({
+const openAITranscriptionWorker = openAITranscriptionSpec.defineWorker({
   processor: async ({ input, output }) => {
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -117,13 +117,13 @@ const openAILLMTranscriptionWorker = openAILLMTranscriptionSpec.defineWorker({
   },
 });
 
-const llmSelectorWorker = transcriptionSelectorSpec.defineWorker({
+const transcriptionSelectorWorker = transcriptionSelectorSpec.defineWorker({
   processor: async ({ input, output, jobOptions, invoke }) => {
     const { whisperType } = jobOptions;
     const job =
       whisperType === "openai"
-        ? await openAILLMTranscriptionWorker.enqueueJob()
-        : await localLLMTranscriptionWorker.enqueueJob({
+        ? await openAITranscriptionWorker.enqueueJob()
+        : await localTranscriptionWorker.enqueueJob({
             jobOptions: {
               whisperEndpoint:
                 process.env.WHISPER_ENDPOINT || "http://localhost:5500",
@@ -139,26 +139,7 @@ const llmSelectorWorker = transcriptionSelectorSpec.defineWorker({
       if (!r) {
         throw new Error("No output from child worker");
       }
-      output.emit(r.data);
-
-      // if (llmType === "openai") {
-      // const r = await invoke({
-      //   spec: openAILLMTranscriptionSpec,
-      //   inputData: data,
-      // });
-      // output.emit(r);
-      // } else {
-      //   const r = await invoke({
-      //     spec: localLLMTranscriptionSpec,
-      //     inputData: data,
-      //     jobOptions: {
-      //       whisperEndpoint:
-      //         process.env.WHISPER_ENDPOINT || "http://localhost:5500",
-      //       model: "large-v3" as const,
-      //     },
-      //   });
-      //   output.emit(r);
-      // }
+      await output.emit(r.data);
     }
   },
 });

@@ -7,7 +7,7 @@ import {
   LLAMA2_70B_MODEL,
   executeOpenAILikeLLMAPIChat,
 } from "./leptonUtils";
-import { generateResponseOllama } from "./ollamaUtils";
+import { generateSimpleResponseOllama } from "./ollamaUtils";
 import { fewShotExamples } from "./ollamaUtils";
 
 export const transcriptInputDef = z.object({
@@ -65,7 +65,19 @@ const localLLMSummarizedTitleWorker = localLLMSummarizedTitleSpec.defineWorker({
   processor: async ({ input, output }) => {
     for await (const data of input) {
       let title = "";
-      const titleRaw = await generateResponseOllama(data.transcript);
+      const titleRaw = await generateSimpleResponseOllama([
+        ...fewShotExamples,
+        {
+          role: "user",
+          content: `ORIGINAL TEXT:
+\`\`\`
+${data.transcript}
+\`\`\`
+
+JSON TITLE:
+`,
+        },
+      ]);
       try {
         title = JSON.parse(titleRaw).title;
       } catch (e) {
@@ -135,7 +147,7 @@ const llmSelectorWorker = llmSelectorSpec.defineWorker({
         throw new Error("No output from child worker");
       }
 
-      output.emit(r.data);
+      await output.emit(r.data);
       // if (llmType === "openai") {
       //   const r = await invoke({
       //     spec: openAILLMSummarizedTitleSpec,
