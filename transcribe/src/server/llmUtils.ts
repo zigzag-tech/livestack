@@ -131,6 +131,10 @@ const llmSelectorWorker = llmSelectorSpec.defineWorker({
         const r = await invoke({
           spec: localLLMTranscriptionSpec,
           inputData: data,
+          jobOptions: {
+            whisperEndpoint: "http://localhost:5500",
+            model: "large-v3",
+          }
         });
         output.emit(r);
       }
