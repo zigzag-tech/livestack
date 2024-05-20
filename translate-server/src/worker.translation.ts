@@ -4,7 +4,7 @@ import {
   translationInputSchema,
   translationOutputSchema,
 } from "@livestack/lab-internal-common";
-import { llmSelectorSpec } from "./llmUtils";
+import { getQueuedJobOrCreate } from "./llmChildJobManager";
 
 export const translationSpec = new JobSpec({
   name: "translation",
@@ -16,11 +16,10 @@ export const translationSpec = new JobSpec({
 
 export const translationWorker = translationSpec.defineWorker({
   processor: async ({ input, output, invoke }) => {
-    const { input: childInput, output: childOutput } =
-      await llmSelectorSpec.enqueueJob({ jobOptions: { llmType: "openai" } });
-
     for await (const data of input) {
       const { llmType, text, toLang } = data;
+      const job = await getQueuedJobOrCreate({ llmType: llmType || "ollama" });
+      const { input: childInput, output: childOutput } = job;
       await childInput.feed({ text, toLang });
       const r = await childOutput.nextValue();
 
