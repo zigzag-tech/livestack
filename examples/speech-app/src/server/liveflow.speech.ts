@@ -15,7 +15,7 @@ export const speechLiveflow = Liveflow.define({
     // Connection from raw PCM to WAV
     conn({
       from: rawPCMToWavSpec,
-      transform: ({ wavb64Str }) => ({ wavb64Str, llmType: "openai" }),
+      transform: ({ wavb64Str }) => ({ wavb64Str, whisperType: "openai" }),
       to: speechChunkToTextSpec,
     }),
     // Connection from speech chunk to text

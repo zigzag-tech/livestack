@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { JobSpec } from "@livestack/core";
 import { summarizedTitleDef } from "./defs";
-import { llmSelectorSpec, transcriptInputDef } from "./llmUtils";
+import { transcriptInputDef } from "./llmUtils";
+import { getQueuedJobOrCreate } from "./llmChildJobManager";
 
 // const jobOptionsDef = z.object({
 //   maxTokens: z.number().default(100).optional(),
@@ -20,22 +21,22 @@ export const titleSummarizerSepc = new JobSpec({
   name: "live-title-assistant",
   // jobOptions: jobOptionsDef,
   input: transcriptInputDef.extend({
-    llmType: z.enum(["openai", "lepton", "ollama"]).default("ollama").optional(),
+    llmType: z
+      .enum(["openai", "lepton", "ollama"])
+      .default("ollama")
+      .optional(),
   }),
   output: summarizedTitleDef,
 });
 
 export const titleSummarizerWorker = titleSummarizerSepc.defineWorker({
   processor: async ({ input, output, invoke }) => {
-    const { input: childInput, output: childOutput } =
-      await llmSelectorSpec.enqueueJob({
-        jobOptions: {
-          llmType: "ollama",
-        },
-      });
-
     for await (const data of input) {
       const { transcript, llmType } = data;
+      const job = await getQueuedJobOrCreate({
+        llmType: llmType || "ollama",
+      });
+      const { input: childInput, output: childOutput } = job;
       await childInput.feed({ transcript });
       const r = await childOutput.nextValue();
       if (!r) {
