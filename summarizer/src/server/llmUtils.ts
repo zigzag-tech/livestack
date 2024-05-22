@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { JobSpec } from "@livestack/core";
 import { z } from "zod";
-import { summarizedTitleDef } from "./defs";
+import { summarizedTitleDef } from "../common/defs";
 import {
   LLAMA2_13B_MODEL,
   LLAMA2_70B_MODEL,

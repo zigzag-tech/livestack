@@ -7,12 +7,23 @@
     "ollama": "^0.5",
     "zod": "^3.0.0"
   },
-  "module": "dist/livestack-summarizer.esm.js",
-  "main": "dist/livestack-summarizer.cjs.js",
-  "types": "dist/livestack-summarizer.cjs.d.ts",
+  "exports": {
+    "./client": {
+      "module": "./client/dist/livestack-summarizer-client.esm.js",
+      "default": "./client/dist/livestack-summarizer-client.cjs.js"
+    },
+    "./server": {
+      "module": "./server/dist/livestack-summarizer-server.esm.js",
+      "default": "./server/dist/livestack-summarizer-server.cjs.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "module": "/client/dist/livestack-summarizer-client.esm.js",
   "preconstruct": {
+    "exports": true,
     "entrypoints": [
-      "index.ts"
+      "client/index.ts",
+      "server/index.ts"
     ]
   }
 }

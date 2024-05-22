@@ -1,1 +1,0 @@
-/Users/ubuntu/zigzag/livestack/summarizer/src/index.ts

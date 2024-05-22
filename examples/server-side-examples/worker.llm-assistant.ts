@@ -1,7 +1,7 @@
 import {
   titleSummarizerSepc,
   titleSummarizerWorker,
-} from "@livestack/summarizer";
+} from "@livestack/summarizer/server";
 import { v4 } from "uuid";
 
 async function main() {

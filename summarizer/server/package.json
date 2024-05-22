@@ -1,0 +1,4 @@
+{
+  "main": "dist/livestack-summarizer-server.cjs.js",
+  "module": "dist/livestack-summarizer-server.esm.js"
+}
