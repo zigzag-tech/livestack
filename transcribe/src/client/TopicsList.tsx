@@ -1,7 +1,7 @@
 "use client";
 import React from "react";
 import { useOutput, JobInfo } from "@livestack/client";
-import { topicsSchema } from "@livestack/summarizer/src/defs";
+import { topicsSchema } from "@livestack/summarizer/client";
 
 export const TopicsList = ({ tag, job }: { tag: string; job: JobInfo<any> }) => {
   const { last: topicsList } = useOutput({

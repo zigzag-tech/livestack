@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { JobSpec } from "@livestack/core";
 import { z } from "zod";
-import { generateSimpleResponseOllama } from "@livestack/summarizer";
+import { generateSimpleResponseOllama } from "@livestack/summarizer/server";
 import {
   translationInputSchema,
   translationOutputSchema,
