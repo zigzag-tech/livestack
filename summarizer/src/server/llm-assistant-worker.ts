@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { JobSpec } from "@livestack/core";
-import { summarizedTitleDef } from "./defs";
+import { summarizedTitleDef } from "../common/defs";
 import { transcriptInputDef } from "./llmUtils";
 import { getQueuedJobOrCreate } from "./llmChildJobManager";
 

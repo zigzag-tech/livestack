@@ -1,5 +1,5 @@
 import { summaryFewShotPromptMessages } from "./prompts";
-import { topicsSchema, trackedHistorySchema } from "./defs";
+import { topicsSchema, trackedHistorySchema } from "../common/defs";
 import { z } from "zod";
 import { JobSpec } from "@livestack/core";
 import { Message } from "ollama";

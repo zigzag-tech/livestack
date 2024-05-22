@@ -5,7 +5,7 @@ import {
   historySummaryWorkerDef,
   historyTrackerJobSpec,
   historyTrackerWorkerDef,
-} from "@livestack/summarizer/src/topic-summary-worker";
+} from "@livestack/summarizer/server";
 import readline from "readline";
 import fs from "fs";
 import path from "path";

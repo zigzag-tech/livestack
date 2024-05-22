@@ -1,0 +1,1 @@
+/Users/ubuntu/zigzag/auto-live-lower-thirds/livestack/summarizer/src/client/index.ts
