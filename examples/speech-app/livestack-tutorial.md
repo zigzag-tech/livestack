@@ -46,7 +46,7 @@ import {
 import { Liveflow, conn, expose } from "@livestack/core";
 import { SPEECH_LIVEFLOW_NAME } from "../common/defs";
 import { translationSpec } from "@livestack/translate-server";
-import { titleSummarizerSepc } from "@livestack/summarizer";
+import { titleSummarizerSepc } from "@livestack/summarizer/client";
 import { textSplittingSpec } from "@livestack/lab-internal-server";
 
 // Define the speech liveflow
