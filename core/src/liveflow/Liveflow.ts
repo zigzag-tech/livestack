@@ -190,14 +190,17 @@ export function conn<
 >(
   p: Connection<P1, I1, O1, IMap1, OMap1, P2, I2, O2, IMap2, OMap2, K1Out, K2In>
 ): CanonicalConnection<P1, I1, O1, IMap1, OMap1, P2, I2, O2, IMap2, OMap2> {
-  const from = resolveUniqueSpec(
+  const parsed =
     typeof p.from === "string" || JobSpec.isJobSpec(p.from)
       ? p.from
       : p.from instanceof TaggedStreamDef
       ? ((p.from as TaggedStreamDef<K1Out, OMap1[K1Out], any>).extraFields
           .spec as JobSpec<P1, I1, O1, IMap1, OMap1>)
-      : (p.from as SpecAndOutput<P1, I1, O1, IMap1, OMap1, K1Out>).spec
-  );
+      : (p.from as SpecAndOutput<P1, I1, O1, IMap1, OMap1, K1Out>).spec;
+  if (!parsed) {
+    throw new Error("Illformed from spec in conn(spec).");
+  }
+  const from = resolveUniqueSpec(parsed);
   const to = resolveUniqueSpec(
     typeof p.to === "string" || JobSpec.isJobSpec(p.to)
       ? p.to
