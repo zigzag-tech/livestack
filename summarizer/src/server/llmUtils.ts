@@ -61,33 +61,35 @@ const leptonLLMSummarizedTitleWorker =
     },
   });
 
-const localLLMSummarizedTitleWorker = localLLMSummarizedTitleSpec.defineWorker({
-  processor: async ({ input, output }) => {
-    for await (const data of input) {
-      let title = "";
-      const titleRaw = await generateSimpleResponseOllama([
-        ...fewShotExamples,
-        {
-          role: "user",
-          content: `ORIGINAL TEXT:
+export const localLLMSummarizedTitleWorker =
+  localLLMSummarizedTitleSpec.defineWorker({
+    autostartWorker: false,
+    processor: async ({ input, output }) => {
+      for await (const data of input) {
+        let title = "";
+        const titleRaw = await generateSimpleResponseOllama([
+          ...fewShotExamples,
+          {
+            role: "user",
+            content: `ORIGINAL TEXT:
 \`\`\`
 ${data.transcript}
 \`\`\`
 
 JSON TITLE:
 `,
-        },
-      ]);
-      try {
-        title = JSON.parse(titleRaw).title;
-      } catch (e) {
-        console.error("Failed to parse Ollama response", e);
-        console.error("Ollama response", titleRaw);
+          },
+        ]);
+        try {
+          title = JSON.parse(titleRaw).title;
+        } catch (e) {
+          console.error("Failed to parse Ollama response", e);
+          console.error("Ollama response", titleRaw);
+        }
+        output.emit({ summarizedTitle: title });
       }
-      output.emit({ summarizedTitle: title });
-    }
-  },
-});
+    },
+  });
 
 const openAILLMSummarizedTitleWorker =
   openAILLMSummarizedTitleSpec.defineWorker({
@@ -128,7 +130,7 @@ JSON TITLE:
     },
   });
 
-const llmSelectorWorker = llmSelectorSpec.defineWorker({
+export const llmSelectorWorker = llmSelectorSpec.defineWorker({
   processor: async ({ input, output, jobOptions, invoke }) => {
     const { llmType } = jobOptions;
     const job =
