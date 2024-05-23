@@ -217,7 +217,12 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
           //   throwError: false,
           // });
 
-          const ajv = new Ajv();
+          const ajv = new Ajv({
+            useDefaults: true,
+            coerceTypes: true,
+            removeAdditional: false,
+          });
+
 
           const valid = ajv.validate(jsonSchema, replaceRefWithDummyData(data));
           if (!valid) {
