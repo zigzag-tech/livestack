@@ -63,7 +63,9 @@ export class DataStream<T extends object> {
       if (liveEnv) {
         let jsonSchemaStr: string | undefined = undefined;
         if (def) {
-          const jsonSchema = zodToJsonSchema(def);
+          const jsonSchema = zodToJsonSchema(def, {
+            removeAdditionalStrategy: "passthrough",
+          });
           jsonSchemaStr = JSON.stringify(jsonSchema);
         }
         await (
