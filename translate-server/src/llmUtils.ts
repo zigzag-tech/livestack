@@ -57,7 +57,10 @@ async function translate(
     },
   ];
   if (llmType === "ollama") {
-    const response = await generateSimpleResponseOllama(messages, "llama3");
+    const response = await generateSimpleResponseOllama({
+      messages,
+      modelName: "llama3",
+    });
     return { translated: response };
   } else {
     const { openai } = input;
