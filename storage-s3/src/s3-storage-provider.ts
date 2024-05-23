@@ -25,14 +25,27 @@ export function getAWSS3StorageProvider({
   // accessKeyId,
   // accessKeySecret,
   cdnPrefix,
+  region,
 }: {
   bucketName: string;
+  region: string;
   // region: string;
   // accessKeyId: string;
   // accessKeySecret: string;
   cdnPrefix?: string;
 }): IStorageProvider {
-  const s3client = new S3Client({});
+  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+    throw new Error(
+      "AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set in the environment"
+    );
+  }
+  const s3client = new S3Client({
+    region,
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
+  });
 
   return {
     putToStorage: async (destination, data) => {
@@ -60,8 +73,15 @@ export function getAWSS3StorageProvider({
         // File with the same hash already exists, skip uploading
         return { hash };
       } catch (error: any) {
-        if (error.code !== "NotFound") {
-          console.log("Error checking hash reference", error);
+        if ((error.code || error.name) !== "NotFound") {
+          console.log(
+            "Error checking hash reference",
+            error,
+            ", error code: ",
+            error.code || error.name,
+            ", hash: ",
+            hash
+          );
           throw error;
         }
       }
@@ -90,6 +110,7 @@ export function getAWSS3StorageProvider({
           Body: Buffer.from(destination),
         })
       );
+      console.info("Uploaded to S3", destination, hashRefPath);
 
       return { hash };
     },
@@ -108,24 +129,28 @@ export function getAWSS3StorageProvider({
           new GetObjectCommand({ Bucket: bucketName, Key: f.path })
         );
       } catch (error: any) {
-        if (error.code === "NoSuchKey" && f.hash) {
+        if ((error.code || error.name) === "NoSuchKey" && f.hash) {
           // If the file is not found and a hash is provided, look up the hash reference
           const hashRefPath = `__hash_refs/${f.hash}`;
           try {
             // const hashRefResult = await s3
             //   .getObject({ Bucket: bucketName, Key: hashRefPath })
             //   .promise();
+            console.info("Fetching hash reference", hashRefPath);
             const hashRefResult = await s3client.send<
               GetObjectCommandInput,
               GetObjectCommandOutput
             >(new GetObjectCommand({ Bucket: bucketName, Key: hashRefPath }));
-            const referencedPath = hashRefResult.Body?.toString();
+            const referencedPath = await hashRefResult.Body?.transformToString(
+              "utf-8"
+            );
             if (!referencedPath) {
               throw new Error("No data returned from S3");
             }
             // result = await s3
             //   .getObject({ Bucket: bucketName, Key: referencedPath })
             //   .promise();
+            console.info("Fetching referenced path", referencedPath);
             result = await s3client.send<
               GetObjectCommandInput,
               GetObjectCommandOutput
@@ -135,8 +160,11 @@ export function getAWSS3StorageProvider({
           } catch (hashRefError: any) {
             console.log(
               "Error fetching hash reference",
-              `__hash_refs/${f.hash}`
+              `__hash_refs/${f.hash}`,
+              hashRefError,
+              Object.keys(hashRefError)
             );
+
             throw hashRefError;
           }
         } else {
