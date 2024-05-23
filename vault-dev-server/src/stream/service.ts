@@ -25,7 +25,8 @@ import {
   handlePrimitiveOrArray,
 } from "../db/primitives.js";
 import { v4 } from "uuid";
-import { validate } from "jsonschema";
+// import { validate } from "jsonschema";
+import Ajv from "ajv";
 import _ from "lodash";
 import { Readable } from "stream";
 
@@ -216,9 +217,23 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
           //   throwError: false,
           // });
 
-          res = validate(replaceRefWithDummyData(data), jsonSchema, {
-            throwError: false,
-          });
+          const ajv = new Ajv();
+
+          const valid = ajv.validate(jsonSchema, replaceRefWithDummyData(data));
+          if (!valid) {
+            res = {
+              valid: false,
+              errors: (ajv.errors || []).map((e) => {
+                return {
+                  message: e.message,
+                  dataPath: e.dataPath,
+                  schemaPath: e.schemaPath,
+                  keyword: e.keyword,
+                  params: e.params,
+                };
+              }),
+            };
+          }
         } catch (e) {
           console.warn("Error occurred validating data: ", e);
           console.debug("actualSchema: ", JSON.stringify(actualSchema));
