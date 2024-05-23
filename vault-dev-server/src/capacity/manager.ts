@@ -2,8 +2,6 @@ import pkg from "@livestack/shared";
 const { genManuallyFedIterator } = pkg;
 import {
   CacapcityServiceImplementation,
-  FromInstance,
-  FromWorker,
   CommandToInstance,
 } from "@livestack/vault-interface";
 import {
