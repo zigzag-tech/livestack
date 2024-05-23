@@ -58,14 +58,14 @@ Dr. Chen highlights AI's exciting advancements, especially in healthcare, where 
 ];
 
 export const summarize = async (
-  input: { messages: Message[] } & (
+  input: { messages: Message[]; format?: string } & (
     | { useCloudSummarizer: true; openai: OpenAI }
     | {
         useCloudSummarizer: false;
       }
   )
 ) => {
-  const { messages, useCloudSummarizer } = input;
+  const { messages, useCloudSummarizer, format } = input;
   if (useCloudSummarizer) {
     const { openai } = input;
     const response = await openai.chat.completions.create({
@@ -77,7 +77,7 @@ export const summarize = async (
     const r = response.choices[0].message.content || "Failed to summarize";
     return r;
   } else {
-    const r = await generateSimpleResponseOllama({ messages });
+    const r = await generateSimpleResponseOllama({ messages, format });
     return r;
   }
 };
