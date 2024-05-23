@@ -164,7 +164,9 @@ export class JobSpec<
 
   public static lookupByName(specName: string) {
     if (!JobSpec._registryBySpecName[specName]) {
-      throw new Error(`JobSpec ${specName} not defined on this machine.`);
+      throw new Error(
+        `JobSpec ${specName} not defined on this machine. Please make sure they are properly imported.`
+      );
     }
     return JobSpec._registryBySpecName[specName];
   }
