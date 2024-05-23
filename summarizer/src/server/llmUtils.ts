@@ -67,19 +67,22 @@ export const localLLMSummarizedTitleWorker =
     processor: async ({ input, output }) => {
       for await (const data of input) {
         let title = "";
-        const titleRaw = await generateSimpleResponseOllama([
-          ...fewShotExamples,
-          {
-            role: "user",
-            content: `ORIGINAL TEXT:
+        const titleRaw = await generateSimpleResponseOllama({
+          format: "json",
+          messages: [
+            ...fewShotExamples,
+            {
+              role: "user",
+              content: `ORIGINAL TEXT:
 \`\`\`
 ${data.transcript}
 \`\`\`
 
 JSON TITLE:
 `,
-          },
-        ]);
+            },
+          ],
+        });
         try {
           title = JSON.parse(titleRaw).title;
         } catch (e) {

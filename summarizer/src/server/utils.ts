@@ -77,7 +77,7 @@ export const summarize = async (
     const r = response.choices[0].message.content || "Failed to summarize";
     return r;
   } else {
-    const r = await generateSimpleResponseOllama(messages);
+    const r = await generateSimpleResponseOllama({ messages });
     return r;
   }
 };
