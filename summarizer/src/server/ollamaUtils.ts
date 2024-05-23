@@ -3,10 +3,15 @@ import { Message } from "ollama";
 
 const CONVO_MODEL = "mistral:v0.3";
 
-export async function generateSimpleResponseOllama(
-  messages: Message[],
-  modelName?: string
-): Promise<string> {
+export async function generateSimpleResponseOllama({
+  messages,
+  modelName,
+  format,
+}: {
+  messages: Message[];
+  modelName?: string;
+  format?: string;
+}): Promise<string> {
   const { Ollama } = await import("ollama");
   const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
   const ollama = new Ollama({ host: OLLAMA_HOST });
@@ -16,6 +21,7 @@ export async function generateSimpleResponseOllama(
       stream: true,
       model: modelName || CONVO_MODEL,
       messages,
+      format,
     });
     const message = wrapWithTransientStdout(response);
 
