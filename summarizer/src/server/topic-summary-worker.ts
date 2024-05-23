@@ -142,6 +142,7 @@ ${summary}
       const topicsRaw = await summarize({
         useCloudSummarizer: false,
         messages,
+        format: "json",
       });
 
       const { topics } = JSON.parse(topicsRaw) as { topics: string[] };
