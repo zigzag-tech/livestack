@@ -17,6 +17,7 @@ export const textSplittingSpec = JobSpec.define({
 });
 
 export const textSplittingWorkerDef = textSplittingSpec.defineWorker({
+  autostartWorker: false,
   processor: async ({ input, output, jobOptions }) => {
     const splitter = await genSplitterIterable({
       chunkSize: jobOptions.chunkSize || DEFAULT_CHUNK_SIZE,
