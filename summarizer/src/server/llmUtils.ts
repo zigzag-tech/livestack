@@ -130,7 +130,8 @@ JSON TITLE:
     },
   });
 
-export const llmSelectorWorker = llmSelectorSpec.defineWorker({
+export const llmSelectorSummarizerWorkerDef = llmSelectorSpec.defineWorker({
+  autostartWorker: false,
   processor: async ({ input, output, jobOptions, invoke }) => {
     const { llmType } = jobOptions;
     const job =
