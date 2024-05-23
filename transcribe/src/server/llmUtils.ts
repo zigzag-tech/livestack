@@ -72,7 +72,7 @@ const openAITranscriptionSpec = new JobSpec({
   output: speechChunkToTextOutput,
 });
 
-const localTranscriptionWorker = localTranscriptionSpec.defineWorker({
+export const localTranscriptionWorker = localTranscriptionSpec.defineWorker({
   processor: async ({ input, output, jobOptions }) => {
     const { whisperEndpoint, model } = jobOptions;
 
@@ -117,7 +117,8 @@ const openAITranscriptionWorker = openAITranscriptionSpec.defineWorker({
   },
 });
 
-const transcriptionSelectorWorker = transcriptionSelectorSpec.defineWorker({
+export const transcriptionSelectorWorker = transcriptionSelectorSpec.defineWorker({
+  autostartWorker: false,
   processor: async ({ input, output, jobOptions, invoke }) => {
     const { whisperType } = jobOptions;
     const job =

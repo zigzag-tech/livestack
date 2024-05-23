@@ -38,6 +38,7 @@ export const historySummaryJobSpec = new JobSpec({
 });
 
 export const historyTrackerWorkerDef = historyTrackerJobSpec.defineWorker({
+  autostartWorker: false,
   processor: async ({ output, input }) => {
     let counter = 0; // used for triggering historySummaryJobSpec
     for await (const { text } of input) {
@@ -93,6 +94,7 @@ export const historyTrackerWorkerDef = historyTrackerJobSpec.defineWorker({
 });
 
 export const historySummaryWorkerDef = historySummaryJobSpec.defineWorker({
+  autostartWorker: false,
   processor: async ({ output, input }) => {
     for await (const { minLevel } of input) {
       const baseLevels = Array.from(

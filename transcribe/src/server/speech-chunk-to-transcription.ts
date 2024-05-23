@@ -16,21 +16,21 @@ export const speechChunkToTextSpec = new JobSpec({
   output: speechChunkToTextOutput,
 });
 
-export const speechChunkToTranscriptionWorkerDef =
-  speechChunkToTextSpec.defineWorker({
-    processor: async ({ output, input, invoke }) => {
-      for await (const data of input) {
-        const { wavb64Str, whisperType } = data;
-        const job = await getQueuedJobOrCreate({
-          whisperType: whisperType || "local",
-        });
-        const { input: childInput, output: childOutput } = job;
-        await childInput.feed({ wavb64Str });
-        const r = await childOutput.nextValue();
-        if (!r) {
-          throw new Error("No response from LLM");
-        }
-        await output.emit(r.data);
+export const speechChunkToTranscriptionWorkerDef = speechChunkToTextSpec.defineWorker({
+  autostartWorker: false,
+  processor: async ({ output, input, invoke }) => {
+    for await (const data of input) {
+      const { wavb64Str, whisperType } = data;
+      const job = await getQueuedJobOrCreate({
+        whisperType: whisperType || "local",
+      });
+      const { input: childInput, output: childOutput } = job;
+      await childInput.feed({ wavb64Str });
+      const r = await childOutput.nextValue();
+      if (!r) {
+        throw new Error("No response from LLM");
       }
-    },
-  });
+      await output.emit(r.data);
+    }
+  },
+});
