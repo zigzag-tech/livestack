@@ -1,7 +1,7 @@
 import { wrapWithTransientStdout } from "@livestack/shared";
 import { Message } from "ollama";
 
-const CONVO_MODEL = "mistral:v0.3";
+const CONVO_MODEL = "llama3:instruct";
 
 export async function generateSimpleResponseOllama({
   messages,
