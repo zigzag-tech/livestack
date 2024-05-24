@@ -1,9 +1,9 @@
 {
   "name": "@livestack/lab-internal-server",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "dependencies": {
-    "@livestack/core": "^0.0.6",
-    "@livestack/lab-internal-common": "^0.0.6",
+    "@livestack/core": "^0.0.7",
+    "@livestack/lab-internal-common": "^0.0.7",
     "langchain": "^0.1.36",
     "lorem-ipsum": "^2.0.8"
   },
