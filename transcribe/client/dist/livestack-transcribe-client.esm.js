@@ -1,1 +1,1 @@
-/Users/ubuntu/zigzag/livestack/transcribe/src/client/index.ts
+/home/ubuntu/livestack/transcribe/src/client/index.ts
