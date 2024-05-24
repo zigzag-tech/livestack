@@ -1,6 +1,6 @@
 {
   "name": "@livestack/gateway",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Manges and routes requests between the frontend and livestack orechestration services.",
   "scripts": {
     "build": "tsc"
@@ -9,8 +9,8 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "@livestack/core": "^0.0.6",
-    "@livestack/shared": "^0.0.6",
+    "@livestack/core": "^0.0.7",
+    "@livestack/shared": "^0.0.7",
     "jsonwebtoken": "^9.0.2",
     "socket.io": "^4"
   },
