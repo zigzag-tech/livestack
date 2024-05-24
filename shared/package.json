@@ -19,6 +19,7 @@
     "zod": "^3.22.4"
   },
   "devDependencies": {
+    "@babel/core": "^7.24.5",
     "@babel/preset-env": "^7.16.7",
     "@babel/preset-typescript": "^7.16.7",
     "@preconstruct/cli": "^2.8.4",
