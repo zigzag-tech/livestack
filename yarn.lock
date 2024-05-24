@@ -3877,10 +3877,18 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/summarizer@workspace:summarizer"
   dependencies:
+    "@babel/preset-env": "npm:^7.16.7"
+    "@babel/preset-typescript": "npm:^7.16.7"
     "@livestack/core": "npm:^0.0.7"
     "@livestack/shared": "npm:^0.0.7"
+    "@preconstruct/cli": "npm:^2.8.4"
+    "@types/node": "npm:^16"
     ollama: "npm:^0.5"
+    ts-node: "npm:^10.9.1"
+    typescript: "npm:5.4.5"
     zod: "npm:^3.0.0"
+  peerDependencies:
+    openai: ^4
   languageName: unknown
   linkType: soft
 

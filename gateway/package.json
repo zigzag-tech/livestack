@@ -1,9 +1,10 @@
 {
   "name": "@livestack/gateway",
   "version": "0.0.7",
+  "license": "MIT",
   "description": "Manges and routes requests between the frontend and livestack orechestration services.",
   "scripts": {
-    "build": "tsc"
+    "build": "preconstruct build"
   },
   "files": [
     "dist/**/*"

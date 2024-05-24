@@ -1,11 +1,26 @@
 {
   "name": "@livestack/summarizer",
   "version": "0.0.7",
+  "license": "MIT",
   "dependencies": {
     "@livestack/core": "^0.0.7",
     "@livestack/shared": "^0.0.7",
     "ollama": "^0.5",
     "zod": "^3.0.0"
+  },
+  "devDependencies": {
+    "@babel/preset-env": "^7.16.7",
+    "@babel/preset-typescript": "^7.16.7",
+    "@preconstruct/cli": "^2.8.4",
+    "@types/node": "^16",
+    "ts-node": "^10.9.1",
+    "typescript": "5.4.5"
+  },
+  "peerDependencies": {
+    "openai": "^4"
+  },
+  "scripts": {
+    "build": "preconstruct build"
   },
   "exports": {
     "./client": {
