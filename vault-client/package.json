@@ -1,6 +1,6 @@
 {
   "name": "@livestack/vault-client",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "packageManager": "yarn@4.2.2",
   "author": "",
   "license": "MIT",
@@ -9,7 +9,7 @@
     "postinstall": "preconstruct dev"
   },
   "dependencies": {
-    "@livestack/vault-interface": "^0.0.7",
+    "@livestack/vault-interface": "^0.0.8",
     "nice-grpc": "^2.1.8",
     "nice-grpc-client-middleware-retry": "^3.1.7"
   },
