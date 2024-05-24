@@ -1,6 +1,6 @@
 {
   "name": "@livestack/replicate",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Livestack replicate connectors.",
   "scripts": {
     "build": "preconstruct build",

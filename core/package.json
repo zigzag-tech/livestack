@@ -1,6 +1,6 @@
 {
   "name": "@livestack/core",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Orchestration, in real-time.",
   "scripts": {
     "build": "preconstruct build",
@@ -8,9 +8,9 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@livestack/shared": "^0.0.7",
-    "@livestack/vault-client": "^0.0.7",
-    "@livestack/vault-interface": "^0.0.7",
+    "@livestack/shared": "^0.0.8",
+    "@livestack/vault-client": "^0.0.8",
+    "@livestack/vault-interface": "^0.0.8",
     "@ltd/j-toml": "^1.38.0",
     "ansis": "^2.3.0",
     "dotenv": "^16.x",
@@ -33,7 +33,7 @@
     "typescript": "5.4.5"
   },
   "optionalDependencies": {
-    "@livestack/vault-dev-server": "^0.0.7"
+    "@livestack/vault-dev-server": "^0.0.8"
   },
   "module": "dist/livestack-core.esm.js",
   "main": "dist/livestack-core.cjs.js",
