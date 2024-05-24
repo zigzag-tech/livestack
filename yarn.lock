@@ -3625,7 +3625,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@livestack/client@npm:^0.0.8, @livestack/client@workspace:client":
+"@livestack/client@npm:*, @livestack/client@npm:^0.0.8, @livestack/client@workspace:client":
   version: 0.0.0-use.local
   resolution: "@livestack/client@workspace:client"
   dependencies:
@@ -3643,7 +3643,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/core@npm:^0.0.8, @livestack/core@workspace:core":
+"@livestack/core@npm:*, @livestack/core@npm:^0.0.8, @livestack/core@workspace:core":
   version: 0.0.0-use.local
   resolution: "@livestack/core@workspace:core"
   dependencies:
@@ -3809,6 +3809,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/shared@workspace:shared"
   dependencies:
+    "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
     "@preconstruct/cli": "npm:^2.8.4"
@@ -3877,6 +3878,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/summarizer@workspace:summarizer"
   dependencies:
+    "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
     "@livestack/core": "npm:^0.0.8"
@@ -3895,9 +3897,22 @@ __metadata:
 "@livestack/transcribe@npm:^0.0.8, @livestack/transcribe@workspace:transcribe":
   version: 0.0.0-use.local
   resolution: "@livestack/transcribe@workspace:transcribe"
+  dependencies:
+    "@babel/core": "npm:^7.24.5"
+    "@babel/preset-env": "npm:^7.16.7"
+    "@babel/preset-typescript": "npm:^7.16.7"
+    "@livestack/client": "npm:*"
+    "@livestack/core": "npm:*"
+    "@preconstruct/cli": "npm:^2.8.4"
+    "@types/node": "npm:^16"
+    "@types/uuid": "npm:^9.0.7"
+    ts-node: "npm:^10.9.1"
+    typescript: "npm:5.4.5"
   peerDependencies:
-    "@livestack/client": "*"
-    "@livestack/core": "*"
+    openai: ^4
+    react: ^18
+    uuid: ^9
+    zod: ^3
   languageName: unknown
   linkType: soft
 
