@@ -1,8 +1,8 @@
 {
   "name": "@livestack/lab-internal-common",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "dependencies": {
-    "@livestack/core": "^0.0.6",
+    "@livestack/core": "^0.0.7",
     "zod": "^3"
   },
   "main": "dist/livestack-lab-internal-common.cjs.js",
