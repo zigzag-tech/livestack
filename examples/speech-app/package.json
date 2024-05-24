@@ -7,7 +7,7 @@
   },
   "main": "dist/livestack-example-speech-app.cjs.js",
   "scripts": {
-    "dev": "tsx --tsconfig tsconfig.json src/server/index.ts"
+    "dev": "NODE_OPTIONS='-r dotenv/config' tsx --tsconfig tsconfig.json src/server/index.ts"
   },
   "author": "",
   "license": "MIT",
