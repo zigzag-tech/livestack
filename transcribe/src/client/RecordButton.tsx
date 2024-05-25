@@ -2,6 +2,7 @@
 import React from "react";
 import { FaStop, FaMicrophone } from "react-icons/fa";
 
+
 export const RecordButton = ({
   handleRecording,
   isRecording,
