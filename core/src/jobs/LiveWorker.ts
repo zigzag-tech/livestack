@@ -37,6 +37,7 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
   public readonly processor: ZZProcessor<P, I, O, WP, IMap, OMap>;
   public readonly liveEnvP: Promise<LiveEnv>;
   public readonly workerPrefix?: string;
+  public readonly autoStartWorker: boolean;
 
   public static registeredWorkerDefsBySpecName: Record<
     string,
@@ -55,6 +56,8 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     autostartWorker = true,
   }: LiveWorkerDefParams<P, I, O, WP, IMap, OMap>) {
     this.jobSpec = jobSpec;
+    this.autoStartWorker = autostartWorker;
+
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
     if (liveEnv) {
@@ -72,12 +75,9 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     } else {
       LiveWorkerDef.registeredWorkerDefsBySpecName[jobSpec.name] = this;
     }
-
     if (!LiveWorkerDef.instanceReported) {
       LiveWorkerDef.instanceReported = true;
-      if (autostartWorker === true) {
-        this.reportInstanceCapacityLazy();
-      }
+      this.reportInstanceCapacityLazy();
     }
   }
 
@@ -102,6 +102,7 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     //   genManuallyFedIterator<FromInstance>((v) => {
     //     // console.info(`INSTANCE REPORT: ${JSON.stringify(v)}`);
     //   });
+
     const cmdFromVault = (
       await this.liveEnvP
     ).vaultClient.capacity.reportAsInstance({
@@ -136,9 +137,14 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
 
       if (queryCapacity) {
         // console.info("Capacity query received: ", queryCapacity);
-        const specNames = Object.keys(
+        const autoStartSpecNames = Object.keys(
           LiveWorkerDef.registeredWorkerDefsBySpecName
+        ).filter(
+          (specName) =>
+            LiveWorkerDef.registeredWorkerDefsBySpecName[specName]
+              .autoStartWorker
         );
+        console.log("autoStartSpecNames", autoStartSpecNames);
         const capacity = 10;
 
         await (
@@ -147,7 +153,7 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
           correlationId,
           projectUuid,
           instanceId,
-          specNameAndCapacity: specNames.map((specName) => {
+          specNameAndCapacity: autoStartSpecNames.map((specName) => {
             return {
               specName,
               capacity,
