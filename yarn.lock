@@ -3843,11 +3843,12 @@ __metadata:
     react: "npm:^18"
     react-dom: "npm:^18"
     react-icons: "npm:^5.2.1"
-    socket.io-client: "npm:^4.7.2"
+    socket.io-client: "npm:^4"
     tailwindcss: "npm:^3"
     ts-node: "npm:^10.9.2"
     tsx: "npm:^4.7.1"
     typescript: "npm:5.4.5"
+    uuid: "npm:^9"
     vite: "npm:^5.1.6"
     vite-express: "npm:^0.14.1"
     vite-tsconfig-paths: "npm:^4.3.2"
@@ -3877,7 +3878,14 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/lab-internal-common@workspace:lab-common"
   dependencies:
+    "@babel/core": "npm:^7.24.5"
+    "@babel/preset-env": "npm:^7.16.7"
+    "@babel/preset-typescript": "npm:^7.16.7"
     "@livestack/core": "npm:^0.0.10"
+    "@preconstruct/cli": "npm:^2.8.4"
+    "@types/node": "npm:^16"
+    ts-node: "npm:^10.9.1"
+    typescript: "npm:5.4.5"
     zod: "npm:^3"
   languageName: unknown
   linkType: soft
@@ -3886,10 +3894,18 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/lab-internal-server@workspace:lab-server"
   dependencies:
+    "@babel/core": "npm:^7.24.5"
+    "@babel/preset-env": "npm:^7.16.7"
+    "@babel/preset-typescript": "npm:^7.16.7"
     "@livestack/core": "npm:^0.0.10"
     "@livestack/lab-internal-common": "npm:^0.0.10"
+    "@livestack/shared": "npm:^0.0.10"
+    "@preconstruct/cli": "npm:^2.8.4"
+    "@types/node": "npm:^16"
     langchain: "npm:^0.1.36"
-    lorem-ipsum: "npm:^2.0.8"
+    ts-node: "npm:^10.9.1"
+    typescript: "npm:5.4.5"
+    zod: "npm:^3"
   languageName: unknown
   linkType: soft
 
@@ -4040,6 +4056,7 @@ __metadata:
     "@preconstruct/cli": "npm:^2.8.4"
     "@types/node": "npm:^16"
     "@types/uuid": "npm:^9.0.7"
+    axios: "npm:^1.7.2"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.4.5"
   peerDependencies:
@@ -6966,6 +6983,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"axios@npm:^1.7.2":
+  version: 1.7.2
+  resolution: "axios@npm:1.7.2"
+  dependencies:
+    follow-redirects: "npm:^1.15.6"
+    form-data: "npm:^4.0.0"
+    proxy-from-env: "npm:^1.1.0"
+  checksum: 10c0/cbd47ce380fe045313364e740bb03b936420b8b5558c7ea36a4563db1258c658f05e40feb5ddd41f6633fdd96d37ac2a76f884dad599c5b0224b4c451b3fa7ae
+  languageName: node
+  linkType: hard
+
 "axobject-query@npm:^3.2.1":
   version: 3.2.1
   resolution: "axobject-query@npm:3.2.1"
@@ -7799,13 +7827,6 @@ __metadata:
   version: 4.1.1
   resolution: "commander@npm:4.1.1"
   checksum: 10c0/84a76c08fe6cc08c9c93f62ac573d2907d8e79138999312c92d4155bc2325d487d64d13f669b2000c9f8caf70493c1be2dac74fec3c51d5a04f8bc3ae1830bab
-  languageName: node
-  linkType: hard
-
-"commander@npm:^9.3.0":
-  version: 9.5.0
-  resolution: "commander@npm:9.5.0"
-  checksum: 10c0/5f7784fbda2aaec39e89eb46f06a999e00224b3763dc65976e05929ec486e174fe9aac2655f03ba6a5e83875bd173be5283dc19309b7c65954701c02025b3c1d
   languageName: node
   linkType: hard
 
@@ -13234,17 +13255,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lorem-ipsum@npm:^2.0.8":
-  version: 2.0.8
-  resolution: "lorem-ipsum@npm:2.0.8"
-  dependencies:
-    commander: "npm:^9.3.0"
-  bin:
-    lorem-ipsum: dist/bin/lorem-ipsum.bin.js
-  checksum: 10c0/bf1bc1a5a4ee118fbc9c28b5dd16043124e6163c3282ea453fa43626703e26a57b14c6d097954f5f57e283991c567f25de5a9313f4ee203afdbba389d71b412d
-  languageName: node
-  linkType: hard
-
 "lru-cache@npm:^10.0.1, lru-cache@npm:^10.2.0, lru-cache@npm:^10.2.2":
   version: 10.2.2
   resolution: "lru-cache@npm:10.2.2"
@@ -16540,7 +16550,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"socket.io-client@npm:^4.7.2":
+"socket.io-client@npm:^4":
   version: 4.7.5
   resolution: "socket.io-client@npm:4.7.5"
   dependencies:
