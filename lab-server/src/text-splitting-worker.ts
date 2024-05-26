@@ -3,6 +3,7 @@ import { z } from "zod";
 import { genSplitterIterable } from "./textSplitter";
 import { JobSpec } from "@livestack/core";
 const DEFAULT_CHUNK_SIZE = 500;
+const AUTO_START_WORKER = true;
 
 export const textSplittingSpec = JobSpec.define({
   name: "text-splitting",
@@ -17,7 +18,7 @@ export const textSplittingSpec = JobSpec.define({
 });
 
 export const textSplittingWorkerDef = textSplittingSpec.defineWorker({
-  autostartWorker: false,
+  autostartWorker: AUTO_START_WORKER,
   processor: async ({ input, output, jobOptions }) => {
     const splitter = await genSplitterIterable({
       chunkSize: jobOptions.chunkSize || DEFAULT_CHUNK_SIZE,

@@ -7,6 +7,7 @@ import {
 } from "../common/defs";
 import { v4 } from "uuid";
 import axios from "axios";
+const AUTO_START_WORKER = true;
 
 export const localWhisperConfigSchema = z.object({
   whisperEndpoint: z.string(),
@@ -118,7 +119,7 @@ const openAITranscriptionWorker = openAITranscriptionSpec.defineWorker({
 });
 
 export const transcriptionSelectorWorker = transcriptionSelectorSpec.defineWorker({
-  autostartWorker: false,
+  autostartWorker: AUTO_START_WORKER,
   processor: async ({ input, output, jobOptions, invoke }) => {
     const { whisperType } = jobOptions;
     const job =
