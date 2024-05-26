@@ -1,9 +1,22 @@
 {
   "name": "@livestack/lab-internal-common",
   "version": "0.0.10",
+  "license": "MIT",
   "dependencies": {
     "@livestack/core": "^0.0.10",
     "zod": "^3"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.5",
+    "@babel/preset-env": "^7.16.7",
+    "@babel/preset-typescript": "^7.16.7",
+    "@preconstruct/cli": "^2.8.4",
+    "@types/node": "^16",
+    "ts-node": "^10.9.1",
+    "typescript": "5.4.5"
+  },
+  "scripts": {
+    "build": "preconstruct build"
   },
   "main": "dist/livestack-lab-internal-common.cjs.js",
   "module": "dist/livestack-lab-internal-common.esm.js",
