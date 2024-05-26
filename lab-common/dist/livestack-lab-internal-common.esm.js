@@ -1,1 +1,1 @@
-/home/ubuntu/auto-live-lower-thirds/livestack/lab-common/src/index.ts
+/home/ubuntu/livestack/lab-common/src/index.ts
