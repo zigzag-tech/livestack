@@ -7,6 +7,7 @@ import { z } from "zod";
 import { getQueuedJobOrCreate } from "./whisperChildJobManager";
 
 export const SPEECH_REC_JOB_PREFIX = "speech-rec-one";
+const AUTO_START_WORKER = true;
 
 export const speechChunkToTextSpec = new JobSpec({
   name: "speech-chunk-to-transcription",
@@ -17,7 +18,7 @@ export const speechChunkToTextSpec = new JobSpec({
 });
 
 export const speechChunkToTranscriptionWorkerDef = speechChunkToTextSpec.defineWorker({
-  autostartWorker: false,
+  autostartWorker: AUTO_START_WORKER,
   processor: async ({ output, input, invoke }) => {
     for await (const data of input) {
       const { wavb64Str, whisperType } = data;

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { JobSpec } from "@livestack/core";
+const AUTO_START_WORKER = true;
 
 export const inputDef = z.object({
   rawPCM64Str: z.string(),
@@ -14,7 +15,7 @@ export const rawPCMToWavSpec = new JobSpec({
 });
 
 export const rawPCMToWavWorker = rawPCMToWavSpec.defineWorker({
-  autostartWorker: false,
+  autostartWorker: AUTO_START_WORKER,
   processor: async ({ input, output }) => {
     // const fileNamePrefix = "rawPCM-" + Date.now();
     // let fileIndex = 0;

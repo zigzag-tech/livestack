@@ -4,6 +4,9 @@ import { z } from "zod";
 import { JobSpec } from "@livestack/core";
 import { Message } from "ollama";
 import { fewShotExamples, summarize } from "./utils";
+
+const AUTO_START_WORKER = true;
+
 // How this works:
 // {
 //  "0": [{"text": "This is a test", "ids": [8]}],
@@ -38,7 +41,7 @@ export const historySummaryJobSpec = new JobSpec({
 });
 
 export const historyTrackerWorkerDef = historyTrackerJobSpec.defineWorker({
-  autostartWorker: false,
+  autostartWorker: AUTO_START_WORKER,
   processor: async ({ output, input }) => {
     let counter = 0; // used for triggering historySummaryJobSpec
     for await (const { text } of input) {
@@ -94,7 +97,7 @@ export const historyTrackerWorkerDef = historyTrackerJobSpec.defineWorker({
 });
 
 export const historySummaryWorkerDef = historySummaryJobSpec.defineWorker({
-  autostartWorker: false,
+  autostartWorker: AUTO_START_WORKER,
   processor: async ({ output, input }) => {
     for await (const { minLevel } of input) {
       const baseLevels = Array.from(
