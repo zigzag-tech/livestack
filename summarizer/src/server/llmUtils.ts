@@ -9,6 +9,7 @@ import {
 } from "./leptonUtils";
 import { generateSimpleResponseOllama } from "./ollamaUtils";
 import { fewShotExamples } from "./ollamaUtils";
+const AUTO_START_WORKER = true;
 
 export const transcriptInputDef = z.object({
   transcript: z.string(),
@@ -63,7 +64,7 @@ const leptonLLMSummarizedTitleWorker =
 
 export const localLLMSummarizedTitleWorker =
   localLLMSummarizedTitleSpec.defineWorker({
-    autostartWorker: false,
+    autostartWorker: AUTO_START_WORKER,
     processor: async ({ input, output }) => {
       for await (const data of input) {
         let title = "";
@@ -134,7 +135,7 @@ JSON TITLE:
   });
 
 export const llmSelectorSummarizerWorkerDef = llmSelectorSpec.defineWorker({
-  autostartWorker: false,
+  autostartWorker: AUTO_START_WORKER,
   processor: async ({ input, output, jobOptions, invoke }) => {
     const { llmType } = jobOptions;
     const job =
