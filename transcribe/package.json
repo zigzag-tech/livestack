@@ -1,10 +1,10 @@
 {
   "name": "@livestack/transcribe",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "liencese": "MIT",
   "dependencies": {
-    "@livestack/client": "^0.0.9",
-    "@livestack/core": "^0.0.9"
+    "@livestack/client": "^0.0.10",
+    "@livestack/core": "^0.0.10"
   },
   "devDependencies": {
     "@babel/core": "^7.24.5",
