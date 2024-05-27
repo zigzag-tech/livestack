@@ -6,8 +6,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "preconstruct dev && ts-node src/index.ts --transpile-only --project tsconfig.json",
-    "build": "preconstruct build",
-    "postinstall": "preconstruct dev"
+    "build": "preconstruct build"
   },
   "dependencies": {
     "@chainsafe/libp2p-noise": "^15.0.0",
