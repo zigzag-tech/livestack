@@ -154,15 +154,18 @@ function genAuthorizedGRPCFn<REQ extends object, R>(
   fn: (req: REQ, ctx?: Partial<CallContext> & RetryExt) => R,
   opts?: { retry: boolean }
 ) {
-  const { retry } = { retry: true, ...opts };
+  let retry = true;
+  if (opts?.retry !== undefined) {
+    retry = opts.retry;
+  }
   return (req: REQ, ctx?: Partial<CallContext> & RetryExt): R => {
     const metadata = ctx?.metadata || new Metadata();
     metadata.set("authorization", "Bearer " + authToken);
-
-    return fn(req, {
-      ...(ctx || ({} as Partial<CallContext> & RetryExt)),
-      metadata,
-      ...(retry
+    const params = ctx || ({} as Partial<CallContext> & RetryExt);
+    Object.assign(params, { metadata });
+    Object.assign(
+      params,
+      retry
         ? {
             // not needed if the method is marked as idempotent in Protobuf
             retry: true,
@@ -181,7 +184,8 @@ function genAuthorizedGRPCFn<REQ extends object, R>(
               );
             },
           }
-        : {}),
-    });
+        : {}
+    );
+    return fn(req, params);
   };
 }
