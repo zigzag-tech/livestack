@@ -1,9 +1,9 @@
 {
   "name": "@livestack/lab-internal-common",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "license": "MIT",
   "dependencies": {
-    "@livestack/core": "^0.0.17",
+    "@livestack/core": "^0.0.18",
     "zod": "^3"
   },
   "devDependencies": {
