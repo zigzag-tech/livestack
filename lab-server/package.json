@@ -1,11 +1,11 @@
 {
   "name": "@livestack/lab-internal-server",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "license": "MIT",
   "dependencies": {
-    "@livestack/core": "^0.0.15",
-    "@livestack/lab-internal-common": "^0.0.15",
-    "@livestack/shared": "^0.0.15",
+    "@livestack/core": "^0.0.16",
+    "@livestack/lab-internal-common": "^0.0.16",
+    "@livestack/shared": "^0.0.16",
     "langchain": "^0.1.36",
     "zod": "^3"
   },
