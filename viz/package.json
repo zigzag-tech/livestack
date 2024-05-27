@@ -1,6 +1,6 @@
 {
   "name": "@livestack/viz",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "description": "Realtime livestack visualization.",
   "scripts": {
     "build": "tsc"
