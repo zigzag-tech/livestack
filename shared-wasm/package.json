@@ -3,7 +3,7 @@
   "collaborators": [
     "Xiyang Chen <xiyang@zztech.io>"
   ],
-  "version": "0.0.12",
+  "version": "0.0.13",
   "files": [
     "livestack_shared_wasm_bg.wasm",
     "livestack_shared_wasm.js",
