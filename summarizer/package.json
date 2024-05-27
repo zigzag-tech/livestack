@@ -3,7 +3,7 @@
   "version": "0.0.15",
   "license": "MIT",
   "dependencies": {
-    "@livestack/core": "^0.0.11",
+    "@livestack/core": "^0.0.15",
     "@livestack/shared": "^0.0.15",
     "ollama": "^0.5",
     "zod": "^3.0.0"
