@@ -3,8 +3,7 @@
   "version": "0.0.10",
   "description": "Helper functions and react hooks that help display Livestack data in the frontend.",
   "scripts": {
-    "build": "preconstruct build",
-    "postinstall": "preconstruct dev"
+    "build": "preconstruct build"
   },
   "files": [
     "dist/**/*"
