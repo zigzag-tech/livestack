@@ -31,9 +31,6 @@
     "@types/uuid": "^9.0.7",
     "typescript": "5.4.5"
   },
-  "optionalDependencies": {
-    "@livestack/vault-dev-server": "^0.0.11"
-  },
   "module": "dist/livestack-core.esm.js",
   "main": "dist/livestack-core.cjs.js",
   "types": "dist/livestack-core.cjs.d.ts",
