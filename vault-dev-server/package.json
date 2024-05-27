@@ -5,7 +5,7 @@
   "author": "",
   "license": "MIT",
   "scripts": {
-    "dev": "preconstruct dev && ts-node src/index.ts --transpile-only --project tsconfig.json",
+    "dev": "ts-node src/index.ts --transpile-only --project tsconfig.json",
     "build": "preconstruct build"
   },
   "dependencies": {
