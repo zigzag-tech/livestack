@@ -7,9 +7,9 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@livestack/shared": "^0.0.11",
-    "@livestack/vault-client": "^0.0.11",
-    "@livestack/vault-interface": "^0.0.11",
+    "@livestack/shared": "^0.0.12",
+    "@livestack/vault-client": "^0.0.12",
+    "@livestack/vault-interface": "^0.0.12",
     "@ltd/j-toml": "^1.38.0",
     "ansis": "^2.3.0",
     "dotenv": "^16.x",

@@ -6,3 +6,4 @@ _docs
 .nx
 .yarn
 .pnp.*
+*.log
