@@ -1,13 +1,31 @@
 {
   "name": "@livestack/translate-server",
   "version": "0.0.10",
+  "license": "MIT",
   "dependencies": {
     "@livestack/core": "^0.0.10",
-    "@livestack/lab-internal-common": "^0.0.10"
+    "@livestack/lab-internal-common": "^0.0.10",
+    "@livestack/summarizer": "^0.0.10",
+    "zod": "^3.0.0"
   },
   "module": "dist/livestack-translate-server.esm.js",
   "main": "dist/livestack-translate-server.cjs.js",
   "types": "dist/livestack-translate-server.cjs.d.ts",
+  "devDependencies": {
+    "@babel/core": "^7.24.5",
+    "@babel/preset-env": "^7.16.7",
+    "@babel/preset-typescript": "^7.16.7",
+    "@preconstruct/cli": "^2.8.4",
+    "@types/node": "^16",
+    "ts-node": "^10.9.1",
+    "typescript": "5.4.5"
+  },
+  "peerDependencies": {
+    "openai": "^4"
+  },
+  "scripts": {
+    "build": "preconstruct build"
+  },
   "preconstruct": {
     "entrypoints": [
       "index.ts"

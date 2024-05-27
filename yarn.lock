@@ -4071,8 +4071,19 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/translate-server@workspace:translate-server"
   dependencies:
+    "@babel/core": "npm:^7.24.5"
+    "@babel/preset-env": "npm:^7.16.7"
+    "@babel/preset-typescript": "npm:^7.16.7"
     "@livestack/core": "npm:^0.0.10"
     "@livestack/lab-internal-common": "npm:^0.0.10"
+    "@livestack/summarizer": "npm:^0.0.10"
+    "@preconstruct/cli": "npm:^2.8.4"
+    "@types/node": "npm:^16"
+    ts-node: "npm:^10.9.1"
+    typescript: "npm:5.4.5"
+    zod: "npm:^3.0.0"
+  peerDependencies:
+    openai: ^4
   languageName: unknown
   linkType: soft
 
