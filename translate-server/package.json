@@ -1,11 +1,11 @@
 {
   "name": "@livestack/translate-server",
-  "version": "0.0.10",
+  "version": "0.0.11",
   "license": "MIT",
   "dependencies": {
-    "@livestack/core": "^0.0.10",
-    "@livestack/lab-internal-common": "^0.0.10",
-    "@livestack/summarizer": "^0.0.10",
+    "@livestack/core": "^0.0.11",
+    "@livestack/lab-internal-common": "^0.0.11",
+    "@livestack/summarizer": "^0.0.11",
     "zod": "^3.0.0"
   },
   "module": "dist/livestack-translate-server.esm.js",
