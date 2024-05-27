@@ -1,6 +1,6 @@
 {
   "name": "@livestack/lab-internal-common",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "license": "MIT",
   "dependencies": {
     "@livestack/core": "^0.0.11",
