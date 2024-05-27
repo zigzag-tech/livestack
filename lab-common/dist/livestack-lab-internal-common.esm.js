@@ -1,1 +1,1 @@
-/home/ubuntu/livestack/lab-common/src/index.ts
+/Users/ubuntu/zigzag/livestack/lab-common/src/index.ts

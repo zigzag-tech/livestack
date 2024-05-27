@@ -1,1 +1,1 @@
-/home/ubuntu/livestack/translate-server/src/index.ts
+/Users/ubuntu/zigzag/livestack/translate-server/src/index.ts
