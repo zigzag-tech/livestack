@@ -1,6 +1,6 @@
 {
   "name": "@livestack/shared",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "description": "Shared core Livestack logic for both frontend and backend.",
   "scripts": {
     "build": "cargo build && preconstruct build && cp -r src/graph/wasm dist/",
