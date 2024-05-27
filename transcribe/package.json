@@ -1,9 +1,9 @@
 {
   "name": "@livestack/transcribe",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "liencese": "MIT",
   "dependencies": {
-    "@livestack/client": "^0.0.13",
+    "@livestack/client": "^0.0.14",
     "@livestack/core": "^0.0.11",
     "axios": "^1.7.2"
   },
