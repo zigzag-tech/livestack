@@ -1,6 +1,6 @@
 {
   "name": "@livestack/storage-s3",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "description": "Livestack storage orchestration via Amazon S3.",
   "scripts": {
     "build": "preconstruct build"
