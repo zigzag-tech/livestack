@@ -1,10 +1,10 @@
 {
   "name": "@livestack/summarizer",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "license": "MIT",
   "dependencies": {
-    "@livestack/core": "^0.0.16",
-    "@livestack/shared": "^0.0.16",
+    "@livestack/core": "^0.0.17",
+    "@livestack/shared": "^0.0.17",
     "ollama": "^0.5",
     "zod": "^3.0.0"
   },
