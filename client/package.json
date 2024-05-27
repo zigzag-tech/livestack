@@ -1,6 +1,6 @@
 {
   "name": "@livestack/client",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "description": "Helper functions and react hooks that help display Livestack data in the frontend.",
   "scripts": {
     "build": "preconstruct build"
@@ -9,7 +9,7 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "@livestack/shared": "^0.0.17",
+    "@livestack/shared": "^0.0.18",
     "uuid": "^9"
   },
   "devDependencies": {

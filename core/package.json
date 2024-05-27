@@ -1,15 +1,15 @@
 {
   "name": "@livestack/core",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "description": "Orchestration, in real-time.",
   "scripts": {
     "build": "preconstruct build"
   },
   "license": "MIT",
   "dependencies": {
-    "@livestack/shared": "^0.0.17",
-    "@livestack/vault-client": "^0.0.17",
-    "@livestack/vault-interface": "^0.0.17",
+    "@livestack/shared": "^0.0.18",
+    "@livestack/vault-client": "^0.0.18",
+    "@livestack/vault-interface": "^0.0.18",
     "@ltd/j-toml": "^1.38.0",
     "ansis": "^2.3.0",
     "dotenv": "^16.x",
