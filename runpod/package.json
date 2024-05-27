@@ -1,6 +1,6 @@
 {
   "name": "@livestack/runpod",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "Livestack runpod connectors.",
   "scripts": {
     "build": "preconstruct build"
