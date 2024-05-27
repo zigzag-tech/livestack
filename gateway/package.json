@@ -1,6 +1,6 @@
 {
   "name": "@livestack/gateway",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "license": "MIT",
   "description": "Manges and routes requests between the frontend and livestack orechestration services.",
   "scripts": {
@@ -10,8 +10,8 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "@livestack/core": "^0.0.14",
-    "@livestack/shared": "^0.0.14",
+    "@livestack/core": "^0.0.15",
+    "@livestack/shared": "^0.0.15",
     "jsonwebtoken": "^9.0.2",
     "socket.io": "^4"
   },
