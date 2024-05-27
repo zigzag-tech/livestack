@@ -5,8 +5,7 @@
   "author": "",
   "license": "MIT",
   "scripts": {
-    "build": "preconstruct build",
-    "postinstall": "preconstruct dev"
+    "build": "preconstruct build"
   },
   "dependencies": {
     "@livestack/vault-interface": "^0.0.10",

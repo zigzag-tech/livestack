@@ -3,8 +3,7 @@
   "version": "0.0.10",
   "description": "Orchestration, in real-time.",
   "scripts": {
-    "build": "preconstruct build",
-    "postinstall": "preconstruct dev"
+    "build": "preconstruct build"
   },
   "license": "MIT",
   "dependencies": {
@@ -38,15 +37,7 @@
   "module": "dist/livestack-core.esm.js",
   "main": "dist/livestack-core.cjs.js",
   "types": "dist/livestack-core.cjs.d.ts",
-  "exports": {
-    ".": {
-      "module": "./dist/livestack-core.esm.js",
-      "default": "./dist/livestack-core.cjs.js"
-    },
-    "./package.json": "./package.json"
-  },
   "preconstruct": {
-    "exports": true,
     "entrypoints": [
       "index.ts"
     ]

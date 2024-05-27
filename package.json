@@ -2,7 +2,8 @@
   "name": "@livestack/root",
   "version": "0.0.2",
   "scripts": {
-    "typedoc": "typedoc && cp -r _misc _docs/"
+    "typedoc": "typedoc && cp -r _misc _docs/",
+    "postinstall": "preconstruct dev"
   },
   "workspaces": [
     "*",
