@@ -1,6 +1,11 @@
 export { DBServiceDefinition } from "./generated/db";
 export { QueueServiceDefinition } from "./generated/queue";
-export { StreamServiceDefinition, JobInfo } from "./generated/stream";
+export {
+  StreamServiceDefinition,
+  JobInfo,
+  StreamDatapoint,
+  SubType,
+} from "./generated/stream";
 export { CacapcityServiceDefinition } from "./generated/capacity";
 
 import type { DBServiceImplementation } from "./generated/db";
