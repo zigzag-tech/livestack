@@ -1,9 +1,9 @@
 {
   "name": "@livestack/shared",
-  "version": "0.0.18",
+  "version": "0.0.23",
   "description": "Shared core Livestack logic for both frontend and backend.",
   "scripts": {
-    "build": "cargo build && preconstruct build && cp -r src/graph/wasm dist/",
+    "build": "cargo build && tsc && cp -r src/graph/wasm dist/graph/",
     "test": "jest",
     "test:watch": "jest --watch"
   },
@@ -33,13 +33,6 @@
     "ts-node": "^10.9.1",
     "typescript": "5.4.5"
   },
-  "main": "dist/livestack-shared.cjs.js",
-  "types": "dist/livestack-shared.cjs.d.ts",
-  "module": "dist/livestack-shared.esm.js",
-  "preconstruct": {
-    "entrypoints": [
-      "./index.ts"
-    ]
-  },
+  "main": "dist/index.js",
   "author": ""
 }
