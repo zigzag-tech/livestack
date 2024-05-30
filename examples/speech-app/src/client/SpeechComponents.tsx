@@ -108,6 +108,9 @@ export const SpeechComponents: React.FC = () => {
           <h2 className="text-green-800">
             2. Speech transcripts will pop up here
           </h2>
+          <p>Word Count: {transcription.reduce((total, transcript) => {
+                return total + transcript.data.transcript.split(' ').length;
+              }, 0)}</p>
           <br />
           <>
             <h2>Transcript</h2>
