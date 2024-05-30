@@ -39,6 +39,14 @@ import {
   InferDefaultOrSingleKey,
   InferDefaultOrSingleValue,
 } from "./LiveWorker";
+import pLimit from "p-limit";
+function pLimitedFn<T extends any[], R>(
+  limit: number,
+  fn: (...arg: T) => Promise<R>
+) {
+  const limiter = pLimit(limit);
+  return async (...arg: T) => limiter(() => fn(...arg));
+}
 
 export type ZZProcessor<P, I, O, WP extends object | undefined, IMap, OMap> = (
   j: LiveJob<P, I, O, WP, IMap, OMap>
@@ -234,6 +242,8 @@ export class LiveJob<
     Record<keyof OMap, AssociationTracker>
   >;
 
+  private _lastEmitPromise: Promise<void> | null = null;
+
   /**
    * Constructs a new LiveJob instance.
    *
@@ -383,48 +393,55 @@ export class LiveJob<
       return func as any;
     })();
 
-    const emitOutput = async <K extends keyof OMap>(
-      o: OMap[K extends never ? InferDefaultOrSingleKey<OMap> : K],
-      tag?: K
-    ) => {
-      // this.logger.info(
-      //   `Emitting output: ${this.jobId}, ${this.def.name} ` +
-      //     JSON.stringify(o, longStringTruncator)
-      // );
+    const emitOutput = pLimitedFn(
+      1,
+      async <K extends keyof OMap>(
+        o: OMap[K extends never ? InferDefaultOrSingleKey<OMap> : K],
+        tag?: K
+      ) => {
+        // this.logger.info(
+        //   `Emitting output: ${this.jobId}, ${this.def.name} ` +
+        //     JSON.stringify(o, longStringTruncator)
+        // );
 
-      const resolvedTag = tag || this.spec.getSingleTag("output", true);
+        const resolvedTag = tag || this.spec.getSingleTag("output", true);
 
-      const relevantDatapoints: { streamId: string; datapointId: string }[] =
-        [];
-      for (const itag of this.spec.inputTags) {
-        const stream = await this.spec.getInputJobStream({
-          jobId: this.jobId,
-          tag: itag,
-        });
-        const streamId = stream.uniqueName;
-        if (this.trackerByInputOutputTag[itag][resolvedTag]) {
-          // TODO: this is hacky. this.trackerByInputOutputTag[itag][resolvedTag] is null when we are in a liveflow
-          relevantDatapoints.push(
-            ...this.trackerByInputOutputTag[itag][resolvedTag]
-              .dispense()
-              .map((x) => ({ streamId, datapointId: x.datapointId }))
-          );
+        const relevantDatapoints: { streamId: string; datapointId: string }[] =
+          [];
+        for (const itag of this.spec.inputTags) {
+          const stream = await this.spec.getInputJobStream({
+            jobId: this.jobId,
+            tag: itag,
+          });
+          const streamId = stream.uniqueName;
+          if (this.trackerByInputOutputTag[itag][resolvedTag]) {
+            // TODO: this is hacky. this.trackerByInputOutputTag[itag][resolvedTag] is null when we are in a liveflow
+            relevantDatapoints.push(
+              ...this.trackerByInputOutputTag[itag][resolvedTag]
+                .dispense()
+                .map((x) => ({ streamId, datapointId: x.datapointId }))
+            );
+          }
         }
+
+        this._lastEmitPromise = (async () => {
+          await this.spec._getStreamAndSendDataToPLimited({
+            jobId: this.jobId,
+            type: "out",
+            tag: resolvedTag,
+            data: {
+              data: o,
+              terminate: false,
+            },
+            parentDatapoints: [...relevantDatapoints],
+          });
+
+          await this.updateProgress(this._dummyProgressCount++);
+        })();
+
+        await this._lastEmitPromise;
       }
-
-      await this.spec._getStreamAndSendDataToPLimited({
-        jobId: this.jobId,
-        type: "out",
-        tag: resolvedTag,
-        data: {
-          data: o,
-          terminate: false,
-        },
-        parentDatapoints: [...relevantDatapoints],
-      });
-
-      await this.updateProgress(this._dummyProgressCount++);
-    };
+    );
     const that = this;
 
     this.invoke = async <
@@ -819,11 +836,7 @@ export class LiveJob<
     );
 
     try {
-      await (
-        await (
-          await this.liveEnvP
-        ).vaultClient
-      ).db.appendJobStatusRec({
+      await(await(await this.liveEnvP).vaultClient).db.appendJobStatusRec({
         ...jId,
         jobStatus: "running",
       });
@@ -860,14 +873,15 @@ export class LiveJob<
         await this.output.emit(processedR);
       }
 
-      await (
-        await (
-          await this.liveEnvP
-        ).vaultClient
-      ).db.appendJobStatusRec({
+      await(await(await this.liveEnvP).vaultClient).db.appendJobStatusRec({
         ...jId,
         jobStatus: "completed",
       });
+
+      // wait on any lingering emissions
+      if (this._lastEmitPromise) {
+        await this._lastEmitPromise;
+      }
 
       // await job.updateProgress(processedR as object);
       // console.debug("signalOutputEnd", this.jobId);

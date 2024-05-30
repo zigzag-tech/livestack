@@ -208,13 +208,11 @@ class CapacityManager implements CacapcityServiceImplementation {
     by: number;
   }) {
     const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
-
     const capacities = await Promise.all(
       instanceIds.map((instanceId) =>
         this.runCapacityQuery({ instanceId, projectUuid })
       )
     );
-
     // console.debug("capacities", capacities);
 
     const qualifiedCapacities = capacities.filter((c) =>
@@ -222,7 +220,6 @@ class CapacityManager implements CacapcityServiceImplementation {
         (s) => s.specName === specName && s.capacity >= by
       )
     );
-
     if (qualifiedCapacities.length === 0) {
       console.warn(
         `No instances with enough capacity found for ${projectUuid}:${specName}`
@@ -254,6 +251,7 @@ class CapacityManager implements CacapcityServiceImplementation {
       specName,
       numberOfWorkersNeeded: by,
     });
+
   }
 }
 
