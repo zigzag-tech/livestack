@@ -1,1 +1,1 @@
-/Users/ubuntu/zigzag/livestack/summarizer/src/client/index.ts
+/Users/ubuntu/zigzag/incubator/livestack/summarizer/src/client/index.ts
