@@ -13,7 +13,7 @@
   "license": "MIT",
   "dependencies": {
     "@livestack/client": "^0.0.18",
-    "@livestack/core": "^0.0.18",
+    "@livestack/core": "^0.0.23",
     "@livestack/gateway": "^0.0.18",
     "@livestack/lab-internal-server": "^0.0.18",
     "@livestack/summarizer": "^0.0.18",

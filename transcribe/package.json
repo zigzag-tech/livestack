@@ -4,7 +4,7 @@
   "liencese": "MIT",
   "dependencies": {
     "@livestack/client": "^0.0.18",
-    "@livestack/core": "^0.0.18",
+    "@livestack/core": "^0.0.23",
     "axios": "^1.7.2"
   },
   "devDependencies": {
