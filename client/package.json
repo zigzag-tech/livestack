@@ -9,7 +9,7 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "@livestack/shared": "^0.0.18",
+    "@livestack/shared": "^0.0.23",
     "uuid": "^9"
   },
   "devDependencies": {
