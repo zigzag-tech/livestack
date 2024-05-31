@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useMemo } from "react";
 import {
   usePCMRecorder,
   encodeToB64,
@@ -69,6 +69,9 @@ export const SpeechComponents: React.FC = () => {
 
   // Toggle recording state
   const handleRecording = isRecording ? stopRecording : startRecording;
+  const wordCount = useMemo(() => transcription.reduce((total, transcript) => {
+    return total + transcript.data.transcript.split(' ').length;
+  }, 0), [transcription])
 
   return (
     <div className="m-4 grid grid-cols-5 gap-2 divide-x">
@@ -123,6 +126,7 @@ export const SpeechComponents: React.FC = () => {
               ))}
             </article>
           </>
+          <p>Word Count: {wordCount}</p>
         </div>
       </div>
       <div className="col-span-2">
