@@ -10,14 +10,15 @@ export default {
   output: {
     format: "cjs",
     file: "lib/index.js",
+    sourcemap: true,
   },
   plugins: [
-    nodeResolve(),
+    // nodeResolve(),
     typescript({
-      sourceMap: false,
-      inlineSources: false
-  }),
-    commonjs({ include: "../node_modules/**" }),
-    babel({exclude: "../node_modules/**"})
+      sourceMap: true,
+      inlineSources: true,
+    }),
+    // commonjs({}),
+    // babel({}),
   ],
 };
