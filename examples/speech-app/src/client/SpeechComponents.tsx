@@ -126,7 +126,7 @@ export const SpeechComponents: React.FC = () => {
               ))}
             </article>
           </>
-          <p style = {{position: "relative", top: "300%", left: "80%"}}>Word Count: {wordCount}</p>
+          <p>Word Count: {wordCount}</p>
         </div>
       </div>
       <div className="col-span-2">
