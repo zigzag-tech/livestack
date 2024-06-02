@@ -20,6 +20,7 @@ const submoduleFolders = [
   "client",
   "lab-common",
   "lab-server",
+  "summarizer",
 ];
 
 for (const folder of submoduleFolders) {
