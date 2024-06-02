@@ -8,8 +8,6 @@
     "src/index.ts"
   ],
   "compilerOptions": {
-    "module": "CommonJS",
-    // "types": ["reflect-metadata"],
     "outDir": "dist",
     "target": "ES5",
     "pretty": true,
