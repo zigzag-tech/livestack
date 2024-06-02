@@ -13,19 +13,12 @@
     "@babel/core": "^7.24.5",
     "@babel/preset-env": "^7.16.7",
     "@babel/preset-typescript": "^7.16.7",
-    "@preconstruct/cli": "^2.8.4",
     "@types/node": "^16",
     "ts-node": "^10.9.1",
     "typescript": "5.4.5"
   },
   "scripts": {
-    "build": "preconstruct build"
+    "build": "tsc"
   },
-  "main": "dist/livestack-lab-internal-server.cjs.js",
-  "module": "dist/livestack-lab-internal-server.esm.js",
-  "preconstruct": {
-    "entrypoints": [
-      "index.ts"
-    ]
-  }
+  "main": "dist/index.js"
 }

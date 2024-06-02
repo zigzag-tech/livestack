@@ -3,7 +3,7 @@
   "version": "0.0.18",
   "liencese": "MIT",
   "dependencies": {
-    "@livestack/client": "^0.0.18",
+    "@livestack/client": "^0.0.23",
     "@livestack/core": "^0.0.23",
     "axios": "^1.7.2"
   },
