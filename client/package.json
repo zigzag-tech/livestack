@@ -1,9 +1,9 @@
 {
   "name": "@livestack/client",
-  "version": "0.0.18",
+  "version": "0.0.23",
   "description": "Helper functions and react hooks that help display Livestack data in the frontend.",
   "scripts": {
-    "build": "preconstruct build"
+    "build": "rimraf dist && rollup -c rollup.config.mjs"
   },
   "files": [
     "dist/**/*"
@@ -16,21 +16,16 @@
     "@babel/core": "^7.24.5",
     "@babel/preset-env": "^7.16.7",
     "@babel/preset-typescript": "^7.16.7",
-    "@preconstruct/cli": "^2.8.4",
+    "@rollup/plugin-typescript": "^11.1.6",
     "@types/react": "^18",
+    "rimraf": "^5.0.7",
+    "rollup": "^4.18.0",
     "typescript": "5.4.5"
   },
   "peerDependencies": {
     "react": "^18",
     "socket.io-client": "^4"
   },
-  "types": "dist/livestack-client.cjs.d",
-  "module": "dist/livestack-client.esm.js",
-  "main": "dist/livestack-client.cjs.js",
-  "preconstruct": {
-    "entrypoints": [
-      "./index.ts"
-    ]
-  },
+  "main": "dist/index.js",
   "author": ""
 }

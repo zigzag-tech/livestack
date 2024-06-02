@@ -12,9 +12,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@livestack/client": "^0.0.18",
+    "@livestack/client": "^0.0.23",
     "@livestack/core": "^0.0.23",
-    "@livestack/gateway": "^0.0.18",
+    "@livestack/gateway": "^0.0.23",
     "@livestack/lab-internal-server": "^0.0.18",
     "@livestack/summarizer": "^0.0.18",
     "@livestack/transcribe": "^0.0.18",
