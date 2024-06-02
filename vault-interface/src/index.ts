@@ -1,5 +1,5 @@
 export { DBServiceDefinition } from "./generated/db";
-export { QueueServiceDefinition } from "./generated/queue";
+export { QueueServiceDefinition, InitInstanceParams } from "./generated/queue";
 export {
   StreamServiceDefinition,
   JobInfo,
