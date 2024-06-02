@@ -1,5 +1,7 @@
 #!/bin/bash
 
+npx lerna version
+
 # List of folders
 folders=(
     "vault-interface"
@@ -15,6 +17,9 @@ folders=(
     "translate-server"
 )
 
+# Make sure "main" and "exports" are using prod settings
+yarn use-prod
+
 # Loop through each folder and execute the commands
 for folder in "${folders[@]}"; do
     if [ -d "$folder" ]; then
@@ -23,10 +28,13 @@ for folder in "${folders[@]}"; do
         # Run the commands
         yarn build
         npm publish --access public
-        npx preconstruct dev
         # Go back to the original directory
         cd - || exit
     else
         echo "Directory $folder does not exist."
     fi
 done
+
+
+# Revert "main" and "exports" to dev settings
+yarn use-dev
