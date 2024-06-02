@@ -4,7 +4,7 @@ import {
   FromWorker,
   ToWorker,
 } from "@livestack/vault-interface";
-import { InitInstanceParams } from "@livestack/vault-interface/src/generated/queue.js";
+import { InitInstanceParams } from "@livestack/vault-interface";
 import { Queue, Worker } from "bullmq";
 import sharedPkg from "@livestack/shared";
 const { genPromiseCycle, genManuallyFedIterator } = sharedPkg;
