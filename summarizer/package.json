@@ -29,16 +29,8 @@
     "build-client": "rimraf client && rollup -c rollup.config.mjs"
   },
   "exports": {
-    "./client": {
-      "default": "./client/index.js",
-      "types": "./client/index.d.ts"
-    },
-    "./server": {
-      "import": "./server/index.js",
-      "require": "./server/index.js",
-      "defualt": "./server/index.js",
-      "types": "./server/index.d.ts"
-    },
+    "./client": "./src/client/index.ts",
+    "./server": "./src/server/index.ts",
     "./package.json": "./package.json"
   },
   "files": [

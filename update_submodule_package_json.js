@@ -14,8 +14,8 @@ const mainValue = mode === "dev" ? "src/index.ts" : "dist/index.js";
 const exportsValue =
   mode === "dev"
     ? {
-        "./client": "src/client/index.ts",
-        "./server": "src/server/index.ts",
+        "./client": "./src/client/index.ts",
+        "./server": "./src/server/index.ts",
         "./package.json": "./package.json",
       }
     : {
@@ -76,6 +76,6 @@ for (const folder of multiEntryPointsSubmoduleFolders) {
     "utf8"
   );
   console.log(
-    `Updated "main" field for ${folder} to "${mainValue}" for ${mode} mode.`
+    `Updated "exports" field for ${folder} for ${mode} mode.`
   );
 }

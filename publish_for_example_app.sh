@@ -1,6 +1,6 @@
 #!/bin/bash
 
-npx lerna version
+# npx lerna version
 
 # List of folders
 folders=(
@@ -34,7 +34,6 @@ for folder in "${folders[@]}"; do
         echo "Directory $folder does not exist."
     fi
 done
-
 
 # Revert "main" and "exports" to dev settings
 yarn use-dev
