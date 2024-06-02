@@ -1,16 +1,14 @@
 {
   "include": [
     "missing-modules.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    "*.ts",
-    "*.tsx",
-    "src/index.ts",
-    "**/*.js",
-    "*.js"
+    "src/server/*.ts",
+    "src/common/*.ts",
+    "src/index.ts"
   ],
   "compilerOptions": {
-    "outDir": "dist",
+    "module": "CommonJS",
+    // "types": ["reflect-metadata"],
+    "outDir": "server",
     "target": "ES5",
     "pretty": true,
     "moduleResolution": "node",

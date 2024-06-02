@@ -1,6 +1,6 @@
 {
   "name": "@livestack/lab-internal-common",
-  "version": "0.0.18",
+  "version": "0.0.22",
   "license": "MIT",
   "dependencies": {
     "@livestack/core": "^0.0.23",
@@ -20,5 +20,5 @@
   "scripts": {
     "build": "rimraf dist && rollup -c rollup.config.mjs"
   },
-  "main": "src/index.js"
+  "main": "dist/index.js"
 }

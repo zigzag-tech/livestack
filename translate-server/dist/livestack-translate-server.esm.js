@@ -1,1 +1,0 @@
-/Users/ubuntu/zigzag/incubator/livestack/translate-server/src/index.ts

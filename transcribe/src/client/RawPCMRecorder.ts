@@ -22,13 +22,13 @@ export class RawPCMRecorder {
   public async startRecording(): Promise<void> {
     const rawPCMProcessorUrl = new URL(
       "./raw-pcm-processor.js",
-      import.meta.url
+      __dirname
     );
     // const vadProcessorUrl = new URL(
     //   "/vad/vad-audio-worklet.js",
-    //   import.meta.url
+    //   __dirname
     // );
-    // const fftUrl = new URL("./fft.js", import.meta.url);
+    // const fftUrl = new URL("./fft.js", __dirname);
     // console.log(fftUrl);
 
     await this.audioContext.audioWorklet.addModule(rawPCMProcessorUrl);
