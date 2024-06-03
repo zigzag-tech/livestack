@@ -16,7 +16,7 @@
     "@livestack/core": "^0.0.24",
     "@livestack/gateway": "^0.0.24",
     "@livestack/lab-internal-server": "^0.0.24",
-    "@livestack/summarizer": "^0.0.24",
+    "@livestack/summarizer": "^0.0.29",
     "@livestack/transcribe": "^0.0.24",
     "@livestack/translate-server": "^0.0.24",
     "@types/node": "^20.10.4",

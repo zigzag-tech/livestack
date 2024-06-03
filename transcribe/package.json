@@ -1,6 +1,6 @@
 {
   "name": "@livestack/transcribe",
-  "version": "0.0.24",
+  "version": "0.0.29",
   "liencese": "MIT",
   "dependencies": {
     "@livestack/client": "^0.0.24",
@@ -29,17 +29,21 @@
   },
   "scripts": {
     "build": "yarn build-client && yarn build-server",
-    "build-client": "rimraf client && rollup -c rollup.config.mjs && cp src/client/raw-pcm-processor.js client/raw-pcm-processor.js",
+    "build-client": "rimraf client && rollup -c rollup.config.mjs",
     "build-server": "rimraf server && tsc --project tsconfig-server.json"
   },
   "exports": {
     "./client": "./src/client/index.ts",
     "./server": "./src/server/index.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./raw-pcm-processor.js": "./static/raw-pcm-processor.js",
+    "./fft.js": "./static/fft.js",
+    "./vad-audio-worklet.js": "./static/vad-audio-worklet.js"
   },
   "files": [
     "client",
     "server",
+    "static",
     "package.json"
   ]
 }

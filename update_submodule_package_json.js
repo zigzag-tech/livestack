@@ -69,13 +69,21 @@ for (const folder of multiEntryPointsSubmoduleFolders) {
   const packageJson = JSON.parse(packageJsonContent);
 
   // Update the "exports" field in the package.json file
-  packageJson.exports = exportsValue;
+  const static = {
+    "./raw-pcm-processor.js": "./static/raw-pcm-processor.js",
+    "./fft.js": "./static/fft.js",
+    "./vad-audio-worklet.js": "./static/vad-audio-worklet.js",
+  };
+  if (folder == "transcribe") {
+    packageJson.exports = { ...exportsValue, ...static };
+  } else {
+    packageJson.exports = exportsValue;
+  }
+  
   fs.writeFileSync(
     packageJsonPath,
     JSON.stringify(packageJson, null, 2) + "\n",
     "utf8"
   );
-  console.log(
-    `Updated "exports" field for ${folder} for ${mode} mode.`
-  );
+  console.log(`Updated "exports" field for ${folder} for ${mode} mode.`);
 }

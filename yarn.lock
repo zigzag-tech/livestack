@@ -3974,7 +3974,23 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/transcribe@npm:^0.0.24, @livestack/transcribe@workspace:transcribe":
+"@livestack/transcribe@npm:^0.0.24":
+  version: 0.0.24
+  resolution: "@livestack/transcribe@npm:0.0.24"
+  dependencies:
+    "@livestack/client": "npm:^0.0.24"
+    "@livestack/core": "npm:^0.0.24"
+    axios: "npm:^1.7.2"
+  peerDependencies:
+    openai: ^4
+    react: ^18
+    uuid: ^9
+    zod: ^3
+  checksum: 10c0/17b42e0e0f950c292936759ee3a0317720d305675d58d3face7e019df592b83884e11bf46872dbe1670df9fcd632dad3d0f6b9b4e5dc562fddcd71124e34e9bb
+  languageName: node
+  linkType: hard
+
+"@livestack/transcribe@workspace:transcribe":
   version: 0.0.0-use.local
   resolution: "@livestack/transcribe@workspace:transcribe"
   dependencies:
@@ -3987,6 +4003,7 @@ __metadata:
     "@rollup/plugin-typescript": "npm:^11.1.6"
     "@types/node": "npm:^16"
     "@types/uuid": "npm:^9.0.7"
+    "@web/rollup-plugin-import-meta-assets": "npm:^2.2.1"
     axios: "npm:^1.7.2"
     rimraf: "npm:^5.0.7"
     rollup: "npm:^4.18.0"
@@ -4879,6 +4896,24 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@rollup/plugin-dynamic-import-vars@npm:^2.1.0":
+  version: 2.1.2
+  resolution: "@rollup/plugin-dynamic-import-vars@npm:2.1.2"
+  dependencies:
+    "@rollup/pluginutils": "npm:^5.0.1"
+    astring: "npm:^1.8.5"
+    estree-walker: "npm:^2.0.2"
+    fast-glob: "npm:^3.2.12"
+    magic-string: "npm:^0.30.3"
+  peerDependencies:
+    rollup: ^1.20.0||^2.0.0||^3.0.0||^4.0.0
+  peerDependenciesMeta:
+    rollup:
+      optional: true
+  checksum: 10c0/b8c225bebeda596639472bec6f3394d5d423c6f023e3aa9b07adfe87292ffe3071cfdfdc995868ccbe37fc7ff9e55f33fb45a9182b56c129036e44d9431682ea
+  languageName: node
+  linkType: hard
+
 "@rollup/plugin-json@npm:^4.1.0":
   version: 4.1.0
   resolution: "@rollup/plugin-json@npm:4.1.0"
@@ -4950,7 +4985,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@rollup/pluginutils@npm:^5.1.0":
+"@rollup/pluginutils@npm:^5.0.1, @rollup/pluginutils@npm:^5.0.2, @rollup/pluginutils@npm:^5.1.0":
   version: 5.1.0
   resolution: "@rollup/pluginutils@npm:5.1.0"
   dependencies:
@@ -6391,6 +6426,19 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@web/rollup-plugin-import-meta-assets@npm:^2.2.1":
+  version: 2.2.1
+  resolution: "@web/rollup-plugin-import-meta-assets@npm:2.2.1"
+  dependencies:
+    "@rollup/plugin-dynamic-import-vars": "npm:^2.1.0"
+    "@rollup/pluginutils": "npm:^5.0.2"
+    estree-walker: "npm:^2.0.2"
+    globby: "npm:^13.2.2"
+    magic-string: "npm:^0.30.0"
+  checksum: 10c0/a3e8a05e6e1401ab7e74e3e2ad640ac9055cdd4871ba22972201286faaba481eda9816854693c4718d624d61f9d3db0edfda1773331ed4a9da978c855cccb1ee
+  languageName: node
+  linkType: hard
+
 "@yarnpkg/lockfile@npm:^1.1.0":
   version: 1.1.0
   resolution: "@yarnpkg/lockfile@npm:1.1.0"
@@ -6891,6 +6939,15 @@ __metadata:
   version: 0.0.8
   resolution: "ast-types-flow@npm:0.0.8"
   checksum: 10c0/f2a0ba8055353b743c41431974521e5e852a9824870cd6fce2db0e538ac7bf4da406bbd018d109af29ff3f8f0993f6a730c9eddbd0abd031fbcb29ca75c1014e
+  languageName: node
+  linkType: hard
+
+"astring@npm:^1.8.5":
+  version: 1.8.6
+  resolution: "astring@npm:1.8.6"
+  bin:
+    astring: bin/astring
+  checksum: 10c0/31f09144597048c11072417959a412f208f8f95ba8dce408dfbc3367acb929f31fbcc00ed5eb61ccbf7c2f1173b9ac8bfcaaa37134a9455050c669b2b036ed88
   languageName: node
   linkType: hard
 
@@ -9500,7 +9557,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"fast-glob@npm:^3.2.4, fast-glob@npm:^3.2.9, fast-glob@npm:^3.3.0, fast-glob@npm:^3.3.1":
+"fast-glob@npm:^3.2.12, fast-glob@npm:^3.2.4, fast-glob@npm:^3.2.9, fast-glob@npm:^3.3.0, fast-glob@npm:^3.3.1":
   version: 3.3.2
   resolution: "fast-glob@npm:3.3.2"
   dependencies:
@@ -10262,6 +10319,19 @@ __metadata:
   languageName: node
   linkType: hard
 
+"globby@npm:^13.2.2":
+  version: 13.2.2
+  resolution: "globby@npm:13.2.2"
+  dependencies:
+    dir-glob: "npm:^3.0.1"
+    fast-glob: "npm:^3.3.0"
+    ignore: "npm:^5.2.4"
+    merge2: "npm:^1.4.1"
+    slash: "npm:^4.0.0"
+  checksum: 10c0/a8d7cc7cbe5e1b2d0f81d467bbc5bc2eac35f74eaded3a6c85fc26d7acc8e6de22d396159db8a2fc340b8a342e74cac58de8f4aee74146d3d146921a76062664
+  languageName: node
+  linkType: hard
+
 "globrex@npm:^0.1.2":
   version: 0.1.2
   resolution: "globrex@npm:0.1.2"
@@ -10629,7 +10699,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ignore@npm:^5.0.4, ignore@npm:^5.2.0":
+"ignore@npm:^5.0.4, ignore@npm:^5.2.0, ignore@npm:^5.2.4":
   version: 5.3.1
   resolution: "ignore@npm:5.3.1"
   checksum: 10c0/703f7f45ffb2a27fb2c5a8db0c32e7dee66b33a225d28e8db4e1be6474795f606686a6e3bcc50e1aa12f2042db4c9d4a7d60af3250511de74620fbed052ea4cd
@@ -13291,7 +13361,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"magic-string@npm:^0.30.0, magic-string@npm:^0.30.10":
+"magic-string@npm:^0.30.0, magic-string@npm:^0.30.10, magic-string@npm:^0.30.3":
   version: 0.30.10
   resolution: "magic-string@npm:0.30.10"
   dependencies:
@@ -16537,6 +16607,13 @@ __metadata:
   version: 3.0.0
   resolution: "slash@npm:3.0.0"
   checksum: 10c0/e18488c6a42bdfd4ac5be85b2ced3ccd0224773baae6ad42cfbb9ec74fc07f9fa8396bd35ee638084ead7a2a0818eb5e7151111544d4731ce843019dab4be47b
+  languageName: node
+  linkType: hard
+
+"slash@npm:^4.0.0":
+  version: 4.0.0
+  resolution: "slash@npm:4.0.0"
+  checksum: 10c0/b522ca75d80d107fd30d29df0549a7b2537c83c4c4ecd12cd7d4ea6c8aaca2ab17ada002e7a1d78a9d736a0261509f26ea5b489082ee443a3a810586ef8eff18
   languageName: node
   linkType: hard
 
