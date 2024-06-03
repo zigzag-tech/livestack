@@ -1229,7 +1229,7 @@ export class JobSpec<
         return {
           connectedStreamNodes: defG
             .getInboundStreamNodes(specNodeId)
-            .results.map((s: any) => ({
+            .results.map((s) => ({
               specName: specNode.specName,
               uniqueSpecLabel: specNode.uniqueSpecLabel,
               type: "in" as const,
@@ -1243,7 +1243,7 @@ export class JobSpec<
         return {
           connectedStreamNodes: defG
             .getOutboundStreamNodes(specNodeId)
-            .results.map((s: any) => ({
+            .results.map((s) => ({
               specName: specNode.specName,
               uniqueSpecLabel: specNode.uniqueSpecLabel,
               type: "out" as const,
@@ -1259,7 +1259,7 @@ export class JobSpec<
     const pass1 = pass0.filter(
       ({ connectedStreamNodes }) =>
         connectedStreamNodes.length === 1 ||
-        connectedStreamNodes.some((c: any) => c.tag === "default")
+        connectedStreamNodes.some((c) => c.tag === "default")
     );
     const pass2 = pass1
       .filter(({ connectedStreamNodes }) => {
@@ -1277,7 +1277,7 @@ export class JobSpec<
       })
       .map((qualified) => ({
         ...qualified,
-        connectedStreamNodes: qualified.connectedStreamNodes.map((c: any) => ({
+        connectedStreamNodes: qualified.connectedStreamNodes.map((c) => ({
           ...c,
           alias: this.convertSpecTagToLiveflowAlias(c),
         })),
@@ -1315,7 +1315,7 @@ export class JobSpec<
       const qualifiedC =
         qualified[0].connectedStreamNodes.length === 1
           ? qualified[0].connectedStreamNodes[0]
-          : qualified[0].connectedStreamNodes.find((c: any) => c.tag === "default")!;
+          : qualified[0].connectedStreamNodes.find((c) => c.tag === "default")!;
       if (!qualifiedC.alias) {
         // the user didn't give a public tag; auto-register
       }
@@ -1550,23 +1550,23 @@ export function convertSpecOrName(
     throw new Error("Invalid spec");
   }
 }
- function resolveTagMapping(
-   p:
-     | {
-         _aliasMaps?: Partial<TagMaps<any, any, any, any, any, any>>;
-       }
-     | string
-     | any
- ) {
-   let inputAliasMap: Record<string, string> = {};
-   let outputAliasMap: Record<string, string> = {};
+function resolveTagMapping(
+  p:
+    | {
+        _aliasMaps?: Partial<TagMaps<any, any, any, any, any, any>>;
+      }
+    | string
+    | any
+) {
+  let inputAliasMap: Record<string, string> = {};
+  let outputAliasMap: Record<string, string> = {};
 
-   if (typeof p === "object" && !(p instanceof JobSpec) && p._aliasMaps) {
-     inputAliasMap = p._aliasMaps.inputTag || {};
-     outputAliasMap = p._aliasMaps.outputTag || {};
-   }
-   return {
-     inputAliasMap,
-     outputAliasMap,
-   };
- }
+  if (typeof p === "object" && !(p instanceof JobSpec) && p._aliasMaps) {
+    inputAliasMap = p._aliasMaps.inputTag || {};
+    outputAliasMap = p._aliasMaps.outputTag || {};
+  }
+  return {
+    inputAliasMap,
+    outputAliasMap,
+  };
+}
