@@ -12,7 +12,7 @@ import {
   getNodesConnectedToStream,
   getSourceSpecNodeConnectedToStream,
   InstantiatedGraph,
-} from "@livestack/shared/src/graph/InstantiatedGraph";
+} from "@livestack/shared";
 import { v4 } from "uuid";
 import { getLogger } from "../utils/createWorkerLogger";
 import { longStringTruncator } from "../utils/longStringTruncator";
@@ -1550,23 +1550,23 @@ export function convertSpecOrName(
     throw new Error("Invalid spec");
   }
 }
- function resolveTagMapping(
-   p:
-     | {
-         _aliasMaps?: Partial<TagMaps<any, any, any, any, any, any>>;
-       }
-     | string
-     | any
- ) {
-   let inputAliasMap: Record<string, string> = {};
-   let outputAliasMap: Record<string, string> = {};
+function resolveTagMapping(
+  p:
+    | {
+        _aliasMaps?: Partial<TagMaps<any, any, any, any, any, any>>;
+      }
+    | string
+    | any
+) {
+  let inputAliasMap: Record<string, string> = {};
+  let outputAliasMap: Record<string, string> = {};
 
-   if (typeof p === "object" && !(p instanceof JobSpec) && p._aliasMaps) {
-     inputAliasMap = p._aliasMaps.inputTag || {};
-     outputAliasMap = p._aliasMaps.outputTag || {};
-   }
-   return {
-     inputAliasMap,
-     outputAliasMap,
-   };
- }
+  if (typeof p === "object" && !(p instanceof JobSpec) && p._aliasMaps) {
+    inputAliasMap = p._aliasMaps.inputTag || {};
+    outputAliasMap = p._aliasMaps.outputTag || {};
+  }
+  return {
+    inputAliasMap,
+    outputAliasMap,
+  };
+}

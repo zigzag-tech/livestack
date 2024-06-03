@@ -1,17 +1,17 @@
 {
   "name": "@livestack/gateway",
-  "version": "0.0.18",
+  "version": "0.0.30",
   "license": "MIT",
   "description": "Manges and routes requests between the frontend and livestack orechestration services.",
   "scripts": {
-    "build": "preconstruct build"
+    "build": "tsc"
   },
   "files": [
     "dist/**/*"
   ],
   "dependencies": {
-    "@livestack/core": "^0.0.18",
-    "@livestack/shared": "^0.0.18",
+    "@livestack/core": "^0.0.30",
+    "@livestack/shared": "^0.0.30",
     "jsonwebtoken": "^9.0.2",
     "socket.io": "^4"
   },
@@ -19,18 +19,10 @@
     "@babel/core": "^7.24.5",
     "@babel/preset-env": "^7.16.7",
     "@babel/preset-typescript": "^7.16.7",
-    "@preconstruct/cli": "^2.8.4",
+    "@types/jsonwebtoken": "^9.0.6",
     "@types/lodash": "^4.14.201",
     "@types/uuid": "^9.0.7",
     "typescript": "5.4.5"
   },
-  "main": "dist/livestack-gateway.cjs.js",
-  "types": "dist/livestack-gateway.cjs.d.ts",
-  "module": "dist/livestack-gateway.esm.js",
-  "author": "",
-  "preconstruct": {
-    "entrypoints": [
-      "./index.ts"
-    ]
-  }
+  "main": "src/index.ts"
 }

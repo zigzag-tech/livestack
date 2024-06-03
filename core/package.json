@@ -1,15 +1,15 @@
 {
   "name": "@livestack/core",
-  "version": "0.0.18",
+  "version": "0.0.30",
   "description": "Orchestration, in real-time.",
   "scripts": {
-    "build": "preconstruct build"
+    "build": "tsc"
   },
   "license": "MIT",
   "dependencies": {
-    "@livestack/shared": "^0.0.18",
-    "@livestack/vault-client": "^0.0.18",
-    "@livestack/vault-interface": "^0.0.18",
+    "@livestack/shared": "^0.0.30",
+    "@livestack/vault-client": "^0.0.30",
+    "@livestack/vault-interface": "^0.0.30",
     "@ltd/j-toml": "^1.38.0",
     "ansis": "^2.3.0",
     "dotenv": "^16.x",
@@ -26,18 +26,10 @@
     "@babel/core": "^7.24.5",
     "@babel/preset-env": "^7.16.7",
     "@babel/preset-typescript": "^7.16.7",
-    "@preconstruct/cli": "^2.8.4",
     "@types/lodash": "^4.14.201",
     "@types/uuid": "^9.0.7",
     "typescript": "5.4.5"
   },
-  "module": "dist/livestack-core.esm.js",
-  "main": "dist/livestack-core.cjs.js",
-  "types": "dist/livestack-core.cjs.d.ts",
-  "preconstruct": {
-    "entrypoints": [
-      "index.ts"
-    ]
-  },
+  "main": "src/index.ts",
   "author": ""
 }

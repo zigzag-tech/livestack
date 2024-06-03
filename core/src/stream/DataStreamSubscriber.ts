@@ -3,7 +3,7 @@ import {
   identifyLargeFilesToRestore,
   restoreLargeValues,
 } from "../files/file-ops";
-import { SubType } from "@livestack/vault-interface/src/generated/stream";
+import { SubType } from "@livestack/vault-interface";
 import { Observable, Subscriber } from "rxjs";
 import { createLazyNextValueGenerator } from "../jobs/pubsub";
 import { DataStream, WithTimestamp } from "./DataStream";

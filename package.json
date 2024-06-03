@@ -2,7 +2,9 @@
   "name": "@livestack/root",
   "version": "0.0.2",
   "scripts": {
-    "typedoc": "typedoc && cp -r _misc _docs/"
+    "typedoc": "typedoc && cp -r _misc _docs/",
+    "use-dev": "node update_submodule_package_json.js dev",
+    "use-prod": "node update_submodule_package_json.js prod"
   },
   "workspaces": [
     "*",

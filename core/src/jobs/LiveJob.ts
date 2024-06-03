@@ -1,7 +1,7 @@
 import {
   InstantiatedGraph,
   JobId,
-} from "@livestack/shared/src/graph/InstantiatedGraph";
+} from "@livestack/shared";
 import { InferTMap } from "@livestack/shared";
 import * as _ from "lodash";
 import {
