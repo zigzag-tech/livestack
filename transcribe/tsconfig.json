@@ -5,11 +5,11 @@
     "**/*.tsx",
     "*.ts",
     "*.tsx",
-    "src/index.ts"
+    "src/index.ts",
+    "**/*.js",
+    "*.js"
   ],
   "compilerOptions": {
-    "module": "CommonJS",
-    // "types": ["reflect-metadata"],
     "outDir": "dist",
     "target": "ES5",
     "pretty": true,

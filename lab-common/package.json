@@ -1,28 +1,24 @@
 {
   "name": "@livestack/lab-internal-common",
-  "version": "0.0.18",
+  "version": "0.0.30",
   "license": "MIT",
   "dependencies": {
-    "@livestack/core": "^0.0.18",
+    "@livestack/core": "^0.0.30",
     "zod": "^3"
   },
   "devDependencies": {
     "@babel/core": "^7.24.5",
     "@babel/preset-env": "^7.16.7",
     "@babel/preset-typescript": "^7.16.7",
-    "@preconstruct/cli": "^2.8.4",
+    "@rollup/plugin-typescript": "^11.1.6",
     "@types/node": "^16",
+    "rimraf": "^5.0.7",
+    "rollup": "^4.18.0",
     "ts-node": "^10.9.1",
     "typescript": "5.4.5"
   },
   "scripts": {
-    "build": "preconstruct build"
+    "build": "rimraf dist && rollup -c rollup.config.mjs"
   },
-  "main": "dist/livestack-lab-internal-common.cjs.js",
-  "module": "dist/livestack-lab-internal-common.esm.js",
-  "preconstruct": {
-    "entrypoints": [
-      "index.ts"
-    ]
-  }
+  "main": "src/index.ts"
 }

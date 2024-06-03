@@ -3,7 +3,7 @@ import {
   StreamIdOverridesForRootSpec,
   StreamNode,
   getSourceSpecNodeConnectedToStream,
-} from "@livestack/shared/src/graph/InstantiatedGraph";
+} from "@livestack/shared";
 import { ConnectorType } from "@livestack/vault-interface";
 import { TransformRegistry } from "./TransformRegistry";
 import { lruCacheFn } from "@livestack/shared";

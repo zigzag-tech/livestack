@@ -742,7 +742,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@babel/code-frame@npm:^7.0.0, @babel/code-frame@npm:^7.12.13, @babel/code-frame@npm:^7.24.6, @babel/code-frame@npm:^7.5.5":
+"@babel/code-frame@npm:^7.0.0, @babel/code-frame@npm:^7.12.13, @babel/code-frame@npm:^7.24.2, @babel/code-frame@npm:^7.24.6, @babel/code-frame@npm:^7.5.5":
   version: 7.24.6
   resolution: "@babel/code-frame@npm:7.24.6"
   dependencies:
@@ -3689,16 +3689,18 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@livestack/client@npm:^0.0.18, @livestack/client@workspace:client":
+"@livestack/client@npm:^0.0.30, @livestack/client@workspace:client":
   version: 0.0.0-use.local
   resolution: "@livestack/client@workspace:client"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/shared": "npm:^0.0.18"
-    "@preconstruct/cli": "npm:^2.8.4"
+    "@livestack/shared": "npm:^0.0.30"
+    "@rollup/plugin-typescript": "npm:^11.1.6"
     "@types/react": "npm:^18"
+    rimraf: "npm:^5.0.7"
+    rollup: "npm:^4.18.0"
     typescript: "npm:5.4.5"
     uuid: "npm:^9"
   peerDependencies:
@@ -3707,18 +3709,17 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/core@npm:^0.0.18, @livestack/core@workspace:core":
+"@livestack/core@npm:^0.0.30, @livestack/core@workspace:core":
   version: 0.0.0-use.local
   resolution: "@livestack/core@workspace:core"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/shared": "npm:^0.0.18"
-    "@livestack/vault-client": "npm:^0.0.18"
-    "@livestack/vault-interface": "npm:^0.0.18"
+    "@livestack/shared": "npm:^0.0.30"
+    "@livestack/vault-client": "npm:^0.0.30"
+    "@livestack/vault-interface": "npm:^0.0.30"
     "@ltd/j-toml": "npm:^1.38.0"
-    "@preconstruct/cli": "npm:^2.8.4"
     "@types/lodash": "npm:^4.14.201"
     "@types/uuid": "npm:^9.0.7"
     ansis: "npm:^2.3.0"
@@ -3742,13 +3743,13 @@ __metadata:
     "@babel/core": "npm:^7.24.0"
     "@babel/preset-env": "npm:^7.24.0"
     "@babel/preset-typescript": "npm:^7.23.3"
-    "@livestack/client": "npm:^0.0.18"
-    "@livestack/core": "npm:^0.0.18"
-    "@livestack/gateway": "npm:^0.0.18"
-    "@livestack/lab-internal-server": "npm:^0.0.18"
-    "@livestack/summarizer": "npm:^0.0.18"
-    "@livestack/transcribe": "npm:^0.0.18"
-    "@livestack/translate-server": "npm:^0.0.18"
+    "@livestack/client": "npm:^0.0.30"
+    "@livestack/core": "npm:^0.0.30"
+    "@livestack/gateway": "npm:^0.0.30"
+    "@livestack/lab-internal-server": "npm:^0.0.30"
+    "@livestack/summarizer": "npm:^0.0.30"
+    "@livestack/transcribe": "npm:^0.0.30"
+    "@livestack/translate-server": "npm:^0.0.30"
     "@types/cors": "npm:^2.8.17"
     "@types/express": "npm:^4.17.21"
     "@types/node": "npm:^20"
@@ -3783,16 +3784,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/gateway@npm:^0.0.18, @livestack/gateway@workspace:gateway":
+"@livestack/gateway@npm:^0.0.30, @livestack/gateway@workspace:gateway":
   version: 0.0.0-use.local
   resolution: "@livestack/gateway@workspace:gateway"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/core": "npm:^0.0.18"
-    "@livestack/shared": "npm:^0.0.18"
-    "@preconstruct/cli": "npm:^2.8.4"
+    "@livestack/core": "npm:^0.0.30"
+    "@livestack/shared": "npm:^0.0.30"
+    "@types/jsonwebtoken": "npm:^9.0.6"
     "@types/lodash": "npm:^4.14.201"
     "@types/uuid": "npm:^9.0.7"
     jsonwebtoken: "npm:^9.0.2"
@@ -3801,33 +3802,34 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/lab-internal-common@npm:^0.0.18, @livestack/lab-internal-common@workspace:lab-common":
+"@livestack/lab-internal-common@npm:^0.0.30, @livestack/lab-internal-common@workspace:lab-common":
   version: 0.0.0-use.local
   resolution: "@livestack/lab-internal-common@workspace:lab-common"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/core": "npm:^0.0.18"
-    "@preconstruct/cli": "npm:^2.8.4"
+    "@livestack/core": "npm:^0.0.30"
+    "@rollup/plugin-typescript": "npm:^11.1.6"
     "@types/node": "npm:^16"
+    rimraf: "npm:^5.0.7"
+    rollup: "npm:^4.18.0"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.4.5"
     zod: "npm:^3"
   languageName: unknown
   linkType: soft
 
-"@livestack/lab-internal-server@npm:^0.0.18, @livestack/lab-internal-server@workspace:lab-server":
+"@livestack/lab-internal-server@npm:^0.0.30, @livestack/lab-internal-server@workspace:lab-server":
   version: 0.0.0-use.local
   resolution: "@livestack/lab-internal-server@workspace:lab-server"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/core": "npm:^0.0.18"
-    "@livestack/lab-internal-common": "npm:^0.0.18"
-    "@livestack/shared": "npm:^0.0.18"
-    "@preconstruct/cli": "npm:^2.8.4"
+    "@livestack/core": "npm:^0.0.30"
+    "@livestack/lab-internal-common": "npm:^0.0.30"
+    "@livestack/shared": "npm:^0.0.30"
     "@types/node": "npm:^16"
     langchain: "npm:^0.1.36"
     ts-node: "npm:^10.9.1"
@@ -3881,14 +3883,13 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/shared@npm:^0.0.18, @livestack/shared@workspace:shared":
+"@livestack/shared@npm:^0.0.30, @livestack/shared@workspace:shared":
   version: 0.0.0-use.local
   resolution: "@livestack/shared@workspace:shared"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@preconstruct/cli": "npm:^2.8.4"
     "@types/chai": "npm:^4.3.12"
     "@types/jest": "npm:^29.5.12"
     "@types/lodash": "npm:^4.14.201"
@@ -3950,18 +3951,21 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/summarizer@npm:^0.0.18, @livestack/summarizer@workspace:summarizer":
+"@livestack/summarizer@npm:^0.0.30, @livestack/summarizer@workspace:summarizer":
   version: 0.0.0-use.local
   resolution: "@livestack/summarizer@workspace:summarizer"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/core": "npm:^0.0.18"
-    "@livestack/shared": "npm:^0.0.18"
-    "@preconstruct/cli": "npm:^2.8.4"
+    "@livestack/core": "npm:^0.0.30"
+    "@livestack/shared": "npm:^0.0.30"
+    "@rollup/plugin-typescript": "npm:^11.1.6"
     "@types/node": "npm:^16"
     ollama: "npm:^0.5"
+    rimraf: "npm:^5.0.7"
+    rollup: "npm:^4.18.0"
+    rollup-plugin-dts: "npm:^6.1.1"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.4.5"
     zod: "npm:^3.0.0"
@@ -3970,7 +3974,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/transcribe@npm:^0.0.18, @livestack/transcribe@workspace:transcribe":
+"@livestack/transcribe@npm:^0.0.30, @livestack/transcribe@workspace:transcribe":
   version: 0.0.0-use.local
   resolution: "@livestack/transcribe@workspace:transcribe"
   dependencies:
@@ -3978,12 +3982,15 @@ __metadata:
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-react": "npm:^7.24.6"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/client": "npm:^0.0.18"
-    "@livestack/core": "npm:^0.0.18"
-    "@preconstruct/cli": "npm:^2.8.4"
+    "@livestack/client": "npm:^0.0.30"
+    "@livestack/core": "npm:^0.0.30"
+    "@rollup/plugin-typescript": "npm:^11.1.6"
     "@types/node": "npm:^16"
     "@types/uuid": "npm:^9.0.7"
     axios: "npm:^1.7.2"
+    rimraf: "npm:^5.0.7"
+    rollup: "npm:^4.18.0"
+    rollup-plugin-dts: "npm:^6.1.1"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.4.5"
   peerDependencies:
@@ -3994,17 +4001,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/translate-server@npm:^0.0.18, @livestack/translate-server@workspace:translate-server":
+"@livestack/translate-server@npm:^0.0.30, @livestack/translate-server@workspace:translate-server":
   version: 0.0.0-use.local
   resolution: "@livestack/translate-server@workspace:translate-server"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/core": "npm:^0.0.18"
-    "@livestack/lab-internal-common": "npm:^0.0.18"
-    "@livestack/summarizer": "npm:^0.0.18"
-    "@preconstruct/cli": "npm:^2.8.4"
+    "@livestack/core": "npm:^0.0.30"
+    "@livestack/lab-internal-common": "npm:^0.0.30"
+    "@livestack/summarizer": "npm:^0.0.30"
     "@types/node": "npm:^16"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.4.5"
@@ -4014,15 +4020,14 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/vault-client@npm:^0.0.18, @livestack/vault-client@workspace:vault-client":
+"@livestack/vault-client@npm:^0.0.30, @livestack/vault-client@workspace:vault-client":
   version: 0.0.0-use.local
   resolution: "@livestack/vault-client@workspace:vault-client"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/vault-interface": "npm:^0.0.18"
-    "@preconstruct/cli": "npm:^2.8.4"
+    "@livestack/vault-interface": "npm:^0.0.30"
     "@types/lodash": "npm:^4.14.201"
     "@types/node": "npm:^20.11.0"
     "@types/uuid": "npm:^9.0.7"
@@ -4041,8 +4046,8 @@ __metadata:
     "@libp2p/mplex": "npm:^10.0.22"
     "@libp2p/tcp": "npm:^9.0.24"
     "@libp2p/websockets": "npm:^8.0.22"
-    "@livestack/shared": "npm:^0.0.18"
-    "@livestack/vault-interface": "npm:^0.0.18"
+    "@livestack/shared": "npm:^0.0.30"
+    "@livestack/vault-interface": "npm:^0.0.30"
     "@preconstruct/cli": "npm:^2.8.4"
     "@types/node": "npm:^20.11.0"
     better-sqlite3: "npm:^9.4.0"
@@ -4061,7 +4066,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/vault-interface@npm:^0.0.18, @livestack/vault-interface@workspace:vault-interface":
+"@livestack/vault-interface@npm:^0.0.30, @livestack/vault-interface@workspace:vault-interface":
   version: 0.0.0-use.local
   resolution: "@livestack/vault-interface@workspace:vault-interface"
   dependencies:
@@ -4070,7 +4075,6 @@ __metadata:
     "@babel/preset-typescript": "npm:^7.16.7"
     "@grpc/grpc-js": "npm:^1.10.6"
     "@grpc/proto-loader": "npm:^0.7.12"
-    "@preconstruct/cli": "npm:^2.8.4"
     "@types/lodash": "npm:^4.14.201"
     "@types/node": "npm:^20.11.0"
     "@types/uuid": "npm:^9.0.7"
@@ -4914,6 +4918,25 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@rollup/plugin-typescript@npm:^11.1.6":
+  version: 11.1.6
+  resolution: "@rollup/plugin-typescript@npm:11.1.6"
+  dependencies:
+    "@rollup/pluginutils": "npm:^5.1.0"
+    resolve: "npm:^1.22.1"
+  peerDependencies:
+    rollup: ^2.14.0||^3.0.0||^4.0.0
+    tslib: "*"
+    typescript: ">=3.7.0"
+  peerDependenciesMeta:
+    rollup:
+      optional: true
+    tslib:
+      optional: true
+  checksum: 10c0/5347cd73ac28d4cf2401a3e689864a1a0df8f3ae029abd9c38525cbc84bcfa16c3a32a0ac5698dac65ec531ba7cf8332e14f5fc7f8fa501193da23320a134c5c
+  languageName: node
+  linkType: hard
+
 "@rollup/pluginutils@npm:^3.0.8, @rollup/pluginutils@npm:^3.1.0":
   version: 3.1.0
   resolution: "@rollup/pluginutils@npm:3.1.0"
@@ -4924,6 +4947,22 @@ __metadata:
   peerDependencies:
     rollup: ^1.20.0||^2.0.0
   checksum: 10c0/7151753160d15ba2b259461a6c25b3932150994ea52dba8fd3144f634c7647c2e56733d986e2c15de67c4d96a9ee7d6278efa6d2e626a7169898fd64adc0f90c
+  languageName: node
+  linkType: hard
+
+"@rollup/pluginutils@npm:^5.1.0":
+  version: 5.1.0
+  resolution: "@rollup/pluginutils@npm:5.1.0"
+  dependencies:
+    "@types/estree": "npm:^1.0.0"
+    estree-walker: "npm:^2.0.2"
+    picomatch: "npm:^2.3.1"
+  peerDependencies:
+    rollup: ^1.20.0||^2.0.0||^3.0.0||^4.0.0
+  peerDependenciesMeta:
+    rollup:
+      optional: true
+  checksum: 10c0/c7bed15711f942d6fdd3470fef4105b73991f99a478605e13d41888963330a6f9e32be37e6ddb13f012bc7673ff5e54f06f59fd47109436c1c513986a8a7612d
   languageName: node
   linkType: hard
 
@@ -5912,7 +5951,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/estree@npm:*, @types/estree@npm:1.0.5":
+"@types/estree@npm:*, @types/estree@npm:1.0.5, @types/estree@npm:^1.0.0":
   version: 1.0.5
   resolution: "@types/estree@npm:1.0.5"
   checksum: 10c0/b3b0e334288ddb407c7b3357ca67dbee75ee22db242ca7c56fe27db4e1a31989cb8af48a84dd401deb787fe10cc6b2ab1ee82dc4783be87ededbe3d53c79c70d
@@ -6005,6 +6044,15 @@ __metadata:
   version: 0.0.29
   resolution: "@types/json5@npm:0.0.29"
   checksum: 10c0/6bf5337bc447b706bb5b4431d37686aa2ea6d07cfd6f79cc31de80170d6ff9b1c7384a9c0ccbc45b3f512bae9e9f75c2e12109806a15331dc94e8a8db6dbb4ac
+  languageName: node
+  linkType: hard
+
+"@types/jsonwebtoken@npm:^9.0.6":
+  version: 9.0.6
+  resolution: "@types/jsonwebtoken@npm:9.0.6"
+  dependencies:
+    "@types/node": "npm:*"
+  checksum: 10c0/9c29e3896e5fb6056e54d87514643e59e0cfb966ae25171a107776270195bba955f0373e98c8ed6450c145b18984f5df9cf0fcac360f382cec3c7c4d3510b202
   languageName: node
   linkType: hard
 
@@ -9243,7 +9291,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"estree-walker@npm:^2.0.1":
+"estree-walker@npm:^2.0.1, estree-walker@npm:^2.0.2":
   version: 2.0.2
   resolution: "estree-walker@npm:2.0.2"
   checksum: 10c0/53a6c54e2019b8c914dc395890153ffdc2322781acf4bd7d1a32d7aedc1710807bdcd866ac133903d5629ec601fbb50abe8c2e5553c7f5a0afdd9b6af6c945af
@@ -10120,7 +10168,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"glob@npm:^10.2.2, glob@npm:^10.3.10":
+"glob@npm:^10.2.2, glob@npm:^10.3.10, glob@npm:^10.3.7":
   version: 10.4.1
   resolution: "glob@npm:10.4.1"
   dependencies:
@@ -13243,7 +13291,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"magic-string@npm:^0.30.0":
+"magic-string@npm:^0.30.0, magic-string@npm:^0.30.10":
   version: 0.30.10
   resolution: "magic-string@npm:0.30.10"
   dependencies:
@@ -15947,7 +15995,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"resolve@npm:^1.1.7, resolve@npm:^1.10.0, resolve@npm:^1.14.2, resolve@npm:^1.17.0, resolve@npm:^1.19.0, resolve@npm:^1.20.0, resolve@npm:^1.22.2, resolve@npm:^1.22.4":
+"resolve@npm:^1.1.7, resolve@npm:^1.10.0, resolve@npm:^1.14.2, resolve@npm:^1.17.0, resolve@npm:^1.19.0, resolve@npm:^1.20.0, resolve@npm:^1.22.1, resolve@npm:^1.22.2, resolve@npm:^1.22.4":
   version: 1.22.8
   resolution: "resolve@npm:1.22.8"
   dependencies:
@@ -15973,7 +16021,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"resolve@patch:resolve@npm%3A^1.1.7#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.10.0#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.14.2#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.17.0#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.19.0#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.20.0#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.22.2#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.22.4#optional!builtin<compat/resolve>":
+"resolve@patch:resolve@npm%3A^1.1.7#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.10.0#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.14.2#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.17.0#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.19.0#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.20.0#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.22.1#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.22.2#optional!builtin<compat/resolve>, resolve@patch:resolve@npm%3A^1.22.4#optional!builtin<compat/resolve>":
   version: 1.22.8
   resolution: "resolve@patch:resolve@npm%3A1.22.8#optional!builtin<compat/resolve>::version=1.22.8&hash=c3c19d"
   dependencies:
@@ -16070,6 +16118,33 @@ __metadata:
   languageName: node
   linkType: hard
 
+"rimraf@npm:^5.0.7":
+  version: 5.0.7
+  resolution: "rimraf@npm:5.0.7"
+  dependencies:
+    glob: "npm:^10.3.7"
+  bin:
+    rimraf: dist/esm/bin.mjs
+  checksum: 10c0/bd6dbfaa98ae34ce1e54d1e06045d2d63e8859d9a1979bb4a4628b652b459a2d17b17dc20ee072b034bd2d09bd691e801d24c4d9cfe94e16fdbcc8470a1d4807
+  languageName: node
+  linkType: hard
+
+"rollup-plugin-dts@npm:^6.1.1":
+  version: 6.1.1
+  resolution: "rollup-plugin-dts@npm:6.1.1"
+  dependencies:
+    "@babel/code-frame": "npm:^7.24.2"
+    magic-string: "npm:^0.30.10"
+  peerDependencies:
+    rollup: ^3.29.4 || ^4
+    typescript: ^4.5 || ^5.0
+  dependenciesMeta:
+    "@babel/code-frame":
+      optional: true
+  checksum: 10c0/2b042198ff00fb10c9c70087bbac9013f748dc34be0dbfcca82c6353884ead1467b4a8a37bafe9a8b9356479d43715c7cbc591eeb8e4112c583452431c1cb0a0
+  languageName: node
+  linkType: hard
+
 "rollup@npm:^2.79.1":
   version: 2.79.1
   resolution: "rollup@npm:2.79.1"
@@ -16084,7 +16159,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"rollup@npm:^4.13.0":
+"rollup@npm:^4.13.0, rollup@npm:^4.18.0":
   version: 4.18.0
   resolution: "rollup@npm:4.18.0"
   dependencies:
