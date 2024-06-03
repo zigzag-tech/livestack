@@ -1,6 +1,6 @@
 {
   "name": "@livestack/vault-dev-server",
-  "version": "0.0.24",
+  "version": "0.0.30",
   "packageManager": "yarn@4.2.2",
   "author": "",
   "license": "MIT",
@@ -14,8 +14,8 @@
     "@libp2p/mplex": "^10.0.22",
     "@libp2p/tcp": "^9.0.24",
     "@libp2p/websockets": "^8.0.22",
-    "@livestack/shared": "^0.0.24",
-    "@livestack/vault-interface": "^0.0.24",
+    "@livestack/shared": "^0.0.30",
+    "@livestack/vault-interface": "^0.0.30",
     "better-sqlite3": "^9.4.0",
     "bullmq": "^4.x",
     "dotenv": "^16.x",
