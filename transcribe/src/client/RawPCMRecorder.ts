@@ -20,19 +20,17 @@ export class RawPCMRecorder {
   }
 
   public async startRecording(): Promise<void> {
-    const rawPCMProcessorUrl = new URL(
-      "./raw-pcm-processor.js",
-      import.meta.url
-    );
+    const rawPCMProcessorUrl = new URL("https://unpkg.com/@livestack/transcribe@0.0.28/static/raw-pcm-processor.js");
+    const vadAudioWorkletUrl = new URL("https://unpkg.com/@livestack/transcribe@0.0.28/static/vad-audio-worklet.js");
     // const vadProcessorUrl = new URL(
     //   "/vad/vad-audio-worklet.js",
-    //   import.meta.url
+    //   __dirname
     // );
-    // const fftUrl = new URL("./fft.js", import.meta.url);
+    // const fftUrl = new URL("./fft.js", __dirname);
     // console.log(fftUrl);
 
     await this.audioContext.audioWorklet.addModule(rawPCMProcessorUrl);
-    await this.audioContext.audioWorklet.addModule("/vad/vad-audio-worklet.js");
+    await this.audioContext.audioWorklet.addModule(vadAudioWorkletUrl);
 
     this.rawPCMWorkletNode = new AudioWorkletNode(
       this.audioContext,

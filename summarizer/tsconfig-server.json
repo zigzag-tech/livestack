@@ -1,7 +1,14 @@
 {
-  "include": ["missing-modules.d.ts", "**/*.ts", "**/*.tsx", "*.ts", "*.tsx"],
+  "include": [
+    "missing-modules.d.ts",
+    "src/server/*.ts",
+    "src/common/*.ts",
+    "src/index.ts"
+  ],
   "compilerOptions": {
-    "outDir": "dist",
+    "module": "CommonJS",
+    // "types": ["reflect-metadata"],
+    "outDir": "server",
     "target": "ES5",
     "pretty": true,
     "moduleResolution": "node",
@@ -14,7 +21,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "sourceMap": true,
-    "isolatedModules": true,
+    "isolatedModules": false,
     "strict": true,
     "strictNullChecks": true,
     "downlevelIteration": true,

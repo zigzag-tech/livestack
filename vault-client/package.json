@@ -1,14 +1,14 @@
 {
   "name": "@livestack/vault-client",
-  "version": "0.0.18",
+  "version": "0.0.30",
   "packageManager": "yarn@4.2.2",
   "author": "",
   "license": "MIT",
   "scripts": {
-    "build": "preconstruct build"
+    "build": "tsc"
   },
   "dependencies": {
-    "@livestack/vault-interface": "^0.0.18",
+    "@livestack/vault-interface": "^0.0.30",
     "nice-grpc": "^2.1.8",
     "nice-grpc-client-middleware-retry": "^3.1.7"
   },
@@ -16,18 +16,10 @@
     "@babel/core": "^7.24.5",
     "@babel/preset-env": "^7.16.7",
     "@babel/preset-typescript": "^7.16.7",
-    "@preconstruct/cli": "^2.8.4",
     "@types/lodash": "^4.14.201",
     "@types/node": "^20.11.0",
     "@types/uuid": "^9.0.7",
     "typescript": "5.4.5"
   },
-  "main": "dist/livestack-vault-client.cjs.js",
-  "types": "dist/livestack-vault-client.cjs.d.ts",
-  "module": "dist/livestack-vault-client.esm.js",
-  "preconstruct": {
-    "entrypoints": [
-      "./index.ts"
-    ]
-  }
+  "main": "src/index.ts"
 }
