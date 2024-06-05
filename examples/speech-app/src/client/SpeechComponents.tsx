@@ -167,7 +167,7 @@ const handleLanguage = (e: React.ChangeEvent<HTMLSelectElement>) =>{
           {translation && (
             <div>
               <h2 className="text-indigo-800">
-                4. Your speech translated to {lang}
+                4. Your speech translated to
                   <select id="language-select" value = {lang} onChange={(e)=>handleLanguage(e)}>
                     <option value="English">English</option>
                     <option value="Chinese">Chinese</option>

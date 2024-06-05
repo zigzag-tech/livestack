@@ -34,7 +34,7 @@ export const speechLiveflow = Liveflow.define({
     conn({
       from: speechChunkToTextSpec,
       transform: ({ transcript }) => ({
-        toLang: "French",
+        toLang: translationSpec.input.lang,
         text: transcript,
         llmType: "openai",
       }),
@@ -50,5 +50,7 @@ export const speechLiveflow = Liveflow.define({
     expose(titleSummarizerSepc.output.default, "summarized-title"),
     // Expose the default output for translation
     expose(translationSpec.output.default, "translation"),
+
+    expose(translationSpec.input.lang, "lang"),
   ],
 });
