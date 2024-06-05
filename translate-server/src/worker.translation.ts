@@ -3,24 +3,46 @@ import { z } from "zod";
 import {
   translationInputSchema,
   translationOutputSchema,
+  supportedLangs,
 } from "@livestack/lab-internal-common";
 import { getQueuedJobOrCreate } from "./llmChildJobManager";
 
 export const translationSpec = new JobSpec({
   name: "translation",
-  input: translationInputSchema.extend({
-    llmType: z.enum(["openai", "ollama"]).default("ollama").optional(),
-  }),
+  input: {
+    default: translationInputSchema.extend({
+      llmType: z.enum(["openai", "ollama"]).default("ollama").optional(),
+    }),
+    lang: supportedLangs
+  },
   output: translationOutputSchema,
 });
 
 export const translationWorker = translationSpec.defineWorker({
   processor: async ({ input, output, invoke }) => {
-    for await (const data of input) {
-      const { llmType, text, toLang } = data;
+    let currLang: z.infer<typeof supportedLangs> = supportedLangs.Enum.French;
+
+    const langObs = input("lang").observable();
+    langObs.subscribe(newLang => {
+      if(newLang) {
+        currLang = newLang;
+      }
+    });
+
+    // const langLoop = async () => {
+    //   for await(const newLang of input("lang")) {
+    //     currLang = newLang;
+    //   }  
+    // }
+    // langLoop();
+   
+
+    for await (const data of input("default")) {
+      const { llmType, text } = data;
+      // obtain translation results from the LLM
       const job = await getQueuedJobOrCreate({ llmType: llmType || "ollama" });
       const { input: childInput, output: childOutput } = job;
-      await childInput.feed({ text, toLang });
+      await childInput.feed({ text, toLang: currLang  });
       const r = await childOutput.nextValue();
 
       if (!r) {
@@ -37,3 +59,4 @@ export const translationWorker = translationSpec.defineWorker({
     }
   },
 });
+

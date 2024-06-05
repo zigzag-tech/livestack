@@ -1,5 +1,5 @@
 "use client";
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   usePCMRecorder,
   encodeToB64,
@@ -73,6 +73,30 @@ export const SpeechComponents: React.FC = () => {
     return total + transcript.data.transcript.split(' ').length;
   }, 0), [transcription])
 
+
+    /* TODO:
+  1. Expose lang input in backend.
+  2. Use useInput() to connect lang to frontend
+  3. Implement a dropdown select box whose options are languages
+  4. Listen to the "change" event of the dropdown select box, and call "feed" whenever a new langage is selected.
+  */
+const [lang, setLanguage] = useState("French")
+
+const {feed:feedLang} = useInput({
+  tag: "lang",
+  job,
+});
+
+
+
+const handleLanguage = (e: React.ChangeEvent<HTMLSelectElement>) =>{
+  const selectedLang = e.target.value;
+  setLanguage(selectedLang);
+  if (feedLang) {
+    feedLang({ selectedLang, "lang":String});
+  }
+};
+
   return (
     <div className="m-4 grid grid-cols-5 gap-2 divide-x">
       <div>
@@ -143,7 +167,15 @@ export const SpeechComponents: React.FC = () => {
           {translation && (
             <div>
               <h2 className="text-indigo-800">
-                4. Your speech translated to French
+                4. Your speech translated to {lang}
+                  <select id="language-select" value = {lang} onChange={(e)=>handleLanguage(e)}>
+                    <option value="English">English</option>
+                    <option value="Chinese">Chinese</option>
+                    <option value="French">French</option>
+                    <option value="Spanish">Spanish</option>
+                    <option value="German">Spanish</option>
+                    <option value="Japanese">Japanese</option>
+                  </select>
               </h2>
               <br />
               {translation.map((t, idx) => (
