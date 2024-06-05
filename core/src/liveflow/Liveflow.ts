@@ -712,9 +712,9 @@ export class LiveflowSpec extends JobSpec<
       };
       if (!r) {
         throw new Error(
-          `No spec and tag of type ${
+          `No spec ${
             type === "in" ? "input" : "output"
-          } found for alias ${alias.toString()}.`
+          } exposed as "${alias.toString()}". Did you forget to expose it in the liveflow definition? (Hint: use expose() function to expose a specified input/output.)`
         );
       }
       return r;
