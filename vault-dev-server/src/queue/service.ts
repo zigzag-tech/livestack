@@ -12,11 +12,17 @@ import { CallContext } from "nice-grpc";
 import { v4 } from "uuid";
 import { createClient } from "redis";
 import { escapeColon, getCapacityManager } from "../capacity/manager.js";
+import { stringify } from "querystring";
+
+import path from 'path';
+import { promises as fs } from 'fs';
+import { error } from "console";
 
 const _rawQueueBySpecName = new Map<string, Queue>();
 
 class QueueServiceByProject implements QueueServiceImplementation {
   //   projectUuid: string;
+  private logEntriesExist: boolean;
   authMiddleware?: (context: CallContext) => Promise<void>;
   onJobAssignedToWorker?: (job: QueueJob, ctx: CallContext) => Promise<void>;
   constructor(p?: {
@@ -27,6 +33,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     // this.projectUuid = projectUuid;
     this.authMiddleware = authMiddleware;
     this.onJobAssignedToWorker = p?.onJobAssignedToWorker;
+    this.logEntriesExist = false;
   }
   private redisClientP = createClient().connect();
 
@@ -35,7 +42,45 @@ class QueueServiceByProject implements QueueServiceImplementation {
     context: CallContext
   ): Promise<{ instanceId?: string | undefined }> {
     const instanceId = v4();
+    // console.log(`Entering initInstance`)
     return { instanceId };
+  }
+
+  // private logFilePath = path.join(__dirname, 'workerLogs.json');
+  private logFilePath = 'workerLogs.json';
+
+  async appendLog(entries: any){
+    const data = JSON.stringify(entries, null, 2);
+    const delimiter = this.logEntriesExist ? ',\n' : '';
+    this.logEntriesExist = true;
+    fs.appendFile(this.logFilePath, data);
+  }
+
+  async logWorkers(queue: Queue, projectUuid: string){
+    const workers = await queue.getWorkers();
+    const capacity = workers.length;
+    if(capacity > 0){
+      const logEntries = [];
+      for (const worker of workers) {
+        logEntries.push({
+          projectUuid: projectUuid,
+          queueName: queue.name,
+          workerId: worker.id
+        });
+      }
+      this.appendLog(logEntries);
+    }
+  }
+
+  async logAllWorkers(projectUuid: string){
+
+    // console.log(`Logging workers for project: ${projectUuid}`);
+    for(const[key, queue] of _rawQueueBySpecName.entries()){
+      if(key.startsWith(`${projectUuid}/`)){
+        await this.logWorkers(queue, projectUuid);
+      }
+    }
+
   }
 
   async addJob(job: QueueJob, context: CallContext) {
@@ -46,7 +91,6 @@ class QueueServiceByProject implements QueueServiceImplementation {
     if (this.authMiddleware) {
       await this.authMiddleware(context);
     }
-
     const queue = this.getQueue(job);
     // console.debug("addjob", queue.name, job);
 
@@ -90,7 +134,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
     ) {
       const diff = countOfTotalJobsRequiringCapacity - capacity;
       console.debug(
-        `Queue ${job.specName} for project ${job.projectUuid} has ${countOfTotalJobsRequiringCapacity} waiting+active jobs, while capacity is at ${capacity}. \nAttempting to increase capacity by ${diff}.`
+        // `Queue ${job.specName} for project ${job.projectUuid} has ${countOfTotalJobsRequiringCapacity} waiting+active jobs, while capacity is at ${capacity}. \nAttempting to increase capacity by ${diff}.`
       );
       for (let i = 0; i < diff; i++) {
         await getCapacityManager().increaseCapacity({
@@ -101,6 +145,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
       }
     }
 
+    // await this.logAllWorkers(job.projectUuid);
     return {};
   }
 
@@ -141,6 +186,7 @@ class QueueServiceByProject implements QueueServiceImplementation {
   private currentJobByWorkerId: Record<string, QueueJob> = {};
 
   reportAsWorker(request: AsyncIterable<FromWorker>, context: CallContext) {
+    // console.log(`Entering reportAsWorker`)
     const { iterator: iterServerMsg, resolveNext: resolveJobPromise } =
       genManuallyFedIterator<ToWorker>();
 
