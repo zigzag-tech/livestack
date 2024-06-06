@@ -270,7 +270,7 @@ export class DataStream<T extends object> {
       if (validationFailure) {
         console.error(
           `Error publishing to stream ${this.uniqueName}:`,
-          validationFailure,
+          JSON.stringify(validationFailure, null, 2),
           "; Data being sent: ",
           JSON.stringify((parsed as any).data || parsed, null, 2).slice(0, 500)
         );
@@ -291,7 +291,7 @@ export class DataStream<T extends object> {
     } catch (error) {
       console.error(
         `Error publishing to stream ${this.uniqueName}:`,
-        error,
+        JSON.stringify(error, null, 2),
         "data: ",
         JSON.stringify(parsed, null, 2)
       );
