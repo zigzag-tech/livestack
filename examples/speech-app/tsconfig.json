@@ -20,12 +20,7 @@
     "strictNullChecks": true,
     "downlevelIteration": true,
     "jsx": "react",
-    "noImplicitAny": true,
-    "paths": {
-      "@client/*": ["./client/*"],
-      "@server/*": ["./server/*"],
-      "@common/*": ["./common/*"]
-    }
+    "noImplicitAny": true
   },
   "exclude": ["node_modules", "dist"]
 }

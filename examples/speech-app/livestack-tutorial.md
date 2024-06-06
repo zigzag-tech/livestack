@@ -16,13 +16,13 @@ If you want to get started quickly without going through each step in detail, yo
 1. **Create a new LiveStack app:**
 
 ```bash
-npm create livestack@latest
+npx create-livestack my-livestack-app --template typescript-speech-app
 ```
 
 2. **Navigate to your project directory and install dependencies:**
 
 ```bash
-cd livestack-app
+cd my-livestack-app
 npm install
 ```
 
@@ -40,9 +40,11 @@ First, we need to create a new React project and install the necessary dependenc
 
 1. **Create a new React app:**
 
+The command below will help you create a project scaffold.
+
 ```bash
-npm create livestack@latest
-cd livestack-app
+npx create-livestack my-livestack-app
+cd my-livestack-app
 ```
 
 2. **Install required dependencies:**
@@ -59,7 +61,7 @@ We'll start by setting up the client side of our application.
 
 Create the main entry point for the React application.
 
-**`src/index.tsx`**:
+**`src/client/index.tsx`**:
 
 ```tsx
 import React, { Suspense } from "react";
@@ -82,7 +84,7 @@ root.render(
 
 This component will handle the recording and display of transcriptions.
 
-**`src/SpeechComponents.tsx`**:
+**`src/client/SpeechComponents.tsx`**:
 
 ```tsx
 "use client";
@@ -345,7 +347,7 @@ export const SPEECH_LIVEFLOW_NAME = "your_speech_liveflow_name";
 Ensure your project structure matches this:
 
 ```
-livestack-app/
+my-livestack-app/
 ├── node_modules/
 ├── public/ (optional)
 ├── src/
@@ -376,4 +378,4 @@ npm run dev
 
 ### Conclusion
 
-By following this tutorial, you've built a real-time speech transcription, translation and summary app using the LiveStack framework. The app records speech, transcribes it, translates it into French, and periodically generates a summarized title. For a quick start, use the `npm create livestack` command, or follow the detailed steps to gain a deeper understanding of the process.
+By following this tutorial, you've built a real-time speech transcription, translation and summary app using the LiveStack framework. The app records speech, transcribes it, translates it into French, and periodically generates a summarized title. For a quick start, use the `npx create-livestack <project-directory> --template [typescript-speech-app / typescript-backend-only / typescript-setup-only]` command, or follow the detailed steps to gain a deeper understanding of the process.
