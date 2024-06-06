@@ -302,7 +302,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         });
         return {
           validationFailure: {
-            errorMessage: res.toString(),
+            errorMessage: JSON.stringify(res),
             datapointId,
           },
         };
