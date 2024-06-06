@@ -9,11 +9,14 @@ import {
   InstanceResponseToProvisionMessage,
   type ReportAsInstanceMessage,
   type ServerStreamingMethodResult,
+  CapacityInfo,
+  SpecNameAndCapacity,
 } from "@livestack/vault-interface/src/generated/capacity.js";
 import { CallContext } from "nice-grpc";
 import { createClient } from "redis";
-import _ from "lodash";
+import _, { forEach } from "lodash";
 import { v4 } from "uuid";
+import { promises as fs } from "fs";
 
 class CapacityManager implements CacapcityServiceImplementation {
   private redisClientP = createClient().connect();
@@ -32,6 +35,10 @@ class CapacityManager implements CacapcityServiceImplementation {
 
   instanceIdsByProjectUuid: Record<string, string[]> = {};
 
+  capacityQuery: Record<string, string[]> = {};
+
+  instanacesByProejctUuid = {};
+
   reportAsInstance(
     request: ReportAsInstanceMessage,
     context: CallContext
@@ -46,6 +53,7 @@ class CapacityManager implements CacapcityServiceImplementation {
       | undefined;
     queryCapacity?: {} | undefined;
   }> {
+    // capacity log
     const { iterator: iter, resolveNext: resolveJobPromise } =
       genManuallyFedIterator<CommandToInstance>();
 
@@ -68,11 +76,15 @@ class CapacityManager implements CacapcityServiceImplementation {
 
     this.instanceIdsByProjectUuid[projectUuid].push(instanceId);
 
+    this.logCapacity(projectUuid);
+
     // clear all capacities on disconnect
     const abortListener = async () => {
       console.debug(
         `Instance gone: from instance ${instanceId}: ${projectUuid}.`
       );
+      // capcity log
+
       delete this.resolveByInstanceId[instanceId];
 
       // remove instanceId from projectUuid lookup
@@ -81,12 +93,45 @@ class CapacityManager implements CacapcityServiceImplementation {
           (id) => id !== instanceId
         );
 
+      console.log(`instanceIds: ${this.instanceIdsByProjectUuid[projectUuid]}`);
+
+      this.logCapacity(projectUuid);
+
       context.signal.removeEventListener("abort", abortListener);
     };
 
     context.signal.addEventListener("abort", abortListener);
 
     return iter;
+  }
+
+  async logCapacity(projectUuid: string) {
+    const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
+
+    const capacitiesByInstanceId: Record<string, SpecNameAndCapacity[]> = {};
+
+    const logFilePath = `/home/ubuntu/auto-live-lower-thirds/cloud-dashboard/src/server/${projectUuid}.json`;
+
+    const capacities = await Promise.all(
+      instanceIds.map((instanceId) =>
+        this.runCapacityQuery({ instanceId, projectUuid })
+      )
+    );
+
+    for (const capacity of capacities) {
+      capacitiesByInstanceId[capacity.instanceId] =
+        capacity.specNameAndCapacity;
+    }
+
+    try {
+      const jsonData = JSON.stringify(capacitiesByInstanceId, null, 2);
+      fs.writeFile(logFilePath, jsonData, "utf8"); // 同步写入文件
+      console.log("Data saved to file:", logFilePath);
+    } catch (error) {
+      console.error("Failed to save data to file:", error);
+    }
+
+    return capacitiesByInstanceId;
   }
 
   async runCapacityQuery({
@@ -213,7 +258,6 @@ class CapacityManager implements CacapcityServiceImplementation {
         this.runCapacityQuery({ instanceId, projectUuid })
       )
     );
-    // console.debug("capacities", capacities);
 
     const qualifiedCapacities = capacities.filter((c) =>
       c.specNameAndCapacity.some(
@@ -251,7 +295,6 @@ class CapacityManager implements CacapcityServiceImplementation {
       specName,
       numberOfWorkersNeeded: by,
     });
-
   }
 }
 
