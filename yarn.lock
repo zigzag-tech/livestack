@@ -3776,7 +3776,6 @@ __metadata:
     ts-node: "npm:^10.9.2"
     tsx: "npm:^4.7.1"
     typescript: "npm:5.4.5"
-    uuid: "npm:^9"
     vite: "npm:^5.1.6"
     vite-express: "npm:^0.14.1"
     vite-tsconfig-paths: "npm:^4.3.2"
