@@ -12,6 +12,7 @@ import { translationOutputSchema } from "@livestack/lab-internal-common";
 import { FaStop, FaMicrophone } from "react-icons/fa";
 import { z } from "zod";
 import prettyBytes from "pretty-bytes";
+import {supportedLangs} from "@livestack/lab-internal-common"
 
 // SpeechComponents component
 export const SpeechComponents: React.FC = () => {
@@ -85,15 +86,14 @@ const [lang, setLanguage] = useState("French")
 const {feed:feedLang} = useInput({
   tag: "lang",
   job,
+  def: supportedLangs
 });
 
-
-
 const handleLanguage = (e: React.ChangeEvent<HTMLSelectElement>) =>{
-  const selectedLang = e.target.value;
+  const selectedLang = e.target.value as z.infer<typeof supportedLangs>;
   setLanguage(selectedLang);
   if (feedLang) {
-    feedLang({ selectedLang, "lang":String});
+    feedLang(selectedLang);
   }
 };
 
@@ -167,13 +167,13 @@ const handleLanguage = (e: React.ChangeEvent<HTMLSelectElement>) =>{
           {translation && (
             <div>
               <h2 className="text-indigo-800">
-                4. Your speech translated to
+                4. Translate speech to
                   <select id="language-select" value = {lang} onChange={(e)=>handleLanguage(e)}>
                     <option value="English">English</option>
                     <option value="Chinese">Chinese</option>
                     <option value="French">French</option>
                     <option value="Spanish">Spanish</option>
-                    <option value="German">Spanish</option>
+                    <option value="German">German</option>
                     <option value="Japanese">Japanese</option>
                   </select>
               </h2>
