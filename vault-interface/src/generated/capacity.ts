@@ -11,6 +11,12 @@ import { Empty } from "./google/protobuf/empty";
 
 export const protobufPackage = "livestack";
 
+export interface CapacityInfo {
+  projectUuid: string;
+  instanceId: any;
+  totalCapacity: number; // 根据实际类型替换 'any'，比如 number
+}
+
 export interface ReportAsInstanceMessage {
   projectUuid: string;
   instanceId: string;
