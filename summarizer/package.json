@@ -12,6 +12,7 @@
     "@babel/core": "^7.24.5",
     "@babel/preset-env": "^7.16.7",
     "@babel/preset-typescript": "^7.16.7",
+    "@preconstruct/cli": "^2.8.4",
     "@rollup/plugin-typescript": "^11.1.6",
     "@types/node": "^16",
     "rimraf": "^5.0.7",
@@ -28,14 +29,21 @@
     "build-server": "rimraf server && tsc --project tsconfig-server.json",
     "build-client": "rimraf client && rollup -c rollup.config.mjs"
   },
-  "exports": {
-    "./client": "./src/client/index.ts",
-    "./server": "./src/server/index.ts",
-    "./package.json": "./package.json"
-  },
   "files": [
     "client",
     "server",
-    "package.json"
-  ]
+    "package.json",
+    "dist"
+  ],
+  "preconstruct": {
+    "entrypoints": [
+      "client/index.ts",
+      "server/index.ts"
+    ],
+    "___experimentalFlags_WILL_CHANGE_IN_PATCH": {
+      "typeModule": true,
+      "distInRoot": true,
+      "importsConditions": true
+    }
+  }
 }
