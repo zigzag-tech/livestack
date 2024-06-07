@@ -37,6 +37,7 @@
     "@libp2p/tcp": "^9.0.23",
     "libp2p": "^1.4.3",
     "libp2p-kad-dht": "^0.28.6",
+    "multiaddr": "^10.0.1",
     "uint8arrays": "^5.0.3"
   }
 }
