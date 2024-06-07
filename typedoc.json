@@ -1,5 +1,5 @@
 {
-  "entryPoints": ["core", "client", "gateway"],
+  "entryPoints": ["core", "client", "gateway", "tutorials"],
   "out": "_docs",
   "name": "Livestack",
   "theme": "default",
