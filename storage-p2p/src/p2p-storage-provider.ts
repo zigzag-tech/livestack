@@ -14,8 +14,7 @@ import { kadDHT } from "@libp2p/kad-dht";
 // import { fromString as uint8ArrayFromString } from "uint8arrays/from-string";
 import { bootstrap } from "@libp2p/bootstrap";
 import { multiaddr } from "multiaddr";
-import coreStoragePkg from "@livestack/core";
-const { calculateHash } = coreStoragePkg;
+import { calculateHash } from "@livestack/core";
 import dns from "dns";
 // import { concat } from "uint8arrays/concat";
 
