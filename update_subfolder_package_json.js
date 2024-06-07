@@ -32,7 +32,7 @@ const exportsValue =
         "./package.json": "./package.json",
       };
 
-const submoduleFolders = [
+const subFolders = [
   "client",
   "core",
   "gateway",
@@ -44,9 +44,9 @@ const submoduleFolders = [
   "vault-interface",
 ];
 
-const multiEntryPointsSubmoduleFolders = ["summarizer", "transcribe"];
+const multiEntryPointsSubfolders = ["summarizer", "transcribe"];
 
-for (const folder of submoduleFolders) {
+for (const folder of subFolders) {
   const packageJsonPath = path.resolve(__dirname, folder, "package.json");
   const packageJsonContent = fs.readFileSync(packageJsonPath, "utf8");
   const packageJson = JSON.parse(packageJsonContent);
@@ -63,7 +63,7 @@ for (const folder of submoduleFolders) {
   );
 }
 
-for (const folder of multiEntryPointsSubmoduleFolders) {
+for (const folder of multiEntryPointsSubfolders) {
   const packageJsonPath = path.resolve(__dirname, folder, "package.json");
   const packageJsonContent = fs.readFileSync(packageJsonPath, "utf8");
   const packageJson = JSON.parse(packageJsonContent);
