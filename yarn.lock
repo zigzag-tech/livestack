@@ -4020,6 +4020,12 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@livestack/tutorials@workspace:tutorials":
+  version: 0.0.0-use.local
+  resolution: "@livestack/tutorials@workspace:tutorials"
+  languageName: unknown
+  linkType: soft
+
 "@livestack/vault-client@npm:^0.0.30, @livestack/vault-client@workspace:vault-client":
   version: 0.0.0-use.local
   resolution: "@livestack/vault-client@workspace:vault-client"
