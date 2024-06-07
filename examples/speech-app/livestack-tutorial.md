@@ -57,27 +57,14 @@ npm install
 
 We'll start by setting up the client side of our application.
 
-#### 2.1 Create `index.tsx`
+#### 2.1 Define Shared Constants
 
-Create the main entry point for the React application.
+Create a file for shared constants.
 
-**`src/client/index.tsx`**:
+**`src/common/defs.ts`**:
 
-```tsx
-import React, { Suspense } from "react";
-import ReactDOM from "react-dom/client";
-import SpeechComponents from "./SpeechComponents";
-import "./globals.css";
-
-const root = ReactDOM.createRoot(
-  document.getElementById("root") as HTMLElement
-);
-
-root.render(
-  <Suspense fallback={<div>Loading...</div>}>
-    <SpeechComponents />
-  </Suspense>
-);
+```ts
+export const SPEECH_LIVEFLOW_NAME = "<your_speech_liveflow_name>";
 ```
 
 #### 2.2 Create `SpeechComponents.tsx`
@@ -229,56 +216,34 @@ export const SpeechComponents: React.FC = () => {
 export default SpeechComponents;
 ```
 
+#### 2.3 Create `index.tsx`
+
+Create the main entry point for the React application.
+
+**`src/client/index.tsx`**:
+
+```tsx
+import React, { Suspense } from "react";
+import ReactDOM from "react-dom/client";
+import SpeechComponents from "./SpeechComponents";
+import "./globals.css";
+
+const root = ReactDOM.createRoot(
+  document.getElementById("root") as HTMLElement
+);
+
+root.render(
+  <Suspense fallback={<div>Loading...</div>}>
+    <SpeechComponents />
+  </Suspense>
+);
+```
+
 ### Step 3: Server-Side Implementation
 
 Next, we will set up the server that will handle the speech processing.
 
-#### 3.1 Create `index.ts`
-
-Set up the main server file to initialize the environment and start the server.
-
-**`src/server/index.ts`**:
-
-```ts
-import { LiveEnv } from "@livestack/core";
-import { getLocalTempFileStorageProvider } from "@livestack/core";
-import { initJobBinding } from "@livestack/gateway";
-import express from "express";
-import path from "path";
-import bodyParser from "body-parser";
-import cors from "cors";
-import ViteExpress from "vite-express";
-import { speechLiveflow } from "./liveflow.speech";
-
-const liveEnvP = LiveEnv.create({
-  projectId: "MY_LIVE_SPEECH_APP",
-  storageProvider: getLocalTempFileStorageProvider("/tmp/zzlive"),
-});
-
-async function main() {
-  LiveEnv.setGlobal(liveEnvP);
-
-  const app = express();
-  app.use(cors());
-  app.use(bodyParser.json());
-  app.use(express.static(path.join(__dirname, "..", "public")));
-
-  const PORT = 4700;
-
-  const httpServer = ViteExpress.listen(app, PORT, () => {
-    console.info(`Server running on http://localhost:${PORT}.`);
-  });
-
-  initJobBinding({
-    httpServer,
-    allowedSpecsForBinding: [speechLiveflow],
-  });
-}
-
-main();
-```
-
-#### 3.2 Define the Speech LiveFlow
+#### 3.1 Define the Speech LiveFlow
 
 Define the workflow for processing speech input in `liveflow.speech.ts`.
 
@@ -332,14 +297,49 @@ export const speechLiveflow = Liveflow.define({
 });
 ```
 
-#### 3.3 Define Shared Constants
+#### 3.2 Create `index.ts`
 
-Create a file for shared constants.
+Set up the main server file to initialize the environment and start the server.
 
-**`src/common/defs.ts`**:
+**`src/server/index.ts`**:
 
 ```ts
-export const SPEECH_LIVEFLOW_NAME = "your_speech_liveflow_name";
+import { LiveEnv } from "@livestack/core";
+import { getLocalTempFileStorageProvider } from "@livestack/core";
+import { initJobBinding } from "@livestack/gateway";
+import express from "express";
+import path from "path";
+import bodyParser from "body-parser";
+import cors from "cors";
+import ViteExpress from "vite-express";
+import { speechLiveflow } from "./liveflow.speech";
+
+const liveEnvP = LiveEnv.create({
+  projectId: "MY_LIVE_SPEECH_APP",
+  storageProvider: getLocalTempFileStorageProvider("/tmp/zzlive"),
+});
+
+async function main() {
+  LiveEnv.setGlobal(liveEnvP);
+
+  const app = express();
+  app.use(cors());
+  app.use(bodyParser.json());
+  app.use(express.static(path.join(__dirname, "..", "public")));
+
+  const PORT = 4700;
+
+  const httpServer = ViteExpress.listen(app, PORT, () => {
+    console.info(`Server running on http://localhost:${PORT}.`);
+  });
+
+  initJobBinding({
+    httpServer,
+    allowedSpecsForBinding: [speechLiveflow],
+  });
+}
+
+main();
 ```
 
 ### Project Structure
