@@ -24,7 +24,7 @@ Livestack, designed from the ground up, aims to democratize this process, making
 
 We look forward to seeing your next idea come to life with Livestack!
 
-# Installation
+## Installation
   
 ```bash
 npm install @livestack/core @livestack/gateway @livestack/client
