@@ -130,6 +130,7 @@ export class LiveEnv {
 
   /**
    * Ensures that the global LiveEnv instance is initialized.
+   * @hidden
    */
   public static _ensureInitialized(): void {
     if (!LiveEnv._liveEnvP) {
@@ -437,7 +438,9 @@ async function getCliTempToken(localProjectId: string): Promise<string> {
  * @param cliTempToken - The temporary CLI token.
  * @returns The resolved credentials.
  */
-async function waitUntilCredentialsAreResolved(cliTempToken: string): Promise<ResolvedCliTokenStatusWithUserToken> {
+async function waitUntilCredentialsAreResolved(
+  cliTempToken: string
+): Promise<ResolvedCliTokenStatusWithUserToken> {
   // periodically make fetch request to see if the credentials have been fulfilled
   let secondsElapsed = 0;
   while (true) {
@@ -513,6 +516,9 @@ async function getClITempTokenStatus(
 /**
  * Schema for validating data as Buffer or Stream.
  */
-export const fileOrBufferSchema = z.custom<Buffer | Stream>((data): data is Buffer | Stream => {
-  return data instanceof Buffer || data instanceof Stream;
-}, "Data is not an instance of a Buffer or a Stream.");
+export const fileOrBufferSchema = z.custom<Buffer | Stream>(
+  (data): data is Buffer | Stream => {
+    return data instanceof Buffer || data instanceof Stream;
+  },
+  "Data is not an instance of a Buffer or a Stream."
+);

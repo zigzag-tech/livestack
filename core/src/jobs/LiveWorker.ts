@@ -46,6 +46,15 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
 
   private static instanceReported = false;
 
+  /**
+   * Constructs a new LiveWorker instance.
+   * @param params - The parameters for constructing the LiveWorker.
+   * @param params.def - The LiveWorkerDef instance.
+   * @param params.instanceParams - Optional instance parameters for the worker.
+   * @param params.workerName - Optional worker name.
+   * @param params.liveEnv - Optional LiveEnv instance.
+   * @param params.terminateOutputsOnJobEnd - Whether to terminate outputs on job end.
+   */
   constructor({
     jobSpec,
     processor,
@@ -199,6 +208,12 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     }
   }
 
+  /**
+   * Starts a new worker instance.
+   * @param p - The parameters for starting the worker.
+   * @param p.instanceParams - Optional instance parameters for the worker.
+   * @returns A promise that resolves to the created LiveWorker instance.
+   */
   public async startWorker(p?: { instanceParams?: WP }) {
     const { instanceParams } = p || {};
 
@@ -213,10 +228,20 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     return worker;
   }
 
+  /**
+   * Enqueues a new job with the given parameters.
+   * @param p - The parameters for enqueuing the job.
+   * @returns A promise that resolves to the JobManager instance for the enqueued job.
+   */
   public enqueueJob: (typeof this.jobSpec)["enqueueJob"] = (p) => {
     return this.jobSpec.enqueueJob(p);
   };
 
+  /**
+   * Enqueues a job with the given input, waits for the result, and returns it.
+   * @param p - The parameters for enqueuing the job and getting the result.
+   * @returns A promise that resolves to the job result containing the data and timestamp, or null if no result is available.
+   */
   public enqueueAndGetResult: (typeof this.jobSpec)["enqueueAndGetResult"] = (
     p
   ) => {
@@ -455,6 +480,10 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     return defineWorker(p);
   }
 
+  /**
+   * Stops the worker gracefully.
+   * @throws An error indicating that the method is not implemented.
+   */
   public async stop() {
     // TODO: Implement graceful shutdown
     throw new Error("Not implemented");

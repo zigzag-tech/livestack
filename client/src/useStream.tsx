@@ -3,6 +3,17 @@ import { z } from "zod";
 import { JobInfo } from "./useJobBinding";
 import { StreamQuery } from "@livestack/shared";
 
+/**
+ * Custom hook to subscribe to a stream of data for a job.
+ *
+ * @param {Object} params - The parameters for the hook.
+ * @param {JobInfo<any>} params.job - The job information.
+ * @param {string} params.type - The type of stream, either "input" or "output".
+ * @param {string} [params.tag] - Optional tag for the stream.
+ * @param {z.ZodType<O>} [params.def] - Optional Zod schema for validation.
+ * @param {StreamQuery} params.query - The query for the stream.
+ * @returns {Array} An array of stream data with a `last` property for the most recent data.
+ */
 export function useStream<O>({
   job: { specName, uniqueSpecLabel, jobId, connRef },
   tag,

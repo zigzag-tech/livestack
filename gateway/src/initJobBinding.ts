@@ -6,6 +6,18 @@ import { SpecOrName, resolveUniqueSpec } from "@livestack/core";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = "jwt_secret";
+/**
+ * Initializes the job binding for the LiveStack socket.io gateway.
+ *
+ * @param {Object} params - The parameters for initializing the job binding.
+ * @param {HTTPServer} params.httpServer - The HTTP server instance.
+ * @param {string} [params.socketPath="/livestack.socket.io"] - The path for the socket.io server.
+ * @param {function} [params.onConnect] - Callback function to be called on a new connection.
+ * @param {SpecOrName[]} params.allowedSpecsForBinding - List of allowed specs for binding.
+ * @param {LiveEnv|null} [params.liveEnv] - The live environment instance.
+ * @param {string} [params.authToken] - The authentication token for socket connections.
+ * @returns {SocketIOServer} The initialized socket.io server instance.
+ */
 export function initJobBinding({
   httpServer,
   socketPath = "/livestack.socket.io",
