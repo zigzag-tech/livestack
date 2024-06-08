@@ -30,7 +30,12 @@ We look forward to seeing your next idea come to life with Livestack!
 npm install @livestack/core @livestack/gateway @livestack/client
 ```
 
-For a detailed walkthrough, check out the [Quickstart](#quickstart) section below to get started.
+For a detailed walkthrough, choose one of the tutorials from the quickstart section below.
+
+## Quickstart
+
+- [Real-Time Speech App Tutorial](https://live.dev/docs/documents/_livestack_tutorials.speech_app_tutorial.html#md:prerequisites)
+
 
 ## Features (current)
 
@@ -53,9 +58,6 @@ Livestack aims at providing:
   - [Game development](https://github.com/zigzag-tech/ready-agent-one)
   -  realtime image generation.
 
-## Quickstart
-
-- [Real-Time Speech App Tutorial](https://live.dev/docs/documents/_livestack_tutorials.speech_app_tutorial.html#md:prerequisites)
 
 
 ## Comparism with other frameworks
