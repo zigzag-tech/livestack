@@ -24,6 +24,14 @@ Livestack, designed from the ground up, aims to democratize this process, making
 
 We look forward to seeing your next idea come to life with Livestack!
 
+# Installation
+  
+```bash
+npm install @livestack/core @livestack/gateway @livestack/client
+```
+
+For a detailed walkthrough, check out the [Quickstart](#quickstart) section below to get started.
+
 ## Features (current)
 
 Livestack aims at providing:
@@ -44,8 +52,6 @@ Livestack aims at providing:
   - live RAG liveflow.
   - [Game development](https://github.com/zigzag-tech/ready-agent-one)
   -  realtime image generation.
-
-
 
 ## Quickstart
 
