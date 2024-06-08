@@ -35,6 +35,7 @@ For a detailed walkthrough, choose one of the tutorials from the quickstart sect
 ## Quickstart
 
 - [Real-Time Speech App Tutorial](https://live.dev/docs/documents/_livestack_tutorials.speech_app_tutorial.html#md:prerequisites)
+- Learn the mechanics: [Minimal Example: Live Counter] 
 
 
 ## Features (current)
