@@ -89,7 +89,11 @@ export class JobSpec<
   protected logger: ReturnType<typeof getLogger>;
   private _defGraph: DefGraph | null = null;
 
-  public getDefGraph() {
+  /**
+   * Retrieves the definition graph for the job spec.
+   * @returns The definition graph.
+   */
+  public getDefGraph(): DefGraph {
     if (!this._defGraph) {
       this._defGraph = initDefGraph({
         root: {
@@ -162,7 +166,13 @@ export class JobSpec<
   public liveEnvP: Promise<LiveEnv>;
   public liveEnvPWithTimeout: Promise<LiveEnv>;
 
-  public static lookupByName(specName: string) {
+  /**
+   * Looks up a JobSpec by its name.
+   * @param specName - The name of the job spec.
+   * @returns The JobSpec instance.
+   * @throws If the JobSpec is not defined on this machine.
+   */
+  public static lookupByName(specName: string): JobSpec<any, any, any, any, any> {
     if (!JobSpec._registryBySpecName[specName]) {
       throw new Error(
         `JobSpec ${specName} not defined on this machine. Please make sure they are properly imported.`
@@ -171,6 +181,16 @@ export class JobSpec<
     return JobSpec._registryBySpecName[specName];
   }
 
+  /**
+   * Derives a new JobSpec from the current one with additional parameters.
+   * @template NewP - The type of the new job parameters.
+   * @template NewI - The type of the new input stream set.
+   * @template NewO - The type of the new output stream set.
+   * @template NewIMap - The mapped type of the new input stream set.
+   * @template NewOMap - The mapped type of the new output stream set.
+   * @param newP - The parameters for the new JobSpec.
+   * @returns The derived JobSpec instance.
+   */
   public derive<NewP, NewI, NewO, NewIMap, NewOMap>(
     newP: Partial<
       ConstructorParameters<typeof JobSpec<NewP, NewIMap, NewOMap>>[0]
@@ -243,7 +263,13 @@ export class JobSpec<
     return r;
   }
 
-  async getJobManager(jobId: string) {
+  /**
+   * Retrieves the JobManager for a specific job ID.
+   * @param jobId - The ID of the job.
+   * @returns A promise that resolves to the JobManager instance.
+   * @throws If the job is not found.
+   */
+  async getJobManager(jobId: string): Promise<JobManager<P, I, O, IMap, OMap>> {
     const liveEnv = await this.liveEnvPWithTimeout;
     const jobRecResp = await liveEnv.vaultClient.db.getJobRec({
       projectUuid: liveEnv.projectUuid,
@@ -273,6 +299,15 @@ export class JobSpec<
     });
   }
 
+  /**
+   * Feeds data to a specific input tag of a job.
+   * @template K - The key type of the input stream set.
+   * @param params - The parameters for feeding the job input.
+   * @param params.jobId - The ID of the job.
+   * @param params.data - The data to feed.
+   * @param params.tag - Optional input tag. If not provided, the default or single input tag will be used.
+   * @returns A promise that resolves when the data is fed.
+   */
   async feedJobInput<K extends keyof IMap>({
     jobId,
     data,
@@ -300,6 +335,16 @@ export class JobSpec<
   } = {};
 
   // p-limit feeding to guarantee the order of data sent to the stream
+  /**
+   * @hidden
+   */
+  /**
+   * Sends data to a stream with p-limit to guarantee the order of data sent to the stream.
+   * @template T - The type of the stream ("in" or "out").
+   * @param params - The parameters for sending data to the stream.
+   * @returns A promise that resolves when the data is sent.
+   * @hidden
+   */
   public async _getStreamAndSendDataToPLimited<T extends "in" | "out">({
     jobId,
     tag,
@@ -395,7 +440,14 @@ export class JobSpec<
     });
   }
 
-  async terminateJobInput({ jobId, tag }: { jobId: string; tag?: keyof IMap }) {
+  /**
+   * Terminates a specific input tag of a job.
+   * @param params - The parameters for terminating the job input.
+   * @param params.jobId - The ID of the job.
+   * @param params.tag - Optional input tag. If not provided, the default or single input tag will be used.
+   * @returns A promise that resolves when the input is terminated.
+   */
+  async terminateJobInput({ jobId, tag }: { jobId: string; tag?: keyof IMap }): Promise<void> {
     return this._deriveInputsForJob(jobId)(tag).terminate();
   }
 
@@ -406,6 +458,12 @@ export class JobSpec<
     };
   } = {};
 
+  /**
+   * Retrieves the stream ID for a specific job and tag.
+   * @param params - The parameters for retrieving the stream ID.
+   * @returns A promise that resolves to the stream ID.
+   * @throws If the stream node is not found.
+   */
   protected async getStreamIdForJob({
     jobId,
     type,
@@ -439,6 +497,12 @@ export class JobSpec<
     return streamNode.streamId;
   }
 
+  /**
+   * Retrieves the input job stream for a specific job and tag.
+   * @template K - The key type of the input stream set.
+   * @param p - The parameters for retrieving the input job stream.
+   * @returns A promise that resolves to the input job stream.
+   */
   public getInputJobStream = async <K extends keyof IMap>(p: {
     jobId: string;
     tag: K;
@@ -449,6 +513,12 @@ export class JobSpec<
     })) as DataStream<WrapTerminatorAndDataId<unknown>>;
   };
 
+  /**
+   * Retrieves the output job stream for a specific job and tag.
+   * @template K - The key type of the output stream set.
+   * @param p - The parameters for retrieving the output job stream.
+   * @returns A promise that resolves to the output job stream.
+   */
   public getOutputJobStream = async <K extends keyof OMap>(p: {
     jobId: string;
     tag: K;
@@ -459,6 +529,13 @@ export class JobSpec<
     })) as DataStream<WrapTerminatorAndDataId<OMap[K]>>;
   };
 
+  /**
+   * Retrieves the job stream for a specific job, type, and tag.
+   * @template TT - The type of the stream ("in" or "out").
+   * @template K - The key type of the stream set.
+   * @param p - The parameters for retrieving the job stream.
+   * @returns A promise that resolves to the job stream.
+   */
   protected getJobStream = lruCacheFn(
     ({ jobId, type, tag }) => `${this.name}--${jobId}::${type}/${tag}`,
     async <
@@ -621,6 +698,12 @@ export class JobSpec<
     >;
   } = {};
 
+  /**
+   * Creates an output collector for a specific job and tag.
+   * @template K - The key type of the output stream set.
+   * @param params - The parameters for creating the output collector.
+   * @returns The created output collector.
+   */
   public createOutputCollector<K extends keyof OMap>({
     jobId,
     tag,
@@ -672,6 +755,11 @@ export class JobSpec<
    * @param params.uniqueSpecLabel - Optional unique label for the job spec.
    * @param params.inputStreamIdOverridesByTag - Optional overrides for input stream IDs by tag.
    * @param params.outputStreamIdOverridesByTag - Optional overrides for output stream IDs by tag.
+   * @returns A promise that resolves to the JobManager instance for the enqueued job.
+   */
+  /**
+   * Enqueues a new job with the given parameters.
+   * @param p - The parameters for enqueuing the job.
    * @returns A promise that resolves to the JobManager instance for the enqueued job.
    */
   public async enqueueJob(p?: {
@@ -813,6 +901,13 @@ export class JobSpec<
    * @param params.outputTag - Optional output tag to wait for the result. If not provided, the default or single output tag will be used.
    * @returns A promise that resolves to the job result containing the data and timestamp, or null if no result is available.
    */
+  /**
+   * Enqueues a job with the given input, waits for the result, and returns it.
+   * @template KI - The key type of the input stream set.
+   * @template KO - The key type of the output stream set.
+   * @param params - The parameters for enqueuing the job and getting the result.
+   * @returns A promise that resolves to the job result containing the data and timestamp, or null if no result is available.
+   */
   public enqueueAndGetResult = async <
     KI extends keyof IMap,
     KO extends keyof OMap
@@ -841,6 +936,11 @@ export class JobSpec<
     return out;
   };
 
+  /**
+   * Looks up the child job ID by group ID and spec tag.
+   * @param params - The parameters for looking up the child job ID.
+   * @returns A promise that resolves to the child job ID.
+   */
   protected async lookUpChildJobIdByGroupIDAndSpecTag({
     groupId,
   }: {
@@ -853,7 +953,7 @@ export class JobSpec<
     return groupId;
   }
 
-  public _deriveInputsForJob: (jobId: string) => JobInput<IMap> = (
+  private _deriveInputsForJob: (jobId: string) => JobInput<IMap> = (
     jobId: string
   ) => {
     const that = this;
@@ -972,30 +1072,54 @@ export class JobSpec<
     })();
   };
 
-  protected _getInputTags() {
+  /**
+   * Retrieves the input tags for the job spec.
+   * @returns The input tags.
+   */
+  protected _getInputTags(): (keyof IMap)[] {
     return Object.keys(this.input) as (keyof IMap)[];
   }
-  protected _getOutputTags() {
+  /**
+   * Retrieves the output tags for the job spec.
+   * @returns The output tags.
+   */
+  protected _getOutputTags(): (keyof OMap)[] {
     return Object.keys(this.output) as (keyof OMap)[];
   }
 
-  public get inputTags() {
+  /**
+   * Retrieves the input tags for the job spec.
+   * @returns The input tags.
+   */
+  public get inputTags(): (keyof IMap)[] {
     return this._getInputTags();
   }
 
-  public get outputTags() {
+  /**
+   * Retrieves the output tags for the job spec.
+   * @returns The output tags.
+   */
+  public get outputTags(): (keyof OMap)[] {
     return this._getOutputTags();
   }
 
-  public get isInputSingle() {
+  /**
+   * Checks if the job spec has a single input tag.
+   * @returns True if there is a single input tag, false otherwise.
+   */
+  public get isInputSingle(): boolean {
     return this.inputTags.length === 1;
   }
 
-  public get isOutputSingle() {
+  /**
+   * Checks if the job spec has a single output tag.
+   * @returns True if there is a single output tag, false otherwise.
+   */
+  public get isOutputSingle(): boolean {
     return this.outputTags.length === 1;
   }
 
-  public _deriveOutputsForJob: (jobId: string) => JobOutput<OMap> = (
+  private _deriveOutputsForJob: (jobId: string) => JobOutput<OMap> = (
     jobId: string
   ) => {
     const singletonSubscriberByTag = <K extends keyof OMap>(tag: K) => {
@@ -1196,6 +1320,15 @@ export class JobSpec<
     };
   }
 
+  /**
+   * Retrieves a single tag for the specified type (input or output).
+   * @template T - The type of the tag ("input" or "output").
+   * @template ThrowErr - Whether to throw an error if the tag cannot be found.
+   * @param type - The type of the tag.
+   * @param throwError - Whether to throw an error if the tag cannot be found.
+   * @returns The single tag or an error object if throwError is false.
+   * @throws If the tag cannot be found and throwError is true.
+   */
   public getSingleTag<
     T extends "input" | "output",
     ThrowErr extends true | false
@@ -1369,11 +1502,19 @@ export class JobSpec<
   //   return { spec: childSpec, jobId };
   // }
 
-  public toString() {
+  /**
+   * Converts the job spec to a string representation.
+   * @returns The name of the job spec.
+   */
+  public toString(): string {
     return this.name;
   }
 
-  toJSON() {
+  /**
+   * Converts the job spec to a JSON representation.
+   * @returns The name of the job spec.
+   */
+  toJSON(): string {
     return this.name;
   }
 
@@ -1382,6 +1523,12 @@ export class JobSpec<
    * Defines a worker for the job spec.
    * @template WP - The type of the worker parameters.
    * @param params - The parameters for defining the worker, excluding the job spec.
+   * @returns The created LiveWorkerDef instance.
+   */
+  /**
+   * Defines a worker for the job spec.
+   * @template WP - The type of the worker parameters.
+   * @param p - The parameters for defining the worker, excluding the job spec.
    * @returns The created LiveWorkerDef instance.
    */
   public defineWorker<WP extends object | undefined>(
@@ -1398,6 +1545,12 @@ export class JobSpec<
    * @template WP - The type of the worker parameters.
    * @param params - The parameters for defining and starting the worker.
    * @param params.instanceParams - Optional instance parameters for the worker.
+   * @returns A promise that resolves to the created LiveWorkerDef instance.
+   */
+  /**
+   * Defines a worker for the job spec and starts it.
+   * @template WP - The type of the worker parameters.
+   * @param params - The parameters for defining and starting the worker.
    * @returns A promise that resolves to the created LiveWorkerDef instance.
    */
   public async defineWorkerAndStart<WP extends object | undefined>({
@@ -1419,6 +1572,14 @@ export class JobSpec<
    * @param params - The parameters for constructing the JobSpec.
    * @returns The created JobSpec instance.
    */
+  /**
+   * Creates a new JobSpec instance with the given parameters.
+   * @template P - The type of the job parameters.
+   * @template I - The type of the input stream set.
+   * @template O - The type of the output stream set.
+   * @param p - The parameters for constructing the JobSpec.
+   * @returns The created JobSpec instance.
+   */
   public static define<P, I, O>(
     p: ConstructorParameters<
       typeof JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>
@@ -1427,6 +1588,11 @@ export class JobSpec<
     return new JobSpec<P, I, O, InferTMap<I>, InferTMap<O>>(p);
   }
 
+  /**
+   * Checks if the given object is an instance of JobSpec.
+   * @param x - The object to check.
+   * @returns True if the object is an instance of JobSpec, false otherwise.
+   */
   static isJobSpec = (x: any): x is JobSpec<any, any, any, any, any> => {
     return x instanceof JobSpec;
   };

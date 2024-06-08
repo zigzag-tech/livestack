@@ -31,6 +31,20 @@ const DEFERRED_CLOSED_CONN_CACHE: Record<
   DeferredClosedConn | undefined
 > = {};
 
+/**
+ * Custom hook to bind a job to a socket.io connection.
+ *
+ * @param {Object} params - The parameters for the hook.
+ * @param {string} params.socketIOURI - The URI for the socket.io server.
+ * @param {string} params.socketIOPath - The path for the socket.io server.
+ * @param {SocketIOClient} params.socketIOClient - The socket.io client instance.
+ * @param {string} params.specName - The name of the job specification.
+ * @param {string} [params.uniqueSpecLabel] - Optional unique label for the job specification.
+ * @param {string} [params.authToken] - Optional authentication token.
+ * @param {P} [params.jobOptions] - Optional job options.
+ * @param {string} [params.jobId] - Optional job ID.
+ * @returns {JobInfo<P>} An object containing the job information and connection reference.
+ */
 export function useJobBinding<P>({
   socketIOURI,
   socketIOPath,
