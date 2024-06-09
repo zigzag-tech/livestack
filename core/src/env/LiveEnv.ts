@@ -311,7 +311,7 @@ const getOrPromptForUserCredentials: (localProjectId: string) => Promise<{
         const cliTempToken = await getCliTempToken(localProjectId);
         const inBoxStr = `${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} `;
 
-        const multiLineText = `\nTo continue, get your Livestack token here:\n${inBoxStr}\n`;
+        const multiLineText = `\nTo continue, first get a Livestack token here:\n${inBoxStr}\n`;
         addDoubleBox(multiLineText);
 
         console.info(
