@@ -241,9 +241,7 @@ async function resolveProjectInfo(projectId: string): Promise<{
       localProjectId
     ));
   }
-  const errMsg =
-    `Failed to fetch project from ${LIVESTACK_DASHBOARD_URL_ROOT}. ` +
-    CONN_FAILED_MSG;
+
   try {
     const resp = await fetch(
       `${LIVESTACK_DASHBOARD_URL_ROOT}/api/v1/projects?userId=${userId}&localProjectId=${localProjectId}`,
@@ -272,6 +270,9 @@ async function resolveProjectInfo(projectId: string): Promise<{
     }
   } catch (e) {
     console.error(e);
+    const errMsg =
+      `Failed to fetch project from ${LIVESTACK_DASHBOARD_URL_ROOT}. ` +
+      CONN_FAILED_MSG;
     throw new Error(errMsg);
   }
 }
@@ -311,11 +312,11 @@ const getOrPromptForUserCredentials: (localProjectId: string) => Promise<{
         const cliTempToken = await getCliTempToken(localProjectId);
         const inBoxStr = `${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} `;
 
-        const multiLineText = `\nTo continue, first get a Livestack token here:\n${inBoxStr}\n`;
+        const multiLineText = `\nTo continue, first get your Livestack token here:\n\n${inBoxStr}\n`;
         addDoubleBox(multiLineText);
 
         console.info(
-          yellow`(If you cannot open it, copy the link & paste it in a browser.)`
+          yellow`(If you cannot open the link, copy & paste it in a browser.)`
         );
 
         const {
