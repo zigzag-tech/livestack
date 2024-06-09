@@ -27,6 +27,7 @@ We look forward to seeing your next idea come to life with Livestack!
 ## Installation
   
 ```bash
+# Install both backend and frontend packages
 npm install @livestack/core @livestack/gateway @livestack/client
 ```
 
