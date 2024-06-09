@@ -8,6 +8,21 @@ if (!mode || (mode !== "dev" && mode !== "prod")) {
   process.exit(1);
 }
 
+function writePackageJson(pkgFolder, folder, indexFile) {
+  const folderDir = path.join(__dirname, pkgFolder, folder);
+  const packageJsonPath = path.join(folderDir, "package.json");
+  const packageJsonContent = JSON.stringify(
+    { main: `../src/${folder}/${indexFile}` },
+    null,
+    2
+  );
+  if (!fs.existsSync(folderDir)) {
+    fs.mkdirSync(folderDir, { recursive: true });
+  }
+  fs.writeFileSync(packageJsonPath, packageJsonContent, "utf8");
+  console.log(`package.json written to ${packageJsonPath}`);
+}
+
 // Define the new "main" value based on the mode
 const mainValue = mode === "dev" ? "src/index.ts" : "dist/index.js";
 
@@ -79,11 +94,16 @@ for (const folder of multiEntryPointsSubfolders) {
   } else {
     packageJson.exports = exportsValue;
   }
-  
+
   fs.writeFileSync(
     packageJsonPath,
     JSON.stringify(packageJson, null, 2) + "\n",
     "utf8"
   );
   console.log(`Updated "exports" field for ${folder} for ${mode} mode.`);
+
+  if (mode === "dev") {
+    writePackageJson(folder, "client", "index.ts");
+    writePackageJson(folder, "server", "index.ts");
+  }
 }
