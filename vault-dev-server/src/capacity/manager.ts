@@ -14,9 +14,11 @@ import {
 } from "@livestack/vault-interface/src/generated/capacity.js";
 import { CallContext } from "nice-grpc";
 import { createClient } from "redis";
-import _, { forEach } from "lodash";
+import _ from "lodash";
 import { v4 } from "uuid";
-import { promises as fs } from "fs";
+import { tmpdir } from "os";
+import { mkdir, writeFile } from "fs/promises";
+import { join } from "path";
 
 class CapacityManager implements CacapcityServiceImplementation {
   private redisClientP = createClient().connect();
@@ -110,7 +112,8 @@ class CapacityManager implements CacapcityServiceImplementation {
 
     const capacitiesByInstanceId: Record<string, SpecNameAndCapacity[]> = {};
 
-    const logFilePath = `/home/ubuntu/auto-live-lower-thirds/cloud-dashboard/src/server/${projectUuid}.json`;
+    const tempDir = join(tmpdir(), "capacity_logs");
+    const logFilePath = join(tempDir, `${projectUuid}.json`);
 
     const capacities = await Promise.all(
       instanceIds.map((instanceId) =>
@@ -124,8 +127,11 @@ class CapacityManager implements CacapcityServiceImplementation {
     }
 
     try {
+      // Ensure the temporary directory exists
+      await mkdir(tempDir, { recursive: true });
+
       const jsonData = JSON.stringify(capacitiesByInstanceId, null, 2);
-      fs.writeFile(logFilePath, jsonData, "utf8"); // 同步写入文件
+      await writeFile(logFilePath, jsonData, "utf8"); // Asynchronously write to the file
       console.log("Data saved to file:", logFilePath);
     } catch (error) {
       console.error("Failed to save data to file:", error);
