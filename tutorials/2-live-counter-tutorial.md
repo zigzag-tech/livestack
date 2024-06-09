@@ -1,8 +1,8 @@
 ### Real-Time Simple Counter App Tutorial
 
-Hopefully by following the previous tutorial, you have successfully got your own real-time speech app up and running. Now this tutorial will guide you through the creation of another real-time full-stack application using Livestack. We will dive into the details of the server, client, and common components to understand how they work together to provide a seamless real-time experience.
+This tutorial will guide you through the creation of another real-time full-stack application using Livestack. We will dive into the details of the server, client, and common components to understand how they work together to provide a seamless real-time experience.
 
-### Quick Start
+### TL;DR
 
 As always, you can run the following commands to see how the end result is going to look like
 
