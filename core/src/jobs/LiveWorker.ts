@@ -153,12 +153,10 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
             LiveWorkerDef.registeredWorkerDefsBySpecName[specName]
               .autoStartWorker
         );
-        console.log("autoStartSpecNames", autoStartSpecNames);
+        // console.debug("autoStartSpecNames", autoStartSpecNames);
         const capacity = 10;
 
-        await (
-          await this.liveEnvP
-        ).vaultClient.capacity.respondToCapacityQuery({
+        await(await this.liveEnvP).vaultClient.capacity.respondToCapacityQuery({
           correlationId,
           projectUuid,
           instanceId,
