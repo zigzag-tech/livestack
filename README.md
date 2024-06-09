@@ -68,14 +68,14 @@ Livestack aims at providing:
 
 | Features                                                    | Livestack | Langchain/<br />LangGraph | Llamaindex | ComfyUI | Ray.io |
 | ----------------------------------------------------------- | :-------: | :-----------------------: | :--------: | :-----: | ------ |
-| DAG based liveflow                                          |    ✅     |            ✅             |     ✅     |   ✅    |        |
+| Liveflow  (realtime workflow)                               |    ✅     |            ❌             |     ❌     |   ❌    | ❌     |
 | Full-stack app scaffolding                                  |    ✅     |            ❌             |     ❌     |   ❌    | ❌     |
 | Job autoscaling                                             |    ✅     |            ❌             |     ❌     |   ❌    | ❌     |
 | Any modality as input/output <br />(e.g. text/image/audio)  |    ✅     |            ❌             |     ❌     |   ❌    | ✅     |
 | Allow any number of input/output <br />per processing node  |    ✅     |            ❌             |     ❌     |   ✅    |        |
 | Streaming & async input/output                              |    ✅     |            🔶            |    🔶     |   ❌    | 🔶    |
 | Long running stream processing                              |    ✅     |            ❌             |     ❌     |   ❌    | ✅     |
-| Cloud+on-prem mixed deployment <br />(local + cloud hybrid) |    ✅     |            ❌             |     ❌     |   ❌    | ❌     |
+| Cloud+on-prem mixed deployment <br />(local + cloud hybrid) |    ✅     |            ❌             |     ❌     |   ❌    | 🔶     |
 | Out-of-the-box data logging                                 |    ✅     |            ❌             |     ❌     |   ❌    | ❌     |
 | Python + JS Hybrid language liveflows                       |    🚧    |            ✅             |     ❌     |   ❌    | ❌     |
 | Official support audio Input & output                       |    🚧    |            ❌             |     ❌     |   ❌    | ❌     |
