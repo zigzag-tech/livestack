@@ -35,7 +35,7 @@ For a detailed walkthrough, choose one of the tutorials from the quickstart sect
 
 ## Quickstart
 
-- [Real-Time Speech App Tutorial](https://live.dev/docs/documents/_livestack_tutorials.1_speech_app_tutorial.html)
+- [Build Your Own Real Time Conversation Assistant: Transcription, Summarization, and Translation](https://live.dev/docs/documents/_livestack_tutorials.1_speech_app_tutorial.html)
 - Learn the mechanics (single JobSpec): [Minimal Example: Live Counter](https://live.dev/docs/documents/_livestack_tutorials.2_live_counter_tutorial.html)
 - Learn the mechanics: [Minimal Example: Liveflow Zoo] 
 

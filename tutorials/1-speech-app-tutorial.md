@@ -1,4 +1,4 @@
-### Real-Time Speech App Tutorial
+### Build Your Own Real Time Conversation Assistant: Transcription, Summarization, and Translation
 
 In this tutorial, you'll learn how to build a real-time speech app using the Livestack framework. This app will record speech, transcribe it into text, translate the text into French, and provide a summarized title periodically.
 
