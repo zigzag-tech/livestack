@@ -8,15 +8,17 @@ import cors from "cors";
 import ViteExpress from "vite-express";
 import { speechLiveflow } from "./liveflow.speech";
 
-const liveEnvP = LiveEnv.create({
-  projectId: "MY_LIVE_SPEECH_APP",
-  storageProvider: getLocalTempFileStorageProvider("/tmp/zzlive"),
-});
+
 
 // Main function
 async function main() {
+  const liveEnvP = LiveEnv.create({
+    projectId: "MY_LIVE_ASSISTANT",
+    storageProvider: getLocalTempFileStorageProvider("/tmp/zzlive"),
+  });
+
   // Set the global LiveEnv
-  LiveEnv.setGlobal(liveEnvP);
+  LiveEnv.setGlobal(await liveEnvP);
 
   // Create an Express app
   const app = express();
