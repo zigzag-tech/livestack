@@ -1,6 +1,6 @@
 ### Real-Time Speech App Tutorial
 
-In this tutorial, you'll learn how to build a real-time speech app using the LiveStack framework. This app will record speech, transcribe it into text, translate the text into French, and provide a summarized title periodically.
+In this tutorial, you'll learn how to build a real-time speech app using the Livestack framework. This app will record speech, transcribe it into text, translate the text into French, and provide a summarized title periodically.
 
 #### Prerequisites
 
@@ -11,9 +11,9 @@ Before you begin, make sure you have the following installed:
 
 ### Quick Start
 
-If you want to get started quickly without going through each step in detail, you can use the LiveStack example project creator. This will set up all the necessary files for you.
+If you want to get started quickly without going through each step in detail, you can use the Livestack example project creator. This will set up all the necessary files for you.
 
-1. **Create a new LiveStack app:**
+1. **Create a new Livestack app:**
 
 ```bash
 npx create-livestack my-livestack-app --template typescript-speech-app
@@ -378,4 +378,4 @@ npm run dev
 
 ### Conclusion
 
-By following this tutorial, you've built a real-time speech transcription, translation and summary app using the LiveStack framework. The app records speech, transcribes it, translates it into French, and periodically generates a summarized title. For a quick start, use the `npx create-livestack <project-directory> --template [typescript-speech-app / typescript-backend-only / typescript-setup-only]` command, or follow the detailed steps to gain a deeper understanding of the process.
+By following this tutorial, you've built a real-time speech transcription, translation and summary app using the Livestack framework. The app records speech, transcribes it, translates it into French, and periodically generates a summarized title. For a quick start, use the `npx create-livestack <project-directory> --template [typescript-speech-app / typescript-backend-only / typescript-setup-only]` command, or follow the detailed steps to gain a deeper understanding of the process.
