@@ -34,6 +34,43 @@ npm run dev
 
 This will set up and run the app immediately. However, if you want to understand how everything works, we recommend going through the detailed approach below.
 
+4. **If you are running a Livestack app for the very first time:**
+
+If you're running a Livestack app for the very first time, you will need to complete the sign-up or login process. Here are the steps to guide you through this process:
+
+- After running `npm run dev`, you should see below in your terminal. Click on the link `https://live.dev/cli?t=xxxx` after `To continue, get your Livestack token here`:
+&nbsp;
+
+![image](auth_flow/screenshot1.JPG)
+&nbsp;
+
+- The link will take you to a browser window where you can either LOG IN or REGISTER:
+&nbsp;
+
+![image](auth_flow/screenshot2.JPG)
+&nbsp;
+
+- After logging in, you should be redirected to the page below where you can click on the yellow button that says `Add xxx to My Account`:
+&nbsp;
+
+![image](auth_flow/screenshot3.JPG)
+&nbsp;
+
+
+- Congratulations! You've successfully linked your project to your account, and your terminal should print out a line saying `Welcome to Livestack! Your token has been saved to `xxx/.livestack/config.toml`:
+&nbsp;
+
+![image](auth_flow/screenshot5.JPG)
+&nbsp;
+
+- You might have noticed the highlighted line that says `LIVE https://live.dev/p/xxxx` in the above screenshot. If you click on the link, you will be taken to the project dashboard where you can monitor your workflow linage and data flow in real-time:
+&nbsp;
+
+![image](auth_flow/screenshot4.JPG)
+&nbsp;
+
+By following these steps, you will successfully complete the sign-up or login process and be ready to use the Livestack app.
+
 ### Step 1: Setting Up the Project
 
 First, we need to create a new React project and install the necessary dependencies.
