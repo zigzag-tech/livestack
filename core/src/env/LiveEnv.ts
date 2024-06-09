@@ -309,33 +309,14 @@ const getOrPromptForUserCredentials: (localProjectId: string) => Promise<{
     } else {
       try {
         const cliTempToken = await getCliTempToken(localProjectId);
-        const inBoxStr = ` ${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} `;
-        const boxWidth = inBoxStr.length;
-        const boxBorder = "╔" + "═".repeat(boxWidth) + "╗";
-        const boxSides = "║";
-        const boxBottom = "╚" + "═".repeat(boxWidth) + "╝";
-        const toContinueMsg = `To continue, get your Livestack token here:`;
-        console.info(blueBright(boxBorder));
+        const inBoxStr = `${LIVESTACK_DASHBOARD_URL_ROOT}/cli?t=${cliTempToken} `;
+
+        const multiLineText = `\nTo continue, get your Livestack token here:\n${inBoxStr}\n`;
+        addDoubleBox(multiLineText);
+
         console.info(
-          blueBright`${boxSides}${Array(
-            Math.floor((inBoxStr.length + 2 - toContinueMsg.length) / 2)
-          ).join(" ")}${toContinueMsg}${Array(
-            Math.ceil((inBoxStr.length + 2 - toContinueMsg.length) / 2)
-          ).join(" ")}${boxSides}`
+          yellow`(If you cannot open it, copy the link & paste it in a browser.)`
         );
-        console.info(
-          blueBright`${boxSides}${Array(inBoxStr.length + 1).join(
-            " "
-          )}${boxSides}`
-        );
-        console.info(blueBright`${boxSides}${inBoxStr}${boxSides}`);
-        console.info(
-          blueBright`${boxSides}${Array(inBoxStr.length + 1).join(
-            " "
-          )}${boxSides}`
-        );
-        console.info(blueBright(boxBottom));
-        console.info(yellow`(Or copy & paste the link in a browser)`);
 
         const {
           userToken: authToken,
@@ -401,6 +382,22 @@ const getOrPromptForUserCredentials: (localProjectId: string) => Promise<{
     }
   });
 };
+
+function addDoubleBox(text: string) {
+  const lines = text.split("\n");
+  const maxLength = Math.max(...lines.map((line) => line.length));
+  const boxWidth = maxLength + 2;
+  const boxBorder = "╔" + "═".repeat(boxWidth) + "╗";
+  const boxSides = "║";
+  const boxBottom = "╚" + "═".repeat(boxWidth) + "╝";
+
+  console.info(blueBright(boxBorder));
+  for (const line of lines) {
+    const padding = " ".repeat(maxLength - line.length);
+    console.info(blueBright`${boxSides} ${line}${padding} ${boxSides}`);
+  }
+  console.info(blueBright(boxBottom));
+}
 
 /**
  * Gets a temporary CLI token.
