@@ -50,7 +50,7 @@ export const speechLiveflow = Liveflow.define({
     expose(titleSummarizerSepc.output.default, "summarized-title"),
     // Expose the default output for translation
     expose(translationSpec.output.default, "translation"),
-
+    // Expose the default input language for translation
     expose(translationSpec.input.lang, "lang"),
   ],
 });
