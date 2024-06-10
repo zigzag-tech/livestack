@@ -1,6 +1,6 @@
 {
   "name": "@livestack/example-speech-app",
-  "version": "0.0.30",
+  "version": "0.0.31",
   "description": "",
   "engines": {
     "node": ">=20.0.0 <22.0.0"
@@ -12,13 +12,13 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@livestack/client": "^0.0.30",
-    "@livestack/core": "^0.0.30",
-    "@livestack/gateway": "^0.0.30",
-    "@livestack/lab-internal-server": "^0.0.30",
-    "@livestack/summarizer": "^0.0.30",
-    "@livestack/transcribe": "^0.0.30",
-    "@livestack/translate-server": "^0.0.30",
+    "@livestack/client": "^0.0.31",
+    "@livestack/core": "^0.0.31",
+    "@livestack/gateway": "^0.0.31",
+    "@livestack/lab-internal-server": "^0.0.31",
+    "@livestack/summarizer": "^0.0.31",
+    "@livestack/transcribe": "^0.0.31",
+    "@livestack/translate-server": "^0.0.31",
     "@types/node": "^20.10.4",
     "@vitejs/plugin-react": "^4.2.1",
     "body-parser": "^1.20.2",

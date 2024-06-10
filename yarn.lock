@@ -3689,14 +3689,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@livestack/client@npm:^0.0.30, @livestack/client@workspace:client":
+"@livestack/client@npm:^0.0.31, @livestack/client@workspace:client":
   version: 0.0.0-use.local
   resolution: "@livestack/client@workspace:client"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/shared": "npm:^0.0.30"
+    "@livestack/shared": "npm:^0.0.31"
     "@rollup/plugin-typescript": "npm:^11.1.6"
     "@types/react": "npm:^18"
     rimraf: "npm:^5.0.7"
@@ -3709,16 +3709,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/core@npm:^0.0.30, @livestack/core@workspace:core":
+"@livestack/core@npm:^0.0.31, @livestack/core@workspace:core":
   version: 0.0.0-use.local
   resolution: "@livestack/core@workspace:core"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/shared": "npm:^0.0.30"
-    "@livestack/vault-client": "npm:^0.0.30"
-    "@livestack/vault-interface": "npm:^0.0.30"
+    "@livestack/shared": "npm:^0.0.31"
+    "@livestack/vault-client": "npm:^0.0.31"
+    "@livestack/vault-interface": "npm:^0.0.31"
     "@ltd/j-toml": "npm:^1.38.0"
     "@types/lodash": "npm:^4.14.201"
     "@types/uuid": "npm:^9.0.7"
@@ -3743,13 +3743,13 @@ __metadata:
     "@babel/core": "npm:^7.24.0"
     "@babel/preset-env": "npm:^7.24.0"
     "@babel/preset-typescript": "npm:^7.23.3"
-    "@livestack/client": "npm:^0.0.30"
-    "@livestack/core": "npm:^0.0.30"
-    "@livestack/gateway": "npm:^0.0.30"
-    "@livestack/lab-internal-server": "npm:^0.0.30"
-    "@livestack/summarizer": "npm:^0.0.30"
-    "@livestack/transcribe": "npm:^0.0.30"
-    "@livestack/translate-server": "npm:^0.0.30"
+    "@livestack/client": "npm:^0.0.31"
+    "@livestack/core": "npm:^0.0.31"
+    "@livestack/gateway": "npm:^0.0.31"
+    "@livestack/lab-internal-server": "npm:^0.0.31"
+    "@livestack/summarizer": "npm:^0.0.31"
+    "@livestack/transcribe": "npm:^0.0.31"
+    "@livestack/translate-server": "npm:^0.0.31"
     "@types/cors": "npm:^2.8.17"
     "@types/express": "npm:^4.17.21"
     "@types/node": "npm:^20"
@@ -3783,15 +3783,15 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/gateway@npm:^0.0.30, @livestack/gateway@workspace:gateway":
+"@livestack/gateway@npm:^0.0.31, @livestack/gateway@workspace:gateway":
   version: 0.0.0-use.local
   resolution: "@livestack/gateway@workspace:gateway"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/core": "npm:^0.0.30"
-    "@livestack/shared": "npm:^0.0.30"
+    "@livestack/core": "npm:^0.0.31"
+    "@livestack/shared": "npm:^0.0.31"
     "@types/jsonwebtoken": "npm:^9.0.6"
     "@types/lodash": "npm:^4.14.201"
     "@types/uuid": "npm:^9.0.7"
@@ -3801,14 +3801,14 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/lab-internal-common@npm:^0.0.30, @livestack/lab-internal-common@workspace:lab-common":
+"@livestack/lab-internal-common@npm:^0.0.31, @livestack/lab-internal-common@workspace:lab-common":
   version: 0.0.0-use.local
   resolution: "@livestack/lab-internal-common@workspace:lab-common"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/core": "npm:^0.0.30"
+    "@livestack/core": "npm:^0.0.31"
     "@rollup/plugin-typescript": "npm:^11.1.6"
     "@types/node": "npm:^16"
     rimraf: "npm:^5.0.7"
@@ -3819,16 +3819,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/lab-internal-server@npm:^0.0.30, @livestack/lab-internal-server@workspace:lab-server":
+"@livestack/lab-internal-server@npm:^0.0.31, @livestack/lab-internal-server@workspace:lab-server":
   version: 0.0.0-use.local
   resolution: "@livestack/lab-internal-server@workspace:lab-server"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/core": "npm:^0.0.30"
-    "@livestack/lab-internal-common": "npm:^0.0.30"
-    "@livestack/shared": "npm:^0.0.30"
+    "@livestack/core": "npm:^0.0.31"
+    "@livestack/lab-internal-common": "npm:^0.0.31"
+    "@livestack/shared": "npm:^0.0.31"
     "@types/node": "npm:^16"
     langchain: "npm:^0.1.36"
     ts-node: "npm:^10.9.1"
@@ -3882,7 +3882,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/shared@npm:^0.0.30, @livestack/shared@workspace:shared":
+"@livestack/shared@npm:^0.0.31, @livestack/shared@workspace:shared":
   version: 0.0.0-use.local
   resolution: "@livestack/shared@workspace:shared"
   dependencies:
@@ -3951,15 +3951,15 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/summarizer@npm:^0.0.30, @livestack/summarizer@workspace:summarizer":
+"@livestack/summarizer@npm:^0.0.31, @livestack/summarizer@workspace:summarizer":
   version: 0.0.0-use.local
   resolution: "@livestack/summarizer@workspace:summarizer"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/core": "npm:^0.0.30"
-    "@livestack/shared": "npm:^0.0.30"
+    "@livestack/core": "npm:^0.0.31"
+    "@livestack/shared": "npm:^0.0.31"
     "@rollup/plugin-typescript": "npm:^11.1.6"
     "@types/node": "npm:^16"
     ollama: "npm:^0.5"
@@ -3974,7 +3974,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/transcribe@npm:^0.0.30, @livestack/transcribe@workspace:transcribe":
+"@livestack/transcribe@npm:^0.0.31, @livestack/transcribe@workspace:transcribe":
   version: 0.0.0-use.local
   resolution: "@livestack/transcribe@workspace:transcribe"
   dependencies:
@@ -3982,8 +3982,8 @@ __metadata:
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-react": "npm:^7.24.6"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/client": "npm:^0.0.30"
-    "@livestack/core": "npm:^0.0.30"
+    "@livestack/client": "npm:^0.0.31"
+    "@livestack/core": "npm:^0.0.31"
     "@rollup/plugin-typescript": "npm:^11.1.6"
     "@types/node": "npm:^16"
     "@types/uuid": "npm:^9.0.7"
@@ -4001,16 +4001,16 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/translate-server@npm:^0.0.30, @livestack/translate-server@workspace:translate-server":
+"@livestack/translate-server@npm:^0.0.31, @livestack/translate-server@workspace:translate-server":
   version: 0.0.0-use.local
   resolution: "@livestack/translate-server@workspace:translate-server"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/core": "npm:^0.0.30"
-    "@livestack/lab-internal-common": "npm:^0.0.30"
-    "@livestack/summarizer": "npm:^0.0.30"
+    "@livestack/core": "npm:^0.0.31"
+    "@livestack/lab-internal-common": "npm:^0.0.31"
+    "@livestack/summarizer": "npm:^0.0.31"
     "@types/node": "npm:^16"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.4.5"
@@ -4026,14 +4026,14 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/vault-client@npm:^0.0.30, @livestack/vault-client@workspace:vault-client":
+"@livestack/vault-client@npm:^0.0.31, @livestack/vault-client@workspace:vault-client":
   version: 0.0.0-use.local
   resolution: "@livestack/vault-client@workspace:vault-client"
   dependencies:
     "@babel/core": "npm:^7.24.5"
     "@babel/preset-env": "npm:^7.16.7"
     "@babel/preset-typescript": "npm:^7.16.7"
-    "@livestack/vault-interface": "npm:^0.0.30"
+    "@livestack/vault-interface": "npm:^0.0.31"
     "@types/lodash": "npm:^4.14.201"
     "@types/node": "npm:^20.11.0"
     "@types/uuid": "npm:^9.0.7"
@@ -4052,8 +4052,8 @@ __metadata:
     "@libp2p/mplex": "npm:^10.0.22"
     "@libp2p/tcp": "npm:^9.0.24"
     "@libp2p/websockets": "npm:^8.0.22"
-    "@livestack/shared": "npm:^0.0.30"
-    "@livestack/vault-interface": "npm:^0.0.30"
+    "@livestack/shared": "npm:^0.0.31"
+    "@livestack/vault-interface": "npm:^0.0.31"
     "@preconstruct/cli": "npm:^2.8.4"
     "@types/node": "npm:^20.11.0"
     better-sqlite3: "npm:^9.4.0"
@@ -4072,7 +4072,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/vault-interface@npm:^0.0.30, @livestack/vault-interface@workspace:vault-interface":
+"@livestack/vault-interface@npm:^0.0.31, @livestack/vault-interface@workspace:vault-interface":
   version: 0.0.0-use.local
   resolution: "@livestack/vault-interface@workspace:vault-interface"
   dependencies:
