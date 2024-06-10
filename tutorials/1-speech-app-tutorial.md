@@ -1,15 +1,16 @@
-### Build Your Own Real Time Conversation Assistant: Transcription, Summarization, and Translation
+# Build Your Own Real Time Conversation Assistant: Transcription, Summarization, and Translation
 
 In this tutorial, you'll learn how to build a real-time speech app using the Livestack framework. This app will record speech, transcribe it into text, translate the text into French, and provide a summarized title periodically.
 
-#### Prerequisites
+## Prerequisites
 
 Before you begin, make sure you have the following installed:
 
-- Node.js
-- npm (Node Package Manager)
+- Node.js (20.0.0 or higher)
+- An OpenAI API key (Get one [here](https://platform.openai.com/signup))
 
-### Quick Start
+
+## Jump Start the Example App
 
 If you want to get started quickly without going through each step in detail, you can use the Livestack example project creator. This will set up all the necessary files for you.
 
@@ -70,6 +71,10 @@ If you're running a Livestack app for the very first time, you will need to comp
 &nbsp;
 
 By following these steps, you will successfully complete the sign-up or login process and be ready to use the Livestack app.
+
+## Create the Example App from Scratch
+
+If you prefer to understand each step in detail, follow the instructions below to create the example app from scratch.
 
 ### Step 1: Setting Up the Project
 
