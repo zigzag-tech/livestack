@@ -3,9 +3,9 @@ import { z } from "zod";
 import {
   translationInputSchema,
   translationOutputSchema,
-  supportedLangs,
 } from "@livestack/lab-internal-common";
 import { getQueuedJobOrCreate } from "./llmChildJobManager";
+import { supportedLangs } from "../../examples/speech-app/src/common/supportedLangs";
 
 export const translationSpec = new JobSpec({
   name: "translation",

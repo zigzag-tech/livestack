@@ -12,7 +12,7 @@ import { translationOutputSchema } from "@livestack/lab-internal-common";
 import { FaStop, FaMicrophone } from "react-icons/fa";
 import { z } from "zod";
 import prettyBytes from "pretty-bytes";
-import { supportedLangs } from "@livestack/lab-internal-common"
+import { supportedLangs } from "common/supportedLangs";
 
 // SpeechComponents component
 export const SpeechComponents: React.FC = () => {
