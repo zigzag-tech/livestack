@@ -27,7 +27,13 @@ cd my-livestack-app
 npm install
 ```
 
-3. **Start the app server:**
+3. **Create a `.env` file in the root directory of your project and add your OpenAI API key:**
+
+```bash
+echo "OPENAI_API_KEY=<your_openai_api_key>" > .env
+```
+
+4. **Start the app server:**
 
 ```bash
 npm run dev
