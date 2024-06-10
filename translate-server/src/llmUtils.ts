@@ -100,7 +100,7 @@ export const llmSelectorSpec = new JobSpec({
   output: translationOutputSchema,
 });
 
-const localLLMTranslationWorker = localLLMTranslationSpec.defineWorker({
+export const localLLMTranslationWorker = localLLMTranslationSpec.defineWorker({
   processor: async ({ input, output }) => {
     for await (const data of input) {
       const r = await translate({ ...data, llmType: "ollama" });
@@ -109,19 +109,26 @@ const localLLMTranslationWorker = localLLMTranslationSpec.defineWorker({
   },
 });
 
-const openAILLMTranslationWorker = openAILLMTranslationSpec.defineWorker({
-  processor: async ({ input, output }) => {
-    const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
-    });
-    for await (const data of input) {
-      const r = await translate({ ...data, llmType: "openai", openai });
-      output.emit(r);
-    }
-  },
-});
+export const openAILLMTranslationWorker = openAILLMTranslationSpec.defineWorker(
+  {
+    processor: async ({ input, output }) => {
+      if (!process.env.OPENAI_API_KEY) {
+        throw new Error(
+          "OPENAI_API_KEY is not defined. Please set it as an environment variable."
+        );
+      }
+      const openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+      });
+      for await (const data of input) {
+        const r = await translate({ ...data, llmType: "openai", openai });
+        output.emit(r);
+      }
+    },
+  }
+);
 
-const llmSelectorWorker = llmSelectorSpec.defineWorker({
+export const llmSelectorWorker = llmSelectorSpec.defineWorker({
   processor: async ({ input, output, jobOptions, invoke }) => {
     const { llmType } = jobOptions;
     const { input: childInput, output: childOutput } =
