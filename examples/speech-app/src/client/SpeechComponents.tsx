@@ -1,5 +1,5 @@
 "use client";
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import {
   usePCMRecorder,
   encodeToB64,
@@ -12,6 +12,7 @@ import { translationOutputSchema } from "@livestack/lab-internal-common";
 import { FaStop, FaMicrophone } from "react-icons/fa";
 import { z } from "zod";
 import prettyBytes from "pretty-bytes";
+import { supportedLangs } from "common/supportedLangs";
 
 // SpeechComponents component
 export const SpeechComponents: React.FC = () => {
@@ -72,6 +73,29 @@ export const SpeechComponents: React.FC = () => {
   const wordCount = useMemo(() => transcription.reduce((total, transcript) => {
     return total + transcript.data.transcript.split(' ').length;
   }, 0), [transcription])
+
+
+  /* TODO:
+1. Expose lang input in backend.
+2. Use useInput() to connect lang to frontend
+3. Implement a dropdown select box whose options are languages
+4. Listen to the "change" event of the dropdown select box, and call "feed" whenever a new langage is selected.
+*/
+  const [lang, setLanguage] = useState("French")
+
+  const { feed: feedLang } = useInput({
+    tag: "lang",
+    job,
+    def: supportedLangs
+  });
+
+  const handleLanguage = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedLang = e.target.value as z.infer<typeof supportedLangs>;
+    setLanguage(selectedLang);
+    if (feedLang) {
+      feedLang(selectedLang);
+    }
+  };
 
   return (
     <div className="m-4 grid grid-cols-5 gap-2 divide-x">
@@ -143,7 +167,14 @@ export const SpeechComponents: React.FC = () => {
           {translation && (
             <div>
               <h2 className="text-indigo-800">
-                4. Your speech translated to French
+                4. Translate speech to
+                <select id="language-select" value={lang} onChange={(e) => handleLanguage(e)}>
+                  {supportedLangs.options.map((language) => (
+                    <option key={language} value={language}>
+                      {language}
+                    </option>
+                  ))}
+                </select>
               </h2>
               <br />
               {translation.map((t, idx) => (
