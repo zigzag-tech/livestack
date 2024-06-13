@@ -8,8 +8,6 @@ import cors from "cors";
 import ViteExpress from "vite-express";
 import { speechLiveflow } from "./liveflow.speech";
 
-
-
 // Main function
 async function main() {
   const liveEnvP = LiveEnv.create({
