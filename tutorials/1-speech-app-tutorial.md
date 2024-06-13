@@ -1,6 +1,6 @@
 # Build Your Own Real Time Conversation Assistant: Transcription, Summarization, and Translation
 
-In this tutorial, you'll learn how to build a real-time speech app using the Livestack framework. This app will record speech, transcribe it into text, translate the text into French, and provide a summarized title periodically.
+In this tutorial, you'll learn how to build a real-time speech app using the Livestack framework. This app will record speech, transcribe it into text, translate the text into a selected language, and provide a summarized title periodically.
 
 ## Prerequisites
 
@@ -86,7 +86,7 @@ If you prefer to understand each step in detail, follow the instructions below t
 
 First, we need to create a new React project and install the necessary dependencies.
 
-1. **Create a new React app:**
+1. **Create a new Livestack app:**
 
 The command below will help you create a project scaffold.
 
