@@ -1,0 +1,5 @@
+.env
+rag_index
+dist
+dist-frontend
+*_index
