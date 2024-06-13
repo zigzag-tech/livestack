@@ -52,7 +52,7 @@
     "eslint-config-next": "14.0.3",
     "postcss": "^8",
     "ts-node": "^10.9.2",
-    "tsx": "^4.7.1",
+    "tsx": "^4.15.2",
     "typescript": "5.4.5",
     "vite": "^5.1.6",
     "vite-tsconfig-paths": "^4.3.2"

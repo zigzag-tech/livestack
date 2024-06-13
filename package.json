@@ -7,7 +7,8 @@
     "use-prod": "node update_subfolder_package_json.js prod"
   },
   "workspaces": [
-    "*"
+    "*",
+    "examples/kitchen-sink"
   ],
   "dependencies": {
     "typedoc": "^0.26.0-beta.2"
