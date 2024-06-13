@@ -34,6 +34,7 @@ async function main() {
     connections: [
       conn({
         from: rawPCMToWavSpec,
+        transform: ({ wavb64Str }) => ({ wavb64Str, whisperType: "openai" }),
         to: speechChunkToTextSpec,
       }),
       conn({
@@ -43,7 +44,10 @@ async function main() {
       }),
       conn({
         from: textSplittingSpec,
-        transform: async (chunkText) => ({ transcript: chunkText }),
+        transform: (chunkText) => ({
+          transcript: chunkText,
+          llmType: "openai",
+        }),
         to: titleSummarizerSepc,
       }),
       conn({

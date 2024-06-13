@@ -19,7 +19,7 @@ export const speechChunkToTextSpec = new JobSpec({
 
 export const speechChunkToTranscriptionWorkerDef = speechChunkToTextSpec.defineWorker({
   autostartWorker: AUTO_START_WORKER,
-  processor: async ({ output, input, invoke }) => {
+  processor: async ({ output, input }) => {
     for await (const data of input) {
       const { wavb64Str, whisperType } = data;
       const job = await getQueuedJobOrCreate({
