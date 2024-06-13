@@ -12,7 +12,7 @@ import { translationOutputSchema } from "@livestack/lab-internal-common";
 import { FaStop, FaMicrophone } from "react-icons/fa";
 import { z } from "zod";
 import prettyBytes from "pretty-bytes";
-import { supportedLangs } from "common/supportedLangs";
+import { supportedLangs } from "@livestack/lab-internal-common";
 
 // SpeechComponents component
 export const SpeechComponents: React.FC = () => {
@@ -70,32 +70,30 @@ export const SpeechComponents: React.FC = () => {
 
   // Toggle recording state
   const handleRecording = isRecording ? stopRecording : startRecording;
-  const wordCount = useMemo(() => transcription.reduce((total, transcript) => {
-    return total + transcript.data.transcript.split(' ').length;
-  }, 0), [transcription])
 
-
-  /* TODO:
-1. Expose lang input in backend.
-2. Use useInput() to connect lang to frontend
-3. Implement a dropdown select box whose options are languages
-4. Listen to the "change" event of the dropdown select box, and call "feed" whenever a new langage is selected.
-*/
-  const [lang, setLanguage] = useState("French")
+  const [language, setLanguage] = useState("French");
 
   const { feed: feedLang } = useInput({
-    tag: "lang",
+    tag: "language",
     job,
-    def: supportedLangs
+    def: supportedLangs,
   });
 
-  const handleLanguage = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleLanguageSelection = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selectedLang = e.target.value as z.infer<typeof supportedLangs>;
     setLanguage(selectedLang);
     if (feedLang) {
       feedLang(selectedLang);
     }
   };
+
+  const wordCount = useMemo(
+    () =>
+      transcription.reduce((total, transcript) => {
+        return total + transcript.data.transcript.split(" ").length;
+      }, 0),
+    [transcription]
+  );
 
   return (
     <div className="m-4 grid grid-cols-5 gap-2 divide-x">
@@ -136,21 +134,19 @@ export const SpeechComponents: React.FC = () => {
             2. Speech transcripts will pop up here
           </h2>
           <br />
-          <>
-            <h2>Transcript</h2>
-            <article
-              style={{
-                maxWidth: "100%",
-              }}
-            >
-              {transcription.map((transcript, i) => (
-                <span key={i} className="text-sm">
-                  {transcript.data.transcript}
-                </span>
-              ))}
-            </article>
-          </>
-          <p>Word Count: {wordCount}</p>
+          <article
+            style={{
+              maxWidth: "100%",
+            }}
+          >
+            {transcription.map((transcript, i) => (
+              <span key={i} className="text-sm">
+                {transcript.data.transcript}
+              </span>
+            ))}
+          </article>
+          <br />
+          <article>Word Count: {wordCount}</article>
         </div>
       </div>
       <div className="col-span-2">
@@ -159,16 +155,17 @@ export const SpeechComponents: React.FC = () => {
             3. Periodically, a one-liner short summary is generated
           </h2>
           <br />
-          <>
-            <h2>Title</h2>
-            <p>{summarizedTitle?.data.summarizedTitle}</p>
-          </>
+          <p>{summarizedTitle?.data.summarizedTitle}</p>
           <br />
           {translation && (
             <div>
               <h2 className="text-indigo-800">
-                4. Translate speech to
-                <select id="language-select" value={lang} onChange={(e) => handleLanguage(e)}>
+                4. Your speech translated to
+                <select
+                  id="language-select"
+                  value={language}
+                  onChange={(e) => handleLanguageSelection(e)}
+                >
                   {supportedLangs.options.map((language) => (
                     <option key={language} value={language}>
                       {language}
