@@ -40,6 +40,9 @@ For a detailed walkthrough, choose one of the tutorials from the quickstart sect
 - Learn the mechanics: [Minimal Example: Liveflow Zoo] 
 
 
+## Join the Community
+[![Discord Channel](https://dcbadge.vercel.app/api/server/JGnGCFgWkN)](https://discord.gg/JGnGCFgWkN)
+
 ## Features (current)
 
 Livestack aims at providing:
