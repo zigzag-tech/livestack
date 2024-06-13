@@ -1,0 +1,33 @@
+{
+  "name": "@livestack/backend-only",
+  "version": "0.0.1",
+  "description": "",
+  "engines": {
+    "node": ">=20.0.0 <22.0.0"
+  },
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "ts-node -r dotenv/config --project tsconfig.json src/index.ts",
+    "test": "ts-node -r dotenv/config --project tsconfig.json src/worker.simple-greeting.ts"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@babel/preset-env": "^7.24.0",
+    "@babel/preset-typescript": "^7.23.3",
+    "@types/node": "^20",
+    "dotenv": "^16.4.5",
+    "eslint-config-next": "14.0.3",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.7.1",
+    "typescript": "5.4.5"
+  },
+  "dependencies": {
+    "@livestack/core": "^0.0.31",
+    "@livestack/shared": "^0.0.31",
+    "@livestack/vault-client": "^0.0.31",
+    "@livestack/vault-interface": "^0.0.31",
+    "zod": "^3.23.8"
+  }
+}
