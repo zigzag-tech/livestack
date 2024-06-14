@@ -620,11 +620,14 @@ export class JobSpec<
 
           const inletNodeId = instaG.findNode((nId) => {
             const n = instaG.getNodeAttributes(nId);
-            if (n.nodeType !== "Inlet") {
+            if (n.nodeType !== "Inlet" || n.tag !== specTagInfo.tag) {
               return false;
             } else {
               const ee = instaG.findOutboundEdge((eId) => {
-                return instaG.target(eId) === connectedJobNodeId;
+                return (
+                  instaG.target(eId) === connectedJobNodeId &&
+                  instaG.source(eId) === nId
+                );
               });
               return !!ee;
             }
