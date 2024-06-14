@@ -1,6 +1,6 @@
 {
   "name": "@livestack/client",
-  "version": "0.0.31",
+  "version": "0.0.32",
   "description": "Helper functions and react hooks that help display Livestack data in the frontend.",
   "scripts": {
     "build": "rimraf dist && rollup -c rollup.config.mjs"
@@ -9,7 +9,7 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "@livestack/shared": "^0.0.31",
+    "@livestack/shared": "^0.0.32",
     "uuid": "^9"
   },
   "devDependencies": {

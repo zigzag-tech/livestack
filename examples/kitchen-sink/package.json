@@ -1,6 +1,6 @@
 {
   "name": "@livestack/kitchen-sink-example",
-  "version": "1.0.0",
+  "version": "0.0.32",
   "description": "",
   "scripts": {
     "dev": "NODE_OPTIONS='-r dotenv/config' tsx --tsconfig tsconfig.json src/server/start-web-server.ts",
@@ -10,11 +10,11 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@livestack/client": "*",
-    "@livestack/core": "*",
-    "@livestack/gateway": "*",
-    "@livestack/lab-internal-server": "*",
-    "@livestack/viz": "*",
+    "@livestack/client": "^0.0.32",
+    "@livestack/core": "^0.0.32",
+    "@livestack/gateway": "^0.0.32",
+    "@livestack/lab-internal-server": "^0.0.32",
+    "@livestack/viz": "^0.0.32",
     "@postlight/parser": "^2.2.3",
     "autoprefixer": "^10.4.19",
     "axios": "^1.6.7",
