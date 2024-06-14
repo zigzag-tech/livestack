@@ -1,11 +1,11 @@
 {
   "name": "@livestack/translate-server",
-  "version": "0.0.31",
+  "version": "0.0.32",
   "license": "MIT",
   "dependencies": {
-    "@livestack/core": "^0.0.31",
-    "@livestack/lab-internal-common": "^0.0.31",
-    "@livestack/summarizer": "^0.0.31",
+    "@livestack/core": "^0.0.32",
+    "@livestack/lab-internal-common": "^0.0.32",
+    "@livestack/summarizer": "^0.0.32",
     "zod": "^3.0.0"
   },
   "main": "src/index.ts",
