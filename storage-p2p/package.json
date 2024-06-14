@@ -1,6 +1,6 @@
 {
   "name": "@livestack/storage-p2p",
-  "version": "0.0.31",
+  "version": "0.0.32",
   "description": "Livestack storage orchestration via P2P.",
   "scripts": {
     "build": "preconstruct build"
