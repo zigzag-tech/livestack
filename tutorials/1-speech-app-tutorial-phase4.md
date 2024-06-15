@@ -1,5 +1,3 @@
-Certainly! Let's move on to Phase 4, where we'll add the summarization functionality to the app. We'll modify the existing code and add new code to both the frontend and backend.
-
 ## Phase 4: Get Summarization to Work
 
 ### Step 1: Update the Frontend
