@@ -9,15 +9,14 @@ In this phase, we'll get the transcription functionality to work. We'll first de
 Create a new file named `liveflow.speech.ts` in the `src/server` directory with the following code:
 
 ```ts
-// [START] Import dependencies
+// Import dependencies
 import {
   rawPCMToWavSpec,
   speechChunkToTextSpec,
 } from "@livestack/transcribe/server";
 import { Liveflow, conn, expose } from "@livestack/core";
-// [END] Import dependencies
 
-// [START] Define speech Liveflow
+// Define speech Liveflow
 export const SPEECH_LIVEFLOW_NAME = "speech_liveflow";
 
 export const speechLiveflow = Liveflow.define({
@@ -34,7 +33,6 @@ export const speechLiveflow = Liveflow.define({
     expose(speechChunkToTextSpec.output.default, "transcription"),
   ],
 });
-// [END] Define speech Liveflow
 ```
 
 #### 1.2 Update `index.ts`
