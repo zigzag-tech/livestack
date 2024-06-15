@@ -6,17 +6,11 @@ By completing this phase, your frontend will be able to capture raw PCM audio da
 
 ### Step 1: Set Up the Project
 
-1. Start by creating a new Livestack app:
+Start by creating a new Livestack app:
 
 ```bash
 npx create-livestack my-livestack-app
 cd my-livestack-app
-```
-
-2. Install the required dependencies:
-
-```bash
-npm install
 ```
 
 ### Step 2: Implement the Frontend
@@ -134,18 +128,6 @@ Explanation:
 - We create an Express app and configure it with CORS, JSON body parsing, and serving static files from the `public` directory.
 - We set the port to `4700` and start the server using `ViteExpress.listen()`.
 
-#### 3.2 Update `package.json`
-
-Update the `scripts` section in the `package.json` file to include the `dev` script:
-
-```json
-"scripts": {
-  "dev": "vite-express --server src/server/index.ts",
-  "build": "tsc && vite build",
-  "preview": "vite preview"
-}
-```
-
 ### Step 4: Run the App
 
 Now that we have set up the backend, let's run the app:
@@ -154,6 +136,15 @@ Now that we have set up the backend, let's run the app:
 npm run dev
 ```
 
+Note that `dev` script is defined in the `scripts` section in the `package.json` file.
+
+```json
+{
+  "scripts": {
+    "dev": "ts-node -r dotenv/config --project tsconfig.json src/server/index.ts"
+  }
+}
+```
 
 Open your browser and navigate to `http://localhost:4700`. You should see the "Start Recording" button. When you click on it, the volume indicator will show a green bar as you speak to the microphone, and the length of the audio (PCM) chunks generated will be logged to the console.
 

@@ -15,21 +15,11 @@ If you prefer to understand each step in detail, follow the instructions below t
 
 ### Step 1: Setting Up the Project
 
-First, we need to create a new React project and install the necessary dependencies.
-
-1. **Create a new Livestack app:**
-
-The command below will help you create a project scaffold.
+First, we need to create a new React project. The command below will help you create a project scaffold and install the necessary dependencies.
 
 ```bash
 npx create-livestack my-livestack-app
 cd my-livestack-app
-```
-
-2. **Install required dependencies:**
-
-```bash
-npm install
 ```
 
 ### Step 2: Client-Side Implementation
