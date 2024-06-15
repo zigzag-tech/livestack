@@ -23,7 +23,6 @@ Create a new file named `SpeechComponents.tsx` in the `src/client` directory wit
 "use client";
 import React from "react";
 import { usePCMRecorder, encodeToB64 } from "@livestack/transcribe/client";
-import { FaStop, FaMicrophone } from "react-icons/fa";
 
 export const SpeechComponents: React.FC = () => {
   const [volume, setVolume] = React.useState<number>(0);
@@ -51,9 +50,6 @@ export const SpeechComponents: React.FC = () => {
       >
         <span style={{ display: "inline-block" }}>
           {isRecording ? "Stop Recording" : "Start Recording"}
-        </span>
-        <span style={{ display: "inline-block" }}>
-          {isRecording ? <FaStop /> : <FaMicrophone />}
         </span>
       </button>
       <div>
