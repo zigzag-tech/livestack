@@ -1,5 +1,3 @@
-Absolutely! I'll use comments to clearly indicate the start and end of the inserted or modified code sections. Let's update the code accordingly.
-
 ## Phase 2: Get the Transcription to Work
 
 ### Step 1: Update the Frontend
