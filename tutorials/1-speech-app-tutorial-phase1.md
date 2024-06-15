@@ -149,4 +149,4 @@ Note that `dev` script is defined in the `scripts` section in the `package.json`
 Open your browser and navigate to `http://localhost:4700`. You should see the "Start Recording" button. When you click on it, the volume indicator will show a green bar as you speak to the microphone, and the length of the audio (PCM) chunks generated will be logged to the console.
 
 
-That's it for Phase 1! You have successfully set up the frontend to record audio and display the volume indicator. In the next phase, we'll add the transcription functionality.
+That's it for Phase 1! You have successfully set up the frontend to record audio and display the volume indicator. In the [next phase](), we'll add the transcription functionality.
