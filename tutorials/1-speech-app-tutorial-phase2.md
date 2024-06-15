@@ -15,11 +15,17 @@ import { speechChunkToTextOutput } from "@livestack/transcribe/client";
 export const SpeechComponents: React.FC = () => {
   // ...
 
-  // [START] Add transcription output
+  // [START] Add liveflow job binding and transcription output
+
+  const job = useJobBinding({
+    specName: SPEECH_LIVEFLOW_NAME,
+  });
+
   const transcription = useOutput({
     tag: "transcription",
     def: speechChunkToTextOutput,
     query: { type: "lastN", n: 10 },
+    job,
   });
   // [END] Add transcription output
 
@@ -52,6 +58,9 @@ export const SpeechComponents: React.FC = () => {
 
 // ...
 ```
+
+Explanation:
+- We use `useOutput` to get the transcription output.
 
 ### Step 2: Update the Backend
 
