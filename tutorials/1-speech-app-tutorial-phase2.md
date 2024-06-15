@@ -1,8 +1,86 @@
 ## Phase 2: Get the Transcription to Work
 
-### Step 1: Update the Frontend
 
-#### 1.1 Update `SpeechComponents.tsx`
+### Step 1: Update the Backend
+
+#### 1.1 Create `liveflow.speech.ts`
+
+Create a new file named `liveflow.speech.ts` in the `src/server` directory with the following code:
+
+```ts
+// [START] Import dependencies
+import {
+  rawPCMToWavSpec,
+  speechChunkToTextSpec,
+} from "@livestack/transcribe/server";
+import { Liveflow, conn, expose } from "@livestack/core";
+// [END] Import dependencies
+
+// [START] Define speech Liveflow
+export const SPEECH_LIVEFLOW_NAME = "speech_liveflow";
+
+export const speechLiveflow = Liveflow.define({
+  name: SPEECH_LIVEFLOW_NAME,
+  connections: [
+    conn({
+      from: rawPCMToWavSpec,
+      transform: ({ wavb64Str }) => ({ wavb64Str, whisperType: "openai" }),
+      to: speechChunkToTextSpec,
+    }),
+  ],
+  exposures: [
+    expose(rawPCMToWavSpec.input.default, "input-default"),
+    expose(speechChunkToTextSpec.output.default, "transcription"),
+  ],
+});
+// [END] Define speech Liveflow
+```
+
+#### 1.2 Update `index.ts`
+
+Update the `index.ts` file in the `src/server` directory to initialize the Liveflow and set up the job binding:
+
+```ts
+// ...
+// [START] Import dependencies
+import { LiveEnv } from "@livestack/core";
+import { getLocalTempFileStorageProvider } from "@livestack/core";
+import { initJobBinding } from "@livestack/gateway";
+import { speechLiveflow } from "./liveflow.speech";
+// [END] Import dependencies
+
+// [START] Initialize LiveEnv
+const liveEnvP = LiveEnv.create({
+  projectId: "MY_LIVE_SPEECH_APP",
+  storageProvider: getLocalTempFileStorageProvider("/tmp/zzlive"),
+});
+// [END] Initialize LiveEnv
+
+async function main() {
+  // [START] Set global LiveEnv
+  LiveEnv.setGlobal(liveEnvP);
+  // [END] Set global LiveEnv
+
+  // ...
+
+  const httpServer = ViteExpress.listen(app, PORT, () => {
+    console.info(`Server running on http://localhost:${PORT}.`);
+  });
+
+  // [START] Initialize job binding
+  initJobBinding({
+    httpServer,
+    allowedSpecsForBinding: [speechLiveflow],
+  });
+  // [END] Initialize job binding
+}
+
+// ...
+```
+
+### Step 2: Update the Frontend
+
+#### 2.1 Update `SpeechComponents.tsx`
 
 Update the `SpeechComponents.tsx` file in the `src/client` directory to include the transcription output:
 
@@ -62,82 +140,6 @@ export const SpeechComponents: React.FC = () => {
 Explanation:
 - We use `useOutput` to get the transcription output.
 
-### Step 2: Update the Backend
-
-#### 2.1 Create `liveflow.speech.ts`
-
-Create a new file named `liveflow.speech.ts` in the `src/server` directory with the following code:
-
-```ts
-// [START] Import dependencies
-import {
-  rawPCMToWavSpec,
-  speechChunkToTextSpec,
-} from "@livestack/transcribe/server";
-import { Liveflow, conn, expose } from "@livestack/core";
-// [END] Import dependencies
-
-// [START] Define speech Liveflow
-export const SPEECH_LIVEFLOW_NAME = "speech_liveflow";
-
-export const speechLiveflow = Liveflow.define({
-  name: SPEECH_LIVEFLOW_NAME,
-  connections: [
-    conn({
-      from: rawPCMToWavSpec,
-      transform: ({ wavb64Str }) => ({ wavb64Str, whisperType: "openai" }),
-      to: speechChunkToTextSpec,
-    }),
-  ],
-  exposures: [
-    expose(rawPCMToWavSpec.input.default, "input-default"),
-    expose(speechChunkToTextSpec.output.default, "transcription"),
-  ],
-});
-// [END] Define speech Liveflow
-```
-
-#### 2.2 Update `index.ts`
-
-Update the `index.ts` file in the `src/server` directory to initialize the Liveflow and set up the job binding:
-
-```ts
-// ...
-// [START] Import dependencies
-import { LiveEnv } from "@livestack/core";
-import { getLocalTempFileStorageProvider } from "@livestack/core";
-import { initJobBinding } from "@livestack/gateway";
-import { speechLiveflow } from "./liveflow.speech";
-// [END] Import dependencies
-
-// [START] Initialize LiveEnv
-const liveEnvP = LiveEnv.create({
-  projectId: "MY_LIVE_SPEECH_APP",
-  storageProvider: getLocalTempFileStorageProvider("/tmp/zzlive"),
-});
-// [END] Initialize LiveEnv
-
-async function main() {
-  // [START] Set global LiveEnv
-  LiveEnv.setGlobal(liveEnvP);
-  // [END] Set global LiveEnv
-
-  // ...
-
-  const httpServer = ViteExpress.listen(app, PORT, () => {
-    console.info(`Server running on http://localhost:${PORT}.`);
-  });
-
-  // [START] Initialize job binding
-  initJobBinding({
-    httpServer,
-    allowedSpecsForBinding: [speechLiveflow],
-  });
-  // [END] Initialize job binding
-}
-
-// ...
-```
 
 ### Step 3: Run the App
 
