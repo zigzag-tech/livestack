@@ -16,11 +16,10 @@ import {
 } from "@livestack/transcribe/server";
 import { Liveflow, conn, expose } from "@livestack/core";
 
-// Define speech Liveflow
-export const SPEECH_LIVEFLOW_NAME = "speech_liveflow";
+// [START] Define speech Liveflow
 
 export const speechLiveflow = Liveflow.define({
-  name: SPEECH_LIVEFLOW_NAME,
+  name: "speech_liveflow",
   connections: [
     conn({
       from: rawPCMToWavSpec,
@@ -34,6 +33,13 @@ export const speechLiveflow = Liveflow.define({
   ],
 });
 ```
+
+Explanation:
+- A Liveflow is a realtime DAG (Directed Acyclic Graph) that defines the workflow for processing data.
+- We define a Liveflow named `speech_liveflow` that takes raw PCM audio data (to be connected to the frontend), converts it to WAV format, and then transcribes it to text.
+- A Spec is a node in the Liveflow DAG that defines the input/output data structure and processing logic.
+- Specs are connected using `conn` to form the Liveflow DAG.
+- We expose the input and output of the Specs to make them accessible to other parts of the application (in our case, the frontend).
 
 #### 1.2 Update `index.ts`
 
@@ -95,7 +101,7 @@ export const SpeechComponents: React.FC = () => {
   // [START] Add liveflow job binding and transcription output
 
   const job = useJobBinding({
-    specName: SPEECH_LIVEFLOW_NAME,
+    specName: "speech_liveflow",
   });
 
   const transcription = useOutput({
