@@ -116,13 +116,10 @@ Create a new file named `index.ts` in the `src/server` directory with the follow
 
 ```ts
 import express from "express";
-import path from "path";
 import ViteExpress from "vite-express";
 
 async function main() {
   const app = express();
-  app.use(express.static(path.join(__dirname, "..", "public")));
-
   const PORT = 4700;
 
   ViteExpress.listen(app, PORT, () => {
