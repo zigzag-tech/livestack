@@ -91,7 +91,7 @@ Update the `SpeechComponents.tsx` file in the `src/client` directory to include 
 
 ```tsx
 // ...
-import { useOutput } from "@livestack/client";
+import { useJobBinding, useOutput } from "@livestack/client";
 import { speechChunkToTextOutput } from "@livestack/transcribe/client";
 // ...
 
@@ -105,10 +105,10 @@ export const SpeechComponents: React.FC = () => {
   });
 
   const transcription = useOutput({
+    job,
     tag: "transcription",
     def: speechChunkToTextOutput,
     query: { type: "lastN", n: 10 },
-    job,
   });
   // [END] Add transcription output
 
