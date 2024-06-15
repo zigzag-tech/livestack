@@ -2,11 +2,11 @@
 
 In this phase, we'll focus on setting up the frontend to record audio using the `usePCMRecorder` hook from the `@livestack/transcribe/client` package. 
 
-By completing this tutorial, when the "Start Recording" button is clicked, the volume indicator will show a green bar as you speak to the microphone, and the length of the PCM data generated will be logged to the console.
+By completing this phase, your frontend will be able to capture raw PCM audio data and display a volume indicator as you speak into the microphone, which will be useful for the subsequent phases of the tutorial.
 
 ### Step 1: Set Up the Project
 
-1. Create a new Livestack app:
+1. Start by creating a new Livestack app:
 
 ```bash
 npx create-livestack my-livestack-app
@@ -58,7 +58,6 @@ export const SpeechComponents: React.FC = () => {
         <span style={{ display: "inline-block" }}>
           {isRecording ? "Stop Recording" : "Start Recording"}
         </span>
-        &nbsp;
         <span style={{ display: "inline-block" }}>
           {isRecording ? <FaStop /> : <FaMicrophone />}
         </span>
@@ -163,6 +162,7 @@ npm run dev
 ```
 
 
-Open your browser and navigate to `http://localhost:4700`. You should see the "Start Recording" button. When you click on it, the volume indicator will show, and the length of the PCM data will be logged to the console.
+Open your browser and navigate to `http://localhost:4700`. You should see the "Start Recording" button. When you click on it, the volume indicator will show a green bar as you speak to the microphone, and the length of the audio (PCM) chunks generated will be logged to the console.
+
 
 That's it for Phase 1! You have successfully set up the frontend to record audio and display the volume indicator. In the next phase, we'll add the transcription functionality.
