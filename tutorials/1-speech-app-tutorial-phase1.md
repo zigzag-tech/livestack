@@ -1,6 +1,8 @@
 ## Phase 1: Get the Frontend's Raw PCM Recorder to Work
 
-In this phase, we'll focus on setting up the frontend to record audio using the `usePCMRecorder` hook from the `@livestack/transcribe/client` package. When the "Start Recording" button is clicked, the volume indicator will show, and the length of the PCM data will be logged to the console.
+In this phase, we'll focus on setting up the frontend to record audio using the `usePCMRecorder` hook from the `@livestack/transcribe/client` package. 
+
+By completing this tutorial, when the "Start Recording" button is clicked, the volume indicator will show a green bar as you speak to the microphone, and the length of the PCM data generated will be logged to the console.
 
 ### Step 1: Set Up the Project
 
