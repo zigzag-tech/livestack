@@ -112,7 +112,7 @@ async function main() {
   const app = express();
   const PORT = 4700;
 
-  ViteExpress.listen(app, PORT, () => {
+  const httpServer = ViteExpress.listen(app, PORT, () => {
     console.info(`Server running on http://localhost:${PORT}.`);
   });
 }

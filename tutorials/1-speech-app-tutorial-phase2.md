@@ -1,5 +1,6 @@
 ## Phase 2: Get the Transcription to Work
 
+In this phase, we'll get the transcription functionality to work. We'll first define the Liveflow for speech transcription and then update the frontend to display the transcription output.
 
 ### Step 1: Update the Backend
 
