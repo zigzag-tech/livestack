@@ -100,12 +100,13 @@ const root = ReactDOM.createRoot(
 );
 
 root.render(
-  <Suspense fallback={<div>Loading...</div>}>
-    <SpeechComponents />
-  </Suspense>
+  <SpeechComponents />
 );
 ```
 
+Explanation:
+- We import the `SpeechComponents` component and render it within a `Suspense` component.
+- We import `global.css` to apply global tailwind styles.
 
 ### Step 3: Set Up the Backend
 
@@ -116,14 +117,10 @@ Create a new file named `index.ts` in the `src/server` directory with the follow
 ```ts
 import express from "express";
 import path from "path";
-import bodyParser from "body-parser";
-import cors from "cors";
 import ViteExpress from "vite-express";
 
 async function main() {
   const app = express();
-  app.use(cors());
-  app.use(bodyParser.json());
   app.use(express.static(path.join(__dirname, "..", "public")));
 
   const PORT = 4700;
@@ -137,7 +134,6 @@ main();
 ```
 
 Explanation:
-- We import the necessary dependencies: `express`, `path`, `bodyParser`, `cors`, and `ViteExpress`.
 - We create an Express app and configure it with CORS, JSON body parsing, and serving static files from the `public` directory.
 - We set the port to `4700` and start the server using `ViteExpress.listen()`.
 
