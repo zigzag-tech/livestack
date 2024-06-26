@@ -2,6 +2,8 @@ import pkg from "@livestack/shared";
 const { genManuallyFedIterator } = pkg;
 import {
   CacapcityServiceImplementation,
+  FromInstance,
+  FromWorker,
   CommandToInstance,
 } from "@livestack/vault-interface";
 import {
@@ -11,14 +13,17 @@ import {
   type ServerStreamingMethodResult,
   CapacityInfo,
   SpecNameAndCapacity,
+  RespondToCapacityLogMessage,
+  CapacityLog,
 } from "@livestack/vault-interface/src/generated/capacity.js";
 import { CallContext } from "nice-grpc";
 import { createClient } from "redis";
-import _ from "lodash";
+import _, { forEach } from "lodash";
 import { v4 } from "uuid";
 import { tmpdir } from "os";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
+
 
 class CapacityManager implements CacapcityServiceImplementation {
   private redisClientP = createClient().connect();
@@ -36,10 +41,44 @@ class CapacityManager implements CacapcityServiceImplementation {
   > = new Map();
 
   instanceIdsByProjectUuid: Record<string, string[]> = {};
-
+  
   capacityQuery: Record<string, string[]> = {};
 
-  instanacesByProejctUuid = {};
+  instanacesByProejctUuid = {}
+
+
+ async respondToCapacityLog(
+  request: RespondToCapacityLogMessage, 
+  context: CallContext
+): Promise<{
+  specCapacity?: { 
+    specName?: string | undefined; 
+    capacity?: number | undefined; }[] | undefined; 
+  }> {
+    const projectUuid = request.projectUuid;
+    const capacitiesLog = this.logCapacity(projectUuid);
+    const capacities = await capacitiesLog;
+    const sumsBySpecName: Record<string, number> = {};
+    for(const key in capacities){
+      if (capacities.hasOwnProperty(key)) {
+        const capacitiesByInstanceId = capacities[key];
+        capacitiesByInstanceId.forEach(item => {
+          if (sumsBySpecName[item.specName]) {
+            sumsBySpecName[item.specName] += item.capacity;
+          } else {
+            sumsBySpecName[item.specName] = item.capacity;
+          }
+        });
+      }
+    }
+    const specCapacities = Object.keys(sumsBySpecName).map(specName => ({
+      specName: specName,
+      capacity: sumsBySpecName[specName]
+    }));
+    console.log(`specCapacities: ${specCapacities}`);
+    return {specCapacity: specCapacities}
+ }
+
 
   reportAsInstance(
     request: ReportAsInstanceMessage,
@@ -77,7 +116,7 @@ class CapacityManager implements CacapcityServiceImplementation {
       this.instanceIdsByProjectUuid[projectUuid] || [];
 
     this.instanceIdsByProjectUuid[projectUuid].push(instanceId);
-
+    
     this.logCapacity(projectUuid);
 
     // clear all capacities on disconnect
@@ -95,25 +134,28 @@ class CapacityManager implements CacapcityServiceImplementation {
           (id) => id !== instanceId
         );
 
-      console.log(`instanceIds: ${this.instanceIdsByProjectUuid[projectUuid]}`);
-
-      this.logCapacity(projectUuid);
+      console.log(`instanceIds: ${this.instanceIdsByProjectUuid[projectUuid]}`)
+      
+      this.logCapacity(projectUuid)
 
       context.signal.removeEventListener("abort", abortListener);
     };
 
     context.signal.addEventListener("abort", abortListener);
-
+    
     return iter;
   }
 
-  async logCapacity(projectUuid: string) {
+  async logCapacity(projectUuid: string){
+
     const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
 
     const capacitiesByInstanceId: Record<string, SpecNameAndCapacity[]> = {};
-
+    
     const tempDir = join(tmpdir(), "capacity_logs");
     const logFilePath = join(tempDir, `${projectUuid}.json`);
+
+    // const logFilePath = `/home/ubuntu/auto-live-lower-thirds/cloud-dashboard/src/server/${projectUuid}.json`;
 
     const capacities = await Promise.all(
       instanceIds.map((instanceId) =>
@@ -121,20 +163,18 @@ class CapacityManager implements CacapcityServiceImplementation {
       )
     );
 
-    for (const capacity of capacities) {
-      capacitiesByInstanceId[capacity.instanceId] =
-        capacity.specNameAndCapacity;
-    }
+    for(const capacity of capacities){
+      capacitiesByInstanceId[capacity.instanceId] = capacity.specNameAndCapacity;
+    };
+
 
     try {
-      // Ensure the temporary directory exists
-      await mkdir(tempDir, { recursive: true });
-
       const jsonData = JSON.stringify(capacitiesByInstanceId, null, 2);
       await writeFile(logFilePath, jsonData, "utf8"); // Asynchronously write to the file
-      console.log("Data saved to file:", logFilePath);
+      console.log(`Log Data: ${jsonData}`);
+      console.log('Data saved to file:', logFilePath);
     } catch (error) {
-      console.error("Failed to save data to file:", error);
+      console.error('Failed to save data to file:', error);
     }
 
     return capacitiesByInstanceId;
@@ -258,7 +298,9 @@ class CapacityManager implements CacapcityServiceImplementation {
     specName: string;
     by: number;
   }) {
+
     const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
+
     const capacities = await Promise.all(
       instanceIds.map((instanceId) =>
         this.runCapacityQuery({ instanceId, projectUuid })
@@ -270,6 +312,7 @@ class CapacityManager implements CacapcityServiceImplementation {
         (s) => s.specName === specName && s.capacity >= by
       )
     );
+
     if (qualifiedCapacities.length === 0) {
       console.warn(
         `No instances with enough capacity found for ${projectUuid}:${specName}`
@@ -290,7 +333,6 @@ class CapacityManager implements CacapcityServiceImplementation {
           correlationId,
         });
       }
-      return;
     }
 
     const nextBestInstanceId = _.sample(qualifiedCapacities)!.instanceId;
