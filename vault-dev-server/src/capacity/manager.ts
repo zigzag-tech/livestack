@@ -56,6 +56,7 @@ class CapacityManager implements CacapcityServiceImplementation {
     capacity?: number | undefined; }[] | undefined; 
   }> {
     const projectUuid = request.projectUuid;
+    console.log(`projectId: ${projectUuid}`)
     const capacitiesLog = this.logCapacity(projectUuid);
     const capacities = await capacitiesLog;
     const sumsBySpecName: Record<string, number> = {};
@@ -75,7 +76,6 @@ class CapacityManager implements CacapcityServiceImplementation {
       specName: specName,
       capacity: sumsBySpecName[specName]
     }));
-    console.log(`specCapacities: ${specCapacities}`);
     return {specCapacity: specCapacities}
  }
 
@@ -117,8 +117,6 @@ class CapacityManager implements CacapcityServiceImplementation {
 
     this.instanceIdsByProjectUuid[projectUuid].push(instanceId);
     
-    this.logCapacity(projectUuid);
-
     // clear all capacities on disconnect
     const abortListener = async () => {
       console.debug(
@@ -136,8 +134,6 @@ class CapacityManager implements CacapcityServiceImplementation {
 
       console.log(`instanceIds: ${this.instanceIdsByProjectUuid[projectUuid]}`)
       
-      this.logCapacity(projectUuid)
-
       context.signal.removeEventListener("abort", abortListener);
     };
 
@@ -151,11 +147,6 @@ class CapacityManager implements CacapcityServiceImplementation {
     const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
 
     const capacitiesByInstanceId: Record<string, SpecNameAndCapacity[]> = {};
-    
-    const tempDir = join(tmpdir(), "capacity_logs");
-    const logFilePath = join(tempDir, `${projectUuid}.json`);
-
-    // const logFilePath = `/home/ubuntu/auto-live-lower-thirds/cloud-dashboard/src/server/${projectUuid}.json`;
 
     const capacities = await Promise.all(
       instanceIds.map((instanceId) =>
@@ -166,16 +157,6 @@ class CapacityManager implements CacapcityServiceImplementation {
     for(const capacity of capacities){
       capacitiesByInstanceId[capacity.instanceId] = capacity.specNameAndCapacity;
     };
-
-
-    try {
-      const jsonData = JSON.stringify(capacitiesByInstanceId, null, 2);
-      await writeFile(logFilePath, jsonData, "utf8"); // Asynchronously write to the file
-      console.log(`Log Data: ${jsonData}`);
-      console.log('Data saved to file:', logFilePath);
-    } catch (error) {
-      console.error('Failed to save data to file:', error);
-    }
 
     return capacitiesByInstanceId;
   }
