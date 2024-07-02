@@ -143,6 +143,10 @@ export function findSuitableVaultServer(authToken: string) {
         authToken,
         capacityClient.respondToProvision.bind(capacityClient)
       ).bind(capacityClient),
+      respondToCapacityLog: genAuthorizedGRPCFn(
+        authToken,
+        capacityClient.respondToCapacityLog.bind(capacityClient)
+      ),
     },
   };
 }
