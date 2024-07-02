@@ -1636,7 +1636,14 @@ export class JobManager<P, I, O, IMap, OMap> {
   private _genWaitUntilFinishPromise = async () => {
     const outputsToWaitOn: (keyof OMap)[] = [];
 
-    const maybeSingleOutputTag = this.spec.getSingleTag("output", false);
+    let maybeSingleOutputTag = null;
+
+    try {
+       maybeSingleOutputTag = this.spec.getSingleTag("output", false);
+    } catch(e) {
+      // fail silently for now
+    }
+
     if (typeof maybeSingleOutputTag === "string") {
       outputsToWaitOn.push(maybeSingleOutputTag);
     } else {
