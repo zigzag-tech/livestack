@@ -8,6 +8,20 @@ service CacapcityService {
   rpc ReportAsInstance(ReportAsInstanceMessage) returns (stream CommandToInstance);
   rpc RespondToCapacityQuery(InstanceResponseToCapacityQueryMessage) returns (google.protobuf.Empty);;
   rpc RespondToProvision(InstanceResponseToProvisionMessage) returns (google.protobuf.Empty);;
+  rpc RespondToCapacityLog(RespondToCapacityLogMessage) returns (CapacityLog);;
+}
+
+message SpecCapacity{
+  string specName = 1;
+  int32 capacity = 2;
+}
+
+message CapacityLog{
+  repeated SpecCapacity specCapacity = 1;
+}
+
+message RespondToCapacityLogMessage{
+  string projectUuid = 1;
 }
 
 message ReportAsInstanceMessage {
