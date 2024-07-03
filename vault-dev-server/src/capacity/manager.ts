@@ -56,20 +56,19 @@ class CapacityManager implements CacapcityServiceImplementation {
     capacity?: number | undefined; }[] | undefined; 
   }> {
     const projectUuid = request.projectUuid;
-    console.log(`projectId: ${projectUuid}`)
     const capacitiesLog = this.logCapacity(projectUuid);
     const capacities = await capacitiesLog;
     const sumsBySpecName: Record<string, number> = {};
     for(const key in capacities){
       if (capacities.hasOwnProperty(key)) {
         const capacitiesByInstanceId = capacities[key];
-        capacitiesByInstanceId.forEach(item => {
-          if (sumsBySpecName[item.specName]) {
+        for (const item of capacitiesByInstanceId){
+          if (sumsBySpecName[item.specName]){
             sumsBySpecName[item.specName] += item.capacity;
           } else {
             sumsBySpecName[item.specName] = item.capacity;
           }
-        });
+        }
       }
     }
     const specCapacities = Object.keys(sumsBySpecName).map(specName => ({
