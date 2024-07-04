@@ -6,15 +6,15 @@
 folders=(
     "vault-interface"
     "vault-client"
-    "shared"
-    "core"
-    "client"
-    "gateway"
-    "lab-common"
-    "lab-server"
-    "summarizer"
-    "transcribe"
-    "translate-server"
+    # "shared"
+    # "core"
+    # "client"
+    # "gateway"
+    # "lab-common"
+    # "lab-server"
+    # "summarizer"
+    # "transcribe"
+    # "translate-server"
 )
 
 # Make sure "main" and "exports" are using prod settings
