@@ -4,7 +4,8 @@
   "scripts": {
     "typedoc": "typedoc && cp -r _misc _docs/ && cp -r tutorials/auth_flow _docs/documents",
     "use-dev": "node update_subfolder_package_json.js dev",
-    "use-prod": "node update_subfolder_package_json.js prod"
+    "use-prod": "node update_subfolder_package_json.js prod",
+    "use-prod-vault-only": "node update_subfolder_package_json_vault_only.js prod"
   },
   "workspaces": [
     "*",

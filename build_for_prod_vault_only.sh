@@ -18,7 +18,7 @@ folders=(
 )
 
 # Make sure "main" and "exports" are using prod settings
-yarn use-prod
+yarn use-prod-vault-only
 
 # Loop through each folder and execute the commands
 for folder in "${folders[@]}"; do
