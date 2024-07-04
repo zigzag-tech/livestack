@@ -23,7 +23,7 @@ export const translationWorker = translationSpec.defineWorker({
     let currLang: z.infer<typeof supportedLangs> = supportedLangs.Enum.French;
 
     const langObs = input("language").observable();
-    langObs.subscribe((newLang) => {
+    langObs.subscribe((newLang: any) => {
       if (newLang) {
         currLang = newLang;
       }
