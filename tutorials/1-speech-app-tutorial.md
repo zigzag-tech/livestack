@@ -18,7 +18,7 @@ If you prefer to understand each step in detail, follow the instructions below t
 First, we need to create a new React project. The command below will help you create a project scaffold and install the necessary dependencies.
 
 ```bash
-npx create-livestack my-livestack-app
+npx create-livestack my-livestack-app --template typescript-speech-app
 cd my-livestack-app
 ```
 
