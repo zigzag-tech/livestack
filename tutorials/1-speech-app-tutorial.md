@@ -52,7 +52,7 @@ import {
   speechChunkToTextOutput,
 } from "@livestack/transcribe/client";
 import { useJobBinding, useOutput, useInput } from "@livestack/client";
-import { SPEECH_LIVEFLOW_NAME } from "./common/defs";
+import { SPEECH_LIVEFLOW_NAME } from "../common/defs";
 import { translationOutputSchema } from "@livestack/lab-internal-common";
 import { FaStop, FaMicrophone } from "react-icons/fa";
 import { z } from "zod";
