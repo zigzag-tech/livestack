@@ -20,7 +20,9 @@ import {
 export const genAuthorizedVaultClient = async (authToken: string) =>
   await findSuitableVaultServer(authToken);
 
-export type GRPCVaultClient = ReturnType<typeof findSuitableVaultServer>;
+export type GRPCVaultClient = Awaited<
+  ReturnType<typeof findSuitableVaultServer>
+>;
 
 const connOpts = {
   "grpc.keepalive_time_ms": 1000 * 10,
