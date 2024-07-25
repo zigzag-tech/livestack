@@ -17,11 +17,10 @@ import {
   retryMiddleware,
 } from "nice-grpc-client-middleware-retry";
 
-export const genAuthorizedVaultClient = (authToken: string) =>
-  findSuitableVaultServer(authToken);
+export const genAuthorizedVaultClient = async (authToken: string) =>
+  await findSuitableVaultServer(authToken);
 
-export type AuthorizedGRPCClient = ReturnType<typeof findSuitableVaultServer>;
-const ONE_YEAR = 1000 * 60 * 60 * 24 * 365 * 1;
+export type GRPCVaultClient = ReturnType<typeof findSuitableVaultServer>;
 
 const connOpts = {
   "grpc.keepalive_time_ms": 1000 * 10,
@@ -30,7 +29,7 @@ const connOpts = {
   // "grpc.client_idle_timeout_ms": ONE_YEAR,
   "grpc.keepalive_permit_without_calls": 1,
 };
-export function findSuitableVaultServer(authToken: string) {
+export async function findSuitableVaultServer(authToken: string) {
   const clientFactory = createClientFactory().use(retryMiddleware);
 
   let vaultServerURL: string;
