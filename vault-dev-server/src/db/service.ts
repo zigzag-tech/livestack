@@ -6,12 +6,12 @@ import {
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
 } from "./primitives.js";
-import pkg from "@livestack/vault-interface";
+import { Order, ConnectorType } from "@livestack/vault-interface";
 import type {
   DBServiceImplementation,
   JobRec,
 } from "@livestack/vault-interface";
-const { Order, ConnectorType } = pkg;
+
 import _ from "lodash";
 import { ensureJobRelationRec, getParentJobRec } from "./job_relations.js";
 import {

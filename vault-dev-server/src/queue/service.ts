@@ -6,17 +6,12 @@ import {
 } from "@livestack/vault-interface";
 import { InitInstanceParams } from "@livestack/vault-interface";
 import { Queue, Worker } from "bullmq";
-import sharedPkg from "@livestack/shared";
-const { genPromiseCycle, genManuallyFedIterator } = sharedPkg;
+import { genPromiseCycle, genManuallyFedIterator } from "@livestack/shared";
 import { CallContext } from "nice-grpc";
 import { v4 } from "uuid";
 import { createClient } from "redis";
 import { escapeColon, getCapacityManager } from "../capacity/manager.js";
-import { stringify } from "querystring";
-
-import path from 'path';
-import { promises as fs } from 'fs';
-import { error } from "console";
+import { promises as fs } from "fs";
 
 const _rawQueueBySpecName = new Map<string, Queue>();
 

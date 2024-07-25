@@ -6,18 +6,20 @@ import type {
   ValuesByReverseIndexRequest,
   LastValueRequest,
 } from "@livestack/vault-interface//src/generated/stream.js";
-import sharedPkg from "@livestack/shared";
-const { OBJ_REF_VALUE, genManuallyFedIterator, lruCacheFn } = sharedPkg;
+import {
+  OBJ_REF_VALUE,
+  genManuallyFedIterator,
+  lruCacheFn,
+} from "@livestack/shared";
 import { StreamServiceImplementation } from "@livestack/vault-interface";
-import streamPkg from "@livestack/vault-interface/src/generated/stream.js";
-const { SubType } = streamPkg;
+import { SubType } from "@livestack/vault-interface/src/generated/stream.js";
 import { CallContext } from "nice-grpc-common";
 import { createClient } from "redis";
 import {
   ZZDatapointRec,
   ensureStreamRec,
   ensureDatapointRelationRec,
-} from "../db/service.js";
+} from "../db/service";
 import { Knex } from "knex";
 import {
   ARRAY_KEY,
