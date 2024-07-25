@@ -1,8 +1,6 @@
-import pkg from "@livestack/shared";
-const { genManuallyFedIterator } = pkg;
+import { genManuallyFedIterator } from "@livestack/shared";
 import {
   CacapcityServiceImplementation,
-  FromInstance,
   FromWorker,
   CommandToInstance,
 } from "@livestack/vault-interface";
@@ -11,19 +9,13 @@ import {
   InstanceResponseToProvisionMessage,
   type ReportAsInstanceMessage,
   type ServerStreamingMethodResult,
-  CapacityInfo,
   SpecNameAndCapacity,
   RespondToCapacityLogMessage,
-  CapacityLog,
 } from "@livestack/vault-interface/src/generated/capacity.js";
 import { CallContext } from "nice-grpc";
 import { createClient } from "redis";
-import _, { forEach } from "lodash";
+import _ from "lodash";
 import { v4 } from "uuid";
-import { tmpdir } from "os";
-import { mkdir, writeFile } from "fs/promises";
-import { join } from "path";
-
 
 class CapacityManager implements CacapcityServiceImplementation {
   private redisClientP = createClient().connect();
@@ -41,29 +33,31 @@ class CapacityManager implements CacapcityServiceImplementation {
   > = new Map();
 
   instanceIdsByProjectUuid: Record<string, string[]> = {};
-  
+
   capacityQuery: Record<string, string[]> = {};
 
-  instanacesByProejctUuid = {}
+  instanacesByProejctUuid = {};
 
-
- async respondToCapacityLog(
-  request: RespondToCapacityLogMessage, 
-  context: CallContext
-): Promise<{
-  specCapacity?: { 
-    specName?: string | undefined; 
-    capacity?: number | undefined; }[] | undefined; 
+  async respondToCapacityLog(
+    request: RespondToCapacityLogMessage,
+    context: CallContext
+  ): Promise<{
+    specCapacity?:
+      | {
+          specName?: string | undefined;
+          capacity?: number | undefined;
+        }[]
+      | undefined;
   }> {
     const projectUuid = request.projectUuid;
     const capacitiesLog = this.logCapacity(projectUuid);
     const capacities = await capacitiesLog;
     const sumsBySpecName: Record<string, number> = {};
-    for(const key in capacities){
+    for (const key in capacities) {
       if (capacities.hasOwnProperty(key)) {
         const capacitiesByInstanceId = capacities[key];
-        for (const item of capacitiesByInstanceId){
-          if (sumsBySpecName[item.specName]){
+        for (const item of capacitiesByInstanceId) {
+          if (sumsBySpecName[item.specName]) {
             sumsBySpecName[item.specName] += item.capacity;
           } else {
             sumsBySpecName[item.specName] = item.capacity;
@@ -71,13 +65,12 @@ class CapacityManager implements CacapcityServiceImplementation {
         }
       }
     }
-    const specCapacities = Object.keys(sumsBySpecName).map(specName => ({
+    const specCapacities = Object.keys(sumsBySpecName).map((specName) => ({
       specName: specName,
-      capacity: sumsBySpecName[specName]
+      capacity: sumsBySpecName[specName],
     }));
-    return {specCapacity: specCapacities}
- }
-
+    return { specCapacity: specCapacities };
+  }
 
   reportAsInstance(
     request: ReportAsInstanceMessage,
@@ -115,7 +108,7 @@ class CapacityManager implements CacapcityServiceImplementation {
       this.instanceIdsByProjectUuid[projectUuid] || [];
 
     this.instanceIdsByProjectUuid[projectUuid].push(instanceId);
-    
+
     // clear all capacities on disconnect
     const abortListener = async () => {
       console.debug(
@@ -131,18 +124,17 @@ class CapacityManager implements CacapcityServiceImplementation {
           (id) => id !== instanceId
         );
 
-      console.log(`instanceIds: ${this.instanceIdsByProjectUuid[projectUuid]}`)
-      
+      console.log(`instanceIds: ${this.instanceIdsByProjectUuid[projectUuid]}`);
+
       context.signal.removeEventListener("abort", abortListener);
     };
 
     context.signal.addEventListener("abort", abortListener);
-    
+
     return iter;
   }
 
-  async logCapacity(projectUuid: string){
-
+  async logCapacity(projectUuid: string) {
     const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
 
     const capacitiesByInstanceId: Record<string, SpecNameAndCapacity[]> = {};
@@ -153,9 +145,10 @@ class CapacityManager implements CacapcityServiceImplementation {
       )
     );
 
-    for(const capacity of capacities){
-      capacitiesByInstanceId[capacity.instanceId] = capacity.specNameAndCapacity;
-    };
+    for (const capacity of capacities) {
+      capacitiesByInstanceId[capacity.instanceId] =
+        capacity.specNameAndCapacity;
+    }
 
     return capacitiesByInstanceId;
   }
@@ -278,7 +271,6 @@ class CapacityManager implements CacapcityServiceImplementation {
     specName: string;
     by: number;
   }) {
-
     const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
 
     const capacities = await Promise.all(

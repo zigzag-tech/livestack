@@ -1,16 +1,16 @@
 import { createServer } from "nice-grpc";
-import { dbService } from "./db/service.js";
-import { getQueueService } from "./queue/service.js";
-import { getStreamService } from "./stream/service.js";
-import { getCapacityManager } from "./capacity/manager.js";
-import { db } from "./db/knexConn.js";
+import { dbService } from "./db/service";
+import { getQueueService } from "./queue/service";
+import { getStreamService } from "./stream/service";
+import { getCapacityManager } from "./capacity/manager";
+import { db } from "./db/knexConn";
 import {
   CacapcityServiceDefinition,
   DBServiceDefinition,
   QueueServiceDefinition,
   StreamServiceDefinition,
 } from "@livestack/vault-interface";
-import { startBootstrapNode } from "./storage-p2p/startBootstrapNode.js";
+import { startBootstrapNode } from "./storage-p2p/startBootstrapNode";
 
 export async function launchVaultDevServer(port?: string | number) {
   // if (!port) {
