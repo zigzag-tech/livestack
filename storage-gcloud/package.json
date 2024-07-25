@@ -13,7 +13,7 @@
   },
   "devDependencies": {
     "@preconstruct/cli": "^2.8.4",
-    "typescript": "5.4.5"
+    "typescript": "5.5.4"
   },
   "main": "dist/livestack-storage-gcloud.cjs.js",
   "types": "dist/livestack-storage-gcloud.cjs.d.ts",
