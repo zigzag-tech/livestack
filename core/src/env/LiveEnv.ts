@@ -1,5 +1,5 @@
 import {
-  AuthorizedGRPCClient,
+  GRPCVaultClient,
   genAuthorizedVaultClient,
 } from "@livestack/vault-client";
 import { IStorageProvider } from "../storage/cloudStorage";
@@ -41,7 +41,7 @@ export class LiveEnv {
   /**
    * Vault client for managing secure data.
    */
-  public readonly vaultClient: AuthorizedGRPCClient;
+  public readonly vaultClient: GRPCVaultClient;
   /**
    * UUID of the project.
    */
@@ -74,19 +74,21 @@ export class LiveEnv {
     localProjectId,
     userId,
     authToken,
+    vaultClient,
   }: {
     storageProvider?: IStorageProvider | Promise<IStorageProvider>;
     projectUuid: string;
     localProjectId: string;
     userId: string;
     authToken: string;
+    vaultClient: GRPCVaultClient;
   }) {
     this.storageProvider = Promise.resolve(storageProvider);
     this.projectUuid = projectUuid;
     this.localProjectId = localProjectId;
     this.userId = userId;
     this.authToken = authToken;
-    this.vaultClient = genAuthorizedVaultClient(authToken);
+    this.vaultClient = vaultClient;
     this.printLiveDevUrlOnce();
   }
 
@@ -109,13 +111,14 @@ export class LiveEnv {
     }
     const { projectUuid, localProjectId, userId, authToken } =
       await resolveProjectInfo(projectId);
-
+    const vaultClient = await genAuthorizedVaultClient(authToken);
     return new LiveEnv({
       storageProvider: config.storageProvider,
       projectUuid,
       localProjectId,
       userId,
       authToken,
+      vaultClient,
     });
   }
 
