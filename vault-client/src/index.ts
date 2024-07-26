@@ -31,7 +31,26 @@ const connOpts = {
   // "grpc.client_idle_timeout_ms": ONE_YEAR,
   "grpc.keepalive_permit_without_calls": 1,
 };
+import select, { Separator } from "@inquirer/select";
 export async function findSuitableVaultServer(authToken: string) {
+  const answer = await select({
+    message:
+      "Select a vault server option to continue \n(help: https://live.dev/DOC_TODO).",
+    choices: [
+      {
+        name: "live.dev (recommended)",
+        value: "live_dot_dev",
+        description:
+          "Cloud-based, user-friendly environment with live data visualization, production-ready scaling, plus more.",
+      },
+      {
+        name: "A minimal, local vault daemon",
+        value: "local",
+        description:
+          "Suitable for development and full local testing scenarios.",
+      },
+    ],
+  });
   const clientFactory = createClientFactory().use(retryMiddleware);
 
   let vaultServerURL: string;
