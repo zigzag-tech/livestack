@@ -3768,9 +3768,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/example-speech-app@workspace:typescript-speech-app":
+"@livestack/example-speech-app@workspace:speech-app-for-debugging-only":
   version: 0.0.0-use.local
-  resolution: "@livestack/example-speech-app@workspace:typescript-speech-app"
+  resolution: "@livestack/example-speech-app@workspace:speech-app-for-debugging-only"
   dependencies:
     "@babel/core": "npm:^7.24.0"
     "@babel/preset-env": "npm:^7.24.0"
