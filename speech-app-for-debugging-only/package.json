@@ -7,7 +7,7 @@
   },
   "main": "src/server/index.ts",
   "scripts": {
-    "dev": "ts-node -r dotenv/config --project tsconfig.json src/server/index.ts"
+    "dev": "NODE_OPTIONS='-r dotenv/config' tsx --tsconfig tsconfig.json src/server/index.ts"
   },
   "author": "",
   "license": "MIT",
