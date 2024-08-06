@@ -2,11 +2,11 @@ import { Pinecone } from '@pinecone-database/pinecone';
 import { OpenAIEmbeddings } from "@langchain/openai";
 
 const pc = new Pinecone({
-  apiKey: 'df9ed73d-d3c9-48b5-a2c9-520f16645613'
+  apiKey: process.env.PINECONE_API_KEY
 });
 
 const embeddings = new OpenAIEmbeddings({
-  openAIApiKey: "sk-None-7DzU3GmFx5cOyBvhSfPgT3BlbkFJ9fVdlcPOZt8DxOpGgdC6",
+  openAIApiKey: process.env.OPENAI_API_KEY,
   model: "text-embedding-3-large",
 });
 
