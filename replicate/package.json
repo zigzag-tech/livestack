@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@preconstruct/cli": "^2.8.4",
-    "typescript": "5.4.5"
+    "typescript": "5.5.4"
   },
   "main": "dist/livestack-replicate.cjs.js",
   "types": "dist/livestack-replicate.cjs.d.ts",

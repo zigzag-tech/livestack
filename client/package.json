@@ -20,7 +20,7 @@
     "@types/react": "^18",
     "rimraf": "^5.0.7",
     "rollup": "^4.18.0",
-    "typescript": "5.4.5"
+    "typescript": "5.5.4"
   },
   "peerDependencies": {
     "react": "^18",

@@ -21,7 +21,7 @@
     "dotenv": "^16.x",
     "get-port": "^7.0.0",
     "jsonschema": "^1.4.1",
-    "knex": "^2.x",
+    "knex": "^3",
     "libp2p": "^1.5.1",
     "lodash": "^4.x",
     "nice-grpc": "^2.1",
@@ -32,12 +32,11 @@
     "@preconstruct/cli": "^2.8.4",
     "@types/node": "^20.11.0",
     "ts-node": "^10.9.2",
-    "typescript": "5.4.5"
+    "typescript": "5.5.4"
   },
   "files": [
     "dist"
   ],
-  "type": "module",
   "main": "dist/livestack-vault-dev-server.cjs.js",
   "types": "dist/livestack-vault-dev-server.d.ts",
   "module": "dist/livestack-vault-dev-server.esm.js",

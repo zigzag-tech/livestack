@@ -34,7 +34,7 @@ import { DataStreamSubscriber } from "../stream/DataStreamSubscriber";
 import { JobSpec } from "./JobSpec";
 import { LiveEnv } from "../env/LiveEnv";
 import { identifyLargeFilesToSave } from "../files/file-ops";
-import { AuthorizedGRPCClient } from "@livestack/vault-client";
+import { GRPCVaultClient } from "@livestack/vault-client";
 import {
   InferDefaultOrSingleKey,
   InferDefaultOrSingleValue,
@@ -635,9 +635,7 @@ export class LiveJob<
   private _parentRec:
     | (Omit<
         NonNullable<
-          Awaited<
-            ReturnType<AuthorizedGRPCClient["db"]["getParentJobRec"]>
-          >["rec"]
+          Awaited<ReturnType<GRPCVaultClient["db"]["getParentJobRec"]>>["rec"]
         >,
         "job_params_str"
       > & {
