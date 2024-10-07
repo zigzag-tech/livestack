@@ -24,6 +24,13 @@ Livestack, designed from the ground up, aims to democratize this process, making
 
 We look forward to seeing your next idea come to life with Livestack!
 
+
+## Quickstart
+
+- [Build Your Own Real Time Conversation Assistant: Transcription, Summarization, and Translation](https://live.dev/docs/documents/_livestack_tutorials.1_speech_app_tutorial.html)
+- Learn the mechanics (single JobSpec): [Minimal Example: Live Counter](https://live.dev/docs/documents/_livestack_tutorials.2_live_counter_tutorial.html)
+- Learn the mechanics: [Minimal Example: Liveflow Zoo] 
+
 ## Installation
   
 ```bash
@@ -32,12 +39,6 @@ npm install @livestack/core @livestack/gateway @livestack/client
 ```
 
 For a detailed walkthrough, choose one of the tutorials from the quickstart section below.
-
-## Quickstart
-
-- [Build Your Own Real Time Conversation Assistant: Transcription, Summarization, and Translation](https://live.dev/docs/documents/_livestack_tutorials.1_speech_app_tutorial.html)
-- Learn the mechanics (single JobSpec): [Minimal Example: Live Counter](https://live.dev/docs/documents/_livestack_tutorials.2_live_counter_tutorial.html)
-- Learn the mechanics: [Minimal Example: Liveflow Zoo] 
 
 
 ## Join the Community
