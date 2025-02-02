@@ -67,4 +67,97 @@ describe("InstantiatedGraph", () => {
     const defGraphEdgeCount = (realDefGraph).edges().results.length;
     expect(instantiatedEdgeCount).toBe(defGraphEdgeCount);
   });
+
+  it("should instantiate with multiple spec nodes and compute correct job ids", async () => {
+    // Create a real DefGraph.
+    const realDefGraph = initDefGraph({
+      root: {
+        name: "RootSpec",
+        inputTags: [],
+        outputTags: [],
+      },
+    });
+    // Add two Spec nodes: SpecA and SpecB using ensureInletAndStream.
+    (realDefGraph).ensureInletAndStream({ specName: "SpecA", tag: "dummyA", uniqueSpecLabel: null }, false);
+    (realDefGraph).ensureInletAndStream({ specName: "SpecB", tag: "dummyB", uniqueSpecLabel: null }, false);
+
+    const instantiatedGraph = new InstantiatedGraph({
+      contextId: "multiTest",
+      defGraph: realDefGraph,
+      streamIdOverrides: {} as StreamIdOverridesForRootSpec,
+      rootJobId: "rootJob",
+      inletHasTransformOverridesByTag: {},
+      streamSourceSpecTypeByStreamId: {},
+    });
+    await instantiatedGraph.initPromise;
+
+    const nodeIds = instantiatedGraph.nodes();
+    const foundSpecA = nodeIds.some((id) => {
+      const node = instantiatedGraph.getNodeAttributes(id);
+      return 'jobId' in node && node.jobId === "[multiTest]SpecA";
+    });
+    const foundSpecB = nodeIds.some((id) => {
+      const node = instantiatedGraph.getNodeAttributes(id);
+      return 'jobId' in node && node.jobId === "[multiTest]SpecB";
+    });
+
+    expect(foundSpecA).toBeTruthy();
+    expect(foundSpecB).toBeTruthy();
+  });
+
+  it("should have the same node count as the underlying defGraph", async () => {
+    const realDefGraph = initDefGraph({
+      root: {
+        name: "RootSpec",
+        inputTags: ["in1"],
+        outputTags: ["out1"],
+      },
+    });
+    (realDefGraph).ensureInletAndStream({ specName: "SpecA", tag: "dummy", uniqueSpecLabel: null }, false);
+
+    const instantiatedGraph = new InstantiatedGraph({
+      contextId: "nodeCountTest",
+      defGraph: realDefGraph,
+      streamIdOverrides: {} as StreamIdOverridesForRootSpec,
+      rootJobId: "rootJob",
+      inletHasTransformOverridesByTag: {},
+      streamSourceSpecTypeByStreamId: {},
+    });
+    await instantiatedGraph.initPromise;
+
+    const instantiatedNodeCount = instantiatedGraph.nodes().length;
+    const defGraphNodeCount = realDefGraph.nodes().length;
+    expect(instantiatedNodeCount).toBe(defGraphNodeCount);
+  });
+
+  it("should retrieve correct node attributes for all nodes", async () => {
+    const realDefGraph = initDefGraph({
+      root: {
+        name: "RootSpec",
+        inputTags: ["in1"],
+        outputTags: ["out1"],
+      },
+    });
+    (realDefGraph).ensureInletAndStream({ specName: "SpecA", tag: "dummy", uniqueSpecLabel: null }, false);
+
+    const instantiatedGraph = new InstantiatedGraph({
+      contextId: "attrTest",
+      defGraph: realDefGraph,
+      streamIdOverrides: {} as StreamIdOverridesForRootSpec,
+      rootJobId: "rootJob",
+      inletHasTransformOverridesByTag: {},
+      streamSourceSpecTypeByStreamId: {},
+    });
+    await instantiatedGraph.initPromise;
+
+    const nodeIds = instantiatedGraph.nodes();
+    nodeIds.forEach((id) => {
+      const attr = instantiatedGraph.getNodeAttributes(id);
+      expect(attr).toHaveProperty("label");
+      // For Spec and RootSpec nodes, check that the jobId property is defined.
+      if (attr.nodeType === "job" || attr.nodeType === "root-job") {
+        expect(attr).toHaveProperty("jobId");
+      }
+    });
+  });
 }); 
