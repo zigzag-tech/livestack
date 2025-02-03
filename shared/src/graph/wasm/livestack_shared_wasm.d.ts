@@ -207,6 +207,11 @@ export class DefGraph {
 * @returns {SpecAndTagInfoAndDirection | undefined}
 */
   lookupSpecAndTagByAlias(alias: string, direction: string): SpecAndTagInfoAndDirection | undefined;
+/**
+* @param {number} stream_node_id
+* @returns {any}
+*/
+  getNodesConnectedToStream(stream_node_id: number): any;
 }
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
@@ -232,6 +237,7 @@ export interface InitOutput {
   readonly defgraph_getAllAliasNodeIds: (a: number, b: number) => void;
   readonly defgraph_lookupRootSpecAlias: (a: number, b: number, c: number) => void;
   readonly defgraph_lookupSpecAndTagByAlias: (a: number, b: number, c: number, d: number, e: number) => number;
+  readonly defgraph_getNodesConnectedToStream: (a: number, b: number) => number;
   readonly loadDefGraphFromJson: (a: number, b: number) => number;
   readonly genSpecIdentifier: (a: number, b: number, c: number, d: number, e: number) => void;
   readonly uniqueStreamIdentifier: (a: number, b: number) => void;

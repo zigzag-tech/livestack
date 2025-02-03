@@ -9,7 +9,6 @@ import {
 import { InletNode, SpecNode, DefGraph } from "@livestack/shared";
 import {
   StreamNode,
-  getNodesConnectedToStream,
   getSourceSpecNodeConnectedToStream,
   InstantiatedGraph,
 } from "@livestack/shared";
@@ -1401,11 +1400,10 @@ export class JobSpec<
       .filter(({ connectedStreamNodes }) => {
         const conn = connectedStreamNodes[0];
         if (type === "input") {
-          const { source } = getNodesConnectedToStream(defG, conn.streamNodeId);
+          const { source } = defG.getNodesConnectedToStream(conn.streamNodeId);
           return !source;
         } else {
-          const { targets } = getNodesConnectedToStream(
-            defG,
+          const { targets } = defG.getNodesConnectedToStream(
             conn.streamNodeId
           );
           return targets.length === 0;

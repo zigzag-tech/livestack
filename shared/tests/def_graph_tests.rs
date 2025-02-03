@@ -595,3 +595,222 @@ mod tests {
         assert!(root_spec_node_id.is_some());
     }
 }
+
+// NEW TESTS for get_nodes_connected_to_stream
+#[cfg(test)]
+mod stream_connections_tests {
+    use super::*;
+    
+    #[test]
+    fn test_get_nodes_connected_to_stream_source_only() {
+        // Create a new graph with no input/output tags
+        let mut graph = DefGraph::new("RootSpec".to_string(), vec![], vec![]);
+        
+        // Manually add a Spec node (source)
+        let spec_node = DefGraphNode {
+            node_type: NodeType::Spec,
+            spec_name: Some("Spec1".to_string()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "Spec1".to_string(),
+        };
+        let spec_node_id = graph.ensure_node("Spec1", spec_node);
+        
+        // Add an Outlet node for Spec1
+        let outlet_node = DefGraphNode {
+            node_type: NodeType::Outlet,
+            spec_name: None,
+            unique_spec_label: None,
+            tag: Some("out".to_string()),
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "Spec1/out".to_string(),
+        };
+        let outlet_node_id = graph.ensure_node("Spec1/out", outlet_node);
+        
+        // Add a StreamDef node
+        let stream_node = DefGraphNode {
+            node_type: NodeType::StreamDef,
+            spec_name: None,
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: Some("stream1".to_string()),
+            alias: None,
+            direction: None,
+            label: "stream1".to_string(),
+        };
+        let stream_node_id = graph.ensure_node("stream1", stream_node);
+        
+        // Connect: Spec1 -> Outlet, Outlet -> StreamDef
+        graph.ensure_edge(spec_node_id, outlet_node_id);
+        graph.ensure_edge(outlet_node_id, stream_node_id);
+        
+        // Call get_nodes_connected_to_stream
+        let connections = graph.get_nodes_connected_to_stream(stream_node_id);
+        
+        // Expect source to be present and targets to be empty
+        assert!(connections.source.is_some(), "Expected a source connection");
+        let source = connections.source.unwrap();
+        assert_eq!(source.origin.spec_name, Some("Spec1".to_string()));
+        assert_eq!(source.outlet_node.tag, Some("out".to_string()));
+        assert!(connections.targets.is_empty(), "Expected no target connections");
+    }
+    
+    #[test]
+    fn test_get_nodes_connected_to_stream_targets_only() {
+        // Create a new graph
+        let mut graph = DefGraph::new("RootSpec".to_string(), vec![], vec![]);
+        
+        // Manually add a Spec node for target
+        let spec_node = DefGraphNode {
+            node_type: NodeType::Spec,
+            spec_name: Some("Spec2".to_string()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "Spec2".to_string(),
+        };
+        let spec_node_id = graph.ensure_node("Spec2", spec_node);
+        
+        // Add an Inlet node for Spec2
+        let inlet_node = DefGraphNode {
+            node_type: NodeType::Inlet,
+            spec_name: None,
+            unique_spec_label: None,
+            tag: Some("in".to_string()),
+            has_transform: Some(false),
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "Spec2/in".to_string(),
+        };
+        let inlet_node_id = graph.ensure_node("Spec2/in", inlet_node);
+        
+        // Add a StreamDef node
+        let stream_node = DefGraphNode {
+            node_type: NodeType::StreamDef,
+            spec_name: None,
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: Some("stream2".to_string()),
+            alias: None,
+            direction: None,
+            label: "stream2".to_string(),
+        };
+        let stream_node_id = graph.ensure_node("stream2", stream_node);
+        
+        // Connect: StreamDef -> Inlet, Inlet -> Spec2
+        graph.ensure_edge(stream_node_id, inlet_node_id);
+        graph.ensure_edge(inlet_node_id, spec_node_id);
+        
+        let connections = graph.get_nodes_connected_to_stream(stream_node_id);
+        // Expect targets to have exactly one connection and source to be None
+        assert!(connections.source.is_none(), "Expected no source connection");
+        assert_eq!(connections.targets.len(), 1, "Expected one target connection");
+        let target = &connections.targets[0];
+        assert_eq!(target.inlet_node.tag, Some("in".to_string()));
+        assert_eq!(target.destination.spec_name, Some("Spec2".to_string()));
+    }
+    
+    #[test]
+    fn test_get_nodes_connected_to_stream_both() {
+        // Create a new graph
+        let mut graph = DefGraph::new("RootSpec".to_string(), vec![], vec![]);
+        
+        // Create source part: Spec1 -> Outlet -> Stream
+        let spec1 = DefGraphNode {
+            node_type: NodeType::Spec,
+            spec_name: Some("Spec1".to_string()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "Spec1".to_string(),
+        };
+        let spec1_id = graph.ensure_node("Spec1", spec1);
+        let outlet = DefGraphNode {
+            node_type: NodeType::Outlet,
+            spec_name: None,
+            unique_spec_label: None,
+            tag: Some("out".to_string()),
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "Spec1/out".to_string(),
+        };
+        let outlet_id = graph.ensure_node("Spec1/out", outlet);
+        
+        // Create target part: Stream -> Inlet -> Spec2
+        let spec2 = DefGraphNode {
+            node_type: NodeType::Spec,
+            spec_name: Some("Spec2".to_string()),
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "Spec2".to_string(),
+        };
+        let spec2_id = graph.ensure_node("Spec2", spec2);
+        let inlet = DefGraphNode {
+            node_type: NodeType::Inlet,
+            spec_name: None,
+            unique_spec_label: None,
+            tag: Some("in".to_string()),
+            has_transform: Some(false),
+            stream_def_id: None,
+            alias: None,
+            direction: None,
+            label: "Spec2/in".to_string(),
+        };
+        let inlet_id = graph.ensure_node("Spec2/in", inlet);
+        
+        // Create a common StreamDef node
+        let stream = DefGraphNode {
+            node_type: NodeType::StreamDef,
+            spec_name: None,
+            unique_spec_label: None,
+            tag: None,
+            has_transform: None,
+            stream_def_id: Some("stream3".to_string()),
+            alias: None,
+            direction: None,
+            label: "stream3".to_string(),
+        };
+        let stream_id = graph.ensure_node("stream3", stream);
+        
+        // Add edges for source: Spec1 -> Outlet, Outlet -> Stream
+        graph.ensure_edge(spec1_id, outlet_id);
+        graph.ensure_edge(outlet_id, stream_id);
+        
+        // Add edges for target: Stream -> Inlet, Inlet -> Spec2
+        graph.ensure_edge(stream_id, inlet_id);
+        graph.ensure_edge(inlet_id, spec2_id);
+        
+        let connections = graph.get_nodes_connected_to_stream(stream_id);
+        // Expect both source and target to be present
+        assert!(connections.source.is_some(), "Expected a source connection");
+        assert_eq!(connections.targets.len(), 1, "Expected one target connection");
+        let source = connections.source.unwrap();
+        assert_eq!(source.origin.spec_name, Some("Spec1".to_string()));
+        assert_eq!(source.outlet_node.tag, Some("out".to_string()));
+        let target = &connections.targets[0];
+        assert_eq!(target.inlet_node.tag, Some("in".to_string()));
+        assert_eq!(target.destination.spec_name, Some("Spec2".to_string()));
+    }
+}

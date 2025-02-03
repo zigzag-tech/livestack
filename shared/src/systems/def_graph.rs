@@ -51,6 +51,25 @@ pub struct DefGraphNode {
     pub label: String,
 }
 
+// NEW: Structs for stream connection info
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StreamConnectionSource {
+    pub origin: DefGraphNode,
+    pub outlet_node: DefGraphNode,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StreamConnectionTarget {
+    pub inlet_node: DefGraphNode,
+    pub destination: DefGraphNode,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StreamConnections {
+    pub source: Option<StreamConnectionSource>,
+    pub targets: Vec<StreamConnectionTarget>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // #[napi]
 pub struct DefGraph {
@@ -1014,5 +1033,75 @@ impl DefGraph {
             .neighbors_directed(node_id, petgraph::Outgoing)
             .map(|index| index.index() as u32)
             .collect()
+    }
+
+    // NEW: Implement get_nodes_connected_to_stream
+    pub fn get_nodes_connected_to_stream(&self, stream_node_id: u32) -> StreamConnections {
+        // Get targets: from stream node, use outbound_neighbors to find Inlet nodes
+        let mut targets = Vec::new();
+        let outbound_ids = self.outbound_neighbors(stream_node_id);
+        let inlet_ids: Vec<u32> = outbound_ids.into_iter().filter(|&id| {
+            if let Some(node) = self.node_weight(id) {
+                node.node_type == NodeType::Inlet
+            } else {
+                false
+            }
+        }).collect();
+
+        for inlet_id in inlet_ids {
+            let spec_ids = self.outbound_neighbors(inlet_id);
+            if let Some(dest_id) = spec_ids.into_iter().find(|&id| {
+                if let Some(node) = self.node_weight(id) {
+                    node.node_type == NodeType::Spec || node.node_type == NodeType::RootSpec
+                } else {
+                    false
+                }
+            }) {
+                if let (Some(inlet_node), Some(dest_node)) = (self.node_weight(inlet_id), self.node_weight(dest_id)) {
+                    targets.push(StreamConnectionTarget {
+                        inlet_node,
+                        destination: dest_node,
+                    });
+                }
+            }
+        }
+
+        // Get source: from stream node, use inbound_neighbors to find an Outlet node
+        let inbound_ids = self.inbound_neighbors(stream_node_id);
+        let outlet_id_option = inbound_ids.into_iter().find(|&id| {
+            if let Some(node) = self.node_weight(id) {
+                node.node_type == NodeType::Outlet
+            } else {
+                false
+            }
+        });
+        let source = if let Some(outlet_id) = outlet_id_option {
+            let spec_ids = self.inbound_neighbors(outlet_id);
+            if let Some(source_spec_id) = spec_ids.into_iter().find(|&id| {
+                if let Some(node) = self.node_weight(id) {
+                    node.node_type == NodeType::Spec || node.node_type == NodeType::RootSpec
+                } else {
+                    false
+                }
+            }) {
+                if let (Some(outlet_node), Some(origin_node)) = (self.node_weight(outlet_id), self.node_weight(source_spec_id)) {
+                    Some(StreamConnectionSource {
+                        origin: origin_node,
+                        outlet_node,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        StreamConnections {
+            source,
+            targets,
+        }
     }
 }
