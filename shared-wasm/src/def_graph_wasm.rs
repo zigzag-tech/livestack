@@ -467,6 +467,13 @@ impl DefGraph {
             }
         }
     }
+
+    // NEW: Expose getNodesConnectedToStream to JS
+    #[wasm_bindgen(js_name = getNodesConnectedToStream)]
+    pub fn get_nodes_connected_to_stream(&self, stream_node_id: u32) -> JsValue {
+        let connections = self.def_graph.get_nodes_connected_to_stream(stream_node_id);
+        serde_wasm_bindgen::to_value(&connections).unwrap()
+    }
 }
 
 #[wasm_bindgen(js_name = loadDefGraphFromJson)]

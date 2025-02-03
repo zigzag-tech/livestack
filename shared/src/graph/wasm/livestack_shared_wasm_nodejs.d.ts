@@ -207,4 +207,9 @@ export class DefGraph {
 * @returns {SpecAndTagInfoAndDirection | undefined}
 */
   lookupSpecAndTagByAlias(alias: string, direction: string): SpecAndTagInfoAndDirection | undefined;
+/**
+* @param {number} stream_node_id
+* @returns {any}
+*/
+  getNodesConnectedToStream(stream_node_id: number): any;
 }
