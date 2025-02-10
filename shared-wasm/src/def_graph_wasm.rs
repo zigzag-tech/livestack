@@ -2,10 +2,10 @@
 
 // import utils in the same folder
 use crate::utils;
-
+use js_sys::Number;
 use livestack_shared::systems::def_graph::{
     load_from_json as load_from_json_impl, DefGraph as DefGraphImpl,
-    NodeType as NodeTypeImpl,
+    DefGraphNodeType as NodeTypeImpl,
 
 };
 use livestack_shared::systems::def_graph_utils::unique_spec_identifier as unique_spec_identifier_impl;
@@ -23,7 +23,8 @@ use utils::set_panic_hook;
 
 #[derive(Tsify, Serialize, Deserialize)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
-pub enum NodeType {
+#[serde(rename_all(serialize = "kebab-case", deserialize = "kebab-case"))]
+pub enum DefGraphNodeType {
     RootSpec,
     Spec,
     StreamDef,
@@ -73,7 +74,7 @@ pub struct SpecAndTagInfoAndDirection {
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
 pub struct DefGraphNode {
     pub id: u32,
-    pub node_type: NodeType,
+    pub node_type: DefGraphNodeType,
     pub spec_name: Option<String>,
     pub unique_spec_label: Option<String>,
     pub tag: Option<String>,
@@ -217,17 +218,17 @@ impl DefGraph {
     }
 
     #[wasm_bindgen(js_name = getSpecNodeIds)]
-    pub fn get_spec_node_ids(&self) -> Vec<u32> {
-        return self.def_graph.get_spec_node_ids();
+    pub fn get_spec_node_ids(&self) -> Vec<Number> {
+        return self.def_graph.get_spec_node_ids().into_iter().map(|e| Number::from(e)).collect();
     }
 
     #[wasm_bindgen(js_name = getRootSpecNodeId)]
-    pub fn get_root_spec_node_id(&self) -> u32 {
+    pub fn get_root_spec_node_id(&self) -> Number {
         let root_id = self
             .def_graph
             .get_root_spec_node_id()
             .expect("Failed to get root spec node id");
-        return root_id;
+        return Number::from(root_id);
     }
 
     #[wasm_bindgen(js_name = getNodeAttributes)]
@@ -236,12 +237,12 @@ impl DefGraph {
         match node {
             Some(node) => {
                 let node_type = match node.node_type {
-                    NodeTypeImpl::RootSpec => NodeType::RootSpec,
-                    NodeTypeImpl::Spec => NodeType::Spec,
-                    NodeTypeImpl::StreamDef => NodeType::StreamDef,
-                    NodeTypeImpl::Inlet => NodeType::Inlet,
-                    NodeTypeImpl::Outlet => NodeType::Outlet,
-                    NodeTypeImpl::Alias => NodeType::Alias,
+                    NodeTypeImpl::RootSpec => DefGraphNodeType::RootSpec,
+                    NodeTypeImpl::Spec => DefGraphNodeType::Spec,
+                    NodeTypeImpl::StreamDef => DefGraphNodeType::StreamDef,
+                    NodeTypeImpl::Inlet => DefGraphNodeType::Inlet,
+                    NodeTypeImpl::Outlet => DefGraphNodeType::Outlet,
+                    NodeTypeImpl::Alias => DefGraphNodeType::Alias,
                 };
                 return DefGraphNode {
                     id: node_id,
@@ -278,7 +279,7 @@ impl DefGraph {
             results.push(GetInboundNodeSetsResultSingle {
                 inlet_node: DefGraphNode {
                     id: inlet_node_id,
-                    node_type: NodeType::Inlet,
+                    node_type: DefGraphNodeType::Inlet,
                     spec_name: inlet_node.spec_name.clone(),
                     unique_spec_label: inlet_node.unique_spec_label.clone(),
                     tag: inlet_node.tag.clone(),
@@ -290,7 +291,7 @@ impl DefGraph {
                 },
                 stream_node: DefGraphNode {
                     id: stream_node_id,
-                    node_type: NodeType::StreamDef,
+                    node_type: DefGraphNodeType::StreamDef,
                     spec_name: stream_node.spec_name.clone(),
                     unique_spec_label: stream_node.unique_spec_label.clone(),
                     tag: stream_node.tag.clone(),
@@ -322,7 +323,7 @@ impl DefGraph {
             results.push(GetOutboundNodeSetsResultSingle {
                 outlet_node: DefGraphNode {
                     id: outlet_node_id,
-                    node_type: NodeType::Outlet,
+                    node_type: DefGraphNodeType::Outlet,
                     spec_name: outlet_node.spec_name.clone(),
                     unique_spec_label: outlet_node.unique_spec_label.clone(),
                     tag: outlet_node.tag.clone(),
@@ -334,7 +335,7 @@ impl DefGraph {
                 },
                 stream_node: DefGraphNode {
                     id: stream_node_id,
-                    node_type: NodeType::StreamDef,
+                    node_type: DefGraphNodeType::StreamDef,
                     spec_name: stream_node.spec_name.clone(),
                     unique_spec_label: stream_node.unique_spec_label.clone(),
                     tag: stream_node.tag.clone(),

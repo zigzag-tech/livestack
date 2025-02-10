@@ -16,7 +16,7 @@ export function genSpecIdentifier(spec_name: string, unique_spec_label?: string)
 * @returns {string}
 */
 export function uniqueStreamIdentifier(p: UniqueStreamIdentifierParams): string;
-export type NodeType = "RootSpec" | "Spec" | "StreamDef" | "Inlet" | "Outlet" | "Alias";
+export type DefGraphNodeType = "root-spec" | "spec" | "stream-def" | "inlet" | "outlet" | "alias";
 
 export interface DefGraphParams {
     root: DefGraphSpecParams;
@@ -43,7 +43,7 @@ export interface SpecAndTagInfoAndDirection {
 
 export interface DefGraphNode {
     id: number;
-    nodeType: NodeType;
+    nodeType: DefGraphNodeType;
     specName: string | null;
     uniqueSpecLabel: string | null;
     tag: string | null;
@@ -121,6 +121,36 @@ export interface LookUpRootSpecAliasParams {
     direction: string;
 }
 
+export type InstantiatedNodeType = "root-job" | "job" | "stream" | "inlet" | "outlet" | "alias";
+
+export interface InstantiatedGraphNodeWasm {
+    nodeType: InstantiatedNodeType;
+    jobId: string | null;
+    specName: string | null;
+    uniqueSpecLabel: string | null;
+    streamId: string | null;
+    tag: string | null;
+    hasTransform: boolean | null;
+    alias: string | null;
+    direction: string | null;
+    label: string;
+}
+
+export interface InstantiatedStreamConnectionSourceWasm {
+    origin: InstantiatedGraphNodeWasm;
+    outletNode: InstantiatedGraphNodeWasm;
+}
+
+export interface InstantiatedStreamConnectionTargetWasm {
+    inletNode: InstantiatedGraphNodeWasm;
+    destination: InstantiatedGraphNodeWasm;
+}
+
+export interface InstantiatedStreamConnectionsWasm {
+    source: InstantiatedStreamConnectionSourceWasm | null;
+    targets: InstantiatedStreamConnectionTargetWasm[];
+}
+
 /**
 */
 export class DefGraph {
@@ -134,9 +164,9 @@ export class DefGraph {
 */
   toJson(): string;
 /**
-* @returns {Uint32Array}
+* @returns {(number)[]}
 */
-  getSpecNodeIds(): Uint32Array;
+  getSpecNodeIds(): (number)[];
 /**
 * @returns {number}
 */
@@ -213,6 +243,118 @@ export class DefGraph {
 */
   getNodesConnectedToStream(stream_node_id: number): any;
 }
+/**
+* The main struct bridging Rust's InstantiatedGraphImpl to JS/Wasm.  
+* Instead of receiving a DefGraph, it takes a serialized JSON string for the DefGraph.
+*/
+export class InstantiatedGraph {
+  free(): void;
+/**
+* Create a new InstantiatedGraphWasm by:
+*  - Deserializing a `DefGraph` from JSON,
+*  - Parsing the stream/inlet overrides from JS objects,
+*  - Constructing the internal Rust `InstantiatedGraph`.
+* @param {string} context_id
+* @param {string} def_graph_json
+* @param {string} root_job_id
+* @param {any} streamIdOverrides
+* @param {any} inletHasTransformOverridesByTag
+* @param {any} streamSourceSpecTypeByStreamId
+*/
+  constructor(context_id: string, def_graph_json: string, root_job_id: string, streamIdOverrides: any, inletHasTransformOverridesByTag: any, streamSourceSpecTypeByStreamId: any);
+/**
+* Retrieve all node IDs in the InstantiatedGraph (JS array of u32).
+* @returns {(number)[]}
+*/
+  nodes(): (number)[];
+/**
+* Return the node's attributes as a JS object.  
+* Similar to the TS `InstantiatedGraph.getNodeAttributes(...)`.
+* @param {number} node_id
+* @returns {InstantiatedGraphNodeWasm}
+*/
+  getNodeAttributes(node_id: number): InstantiatedGraphNodeWasm;
+/**
+* Return the total number of edges in the InstantiatedGraph (optional).
+* @returns {number}
+*/
+  edgeCount(): number;
+/**
+* Retrieve the "source" and "targets" for a particular stream node,
+* returning a JS object with shape `{ source: { origin, outlet_node }, targets: [...] }`.
+* @param {number} stream_node_id
+* @returns {any}
+*/
+  getNodesConnectedToStream(stream_node_id: number): any;
+/**
+* Return an array of node IDs that are inbound neighbors of the given node ID.
+* @param {number} node_id
+* @returns {Uint32Array}
+*/
+  inboundNeighbors(node_id: number): Uint32Array;
+/**
+* getSourceSpecNodeConnectedToStream
+* @param {number} stream_node_id
+* @returns {InstantiatedStreamConnectionSourceWasm | undefined}
+*/
+  getSourceSpecNodeConnectedToStream(stream_node_id: number): InstantiatedStreamConnectionSourceWasm | undefined;
+/**
+* Just like the TS version: find a stream node by matching a jobId, direction, and tag.
+* @param {string} job_id
+* @param {string} direction
+* @param {string} tag
+* @returns {number | undefined}
+*/
+  findStreamNodeIdConnectedToJob(job_id: string, direction: string, tag: string): number | undefined;
+/**
+* Return an array of edge IDs that enter the given nodeId.
+* Mirrors InstantiatedGraph::inbound_edges.
+* @param {number} node_id
+* @returns {(number)[]}
+*/
+  inboundEdges(node_id: number): (number)[];
+/**
+* Return an array of edge IDs that leave the given nodeId.
+* Mirrors InstantiatedGraph::outbound_edges.
+* @param {number} node_id
+* @returns {(number)[]}
+*/
+  outboundEdges(node_id: number): (number)[];
+/**
+* Return the source node ID of the given edge ID.
+* @param {number} edge_id
+* @returns {number}
+*/
+  source(edge_id: number): number;
+/**
+* Return the target node ID of the given edge ID.
+* @param {number} edge_id
+* @returns {number}
+*/
+  target(edge_id: number): number;
+/**
+* Return the serialized JSON string of the InstantiatedGraph.
+* @returns {string}
+*/
+  toJson(): string;
+/**
+* Return an array of edge IDs.
+* @returns {string}
+*/
+  edgesPrintout(): string;
+/**
+* Return the root job ID string, which is stored in the Rust InstantiatedGraph.
+*/
+  readonly rootJobId: string;
+/**
+* Return the root job node as a JS object.
+*/
+  readonly rootJobNodeId: number;
+/**
+* Return the root job ID string, which is stored in the Rust InstantiatedGraph.
+*/
+  readonly streamSourceSpecTypeByStreamId: any;
+}
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
@@ -241,6 +383,24 @@ export interface InitOutput {
   readonly loadDefGraphFromJson: (a: number, b: number) => number;
   readonly genSpecIdentifier: (a: number, b: number, c: number, d: number, e: number) => void;
   readonly uniqueStreamIdentifier: (a: number, b: number) => void;
+  readonly __wbg_instantiatedgraph_free: (a: number) => void;
+  readonly instantiatedgraph_new: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+  readonly instantiatedgraph_nodes: (a: number, b: number) => void;
+  readonly instantiatedgraph_getNodeAttributes: (a: number, b: number) => number;
+  readonly instantiatedgraph_edgeCount: (a: number) => number;
+  readonly instantiatedgraph_getNodesConnectedToStream: (a: number, b: number, c: number) => void;
+  readonly instantiatedgraph_inboundNeighbors: (a: number, b: number, c: number) => void;
+  readonly instantiatedgraph_getSourceSpecNodeConnectedToStream: (a: number, b: number) => number;
+  readonly instantiatedgraph_findStreamNodeIdConnectedToJob: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+  readonly instantiatedgraph_inboundEdges: (a: number, b: number, c: number) => void;
+  readonly instantiatedgraph_outboundEdges: (a: number, b: number, c: number) => void;
+  readonly instantiatedgraph_source: (a: number, b: number) => number;
+  readonly instantiatedgraph_target: (a: number, b: number) => number;
+  readonly instantiatedgraph_rootJobId: (a: number, b: number) => void;
+  readonly instantiatedgraph_streamSourceSpecTypeByStreamId: (a: number, b: number) => void;
+  readonly instantiatedgraph_rootJobNodeId: (a: number) => number;
+  readonly instantiatedgraph_toJson: (a: number, b: number) => void;
+  readonly instantiatedgraph_edgesPrintout: (a: number, b: number) => void;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
   readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
   readonly __wbindgen_add_to_stack_pointer: (a: number) => number;

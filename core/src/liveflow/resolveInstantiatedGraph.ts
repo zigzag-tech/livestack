@@ -2,7 +2,7 @@ import {
   InstantiatedGraph,
   StreamIdOverridesForRootSpec,
   StreamNode,
-  getSourceSpecNodeConnectedToStream,
+  initInstantiatedGraph,
 } from "@livestack/shared";
 import { ConnectorType } from "@livestack/vault-interface";
 import { TransformRegistry } from "./TransformRegistry";
@@ -89,7 +89,7 @@ export const resolveInstantiatedGraph = lruCacheFn(
         jobId: pRec.parent_job_id,
       });
 
-      const streamNodeIds = parentInstaG.filterNodes(
+      const streamNodeIds = parentInstaG.nodes().filter(
         (nId) => parentInstaG.getNodeAttributes(nId).nodeType === "stream"
       );
 
@@ -97,11 +97,16 @@ export const resolveInstantiatedGraph = lruCacheFn(
         const streamId = (
           parentInstaG.getNodeAttributes(streamNodeId) as StreamNode
         ).streamId;
-        const sourceSpecNode = getSourceSpecNodeConnectedToStream(
-          parentInstaG,
+        const sourceSpecNode = parentInstaG.getSourceSpecNodeConnectedToStream(
           streamNodeId
         );
         if (sourceSpecNode) {
+          if(!sourceSpecNode.origin.specName) {
+            throw new Error("sourceSpecNode.origin.specName is null");
+          }
+          if(!sourceSpecNode.outletNode.tag) {
+            throw new Error("sourceSpecNode.outletNode.tag is null");
+          }
           streamSourceSpecTypeByStreamId[streamId] = {
             specName: sourceSpecNode.origin.specName,
             tag: sourceSpecNode.outletNode.tag,
@@ -122,7 +127,7 @@ export const resolveInstantiatedGraph = lruCacheFn(
       }
     }
 
-    const instaG = new InstantiatedGraph({
+    const instaG = initInstantiatedGraph({
       defGraph: spec.getDefGraph(),
       contextId: parentRec.rec?.parent_job_id || jobId,
       rootJobId: jobId,
@@ -131,7 +136,6 @@ export const resolveInstantiatedGraph = lruCacheFn(
       streamSourceSpecTypeByStreamId,
     });
 
-    await instaG.initPromise;
     return instaG;
   }
 );

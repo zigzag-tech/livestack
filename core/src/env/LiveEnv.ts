@@ -109,8 +109,13 @@ export class LiveEnv {
         "Project ID is not provided. Please provide a project ID with LiveEnv.create({ projectId: '...' }) or set the LIVESTACK_PROJECT_ID environment variable."
       );
     }
-    const { projectUuid, localProjectId, userId, authToken } =
-      await resolveProjectInfo(projectId);
+    // const { projectUuid, localProjectId, userId, authToken } =
+    //   await resolveProjectInfo(projectId);
+    const projectUuid = "fake-project-uuid";
+    const localProjectId = "fake-local-project-id";
+    const userId = "fake-user-id";
+    const authToken = "fake-auth-token";
+
     const vaultClient = await genAuthorizedVaultClient(authToken);
     return new LiveEnv({
       storageProvider: config.storageProvider,

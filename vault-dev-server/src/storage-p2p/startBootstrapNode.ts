@@ -1,5 +1,4 @@
-import { webSockets } from "@libp2p/websockets";
-import { multiaddr } from "@multiformats/multiaddr";
+
 const bootstrapMultiaddr = `/ip4/0.0.0.0/tcp/65448/p2p/QmYJyUMAcXEw1b5bFfbBbzYu5wyyjLMRHXGUkCXpag74Fu`;
 
 export async function startBootstrapNode() {
