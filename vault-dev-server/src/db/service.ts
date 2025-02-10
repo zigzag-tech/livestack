@@ -5,7 +5,7 @@ import {
   PRIMTIVE_KEY,
   convertMaybePrimtiveOrArrayBack,
   handlePrimitiveOrArray,
-} from "./primitives.js";
+} from "./primitives";
 import { Order, ConnectorType } from "@livestack/vault-interface";
 import type {
   DBServiceImplementation,
@@ -13,11 +13,11 @@ import type {
 } from "@livestack/vault-interface";
 
 import _ from "lodash";
-import { ensureJobRelationRec, getParentJobRec } from "./job_relations.js";
+import { ensureJobRelationRec, getParentJobRec } from "./job_relations";
 import {
   LiveJobStreamConnectorRec,
   ensureJobStreamConnectorRec,
-} from "./streams.js";
+} from "./streams";
 
 export interface LiveJobUniqueId {
   project_uuid: string;
@@ -50,8 +50,13 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       .andWhere("zz_jobs.spec_name", "=", specName)
       .andWhere("zz_jobs.job_id", "=", jobId)
       .orderBy("zz_job_status.time_created", "desc")
-      .first()) as (JobRec & Pick<LiveJobStatusRec, "status">) | null;
+      .first()) as (JobRec & Pick<LiveJobStatusRec, "status"> &{
+        time_created:string;
+      }) | null;
 
+   
+
+    // check if job status is what we want
     // check if job status is what we want
     // if (jobStatus && r?.status !== jobStatus) {
     //   return null;
@@ -62,8 +67,13 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       };
     }
 
-    const withJobParams = {
+    const r_convrted = {
       ...r,
+      time_created: new Date(r.time_created),
+    };
+
+    const withJobParams = {
+      ...r_convrted,
       job_params: convertMaybePrimtiveOrArrayBack(r.job_params),
     };
 
@@ -77,7 +87,6 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
   },
 
   ensureJobAndStatusAndConnectorRecs: async (rec, ctx) => {
-    // console.log(ctx.metadata.get("auth"));
 
     const {
       projectUuid,
@@ -111,7 +120,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
 
       if (inputStreamIdOverridesByTag) {
         for (const [key, streamId] of _.entries(inputStreamIdOverridesByTag)) {
-          await ensureStreamRec(dbConn, {
+          await ensureStreamRec(trx, {
             project_uuid: projectUuid,
             stream_id: streamId as string,
           });
@@ -128,7 +137,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
 
       if (outputStreamIdOverridesByTag) {
         for (const [key, streamId] of _.entries(outputStreamIdOverridesByTag)) {
-          await ensureStreamRec(dbConn, {
+          await ensureStreamRec(trx, {
             project_uuid: projectUuid,
             stream_id: streamId as string,
           });
@@ -142,7 +151,7 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
           });
         }
       }
-      await trx.commit();
+      // await trx.commit();
     });
     return {};
   },
@@ -185,12 +194,17 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
             }
         >[]
       >("*");
+
+    const r_convrted = r.map((rr) => ({
+      ...rr,
+      time_created: new Date(rr.time_created),
+    }));
     // if (r.length === 0) {
     //   console.error("Job datapoints not found", jId, ioType);
     //   throw new Error(`Job datapoint for ${jId.jobId} not found!`);
     // }
     return {
-      points: r.map((rec) => ({
+      points: r_convrted.map((rec) => ({
         datapointId: rec.datapoint_id,
         dataStr: JSON.stringify(convertMaybePrimtiveOrArrayBack(rec.data)),
       })),
@@ -207,7 +221,9 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       throw new Error("connectorType must be provided if key is provided");
     }
 
-    const q = dbConn<LiveJobStreamConnectorRec>("zz_job_stream_connectors")
+    const q = dbConn<Omit<LiveJobStreamConnectorRec, "time_created"> & {
+      time_created: string;
+    }>("zz_job_stream_connectors")
       .where("project_uuid", "=", projectUuid)
       .andWhere("job_id", "=", jobId);
     if (key) {
@@ -222,7 +238,10 @@ export const dbService = (dbConn: Knex): DBServiceImplementation => ({
       connector_type:
         rec.connector_type === "in" ? ConnectorType.IN : ConnectorType.OUT,
     }));
-    return { records: r };
+    return { records: r.map((rec) => ({
+      ...rec,
+      time_created: new Date(rec.time_created),
+    })) };
   },
   appendJobStatusRec: async ({ projectUuid, specName, jobId, jobStatus }) => {
     // console.debug("appendJobStatusRec", specName, jobId, jobStatus);

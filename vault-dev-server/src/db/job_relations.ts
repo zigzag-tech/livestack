@@ -74,7 +74,8 @@ export async function getParentJobRec({
   // join the job table to get the job spec name and params
   const rec = await dbConn("zz_job_relations")
     .first<
-      JobRec & {
+      Omit<JobRec, "time_created"> & {
+        time_created: string;
         unique_spec_label: string | null;
       }
     >([
@@ -93,6 +94,7 @@ export async function getParentJobRec({
   } else {
     return {
       ...rec,
+      time_created: new Date(rec.time_created),
       job_params: convertMaybePrimtiveOrArrayBack(rec.job_params),
       unique_spec_label:
         rec.unique_spec_label === "null" ? null : rec.unique_spec_label,

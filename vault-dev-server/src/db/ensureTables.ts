@@ -5,6 +5,7 @@ export async function ensureTables(knex: Knex): Promise<void> {
     await knex.schema.createTable("zz_streams", (table) => {
       table.string("project_uuid").notNullable();
       table.string("stream_id").notNullable();
+      table.text("json_schema_str").nullable();
       table.timestamp("time_created").defaultTo(knex.fn.now());
       table.primary(["project_uuid", "stream_id"]);
     });
@@ -15,6 +16,7 @@ export async function ensureTables(knex: Knex): Promise<void> {
       table.string("project_uuid").notNullable();
       table.string("spec_name").notNullable();
       table.string("job_id").notNullable();
+      table.text("instagraph_str").nullable();
       table.json("job_params");
       table.timestamp("time_created").defaultTo(knex.fn.now());
       table.primary(["project_uuid", "spec_name", "job_id"]);
@@ -104,5 +106,42 @@ export async function ensureTables(knex: Knex): Promise<void> {
         .inTable("zz_jobs");
     });
   }
+
+  if (!(await knex.schema.hasTable("zz_datapoint_relations"))) {
+    await knex.schema.createTable("zz_datapoint_relations", (table) => {
+      table.string("project_uuid").notNullable();
+      table.string("source_datapoint_id").notNullable();
+      table.string("source_stream_id").notNullable();
+      table.string("target_datapoint_id").notNullable();
+      table.string("target_stream_id").notNullable();
+
+      table.primary([
+        "project_uuid",
+        "source_stream_id",
+        "source_datapoint_id",
+        "target_stream_id",
+        "target_datapoint_id",
+      ]);
+    });
+  }
+
+  if (!(await knex.schema.hasTable("zz_data_validation_results"))) {
+    await knex.schema.createTable("zz_data_validation_results", (table) => {
+      table.string("project_uuid").notNullable();
+      table.string("stream_id").notNullable();
+      table.string("datapoint_id").notNullable();
+      table.boolean("validation_failed").notNullable();
+    });
+  }
+
+  if (!(await knex.schema.hasTable("zz_projects"))) {
+    await knex.schema.createTable("zz_projects", (table) => {
+      table.string("project_uuid").notNullable();
+      table.string("local_id").notNullable();
+      table.string("owner_user_id").notNullable();
+      table.string("description").nullable();
+    });
+  }
+
   console.info("Tables created.");
 }

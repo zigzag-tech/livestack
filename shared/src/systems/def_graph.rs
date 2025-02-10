@@ -10,8 +10,9 @@ use std::collections::HashMap;
 use super::def_graph_utils::{FromSpecAndTag, SpecTagInfo, ToSpecAndTag};
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "kebab-case")]
 // #[napi]
-pub enum NodeType {
+pub enum DefGraphNodeType {
     RootSpec,
     Spec,
     StreamDef,
@@ -20,20 +21,21 @@ pub enum NodeType {
     Alias,
 }
 
-fn node_type_to_string(node_type: &NodeType) -> String {
+fn node_type_to_string(node_type: &DefGraphNodeType) -> String {
     match node_type {
-        NodeType::RootSpec => "RootSpec".to_string(),
-        NodeType::Spec => "Spec".to_string(),
-        NodeType::StreamDef => "StreamDef".to_string(),
-        NodeType::Inlet => "Inlet".to_string(),
-        NodeType::Outlet => "Outlet".to_string(),
-        NodeType::Alias => "Alias".to_string(),
+        DefGraphNodeType::RootSpec => "RootSpec".to_string(),
+        DefGraphNodeType::Spec => "Spec".to_string(),
+        DefGraphNodeType::StreamDef => "StreamDef".to_string(),
+        DefGraphNodeType::Inlet => "Inlet".to_string(),
+        DefGraphNodeType::Outlet => "Outlet".to_string(),
+        DefGraphNodeType::Alias => "Alias".to_string(),
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DefGraphNode {
-    pub node_type: NodeType,
+    pub node_type: DefGraphNodeType,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spec_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,18 +55,21 @@ pub struct DefGraphNode {
 
 // NEW: Structs for stream connection info
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct StreamConnectionSource {
     pub origin: DefGraphNode,
     pub outlet_node: DefGraphNode,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct StreamConnectionTarget {
     pub inlet_node: DefGraphNode,
     pub destination: DefGraphNode,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct StreamConnections {
     pub source: Option<StreamConnectionSource>,
     pub targets: Vec<StreamConnectionTarget>,
@@ -72,6 +77,7 @@ pub struct StreamConnections {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 // #[napi]
+#[serde(rename_all = "camelCase")]
 pub struct DefGraph {
     graph: DiGraph<DefGraphNode, ()>,
     node_indices: HashMap<String, NodeIndex>,
@@ -157,7 +163,7 @@ impl DefGraph {
             .node_indices()
             .filter_map(|index| {
                 if let Some(node) = self.graph.node_weight(index) {
-                    if node.node_type == NodeType::Alias {
+                    if node.node_type == DefGraphNodeType::Alias {
                         // Cast usize to u32 here
                         Some(index.index() as u32)
                     } else {
@@ -175,7 +181,7 @@ impl DefGraph {
             .node_indices()
             .find(|&index| {
                 if let Some(node) = self.graph.node_weight(index) {
-                    node.node_type == NodeType::RootSpec
+                    node.node_type == DefGraphNodeType::RootSpec
                 } else {
                     false
                 }
@@ -192,10 +198,10 @@ impl DefGraph {
         let root_spec_node_id = self.get_root_spec_node_id()?;
         let alias_node_id = match direction {
             "in" => self.find_inbound_neighbor(root_spec_node_id, |node| {
-                node.node_type == NodeType::Alias && node.alias.as_deref() == Some(&alias)
+                node.node_type == DefGraphNodeType::Alias && node.alias.as_deref() == Some(&alias)
             }),
             "out" => self.find_outbound_neighbor(root_spec_node_id, |node| {
-                node.node_type == NodeType::Alias && node.alias.as_deref() == Some(&alias)
+                node.node_type == DefGraphNodeType::Alias && node.alias.as_deref() == Some(&alias)
             }),
             _ => None,
         }?;
@@ -203,10 +209,10 @@ impl DefGraph {
         let (spec_node_id, tag) = match direction {
             "in" => {
                 let inlet_node_id = self.find_inbound_neighbor(alias_node_id, |node| {
-                    node.node_type == NodeType::Inlet
+                    node.node_type == DefGraphNodeType::Inlet
                 })?;
                 let spec_node_id = self.find_outbound_neighbor(inlet_node_id, |node| {
-                    node.node_type == NodeType::Spec
+                    node.node_type == DefGraphNodeType::Spec
                 })?;
                 let inlet_node_id_idx = NodeIndex::new(inlet_node_id as usize);
                 let tag = self.graph.node_weight(inlet_node_id_idx)?.tag.clone()?;
@@ -214,11 +220,11 @@ impl DefGraph {
             }
             "out" => {
                 let outlet_node_id = self.find_outbound_neighbor(alias_node_id, |node| {
-                    node.node_type == NodeType::Outlet
+                    node.node_type == DefGraphNodeType::Outlet
                 })?;
                 let outlet_node_id_idx = NodeIndex::new(outlet_node_id as usize);
                 let spec_node_id = self.find_inbound_neighbor(outlet_node_id, |node| {
-                    node.node_type == NodeType::Spec
+                    node.node_type == DefGraphNodeType::Spec
                 })?;
                 let tag = self.graph.node_weight(outlet_node_id_idx)?.tag.clone()?;
                 (spec_node_id, tag)
@@ -253,7 +259,7 @@ impl DefGraph {
         direction: String,
     ) -> Option<String> {
         let spec_node_id = self.find_node(|node| {
-            node.node_type == NodeType::Spec
+            node.node_type == DefGraphNodeType::Spec
                 && node.spec_name.as_deref() == Some(spec_name.as_str())
                 && node.unique_spec_label.as_deref() == unique_spec_label.as_deref()
         })?;
@@ -261,20 +267,20 @@ impl DefGraph {
         let alias_node_id = match direction.as_str() {
             "in" => {
                 let inlet_node_id = self.find_inbound_neighbor(spec_node_id, |node| {
-                    node.node_type == NodeType::Inlet
+                    node.node_type == DefGraphNodeType::Inlet
                         && node.tag.as_deref() == Some(tag.as_str())
                 })?;
                 self.find_outbound_neighbor(inlet_node_id, |node| {
-                    node.node_type == NodeType::Alias
+                    node.node_type == DefGraphNodeType::Alias
                 })
             }
             "out" => {
                 let outlet_node_id = self.find_outbound_neighbor(spec_node_id, |node| {
-                    node.node_type == NodeType::Outlet
+                    node.node_type == DefGraphNodeType::Outlet
                         && node.tag.as_deref() == Some(tag.as_str())
                 })?;
                 self.find_inbound_neighbor(outlet_node_id, |node| {
-                    node.node_type == NodeType::Alias
+                    node.node_type == DefGraphNodeType::Alias
                 })
             }
             _ => return None,
@@ -319,7 +325,7 @@ impl DefGraph {
         let from_spec_node_id = self.ensure_node(
             &from_spec_id,
             DefGraphNode {
-                node_type: NodeType::Spec,
+                node_type: DefGraphNodeType::Spec,
                 spec_name: Some(from.spec_name.clone()),
                 unique_spec_label: from.unique_spec_label.clone(),
                 tag: None,
@@ -333,7 +339,7 @@ impl DefGraph {
         let from_outlet_node_id = self.ensure_node(
             &format!("{}/{}", from_spec_id, from.output),
             DefGraphNode {
-                node_type: NodeType::Outlet,
+                node_type: DefGraphNodeType::Outlet,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: Some(from.output.clone()),
@@ -375,7 +381,7 @@ impl DefGraph {
             stream_node_id = self.ensure_node(
                 &stream_def_id,
                 DefGraphNode {
-                    node_type: NodeType::StreamDef,
+                    node_type: DefGraphNodeType::StreamDef,
                     spec_name: None,
                     unique_spec_label: None,
                     tag: None,
@@ -394,7 +400,7 @@ impl DefGraph {
         let to_inlet_node_id = self.ensure_node(
             &format!("{}/{}", to_spec_id, to.input),
             DefGraphNode {
-                node_type: NodeType::Inlet,
+                node_type: DefGraphNodeType::Inlet,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: Some(to.input.clone()),
@@ -409,7 +415,7 @@ impl DefGraph {
         let to_spec_node_id = self.ensure_node(
             &to_spec_id,
             DefGraphNode {
-                node_type: NodeType::Spec,
+                node_type: DefGraphNodeType::Spec,
                 spec_name: Some(to.spec_name.clone()),
                 unique_spec_label: to.unique_spec_label.clone(),
                 tag: None,
@@ -456,7 +462,7 @@ impl DefGraph {
     ) {
         let spec_node_id = self
             .find_node(|node| {
-                node.node_type == NodeType::Spec
+                node.node_type == DefGraphNodeType::Spec
                     && node.spec_name.as_deref() == Some(spec_name)
                     && node.unique_spec_label.as_deref() == unique_spec_label
             })
@@ -464,7 +470,7 @@ impl DefGraph {
 
         let root_spec_node_id = self
             .find_node(|node| {
-                node.node_type == NodeType::RootSpec
+                node.node_type == DefGraphNodeType::RootSpec
                     && node.spec_name.as_deref() == Some(root_spec_name)
             })
             .expect(format!("Root spec node not found: {}", root_spec_name).as_str());
@@ -473,7 +479,7 @@ impl DefGraph {
         let alias_node_id = self.ensure_node(
             &alias_id,
             DefGraphNode {
-                node_type: NodeType::Alias,
+                node_type: DefGraphNodeType::Alias,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: None,
@@ -489,7 +495,7 @@ impl DefGraph {
             "in" => {
                 let inlet_node_id = self
                     .find_inbound_neighbor(spec_node_id, |node| {
-                        node.node_type == NodeType::Inlet && node.tag.as_deref() == Some(tag)
+                        node.node_type == DefGraphNodeType::Inlet && node.tag.as_deref() == Some(tag)
                     })
                     .expect(format!("Inlet node not found: {}", tag).as_str());
                 self.ensure_edge(inlet_node_id, alias_node_id);
@@ -498,7 +504,7 @@ impl DefGraph {
             "out" => {
                 let outlet_node_id = self
                     .find_outbound_neighbor(spec_node_id, |node| {
-                        node.node_type == NodeType::Outlet && node.tag.as_deref() == Some(tag)
+                        node.node_type == DefGraphNodeType::Outlet && node.tag.as_deref() == Some(tag)
                     });
                 // propagate error if outlet_node_id is None
                 let outlet_node_id = outlet_node_id.expect(format ! ("Outlet node not found: {}", tag).as_str());
@@ -518,7 +524,7 @@ impl DefGraph {
             .neighbors_directed(spec_node_id, petgraph::Incoming)
             .filter_map(|inlet_node_id| {
                 if let Some(inlet_node) = self.graph.node_weight(inlet_node_id) {
-                    if inlet_node.node_type == NodeType::Inlet {
+                    if inlet_node.node_type == DefGraphNodeType::Inlet {
                         let stream_node_id = self
                             .graph
                             .neighbors_directed(inlet_node_id, petgraph::Incoming)
@@ -543,7 +549,7 @@ impl DefGraph {
             .neighbors_directed(spec_node_id, petgraph::Outgoing)
             .filter_map(|outlet_node_id| {
                 if let Some(outlet_node) = self.graph.node_weight(outlet_node_id) {
-                    if outlet_node.node_type == NodeType::Outlet {
+                    if outlet_node.node_type == DefGraphNodeType::Outlet {
                         let stream_node_id = self
                             .graph
                             .neighbors_directed(outlet_node_id, petgraph::Outgoing)
@@ -635,7 +641,7 @@ impl DefGraph {
         let spec_node_id = self.ensure_node(
             &spec_id,
             DefGraphNode {
-                node_type: NodeType::Spec,
+                node_type: DefGraphNodeType::Spec,
                 spec_name: Some(spec_id.clone()),
                 unique_spec_label: None,
                 tag: None,
@@ -650,7 +656,7 @@ impl DefGraph {
         let inlet_node_id = self.ensure_node(
             &format!("{}/{}", spec_id, tag),
             DefGraphNode {
-                node_type: NodeType::Inlet,
+                node_type: DefGraphNodeType::Inlet,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: Some(tag.to_string()),
@@ -696,7 +702,7 @@ impl DefGraph {
         let stream_node_id = self.ensure_node(
             stream_def_id.as_str(),
             DefGraphNode {
-                node_type: NodeType::StreamDef,
+                node_type: DefGraphNodeType::StreamDef,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: None,
@@ -729,7 +735,7 @@ impl DefGraph {
         let spec_node_id = self.ensure_node(
             &spec_id,
             DefGraphNode {
-                node_type: NodeType::Spec,
+                node_type: DefGraphNodeType::Spec,
                 spec_name: Some(spec_id.clone()),
                 unique_spec_label: None,
                 tag: None,
@@ -744,7 +750,7 @@ impl DefGraph {
         let outlet_node_id = self.ensure_node(
             &format!("{}/{}", spec_id, tag),
             DefGraphNode {
-                node_type: NodeType::Outlet,
+                node_type: DefGraphNodeType::Outlet,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: Some(tag.to_string()),
@@ -789,7 +795,7 @@ impl DefGraph {
         let stream_node_id = self.ensure_node(
             stream_def_id.as_str(),
             DefGraphNode {
-                node_type: NodeType::StreamDef,
+                node_type: DefGraphNodeType::StreamDef,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: None,
@@ -819,7 +825,7 @@ impl DefGraph {
         let mut node_indices = HashMap::new();
         let root_spec_id = unique_spec_identifier(root_spec_name, None);
         let root_spec_node_id = graph.add_node(DefGraphNode {
-            node_type: NodeType::RootSpec,
+            node_type: DefGraphNodeType::RootSpec,
             spec_name: Some(root_spec_name_c0),
             unique_spec_label: None,
             tag: None,
@@ -835,7 +841,7 @@ impl DefGraph {
         // Add inlet and outlet nodes, their edges, and the connected stream node and edges
         for tag in input_tags.iter() {
             let inlet_node_id = graph.add_node(DefGraphNode {
-                node_type: NodeType::Inlet,
+                node_type: DefGraphNodeType::Inlet,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: Some(tag.clone()),
@@ -874,7 +880,7 @@ impl DefGraph {
             };
             
             let stream_node_id = graph.add_node(DefGraphNode {
-                node_type: NodeType::StreamDef,
+                node_type: DefGraphNodeType::StreamDef,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: None,
@@ -890,7 +896,7 @@ impl DefGraph {
 
         for tag in output_tags.iter() {
             let outlet_node_id = graph.add_node(DefGraphNode {
-                node_type: NodeType::Outlet,
+                node_type: DefGraphNodeType::Outlet,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: Some(tag.clone()),
@@ -929,7 +935,7 @@ impl DefGraph {
 
 
             let stream_node_id = graph.add_node(DefGraphNode {
-                node_type: NodeType::StreamDef,
+                node_type: DefGraphNodeType::StreamDef,
                 spec_name: None,
                 unique_spec_label: None,
                 tag: None,
@@ -955,7 +961,7 @@ impl DefGraph {
             .node_indices()
             .filter_map(|index| {
                 if let Some(node) = self.graph.node_weight(index) {
-                    if node.node_type == NodeType::Spec {
+                    if node.node_type == DefGraphNodeType::Spec {
                         Some(index.index() as u32)
                     } else {
                         None
@@ -1042,7 +1048,7 @@ impl DefGraph {
         let outbound_ids = self.outbound_neighbors(stream_node_id);
         let inlet_ids: Vec<u32> = outbound_ids.into_iter().filter(|&id| {
             if let Some(node) = self.node_weight(id) {
-                node.node_type == NodeType::Inlet
+                node.node_type == DefGraphNodeType::Inlet
             } else {
                 false
             }
@@ -1052,7 +1058,7 @@ impl DefGraph {
             let spec_ids = self.outbound_neighbors(inlet_id);
             if let Some(dest_id) = spec_ids.into_iter().find(|&id| {
                 if let Some(node) = self.node_weight(id) {
-                    node.node_type == NodeType::Spec || node.node_type == NodeType::RootSpec
+                    node.node_type == DefGraphNodeType::Spec || node.node_type == DefGraphNodeType::RootSpec
                 } else {
                     false
                 }
@@ -1070,7 +1076,7 @@ impl DefGraph {
         let inbound_ids = self.inbound_neighbors(stream_node_id);
         let outlet_id_option = inbound_ids.into_iter().find(|&id| {
             if let Some(node) = self.node_weight(id) {
-                node.node_type == NodeType::Outlet
+                node.node_type == DefGraphNodeType::Outlet
             } else {
                 false
             }
@@ -1079,7 +1085,7 @@ impl DefGraph {
             let spec_ids = self.inbound_neighbors(outlet_id);
             if let Some(source_spec_id) = spec_ids.into_iter().find(|&id| {
                 if let Some(node) = self.node_weight(id) {
-                    node.node_type == NodeType::Spec || node.node_type == NodeType::RootSpec
+                    node.node_type == DefGraphNodeType::Spec || node.node_type == DefGraphNodeType::RootSpec
                 } else {
                     false
                 }

@@ -10,7 +10,7 @@ import { genPromiseCycle, genManuallyFedIterator } from "@livestack/shared";
 import { CallContext } from "nice-grpc";
 import { v4 } from "uuid";
 import { createClient } from "redis";
-import { escapeColon, getCapacityManager } from "../capacity/manager.js";
+import { escapeColon, getCapacityManager } from "../capacity/manager";
 import { promises as fs } from "fs";
 
 const _rawQueueBySpecName = new Map<string, Queue>();
