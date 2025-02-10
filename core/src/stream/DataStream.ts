@@ -31,7 +31,7 @@ export class DataStream<T extends object> {
     liveEnv?: LiveEnv | null;
     logger?: ReturnType<typeof getLogger>;
   }): Promise<DataStream<T>> {
-    if (liveEnv) {
+    if (!liveEnv) {
       liveEnv = await LiveEnv.globalP();
     }
     if (DataStream.globalRegistry[uniqueName]) {

@@ -49,7 +49,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
           json_schema_str: string;
         }>(["json_schema_str"]);
       if (!rec) {
-        throw new Error("Stream not found");
+        throw new Error(`Stream not found with projectUuid: ${projectUuid} and streamId: ${streamId}`);
       }
       if (!rec.json_schema_str) {
         return null;
