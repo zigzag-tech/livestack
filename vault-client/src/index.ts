@@ -35,8 +35,8 @@ export async function findSuitableVaultServer(authToken: string) {
   const clientFactory = createClientFactory().use(retryMiddleware);
 
   let vaultServerURL: string;
-  if (process.env.LIVESTACK_VALULT_SERVER_URL) {
-    vaultServerURL = process.env.LIVESTACK_VALULT_SERVER_URL;
+  if (process.env.LIVESTACK_VAULT_SERVER_URL) {
+    vaultServerURL = process.env.LIVESTACK_VAULT_SERVER_URL;
   } else {
     vaultServerURL = "livedev.zztech.io:50504";
   }

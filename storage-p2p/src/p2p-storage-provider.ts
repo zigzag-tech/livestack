@@ -20,8 +20,8 @@ import dns from "dns";
 
 let vaultServerURL = "localhost:50504";
 
-if (process.env.LIVESTACK_VALULT_SERVER_URL) {
-  vaultServerURL = process.env.LIVESTACK_VALULT_SERVER_URL;
+if (process.env.LIVESTACK_VAULT_SERVER_URL) {
+  vaultServerURL = process.env.LIVESTACK_VAULT_SERVER_URL;
 }
 
 export async function getP2PStorageProvider(

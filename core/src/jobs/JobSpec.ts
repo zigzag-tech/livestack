@@ -5,11 +5,11 @@ import {
   wrapIfSingle,
   initDefGraph,
   OutletNode,
+  initInstantiatedGraph,
 } from "@livestack/shared";
 import { InletNode, SpecNode, DefGraph } from "@livestack/shared";
 import {
   StreamNode,
-  getSourceSpecNodeConnectedToStream,
   InstantiatedGraph,
 } from "@livestack/shared";
 import { v4 } from "uuid";
@@ -259,7 +259,8 @@ export class JobSpec<
     input.tags.forEach((k) => {
       input.terminate(k);
     });
-    return r;
+    //TODO: remove the forced cast
+    return r as { data: OMap[K | InferDefaultOrSingleKey<OMap>]; timestamp: number; } | null;
   }
 
   /**
@@ -270,6 +271,7 @@ export class JobSpec<
    */
   async getJobManager(jobId: string): Promise<JobManager<P, I, O, IMap, OMap>> {
     const liveEnv = await this.liveEnvPWithTimeout;
+
     const jobRecResp = await liveEnv.vaultClient.db.getJobRec({
       projectUuid: liveEnv.projectUuid,
       jobId,
@@ -479,14 +481,21 @@ export class JobSpec<
       jobId,
       liveEnv: await this.liveEnvPWithTimeout,
     });
+    
 
-    const streamNodeId = instaG.findStreamNodeIdConnectedToJob({
+    const streamNodeId = instaG.findStreamNodeIdConnectedToJob(
       jobId,
       type,
-      tag: p.tag.toString(),
-    });
+      p.tag.toString(),
+    );
 
-    if (!streamNodeId) {
+
+    if (streamNodeId === undefined || streamNodeId === null) {
+      instaG.nodes().forEach((nId) => {
+        const n = instaG.getNodeAttributes(nId);
+
+      });
+
       throw new Error(
         `Stream node not found for job ${jobId} and tag ${p.tag.toString()}`
       );
@@ -584,11 +593,7 @@ export class JobSpec<
           jobId,
           liveEnv: await this.liveEnvPWithTimeout,
         });
-        // console.log(
-        //   "streamSourceSpecTypeByStreamId",
-        //   this.name,
-        //   instaG.streamSourceSpecTypeByStreamId
-        // );
+
         if (instaG.streamSourceSpecTypeByStreamId[streamId]) {
           const sourceSpec = JobSpec.lookupByName(
             instaG.streamSourceSpecTypeByStreamId[streamId].specName
@@ -602,7 +607,7 @@ export class JobSpec<
           >;
         } else {
           // check if inlet node has a transform
-          const connectedJobNodeId = instaG.findNode((nId) => {
+          const connectedJobNodeId = instaG.nodes().find((nId) => {
             const n = instaG.getNodeAttributes(nId);
             if (n.nodeType !== "job" && n.nodeType !== "root-job") {
               return false;
@@ -611,18 +616,18 @@ export class JobSpec<
             }
           });
 
-          if (!connectedJobNodeId) {
+          if (connectedJobNodeId === undefined || connectedJobNodeId === null) {
             throw new Error(
               `Connected job node not found for job ${jobId} and tag ${p.tag.toString()}`
             );
           }
 
-          const inletNodeId = instaG.findNode((nId) => {
+          const inletNodeId = instaG.nodes().find((nId) => {
             const n = instaG.getNodeAttributes(nId);
-            if (n.nodeType !== "Inlet" || n.tag !== specTagInfo.tag) {
+            if (n.nodeType !== "inlet" || n.tag !== specTagInfo.tag) {
               return false;
             } else {
-              const ee = instaG.findOutboundEdge((eId) => {
+              const ee = instaG.outboundEdges(nId).find((eId) => {
                 return (
                   instaG.target(eId) === connectedJobNodeId &&
                   instaG.source(eId) === nId
@@ -632,7 +637,7 @@ export class JobSpec<
             }
           });
 
-          const inletNode = instaG.getNodeAttributes(inletNodeId) as InletNode;
+          const inletNode = instaG.getNodeAttributes(inletNodeId!) as InletNode;
           if (!inletNode.hasTransform) {
             // no transform; proceed as usual
             def = wrapTerminatorAndDataId(
@@ -643,19 +648,19 @@ export class JobSpec<
             ) as z.ZodType<WrapTerminatorAndDataId<T>>;
           } else {
             // try to find source of the stream
-            const streamNodeId = instaG.findStreamNodeIdConnectedToJob({
-              jobId: connectedJobId,
-              type: "in",
-              tag: specTagInfo.tag,
-            });
+            const streamNodeId = instaG.findStreamNodeIdConnectedToJob(
+              connectedJobId,
+              "in",
+              specTagInfo.tag,
+            );
             if (!streamNodeId) {
               throw new Error(
                 `Stream node not found for job ${connectedJobId} and tag ${specTagInfo.tag}`
               );
             }
 
-            const source = getSourceSpecNodeConnectedToStream(
-              instaG,
+            const source = instaG.getSourceSpecNodeConnectedToStream(
+              
               streamNodeId
             );
             if (!source) {
@@ -664,6 +669,12 @@ export class JobSpec<
               );
               def = null;
             } else {
+              if(!source.origin.specName) {
+                throw new Error("source.origin.specName is null");
+              }
+              if(!source.outletNode.tag) {
+                throw new Error("source.outletNode.tag is null");
+              }
               const responsibleSpec = JobSpec.lookupByName(
                 source.origin.specName
               );
@@ -786,7 +797,7 @@ export class JobSpec<
     // construct streamIdOverridesByTagByTypeByJobId[jobId] from the graph
 
     // construct a local instantiated graph to get default streamIdOverridesByTagByTypeByJobId
-    const localG = new InstantiatedGraph({
+    const localG = initInstantiatedGraph({
       defGraph: this.getDefGraph(),
       contextId: jobId,
       rootJobId: jobId,
@@ -796,9 +807,10 @@ export class JobSpec<
     });
 
     if (!this.streamIdOverridesByTagByTypeByJobId[jobId]) {
-      const inletEdgeIds = localG.inboundEdges(localG.rootJobId).filter((e) => {
+      const rootJobNodeId = localG.rootJobNodeId;
+      const inletEdgeIds = localG.inboundEdges(rootJobNodeId).filter((e) => {
         const node = localG.getNodeAttributes(localG.source(e));
-        return node.nodeType === "Inlet";
+        return node.nodeType === "inlet";
       });
       const inletNodeIds = inletEdgeIds.map((e) => localG.source(e));
       const _in = Object.fromEntries(
@@ -815,10 +827,10 @@ export class JobSpec<
       ) as Record<keyof IMap, string>;
 
       const outletEdgeIds = localG
-        .outboundEdges(localG.rootJobId)
+        .outboundEdges(rootJobNodeId)
         .filter((e) => {
           const node = localG.getNodeAttributes(localG.target(e));
-          return node.nodeType === "Outlet";
+          return node.nodeType === "outlet";
         });
       const outletNodeIds = outletEdgeIds.map((e) => localG.target(e));
       const _out = Object.fromEntries(
@@ -854,6 +866,7 @@ export class JobSpec<
 
     jobOptions = jobOptions || ({} as P);
     const vaultClient = await (await this.liveEnvP).vaultClient;
+
     await vaultClient.db.ensureJobAndStatusAndConnectorRecs({
       projectUuid: (await this.liveEnvPWithTimeout).projectUuid,
       specName: this.name,
@@ -1650,12 +1663,7 @@ export class JobManager<P, I, O, IMap, OMap> {
         ...this.output.tags.map((t) => t.toString() as keyof OMap)
       );
     }
-    // console.log(
-    //   "JobManager: ",
-    //   this.jobId,
-    //   "waiting on outputs",
-    //   outputsToWaitOn
-    // );
+
     await Promise.all(
       outputsToWaitOn.map(async (outputTag) => {
         for await (const _ of this.output(outputTag)) {
@@ -1664,7 +1672,6 @@ export class JobManager<P, I, O, IMap, OMap> {
       })
     );
 
-    // console.log("JobManager: Job finished", this.jobId);
   };
 
   public waitUntilFinish = () => {

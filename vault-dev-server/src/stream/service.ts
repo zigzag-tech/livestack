@@ -5,14 +5,14 @@ import type {
   SubRequest,
   ValuesByReverseIndexRequest,
   LastValueRequest,
-} from "@livestack/vault-interface//src/generated/stream.js";
+} from "@livestack/vault-interface//src/generated/stream";
 import {
   OBJ_REF_VALUE,
   genManuallyFedIterator,
   lruCacheFn,
 } from "@livestack/shared";
 import { StreamServiceImplementation } from "@livestack/vault-interface";
-import { SubType } from "@livestack/vault-interface/src/generated/stream.js";
+import { SubType } from "@livestack/vault-interface/src/generated/stream";
 import { CallContext } from "nice-grpc-common";
 import { createClient } from "redis";
 import {
@@ -25,7 +25,7 @@ import {
   ARRAY_KEY,
   PRIMTIVE_KEY,
   handlePrimitiveOrArray,
-} from "../db/primitives.js";
+} from "../db/primitives";
 import { v4 } from "uuid";
 // import { validate } from "jsonschema";
 import Ajv from "ajv";

@@ -1,5 +1,11 @@
 #!/bin/bash
+# stop if any command fails
+set -e
 
+# install wasm-pack if not already installed
+if ! command -v wasm-pack &> /dev/null; then
+    curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+fi
 
 # cd into the directory where the script is
 cd "$(dirname "$0")"

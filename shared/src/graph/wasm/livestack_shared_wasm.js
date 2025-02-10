@@ -29,7 +29,9 @@ function addHeapObject(obj) {
     return idx;
 }
 
-let WASM_VECTOR_LEN = 0;
+const cachedTextDecoder = (typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }) : { decode: () => { throw Error('TextDecoder not available') } } );
+
+if (typeof TextDecoder !== 'undefined') { cachedTextDecoder.decode(); };
 
 let cachedUint8Memory0 = null;
 
@@ -39,6 +41,13 @@ function getUint8Memory0() {
     }
     return cachedUint8Memory0;
 }
+
+function getStringFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return cachedTextDecoder.decode(getUint8Memory0().subarray(ptr, ptr + len));
+}
+
+let WASM_VECTOR_LEN = 0;
 
 const cachedTextEncoder = (typeof TextEncoder !== 'undefined' ? new TextEncoder('utf-8') : { encode: () => { throw Error('TextEncoder not available') } } );
 
@@ -107,13 +116,13 @@ function getInt32Memory0() {
     return cachedInt32Memory0;
 }
 
-const cachedTextDecoder = (typeof TextDecoder !== 'undefined' ? new TextDecoder('utf-8', { ignoreBOM: true, fatal: true }) : { decode: () => { throw Error('TextDecoder not available') } } );
+let cachedFloat64Memory0 = null;
 
-if (typeof TextDecoder !== 'undefined') { cachedTextDecoder.decode(); };
-
-function getStringFromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    return cachedTextDecoder.decode(getUint8Memory0().subarray(ptr, ptr + len));
+function getFloat64Memory0() {
+    if (cachedFloat64Memory0 === null || cachedFloat64Memory0.byteLength === 0) {
+        cachedFloat64Memory0 = new Float64Array(wasm.memory.buffer);
+    }
+    return cachedFloat64Memory0;
 }
 
 function debugString(val) {
@@ -188,6 +197,17 @@ function getUint32Memory0() {
         cachedUint32Memory0 = new Uint32Array(wasm.memory.buffer);
     }
     return cachedUint32Memory0;
+}
+
+function getArrayJsValueFromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    const mem = getUint32Memory0();
+    const slice = mem.subarray(ptr / 4, ptr / 4 + len);
+    const result = [];
+    for (let i = 0; i < slice.length; i++) {
+        result.push(takeObject(slice[i]));
+    }
+    return result;
 }
 
 function getArrayU32FromWasm0(ptr, len) {
@@ -325,7 +345,7 @@ export class DefGraph {
         }
     }
     /**
-    * @returns {Uint32Array}
+    * @returns {(number)[]}
     */
     getSpecNodeIds() {
         try {
@@ -333,7 +353,7 @@ export class DefGraph {
             wasm.defgraph_getSpecNodeIds(retptr, this.__wbg_ptr);
             var r0 = getInt32Memory0()[retptr / 4 + 0];
             var r1 = getInt32Memory0()[retptr / 4 + 1];
-            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            var v1 = getArrayJsValueFromWasm0(r0, r1).slice();
             wasm.__wbindgen_free(r0, r1 * 4, 4);
             return v1;
         } finally {
@@ -345,7 +365,7 @@ export class DefGraph {
     */
     getRootSpecNodeId() {
         const ret = wasm.defgraph_getRootSpecNodeId(this.__wbg_ptr);
-        return ret >>> 0;
+        return takeObject(ret);
     }
     /**
     * @param {number} node_id
@@ -513,6 +533,312 @@ export class DefGraph {
     }
 }
 
+const InstantiatedGraphFinalization = (typeof FinalizationRegistry === 'undefined')
+    ? { register: () => {}, unregister: () => {} }
+    : new FinalizationRegistry(ptr => wasm.__wbg_instantiatedgraph_free(ptr >>> 0));
+/**
+* The main struct bridging Rust's InstantiatedGraphImpl to JS/Wasm.
+* Instead of receiving a DefGraph, it takes a serialized JSON string for the DefGraph.
+*/
+export class InstantiatedGraph {
+
+    __destroy_into_raw() {
+        const ptr = this.__wbg_ptr;
+        this.__wbg_ptr = 0;
+        InstantiatedGraphFinalization.unregister(this);
+        return ptr;
+    }
+
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_instantiatedgraph_free(ptr);
+    }
+    /**
+    * Create a new InstantiatedGraphWasm by:
+    *  - Deserializing a `DefGraph` from JSON,
+    *  - Parsing the stream/inlet overrides from JS objects,
+    *  - Constructing the internal Rust `InstantiatedGraph`.
+    * @param {string} context_id
+    * @param {string} def_graph_json
+    * @param {string} root_job_id
+    * @param {any} streamIdOverrides
+    * @param {any} inletHasTransformOverridesByTag
+    * @param {any} streamSourceSpecTypeByStreamId
+    */
+    constructor(context_id, def_graph_json, root_job_id, streamIdOverrides, inletHasTransformOverridesByTag, streamSourceSpecTypeByStreamId) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(context_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(def_graph_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(root_job_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            wasm.instantiatedgraph_new(retptr, ptr0, len0, ptr1, len1, ptr2, len2, addHeapObject(streamIdOverrides), addHeapObject(inletHasTransformOverridesByTag), addHeapObject(streamSourceSpecTypeByStreamId));
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            var r2 = getInt32Memory0()[retptr / 4 + 2];
+            if (r2) {
+                throw takeObject(r1);
+            }
+            this.__wbg_ptr = r0 >>> 0;
+            return this;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * Retrieve all node IDs in the InstantiatedGraph (JS array of u32).
+    * @returns {(number)[]}
+    */
+    nodes() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.instantiatedgraph_nodes(retptr, this.__wbg_ptr);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            var v1 = getArrayJsValueFromWasm0(r0, r1).slice();
+            wasm.__wbindgen_free(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * Return the node's attributes as a JS object.
+    * Similar to the TS `InstantiatedGraph.getNodeAttributes(...)`.
+    * @param {number} node_id
+    * @returns {InstantiatedGraphNodeWasm}
+    */
+    getNodeAttributes(node_id) {
+        const ret = wasm.instantiatedgraph_getNodeAttributes(this.__wbg_ptr, node_id);
+        return takeObject(ret);
+    }
+    /**
+    * Return the total number of edges in the InstantiatedGraph (optional).
+    * @returns {number}
+    */
+    edgeCount() {
+        const ret = wasm.instantiatedgraph_edgeCount(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+    * Retrieve the "source" and "targets" for a particular stream node,
+    * returning a JS object with shape `{ source: { origin, outlet_node }, targets: [...] }`.
+    * @param {number} stream_node_id
+    * @returns {any}
+    */
+    getNodesConnectedToStream(stream_node_id) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.instantiatedgraph_getNodesConnectedToStream(retptr, this.__wbg_ptr, stream_node_id);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            var r2 = getInt32Memory0()[retptr / 4 + 2];
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * Return an array of node IDs that are inbound neighbors of the given node ID.
+    * @param {number} node_id
+    * @returns {Uint32Array}
+    */
+    inboundNeighbors(node_id) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.instantiatedgraph_inboundNeighbors(retptr, this.__wbg_ptr, node_id);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            var v1 = getArrayU32FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_free(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * getSourceSpecNodeConnectedToStream
+    * @param {number} stream_node_id
+    * @returns {InstantiatedStreamConnectionSourceWasm | undefined}
+    */
+    getSourceSpecNodeConnectedToStream(stream_node_id) {
+        const ret = wasm.instantiatedgraph_getSourceSpecNodeConnectedToStream(this.__wbg_ptr, stream_node_id);
+        return takeObject(ret);
+    }
+    /**
+    * Just like the TS version: find a stream node by matching a jobId, direction, and tag.
+    * @param {string} job_id
+    * @param {string} direction
+    * @param {string} tag
+    * @returns {number | undefined}
+    */
+    findStreamNodeIdConnectedToJob(job_id, direction, tag) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passStringToWasm0(job_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len0 = WASM_VECTOR_LEN;
+            const ptr1 = passStringToWasm0(direction, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len1 = WASM_VECTOR_LEN;
+            const ptr2 = passStringToWasm0(tag, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            const len2 = WASM_VECTOR_LEN;
+            wasm.instantiatedgraph_findStreamNodeIdConnectedToJob(retptr, this.__wbg_ptr, ptr0, len0, ptr1, len1, ptr2, len2);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            return r0 === 0 ? undefined : r1 >>> 0;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * Return an array of edge IDs that enter the given nodeId.
+    * Mirrors InstantiatedGraph::inbound_edges.
+    * @param {number} node_id
+    * @returns {(number)[]}
+    */
+    inboundEdges(node_id) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.instantiatedgraph_inboundEdges(retptr, this.__wbg_ptr, node_id);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            var v1 = getArrayJsValueFromWasm0(r0, r1).slice();
+            wasm.__wbindgen_free(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * Return an array of edge IDs that leave the given nodeId.
+    * Mirrors InstantiatedGraph::outbound_edges.
+    * @param {number} node_id
+    * @returns {(number)[]}
+    */
+    outboundEdges(node_id) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.instantiatedgraph_outboundEdges(retptr, this.__wbg_ptr, node_id);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            var v1 = getArrayJsValueFromWasm0(r0, r1).slice();
+            wasm.__wbindgen_free(r0, r1 * 4, 4);
+            return v1;
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * Return the source node ID of the given edge ID.
+    * @param {number} edge_id
+    * @returns {number}
+    */
+    source(edge_id) {
+        const ret = wasm.instantiatedgraph_source(this.__wbg_ptr, edge_id);
+        return ret >>> 0;
+    }
+    /**
+    * Return the target node ID of the given edge ID.
+    * @param {number} edge_id
+    * @returns {number}
+    */
+    target(edge_id) {
+        const ret = wasm.instantiatedgraph_target(this.__wbg_ptr, edge_id);
+        return ret >>> 0;
+    }
+    /**
+    * Return the root job ID string, which is stored in the Rust InstantiatedGraph.
+    * @returns {string}
+    */
+    get rootJobId() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.instantiatedgraph_rootJobId(retptr, this.__wbg_ptr);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+    * Return the root job ID string, which is stored in the Rust InstantiatedGraph.
+    * @returns {any}
+    */
+    get streamSourceSpecTypeByStreamId() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.instantiatedgraph_streamSourceSpecTypeByStreamId(retptr, this.__wbg_ptr);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            var r2 = getInt32Memory0()[retptr / 4 + 2];
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return takeObject(r0);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * Return the root job node as a JS object.
+    * @returns {number}
+    */
+    get rootJobNodeId() {
+        const ret = wasm.instantiatedgraph_rootJobNodeId(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+    * Return the serialized JSON string of the InstantiatedGraph.
+    * @returns {string}
+    */
+    toJson() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.instantiatedgraph_toJson(retptr, this.__wbg_ptr);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+    * Return an array of edge IDs.
+    * @returns {string}
+    */
+    edgesPrintout() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.instantiatedgraph_edgesPrintout(retptr, this.__wbg_ptr);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
+        } finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+}
+
 async function __wbg_load(module, imports) {
     if (typeof Response === 'function' && module instanceof Response) {
         if (typeof WebAssembly.instantiateStreaming === 'function') {
@@ -554,8 +880,42 @@ function __wbg_get_imports() {
         const ret = getObject(arg0);
         return addHeapObject(ret);
     };
+    imports.wbg.__wbindgen_number_new = function(arg0) {
+        const ret = arg0;
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbindgen_error_new = function(arg0, arg1) {
+        const ret = new Error(getStringFromWasm0(arg0, arg1));
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbindgen_string_get = function(arg0, arg1) {
+        const obj = getObject(arg1);
+        const ret = typeof(obj) === 'string' ? obj : undefined;
+        var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        var len1 = WASM_VECTOR_LEN;
+        getInt32Memory0()[arg0 / 4 + 1] = len1;
+        getInt32Memory0()[arg0 / 4 + 0] = ptr1;
+    };
+    imports.wbg.__wbindgen_is_string = function(arg0) {
+        const ret = typeof(getObject(arg0)) === 'string';
+        return ret;
+    };
+    imports.wbg.__wbindgen_boolean_get = function(arg0) {
+        const v = getObject(arg0);
+        const ret = typeof(v) === 'boolean' ? (v ? 1 : 0) : 2;
+        return ret;
+    };
     imports.wbg.__wbindgen_is_undefined = function(arg0) {
         const ret = getObject(arg0) === undefined;
+        return ret;
+    };
+    imports.wbg.__wbindgen_is_object = function(arg0) {
+        const val = getObject(arg0);
+        const ret = typeof(val) === 'object' && val !== null;
+        return ret;
+    };
+    imports.wbg.__wbindgen_in = function(arg0, arg1) {
+        const ret = getObject(arg0) in getObject(arg1);
         return ret;
     };
     imports.wbg.__wbg_new_abda76e883ba8a5f = function() {
@@ -580,11 +940,20 @@ function __wbg_get_imports() {
             wasm.__wbindgen_free(deferred0_0, deferred0_1, 1);
         }
     };
-    imports.wbg.__wbindgen_string_get = function(arg0, arg1) {
+    imports.wbg.__wbindgen_jsval_loose_eq = function(arg0, arg1) {
+        const ret = getObject(arg0) == getObject(arg1);
+        return ret;
+    };
+    imports.wbg.__wbindgen_number_get = function(arg0, arg1) {
         const obj = getObject(arg1);
-        const ret = typeof(obj) === 'string' ? obj : undefined;
-        var ptr1 = isLikeNone(ret) ? 0 : passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        var len1 = WASM_VECTOR_LEN;
+        const ret = typeof(obj) === 'number' ? obj : undefined;
+        getFloat64Memory0()[arg0 / 8 + 1] = isLikeNone(ret) ? 0 : ret;
+        getInt32Memory0()[arg0 / 4 + 0] = !isLikeNone(ret);
+    };
+    imports.wbg.__wbg_String_b9412f8799faab3e = function(arg0, arg1) {
+        const ret = String(getObject(arg1));
+        const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
         getInt32Memory0()[arg0 / 4 + 1] = len1;
         getInt32Memory0()[arg0 / 4 + 0] = ptr1;
     };
@@ -592,19 +961,110 @@ function __wbg_get_imports() {
         const ret = getStringFromWasm0(arg0, arg1);
         return addHeapObject(ret);
     };
+    imports.wbg.__wbg_getwithrefkey_edc2c8960f0f1191 = function(arg0, arg1) {
+        const ret = getObject(arg0)[getObject(arg1)];
+        return addHeapObject(ret);
+    };
     imports.wbg.__wbg_set_f975102236d3c502 = function(arg0, arg1, arg2) {
         getObject(arg0)[takeObject(arg1)] = takeObject(arg2);
+    };
+    imports.wbg.__wbg_get_bd8e338fbd5f5cc8 = function(arg0, arg1) {
+        const ret = getObject(arg0)[arg1 >>> 0];
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_length_cd7af8117672b8b8 = function(arg0) {
+        const ret = getObject(arg0).length;
+        return ret;
     };
     imports.wbg.__wbg_new_16b304a2cfa7ff4a = function() {
         const ret = new Array();
         return addHeapObject(ret);
     };
+    imports.wbg.__wbindgen_is_function = function(arg0) {
+        const ret = typeof(getObject(arg0)) === 'function';
+        return ret;
+    };
+    imports.wbg.__wbg_new_d9bc3a0147634640 = function() {
+        const ret = new Map();
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_next_40fc327bfc8770e6 = function(arg0) {
+        const ret = getObject(arg0).next;
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_next_196c84450b364254 = function() { return handleError(function (arg0) {
+        const ret = getObject(arg0).next();
+        return addHeapObject(ret);
+    }, arguments) };
+    imports.wbg.__wbg_done_298b57d23c0fc80c = function(arg0) {
+        const ret = getObject(arg0).done;
+        return ret;
+    };
+    imports.wbg.__wbg_value_d93c65011f51a456 = function(arg0) {
+        const ret = getObject(arg0).value;
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_iterator_2cee6dadfd956dfa = function() {
+        const ret = Symbol.iterator;
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_get_e3c254076557e348 = function() { return handleError(function (arg0, arg1) {
+        const ret = Reflect.get(getObject(arg0), getObject(arg1));
+        return addHeapObject(ret);
+    }, arguments) };
+    imports.wbg.__wbg_call_27c0f87801dedf93 = function() { return handleError(function (arg0, arg1) {
+        const ret = getObject(arg0).call(getObject(arg1));
+        return addHeapObject(ret);
+    }, arguments) };
     imports.wbg.__wbg_new_72fb9a18b5ae2624 = function() {
         const ret = new Object();
         return addHeapObject(ret);
     };
     imports.wbg.__wbg_set_d4638f722068f043 = function(arg0, arg1, arg2) {
         getObject(arg0)[arg1 >>> 0] = takeObject(arg2);
+    };
+    imports.wbg.__wbg_instanceof_ArrayBuffer_836825be07d4c9d2 = function(arg0) {
+        let result;
+        try {
+            result = getObject(arg0) instanceof ArrayBuffer;
+        } catch (_) {
+            result = false;
+        }
+        const ret = result;
+        return ret;
+    };
+    imports.wbg.__wbg_set_8417257aaedc936b = function(arg0, arg1, arg2) {
+        const ret = getObject(arg0).set(getObject(arg1), getObject(arg2));
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_entries_95cc2c823b285a09 = function(arg0) {
+        const ret = Object.entries(getObject(arg0));
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_buffer_12d079cc21e14bdb = function(arg0) {
+        const ret = getObject(arg0).buffer;
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_new_63b92bc8671ed464 = function(arg0) {
+        const ret = new Uint8Array(getObject(arg0));
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_set_a47bac70306a19a7 = function(arg0, arg1, arg2) {
+        getObject(arg0).set(getObject(arg1), arg2 >>> 0);
+    };
+    imports.wbg.__wbg_length_c20a40f15020d68a = function(arg0) {
+        const ret = getObject(arg0).length;
+        return ret;
+    };
+    imports.wbg.__wbg_instanceof_Uint8Array_2b3bbecd033d19f6 = function(arg0) {
+        let result;
+        try {
+            result = getObject(arg0) instanceof Uint8Array;
+        } catch (_) {
+            result = false;
+        }
+        const ret = result;
+        return ret;
     };
     imports.wbg.__wbg_parse_66d1801634e099ac = function() { return handleError(function (arg0, arg1) {
         const ret = JSON.parse(getStringFromWasm0(arg0, arg1));
@@ -624,6 +1084,10 @@ function __wbg_get_imports() {
     imports.wbg.__wbindgen_throw = function(arg0, arg1) {
         throw new Error(getStringFromWasm0(arg0, arg1));
     };
+    imports.wbg.__wbindgen_memory = function() {
+        const ret = wasm.memory;
+        return addHeapObject(ret);
+    };
 
     return imports;
 }
@@ -635,6 +1099,7 @@ function __wbg_init_memory(imports, maybe_memory) {
 function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     __wbg_init.__wbindgen_wasm_module = module;
+    cachedFloat64Memory0 = null;
     cachedInt32Memory0 = null;
     cachedUint32Memory0 = null;
     cachedUint8Memory0 = null;

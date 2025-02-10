@@ -11,6 +11,7 @@ import {
   TransformFunction,
   JobNode,
   InstantiatedGraph,
+  initInstantiatedGraph,
 } from "@livestack/shared";
 import { AliasNode } from "@livestack/shared";
 import { z } from "zod";
@@ -508,15 +509,14 @@ export class LiveflowSpec extends JobSpec<
             }
           }
         }
-        const instG = new InstantiatedGraph({
+        const instG = initInstantiatedGraph({
           defGraph: this.getDefGraph(),
           contextId: groupId,
           rootJobId: groupId,
           streamIdOverrides: {},
-          streamSourceSpecTypeByStreamId: {},
           inletHasTransformOverridesByTag,
+          streamSourceSpecTypeByStreamId: {},
         });
-        await instG.initPromise;
 
         const allJobNodes = instG
           .nodes()
@@ -539,12 +539,12 @@ export class LiveflowSpec extends JobSpec<
             const inboundEdges = instG.inboundEdges(jobNodeId);
             const inletEdgeIds = inboundEdges.filter((e) => {
               const node = instG.getNodeAttributes(instG.source(e));
-              return node.nodeType === "Inlet";
+              return node.nodeType === "inlet";
             });
             const inletNodeIds = inletEdgeIds.map((e) => instG.source(e));
             for (const inletNodeId of inletNodeIds) {
               const inletNode = instG.getNodeAttributes(inletNodeId);
-              if (inletNode.nodeType !== "Inlet") {
+              if (inletNode.nodeType !== "inlet") {
                 throw new Error("Expected inlet node");
               }
               const streamToInletEdgeId = instG.inboundEdges(inletNodeId)[0];
@@ -554,6 +554,12 @@ export class LiveflowSpec extends JobSpec<
                 throw new Error("Expected stream node");
               }
               const streamId = streamNode.streamId;
+              if (!streamId) {
+                throw new Error("Stream node has no stream id");
+              }
+              if (!inletNode.tag) {
+                throw new Error("Inlet node has no tag");
+              }
               inputStreamIdOverridesByTag[inletNode.tag] = streamId;
             }
 
@@ -561,13 +567,13 @@ export class LiveflowSpec extends JobSpec<
             const outboundEdges = instG.outboundEdges(jobNodeId);
             const outletEdgeIds = outboundEdges.filter((e) => {
               const node = instG.getNodeAttributes(instG.target(e));
-              return node.nodeType === "Outlet";
+              return node.nodeType === "outlet";
             });
             const outletNodeIds = outletEdgeIds.map((e) => instG.target(e));
 
             for (const outletNodeId of outletNodeIds) {
               const outletNode = instG.getNodeAttributes(outletNodeId);
-              if (outletNode.nodeType !== "Outlet") {
+              if (outletNode.nodeType !== "outlet") {
                 throw new Error("Expected outlet node");
               }
 
@@ -579,6 +585,12 @@ export class LiveflowSpec extends JobSpec<
                 throw new Error("Expected stream node");
               }
               const streamId = streamNode.streamId;
+              if (!streamId) {
+                throw new Error("Stream node has no stream id");
+              }
+              if (!outletNode.tag) {
+                throw new Error("Outlet node has no tag");
+              }
               outputStreamIdOverridesByTag[outletNode.tag] = streamId;
             }
 
@@ -768,12 +780,12 @@ export class LiveflowSpec extends JobSpec<
     }
 
     const instaG = await liveflow.graphP;
-
-    const childJobNodeId = instaG.findNode((n) => {
-      const node = instaG.getNodeAttributes(n);
+    const childJobNodeId = instaG.nodes().find((nid) => {
+      const node = instaG.getNodeAttributes(nid);
       if (node.nodeType !== "job" && node.nodeType !== "root-job") {
         return false;
       } else {
+        
         return (
           node.specName === specInfo.specName &&
           (node.nodeType === "root-job" ||
@@ -782,9 +794,10 @@ export class LiveflowSpec extends JobSpec<
         );
       }
     });
-    if (!childJobNodeId) {
+
+    if (childJobNodeId === undefined || childJobNodeId === null) {
       throw new Error(
-        `No child job found for ${groupId} and ${specInfo.specName}`
+        `No child job found for group ID ${groupId} and spec name ${specInfo.specName}`
       );
     }
     return (instaG.getNodeAttributes(childJobNodeId) as JobNode).jobId;
@@ -861,7 +874,7 @@ export class Liveflow {
             }
           }
         }
-        const g = new InstantiatedGraph({
+        const g = initInstantiatedGraph({
           defGraph: this.jobGroupDef.getDefGraph(),
           contextId: this.contextId,
           rootJobId: this.contextId,
@@ -869,7 +882,6 @@ export class Liveflow {
           streamSourceSpecTypeByStreamId: {},
           inletHasTransformOverridesByTag,
         });
-        await g.initPromise;
         return g;
       })();
     }

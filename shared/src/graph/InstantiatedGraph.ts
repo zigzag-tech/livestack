@@ -7,10 +7,10 @@ import {
   SpecNode,
   RootSpecNode,
   genSpecIdentifier,
+  ensureNodeJSOnly,
 } from "./DefGraph";
-import { Attributes } from "graphology-types";
-import type { DefGraph } from "./wasm/livestack_shared_wasm";
-
+import type { DefGraph, InstantiatedGraph } from "./wasm/livestack_shared_wasm";
+export type { InstantiatedGraph };
 export type JobId = `[${string}]${string}`;
 export type RootJobNode = {
   nodeType: "root-job";
@@ -29,16 +29,10 @@ export type StreamNode = {
   streamId: string;
 };
 
-export class InstantiatedGraph extends DirectedGraph<
-  { label: string } & (
-    | RootJobNode
-    | JobNode
-    | StreamNode
-    | InletNode
-    | OutletNode
-    | AliasNode
-  )
-> {
+export class InstantiatedGraphOld {
+  // Internal graph wrapped privately
+  private graph: DirectedGraph<{ label: string } & (RootJobNode | JobNode | StreamNode | InletNode | OutletNode | AliasNode)>;
+
   public contextId: string;
   public rootJobId: string;
   public streamIdOverrides: StreamIdOverridesForRootSpec;
@@ -75,7 +69,9 @@ export class InstantiatedGraph extends DirectedGraph<
       }
     >;
   }) {
-    super({ multi: false });
+    // Initialize the internal DirectedGraph with non-multi edges
+    this.graph = new DirectedGraph({ multi: false });
+
     this.contextId = contextId;
     this.rootJobId = rootJobId;
     this.streamIdOverrides = streamIdOverrides;
@@ -100,20 +96,20 @@ export class InstantiatedGraph extends DirectedGraph<
 
     for (const nodeId of nodeIds) {
       const node = defGraph.getNodeAttributes(nodeId);
-      if (node.nodeType === "RootSpec") {
-        this.addNode(rootJobId, {
+      if (node.nodeType === "root-spec") {
+        this.graph.addNode(rootJobId, {
           ...(node as RootSpecNode & {
             label: string;
           }),
           nodeType: "root-job",
           jobId: rootJobId,
         });
-      } else if (node.nodeType === "Spec") {
+      } else if (node.nodeType === "spec") {
         const jobId: JobId = `[${contextId}]${await genSpecIdentifier(
           node.specName!,
           node.uniqueSpecLabel || undefined
         )}`;
-        this.addNode(jobId, {
+        this.graph.addNode(jobId, {
           ...(node as SpecNode & {
             label: string;
           }),
@@ -121,10 +117,10 @@ export class InstantiatedGraph extends DirectedGraph<
           jobId,
         });
         childJobNodeIdBySpecNodeId[nodeId] = jobId;
-      } else if (node.nodeType === "StreamDef") {
+      } else if (node.nodeType === "stream-def") {
         let streamId: string | null = null;
-        const { source, targets } = getNodesConnectedToStream(defGraph, nodeId);
-        if (source?.origin.nodeType === "RootSpec") {
+        const { source, targets } = defGraph.getNodesConnectedToStream(nodeId);
+        if (source?.origin.nodeType === "root-spec") {
           const tag = source.outletNode.tag;
           const streamIdOverride = streamIdOverrides[`out/${tag}`];
           if (streamIdOverride) {
@@ -145,24 +141,24 @@ export class InstantiatedGraph extends DirectedGraph<
           streamId = `[${contextId}]${node.streamDefId}`;
         }
 
-        if (!this.hasNode(streamId)) {
-          this.addNode(streamId, {
+        if (!this.graph.hasNode(streamId)) {
+          this.graph.addNode(streamId, {
             nodeType: "stream",
             streamId,
             label: streamId,
           });
         }
         streamNodeIdByStreamId[nodeId] = streamId;
-      } else if (node.nodeType === "Inlet") {
-        this.addNode(nodeId, {
+      } else if (node.nodeType === "inlet") {
+        this.graph.addNode(nodeId, {
           ...(node as InletNode & {
             label: string;
           }),
           hasTransform: inletHasTransformOverridesByTag[node.tag!],
         });
       } else {
-        if (!this.hasNode(nodeId)) {
-          this.addNode(nodeId, node as OutletNode & { label: string });
+        if (!this.graph.hasNode(nodeId)) {
+          this.graph.addNode(nodeId, node as OutletNode & { label: string });
         }
       }
     }
@@ -174,30 +170,95 @@ export class InstantiatedGraph extends DirectedGraph<
       const toNode = defGraph.getNodeAttributes(to);
 
       const newFrom =
-        fromNode.nodeType === "Spec"
+        fromNode.nodeType === "spec"
           ? childJobNodeIdBySpecNodeId[from]
-          : fromNode.nodeType === "RootSpec"
+          : fromNode.nodeType === "root-spec"
           ? rootJobId
-          : fromNode.nodeType === "StreamDef"
+          : fromNode.nodeType === "stream-def"
           ? streamNodeIdByStreamId[from]
           : from;
       const newTo =
-        toNode.nodeType === "Spec"
+        toNode.nodeType === "spec"
           ? childJobNodeIdBySpecNodeId[to]
-          : toNode.nodeType === "RootSpec"
+          : toNode.nodeType === "root-spec"
           ? rootJobId
-          : toNode.nodeType === "StreamDef"
+          : toNode.nodeType === "stream-def"
           ? streamNodeIdByStreamId[to]
           : to;
-      if (!this.hasEdge(newFrom, newTo)) {
+      if (!this.graph.hasEdge(newFrom, newTo)) {
         try {
-          this.addEdge(newFrom, newTo);
+          this.graph.addEdge(newFrom, newTo);
         } catch (e) {
           throw e;
         }
       }
     }
   }
+
+  /* Public wrapper methods delegating to the internal DirectedGraph */
+
+
+
+  public nodes(): Array<string | number> {
+    return this.graph.nodes();
+  }
+
+  public getNodeAttributes(nodeId: string | number) {
+    return this.graph.getNodeAttributes(nodeId);
+  }
+
+  public findOutboundEdge(predicate: (edgeId: string | number) => boolean) {
+    return this.graph.findOutboundEdge(predicate);
+  }
+
+  public findInboundEdge(predicate: (edgeId: string | number) => boolean) {
+    return this.graph.findInboundEdge(predicate);
+  }
+
+
+
+  public inboundNeighbors(nodeId: string | number) {
+    return this.graph.inboundNeighbors(nodeId);
+  }
+
+  public outboundNeighbors(nodeId: string | number) {
+    return this.graph.outboundNeighbors(nodeId);
+  }
+
+  public edges() {
+    return this.graph.edges();
+  }
+
+  public findNode(predicate: (nodeId: string | number) => boolean) {
+    return this.nodes().find(predicate);
+  }
+
+  public inboundEdges(nodeId: string | number) {
+    return this.graph.inboundEdges(nodeId);
+  }
+
+  public outboundEdges(nodeId: string | number) {
+    return this.graph.outboundEdges(nodeId);
+  }
+
+  public source(edgeId: string | number) {
+    return this.graph.source(edgeId);
+  }
+
+  public target(edgeId: string | number) {
+    return this.graph.target(edgeId);
+  }
+
+
+  public filterNodes(predicate: (nodeId: string | number) => boolean) {
+    return this.graph.filterNodes(predicate);
+  }
+
+  public filterEdges(predicate: (edgeId: string | number) => boolean) {
+    return this.graph.filterEdges(predicate);
+  }
+
+
 
   public findStreamNodeIdConnectedToJob({
     jobId,
@@ -213,12 +274,12 @@ export class InstantiatedGraph extends DirectedGraph<
       if (n.nodeType !== "stream") {
         return false;
       } else {
-        const { source, targets } = getNodesConnectedToStream(this, nId);
+        const { source, targets } = this.getNodesConnectedToStream(nId);
 
         if (type === "out") {
           return (
             (source &&
-              source.origin.jobId === jobId &&
+              source.origin.nodeType === "root-job" &&
               source.outletNode.tag === tag) ||
             false
           );
@@ -227,13 +288,58 @@ export class InstantiatedGraph extends DirectedGraph<
             (t) => t.destination.jobId === jobId && t.inletNode.tag === tag
           );
         }
+        return false;
       }
     });
     return streamNodeId;
   }
 
-  public override toJSON() {
-    const json = super.toJSON();
+  public getTargetSpecNodesConnectedToStream(streamNodeId: number | string) {
+    const targets: { inletNode: InletNode; destination: JobNode | RootJobNode }[] = [];
+    const inletNodeIds = this.outboundNeighbors(Number(streamNodeId))
+      .filter(nId => this.getNodeAttributes(Number(nId)).nodeType === "inlet");
+    inletNodeIds.forEach(inletNodeId => {
+      if (inletNodeId !== undefined) {
+        const inletNode = this.getNodeAttributes(Number(inletNodeId)) as InletNode;
+        const [targetSpecNodeId] = this.outboundNeighbors(Number(inletNodeId))
+          .filter(nId => {
+            const type = this.getNodeAttributes(Number(nId)).nodeType;
+            return type === "job" || type === "root-job";
+          });
+        if (targetSpecNodeId !== undefined) {
+          const targetSpecNode = this.getNodeAttributes(Number(targetSpecNodeId)) as (JobNode | RootJobNode);
+          targets.push({ inletNode, destination: targetSpecNode });
+        }
+      }
+    });
+    return targets;
+  }
+
+  public getSourceSpecNodeConnectedToStream(streamNodeId: number | string) {
+    const outletIds = this.inboundNeighbors(Number(streamNodeId))
+      .filter(nId => this.getNodeAttributes(Number(nId)).nodeType === "outlet");
+    const outletNodeId = outletIds[0];
+    if (outletNodeId === undefined) return null;
+    const outletNode = this.getNodeAttributes(Number(outletNodeId)) as OutletNode;
+    const inboundIds = this.inboundNeighbors(Number(outletNodeId))
+      .filter(nId => {
+        const type = this.getNodeAttributes(Number(nId)).nodeType;
+        return type === "job" || type === "root-job";
+      });
+    const sourceSpecNodeId = inboundIds[0];
+    if (sourceSpecNodeId === undefined) return null;
+    const sourceSpecNode = this.getNodeAttributes(Number(sourceSpecNodeId)) as (JobNode | RootJobNode);
+    return { origin: sourceSpecNode, outletNode };
+  }
+
+  public getNodesConnectedToStream(streamNodeId: number | string) {
+    const source = this.getSourceSpecNodeConnectedToStream(streamNodeId);
+    const targets = this.getTargetSpecNodesConnectedToStream(streamNodeId);
+    return { source, targets };
+  }
+
+  public toJSON() {
+    const json = this.graph.toJSON();
     const newJ = {
       ...json,
       contextId: this.contextId,
@@ -246,8 +352,8 @@ export class InstantiatedGraph extends DirectedGraph<
     return newJ;
   }
 
-  static async loadFromJSON(json: ReturnType<InstantiatedGraph["toJSON"]>) {
-    const g = new InstantiatedGraph({
+  static async loadFromJSON(json: ReturnType<InstantiatedGraphOld["toJSON"]>) {
+    const g = new InstantiatedGraphOld({
       contextId: json.contextId,
       defGraph: await loadDefGraphFromJson(json.defGraph),
       rootJobId: json.rootJobId,
@@ -260,101 +366,37 @@ export class InstantiatedGraph extends DirectedGraph<
   }
 }
 
+
+export const initInstantiatedGraph = ({
+  contextId,
+  defGraph,
+  rootJobId,
+  streamIdOverrides,
+  inletHasTransformOverridesByTag,
+  streamSourceSpecTypeByStreamId,
+}: {
+  contextId: string;
+  defGraph: DefGraph;
+  rootJobId: string;
+  streamIdOverrides: StreamIdOverridesForRootSpec;
+  inletHasTransformOverridesByTag: Record<string, boolean>;
+  streamSourceSpecTypeByStreamId: Record<string, { specName: string; tag: string }>;
+}) => {
+  ensureNodeJSOnly();
+  const { InstantiatedGraph } = require("./wasm/livestack_shared_wasm_nodejs");
+  const defGraphJson = defGraph.toJson();
+
+  const instantiatedGraph: InstantiatedGraph = new InstantiatedGraph(
+    contextId,
+    defGraphJson,
+    rootJobId,
+    streamIdOverrides,
+    inletHasTransformOverridesByTag,
+    streamSourceSpecTypeByStreamId,
+  );
+  return instantiatedGraph;
+};
+
 export type StreamIdOverridesForRootSpec = {
   [k: `${"in" | "out"}/${string}`]: string;
 };
-
-export function getTargetSpecNodesConnectedToStream<
-  G extends DefGraph | InstantiatedGraph
->(g: G, streamNodeId: number | string) {
-  // one source, multiple targets
-  type NT = G extends DefGraph ? SpecNode | RootSpecNode : JobNode;
-
-  let targets: {
-    inletNode: InletNode;
-    destination: G extends DefGraph ? SpecNode | RootSpecNode : JobNode;
-  }[] = [];
-  const inletNodeIds = g
-    .outboundNeighbors(streamNodeId as number)
-    .filter(
-      (nId) => g.getNodeAttributes(nId as number).nodeType === "Inlet"
-    ) as (string | number | undefined)[];
-
-  inletNodeIds.forEach((inletNodeId) => {
-    if (inletNodeId) {
-      const inletNode = g.getNodeAttributes(inletNodeId as number) as InletNode;
-      const [targetSpecNodeId] = g
-        .outboundNeighbors(inletNodeId as number)
-        .filter(
-          (nId) =>
-            g.getNodeAttributes(nId as number).nodeType === "Spec" ||
-            g.getNodeAttributes(nId as number).nodeType === "RootSpec" ||
-            g.getNodeAttributes(nId as number).nodeType === "job" ||
-            g.getNodeAttributes(nId as number).nodeType === "root-job"
-        ) as (string | number | undefined)[];
-      const targetSpecNode = g.getNodeAttributes(
-        targetSpecNodeId as number
-      ) as Attributes as NT;
-      targets.push({
-        destination: targetSpecNode,
-        inletNode,
-      });
-    }
-  });
-
-  return targets;
-}
-
-export function getSourceSpecNodeConnectedToStream<
-  G extends DefGraph | InstantiatedGraph
->(g: G, streamNodeId: number | string) {
-  // one source, multiple targets
-  type NT = G extends DefGraph ? SpecNode | RootSpecNode : JobNode;
-  let source: {
-    origin: NT;
-    outletNode: OutletNode;
-  } | null = null;
-  const [outletNodeId] = g
-    .inboundNeighbors(streamNodeId as number)
-    .filter((nId) => g.getNodeAttributes(nId as number).nodeType === "Outlet");
-  if (!outletNodeId) {
-    source = null;
-  } else {
-    const outletNode = g.getNodeAttributes(
-      outletNodeId as number
-    ) as OutletNode;
-
-    const [sourceSpecNodeId] = g
-      .inboundNeighbors(outletNodeId as number)
-      .filter(
-        (nId) =>
-          g.getNodeAttributes(nId as number).nodeType === "Spec" ||
-          g.getNodeAttributes(nId as number).nodeType === "RootSpec" ||
-          g.getNodeAttributes(nId as number).nodeType === "job" ||
-          g.getNodeAttributes(nId as number).nodeType === "root-job"
-      );
-
-    const sourceSpecNode = g.getNodeAttributes(
-      sourceSpecNodeId as number
-    ) as Attributes as NT;
-    source = {
-      origin: sourceSpecNode,
-      outletNode,
-    };
-  }
-
-  return source;
-}
-
-export function getNodesConnectedToStream<
-  G extends DefGraph | InstantiatedGraph
->(g: G, streamNodeId: number | string) {
-  // one source, multiple targets
-  const source = getSourceSpecNodeConnectedToStream(g, streamNodeId);
-  const targets = getTargetSpecNodesConnectedToStream(g, streamNodeId);
-
-  return {
-    source,
-    targets,
-  };
-}
