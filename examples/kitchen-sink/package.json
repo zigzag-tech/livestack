@@ -45,7 +45,7 @@
     "sass": "^1.77.5",
     "ts-node": "^10.9.2",
     "tsx": "^4.15.2",
-    "typescript": "5.5.4"
+    "typescript": "5.7.3"
   },
   "main": "dist/livestack-kitchen-sink-example.cjs.js",
   "types": "dist/livestack-kitchen-sink-example.cjs.d.ts",
