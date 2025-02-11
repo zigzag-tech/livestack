@@ -1,0 +1,36 @@
+{
+  "include": [
+    "src/**/*/ts",
+    "src/**/*.tsx",
+    "src/*.ts",
+    "src/*.tsx"
+  ],
+  "compilerOptions": {
+    "module": "ESNext",
+    "outDir": "dist",
+    "target": "ESNext",
+    "pretty": true,
+    "moduleResolution": "Node",
+    "noEmit": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "resolveJsonModule": true,
+    "preserveConstEnums": true,
+    "removeComments": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    // "isolatedModules": true,
+    "sourceMap": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "downlevelIteration": true,
+    "jsx": "react",
+    "noImplicitAny": true
+  },
+  "ts-node": {
+    "experimentalSpecifierResolution": "node",
+    "transpileOnly": true,
+    "esm": true
+  },
+  "exclude": ["node_modules", "dist"]
+}

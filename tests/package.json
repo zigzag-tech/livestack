@@ -1,0 +1,45 @@
+{
+  "name": "@livestack/tests-internal",
+  "version": "1.0.0",
+  "description": "",
+  "engines": {
+    "node": ">=20.0.0 <22.0.0"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "NODE_OPTIONS='-r dotenv/config' ts-node-esm src/gpt-assistant-worker.test.ts"
+  },
+  "author": "",
+  "private": true,
+  "dependencies": {
+    "@livestack/core": "*",
+    "@livestack/gateway": "*",
+    "@livestack/shared": "*",
+    "@livestack/viz": "*",
+    "@types/node": "^20.10.4",
+    "axios": "^1.6.2",
+    "body-parser": "^1.20.2",
+    "canvas": "^2",
+    "dotenv": "^16.3.1",
+    "escape-html": "^1.0.3",
+    "lodash": "^4.17.21",
+    "lorem-ipsum": "^2.0.8",
+    "multer": "^1.4.5-lts.1",
+    "multiaddr": "^10.0.1",
+    "openai": "^4.29.1",
+    "uuid": "^9",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0",
+    "@babel/preset-env": "^7.24.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.11",
+    "@types/uuid": "^9.0.7",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.15.2",
+    "typescript": "5.5.4"
+  }
+}
