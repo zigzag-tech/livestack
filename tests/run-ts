@@ -1,0 +1,3 @@
+#!/bin/bash
+
+NODE_OPTIONS='-r dotenv/config' npx tsx --tsconfig tsconfig.json  $1
