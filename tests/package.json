@@ -28,7 +28,7 @@
     "multiaddr": "^10.0.1",
     "openai": "^4.29.1",
     "uuid": "^9",
-    "zod": "^3.22.4"
+    "zod": "^3.24.2"
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",

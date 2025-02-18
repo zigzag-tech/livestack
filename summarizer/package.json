@@ -6,7 +6,7 @@
     "@livestack/core": "^0.0.32",
     "@livestack/shared": "^0.0.32",
     "ollama": "^0.5",
-    "zod": "^3.0.0"
+    "zod": "^3.24.2"
   },
   "devDependencies": {
     "@babel/core": "^7.24.5",
