@@ -3763,7 +3763,7 @@ __metadata:
     typescript: "npm:5.7.3"
     uuid: "npm:^9"
     winston: "npm:^3.12.0"
-    zod: "npm:^3.22.4"
+    zod: "npm:^3.24.2"
     zod-to-json-schema: "npm:^3.22.4"
   languageName: unknown
   linkType: soft
@@ -3823,7 +3823,7 @@ __metadata:
     typescript: "npm:5.7.3"
     vite: "npm:^5.1.6"
     vite-express: "npm:^0.14.1"
-    zod: "npm:^3.22.4"
+    zod: "npm:^3.24.2"
   languageName: unknown
   linkType: soft
 
@@ -3841,7 +3841,7 @@ __metadata:
     rollup: "npm:^4.18.0"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.7.3"
-    zod: "npm:^3"
+    zod: "npm:^3.24.2"
   languageName: unknown
   linkType: soft
 
@@ -3859,7 +3859,7 @@ __metadata:
     langchain: "npm:^0.1.36"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.7.3"
-    zod: "npm:^3"
+    zod: "npm:^3.24.2"
   languageName: unknown
   linkType: soft
 
@@ -3898,7 +3898,7 @@ __metadata:
     typescript: "npm:5.7.3"
   peerDependencies:
     "@livestack/core": "*"
-    zod: ^3
+    zod: ^3.24.2
   languageName: unknown
   linkType: soft
 
@@ -3928,7 +3928,7 @@ __metadata:
     ts-jest: "npm:^29.1.2"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.7.3"
-    zod: "npm:^3.22.4"
+    zod: "npm:^3.24.2"
   languageName: unknown
   linkType: soft
 
@@ -3994,7 +3994,7 @@ __metadata:
     rollup-plugin-dts: "npm:^6.1.1"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.7.3"
-    zod: "npm:^3.0.0"
+    zod: "npm:^3.24.2"
   peerDependencies:
     openai: ^4
   languageName: unknown
@@ -4028,7 +4028,7 @@ __metadata:
     tsx: "npm:^4.15.2"
     typescript: "npm:5.7.3"
     uuid: "npm:^9"
-    zod: "npm:^3.22.4"
+    zod: "npm:^3.24.2"
   languageName: unknown
   linkType: soft
 
@@ -4055,7 +4055,7 @@ __metadata:
     openai: ^4
     react: ^18
     uuid: ^9
-    zod: ^3
+    zod: ^3.24.2
   languageName: unknown
   linkType: soft
 
@@ -4072,7 +4072,7 @@ __metadata:
     "@types/node": "npm:^16"
     ts-node: "npm:^10.9.1"
     typescript: "npm:5.7.3"
-    zod: "npm:^3.0.0"
+    zod: "npm:^3.24.2"
   peerDependencies:
     openai: ^4
   languageName: unknown
@@ -18370,9 +18370,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zod@npm:^3, zod@npm:^3.0.0, zod@npm:^3.21.4, zod@npm:^3.22.3, zod@npm:^3.22.4":
+"zod@npm:^3.21.4, zod@npm:^3.22.3, zod@npm:^3.22.4":
   version: 3.23.8
   resolution: "zod@npm:3.23.8"
   checksum: 10c0/8f14c87d6b1b53c944c25ce7a28616896319d95bc46a9660fe441adc0ed0a81253b02b5abdaeffedbeb23bdd25a0bf1c29d2c12dd919aef6447652dd295e3e69
+  languageName: node
+  linkType: hard
+
+"zod@npm:^3.24.2":
+  version: 3.24.2
+  resolution: "zod@npm:3.24.2"
+  checksum: 10c0/c638c7220150847f13ad90635b3e7d0321b36cce36f3fc6050ed960689594c949c326dfe2c6fa87c14b126ee5d370ccdebd6efb304f41ef5557a4aaca2824565
   languageName: node
   linkType: hard

@@ -6,7 +6,7 @@
     "@livestack/core": "^0.0.32",
     "@livestack/lab-internal-common": "^0.0.32",
     "@livestack/summarizer": "^0.0.32",
-    "zod": "^3.0.0"
+    "zod": "^3.24.2"
   },
   "main": "src/index.ts",
   "devDependencies": {
