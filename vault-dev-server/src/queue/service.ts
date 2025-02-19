@@ -12,7 +12,7 @@ import { v4 } from "uuid";
 import { createClient } from "redis";
 import { escapeColon, getCapacityManager } from "../capacity/manager";
 import { promises as fs } from "fs";
-
+import { REDIS_MEMORY_SERVER_P } from "../ensureRedisMemoryServer";
 const _rawQueueBySpecName = new Map<string, Queue>();
 
 class QueueServiceByProject implements QueueServiceImplementation {
@@ -30,7 +30,14 @@ class QueueServiceByProject implements QueueServiceImplementation {
     this.onJobAssignedToWorker = p?.onJobAssignedToWorker;
     this.logEntriesExist = false;
   }
-  private redisClientP = createClient().connect();
+  private redisClientP = ((async ()=>{
+    const {host, port} = await REDIS_MEMORY_SERVER_P;
+    const redisClient = createClient({
+      url: `redis://${host}:${port}`,
+    });
+    await redisClient.connect();
+    return redisClient;
+  }))();
 
   async initInstance(
     request: InitInstanceParams,

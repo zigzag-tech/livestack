@@ -131,6 +131,7 @@ export async function ensureTables(knex: Knex): Promise<void> {
       table.string("stream_id").notNullable();
       table.string("datapoint_id").notNullable();
       table.boolean("validation_failed").notNullable();
+      table.primary(["project_uuid", "stream_id", "datapoint_id"]);
     });
   }
 
