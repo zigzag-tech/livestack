@@ -33,7 +33,10 @@ class QueueServiceByProject implements QueueServiceImplementation {
   private redisClientP = ((async ()=>{
     const {host, port} = await REDIS_MEMORY_SERVER_P;
     const redisClient = createClient({
-      url: `redis://${host}:${port}`,
+      socket: {
+        host,
+        port,
+      },
     });
     await redisClient.connect();
     return redisClient;
@@ -97,9 +100,9 @@ class QueueServiceByProject implements QueueServiceImplementation {
     // console.debug("addjob", queue.name, job);
 
     // get current capacity
-    const client = await this.redisClientP;
-    const projectUuidN = escapeColon(job.projectUuid);
-    const specNameN = escapeColon(job.specName);
+    // const client = await this.redisClientP;
+    // const projectUuidN = escapeColon(job.projectUuid);
+    // const specNameN = escapeColon(job.specName);
 
     // const workers = await queue.getWorkers();
 
