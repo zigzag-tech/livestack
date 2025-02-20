@@ -268,7 +268,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       let chunkId: string;
       const {host, port} = await REDIS_MEMORY_SERVER_P;
       const pubClient = await createClient({
-        url: `redis://${host}:${port}`,
+        socket: {
+          host,
+          port,
+        },
       }).connect();
 
       if (res.valid) {
@@ -336,7 +339,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         const channelId = `${projectUuid}/${uniqueName}`;
         const {host, port} = await REDIS_MEMORY_SERVER_P;
         const subClient = await createClient({
-          url: `redis://${host}:${port}`,
+          socket: {
+            host,
+            port,
+          },
         }).connect();
 
         while (context.signal.aborted === false) {
@@ -393,7 +399,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       const channelId = `${projectUuid}/${uniqueName}`;
       const {host, port} = await REDIS_MEMORY_SERVER_P;
       const subClient = await createClient({
-        url: `redis://${host}:${port}`,
+        socket: {
+          host,
+          port,
+        },
       }).connect();
 
       const s = (await subClient.sendCommand([
@@ -451,7 +460,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       const channelId = `${projectUuid}/${uniqueName}`;
       const {host, port} = await REDIS_MEMORY_SERVER_P;
       const subClient = await createClient({
-        url: `redis://${host}:${port}`,
+        socket: {
+          host,
+          port,
+        },
       }).connect();
       // get all values from the stream
 
@@ -496,7 +508,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       const channelId = `${projectUuid}/${uniqueName}`;
       const {host, port} = await REDIS_MEMORY_SERVER_P;
       const subClient = await createClient({
-        url: `redis://${host}:${port}`,
+        socket: {
+          host,
+          port,
+        },
       }).connect();
       const s = (await subClient.sendCommand([
         "XREVRANGE",
