@@ -6,7 +6,6 @@
     "@livestack/core": "^0.0.32",
     "@livestack/lab-internal-common": "^0.0.32",
     "@livestack/shared": "^0.0.32",
-    "langchain": "^0.1.36",
     "zod": "^3.24.2"
   },
   "devDependencies": {
