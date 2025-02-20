@@ -13,20 +13,11 @@ import {
   RespondToCapacityLogMessage,
 } from "@livestack/vault-interface/src/generated/capacity.js";
 import { CallContext } from "nice-grpc";
-import { createClient } from "redis";
 import _ from "lodash";
 import { v4 } from "uuid";
-import { REDIS_MEMORY_SERVER_P } from "../ensureRedisMemoryServer";
 class CapacityManager implements CacapcityServiceImplementation {
   
-  private redisClientP = ((async ()=>{
-    const {host, port} = await REDIS_MEMORY_SERVER_P;
-    const redisClient = createClient({
-      url: `redis://${host}:${port}`,
-    });
-    await redisClient.connect();
-    return redisClient;
-  })());
+
   public readonly sessionId = v4();
   constructor() {}
 
