@@ -10,7 +10,6 @@ import {
   QueueServiceDefinition,
   StreamServiceDefinition,
 } from "@livestack/vault-interface";
-// import { startBootstrapNode } from "./storage-p2p/startBootstrapNode";
 
 export async function launchVaultDevServer(port: string | number = 50508) {
   // if (!port) {
@@ -27,7 +26,6 @@ export async function launchVaultDevServer(port: string | number = 50508) {
   const PORT = Number(process.env.VAULT_SERVER_LOCAL_DEV_SERVER_PORT) || port;
   const address = `${HOST}:${PORT}`;
 
-  // await startBootstrapNode();
 
   await server.listen(address);
   console.info(
