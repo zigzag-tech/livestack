@@ -1,11 +1,15 @@
-const Parser = require("@postlight/parser");
-
+import { Readability } from "@mozilla/readability";
 // A simple Markdown to plain text converter in TypeScript
 
 export async function parseURLMarkdownText(url: string) {
-  const result = await Parser.parse(url, { contentType: "markdown" });
+  // first obtain the html
+  const response = await fetch(url);
+  const html = await response.text();
+  const doc = new JSDOM(html);
+  const reader = new Readability(doc.window.document);
+  const result = reader.read();
   let title: string | undefined = result.title;
-  let markdown: string | undefined = result.content;
+  let markdown: string | undefined = result.textContent;
 
   if (!title || !markdown) {
     ({ title, markdown } = await extractViaExtractorAPI(url));
