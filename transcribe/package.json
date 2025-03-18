@@ -16,7 +16,7 @@
     "@types/node": "^16",
     "@types/uuid": "^9.0.7",
     "uuid": ">=9",
-    "rimraf": "^5.0.7",
+    "rimraf": "^6.0.1",
     "rollup": "^4.18.0",
     "rollup-plugin-dts": "^6.1.1",
     "ts-node": "^10.9.1",
