@@ -9,11 +9,6 @@
     "build": "preconstruct build"
   },
   "dependencies": {
-    "@chainsafe/libp2p-noise": "^15.0.0",
-    "@libp2p/kad-dht": "^12.0.15",
-    "@libp2p/mplex": "^10.0.22",
-    "@libp2p/tcp": "^9.0.24",
-    "@libp2p/websockets": "^8.0.22",
     "@livestack/shared": "^0.0.32",
     "@livestack/vault-interface": "^0.0.32",
     "better-sqlite3": "^9.4.0",
@@ -22,7 +17,6 @@
     "get-port": "^7.0.0",
     "jsonschema": "^1.4.1",
     "knex": "^3",
-    "libp2p": "^1.5.1",
     "lodash": "^4.x",
     "nice-grpc": "^2.1",
     "redis": "^4",
