@@ -1,1 +1,0 @@
-declare module '@postlight/parser';
