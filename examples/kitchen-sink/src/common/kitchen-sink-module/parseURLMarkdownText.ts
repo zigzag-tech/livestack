@@ -1,4 +1,5 @@
 import { Readability } from "@mozilla/readability";
+import { JSDOM } from "jsdom";
 // A simple Markdown to plain text converter in TypeScript
 
 export async function parseURLMarkdownText(url: string) {
@@ -7,9 +8,9 @@ export async function parseURLMarkdownText(url: string) {
   const html = await response.text();
   const doc = new JSDOM(html);
   const reader = new Readability(doc.window.document);
-  const result = reader.read();
-  let title: string | undefined = result.title;
-  let markdown: string | undefined = result.textContent;
+  const result = reader.parse();
+  let title: string |null| undefined = result?.title;
+  let markdown: string | null|undefined = result?.textContent;
 
   if (!title || !markdown) {
     ({ title, markdown } = await extractViaExtractorAPI(url));
