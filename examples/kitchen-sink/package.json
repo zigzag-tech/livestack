@@ -43,7 +43,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "sass": "^1.77.5",
     "ts-node": "^10.9.2",
-    "tsx": "^4.15.2",
+    "tsx": "^4.19.3",
     "typescript": "5.7.3"
   },
   "main": "dist/livestack-kitchen-sink-example.cjs.js",
