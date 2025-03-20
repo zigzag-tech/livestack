@@ -1,0 +1,12 @@
+{
+  "include": [
+    "missing-modules.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "*.ts",
+    "*.tsx",
+    "src/index.ts"
+  ],
+  "exclude": ["node_modules", "dist", "*.mp3", "*.mp4"],
+  "extends": "../tsconfig.json"
+}
