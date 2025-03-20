@@ -1,0 +1,13 @@
+{
+    "name": "@livestack/llm-utils",
+    "version": "0.0.32",
+    "license": "MIT",
+    "dependencies": {
+        "@livestack/core": "^0.0.32",
+        "zod": "^3.24.2"
+    },
+    "peerDependencies": {
+        "ollama": "^0.5.14"
+    },
+    "main": "src/ollama-client.ts"
+}
