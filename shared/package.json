@@ -14,7 +14,7 @@
   "dependencies": {
     "graphology": "^0.25.4",
     "graphology-types": "^0.24.8",
-    "lru-cache": "^10.2.2",
+    "lru-cache": "^11.0.2",
     "zod": "^3.24.2"
   },
   "devDependencies": {
