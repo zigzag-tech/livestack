@@ -2137,6 +2137,13 @@
     "@livestack/shared" "^0.0.32"
     zod "^3.24.2"
 
+"@livestack/llm-utils@file:/home/ubuntu/video-essays/livestack/llm-utils":
+  version "0.0.1"
+  resolved "file:llm-utils"
+  dependencies:
+    "@livestack/core" "^0.0.32"
+    zod "^3.24.2"
+
 "@livestack/replicate@file:/home/ubuntu/video-essays/livestack/replicate":
   version "0.0.32"
   resolved "file:replicate"
@@ -2157,7 +2164,7 @@
   dependencies:
     graphology "^0.25.4"
     graphology-types "^0.24.8"
-    lru-cache "^10.2.2"
+    lru-cache "^11.0.2"
     zod "^3.24.2"
 
 "@livestack/storage-gcloud@file:/home/ubuntu/video-essays/livestack/storage-gcloud":
@@ -2178,7 +2185,7 @@
   dependencies:
     "@livestack/core" "^0.0.32"
     "@livestack/shared" "^0.0.32"
-    ollama "^0.5"
+    ollama "^0.5.14"
     zod "^3.24.2"
 
 "@livestack/tests-internal@file:/home/ubuntu/video-essays/livestack/tests":
@@ -7128,7 +7135,7 @@ obliterator@^2.0.2:
   resolved "https://registry.npmjs.org/obliterator/-/obliterator-2.0.5.tgz"
   integrity sha512-42CPE9AhahZRsMNslczq0ctAEtqk8Eka26QofnqC346BZdHDySk3LWka23LI7ULIw11NmltpiLagIq8gBozxTw==
 
-ollama@^0.5:
+ollama@^0.5.14:
   version "0.5.14"
   resolved "https://registry.npmjs.org/ollama/-/ollama-0.5.14.tgz"
   integrity sha512-pvOuEYa2WkkAumxzJP0RdEYHkbZ64AYyyUszXVX7ruLvk5L+EiO2G71da2GqEQ4IAk4j6eLoUbGk5arzFT1wJA==
