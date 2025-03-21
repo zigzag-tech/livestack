@@ -2,12 +2,27 @@
     "name": "@livestack/llm-utils",
     "version": "0.0.32",
     "license": "MIT",
+    "main": "dist/livestack-llm-utils.cjs.js",
+    "types": "dist/livestack-llm-utils.cjs.d.ts",
+    "module": "dist/livestack-llm-utils.esm.js",
+    "scripts": {
+        "build": "preconstruct build"
+    },
+    "files": [
+        "dist"
+    ],
     "dependencies": {
         "@livestack/core": "^0.0.32",
         "zod": "^3.24.2"
     },
-    "peerDependencies": {
-        "ollama": "^0.5.14"
+    "devDependencies": {
+        "@preconstruct/cli": "^2.8.11",
+        "typescript": "^5.7.3",
+        "@babel/core": "^7.26.10",
+        "@babel/preset-env": "^7.26.9",
+        "@babel/preset-typescript": "^7.26.0"
     },
-    "main": "src/ollama-client.ts"
+    "peerDependencies": {
+        "ollama": "^0.5.x"
+    }
 }

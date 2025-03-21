@@ -1,12 +1,33 @@
 {
-  "include": [
-    "missing-modules.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
-    "*.ts",
-    "*.tsx",
-    "src/index.ts"
-  ],
-  "exclude": ["node_modules", "dist", "*.mp3", "*.mp4"],
-  "extends": "../tsconfig.json"
-}
+    "include": ["missing-modules.d.ts", "**/*.ts", "**/*.tsx", "*.ts", "*.tsx"],
+    "compilerOptions": {
+      "module": "CommonJS",
+      // "types": ["reflect-metadata"],
+      "outDir": "dist",
+      "target": "ES5",
+      "pretty": true,
+      "moduleResolution": "node",
+      "noEmit": false,
+      "noUnusedLocals": false,
+      "noUnusedParameters": false,
+      "resolveJsonModule": true,
+      "preserveConstEnums": true,
+      "removeComments": false,
+      "esModuleInterop": true,
+      "skipLibCheck": true,
+      "sourceMap": true,
+      "strict": true,
+      "paths": {
+        "@livestack/core": ["./src"]
+      },
+      "strictNullChecks": true,
+      "downlevelIteration": true,
+      "declaration": true,
+      "jsx": "react",
+      "noImplicitAny": true
+      // "emitDecoratorMetadata": true,
+      // "experimentalDecorators": true
+    },
+    "exclude": ["node_modules", "dist",]
+  }
+  

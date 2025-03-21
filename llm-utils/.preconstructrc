@@ -1,0 +1,16 @@
+{
+  "packages": [
+    "."
+  ],
+  "entrypoints": [
+    "src/index.ts"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/livestack-llm-utils.cjs.d.ts",
+      "import": "./dist/livestack-llm-utils.esm.js",
+      "require": "./dist/livestack-llm-utils.cjs.js",
+      "default": "./dist/livestack-llm-utils.cjs.js"
+    }
+  }
+} 

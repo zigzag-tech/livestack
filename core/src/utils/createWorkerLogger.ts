@@ -1,57 +1,63 @@
-import winston, { format } from "winston";
 import chalk from "ansis";
 
-const { combine, timestamp, label, printf, simple, splat } = format;
+interface Logger {
+  info: (message: string, ...args: any[]) => void;
+  warn: (message: string, ...args: any[]) => void;
+  error: (message: string, ...args: any[]) => void;
+}
 
-const loggers: { [key: string]: winston.Logger } = {};
+const loggers: { [key: string]: Logger } = {};
 
-export function getLogger(workerName: string, logColor?: string) {
-  const consoleFormat = printf(({ level, message, label, timestamp }) => {
-    var levelUpper = level.toUpperCase();
-    switch (levelUpper) {
-      case "INFO":
-        message = chalk.green(message);
-        level = chalk.black.bgGreenBright.bold(level);
-        break;
-
-      case "WARN":
-        message = chalk.yellow(message);
-        level = chalk.black.bgYellowBright.bold(level);
-        break;
-
-      case "ERROR":
-        message = chalk.red(message);
-        level = chalk.black.bgRedBright.bold(level);
-        break;
-
-      default:
-        break;
-    }
-    return `[${chalk.black.bgBlue.bold(
-      workerName
-    )}] [${chalk.black.bgWhiteBright(
-      timestamp
-    )}] [${level.toUpperCase()}]: ${message}`;
+function formatTimestamp(): string {
+  const now = new Date();
+  return now.toLocaleString('en-GB', {
+    year: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
   });
+}
 
+function createLogMessage(workerName: string, level: string, message: string): string {
+  const timestamp = formatTimestamp();
+  const levelUpper = level.toUpperCase();
+  let coloredMessage = message;
+  let coloredLevel = levelUpper;
+
+  switch (levelUpper) {
+    case "INFO":
+      coloredMessage = chalk.green(message);
+      coloredLevel = chalk.black.bgGreenBright.bold(levelUpper);
+      break;
+    case "WARN":
+      coloredMessage = chalk.yellow(message);
+      coloredLevel = chalk.black.bgYellowBright.bold(levelUpper);
+      break;
+    case "ERROR":
+      coloredMessage = chalk.red(message);
+      coloredLevel = chalk.black.bgRedBright.bold(levelUpper);
+      break;
+  }
+
+  return `[${chalk.black.bgBlue.bold(workerName)}] [${chalk.black.bgWhiteBright(timestamp)}] [${coloredLevel}]: ${coloredMessage}`;
+}
+
+export function getLogger(workerName: string, logColor?: string): Logger {
   if (!loggers[workerName]) {
-    loggers[workerName] = winston.createLogger({
-      level: "info",
-      format: winston.format.combine(
-        winston.format.label({
-          label: "[LOGGER]",
-        }),
-        winston.format.timestamp({
-          format: "YY-MM-DD HH:mm:ss",
-        }),
-        consoleFormat
-      ),
-      defaultMeta: { service: workerName },
-      transports: [
-        new winston.transports.Console(),
-        // new winston.transports.File({ filename: `logs/${workerName}.log` }),
-      ],
-    });
+    loggers[workerName] = {
+      info: (message: string, ...args: any[]) => {
+        console.log(createLogMessage(workerName, 'info', message), ...args);
+      },
+      warn: (message: string, ...args: any[]) => {
+        console.warn(createLogMessage(workerName, 'warn', message), ...args);
+      },
+      error: (message: string, ...args: any[]) => {
+        console.error(createLogMessage(workerName, 'error', message), ...args);
+      }
+    };
   }
   return loggers[workerName]!;
 }

@@ -6,7 +6,7 @@
     "build": "preconstruct build"
   },
   "files": [
-    "dist/**/*"
+    "dist"
   ],
   "peerDependencies": {
     "@livestack/core": "*"

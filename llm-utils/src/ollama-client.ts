@@ -14,7 +14,7 @@ const RESET = '\x1b[0m';
  * Utility function to wait for user to press Enter
  * Returns a promise that resolves when Enter is pressed, rejects otherwise
  */
-function waitForEnterKey(): Promise<void> {
+async function waitForEnterKey(): Promise<void> {
   return new Promise((resolve, reject) => {
     // Set up stdin to read input
     process.stdin.setRawMode(true);

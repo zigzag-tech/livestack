@@ -10,9 +10,9 @@
   },
   "main": "src/index.ts",
   "devDependencies": {
-    "@babel/core": "^7.24.5",
-    "@babel/preset-env": "^7.16.7",
-    "@babel/preset-typescript": "^7.16.7",
+    "@babel/core": "^7.26.10",
+    "@babel/preset-env": "^7.26.9",
+    "@babel/preset-typescript": "^7.26.0",
     "@types/node": "^16",
     "ts-node": "^10.9.1",
     "typescript": "5.7.3"

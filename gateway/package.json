@@ -16,9 +16,9 @@
     "socket.io": "^4"
   },
   "devDependencies": {
-    "@babel/core": "^7.24.5",
-    "@babel/preset-env": "^7.16.7",
-    "@babel/preset-typescript": "^7.16.7",
+    "@babel/core": "^7.26.10",
+    "@babel/preset-env": "^7.26.9",
+    "@babel/preset-typescript": "^7.26.0",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/lodash": "^4.14.201",
     "@types/uuid": "^9.0.7",
