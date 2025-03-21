@@ -554,10 +554,18 @@ export class LiveJob<
    * @param _tag - The tag for which to generate the input object.
    * @returns An object containing input-related methods and properties for the specified tag.
    */
-  private readonly genInputObjectByTag = <K extends keyof IMap>(_tag?: K) => {
+  private genInputObjectByTag<K extends keyof IMap | undefined = undefined>(_tag?: K): {
+    nextValue: () => Promise<K extends keyof IMap ? IMap[K] | null : IMap[InferDefaultOrSingleKey<IMap>] | null>;
+    observable: () => Observable<K extends keyof IMap ? IMap[K] | null : IMap[InferDefaultOrSingleKey<IMap>] | null>;
+    [Symbol.asyncIterator](): AsyncGenerator<K extends keyof IMap ? IMap[K] : IMap[InferDefaultOrSingleKey<IMap>]>;
+  } {
     const that = this;
-    let resolvedTag: K | InferDefaultOrSingleKey<IMap> | undefined = _tag;
-    const nextValue = async () => {
+    let resolvedTag: keyof IMap | undefined = _tag as keyof IMap | undefined;
+    
+    // Define the return type of the nextValue function to match the expected type
+    type ReturnType = K extends keyof IMap ? IMap[K] | null : IMap[InferDefaultOrSingleKey<IMap>] | null;
+    
+    const nextValue = async (): Promise<ReturnType> => {
       if (!resolvedTag) {
         resolvedTag = that.spec.getSingleTag(
           "input",
@@ -570,13 +578,15 @@ export class LiveJob<
       // track
       if (r) {
         for (const otag of that.spec.outputTags) {
-          that.trackerByInputOutputTag[resolvedTag][otag].intake({
+          that.trackerByInputOutputTag[resolvedTag as keyof IMap][otag].intake({
             datapointId: r.datapointId,
           });
         }
       }
-      return r?.data || (null as IMap[K] | null);
+      // Use type assertion to ensure the return type matches the expected type
+      return (r?.data || null) as ReturnType;
     };
+    
     return {
       nextValue,
       observable() {
@@ -587,24 +597,24 @@ export class LiveJob<
           ) as InferDefaultOrSingleKey<IMap>;
         }
         const obs = that._ensureInputStreamFn(
-          resolvedTag as K
+          resolvedTag as keyof IMap
         ).trackedObservable;
         // wrap observable with tracking
         return obs.pipe(
-          takeWhile((x) => !!x), // Only take values that are not falsy (similar to your if (!x))
+          takeWhile((x) => !!x),
           tap((x) => {
             // Assuming x can never be falsy here because of the takeWhile
             for (const otag of that.spec.outputTags) {
-              that.trackerByInputOutputTag[resolvedTag as K][otag].intake({
+              that.trackerByInputOutputTag[resolvedTag as keyof IMap][otag].intake({
                 datapointId: x!.datapointId,
               });
             }
           }),
-          map((x) => x!.data),
+          map((x) => x!.data as ReturnType),
           catchError((err) => {
             // Handle any errors that occur in the above operations
             console.error("Error processing observable stream:", err);
-            return of(null); // Continue the stream with a null value or use throwError to re-throw the error
+            return of(null as ReturnType);
           }),
           finalize(() => {
             // This will execute when the consumer unsubscribes or the stream completes naturally
@@ -626,7 +636,7 @@ export class LiveJob<
           if (!input) {
             break;
           }
-          yield input;
+          yield input as K extends keyof IMap ? IMap[K] : IMap[InferDefaultOrSingleKey<IMap>];
         }
       },
     };
