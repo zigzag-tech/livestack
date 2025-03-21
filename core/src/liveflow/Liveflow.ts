@@ -393,6 +393,21 @@ export class LiveflowSpec extends JobSpec<
               `Input alias "${alias}" already used for input "${inputAliasesSoFar[alias].tag}" of spec "${inputAliasesSoFar[alias].specName}"`
             );
           }
+          // check if the spec exists in the defG
+          const specNode = defG.nodes().find((n) => {
+            const node = defG.getNodeAttributes(n);
+            return node.specName === exposure.specName && (node.uniqueSpecLabel || null) === (exposure.uniqueSpecLabel || null);
+          });
+
+
+          if (!specNode) {
+            console.error("Existing nodes: ", Array.from(defG.nodes()).filter((n) => defG.getNodeAttributes(n).nodeType === "spec" ).map((n) =>{
+              const node = defG.getNodeAttributes(n);
+              return node.specName;
+            }).join("\n"));
+            throw new Error(`Spec "${exposure.specName}" not found in defG.`);
+            
+          }
           defG.assignAlias({
             alias,
             tag: specTag,
