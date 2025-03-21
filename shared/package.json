@@ -3,7 +3,7 @@
   "version": "0.0.32",
   "description": "Shared core Livestack logic for both frontend and backend.",
   "scripts": {
-    "build": "cargo build && tsc && cp -r src/graph/wasm dist/graph/ && preconstruct build",
+    "build": "cargo build && preconstruct build && cp -r src/graph/wasm dist/wasm/",
     "test": "jest",
     "test:watch": "jest --watch"
   },
