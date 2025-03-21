@@ -6,7 +6,8 @@
     "types": "dist/livestack-llm-utils.cjs.d.ts",
     "module": "dist/livestack-llm-utils.esm.js",
     "scripts": {
-        "build": "preconstruct build"
+        "build": "preconstruct build",
+        "build-dev": "preconstruct dev"
     },
     "files": [
         "dist"
