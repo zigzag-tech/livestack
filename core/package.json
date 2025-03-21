@@ -5,12 +5,6 @@
   "scripts": {
     "build": "preconstruct build"
   },
-  "exports": {
-    ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
-    }
-  },
   "main": "dist/livestack-core.cjs.js",
   "types": "dist/livestack-core.cjs.d.ts",
   "module": "dist/livestack-core.esm.js",
