@@ -3,33 +3,44 @@
   "version": "0.0.32",
   "description": "Orchestration, in real-time.",
   "scripts": {
-    "build": "tsc"
+    "build": "preconstruct build"
   },
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "main": "dist/livestack-core.cjs.js",
+  "types": "dist/livestack-core.cjs.d.ts",
+  "module": "dist/livestack-core.esm.js",
+  "files": [
+    "dist"
+  ],
   "license": "MIT",
   "dependencies": {
     "@livestack/shared": "^0.0.32",
     "@livestack/vault-client": "^0.0.32",
     "@livestack/vault-interface": "^0.0.32",
     "@ltd/j-toml": "^1.38.0",
-    "ansis": "^2.3.0",
+    "ansis": "^3.17.0",
     "dotenv": "^16.x",
     "lodash": "^4.17.21",
     "lru-cache": "^10.2.0",
     "p-limit": "^3",
     "rxjs": "^7",
     "uuid": "^9",
-    "winston": "^3.12.0",
     "zod": "^3.24.2",
     "zod-to-json-schema": "^3.22.4"
   },
   "devDependencies": {
-    "@babel/core": "^7.24.5",
-    "@babel/preset-env": "^7.16.7",
-    "@babel/preset-typescript": "^7.16.7",
+    "@babel/core": "^7.26.10",
+    "@babel/preset-env": "^7.26.9",
+    "@babel/preset-typescript": "^7.26.0",
     "@types/lodash": "^4.14.201",
     "@types/uuid": "^9.0.7",
-    "typescript": "5.7.3"
+    "typescript": "5.7.3",
+    "@preconstruct/cli": "^2.8.11"
   },
-  "main": "src/index.ts",
   "author": ""
 }
