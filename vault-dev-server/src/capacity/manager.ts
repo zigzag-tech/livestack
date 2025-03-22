@@ -304,6 +304,8 @@ class CapacityManager implements CacapcityServiceImplementation {
           correlationId,
         });
       }
+      // Return early if no qualified instances found
+      return;
     }
 
     const nextBestInstanceId = _.sample(qualifiedCapacities)!.instanceId;
