@@ -89,11 +89,11 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       ZZDatapointRec<
         | any
         | {
-            [PRIMTIVE_KEY]: any;
-          }
+          [PRIMTIVE_KEY]: any;
+        }
         | {
-            [ARRAY_KEY]: any;
-          }
+          [ARRAY_KEY]: any;
+        }
       >
     >("zz_datapoints")
       .insert({
@@ -198,12 +198,12 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       let res = { valid: true, errors: [] as any[] };
       const data = JSON.parse(dataStr) as
         | {
-            terminate: true;
-          }
+          terminate: true;
+        }
         | {
-            terminate: false;
-            data: any;
-          };
+          terminate: false;
+          data: any;
+        };
       // bypass {terminate: true} layer and validate the just data
       if (jsonSchema && data.terminate === false && jsonSchema["anyOf"]) {
         // sample schema
@@ -266,7 +266,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       });
 
       let chunkId: string;
-      const {host, port} = await REDIS_MEMORY_SERVER_P;
+      const { host, port } = await REDIS_MEMORY_SERVER_P;
       const pubClient = await createClient({
         socket: {
           host,
@@ -337,7 +337,7 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         let cursor: `${string}-${string}` | "$" | "0" =
           subType === SubType.fromNow ? "$" : "0";
         const channelId = `${projectUuid}/${uniqueName}`;
-        const {host, port} = await REDIS_MEMORY_SERVER_P;
+        const { host, port } = await REDIS_MEMORY_SERVER_P;
         const subClient = await createClient({
           socket: {
             host,
@@ -386,18 +386,18 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       context: CallContext
     ): Promise<{
       datapoint?:
-        | {
-            timestamp?: number | undefined;
-            chunkId?: string | undefined;
-            dataStr?: string | undefined;
-            datapointId?: string | undefined;
-          }
-        | undefined;
+      | {
+        timestamp?: number | undefined;
+        chunkId?: string | undefined;
+        dataStr?: string | undefined;
+        datapointId?: string | undefined;
+      }
+      | undefined;
       null_response?: {} | undefined;
     }> {
       const { projectUuid, uniqueName } = request;
       const channelId = `${projectUuid}/${uniqueName}`;
-      const {host, port} = await REDIS_MEMORY_SERVER_P;
+      const { host, port } = await REDIS_MEMORY_SERVER_P;
       const subClient = await createClient({
         socket: {
           host,
@@ -446,19 +446,19 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
     ): Promise<{
       datapoints: {
         datapoint?:
-          | {
-              timestamp?: number | undefined;
-              chunkId?: string | undefined;
-              dataStr?: string | undefined;
-              datapointId?: string | undefined;
-            }
-          | undefined;
+        | {
+          timestamp?: number | undefined;
+          chunkId?: string | undefined;
+          dataStr?: string | undefined;
+          datapointId?: string | undefined;
+        }
+        | undefined;
         null_response?: {} | undefined;
       }[];
     }> {
       const { projectUuid, uniqueName } = request;
       const channelId = `${projectUuid}/${uniqueName}`;
-      const {host, port} = await REDIS_MEMORY_SERVER_P;
+      const { host, port } = await REDIS_MEMORY_SERVER_P;
       const subClient = await createClient({
         socket: {
           host,
@@ -494,19 +494,19 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
     ): Promise<{
       datapoints: {
         datapoint?:
-          | {
-              timestamp?: number | undefined;
-              chunkId?: string | undefined;
-              dataStr?: string | undefined;
-              datapointId?: string | undefined;
-            }
-          | undefined;
+        | {
+          timestamp?: number | undefined;
+          chunkId?: string | undefined;
+          dataStr?: string | undefined;
+          datapointId?: string | undefined;
+        }
+        | undefined;
         null_response?: {} | undefined;
       }[];
     }> {
       const { projectUuid, uniqueName, lastN } = request;
       const channelId = `${projectUuid}/${uniqueName}`;
-      const {host, port} = await REDIS_MEMORY_SERVER_P;
+      const { host, port } = await REDIS_MEMORY_SERVER_P;
       const subClient = await createClient({
         socket: {
           host,
