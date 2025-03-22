@@ -15,7 +15,7 @@ export interface ByTagOutput<T> {
 }
 
 export interface ByTagInput<T> {
-  feed: (data: T) => Promise<void>;
+  feed: <TT extends T>(data: TT) => Promise<void>;
   terminate: () => Promise<void>;
   getStreamId: () => Promise<string>;
 }
