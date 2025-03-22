@@ -52,6 +52,7 @@ async function waitForEnterKey(): Promise<void> {
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  images?: string[]; // Add support for image paths
 }
 
 /**
@@ -74,8 +75,12 @@ const OLLAMA_RESPONSE_CACHE_DIR = path.join(process.cwd(), '_ollama_response_cac
  */
 function createOllamaRequestHash(messages: ChatMessage[], options: Omit<OllamaOptions, 'stream'>): string {
   // Create a string representation of the input that includes all relevant data
-  const inputString = JSON.stringify({
-    messages,
+  const inputStringBase = JSON.stringify({
+    messages: messages.map(msg => ({
+      ...msg,
+      // Remove images array as we'll handle it separately
+      images: undefined
+    })),
     options: {
       ...options,
       // Exclude stream as it's always false for JSON responses
@@ -83,8 +88,31 @@ function createOllamaRequestHash(messages: ChatMessage[], options: Omit<OllamaOp
     }
   });
   
+  // Process images if any message contains them
+  const imageHashes: string[] = [];
+  for (const message of messages) {
+    if (message.images && message.images.length > 0) {
+      for (const imagePath of message.images) {
+        try {
+          // Read image file synchronously
+          const imageBuffer = fs.readFileSync(imagePath);
+          // Create hash of image content
+          const imageHash = crypto.createHash('sha256').update(imageBuffer).digest('hex');
+          imageHashes.push(`${imagePath}:${imageHash}`);
+        } catch (error) {
+          console.error(`Error hashing image ${imagePath}:`, error);
+          // Include the path without hash if we can't read the file
+          imageHashes.push(`${imagePath}:error`);
+        }
+      }
+    }
+  }
+  
+  // Combine base input string with image hashes
+  const fullInputString = inputStringBase + (imageHashes.length > 0 ? JSON.stringify(imageHashes) : '');
+  
   // Create a SHA-256 hash of the input string
-  return crypto.createHash('sha256').update(inputString).digest('hex');
+  return crypto.createHash('sha256').update(fullInputString).digest('hex');
 }
 
 /**
@@ -209,7 +237,8 @@ export async function generateJSONResponseOllama<T>({
     if(printPrompt || requireConfirmation) {
       // use a different color (green) for the prompt
       const formattedPrompts = messages.map(message => {
-        return message.role + ': ' + message.content.replace(/^```json\s*|\s*```$/g, '');
+        return message.role + ': ' + message.content.replace(/^```json\s*|\s*```$/g, '') + 
+          (message.images && message.images.length > 0 ? ` [Contains ${message.images.length} image(s)]` : '');
       }).join('\n\n');
       console.log(`${GREEN}Prompt:${RESET}`, formattedPrompts);
     }
@@ -226,8 +255,24 @@ export async function generateJSONResponseOllama<T>({
     }
 
     for (let attempt = 1; attempt <= MAX_JSON_PARSE_ATTEMPTS; attempt++) {
+      let fullResponse = '';
+
       try {
         // Force JSON format but enable streaming for console output
+        // Create a deep copy of the messages to add images properly
+        const ollama_messages = messages.map(msg => {
+          const msgCopy = { ...msg };
+          
+          // If the message has images, prepare them for ollama API
+          if (msg.images && msg.images.length > 0) {
+            // Keep the images array as is, the Ollama client will handle the conversion
+            // No special processing needed here
+          }
+          
+          return msgCopy;
+        });
+
+        // Call Ollama with the prepared messages
         const response = await ollama.chat({
           model: options.model,
           format: 'json',
@@ -243,11 +288,10 @@ export async function generateJSONResponseOllama<T>({
               )
             )
           },
-          messages,
+          messages: ollama_messages,
           stream: true // Enable streaming for console output
         });
 
-        let fullResponse = '';
         if (logStream) {
           process.stdout.write(`\nStreaming response${attempt > 1 ? ` (attempt ${attempt}/${MAX_JSON_PARSE_ATTEMPTS})` : ''}: `);
         }
@@ -301,6 +345,7 @@ export async function generateJSONResponseOllama<T>({
         }
       } catch (parseError) {
         console.warn(`Error parsing JSON response (attempt ${attempt}/${MAX_JSON_PARSE_ATTEMPTS}).`);
+        console.warn("Full response:", fullResponse);
         if (attempt === MAX_JSON_PARSE_ATTEMPTS) {
           console.error('All attempts to parse JSON response failed');
           return { status: 'failed' };
@@ -350,6 +395,13 @@ export async function generateResponseOllama(
     // Set default stream to true if not specified
     const streamEnabled = options.stream !== false;
     
+    // Create a deep copy of the messages to add images properly
+    const ollama_messages = messages.map(msg => {
+      const msgCopy = { ...msg };
+      // No special processing needed for images as the Ollama client handles them
+      return msgCopy;
+    });
+    
     if (streamEnabled) {
       // Handle streaming response
       const response = await ollama.chat({
@@ -366,7 +418,7 @@ export async function generateResponseOllama(
             )
           )
         },
-        messages,
+        messages: ollama_messages,
         stream: true
       });
 
@@ -403,7 +455,7 @@ export async function generateResponseOllama(
             )
           )
         },
-        messages,
+        messages: ollama_messages,
         stream: false
       });
       
