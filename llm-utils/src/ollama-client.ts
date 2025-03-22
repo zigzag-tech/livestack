@@ -344,6 +344,7 @@ export async function generateJSONResponseOllama<T>({
           return { status: 'success', result: parsedResponse as T, stream: streamGenerator };
         }
       } catch (parseError) {
+        console.error(parseError, "data", fullResponse);
         console.warn(`Error parsing JSON response (attempt ${attempt}/${MAX_JSON_PARSE_ATTEMPTS}).`);
         console.warn("Full response:", fullResponse);
         if (attempt === MAX_JSON_PARSE_ATTEMPTS) {
