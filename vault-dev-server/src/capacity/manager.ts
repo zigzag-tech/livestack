@@ -15,6 +15,7 @@ import {
 import { CallContext } from "nice-grpc";
 import _ from "lodash";
 import { v4 } from "uuid";
+
 class CapacityManager implements CacapcityServiceImplementation {
   
 
@@ -32,10 +33,33 @@ class CapacityManager implements CacapcityServiceImplementation {
   > = new Map();
 
   instanceIdsByProjectUuid: Record<string, string[]> = {};
+  
+  // In-memory tracking of pending jobs by project and spec
+  pendingJobsByProjectAndSpec: Record<string, Record<string, number>> = {};
 
   capacityQuery: Record<string, string[]> = {};
 
   instanacesByProejctUuid = {};
+
+  // Add a job to pending tracking
+  addPendingJob(projectUuid: string, specName: string) {
+    if (!this.pendingJobsByProjectAndSpec[projectUuid]) {
+      this.pendingJobsByProjectAndSpec[projectUuid] = {};
+    }
+    
+    if (!this.pendingJobsByProjectAndSpec[projectUuid][specName]) {
+      this.pendingJobsByProjectAndSpec[projectUuid][specName] = 0;
+    }
+    
+    this.pendingJobsByProjectAndSpec[projectUuid][specName]++;
+  }
+  
+  // Remove a job from pending tracking (when it gets processed)
+  removePendingJob(projectUuid: string, specName: string) {
+    if (this.pendingJobsByProjectAndSpec[projectUuid]?.[specName] > 0) {
+      this.pendingJobsByProjectAndSpec[projectUuid][specName]--;
+    }
+  }
 
   async respondToCapacityLog(
     request: RespondToCapacityLogMessage,
@@ -107,6 +131,11 @@ class CapacityManager implements CacapcityServiceImplementation {
       this.instanceIdsByProjectUuid[projectUuid] || [];
 
     this.instanceIdsByProjectUuid[projectUuid].push(instanceId);
+
+    // After a new instance comes online, check for any pending jobs
+    this.checkPendingJobs(projectUuid).catch(err => {
+      console.error("Error checking pending jobs after instance online:", err);
+    });
 
     // clear all capacities on disconnect
     const abortListener = async () => {
@@ -200,6 +229,12 @@ class CapacityManager implements CacapcityServiceImplementation {
       );
     }
     resolveFn(request);
+    
+    // Check for pending jobs after receiving capacity information
+    this.checkPendingJobs(projectUuid).catch(err => {
+      console.error("Error checking pending jobs after capacity query:", err);
+    });
+    
     return {};
   }
 
@@ -304,6 +339,10 @@ class CapacityManager implements CacapcityServiceImplementation {
           correlationId,
         });
       }
+      
+      // Add to pending jobs
+      this.addPendingJob(projectUuid, specName);
+      
       // Return early if no qualified instances found
       return;
     }
@@ -316,6 +355,34 @@ class CapacityManager implements CacapcityServiceImplementation {
       specName,
       numberOfWorkersNeeded: by,
     });
+    
+    // Remove from pending jobs if we successfully provisioned
+    this.removePendingJob(projectUuid, specName);
+  }
+
+  async checkPendingJobs(projectUuid: string): Promise<void> {
+    try {
+      // Get all specs with pending jobs for this project
+      const projectJobs = this.pendingJobsByProjectAndSpec[projectUuid];
+      if (!projectJobs) return;
+      
+      for (const [specName, count] of Object.entries(projectJobs)) {
+        if (count > 0) {
+          console.log(`Found ${count} pending jobs for ${projectUuid}/${specName}`);
+          
+          // Try to increase capacity for each waiting job
+          for (let i = 0; i < count; i++) {
+            await this.increaseCapacity({
+              projectUuid,
+              specName,
+              by: 1,
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error in checkPendingJobs:", error);
+    }
   }
 }
 
