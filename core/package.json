@@ -4,7 +4,7 @@
   "description": "Orchestration, in real-time.",
   "scripts": {
     "build": "preconstruct build",
-    "dev": "preconstruct dev"
+    "build-dev": "preconstruct dev"
   },
   "main": "dist/livestack-core.cjs.js",
   "types": "dist/livestack-core.cjs.d.ts",
