@@ -1,4 +1,4 @@
-import ollama from 'ollama';
+import  { Ollama } from 'ollama';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
@@ -9,6 +9,9 @@ const CYAN = '\x1b[36m';
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
 const RESET = '\x1b[0m';
+
+const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+const ollama = new Ollama({ host: OLLAMA_HOST })
 
 /**
  * Utility function to wait for user to press Enter
