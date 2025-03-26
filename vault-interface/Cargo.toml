@@ -16,7 +16,8 @@ napi = { version = "2.16", default-features = false, features = ["napi4",
   "serde-json",
   "latin1",
   "compat-mode",
-  "async"
+  "async",
+  "noop"
 ] }
 napi-derive = "2.16"
 
