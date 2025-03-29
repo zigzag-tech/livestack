@@ -573,11 +573,11 @@ const EMBEDDING_MODEL = 'nomic-embed-text'; // Ollama embedding model
 
 export class EmbeddingCache {
   private cacheDir: string;
-  private cache: Map<string, number[]>;
+  private cache: Set<string>;
 
   constructor(cacheDir: string = '.cache/embeddings') {
     this.cacheDir = cacheDir;
-    this.cache = new Map();
+    this.cache = new Set();
     this.initializeCache();
   }
 
@@ -586,6 +586,17 @@ export class EmbeddingCache {
     if (!fs.existsSync(this.cacheDir)) {
       fs.mkdirSync(this.cacheDir, { recursive: true });
     }
+    // load existing cache files into memory  
+    const files = fs.readdirSync(this.cacheDir);
+
+    files.forEach(file => {
+      const filePath = path.join(this.cacheDir, file);
+      if (fs.statSync(filePath).isFile()) {
+        const hash = file.replace('.bin', '');
+        this.cache.add(hash);
+      }
+    });
+   
   }
 
   private getHash(text: string): string {
@@ -613,7 +624,15 @@ export class EmbeddingCache {
 
     // Check in-memory cache first
     if (this.cache.has(hash)) {
-      return this.cache.get(hash)!;
+      // read from file cache
+      const cacheFilePath = this.getCacheFilePath(hash);
+      if(!fs.existsSync(cacheFilePath)) {
+       throw new Error(`Cache file not found for hash: ${hash}`);
+      }
+
+      const buffer = fs.readFileSync(cacheFilePath);
+      const embedding = this.bufferToArray(buffer);
+      return embedding;
     }
 
     // Check file cache
@@ -621,7 +640,7 @@ export class EmbeddingCache {
     if (fs.existsSync(cacheFilePath)) {
       const buffer = fs.readFileSync(cacheFilePath);
       const embedding = this.bufferToArray(buffer);
-      this.cache.set(hash, embedding);
+      this.cache.add(hash);
       return embedding;
     }
 
@@ -629,7 +648,7 @@ export class EmbeddingCache {
     const embedding = await genEmbeddingOllama(text);
     
     // Save to both caches
-    this.cache.set(hash, embedding);
+    this.cache.add(hash);
     const buffer = this.arrayToBuffer(embedding);
     fs.writeFileSync(cacheFilePath, buffer);
 
