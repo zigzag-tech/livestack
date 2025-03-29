@@ -28,8 +28,9 @@ async function genEmbeddingHGInference(text: string): Promise<number[]> {
             throw new Error(`Failed to generate embedding: ${response.status} ${response.statusText} - ${errorText}`);
         }
 
-        const result = await response.json();
-        return result.embeddings;
+        // The response is a 2D array where the first element is the embedding for the input
+        const result = await response.json() as number[][];
+        return result[0];
     } catch (error) {
         console.error('Error generating embedding from Hugging Face inference endpoint:', error);
         throw error;
