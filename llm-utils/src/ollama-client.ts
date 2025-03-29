@@ -1,6 +1,6 @@
-import  { Ollama } from 'ollama';
 import * as fs from 'fs';
 import * as path from 'path';
+import { getAvailableOllama } from './multi-ollama'; // Import the new function
 import * as crypto from 'crypto';
 import { z } from 'zod';
 
@@ -10,8 +10,9 @@ const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
 const RESET = '\x1b[0m';
 
-const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
-const ollama = new Ollama({ host: OLLAMA_HOST })
+// Remove the old direct Ollama initialization
+// const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
+// const ollama = new Ollama({ host: OLLAMA_HOST })
 
 /**
  * Utility function to wait for user to press Enter
@@ -211,7 +212,8 @@ export async function generateJSONResponseOllama<T>({
   requireConfirmation?: boolean;
   schema?: z.ZodType<T>;
 }): Promise<OllamaJSONResponse<T>> {
-
+  // Get the auto-releasing client
+  const client = await getAvailableOllama();
   try {
     // Check cache if enabled
     if (cache) {
@@ -275,8 +277,8 @@ export async function generateJSONResponseOllama<T>({
           return msgCopy;
         });
 
-        // Call Ollama with the prepared messages
-        const response = await ollama.chat({
+        // Call Ollama using the client
+        const response = await client.chat({
           model: options.model,
           format: 'json',
           options: {
@@ -365,6 +367,7 @@ export async function generateJSONResponseOllama<T>({
     console.error("Messages:", messages);
     return { status: 'failed' };
   }
+  // No finally block needed for release, it's handled internally by the client's methods
 }
 
 /**
@@ -376,6 +379,8 @@ export async function generateJSONResponseOllama<T>({
  */
 export async function generateResponseOllama(
 { messages, options }: { messages: ChatMessage[]; options: OllamaOptions & { json?: boolean; cache?: boolean; }; }): Promise<string> {
+  // Get the auto-releasing client
+  const client = await getAvailableOllama();
   try {
     // If JSON response is requested, use the JSON-specific function
     if (options.json) {
@@ -408,7 +413,7 @@ export async function generateResponseOllama(
     
     if (streamEnabled) {
       // Handle streaming response
-      const response = await ollama.chat({
+      const response = await client.chat({
         model: options.model,
         options: {
           temperature: options.temperature ?? 0.0,
@@ -446,7 +451,7 @@ export async function generateResponseOllama(
       return fullResponse;
     } else {
       // Handle non-streaming response
-      const response = await ollama.chat({
+      const response = await client.chat({
         model: options.model,
         options: {
           temperature: options.temperature ?? 0.7,
@@ -483,6 +488,7 @@ export async function generateResponseOllama(
     console.error("Messages:", messages);
     throw error;
   }
+  // No finally block needed for release, it's handled internally by the client's methods
 }
 
 /**
@@ -556,8 +562,11 @@ const EMBEDDING_MODEL = 'nomic-embed-text'; // Ollama embedding model
  * @returns Array of embedding values
  */
  async function genEmbeddingOllama(text: string): Promise<number[]> {
+  // Get the auto-releasing client
+  const client = await getAvailableOllama();
   try {
-    const response = await ollama.embeddings({
+    // Call embeddings using the client
+    const response = await client.embeddings({
       model: EMBEDDING_MODEL,
       prompt: text,
     });
@@ -567,6 +576,7 @@ const EMBEDDING_MODEL = 'nomic-embed-text'; // Ollama embedding model
     console.error('Error generating embedding:', error);
     throw error;
   }
+  // No finally block needed for release, it's handled internally by the client's methods
 }
 
 
