@@ -222,20 +222,15 @@ export async function generateJSONResponseOllama<T>({
     releaseClient = acquiredReleaseClient; // Assign release func to outer scope
 
     // Check cache if enabled
-    console.time('[generateJSONResponseOllama] Cache Check');
     if (cache) {
       const requestHash = createOllamaRequestHash(messages, options);
       if (hasCachedResponse(requestHash)) {
         const cachedResponse = readCachedResponse<any>(requestHash);
-        console.timeEnd('[generateJSONResponseOllama] Cache Check');
         if (schema) {
           try {
-            console.time('[generateJSONResponseOllama] Cache Schema Validation');
             const validatedResponse = schema.parse(cachedResponse);
-            console.timeEnd('[generateJSONResponseOllama] Cache Schema Validation');
             return { status: 'success', result: validatedResponse };
           } catch (validationError) {
-            console.timeEnd('[generateJSONResponseOllama] Cache Schema Validation');
             if (validationError instanceof z.ZodError) {
               console.warn('Cached response failed schema validation:');
               console.error(`${RED}${JSON.stringify(validationError.format(), null, 2)}${RESET}`);
@@ -249,7 +244,6 @@ export async function generateJSONResponseOllama<T>({
         }
       }
     }
-    console.timeEnd('[generateJSONResponseOllama] Cache Check');
 
     if(printPrompt || requireConfirmation) {
       // use a different color (green) for the prompt
@@ -273,7 +267,6 @@ export async function generateJSONResponseOllama<T>({
     let streamResult: AsyncGenerator<string, void, unknown> | undefined;
 
     try {
-      console.time('[generateJSONResponseOllama] Ollama client.chat');
       let chunkCounter = 0;
       const responseStream = await client.chat({
         stream: true, // Always stream for JSON extraction
@@ -325,10 +318,7 @@ export async function generateJSONResponseOllama<T>({
         }
       }
 
-      console.timeEnd('[generateJSONResponseOllama] Ollama client.chat');
-
     } catch (error) {
-      console.timeEnd('[generateJSONResponseOllama] Ollama client.chat'); // End time in case of error
       console.error(`${RED}[generateJSONResponseOllama] Error during Ollama API call: ${error}${RESET}`);
       return { status: 'failed' };
     }
@@ -342,7 +332,6 @@ export async function generateJSONResponseOllama<T>({
 
     while (parseAttempts < MAX_JSON_PARSE_ATTEMPTS && parsedJson === null) {
       parseAttempts++;
-      console.time(`[generateJSONResponseOllama] JSON Parse Attempt ${parseAttempts}`);
       try {
         let jsonString = extractJsonFromResponse(fullResponse);
         if (!jsonString) {
@@ -355,13 +344,11 @@ export async function generateJSONResponseOllama<T>({
         console.warn(`${RED}[generateJSONResponseOllama] Error parsing JSON on attempt ${parseAttempts}: ${error}${RESET}`);
         if (parseAttempts >= MAX_JSON_PARSE_ATTEMPTS) {
           console.error(`${RED}[generateJSONResponseOllama] Failed to parse JSON after ${MAX_JSON_PARSE_ATTEMPTS} attempts.${RESET}`);
-          console.timeEnd(`[generateJSONResponseOllama] JSON Parse Attempt ${parseAttempts}`);
           return { status: 'failed' };
         }
         // Optional: Add a small delay before retrying?
         // await new Promise(resolve => setTimeout(resolve, 100));
       }
-      console.timeEnd(`[generateJSONResponseOllama] JSON Parse Attempt ${parseAttempts}`);
     }
 
     if (!parsedJson) {
@@ -372,7 +359,6 @@ export async function generateJSONResponseOllama<T>({
     let validatedResponse: T = parsedJson;
     // Validate with Zod schema if provided
     if (schema) {
-      console.time('[generateJSONResponseOllama] Zod Schema Validation');
       try {
         validatedResponse = schema.parse(parsedJson);
       } catch (validationError) {
@@ -382,18 +368,14 @@ export async function generateJSONResponseOllama<T>({
         } else {
           console.error(`${RED}[generateJSONResponseOllama] Zod schema validation failed: ${validationError}${RESET}`);
         }
-        console.timeEnd('[generateJSONResponseOllama] Zod Schema Validation');
         return { status: 'failed' };
       }
-      console.timeEnd('[generateJSONResponseOllama] Zod Schema Validation');
     }
 
     // Write to cache if enabled
     if (cache) {
-      console.time('[generateJSONResponseOllama] Cache Write');
       const requestHash = createOllamaRequestHash(messages, options);
       writeResponseCache(requestHash, validatedResponse); // Cache the validated response
-      console.timeEnd('[generateJSONResponseOllama] Cache Write');
     }
 
     // Return success with the validated response (or parsed if no schema)
