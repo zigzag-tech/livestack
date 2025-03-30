@@ -36,21 +36,25 @@ function initializeOllamaInstances() {
     throw new Error('Ollama host configuration error: Neither OLLAMA_HOSTS nor OLLAMA_HOST environment variables are set or valid.');
   }
 
-
-  ollamaInstances = hosts.map(host => ({
-    instance: new Ollama({ host }),
-    host,
-    busy: false,
-  }));
+  try {
+    ollamaInstances = hosts.map(host => ({
+      instance: new Ollama({ host }),
+      host,
+      busy: false,
+    }));
+  } catch (error) {
+    throw error;
+  }
 
   console.log(`Initialized ${ollamaInstances.length} Ollama instances.`);
+
 }
 
 initializeOllamaInstances();
 
 // Return type is now Promise<Ollama>, but it's a proxied instance
-async function getAvailableOllama(): Promise<Ollama> {
-   const getWrapper = (): Promise<OllamaInstanceWrapper> => {
+async function getAvailableOllama(): Promise<{ client: Ollama; releaseClient: () => void }> {
+  const getWrapper = (): Promise<OllamaInstanceWrapper> => {
     const availableInstance = ollamaInstances.find(inst => !inst.busy);
     if (availableInstance) {
       availableInstance.busy = true;
@@ -72,7 +76,6 @@ async function getAvailableOllama(): Promise<Ollama> {
     if (released) return; // Already released
     released = true;
     wrapper.busy = false;
-    // console.log(`Released Ollama instance via proxy: ${wrapper.host}`);
     if (waitingResolvers.length > 0) {
       const resolver = waitingResolvers.shift();
       const newlyAvailable = ollamaInstances.find(inst => !inst.busy);
@@ -154,7 +157,7 @@ async function getAvailableOllama(): Promise<Ollama> {
     }
   });
 
-  return proxyClient;
+  return { client: proxyClient, releaseClient: release };
 }
 
 export { getAvailableOllama };

@@ -3,6 +3,7 @@ import * as path from 'path';
 import { getAvailableOllama } from './multi-ollama'; // Import the new function
 import * as crypto from 'crypto';
 import { z } from 'zod';
+import { Ollama } from 'ollama'; // Import the Ollama type
 
 // ANSI color codes
 const CYAN = '\x1b[36m';
@@ -213,18 +214,28 @@ export async function generateJSONResponseOllama<T>({
   schema?: z.ZodType<T>;
 }): Promise<OllamaJSONResponse<T>> {
   // Get the auto-releasing client
-  const client = await getAvailableOllama();
+  let releaseClient: (() => void) | null = null;
+  const funcStartTime = Date.now();
   try {
+    // Get the client and its specific release function
+    const { client, releaseClient: acquiredReleaseClient } = await getAvailableOllama();
+    releaseClient = acquiredReleaseClient; // Assign release func to outer scope
+
     // Check cache if enabled
+    console.time('[generateJSONResponseOllama] Cache Check');
     if (cache) {
       const requestHash = createOllamaRequestHash(messages, options);
       if (hasCachedResponse(requestHash)) {
         const cachedResponse = readCachedResponse<any>(requestHash);
+        console.timeEnd('[generateJSONResponseOllama] Cache Check');
         if (schema) {
           try {
+            console.time('[generateJSONResponseOllama] Cache Schema Validation');
             const validatedResponse = schema.parse(cachedResponse);
+            console.timeEnd('[generateJSONResponseOllama] Cache Schema Validation');
             return { status: 'success', result: validatedResponse };
           } catch (validationError) {
+            console.timeEnd('[generateJSONResponseOllama] Cache Schema Validation');
             if (validationError instanceof z.ZodError) {
               console.warn('Cached response failed schema validation:');
               console.error(`${RED}${JSON.stringify(validationError.format(), null, 2)}${RESET}`);
@@ -238,6 +249,7 @@ export async function generateJSONResponseOllama<T>({
         }
       }
     }
+    console.timeEnd('[generateJSONResponseOllama] Cache Check');
 
     if(printPrompt || requireConfirmation) {
       // use a different color (green) for the prompt
@@ -248,126 +260,154 @@ export async function generateJSONResponseOllama<T>({
       console.log(`${GREEN}Prompt:${RESET}`, formattedPrompts);
     }
     
-    // If confirmation is required, wait for user to press Enter
-    if (requireConfirmation) {
+    if(requireConfirmation) {
       try {
         await waitForEnterKey();
-        console.log(`${GREEN}Proceeding with Ollama request...${RESET}`);
       } catch (error) {
-        console.log(`${RED}Operation cancelled by user${RESET}`);
-        throw error;
+        console.error('[generateJSONResponseOllama] User cancelled.');
+        return { status: 'failed' };
       }
     }
 
-    for (let attempt = 1; attempt <= MAX_JSON_PARSE_ATTEMPTS; attempt++) {
-      let fullResponse = '';
+    let fullResponse = '';
+    let streamResult: AsyncGenerator<string, void, unknown> | undefined;
 
-      try {
-        // Force JSON format but enable streaming for console output
-        // Create a deep copy of the messages to add images properly
-        const ollama_messages = messages.map(msg => {
-          const msgCopy = { ...msg };
-          
-          // If the message has images, prepare them for ollama API
-          if (msg.images && msg.images.length > 0) {
-            // Keep the images array as is, the Ollama client will handle the conversion
-            // No special processing needed here
-          }
-          
-          return msgCopy;
-        });
-
-        // Call Ollama using the client
-        const response = await client.chat({
-          model: options.model,
-          format: 'json',
-          options: {
-            temperature: options.temperature ?? 0.2, // Lower default temperature for JSON responses
-            top_p: options.top_p,
-            top_k: options.top_k,
-            num_ctx: 1024 * 6,
-            // Include any other options
-            ...Object.fromEntries(
-              Object.entries(options).filter(([key]) => 
-                !['model', 'stream'].includes(key)
-              )
+    try {
+      console.time('[generateJSONResponseOllama] Ollama client.chat');
+      let chunkCounter = 0;
+      const responseStream = await client.chat({
+        stream: true, // Always stream for JSON extraction
+        messages, // Convert message format if needed
+        model: options.model,
+        format: options.format === 'json' ? 'json' : undefined,
+        options: {
+          temperature: options.temperature,
+          top_p: options.top_p,
+          top_k: options.top_k,
+          // Include any other specific Ollama options passed in
+          ...Object.fromEntries(
+            Object.entries(options).filter(([key]) =>
+              !['model', 'stream', 'temperature', 'top_p', 'top_k', 'format', 'stripThinkTag'].includes(key)
             )
-          },
-          messages: ollama_messages,
-          stream: true // Enable streaming for console output
-        });
+          )
+        }
+      });
 
-        if (logStream) {
-          process.stdout.write(`\nStreaming response${attempt > 1 ? ` (attempt ${attempt}/${MAX_JSON_PARSE_ATTEMPTS})` : ''}: `);
-        }
-        
-        // Buffer to store the stream chunks for later replay
-        const streamParts: string[] = [];
-        
-        // Create the stream generator that will be returned
-        const streamGenerator = (async function* () {
-          for (const part of streamParts) {
-            yield part;
+      const streamProcessor = async function*() {
+        for await (const part of responseStream) {
+          chunkCounter++;
+          if (part.message) {
+            const content = part.message.content;
+            fullResponse += content;
+            if (logStream) {
+              process.stdout.write(`${CYAN}${content}${RESET}`);
+            }
+            // Yield the content for potential external consumers of the stream
+            yield content;
           }
-        })();
-        
-        // Collect streamed response while printing to console
-        for await (const part of response) {
-          const content = part.message.content;
-          if (logStream) {
-            process.stdout.write(`${CYAN}${content}${RESET}`);
-          }
-          // Store the content for later replay through the generator
-          streamParts.push(content);
-          fullResponse += content;
         }
-        if (logStream) {
-          process.stdout.write('\n'); // Add newline after streaming
+        if (logStream && chunkCounter > 0) {
+          process.stdout.write('\n'); // Add newline after streaming is done
         }
+      };
 
-        // Strip think tags if enabled (defaults to true)
-        if (options.stripThinkTag !== false) {
-          fullResponse = stripThinkTags(fullResponse);
-        }
+      streamResult = streamProcessor();
+      // Consume the stream fully to build fullResponse
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      for await (const _ of streamResult) {}
 
-        // Parse the complete response as JSON
-        const parsedResponse = JSON.parse(fullResponse);
-        
-        // Validate against schema if provided
-        if (schema) {
-          const validatedResponse = schema.parse(parsedResponse);
-          if (cache) {
-            const requestHash = createOllamaRequestHash(messages, options);
-            writeResponseCache(requestHash, validatedResponse);
-          }
-          return { status: 'success', result: validatedResponse, stream: streamGenerator };
-        } else {
-          if (cache) {
-            const requestHash = createOllamaRequestHash(messages, options);
-            writeResponseCache(requestHash, parsedResponse);
-          }
-          return { status: 'success', result: parsedResponse as T, stream: streamGenerator };
+      // Strip think tags if enabled (defaults to true)
+      if (options.stripThinkTag !== false) {
+        const originalLength = fullResponse.length;
+        fullResponse = stripThinkTags(fullResponse);
+        if(fullResponse.length < originalLength) {
+          // Optional: Log if tags were stripped
         }
-      } catch (parseError) {
-        console.error(parseError, "data", fullResponse);
-        console.warn(`Error parsing JSON response (attempt ${attempt}/${MAX_JSON_PARSE_ATTEMPTS}).`);
-        console.warn("Full response:", fullResponse);
-        if (attempt === MAX_JSON_PARSE_ATTEMPTS) {
-          console.error('All attempts to parse JSON response failed');
+      }
+
+      console.timeEnd('[generateJSONResponseOllama] Ollama client.chat');
+
+    } catch (error) {
+      console.timeEnd('[generateJSONResponseOllama] Ollama client.chat'); // End time in case of error
+      console.error(`${RED}[generateJSONResponseOllama] Error during Ollama API call: ${error}${RESET}`);
+      return { status: 'failed' };
+    }
+
+    // Attempt to parse JSON, potentially retrying
+    let parsedJson: T | null = null;
+    let parseAttempts = 0;
+
+    // Log raw response before parsing (consider limiting length in production)
+    // console.log(`[generateJSONResponseOllama] Raw response before parsing (truncated):\n---\n${fullResponse.substring(0, 500)}...`); // Keep commented for potential future debugging
+
+    while (parseAttempts < MAX_JSON_PARSE_ATTEMPTS && parsedJson === null) {
+      parseAttempts++;
+      console.time(`[generateJSONResponseOllama] JSON Parse Attempt ${parseAttempts}`);
+      try {
+        let jsonString = extractJsonFromResponse(fullResponse);
+        if (!jsonString) {
+          console.warn('[generateJSONResponseOllama] No JSON block found in response. Attempting to parse entire response.');
+          // Optionally try parsing the whole thing if no block found
+          jsonString = fullResponse;
+        }
+        parsedJson = JSON.parse(jsonString);
+      } catch (error) {
+        console.warn(`${RED}[generateJSONResponseOllama] Error parsing JSON on attempt ${parseAttempts}: ${error}${RESET}`);
+        if (parseAttempts >= MAX_JSON_PARSE_ATTEMPTS) {
+          console.error(`${RED}[generateJSONResponseOllama] Failed to parse JSON after ${MAX_JSON_PARSE_ATTEMPTS} attempts.${RESET}`);
+          console.timeEnd(`[generateJSONResponseOllama] JSON Parse Attempt ${parseAttempts}`);
           return { status: 'failed' };
         }
-        // Wait briefly before retrying
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Optional: Add a small delay before retrying?
+        // await new Promise(resolve => setTimeout(resolve, 100));
       }
+      console.timeEnd(`[generateJSONResponseOllama] JSON Parse Attempt ${parseAttempts}`);
     }
 
-    return { status: 'failed' };
-  } catch (error) {
-    console.error('Error generating JSON response from Ollama:', error);
-    console.error("Messages:", messages);
-    return { status: 'failed' };
+    if (!parsedJson) {
+      console.error('[generateJSONResponseOllama] Could not obtain parsed JSON after retries.');
+      return { status: 'failed' }; // Should have returned in the loop, but belt-and-suspenders
+    }
+
+    let validatedResponse: T = parsedJson;
+    // Validate with Zod schema if provided
+    if (schema) {
+      console.time('[generateJSONResponseOllama] Zod Schema Validation');
+      try {
+        validatedResponse = schema.parse(parsedJson);
+      } catch (validationError) {
+        if (validationError instanceof z.ZodError) {
+          console.error(`${RED}[generateJSONResponseOllama] Zod schema validation failed:${RESET}`);
+          console.error(`${RED}${JSON.stringify(validationError.format(), null, 2)}${RESET}`);
+        } else {
+          console.error(`${RED}[generateJSONResponseOllama] Zod schema validation failed: ${validationError}${RESET}`);
+        }
+        console.timeEnd('[generateJSONResponseOllama] Zod Schema Validation');
+        return { status: 'failed' };
+      }
+      console.timeEnd('[generateJSONResponseOllama] Zod Schema Validation');
+    }
+
+    // Write to cache if enabled
+    if (cache) {
+      console.time('[generateJSONResponseOllama] Cache Write');
+      const requestHash = createOllamaRequestHash(messages, options);
+      writeResponseCache(requestHash, validatedResponse); // Cache the validated response
+      console.timeEnd('[generateJSONResponseOllama] Cache Write');
+    }
+
+    // Return success with the validated response (or parsed if no schema)
+    // Also return the stream generator in case the caller wants to replay it
+    return { status: 'success', result: validatedResponse };
+
+  } finally {
+    // Ensure the client is released back to the pool
+    if (releaseClient) {
+      releaseClient();
+    } else {
+      console.warn('[generateJSONResponseOllama] releaseClient function was not available in finally block, cannot release.');
+    }
   }
-  // No finally block needed for release, it's handled internally by the client's methods
 }
 
 /**
@@ -380,8 +420,11 @@ export async function generateJSONResponseOllama<T>({
 export async function generateResponseOllama(
 { messages, options }: { messages: ChatMessage[]; options: OllamaOptions & { json?: boolean; cache?: boolean; }; }): Promise<string> {
   // Get the auto-releasing client
-  const client = await getAvailableOllama();
+  let releaseClient: (() => void) | null = null;
+  const funcStartTime = Date.now(); // Add timing for this function too if desired
   try {
+    const { client, releaseClient: acquiredReleaseClient } = await getAvailableOllama();
+    releaseClient = acquiredReleaseClient;
     // If JSON response is requested, use the JSON-specific function
     if (options.json) {
       const jsonResponse = await generateJSONResponseOllama<any>({ messages, options });
@@ -487,8 +530,13 @@ export async function generateResponseOllama(
     console.error('Error generating response from Ollama:', error);
     console.error("Messages:", messages);
     throw error;
+  } finally {
+    if (releaseClient) {
+      releaseClient();
+    } else {
+      console.warn('[generateResponseOllama] releaseClient function was not available in finally block, cannot release.');
+    }
   }
-  // No finally block needed for release, it's handled internally by the client's methods
 }
 
 /**
