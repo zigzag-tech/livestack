@@ -29,7 +29,7 @@ async function genEmbeddingOllama(text: string): Promise<number[]> {
     const client = await getAvailableOllama();
     try {
         // Call embeddings using the client
-        const response = await client.embeddings({
+        const response = await client.client.embeddings({
             model: EMBEDDING_MODEL,
             prompt: text,
         });
