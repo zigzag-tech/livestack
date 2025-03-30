@@ -25,7 +25,7 @@ async function genEmbeddingHGInference(text: string): Promise<number[]> {
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`Failed to generate embedding: ${response.status} ${response.statusText} - ${errorText}`);
+            throw new Error(`Failed to generate embedding for (${text.length} characters): "${text.slice(0, 100)}...": ${response.status} ${response.statusText} - ${errorText}`);
         }
 
         // The response is a 2D array where the first element is the embedding for the input
