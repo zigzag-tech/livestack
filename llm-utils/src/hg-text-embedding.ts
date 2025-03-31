@@ -30,7 +30,11 @@ async function genEmbeddingHGInference(text: string): Promise<number[]> {
 
         // The response is a 2D array where the first element is the embedding for the input
         const result = await response.json() as number[][];
-        return result[0];
+        const embedding = result[0];
+        if (!embedding) {
+            throw new Error(`Failed to generate embedding for (${text.length} characters): "${text.slice(0, 100)}...": ${response.status} ${response.statusText}`);
+        }
+        return embedding;
     } catch (error) {
         console.error('Error generating embedding from Hugging Face inference endpoint:', error);
         throw error;
@@ -66,6 +70,12 @@ export async function generateEmbeddingHGInference(text: string): Promise<number
  * @returns Cosine similarity value between 0 and 1
  */
 export async function getCosineSimilarityHGInference(embedding1: number[], embedding2: number[]): Promise<number> {
+    if (!embedding1 || !embedding2) {
+        throw new Error('Invalid embeddings provided for cosine similarity calculation. embedding1: ' + embedding1 + ' embedding2: ' + embedding2);
+    }
+    else if (embedding1.length !== embedding2.length || embedding1.length === 0) {
+        throw new Error('Invalid embeddings provided for cosine similarity calculation. embedding1.length: ' + embedding1.length + ' embedding2.length: ' + embedding2.length);
+    }
     // Initialize cache if needed
     if (!cache) {
         if (!process.env.EMBEDDING_CLIENT) {
