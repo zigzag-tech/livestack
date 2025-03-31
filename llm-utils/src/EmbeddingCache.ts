@@ -94,8 +94,7 @@ export class EmbeddingCache {
     getCosineSimilarity(embedding1: number[], embedding2: number[]): number {
         if (!Array.isArray(embedding1) || !Array.isArray(embedding2) ||
             embedding1.length !== embedding2.length || embedding1.length === 0) {
-            console.warn('Invalid embeddings provided for cosine similarity calculation');
-            return 0;
+            throw new Error('Invalid embeddings provided for cosine similarity calculation. embedding1.length: ' + embedding1.length + ' embedding2.length: ' + embedding2.length);
         }
 
         let dotProduct = 0;
