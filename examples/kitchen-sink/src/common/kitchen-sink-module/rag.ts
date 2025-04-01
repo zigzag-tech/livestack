@@ -8,7 +8,7 @@ import {
 import { JobSpec, LiveWorker } from "@livestack/core";
 import { z } from "zod";
 import { parseURLMarkdownText } from "./parseURLMarkdownText";
-import { getRecursiveCharacterTextSplitter } from "@livestack/lab-internal-server";
+import { splitTextRecursively } from "@livestack/lab-internal-server";
 import { getIndexOrCreate } from "./indexMap";
 import { formatDocumentsAsString } from "langchain/util/document";
 import { StringOutputParser } from "@langchain/core/output_parsers";
@@ -21,8 +21,7 @@ const systemPrompt = `Your task is to assist users by providing accurate, inform
 
 export const splitTextToChunks = async (text: string, chunkSize = 200) => {
   // split body text into chunks and index each chunk
-  const splitter = getRecursiveCharacterTextSplitter({ chunkSize });
-  const chunks = await splitter.createDocuments([text]);
+  const chunks = await splitTextRecursively(text, { chunkSize });
   return chunks;
 };
 
@@ -66,17 +65,16 @@ export function getRAGWorkerDefs() {
 
               await index.addDocuments(
                 chunks.map((chunk, idx) => ({
-                  pageContent: chunk.pageContent,
+                  pageContent: chunk,
                   metadata: {
-                    ...chunk.metadata,
                     url,
                     title: parsedContent.title,
                     id: `${url}__${idx}`,
                   },
                 }))
               );
-              chunks.forEach(async ({ pageContent }) => {
-                output.emit(pageContent);
+              chunks.forEach(async (chunk) => {
+                output.emit(chunk);
               });
               await output("text-status").emit(`indexed: ${url}`);
               logger.info("Indexed: " + url + ".");
@@ -89,8 +87,8 @@ export function getRAGWorkerDefs() {
           try {
             const chunks = await splitTextToChunks(data.content);
             await index!.addDocuments(chunks);
-            chunks.forEach(async ({ pageContent }) => {
-              output.emit(pageContent);
+            chunks.forEach(async (chunk) => {
+              output.emit(chunk);
             });
             await output("text-status").emit(
               `indexed: ${data.content.slice(0, 10)}...`
