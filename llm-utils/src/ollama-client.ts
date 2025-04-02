@@ -4,6 +4,7 @@ import { getAvailableOllama } from './multi-ollama'; // Import the new function
 import * as crypto from 'crypto';
 import { z } from 'zod';
 import { Ollama } from 'ollama'; // Import the Ollama type
+import { jsonrepair } from 'jsonrepair'
 
 // ANSI color codes
 const CYAN = '\x1b[36m';
@@ -369,7 +370,6 @@ export async function generateJSONResponseOllama<T>({
         
         // Strip think tags if enabled (defaults to true)
         if (options.stripThinkTag !== false) {
-          const originalLength = fullResponse.length;
           fullResponse = stripThinkTags(fullResponse);
         }
 
@@ -380,7 +380,7 @@ export async function generateJSONResponseOllama<T>({
             console.warn(`[generateJSONResponseOllama] No JSON block found in response on attempt ${parseAttempts}. Attempting to parse entire response.`);
             jsonString = fullResponse;
           }
-          parsedJson = JSON.parse(jsonString);
+          parsedJson = JSON.parse(jsonrepair(jsonString));
           // If we get here, parsing succeeded
         } catch (parseError) {
           console.warn(`${RED}[generateJSONResponseOllama] Error parsing JSON from LLM attempt ${parseAttempts}: ${parseError}${RESET}`);
