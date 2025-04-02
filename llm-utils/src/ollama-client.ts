@@ -265,95 +265,113 @@ export async function generateJSONResponseOllama<T>({
 
     let fullResponse = '';
     let streamResult: AsyncGenerator<string, void, unknown> | undefined;
-
-    try {
-      let chunkCounter = 0;
-      const responseStream = await client.chat({
-        stream: true, // Always stream for JSON extraction
-        messages, // Convert message format if needed
-        model: options.model,
-        format: options.format === 'json' ? 'json' : undefined,
-        options: {
-          temperature: options.temperature,
-          top_p: options.top_p,
-          top_k: options.top_k,
-          // Include any other specific Ollama options passed in
-          ...Object.fromEntries(
-            Object.entries(options).filter(([key]) =>
-              !['model', 'stream', 'temperature', 'top_p', 'top_k', 'format', 'stripThinkTag'].includes(key)
-            )
-          )
-        }
-      });
-
-      const streamProcessor = async function*() {
-        for await (const part of responseStream) {
-          chunkCounter++;
-          if (part.message) {
-            const content = part.message.content;
-            fullResponse += content;
-            if (logStream) {
-              process.stdout.write(`${CYAN}${content}${RESET}`);
-            }
-            // Yield the content for potential external consumers of the stream
-            yield content;
-          }
-        }
-        if (logStream && chunkCounter > 0) {
-          process.stdout.write('\n'); // Add newline after streaming is done
-        }
-      };
-
-      streamResult = streamProcessor();
-      // Consume the stream fully to build fullResponse
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _ of streamResult) {}
-
-      // Strip think tags if enabled (defaults to true)
-      if (options.stripThinkTag !== false) {
-        const originalLength = fullResponse.length;
-        fullResponse = stripThinkTags(fullResponse);
-        if(fullResponse.length < originalLength) {
-          // Optional: Log if tags were stripped
-        }
-      }
-
-    } catch (error) {
-      console.error(`${RED}[generateJSONResponseOllama] Error during Ollama API call: ${error}${RESET}`);
-      return { status: 'failed' };
-    }
-
-    // Attempt to parse JSON, potentially retrying
     let parsedJson: T | null = null;
     let parseAttempts = 0;
 
-    // Log raw response before parsing (consider limiting length in production)
-    // console.log(`[generateJSONResponseOllama] Raw response before parsing (truncated):\n---\n${fullResponse.substring(0, 500)}...`); // Keep commented for potential future debugging
-
+    // Make up to MAX_JSON_PARSE_ATTEMPTS to get valid JSON from LLM
     while (parseAttempts < MAX_JSON_PARSE_ATTEMPTS && parsedJson === null) {
       parseAttempts++;
-      try {
-        let jsonString = extractJsonFromResponse(fullResponse);
-        if (!jsonString) {
-          console.warn('[generateJSONResponseOllama] No JSON block found in response. Attempting to parse entire response.');
-          // Optionally try parsing the whole thing if no block found
-          jsonString = fullResponse;
+      
+      if (parseAttempts > 1) {
+        console.log(`${CYAN}[generateJSONResponseOllama] Making attempt ${parseAttempts} to get valid JSON from LLM${RESET}`);
+        
+        // For retries, we can add a system message to encourage valid JSON output
+        if (parseAttempts === 2) {
+          messages = [
+            { role: 'system', content: 'You MUST respond with valid, parseable JSON. Wrap your response in ```json and ``` tags. Your previous response could not be parsed.' },
+            ...messages
+          ];
+        } else if (parseAttempts === 3) {
+          messages = [
+            { role: 'system', content: 'CRITICAL: This is the final attempt. You MUST respond with ONLY valid, parseable JSON without any additional text. Wrap your response in ```json and ``` tags.' },
+            ...messages
+          ];
         }
-        parsedJson = JSON.parse(jsonString);
-      } catch (error) {
-        console.warn(`${RED}[generateJSONResponseOllama] Error parsing JSON on attempt ${parseAttempts}: ${error}${RESET}`);
+      }
+
+      try {
+        fullResponse = '';
+        let chunkCounter = 0;
+        const responseStream = await client.chat({
+          stream: true, // Always stream for JSON extraction
+          messages, // Convert message format if needed
+          model: options.model,
+          format: options.format === 'json' ? 'json' : undefined,
+          options: {
+            temperature: options.temperature,
+            top_p: options.top_p,
+            top_k: options.top_k,
+            // Include any other specific Ollama options passed in
+            ...Object.fromEntries(
+              Object.entries(options).filter(([key]) =>
+                !['model', 'stream', 'temperature', 'top_p', 'top_k', 'format', 'stripThinkTag'].includes(key)
+              )
+            )
+          }
+        });
+
+        const streamProcessor = async function*() {
+          for await (const part of responseStream) {
+            chunkCounter++;
+            if (part.message) {
+              const content = part.message.content;
+              fullResponse += content;
+              if (logStream) {
+                process.stdout.write(`${CYAN}${content}${RESET}`);
+              }
+              // Yield the content for potential external consumers of the stream
+              yield content;
+            }
+          }
+          if (logStream && chunkCounter > 0) {
+            process.stdout.write('\n'); // Add newline after streaming is done
+          }
+        };
+
+        streamResult = streamProcessor();
+        // Consume the stream fully to build fullResponse
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        for await (const _ of streamResult) {}
+
+        // Strip think tags if enabled (defaults to true)
+        if (options.stripThinkTag !== false) {
+          const originalLength = fullResponse.length;
+          fullResponse = stripThinkTags(fullResponse);
+          if(fullResponse.length < originalLength) {
+            // Optional: Log if tags were stripped
+          }
+        }
+
+        // Attempt to parse the JSON from this LLM attempt
+        try {
+          let jsonString = extractJsonFromResponse(fullResponse);
+          if (!jsonString) {
+            console.warn(`[generateJSONResponseOllama] No JSON block found in response on attempt ${parseAttempts}. Attempting to parse entire response.`);
+            // Optionally try parsing the whole thing if no block found
+            jsonString = fullResponse;
+          }
+          parsedJson = JSON.parse(jsonString);
+          // If we get here, parsing succeeded
+        } catch (parseError) {
+          console.warn(`${RED}[generateJSONResponseOllama] Error parsing JSON from LLM attempt ${parseAttempts}: ${parseError}${RESET}`);
+          // Continue to next attempt if we have retries left
+          if (parseAttempts >= MAX_JSON_PARSE_ATTEMPTS) {
+            console.error(`${RED}[generateJSONResponseOllama] Failed to get valid JSON after ${MAX_JSON_PARSE_ATTEMPTS} LLM attempts.${RESET}`);
+            return { status: 'failed' };
+          }
+        }
+      } catch (apiError) {
+        console.error(`${RED}[generateJSONResponseOllama] Error during Ollama API call on attempt ${parseAttempts}: ${apiError}${RESET}`);
         if (parseAttempts >= MAX_JSON_PARSE_ATTEMPTS) {
-          console.error(`${RED}[generateJSONResponseOllama] Failed to parse JSON after ${MAX_JSON_PARSE_ATTEMPTS} attempts.${RESET}`);
           return { status: 'failed' };
         }
-        // Optional: Add a small delay before retrying?
-        // await new Promise(resolve => setTimeout(resolve, 100));
+        // Continue to next attempt
       }
     }
 
     if (!parsedJson) {
-      console.error('[generateJSONResponseOllama] Could not obtain parsed JSON after retries.');
-      return { status: 'failed' }; // Should have returned in the loop, but belt-and-suspenders
+      console.error('[generateJSONResponseOllama] Could not obtain parsed JSON after all LLM attempts.');
+      return { status: 'failed' };
     }
 
     let validatedResponse: T = parsedJson;
