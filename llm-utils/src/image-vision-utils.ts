@@ -68,7 +68,7 @@ export async function generateImageDescriptionWithVisionLLM(imagePath: string): 
     }];
     
     // Call Ollama vision model using the JSON response generator
-    const response = await generateJSONResponseOllama<{ desc: string }>({
+    const { resultPromise } = await generateJSONResponseOllama<{ desc: string }>({
       messages,
       options: { 
         model: VISION_MODEL,
@@ -78,6 +78,7 @@ export async function generateImageDescriptionWithVisionLLM(imagePath: string): 
       logStream: false
     });
 
+    const response = await resultPromise;
     if(response.status === 'failed') {
       throw new Error('Failed to generate image description');
     }
@@ -90,11 +91,8 @@ export async function generateImageDescriptionWithVisionLLM(imagePath: string): 
   
     // Extract the description from the response
     if (response.status === 'success') {
-
-  
-      
       // The response will contain the full message content as a string, not in JSON format
-      const result = response.result.desc;
+      const result = response.content.desc;
       // Handle different response formats - sometimes it might be a string directly,
       // other times it might be an object with a content property
       if (typeof result === 'string') {
