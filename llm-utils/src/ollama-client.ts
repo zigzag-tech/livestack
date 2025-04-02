@@ -173,8 +173,8 @@ function writeResponseCache<T>(requestHash: string, response: T): void {
 /**
  * Response wrapper type for JSON responses from Ollama
  */
-export type OllamaJSONResponse<T> = 
-  | { status: 'success'; result: T; stream?: AsyncGenerator<string, void, unknown> }
+export type OllamaJSONResult<T> = 
+  | { status: 'success'; content: T }
   | { status: 'failed' };
 
 const MAX_JSON_PARSE_ATTEMPTS = 3;
@@ -194,7 +194,7 @@ function stripThinkTags(text: string): string {
  * @param cache - Whether to use caching (defaults to true)
  * @param logStream - Whether to log the streaming response to console (defaults to true)
  * @param schema - Optional Zod schema for response validation and type inference
- * @returns A wrapped response containing either the parsed JSON of type T or a failure status
+ * @returns An object containing the stream for immediate consumption and a promise that resolves when processing is complete
  */
 export async function generateJSONResponseOllama<T>({ 
   messages, 
@@ -212,142 +212,172 @@ export async function generateJSONResponseOllama<T>({
   printPrompt?: boolean;
   requireConfirmation?: boolean;
   schema?: z.ZodType<T>;
-}): Promise<OllamaJSONResponse<T>> {
+}): Promise<{
+  stream: AsyncGenerator<string, void, unknown>,
+  resultPromise: Promise<OllamaJSONResult<T>>
+}> {
   // Get the auto-releasing client
   let releaseClient: (() => void) | null = null;
   const funcStartTime = Date.now();
-  try {
-    // Get the client and its specific release function
-    const { client, releaseClient: acquiredReleaseClient } = await getAvailableOllama();
-    releaseClient = acquiredReleaseClient; // Assign release func to outer scope
+  
+  // Get the client and its specific release function
+  const { client, releaseClient: acquiredReleaseClient } = await getAvailableOllama();
+  releaseClient = acquiredReleaseClient; // Assign release func to outer scope
 
-    // Check cache if enabled
-    if (cache) {
-      const requestHash = createOllamaRequestHash(messages, options);
-      if (hasCachedResponse(requestHash)) {
-        const cachedResponse = readCachedResponse<any>(requestHash);
-        if (schema) {
-          try {
-            const validatedResponse = schema.parse(cachedResponse);
-            return { status: 'success', result: validatedResponse };
-          } catch (validationError) {
-            if (validationError instanceof z.ZodError) {
-              console.warn('Cached response failed schema validation:');
-              console.error(`${RED}${JSON.stringify(validationError.format(), null, 2)}${RESET}`);
-            } else {
-              console.warn('Cached response failed schema validation:', validationError);
-            }
-            // Fall through to generate new response
+  // Check cache if enabled
+  if (cache) {
+    const requestHash = createOllamaRequestHash(messages, options);
+    if (hasCachedResponse(requestHash)) {
+      const cachedResponse = readCachedResponse<any>(requestHash);
+      if (schema) {
+        try {
+          const validatedResponse = schema.parse(cachedResponse);
+          // Create a dummy stream that yields nothing since we're using cached data
+          const dummyStream = async function*() {}();
+          return { 
+            stream: dummyStream, 
+            resultPromise: Promise.resolve({ status: 'success', content: validatedResponse }) 
+          };
+        } catch (validationError) {
+          if (validationError instanceof z.ZodError) {
+            console.warn('Cached response failed schema validation:');
+            console.error(`${RED}${JSON.stringify(validationError.format(), null, 2)}${RESET}`);
+          } else {
+            console.warn('Cached response failed schema validation:', validationError);
           }
-        } else {
-          return { status: 'success', result: cachedResponse };
+          // Fall through to generate new response
         }
+      } else {
+        // Create a dummy stream that yields nothing since we're using cached data
+        const dummyStream = async function*() {}();
+        return { 
+          stream: dummyStream, 
+          resultPromise: Promise.resolve({ status: 'success', content: cachedResponse }) 
+        };
       }
     }
+  }
 
-    if(printPrompt || requireConfirmation) {
-      // use a different color (green) for the prompt
-      const formattedPrompts = messages.map(message => {
-        return message.role + ': ' + message.content.replace(/^```json\s*|\s*```$/g, '') + 
-          (message.images && message.images.length > 0 ? ` [Contains ${message.images.length} image(s)]` : '');
-      }).join('\n\n');
-      console.log(`${GREEN}Prompt:${RESET}`, formattedPrompts);
+  if(printPrompt || requireConfirmation) {
+    // use a different color (green) for the prompt
+    const formattedPrompts = messages.map(message => {
+      return message.role + ': ' + message.content.replace(/^```json\s*|\s*```$/g, '') + 
+        (message.images && message.images.length > 0 ? ` [Contains ${message.images.length} image(s)]` : '');
+    }).join('\n\n');
+    console.log(`${GREEN}Prompt:${RESET}`, formattedPrompts);
+  }
+  
+  if(requireConfirmation) {
+    try {
+      await waitForEnterKey();
+    } catch (error) {
+      console.error('[generateJSONResponseOllama] User cancelled.');
+      // Create a dummy stream that yields nothing since user cancelled
+      const dummyStream = async function*() {}();
+      return { 
+        stream: dummyStream, 
+        resultPromise: Promise.resolve({ status: 'failed' }) 
+      };
     }
-    
-    if(requireConfirmation) {
-      try {
-        await waitForEnterKey();
-      } catch (error) {
-        console.error('[generateJSONResponseOllama] User cancelled.');
-        return { status: 'failed' };
-      }
-    }
+  }
 
+  // This will store our response processing promise
+  let resultPromiseResolve: (value: OllamaJSONResult<T>) => void;
+  let resultPromiseReject: (reason: any) => void;
+  
+  const resultPromise = new Promise<OllamaJSONResult<T>>((resolve, reject) => {
+    resultPromiseResolve = resolve;
+    resultPromiseReject = reject;
+  });
+
+  // Create a function to process the stream and resolve the result promise
+  const processStreamAndResolveResult = async (stream: AsyncGenerator<string, void, unknown>) => {
     let fullResponse = '';
-    let streamResult: AsyncGenerator<string, void, unknown> | undefined;
     let parsedJson: T | null = null;
     let parseAttempts = 0;
-
-    // Make up to MAX_JSON_PARSE_ATTEMPTS to get valid JSON from LLM
-    while (parseAttempts < MAX_JSON_PARSE_ATTEMPTS && parsedJson === null) {
-      parseAttempts++;
-      
-      if (parseAttempts > 1) {
-        console.log(`${CYAN}[generateJSONResponseOllama] Making attempt ${parseAttempts} to get valid JSON from LLM${RESET}`);
+    let currentMessages = [...messages];
+    
+    try {
+      // Make up to MAX_JSON_PARSE_ATTEMPTS to get valid JSON from LLM
+      while (parseAttempts < MAX_JSON_PARSE_ATTEMPTS && parsedJson === null) {
+        parseAttempts++;
         
-        // For retries, we can add a system message to encourage valid JSON output
-        if (parseAttempts === 2) {
-          messages = [
-            { role: 'system', content: 'You MUST respond with valid, parseable JSON. Wrap your response in ```json and ``` tags. Your previous response could not be parsed.' },
-            ...messages
-          ];
-        } else if (parseAttempts === 3) {
-          messages = [
-            { role: 'system', content: 'CRITICAL: This is the final attempt. You MUST respond with ONLY valid, parseable JSON without any additional text. Wrap your response in ```json and ``` tags.' },
-            ...messages
-          ];
-        }
-      }
-
-      try {
-        fullResponse = '';
-        let chunkCounter = 0;
-        const responseStream = await client.chat({
-          stream: true, // Always stream for JSON extraction
-          messages, // Convert message format if needed
-          model: options.model,
-          format: options.format === 'json' ? 'json' : undefined,
-          options: {
-            temperature: options.temperature,
-            top_p: options.top_p,
-            top_k: options.top_k,
-            // Include any other specific Ollama options passed in
-            ...Object.fromEntries(
-              Object.entries(options).filter(([key]) =>
-                !['model', 'stream', 'temperature', 'top_p', 'top_k', 'format', 'stripThinkTag'].includes(key)
-              )
-            )
+        if (parseAttempts > 1) {
+          console.log(`${CYAN}[generateJSONResponseOllama] Making attempt ${parseAttempts} to get valid JSON from LLM${RESET}`);
+          
+          // For retries, we can add a system message to encourage valid JSON output
+          if (parseAttempts === 2) {
+            currentMessages = [
+              { role: 'system', content: 'You MUST respond with valid, parseable JSON. Wrap your response in ```json and ``` tags. Your previous response could not be parsed.' },
+              ...messages
+            ];
+          } else if (parseAttempts === 3) {
+            currentMessages = [
+              { role: 'system', content: 'CRITICAL: This is the final attempt. You MUST respond with ONLY valid, parseable JSON without any additional text. Wrap your response in ```json and ``` tags.' },
+              ...messages
+            ];
           }
-        });
-
-        const streamProcessor = async function*() {
-          for await (const part of responseStream) {
-            chunkCounter++;
+          
+          // Reset for retry
+          fullResponse = '';
+          
+          // Get a new client for retry
+          if (releaseClient) {
+            releaseClient();
+          }
+          const { client: retryClient, releaseClient: retryReleaseClient } = await getAvailableOllama();
+          releaseClient = retryReleaseClient;
+          
+          // Create a new response stream for retry
+          const retryResponseStream = await retryClient.chat({
+            stream: true,
+            messages: currentMessages,
+            model: options.model,
+            format: options.format === 'json' ? 'json' : undefined,
+            options: {
+              temperature: options.temperature,
+              top_p: options.top_p,
+              top_k: options.top_k,
+              ...Object.fromEntries(
+                Object.entries(options).filter(([key]) =>
+                  !['model', 'stream', 'temperature', 'top_p', 'top_k', 'format', 'stripThinkTag'].includes(key)
+                )
+              )
+            }
+          });
+          
+          // Process the retry stream
+          for await (const part of retryResponseStream) {
             if (part.message) {
               const content = part.message.content;
               fullResponse += content;
               if (logStream) {
                 process.stdout.write(`${CYAN}${content}${RESET}`);
               }
-              // Yield the content for potential external consumers of the stream
-              yield content;
             }
           }
-          if (logStream && chunkCounter > 0) {
-            process.stdout.write('\n'); // Add newline after streaming is done
+          
+          if (logStream) {
+            process.stdout.write('\n');
           }
-        };
-
-        streamResult = streamProcessor();
-        // Consume the stream fully to build fullResponse
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        for await (const _ of streamResult) {}
-
+        } else {
+          // For the first attempt, consume the stream that was returned to the caller
+          for await (const chunk of stream) {
+            fullResponse += chunk;
+          }
+        }
+        
         // Strip think tags if enabled (defaults to true)
         if (options.stripThinkTag !== false) {
           const originalLength = fullResponse.length;
           fullResponse = stripThinkTags(fullResponse);
-          if(fullResponse.length < originalLength) {
-            // Optional: Log if tags were stripped
-          }
         }
 
-        // Attempt to parse the JSON from this LLM attempt
+        // Attempt to parse the JSON
         try {
           let jsonString = extractJsonFromResponse(fullResponse);
           if (!jsonString) {
             console.warn(`[generateJSONResponseOllama] No JSON block found in response on attempt ${parseAttempts}. Attempting to parse entire response.`);
-            // Optionally try parsing the whole thing if no block found
             jsonString = fullResponse;
           }
           parsedJson = JSON.parse(jsonString);
@@ -357,56 +387,112 @@ export async function generateJSONResponseOllama<T>({
           // Continue to next attempt if we have retries left
           if (parseAttempts >= MAX_JSON_PARSE_ATTEMPTS) {
             console.error(`${RED}[generateJSONResponseOllama] Failed to get valid JSON after ${MAX_JSON_PARSE_ATTEMPTS} LLM attempts.${RESET}`);
-            return { status: 'failed' };
+            resultPromiseResolve({ status: 'failed' });
+            return;
           }
         }
-      } catch (apiError) {
-        console.error(`${RED}[generateJSONResponseOllama] Error during Ollama API call on attempt ${parseAttempts}: ${apiError}${RESET}`);
-        if (parseAttempts >= MAX_JSON_PARSE_ATTEMPTS) {
-          return { status: 'failed' };
+      }
+
+      if (!parsedJson) {
+        console.error('[generateJSONResponseOllama] Could not obtain parsed JSON after all LLM attempts.');
+        resultPromiseResolve({ status: 'failed' });
+        return;
+      }
+
+      let validatedResponse: T = parsedJson;
+      // Validate with Zod schema if provided
+      if (schema) {
+        try {
+          validatedResponse = schema.parse(parsedJson);
+        } catch (validationError) {
+          if (validationError instanceof z.ZodError) {
+            console.error(`${RED}[generateJSONResponseOllama] Zod schema validation failed:${RESET}`);
+            console.error(`${RED}${JSON.stringify(validationError.format(), null, 2)}${RESET}`);
+          } else {
+            console.error(`${RED}[generateJSONResponseOllama] Zod schema validation failed: ${validationError}${RESET}`);
+          }
+          resultPromiseResolve({ status: 'failed' });
+          return;
         }
-        // Continue to next attempt
+      }
+
+      // Write to cache if enabled
+      if (cache) {
+        const requestHash = createOllamaRequestHash(messages, options);
+        writeResponseCache(requestHash, validatedResponse);
+      }
+
+      // Resolve the promise with the successful result
+      resultPromiseResolve({ status: 'success', content: validatedResponse });
+    } catch (error) {
+      console.error(`${RED}[generateJSONResponseOllama] Error processing stream: ${error}${RESET}`);
+      resultPromiseResolve({ status: 'failed' });
+    } finally {
+      // Ensure the client is released back to the pool
+      if (releaseClient) {
+        releaseClient();
+      } else {
+        console.warn('[generateJSONResponseOllama] releaseClient function was not available in finally block, cannot release.');
       }
     }
+  };
 
-    if (!parsedJson) {
-      console.error('[generateJSONResponseOllama] Could not obtain parsed JSON after all LLM attempts.');
-      return { status: 'failed' };
-    }
-
-    let validatedResponse: T = parsedJson;
-    // Validate with Zod schema if provided
-    if (schema) {
-      try {
-        validatedResponse = schema.parse(parsedJson);
-      } catch (validationError) {
-        if (validationError instanceof z.ZodError) {
-          console.error(`${RED}[generateJSONResponseOllama] Zod schema validation failed:${RESET}`);
-          console.error(`${RED}${JSON.stringify(validationError.format(), null, 2)}${RESET}`);
-        } else {
-          console.error(`${RED}[generateJSONResponseOllama] Zod schema validation failed: ${validationError}${RESET}`);
-        }
-        return { status: 'failed' };
+  try {
+    // Create the stream that we'll return immediately
+    let responseStream = await client.chat({
+      stream: true,
+      messages, 
+      model: options.model,
+      format: options.format === 'json' ? 'json' : undefined,
+      options: {
+        temperature: options.temperature,
+        top_p: options.top_p,
+        top_k: options.top_k,
+        ...Object.fromEntries(
+          Object.entries(options).filter(([key]) =>
+            !['model', 'stream', 'temperature', 'top_p', 'top_k', 'format', 'stripThinkTag'].includes(key)
+          )
+        )
       }
-    }
+    });
 
-    // Write to cache if enabled
-    if (cache) {
-      const requestHash = createOllamaRequestHash(messages, options);
-      writeResponseCache(requestHash, validatedResponse); // Cache the validated response
-    }
+    // Create a stream processor that yields content and collects it
+    const streamProcessor = async function*() {
+      for await (const part of responseStream) {
+        if (part.message) {
+          const content = part.message.content;
+          if (logStream) {
+            process.stdout.write(`${CYAN}${content}${RESET}`);
+          }
+          yield content;
+        }
+      }
+      if (logStream) {
+        process.stdout.write('\n'); // Add newline after streaming is done
+      }
+    };
 
-    // Return success with the validated response (or parsed if no schema)
-    // Also return the stream generator in case the caller wants to replay it
-    return { status: 'success', result: validatedResponse };
-
-  } finally {
-    // Ensure the client is released back to the pool
+    const stream = streamProcessor();
+    
+    // Start the processing in the background
+    processStreamAndResolveResult(stream);
+    
+    // Return both the stream and the promise
+    return { stream, resultPromise };
+  } catch (error) {
+    console.error(`${RED}[generateJSONResponseOllama] Error initializing stream: ${error}${RESET}`);
+    // If we fail to create the stream, return a dummy stream and failed result
+    const dummyStream = async function*() {}();
+    
+    // Make sure to release the client in case of error
     if (releaseClient) {
       releaseClient();
-    } else {
-      console.warn('[generateJSONResponseOllama] releaseClient function was not available in finally block, cannot release.');
     }
+    
+    return {
+      stream: dummyStream,
+      resultPromise: Promise.resolve({ status: 'failed' })
+    };
   }
 }
 
@@ -428,10 +514,11 @@ export async function generateResponseOllama(
     // If JSON response is requested, use the JSON-specific function
     if (options.json) {
       const jsonResponse = await generateJSONResponseOllama<any>({ messages, options });
-      if (jsonResponse.status === 'failed') {
+      const result = await jsonResponse.resultPromise;
+      if (result.status === 'failed') {
         return '{}'; // Return empty JSON object if parsing failed
       }
-      return JSON.stringify(jsonResponse.result, null, 2);
+      return JSON.stringify(result.content, null, 2);
     }
 
     // Check cache if enabled (defaults to true)
