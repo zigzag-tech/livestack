@@ -384,6 +384,7 @@ export async function generateJSONResponseOllama<T>({
           // If we get here, parsing succeeded
         } catch (parseError) {
           console.warn(`${RED}[generateJSONResponseOllama] Error parsing JSON from LLM attempt ${parseAttempts}: ${parseError}${RESET}`);
+          console.warn(`${RED}[generateJSONResponseOllama] Full response:${RESET}`, fullResponse);
           // Continue to next attempt if we have retries left
           if (parseAttempts >= MAX_JSON_PARSE_ATTEMPTS) {
             console.error(`${RED}[generateJSONResponseOllama] Failed to get valid JSON after ${MAX_JSON_PARSE_ATTEMPTS} LLM attempts.${RESET}`);
