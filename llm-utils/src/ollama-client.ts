@@ -369,7 +369,8 @@ export async function generateJSONResponseOllama<T>({
           try {
             let jsonString = extractJsonFromResponse(fullResponseAccumulated);
             if (!jsonString) {
-              console.warn(`[generateJSONResponseOllama] No JSON block found in response on attempt ${attempt}. Attempting repair on entire response.`);
+              // console.log(`[generateJSONResponseOllama] Full response on attempt ${attempt}:${RESET}\n`, fullResponseAccumulated);
+              // console.warn(`[generateJSONResponseOllama] No JSON block found in response on attempt ${attempt}. Attempting repair on entire response.`);
               jsonString = fullResponseAccumulated;
             } 
             parsedJson = JSON.parse(jsonrepair(jsonString));
