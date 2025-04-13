@@ -10,10 +10,10 @@ export { CacapcityServiceDefinition } from "./generated/capacity";
 
 import type { DBServiceImplementation } from "./generated/db";
 import type { QueueServiceImplementation } from "./generated/queue";
-import type { StreamServiceImplementation, ValuesByReverseIndexRequest, LastValueRequest, SubRequest, SubType, AllValuesRequest, StreamDatapoint, JobInfo, StreamPubMessage } from "./generated/stream";
+import type { StreamServiceImplementation, ValuesByReverseIndexRequest, LastValueRequest, SubRequest, SubType, AllValuesRequest, StreamDatapoint, ServerStreamingMethodResult, StreamPubMessage } from "./generated/stream";
 import type { CacapcityServiceImplementation } from "./generated/capacity";
 
-export { StreamServiceImplementation, ValuesByReverseIndexRequest, LastValueRequest, SubRequest, AllValuesRequest, StreamPubMessage };
+export { StreamServiceImplementation, ValuesByReverseIndexRequest, LastValueRequest, SubRequest, AllValuesRequest, StreamPubMessage, ServerStreamingMethodResult };
 export { QueueServiceImplementation };
 export { DBServiceImplementation };
 export { CacapcityServiceImplementation };
