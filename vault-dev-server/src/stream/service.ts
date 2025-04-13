@@ -5,7 +5,7 @@ import type {
   SubRequest,
   ValuesByReverseIndexRequest,
   LastValueRequest,
-} from "@livestack/vault-interface//src/generated/stream";
+} from "@livestack/vault-interface";
 import {
   OBJ_REF_VALUE,
   genManuallyFedIterator,
