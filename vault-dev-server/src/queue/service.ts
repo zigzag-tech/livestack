@@ -12,8 +12,10 @@ import { v4 } from "uuid";
 import { createClient } from "redis";
 import { escapeColon, getCapacityManager } from "../capacity/manager";
 import { promises as fs } from "fs";
-import { REDIS_MEMORY_SERVER_P } from "../ensureRedisMemoryServer";
 const _rawQueueBySpecName = new Map<string, Queue>();
+
+const REDIS_HOST = process.env.REDIS_HOST || "localhost";
+const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
 
 class QueueServiceByProject implements QueueServiceImplementation {
   //   projectUuid: string;
@@ -31,11 +33,10 @@ class QueueServiceByProject implements QueueServiceImplementation {
     this.logEntriesExist = false;
   }
   private redisClientP = ((async ()=>{
-    const {host, port} = await REDIS_MEMORY_SERVER_P;
     const redisClient = createClient({
       socket: {
-        host,
-        port,
+        host: REDIS_HOST,
+        port: REDIS_PORT,
       },
     });
     await redisClient.connect();

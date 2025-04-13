@@ -31,7 +31,10 @@ import { v4 } from "uuid";
 import Ajv from "ajv";
 import _ from "lodash";
 import { Readable } from "stream";
-import { REDIS_MEMORY_SERVER_P } from "../ensureRedisMemoryServer";
+
+const REDIS_HOST = process.env.REDIS_HOST || "localhost";
+const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
+
 export const streamService = (dbConn: Knex): StreamServiceImplementation => {
   const jsonSchemaByStreamId = lruCacheFn(
     ({ projectUuid, streamId }) => `${projectUuid}/${streamId}`,
@@ -266,11 +269,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
       });
 
       let chunkId: string;
-      const { host, port } = await REDIS_MEMORY_SERVER_P;
       const pubClient = await createClient({
         socket: {
-          host,
-          port,
+          host: REDIS_HOST,
+          port: REDIS_PORT,
         },
       }).connect();
 
@@ -337,11 +339,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
         let cursor: `${string}-${string}` | "$" | "0" =
           subType === SubType.fromNow ? "$" : "0";
         const channelId = `${projectUuid}/${uniqueName}`;
-        const { host, port } = await REDIS_MEMORY_SERVER_P;
         const subClient = await createClient({
           socket: {
-            host,
-            port,
+            host: REDIS_HOST,
+            port: REDIS_PORT,
           },
         }).connect();
 
@@ -397,11 +398,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
     }> {
       const { projectUuid, uniqueName } = request;
       const channelId = `${projectUuid}/${uniqueName}`;
-      const { host, port } = await REDIS_MEMORY_SERVER_P;
       const subClient = await createClient({
         socket: {
-          host,
-          port,
+          host: REDIS_HOST,
+          port: REDIS_PORT,
         },
       }).connect();
 
@@ -458,11 +458,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
     }> {
       const { projectUuid, uniqueName } = request;
       const channelId = `${projectUuid}/${uniqueName}`;
-      const { host, port } = await REDIS_MEMORY_SERVER_P;
       const subClient = await createClient({
         socket: {
-          host,
-          port,
+          host: REDIS_HOST,
+          port: REDIS_PORT,
         },
       }).connect();
       // get all values from the stream
@@ -506,11 +505,10 @@ export const streamService = (dbConn: Knex): StreamServiceImplementation => {
     }> {
       const { projectUuid, uniqueName, lastN } = request;
       const channelId = `${projectUuid}/${uniqueName}`;
-      const { host, port } = await REDIS_MEMORY_SERVER_P;
       const subClient = await createClient({
         socket: {
-          host,
-          port,
+          host: REDIS_HOST,
+          port: REDIS_PORT,
         },
       }).connect();
       const s = (await subClient.sendCommand([
