@@ -20,7 +20,6 @@
     "lodash": "^4.x",
     "nice-grpc": "^2.1",
     "redis": "^4",
-    "redis-memory-server": "^0.12.1",
     "uuid": "^9"
   },
   "devDependencies": {
