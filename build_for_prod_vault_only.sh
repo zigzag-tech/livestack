@@ -6,10 +6,10 @@
 folders=(
     "vault-interface"
     "vault-client"
-    # "shared"
-    # "core"
-    # "client"
-    # "gateway"
+    "shared"
+    "core"
+    "client"
+    "gateway"
     # "lab-common"
     # "lab-server"
     # "summarizer"
@@ -26,7 +26,7 @@ for folder in "${folders[@]}"; do
         echo "Entering directory: $folder"
         cd "$folder" || exit
         # Run the commands
-        yarn build
+        npm run build
         # Go back to the original directory
         cd - || exit
     else
