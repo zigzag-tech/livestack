@@ -17,14 +17,14 @@ export type JobInfo<P> = {
 
 type DeferredClosedConn =
   | {
-      status: "connected";
-      jobConn: Promise<JobSocketIOConnection>;
-      initiateDeferredClose: () => void;
-    }
+    status: "connected";
+    jobConn: Promise<JobSocketIOConnection>;
+    initiateDeferredClose: () => void;
+  }
   | {
-      status: "closing";
-      cancelClose: () => Promise<JobSocketIOConnection>;
-    };
+    status: "closing";
+    cancelClose: () => Promise<JobSocketIOConnection>;
+  };
 
 const DEFERRED_CLOSED_CONN_CACHE: Record<
   `${string}${"" | `[${string}]`}`,
@@ -64,8 +64,8 @@ export function useJobBinding<P>({
     specName,
     uniqueSpecLabel,
   });
-  const clientRef = useRef<Promise<JobSocketIOConnection>>();
-  const deferredCloseRef = useRef<() => void>();
+  const clientRef = useRef<Promise<JobSocketIOConnection> | undefined>(undefined);
+  const deferredCloseRef = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => {
     if (!clientRef.current) {
@@ -78,7 +78,7 @@ export function useJobBinding<P>({
 
         const existing =
           DEFERRED_CLOSED_CONN_CACHE[
-            `${specName}${uniqueSpecLabel ? `[${uniqueSpecLabel}]` : ""}`
+          `${specName}${uniqueSpecLabel ? `[${uniqueSpecLabel}]` : ""}`
           ];
 
         let connection: Promise<JobSocketIOConnection>;
@@ -172,17 +172,17 @@ function resetToConnected({
 
 type JobStatus =
   | {
-      status: "connecting";
-      specName: string;
-      uniqueSpecLabel?: string;
-    }
+    status: "connecting";
+    specName: string;
+    uniqueSpecLabel?: string;
+  }
   | {
-      status: "connected";
-      jobId: string;
-      specName: string;
-      uniqueSpecLabel?: string;
-    }
+    status: "connected";
+    jobId: string;
+    specName: string;
+    uniqueSpecLabel?: string;
+  }
   | {
-      status: "error";
-      errorMessage: string;
-    };
+    status: "error";
+    errorMessage: string;
+  };
