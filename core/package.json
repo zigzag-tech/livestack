@@ -24,7 +24,7 @@
     "lru-cache": "^10.2.0",
     "p-limit": "^3",
     "rxjs": "^7",
-    "uuid": "^9",
+    "uuid": "^11.1.0",
     "zod": "^3.24.2",
     "zod-to-json-schema": "^3.22.4"
   },
