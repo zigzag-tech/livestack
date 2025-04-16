@@ -15,7 +15,7 @@
     "@rollup/plugin-typescript": "^11.1.6",
     "@types/node": "^16",
     "@types/uuid": "^9.0.7",
-    "uuid": ">=9",
+    "uuid": ">=11",
     "rimraf": "^6.0.1",
     "rollup": "^4.18.0",
     "rollup-plugin-dts": "^6.1.1",

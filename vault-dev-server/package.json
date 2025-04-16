@@ -20,7 +20,7 @@
     "lodash": "^4.x",
     "nice-grpc": "^2.1",
     "redis": "^4",
-    "uuid": "^9"
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@preconstruct/cli": "^2.8.4",
