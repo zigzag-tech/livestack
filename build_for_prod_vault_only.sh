@@ -10,6 +10,7 @@ folders=(
     "core"
     "client"
     "gateway"
+    "llm-utils"
     # "lab-common"
     # "lab-server"
     # "summarizer"
