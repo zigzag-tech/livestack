@@ -5,7 +5,7 @@
   "dependencies": {
     "@livestack/client": "^0.0.32",
     "@livestack/core": "^0.0.32",
-    "axios": "^1.7.2"
+    "axios": "^1.8.4"
   },
   "devDependencies": {
     "@babel/core": "^7.26.10",
