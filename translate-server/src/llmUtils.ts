@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { JobSpec } from "@livestack/core";
 import { z } from "zod";
-import { generateSimpleResponseOllama } from "@livestack/summarizer/server";
+import { generateJSONResponseOllama } from "@livestack/llm-utils";
 import {
   translationInputSchema,
   translationOutputSchema,
@@ -9,32 +9,32 @@ import {
 
 const translationExamples = [
   {
-    role: "system",
+    role: "system" as const,
     content:
       'You are a helpful assistant. Your job is to translate content that the user provided from one language to another. Respond in JSON format e.g. { "translated": "..." }',
   },
   {
-    role: "user",
+    role: "user" as const,
     content: "Translate to Chinese: I'm enjoying a hamburger right now.",
   },
   {
-    role: "assistant",
+    role: "assistant" as const,
     content: '{"translated": "我现在正在享用一个汉堡。"}',
   },
   {
-    role: "user",
+    role: "user" as const,
     content: "Translate to French: She reads a book.",
   },
   {
-    role: "assistant",
+    role: "assistant" as const,
     content: '{"translated": "Elle lit un livre."}',
   },
   {
-    role: "user",
+    role: "user" as const,
     content: "Translate to English: 他正在弹吉他。",
   },
   {
-    role: "assistant",
+    role: "assistant" as const,
     content: '{"translated": "He is playing the guitar."}',
   },
 ];
@@ -43,8 +43,8 @@ async function translate(
   input: z.infer<typeof translationInputSchema> &
     (
       | {
-          llmType: "ollama";
-        }
+        llmType: "ollama";
+      }
       | { llmType: "openai"; openai: OpenAI }
     )
 ): Promise<z.infer<typeof translationOutputSchema>> {
@@ -52,16 +52,23 @@ async function translate(
   const messages = [
     ...translationExamples,
     {
-      role: "user",
+      role: "user" as const,
       content: `Translate to ${toLang}: ${text}`,
     },
   ];
   if (llmType === "ollama") {
-    const response = await generateSimpleResponseOllama({
+    const responseRaw = await generateJSONResponseOllama<{ translated: string }>({
       messages,
-      modelName: "llama3",
+      options: {
+        modelName: "gemma3:27b",
+      },
     });
-    return { translated: response };
+
+    const result = await responseRaw.resultPromise;
+    if (result.status === "failed") {
+      throw new Error("Failed to generate response");
+    }
+    return { translated: result.content.translated };
   } else {
     const { openai } = input;
     const response: any = await openai.chat.completions.create({
