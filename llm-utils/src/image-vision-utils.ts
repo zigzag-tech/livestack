@@ -45,32 +45,35 @@ async function convertImageToPng(inputPath: string, outputPath: string): Promise
  * @param imagePath - Path to the image file
  * @returns A promise that resolves to the image description
  */
-export async function generateImageDescriptionWithVisionLLM(imagePath: string): Promise<string> {
+export async function generateImageDescriptionWithVisionLLM(imagePath: string): Promise<{
+  title: string;
+  description: string;
+}> {
   try {
     let imageToProcess = imagePath;
-    
+
     // Check if the image format is supported
     if (!isFormatSupportedByVisionModel(imagePath)) {
       // If not supported, convert to PNG first
       const tempFileName = `temp_${path.basename(imagePath, path.extname(imagePath))}_${Date.now()}.png`;
       const tempFilePath = path.join(path.dirname(imagePath), tempFileName);
-      
+
       // Convert the image to PNG format
       imageToProcess = await convertImageToPng(imagePath, tempFilePath);
       console.log(`Converted ${imagePath} to ${imageToProcess} for vision model compatibility`);
     }
-    
+
     // Prepare message for vision model
     const messages: ChatMessage[] = [{
       role: 'user',
-      content: `Describe the contents of this image in a concise sentence. Return as a JSON object of the format { "desc": "<description>" }`,
+      content: `Describe the contents of this image in a concise sentence, and give it a short title. Return as a JSON object of the format { "title": "<title>", "desc": "<description>" }`,
       images: [imageToProcess]
     }];
-    
+
     // Call Ollama vision model using the JSON response generator
-    const { resultPromise } = await generateJSONResponseOllama<{ desc: string }>({
+    const { resultPromise } = await generateJSONResponseOllama<{ title: string, desc: string }>({
       messages,
-      options: { 
+      options: {
         model: VISION_MODEL,
         temperature: 0.0
       },
@@ -79,39 +82,37 @@ export async function generateImageDescriptionWithVisionLLM(imagePath: string): 
     });
 
     const response = await resultPromise;
-    if(response.status === 'failed') {
+    if (response.status === 'failed') {
       throw new Error('Failed to generate image description');
     }
 
-      // Clean up temporary file if created
-      if (imageToProcess !== imagePath && fs.existsSync(imageToProcess)) {
+    // Clean up temporary file if created
+    if (imageToProcess !== imagePath && fs.existsSync(imageToProcess)) {
       fs.unlinkSync(imageToProcess);
     }
-    
-  
+
+
     // Extract the description from the response
     if (response.status === 'success') {
       // The response will contain the full message content as a string, not in JSON format
-      const result = response.content.desc;
+      const result = response.content;
       // Handle different response formats - sometimes it might be a string directly,
       // other times it might be an object with a content property
-      if (typeof result === 'string') {
-        return result.trim();
-      } else if (typeof result === 'object' && result !== null) {
+      if (typeof result === 'object' && result !== null) {
         // Try to extract content from the result object
-        const content = (result as any).content || (result as any).message?.content;
-        if (typeof content === 'string') {
-          return content.trim();
-        }
+        return {
+          title: result.title,
+          description: result.desc
+        };
+      } else {
+        throw new Error('Failed to generate image description');
       }
-      // If we can't extract a string, convert to string and hope for the best
-      return String(result).trim();
     } else {
       throw new Error('Failed to generate image description');
     }
   } catch (error) {
     console.error(`Error generating description for image ${imagePath}:`, error);
-    return 'Failed to generate description';
+    throw error;
   }
 }
 
@@ -125,29 +126,28 @@ export async function generateDescriptionsForImagesInFolder(folderPath: string):
   try {
     // Get all files in the folder
     const files = fs.readdirSync(folderPath);
-    
+
     // Filter for image files
     const imageFiles = files.filter(file => {
       const ext = path.extname(file).toLowerCase();
       return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'].includes(ext);
     });
-    
+
     console.log(`Found ${imageFiles.length} images in folder ${folderPath}`);
-    
+
     // Process each image
     for (let i = 0; i < imageFiles.length; i++) {
       const imagePath = path.join(folderPath, imageFiles[i]);
       console.log(`Processing image ${i + 1}/${imageFiles.length}: ${imagePath}`);
-      
+
       // Generate description (will use cache if available)
       const description = await generateImageDescriptionWithVisionLLM(imagePath);
-      
+
       console.log(`Description for ${imagePath}: "${description.substring(0, 50)}${description.length > 50 ? '...' : ''}"`);
     }
-    
+
     console.log(`Completed processing ${imageFiles.length} images in ${folderPath}`);
   } catch (error) {
     console.error(`Error generating descriptions for images in folder ${folderPath}:`, error);
   }
 }
-  
