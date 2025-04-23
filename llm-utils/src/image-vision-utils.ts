@@ -143,7 +143,7 @@ export async function generateDescriptionsForImagesInFolder(folderPath: string):
       // Generate description (will use cache if available)
       const description = await generateImageDescriptionWithVisionLLM(imagePath);
 
-      console.log(`Description for ${imagePath}: "${description.substring(0, 50)}${description.length > 50 ? '...' : ''}"`);
+      console.log(`Description for ${imagePath}: "${description.title}": "${description.description.substring(0, 50)}${description.description.length > 50 ? '...' : ''}"`);
     }
 
     console.log(`Completed processing ${imageFiles.length} images in ${folderPath}`);
