@@ -363,6 +363,7 @@ export async function handleLLMJsonResponseGeneration<T>({
             try {
               finalValidatedResponse = jsonParsingOptions.schema.parse(parsedJson);
             } catch (validationError) {
+              console.error("Zod schema: ", jsonParsingOptions.schema);
               console.error(`${RED}[handleLLMJsonResponseGeneration] Zod schema validation failed on attempt ${attempt}:${RESET}`);
               if (validationError instanceof z.ZodError) {
                 console.error(`${RED}${JSON.stringify(validationError.format(), null, 2)}${RESET}`);
