@@ -1,9 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { getAvailableOllama } from './multi-ollama'; // Import the new function
 import * as crypto from 'crypto';
 import { z } from 'zod';
-import { Ollama } from 'ollama'; // Import the Ollama type
 import { jsonrepair } from 'jsonrepair'
 import OpenAI from 'openai'; // Import OpenAI
 
