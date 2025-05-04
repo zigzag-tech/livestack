@@ -14,7 +14,7 @@
     ],
     "dependencies": {
         "jsonrepair": "^3.12.0",
-        "sharp": "^0.33.5",
+        "sharp": "^0.34.1",
         "zod": "^3.24.2"
     },
     "devDependencies": {
@@ -25,6 +25,7 @@
         "typescript": "^5.7.3"
     },
     "peerDependencies": {
-        "ollama": "^0.5.x"
+        "ollama": "^0.5.x",
+        "openai": "^4"
     }
 }
