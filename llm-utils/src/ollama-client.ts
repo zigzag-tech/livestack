@@ -5,12 +5,27 @@ import * as crypto from 'crypto';
 import { z } from 'zod';
 import { Ollama } from 'ollama'; // Import the Ollama type
 import { jsonrepair } from 'jsonrepair'
+import OpenAI from 'openai'; // Import OpenAI
 
 // ANSI color codes
 const CYAN = '\x1b[36m';
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
 const RESET = '\x1b[0m';
+
+// Store OpenAI clients by base URL to avoid repeated initialization
+const openAIClients: Record<string, OpenAI> = {};
+
+// Function to get or create an OpenAI client for a specific base URL
+function getOpenAIClient(baseUrl: string = 'http://localhost:11434/v1'): OpenAI {
+  if (!openAIClients[baseUrl]) {
+    openAIClients[baseUrl] = new OpenAI({
+      baseURL: baseUrl,
+      apiKey: 'ollama', // Required but unused for Ollama
+    });
+  }
+  return openAIClients[baseUrl];
+}
 
 // Remove the old direct Ollama initialization
 // const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
@@ -436,56 +451,109 @@ const _ollamaChatApiCall: ApiCallFn = async (
   options: Record<string, any> // Use Record<string, any> to match ApiCallFn type
 ): Promise<AsyncGenerator<string, void, unknown>> => { // Return a Promise<AsyncGenerator>
 
+  // Helper to convert our ChatMessage to OpenAI format
+  function convertToOpenAIMessages(msgs: ChatMessage[]): Array<OpenAI.Chat.ChatCompletionMessageParam> {
+    return msgs.map(msg => {
+      const openAIMsg: OpenAI.Chat.ChatCompletionMessageParam = {
+        role: msg.role,
+        content: msg.content,
+      };
+
+      // Handle images if present
+      if (msg.images && msg.images.length > 0) {
+        // Convert to OpenAI content array format
+        const contentArray: Array<OpenAI.Chat.ChatCompletionContentPart> = [
+          { type: 'text', text: msg.content }
+        ];
+
+        // Add image URLs as image_url content parts
+        for (const imagePath of msg.images) {
+          try {
+            // If image is a base64 string or URL, use directly
+            if (imagePath.startsWith('data:') || imagePath.startsWith('http')) {
+              contentArray.push({
+                type: 'image_url',
+                image_url: { url: imagePath }
+              });
+            } else {
+              // Read image as base64
+              const imageBuffer = fs.readFileSync(imagePath);
+              const base64Image = imageBuffer.toString('base64');
+              const mimeType = path.extname(imagePath).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
+              const dataUri = `data:${mimeType};base64,${base64Image}`;
+
+              contentArray.push({
+                type: 'image_url',
+                image_url: { url: dataUri }
+              });
+            }
+          } catch (error) {
+            console.error(`Error processing image ${imagePath}:`, error);
+          }
+        }
+
+        // Replace content with the content array
+        openAIMsg.content = contentArray;
+      }
+
+      return openAIMsg;
+    });
+  }
+
   // Define the async generator function internally
   async function* ollamaStreamGenerator(): AsyncGenerator<string, void, unknown> {
-    let client: Ollama | null = null;
-    let releaseClient: (() => void) | null = null;
+    let client: OpenAI | null = null;
+    const baseUrl = options.baseUrl || 'http://localhost:11434/v1';
 
     try {
-      const { client: acquiredClient, releaseClient: acquiredReleaseClient } = await getAvailableOllama();
-      client = acquiredClient;
-      releaseClient = acquiredReleaseClient;
+      // Use the baseUrl provided in options or default
+      client = getOpenAIClient(baseUrl);
 
-      // Create the raw stream
-      const responseStream = await client.chat({
-        stream: true, // Always stream for the handler to consume
-        messages: messages,
-        model: options.model, // Access properties directly, assuming they exist
-        format: options.format === 'json' ? 'json' : undefined, // Pass format if specified
-        options: { // Pass other relevant options
-          temperature: options.temperature,
-          top_p: options.top_p,
-          top_k: options.top_k,
-          num_ctx: options.num_ctx, // Example: ensure common options are passed
-          // Include any other arbitrary options passed in 'options' object
-          ...Object.fromEntries(
-            Object.entries(options).filter(([key]) =>
-              !['model', 'stream', 'temperature', 'top_p', 'top_k', 'format', 'stripThinkTag', 'cache', 'json', 'printPrompt', 'requireConfirmation'].includes(key) && // Filter out handled/meta options
-              options[key] !== undefined // Filter out undefined values
-            )
-          )
-        }
-      });
+      // Convert messages to OpenAI format
+      const openAIMessages = convertToOpenAIMessages(messages);
 
-      // Yield content parts from the stream
-      for await (const part of responseStream) {
-        if (part.message) {
-          yield part.message.content;
+      // Map Ollama options to OpenAI format
+      const openAIOptions: OpenAI.Chat.ChatCompletionCreateParams = {
+        model: options.model,
+        messages: openAIMessages,
+        stream: true,
+        temperature: options.temperature,
+        top_p: options.top_p,
+        // Include additional parameters supported by both
+      };
+
+      // Add any extra parameters that might be supported by Ollama's OpenAI compatibility
+      // Use type assertion to allow additional properties
+      const extendedOptions = openAIOptions as OpenAI.Chat.ChatCompletionCreateParams & {
+        top_k?: number;
+        num_ctx?: number;
+        [key: string]: any;
+      };
+
+      if (options.top_k !== undefined) extendedOptions.top_k = options.top_k;
+      if (options.num_ctx !== undefined) extendedOptions.num_ctx = options.num_ctx;
+
+      // Configure stream parameter
+      extendedOptions.stream = true;
+
+      // Create the stream
+      const streamResponse = await client.chat.completions.create(extendedOptions);
+
+      // Process streaming response
+      try {
+        for await (const chunk of streamResponse as any) {
+          const content = chunk.choices?.[0]?.delta?.content;
+          if (content) {
+            yield content;
+          }
         }
+      } catch (error) {
+        console.error(`${RED}[_ollamaChatApiCall] Error processing stream chunks: ${error}${RESET}`);
+        throw error;
       }
     } catch (error) {
-      console.error(`${RED}[_ollamaChatApiCall] Error during Ollama API call: ${error}${RESET}`);
-      // Re-throw the error to be caught by the handler's retry logic
-      // Ensure the generator throws, which will reject the promise returned by handleLLMJsonResponseGeneration eventually
+      console.error(`${RED}[_ollamaChatApiCall] Error during OpenAI API call: ${error}${RESET}`);
       throw error;
-    } finally {
-      // Ensure client is released
-      if (releaseClient) {
-        releaseClient();
-      } else if (client) {
-        // This case shouldn't happen with getAvailableOllama, but good practice
-        console.warn('Client acquired but no release function provided.');
-      }
     }
   }
 
@@ -501,6 +569,7 @@ const _ollamaChatApiCall: ApiCallFn = async (
  * @param cache - Whether to use caching (defaults to true)
  * @param logStream - Whether to log the streaming response to console (defaults to true)
  * @param schema - Optional Zod schema for response validation and type inference
+ * @param baseUrl - Base URL for the OpenAI-compatible API (defaults to http://localhost:11434/v1)
  * @returns An object containing the stream for immediate consumption and a promise that resolves when processing is complete
  */
 export async function generateJSONResponseOllama<T>({
@@ -511,6 +580,7 @@ export async function generateJSONResponseOllama<T>({
   printPrompt = false,
   requireConfirmation = false,
   schema,
+  baseUrl = 'http://localhost:11434/v1',
 }: {
   messages: ChatMessage[];
   options: Omit<OllamaOptions, 'stream'>; // OllamaOptions, stream is handled internally
@@ -519,6 +589,7 @@ export async function generateJSONResponseOllama<T>({
   printPrompt?: boolean;
   requireConfirmation?: boolean;
   schema?: z.ZodType<T>;
+  baseUrl?: string;
 }): Promise<{
   stream: AsyncGenerator<string, void, unknown>,
   resultPromise: Promise<LLMJSONResult<T>>
@@ -528,10 +599,16 @@ export async function generateJSONResponseOllama<T>({
   // Calculate cache hash based on Ollama options
   const requestHash = createRequestHash(messages, options);
 
+  // Add baseUrl to options for the API call
+  const enrichedOptions = {
+    ...options,
+    baseUrl,
+  };
+
   // Call the generic handler with Ollama-specific API call function and options
   const result = await handleLLMJsonResponseGeneration<T>({
     messages,
-    options, // Pass OllamaOptions directly
+    options: enrichedOptions,
     apiCallFn: _ollamaChatApiCall,
     cacheOptions: {
       enabled: cache,
@@ -565,12 +642,19 @@ export async function generateJSONResponseOllama<T>({
  * 
  * @param messages - Array of chat messages to send to Ollama
  * @param options - Configuration options for the Ollama API call
+ * @param baseUrl - Base URL for the OpenAI-compatible API (defaults to http://localhost:11434/v1)
  * @returns The full response text from Ollama
  */
 export async function generateResponseOllama(
-  { messages, options }: { messages: ChatMessage[]; options: OllamaOptions & { json?: boolean; cache?: boolean; }; }): Promise<string> {
-  // Get the auto-releasing client
-  let releaseClient: (() => void) | null = null;
+  {
+    messages,
+    options,
+    baseUrl = 'http://localhost:11434/v1'
+  }: {
+    messages: ChatMessage[];
+    options: OllamaOptions & { json?: boolean; cache?: boolean; };
+    baseUrl?: string;
+  }): Promise<string> {
   const funcStartTime = Date.now(); // Add timing for this function too if desired
   try {
     // If JSON response is requested, use the JSON-specific function
@@ -583,6 +667,7 @@ export async function generateResponseOllama(
         schema: undefined, // No schema by default for this generic call
         printPrompt: false, // Defaults for generic call
         requireConfirmation: false,
+        baseUrl, // Pass the baseUrl parameter
       });
       const result = await jsonResponse.resultPromise;
       if (result.status === 'failed') {
@@ -609,9 +694,9 @@ export async function generateResponseOllama(
       return JSON.stringify(result.content, null, 2);
     }
 
-    // --- Non-JSON response handling (remains mostly the same) ---
-    const { client, releaseClient: acquiredReleaseClient } = await getAvailableOllama();
-    releaseClient = acquiredReleaseClient;
+    // --- Non-JSON response handling (using OpenAI client) ---
+    // Get an OpenAI client for the specified baseUrl
+    const client = getOpenAIClient(baseUrl);
 
     // Check cache if enabled (defaults to true)
     const cacheEnabled = options.cache !== false;
@@ -619,7 +704,6 @@ export async function generateResponseOllama(
     if (cacheEnabled) {
       if (hasCachedResponse(requestHash)) {
         const cachedResponse = readCachedResponse<string>(requestHash);
-        if (releaseClient) releaseClient(); // Release client early for cache hit
         return cachedResponse;
       }
     }
@@ -627,62 +711,83 @@ export async function generateResponseOllama(
     // Set default stream to true if not specified
     const streamEnabled = options.stream !== false;
 
-    // Create a deep copy of the messages to add images properly
-    const ollama_messages = messages.map(msg => {
-      const msgCopy = { ...msg };
-      // No special processing needed for images as the Ollama client handles them
-      return msgCopy;
+    // Convert messages to OpenAI format
+    const openAIMessages = messages.map(msg => {
+      const openAIMsg: OpenAI.Chat.ChatCompletionMessageParam = {
+        role: msg.role,
+        content: msg.content,
+      };
+
+      // Handle images if present
+      if (msg.images && msg.images.length > 0) {
+        // Convert to OpenAI content array format
+        const contentArray: Array<OpenAI.Chat.ChatCompletionContentPart> = [
+          { type: 'text', text: msg.content }
+        ];
+
+        // Add image URLs as image_url content parts
+        for (const imagePath of msg.images) {
+          try {
+            // If image is a base64 string or URL, use directly
+            if (imagePath.startsWith('data:') || imagePath.startsWith('http')) {
+              contentArray.push({
+                type: 'image_url',
+                image_url: { url: imagePath }
+              });
+            } else {
+              // Read image as base64
+              const imageBuffer = fs.readFileSync(imagePath);
+              const base64Image = imageBuffer.toString('base64');
+              const mimeType = path.extname(imagePath).toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
+              const dataUri = `data:${mimeType};base64,${base64Image}`;
+
+              contentArray.push({
+                type: 'image_url',
+                image_url: { url: dataUri }
+              });
+            }
+          } catch (error) {
+            console.error(`Error processing image ${imagePath}:`, error);
+          }
+        }
+
+        // Replace content with the content array
+        openAIMsg.content = contentArray;
+      }
+
+      return openAIMsg;
     });
+
+    // Map Ollama options to OpenAI format
+    const openAIOptions: any = {
+      model: options.model,
+      messages: openAIMessages,
+      stream: streamEnabled,
+      temperature: options.temperature ?? 0.7,
+      top_p: options.top_p,
+    };
+
+    // Add Ollama-specific options that might be supported via the OpenAI compatibility layer
+    if (options.top_k !== undefined) openAIOptions.top_k = options.top_k;
+    if (options.num_ctx !== undefined) openAIOptions.num_ctx = options.num_ctx;
 
     let fullResponse = '';
     if (streamEnabled) {
       // Handle streaming response
-      const response = await client.chat({
-        model: options.model,
-        options: {
-          temperature: options.temperature ?? 0.0,
-          top_p: options.top_p,
-          top_k: options.top_k,
-          num_ctx: 1024 * 6,
-          // Include any other options
-          ...Object.fromEntries(
-            Object.entries(options).filter(([key]) =>
-              !['model', 'stream', 'json', 'cache', 'stripThinkTag'].includes(key) && options[key] !== undefined
-            )
-          )
-        },
-        messages: ollama_messages,
-        stream: true
-      });
+      const stream = await client.chat.completions.create(openAIOptions);
 
-      for await (const part of response) {
-        const content = part.message.content;
-        process.stdout.write(`${CYAN}${content}${RESET}`);
-        fullResponse += content;
+      for await (const chunk of stream as any) {
+        const content = chunk.choices?.[0]?.delta?.content;
+        if (content) {
+          process.stdout.write(`${CYAN}${content}${RESET}`);
+          fullResponse += content;
+        }
       }
       process.stdout.write('\n'); // Add newline after streaming
-
     } else {
       // Handle non-streaming response
-      const response = await client.chat({
-        model: options.model,
-        options: {
-          temperature: options.temperature ?? 0.7,
-          top_p: options.top_p,
-          top_k: options.top_k,
-          num_ctx: 1024 * 6,
-          // Include any other options
-          ...Object.fromEntries(
-            Object.entries(options).filter(([key]) =>
-              !['model', 'stream', 'json', 'cache', 'stripThinkTag'].includes(key) && options[key] !== undefined
-            )
-          )
-        },
-        messages: ollama_messages,
-        stream: false
-      });
-
-      fullResponse = response.message.content;
+      const response = await client.chat.completions.create(openAIOptions);
+      fullResponse = response.choices[0].message.content || '';
     }
 
     // Strip think tags if enabled (defaults to true)
@@ -698,16 +803,9 @@ export async function generateResponseOllama(
     return fullResponse;
 
   } catch (error) {
-    console.error('Error generating response from Ollama:', error);
+    console.error('Error generating response from OpenAI:', error);
     console.error("Messages:", messages);
     throw error;
-  } finally {
-    if (releaseClient) {
-      releaseClient();
-    } else {
-      // This path might be hit if getAvailableOllama fails initially in non-JSON case
-      console.warn('[generateResponseOllama] releaseClient function was not available in finally block, cannot release.');
-    }
   }
 }
 

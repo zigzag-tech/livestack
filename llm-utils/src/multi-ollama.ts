@@ -1,4 +1,5 @@
 import { Ollama, ChatRequest, ChatResponse, EmbeddingsRequest, EmbeddingsResponse, AbortableAsyncIterator } from 'ollama';
+import OpenAI from 'openai';
 
 interface OllamaInstanceWrapper {
   instance: Ollama;
@@ -6,10 +7,19 @@ interface OllamaInstanceWrapper {
   busy: boolean;
 }
 
+// OpenAI client wrappers
+interface OpenAIInstanceWrapper {
+  instance: OpenAI;
+  baseUrl: string;
+  busy: boolean;
+}
+
 // No longer need AutoReleaseOllamaClient type, we return a proxied Ollama instance
 
 let ollamaInstances: OllamaInstanceWrapper[] = [];
+let openAIInstances: OpenAIInstanceWrapper[] = [];
 let waitingResolvers: ((wrapper: OllamaInstanceWrapper) => void)[] = [];
+let waitingOpenAIResolvers: ((wrapper: OpenAIInstanceWrapper) => void)[] = [];
 
 function initializeOllamaInstances() {
   const hostsEnv = process.env.OLLAMA_HOSTS;
@@ -33,7 +43,9 @@ function initializeOllamaInstances() {
   }
 
   if (hosts.length === 0) {
-    throw new Error('Ollama host configuration error: Neither OLLAMA_HOSTS nor OLLAMA_HOST environment variables are set or valid.');
+    // Default to localhost if no env vars set
+    hosts = ['http://127.0.0.1:11434'];
+    console.log(`Initializing Ollama with default host: ${hosts[0]}`);
   }
 
   try {
@@ -42,12 +54,26 @@ function initializeOllamaInstances() {
       host,
       busy: false,
     }));
+
+    // Also initialize OpenAI clients for each Ollama host
+    // Convert traditional Ollama host to OpenAI-compatible baseUrl
+    openAIInstances = hosts.map(host => {
+      // Handle host format transformation for OpenAI compatibility
+      const baseUrl = `${host}/v1`.replace(/\/+v1$/, '/v1');
+      return {
+        instance: new OpenAI({
+          baseURL: baseUrl,
+          apiKey: 'ollama', // Required but unused with Ollama
+        }),
+        baseUrl,
+        busy: false,
+      };
+    });
   } catch (error) {
     throw error;
   }
 
-  console.log(`Initialized ${ollamaInstances.length} Ollama instances.`);
-
+  console.log(`Initialized ${ollamaInstances.length} Ollama instances and ${openAIInstances.length} OpenAI-compatible clients.`);
 }
 
 initializeOllamaInstances();
@@ -160,4 +186,41 @@ async function getAvailableOllama(): Promise<{ client: Ollama; releaseClient: ()
   return { client: proxyClient, releaseClient: release };
 }
 
-export { getAvailableOllama };
+// New function to get an available OpenAI client
+async function getAvailableOpenAI(): Promise<{ client: OpenAI; releaseClient: () => void }> {
+  const getWrapper = (): Promise<OpenAIInstanceWrapper> => {
+    const availableInstance = openAIInstances.find(inst => !inst.busy);
+    if (availableInstance) {
+      availableInstance.busy = true;
+      return Promise.resolve(availableInstance);
+    } else {
+      return new Promise((resolve) => {
+        waitingOpenAIResolvers.push((instanceWrapper) => {
+          resolve(instanceWrapper);
+        });
+      });
+    }
+  };
+
+  const wrapper = await getWrapper();
+  const openAIInstance = wrapper.instance;
+
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    wrapper.busy = false;
+    if (waitingOpenAIResolvers.length > 0) {
+      const resolver = waitingOpenAIResolvers.shift();
+      const newlyAvailable = openAIInstances.find(inst => !inst.busy);
+      if (newlyAvailable && resolver) {
+        newlyAvailable.busy = true;
+        resolver(newlyAvailable);
+      }
+    }
+  };
+
+  return { client: openAIInstance, releaseClient: release };
+}
+
+export { getAvailableOllama, getAvailableOpenAI };
