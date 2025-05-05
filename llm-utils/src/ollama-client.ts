@@ -325,7 +325,7 @@ export async function handleLLMJsonResponseGeneration<T>({
             ];
           } else { // attempt >= 3
             currentMessages = [
-              { role: 'system', content: `CRITICAL: Attempt ${attempt}/${jsonParsingOptions.maxAttempts}. You MUST respond with ONLY valid, parseable JSON without any additional text. Wrap your response in \`\`\`json and \`\`\` tags.` },
+              { role: 'system', content: `CRITICAL: Attempt ${attempt}/${jsonParsingOptions.maxAttempts}. You MUST respond with ONLY valid, parseable JSON without any additional text. Wrap your response in \`\`\`json and \`\`\` tags. Return only the JSON, nothing else.` },
               ...messages
             ];
           }
