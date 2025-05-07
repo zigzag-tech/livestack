@@ -30,6 +30,7 @@ const connOpts = {
   // "grpc.max_connection_age_ms": ONE_YEAR,
   // "grpc.client_idle_timeout_ms": ONE_YEAR,
   "grpc.keepalive_permit_without_calls": 1,
+  "grpc.max_receive_message_length": 100 * 1024 * 1024, // 100 MB for example
 };
 export async function findSuitableVaultServer(authToken: string) {
   const clientFactory = createClientFactory().use(retryMiddleware);

@@ -16,7 +16,11 @@ export async function launchVaultDevServer(port: string | number = 50508) {
   //   const { default: getPort } = await import("get-port");
   //   port = await getPort({ port: 50508 });
   // }
-  const server = createServer();
+  const server = createServer({
+    "grpc.max_receive_message_length": 100 * 1024 * 1024, // 100 MB for example
+    // You might also want to set "grpc.max_send_message_length" if sending large messages
+    "grpc.max_send_message_length": 100 * 1024 * 1024, // 100 MB
+  });
   server.add(DBServiceDefinition, dbService(db));
   server.add(QueueServiceDefinition, getQueueService());
   server.add(StreamServiceDefinition, getStreamService(db));
