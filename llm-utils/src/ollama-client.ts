@@ -263,6 +263,40 @@ export async function handleLLMJsonResponseGeneration<T>({
     resultPromiseReject = reject;
   });
 
+  // --- Asynchronous logger setup (defined outside IIFE) ---
+  const logParts: string[] = [];
+  let isLoggingScheduled = false;
+  let loggingCompletedForAttempt = true; // True initially, set to false when logging starts for an attempt
+
+  function scheduleLogProcessing() {
+    if (isLoggingScheduled || logParts.length === 0) {
+      if (logParts.length === 0 && !isLoggingScheduled) {
+        loggingCompletedForAttempt = true; // Mark as completed if nothing to log and not scheduled
+      }
+      return;
+    }
+    isLoggingScheduled = true;
+    loggingCompletedForAttempt = false; // Logging is now active for the attempt
+
+    setImmediate(() => {
+      let output = '';
+      while(logParts.length > 0) {
+        output += logParts.shift();
+      }
+      if (output) {
+        process.stdout.write(output);
+      }
+      isLoggingScheduled = false;
+      // If more parts came in while processing, reschedule
+      if (logParts.length > 0) {
+        scheduleLogProcessing(); // This will set loggingCompletedForAttempt to false again
+      } else {
+        loggingCompletedForAttempt = true; // All parts processed for now
+      }
+    });
+  }
+  // --- End asynchronous logger setup ---
+
   // --- Async IIFE to handle the generation logic ---
   (async () => {
     try {
@@ -272,11 +306,11 @@ export async function handleLLMJsonResponseGeneration<T>({
           const cachedResponse = readCachedResponse<any>(cacheOptions.requestHash, cacheOptions.cacheDir);
           if (jsonParsingOptions.schema) {
             const validatedResponse = jsonParsingOptions.schema.parse(cachedResponse);
-            const dummyStream = async function* () { }();
+            // const dummyStream = async function* () { }(); // Not needed as we return before stream is relevant here
             resultPromiseResolve({ status: 'success', content: validatedResponse });
             return; // Exit IIFE
           } else {
-            const dummyStream = async function* () { }();
+            // const dummyStream = async function* () { }(); // Not needed
             resultPromiseResolve({ status: 'success', content: cachedResponse });
             return; // Exit IIFE
           }
@@ -289,9 +323,9 @@ export async function handleLLMJsonResponseGeneration<T>({
       // --- Prompt Display & Confirmation ---
       if (promptOptions.printPrompt || promptOptions.requireConfirmation) {
         const formattedPrompts = messages.map(message => {
-          return message.role + ': ' + message.content.replace(/^```json\s*|\s*```$/g, '') +
+          return message.role + ': ' + message.content.replace(/^```json\\s*|\\s*```$/g, '') +
             (message.images && message.images.length > 0 ? ` [Contains ${message.images.length} image(s)]` : '');
-        }).join('\n\n');
+        }).join('\\n\\n');
         console.log(`${GREEN}Prompt:${RESET}`, formattedPrompts);
       }
 
@@ -311,9 +345,13 @@ export async function handleLLMJsonResponseGeneration<T>({
       let finalValidatedResponse: T | null = null;
       let fullResponseAccumulated = '';
 
+      // No need to redefine logger variables here, they are in the outer scope
+
       while (attempt < jsonParsingOptions.maxAttempts && finalValidatedResponse === null) {
         attempt++;
         fullResponseAccumulated = ''; // Reset for each attempt
+        logParts.length = 0; // Clear log parts for the new attempt
+        loggingCompletedForAttempt = true; // Reset for the new attempt
 
         if (attempt > 1) {
           console.log(`${CYAN}[handleLLMJsonResponseGeneration] Attempt ${attempt} to get valid JSON from LLM${RESET}`);
@@ -340,11 +378,26 @@ export async function handleLLMJsonResponseGeneration<T>({
             fullResponseAccumulated += part; // Accumulate for final parsing
             // Log stream content if requested
             if (logStream) {
-              process.stdout.write(`${CYAN}${part}${RESET}`);
+              logParts.push(`${CYAN}${part}${RESET}`);
+              scheduleLogProcessing();
             }
           }
+
           if (logStream) {
-            process.stdout.write('\n'); // Newline after logging stream
+            // Ensure any remaining logs for this attempt are scheduled
+            scheduleLogProcessing();
+            // Wait for logs to flush before printing the newline and proceeding.
+            await new Promise<void>(resolve => {
+              const checkLogsCompletion = () => {
+                if (loggingCompletedForAttempt) {
+                  process.stdout.write('\\n'); // Newline after logging stream for this attempt
+                  resolve();
+                } else {
+                  setImmediate(checkLogsCompletion);
+                }
+              };
+              setImmediate(checkLogsCompletion); // Start the checking process.
+            });
           }
 
           // Strip think tags if enabled
