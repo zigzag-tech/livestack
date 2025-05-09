@@ -25,7 +25,7 @@
     "p-limit": "^3",
     "rxjs": "^7",
     "uuid": "^11.1.0",
-    "zod": "^3.24.2",
+    "zod": "^3.24.4",
     "zod-to-json-schema": "^3.22.4"
   },
   "devDependencies": {
