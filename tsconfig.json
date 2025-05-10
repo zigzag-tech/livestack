@@ -25,6 +25,8 @@
       // "emitDecoratorMetadata": true,
       // "experimentalDecorators": true
     },
+    "files": [],
+
     "exclude": ["node_modules", "dist", "*.mp3", "*.mp4"]
   }
   
