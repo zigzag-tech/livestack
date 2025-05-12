@@ -570,6 +570,7 @@ const _ollamaChatApiCall: ApiCallFn = async (
         stream: true,
         temperature: options.temperature,
         top_p: options.top_p,
+        max_completion_tokens: 50 * 1000,
         // Include additional parameters supported by both
       };
 
@@ -816,6 +817,7 @@ export async function generateResponseOllama(
       stream: streamEnabled,
       temperature: options.temperature ?? 0.7,
       top_p: options.top_p,
+      max_completion_tokens: 50 * 1000,
     };
 
     // Add Ollama-specific options that might be supported via the OpenAI compatibility layer
