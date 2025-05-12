@@ -7,7 +7,7 @@ export class EmbeddingCache {
     private cacheDir: string;
     private cache: Set<string>;
     private embeddingFn: (text: string) => Promise<number[]>;
-    constructor({ embeddingFn, cacheDir = '.cache/embeddings' }: { embeddingFn: (text: string) => Promise<number[]>; cacheDir?: string; }) {
+    constructor({ embeddingFn, cacheDir = '.embedding-cache' }: { embeddingFn: (text: string) => Promise<number[]>; cacheDir?: string; }) {
         this.embeddingFn = embeddingFn;
         this.cacheDir = cacheDir;
         this.cache = new Set();
