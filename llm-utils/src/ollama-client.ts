@@ -570,7 +570,7 @@ const _ollamaChatApiCall: ApiCallFn = async (
         stream: true,
         temperature: options.temperature,
         top_p: options.top_p,
-        max_completion_tokens: 50 * 1000,
+        max_completion_tokens: 32767,
         // Include additional parameters supported by both
       };
 
