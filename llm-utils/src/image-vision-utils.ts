@@ -3,11 +3,12 @@ import * as fs from 'fs';
 import sharp from 'sharp';
 import { ChatMessage, generateJSONResponseOllama } from './ollama-client';
 
-if (!process.env.VISION_MODEL) {
-  throw new Error("VISION_MODEL is not set");
+function getVisionModel(): string {
+  if (!process.env.VISION_MODEL) {
+    throw new Error("VISION_MODEL is not set");
+  }
+  return process.env.VISION_MODEL;
 }
-
-const VISION_MODEL = process.env.VISION_MODEL;
 
 /**
  * Check if the image format is supported by Ollama vision model
@@ -74,7 +75,7 @@ export async function generateImageDescriptionWithVisionLLM(imagePath: string): 
     const { resultPromise } = await generateJSONResponseOllama<{ title: string, desc: string }>({
       messages,
       options: {
-        model: VISION_MODEL,
+        model: getVisionModel(),
         temperature: 0.0
       },
       cache: true,
