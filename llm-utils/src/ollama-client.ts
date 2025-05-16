@@ -15,11 +15,11 @@ const RESET = '\x1b[0m';
 const openAIClients: Record<string, OpenAI> = {};
 
 // Function to get or create an OpenAI client for a specific base URL
-function getOpenAIClient(baseUrl: string = 'http://localhost:11434/v1'): OpenAI {
+function getOpenAIClient({ baseUrl, apiKey }: { baseUrl: string; apiKey: string; }): OpenAI {
   if (!openAIClients[baseUrl]) {
     openAIClients[baseUrl] = new OpenAI({
       baseURL: baseUrl,
-      apiKey: 'ollama', // Required but unused for Ollama
+      apiKey: apiKey,
     });
   }
   return openAIClients[baseUrl];
@@ -554,11 +554,11 @@ const _ollamaChatApiCall: ApiCallFn = async (
   // Define the async generator function internally
   async function* ollamaStreamGenerator(): AsyncGenerator<string, void, unknown> {
     let client: OpenAI | null = null;
-    const baseUrl = options.baseUrl || 'http://localhost:11434/v1';
-
+    const baseUrl = options.baseUrl;
+    const apiKey = options.apiKey;
     try {
       // Use the baseUrl provided in options or default
-      client = getOpenAIClient(baseUrl);
+      client = getOpenAIClient({ baseUrl, apiKey });
 
       // Convert messages to OpenAI format
       const openAIMessages = convertToOpenAIMessages(messages);
@@ -747,7 +747,7 @@ export async function generateResponseOllama(
 
     // --- Non-JSON response handling (using OpenAI client) ---
     // Get an OpenAI client for the specified baseUrl
-    const client = getOpenAIClient(baseUrl);
+    const client = getOpenAIClient({ baseUrl, apiKey: options.apiKey });
 
     // Check cache if enabled (defaults to true)
     const cacheEnabled = options.cache !== false;
