@@ -1,5 +1,5 @@
 {
-  "include": ["missing-modules.d.ts", "**/*.ts", "**/*.tsx", "*.ts", "*.tsx", "../examples/speech-app/src/common/supportedLangs.ts"],
+  "include": ["missing-modules.d.ts", "src/**/*.ts", "src/**/*.tsx", "src/*.ts", "src/*.tsx"],
   "compilerOptions": {
     "outDir": "dist",
     "target": "ES5",
