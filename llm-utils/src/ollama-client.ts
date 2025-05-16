@@ -222,7 +222,7 @@ export type ApiCallFn = (
  * @param promptOptions - Configuration for displaying prompts and requiring confirmation.
  * @param jsonParsingOptions - Configuration for JSON extraction, repair, and validation.
  * @param logStream - Whether to log the raw stream to console.
- * @returns An object containing the stream (yielding the final full response) and a promise for the structured result.
+ * @returns An object containing the rawChunkStream (yielding chunks as they arrive), finalResultStream (yielding the final processed response), and a promise for the structured result.
  */
 export async function handleLLMJsonResponseGeneration<T>({
   messages,
@@ -252,7 +252,7 @@ export async function handleLLMJsonResponseGeneration<T>({
   };
   logStream?: boolean;
 }): Promise<{
-  stream: AsyncGenerator<string, void, unknown>,
+  rawChunkStream: AsyncGenerator<string, void, unknown>,
   resultPromise: Promise<LLMJSONResult<T>>
 }> {
   // --- Promise Setup ---
@@ -262,6 +262,55 @@ export async function handleLLMJsonResponseGeneration<T>({
     resultPromiseResolve = resolve;
     resultPromiseReject = reject;
   });
+
+  // --- Raw Chunk Stream Setup ---
+  // We'll use a channel pattern to pass chunks from the processing logic to the exposed stream
+  let rawChunkQueue: string[] = [];
+  let rawChunkResolvers: ((value: IteratorResult<string, void>) => void)[] = [];
+  let rawChunkStreamDone = false;
+
+  const enqueueRawChunk = (chunk: string) => {
+    if (rawChunkStreamDone) return;
+    
+    if (rawChunkResolvers.length > 0) {
+      // If there are waiting resolvers, resolve the first one with this chunk
+      const resolve = rawChunkResolvers.shift()!;
+      resolve({ value: chunk, done: false });
+    } else {
+      // Otherwise, queue the chunk for later consumption
+      rawChunkQueue.push(chunk);
+    }
+  };
+
+  const completeRawChunkStream = () => {
+    rawChunkStreamDone = true;
+    // Resolve any waiting consumers with done:true
+    while (rawChunkResolvers.length > 0) {
+      const resolve = rawChunkResolvers.shift()!;
+      resolve({ value: undefined, done: true });
+    }
+  };
+
+  // Create the rawChunkStream generator that will be returned to the caller
+  const rawChunkStream = (async function* () {
+    while (!rawChunkStreamDone) {
+      // If there are queued chunks, yield the first one
+      if (rawChunkQueue.length > 0) {
+        yield rawChunkQueue.shift()!;
+      } else {
+        // Otherwise wait for the next chunk or stream completion
+        yield await new Promise<string>((resolve) => {
+          rawChunkResolvers.push((result) => {
+            if (result.done) {
+              resolve(''); // An empty string will be filtered out by the caller
+            } else {
+              resolve(result.value);
+            }
+          });
+        });
+      }
+    }
+  })();
 
   // --- Asynchronous logger setup (defined outside IIFE) ---
   const logParts: string[] = [];
@@ -306,11 +355,19 @@ export async function handleLLMJsonResponseGeneration<T>({
           const cachedResponse = readCachedResponse<any>(cacheOptions.requestHash, cacheOptions.cacheDir);
           if (jsonParsingOptions.schema) {
             const validatedResponse = jsonParsingOptions.schema.parse(cachedResponse);
-            // const dummyStream = async function* () { }(); // Not needed as we return before stream is relevant here
+            // For cached responses, yield the full content as a single chunk
+            const cachedContent = JSON.stringify(validatedResponse, null, 2);
+            enqueueRawChunk(cachedContent);
+            completeRawChunkStream();
             resultPromiseResolve({ status: 'success', content: validatedResponse });
             return; // Exit IIFE
           } else {
-            // const dummyStream = async function* () { }(); // Not needed
+            // For cached responses without schema, do the same
+            const cachedContent = typeof cachedResponse === 'string' 
+              ? cachedResponse 
+              : JSON.stringify(cachedResponse, null, 2);
+            enqueueRawChunk(cachedContent);
+            completeRawChunkStream();
             resultPromiseResolve({ status: 'success', content: cachedResponse });
             return; // Exit IIFE
           }
@@ -334,6 +391,7 @@ export async function handleLLMJsonResponseGeneration<T>({
           await waitForEnterKey();
         } catch (error) {
           console.error('[handleLLMJsonResponseGeneration] User cancelled.');
+          completeRawChunkStream();
           resultPromiseResolve({ status: 'failed' });
           return; // Exit IIFE
         }
@@ -376,6 +434,12 @@ export async function handleLLMJsonResponseGeneration<T>({
           // Process the stream for this attempt
           for await (const part of responseStream) {
             fullResponseAccumulated += part; // Accumulate for final parsing
+            
+            // Forward the raw chunk to our stream (only on first successful attempt)
+            if (attempt === 1) {
+              enqueueRawChunk(part);
+            }
+            
             // Log stream content if requested
             if (logStream) {
               logParts.push(`${CYAN}${part}${RESET}`);
@@ -468,29 +532,26 @@ export async function handleLLMJsonResponseGeneration<T>({
       if (cacheOptions.enabled) {
         writeResponseCache(cacheOptions.requestHash, finalValidatedResponse, cacheOptions.cacheDir);
       }
+      
+      // Signal that the raw chunk stream is complete
+      completeRawChunkStream();
+      
+      // Resolve the result promise with the final validated response
       resultPromiseResolve({ status: 'success', content: finalValidatedResponse });
 
     } catch (error) {
       console.error(`${RED}[handleLLMJsonResponseGeneration] Overall error: ${error}${RESET}`);
+      
+      // Signal that the raw chunk stream is complete
+      completeRawChunkStream();
+      
+      // Resolve with failed status
       resultPromiseResolve({ status: 'failed' });
     }
   })(); // Immediately invoke the async IIFE
 
-  // --- Stream Return ---
-  // This stream yields the *final* accumulated response once the resultPromise resolves successfully.
-  // It doesn't stream during generation in this refactored version, as accumulation happens inside.
-  const finalStream = async function* () {
-    const result = await resultPromise;
-    if (result.status === 'success') {
-      // Yield the final validated object as a string, or the raw accumulated string?
-      // Let's yield the stringified final object for consistency with expected JSON output.
-      yield JSON.stringify(result.content, null, 2);
-    } else {
-      // Yield nothing or an error message if failed? Yielding nothing for now.
-    }
-  }();
-
-  return { stream: finalStream, resultPromise };
+  // Return both the raw chunk stream and the result promise
+  return { rawChunkStream, resultPromise };
 }
 
 
@@ -622,7 +683,7 @@ const _ollamaChatApiCall: ApiCallFn = async (
  * @param logStream - Whether to log the streaming response to console (defaults to true)
  * @param schema - Optional Zod schema for response validation and type inference
  * @param baseUrl - Base URL for the OpenAI-compatible API (defaults to http://localhost:11434/v1)
- * @returns An object containing the stream for immediate consumption and a promise that resolves when processing is complete
+ * @returns An object containing the rawChunkStream for immediate consumption and a promise that resolves when processing is complete
  */
 export async function generateJSONResponseOllama<T>({
   messages,
@@ -643,7 +704,7 @@ export async function generateJSONResponseOllama<T>({
   schema?: z.ZodType<T>;
   baseUrl?: string;
 }): Promise<{
-  stream: AsyncGenerator<string, void, unknown>,
+  rawChunkStream: AsyncGenerator<string, void, unknown>,
   resultPromise: Promise<LLMJSONResult<T>>
 }> {
   const funcStartTime = Date.now(); // Keep timing if needed
@@ -684,7 +745,6 @@ export async function generateJSONResponseOllama<T>({
     const duration = Date.now() - funcStartTime;
     // console.log(`[generateJSONResponseOllama] Total time: ${duration}ms`);
   }).catch(() => {/* ignore */ }); // Prevent unhandled rejection if promise fails
-
 
   return result;
 }
@@ -727,7 +787,7 @@ export async function generateResponseOllama(
         let rawContent = '';
         try {
           // The stream from generateJSONResponseOllama now yields the final stringified JSON
-          for await (const chunk of jsonResponse.stream) {
+          for await (const chunk of jsonResponse.rawChunkStream) {
             rawContent += chunk;
           }
           // If rawContent is empty, means the promise failed before yielding
