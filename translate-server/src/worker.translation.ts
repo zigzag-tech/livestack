@@ -20,7 +20,7 @@ export const translationSpec = new JobSpec({
 
 export const translationWorker = translationSpec.defineWorker({
   processor: async ({ input, output, invoke }) => {
-    let currLang: z.infer<typeof supportedLangs> = supportedLangs.Enum.French;
+    let currLang: z.infer<typeof supportedLangs> = supportedLangs.enum.French;
 
     const langObs = input("language").observable();
     langObs.subscribe((newLang: any) => {

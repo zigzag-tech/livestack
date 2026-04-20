@@ -1,8 +1,7 @@
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { saveLargeFilesToStorage } from "../storage/cloudStorage";
 import { LiveEnv, LIVESTACK_DASHBOARD_URL_ROOT } from "../env/LiveEnv";
 import path from "path";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   identifyLargeFilesToRestore,
   identifyLargeFilesToSave,
@@ -63,8 +62,8 @@ export class DataStream<T extends object> {
       if (liveEnv) {
         let jsonSchemaStr: string | undefined = undefined;
         if (def) {
-          const jsonSchema = zodToJsonSchema(def, {
-            removeAdditionalStrategy: "passthrough",
+          const jsonSchema = z.toJSONSchema(def, {
+            target: "draft-7",
           });
           jsonSchemaStr = JSON.stringify(jsonSchema);
         }
