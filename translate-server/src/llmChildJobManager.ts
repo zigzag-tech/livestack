@@ -7,7 +7,7 @@ export const getQueuedJobOrCreate = async ({
   llmType,
 }: {
   llmType: "openai" | "ollama";
-}) => {
+}): Promise<JobManager<any, any, any, any, any>> => {
   if (!queuedJobs.has(llmType)) {
     const newJ = await llmSelectorSpec.enqueueJob({
       jobOptions: { llmType },
