@@ -343,9 +343,10 @@ export async function listAliyunEciWorkers(
   return result.ContainerGroups.ContainerGroup.map((group) => {
     const regionId = group.RegionId ?? input.regionId ?? profile.regionId;
     const hostProfile = { ...profile, regionId };
+    const hostIdentityKey = group.ContainerGroupName ?? group.ContainerGroupId;
     return {
       containerGroupId: group.ContainerGroupId,
-      hostId: aliyunEciWorkerHostId(hostProfile, group.ContainerGroupId),
+      hostId: aliyunEciWorkerHostId(hostProfile, hostIdentityKey),
       regionId,
       instanceType: profile.instanceType,
       ...(group.Status ? { status: group.Status } : {}),
