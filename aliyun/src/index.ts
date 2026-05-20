@@ -155,6 +155,7 @@ export interface AliyunEciCreateContainerGroupResult {
 export interface AliyunEciDescribeContainerGroupsRequest {
   RegionId: string;
   ContainerGroupIds?: string[];
+  Tags?: Array<{ Key: string; Value: string }>;
   Limit?: number;
 }
 
@@ -338,9 +339,17 @@ export async function listAliyunEciWorkers(
     ...(input.containerGroupIds && input.containerGroupIds.length > 0
       ? { ContainerGroupIds: input.containerGroupIds }
       : {}),
-    Limit: 100,
+    Tags: Object.entries({
+      app: "livestack",
+      region: profile.regionId,
+      backend: "eci",
+      shape: profile.instanceType,
+      ...profile.labels,
+    }).map(([Key, Value]) => ({ Key, Value })),
+    Limit: 20,
   });
-  return result.ContainerGroups.ContainerGroup.map((group) => {
+  const groups = normalizeEciContainerGroups(result.ContainerGroups);
+  return groups.map((group) => {
     const regionId = group.RegionId ?? input.regionId ?? profile.regionId;
     const hostProfile = { ...profile, regionId };
     const hostIdentityKey = group.ContainerGroupName ?? group.ContainerGroupId;
@@ -355,6 +364,15 @@ export async function listAliyunEciWorkers(
       tags: normalizeEciTags(group.Tags),
     };
   });
+}
+
+function normalizeEciContainerGroups(
+  containerGroups: AliyunEciDescribeContainerGroupsResult["ContainerGroups"]
+    | AliyunEciContainerGroupDescription[],
+): AliyunEciContainerGroupDescription[] {
+  return Array.isArray(containerGroups)
+    ? containerGroups
+    : containerGroups.ContainerGroup ?? [];
 }
 
 export async function deleteAliyunEciWorker(
@@ -515,11 +533,18 @@ export function createAliyunEciClientFromEnv(
   if (!accessKeyId || !accessKeySecret) {
     throw new Error("Missing Aliyun credentials.");
   }
+  const regionId = env.ALIBABA_CLOUD_REGION_ID
+    ?? env.ALIYUN_REGION_ID
+    ?? HEYUAN_ECI_8VCPU_32GIB_WORKER_PROFILE.regionId;
   return new AliyunEciRpcClient({
     accessKeyId,
     accessKeySecret,
-    endpoint: env.ALIYUN_ECI_ENDPOINT,
+    endpoint: env.ALIYUN_ECI_ENDPOINT ?? aliyunEciEndpointForRegion(regionId),
   });
+}
+
+export function aliyunEciEndpointForRegion(regionId: string): string {
+  return `https://eci.${regionId}.aliyuncs.com/`;
 }
 
 export class AliyunEcsRpcClient implements AliyunEcsClient {
@@ -736,6 +761,7 @@ function flattenAliyunEciDescribeContainerGroupsRequest(
     RegionId: request.RegionId,
     ...(request.ContainerGroupIds ? { ContainerGroupIds: JSON.stringify(request.ContainerGroupIds) } : {}),
     ...(request.Limit ? { Limit: String(request.Limit) } : {}),
+    ...flattenTags(request.Tags ?? []),
   };
 }
 

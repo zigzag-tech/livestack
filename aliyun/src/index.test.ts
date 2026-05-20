@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildAliyunEciCreateContainerGroupRequest,
+  aliyunEciEndpointForRegion,
   createAliyunEciWorker,
   deleteAliyunEciWorker,
   flattenAliyunEciCreateContainerGroupRequest,
@@ -107,6 +108,7 @@ test("requires an explicit ECI image when the profile does not provide one", () 
     () => buildAliyunEciCreateContainerGroupRequest(),
     /Missing Aliyun ECI worker image/,
   );
+  assert.equal(aliyunEciEndpointForRegion("cn-heyuan"), "https://eci.cn-heyuan.aliyuncs.com/");
 });
 
 test("creates, lists, and deletes ECI workers through the client wrapper", async () => {
@@ -143,6 +145,24 @@ test("creates, lists, and deletes ECI workers through the client wrapper", async
   assert.deepEqual(client.deleted, [{ RegionId: "cn-heyuan", ContainerGroupId: "eci-1" }]);
 });
 
+test("accepts empty Aliyun ECI list responses where ContainerGroups is an array", async () => {
+  const client: AliyunEciClient = {
+    async createContainerGroup() {
+      throw new Error("not used");
+    },
+    async describeContainerGroups() {
+      return {
+        ContainerGroups: [] as any,
+      };
+    },
+    async deleteContainerGroup() {
+      throw new Error("not used");
+    },
+  };
+
+  assert.deepEqual(await listAliyunEciWorkers(client), []);
+});
+
 class MemoryEciClient implements AliyunEciClient {
   readonly createdRequests: AliyunEciCreateContainerGroupRequest[] = [];
   readonly deleted: Array<{ RegionId: string; ContainerGroupId: string }> = [];
@@ -168,7 +188,18 @@ class MemoryEciClient implements AliyunEciClient {
       }>;
     };
   }> {
-    assert.deepEqual(request, { RegionId: HEYUAN_ECI_8VCPU_32GIB_WORKER_PROFILE.regionId, Limit: 100 });
+    assert.deepEqual(request, {
+      RegionId: HEYUAN_ECI_8VCPU_32GIB_WORKER_PROFILE.regionId,
+      Tags: [
+        { Key: "app", Value: "livestack" },
+        { Key: "region", Value: "cn-heyuan" },
+        { Key: "backend", Value: "eci" },
+        { Key: "shape", Value: "eci.8vcpu-32gib" },
+        { Key: "workload", Value: "livestack-worker" },
+        { Key: "sizingPolicy", Value: "eci-8vcpu-32gib" },
+      ],
+      Limit: 20,
+    });
     return {
       ContainerGroups: {
         ContainerGroup: [{
