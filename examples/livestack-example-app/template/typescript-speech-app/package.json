@@ -27,7 +27,7 @@
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "ollama": "^0.5.15",
-    "openai": "^4.98.0",
+    "openai": "^6.38.0",
     "pretty-bytes": "^6.1.1",
     "react": "^18",
     "react-dom": "^18",

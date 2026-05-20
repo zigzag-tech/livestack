@@ -15,20 +15,20 @@
     "@grpc/grpc-js": "^1.10.6",
     "@grpc/proto-loader": "^0.7.12",
     "google-protobuf": "^3.21.2",
-    "long": "^5.2.3",
-    "nice-grpc-common": "^2.0.2",
-    "protobufjs": "^7.2.6"
+    "long": "^5.3.2",
+    "nice-grpc-common": "^2.0.3",
+    "protobufjs": "^7.6.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.26.10",
-    "@babel/preset-env": "^7.26.9",
-    "@babel/preset-typescript": "^7.26.0",
-    "@types/lodash": "^4.14.201",
-    "@types/node": "^20.11.0",
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "@preconstruct/cli": "^2.8.13",
+    "@types/lodash": "^4.17.24",
+    "@types/node": "^24",
     "@types/uuid": "^9.0.7",
     "eslint": "^9.22.0",
     "ts-proto": "^1.174.0",
-    "typescript": "5.8.3",
-    "@preconstruct/cli": "^2.8.11"
+    "typescript": "5.8.3"
   }
 }

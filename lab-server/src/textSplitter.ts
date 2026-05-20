@@ -1,3 +1,5 @@
+import { genManuallyFedIterator } from "@livestack/shared";
+
 /**
  * Text splitter implementation based on LangChain's text splitter
  * Function-based implementation with no classes
@@ -300,4 +302,55 @@ export function splitTextByLanguage(
     ...options,
     separators: getSeparatorsForLanguage(language),
   });
-} 
+}
+
+export function genSplitterIterable({
+  chunkSize,
+  chunkOverlap = 0,
+}: {
+  chunkSize: number;
+  chunkOverlap?: number;
+}) {
+  let text = "";
+  const { iterator, resolveNext, terminate } = genManuallyFedIterator<string>();
+
+  const splitCurrentText = () =>
+    splitTextRecursively(text, {
+      chunkSize,
+      chunkOverlap,
+    });
+
+  const maybeSplit = async () => {
+    if (text.length <= chunkSize) {
+      return;
+    }
+
+    const [firstChunk, ...remainingChunks] = splitCurrentText();
+    if (!firstChunk) {
+      return;
+    }
+
+    text = remainingChunks.join("");
+    await resolveNext(firstChunk);
+  };
+
+  const flushRemaining = async () => {
+    if (text.length > 0) {
+      for (const chunk of splitCurrentText()) {
+        await resolveNext(chunk);
+      }
+      text = "";
+    }
+    terminate();
+  };
+
+  const feed = async (t: string) => {
+    text += t;
+    await maybeSplit();
+    return {
+      numCharsInCache: text.length,
+    };
+  };
+
+  return { ...iterator, feed, flushRemaining };
+}

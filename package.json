@@ -15,10 +15,10 @@
     "typedoc": "^0.28.4"
   },
   "devDependencies": {
-    "@babel/core": "^7.26.10",
-    "@babel/preset-env": "^7.26.9",
-    "@babel/preset-typescript": "^7.26.0",
-    "@preconstruct/cli": "^2.8.4",
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "@preconstruct/cli": "^2.8.13",
     "typescript": "^5.8.3"
   },
   "preconstruct": {
