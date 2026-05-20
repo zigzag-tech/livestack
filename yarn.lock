@@ -2116,6 +2116,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@bufbuild/protobuf@npm:^2.0.0, @bufbuild/protobuf@npm:^2.10.2, @bufbuild/protobuf@npm:^2.12.0":
+  version: 2.12.0
+  resolution: "@bufbuild/protobuf@npm:2.12.0"
+  checksum: 10c0/28959e371fd2e7c8d67d52af9e3c8f8e6770e2e116dcc5508f469ca736afa6905e216bc76183835898a5f3deb8aa2e7db47d4a0e706fba76115e9a1996893191
+  languageName: node
+  linkType: hard
+
 "@cspotcode/source-map-support@npm:^0.8.0":
   version: 0.8.1
   resolution: "@cspotcode/source-map-support@npm:0.8.1"
@@ -2718,21 +2725,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@grpc/proto-loader@npm:^0.7.12":
-  version: 0.7.15
-  resolution: "@grpc/proto-loader@npm:0.7.15"
-  dependencies:
-    lodash.camelcase: "npm:^4.3.0"
-    long: "npm:^5.0.0"
-    protobufjs: "npm:^7.2.5"
-    yargs: "npm:^17.7.2"
-  bin:
-    proto-loader-gen-types: build/bin/proto-loader-gen-types.js
-  checksum: 10c0/514a134a724b56d73d0a202b7e02c84479da21e364547bacb2f4995ebc0d52412a1a21653add9f004ebd146c1e6eb4bcb0b8846fdfe1bfa8a98ed8f3d203da4a
-  languageName: node
-  linkType: hard
-
-"@grpc/proto-loader@npm:^0.8.0":
+"@grpc/proto-loader@npm:^0.8.0, @grpc/proto-loader@npm:^0.8.1":
   version: 0.8.1
   resolution: "@grpc/proto-loader@npm:0.8.1"
   dependencies:
@@ -3797,18 +3790,19 @@ __metadata:
     "@babel/core": "npm:^7.29.0"
     "@babel/preset-env": "npm:^7.29.5"
     "@babel/preset-typescript": "npm:^7.28.5"
+    "@bufbuild/protobuf": "npm:^2.12.0"
     "@grpc/grpc-js": "npm:^1.10.6"
-    "@grpc/proto-loader": "npm:^0.7.12"
+    "@grpc/proto-loader": "npm:^0.8.1"
     "@preconstruct/cli": "npm:^2.8.13"
     "@types/lodash": "npm:^4.17.24"
     "@types/node": "npm:^24"
     "@types/uuid": "npm:^9.0.7"
     eslint: "npm:^9.22.0"
-    google-protobuf: "npm:^3.21.2"
+    google-protobuf: "npm:^4.0.2"
     long: "npm:^5.3.2"
     nice-grpc-common: "npm:^2.0.3"
-    protobufjs: "npm:^7.6.0"
-    ts-proto: "npm:^1.174.0"
+    protobufjs: "npm:^8.4.0"
+    ts-proto: "npm:^2.11.8"
     typescript: "npm:5.8.3"
   languageName: unknown
   linkType: soft
@@ -7680,10 +7674,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"google-protobuf@npm:^3.21.2":
-  version: 3.21.4
-  resolution: "google-protobuf@npm:3.21.4"
-  checksum: 10c0/28f2800f7fe1a8fc55eb58ba76e158268407bfb3b90646eaf8a177dd92a2e522459b773f8132ae546e60ac3b6f5947557a1cf3d963a05bb594f43bcde640f54f
+"google-protobuf@npm:^4.0.2":
+  version: 4.0.2
+  resolution: "google-protobuf@npm:4.0.2"
+  checksum: 10c0/9f1bc666522747610edbe1b7bfaed447b597e6c2f7d9522c98ca4707255d1f4946c4db7e902a5950921090360a28f96d29a4272d6e476f7d33cf9393c861ad98
   languageName: node
   linkType: hard
 
@@ -9066,7 +9060,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"long@npm:^5.0.0, long@npm:^5.2.3, long@npm:^5.3.2":
+"long@npm:^5.0.0, long@npm:^5.3.2":
   version: 5.3.2
   resolution: "long@npm:5.3.2"
   checksum: 10c0/7130fe1cbce2dca06734b35b70d380ca3f70271c7f8852c922a7c62c86c4e35f0c39290565eca7133c625908d40e126ac57c02b1b1a4636b9457d77e1e60b981
@@ -10083,7 +10077,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"protobufjs@npm:^7.2.4, protobufjs@npm:^7.2.5, protobufjs@npm:^7.5.5, protobufjs@npm:^7.6.0":
+"protobufjs@npm:^7.5.5":
   version: 7.6.0
   resolution: "protobufjs@npm:7.6.0"
   dependencies:
@@ -10100,6 +10094,15 @@ __metadata:
     "@types/node": "npm:>=13.7.0"
     long: "npm:^5.3.2"
   checksum: 10c0/013339777bc29610ef141876d734aa538a7982d278930a121513171f32958b3b38411b259476d9118c56d55f67980a8f433476cfbfdd1d1c60b4a06f36d3f689
+  languageName: node
+  linkType: hard
+
+"protobufjs@npm:^8.4.0":
+  version: 8.4.0
+  resolution: "protobufjs@npm:8.4.0"
+  dependencies:
+    long: "npm:^5.3.2"
+  checksum: 10c0/d692c1741e04c9eb777b7aecfed4bb5a5407cc0aa4b601850f73e1bb0b12ba6a28bf06602463b2479bfcd4498089d8812b47df61a5ea2a790d3dc1fc5b6eadb7
   languageName: node
   linkType: hard
 
@@ -11650,7 +11653,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ts-poet@npm:^6.7.0":
+"ts-poet@npm:^6.12.0":
   version: 6.12.0
   resolution: "ts-poet@npm:6.12.0"
   dependencies:
@@ -11659,27 +11662,26 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ts-proto-descriptors@npm:1.16.0":
-  version: 1.16.0
-  resolution: "ts-proto-descriptors@npm:1.16.0"
+"ts-proto-descriptors@npm:2.1.0":
+  version: 2.1.0
+  resolution: "ts-proto-descriptors@npm:2.1.0"
   dependencies:
-    long: "npm:^5.2.3"
-    protobufjs: "npm:^7.2.4"
-  checksum: 10c0/6e943b05ecd1f240ff443719479fe112e198d5bbf2d9ec7c3412511d555f85da485021286b424cedba52392dc23de49d3ea773f865f556c9c173446a948d5484
+    "@bufbuild/protobuf": "npm:^2.0.0"
+  checksum: 10c0/5695def6c31b7f3f8561876361a2db9f1ad859613fdcf1c7ffd093c3477fea4552ccccef9c99cd63ca2a215a7187e20e0de1fc942e2996d6671c25c6b190bf31
   languageName: node
   linkType: hard
 
-"ts-proto@npm:^1.174.0":
-  version: 1.181.2
-  resolution: "ts-proto@npm:1.181.2"
+"ts-proto@npm:^2.11.8":
+  version: 2.11.8
+  resolution: "ts-proto@npm:2.11.8"
   dependencies:
+    "@bufbuild/protobuf": "npm:^2.10.2"
     case-anything: "npm:^2.1.13"
-    protobufjs: "npm:^7.2.4"
-    ts-poet: "npm:^6.7.0"
-    ts-proto-descriptors: "npm:1.16.0"
+    ts-poet: "npm:^6.12.0"
+    ts-proto-descriptors: "npm:2.1.0"
   bin:
     protoc-gen-ts_proto: protoc-gen-ts_proto
-  checksum: 10c0/1c72e9d4b350379f2ee0717f20d2fafc4164a51763fbc6bb58421b79ee7b252fa4098566e2a0804c30ff399fef93c4620d237ed51bac9d79b1caa9f4edf1bbfb
+  checksum: 10c0/2d8098f59703430057f4a8cc7881b236459884dd6e2bc52a80d638cffd63039b4eb5af186c64e64de129e8e226f3d2dffa1fa7ea324228a39fc01a5ec5465d04
   languageName: node
   linkType: hard
 
