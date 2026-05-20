@@ -3611,6 +3611,15 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@livestack/storage-cas@workspace:storage-cas":
+  version: 0.0.0-use.local
+  resolution: "@livestack/storage-cas@workspace:storage-cas"
+  dependencies:
+    "@preconstruct/cli": "npm:^2.8.13"
+    typescript: "npm:6.0.3"
+  languageName: unknown
+  linkType: soft
+
 "@livestack/storage-gcloud@workspace:storage-gcloud":
   version: 0.0.0-use.local
   resolution: "@livestack/storage-gcloud@workspace:storage-gcloud"
