@@ -288,6 +288,9 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
   private readonly workerId = v4();
   protected readonly loggerP: Promise<ReturnType<typeof getLogger>>;
   protected _workerStatus: "running" | "stopping" | "stopped" = "running";
+  private activeJobP: Promise<unknown> | null = null;
+  private sendNextActivity?: (activity: FromWorker) => void;
+  private terminateActivityIterator?: () => void;
 
   constructor({
     instanceParams,
@@ -330,10 +333,16 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     const that = this;
 
     // create async iterator to report duty
-    const { iterator: clientMsgIter, resolveNext: sendNextActivity } =
+    const {
+      iterator: clientMsgIter,
+      resolveNext: sendNextActivity,
+      terminate: terminateActivityIterator,
+    } =
       genManuallyFedIterator<FromWorker>((v) => {
         // console.info(`DUTY REPORT: ${JSON.stringify(v)}`);
       });
+    this.sendNextActivity = sendNextActivity;
+    this.terminateActivityIterator = terminateActivityIterator;
 
     (async () => {
       (await that.loggerP).info(`WORKER STARTED: ${await that.workerNameP}.`);
@@ -409,7 +418,9 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
             // process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
             try {
-              await processJob(job);
+              const activeJobP = processJob(job);
+              that.activeJobP = activeJobP;
+              await activeJobP;
               // console.log("jobCompleted", {
               //   jobId: job.jobId,
               //   projectUuid: that.liveEnv.projectUuid,
@@ -444,8 +455,13 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
                 `JOB FAILED: ID: ${job.jobId}, spec: ${that.jobSpec.name}, message: ${err}`
               );
             } finally {
+              that.activeJobP = null;
               // process.off("SIGTERM", () => gracefulShutdown("SIGTERM"));
               // process.off("SIGINT", () => gracefulShutdown("SIGINT"));
+            }
+
+            if (that._workerStatus === "stopping") {
+              break;
             }
           }
         } catch (e) {
@@ -480,11 +496,37 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
 
   /**
    * Stops the worker gracefully.
-   * @throws An error indicating that the method is not implemented.
    */
   public async stop() {
-    // TODO: Implement graceful shutdown
-    throw new Error("Not implemented");
+    if (this._workerStatus === "stopped") {
+      return;
+    }
+
+    this._workerStatus = "stopping";
+    const activeJobP = this.activeJobP;
+    if (activeJobP) {
+      try {
+        await activeJobP;
+      } catch {
+        // The normal worker loop reports the failure before shutdown.
+      }
+    }
+
+    if (this._workerStatus === "stopped") {
+      return;
+    }
+
+    const liveEnv = await this.liveEnvP;
+    this.sendNextActivity?.({
+      workerStopped: {
+        projectUuid: liveEnv.projectUuid,
+        specName: this.jobSpec.name,
+      },
+      workerId: this.workerId,
+    });
+    this.terminateActivityIterator?.();
+    this._workerStatus = "stopped";
+    (await this.loggerP).info(`WORKER STOPPED: ${await this.workerNameP}.`);
   }
 }
 

@@ -338,7 +338,19 @@ class QueueServiceByProject implements QueueServiceImplementation {
           if (!workerId) {
             throw new Error("workerId not initialized");
           }
+          const bundle = this.workerBundleById[workerId];
+          if (bundle) {
+            const client = await this.redisClientP;
+            await client.sendCommand([
+              "HINCRBY",
+              `livestack/${(await getCapacityManager()).sessionId}/zz_capacity`,
+              `${workerStopped.projectUuid}:${workerStopped.specName}`,
+              "-1",
+            ]);
+            await bundle.worker.close();
+          }
           delete this.workerBundleById[workerId];
+          delete this.currentJobByWorkerId[workerId];
           return;
         } else {
           throw new Error("Unknown message from worker");
