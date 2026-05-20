@@ -34,7 +34,7 @@
     "@babel/preset-typescript": "^7.28.5",
     "@preconstruct/cli": "^2.8.13",
     "@types/lodash": "^4.17.24",
-    "typescript": "5.8.3"
+    "typescript": "6.0.3"
   },
   "author": ""
 }

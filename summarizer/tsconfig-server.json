@@ -6,9 +6,11 @@
     "src/index.ts"
   ],
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "module": "CommonJS",
     // "types": ["reflect-metadata"],
     "outDir": "server",
+    "rootDir": "src",
     "target": "ES5",
     "pretty": true,
     "moduleResolution": "node",

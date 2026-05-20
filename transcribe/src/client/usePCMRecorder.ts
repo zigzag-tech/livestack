@@ -122,13 +122,16 @@ function getWAVHeader({
 function exportFile({ chunks }: { chunks: ArrayBufferLike[] }) {
   if (chunks.length !== 0) {
     // 將 header 與 chunks 合併
+    const wavChunks = chunks.map(
+      (chunk) => Uint8Array.from(new Uint8Array(chunk)).buffer
+    );
     const wavRawData = [
       getWAVHeader({
         chunks,
         channel: 1,
         sampleRate: 16000,
       }),
-      ...chunks,
+      ...wavChunks,
     ];
 
     const link = document.createElement("a");

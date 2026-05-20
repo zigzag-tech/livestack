@@ -1,9 +1,11 @@
 {
     "include": ["missing-modules.d.ts", "src/**/*.ts", "src/**/*.tsx", "src/*.ts", "src/*.tsx"],
     "compilerOptions": {
+    "ignoreDeprecations": "6.0",
       "module": "CommonJS",
       // "types": ["reflect-metadata"],
       "outDir": "dist",
+    "rootDir": "src",
       "target": "ES5",
       "pretty": true,
       "moduleResolution": "node",

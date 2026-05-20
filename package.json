@@ -19,7 +19,7 @@
     "@babel/preset-env": "^7.29.5",
     "@babel/preset-typescript": "^7.28.5",
     "@preconstruct/cli": "^2.8.13",
-    "typescript": "^5.8.3"
+    "typescript": "^6.0.3"
   },
   "resolutions": {
     "brace-expansion@npm:^1.1.7": "npm:1.1.13",

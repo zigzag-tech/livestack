@@ -6,8 +6,10 @@
     "src/*.tsx"
   ],
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "module": "ESNext",
     "outDir": "dist",
+    "rootDir": "src",
     "target": "ESNext",
     "pretty": true,
     "moduleResolution": "Node",

@@ -1,8 +1,10 @@
 {
   "include": ["src/**/*"],
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "baseUrl": "./src",
     "outDir": "dist",
+    "rootDir": "src",
     "pretty": true,
     "module": "CommonJS",
     "target": "ESNext",

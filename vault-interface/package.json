@@ -27,8 +27,8 @@
     "@preconstruct/cli": "^2.8.13",
     "@types/lodash": "^4.17.24",
     "@types/node": "^24",
-    "eslint": "^9.22.0",
+    "eslint": "^10.4.0",
     "ts-proto": "^2.11.8",
-    "typescript": "5.8.3"
+    "typescript": "6.0.3"
   }
 }
