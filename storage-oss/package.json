@@ -3,7 +3,8 @@
   "version": "0.0.32",
   "description": "OSS-backed content-addressed storage for Livestack workers.",
   "scripts": {
-    "build": "preconstruct build"
+    "build": "preconstruct build",
+    "test": "tsx --test src/index.test.ts"
   },
   "files": [
     "dist/**/*"
