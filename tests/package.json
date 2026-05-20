@@ -34,7 +34,6 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
     "@types/multer": "^1.4.11",
-    "@types/uuid": "^9.0.7",
     "short-unique-id": "^5.3.2",
     "ts-node": "^10.9.2",
     "tsx": "^4.22.3",
