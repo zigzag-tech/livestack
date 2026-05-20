@@ -21,6 +21,16 @@
     "@preconstruct/cli": "^2.8.13",
     "typescript": "^5.8.3"
   },
+  "resolutions": {
+    "brace-expansion@npm:^1.1.7": "npm:1.1.13",
+    "minimatch@npm:^3.0.4": "npm:3.1.5",
+    "minimatch@npm:^3.1.1": "npm:3.1.5",
+    "picomatch@npm:^2.0.4": "npm:2.3.2",
+    "picomatch@npm:^2.2.2": "npm:2.3.2",
+    "picomatch@npm:^2.2.3": "npm:2.3.2",
+    "picomatch@npm:^2.3.1": "npm:2.3.2",
+    "rollup@npm:^2.79.1": "npm:2.80.0"
+  },
   "preconstruct": {
     "packages": [
       "*",
