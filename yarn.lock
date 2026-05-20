@@ -3611,7 +3611,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@livestack/storage-cas@workspace:storage-cas":
+"@livestack/storage-cas@workspace:*, @livestack/storage-cas@workspace:storage-cas":
   version: 0.0.0-use.local
   resolution: "@livestack/storage-cas@workspace:storage-cas"
   dependencies:
@@ -3629,6 +3629,16 @@ __metadata:
     typescript: "npm:6.0.3"
   peerDependencies:
     "@livestack/core": "*"
+  languageName: unknown
+  linkType: soft
+
+"@livestack/storage-oss@workspace:storage-oss":
+  version: 0.0.0-use.local
+  resolution: "@livestack/storage-oss@workspace:storage-oss"
+  dependencies:
+    "@livestack/storage-cas": "workspace:*"
+    "@preconstruct/cli": "npm:^2.8.13"
+    typescript: "npm:6.0.3"
   languageName: unknown
   linkType: soft
 

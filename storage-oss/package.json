@@ -1,0 +1,26 @@
+{
+  "name": "@livestack/storage-oss",
+  "version": "0.0.32",
+  "description": "OSS-backed content-addressed storage for Livestack workers.",
+  "scripts": {
+    "build": "preconstruct build"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "dependencies": {
+    "@livestack/storage-cas": "workspace:*"
+  },
+  "devDependencies": {
+    "@preconstruct/cli": "^2.8.13",
+    "typescript": "6.0.3"
+  },
+  "main": "dist/livestack-storage-oss.cjs.js",
+  "types": "dist/livestack-storage-oss.cjs.d.ts",
+  "module": "dist/livestack-storage-oss.esm.js",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
+}
