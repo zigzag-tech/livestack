@@ -9,7 +9,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@langchain/classic": "^1.0.27",
+    "@langchain/classic": "^1.0.33",
     "@langchain/core": "^1.1.47",
     "@langchain/ollama": "^1.2.7",
     "@livestack/client": "^0.0.32",

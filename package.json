@@ -12,7 +12,7 @@
     "examples/kitchen-sink"
   ],
   "dependencies": {
-    "typedoc": "^0.28.4"
+    "typedoc": "^0.28.19"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",

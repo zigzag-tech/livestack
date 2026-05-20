@@ -10,10 +10,10 @@
   ],
   "peerDependencies": {
     "@livestack/core": "*",
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "dependencies": {
-    "zod": "^4.3.6"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@preconstruct/cli": "^2.8.13",
