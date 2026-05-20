@@ -21,7 +21,7 @@
     "rollup-plugin-dts": "^6.4.1",
     "ts-node": "^10.9.1",
     "typescript": "5.8.3",
-    "uuid": ">=11"
+    "uuid": "^14.0.0"
   },
   "peerDependencies": {
     "openai": "^6.38.0",
