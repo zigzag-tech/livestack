@@ -9,6 +9,7 @@ import {
   flattenAliyunEciCreateContainerGroupRequest,
   HEYUAN_ECI_8VCPU_32GIB_WORKER_PROFILE,
   listAliyunEciWorkers,
+  redactAliyunEciRequestForDryRun,
   type AliyunEciClient,
   type AliyunEciCreateContainerGroupRequest,
   type AliyunEciDescribeContainerGroupsRequest,
@@ -109,6 +110,36 @@ test("requires an explicit ECI image when the profile does not provide one", () 
     /Missing Aliyun ECI worker image/,
   );
   assert.equal(aliyunEciEndpointForRegion("cn-heyuan"), "https://eci.cn-heyuan.aliyuncs.com/");
+});
+
+test("adds private registry credentials to ECI requests and redacts dry-run passwords", () => {
+  const request = buildAliyunEciCreateContainerGroupRequest({
+    profile: {
+      ...HEYUAN_ECI_8VCPU_32GIB_WORKER_PROFILE,
+      containerImage: "registry.cn-heyuan.aliyuncs.com/unchain/render-worker:sha",
+      imageRegistryCredential: {
+        server: "registry.cn-heyuan.aliyuncs.com",
+        userName: "render-user",
+        password: "render-password",
+      },
+    },
+    name: "unchain-render-0001",
+  });
+
+  assert.deepEqual(request.ImageRegistryCredential, [{
+    server: "registry.cn-heyuan.aliyuncs.com",
+    userName: "render-user",
+    password: "render-password",
+  }]);
+  assert.deepEqual(redactAliyunEciRequestForDryRun(request).ImageRegistryCredential, [{
+    server: "registry.cn-heyuan.aliyuncs.com",
+    userName: "render-user",
+    password: "<redacted>",
+  }]);
+  assert.equal(
+    flattenAliyunEciCreateContainerGroupRequest(request)["ImageRegistryCredential.1.Password"],
+    "render-password",
+  );
 });
 
 test("creates, lists, and deletes ECI workers through the client wrapper", async () => {

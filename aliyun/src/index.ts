@@ -97,6 +97,11 @@ export interface AliyunEciWorkerProfile {
   instanceType: string;
   containerImage?: string;
   containerName?: string;
+  imageRegistryCredential?: {
+    server: string;
+    userName: string;
+    password: string;
+  };
   restartPolicy: "Never" | "OnFailure" | "Always";
   activeDeadlineSeconds?: number;
   vcpu: number;
@@ -145,6 +150,11 @@ export interface AliyunEciCreateContainerGroupRequest {
   ActiveDeadlineSeconds?: number;
   ClientToken?: string;
   Container: AliyunEciContainer[];
+  ImageRegistryCredential?: Array<{
+    server: string;
+    userName: string;
+    password: string;
+  }>;
   Tags: Array<{ Key: string; Value: string }>;
 }
 
@@ -467,6 +477,15 @@ export function buildAliyunEciCreateContainerGroupRequest(input: {
         ...input.env,
       },
     }],
+    ...(profile.imageRegistryCredential
+      ? {
+          ImageRegistryCredential: [{
+            server: profile.imageRegistryCredential.server,
+            userName: profile.imageRegistryCredential.userName,
+            password: profile.imageRegistryCredential.password,
+          }],
+        }
+      : {}),
     Tags: Object.entries({
       app: "livestack",
       region: profile.regionId,
@@ -750,7 +769,24 @@ export function flattenAliyunEciCreateContainerGroupRequest(
     ...(request.ActiveDeadlineSeconds ? { ActiveDeadlineSeconds: String(request.ActiveDeadlineSeconds) } : {}),
     ...(request.ClientToken ? { ClientToken: request.ClientToken } : {}),
     ...flattenEciContainers(request.Container),
+    ...flattenImageRegistryCredentials(request.ImageRegistryCredential ?? []),
     ...flattenTags(request.Tags),
+  };
+}
+
+export function redactAliyunEciRequestForDryRun(
+  request: AliyunEciCreateContainerGroupRequest,
+): AliyunEciCreateContainerGroupRequest {
+  return {
+    ...request,
+    ...(request.ImageRegistryCredential
+      ? {
+          ImageRegistryCredential: request.ImageRegistryCredential.map((credential) => ({
+            ...credential,
+            password: "<redacted>",
+          })),
+        }
+      : {}),
   };
 }
 
@@ -787,6 +823,19 @@ function flattenEciContainers(containers: AliyunEciContainer[]): Record<string, 
       params[`${prefix}.EnvironmentVar.${envIndex}.Value`] = value;
       envIndex += 1;
     });
+  });
+  return params;
+}
+
+function flattenImageRegistryCredentials(
+  credentials: NonNullable<AliyunEciCreateContainerGroupRequest["ImageRegistryCredential"]>,
+): Record<string, string> {
+  const params: Record<string, string> = {};
+  credentials.forEach((credential, index) => {
+    const prefix = `ImageRegistryCredential.${index + 1}`;
+    params[`${prefix}.Server`] = credential.server;
+    params[`${prefix}.UserName`] = credential.userName;
+    params[`${prefix}.Password`] = credential.password;
   });
   return params;
 }
