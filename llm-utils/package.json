@@ -26,7 +26,7 @@
         "typescript": "^5.8.3"
     },
     "peerDependencies": {
-        "ollama": "^0.5.x",
+        "ollama": "^0.6.3",
         "openai": "^6.38.0"
     }
 }

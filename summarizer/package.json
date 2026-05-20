@@ -5,7 +5,7 @@
   "dependencies": {
     "@livestack/core": "^0.0.32",
     "@livestack/shared": "^0.0.32",
-    "ollama": "^0.5.15",
+    "ollama": "^0.6.3",
     "zod": "^4.3.6"
   },
   "devDependencies": {
