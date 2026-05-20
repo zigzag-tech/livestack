@@ -8,9 +8,11 @@
     "src/db/primitives.ts"
   ],
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "module": "NodeNext",
     // "types": ["reflect-metadata"],
     "outDir": "dist",
+    "rootDir": "src",
     "target": "ES5",
     "pretty": true,
     "moduleResolution": "NodeNext",

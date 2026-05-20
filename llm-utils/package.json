@@ -23,7 +23,7 @@
         "@babel/preset-typescript": "^7.28.5",
         "@preconstruct/cli": "^2.8.13",
         "jsonrepair": "^3.14.0",
-        "typescript": "^5.8.3"
+        "typescript": "^6.0.3"
     },
     "peerDependencies": {
         "ollama": "^0.6.3",

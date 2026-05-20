@@ -22,13 +22,14 @@ export const rawPCMToWavWorker = rawPCMToWavSpec.defineWorker({
     for await (const data of input) {
       const { rawPCM64Str } = data;
       const rawPCM = await decode(rawPCM64Str);
+      const rawPCMBuffer = Uint8Array.from(rawPCM).buffer;
       const wavRawData = [
         getWAVHeader({
           channel: 1,
           sampleRate: 16000,
-          chunks: [rawPCM.buffer],
+          chunks: [rawPCMBuffer],
         }),
-        ...[rawPCM.buffer],
+        rawPCMBuffer,
       ];
 
       const blob = new Blob(wavRawData, { type: "audio/wav" });

@@ -27,7 +27,7 @@
     "@preconstruct/cli": "^2.8.13",
     "@types/node": "^24",
     "ts-node": "^10.9.2",
-    "typescript": "5.8.3"
+    "typescript": "6.0.3"
   },
   "files": [
     "dist"
