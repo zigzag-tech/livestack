@@ -6,6 +6,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "target": "ES5",
+    "lib": ["ES2019", "DOM"],
     "pretty": true,
     "moduleResolution": "node",
     "noEmit": false,
@@ -21,6 +22,7 @@
     "strictNullChecks": true,
     "downlevelIteration": true,
     "declaration": true,
+    "types": ["node"],
     "noImplicitAny": true
   },
   "exclude": ["node_modules", "dist"]
