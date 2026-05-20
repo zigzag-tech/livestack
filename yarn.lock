@@ -3370,6 +3370,17 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@livestack/aliyun@workspace:aliyun":
+  version: 0.0.0-use.local
+  resolution: "@livestack/aliyun@workspace:aliyun"
+  dependencies:
+    "@preconstruct/cli": "npm:^2.8.13"
+    typescript: "npm:6.0.3"
+  peerDependencies:
+    "@livestack/core": "*"
+  languageName: unknown
+  linkType: soft
+
 "@livestack/client@npm:^0.0.32, @livestack/client@workspace:client":
   version: 0.0.0-use.local
   resolution: "@livestack/client@workspace:client"

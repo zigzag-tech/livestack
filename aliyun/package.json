@@ -1,0 +1,26 @@
+{
+  "name": "@livestack/aliyun",
+  "version": "0.0.32",
+  "description": "Livestack Aliyun worker provisioning helpers.",
+  "scripts": {
+    "build": "preconstruct build"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "peerDependencies": {
+    "@livestack/core": "*"
+  },
+  "devDependencies": {
+    "@preconstruct/cli": "^2.8.13",
+    "typescript": "6.0.3"
+  },
+  "main": "dist/livestack-aliyun.cjs.js",
+  "types": "dist/livestack-aliyun.cjs.d.ts",
+  "module": "dist/livestack-aliyun.esm.js",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
+}
