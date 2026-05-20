@@ -42,13 +42,20 @@ export function initJobBinding({
   });
   io.use((socket, next) => {
     if (authToken) {
-      jwt.verify(authToken, JWT_SECRET, (err: Error | null, decoded: any) => {
-        if (err) {
-          console.log("Global authToken verification failed:", err.message);
-          return next(new Error("Global authToken verification failed."));
+      const suppliedToken = socket.handshake.auth?.token ||
+        bearerTokenFromHeader(socket.handshake.headers.authorization);
+      if (!suppliedToken) {
+        return next(new Error("Missing auth token."));
+      }
+      if (suppliedToken === authToken) {
+        return next();
+      }
+      jwt.verify(suppliedToken, JWT_SECRET, (err: Error | null, decoded: any) => {
+        if (err || suppliedToken !== authToken) {
+          console.log("Socket auth token verification failed:", err?.message);
+          return next(new Error("Socket auth token verification failed."));
         }
-        console.log("Global authToken verified successfully");
-        (socket as any).decoded = decoded; // Attach decoded information to the socket
+        (socket as any).decoded = decoded;
         return next();
       });
     } else {
@@ -91,4 +98,10 @@ export function initJobBinding({
     `🦓 LiveStack socket.io gateway initiated on path ${socketPath}.`
   );
   return io;
+}
+
+function bearerTokenFromHeader(header: string | string[] | undefined): string | undefined {
+  const value = Array.isArray(header) ? header[0] : header;
+  const match = value?.match(/^Bearer\s+(.+)$/i);
+  return match?.[1];
 }
