@@ -27,6 +27,6 @@
     "@livestack/shared": "^0.0.32",
     "@livestack/vault-client": "^0.0.32",
     "@livestack/vault-interface": "^0.0.32",
-    "zod": "^3.25.76"
+    "zod": "^4.4.3"
   }
 }
