@@ -14,7 +14,7 @@
     "ajv": "^8.20.0",
     "better-sqlite3": "^12.10.0",
     "bullmq": "^5.76.10",
-    "dotenv": "^16.x",
+    "dotenv": "^17.4.2",
     "get-port": "^7.2.0",
     "jsonschema": "^1.5.0",
     "knex": "^3.2.10",
