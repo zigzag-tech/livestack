@@ -1,4 +1,4 @@
-import { MemoryVectorStore } from "langchain/vectorstores/memory";
+import { MemoryVectorStore } from "@langchain/classic/vectorstores/memory";
 import pLimit from "p-limit";
 import { provisionLangChainEmbeddings } from "./provisionedLangChainModel";
 // Assuming pLimitedFn is a function you've defined elsewhere for rate limiting

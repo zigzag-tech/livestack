@@ -16,6 +16,7 @@ import {
   historySummaryJobSpec,
   historyTrackerJobSpec,
 } from "@livestack/summarizer/server";
+import { v4 } from "uuid";
 
 async function main() {
   const app = express();
@@ -39,13 +40,16 @@ async function main() {
       }),
       conn({
         from: speechChunkToTextSpec,
-        transform: async ({ transcript }) => transcript,
+        transform: async ({ transcript }) => ({
+          documentId: v4(),
+          content: transcript,
+        }),
         to: textSplittingSpec,
       }),
       conn({
         from: textSplittingSpec,
         transform: (chunkText) => ({
-          transcript: chunkText,
+          transcript: chunkText.chunk,
           llmType: "openai",
         }),
         to: titleSummarizerSepc,
@@ -53,14 +57,14 @@ async function main() {
       conn({
         from: textSplittingSpec,
         transform: (chunkText) => ({
-          content: chunkText,
+          content: chunkText.chunk,
           source: "audio-stream",
         }),
         to: indexJobSpec,
       }),
       conn({
         from: textSplittingSpec.output.default,
-        transform: async (chunkText) => ({ text: chunkText, id: 0 }), // dummy id
+        transform: async (chunkText) => ({ text: chunkText.chunk, id: 0 }), // dummy id
         to: historyTrackerJobSpec.input.default,
       }),
       conn({

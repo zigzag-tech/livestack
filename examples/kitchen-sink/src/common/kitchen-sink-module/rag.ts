@@ -10,11 +10,11 @@ import { z } from "zod";
 import { parseURLMarkdownText } from "./parseURLMarkdownText";
 import { splitTextRecursively } from "@livestack/lab-internal-server";
 import { getIndexOrCreate } from "./indexMap";
-import { formatDocumentsAsString } from "langchain/util/document";
+import { formatDocumentsAsString } from "@langchain/classic/util/document";
 import { StringOutputParser } from "@langchain/core/output_parsers";
 import { v4 } from "uuid";
 import { provisionedLangChainModel } from "./provisionedLangChainModel";
-import { Document } from "langchain/document";
+import { Document } from "@langchain/classic/document";
 import { HumanMessage } from "@langchain/core/messages";
 
 const systemPrompt = `Your task is to assist users by providing accurate, informative, and engaging responses to their questions based on the context provided.`;
@@ -86,7 +86,9 @@ export function getRAGWorkerDefs() {
           logger.info("Indexing: " + data.content.slice(0, 10));
           try {
             const chunks = await splitTextToChunks(data.content);
-            await index!.addDocuments(chunks);
+            await index!.addDocuments(
+              chunks.map((chunk) => new Document({ pageContent: chunk }))
+            );
             chunks.forEach(async (chunk) => {
               output.emit(chunk);
             });
