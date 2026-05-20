@@ -21,6 +21,8 @@ class CapacityManager implements CacapcityServiceImplementation {
 
   public readonly sessionId = v4();
   constructor() {}
+  private readonly requestTimeoutMs = 30_000;
+  private readonly pendingCheckInFlightByProjectUuid = new Set<string>();
 
   resolveByInstanceId: Record<string, (value: CommandToInstance) => void> = {};
   pendingResponseToCapacityQueryResolveFnMap: Map<
@@ -115,19 +117,16 @@ class CapacityManager implements CacapcityServiceImplementation {
       console.log("aborting", e);
     });
 
-    const existing = this.resolveByInstanceId[instanceId];
-    if (!existing) {
-      this.resolveByInstanceId[instanceId] = resolveJobPromise;
-    }
+    this.resolveByInstanceId[instanceId] = resolveJobPromise;
 
     console.debug(
       `reportInstanceOnline from instance ${instanceId}: ${projectUuid}.`
     );
 
-    this.instanceIdsByProjectUuid[projectUuid] =
-      this.instanceIdsByProjectUuid[projectUuid] || [];
-
-    this.instanceIdsByProjectUuid[projectUuid].push(instanceId);
+    this.instanceIdsByProjectUuid[projectUuid] = Array.from(new Set([
+      ...(this.instanceIdsByProjectUuid[projectUuid] || []),
+      instanceId,
+    ]));
 
     // After a new instance comes online, check for any pending jobs
     this.checkPendingJobs(projectUuid).catch(err => {
@@ -142,6 +141,7 @@ class CapacityManager implements CacapcityServiceImplementation {
       // capcity log
 
       delete this.resolveByInstanceId[instanceId];
+      this.dropPendingRequestsForInstance(instanceId);
 
       // remove instanceId from projectUuid lookup
       this.instanceIdsByProjectUuid[projectUuid] =
@@ -164,11 +164,7 @@ class CapacityManager implements CacapcityServiceImplementation {
 
     const capacitiesByInstanceId: Record<string, SpecNameAndCapacity[]> = {};
 
-    const capacities = await Promise.all(
-      instanceIds.map((instanceId) =>
-        this.runCapacityQuery({ instanceId, projectUuid })
-      )
-    );
+    const capacities = await this.queryAllLiveCapacities(projectUuid, instanceIds);
 
     for (const capacity of capacities) {
       capacitiesByInstanceId[capacity.instanceId] =
@@ -192,6 +188,8 @@ class CapacityManager implements CacapcityServiceImplementation {
       throw new Error(`No instance found for ${instanceId}`);
     }
     const correlationId = v4();
+    const requestKey =
+      `instances//${instanceId}//projects//${projectUuid}\$\$${correlationId}` as const;
     sendCmdToClient({
       projectUuid,
       instanceId,
@@ -200,10 +198,19 @@ class CapacityManager implements CacapcityServiceImplementation {
     });
 
     const promise = new Promise<InstanceResponseToCapacityQueryMessage>(
-      (resolve) => {
+      (resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.pendingResponseToCapacityQueryResolveFnMap.delete(requestKey);
+          reject(new Error(`Timed out waiting for capacity from ${instanceId}:${projectUuid}`));
+        }, this.requestTimeoutMs);
+        timer.unref?.();
         this.pendingResponseToCapacityQueryResolveFnMap.set(
-          `instances//${instanceId}//projects//${projectUuid}\$\$${correlationId}`,
-          resolve
+          requestKey,
+          (msg) => {
+            clearTimeout(timer);
+            this.pendingResponseToCapacityQueryResolveFnMap.delete(requestKey);
+            resolve(msg);
+          }
         );
       }
     );
@@ -221,10 +228,12 @@ class CapacityManager implements CacapcityServiceImplementation {
       `instances//${instanceId}//projects//${projectUuid}\$\$${correlationId}`
     );
     if (!resolveFn) {
-      throw new Error(
-        `No pending response found for ${instanceId}:${projectUuid}`
-      );
+      console.warn(`No pending capacity response found for ${instanceId}:${projectUuid}`);
+      return {};
     }
+    this.pendingResponseToCapacityQueryResolveFnMap.delete(
+      `instances//${instanceId}//projects//${projectUuid}\$\$${correlationId}`
+    );
     resolveFn(request);
     
     // Check for pending jobs after receiving capacity information
@@ -252,6 +261,8 @@ class CapacityManager implements CacapcityServiceImplementation {
       throw new Error(`No instance found for ${instanceId}`);
     }
     const correlationId = v4();
+    const requestKey =
+      `instanaces//${instanceId}//projects//${projectUuid}//specs//${specName}\$\$${correlationId}` as const;
     sendCmdToClient({
       projectUuid,
       instanceId,
@@ -264,11 +275,20 @@ class CapacityManager implements CacapcityServiceImplementation {
     let resolveFn: (msg: InstanceResponseToProvisionMessage) => void;
 
     const promise = new Promise<InstanceResponseToProvisionMessage>(
-      (resolve) => {
+      (resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.pendingResponseToProvisionResolveFnMap.delete(requestKey);
+          reject(new Error(`Timed out waiting for provision from ${instanceId}:${projectUuid}:${specName}`));
+        }, this.requestTimeoutMs);
+        timer.unref?.();
         resolveFn = resolve;
         this.pendingResponseToProvisionResolveFnMap.set(
-          `instanaces//${instanceId}//projects//${projectUuid}//specs//${specName}\$\$${correlationId}`,
-          resolveFn
+          requestKey,
+          (msg) => {
+            clearTimeout(timer);
+            this.pendingResponseToProvisionResolveFnMap.delete(requestKey);
+            resolveFn(msg);
+          }
         );
       }
     );
@@ -285,10 +305,12 @@ class CapacityManager implements CacapcityServiceImplementation {
       `instanaces//${instanceId}//projects//${projectUuid}//specs//${specName}\$\$${correlationId}`
     );
     if (!resolveFn) {
-      throw new Error(
-        `No pending response found for ${instanceId}:${projectUuid}:${specName}`
-      );
+      console.warn(`No pending provision response found for ${instanceId}:${projectUuid}:${specName}`);
+      return Promise.resolve({});
     }
+    this.pendingResponseToProvisionResolveFnMap.delete(
+      `instanaces//${instanceId}//projects//${projectUuid}//specs//${specName}\$\$${correlationId}`
+    );
     resolveFn(request);
     return Promise.resolve({});
   }
@@ -304,11 +326,7 @@ class CapacityManager implements CacapcityServiceImplementation {
   }) {
     const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
 
-    const capacities = await Promise.all(
-      instanceIds.map((instanceId) =>
-        this.runCapacityQuery({ instanceId, projectUuid })
-      )
-    );
+    const capacities = await this.queryAllLiveCapacities(projectUuid, instanceIds);
 
     const qualifiedCapacities = capacities.filter((c) =>
       c.specNameAndCapacity.some(
@@ -324,7 +342,8 @@ class CapacityManager implements CacapcityServiceImplementation {
       for (const instanceId of instanceIds) {
         const sendCmdToClient = this.resolveByInstanceId[instanceId];
         if (!sendCmdToClient) {
-          throw new Error(`No instance found for ${instanceId}`);
+          this.forgetInstance(projectUuid, instanceId);
+          continue;
         }
         const correlationId = v4();
         sendCmdToClient({
@@ -356,6 +375,8 @@ class CapacityManager implements CacapcityServiceImplementation {
   }
 
   async checkPendingJobs(projectUuid: string): Promise<void> {
+    if (this.pendingCheckInFlightByProjectUuid.has(projectUuid)) return;
+    this.pendingCheckInFlightByProjectUuid.add(projectUuid);
     try {
       // Get all specs with pending jobs for this project
       const projectJobs = this.pendingJobsByProjectAndSpec[projectUuid];
@@ -377,6 +398,53 @@ class CapacityManager implements CacapcityServiceImplementation {
       }
     } catch (error) {
       console.error("Error in checkPendingJobs:", error);
+    } finally {
+      this.pendingCheckInFlightByProjectUuid.delete(projectUuid);
+    }
+  }
+
+  private async queryAllLiveCapacities(
+    projectUuid: string,
+    instanceIds: string[]
+  ): Promise<InstanceResponseToCapacityQueryMessage[]> {
+    const liveInstanceIds = Array.from(new Set(instanceIds)).filter((instanceId) => {
+      if (this.resolveByInstanceId[instanceId]) return true;
+      this.forgetInstance(projectUuid, instanceId);
+      return false;
+    });
+    const settled = await Promise.allSettled(
+      liveInstanceIds.map((instanceId) =>
+        this.runCapacityQuery({ instanceId, projectUuid })
+      )
+    );
+    return settled.flatMap((result, index) => {
+      if (result.status === "fulfilled") return [result.value];
+      const instanceId = liveInstanceIds[index];
+      if (instanceId) this.forgetInstance(projectUuid, instanceId);
+      console.warn(result.reason);
+      return [];
+    });
+  }
+
+  private forgetInstance(projectUuid: string, instanceId: string) {
+    delete this.resolveByInstanceId[instanceId];
+    this.dropPendingRequestsForInstance(instanceId);
+    this.instanceIdsByProjectUuid[projectUuid] =
+      (this.instanceIdsByProjectUuid[projectUuid] || []).filter(
+        (id) => id !== instanceId
+      );
+  }
+
+  private dropPendingRequestsForInstance(instanceId: string) {
+    for (const key of this.pendingResponseToCapacityQueryResolveFnMap.keys()) {
+      if (key.startsWith(`instances//${instanceId}//`)) {
+        this.pendingResponseToCapacityQueryResolveFnMap.delete(key);
+      }
+    }
+    for (const key of this.pendingResponseToProvisionResolveFnMap.keys()) {
+      if (key.startsWith(`instanaces//${instanceId}//`)) {
+        this.pendingResponseToProvisionResolveFnMap.delete(key);
+      }
     }
   }
 }
