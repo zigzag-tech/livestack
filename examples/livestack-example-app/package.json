@@ -7,9 +7,9 @@
   "bin": "./dist/index.mjs",
   "type": "module",
   "devDependencies": {
-    "commander": "^12.1.0",
-    "rimraf": "^5.0.7",
-    "unbuild": "^2.0.0"
+    "commander": "^14.0.3",
+    "rimraf": "^6.1.3",
+    "unbuild": "^3.6.1"
   },
   "main": "dist/index.mjs",
   "files": [
