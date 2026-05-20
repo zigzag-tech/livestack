@@ -298,6 +298,16 @@ const LiveflowJobOptionsSanitized = z.object({
 });
 type LiveflowJobOptionsSanitized = z.infer<typeof LiveflowJobOptionsSanitized>;
 
+function formatSpecName({
+  specName,
+  uniqueSpecLabel,
+}: {
+  specName: string;
+  uniqueSpecLabel?: string | null;
+}) {
+  return uniqueSpecLabel ? `${specName}[${uniqueSpecLabel}]` : specName;
+}
+
 export class LiveflowSpec extends JobSpec<
   LiveflowChildJobOptionsSanitized,
   any,
@@ -386,27 +396,44 @@ export class LiveflowSpec extends JobSpec<
       const inputAliasesSoFar: Rec = {};
       const outputAliasesSoFar: Rec = {};
 
+      const ensureExposureTargetExists = (exposure: CanonicalExposure) => {
+        const specNode = defG.nodes().find((n) => {
+          const node = defG.getNodeAttributes(n);
+          return (
+            node.specName === exposure.specName &&
+            (node.uniqueSpecLabel || null) ===
+              (exposure.uniqueSpecLabel || null)
+          );
+        });
+
+        if (!specNode) {
+          const existingSpecs = Array.from(defG.nodes())
+            .map((n) => defG.getNodeAttributes(n))
+            .filter((node) => node.nodeType === "spec")
+            .map((node) =>
+              formatSpecName({
+                specName: node.specName,
+                uniqueSpecLabel: node.uniqueSpecLabel || null,
+              })
+            );
+          throw new Error(
+            `Cannot expose spec "${formatSpecName(
+              exposure
+            )}" because it is not part of liveflow "${this.name}". Add it to connections before exposing it. Existing specs: [${
+              existingSpecs.length > 0 ? existingSpecs.join(", ") : "none"
+            }]`
+          );
+        }
+      };
+
       for (const exposure of this.exposures) {
+        ensureExposureTargetExists(exposure);
+
         for (const [specTag, alias] of Object.entries(exposure.input || {})) {
           if (inputAliasesSoFar[alias]) {
             throw new Error(
               `Input alias "${alias}" already used for input "${inputAliasesSoFar[alias].tag}" of spec "${inputAliasesSoFar[alias].specName}"`
             );
-          }
-          // check if the spec exists in the defG
-          const specNode = defG.nodes().find((n) => {
-            const node = defG.getNodeAttributes(n);
-            return node.specName === exposure.specName && (node.uniqueSpecLabel || null) === (exposure.uniqueSpecLabel || null);
-          });
-
-
-          if (!specNode) {
-            console.error("Existing nodes: ", Array.from(defG.nodes()).filter((n) => defG.getNodeAttributes(n).nodeType === "spec" ).map((n) =>{
-              const node = defG.getNodeAttributes(n);
-              return node.specName;
-            }).join("\n"));
-            throw new Error(`Spec "${exposure.specName}" not found in defG.`);
-            
           }
           defG.assignAlias({
             alias,
@@ -967,7 +994,7 @@ type CanonicalConnection<
 };
 
 type CanonicalSpecAndOutletBase<P, I, O, IMap, OMap> = {
-  spec: JobSpec<P, I, O, IMap, OMap>;
+  spec: IOSpec<I, O, IMap, OMap>;
   uniqueSpecLabel?: string;
 };
 export type CanonicalSpecAndOutletFrom<P, I, O, IMap, OMap> =
