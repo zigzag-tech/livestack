@@ -9,7 +9,7 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "replicate": "^0.21"
+    "replicate": "^1.4.0"
   },
   "peerDependencies": {
     "@livestack/core": "*"
