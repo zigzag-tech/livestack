@@ -20,8 +20,8 @@
   "module": "dist/livestack-shared.esm.js",
   "license": "MIT",
   "dependencies": {
-    "lru-cache": "^11.0.2",
-    "zod": "^4.3.6"
+    "lru-cache": "^11.5.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
@@ -35,7 +35,7 @@
     "@types/node": "^24",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.10",
-    "ts-node": "^10.9.1",
+    "ts-node": "^10.9.2",
     "typescript": "5.8.3"
   },
   "author": ""

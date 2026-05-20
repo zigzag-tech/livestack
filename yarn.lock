@@ -2599,7 +2599,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@grpc/grpc-js@npm:^1.10.6, @grpc/grpc-js@npm:^1.14.0":
+"@grpc/grpc-js@npm:^1.14.0, @grpc/grpc-js@npm:^1.14.3":
   version: 1.14.3
   resolution: "@grpc/grpc-js@npm:1.14.3"
   dependencies:
@@ -3312,7 +3312,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@langchain/classic@npm:^1.0.27":
+"@langchain/classic@npm:^1.0.33":
   version: 1.0.33
   resolution: "@langchain/classic@npm:1.0.33"
   dependencies:
@@ -3404,7 +3404,7 @@ __metadata:
     "@livestack/shared": "npm:^0.0.32"
     "@rollup/plugin-typescript": "npm:^12.3.0"
     "@types/react": "npm:>=18"
-    rimraf: "npm:^6.0.1"
+    rimraf: "npm:^6.1.3"
     rollup: "npm:^4.60.4"
     typescript: "npm:5.8.3"
     uuid: "npm:^14.0.0"
@@ -3435,7 +3435,7 @@ __metadata:
     rxjs: "npm:^7.8.2"
     typescript: "npm:5.8.3"
     uuid: "npm:^14.0.0"
-    zod: "npm:^4.3.6"
+    zod: "npm:^4.4.3"
     zod-to-json-schema: "npm:^3.25.2"
   languageName: unknown
   linkType: soft
@@ -3462,7 +3462,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@livestack/kitchen-sink-example@workspace:examples/kitchen-sink"
   dependencies:
-    "@langchain/classic": "npm:^1.0.27"
+    "@langchain/classic": "npm:^1.0.33"
     "@langchain/core": "npm:^1.1.47"
     "@langchain/ollama": "npm:^1.2.7"
     "@livestack/client": "npm:^0.0.32"
@@ -3515,11 +3515,11 @@ __metadata:
     "@livestack/core": "npm:^0.0.32"
     "@rollup/plugin-typescript": "npm:^12.3.0"
     "@types/node": "npm:^24"
-    rimraf: "npm:^6.0.1"
+    rimraf: "npm:^6.1.3"
     rollup: "npm:^4.60.4"
-    ts-node: "npm:^10.9.1"
+    ts-node: "npm:^10.9.2"
     typescript: "npm:5.8.3"
-    zod: "npm:^4.3.6"
+    zod: "npm:^4.4.3"
   languageName: unknown
   linkType: soft
 
@@ -3534,9 +3534,9 @@ __metadata:
     "@livestack/lab-internal-common": "npm:^0.0.32"
     "@livestack/shared": "npm:^0.0.32"
     "@types/node": "npm:^24"
-    ts-node: "npm:^10.9.1"
+    ts-node: "npm:^10.9.2"
     typescript: "npm:5.8.3"
-    zod: "npm:^4.3.6"
+    zod: "npm:^4.4.3"
   languageName: unknown
   linkType: soft
 
@@ -3551,7 +3551,7 @@ __metadata:
     jsonrepair: "npm:^3.14.0"
     sharp: "npm:^0.34.5"
     typescript: "npm:^5.8.3"
-    zod: "npm:^4.3.6"
+    zod: "npm:^4.4.3"
   peerDependencies:
     ollama: ^0.6.3
     openai: ^6.38.0
@@ -3578,7 +3578,7 @@ __metadata:
     "@babel/preset-env": "npm:^7.29.5"
     "@babel/preset-typescript": "npm:^7.28.5"
     "@preconstruct/cli": "npm:^2.8.13"
-    typedoc: "npm:^0.28.4"
+    typedoc: "npm:^0.28.19"
     typescript: "npm:^5.8.3"
   languageName: unknown
   linkType: soft
@@ -3589,10 +3589,10 @@ __metadata:
   dependencies:
     "@preconstruct/cli": "npm:^2.8.13"
     typescript: "npm:5.8.3"
-    zod: "npm:^4.3.6"
+    zod: "npm:^4.4.3"
   peerDependencies:
     "@livestack/core": "*"
-    zod: ^4.3.6
+    zod: ^4.4.3
   languageName: unknown
   linkType: soft
 
@@ -3616,11 +3616,11 @@ __metadata:
     "@types/mocha": "npm:^10.0.10"
     "@types/node": "npm:^24"
     jest: "npm:^30.4.2"
-    lru-cache: "npm:^11.0.2"
+    lru-cache: "npm:^11.5.0"
     ts-jest: "npm:^29.4.10"
-    ts-node: "npm:^10.9.1"
+    ts-node: "npm:^10.9.2"
     typescript: "npm:5.8.3"
-    zod: "npm:^4.3.6"
+    zod: "npm:^4.4.3"
   languageName: unknown
   linkType: soft
 
@@ -3660,12 +3660,12 @@ __metadata:
     "@rollup/plugin-typescript": "npm:^12.3.0"
     "@types/node": "npm:^24"
     ollama: "npm:^0.6.3"
-    rimraf: "npm:^6.0.1"
+    rimraf: "npm:^6.1.3"
     rollup: "npm:^4.60.4"
     rollup-plugin-dts: "npm:^6.4.1"
-    ts-node: "npm:^10.9.1"
+    ts-node: "npm:^10.9.2"
     typescript: "npm:5.8.3"
-    zod: "npm:^4.3.6"
+    zod: "npm:^4.4.3"
   peerDependencies:
     openai: ^6.38.0
   languageName: unknown
@@ -3681,7 +3681,7 @@ __metadata:
     "@livestack/gateway": "npm:*"
     "@livestack/shared": "npm:*"
     "@livestack/viz": "npm:*"
-    "@types/cors": "npm:^2.8.17"
+    "@types/cors": "npm:^2.8.19"
     "@types/express": "npm:^5.0.6"
     "@types/multer": "npm:^2.1.0"
     "@types/node": "npm:^24"
@@ -3697,7 +3697,7 @@ __metadata:
     tsx: "npm:^4.22.3"
     typescript: "npm:5.8.3"
     uuid: "npm:^14.0.0"
-    zod: "npm:^4.3.6"
+    zod: "npm:^4.4.3"
   languageName: unknown
   linkType: soft
 
@@ -3714,18 +3714,18 @@ __metadata:
     "@rollup/plugin-typescript": "npm:^12.3.0"
     "@types/node": "npm:^24"
     axios: "npm:^1.16.1"
-    rimraf: "npm:^6.0.1"
+    rimraf: "npm:^6.1.3"
     rollup: "npm:^4.60.4"
     rollup-plugin-dts: "npm:^6.4.1"
-    ts-node: "npm:^10.9.1"
+    ts-node: "npm:^10.9.2"
     typescript: "npm:5.8.3"
     uuid: "npm:^14.0.0"
-    zod: "npm:^4.3.6"
+    zod: "npm:^4.4.3"
   peerDependencies:
     openai: ^6.38.0
     react: ">=18"
     socket.io-client: ^4
-    zod: ^4.3.6
+    zod: ^4.4.3
   languageName: unknown
   linkType: soft
 
@@ -3740,9 +3740,9 @@ __metadata:
     "@livestack/lab-internal-common": "npm:^0.0.32"
     "@livestack/summarizer": "npm:^0.0.32"
     "@types/node": "npm:^24"
-    ts-node: "npm:^10.9.1"
+    ts-node: "npm:^10.9.2"
     typescript: "npm:5.8.3"
-    zod: "npm:^4.3.6"
+    zod: "npm:^4.4.3"
   peerDependencies:
     openai: ^6.38.0
   languageName: unknown
@@ -3803,7 +3803,7 @@ __metadata:
     "@babel/preset-env": "npm:^7.29.5"
     "@babel/preset-typescript": "npm:^7.28.5"
     "@bufbuild/protobuf": "npm:^2.12.0"
-    "@grpc/grpc-js": "npm:^1.10.6"
+    "@grpc/grpc-js": "npm:^1.14.3"
     "@grpc/proto-loader": "npm:^0.8.1"
     "@preconstruct/cli": "npm:^2.8.13"
     "@types/lodash": "npm:^4.17.24"
@@ -5146,7 +5146,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/cors@npm:^2.8.12, @types/cors@npm:^2.8.17":
+"@types/cors@npm:^2.8.12, @types/cors@npm:^2.8.19":
   version: 2.8.19
   resolution: "@types/cors@npm:2.8.19"
   dependencies:
@@ -9548,7 +9548,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lru-cache@npm:^11.0.0, lru-cache@npm:^11.0.2, lru-cache@npm:^11.3.5, lru-cache@npm:^11.5.0":
+"lru-cache@npm:^11.0.0, lru-cache@npm:^11.3.5, lru-cache@npm:^11.5.0":
   version: 11.5.0
   resolution: "lru-cache@npm:11.5.0"
   checksum: 10c0/b92c2a7518128dec6b244bf3eb9fd79964d316cdeb12865ebfc2cebb4dfe9b24e3767a3923d71e6eb735f56b557fc55f08f150a53097d7805afb628c90158df4
@@ -11030,7 +11030,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"rimraf@npm:^6.0.1":
+"rimraf@npm:^6.1.3":
   version: 6.1.3
   resolution: "rimraf@npm:6.1.3"
   dependencies:
@@ -12137,7 +12137,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"ts-node@npm:^10.9.1, ts-node@npm:^10.9.2":
+"ts-node@npm:^10.9.2":
   version: 10.9.2
   resolution: "ts-node@npm:10.9.2"
   dependencies:
@@ -12286,7 +12286,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"typedoc@npm:^0.28.4":
+"typedoc@npm:^0.28.19":
   version: 0.28.19
   resolution: "typedoc@npm:0.28.19"
   dependencies:
@@ -12971,13 +12971,13 @@ __metadata:
   linkType: hard
 
 "zod@npm:^3.21.4":
-  version: 3.24.4
-  resolution: "zod@npm:3.24.4"
-  checksum: 10c0/ab3112f017562180a41a0f83d870b333677f7d6b77f106696c56894567051b91154714a088149d8387a4f50806a2520efcb666f108cd384a35c236a191186d91
+  version: 3.25.76
+  resolution: "zod@npm:3.25.76"
+  checksum: 10c0/5718ec35e3c40b600316c5b4c5e4976f7fee68151bc8f8d90ec18a469be9571f072e1bbaace10f1e85cf8892ea12d90821b200e980ab46916a6166a4260a983c
   languageName: node
   linkType: hard
 
-"zod@npm:^3.25.76 || ^4, zod@npm:^4.3.6, zod@npm:^4.4.3":
+"zod@npm:^3.25.76 || ^4, zod@npm:^4.4.3":
   version: 4.4.3
   resolution: "zod@npm:4.4.3"
   checksum: 10c0/7ea31b558e88f9faf44f31dd185e2e1cbf51fed3081787fb96cc2534749b50c0acfc6da7f0922a7353ed092dd358c7d50c28ea96c94d04af64191bd33152eca3
