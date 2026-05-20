@@ -12,6 +12,7 @@
     "@livestack/core": "*"
   },
   "devDependencies": {
+    "@types/node": "^24",
     "@preconstruct/cli": "^2.8.13",
     "typescript": "6.0.3"
   },

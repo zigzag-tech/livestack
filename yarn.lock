@@ -3375,6 +3375,7 @@ __metadata:
   resolution: "@livestack/aliyun@workspace:aliyun"
   dependencies:
     "@preconstruct/cli": "npm:^2.8.13"
+    "@types/node": "npm:^24"
     typescript: "npm:6.0.3"
   peerDependencies:
     "@livestack/core": "*"
