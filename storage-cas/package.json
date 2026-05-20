@@ -1,0 +1,23 @@
+{
+  "name": "@livestack/storage-cas",
+  "version": "0.0.32",
+  "description": "Content-addressed storage primitives for Livestack workers.",
+  "scripts": {
+    "build": "preconstruct build"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "devDependencies": {
+    "@preconstruct/cli": "^2.8.13",
+    "typescript": "6.0.3"
+  },
+  "main": "dist/livestack-storage-cas.cjs.js",
+  "types": "dist/livestack-storage-cas.cjs.d.ts",
+  "module": "dist/livestack-storage-cas.esm.js",
+  "preconstruct": {
+    "entrypoints": [
+      "./index.ts"
+    ]
+  }
+}
