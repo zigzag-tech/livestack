@@ -40,6 +40,7 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
   public readonly workerPrefix?: string;
   public readonly autoStartWorker: boolean;
   public readonly reportedCapacity: number;
+  private startedWorkerCount = 0;
 
   public static registeredWorkerDefsBySpecName: Record<
     string,
@@ -169,11 +170,11 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
           projectUuid,
           instanceId,
           specNameAndCapacity: autoStartSpecNames.map((specName) => {
+            const workerDef =
+              LiveWorkerDef.registeredWorkerDefsBySpecName[specName];
             return {
               specName,
-              capacity:
-                LiveWorkerDef.registeredWorkerDefsBySpecName[specName]
-                  .reportedCapacity,
+              capacity: workerDef.availableWorkerCapacity(),
             };
           }),
         });
@@ -189,8 +190,12 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
           throw new Error(`Worker definition not found for ${specName}`);
         }
 
-        for (let i = 0; i < numberOfWorkersNeeded; i++) {
-          workerDef.startWorker({});
+        const numberOfWorkersStarted = Math.min(
+          numberOfWorkersNeeded,
+          workerDef.availableWorkerCapacity()
+        );
+        for (let i = 0; i < numberOfWorkersStarted; i++) {
+          await workerDef.startWorker({});
         }
 
         await (
@@ -200,7 +205,7 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
           projectUuid,
           instanceId,
           specName,
-          numberOfWorkersStarted: numberOfWorkersNeeded,
+          numberOfWorkersStarted,
         });
       } else if (noCapacityWarning) {
         console.warn(
@@ -224,16 +229,31 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
    */
   public async startWorker(p?: { instanceParams?: WP }) {
     const { instanceParams } = p || {};
+    this.startedWorkerCount++;
 
-    const worker = new LiveWorker<P, I, O, WP, IMap, OMap>({
-      def: this,
-      instanceParams: instanceParams || ({} as WP),
-      liveEnv: await this.liveEnvP,
-    });
+    let worker: LiveWorker<P, I, O, WP, IMap, OMap>;
+    try {
+      worker = new LiveWorker<P, I, O, WP, IMap, OMap>({
+        def: this,
+        instanceParams: instanceParams || ({} as WP),
+        liveEnv: await this.liveEnvP,
+      });
+    } catch (error) {
+      this.releaseWorkerCapacity();
+      throw error;
+    }
     // this.workers.push(worker);
     // await worker.waitUntilReady();
     // console.info("Worker started: ", worker.workerName);
     return worker;
+  }
+
+  public availableWorkerCapacity(): number {
+    return Math.max(0, this.reportedCapacity - this.startedWorkerCount);
+  }
+
+  public releaseWorkerCapacity() {
+    this.startedWorkerCount = Math.max(0, this.startedWorkerCount - 1);
   }
 
   /**
@@ -563,6 +583,7 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     });
     this.terminateActivityIterator?.();
     this._workerStatus = "stopped";
+    this.def.releaseWorkerCapacity();
     (await this.loggerP).info(`WORKER STOPPED: ${await this.workerNameP}.`);
   }
 }
