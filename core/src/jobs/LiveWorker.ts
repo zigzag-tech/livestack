@@ -28,6 +28,7 @@ export type LiveWorkerDefParams<
   liveEnv?: LiveEnv;
   workerPrefix?: string;
   maxNumWorkers?: number;
+  reportedCapacity?: number;
   autostartWorker?: boolean;
 };
 
@@ -38,6 +39,7 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
   public readonly liveEnvP: Promise<LiveEnv>;
   public readonly workerPrefix?: string;
   public readonly autoStartWorker: boolean;
+  public readonly reportedCapacity: number;
 
   public static registeredWorkerDefsBySpecName: Record<
     string,
@@ -61,11 +63,18 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
     instanceParamsDef,
     liveEnv,
     workerPrefix,
+    concurrency,
     maxNumWorkers = 1000,
+    reportedCapacity,
     autostartWorker = true,
   }: LiveWorkerDefParams<P, I, O, WP, IMap, OMap>) {
     this.jobSpec = jobSpec;
     this.autoStartWorker = autostartWorker;
+    this.reportedCapacity = resolveWorkerReportedCapacity({
+      reportedCapacity,
+      concurrency,
+      maxNumWorkers,
+    });
 
     this.instanceParamsDef = instanceParamsDef || z.object({});
     this.processor = processor;
@@ -154,7 +163,6 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
               .autoStartWorker
         );
         // console.debug("autoStartSpecNames", autoStartSpecNames);
-        const capacity = 10;
 
         await(await this.liveEnvP).vaultClient.capacity.respondToCapacityQuery({
           correlationId,
@@ -163,7 +171,9 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
           specNameAndCapacity: autoStartSpecNames.map((specName) => {
             return {
               specName,
-              capacity,
+              capacity:
+                LiveWorkerDef.registeredWorkerDefsBySpecName[specName]
+                  .reportedCapacity,
             };
           }),
         });
@@ -251,6 +261,29 @@ export class LiveWorkerDef<P, I, O, WP extends object | undefined, IMap, OMap> {
   ) {
     return defineWorker(p);
   }
+}
+
+export function resolveWorkerReportedCapacity({
+  reportedCapacity,
+  concurrency,
+  maxNumWorkers,
+}: {
+  reportedCapacity?: number;
+  concurrency?: number;
+  maxNumWorkers?: number;
+}): number {
+  const fallback = concurrency ?? 10;
+  const resolved = reportedCapacity ?? fallback;
+  if (!Number.isInteger(resolved) || resolved <= 0) {
+    throw new Error("LiveWorker reportedCapacity must be a positive integer.");
+  }
+  if (maxNumWorkers !== undefined) {
+    if (!Number.isInteger(maxNumWorkers) || maxNumWorkers <= 0) {
+      throw new Error("LiveWorker maxNumWorkers must be a positive integer.");
+    }
+    return Math.min(resolved, maxNumWorkers);
+  }
+  return resolved;
 }
 
 function defineWorker<P, I, O, WP extends object | undefined, IMap, OMap>(
