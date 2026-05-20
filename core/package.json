@@ -34,7 +34,6 @@
     "@babel/preset-typescript": "^7.28.5",
     "@preconstruct/cli": "^2.8.13",
     "@types/lodash": "^4.17.24",
-    "@types/uuid": "^9.0.7",
     "typescript": "5.8.3"
   },
   "author": ""
