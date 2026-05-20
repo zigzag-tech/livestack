@@ -325,6 +325,14 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
   private sendNextActivity?: (activity: FromWorker) => void;
   private terminateActivityIterator?: () => void;
 
+  protected get workerStatus() {
+    return this._workerStatus;
+  }
+
+  protected shouldKeepRunning() {
+    return this._workerStatus === "running";
+  }
+
   constructor({
     instanceParams,
     def,
@@ -421,7 +429,7 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
     };
 
     this.liveEnvP.then(async (liveEnv) => {
-      while (that._workerStatus === "running") {
+      while (that.shouldKeepRunning()) {
         try {
           const serverMsgIter =
             liveEnv.vaultClient.queue.reportAsWorker(clientMsgIter);
@@ -493,7 +501,7 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
               // process.off("SIGINT", () => gracefulShutdown("SIGINT"));
             }
 
-            if (that._workerStatus === "stopping") {
+            if (!that.shouldKeepRunning()) {
               break;
             }
           }
@@ -531,7 +539,7 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
    * Stops the worker gracefully.
    */
   public async stop() {
-    if (this._workerStatus === "stopped") {
+    if (this.workerStatus === "stopped") {
       return;
     }
 
@@ -543,10 +551,6 @@ export class LiveWorker<P, I, O, WP extends object | undefined, IMap, OMap> {
       } catch {
         // The normal worker loop reports the failure before shutdown.
       }
-    }
-
-    if (this._workerStatus === "stopped") {
-      return;
     }
 
     const liveEnv = await this.liveEnvP;

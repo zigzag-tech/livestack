@@ -412,7 +412,7 @@ export class LiveflowSpec extends JobSpec<
             .filter((node) => node.nodeType === "spec")
             .map((node) =>
               formatSpecName({
-                specName: node.specName,
+                specName: node.specName ?? "(unknown)",
                 uniqueSpecLabel: node.uniqueSpecLabel || null,
               })
             );
@@ -994,7 +994,7 @@ type CanonicalConnection<
 };
 
 type CanonicalSpecAndOutletBase<P, I, O, IMap, OMap> = {
-  spec: IOSpec<I, O, IMap, OMap>;
+  spec: IOSpec<I, O, any, any>;
   uniqueSpecLabel?: string;
 };
 export type CanonicalSpecAndOutletFrom<P, I, O, IMap, OMap> =
