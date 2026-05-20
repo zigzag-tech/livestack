@@ -3832,7 +3832,7 @@ __metadata:
     ajv: "npm:^8.20.0"
     better-sqlite3: "npm:^12.10.0"
     bullmq: "npm:^5.76.10"
-    dotenv: "npm:^16.x"
+    dotenv: "npm:^17.4.2"
     get-port: "npm:^7.2.0"
     jsonschema: "npm:^1.5.0"
     knex: "npm:^3.2.10"
@@ -6705,7 +6705,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"dotenv@npm:^16.3.1, dotenv@npm:^16.x":
+"dotenv@npm:^16.3.1":
   version: 16.6.1
   resolution: "dotenv@npm:16.6.1"
   checksum: 10c0/15ce56608326ea0d1d9414a5c8ee6dcf0fffc79d2c16422b4ac2268e7e2d76ff5a572d37ffe747c377de12005f14b3cc22361e79fc7f1061cce81f77d2c973dc
