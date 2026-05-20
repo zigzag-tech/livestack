@@ -7,3 +7,5 @@ _docs
 .yarn
 .pnp.*
 *.log
+dist/
+*.tsbuildinfo
