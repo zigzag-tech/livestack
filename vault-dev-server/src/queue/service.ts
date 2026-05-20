@@ -142,6 +142,11 @@ class QueueServiceByProject implements QueueServiceImplementation {
       console.debug(
         // `Queue ${job.specName} for project ${job.projectUuid} has ${countOfTotalJobsRequiringCapacity} waiting+active jobs, while capacity is at ${capacity}. \nAttempting to increase capacity by ${diff}.`
       );
+      (await getCapacityManager()).setPendingJobs(
+        job.projectUuid,
+        job.specName,
+        diff
+      );
       for (let i = 0; i < diff; i++) {
         await getCapacityManager().increaseCapacity({
           projectUuid: job.projectUuid,

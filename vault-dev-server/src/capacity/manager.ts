@@ -41,17 +41,14 @@ class CapacityManager implements CacapcityServiceImplementation {
 
   instanacesByProejctUuid = {};
 
-  // Add a job to pending tracking
-  addPendingJob(projectUuid: string, specName: string) {
+  setPendingJobs(projectUuid: string, specName: string, count: number) {
     if (!this.pendingJobsByProjectAndSpec[projectUuid]) {
       this.pendingJobsByProjectAndSpec[projectUuid] = {};
     }
-    
-    if (!this.pendingJobsByProjectAndSpec[projectUuid][specName]) {
-      this.pendingJobsByProjectAndSpec[projectUuid][specName] = 0;
-    }
-    
-    this.pendingJobsByProjectAndSpec[projectUuid][specName]++;
+    this.pendingJobsByProjectAndSpec[projectUuid][specName] = Math.max(
+      this.pendingJobsByProjectAndSpec[projectUuid][specName] ?? 0,
+      count
+    );
   }
   
   // Remove a job from pending tracking (when it gets processed)
@@ -300,12 +297,10 @@ class CapacityManager implements CacapcityServiceImplementation {
     projectUuid,
     specName,
     by,
-    trackPending = true,
   }: {
     projectUuid: string;
     specName: string;
     by: number;
-    trackPending?: boolean;
   }) {
     const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
 
@@ -342,10 +337,6 @@ class CapacityManager implements CacapcityServiceImplementation {
         });
       }
       
-      if (trackPending) {
-        this.addPendingJob(projectUuid, specName);
-      }
-      
       // Return early if no qualified instances found
       return;
     }
@@ -361,8 +352,6 @@ class CapacityManager implements CacapcityServiceImplementation {
     
     if ((provisionResponse.numberOfWorkersStarted ?? 0) > 0) {
       this.removePendingJob(projectUuid, specName);
-    } else if (trackPending) {
-      this.addPendingJob(projectUuid, specName);
     }
   }
 
@@ -382,7 +371,6 @@ class CapacityManager implements CacapcityServiceImplementation {
               projectUuid,
               specName,
               by: 1,
-              trackPending: false,
             });
           }
         }
