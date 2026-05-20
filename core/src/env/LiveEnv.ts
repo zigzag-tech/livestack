@@ -109,12 +109,13 @@ export class LiveEnv {
         "Project ID is not provided. Please provide a project ID with LiveEnv.create({ projectId: '...' }) or set the LIVESTACK_PROJECT_ID environment variable."
       );
     }
-    // const { projectUuid, localProjectId, userId, authToken } =
-    //   await resolveProjectInfo(projectId);
-    const projectUuid = "fake-project-uuid";
-    const localProjectId = "fake-local-project-id";
-    const userId = "fake-user-id";
-    const authToken = "fake-auth-token";
+    const parsedProjectId = parseProjectId(projectId);
+    const projectUuid =
+      process.env.LIVESTACK_PROJECT_UUID || parsedProjectId.projectUuid;
+    const localProjectId = parsedProjectId.localProjectId;
+    const userId =
+      process.env.LIVESTACK_USER_ID || parsedProjectId.userId || "local-user";
+    const authToken = process.env.LIVESTACK_AUTH_TOKEN || "local-dev-token";
 
     const vaultClient = await genAuthorizedVaultClient(authToken);
     return new LiveEnv({
@@ -218,6 +219,27 @@ export class LiveEnv {
       return this._cachedInstanceId;
     });
   }
+}
+
+function parseProjectId(projectId: string | `@${string}/${string}`): {
+  projectUuid: string;
+  localProjectId: string;
+  userId?: string;
+} {
+  if (projectId.startsWith("@") && projectId.includes("/")) {
+    const separator = projectId.indexOf("/");
+    const userId = projectId.slice(1, separator);
+    const localProjectId = projectId.slice(separator + 1);
+    return {
+      projectUuid: localProjectId,
+      localProjectId,
+      userId,
+    };
+  }
+  return {
+    projectUuid: projectId,
+    localProjectId: projectId,
+  };
 }
 
 /**
