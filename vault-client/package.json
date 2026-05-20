@@ -12,17 +12,17 @@
   "module": "dist/livestack-vault-client.esm.js",
   "dependencies": {
     "@livestack/vault-interface": "^0.0.32",
-    "nice-grpc": "^2.1.8",
-    "nice-grpc-client-middleware-retry": "^3.1.7"
+    "nice-grpc": "^2.1.16",
+    "nice-grpc-client-middleware-retry": "^3.1.15"
   },
   "devDependencies": {
-    "@babel/core": "^7.26.10",
-    "@babel/preset-env": "^7.26.9",
-    "@babel/preset-typescript": "^7.26.0",
-    "@types/lodash": "^4.14.201",
-    "@types/node": "^20.11.0",
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "@preconstruct/cli": "^2.8.13",
+    "@types/lodash": "^4.17.24",
+    "@types/node": "^24",
     "@types/uuid": "^9.0.7",
-    "typescript": "5.8.3",
-    "@preconstruct/cli": "^2.8.11"
+    "typescript": "5.8.3"
   }
 }

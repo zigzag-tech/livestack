@@ -12,7 +12,7 @@
     "@livestack/core": "*"
   },
   "devDependencies": {
-    "@preconstruct/cli": "^2.8.4",
+    "@preconstruct/cli": "^2.8.13",
     "typescript": "5.8.3"
   },
   "main": "dist/livestack-storage-s3.cjs.js",
@@ -24,6 +24,6 @@
     ]
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.577.0"
+    "@aws-sdk/client-s3": "^3.1050.0"
   }
 }

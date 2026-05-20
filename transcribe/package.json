@@ -5,27 +5,28 @@
   "dependencies": {
     "@livestack/client": "^0.0.32",
     "@livestack/core": "^0.0.32",
-    "axios": "^1.8.4",
+    "axios": "^1.16.1",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@babel/core": "^7.26.10",
-    "@babel/preset-env": "^7.26.9",
-    "@babel/preset-react": "^7.26.0",
-    "@babel/preset-typescript": "^7.26.0",
-    "@rollup/plugin-typescript": "^11.1.6",
-    "@types/node": "^16",
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.5",
+    "@babel/preset-react": "^7.28.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@types/node": "^24",
     "@types/uuid": "^9.0.7",
-    "uuid": ">=11",
     "rimraf": "^6.0.1",
-    "rollup": "^4.18.0",
-    "rollup-plugin-dts": "^6.1.1",
+    "rollup": "^4.60.4",
+    "rollup-plugin-dts": "^6.4.1",
     "ts-node": "^10.9.1",
-    "typescript": "5.8.3"
+    "typescript": "5.8.3",
+    "uuid": ">=11"
   },
   "peerDependencies": {
-    "openai": "^4",
+    "openai": "^6.38.0",
     "react": ">=18",
+    "socket.io-client": "^4",
     "zod": "^4.3.6"
   },
   "scripts": {

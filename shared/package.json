@@ -19,20 +19,20 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@babel/core": "^7.26.10",
-    "@babel/preset-env": "^7.26.9",
-    "@babel/preset-typescript": "^7.26.0",
+    "@babel/core": "^7.29.0",
+    "@babel/preset-env": "^7.29.5",
+    "@babel/preset-typescript": "^7.28.5",
+    "@preconstruct/cli": "^2.8.13",
     "@types/chai": "^4.3.12",
     "@types/jest": "^29.5.12",
-    "@types/lodash": "^4.14.201",
-    "@types/mocha": "^10.0.6",
-    "@types/node": "^16",
+    "@types/lodash": "^4.17.24",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24",
     "@types/uuid": "^9.0.7",
     "jest": "^29.7.0",
-    "ts-jest": "^29.1.2",
+    "ts-jest": "^29.4.10",
     "ts-node": "^10.9.1",
-    "typescript": "5.8.3",
-    "@preconstruct/cli": "^2.8.11"
+    "typescript": "5.8.3"
   },
   "author": ""
 }

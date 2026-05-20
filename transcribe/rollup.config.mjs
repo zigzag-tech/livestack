@@ -15,12 +15,15 @@ export default [
       typescript({
         sourceMap: true,
         inlineSources: true,
+        compilerOptions: {
+          outDir: "client",
+        },
         exclude: ["src/server/*"],
       }),
     ],
   },
   {
-    input: "client/dist/client/index.d.ts",
+    input: "client/client/index.d.ts",
     output: {
       format: "cjs",
       file: "client/index.d.ts",
