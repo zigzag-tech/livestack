@@ -60,17 +60,21 @@ export function getLocalTempFileStorageProvider(
   ) => {
     const fullPath = path.join(pathPrefix, f.path);
     const data = await fs.promises.readFile(fullPath);
+    const arrayBuffer = data.buffer.slice(
+      data.byteOffset,
+      data.byteOffset + data.byteLength
+    ) as ArrayBuffer;
     type R = InferRestoredFileType<T>;
     if (f.originalType === "string") {
       return data.toString() as R;
     } else if (f.originalType === "buffer") {
       return data as R;
     } else if (f.originalType === "array-buffer") {
-      return data.buffer as R;
+      return arrayBuffer as R;
     } else if (f.originalType === "blob") {
-      return new Blob([data]) as R;
+      return new Blob([arrayBuffer]) as R;
     } else if (f.originalType === "file") {
-      return new File([data], fullPath) as R;
+      return new File([arrayBuffer], fullPath) as R;
     } else if (f.originalType === "stream") {
       return fs.createReadStream(fullPath) as Readable as R;
     } else {
