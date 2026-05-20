@@ -6,6 +6,7 @@
     "@livestack/core": "^0.0.32",
     "@livestack/lab-internal-common": "^0.0.32",
     "@livestack/summarizer": "^0.0.32",
+    "@zigzag-tech/llm-catalog": "file:../../llm-catalog",
     "zod": "^4.4.3"
   },
   "main": "src/index.ts",

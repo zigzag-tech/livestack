@@ -1,5 +1,5 @@
-import { wrapWithTransientStdout } from "@livestack/shared";
 import { Message } from "ollama";
+import { generateLivestackText } from "./llmCatalog";
 
 const CONVO_MODEL = "llama3:instruct";
 
@@ -12,20 +12,15 @@ export async function generateSimpleResponseOllama({
   modelName?: string;
   format?: string;
 }): Promise<string> {
-  const { Ollama } = await import("ollama");
-  const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
-  const ollama = new Ollama({ host: OLLAMA_HOST });
-
   try {
-    const response = await ollama.chat({
-      stream: true,
-      model: modelName || CONVO_MODEL,
+    return await generateLivestackText({
+      purpose: "title-local",
       messages,
-      format,
+      parameters: {
+        model: modelName || CONVO_MODEL,
+        format,
+      },
     });
-    const message = wrapWithTransientStdout(response);
-
-    return message;
   } catch (e) {
     console.log(e);
     return "Sorry, I am not able to respond right now. Please try again later.";

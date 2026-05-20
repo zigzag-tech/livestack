@@ -1,4 +1,3 @@
-import OpenAI from "openai";
 import { JobSpec } from "@livestack/core";
 import { z } from "zod";
 import { summarizedTitleDef } from "../common/defs";
@@ -9,6 +8,7 @@ import {
 } from "./leptonUtils";
 import { generateSimpleResponseOllama } from "./ollamaUtils";
 import { fewShotExamples } from "./ollamaUtils";
+import { generateLivestackJson } from "./llmCatalog";
 const AUTO_START_WORKER = true;
 
 export const transcriptInputDef = z.object({
@@ -98,13 +98,10 @@ JSON TITLE:
 const openAILLMSummarizedTitleWorker =
   openAILLMSummarizedTitleSpec.defineWorker({
     processor: async ({ input, output }) => {
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-      });
       for await (const data of input) {
         let title = "";
-        const response = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
+        const parsedR = await generateLivestackJson<{ title: string }>({
+          purpose: "title-openai",
           messages: [
             ...fewShotExamples,
             {
@@ -117,16 +114,13 @@ ${data.transcript}
 JSON TITLE:
 `,
             },
-          ] as any,
+          ],
+          schema: z.object({ title: z.string() }),
         });
         try {
-          const parsedR = JSON.parse(response.choices[0].message.content!) as {
-            title: string;
-          };
           title = parsedR.title;
         } catch (e) {
           console.error("Failed to parse OpenAI response", e);
-          console.error("OpenAI response", response.choices[0].message.content);
         }
 
         output.emit({ summarizedTitle: title });
