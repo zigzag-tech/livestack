@@ -1,6 +1,5 @@
-import { OllamaEmbeddings } from "@langchain/community/embeddings/ollama";
+import { OllamaEmbeddings, ChatOllama } from "@langchain/ollama";
 import { JobSpec, LiveJob } from "@livestack/core";
-import { ChatOllama } from "@langchain/community/chat_models/ollama";
 import {
   SimpleChatModel,
   type BaseChatModelParams,
@@ -165,7 +164,7 @@ class LivestackProvisionedChatModel extends SimpleChatModel<BaseChatModelParams>
   }
   async _call(
     messages: BaseMessage[],
-    options: this["ParsedCallOptions"],
+    options: Record<string, any>,
     runManager?: CallbackManagerForLLMRun | undefined
   ): Promise<string> {
     console.log("invoking", messages, options);
@@ -229,8 +228,11 @@ export const langchainChatModelWorkerDef = langchainChatModelSpec.defineWorker({
           : new SystemMessage(m.data)
       );
       // console.log(deserializedMessages);
-      const result = await model._call(deserializedMessages, options);
-      await output.emit(result);
+      const result = await model.invoke(deserializedMessages, options);
+      const content = Array.isArray(result.content)
+        ? JSON.stringify(result.content)
+        : result.content;
+      await output.emit(content);
 
       // break for now
       break;
