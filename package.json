@@ -22,6 +22,8 @@
     "typescript": "^6.0.3"
   },
   "resolutions": {
+    "@rollup/plugin-commonjs@npm:^15.0.0": "npm:29.0.2",
+    "@rollup/plugin-replace@npm:^2.4.1": "npm:6.0.3",
     "brace-expansion@npm:^1.1.7": "npm:1.1.13",
     "minimatch@npm:^3.0.4": "npm:3.1.5",
     "minimatch@npm:^3.1.1": "npm:3.1.5",
