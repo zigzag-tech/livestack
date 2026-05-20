@@ -1,7 +1,9 @@
 {
   "include": ["src/**/*"],
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "outDir": "dist",
+    "rootDir": "src",
     "target": "ES5",
     "pretty": true,
     "moduleResolution": "node",
