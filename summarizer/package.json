@@ -5,6 +5,7 @@
   "dependencies": {
     "@livestack/core": "^0.0.32",
     "@livestack/shared": "^0.0.32",
+    "@zigzag-tech/llm-catalog": "file:../../llm-catalog",
     "ollama": "^0.6.3",
     "zod": "^4.4.3"
   },

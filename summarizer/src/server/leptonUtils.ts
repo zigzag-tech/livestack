@@ -1,5 +1,5 @@
 import { fewShotExamples } from "./ollamaUtils";
-import OpenAI from "openai";
+import { generateLivestackText } from "./llmCatalog";
 
 export const LLAMA2_13B_MODEL = "llama2-13b";
 export const LLAMA2_70B_MODEL = "llama2-70b";
@@ -16,38 +16,29 @@ export async function executeOpenAILikeLLMAPIChat({
   prompt: string;
   modelIds: string[];
 }) {
-  for (const modelId of modelIds) {
-    const provider = new OpenAI(genLeptonAIConfig(modelId));
-
-    const completion = await provider.chat.completions.create({
-      model: modelId,
-      temperature: 0.5,
-      messages: [
-        ...fewShotExamples,
-        {
-          role: "user",
-          content: `ORIGINAL TEXT:
+  void modelIds;
+  const message = await generateLivestackText({
+    purpose: "title-lepton",
+    messages: [
+      ...fewShotExamples,
+      {
+        role: "user",
+        content: `ORIGINAL TEXT:
 \`\`\`
 ${prompt}
 \`\`\`
 
 JSON TITLE:
 `,
-        },
-      ] as any,
-    });
+      },
+    ],
+    parameters: {
+      temperature: 0.5,
+    },
+  });
 
-    const message = completion.choices[0].message?.content;
-    // const message = completion.data.choices[0].text;
-    // console.log("message", message);
-    if (!message) {
-      console.error(`Failed to generate summary with model ${modelId}.`);
-      continue;
-    }
-    const summary = message;
-    // console.debug("summary", summary);
-
-    return summary;
+  if (message) {
+    return message;
   }
 
   throw new Error("None of the models managed to generate a summary.");

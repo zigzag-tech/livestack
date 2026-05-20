@@ -1,7 +1,6 @@
-import OpenAI from "openai";
 import { JobSpec } from "@livestack/core";
 import { z } from "zod";
-import { generateJSONResponseOllama } from "@livestack/llm-utils";
+import { generateTranslationJson } from "./llmCatalog";
 import {
   translationInputSchema,
   translationOutputSchema,
@@ -45,7 +44,7 @@ async function translate(
       | {
         llmType: "ollama";
       }
-      | { llmType: "openai"; openai: OpenAI }
+      | { llmType: "openai" }
     )
 ): Promise<z.infer<typeof translationOutputSchema>> {
   const { llmType, toLang, text } = input;
@@ -57,32 +56,24 @@ async function translate(
     },
   ];
   if (llmType === "ollama") {
-    const responseRaw = await generateJSONResponseOllama<{ translated: string }>({
+    return await generateTranslationJson<{ translated: string }>({
+      purpose: "translation-local",
       messages,
-      options: {
-        modelName: "gemma3:27b",
+      schema: z.object({ translated: z.string() }),
+    });
+  } else {
+    return await generateTranslationJson<{ translated: string }>({
+      purpose: "translation-openai",
+      messages,
+      schema: z.object({ translated: z.string() }),
+      parameters: {
+        temperature: 1,
+        max_tokens: 256,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0,
       },
     });
-
-    const result = await responseRaw.resultPromise;
-    if (result.status === "failed") {
-      throw new Error("Failed to generate response");
-    }
-    return { translated: result.content.translated };
-  } else {
-    const { openai } = input;
-    const response: any = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: messages as any,
-      temperature: 1,
-      max_tokens: 256,
-      top_p: 1,
-      frequency_penalty: 0,
-      presence_penalty: 0,
-    });
-
-    const translated = JSON.parse(response.choices[0].message.content);
-    return translated;
   }
 }
 
@@ -124,11 +115,8 @@ export const openAILLMTranslationWorker = openAILLMTranslationSpec.defineWorker(
           "OPENAI_API_KEY is not defined. Please set it as an environment variable."
         );
       }
-      const openai = new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-      });
       for await (const data of input) {
-        const r = await translate({ ...data, llmType: "openai", openai });
+        const r = await translate({ ...data, llmType: "openai" });
         output.emit(r);
       }
     },

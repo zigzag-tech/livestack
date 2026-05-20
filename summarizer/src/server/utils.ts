@@ -1,6 +1,7 @@
 import { OpenAI } from "openai";
 import { generateSimpleResponseOllama } from "./ollamaUtils";
 import { Message } from "ollama";
+import { generateLivestackText } from "./llmCatalog";
 
 export const fewShotExamples = [
   {
@@ -67,14 +68,11 @@ export const summarize = async (
 ) => {
   const { messages, useCloudSummarizer, format } = input;
   if (useCloudSummarizer) {
-    const { openai } = input;
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+    const r = await generateLivestackText({
+      purpose: "topics-openai",
       messages: messages as any,
-      temperature: 1,
+      parameters: { temperature: 1 },
     });
-
-    const r = response.choices[0].message.content || "Failed to summarize";
     return r;
   } else {
     const r = await generateSimpleResponseOllama({ messages, format });
