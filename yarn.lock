@@ -3747,7 +3747,6 @@ __metadata:
     "@preconstruct/cli": "npm:^2.8.13"
     "@types/lodash": "npm:^4.17.24"
     "@types/node": "npm:^24"
-    "@types/uuid": "npm:^9.0.7"
     nice-grpc: "npm:^2.1.16"
     nice-grpc-client-middleware-retry: "npm:^3.1.15"
     typescript: "npm:5.8.3"
@@ -3791,7 +3790,6 @@ __metadata:
     "@preconstruct/cli": "npm:^2.8.13"
     "@types/lodash": "npm:^4.17.24"
     "@types/node": "npm:^24"
-    "@types/uuid": "npm:^9.0.7"
     eslint: "npm:^9.22.0"
     google-protobuf: "npm:^4.0.2"
     long: "npm:^5.3.2"
@@ -5159,13 +5157,6 @@ __metadata:
   version: 3.0.3
   resolution: "@types/unist@npm:3.0.3"
   checksum: 10c0/2b1e4adcab78388e088fcc3c0ae8700f76619dbcb4741d7d201f87e2cb346bfc29a89003cfea2d76c996e1061452e14fcd737e8b25aacf949c1f2d6b2bc3dd60
-  languageName: node
-  linkType: hard
-
-"@types/uuid@npm:^9.0.7":
-  version: 9.0.8
-  resolution: "@types/uuid@npm:9.0.8"
-  checksum: 10c0/b411b93054cb1d4361919579ef3508a1f12bf15b5fdd97337d3d351bece6c921b52b6daeef89b62340fd73fd60da407878432a1af777f40648cbe53a01723489
   languageName: node
   linkType: hard
 
