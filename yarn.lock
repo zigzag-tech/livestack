@@ -5007,10 +5007,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tootallnate/once@npm:2":
-  version: 2.0.0
-  resolution: "@tootallnate/once@npm:2.0.0"
-  checksum: 10c0/073bfa548026b1ebaf1659eb8961e526be22fa77139b10d60e712f46d2f0f05f4e6c8bec62a087d41088ee9e29faa7f54838568e475ab2f776171003c3920858
+"@tootallnate/once@npm:3.0.1":
+  version: 3.0.1
+  resolution: "@tootallnate/once@npm:3.0.1"
+  checksum: 10c0/a66a5be492a19337be450056f0225f34abb7e88845bd1f5899211134827a0d90937d8ef161f8ce663aa8fc1505d39ad016e497963f2780d8199ce2067d2b1317
   languageName: node
   linkType: hard
 
@@ -6656,7 +6656,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"debug@npm:4, debug@npm:^4.1.0, debug@npm:^4.1.1, debug@npm:^4.3.1, debug@npm:^4.3.2, debug@npm:^4.3.4, debug@npm:~4.3.1":
+"debug@npm:4, debug@npm:^4.1.0, debug@npm:^4.1.1, debug@npm:^4.3.1, debug@npm:^4.3.2, debug@npm:^4.3.4":
   version: 4.4.0
   resolution: "debug@npm:4.4.0"
   dependencies:
@@ -6806,10 +6806,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"diff@npm:^4.0.1":
-  version: 4.0.2
-  resolution: "diff@npm:4.0.2"
-  checksum: 10c0/81b91f9d39c4eaca068eb0c1eb0e4afbdc5bb2941d197f513dd596b820b956fef43485876226d65d497bebc15666aa2aa82c679e84f65d5f2bfbf14ee46e32c1
+"diff@npm:4.0.4":
+  version: 4.0.4
+  resolution: "diff@npm:4.0.4"
+  checksum: 10c0/855fb70b093d1d9643ddc12ea76dca90dc9d9cdd7f82c08ee8b9325c0dc5748faf3c82e2047ced5dcaa8b26e58f7903900be2628d0380a222c02d79d8de385df
   languageName: node
   linkType: hard
 
@@ -9126,7 +9126,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"jwa@npm:^2.0.0, jwa@npm:^2.0.1":
+"jwa@npm:^2.0.1":
   version: 2.0.1
   resolution: "jwa@npm:2.0.1"
   dependencies:
@@ -9137,17 +9137,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"jws@npm:^4.0.0":
-  version: 4.0.0
-  resolution: "jws@npm:4.0.0"
-  dependencies:
-    jwa: "npm:^2.0.0"
-    safe-buffer: "npm:^5.0.1"
-  checksum: 10c0/f1ca77ea5451e8dc5ee219cb7053b8a4f1254a79cb22417a2e1043c1eb8a569ae118c68f24d72a589e8a3dd1824697f47d6bd4fb4bebb93a3bdf53545e721661
-  languageName: node
-  linkType: hard
-
-"jws@npm:^4.0.1":
+"jws@npm:4.0.1, jws@npm:^4.0.1":
   version: 4.0.1
   resolution: "jws@npm:4.0.1"
   dependencies:
@@ -11561,13 +11551,13 @@ __metadata:
   languageName: node
   linkType: hard
 
-"socket.io-parser@npm:~4.2.4":
-  version: 4.2.4
-  resolution: "socket.io-parser@npm:4.2.4"
+"socket.io-parser@npm:4.2.6":
+  version: 4.2.6
+  resolution: "socket.io-parser@npm:4.2.6"
   dependencies:
     "@socket.io/component-emitter": "npm:~3.1.0"
-    debug: "npm:~4.3.1"
-  checksum: 10c0/9383b30358fde4a801ea4ec5e6860915c0389a091321f1c1f41506618b5cf7cd685d0a31c587467a0c4ee99ef98c2b99fb87911f9dfb329716c43b587f29ca48
+    debug: "npm:~4.4.1"
+  checksum: 10c0/ba0a0b541b0a8e9d02b45c04c4c93a02331be5ea3478073c65bb9ff87032f12469c9adb309728eb90c0a352618d645ab88999c167a11c783cac861d7fd35c9d1
   languageName: node
   linkType: hard
 
