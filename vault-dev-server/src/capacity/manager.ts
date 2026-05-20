@@ -300,10 +300,12 @@ class CapacityManager implements CacapcityServiceImplementation {
     projectUuid,
     specName,
     by,
+    trackPending = true,
   }: {
     projectUuid: string;
     specName: string;
     by: number;
+    trackPending?: boolean;
   }) {
     const instanceIds = this.instanceIdsByProjectUuid[projectUuid] || [];
 
@@ -340,8 +342,9 @@ class CapacityManager implements CacapcityServiceImplementation {
         });
       }
       
-      // Add to pending jobs
-      this.addPendingJob(projectUuid, specName);
+      if (trackPending) {
+        this.addPendingJob(projectUuid, specName);
+      }
       
       // Return early if no qualified instances found
       return;
@@ -349,15 +352,18 @@ class CapacityManager implements CacapcityServiceImplementation {
 
     const nextBestInstanceId = _.sample(qualifiedCapacities)!.instanceId;
 
-    await this.runProvision({
+    const provisionResponse = await this.runProvision({
       projectUuid,
       instanceId: nextBestInstanceId,
       specName,
       numberOfWorkersNeeded: by,
     });
     
-    // Remove from pending jobs if we successfully provisioned
-    this.removePendingJob(projectUuid, specName);
+    if ((provisionResponse.numberOfWorkersStarted ?? 0) > 0) {
+      this.removePendingJob(projectUuid, specName);
+    } else if (trackPending) {
+      this.addPendingJob(projectUuid, specName);
+    }
   }
 
   async checkPendingJobs(projectUuid: string): Promise<void> {
@@ -376,6 +382,7 @@ class CapacityManager implements CacapcityServiceImplementation {
               projectUuid,
               specName,
               by: 1,
+              trackPending: false,
             });
           }
         }
