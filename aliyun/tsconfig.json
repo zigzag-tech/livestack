@@ -1,0 +1,27 @@
+{
+  "include": ["src/**/*.ts", "src/*.ts"],
+  "compilerOptions": {
+    "ignoreDeprecations": "6.0",
+    "module": "CommonJS",
+    "outDir": "dist",
+    "rootDir": "src",
+    "target": "ES5",
+    "pretty": true,
+    "moduleResolution": "node",
+    "noEmit": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "resolveJsonModule": true,
+    "preserveConstEnums": true,
+    "removeComments": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "sourceMap": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "downlevelIteration": true,
+    "declaration": true,
+    "noImplicitAny": true
+  },
+  "exclude": ["node_modules", "dist"]
+}
