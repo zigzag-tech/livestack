@@ -3,6 +3,7 @@ import { createHmac, randomUUID } from "node:crypto";
 export interface AliyunEcsWorkerProfile {
   regionId: string;
   instanceType: string;
+  imageId?: string;
   imageFamily: string;
   systemDiskCategory: string;
   systemDiskSizeGiB: number;
@@ -30,7 +31,8 @@ export const HEYUAN_G8I_2XLARGE_RENDER_PROFILE: AliyunEcsWorkerProfile = {
 export interface AliyunEcsRunInstancesRequest {
   RegionId: string;
   InstanceType: string;
-  ImageFamily: string;
+  ImageId?: string;
+  ImageFamily?: string;
   Amount: number;
   InstanceName: string;
   HostName: string;
@@ -414,7 +416,7 @@ export function buildAliyunRunInstancesRequest(input: {
   return {
     RegionId: input.profile.regionId,
     InstanceType: input.profile.instanceType,
-    ImageFamily: input.profile.imageFamily,
+    ...(input.profile.imageId ? { ImageId: input.profile.imageId } : { ImageFamily: input.profile.imageFamily }),
     Amount: input.amount,
     InstanceName: input.namePrefix,
     HostName: input.namePrefix,
@@ -742,7 +744,8 @@ function flattenRunInstancesRequest(request: AliyunEcsRunInstancesRequest): Reco
   return {
     RegionId: request.RegionId,
     InstanceType: request.InstanceType,
-    ImageFamily: request.ImageFamily,
+    ...(request.ImageId ? { ImageId: request.ImageId } : {}),
+    ...(request.ImageFamily ? { ImageFamily: request.ImageFamily } : {}),
     Amount: String(request.Amount),
     InstanceName: request.InstanceName,
     HostName: request.HostName,
