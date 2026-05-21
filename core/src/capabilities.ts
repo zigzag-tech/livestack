@@ -204,13 +204,18 @@ export function findMatchingCapabilities(
 }
 
 export class CapabilityError extends Error {
+  public readonly code: "MISSING_CAPABILITY";
+  public readonly requirement: CapabilityRequirement;
+
   constructor(
     message: string,
-    public readonly code: "MISSING_CAPABILITY",
-    public readonly requirement: CapabilityRequirement,
+    code: "MISSING_CAPABILITY",
+    requirement: CapabilityRequirement,
   ) {
     super(message);
     this.name = "CapabilityError";
+    this.code = code;
+    this.requirement = requirement;
   }
 }
 
@@ -275,12 +280,15 @@ export interface AcquireServiceLeaseInput {
 }
 
 export class ServiceLeaseError extends Error {
+  public readonly code: "NO_CAPACITY" | "LEASE_NOT_FOUND";
+
   constructor(
     message: string,
-    public readonly code: "NO_CAPACITY" | "LEASE_NOT_FOUND",
+    code: "NO_CAPACITY" | "LEASE_NOT_FOUND",
   ) {
     super(message);
     this.name = "ServiceLeaseError";
+    this.code = code;
   }
 }
 
@@ -399,10 +407,16 @@ export class InMemoryServiceLeaseManager implements ServiceLeaseManager {
 }
 
 export class PersistedServiceLeaseManager implements ServiceLeaseManager {
+  private readonly delegate: ServiceLeaseManager;
+  private readonly store: ServiceLeaseStore;
+
   constructor(
-    private readonly delegate: ServiceLeaseManager,
-    private readonly store: ServiceLeaseStore,
-  ) {}
+    delegate: ServiceLeaseManager,
+    store: ServiceLeaseStore,
+  ) {
+    this.delegate = delegate;
+    this.store = store;
+  }
 
   async acquire(input: AcquireServiceLeaseInput): Promise<ServiceLease> {
     return this.store.put(await this.delegate.acquire(input));
