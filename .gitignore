@@ -9,3 +9,6 @@ _docs
 *.log
 dist/
 *.tsbuildinfo
+
+# runtime DB — never commit (was leaked to public history once, purged)
+/livestack.sqlite
