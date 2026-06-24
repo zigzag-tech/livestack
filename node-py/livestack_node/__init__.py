@@ -1,17 +1,18 @@
-"""livestack-node — the model-node kit.
+"""livestack-node — the livestack side of the polycore residency seam.
 
-The single-node + embedded-gateway case of Livestack: a plain web server becomes
-a self-managing Livestack node whose GPU residence is driven entirely by leases
-(resident iff leased-or-pinned), with no startup dependency on a remote gateway.
+polycore (zero-dep, dependency-inverted) owns the per-process executor
+(ModelManager) and the Coordinator Protocol. This package ships:
 
-Ports:
-  1. lease       — CapabilityLeaseStore (faithful port of capabilities.ts)
-  2. facade      — build_router: the REST surface (optional fastapi dep)
-  3. residence   — ResidenceController: lease lifecycle -> runtime warm/evict
-  4. runtime     — ModelRuntime protocol (the only per-service adapter)
-  client         — lease(): consumer context manager with graceful degradation
+  - LivestackCoordinator : lease-driven implementation of polycore.Coordinator
+                           (resident iff leased-or-pinned; per-unit idle evict).
+  - attach()             : the one call polyasr & polytts make, identically, to
+                           build a polycore manager + coordinator + REST facade.
+  - build_router         : the uniform /livestack REST surface.
+  - CapabilityLeaseStore : the lease broker (also federatable).
+  - lease()              : consumer-side lease context manager.
+
+Pinning is expressed on the units via polycore.ResidencyPolicy.HARD_PIN.
 """
-
 from .lease import (
     Capability,
     CapabilityLeaseStore,
@@ -19,18 +20,19 @@ from .lease import (
     Requirement,
     matches_requirement,
 )
-from .residence import ResidenceController
-from .runtime import FakeRuntime, ModelRuntime
+from .coordinator import LivestackCoordinator
+from .facade import build_router
+from .serve import attach
 from .client import lease
 
 __all__ = [
+    "LivestackCoordinator",
+    "attach",
+    "build_router",
     "Capability",
     "CapabilityLeaseStore",
     "Lease",
     "Requirement",
     "matches_requirement",
-    "ResidenceController",
-    "ModelRuntime",
-    "FakeRuntime",
     "lease",
 ]
