@@ -141,6 +141,12 @@ class ModelManager:
         with self._guard:
             return self.coordinator.idle_sweep()
 
+    def request_evict(self, name: str) -> None:
+        """Broker/operator -> 'please unload ``name``', honoured per coordinator
+        policy (e.g. pins are kept). GPU-thread only."""
+        with self._guard:
+            self.coordinator.on_evict_request(name)
+
     @property
     def resident(self) -> set[str]:
         return self._resident
