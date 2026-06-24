@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "livestack-node"
+version = "0.0.1"
+description = "Livestack model-node kit: lease-driven GPU residence for plain web servers (the single-node + embedded-gateway case of Livestack)."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+facade = ["fastapi>=0.100"]
+dev = ["pytest>=7", "fastapi>=0.100", "httpx>=0.24"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["livestack_node*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
