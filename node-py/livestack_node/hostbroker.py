@@ -105,12 +105,12 @@ import json as _json
 import urllib.request as _urlreq
 
 
-def _http(url, body=None):
+def _http(url, body=None, timeout=5):
     data = _json.dumps(body).encode() if body is not None else None
     method = "POST" if body is not None else "GET"
     req = _urlreq.Request(url, data=data,
                           headers={"Content-Type": "application/json"}, method=method)
-    with _urlreq.urlopen(req, timeout=5) as r:
+    with _urlreq.urlopen(req, timeout=timeout) as r:
         raw = r.read().decode()
     return _json.loads(raw) if raw else {}
 
@@ -123,9 +123,10 @@ class RestPeer:
     POST /model/warm, POST /model/evict). Priority is derived from the residency
     tier unless overridden. One snapshot per planning cycle."""
 
-    def __init__(self, base_url, priority_for=None):
+    def __init__(self, base_url, priority_for=None, priorities=None):
         self.base = base_url.rstrip("/")
         self._prio = priority_for or (lambda r: _RES_TO_PRIO.get(r, 100))
+        self._priorities = priorities or {}   # explicit kind->priority overrides
         self._snap = None
 
     def refresh(self):
@@ -148,7 +149,8 @@ class RestPeer:
         out = {}
         for u in snap["units"]:
             r = u["residency"]
-            out[u["kind"]] = Unit(u["kind"], u["footprint"], priority=self._prio(r),
+            prio = self._priorities.get(u["kind"], self._prio(r))
+            out[u["kind"]] = Unit(u["kind"], u["footprint"], priority=prio,
                                   residency=Residency(r))
         return out
 
@@ -158,7 +160,7 @@ class RestPeer:
                 for u in snap["units"] if u["resident"]]
 
     def warm(self, kind):
-        _http(f"{self.base}/model/warm", {"unit": kind})
+        _http(f"{self.base}/model/warm", {"unit": kind}, timeout=180)
 
     def evict(self, kind):
-        _http(f"{self.base}/model/evict", {"unit": kind})
+        _http(f"{self.base}/model/evict", {"unit": kind}, timeout=60)

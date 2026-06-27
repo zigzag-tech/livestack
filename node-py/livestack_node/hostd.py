@@ -1,0 +1,114 @@
+"""hostd.py — minimal host-broker HTTP daemon.
+
+Wraps a HostBroker + RestPeers for the model-server nodes sharing one host's GPU
+and exposes the planner over HTTP so any consumer can ask for admission before it
+loads a heavy unit:
+
+    POST /admit  {"kind": "align"}   -> {"granted": true, "device_id": "...", "plan": "..."}
+    GET  /status                      -> per-node residence snapshot
+    GET  /plan                        -> dry-run desired plan (no dispatch)
+
+Run:  python -m livestack_node.hostd
+Config via env:
+    LIVESTACK_PEERS      comma-separated /livestack base URLs
+                         (default: polyasr 8766, polytts 8100, chipgen 8844 on localhost)
+    LIVESTACK_HOST_ID    default zz-tower0
+    LIVESTACK_VRAM_GB    device capacity (default 24)
+    LIVESTACK_RESERVED_GB activation/driver slack the planner never allocates (default 2)
+    LIVESTACK_BROKER_PORT default 8799
+"""
+from __future__ import annotations
+
+import os
+import time
+from typing import List
+
+from .hostbroker import HostBroker, RestPeer
+from .planner import Device, Request, Evict, Grant, plan as _plan
+
+GB = 1_000_000_000
+
+# Priority policy (lower = more important). The ASR pipeline (asr/align/diarize)
+# outranks TTS, which outranks chipgen — so a digest'''s align can preempt idle
+# TTS/chipgen. Decoupled from the residency tier on purpose: align/diarize are
+# demand-driven (UNPINNED residence) yet high priority.
+DEFAULT_PRIORITIES = {"asr": 10, "align": 15, "diarize": 15,
+                      "qwen": 20, "voxcpm": 20, "chipgen": 30}
+
+
+def build_broker(peer_urls: List[str], host_id: str = "zz-tower0",
+                 vram_gb: float = 24.0, reserved_gb: float = 2.0) -> HostBroker:
+    dev = Device(f"{host_id}/gpu0", host_id,
+                 capacity={"vram_bytes": vram_gb * GB},
+                 reserved={"vram_bytes": reserved_gb * GB})
+    peers = [RestPeer(u, priorities=DEFAULT_PRIORITIES) for u in peer_urls]
+    return HostBroker([dev], peers, clock=time.monotonic,
+                      log=lambda m: print(m, flush=True))
+
+
+def build_app(broker: HostBroker):
+    from fastapi import FastAPI, Body, HTTPException
+    app = FastAPI(title="livestack host-broker")
+    state = {"last_evicted_at": {}}
+
+    def _track(p):
+        for ev in p.of(Evict):
+            state["last_evicted_at"][ev.kind] = time.monotonic()
+
+    @app.post("/admit")
+    def admit(payload: dict = Body(...)):
+        kind = payload.get("kind")
+        if not kind:
+            raise HTTPException(400, "'kind' required")
+        req = Request(id=payload.get("id", f"{kind}-{int(time.monotonic() * 1000)}"),
+                      kind=kind, owner=payload.get("owner", "consumer"),
+                      created_at=time.monotonic())
+        try:
+            p = broker.plan_and_apply([req], state["last_evicted_at"])
+        except Exception as e:  # a peer down etc. — degrade: let the caller proceed
+            return {"granted": True, "device_id": None, "degraded": str(e)}
+        _track(p)
+        dev = next((g.device_id for g in p.of(Grant) if g.request_id == req.id), None)
+        return {"granted": dev is not None, "device_id": dev, "plan": p.summary()}
+
+    @app.get("/status")
+    def status():
+        out = []
+        for peer in broker.peers:
+            try:
+                out.append(peer.refresh())
+            except Exception as e:
+                out.append({"error": str(e)})
+        return {"peers": out, "last_evicted_at": state["last_evicted_at"]}
+
+    @app.get("/plan")
+    def plan_preview():
+        world = broker.snapshot([], state["last_evicted_at"])
+        return {"plan": _plan(world, broker.policy).summary(),
+                "resident": [(p.kind, p.device_id) for p in world.placements]}
+
+    return app
+
+
+def main():
+    peers_env = os.environ.get("LIVESTACK_PEERS", "").strip()
+    if peers_env:
+        peer_urls = [u.strip() for u in peers_env.split(",") if u.strip()]
+    else:
+        peer_urls = ["http://127.0.0.1:8766/livestack",   # polyasr
+                     "http://127.0.0.1:8100/livestack",   # polytts
+                     "http://127.0.0.1:8844/livestack"]   # chipgen
+    broker = build_broker(
+        peer_urls,
+        host_id=os.environ.get("LIVESTACK_HOST_ID", "zz-tower0"),
+        vram_gb=float(os.environ.get("LIVESTACK_VRAM_GB", "24")),
+        reserved_gb=float(os.environ.get("LIVESTACK_RESERVED_GB", "2")),
+    )
+    import uvicorn
+    port = int(os.environ.get("LIVESTACK_BROKER_PORT", "8799"))
+    print(f"[hostd] host-broker on :{port} over {len(broker.peers)} peers", flush=True)
+    uvicorn.run(build_app(broker), host="0.0.0.0", port=port)
+
+
+if __name__ == "__main__":
+    main()
