@@ -75,4 +75,27 @@ def build_router(manager, coordinator, capability: Capability,
         gpu_call(lambda: manager.request_evict(unit))
         return {"resident": sorted(manager.resident)}
 
+    @router.get("/residence")
+    def residence() -> dict:
+        """Planner-facing view: every unit's footprint, residency tier, and whether
+        it is resident / busy (an explicit, non-usage lease in flight). Lets a
+        HostBroker build a planner WorldState from any node uniformly."""
+        st = coordinator.status()
+        busy = {l["kind"] for l in st.get("active_leases", [])
+                if not str(l.get("owner_id", "")).startswith("__usage__")}
+        resident = set(st.get("resident", []))
+        units = []
+        for kind, unit in manager.units.items():
+            fp = getattr(unit, "footprint", 0) or 0
+            units.append({
+                "kind": kind,
+                "footprint": {"vram_bytes": int(fp)},
+                "residency": int(getattr(unit, "residency_policy", 2)),
+                "resident": kind in resident,
+                "busy": kind in busy,
+            })
+        return {"host_id": capability.host_id,
+                "device_id": f"{capability.host_id}/gpu0",
+                "units": units}
+
     return router

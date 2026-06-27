@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Callable, Dict, List, Mapping, Optional
 
 from .planner import (
-    Device, Placement, Request, Unit, WorldState, PlannerPolicy, plan,
+    Device, Placement, Request, Unit, WorldState, PlannerPolicy, plan, Residency,
     Load, Evict, Grant, Defer,
 )
 
@@ -99,3 +99,66 @@ class HostBroker:
             if g.request_id == request.id:
                 return g.device_id
         return None
+
+
+import json as _json
+import urllib.request as _urlreq
+
+
+def _http(url, body=None):
+    data = _json.dumps(body).encode() if body is not None else None
+    method = "POST" if body is not None else "GET"
+    req = _urlreq.Request(url, data=data,
+                          headers={"Content-Type": "application/json"}, method=method)
+    with _urlreq.urlopen(req, timeout=5) as r:
+        raw = r.read().decode()
+    return _json.loads(raw) if raw else {}
+
+
+_RES_TO_PRIO = {0: 10, 1: 20, 2: 30}
+
+
+class RestPeer:
+    """Peer backed by a livestack node's /livestack REST facade (GET /residence,
+    POST /model/warm, POST /model/evict). Priority is derived from the residency
+    tier unless overridden. One snapshot per planning cycle."""
+
+    def __init__(self, base_url, priority_for=None):
+        self.base = base_url.rstrip("/")
+        self._prio = priority_for or (lambda r: _RES_TO_PRIO.get(r, 100))
+        self._snap = None
+
+    def refresh(self):
+        self._snap = _http(f"{self.base}/residence")
+        return self._snap
+
+    def _s(self):
+        return self._snap or self.refresh()
+
+    @property
+    def host_id(self):
+        return self._s()["host_id"]
+
+    @property
+    def device_id(self):
+        return self._s()["device_id"]
+
+    def units(self):
+        snap = self.refresh()
+        out = {}
+        for u in snap["units"]:
+            r = u["residency"]
+            out[u["kind"]] = Unit(u["kind"], u["footprint"], priority=self._prio(r),
+                                  residency=Residency(r))
+        return out
+
+    def placements(self):
+        snap = self._s()
+        return [Placement(u["kind"], snap["device_id"], busy=u["busy"])
+                for u in snap["units"] if u["resident"]]
+
+    def warm(self, kind):
+        _http(f"{self.base}/model/warm", {"unit": kind})
+
+    def evict(self, kind):
+        _http(f"{self.base}/model/evict", {"unit": kind})
