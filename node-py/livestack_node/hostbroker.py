@@ -1,0 +1,101 @@
+"""hostbroker.py — host-level planning broker.
+
+The planner is a pure function; this is the thin authority that runs it across the
+model-server **processes** sharing one host's devices and dispatches the resulting
+evict/load actions to the owning process. It is what makes preemption work on a
+single host where polyasr, polytts and chipgen are *separate processes* on one GPU
+(an in-process Coordinator can only move its own units).
+
+A ``Peer`` is one model server, reached via its ``/livestack`` facade (or any
+object satisfying the duck type): it reports the units it can host and what it has
+resident/busy, and obeys ``warm``/``evict``. The broker keeps NO durable state —
+peers are ground truth and are re-snapshotted on every decision (soft state), so a
+broker restart rebuilds from the fleet.
+
+This is the single-host degenerate case of the mesh domain planner; the same
+``HostBroker.plan_and_apply`` runs on a federated WorldState once peers span hosts.
+"""
+from __future__ import annotations
+
+from typing import Callable, Dict, List, Mapping, Optional
+
+from .planner import (
+    Device, Placement, Request, Unit, WorldState, PlannerPolicy, plan,
+    Load, Evict, Grant, Defer,
+)
+
+
+class Peer:
+    """Duck type for one model-server process. A real impl wraps the peer's
+    ``/livestack`` REST facade; tests pass a fake."""
+    host_id: str
+    device_id: str
+
+    def units(self) -> Mapping[str, Unit]: ...          # pragma: no cover
+    def placements(self) -> List[Placement]: ...        # pragma: no cover
+    def warm(self, kind: str) -> None: ...              # pragma: no cover
+    def evict(self, kind: str) -> None: ...             # pragma: no cover
+
+
+class HostBroker:
+    def __init__(self, devices: List[Device], peers: Optional[List[Peer]] = None,
+                 policy: Optional[PlannerPolicy] = None,
+                 clock: Optional[Callable[[], float]] = None,
+                 log: Callable[[str], None] = lambda *_: None):
+        self.devices = list(devices)
+        self.peers: List[Peer] = list(peers or [])
+        self.policy = policy or PlannerPolicy()
+        self._clock = clock
+        self._log = log
+
+    def register_peer(self, peer: Peer) -> None:
+        self.peers.append(peer)
+
+    # -- world assembly (soft state: re-snapshot peers every time) ------------
+    def snapshot(self, requests: Optional[List[Request]] = None,
+                 last_evicted_at: Optional[Mapping[str, float]] = None) -> WorldState:
+        units: Dict[str, Unit] = {}
+        placements: List[Placement] = []
+        for p in self.peers:
+            for kind, unit in p.units().items():
+                units.setdefault(kind, unit)
+            placements.extend(p.placements())
+        now = self._clock() if self._clock else 0.0
+        return WorldState(devices=tuple(self.devices), units=units,
+                          placements=tuple(placements), requests=tuple(requests or ()),
+                          now=now, last_evicted_at=dict(last_evicted_at or {}))
+
+    # -- dispatch -------------------------------------------------------------
+    def _peer_for(self, kind: str, device_id: str) -> Optional[Peer]:
+        for p in self.peers:
+            if p.device_id == device_id and kind in p.units():
+                return p
+        return None
+
+    def plan_and_apply(self, requests: Optional[List[Request]] = None,
+                       last_evicted_at: Optional[Mapping[str, float]] = None):
+        """Snapshot the fleet, plan, and dispatch every action to the owning peer.
+        Evicts are applied before loads so VRAM is freed first. Returns the Plan."""
+        world = self.snapshot(requests, last_evicted_at)
+        p = plan(world, self.policy)
+        for ev in p.of(Evict):
+            peer = self._peer_for(ev.kind, ev.device_id)
+            if peer is not None:
+                self._log(f"[hostbroker] evict {ev.kind}@{ev.device_id}: {ev.reason}")
+                peer.evict(ev.kind)
+        for ld in p.of(Load):
+            peer = self._peer_for(ld.kind, ld.device_id)
+            if peer is not None:
+                self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id}: {ld.reason}")
+                peer.warm(ld.kind)
+        return p
+
+    def admit(self, request: Request,
+              last_evicted_at: Optional[Mapping[str, float]] = None) -> Optional[str]:
+        """Plan for one new lease request; return the granted device id, or None if
+        it was deferred (caller retries / time-multiplexes)."""
+        p = self.plan_and_apply([request], last_evicted_at)
+        for g in p.of(Grant):
+            if g.request_id == request.id:
+                return g.device_id
+        return None
