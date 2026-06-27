@@ -24,6 +24,8 @@ from .coordinator import LivestackCoordinator
 from .facade import build_router
 from .serve import attach
 from .client import lease
+from .measure import measure_footprint
+from .hostbroker import HostBroker, Peer
 from .planner import (
     plan, Plan, PlannerPolicy, WorldState, Device, Unit, Placement, Request,
     Residency, Load, Evict, Grant, Defer,
@@ -41,4 +43,5 @@ __all__ = [
     "lease",
     "plan", "Plan", "PlannerPolicy", "WorldState", "Device", "Unit",
     "Placement", "Request", "Residency", "Load", "Evict", "Grant", "Defer",
+    "HostBroker", "Peer", "measure_footprint",
 ]
