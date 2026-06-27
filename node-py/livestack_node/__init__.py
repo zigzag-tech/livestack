@@ -24,6 +24,10 @@ from .coordinator import LivestackCoordinator
 from .facade import build_router
 from .serve import attach
 from .client import lease
+from .planner import (
+    plan, Plan, PlannerPolicy, WorldState, Device, Unit, Placement, Request,
+    Residency, Load, Evict, Grant, Defer,
+)
 
 __all__ = [
     "LivestackCoordinator",
@@ -35,4 +39,6 @@ __all__ = [
     "Requirement",
     "matches_requirement",
     "lease",
+    "plan", "Plan", "PlannerPolicy", "WorldState", "Device", "Unit",
+    "Placement", "Request", "Residency", "Load", "Evict", "Grant", "Defer",
 ]
