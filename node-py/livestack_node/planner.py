@@ -131,6 +131,12 @@ class WorldState:
     now: float = 0.0
     # kind -> epoch when it was last evicted under pressure (for SOFT_PIN restore debounce)
     last_evicted_at: Mapping[str, float] = field(default_factory=dict)
+    # device_id -> MEASURED free resource vector (e.g. {"vram_bytes": ...}) read live
+    # off the device this cycle. When present, the planner reconciles it against the
+    # static budget and uses the TIGHTER of the two — so placement tracks real free
+    # memory (external processes, footprint drift, activation spikes the static
+    # footprints miss) instead of pure footprint bookkeeping.
+    measured_free: Mapping[str, Res] = field(default_factory=dict)
 
 
 # --- actions ----------------------------------------------------------------
@@ -207,6 +213,14 @@ class _World:
             if p.device_id in self.resident:
                 self.resident[p.device_id][p.kind] = p
         self.actions: List[Action] = []
+        # Footprint sum resident PER DEVICE at snapshot time. A measured-free reading
+        # corresponds to THIS resident set; as the planner loads/evicts this cycle,
+        # real free shifts by the delta — so we adjust measured_free by it (below).
+        self._used_at_snapshot: Dict[str, Dict[str, float]] = {d.id: {} for d in w.devices}
+        for p in w.placements:
+            if p.device_id in self._used_at_snapshot:
+                self._used_at_snapshot[p.device_id] = _add(
+                    self._used_at_snapshot[p.device_id], w.units[p.kind].footprint)
 
     def used(self, device_id: str) -> Dict[str, float]:
         u: Dict[str, float] = {}
@@ -216,7 +230,25 @@ class _World:
 
     def free(self, device_id: str) -> Dict[str, float]:
         d = self.devices[device_id]
-        return _sub(_sub(d.capacity, d.reserved), self.used(device_id))
+        budget = _sub(_sub(d.capacity, d.reserved), self.used(device_id))
+        meas = self.w.measured_free.get(device_id) if self.w.measured_free else None
+        if not meas:
+            return budget
+        # Reconcile model vs reality: keep the configured `reserved` headroom on top
+        # of the *measured* free bytes, then take the tighter of (policy budget,
+        # measured reality) per dimension. So neither a too-optimistic static model
+        # (external process / drift) nor exceeding our self-imposed budget can grant
+        # an allocation that would OOM. NOTE: this can go NEGATIVE when reality is
+        # worse than the model assumed — step 0 of plan() sheds to relieve that.
+        # Adjust the snapshot reading by what we've loaded/evicted so far this cycle:
+        # delta = used_now - used_at_snapshot (positive => we loaded => less real free).
+        delta = _sub(self.used(device_id), self._used_at_snapshot.get(device_id, {}))
+        adjusted = _sub(meas, delta)
+        avail = _sub(adjusted, d.reserved)
+        out = dict(budget)
+        for k, v in avail.items():
+            out[k] = min(budget.get(k, v), v)
+        return out
 
     def is_resident(self, kind: str, device_id: Optional[str] = None) -> bool:
         if device_id is not None:
@@ -289,6 +321,31 @@ def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: i
     return None
 
 
+def _shed_victim(world: _World, device_id: str, pol: PlannerPolicy) -> Optional[Placement]:
+    """The single least-important evictable resident unit on a device, used to
+    relieve *measured* over-budget pressure when there is no pending request to
+    drive eviction. Evictable = not HARD_PIN, past its min-residency (anti-thrash),
+    and idle unless busy-preemption is allowed. None if nothing may be shed."""
+    units = world.w.units
+    cands: List[Placement] = []
+    for p in world.resident[device_id].values():
+        u = units[p.kind]
+        if u.residency == Residency.HARD_PIN:
+            continue
+        if (world.w.now - p.loaded_at) < u.min_residency_s:
+            continue
+        if p.busy and not pol.allow_busy_preemption:
+            continue
+        cands.append(p)
+    if not cands:
+        return None
+    # idle first, least-important (highest priority int), biggest help, cheapest reload
+    cands.sort(key=lambda p: (p.busy, -units[p.kind].priority,
+                              -_magnitude(units[p.kind].footprint),
+                              units[p.kind].reload_cost))
+    return cands[0]
+
+
 @dataclass
 class _Option:
     device_id: str
@@ -330,6 +387,20 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
     """Compute the residency/placement plan for ``world``. Pure function."""
     pol = policy or PlannerPolicy()
     W = _World(world)
+
+    # 0) Relieve MEASURED over-budget pressure. If a device's reconciled free is
+    #    negative — real free fell below what the static footprints assumed (an
+    #    external process grabbed VRAM, a model is bigger than declared, etc.) —
+    #    shed idle, non-pinned, least-important units until non-negative. Honours
+    #    anti-thrash + idle-only; a no-op when free >= 0 (the steady state).
+    for d in world.devices:
+        guard = 0
+        while any(v < -_EPS for v in W.free(d.id).values()) and guard < 64:
+            guard += 1
+            victim = _shed_victim(W, d.id, pol)
+            if victim is None:
+                break
+            W.evict(victim.kind, d.id, "relieve measured over-budget pressure")
 
     # 1) Honour pending demand, most-important (after aging) first, then FIFO.
     reqs = sorted(

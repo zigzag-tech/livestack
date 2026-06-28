@@ -166,3 +166,52 @@ def test_anti_thrash_protects_freshly_loaded():
     p = plan(w)
     assert p.of(Evict) == []
     assert [d.request_id for d in p.of(Defer)] == ["r1"]
+
+
+# --- measured-free reconciliation (live device memory) -----------------------
+
+def test_measured_free_tighter_than_budget_defers():
+    # Budget says chipgen(5) fits (free = 24-1-10 = 13 after ASR), but the device
+    # reports only 2 GB ACTUALLY free (an external process). Reconciled free =
+    # min(13, 2-1) = 1 < 5, and ASR is HARD_PIN (no legal victim) -> the request
+    # must DEFER, not OOM-grant.
+    w = WorldState(devices=(gpu(),), units=units(),
+                   placements=(Placement("asr", "gpu0", loaded_at=0),),
+                   requests=(Request("r1", "chipgen", created_at=100),), now=100,
+                   measured_free={"gpu0": {"vram": 2}})
+    p = plan(w)
+    assert any(d.request_id == "r1" for d in p.of(Defer))
+    assert "chipgen" not in kinds_of(p.of(Load), Load)
+
+
+def test_measured_free_absent_uses_budget_unchanged():
+    # No measured reading -> identical to before (budget-only): chipgen is granted.
+    w = WorldState(devices=(gpu(),), units=units(),
+                   placements=(Placement("asr", "gpu0", loaded_at=0),),
+                   requests=(Request("r1", "chipgen", created_at=100),), now=100)
+    p = plan(w)
+    assert any(g.kind == "chipgen" for g in p.of(Grant))
+
+
+def test_shed_on_measured_overbudget_evicts_one_idle_victim():
+    # Resident ASR(10,pin)+chipgen(5): budget free = 24-1-15 = 8 >= 0, but the device
+    # reports 0 free (reality worse than the static model). Step 0 sheds the idle,
+    # least-important, non-pinned unit (chipgen). Evicting it frees 5 -> back to
+    # non-negative, so EXACTLY one eviction (no over-shedding); ASR is never shed.
+    w = WorldState(devices=(gpu(),), units=units(),
+                   placements=(Placement("asr", "gpu0", loaded_at=0),
+                               Placement("chipgen", "gpu0", loaded_at=0)),
+                   now=100, measured_free={"gpu0": {"vram": 0}})
+    p = plan(w)
+    assert kinds_of(p.of(Evict), Evict) == ["chipgen"]
+
+
+def test_shed_respects_min_residency_anti_thrash():
+    # Same over-budget, but chipgen loaded 1s ago (< 15s min_residency): anti-thrash
+    # protects it, so nothing is shed despite the pressure.
+    w = WorldState(devices=(gpu(),), units=units(),
+                   placements=(Placement("asr", "gpu0", loaded_at=0),
+                               Placement("chipgen", "gpu0", loaded_at=99)),
+                   now=100, measured_free={"gpu0": {"vram": 0}})
+    p = plan(w)
+    assert kinds_of(p.of(Evict), Evict) == []

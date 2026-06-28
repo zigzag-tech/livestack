@@ -21,12 +21,20 @@ from .lease import Capability
 
 def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
            idle_seconds: int, coload: bool, gpu_call: Callable[[Callable], object],
-           prefix: str = "/livestack"):
+           prefix: str = "/livestack", device_meter="auto"):
+    """``device_meter``: a zero-arg callable -> measured {capacity,free} (see
+    meters.py), ``"auto"`` to pick one by backend (CUDA/MLX), or ``None`` to report
+    no live memory. Defaulting to "auto" means a node becomes memory-aware on
+    redeploy with no server-side change."""
     from polycore import ModelManager
     coordinator = LivestackCoordinator(host_id, coload=coload, usage_ttl_seconds=idle_seconds)
     manager = ModelManager(units, idle_seconds, coordinator=coordinator)
+    if device_meter == "auto":
+        from .meters import auto_meter
+        device_meter = auto_meter()
     app.include_router(
-        build_router(manager, coordinator, Capability(kind=kind, host_id=host_id), gpu_call),
+        build_router(manager, coordinator, Capability(kind=kind, host_id=host_id),
+                     gpu_call, device_meter=device_meter),
         prefix=prefix,
     )
     return manager, coordinator

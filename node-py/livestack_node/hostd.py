@@ -28,7 +28,7 @@ import time
 from typing import List
 
 from .hostbroker import HostBroker, RestPeer
-from .planner import Device, Request, Evict, Grant, plan as _plan
+from .planner import Device, Request, Evict, Grant, Load, plan as _plan
 
 GB = 1_000_000_000
 
@@ -101,6 +101,29 @@ def build_app(broker: HostBroker):
         world = broker.snapshot([], state["last_evicted_at"])
         return {"plan": _plan(world, broker.policy).summary(),
                 "resident": [(p.kind, p.device_id) for p in world.placements]}
+
+    # Proactive reconcile loop: re-snapshot + re-plan with NO pending request every
+    # `interval` seconds, so Harmony reacts to the live situation BETWEEN admissions
+    # — re-asserts the HARD_PIN floor, restores debounced SOFT_PINs once pressure
+    # settles, and (since the snapshot now carries measured free) sheds idle units
+    # when real VRAM drops below budget. Daemon thread: stops with the process.
+    interval = float(os.environ.get("LIVESTACK_REPLAN_INTERVAL", "5"))
+    if interval > 0:
+        import threading
+
+        def _reconcile_loop():
+            while True:
+                time.sleep(interval)
+                try:
+                    p = broker.plan_and_apply([], state["last_evicted_at"])
+                    _track(p)
+                    if p.of(Evict) or p.of(Load):
+                        print(f"[harmony] reconcile: {p.summary()}", flush=True)
+                except Exception as e:  # a peer down etc. — keep looping
+                    print(f"[harmony] reconcile error: {e}", flush=True)
+
+        threading.Thread(target=_reconcile_loop, name="harmony-reconcile",
+                         daemon=True).start()
 
     return app
 
