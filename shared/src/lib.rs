@@ -1,4 +1,5 @@
 pub mod models;
+pub mod residency;
 pub mod systems;
 pub struct A {
     value: u8,
