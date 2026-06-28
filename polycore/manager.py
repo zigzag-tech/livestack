@@ -253,6 +253,16 @@ class ModelManager:
     def resident(self) -> set[str]:
         return set(self._planner.resident())
 
+    # Back-compat alias: coordinators (LocalCoordinator, livestack's
+    # LivestackCoordinator) were written against the manager's old private
+    # ``_resident`` set. The state now lives in the Rust planner; expose a
+    # read-only, planner-backed view so those coordinators keep working
+    # unchanged (membership / iteration / emptiness / sorted — never mutated
+    # directly; writes go through _load/_evict).
+    @property
+    def _resident(self) -> set[str]:
+        return set(self._planner.resident())
+
     def status(self) -> dict:
         resident = self._planner.resident()
         return {
