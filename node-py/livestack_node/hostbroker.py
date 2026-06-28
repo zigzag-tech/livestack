@@ -34,6 +34,7 @@ class Peer:
     def units(self) -> Mapping[str, Unit]: ...          # pragma: no cover
     def placements(self) -> List[Placement]: ...        # pragma: no cover
     def device_memory(self) -> Optional[Mapping[str, float]]: ...  # pragma: no cover
+    def device_capacity(self) -> Optional[Mapping[str, float]]: ...  # pragma: no cover
     def warm(self, kind: str) -> None: ...              # pragma: no cover
     def evict(self, kind: str) -> None: ...             # pragma: no cover
 
@@ -58,14 +59,30 @@ class HostBroker:
         self.default_capacity = default_capacity or {"vram_bytes": 24_000_000_000,
                                                      "reserved": 2_000_000_000}
 
-    def _resolve_devices(self, discovered: dict) -> list:
+    def _resolve_devices(self, discovered: dict,
+                         measured_caps: Optional[Mapping[str, Mapping[str, float]]] = None) -> list:
         if self.devices is not None:
             return self.devices
+        measured_caps = measured_caps or {}
         out = []
         for did, hid in sorted(discovered.items()):
-            cap = self.device_config.get(did, self.default_capacity)
-            out.append(Device(did, hid, capacity={"vram_bytes": cap["vram_bytes"]},
-                              reserved={"vram_bytes": cap.get("reserved", 0)}))
+            # Capacity precedence: explicit device_config (operator intent) > MEASURED
+            # (the device's real total / recommended working set) > default guess. So a
+            # node that reports its true size auto-sizes its budget instead of being
+            # clamped by the conservative LIVESTACK_VRAM_GB default.
+            if did in self.device_config:
+                cap = self.device_config[did]
+                vram = cap["vram_bytes"]
+                reserved = cap.get("reserved", 0)
+            elif did in measured_caps and measured_caps[did].get("vram_bytes"):
+                vram = measured_caps[did]["vram_bytes"]
+                reserved = self.default_capacity.get("reserved", 0)
+            else:
+                cap = self.default_capacity
+                vram = cap["vram_bytes"]
+                reserved = cap.get("reserved", 0)
+            out.append(Device(did, hid, capacity={"vram_bytes": vram},
+                              reserved={"vram_bytes": reserved}))
         return out
 
     def register_peer(self, peer: Peer) -> None:
@@ -77,7 +94,8 @@ class HostBroker:
         units: Dict[str, Unit] = {}
         placements: List[Placement] = []
         discovered: Dict[str, str] = {}     # device_id -> host_id (federated discovery)
-        measured: Dict[str, Dict[str, float]] = {}   # device_id -> measured free vector
+        measured: Dict[str, Dict[str, float]] = {}        # device_id -> measured free
+        measured_caps: Dict[str, Dict[str, float]] = {}   # device_id -> measured capacity
         for p in self.peers:
             for kind, unit in p.units().items():
                 units.setdefault(kind, unit)
@@ -92,8 +110,15 @@ class HostBroker:
                     measured[p.device_id] = mem
             except Exception:
                 pass
+            try:
+                cap = p.device_capacity()
+                if cap:
+                    measured_caps[p.device_id] = cap
+            except Exception:
+                pass
         now = self._clock() if self._clock else 0.0
-        return WorldState(devices=tuple(self._resolve_devices(discovered)), units=units,
+        return WorldState(devices=tuple(self._resolve_devices(discovered, measured_caps)),
+                          units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
                           now=now, last_evicted_at=dict(last_evicted_at or {}),
                           measured_free=measured)
@@ -202,6 +227,13 @@ class RestPeer:
         if not dev or not dev.get("free"):
             return None
         return dict(dev["free"])
+
+    def device_capacity(self):
+        """Measured device capacity (real total / recommended working set), or None."""
+        dev = self._s().get("device_mem")
+        if not dev or not dev.get("capacity"):
+            return None
+        return dict(dev["capacity"])
 
     def warm(self, kind):
         _http(f"{self.base}/model/warm", {"unit": kind}, timeout=180)

@@ -81,3 +81,28 @@ def test_measure_footprint_captures_peak_activation():
     model, fp = measure_footprint(load, run, meter=m)
     assert model == "model"
     assert fp["vram_bytes"] == 12_000_000_000
+
+
+def test_measured_capacity_autosizes_device():
+    # No fixed device, no device_config: the default budget is a tiny 12 GB, but the
+    # peer REPORTS a real 40 GB device. Measured capacity must auto-size the device so
+    # a 30 GB unit fits, instead of being wrongly rejected against the 12 GB guess.
+    class MeteredPeer:
+        host_id = "tower0"; device_id = "tower0/gpu0"
+        def __init__(self):
+            self.calls = []
+            self._unit = Unit("big", {"vram_bytes": 30}, priority=20,
+                              residency=Residency.UNPINNED)
+        def units(self): return {"big": self._unit}
+        def placements(self): return []
+        def device_memory(self): return {"vram_bytes": 38}
+        def device_capacity(self): return {"vram_bytes": 40}
+        def warm(self, kind): self.calls.append(("warm", kind))
+        def evict(self, kind): self.calls.append(("evict", kind))
+
+    peer = MeteredPeer()
+    broker = HostBroker(devices=None, peers=[peer], clock=lambda: 1000.0,
+                        default_capacity={"vram_bytes": 12, "reserved": 0})
+    dev = broker.admit(Request("r1", "big", created_at=1000))
+    assert dev == "tower0/gpu0"
+    assert ("warm", "big") in peer.calls
