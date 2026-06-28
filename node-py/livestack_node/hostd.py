@@ -43,15 +43,18 @@ DEFAULT_FOOTPRINTS = {"asr": 5_070_913_536, "align": 5_295_308_800,
                       "qwen": 9_393_143_808, "chipgen": 5_259_657_216}
 
 
-def build_broker(peer_urls: List[str], host_id: str = "zz-tower0",
-                 vram_gb: float = 24.0, reserved_gb: float = 2.0) -> HostBroker:
-    dev = Device(f"{host_id}/gpu0", host_id,
-                 capacity={"vram_bytes": vram_gb * GB},
-                 reserved={"vram_bytes": reserved_gb * GB})
+def build_broker(peer_urls: List[str], device_config=None,
+                 default_vram_gb: float = 24.0, default_reserved_gb: float = 2.0) -> HostBroker:
+    """Federated by default: devices are DISCOVERED from the peers (one per reported
+    device_id, across however many hosts), sized from device_config[device_id] or the
+    default. Point peer_urls at nodes on several hosts and the same broker plans and
+    dispatches across all their GPUs."""
     peers = [RestPeer(u, priorities=DEFAULT_PRIORITIES, footprints=DEFAULT_FOOTPRINTS)
              for u in peer_urls]
-    return HostBroker([dev], peers, clock=time.monotonic,
-                      log=lambda m: print(m, flush=True))
+    return HostBroker(devices=None, peers=peers, device_config=device_config or {},
+                      default_capacity={"vram_bytes": int(default_vram_gb * GB),
+                                        "reserved": int(default_reserved_gb * GB)},
+                      clock=time.monotonic, log=lambda m: print(m, flush=True))
 
 
 def build_app(broker: HostBroker):
@@ -106,11 +109,18 @@ def main():
         peer_urls = ["http://127.0.0.1:8766/livestack",   # polyasr
                      "http://127.0.0.1:8100/livestack",   # polytts
                      "http://127.0.0.1:8844/livestack"]   # chipgen
+    import json
+    device_config = {}
+    dev_env = os.environ.get("LIVESTACK_DEVICES", "").strip()
+    if dev_env:
+        # {"host-b/gpu0": {"vram_gb": 48, "reserved_gb": 3}, ...}
+        for did, c in json.loads(dev_env).items():
+            device_config[did] = {"vram_bytes": int(float(c["vram_gb"]) * GB),
+                                  "reserved": int(float(c.get("reserved_gb", 2)) * GB)}
     broker = build_broker(
-        peer_urls,
-        host_id=os.environ.get("LIVESTACK_HOST_ID", "zz-tower0"),
-        vram_gb=float(os.environ.get("LIVESTACK_VRAM_GB", "24")),
-        reserved_gb=float(os.environ.get("LIVESTACK_RESERVED_GB", "2")),
+        peer_urls, device_config=device_config,
+        default_vram_gb=float(os.environ.get("LIVESTACK_VRAM_GB", "24")),
+        default_reserved_gb=float(os.environ.get("LIVESTACK_RESERVED_GB", "2")),
     )
     import uvicorn
     port = int(os.environ.get("LIVESTACK_BROKER_PORT", "8799"))
