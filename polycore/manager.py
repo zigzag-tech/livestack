@@ -46,19 +46,38 @@ class ManagedUnit:
                  freer: Callable[[], None],
                  footprint: int = 0,
                  residency_policy: ResidencyPolicy = ResidencyPolicy.UNPINNED,
-                 min_resident: int = 0):
+                 min_resident: int = 0,
+                 health_check: "Optional[Callable[[object], bool]]" = None):
         self.name = name
         self._loader = loader
         self._freer = freer
         self.footprint = footprint              # measured-and-cached bytes (0 = unknown)
         self.residency_policy = residency_policy
         self.min_resident = min_resident
+        # Optional FUNCTIONAL liveness probe: given the loaded model, returns True
+        # iff the unit is actually producing correct output. This is the signal a
+        # heartbeat / process-alive / `/health` check cannot give — a unit can be
+        # resident and answering health checks yet silently emit garbage (e.g. an
+        # ASR partial path that returns empty after long uptime). None = no probe.
+        self.health_check = health_check
         self.model: object = None
         self.loaded_at: Optional[float] = None
 
     @property
     def loaded(self) -> bool:
         return self.model is not None
+
+    def check_health(self) -> "Optional[bool]":
+        """Run the functional liveness probe. Returns None when the unit is not
+        loaded or has no probe (health unknown / not applicable), otherwise the
+        probe's verdict. A probe that raises counts as unhealthy (False) — a
+        crashing probe is itself a degradation signal."""
+        if self.model is None or self.health_check is None:
+            return None
+        try:
+            return bool(self.health_check(self.model))
+        except Exception:
+            return False
 
     def load(self) -> object:
         if self.model is None:
@@ -92,6 +111,7 @@ class ModelManager:
         self.last_used = time.monotonic()
         self._guard = threading.Lock()
         self._log = log
+        self._last_recover: dict[str, float] = {}   # unit -> monotonic of last reload
         # Local import to avoid a cycle; LocalCoordinator only references manager primitives.
         from .coordinator import LocalCoordinator
         self.coordinator = coordinator or LocalCoordinator(coload=coload)
@@ -108,6 +128,15 @@ class ModelManager:
         self.units[name].unload()
         self._resident.discard(name)
         self._log(f"[polycore] evicted {name} (resident={sorted(self._resident)})")
+
+    def _reload(self, name: str) -> object:
+        """Evict (if resident) then load — the unit-level self-heal for a
+        functionally degraded model. Cheaper than a process restart and the unit
+        of recovery the broker reasons about (same mechanism as warm-floor
+        reload). Caller holds ``_guard``; GPU thread."""
+        if name in self._resident:
+            self._evict(name)
+        return self._load(name)
 
     # --- public surface (parity with AsrModelManager) -----------------------------
     def ensure(self, name: str) -> object:
@@ -140,6 +169,52 @@ class ModelManager:
         """Idle sweep, per coordinator policy. GPU-thread only."""
         with self._guard:
             return self.coordinator.idle_sweep()
+
+    def recover(self, name: str) -> object:
+        """Evict+reload ``name`` and notify the coordinator — the explicit
+        unit-level self-heal for a functionally degraded model. Returns the
+        reloaded model. GPU-thread only."""
+        if name not in self.units:
+            raise KeyError(f"unknown unit: {name}")
+        with self._guard:
+            model = self._reload(name)
+            self._last_recover[name] = time.monotonic()
+            self.last_used = time.monotonic()
+            self.coordinator.on_degraded(name)
+            return model
+
+    def maybe_recover_degraded(self, min_interval: float = 0.0) -> list[str]:
+        """Functional-liveness sweep: for each resident unit that carries a
+        ``health_check``, verify it and evict+reload any that report unhealthy.
+        This catches the failure a heartbeat / ``/health`` probe cannot — a unit
+        that is resident and process-alive yet silently produces wrong/empty
+        output. Per-unit rate-limited by ``min_interval`` so a unit that reloads
+        still-broken cannot hot-loop. Returns the names recovered. GPU-thread only.
+
+        The driver (cadence + the unit-specific probe) lives in the server, exactly
+        like ``maybe_evict`` is driven by the server's idle loop — polycore stays
+        zero-dependency and device-agnostic; it owns only the mechanism."""
+        with self._guard:
+            candidates = [n for n in self._resident
+                          if self.units[n].health_check is not None]
+        recovered: list[str] = []
+        for name in candidates:
+            # Probe runs the unit's own inference; on the GPU thread, outside the
+            # bookkeeping guard so a slow probe doesn't block status() reads.
+            if self.units[name].check_health() is not False:
+                continue  # healthy (True) or unknown (None — e.g. evicted meanwhile)
+            now = time.monotonic()
+            if min_interval > 0 and (now - self._last_recover.get(name, 0.0)) < min_interval:
+                self._log(f"[polycore] {name} degraded but recover rate-limited")
+                continue
+            with self._guard:
+                if name in self._resident:           # still resident (GPU-thread serialized)
+                    self._reload(name)
+                    self._last_recover[name] = time.monotonic()
+                    self.last_used = time.monotonic()
+                    self.coordinator.on_degraded(name)
+                    recovered.append(name)
+        return recovered
 
     @property
     def resident(self) -> set[str]:

@@ -140,5 +140,100 @@ class SeamContract(unittest.TestCase):
         self.assertIn(("busy", "asr", True), events)
 
 
+class FunctionalHealth(unittest.TestCase):
+    """A resident unit can be process-alive yet functionally degraded (the ASR
+    silent-empty-partials bug). The manager verifies a unit's own probe and
+    evicts+reloads the degraded ones, surfacing them to the coordinator."""
+
+    def _mgr_with_probe(self, healthy_flag, coordinator=None):
+        be = Backend()
+        units = {
+            "asr": ManagedUnit("asr", be.loader("asr"), be.freer,
+                               residency_policy=ResidencyPolicy.HARD_PIN,
+                               health_check=lambda _model: healthy_flag["asr"]),
+            "tts": ManagedUnit("tts", be.loader("tts"), be.freer),  # no probe
+        }
+        m = ModelManager(units, idle_seconds=0, coload=True,
+                         coordinator=coordinator, log=lambda *_: None)
+        return m, be
+
+    def test_check_health_none_without_probe_or_when_unloaded(self):
+        flag = {"asr": True}
+        m, _ = self._mgr_with_probe(flag)
+        self.assertIsNone(m.units["asr"].check_health())   # has probe, not loaded
+        self.assertIsNone(m.units["tts"].check_health())   # no probe
+        m.ensure("tts")
+        self.assertIsNone(m.units["tts"].check_health())   # loaded but no probe
+
+    def test_healthy_unit_is_not_reloaded(self):
+        flag = {"asr": True}
+        m, be = self._mgr_with_probe(flag)
+        m.ensure("asr")
+        self.assertEqual(m.maybe_recover_degraded(), [])
+        self.assertEqual(be.loads["asr"], 1)               # not reloaded
+        self.assertEqual(be.frees, 0)
+
+    def test_degraded_unit_is_evicted_and_reloaded(self):
+        flag = {"asr": True}
+        m, be = self._mgr_with_probe(flag)
+        m.ensure("asr")
+        flag["asr"] = False                                # partial path goes silent
+        self.assertEqual(m.maybe_recover_degraded(), ["asr"])
+        self.assertEqual(be.loads["asr"], 2)               # reloaded once
+        self.assertEqual(be.frees, 1)                      # old instance freed
+        self.assertIn("asr", m.resident)                   # warm again
+
+    def test_recover_is_rate_limited(self):
+        flag = {"asr": False}
+        m, be = self._mgr_with_probe(flag)
+        m.ensure("asr")                                    # loads=1
+        self.assertEqual(m.maybe_recover_degraded(min_interval=600), ["asr"])  # loads=2
+        # Still unhealthy, but within the interval → must not hot-loop.
+        self.assertEqual(m.maybe_recover_degraded(min_interval=600), [])
+        self.assertEqual(be.loads["asr"], 2)
+
+    def test_probe_that_raises_counts_as_degraded(self):
+        def boom(_model):
+            raise RuntimeError("probe blew up")
+        be = Backend()
+        units = {"asr": ManagedUnit("asr", be.loader("asr"), be.freer,
+                                    health_check=boom)}
+        m = ModelManager(units, idle_seconds=0, log=lambda *_: None)
+        m.ensure("asr")
+        self.assertEqual(m.maybe_recover_degraded(), ["asr"])
+        self.assertEqual(be.loads["asr"], 2)
+
+    def test_explicit_recover_notifies_coordinator(self):
+        events = []
+
+        class RecordingCoordinator(LocalCoordinator):
+            def on_degraded(self, name):
+                events.append(("degraded", name))
+
+        flag = {"asr": True}
+        m, be = self._mgr_with_probe(flag, coordinator=RecordingCoordinator(coload=True))
+        m.ensure("asr")
+        m.recover("asr")
+        self.assertEqual(be.loads["asr"], 2)
+        self.assertIn(("degraded", "asr"), events)
+
+    def test_sweep_notifies_coordinator_on_degraded(self):
+        events = []
+
+        class RecordingCoordinator(LocalCoordinator):
+            def on_degraded(self, name):
+                events.append(name)
+
+        flag = {"asr": False}
+        m, _ = self._mgr_with_probe(flag, coordinator=RecordingCoordinator(coload=True))
+        m.ensure("asr")
+        m.maybe_recover_degraded()
+        self.assertEqual(events, ["asr"])
+
+    def test_localcoordinator_still_satisfies_protocol(self):
+        # on_degraded added to the Protocol; LocalCoordinator must still match.
+        self.assertIsInstance(LocalCoordinator(), Coordinator)
+
+
 if __name__ == "__main__":
     unittest.main()

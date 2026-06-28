@@ -40,6 +40,12 @@ class Coordinator(Protocol):
     def report_busy(self, name: str, busy: bool) -> None:
         """Surface a busy/idle edge for ``name`` (e.g. to the broker). No-op locally."""
 
+    def on_degraded(self, name: str) -> None:
+        """A resident unit failed its FUNCTIONAL health probe and was just
+        evicted+reloaded locally. Heartbeat/busy-idle liveness can't see this
+        (the process never died), so surface it to the broker for fleet health /
+        reload accounting. No-op locally — the manager already did the reload."""
+
 
 class LocalCoordinator:
     """Today's in-process discipline, factored out unchanged.
@@ -85,4 +91,7 @@ class LocalCoordinator:
             self.mgr._evict(name)
 
     def report_busy(self, name: str, busy: bool) -> None:
+        return None
+
+    def on_degraded(self, name: str) -> None:
         return None
