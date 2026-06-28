@@ -1,15 +1,19 @@
 """polycore.ModelManager — the per-process *local executor* of model residency.
 
-This is the zero-dependency seam shared by polyasr and polytts (which today each
-embed a mirrored copy as ``AsrModelManager`` / ``ModelManager``). The manager owns
-the resident set and the load/unload/measure primitives; the *policy* of what to
-load or evict is delegated to a :class:`~polycore.coordinator.Coordinator`.
+This is the seam shared by polyasr and polytts (which each used to embed a
+mirrored copy as ``AsrModelManager`` / ``ModelManager``). The manager owns the
+**side-effects** — model load/unload, the functional health-probe inference, the
+idle clock — while the **decisions** (what to evict/load/recover, the resident-set
+state machine, idle math, per-unit recover rate-limit) are delegated to a pure
+Rust planner (``livestack_shared::residency``) exposed via the ``shared_py``
+extension. One brain, shared by Python (here) and future TS services; no parallel
+implementation to drift.
 
 The default :class:`~polycore.coordinator.LocalCoordinator` reproduces today's
 in-process discipline exactly (COLOAD + idle-evict), so a server that swaps its
-embedded manager for this one sees no behavioural change. A
-``LivestackCoordinator`` (shipped by livestack, never imported here) implements the
-same seam to arbitrate VRAM across processes via the lease broker.
+embedded manager for this one sees no behavioural change. A ``LivestackCoordinator``
+(shipped by livestack, never imported here) implements the same seam to arbitrate
+VRAM across processes via the lease broker.
 
 All load/unload calls must run on a single GPU executor thread, exactly like the
 servers do today; the manager's light ``_guard`` only protects its own bookkeeping.
@@ -24,9 +28,19 @@ from typing import Callable, Optional
 
 from .freeing import trim_ram
 
+try:
+    from shared_py import Planner as _Planner
+except ImportError as _e:  # pragma: no cover - environment misconfiguration
+    raise ImportError(
+        "polycore requires the compiled `shared_py` residency planner (the Rust "
+        "decision core). Build it into this venv:\n"
+        "  cd ~/livestack/shared-py && VIRTUAL_ENV=\"$VIRTUAL_ENV\" "
+        "PYO3_PYTHON=\"$(command -v python)\" python -m maturin develop --release"
+    ) from _e
+
 
 class ResidencyPolicy(enum.IntEnum):
-    """Per-unit static policy. Mirrors the gRPC wire ints in the design doc."""
+    """Per-unit static policy. Wire ints match ``shared`` + the gRPC proto."""
     HARD_PIN = 0    # fleet guarantees >= min_resident warm; never evict the last one
     SOFT_PIN = 1    # preferred-warm, evictable under pressure
     UNPINNED = 2    # pure demand-driven (default)
@@ -94,12 +108,15 @@ class ManagedUnit:
 
 
 class ModelManager:
-    """Resident-unit bookkeeping + load/unload primitives. Policy is delegated to a
-    Coordinator. GPU-thread only beyond the bookkeeping guard.
+    """Resident-unit side-effects (load/unload/probe) over a pure Rust planner.
+
+    Policy/decisions are delegated to a Coordinator (which, locally, drives the
+    Rust planner). GPU-thread only beyond the bookkeeping guard.
 
     The public surface (``ensure`` / ``touch`` / ``unload_now`` / ``maybe_evict`` /
-    ``status`` / ``resident`` / ``last_used``) is a strict superset of the servers'
-    current ``AsrModelManager`` so callers migrate unchanged.
+    ``recover`` / ``maybe_recover_degraded`` / ``status`` / ``resident`` /
+    ``last_used``) is a strict superset of the servers' current ``AsrModelManager``
+    so callers migrate unchanged.
     """
 
     def __init__(self, units: dict[str, ManagedUnit], idle_seconds: int,
@@ -107,11 +124,16 @@ class ModelManager:
                  log: Callable[[str], None] = print):
         self.units = units
         self.idle_seconds = idle_seconds
-        self._resident: set[str] = set()
         self.last_used = time.monotonic()
         self._guard = threading.Lock()
         self._log = log
-        self._last_recover: dict[str, float] = {}   # unit -> monotonic of last reload
+        # The Rust decision core. State (resident set, recover rate-limit) lives in
+        # the planner; the host only executes the side-effects it returns.
+        self._planner = _Planner([
+            (name, int(u.footprint), int(u.residency_policy), int(u.min_resident),
+             u.health_check is not None)
+            for name, u in units.items()
+        ])
         # Local import to avoid a cycle; LocalCoordinator only references manager primitives.
         from .coordinator import LocalCoordinator
         self.coordinator = coordinator or LocalCoordinator(coload=coload)
@@ -120,29 +142,33 @@ class ModelManager:
     # --- primitives the coordinator drives (caller holds _guard, GPU thread) ------
     def _load(self, name: str) -> object:
         model = self.units[name].load()
-        self._resident.add(name)
-        self._log(f"[polycore] loaded {name} (resident={sorted(self._resident)})")
+        self._planner.commit_loaded(name)
+        self._log(f"[polycore] loaded {name} (resident={self._planner.resident()})")
         return model
 
     def _evict(self, name: str) -> None:
         self.units[name].unload()
-        self._resident.discard(name)
-        self._log(f"[polycore] evicted {name} (resident={sorted(self._resident)})")
+        self._planner.commit_evicted(name)
+        self._log(f"[polycore] evicted {name} (resident={self._planner.resident()})")
 
     def _reload(self, name: str) -> object:
         """Evict (if resident) then load — the unit-level self-heal for a
         functionally degraded model. Cheaper than a process restart and the unit
         of recovery the broker reasons about (same mechanism as warm-floor
         reload). Caller holds ``_guard``; GPU thread."""
-        if name in self._resident:
-            self._evict(name)
-        return self._load(name)
+        evict, load = self._planner.plan_recover_one(name)
+        for n in evict:
+            self._evict(n)
+        model = None
+        for n in load:
+            model = self._load(n)
+        return model
 
     # --- public surface (parity with AsrModelManager) -----------------------------
     def ensure(self, name: str) -> object:
         """Make ``name`` resident, returning its model, per the coordinator's policy.
         Resets the idle timer. GPU-thread only."""
-        if name not in self.units:
+        if not self._planner.known(name):
             raise KeyError(f"unknown unit: {name}")
         with self._guard:
             model = self.coordinator.acquire(name)
@@ -157,8 +183,8 @@ class ModelManager:
     def unload_now(self) -> list[str]:
         """Force-evict ALL resident units now, regardless of idle time. For hand-off."""
         with self._guard:
-            evicted = sorted(self._resident)
-            for name in list(self._resident):
+            evicted = self._planner.resident()      # sorted
+            for name in evicted:
                 self._evict(name)
             self.coordinator.on_release_all(evicted)
             if not evicted:
@@ -174,11 +200,11 @@ class ModelManager:
         """Evict+reload ``name`` and notify the coordinator — the explicit
         unit-level self-heal for a functionally degraded model. Returns the
         reloaded model. GPU-thread only."""
-        if name not in self.units:
+        if not self._planner.known(name):
             raise KeyError(f"unknown unit: {name}")
         with self._guard:
             model = self._reload(name)
-            self._last_recover[name] = time.monotonic()
+            self._planner.mark_recovered(name, time.monotonic())
             self.last_used = time.monotonic()
             self.coordinator.on_degraded(name)
             return model
@@ -193,39 +219,41 @@ class ModelManager:
 
         The driver (cadence + the unit-specific probe) lives in the server, exactly
         like ``maybe_evict`` is driven by the server's idle loop — polycore stays
-        zero-dependency and device-agnostic; it owns only the mechanism."""
+        device-agnostic; it owns only the mechanism. The decision (which degraded
+        units to reload, subject to the rate-limit) is the planner's."""
         with self._guard:
-            candidates = [n for n in self._resident
-                          if self.units[n].health_check is not None]
+            candidates = self._planner.probe_candidates()
+        # Probe each candidate's own inference OUTSIDE the guard so a slow probe
+        # doesn't block status() reads. False == degraded; None/True == skip.
+        degraded = [n for n in candidates if self.units[n].check_health() is False]
+        if not degraded:
+            return []
         recovered: list[str] = []
-        for name in candidates:
-            # Probe runs the unit's own inference; on the GPU thread, outside the
-            # bookkeeping guard so a slow probe doesn't block status() reads.
-            if self.units[name].check_health() is not False:
-                continue  # healthy (True) or unknown (None — e.g. evicted meanwhile)
+        with self._guard:
             now = time.monotonic()
-            if min_interval > 0 and (now - self._last_recover.get(name, 0.0)) < min_interval:
+            to_reload = self._planner.plan_recover(degraded, now, min_interval)
+            rate_limited = set(degraded) - set(to_reload)
+            for name in rate_limited:
                 self._log(f"[polycore] {name} degraded but recover rate-limited")
-                continue
-            with self._guard:
-                if name in self._resident:           # still resident (GPU-thread serialized)
-                    self._reload(name)
-                    self._last_recover[name] = time.monotonic()
-                    self.last_used = time.monotonic()
-                    self.coordinator.on_degraded(name)
-                    recovered.append(name)
+            for name in to_reload:
+                self._reload(name)
+                self._planner.mark_recovered(name, now)
+                self.last_used = now
+                self.coordinator.on_degraded(name)
+                recovered.append(name)
         return recovered
 
     @property
     def resident(self) -> set[str]:
-        return self._resident
+        return set(self._planner.resident())
 
     def status(self) -> dict:
+        resident = self._planner.resident()
         return {
-            "resident": sorted(self._resident),
+            "resident": resident,
             "coload": getattr(self.coordinator, "coload", None),
             "idle_seconds": self.idle_seconds,
             "idle_for": (round(time.monotonic() - self.last_used, 1)
-                         if self._resident else None),
+                         if resident else None),
             "units": list(self.units.keys()),
         }

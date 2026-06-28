@@ -64,30 +64,29 @@ class LocalCoordinator:
 
     def acquire(self, name: str) -> object:
         m = self.mgr
-        if name not in m._resident:
-            if not self.coload:
-                for other in list(m._resident):
-                    if other != name:
-                        m._evict(other)
-            return m._load(name)
-        return m.units[name].model
+        # The planner decides eviction (COLOAD vs one-in-VRAM); we execute it.
+        evict, load = m._planner.plan_acquire(self.coload, name)
+        for other in evict:
+            m._evict(other)
+        model = None
+        for n in load:
+            model = m._load(n)
+        return model if load else m.units[name].model
 
     def idle_sweep(self) -> bool:
         m = self.mgr
-        if m.idle_seconds <= 0:
-            return False
-        if m._resident and (time.monotonic() - m.last_used) > m.idle_seconds:
-            for name in list(m._resident):
-                m._evict(name)
-            return True
-        return False
+        idle_for = time.monotonic() - m.last_used
+        victims = m._planner.plan_idle_sweep(m.idle_seconds, idle_for)
+        for name in victims:
+            m._evict(name)
+        return bool(victims)
 
     # Local mode has no broker; these are no-ops.
     def on_release_all(self, evicted: list[str]) -> None:
         return None
 
     def on_evict_request(self, name: str) -> None:
-        if self.mgr and name in self.mgr._resident:
+        if self.mgr and self.mgr._planner.is_resident(name):
             self.mgr._evict(name)
 
     def report_busy(self, name: str, busy: bool) -> None:
