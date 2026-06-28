@@ -1,4 +1,8 @@
-"""hostd.py — minimal host-broker HTTP daemon.
+"""hostd.py — the Harmony broker: a minimal host-broker HTTP daemon.
+
+Harmony is Livestack's GPU-residency arbitration layer — priority-preemptive,
+lease-based — that lets live (ASR/TTS), interactive (chipgen), and batch
+(meeting-digest) workloads share one host's GPU in harmony instead of fighting.
 
 Wraps a HostBroker + RestPeers for the model-server nodes sharing one host's GPU
 and exposes the planner over HTTP so any consumer can ask for admission before it
@@ -59,7 +63,7 @@ def build_broker(peer_urls: List[str], device_config=None,
 
 def build_app(broker: HostBroker):
     from fastapi import FastAPI, Body, HTTPException
-    app = FastAPI(title="livestack host-broker")
+    app = FastAPI(title="Livestack Harmony broker")
     state = {"last_evicted_at": {}}
 
     def _track(p):
@@ -124,7 +128,7 @@ def main():
     )
     import uvicorn
     port = int(os.environ.get("LIVESTACK_BROKER_PORT", "8799"))
-    print(f"[hostd] host-broker on :{port} over {len(broker.peers)} peers", flush=True)
+    print(f"[harmony] broker on :{port} over {len(broker.peers)} peers", flush=True)
     uvicorn.run(build_app(broker), host="0.0.0.0", port=port)
 
 
