@@ -38,15 +38,34 @@ class Peer:
 
 
 class HostBroker:
-    def __init__(self, devices: List[Device], peers: Optional[List[Peer]] = None,
+    def __init__(self, devices=None, peers: Optional[List[Peer]] = None,
                  policy: Optional[PlannerPolicy] = None,
                  clock: Optional[Callable[[], float]] = None,
-                 log: Callable[[str], None] = lambda *_: None):
-        self.devices = list(devices)
+                 log: Callable[[str], None] = lambda *_: None,
+                 device_config: Optional[dict] = None,
+                 default_capacity: Optional[dict] = None):
+        # devices: a FIXED list (single-host / tests). If None, devices are
+        # DISCOVERED from the peers' reported device_ids (federated / multi-host),
+        # each sized from device_config[device_id] or default_capacity. That is the
+        # whole of "federation": the same plan() runs over one device or many.
+        self.devices = list(devices) if devices is not None else None
         self.peers: List[Peer] = list(peers or [])
         self.policy = policy or PlannerPolicy()
         self._clock = clock
         self._log = log
+        self.device_config = device_config or {}
+        self.default_capacity = default_capacity or {"vram_bytes": 24_000_000_000,
+                                                     "reserved": 2_000_000_000}
+
+    def _resolve_devices(self, discovered: dict) -> list:
+        if self.devices is not None:
+            return self.devices
+        out = []
+        for did, hid in sorted(discovered.items()):
+            cap = self.device_config.get(did, self.default_capacity)
+            out.append(Device(did, hid, capacity={"vram_bytes": cap["vram_bytes"]},
+                              reserved={"vram_bytes": cap.get("reserved", 0)}))
+        return out
 
     def register_peer(self, peer: Peer) -> None:
         self.peers.append(peer)
@@ -56,12 +75,17 @@ class HostBroker:
                  last_evicted_at: Optional[Mapping[str, float]] = None) -> WorldState:
         units: Dict[str, Unit] = {}
         placements: List[Placement] = []
+        discovered: Dict[str, str] = {}     # device_id -> host_id (federated discovery)
         for p in self.peers:
             for kind, unit in p.units().items():
                 units.setdefault(kind, unit)
             placements.extend(p.placements())
+            try:
+                discovered[p.device_id] = p.host_id
+            except Exception:
+                pass
         now = self._clock() if self._clock else 0.0
-        return WorldState(devices=tuple(self.devices), units=units,
+        return WorldState(devices=tuple(self._resolve_devices(discovered)), units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
                           now=now, last_evicted_at=dict(last_evicted_at or {}))
 
