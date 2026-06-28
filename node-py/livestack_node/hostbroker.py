@@ -123,10 +123,11 @@ class RestPeer:
     POST /model/warm, POST /model/evict). Priority is derived from the residency
     tier unless overridden. One snapshot per planning cycle."""
 
-    def __init__(self, base_url, priority_for=None, priorities=None):
+    def __init__(self, base_url, priority_for=None, priorities=None, footprints=None):
         self.base = base_url.rstrip("/")
         self._prio = priority_for or (lambda r: _RES_TO_PRIO.get(r, 100))
         self._priorities = priorities or {}   # explicit kind->priority overrides
+        self._footprints = footprints or {}   # explicit kind->vram_bytes overrides
         self._snap = None
 
     def refresh(self):
@@ -150,7 +151,9 @@ class RestPeer:
         for u in snap["units"]:
             r = u["residency"]
             prio = self._priorities.get(u["kind"], self._prio(r))
-            out[u["kind"]] = Unit(u["kind"], u["footprint"], priority=prio,
+            fp = ({"vram_bytes": self._footprints[u["kind"]]}
+                  if u["kind"] in self._footprints else u["footprint"])
+            out[u["kind"]] = Unit(u["kind"], fp, priority=prio,
                                   residency=Residency(r))
         return out
 

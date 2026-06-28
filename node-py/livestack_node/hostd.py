@@ -35,13 +35,21 @@ GB = 1_000_000_000
 DEFAULT_PRIORITIES = {"asr": 10, "align": 15, "diarize": 15,
                       "qwen": 20, "voxcpm": 20, "chipgen": 30}
 
+# Measured 2026-06-28 on zz-tower0 (real per-process VRAM occupancy in bytes,
+# incl. the cached activation workspace torch holds after a forward pass — which
+# is what actually fills the card). diarize runs on CPU (~50 MiB GPU) -> 0.5 GB floor.
+DEFAULT_FOOTPRINTS = {"asr": 5_070_913_536, "align": 5_295_308_800,
+                      "diarize": 524_288_000, "voxcpm": 6_543_114_240,
+                      "qwen": 9_393_143_808, "chipgen": 5_259_657_216}
+
 
 def build_broker(peer_urls: List[str], host_id: str = "zz-tower0",
                  vram_gb: float = 24.0, reserved_gb: float = 2.0) -> HostBroker:
     dev = Device(f"{host_id}/gpu0", host_id,
                  capacity={"vram_bytes": vram_gb * GB},
                  reserved={"vram_bytes": reserved_gb * GB})
-    peers = [RestPeer(u, priorities=DEFAULT_PRIORITIES) for u in peer_urls]
+    peers = [RestPeer(u, priorities=DEFAULT_PRIORITIES, footprints=DEFAULT_FOOTPRINTS)
+             for u in peer_urls]
     return HostBroker([dev], peers, clock=time.monotonic,
                       log=lambda m: print(m, flush=True))
 
