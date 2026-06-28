@@ -33,6 +33,7 @@ class Peer:
 
     def units(self) -> Mapping[str, Unit]: ...          # pragma: no cover
     def placements(self) -> List[Placement]: ...        # pragma: no cover
+    def device_memory(self) -> Optional[Mapping[str, float]]: ...  # pragma: no cover
     def warm(self, kind: str) -> None: ...              # pragma: no cover
     def evict(self, kind: str) -> None: ...             # pragma: no cover
 
@@ -76,6 +77,7 @@ class HostBroker:
         units: Dict[str, Unit] = {}
         placements: List[Placement] = []
         discovered: Dict[str, str] = {}     # device_id -> host_id (federated discovery)
+        measured: Dict[str, Dict[str, float]] = {}   # device_id -> measured free vector
         for p in self.peers:
             for kind, unit in p.units().items():
                 units.setdefault(kind, unit)
@@ -84,10 +86,17 @@ class HostBroker:
                 discovered[p.device_id] = p.host_id
             except Exception:
                 pass
+            try:
+                mem = p.device_memory()
+                if mem:
+                    measured[p.device_id] = mem
+            except Exception:
+                pass
         now = self._clock() if self._clock else 0.0
         return WorldState(devices=tuple(self._resolve_devices(discovered)), units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
-                          now=now, last_evicted_at=dict(last_evicted_at or {}))
+                          now=now, last_evicted_at=dict(last_evicted_at or {}),
+                          measured_free=measured)
 
     # -- dispatch -------------------------------------------------------------
     def _peer_for(self, kind: str, device_id: str) -> Optional[Peer]:
@@ -185,6 +194,14 @@ class RestPeer:
         snap = self._s()
         return [Placement(u["kind"], snap["device_id"], busy=u["busy"])
                 for u in snap["units"] if u["resident"]]
+
+    def device_memory(self):
+        """Measured free resource vector (e.g. {"vram_bytes": ...}) the node read off
+        its device this snapshot, or None if the node reports no live meter."""
+        dev = self._s().get("device_mem")
+        if not dev or not dev.get("free"):
+            return None
+        return dict(dev["free"])
 
     def warm(self, kind):
         _http(f"{self.base}/model/warm", {"unit": kind}, timeout=180)

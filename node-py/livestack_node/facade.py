@@ -12,7 +12,8 @@ from .lease import Capability
 
 
 def build_router(manager, coordinator, capability: Capability,
-                 gpu_call: Callable[[Callable], object]):
+                 gpu_call: Callable[[Callable], object],
+                 device_meter: Optional[Callable[[], Optional[dict]]] = None):
     try:
         from fastapi import APIRouter, Body, HTTPException
     except ImportError as exc:  # pragma: no cover
@@ -94,8 +95,18 @@ def build_router(manager, coordinator, capability: Capability,
                 "resident": kind in resident,
                 "busy": kind in busy,
             })
-        return {"host_id": capability.host_id,
-                "device_id": f"{capability.host_id}/gpu0",
-                "units": units}
+        out = {"host_id": capability.host_id,
+               "device_id": f"{capability.host_id}/gpu0",
+               "units": units}
+        # Live measured device memory (capacity + real free), when a meter is wired.
+        # Lets the Harmony planner reconcile against reality, not just footprints.
+        if device_meter is not None:
+            try:
+                mem = device_meter()
+                if mem:
+                    out["device_mem"] = mem
+            except Exception:
+                pass
+        return out
 
     return router
