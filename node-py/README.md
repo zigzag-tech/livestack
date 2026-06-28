@@ -1,5 +1,10 @@
 # livestack-node (Python)
 
+When several of these nodes share one host's GPU, the multi-node arbitration
+layer that plans residence across them by priority is **Harmony** (the
+`hostd` broker, `python -m livestack_node.hostd`). This package is the
+per-node half of that system.
+
 The **model-node kit**: turn a plain GPU web server into a self-managing
 Livestack node whose VRAM residence is driven entirely by leases —
 
