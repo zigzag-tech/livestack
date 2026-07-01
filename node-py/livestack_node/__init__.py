@@ -30,6 +30,10 @@ from .planner import (
     plan, Plan, PlannerPolicy, WorldState, Device, Unit, Placement, Request,
     Residency, Load, Evict, Grant, Defer,
 )
+from .provision import (
+    Provisioner, ComputeSpec, ComputeHandle, Offer, Instance,
+    ProvisionError, CapacityError, leased, reap_orphans,
+)
 
 __all__ = [
     "LivestackCoordinator",
@@ -44,4 +48,6 @@ __all__ = [
     "plan", "Plan", "PlannerPolicy", "WorldState", "Device", "Unit",
     "Placement", "Request", "Residency", "Load", "Evict", "Grant", "Defer",
     "HostBroker", "Peer", "RestPeer", "measure_footprint",
+    "Provisioner", "ComputeSpec", "ComputeHandle", "Offer", "Instance",
+    "ProvisionError", "CapacityError", "leased", "reap_orphans",
 ]
