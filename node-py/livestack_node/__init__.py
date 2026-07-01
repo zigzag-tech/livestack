@@ -34,6 +34,7 @@ from .provision import (
     Provisioner, ComputeSpec, ComputeHandle, Offer, Instance,
     ProvisionError, CapacityError, leased, reap_orphans,
 )
+from .fleet_dispatch import dispatch, run_on_provider
 
 __all__ = [
     "LivestackCoordinator",
@@ -50,4 +51,5 @@ __all__ = [
     "HostBroker", "Peer", "RestPeer", "measure_footprint",
     "Provisioner", "ComputeSpec", "ComputeHandle", "Offer", "Instance",
     "ProvisionError", "CapacityError", "leased", "reap_orphans",
+    "dispatch", "run_on_provider",
 ]
