@@ -3666,6 +3666,7 @@ __metadata:
     "@livestack/shared": "npm:^0.0.32"
     "@rollup/plugin-typescript": "npm:^12.3.0"
     "@types/node": "npm:^24"
+    "@zigzag-tech/llm-catalog": "file:../../llm-catalog"
     ollama: "npm:^0.6.3"
     rimraf: "npm:^6.1.3"
     rollup: "npm:^4.60.4"
@@ -3747,6 +3748,7 @@ __metadata:
     "@livestack/lab-internal-common": "npm:^0.0.32"
     "@livestack/summarizer": "npm:^0.0.32"
     "@types/node": "npm:^24"
+    "@zigzag-tech/llm-catalog": "file:../../llm-catalog"
     ts-node: "npm:^10.9.2"
     typescript: "npm:6.0.3"
     zod: "npm:^4.4.3"
@@ -5658,6 +5660,36 @@ __metadata:
     babel-plugin-react-compiler:
       optional: true
   checksum: 10c0/6e2d90974e05f2a9aefafad1d137b75c3b3b4bf3f2affdbfe77c6b11b24832cff22dd8852430c6341e2fb5b00a4513fb00db306a6abdbec6f0f5841e93bbcfba
+  languageName: node
+  linkType: hard
+
+"@zigzag-tech/llm-catalog@file:../../llm-catalog::locator=%40livestack%2Fsummarizer%40workspace%3Asummarizer":
+  version: 0.1.0
+  resolution: "@zigzag-tech/llm-catalog@file:../../llm-catalog#../../llm-catalog::hash=69f70c&locator=%40livestack%2Fsummarizer%40workspace%3Asummarizer"
+  dependencies:
+    jsonrepair: "npm:^3.14.0"
+    zod: "npm:^4.3.6"
+  peerDependencies:
+    openai: ^6.0.0
+  peerDependenciesMeta:
+    openai:
+      optional: true
+  checksum: 10c0/2bfc11528edba127ea39d6083a6aa7a2f26cc2bc789d0cc1e5d364bc831b4f84a5c633641df5428d7aca8ec4294392eb14555e191005c7efdc22488a8c42dcb9
+  languageName: node
+  linkType: hard
+
+"@zigzag-tech/llm-catalog@file:../../llm-catalog::locator=%40livestack%2Ftranslate-server%40workspace%3Atranslate-server":
+  version: 0.1.0
+  resolution: "@zigzag-tech/llm-catalog@file:../../llm-catalog#../../llm-catalog::hash=69f70c&locator=%40livestack%2Ftranslate-server%40workspace%3Atranslate-server"
+  dependencies:
+    jsonrepair: "npm:^3.14.0"
+    zod: "npm:^4.3.6"
+  peerDependencies:
+    openai: ^6.0.0
+  peerDependenciesMeta:
+    openai:
+      optional: true
+  checksum: 10c0/2bfc11528edba127ea39d6083a6aa7a2f26cc2bc789d0cc1e5d364bc831b4f84a5c633641df5428d7aca8ec4294392eb14555e191005c7efdc22488a8c42dcb9
   languageName: node
   linkType: hard
 
@@ -12929,7 +12961,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zod@npm:^3.25.76 || ^4, zod@npm:^4.4.3":
+"zod@npm:^3.25.76 || ^4, zod@npm:^4.3.6, zod@npm:^4.4.3":
   version: 4.4.3
   resolution: "zod@npm:4.4.3"
   checksum: 10c0/7ea31b558e88f9faf44f31dd185e2e1cbf51fed3081787fb96cc2534749b50c0acfc6da7f0922a7353ed092dd358c7d50c28ea96c94d04af64191bd33152eca3
