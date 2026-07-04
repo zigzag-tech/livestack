@@ -2,6 +2,11 @@
 
 **Status:** design (this doc). Depends on `resource-planner.md` (the placement brain,
 `node-py/livestack_node/planner.py`) — this is the layer *above* it.
+**First consumer:** the Sorbonne MathVid client project (2026-07 delivery). Cloud
+target committed to **Aliyun**. Sorbonne's needs enter purely as config/weights (BATCH
+SLA class, ~5–10¥/video soft budget) — never as branches in `schedule()`. It is this
+scheduler's first real driver: the client deadline funds the fleet layer, livestack
+keeps the capability.
 **Motivation:** the placement planner is resource-aware over devices that *already
 exist* — it grants/defers/evicts on a fixed device set. It has no notion of **money**
 or **deadlines**, and it cannot **create capacity**. Once we want "prefer local (it's
@@ -50,6 +55,15 @@ elastic: bool               # can we spin up more of this tier?
 Tiers (cost ascending): **LOCAL** (tower0 GPU, ≈0, fixed) < **SPOT** (Aliyun
 ECI/spot, cheap, elastic) < **ONDEMAND** (Aliyun g8i, medium) < **LAST_RESORT**
 (RunPod serverless, expensive, near-instant scale).
+
+Concrete Aliyun provisioning primitives per elastic tier — all **per-job start/stop**,
+driven by `Provision`/`Deprovision`, never Terraform: **SPOT/ONDEMAND** GPU jobs land
+on **ECI-GPU** containers submitted as k8s `Job`s via **ASK** (serverless k8s) — the
+pod exits, billing stops; short, spiky inference can instead use **FC-GPU** functions
+(scale-to-zero, per-100ms). Terraform owns only the long-lived base (VPC, serving ECS,
+OSS/CDN, the ASK cluster shell). `provision_latency_s` ≈ tens of seconds for ECI-GPU,
+so INTERACTIVE prefers already-warm LOCAL while BATCH (Sorbonne teacher-upload)
+absorbs the cold start.
 
 Prefer-local and RunPod-last-resort are **not special cases** — they fall out of the
 cost term. Local wins on budget; RunPod (top cost tier) only wins when speed is
