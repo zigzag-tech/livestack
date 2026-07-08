@@ -12,3 +12,7 @@ dist/
 
 # runtime DB — never commit (was leaked to public history once, purged)
 /livestack.sqlite
+
+# Python bytecode
+__pycache__/
+*.pyc
