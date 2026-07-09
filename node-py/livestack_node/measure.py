@@ -43,6 +43,38 @@ def measure_footprint(load_fn: Callable[[], object],
     return model, {dim: float(max(peak, weights, 0))}
 
 
+class ActivationTracker:
+    """Learns each unit's peak-activation headroom from the live allocator high-water.
+
+    A node process's peak allocation (``PeakMeter.peak_bytes`` — see meters.py) minus
+    the declared weights of its resident units = the transient activation of whatever
+    ran in that sampling window. Attributed to the *sole* busy unit (a window with 0
+    or >1 busy units is skipped, so the signal isn't smeared across units). Held as a
+    per-unit high-water so a single large input raises the reserve for the rest of the
+    process's life. Pure counter logic — unit-tested by driving :meth:`observe`
+    without a GPU; the allocator sampling lives in the node sampler.
+
+    The reported ``activation_headroom`` feeds ``planner.Unit.activation_headroom``,
+    which the Harmony planner reserves on the device while the unit is resident.
+    """
+
+    def __init__(self) -> None:
+        self._hw: Dict[str, float] = {}
+
+    def observe(self, peak_bytes: Optional[int], resident_weights_bytes: float,
+                busy_units) -> None:
+        busy = list(busy_units)
+        if peak_bytes is None or len(busy) != 1:
+            return
+        unit = busy[0]
+        excess = max(0.0, float(peak_bytes) - float(resident_weights_bytes))
+        if excess > self._hw.get(unit, 0.0):
+            self._hw[unit] = excess
+
+    def headroom_bytes(self, unit: str) -> float:
+        return self._hw.get(unit, 0.0)
+
+
 def _cuda_meter() -> MemoryMeter:  # pragma: no cover - requires torch+CUDA
     import torch
 
