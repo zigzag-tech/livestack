@@ -85,6 +85,16 @@ class Unit:
     selector: Mapping[str, str] = field(default_factory=dict)   # device labels required
     min_residency_s: float = 15.0                  # anti-thrash: no preempt this soon after load
     restore_debounce_s: float = 20.0               # anti-thrash: wait after pressure before restore
+    # Peak-activation VRAM kept FREE on the device while this unit is resident, so
+    # its runtime activation never OOMs. `footprint` is resident weights; a unit's
+    # *real* peak is weights + activation, and reserving only weights is the OOM
+    # (a long align chunk's transient activation) that motivated Harmony. Reserved
+    # for as long as the unit is resident — not merely at load — so a later backfill
+    # can't steal the space the unit needs when it next runs. A node MEASURES this
+    # live (allocator high-water minus declared weights) and reports it, so the
+    # reserve tracks reality. Default {} => reserve == footprint => zero behavior
+    # change.
+    activation_headroom: Res = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -228,9 +238,27 @@ class _World:
             u = _add(u, self.w.units[p.kind].footprint)
         return u
 
+    def _resident_headroom(self, device_id: str) -> Dict[str, float]:
+        """Peak-activation VRAM kept FREE on the device for as long as each unit is
+        resident, so a unit's runtime activation never OOMs (the align-chunk spike
+        that motivated Harmony). Summed across resident units — conservative for
+        units in separate processes that can peak concurrently; over-reserves (never
+        under-reserves) when a single executor serializes them. Released on evict."""
+        h: Dict[str, float] = {}
+        for p in self.resident[device_id].values():
+            hr = self.w.units[p.kind].activation_headroom
+            if hr:
+                h = _add(h, hr)
+        return h
+
     def free(self, device_id: str) -> Dict[str, float]:
         d = self.devices[device_id]
-        budget = _sub(_sub(d.capacity, d.reserved), self.used(device_id))
+        # Reserve resident units' measured peak-activation on top of the static
+        # `reserved` slack, so admitting/backfilling another unit can't consume the
+        # space a resident unit needs when it next runs (prevents runtime OOM, not
+        # just load-time). Zero when no unit declares headroom => unchanged.
+        hdrm = self._resident_headroom(device_id)
+        budget = _sub(_sub(_sub(d.capacity, d.reserved), self.used(device_id)), hdrm)
         meas = self.w.measured_free.get(device_id) if self.w.measured_free else None
         if not meas:
             return budget
@@ -244,7 +272,7 @@ class _World:
         # delta = used_now - used_at_snapshot (positive => we loaded => less real free).
         delta = _sub(self.used(device_id), self._used_at_snapshot.get(device_id, {}))
         adjusted = _sub(meas, delta)
-        avail = _sub(adjusted, d.reserved)
+        avail = _sub(_sub(adjusted, d.reserved), hdrm)
         out = dict(budget)
         for k, v in avail.items():
             out[k] = min(budget.get(k, v), v)
@@ -276,6 +304,18 @@ class _World:
 
 def _device_matches(d: Device, selector: Mapping[str, str]) -> bool:
     return all(d.labels.get(k) == v for k, v in selector.items())
+
+
+def _admission_need(unit: Unit) -> Res:
+    """VRAM a device must have free to safely ADMIT/place a new load of ``unit``:
+    resident weights (``footprint``) plus its transient peak-activation
+    ``activation_headroom``. Only the admission/preemption fit checks use this;
+    steady-state residence accounting (``_World.used``) still charges ``footprint``
+    alone, so headroom prevents an OOM grant without permanently inflating the
+    resident memory model. Default (no headroom) => ``footprint`` unchanged."""
+    if not unit.activation_headroom:
+        return unit.footprint
+    return _add(unit.footprint, unit.activation_headroom)
 
 
 def _eff_priority(req: Request, unit: Unit, now: float, pol: PlannerPolicy) -> int:
@@ -368,10 +408,10 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
         # warm: a resident copy serves another lease for free
         if world.is_resident(req.kind, d.id):
             opt = _Option(d.id, 0.0 + loc_pen, [], needs_load=False)
-        elif _fits(unit.footprint, world.free(d.id)):
+        elif _fits(_admission_need(unit), world.free(d.id)):
             opt = _Option(d.id, unit.reload_cost + loc_pen, [], needs_load=True)
         else:
-            victims = _victims_to_free(world, d.id, unit.footprint, eff_prio, pol)
+            victims = _victims_to_free(world, d.id, _admission_need(unit), eff_prio, pol)
             if victims is None:
                 continue
             preempt_cost = sum(world.w.units[v.kind].reload_cost for v in victims)
@@ -458,12 +498,12 @@ def _place_warm(world: _World, kind: str, unit: Unit, pol: PlannerPolicy,
     for d in world.w.devices:
         if not _device_matches(d, unit.selector):
             continue
-        if _fits(unit.footprint, world.free(d.id)):
+        if _fits(_admission_need(unit), world.free(d.id)):
             slack = _magnitude(world.free(d.id))
             if slack > best_free:
                 best_free, best_dev = slack, d.id
         elif mandatory:
-            victims = _victims_to_free(world, d.id, unit.footprint, unit.priority, pol)
+            victims = _victims_to_free(world, d.id, _admission_need(unit), unit.priority, pol)
             if victims is not None:
                 victims_for[d.id] = victims
     if best_dev is not None:
