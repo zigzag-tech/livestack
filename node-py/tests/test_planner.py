@@ -215,3 +215,83 @@ def test_shed_respects_min_residency_anti_thrash():
                    now=100, measured_free={"gpu0": {"vram": 0}})
     p = plan(w)
     assert kinds_of(p.of(Evict), Evict) == []
+
+
+# --- measured activation headroom (admission reserves weights + peak) ---------
+
+def test_activation_headroom_reserved_at_admission_defers_when_peak_wont_fit():
+    # chipgen weights (5) fit in free 24-1=23, but its measured activation peak is
+    # +20 => real admission need 25 > 23. Weights-only would have granted (the OOM);
+    # with headroom the planner refuses and defers instead of loading into an OOM.
+    u = {"chipgen": Unit("chipgen", {"vram": 5}, priority=30, residency=Residency.UNPINNED,
+                         reload_cost=4, activation_headroom={"vram": 20})}
+    w = WorldState(devices=(gpu(),), units=u,
+                   requests=(Request("r1", "chipgen", created_at=0),), now=100)
+    p = plan(w)
+    assert p.of(Load) == []
+    assert [d.request_id for d in p.of(Defer)] == ["r1"]
+
+
+def test_activation_headroom_evicts_extra_victim_to_fit_peak():
+    # gpu holds idle tts(9)+chipgen(5); free=24-1-9-5=9. A fresh asr request: asr
+    # weights=10 (>9) already needs one victim; with +6 activation headroom the need
+    # is 16, so BOTH idle lower-priority units must be evicted to fit the peak.
+    u = units()
+    u["asr"] = Unit("asr", {"vram": 10}, priority=10, residency=Residency.HARD_PIN,
+                    min_resident=1, reload_cost=8, activation_headroom={"vram": 6})
+    w = WorldState(devices=(gpu(),), units=u,
+                   placements=(Placement("tts", "gpu0", loaded_at=0),
+                               Placement("chipgen", "gpu0", loaded_at=0)),
+                   requests=(Request("r1", "asr", created_at=100),), now=100)
+    p = plan(w)
+    assert kinds_of(p.of(Evict), Evict) == ["chipgen", "tts"]
+    assert kinds_of(p.of(Load), Load) == ["asr"]
+
+
+def test_resident_headroom_blocks_backfill_of_reserved_peak_space():
+    # THE runtime-OOM guard: asr(10)+hdrm6 resident, idle tts(9)+chipgen(5) too.
+    # free = 24-1-(10+9+5 weights)-6 hdrm = -7 => over-reserved. A fresh chipgen lease
+    # must NOT be able to backfill into asr's reserved activation space; the planner
+    # keeps 6 free for asr's next run rather than granting a warm chipgen into it.
+    u = units()
+    u["asr"] = Unit("asr", {"vram": 10}, priority=10, residency=Residency.HARD_PIN,
+                    min_resident=1, reload_cost=8, activation_headroom={"vram": 6})
+    w = WorldState(devices=(gpu(),), units=u,
+                   placements=(Placement("asr", "gpu0", loaded_at=0),
+                               Placement("tts", "gpu0", loaded_at=0),
+                               Placement("chipgen", "gpu0", loaded_at=0)),
+                   # chipgen already resident so a lease is warm; the point is that a
+                   # NEW load into reserved space is refused. Shed relieves the -7.
+                   now=100, measured_free={"gpu0": {"vram": 6}})
+    p = plan(w)
+    # over-reserve is relieved by shedding the least-important idle unit (chipgen),
+    # never by dipping into asr's (HARD_PIN) reserved headroom.
+    assert "asr" not in kinds_of(p.of(Evict), Evict)
+    assert "chipgen" in kinds_of(p.of(Evict), Evict)
+
+
+def test_headroom_released_after_evict():
+    # Once a headroom unit is evicted, its reserve is freed: a second unit that only
+    # fit AFTER the eviction is then admittable. asr(10)+hdrm20 idle-resident blocks
+    # tts(9) [free=24-1-10-20=-7]; but asr is UNPINNED here so it can be preempted by
+    # a higher-priority tts request, releasing the 20 => tts fits (free becomes 13).
+    u = units()
+    u["asr"] = Unit("asr", {"vram": 10}, priority=30, residency=Residency.UNPINNED,
+                    reload_cost=8, activation_headroom={"vram": 20})
+    u["tts"] = Unit("tts", {"vram": 9}, priority=10, residency=Residency.SOFT_PIN,
+                    reload_cost=6)
+    w = WorldState(devices=(gpu(),), units=u,
+                   placements=(Placement("asr", "gpu0", loaded_at=0),),
+                   requests=(Request("r1", "tts", created_at=100),), now=100)
+    p = plan(w)
+    assert kinds_of(p.of(Evict), Evict) == ["asr"]   # headroom released
+    assert kinds_of(p.of(Load), Load) == ["tts"]
+    assert any(g.kind == "tts" for g in p.of(Grant))
+
+
+def test_no_headroom_is_unchanged_behavior():
+    # Default units (no activation_headroom) behave exactly as before: chipgen loads.
+    w = WorldState(devices=(gpu(),), units=units(),
+                   requests=(Request("r1", "chipgen", created_at=0),), now=100)
+    p = plan(w)
+    assert "chipgen" in kinds_of(p.of(Load), Load)
