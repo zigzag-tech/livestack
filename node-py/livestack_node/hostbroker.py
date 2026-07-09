@@ -211,8 +211,10 @@ class RestPeer:
             prio = self._priorities.get(u["kind"], self._prio(r))
             fp = ({"vram_bytes": self._footprints[u["kind"]]}
                   if u["kind"] in self._footprints else u["footprint"])
+            # Measured peak-activation reserve (absent on nodes that don't report it).
+            hdrm = u.get("activation_headroom") or {}
             out[u["kind"]] = Unit(u["kind"], fp, priority=prio,
-                                  residency=Residency(r))
+                                  residency=Residency(r), activation_headroom=hdrm)
         return out
 
     def placements(self):

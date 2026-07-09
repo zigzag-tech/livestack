@@ -12,11 +12,42 @@ one-model-in-VRAM engines) and which unit is HARD_PIN differ between the two.
 """
 from __future__ import annotations
 
+import os
+import threading
+import time
 from typing import Callable, Dict
 
 from .coordinator import LivestackCoordinator
 from .facade import build_router
 from .lease import Capability
+
+
+def _start_activation_sampler(manager, coordinator, peak_meter, tracker, interval):
+    """Sample the process allocation high-water every ``interval`` s and attribute
+    the excess over declared weights to the sole busy unit, learning its peak
+    activation. Daemon thread; never raises out. Resets the peak each window so the
+    next window's max is fresh (the allocator maintains the max continuously between
+    resets, so a sub-second spike is still caught)."""
+    def loop():
+        while True:
+            time.sleep(interval)
+            try:
+                peak = peak_meter.peak_bytes()
+                st = coordinator.status()
+                busy = {l["kind"] for l in st.get("active_leases", [])
+                        if not str(l.get("owner_id", "")).startswith("__usage__")}
+                resident = set(st.get("resident", []))
+                weights = 0
+                for k in resident:
+                    u = manager.units.get(k)
+                    weights += int(getattr(u, "footprint", 0) or 0) if u else 0
+                tracker.observe(peak, weights, busy)
+                peak_meter.reset()
+            except Exception:
+                pass
+    t = threading.Thread(target=loop, name="harmony-activation-sampler", daemon=True)
+    t.start()
+    return t
 
 
 def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
@@ -25,16 +56,32 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     """``device_meter``: a zero-arg callable -> measured {capacity,free} (see
     meters.py), ``"auto"`` to pick one by backend (CUDA/MLX), or ``None`` to report
     no live memory. Defaulting to "auto" means a node becomes memory-aware on
-    redeploy with no server-side change."""
+    redeploy with no server-side change.
+
+    A per-process peak meter (also backend-auto) drives an :class:`ActivationTracker`
+    on a background sampler, so the node also learns and reports each unit's peak
+    *activation* headroom for the planner to reserve. Disable with
+    ``LIVESTACK_ACT_SAMPLE_S=0``."""
     from polycore import ModelManager
     coordinator = LivestackCoordinator(host_id, coload=coload, usage_ttl_seconds=idle_seconds)
     manager = ModelManager(units, idle_seconds, coordinator=coordinator)
     if device_meter == "auto":
         from .meters import auto_meter
         device_meter = auto_meter()
+
+    tracker = None
+    sample_s = float(os.environ.get("LIVESTACK_ACT_SAMPLE_S", "1"))
+    if sample_s > 0:
+        from .meters import auto_peak_meter
+        from .measure import ActivationTracker
+        peak_meter = auto_peak_meter()
+        if peak_meter is not None:
+            tracker = ActivationTracker()
+            _start_activation_sampler(manager, coordinator, peak_meter, tracker, sample_s)
+
     app.include_router(
         build_router(manager, coordinator, Capability(kind=kind, host_id=host_id),
-                     gpu_call, device_meter=device_meter),
+                     gpu_call, device_meter=device_meter, activation_tracker=tracker),
         prefix=prefix,
     )
     return manager, coordinator
