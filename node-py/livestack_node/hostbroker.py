@@ -97,9 +97,20 @@ class HostBroker:
         measured: Dict[str, Dict[str, float]] = {}        # device_id -> measured free
         measured_caps: Dict[str, Dict[str, float]] = {}   # device_id -> measured capacity
         for p in self.peers:
-            for kind, unit in p.units().items():
+            try:
+                peer_units = p.units()
+                peer_placements = p.placements()
+            except Exception as e:
+                # A peer that is down/slow/erroring must NOT blind the whole arbiter.
+                # Skip it and plan over the survivors: the surviving peers' driver-level
+                # measured_free still reflects this peer's VRAM (mem_get_info counts all
+                # processes on the card), so co-resident eviction stays safe instead of
+                # snapshot aborting -> the caller fail-opening -> OOM.
+                self._log(f"[hostbroker] peer unreachable, skipping this cycle: {e}")
+                continue
+            for kind, unit in peer_units.items():
                 units.setdefault(kind, unit)
-            placements.extend(p.placements())
+            placements.extend(peer_placements)
             try:
                 discovered[p.device_id] = p.host_id
             except Exception:
@@ -126,8 +137,13 @@ class HostBroker:
     # -- dispatch -------------------------------------------------------------
     def _peer_for(self, kind: str, device_id: str) -> Optional[Peer]:
         for p in self.peers:
-            if p.device_id == device_id and kind in p.units():
-                return p
+            try:
+                if p.device_id == device_id and kind in p.units():
+                    return p
+            except Exception:
+                # A down/erroring peer must not break dispatch of an action bound for
+                # a healthy peer sharing the same device — skip it.
+                continue
         return None
 
     def plan_and_apply(self, requests: Optional[List[Request]] = None,
