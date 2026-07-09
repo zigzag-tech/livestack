@@ -295,3 +295,23 @@ def test_no_headroom_is_unchanged_behavior():
                    requests=(Request("r1", "chipgen", created_at=0),), now=100)
     p = plan(w)
     assert "chipgen" in kinds_of(p.of(Load), Load)
+def test_measured_free_forces_request_driven_eviction_of_unpinned():
+    # The real tower0 case: a HARD_PIN (asr) and an idle UNPINNED (chipgen) are
+    # resident, and the declared footprints UNDERSTATE reality — the static budget
+    # (24-1-(10+5)=8) looks like a mid-priority align(fp5) fits with room to spare.
+    # But the device reports only 3 GB ACTUALLY free. The reconciled free =
+    # min(8, 3-1) = 2 < 5, so the planner must EVICT the idle UNPINNED chipgen
+    # (never the HARD_PIN asr) to admit align — instead of granting into phantom
+    # footprint free and OOMing. This is the defect's regression guard.
+    u = units()
+    u["align"] = Unit("align", {"vram": 5}, priority=15, residency=Residency.UNPINNED,
+                      reload_cost=5)
+    w = WorldState(devices=(gpu(),), units=u,
+                   placements=(Placement("asr", "gpu0", loaded_at=0),
+                               Placement("chipgen", "gpu0", loaded_at=0)),
+                   requests=(Request("r1", "align", created_at=100),), now=100,
+                   measured_free={"gpu0": {"vram": 3}})
+    p = plan(w)
+    assert kinds_of(p.of(Evict), Evict) == ["chipgen"]      # idle UNPINNED shed
+    assert "asr" not in kinds_of(p.of(Evict), Evict)        # HARD_PIN never evicted
+    assert any(g.kind == "align" and g.device_id == "gpu0" for g in p.of(Grant))
