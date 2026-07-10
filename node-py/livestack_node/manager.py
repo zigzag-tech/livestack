@@ -24,6 +24,7 @@ import enum
 import gc
 import time
 import threading
+from contextlib import contextmanager
 from typing import Callable, Optional
 
 from .freeing import trim_ram
@@ -187,24 +188,31 @@ class ModelManager:
             self._last_ensured = name
             return model
 
-    def run(self, name: str, thunk: "Callable[[object], object]"):
-        """Make ``name`` resident and execute ``thunk(model)`` inside an activation
-        measurement scope. The observer resets the device peak counter before the op
-        and, after it, attributes (peak − resident baseline) to ``name`` — the exact,
-        per-op activation the Harmony planner reserves so the unit never OOMs at its
-        runtime peak. Callers MUST serialize GPU ops (polyasr ``_transcribe_lock`` /
-        polytts single-thread executor already do); the observer keeps one in-flight
-        baseline. With no observer wired this is just ``thunk(self.ensure(name))``.
+    @contextmanager
+    def run_scope(self, name: str):
+        """``with manager.run_scope(name) as model: ...`` — make ``name`` resident and
+        bracket the block with the activation observer: it resets the device peak counter
+        on entry and, on exit, attributes (peak − measured resident baseline) to ``name``
+        as its exact per-op activation, which the Harmony planner reserves so the unit
+        never OOMs at its runtime peak. Callers MUST serialize GPU ops (polyasr
+        ``_transcribe_lock`` / polytts single-thread executor already do); the observer
+        keeps one in-flight baseline. With no observer wired this is a plain ``ensure``.
         GPU-thread only."""
         model = self.ensure(name)
         obs = self._act_observer
         if obs is None:
-            return thunk(model)
+            yield model
+            return
         obs.begin(name)
         try:
-            return thunk(model)
+            yield model
         finally:
             obs.end(name)
+
+    def run(self, name: str, thunk: "Callable[[object], object]"):
+        """Thunk form of :meth:`run_scope`: ``manager.run(name, lambda model: ...)``."""
+        with self.run_scope(name) as model:
+            return thunk(model)
 
     def touch(self) -> None:
         """Reset the idle timer without (re)loading. Called on every active frame so
