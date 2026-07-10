@@ -1,17 +1,22 @@
-"""livestack-node — the livestack side of the polycore residency seam.
+"""livestack-node — Harmony's per-process node kit AND executor.
 
-polycore (zero-dep, dependency-inverted) owns the per-process executor
-(ModelManager) and the Coordinator Protocol. This package ships:
+Everything is managed via livestack Harmony now: this one package owns both the
+per-process **executor** (``ModelManager``/``ManagedUnit``/``ResidencyPolicy``, the
+``Coordinator`` seam, the backend freeing callbacks — formerly the separate
+``polycore`` package, now retired into here) and the cross-process node kit:
 
-  - LivestackCoordinator : lease-driven implementation of polycore.Coordinator
-                           (resident iff leased-or-pinned; per-unit idle evict).
+  - ModelManager/ManagedUnit/ResidencyPolicy : the per-process executor (load/unload/
+                           run-with-measurement/idle-evict) over the Rust planner.
+  - Coordinator / LocalCoordinator            : the residency policy seam + its
+                           in-process default.
+  - LivestackCoordinator : lease-driven Coordinator (resident iff leased-or-pinned).
   - attach()             : the one call polyasr & polytts make, identically, to
-                           build a polycore manager + coordinator + REST facade.
+                           build a manager + coordinator + REST facade.
   - build_router         : the uniform /livestack REST surface.
   - CapabilityLeaseStore : the lease broker (also federatable).
   - lease()              : consumer-side lease context manager.
 
-Pinning is expressed on the units via polycore.ResidencyPolicy.HARD_PIN.
+Pinning is expressed on the units via ResidencyPolicy.HARD_PIN.
 """
 from .lease import (
     Capability,
@@ -20,7 +25,9 @@ from .lease import (
     Requirement,
     matches_requirement,
 )
-from .coordinator import LivestackCoordinator
+from .manager import ManagedUnit, ModelManager, ResidencyPolicy
+from .coordinator import Coordinator, LocalCoordinator, LivestackCoordinator
+from .freeing import free_cuda, free_mlx, trim_ram, noop_free
 from .facade import build_router
 from .serve import attach
 from .client import lease
@@ -37,6 +44,9 @@ from .provision import (
 from .fleet_dispatch import dispatch, run_on_provider
 
 __all__ = [
+    "ManagedUnit", "ModelManager", "ResidencyPolicy",
+    "Coordinator", "LocalCoordinator",
+    "free_cuda", "free_mlx", "trim_ram", "noop_free",
     "LivestackCoordinator",
     "attach",
     "build_router",

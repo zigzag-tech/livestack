@@ -1,16 +1,14 @@
-"""polycore — zero-dependency model-residency seam shared by polyasr & polytts.
+"""DEPRECATED transition shim — polycore has been retired into livestack_node.
 
-Public API:
-    ManagedUnit, ModelManager, ResidencyPolicy   — the local executor
-    Coordinator, LocalCoordinator                 — the policy seam
-    free_cuda, free_mlx, trim_ram, noop_free      — backend freeing callbacks
-
-livestack ships a LivestackCoordinator implementing Coordinator; it is never
-imported here (dependency inversion).
+Everything is managed via livestack Harmony now: the per-process executor
+(ModelManager/ManagedUnit/ResidencyPolicy), the Coordinator seam, and the freeing
+callbacks all live in ``livestack_node``. This module re-exports them ONLY so a
+not-yet-migrated ``from polycore import X`` keeps working during rollout. It is
+deleted once every consumer imports from ``livestack_node`` directly.
 """
-from .freeing import free_cuda, free_mlx, trim_ram, noop_free
-from .manager import ManagedUnit, ModelManager, ResidencyPolicy
-from .coordinator import Coordinator, LocalCoordinator
+from livestack_node.manager import ManagedUnit, ModelManager, ResidencyPolicy
+from livestack_node.coordinator import Coordinator, LocalCoordinator
+from livestack_node.freeing import free_cuda, free_mlx, trim_ram, noop_free
 
 __all__ = [
     "ManagedUnit", "ModelManager", "ResidencyPolicy",
