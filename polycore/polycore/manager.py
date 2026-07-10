@@ -125,6 +125,12 @@ class ModelManager:
         self.units = units
         self.idle_seconds = idle_seconds
         self.last_used = time.monotonic()
+        # The most recently ``ensure``d unit — i.e. the one a caller is about to run
+        # (servers call ensure(name) immediately before executing that unit's GPU op,
+        # serialized on their GPU thread). This is a far more faithful "what is
+        # actually executing" signal than which units hold a residence lease, so the
+        # activation sampler attributes the peak-allocation high-water to it.
+        self._last_ensured: Optional[str] = None
         self._guard = threading.Lock()
         self._log = log
         # The Rust decision core. State (resident set, recover rate-limit) lives in
@@ -173,6 +179,7 @@ class ModelManager:
         with self._guard:
             model = self.coordinator.acquire(name)
             self.last_used = time.monotonic()
+            self._last_ensured = name
             return model
 
     def touch(self) -> None:
@@ -252,6 +259,12 @@ class ModelManager:
     @property
     def resident(self) -> set[str]:
         return set(self._planner.resident())
+
+    @property
+    def last_ensured(self) -> Optional[str]:
+        """The unit most recently made resident via :meth:`ensure` — the node's best
+        signal for which unit is currently executing on the GPU (see ``__init__``)."""
+        return self._last_ensured
 
     # Back-compat alias: coordinators (LocalCoordinator, livestack's
     # LivestackCoordinator) were written against the manager's old private
