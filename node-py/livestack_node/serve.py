@@ -24,19 +24,28 @@ from .lease import Capability
 
 def _start_activation_sampler(manager, coordinator, peak_meter, tracker, interval):
     """Sample the process allocation high-water every ``interval`` s and attribute
-    the excess over declared weights to the sole busy unit, learning its peak
-    activation. Daemon thread; never raises out. Resets the peak each window so the
-    next window's max is fresh (the allocator maintains the max continuously between
-    resets, so a sub-second spike is still caught)."""
+    the excess over declared weights to the unit currently executing, learning its
+    peak activation. Daemon thread; never raises out. Resets the peak each window so
+    the next window's max is fresh (the allocator maintains the max continuously
+    between resets, so a sub-second spike is still caught).
+
+    The executing unit is ``manager.last_ensured`` (the unit a caller most recently
+    ``ensure``d and is running on the serialized GPU thread) — NOT which units hold a
+    residence lease. A batch commonly leases several units up front (e.g. media-corpus
+    leases align+diarize together), so the old lease signal saw >1 "busy" unit and
+    skipped every window, never learning diarize's peak. ``last_ensured`` is a single
+    unit, so attribution is unambiguous and every unit that actually runs is measured.
+    During idle the peak collapses to weights, so a stale ``last_ensured`` contributes
+    ~0 excess and never inflates a headroom."""
     def loop():
         while True:
             time.sleep(interval)
             try:
                 peak = peak_meter.peak_bytes()
                 st = coordinator.status()
-                busy = {l["kind"] for l in st.get("active_leases", [])
-                        if not str(l.get("owner_id", "")).startswith("__usage__")}
                 resident = set(st.get("resident", []))
+                exec_unit = manager.last_ensured
+                busy = {exec_unit} if exec_unit in resident else set()
                 weights = 0
                 for k in resident:
                     u = manager.units.get(k)
@@ -76,7 +85,18 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
         from .measure import ActivationTracker
         peak_meter = auto_peak_meter()
         if peak_meter is not None:
-            tracker = ActivationTracker()
+            # Learned activation high-waters persist across restarts so a unit's peak
+            # is not re-discovered via OOM after every redeploy. Overridable; empty
+            # string disables persistence.
+            store = os.environ.get("LIVESTACK_ACT_STORE")
+            if store is None:
+                d = os.path.expanduser("~/.cache/livestack")
+                try:
+                    os.makedirs(d, exist_ok=True)
+                    store = os.path.join(d, f"activation-{host_id}-{kind}.json")
+                except Exception:
+                    store = None
+            tracker = ActivationTracker(store_path=store or None)
             _start_activation_sampler(manager, coordinator, peak_meter, tracker, sample_s)
 
     app.include_router(

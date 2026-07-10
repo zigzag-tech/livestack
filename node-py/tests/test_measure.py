@@ -33,6 +33,31 @@ def test_tracker_never_negative_when_peak_below_weights():
     assert t.headroom_bytes("asr") == 0
 
 
+def test_tracker_persists_high_water_across_restart(tmp_path):
+    store = str(tmp_path / "act.json")
+    t = ActivationTracker(store_path=store)
+    t.observe(peak_bytes=20, resident_weights_bytes=5, busy_units={"align"})
+    assert t.headroom_bytes("align") == 15
+    # a fresh tracker (simulating a process restart) seeds from the store — the peak
+    # is remembered, not re-learned via another OOM.
+    t2 = ActivationTracker(store_path=store)
+    assert t2.headroom_bytes("align") == 15
+    # and it keeps ratcheting up from the persisted floor.
+    t2.observe(peak_bytes=30, resident_weights_bytes=5, busy_units={"align"})
+    assert ActivationTracker(store_path=store).headroom_bytes("align") == 25
+
+
+def test_tracker_survives_corrupt_or_missing_store(tmp_path):
+    missing = str(tmp_path / "nope.json")
+    assert ActivationTracker(store_path=missing).headroom_bytes("x") == 0  # no crash
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not json")
+    t = ActivationTracker(store_path=str(bad))   # corrupt -> start fresh, don't raise
+    assert t.headroom_bytes("x") == 0
+    t.observe(peak_bytes=9, resident_weights_bytes=2, busy_units={"x"})
+    assert t.headroom_bytes("x") == 7
+
+
 def test_restpeer_parses_activation_headroom_into_unit():
     p = RestPeer("http://node", priorities={}, footprints={})
     snap = {"host_id": "h", "device_id": "h/gpu0", "units": [
