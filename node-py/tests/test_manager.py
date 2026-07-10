@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 import unittest
 
-import polycore
-from polycore import (ManagedUnit, ModelManager, ResidencyPolicy,
+import livestack_node as polycore
+from livestack_node import (ManagedUnit, ModelManager, ResidencyPolicy,
                       Coordinator, LocalCoordinator)
 
 

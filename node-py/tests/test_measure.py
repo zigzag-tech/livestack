@@ -58,6 +58,58 @@ def test_tracker_survives_corrupt_or_missing_store(tmp_path):
     assert t.headroom_bytes("x") == 7
 
 
+class _FakeMeter:
+    """Scriptable allocator meter: set .cur (allocated) and .peak (max) directly."""
+    def __init__(self):
+        self.cur = 0
+        self.peak = 0
+    def reset_peak(self):
+        self.peak = self.cur
+    def allocated(self):
+        return self.cur
+    def max_allocated(self):
+        return self.peak
+
+
+def test_observer_measures_op_activation_exactly():
+    from livestack_node.measure import ActivationObserver
+    t = ActivationTracker()
+    m = _FakeMeter()
+    obs = ActivationObserver(t, meter=m)
+    m.cur = m.peak = 5000                 # resident weights baseline
+    obs.begin("align")                    # base=5000, peak reset to 5000
+    m.cur = m.peak = 8000                 # op adds 3000 transient
+    obs.end("align")
+    assert t.headroom_bytes("align") == 3000
+    # a later, smaller op never lowers the reserve
+    m.cur = m.peak = 5000; obs.begin("align")
+    m.peak = 6000; obs.end("align")
+    assert t.headroom_bytes("align") == 3000
+    # a co-resident unit's weights sit in the baseline, so they're NOT attributed as
+    # activation to the unit that runs next
+    m.cur = m.peak = 12000; obs.begin("diarize")   # align+other weights resident
+    m.peak = 12050; obs.end("diarize")             # diarize adds ~50 (CPU-ish)
+    assert t.headroom_bytes("diarize") == 50
+
+
+def test_record_is_monotonic_and_persists(tmp_path):
+    store = str(tmp_path / "r.json")
+    t = ActivationTracker(store_path=store, signature="s1")
+    t.record("x", 10); assert t.headroom_bytes("x") == 10
+    t.record("x", 4);  assert t.headroom_bytes("x") == 10   # never lowered
+    t.record("x", 20); assert t.headroom_bytes("x") == 20
+    assert ActivationTracker(store_path=store, signature="s1").headroom_bytes("x") == 20
+
+
+def test_signature_mismatch_discards_stale_store(tmp_path):
+    store = str(tmp_path / "a.json")
+    ActivationTracker(store_path=store, signature="modelA").record("align", 15)
+    # same signature -> trusted
+    assert ActivationTracker(store_path=store, signature="modelA").headroom_bytes("align") == 15
+    # changed model/footprint -> stale (possibly-too-low) value discarded, not trusted
+    assert ActivationTracker(store_path=store, signature="modelB").headroom_bytes("align") == 0
+
+
 def test_restpeer_parses_activation_headroom_into_unit():
     p = RestPeer("http://node", priorities={}, footprints={})
     snap = {"host_id": "h", "device_id": "h/gpu0", "units": [

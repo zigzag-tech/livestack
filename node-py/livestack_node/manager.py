@@ -1,4 +1,4 @@
-"""polycore.ModelManager — the per-process *local executor* of model residency.
+"""ModelManager — Harmony's per-process *local executor* of model residency.
 
 This is the seam shared by polyasr and polytts (which each used to embed a
 mirrored copy as ``AsrModelManager`` / ``ModelManager``). The manager owns the
@@ -9,7 +9,7 @@ Rust planner (``livestack_shared::residency``) exposed via the ``shared_py``
 extension. One brain, shared by Python (here) and future TS services; no parallel
 implementation to drift.
 
-The default :class:`~polycore.coordinator.LocalCoordinator` reproduces today's
+The default :class:`~livestack_node.coordinator.LocalCoordinator` reproduces today's
 in-process discipline exactly (COLOAD + idle-evict), so a server that swaps its
 embedded manager for this one sees no behavioural change. A ``LivestackCoordinator``
 (shipped by livestack, never imported here) implements the same seam to arbitrate
@@ -32,7 +32,7 @@ try:
     from shared_py import Planner as _Planner
 except ImportError as _e:  # pragma: no cover - environment misconfiguration
     raise ImportError(
-        "polycore requires the compiled `shared_py` residency planner (the Rust "
+        "livestack_node requires the compiled `shared_py` residency planner (the Rust "
         "decision core). Build it into this venv:\n"
         "  cd ~/livestack/shared-py && VIRTUAL_ENV=\"$VIRTUAL_ENV\" "
         "PYO3_PYTHON=\"$(command -v python)\" python -m maturin develop --release"
@@ -121,10 +121,15 @@ class ModelManager:
 
     def __init__(self, units: dict[str, ManagedUnit], idle_seconds: int,
                  coload: bool = True, coordinator: "Coordinator | None" = None,
+                 activation_observer: "Optional[object]" = None,
                  log: Callable[[str], None] = print):
         self.units = units
         self.idle_seconds = idle_seconds
         self.last_used = time.monotonic()
+        # Optional per-op activation-measurement scope (livestack_node.ActivationObserver):
+        # run() brackets the GPU op with observer.begin/end to learn the unit's peak
+        # activation exactly. None => run() is a plain ensure()+call.
+        self._act_observer = activation_observer
         # The most recently ``ensure``d unit — i.e. the one a caller is about to run
         # (servers call ensure(name) immediately before executing that unit's GPU op,
         # serialized on their GPU thread). This is a far more faithful "what is
@@ -149,13 +154,13 @@ class ModelManager:
     def _load(self, name: str) -> object:
         model = self.units[name].load()
         self._planner.commit_loaded(name)
-        self._log(f"[polycore] loaded {name} (resident={self._planner.resident()})")
+        self._log(f"[harmony] loaded {name} (resident={self._planner.resident()})")
         return model
 
     def _evict(self, name: str) -> None:
         self.units[name].unload()
         self._planner.commit_evicted(name)
-        self._log(f"[polycore] evicted {name} (resident={self._planner.resident()})")
+        self._log(f"[harmony] evicted {name} (resident={self._planner.resident()})")
 
     def _reload(self, name: str) -> object:
         """Evict (if resident) then load — the unit-level self-heal for a
@@ -181,6 +186,25 @@ class ModelManager:
             self.last_used = time.monotonic()
             self._last_ensured = name
             return model
+
+    def run(self, name: str, thunk: "Callable[[object], object]"):
+        """Make ``name`` resident and execute ``thunk(model)`` inside an activation
+        measurement scope. The observer resets the device peak counter before the op
+        and, after it, attributes (peak − resident baseline) to ``name`` — the exact,
+        per-op activation the Harmony planner reserves so the unit never OOMs at its
+        runtime peak. Callers MUST serialize GPU ops (polyasr ``_transcribe_lock`` /
+        polytts single-thread executor already do); the observer keeps one in-flight
+        baseline. With no observer wired this is just ``thunk(self.ensure(name))``.
+        GPU-thread only."""
+        model = self.ensure(name)
+        obs = self._act_observer
+        if obs is None:
+            return thunk(model)
+        obs.begin(name)
+        try:
+            return thunk(model)
+        finally:
+            obs.end(name)
 
     def touch(self) -> None:
         """Reset the idle timer without (re)loading. Called on every active frame so
@@ -241,7 +265,7 @@ class ModelManager:
             to_reload = self._planner.plan_recover(degraded, now, min_interval)
             rate_limited = set(degraded) - set(to_reload)
             for name in rate_limited:
-                self._log(f"[polycore] {name} degraded but recover rate-limited")
+                self._log(f"[harmony] {name} degraded but recover rate-limited")
             for name in to_reload:
                 self._reload(name)
                 self._planner.mark_recovered(name, now)

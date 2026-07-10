@@ -5,12 +5,12 @@ import asyncio
 
 import pytest
 
-pytest.importorskip("polycore")
+pytest.importorskip("livestack_node")
 pytest.importorskip("fastapi")
 httpx = pytest.importorskip("httpx")
 
 from fastapi import FastAPI  # noqa: E402
-from polycore import ManagedUnit, ResidencyPolicy, noop_free  # noqa: E402
+from livestack_node import ManagedUnit, ResidencyPolicy, noop_free  # noqa: E402
 
 from livestack_node import attach  # noqa: E402
 

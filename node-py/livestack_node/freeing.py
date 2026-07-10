@@ -1,5 +1,5 @@
 """Backend-specific GPU/heap freeing callbacks. Zero hard dependencies — every
-backend import is lazy and best-effort so polycore stays installable anywhere.
+backend import is lazy and best-effort so this stays installable anywhere.
 
 Lifted verbatim from polyasr_manager / polytts so behaviour is identical; this is
 the one place that knows CUDA vs MLX vs libc."""
