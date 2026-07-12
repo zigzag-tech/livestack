@@ -13,7 +13,8 @@ from .lease import Capability
 
 def build_router(manager, coordinator, capability: Capability,
                  gpu_call: Callable[[Callable], object],
-                 device_meter: Optional[Callable[[], Optional[dict]]] = None):
+                 device_meter: Optional[Callable[[], Optional[dict]]] = None,
+                 activation_tracker=None):
     try:
         from fastapi import APIRouter, Body, HTTPException
     except ImportError as exc:  # pragma: no cover
@@ -88,13 +89,21 @@ def build_router(manager, coordinator, capability: Capability,
         units = []
         for kind, unit in manager.units.items():
             fp = getattr(unit, "footprint", 0) or 0
-            units.append({
+            entry = {
                 "kind": kind,
                 "footprint": {"vram_bytes": int(fp)},
                 "residency": int(getattr(unit, "residency_policy", 2)),
                 "resident": kind in resident,
                 "busy": kind in busy,
-            })
+            }
+            # Measured peak-activation headroom (allocator high-water minus declared
+            # weights), when a tracker is wired. The planner reserves it on-device
+            # while the unit is resident so runtime activation can't OOM.
+            if activation_tracker is not None:
+                hb = activation_tracker.headroom_bytes(kind)
+                if hb > 0:
+                    entry["activation_headroom"] = {"vram_bytes": int(hb)}
+            units.append(entry)
         out = {"host_id": capability.host_id,
                "device_id": f"{capability.host_id}/gpu0",
                "units": units}

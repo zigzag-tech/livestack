@@ -3,8 +3,8 @@ for lease-driven, pin-aware, per-unit residence. Deterministic via injected cloc
 
 import pytest
 
-pytest.importorskip("polycore")
-from polycore import ManagedUnit, ModelManager, ResidencyPolicy, noop_free  # noqa: E402
+pytest.importorskip("livestack_node")
+from livestack_node import ManagedUnit, ModelManager, ResidencyPolicy, noop_free  # noqa: E402
 
 from livestack_node import LivestackCoordinator  # noqa: E402
 

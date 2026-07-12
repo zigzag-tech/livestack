@@ -90,8 +90,10 @@ _KEEPALIVE = ["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"]
 
 def _ssh(host: str, port: int, user: str, cmd: str, *, check: bool = True,
          timeout: int = 600) -> subprocess.CompletedProcess:
-    return subprocess.run(["ssh", *_SSH_OPTS, "-p", str(port), f"{user}@{host}", cmd],
-                          check=check, timeout=timeout)
+    # keepalive is load-bearing for long exec: an idle channel (output buffered
+    # behind `| tail`) is dropped by NAT/proxy idle timeouts mid-run.
+    return subprocess.run(["ssh", *_SSH_OPTS, *_KEEPALIVE, "-p", str(port),
+                           f"{user}@{host}", cmd], check=check, timeout=timeout)
 
 
 def _scp_up(host: str, port: int, user: str, src: str, dst: str, *,
