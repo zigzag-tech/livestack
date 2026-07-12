@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 import unittest
 
-import polycore
-from polycore import (ManagedUnit, ModelManager, ResidencyPolicy,
+import livestack_node as polycore
+from livestack_node import (ManagedUnit, ModelManager, ResidencyPolicy,
                       Coordinator, LocalCoordinator)
 
 
@@ -237,3 +237,29 @@ class FunctionalHealth(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_run_scope_brackets_observer_around_op():
+    """run_scope() must call observer.begin before the body and observer.end after —
+    including when the body raises (finally), so a failed op still records its peak."""
+    import livestack_node as ln
+    calls = []
+
+    class _Obs:
+        def begin(self, u): calls.append(("begin", u))
+        def end(self, u): calls.append(("end", u))
+
+    units = {"a": ln.ManagedUnit("a", lambda: "MODEL", ln.noop_free, footprint=1)}
+    m = ln.ModelManager(units, idle_seconds=0, activation_observer=_Obs())
+    with m.run_scope("a") as model:
+        assert model == "MODEL"
+        calls.append(("body", "a"))
+    assert calls == [("begin", "a"), ("body", "a"), ("end", "a")]
+
+    calls.clear()
+    try:
+        with m.run_scope("a"):
+            raise ValueError("boom")
+    except ValueError:
+        pass
+    assert calls == [("begin", "a"), ("end", "a")]

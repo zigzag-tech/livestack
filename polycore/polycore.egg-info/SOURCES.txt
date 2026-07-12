@@ -1,0 +1,12 @@
+pyproject.toml
+polycore/__init__.py
+polycore/coordinator.py
+polycore/freeing.py
+polycore/manager.py
+polycore.egg-info/PKG-INFO
+polycore.egg-info/SOURCES.txt
+polycore.egg-info/dependency_links.txt
+polycore.egg-info/requires.txt
+polycore.egg-info/top_level.txt
+tests/test_local_parity.py
+tests/test_manager.py

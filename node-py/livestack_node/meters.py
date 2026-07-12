@@ -74,3 +74,76 @@ def auto_meter() -> Optional[Callable[[], Optional[dict]]]:
     except Exception:
         pass
     return None
+
+
+class PeakMeter:
+    """This-PROCESS allocation high-water since the last ``reset()``. Distinct from
+    the device meters above (which read device-wide *free*): a peak meter reads the
+    allocator's continuously-maintained max, so a millisecond activation spike is
+    captured even when sampled only every second. Used to MEASURE a unit's peak
+    activation for the planner's ``activation_headroom``. ``peak_bytes()`` -> int or
+    None; never raises."""
+    def peak_bytes(self) -> Optional[int]: ...   # pragma: no cover
+    def reset(self) -> None: ...                 # pragma: no cover
+
+
+def cuda_peak_meter() -> PeakMeter:
+    class _CudaPeak(PeakMeter):
+        def peak_bytes(self) -> Optional[int]:
+            try:
+                import torch
+                if not torch.cuda.is_available():
+                    return None
+                return int(torch.cuda.max_memory_allocated())
+            except Exception:
+                return None
+
+        def reset(self) -> None:
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.reset_peak_memory_stats()
+            except Exception:
+                pass
+    return _CudaPeak()
+
+
+def mlx_peak_meter() -> PeakMeter:
+    class _MlxPeak(PeakMeter):
+        def peak_bytes(self) -> Optional[int]:
+            try:
+                import mlx.core as mx
+                try:
+                    return int(mx.get_peak_memory())
+                except Exception:
+                    return int(mx.metal.get_peak_memory())
+            except Exception:
+                return None
+
+        def reset(self) -> None:
+            try:
+                import mlx.core as mx
+                try:
+                    mx.reset_peak_memory()
+                except Exception:
+                    mx.metal.reset_peak_memory()
+            except Exception:
+                pass
+    return _MlxPeak()
+
+
+def auto_peak_meter() -> Optional[PeakMeter]:
+    """Pick a per-process peak meter by backend (CUDA first, else MLX). ``None`` if
+    neither — the node then reports no measured activation headroom."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return cuda_peak_meter()
+    except Exception:
+        pass
+    try:
+        import mlx.core  # noqa: F401
+        return mlx_peak_meter()
+    except Exception:
+        pass
+    return None

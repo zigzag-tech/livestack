@@ -11,9 +11,7 @@ import os
 import time
 import unittest
 
-import polycore
-
-
+import livestack_node as polycore
 def _load_ref():
     path = os.path.expanduser("~/polyasr/polyasr_manager.py")
     if not os.path.exists(path):

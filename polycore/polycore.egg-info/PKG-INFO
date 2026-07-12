@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: polycore
+Version: 0.1.0
+Summary: Zero-dependency model-residency seam shared by polyasr & polytts (the Coordinator interface livestack adapts to).
+Requires-Python: >=3.10
+Provides-Extra: test
