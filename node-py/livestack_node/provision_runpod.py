@@ -36,9 +36,12 @@ DEFAULT_IMAGE = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04"
 # Excluded regardless of price: pre-Ampere (no bf16) and MIG/partition SKUs.
 _GPU_DENY = ("V100", "MIG", "P100", "P40", "T4")
 # Known-good fallback order if the live price query fails or returns nothing usable.
+# (sku, zone, price_per_hr, vram_gb) — vram is carried so the fallback honours the
+# caller's min/max VRAM floor exactly like the live path. Without it, a spec asking
+# for >=40GB silently gets a 24GB card the moment the live listing has no match.
 _STATIC_FALLBACK = [
-    ("NVIDIA RTX A5000", "COMMUNITY", 0.16), ("NVIDIA RTX A5000", "SECURE", 0.27),
-    ("NVIDIA GeForce RTX 3090", "COMMUNITY", 0.22), ("NVIDIA RTX A6000", "SECURE", 0.49),
+    ("NVIDIA RTX A5000", "COMMUNITY", 0.16, 24), ("NVIDIA RTX A5000", "SECURE", 0.27, 24),
+    ("NVIDIA GeForce RTX 3090", "COMMUNITY", 0.22, 24), ("NVIDIA RTX A6000", "SECURE", 0.49, 48),
 ]
 
 
@@ -100,7 +103,12 @@ class RunpodProvisioner(Provisioner):
             if t.get("secureCloud") and t.get("securePrice"):
                 raw.append((gid, "SECURE", float(t["securePrice"])))
         if not raw:
-            raw = list(_STATIC_FALLBACK)
+            # Fallback must honour the SAME VRAM floor as the live path, or a
+            # >=40GB request silently lands on a 24GB card (the LoRA OOM).
+            raw = [(g, z, p) for g, z, p, v in _STATIC_FALLBACK
+                   if spec.min_vram_gb <= v <= spec.max_vram_gb
+                   and not any(x in g for x in _GPU_DENY)
+                   and (not spec.gpu_hint or spec.gpu_hint in g)]
         raw.sort(key=lambda c: c[2])
         return [Offer(provider=self.provider, sku=g, zone=c, price_per_hr=p) for g, c, p in raw]
 
