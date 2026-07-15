@@ -41,7 +41,13 @@ _GPU_DENY = ("V100", "MIG", "P100", "P40", "T4")
 # for >=40GB silently gets a 24GB card the moment the live listing has no match.
 _STATIC_FALLBACK = [
     ("NVIDIA RTX A5000", "COMMUNITY", 0.16, 24), ("NVIDIA RTX A5000", "SECURE", 0.27, 24),
-    ("NVIDIA GeForce RTX 3090", "COMMUNITY", 0.22, 24), ("NVIDIA RTX A6000", "SECURE", 0.49, 48),
+    ("NVIDIA GeForce RTX 3090", "COMMUNITY", 0.22, 24),
+    # >=40GB options. Several SKUs across BOTH clouds so a single card being
+    # out of stock is not fatal: a create that returns "no instances currently
+    # available" just falls through to the next offer. Cheapest-first after sort.
+    ("NVIDIA A40", "COMMUNITY", 0.35, 48), ("NVIDIA RTX A6000", "COMMUNITY", 0.33, 48),
+    ("NVIDIA A40", "SECURE", 0.44, 48), ("NVIDIA RTX A6000", "SECURE", 0.49, 48),
+    ("NVIDIA A100 80GB PCIe", "SECURE", 1.19, 80),
 ]
 
 
