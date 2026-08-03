@@ -140,8 +140,20 @@ def main():
     device_config = {}
     dev_env = os.environ.get("LIVESTACK_DEVICES", "").strip()
     if dev_env:
-        # {"host-b/gpu0": {"vram_gb": 48, "reserved_gb": 3}, ...}
+        # Local:  {"host-b/gpu0": {"vram_gb": 48, "reserved_gb": 3}, ...}
+        # Hosted: {"qwen-sg": {"hosted": true, "concurrency": 8,
+        #                      "cost_bias": -1, "labels": {"region": "apac-sg"}}}
+        #
+        # A NEGATIVE cost_bias makes the hosted backend the default — it beats
+        # even a warm local replica, which is how interactive ASR moves off the
+        # card and leaves it for align/diarize/chipgen. A positive bias makes it
+        # overflow-only. Hosted rows carry no vram and are never discovered.
         for did, c in json.loads(dev_env).items():
+            if c.get("hosted"):
+                device_config[did] = {k: c[k] for k in
+                                      ("hosted", "concurrency", "cost_bias", "labels", "host_id")
+                                      if k in c}
+                continue
             device_config[did] = {"vram_bytes": int(float(c["vram_gb"]) * GB),
                                   "reserved": int(float(c.get("reserved_gb", 2)) * GB)}
     broker = build_broker(

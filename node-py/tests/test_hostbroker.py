@@ -150,3 +150,29 @@ def test_measured_capacity_autosizes_device():
     dev = broker.admit(Request("r1", "big", created_at=1000))
     assert dev == "tower0/gpu0"
     assert ("warm", "big") in peer.calls
+
+
+def test_hosted_backends_are_configured_not_discovered():
+    """Nothing on the host reports a vendor endpoint, so a hosted device can only
+    come from configuration — and it must appear alongside the discovered GPUs
+    rather than instead of them."""
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker(device_config={
+        "gpu0": {"vram_bytes": 24_000_000_000, "reserved": 2_000_000_000},
+        "qwen-sg": {"hosted": True, "concurrency": 8, "cost_bias": -1.0,
+                    "labels": {"region": "apac-sg"}},
+    })
+    devs = {d.id: d for d in b._resolve_devices({"gpu0": "tower0"})}
+    assert set(devs) == {"gpu0", "qwen-sg"}
+    assert devs["gpu0"].hosted is False
+    q = devs["qwen-sg"]
+    assert q.hosted and q.cost_bias == -1.0
+    assert q.capacity == {"concurrency": 8.0}
+    assert q.labels["region"] == "apac-sg"
+    assert q.available is True
+
+    # Health gates it without touching config: mark it down and it stops being
+    # offered, which is the whole fallback story.
+    b.hosted_available["qwen-sg"] = False
+    devs2 = {d.id: d for d in b._resolve_devices({"gpu0": "tower0"})}
+    assert devs2["qwen-sg"].available is False

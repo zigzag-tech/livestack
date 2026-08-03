@@ -78,6 +78,53 @@ Two things keep the plan tied to the real machine, not just declared estimates:
    re-asserts the HARD_PIN floor, restores debounced SOFT_PINs, and sheds under
    measured pressure.
 
+## Hosted backends — arbitrating somebody else's GPU
+
+A **hosted backend** is a vendor endpoint (Qwen3-ASR on Alibaba Model Studio, a
+managed STT API) declared as a `Device` with `hosted=True`. It has **no
+residency**: nothing loads, nothing evicts, nothing idles out, and it can never
+be a preemption victim or satisfy a HARD_PIN floor — a pin means "a warm local
+replica", and a hosted device holds nothing.
+
+What it does have is a **concurrency ceiling**, a **price**, and an **uptime**,
+so it is scheduled by lease count rather than by bytes:
+
+| Field | Meaning |
+|---|---|
+| `hosted` | marks the device as having no residency |
+| `capacity["concurrency"]` | max in-flight leases; absent means unmetered |
+| `cost_bias` | added to every placement option on this device |
+| `available` | health gate; an unavailable backend is not a candidate |
+
+`cost_bias` is the whole policy, in one number:
+
+- **negative** — the hosted backend is the **default**. It beats even a warm
+  local replica (cost 0), which is how interactive ASR moves off the card and
+  leaves it for `align`/`diarize`/`chipgen`. That is a capacity win, not just a
+  vendor swap: the contention Harmony was built to arbitrate largely disappears
+  when the interactive tier stops needing VRAM at all.
+- **positive** — **overflow only**. The GPU is preferred; the endpoint absorbs
+  what would otherwise force a load, a preemption, or a `Defer`.
+
+Declared in `LIVESTACK_DEVICES` (hosted rows carry no vram and are never
+discovered, since nothing on the host reports them):
+
+```json
+{"qwen-sg": {"hosted": true, "concurrency": 8, "cost_bias": -1,
+             "labels": {"region": "apac-sg"}}}
+```
+
+Health is set through `broker.hosted_available[device_id]`. A rate-limited or
+down endpoint simply stops being offered and demand lands on the GPU — there is
+no other special case anywhere in the planner.
+
+**What it does not decide.** Harmony arbitrates work running *on a host*. A
+client far from the host should call the vendor directly rather than round-trip
+through a broker to be told to — routing a phone's audio through Nanjing to
+reach Singapore is slower than either leg. Harmony's job is the fleet's use of
+the endpoint (batch ingest, chipgen), and the shared policy for when the API is
+preferred; it is not a proxy.
+
 ## How a server joins (zero ceremony)
 
 ```python
