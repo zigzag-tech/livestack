@@ -56,6 +56,11 @@ class HostBroker:
         self._clock = clock
         self._log = log
         self.device_config = device_config or {}
+        # Hosted-backend health, keyed by device id. Set by whatever probes the
+        # endpoint (hostd's reconcile loop); an unhealthy backend simply stops
+        # being a candidate, so demand falls back to the GPU with no other
+        # special case in the planner.
+        self.hosted_available: Dict[str, bool] = {}
         self.default_capacity = default_capacity or {"vram_bytes": 24_000_000_000,
                                                      "reserved": 2_000_000_000}
 
@@ -83,6 +88,33 @@ class HostBroker:
                 reserved = cap.get("reserved", 0)
             out.append(Device(did, hid, capacity={"vram_bytes": vram},
                               reserved={"vram_bytes": reserved}))
+        out.extend(self._hosted_devices())
+        return out
+
+    def _hosted_devices(self) -> list:
+        """Hosted backends declared by the operator, appended to the discovered
+        local devices.
+
+        A hosted backend is not discovered — nothing on this host reports it —
+        so it can only ever come from configuration. Entries are the
+        ``device_config`` rows carrying ``hosted: true``; they are ignored by the
+        local-device loop above because no peer discovers their id.
+        """
+        out = []
+        for did, cfg in sorted(self.device_config.items()):
+            if not cfg.get("hosted"):
+                continue
+            capacity = {}
+            if cfg.get("concurrency"):
+                capacity["concurrency"] = float(cfg["concurrency"])
+            out.append(Device(
+                did, cfg.get("host_id", "hosted"),
+                capacity=capacity,
+                labels=cfg.get("labels", {}),
+                hosted=True,
+                cost_bias=float(cfg.get("cost_bias", 0.0)),
+                available=self.hosted_available.get(did, True),
+            ))
         return out
 
     def register_peer(self, peer: Peer) -> None:

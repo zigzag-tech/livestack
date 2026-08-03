@@ -315,3 +315,115 @@ def test_measured_free_forces_request_driven_eviction_of_unpinned():
     assert kinds_of(p.of(Evict), Evict) == ["chipgen"]      # idle UNPINNED shed
     assert "asr" not in kinds_of(p.of(Evict), Evict)        # HARD_PIN never evicted
     assert any(g.kind == "align" and g.device_id == "gpu0" for g in p.of(Grant))
+
+
+# --- hosted backends --------------------------------------------------------
+#
+# A hosted backend is somebody else's GPU behind an API (Qwen ASR). It has no
+# residency to arbitrate: nothing loads, nothing evicts, nothing idles out. What
+# it has is a concurrency ceiling, a price, and an uptime — so it is scheduled by
+# lease count, ranked by `cost_bias`, and gated by `available`.
+
+def hosted(id="qwen-sg", concurrency=None, bias=0.0, available=True, labels=None):
+    return Device(id=id, host_id="hosted",
+                  capacity={"concurrency": concurrency} if concurrency else {},
+                  labels=labels or {}, hosted=True,
+                  cost_bias=bias, available=available)
+
+
+def test_hosted_default_wins_over_a_warm_local_replica():
+    """A negative bias is what "the API is the default" means: it beats even a
+    resident local copy, whose cost is 0. This is the flip that frees the GPU."""
+    w = WorldState(
+        devices=(gpu(), hosted(bias=-1.0)),
+        units=units(),
+        placements=(Placement(kind="asr", device_id="gpu0", leases=0),),
+        requests=(Request(id="r1", kind="asr"),),
+    )
+    p = plan(w)
+    assert [g.device_id for g in p.of(Grant)] == ["qwen-sg"]
+    # Nothing is loaded or evicted FOR THIS GRANT — a hosted device has no
+    # residency. (Unrelated pin/restore traffic for other units may still occur.)
+    assert [a for a in p.of(Load) if a.device_id == "qwen-sg"] == []
+    assert [a for a in p.of(Evict) if a.device_id == "qwen-sg"] == []
+
+
+def test_hosted_as_overflow_only_when_bias_is_positive():
+    """The same knob the other way: the GPU is preferred, and the API absorbs
+    what would otherwise force a load or a preemption."""
+    warm = WorldState(
+        devices=(gpu(), hosted(bias=5.0)),
+        units=units(),
+        placements=(Placement(kind="asr", device_id="gpu0"),),
+        requests=(Request(id="r1", kind="asr"),),
+    )
+    assert [g.device_id for g in plan(warm).of(Grant)] == ["gpu0"]
+
+    # Now the card is full of busier, more important work that cannot be
+    # preempted, so a local grant is infeasible. Overflow goes hosted instead —
+    # which beats the old behaviour, where the request was simply deferred.
+    full = WorldState(
+        devices=(gpu(cap=12, reserved=1), hosted(bias=5.0)),
+        units=units(),
+        placements=(Placement(kind="asr", device_id="gpu0", busy=True, leases=1),),
+        requests=(Request(id="r1", kind="chipgen"),),
+    )
+    p = plan(full)
+    assert [g.device_id for g in p.of(Grant)] == ["qwen-sg"]
+    assert p.of(Defer) == [], "overflow should absorb it rather than defer"
+
+
+def test_an_unavailable_hosted_backend_falls_back_to_the_gpu():
+    """A rate-limited or down endpoint is simply not a candidate, so demand
+    lands locally with no special case anywhere else."""
+    w = WorldState(
+        devices=(gpu(), hosted(bias=-1.0, available=False)),
+        units=units(),
+        requests=(Request(id="r1", kind="asr"),),
+    )
+    p = plan(w)
+    assert [g.device_id for g in p.of(Grant)] == ["gpu0"]
+    assert "asr" in [l.kind for l in p.of(Load)], "it must load locally instead"
+
+
+def test_hosted_concurrency_is_the_ceiling_leases_not_bytes():
+    """Residence is free there; in-flight requests are not."""
+    at_cap = WorldState(
+        devices=(gpu(), hosted(concurrency=2, bias=-1.0)),
+        units=units(),
+        placements=(Placement(kind="asr", device_id="qwen-sg", leases=2),),
+        requests=(Request(id="r1", kind="asr"),),
+    )
+    assert [g.device_id for g in plan(at_cap).of(Grant)] == ["gpu0"], \
+        "a full hosted backend must not absorb another lease"
+
+    under_cap = WorldState(
+        devices=(gpu(), hosted(concurrency=2, bias=-1.0)),
+        units=units(),
+        placements=(Placement(kind="asr", device_id="qwen-sg", leases=1),),
+        requests=(Request(id="r1", kind="asr"),),
+    )
+    assert [g.device_id for g in plan(under_cap).of(Grant)] == ["qwen-sg"]
+
+
+def test_a_pin_floor_is_never_satisfied_by_a_hosted_backend():
+    """HARD_PIN means "keep a warm local replica". A hosted device holds nothing,
+    so letting it satisfy the floor would report a guarantee we do not have."""
+    w = WorldState(
+        devices=(gpu(), hosted(bias=-1.0)),
+        units=units(),
+    )
+    loads = plan(w).of(Load)
+    assert [l.device_id for l in loads if l.kind == "asr"] == ["gpu0"]
+
+
+def test_hosted_devices_are_exempt_from_measured_pressure_shedding():
+    """Over-budget shedding reclaims bytes. A hosted backend has none, and its
+    units are not evictable — a negative reading there must not evict anything."""
+    w = WorldState(
+        devices=(hosted(bias=-1.0), gpu()),
+        units=units(),
+        placements=(Placement(kind="asr", device_id="qwen-sg", leases=1),),
+        measured_free={"qwen-sg": {"vram_bytes": -99.0}},
+    )
+    assert plan(w).of(Evict) == []
