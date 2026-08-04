@@ -125,6 +125,40 @@ reach Singapore is slower than either leg. Harmony's job is the fleet's use of
 the endpoint (batch ingest, chipgen), and the shared policy for when the API is
 preferred; it is not a proxy.
 
+## Leak detection — when eviction does not return the memory
+
+Harmony plans against *measured* free memory, which protects it from footprints
+that under-declare. It does not protect it from a node that has already evicted
+everything and still holds the VRAM.
+
+That happened on 2026-08-04: a polytts node reported every unit
+`resident: false` while its process held **14.7 GB** in PyTorch's caching
+allocator. Declared state said "nothing resident", the driver said "full", and
+the planner had no lever — you cannot evict what is already evicted. polyasr on
+the same card then failed every request with `CUDA out of memory. Tried to
+allocate 2.00 MiB`, which reached users as empty transcripts and a 500 on batch
+recovery. Nothing in the system could state the condition.
+
+Two additions, both in `meters.py`:
+
+- **`cuda_self_meter()`** — what THIS process holds, split into live tensors
+  (`allocated_bytes`) and the allocator's reserved-but-unused pool
+  (`reclaimable_bytes`). `cuda_meter` answers "how full is the card";
+  this answers "who is holding it, and is any of it reclaimable".
+- **`leak_signal(self_usage, resident_footprint_bytes)`** — names the gap when a
+  process holds materially more than its resident units explain. Default slack
+  1.5 GB, because kernels, activation and fragmentation cost real memory no
+  footprint declares, and a signal that fires on healthy nodes is one people
+  learn to ignore.
+
+Both surface in `GET /residence` as `process_mem` and `leak`, so the condition is
+visible to the broker and to anyone reading a node — an hour after it starts
+rather than after a neighbour dies.
+
+It is deliberately a **signal, not an action**: calling `empty_cache()` from a
+monitoring path would fight the allocator on the hot path. What to do about a
+leak is the owning server's decision; what Harmony owes is to say it is there.
+
 ## How a server joins (zero ceremony)
 
 ```python

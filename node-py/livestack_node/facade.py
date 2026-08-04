@@ -116,6 +116,25 @@ def build_router(manager, coordinator, capability: Capability,
                     out["device_mem"] = mem
             except Exception:
                 pass
+        # What THIS process holds, and whether its resident units explain it.
+        #
+        # `device_mem` answers "how full is the card" — it cannot answer "who is
+        # holding it". That gap caused an outage: a node reported every unit
+        # `resident: false` while still holding 14.7 GB in the allocator's pool,
+        # so the planner saw nothing to evict and a neighbouring ASR server died
+        # of OOM. The condition is now stated wherever residence is read.
+        try:
+            from .meters import cuda_self_meter, leak_signal
+            self_usage = cuda_self_meter()()
+            if self_usage:
+                out["process_mem"] = self_usage
+                resident_fp = sum(int(getattr(manager.units[k], "footprint", 0) or 0)
+                                  for k in resident if k in manager.units)
+                leak = leak_signal(self_usage, resident_fp)
+                if leak:
+                    out["leak"] = leak
+        except Exception:
+            pass
         return out
 
     return router
