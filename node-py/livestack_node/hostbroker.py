@@ -17,6 +17,9 @@ This is the single-host degenerate case of the mesh domain planner; the same
 """
 from __future__ import annotations
 
+import os
+import time
+
 from typing import Callable, Dict, List, Mapping, Optional
 
 from .planner import (
@@ -61,6 +64,9 @@ class HostBroker:
         # being a candidate, so demand falls back to the GPU with no other
         # special case in the planner.
         self.hosted_available: Dict[str, bool] = {}
+        # Leak reclaim bookkeeping: peer -> last attempt, and how often to retry.
+        self._last_reclaim: Dict[str, float] = {}
+        self.reclaim_interval_s = float(os.environ.get("LIVESTACK_RECLAIM_INTERVAL", "120"))
         self.default_capacity = default_capacity or {"vram_bytes": 24_000_000_000,
                                                      "reserved": 2_000_000_000}
 
@@ -119,6 +125,40 @@ class HostBroker:
 
     def register_peer(self, peer: Peer) -> None:
         self.peers.append(peer)
+
+    def sweep_leaks(self, now: Optional[float] = None) -> list:
+        """Ask any peer reporting a leak to return its allocator pool.
+
+        Runs BEFORE planning, because reclaimed memory changes what fits — a
+        plan built against a card that is about to gain 14 GB would evict things
+        it does not need to.
+
+        Throttled per peer: reclaim touches the GPU executor, and hammering it
+        would contend with real work. A node whose pool does not come back is
+        reporting a genuine leak rather than a stale cache, and that is worth
+        seeing in the log rather than retried in a tight loop.
+        """
+        now = now if now is not None else time.time()
+        acted = []
+        for peer in self.peers:
+            try:
+                leak = getattr(peer, "leak", None)
+                if not leak:
+                    continue
+                key = getattr(peer, "base", str(id(peer)))
+                if now - self._last_reclaim.get(key, 0.0) < self.reclaim_interval_s:
+                    continue
+                self._last_reclaim[key] = now
+                result = peer.reclaim() or {}
+                freed = int(result.get("freed_bytes", 0))
+                acted.append({"peer": key, "freed_bytes": freed,
+                              "unexplained_bytes": int(leak.get("unexplained_bytes", 0))})
+                print(f"[harmony] reclaim peer={key} unexplained="
+                      f"{int(leak.get('unexplained_bytes', 0)) / 1e9:.1f}GB "
+                      f"freed={freed / 1e9:.1f}GB", flush=True)
+            except Exception as exc:
+                print(f"[harmony] reclaim failed peer={getattr(peer, 'base', '?')}: {exc}", flush=True)
+        return acted
 
     # -- world assembly (soft state: re-snapshot peers every time) ------------
     def snapshot(self, requests: Optional[List[Request]] = None,
@@ -239,6 +279,22 @@ class RestPeer:
     def refresh(self):
         self._snap = _http(f"{self.base}/residence")
         return self._snap
+
+    @property
+    def leak(self):
+        """The node's own report that it holds VRAM its resident units do not
+        explain (see meters.leak_signal). None on a healthy node."""
+        return (self._s() or {}).get("leak")
+
+    def reclaim(self):
+        """Ask the node to hand its allocator pool back to the driver.
+
+        The broker cannot do this itself: the memory belongs to the peer's
+        process, and only that process can release it. This is the lever that
+        was missing when a node reported everything evicted and still held the
+        card — detection without it still needs a human.
+        """
+        return _http(f"{self.base}/model/reclaim", method="POST", body={})
 
     def _s(self):
         return self._snap or self.refresh()

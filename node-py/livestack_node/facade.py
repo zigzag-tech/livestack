@@ -59,6 +59,24 @@ def build_router(manager, coordinator, capability: Capability,
     def release(lease_id: str) -> dict:
         return {"released": coordinator.release_lease(lease_id)}
 
+    def _process_mem() -> Optional[dict]:
+        try:
+            from .meters import cuda_self_meter
+            return cuda_self_meter()()
+        except Exception:
+            return None
+
+    def _run_free() -> None:
+        """Every backend's reclaim, best-effort. `freeing` already knows CUDA vs
+        MLX vs libc; this is the first thing that calls it from outside a
+        model unload."""
+        import gc as _gc
+        from . import freeing
+        _gc.collect()
+        freeing.free_cuda()
+        freeing.free_mlx()
+        freeing.trim_ram()
+
     @router.post("/model/warm")
     def warm(payload: dict = Body(...)) -> dict:
         unit = payload.get("unit")
@@ -76,6 +94,33 @@ def build_router(manager, coordinator, capability: Capability,
             raise HTTPException(status_code=409, detail=f"unit '{unit}' is pinned")
         gpu_call(lambda: manager.request_evict(unit))
         return {"resident": sorted(manager.resident)}
+
+    @router.post("/model/reclaim")
+    def reclaim(payload: dict = Body(default={})) -> dict:
+        """Hand the allocator's reserved-but-unused pool back to the driver.
+
+        Eviction drops a model; it does NOT necessarily return that model's VRAM.
+        PyTorch keeps freed blocks in a per-process cache, so a node can report
+        every unit `resident: false` and still hold the card — which is exactly
+        how a polytts node sat on 14.7 GB while polyasr beside it failed every
+        request with `CUDA out of memory. Tried to allocate 2.00 MiB`.
+
+        Detection alone could not fix that: Harmony's only lever is evicting
+        units, and the memory belonged to no unit. This is the missing lever —
+        the owning process is the only thing that can give the pool back.
+
+        Runs on the GPU executor like every other device-touching call, so it
+        cannot race a load or a generate. Reports before/after so the caller can
+        see whether it actually recovered anything, rather than assuming.
+        """
+        before = _process_mem()
+        gpu_call(_run_free)
+        after = _process_mem()
+        freed = 0
+        if before and after:
+            freed = max(0, int(before.get("reserved_bytes", 0)) - int(after.get("reserved_bytes", 0)))
+        return {"freed_bytes": freed, "before": before, "after": after,
+                "resident": sorted(manager.resident)}
 
     @router.get("/residence")
     def residence() -> dict:

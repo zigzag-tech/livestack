@@ -155,9 +155,27 @@ Both surface in `GET /residence` as `process_mem` and `leak`, so the condition i
 visible to the broker and to anyone reading a node — an hour after it starts
 rather than after a neighbour dies.
 
-It is deliberately a **signal, not an action**: calling `empty_cache()` from a
-monitoring path would fight the allocator on the hot path. What to do about a
-leak is the owning server's decision; what Harmony owes is to say it is there.
+### The lever: `POST /model/reclaim`
+
+Detection alone could not have fixed that outage. Harmony's only lever is
+evicting **units**, and the leaked memory belonged to no unit — it was already
+evicted. Only the owning process can hand its allocator pool back, so the node
+facade exposes `POST /model/reclaim`: it runs `gc.collect()` + the backend's
+`freeing.free_cuda()` / `free_mlx()` / `trim_ram()` **on the GPU executor** (so it
+cannot race a load or a generate) and reports before/after, so the caller can see
+whether anything actually came back rather than assuming.
+
+The broker closes the loop in its reconcile pass: `sweep_leaks()` asks any peer
+reporting a `leak` to reclaim, **before** planning — reclaimed memory changes what
+fits, and a plan built against a card that is about to gain 14 GB would evict
+things it does not need to. Throttled per peer (`LIVESTACK_RECLAIM_INTERVAL`,
+default 120 s), because reclaim touches the GPU executor and a node whose pool
+does not come back is reporting a genuine leak rather than a stale cache — worth
+a log line, not a tight retry loop. One peer failing never stops the sweep.
+
+So the guarantee is now: **Harmony prevents over-subscription, detects
+unexplained memory, and asks the one process that can release it to do so.** What
+it still cannot do is stop a process from leaking in the first place.
 
 ## How a server joins (zero ceremony)
 
