@@ -176,3 +176,82 @@ def test_hosted_backends_are_configured_not_discovered():
     b.hosted_available["qwen-sg"] = False
     devs2 = {d.id: d for d in b._resolve_devices({"gpu0": "tower0"})}
     assert devs2["qwen-sg"].available is False
+
+
+class _LeakyPeer:
+    """A node that has evicted everything and still holds the card — the exact
+    shape of the 2026-08-04 outage."""
+    def __init__(self, base="http://leaky", leak=True):
+        self.base = base
+        self._leak = {"unexplained_bytes": 14_700_000_000,
+                      "reclaimable_bytes": 14_700_000_000} if leak else None
+        self.reclaims = 0
+
+    @property
+    def leak(self):
+        return self._leak
+
+    def reclaim(self):
+        self.reclaims += 1
+        freed = int(self._leak["reclaimable_bytes"]) if self._leak else 0
+        self._leak = None                       # the pool came back
+        return {"freed_bytes": freed}
+
+
+def test_a_leaking_peer_is_asked_to_return_its_pool():
+    """Detection alone could not fix the outage: Harmony's only lever is evicting
+    units, and the leaked memory belonged to no unit. Reclaim is the lever."""
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker()
+    peer = _LeakyPeer()
+    b.register_peer(peer)
+
+    acted = b.sweep_leaks(now=1000.0)
+    assert peer.reclaims == 1
+    assert acted[0]["freed_bytes"] == 14_700_000_000
+    assert acted[0]["unexplained_bytes"] == 14_700_000_000
+
+
+def test_a_healthy_peer_is_left_alone():
+    """Reclaim touches the GPU executor. A sweep that fires on healthy nodes
+    would contend with real work every cycle."""
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker()
+    peer = _LeakyPeer(leak=False)
+    b.register_peer(peer)
+    assert b.sweep_leaks(now=1000.0) == []
+    assert peer.reclaims == 0
+
+
+def test_reclaim_is_throttled_per_peer():
+    """A node whose pool does not come back is reporting a real leak, not a
+    stale cache — worth a log line, not a tight retry loop."""
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker()
+    b.reclaim_interval_s = 120.0
+    peer = _LeakyPeer()
+    peer._leak_sticky = True
+
+    b.register_peer(peer)
+    b.sweep_leaks(now=1000.0)
+    peer._leak = {"unexplained_bytes": 14_700_000_000, "reclaimable_bytes": 0}  # still leaking
+    b.sweep_leaks(now=1060.0)          # inside the window
+    assert peer.reclaims == 1, "must not hammer the GPU executor"
+    b.sweep_leaks(now=1200.0)          # past it
+    assert peer.reclaims == 2
+
+
+def test_one_peer_failing_does_not_stop_the_sweep():
+    from livestack_node.hostbroker import HostBroker
+
+    class _Broken(_LeakyPeer):
+        def reclaim(self):
+            raise RuntimeError("connection refused")
+
+    b = HostBroker()
+    broken, ok = _Broken(base="http://broken"), _LeakyPeer(base="http://ok")
+    b.register_peer(broken)
+    b.register_peer(ok)
+    acted = b.sweep_leaks(now=1000.0)
+    assert ok.reclaims == 1, "a dead peer must not block its neighbours"
+    assert [a["peer"] for a in acted] == ["http://ok"]

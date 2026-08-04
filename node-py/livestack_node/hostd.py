@@ -115,6 +115,12 @@ def build_app(broker: HostBroker):
             while True:
                 time.sleep(interval)
                 try:
+                    # Reclaim BEFORE planning. A node that has evicted everything
+                    # and still holds its allocator pool is memory no unit claims,
+                    # so the planner has nothing to evict and would shed innocent
+                    # units to relieve pressure it cannot actually fix. Give the
+                    # pool back first, then plan against what is really free.
+                    broker.sweep_leaks()
                     p = broker.plan_and_apply([], state["last_evicted_at"])
                     _track(p)
                     if p.of(Evict) or p.of(Load):
