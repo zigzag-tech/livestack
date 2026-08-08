@@ -14,7 +14,8 @@ from .lease import Capability
 def build_router(manager, coordinator, capability: Capability,
                  gpu_call: Callable[[Callable], object],
                  device_meter: Optional[Callable[[], Optional[dict]]] = None,
-                 activation_tracker=None):
+                 activation_tracker=None,
+                 readiness: Optional[Callable[[], Optional[dict]]] = None):
     try:
         from fastapi import APIRouter, Body, HTTPException
     except ImportError as exc:  # pragma: no cover
@@ -24,12 +25,47 @@ def build_router(manager, coordinator, capability: Capability,
 
     @router.get("/capability")
     def get_capability() -> dict:
-        return {
+        """The node's readiness descriptor — a stable, documented statement of
+        what this node is and whether it is fit to serve.
+
+        It exists so a consumer stops scraping `/health`, whose shape is each
+        server's own business and drifts. A benchday daemon deciding whether to
+        announce this engine as pool capacity reads THIS, and `ready` here means
+        the model is loaded and the server's own functional probe passes — not
+        that a port accepted a connection.
+
+        `readiness` is supplied by the server because only it knows what fit
+        means (polyasr has a streaming probe; polytts has a loaded voice set).
+        Absent one, we report the generic truth we can actually stand behind:
+        the process is serving and these units are resident.
+        """
+        st = coordinator.status()
+        resident = list(st.get("resident", []))
+        out = {
             "kind": capability.kind,
             "host_id": capability.host_id,
+            "device_id": f"{capability.host_id}/gpu0",
             "labels": dict(capability.labels),
             "units": list(manager.units.keys()),
+            "resident": resident,
+            "ready": bool(resident),
+            "detail": "resident" if resident else "no unit resident",
         }
+        if readiness is not None:
+            try:
+                supplied = readiness() or {}
+                # The server's answer wins on fitness; it cannot invent units.
+                for k in ("ready", "detail", "model", "concurrency", "region"):
+                    if k in supplied:
+                        out[k] = supplied[k]
+            except Exception as e:
+                # A readiness probe that throws is NOT ready. Reporting the
+                # generic fallback here would claim fitness we just failed to
+                # establish, which is the direction that sends audio to a
+                # broken engine.
+                out["ready"] = False
+                out["detail"] = f"readiness probe failed: {e}"
+        return out
 
     @router.get("/health")
     def health() -> dict:

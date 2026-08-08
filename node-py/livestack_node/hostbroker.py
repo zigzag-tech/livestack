@@ -26,6 +26,15 @@ from .planner import (
     Device, Placement, Request, Unit, WorldState, PlannerPolicy, plan, Residency,
     Load, Evict, Grant, Defer,
 )
+from .membership import MembershipPolicy, PeerRoster, RosterFull
+
+
+def peer_key(peer) -> str:
+    """Stable identity for a peer. A REST peer is identified by its facade URL,
+    which is also what makes registration idempotent across node restarts; a
+    fake in a test has no URL and falls back to object identity. Same rule
+    sweep_leaks already used, lifted so membership and reclaim agree."""
+    return getattr(peer, "base", None) or f"peer-{id(peer)}"
 
 
 class Peer:
@@ -48,7 +57,8 @@ class HostBroker:
                  clock: Optional[Callable[[], float]] = None,
                  log: Callable[[str], None] = lambda *_: None,
                  device_config: Optional[dict] = None,
-                 default_capacity: Optional[dict] = None):
+                 default_capacity: Optional[dict] = None,
+                 membership: Optional[MembershipPolicy] = None):
         # devices: a FIXED list (single-host / tests). If None, devices are
         # DISCOVERED from the peers' reported device_ids (federated / multi-host),
         # each sized from device_config[device_id] or default_capacity. That is the
@@ -69,6 +79,14 @@ class HostBroker:
         self.reclaim_interval_s = float(os.environ.get("LIVESTACK_RECLAIM_INTERVAL", "120"))
         self.default_capacity = default_capacity or {"vram_bytes": 24_000_000_000,
                                                      "reserved": 2_000_000_000}
+        # Membership: who is on this host, and who has gone. Peers passed to the
+        # constructor are SEEDS (an operator said they ought to exist); peers
+        # that arrive via register_url() announced themselves and are pruneable.
+        # See membership.py and _plans/peer-membership.md.
+        self.roster = PeerRoster(membership, clock=clock or time.monotonic, log=log)
+        self._last_probe_error: Dict[str, str] = {}
+        for p in self.peers:
+            self.roster.seed(peer_key(p))
 
     def _resolve_devices(self, discovered: dict,
                          measured_caps: Optional[Mapping[str, Mapping[str, float]]] = None) -> list:
@@ -125,6 +143,50 @@ class HostBroker:
 
     def register_peer(self, peer: Peer) -> None:
         self.peers.append(peer)
+        self.roster.seed(peer_key(peer))
+
+    def register_url(self, facade_url: str, make_peer: Callable[[str], Peer],
+                     **meta) -> dict:
+        """A node announcing itself. Idempotent on the facade URL, so a node
+        that restarts re-registers rather than duplicating, and a broker that
+        restarts refills from the nodes within one heartbeat.
+
+        This is the path that makes starting a model server the ONLY action
+        required: the node knows its own facade URL because it is serving it,
+        and the broker's address is a host constant with a working default.
+        """
+        key = facade_url.rstrip("/")
+        existing = next((p for p in self.peers if peer_key(p) == key), None)
+        if existing is None:
+            self.peers.append(make_peer(key))
+        rec = self.roster.register(key, **meta)
+        return {"peer": key, "source": rec.source,
+                "state": self.roster.state_of(key),
+                "peers": len(self.peers)}
+
+    def prune_absent(self) -> List[str]:
+        """Forget registered peers that have been gone past the prune window.
+        Seeds are never pruned and an unset window disables this entirely, so
+        the roster shrinks only where shrinking is provably safe: a registered
+        peer re-announces the moment it returns."""
+        gone = self.roster.prunable()
+        for key in gone:
+            self.peers = [p for p in self.peers if peer_key(p) != key]
+            self.roster.drop(key)
+            self._last_probe_error.pop(key, None)
+            self._log(f"[membership] pruned absent peer: {key}")
+        return gone
+
+    def membership_snapshot(self) -> List[dict]:
+        """Roster with per-peer state, age, and the last probe error — so
+        'is my TTS node gone, or did it just blip?' is answerable without
+        grepping a log."""
+        out = self.roster.snapshot()
+        for row in out:
+            err = self._last_probe_error.get(row["peer"])
+            if err and row["state"] != "fresh":
+                row["last_error"] = err
+        return out
 
     def sweep_leaks(self, now: Optional[float] = None) -> list:
         """Ask any peer reporting a leak to return its allocator pool.
@@ -169,6 +231,13 @@ class HostBroker:
         measured: Dict[str, Dict[str, float]] = {}        # device_id -> measured free
         measured_caps: Dict[str, Dict[str, float]] = {}   # device_id -> measured capacity
         for p in self.peers:
+            key = peer_key(p)
+            # Backoff: a peer already known absent is probed on the roster's slow
+            # cadence, not on every reconcile tick. This is what makes holding a
+            # peer that is not there free rather than costly — and it is why
+            # seeds can be kept indefinitely without paying a connect per cycle.
+            if not self.roster.due_for_probe(key):
+                continue
             try:
                 peer_units = p.units()
                 peer_placements = p.placements()
@@ -178,13 +247,26 @@ class HostBroker:
                 # measured_free still reflects this peer's VRAM (mem_get_info counts all
                 # processes on the card), so co-resident eviction stays safe instead of
                 # snapshot aborting -> the caller fail-opening -> OOM.
-                self._log(f"[hostbroker] peer unreachable, skipping this cycle: {e}")
+                #
+                # The failure is recorded, NOT logged here: printing per cycle is
+                # what produced 92,089 identical lines and 9.2 MB of log while one
+                # peer was down. mark_probed logs the fresh→suspect→mia
+                # transitions, which is where the information actually is.
+                self._last_probe_error[key] = str(e)
+                self.roster.mark_probed(key)
                 continue
+            self.roster.mark_seen(key)
             for kind, unit in peer_units.items():
                 units.setdefault(kind, unit)
             placements.extend(peer_placements)
             try:
                 discovered[p.device_id] = p.host_id
+                # Backfill the roster from what the peer actually reports. A
+                # registration states only where to reach the node; the device
+                # it occupies is the node's own fact, learned by asking it.
+                rec = self.roster._records.get(key)
+                if rec is not None:
+                    rec.device_id, rec.host_id = p.device_id, p.host_id
             except Exception:
                 pass
             try:

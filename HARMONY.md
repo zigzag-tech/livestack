@@ -17,6 +17,7 @@ Harmony does not have its own repository — it lives inside `livestack`:
 | **Node kit** | `node-py/livestack_node/` | The lease-driven `Coordinator`, the `/livestack` REST facade, the `attach()` one-liner, and the live device meters. |
 | **Placement planner** | `node-py/livestack_node/planner.py` | The pure cross-process **brain**: `WorldState → Plan` (load/evict/grant/defer). |
 | **Broker daemon** | `node-py/livestack_node/hostd.py` + `hostbroker.py` | The **authority** that runs the planner across processes on a host and dispatches actions. `python -m livestack_node.hostd`. |
+| **Membership** | `node-py/livestack_node/membership.py` + `announce.py` | Who is on this host, and who has gone. Pure roster/state machine + the node-side registrar. |
 
 ## Two brains, two layers
 
@@ -30,6 +31,40 @@ Harmony does not have its own repository — it lives inside `livestack`:
 The broker is the thin layer that turns one into the other across the separate
 `polyasr` / `polytts` / `chipgen` processes (an in-process coordinator can only move
 its own units).
+
+## Membership: starting a node is the only action required
+
+A node **reports for duty**. On startup, and every 30 s after, `attach()` POSTs
+its facade URL to the broker (`LIVESTACK_BROKER_URL`, default
+`http://127.0.0.1:8799`) and the broker snapshots it from there. There is
+nothing to configure: the node knows the port it is about to serve, and it
+retries until the broker answers, so start order does not matter and a broker
+restart refills from the nodes within one interval.
+
+`LIVESTACK_PEERS` still works, demoted to **seeds** for nodes too old to
+announce themselves. It defaults to empty — the old hardcoded guess at
+`8766/8100/8844` named ports this fleet does not use, and a wrong seed is
+indistinguishable from a dead node.
+
+The broker ages each peer from its last **success** — `fresh` → `suspect` (45 s)
+→ `mia` (10 min) — and probes absent peers on a backoff instead of every cycle.
+Any single success restores `fresh` immediately: membership is a report, not a
+promise. Transitions are logged; "still gone" is not an event. Before this, a
+node that was down produced one identical log line per reconcile tick — 92,089
+of them and 9.2 MB on one host — with no way to tell three weeks of absence from
+three seconds.
+
+A **registered** peer is pruned after a bounded absence (it will re-announce);
+a **seeded** peer never is, because an operator writing it down said it ought to
+exist. `GET /peers` reports state, how long each has been unseen, and the last
+probe error.
+
+`GET /livestack/capability` is the node's **readiness descriptor** — the stable
+thing a consumer reads instead of scraping `/health`. `ready` means the model is
+resident and the server's own functional probe passes; a probe that throws
+reports not-ready rather than falling back to a generic claim of fitness.
+
+Design record: `_plans/peer-membership.md`.
 
 ## Residency tiers & priority
 

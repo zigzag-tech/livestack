@@ -74,3 +74,55 @@ def test_health_and_capability():
             assert set(cap["units"]) == {"asr", "diarize"}
 
     run(scenario())
+
+
+# -- readiness descriptor -----------------------------------------------------
+#
+# /capability is what a consumer reads INSTEAD of scraping /health, whose shape
+# is each server's own business. `ready` must mean "fit to serve", never "a port
+# answered" — that distinction is the whole reason the descriptor exists.
+
+def make_ready_app(readiness):
+    units = {"asr": ManagedUnit("asr", loader=lambda: "m", freer=noop_free,
+                                residency_policy=ResidencyPolicy.HARD_PIN)}
+    app = FastAPI()
+    attach(app, host_id="h", kind="polyasr", units=units, idle_seconds=120,
+           coload=True, gpu_call=lambda fn: fn(), readiness=readiness)
+    return app
+
+
+def test_capability_reports_not_ready_before_anything_is_resident():
+    app = make_ready_app(None)
+    async def go():
+        async with client_for(app) as c:
+            return (await c.get("/livestack/capability")).json()
+    cap = run(go())
+    assert cap["ready"] is False
+    assert cap["kind"] == "polyasr"
+    assert cap["units"] == ["asr"]
+
+
+def test_the_servers_own_probe_decides_fitness():
+    app = make_ready_app(lambda: {"ready": True, "detail": "streaming probe ok",
+                                  "model": "Qwen3-ASR-1.7B", "concurrency": 3})
+    async def go():
+        async with client_for(app) as c:
+            return (await c.get("/livestack/capability")).json()
+    cap = run(go())
+    assert cap["ready"] is True
+    assert cap["model"] == "Qwen3-ASR-1.7B"
+    assert cap["concurrency"] == 3
+
+
+def test_a_readiness_probe_that_throws_is_not_ready():
+    """Falling back to the generic answer would claim fitness we just failed to
+    establish — the direction that sends audio to a broken engine."""
+    def boom():
+        raise RuntimeError("model handle is gone")
+    app = make_ready_app(boom)
+    async def go():
+        async with client_for(app) as c:
+            return (await c.get("/livestack/capability")).json()
+    cap = run(go())
+    assert cap["ready"] is False
+    assert "model handle is gone" in cap["detail"]
