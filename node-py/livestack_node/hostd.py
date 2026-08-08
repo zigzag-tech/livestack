@@ -158,6 +158,10 @@ def build_app(broker: HostBroker):
                     # units to relieve pressure it cannot actually fix. Give the
                     # pool back first, then plan against what is really free.
                     broker.sweep_leaks()
+                    # Announce membership changes even when nothing probed this
+                    # tick — a roster that rots in silence is the failure being
+                    # fixed, so the sweep must not depend on probes happening.
+                    broker.roster.tick()
                     # Forget registered peers gone past the prune window. Seeds
                     # survive, and an unset window prunes nothing at all.
                     broker.prune_absent()

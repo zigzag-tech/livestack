@@ -174,6 +174,19 @@ class PeerRoster:
             self._log(f"[membership] {rec.key} {old} → {new_state} "
                       f"(unseen {rec.age(self._clock()):.0f}s)")
 
+    def tick(self) -> None:
+        """Re-evaluate every peer and log whatever changed.
+
+        Without this, state is derived on READ but announced only on WRITE, so a
+        peer could sit at `mia` in `GET /peers` having never produced a log line
+        — and if probing stopped altogether, the whole roster could rot in
+        silence. That is the exact failure this module exists to end, so the
+        sweep cannot depend on probes still happening.
+        """
+        now = self._clock()
+        for rec in list(self._records.values()):
+            self._note_transition(rec, rec.state(now, self.policy))
+
     # -- reads ---------------------------------------------------------------
 
     def due_for_probe(self, key: str) -> bool:

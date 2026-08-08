@@ -246,3 +246,19 @@ def test_pruning_removes_the_peer_object_too():
     assert broker.prune_absent() == [peer.base]
     assert broker.peers == []
     assert broker.membership_snapshot() == []
+
+
+def test_tick_announces_decay_even_when_nothing_probes():
+    """State is derived on read but announced on write. If probing stops, the
+    roster must still say so — silence is the failure being fixed."""
+    clock = Clock()
+    lines = []
+    roster = PeerRoster(POLICY, clock=clock, log=lines.append)
+    roster.seed("p")
+    lines.clear()
+    clock.advance(700)               # nothing probes at all
+    assert not lines
+    roster.tick()
+    assert len(lines) == 1 and "mia" in lines[0]
+    roster.tick()                    # idempotent — still not an event
+    assert len(lines) == 1
