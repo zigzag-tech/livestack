@@ -31,7 +31,8 @@ def _footprint_signature(units: Dict[str, object]) -> str:
 
 def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
            idle_seconds: int, coload: bool, gpu_call: Callable[[Callable], object],
-           prefix: str = "/livestack", device_meter="auto"):
+           prefix: str = "/livestack", device_meter="auto", port=None,
+           readiness: Callable[[], dict] = None):
     """``device_meter``: a zero-arg callable -> measured {capacity,free} (see
     meters.py), ``"auto"`` to pick one by backend (CUDA/MLX), or ``None`` to report
     no live memory. Defaulting to "auto" means a node becomes memory-aware on
@@ -73,7 +74,27 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
 
     app.include_router(
         build_router(manager, coordinator, Capability(kind=kind, host_id=host_id),
-                     gpu_call, device_meter=device_meter, activation_tracker=tracker),
+                     gpu_call, device_meter=device_meter, activation_tracker=tracker,
+                     readiness=readiness),
         prefix=prefix,
     )
+
+    # Report for duty. This is what makes starting a model server the ONLY
+    # action required to be arbitrated — no LIVESTACK_PEERS edit, no broker
+    # restart. The port is the one fact the broker cannot infer (a POST shows
+    # it the source address, not the listening port), and the caller already
+    # has it because it is about to pass the same number to uvicorn.
+    #
+    # No port ⇒ no registration, silently-but-once. A node embedded in someone
+    # else's server is still perfectly usable as a seeded peer; refusing to
+    # start over it would be worse than not announcing.
+    resolved_port = port if port is not None else os.environ.get("LIVESTACK_NODE_PORT")
+    if os.environ.get("LIVESTACK_REGISTER", "1") != "0" and resolved_port:
+        from .announce import start_registrar
+        start_registrar(
+            f"http://127.0.0.1:{int(resolved_port)}{prefix}",
+            host_id=host_id, kind=kind,
+            interval_s=float(os.environ.get("LIVESTACK_REGISTER_INTERVAL", "30")),
+        )
+
     return manager, coordinator
