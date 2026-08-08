@@ -13,18 +13,22 @@ Harmony does not have its own repository — it lives inside `livestack`:
 |---|---|---|
 | **Residency core** | `shared/src/residency.rs` | Pure Rust per-process resident-set state machine + functional-health evict/reload. State-in/plan-out. |
 | **Python binding** | `shared-py/` (`shared_py`) | pyo3 wrapper exposing the Rust core to Python. |
-| **Executor shim** | `polycore/` (`polycore`) | Thin per-process side-effects shim (load/unload/probe/gc) over the Rust core. The `ModelManager`/`Coordinator` seam each server implements. |
+| **Executor shim** | `node-py/livestack_node/` (`manager.py`, `coordinator.py`, `freeing.py`) | Thin per-process side-effects shim (load/unload/probe/gc) over the Rust core — `ModelManager` + `ResidencyPolicy` in `manager.py`. The `ModelManager`/`Coordinator` seam each server implements. (Retired `polycore/`.) |
 | **Node kit** | `node-py/livestack_node/` | The lease-driven `Coordinator`, the `/livestack` REST facade, the `attach()` one-liner, and the live device meters. |
 | **Placement planner** | `node-py/livestack_node/planner.py` | The pure cross-process **brain**: `WorldState → Plan` (load/evict/grant/defer). |
 | **Broker daemon** | `node-py/livestack_node/hostd.py` + `hostbroker.py` | The **authority** that runs the planner across processes on a host and dispatches actions. `python -m livestack_node.hostd`. |
 | **Membership** | `node-py/livestack_node/membership.py` + `announce.py` | Who is on this host, and who has gone. Pure roster/state machine + the node-side registrar. |
+
+`livestack_node/` also carries fleet modules beyond this doc's scope — `client.py`,
+`fleet_dispatch.py`, `fleet_scheduler.py`, `provision.py`, `provision_runpod.py`,
+`measure.py` (tests `test_fleet_*.py`, `test_provision.py`).
 
 ## Two brains, two layers
 
 - **`planner.py` — placement** (cross-process): given the whole world (every unit's
   footprint, priority, residency tier; what's resident/busy; measured free memory),
   decide *what should be resident where*. Pure function, fully unit-tested, no I/O.
-- **`residency.rs` / `polycore` — execution** (per-process): inside one server,
+- **`residency.rs` / `livestack_node` — execution** (per-process): inside one server,
   own the resident set, the idle clock, and functional-health reload. Carries out
   warm/evict on the GPU thread.
 
@@ -71,7 +75,7 @@ Design record: `_plans/peer-membership.md`.
 
 ## Residency tiers & priority
 
-Residency tier (per unit, mirrors `polycore.ResidencyPolicy`):
+Residency tier (per unit, mirrors `livestack_node.manager.ResidencyPolicy`):
 
 - **HARD_PIN** — kept warm, never preempted, never the last replica evicted (ASR).
 - **SOFT_PIN** — preferred-warm but preemptible under pressure; restored with

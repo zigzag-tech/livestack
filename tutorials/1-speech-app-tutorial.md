@@ -53,7 +53,7 @@ import {
 } from "@livestack/transcribe/client";
 import { useJobBinding, useOutput, useInput } from "@livestack/client";
 import { SPEECH_LIVEFLOW_NAME } from "../common/defs";
-import { translationOutputSchema } from "@livestack/lab-internal-common";
+import { translationOutputSchema, supportedLangs } from "@livestack/lab-internal-common";
 import { FaStop, FaMicrophone } from "react-icons/fa";
 import { z } from "zod";
 import prettyBytes from "pretty-bytes";
@@ -66,6 +66,14 @@ export const SpeechComponents: React.FC = () => {
   const { feed } = useInput({
     tag: "input-default",
     def: rawPCMInput,
+    job,
+  });
+
+  // Feeds the exposed "language" input of the liveflow; the worker
+  // defaults to French when nothing is fed.
+  const { feed: feedLang } = useInput({
+    tag: "language",
+    def: supportedLangs,
     job,
   });
 
@@ -108,6 +116,16 @@ export const SpeechComponents: React.FC = () => {
     });
 
   const handleRecording = isRecording ? stopRecording : startRecording;
+
+  const [language, setLanguage] = React.useState("French");
+
+  const handleLanguageSelection = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedLang = e.target.value as z.infer<typeof supportedLangs>;
+    setLanguage(selectedLang);
+    if (feedLang) {
+      feedLang(selectedLang);
+    }
+  };
 
   return (
     <div className="m-4 grid grid-cols-5 gap-2 divide-x">
@@ -168,8 +186,19 @@ export const SpeechComponents: React.FC = () => {
           {translation && (
             <div>
               <h2 className="text-indigo-800">
-                4. Your speech translated to French
+                4. Your speech translated to {language}
               </h2>
+              <select
+                id="language-select"
+                value={language}
+                onChange={handleLanguageSelection}
+              >
+                {supportedLangs.options.map((lang) => (
+                  <option key={lang} value={lang}>
+                    {lang}
+                  </option>
+                ))}
+              </select>
               <br />
               {translation.map((t, idx) => (
                 <div key={idx}>{t.data.translated}</div>
@@ -239,18 +268,20 @@ export const speechLiveflow = Liveflow.define({
     }),
     conn({
       from: speechChunkToTextSpec,
-      transform: ({ transcript }) => transcript,
+      transform: ({ transcript }) => ({
+        documentId: "speech",
+        content: transcript,
+      }),
       to: textSplittingSpec,
     }),
     conn({
       from: textSplittingSpec,
-      transform: (chunkText) => ({ transcript: chunkText, llmType: "openai" }),
+      transform: ({ chunk }) => ({ transcript: chunk, llmType: "openai" }),
       to: titleSummarizerSepc,
     }),
     conn({
       from: speechChunkToTextSpec,
       transform: ({ transcript }) => ({
-        toLang: "French",
         text: transcript,
         llmType: "openai",
       }),
@@ -262,6 +293,7 @@ export const speechLiveflow = Liveflow.define({
     expose(speechChunkToTextSpec.output.default, "transcription"),
     expose(titleSummarizerSepc.output.default, "summarized-title"),
     expose(translationSpec.output.default, "translation"),
+    expose(translationSpec.input.language, "language"),
   ],
 });
 ```

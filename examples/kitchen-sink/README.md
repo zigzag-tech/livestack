@@ -10,7 +10,7 @@ This README details the setup process for a Livestack project, focusing on the i
 
 ```javascript
 const liveEnv = await LiveEnv.create({
-  projectUuid: "example-project-id", // Unique project ID
+  projectId: "example-project-id", // Unique project ID
   storageProvider: getLocalTempFileStorageProvider("/tmp/example-project"), // Local storage provider (optional, used for large files)
 });
 LiveEnv.setGlobal(liveEnv); // Setting the global environment
@@ -21,7 +21,8 @@ LiveEnv.setGlobal(liveEnv); // Setting the global environment
 In a Livestack project, defining job specifications (`JobSpec`) and worker definitions (`WorkerDef`) is essential for orchestrating the job processing liveflow. These configurations detail the input and output expectations for each job, as well as the processing logic to be executed by workers.
 
 ```javascript
-const { jobSpec, workerDef } = getJobSpecAndWorkerDef({ liveEnv }); // Define your job spec and worker def
+const jobSpec = JobSpec.define({ /* ... */ }); // Define your job spec
+const workerDef = jobSpec.defineWorker({ /* ... */ }); // Define its worker
 ```
 
 #### Job Specifications (JobSpec)
@@ -29,7 +30,7 @@ const { jobSpec, workerDef } = getJobSpecAndWorkerDef({ liveEnv }); // Define yo
 Job Specifications define the structure and requirements of jobs that your application can execute, specifying the inputs they accept and the outputs they produce.
 
 ```javascript
-const jobSpec = new JobSpec({
+const jobSpec = JobSpec.define({
   liveEnv,
   name: "example-job",
   input: z.string(),
@@ -52,9 +53,8 @@ This configuration enables the Livestack system to understand what data is expec
 Worker Definitions (`WorkerDef`) encapsulate the logic for processing jobs based on their specifications. Each worker is associated with a specific `JobSpec` and contains the processing instructions.
 
 ```javascript
-const workerDef = LiveWorker.define({
-  jobSpec: jobSpec,
-  processor: async ({ input, output, logger }) => {
+const workerDef = jobSpec.defineWorker({
+  processor: async ({ input, output }) => {
     // Processing logic here
     for await (const data of input) {
       // do something
@@ -78,12 +78,12 @@ Liveflow Definitions orchestrate a series of job specs and workers to accomplish
 const liveflow = Liveflow.define({
   name: "example-liveflow",
   connections: [
-    [
-      step1JobSpec,
+    conn({
+      from: step1JobSpec,
       // Optional, used when the output shape of Step 1 Job doesn't match the input shape of Step 2 Job
-      (step1Output) => ({ someStep2InputAttribute: someTransformationFunc(step2Input) }),
-      step2JobSpec,
-    ],
+      transform: (step1Output) => ({ someStep2InputAttribute: someTransformationFunc(step1Output) }),
+      to: step2JobSpec,
+    }),
   ],
 });
 
@@ -119,7 +119,7 @@ This method is crucial for applications that require interaction between the fro
 
 # Livestack Frontend Integration Guide
 
-This section of the documentation focuses on integrating Livestack's backend services with a React frontend application. It specifically details the use of Livestack client hooks such as `useJobBinding`, `useInput`, `useOutput`, `useStream`, and `useCumulative` to interact with backend job processing systems in real-time.
+This section of the documentation focuses on integrating Livestack's backend services with a React frontend application. It specifically details the use of Livestack client hooks such as `useJobBinding`, `useInput`, `useOutput`, and `useStream` to interact with backend job processing systems in real-time.
 
 ## Overview
 
@@ -165,16 +165,14 @@ const { feed } = useInput({
 
 ### 3. Receiving Outputs with `useOutput`
 
-The `useOutput` hook listens for the latest outputs from the backend, such as responses from a chatbot or status updates. If you want to maintain output history as a list, you can use the `useCumulative` hook in addition to the `useOutput` hook.
+The `useOutput` hook listens for outputs from the backend, such as responses from a chatbot or status updates. It returns an array of received chunks (each with `data`, `timestamp`, and `chunkId`), with a `.last` property holding the most recent one.
 
 ```javascript
-const outputMessage = useOutput({
+const { last: outputMessage } = useOutput({
   tag: "default",
   def: z.string(),
   job,
 });
-
-const allOutputMessages = useCumulative(outputMessage);
 ```
 
 This hook allows the frontend to reactively display information from the backend as it becomes available.  
@@ -182,18 +180,19 @@ This hook allows the frontend to reactively display information from the backend
 Alternative to `useOutput` or `useInput`: `useStream`:
 
 ```javascript
-const outputMessage = useOutput({
+const { last: outputMessage } = useOutput({
   tag: "default",
   def: z.string(),
   job,
 });
 
 // equivalent to above
-const userMessage = useStream({
+const { last: userMessage } = useStream({
   tag: "default",
   def: z.string(),
   job,
   type: "output",
+  query: { type: "lastN", n: 1 },
 });
 ```
 

@@ -21,13 +21,16 @@ export const speechLiveflow = Liveflow.define({
     // Connection from speech chunk to text
     conn({
       from: speechChunkToTextSpec,
-      transform: ({ transcript }) => transcript,
+      transform: ({ transcript }) => ({
+        documentId: "speech",
+        content: transcript,
+      }),
       to: textSplittingSpec,
     }),
     // Connection from text splitting to title summarizer
     conn({
       from: textSplittingSpec,
-      transform: (chunkText) => ({ transcript: chunkText, llmType: "openai" }),
+      transform: ({ chunk }) => ({ transcript: chunk, llmType: "openai" }),
       to: titleSummarizerSepc,
     }),
     // Connection from speech chunk to translation (will not be a perfect translation)

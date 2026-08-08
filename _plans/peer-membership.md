@@ -1,6 +1,7 @@
 # Peer Membership — Harmony learns who is on the host, and who has gone
 
-**Status:** design (this doc). Layer below `resource-planner.md` (placement) and
+**Status:** implemented (MVP, §6); this doc is the design record. Layer below
+`resource-planner.md` (placement) and
 beside `fleet-scheduler.md` (capacity creation). This one is about *knowing what
 exists*.
 
@@ -11,21 +12,22 @@ Every decision below is measured against that sentence.
 
 ---
 
-## 1. What is broken
+## 1. What was broken
 
-`HostBroker` takes a **static** peer list. `hostd` reads `LIVESTACK_PEERS`, and
-when unset falls back to three hardcoded localhost URLs (polyasr 8766, polytts
-8100, chipgen 8844). Two failures fall straight out of that:
+Before this change, `HostBroker` took a **static** peer list. `hostd` read
+`LIVESTACK_PEERS`, and when unset fell back to three hardcoded localhost URLs
+(polyasr 8766, polytts 8100, chipgen 8844). Two failures fell straight out of
+that:
 
-**A node that exists is invisible.** Start a fourth model server and Harmony
-never learns of it. Its VRAM is real and its units are unplannable — the planner
-sees the memory disappear from `measured_free` with nothing to attribute it to,
-which is precisely the condition that makes it shed innocent units.
+**A node that existed was invisible.** Start a fourth model server and Harmony
+never learned of it. Its VRAM was real and its units unplannable — the planner
+saw the memory disappear from `measured_free` with nothing to attribute it to,
+which is precisely the condition that made it shed innocent units.
 
-**A node that is gone is polled forever, silently.** `snapshot()` catches the
-per-peer exception, logs one line, and continues. There is no record that a peer
-has been absent for three weeks rather than three seconds, and nothing surfaces
-the difference.
+**A node that was gone was polled forever, silently.** `snapshot()` caught the
+per-peer exception, logged one line, and continued. There was no record that a
+peer had been absent for three weeks rather than three seconds, and nothing
+surfaced the difference.
 
 Measured on xc-mac-studio, 2026-08-08, while polytts was down:
 
@@ -39,8 +41,14 @@ that host's `LIVESTACK_PEERS` was also stale relative to the doc default (8765
 vs 8766) — a fact nobody could have noticed, because a misconfigured peer and a
 dead one produce identical output.
 
-The static list is the cause of both. It is a second, hand-maintained copy of a
-fact the nodes already know about themselves.
+The static list was the cause of both. It was a second, hand-maintained copy of
+a fact the nodes already knew about themselves.
+
+Both are fixed as designed below: `HostBroker` owns a `PeerRoster` with dynamic
+`register_url()` (hostbroker.py:100,224), and `snapshot()` probes absent peers
+on the roster's `due_for_probe` backoff and records failures through
+`mark_probed`/`mark_seen`, logging on transitions only
+(hostbroker.py:302-334).
 
 ## 2. The shape: nodes report, the broker ages
 
@@ -65,6 +73,10 @@ POSTs to the host broker:
 ```
 POST /peers  {"facade_url", "host_id", "device_id", "kinds": [...], "readiness": {...}}
 ```
+
+The server accepts all five fields (hostd.py:148-159); the announcer currently
+sends only `facade_url`, `host_id` and `kinds` (announce.py:41-45) — `device_id`
+and `readiness` are accepted but not yet sent.
 
 Zero configuration, because neither side needs to be told anything it does not
 already know:

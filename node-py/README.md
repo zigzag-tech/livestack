@@ -20,42 +20,59 @@ gateway later appears, federation is inbound; absent it, the node keeps running.
 | Port | Module | Generic? | Role |
 |---|---|---|---|
 | 1 Lease plane | `lease.py` | ✅ | `CapabilityLeaseStore` — faithful port of `core/src/capabilities.ts` |
-| 2 REST facade | `facade.py` | ✅ | `build_router(controller, capability)` → mountable FastAPI router |
-| 3 Residence | `residence.py` | ✅ | `ResidenceController` — lease lifecycle → runtime warm/evict |
-| 4 Runtime | `runtime.py` | ❌ per-service | `ModelRuntime` protocol (`warm`/`evict`/`resident`, **per-unit**) |
+| 2 REST facade | `facade.py` | ✅ | `build_router(manager, coordinator, capability, gpu_call, ...)` → mountable FastAPI router |
+| 3 Residence | `coordinator.py` | ✅ | `LivestackCoordinator` — lease lifecycle → manager load/evict |
+| 4 Runtime | `manager.py` + `freeing.py` | ✅ core; units per-service | `ModelManager`/`ManagedUnit`/`ResidencyPolicy` — side-effects over the Rust planner |
 | Consumer | `client.py` | ✅ | `lease()` context manager with graceful no-op degradation |
 
 `reap_expired` alone only deletes lease records; **port 3 is the bridge that
-actually frees VRAM.**
+actually frees VRAM** — `LivestackCoordinator.idle_sweep()` reaps, then evicts
+whatever is neither leased nor pinned.
+
+The one-call wiring of ports 2–4 is `attach()` (`serve.py`); polyasr and
+polytts both call it identically.
+
+## The Harmony broker layer also lives here
+
+Besides the per-node kit, the package carries Harmony's broker/planner side:
+`hostd.py`/`hostbroker.py` (the broker daemon and its peers), `membership.py`,
+`announce.py` (node self-registration), `planner.py` (cross-node placement),
+`meters.py`/`measure.py` (device metering, activation measurement),
+`provision.py`/`provision_runpod.py` (rent-a-box), and
+`fleet_dispatch.py`/`fleet_scheduler.py`. See `../HARMONY.md` for that layer —
+this README covers the per-node half.
 
 ## How the old mechanisms collapse into leases
 
 | Bespoke (today) | Lease semantics |
 |---|---|
-| `IDLE_EVICT_SECONDS=180` idle timer | TTL lease, auto-renewed on use |
+| `IDLE_EVICT_SECONDS=180` idle timer | TTL usage lease, auto-renewed on use |
 | `touch()` per WS frame | lease heartbeat |
-| `IDLE_EVICT_SECONDS=0` (pin) | permanent residence (`pin`) |
+| `IDLE_EVICT_SECONDS=0` (pin) | permanent residence (`ResidencyPolicy.HARD_PIN` on the unit) |
 | `POST /model/unload` | `release()` the lease |
 
 ## Wiring a server (e.g. polyasr)
 
 ```python
-from livestack_node import Capability, ResidenceController
-from livestack_node.facade import build_router
+from livestack_node import ManagedUnit, ResidencyPolicy, attach, free_cuda
 
-class AsrRuntime:                     # port 4: wraps AsrModelManager (per-unit!)
-    def warm(self, unit): ...
-    def evict(self, unit): ...         # MUST affect only `unit`
-    def resident(self): ...
+units = {
+    "asr":     ManagedUnit("asr", load_asr, free_cuda,
+                           residency_policy=ResidencyPolicy.HARD_PIN),  # hot model stays resident
+    "align":   ManagedUnit("align", load_align, free_cuda),
+    "diarize": ManagedUnit("diarize", load_diarize, free_cuda),
+}
 
-units = {k: Capability(kind=k, host_id="zz-tower0", lease_ttl_seconds=180)
-         for k in ("asr", "align", "diarize")}
-controller = ResidenceController("zz-tower0", AsrRuntime(), units)
-controller.pin("asr")                  # benchday's hot model stays resident
-controller.start_sweep(10.0)           # idle-evict analog
-app.include_router(build_router(controller, Capability(kind="polyasr", host_id="zz-tower0")),
-                   prefix="/livestack")
+manager, coordinator = attach(app, host_id="zz-tower0", kind="polyasr",
+                              units=units, idle_seconds=180, coload=True,
+                              gpu_call=gpu_call)   # runs a thunk under the server's GPU lock
 ```
+
+`attach()` builds the `LivestackCoordinator` and `ModelManager` and mounts the
+facade router at `/livestack`; it returns both. Pinning is
+`ResidencyPolicy.HARD_PIN` per unit; the idle-evict analog is
+`coordinator.idle_sweep()`, driven by `manager.maybe_evict()`. `gpu_call` is
+required — warm/evict must never race in-flight GPU work.
 
 ## Consumer (e.g. media-corpus pipeline)
 
