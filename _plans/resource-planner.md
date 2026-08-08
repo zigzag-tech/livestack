@@ -1,11 +1,23 @@
 # Resource Planner — generalized priority-preemptive placement for Livestack
 
 **Status:** core implemented + unit-tested (`node-py/livestack_node/planner.py`,
-`tests/test_planner.py`); federation transport + service wiring pending.
+`tests/test_planner.py`); wired and running — `HostBroker`
+(`node-py/livestack_node/hostbroker.py`) runs `plan()` across host processes,
+dispatches actions via each peer's `/livestack` facade, and discovers peer
+devices when no fixed device list is given; `measure.py` implements real
+footprint measurement (weights + peak activation).
 **Motivation:** three model servers (polyasr 10 GB, polytts 8.75 GB, chipgen 5 GB)
 oversubscribed one 24 GB GPU; a long align OOM'd with 233 MB free. Stopping a
 service by hand fixed it. That manual `腾挪` (make-room) + `defer` (时间换空间) is
 exactly what a planner should do automatically — and not just for GPUs.
+
+**Implemented since this spec:** hosted backends (`Device.hosted`, `cost_bias`)
+— a vendor API GPU admits while its concurrent leases are under capacity, with
+no residence to schedule; `measured_free` reconciliation — when real free VRAM
+is worse than the ledger assumed, `plan()` sheds idle low-priority units to
+relieve the gap before placing; `Unit.activation_headroom` — the §2 headroom
+requirement realized as a separate field, added to `footprint` only at
+admission/preemption fit checks.
 
 ---
 
@@ -49,7 +61,7 @@ not weights. So:
 - Grants are verified against **real** free VRAM (NVML) before load — trust but
   verify; other tenants (a stray notebook, gnome-shell) exist.
 
-## 3. Residency tiers (mirror `polycore.ResidencyPolicy`, kept dep-free)
+## 3. Residency tiers (mirror `livestack_node.manager.ResidencyPolicy`, kept dep-free)
 
 | Tier | Example | Planner behaviour |
 |---|---|---|
@@ -84,20 +96,24 @@ Anti-pathology guards: `min_residency_s` (no load→evict→load churn),
 
 ## 5. How it sits on what already exists
 
-- **`polycore.Coordinator`** — the seam. A new `PlanningCoordinator` (livestack
-  side) builds a single-host `WorldState` from its `ModelManager` units + device
-  descriptor, runs `plan()`, applies `Evict` via `manager._evict` before `_load`.
-  `on_evict_request` / `report_busy` are already the preemption + busy signals.
-- **`node-py/lease.py` (`CapabilityLeaseStore`)** — leases ARE the busy/idle truth
-  (`active_kinds`, heartbeats, TTL). A request = a lease request; busy = an
-  unexpired non-`__usage__` lease.
+- **`livestack_node.coordinator.Coordinator`** — the seam (a `Protocol`;
+  `coordinator.py`), implemented over `ModelManager` (`manager.py`). The planned
+  `PlanningCoordinator` was never built — the role was realized as **`HostBroker`**
+  (`hostbroker.py`): it assembles the `WorldState` from device + peer reports,
+  runs `plan()`, and applies `Evict`/`Load` per host. `on_evict_request` /
+  `report_busy` remain the preemption + busy signals; `manager._evict` before
+  `_load` is still how an eviction lands.
+- **`node-py/livestack_node/lease.py` (`CapabilityLeaseStore`)** — leases ARE
+  the busy/idle truth (`active_kinds`, heartbeats, TTL). A request = a lease
+  request; busy = an unexpired non-`__usage__` lease.
 - **TS `core/src/capabilities.ts` + `vault` `CapacityManager`** — orthogonal axis.
   CapacityManager plans *job/worker counts per spec across instances*; this plans
   *which units are resident where by resource bytes*. They compose: CapacityManager
   decides "spin N workers"; the planner decides "and they fit like so / preempt so."
-- **`gateway` `ServiceLeaseManager` remote** — the federation transport (phase 3):
-  swap the in-proc lease store for a `RemoteServiceLeaseManager` and the host
-  ledgers federate; the planner runs on the union.
+- **`core/src/capabilities.ts` `ServiceLeaseManager`** — the lease seam
+  (`InMemory` + `Persisted` variants; no remote variant exists yet). The planned
+  federation transport (phase 3): swap the in-proc lease store for a remote
+  implementation and the host ledgers federate; the planner runs on the union.
 
 ## 6. Federation (phase 3)
 
@@ -116,8 +132,9 @@ Anti-pathology guards: `min_residency_s` (no load→evict→load churn),
 1. ✅ **Core**: `planner.py` + tests (multi-resource, minimal-victim preemption,
    busy protection, cross-device place-vs-preempt, HARD_PIN floor, SOFT_PIN
    debounced restore, aging, anti-thrash).
-2. **Single-host wiring**: `PlanningCoordinator` + real footprint measurement
-   (weights + peak activation) on polyasr/polytts/chipgen. Kills the manual stop.
+2. ✅ **Single-host wiring**: realized as `HostBroker` (the `PlanningCoordinator`
+   sketch was never implemented under that name) + real footprint measurement
+   (weights + peak activation, `measure.py`). Kills the manual stop.
 3. **Federation**: WorldSource + domain planner over the `ServiceLeaseManager`
    remote seam; action dispatch RPC. Place-vs-preempt across the mesh.
 

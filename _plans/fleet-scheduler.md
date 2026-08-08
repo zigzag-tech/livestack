@@ -1,6 +1,13 @@
 # Fleet Scheduler — resource/budget/speed-aware admission & burst for Livestack
 
-**Status:** design (this doc). Depends on `resource-planner.md` (the placement brain,
+**Status:** **implemented** — `node-py/livestack_node/fleet_scheduler.py` (421 lines)
+is the pure `schedule(FleetState) -> FleetPlan` below (`Tier`, `Sla`, `CostModel`,
+`Target`, `Job`, `Ledger`, `Weights`; `Admit`/`Provision`/`Queue`/`Deprovision`), with
+the RunPod lexicographic guard, `min_uptime_s` hysteresis, and
+`resolve_weights`/`WeightPolicy`. Dispatch is the impure `fleet_dispatch.py` over
+`provision.py` + `provision_runpod.py`; tests are
+`node-py/tests/test_fleet_scheduler.py` + `test_fleet_dispatch.py`. Depends on
+`resource-planner.md` (the placement brain,
 `node-py/livestack_node/planner.py`) — this is the layer *above* it.
 **First consumer:** the Sorbonne MathVid client project (2026-07 delivery). Cloud
 target committed to **Aliyun**. Sorbonne's needs enter purely as config/weights (BATCH
@@ -22,8 +29,8 @@ pay for more*. That is the Fleet Scheduler.
 > **`schedule(FleetState) -> FleetPlan` is a pure function**, exactly like
 > `plan(WorldState) -> Plan`. It decides admission/routing/provisioning across a set
 > of **targets** (running + provisionable); `plan()` then does residency *within* the
-> targets it produces. Two brains, **one shared weight vector** — that is what makes
-> it one system, not a bolt-on.
+> targets it produces. Two brains, one weight vocabulary — the vector lives
+> fleet-side only (`Weights`); the planner consumes none of it and stays unchanged.
 
 ```
  schedule(FleetState) -> FleetPlan     [budget + speed dominate]  ← NEW
@@ -103,11 +110,13 @@ Budget **never blocks or rejects** work. It enters two ways:
    toward budget-first. Cost bites gracefully instead of hard-failing.
 
 Every dispatched job is tagged with `{target, tier, est_cost, actual_cost?}` on its
-`ResultBundle` so "prefer-local" is measured, not asserted.
+`ResultBundle` (design intent — no `ResultBundle` symbol exists yet; the tagging is
+unwired) so "prefer-local" is measured, not asserted.
 
 ## 5. Weights vary over time — a layered `WeightPolicy`
 
-Weights live on `PlannerPolicy` (already exists). A resolver composes three layers,
+Weights live on the fleet-side `SchedulerPolicy.weights` (`fleet_scheduler.py`) —
+the placement `PlannerPolicy` is untouched. A resolver composes three layers,
 last-wins:
 
 ```
@@ -140,18 +149,24 @@ The placement planner already solved the stability problems; mirror them:
 
 **MVP** (one pure module + tests): target tiering, deadline-feasibility + ETA,
 weighted score, RunPod last-resort guard, soft cost ledger, two base profiles
-(peak/offpeak) + manual override. `Provision`/`Deprovision` dispatch via the existing
-`aliyun/` and `runpod/` adapters.
+(peak/offpeak) + manual override. **Done** — `fleet_scheduler.py` + tests.
+`Provision`/`Deprovision` dispatch via `fleet_dispatch.py` over the `provision.py`
+layer; RunPod (`provision_runpod.py`) is the only provider today — Aliyun ECI is a
+registry slot, not yet implemented.
 
-**Full:** continuous auto weight adjustment (queue/deadline/cost pressure),
-speed-aging, provisioning hysteresis, spot-reclaim handling, per-project budgets.
+**Full:** continuous auto weight adjustment (queue/deadline/cost pressure) —
+**done** (`resolve_weights`), provisioning hysteresis — **done** (`min_uptime_s`);
+still open: speed-aging, spot-reclaim handling, per-project budgets.
 
 ## 8. Where it lives & how it's tested
 
 - `node-py/livestack_node/fleet_scheduler.py` — the pure `schedule()` + dataclasses.
-- `node-py/livestack_node/hostd.py` (or a thin `fleetd`) assembles `FleetState`
-  (from broker `/status` + the ledger) and dispatches `FleetPlan` actions.
-- `tests/test_fleet_scheduler.py` — mirror `test_planner.py`/`test_federation.py`:
+- **Not yet wired:** no `hostd`/`fleetd` assembles `FleetState` yet — `hostd.py`/
+  `hostbroker.py` never import the scheduler; today only the tests build a
+  `FleetState`. The plan is still broker `/status` + the ledger in, `FleetPlan`
+  actions out.
+- `node-py/tests/test_fleet_scheduler.py` + `node-py/tests/test_fleet_dispatch.py` —
+  mirror `test_planner.py`/`test_federation.py`:
   prefer-local when local idle; burst SPOT under queue pressure; RunPod *only* when a
   tight INTERACTIVE deadline can't be met cheaper; off-peak never provisions
   LAST_RESORT; manual override beats time-of-day; cost-pressure shifts weights.
