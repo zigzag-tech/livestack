@@ -116,6 +116,51 @@ Two things keep the plan tied to the real machine, not just declared estimates:
    re-asserts the HARD_PIN floor, restores debounced SOFT_PINs, and sheds under
    measured pressure.
 
+## Build hosts — the first *peerless* consumer (lodestar image builds)
+
+The lodestar deploy tooling (`scripts/remote-build.mjs` in lodestar-platform) needs to pick
+**which machine runs each `docker build`** — the same "where does this unit of work go"
+question Harmony answers for GPUs, over machines that run **no livestack node at all**.
+That peerless case needed three additions, all generic:
+
+1. **Config-declared units** (`LIVESTACK_UNITS`, `HostBroker(extra_units=)`). Units used to
+   come only from peers, so `admit("build")` on a node-less broker deferred "unknown kind".
+   Config units are merged in `snapshot()` with `setdefault` — peers stay authoritative.
+2. **A broker-held lease ledger.** `_hosted_has_room` always saw an empty house for hosted
+   devices because *placements* also came only from peers. Now a grant on a hosted device
+   checks out a lease (`/admit` returns `lease_id`), the client heartbeats it
+   (`POST /lease/{id}/heartbeat`) and releases it (`POST /lease/{id}/release`), and the
+   broker expires leases past `LIVESTACK_LEASE_TTL_S` (default 120 s) inside `snapshot()` —
+   a dead leaseholder must not hold capacity. The ledger is the *only* place the broker is
+   authoritative over a client; it is deliberately soft state (a broker restart briefly
+   over-admits; leases re-check out).
+3. **A health prober** (`LIVESTACK_PROBES`): per-device shell commands run on the reconcile
+   loop — exit 0 keeps the device a candidate, anything else gates it (`available=False`)
+   and demand fails over to the next arch-matching host. `POST /devices/{id}/health` is the
+   same gate set by hand; `/status` shows both under `"hosted"`.
+
+A **build broker** is then just a peerless `hostd` (`LIVESTACK_PEERS=none` — the explicit
+opt-out from the localhost GPU seeds). The live one runs on zz-tower2 as systemd unit
+`livestack-buildd` (port 8800, env in `~/livestack/node-py/buildd.env`, log
+`~/livestack/node-py/buildd.log`), declaring each lodestar build host as a hosted device
+whose id equals its key in lodestar's `deploy/build-hosts.json`:
+
+```
+LIVESTACK_UNITS={"build": {"priority": 20}}
+LIVESTACK_DEVICES={"zz-tower2": {"hosted": true, "concurrency": 1, "cost_bias": 0,
+                                  "labels": {"arch": "linux/amd64"}},
+                   "xc-win-1":  {"hosted": true, "concurrency": 1, "cost_bias": 2,
+                                  "labels": {"arch": "linux/amd64"}}}
+```
+
+`cost_bias` encodes *preference*, same knob as the vendor endpoints: zz-tower2 (native
+amd64, datacenter ship path) is the default; xc-win-1 is next; a slow cross-arch host would
+carry a bigger bias as overflow-only. `selector={"arch": "linux/amd64"}` on the request is
+the arch match — the planner's label selector, nothing new. The probes are the same checks
+`remote-build.mjs` preflights (ssh + docker + repo + disk). The client contract: **broker
+down, deferred, or granting an unknown host ⇒ the client falls back to its static default
+host** — a prod deploy is never blocked by this broker.
+
 ## Hosted backends — arbitrating somebody else's GPU
 
 A **hosted backend** is a vendor endpoint (Qwen3-ASR on Alibaba Model Studio, a
@@ -261,6 +306,8 @@ released in `finally`), and keeps non-GPU work (LLM digest, embeddings) off the 
   `chipgen` (+ `polytts` where present). CUDA meter.
 - **xc-mac-studio** (Apple Silicon, 36 GB unified): `io.zigzag.livestack-hostd`
   brokers `polyasr` (MLX) + `polytts` (MLX). MLX meter.
+- **zz-tower2** (no GPU): `livestack-buildd.service` — the peerless **build broker**
+  (:8800) arbitrating lodestar build hosts; see "Build hosts" above.
 
 ## Tests
 
