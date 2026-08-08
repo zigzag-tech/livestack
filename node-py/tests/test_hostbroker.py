@@ -255,3 +255,91 @@ def test_one_peer_failing_does_not_stop_the_sweep():
     acted = b.sweep_leaks(now=1000.0)
     assert ok.reclaims == 1, "a dead peer must not block its neighbours"
     assert [a["peer"] for a in acted] == ["http://ok"]
+
+
+# --- hosted BUILD hosts (the peerless case) ---------------------------------
+# A build host is a hosted device with a concurrency ceiling; no peer speaks
+# for it, so the broker's own unit config + lease ledger are the whole story.
+
+def make_build_broker(device_config, clock=None):
+    return HostBroker(device_config=device_config,
+                      extra_units={"build": Unit("build", {}, priority=20)},
+                      clock=clock or (lambda: 1000.0))
+
+
+def test_admit_build_on_a_peerless_broker():
+    """Zero peers: the kind comes from config, the device comes from config,
+    and the grant must still land — that is the whole BUILD-host case."""
+    b = make_build_broker({"buildhost-a": {"hosted": True, "concurrency": 1,
+                                           "cost_bias": 0,
+                                           "labels": {"arch": "linux/amd64"}}})
+    assert b.admit(Request("r1", "build", created_at=1000)) == "buildhost-a"
+
+
+def test_selector_picks_the_matching_arch():
+    b = make_build_broker({
+        "buildhost-amd": {"hosted": True, "concurrency": 1,
+                          "labels": {"arch": "linux/amd64"}},
+        "buildhost-arm": {"hosted": True, "concurrency": 1,
+                          "labels": {"arch": "linux/arm64"}},
+    })
+    dev = b.admit(Request("r1", "build", created_at=1000,
+                          selector={"arch": "linux/arm64"}))
+    assert dev == "buildhost-arm"
+
+
+def test_cheaper_hosted_device_wins():
+    # Sorted order puts buildhost-a first; the grant must still go to b, or the
+    # ordering is accidental rather than the bias.
+    b = make_build_broker({
+        "buildhost-a": {"hosted": True, "concurrency": 1, "cost_bias": 2},
+        "buildhost-b": {"hosted": True, "concurrency": 1, "cost_bias": 0},
+    })
+    assert b.admit(Request("r1", "build", created_at=1000)) == "buildhost-b"
+
+
+def test_an_unhealthy_device_is_skipped():
+    b = make_build_broker({
+        "buildhost-a": {"hosted": True, "concurrency": 1, "cost_bias": 0},
+        "buildhost-b": {"hosted": True, "concurrency": 1, "cost_bias": 2},
+    })
+    b.set_hosted_available("buildhost-a", False)
+    assert b.admit(Request("r1", "build", created_at=1000)) == "buildhost-b"
+
+
+def test_concurrency_ceiling_until_release():
+    """concurrency: 1 means ONE build at a time. The second admit must defer
+    until the first lease is released — this is why the ledger exists."""
+    b = make_build_broker({"buildhost-a": {"hosted": True, "concurrency": 1}})
+    lease = b.hosted_checkout("buildhost-a", "build", "ci", now=1000)
+    assert b.admit(Request("r1", "build", created_at=1000)) is None
+    assert b.hosted_release(lease) is True
+    assert b.admit(Request("r2", "build", created_at=1000)) == "buildhost-a"
+
+
+def test_a_lease_older_than_the_ttl_stops_counting():
+    """A leaseholder that died mid-build cannot release; the TTL is how its
+    slot comes back on its own."""
+    t = [1000.0]
+    b = make_build_broker({"buildhost-a": {"hosted": True, "concurrency": 1}},
+                          clock=lambda: t[0])
+    b.hosted_lease_ttl_s = 120.0
+    b.hosted_checkout("buildhost-a", "build", "ci", now=t[0])
+    assert b.admit(Request("r1", "build", created_at=t[0])) is None
+    t[0] += 121.0                        # past the TTL, no heartbeat
+    assert b.admit(Request("r2", "build", created_at=t[0])) == "buildhost-a"
+
+
+def test_a_heartbeat_keeps_the_lease_alive():
+    t = [1000.0]
+    b = make_build_broker({"buildhost-a": {"hosted": True, "concurrency": 1}},
+                          clock=lambda: t[0])
+    b.hosted_lease_ttl_s = 120.0
+    lease = b.hosted_checkout("buildhost-a", "build", "ci", now=t[0])
+    t[0] += 100.0
+    assert b.hosted_heartbeat(lease, now=t[0]) is True
+    t[0] += 100.0                        # 200 s old, but refreshed at 100
+    assert b.admit(Request("r1", "build", created_at=t[0])) is None
+    t[0] += 121.0                        # nothing since 1100 -> expired
+    assert b.admit(Request("r2", "build", created_at=t[0])) == "buildhost-a"
+    assert b.hosted_heartbeat("nope") is False
