@@ -42,9 +42,12 @@ retries until the broker answers, so start order does not matter and a broker
 restart refills from the nodes within one interval.
 
 `LIVESTACK_PEERS` still works, demoted to **seeds** for nodes too old to
-announce themselves. It defaults to empty — the old hardcoded guess at
-`8766/8100/8844` named ports this fleet does not use, and a wrong seed is
-indistinguishable from a dead node.
+announce themselves, and the localhost defaults (`8766/8100/8844`) stay as
+seeds too. They are guesses — this fleet's polyasr serves 8765, not 8766 — but
+a wrong guess is now *visible* (`mia` in `GET /peers`, with its connect error)
+and *cheap* (probed on a backoff, not every cycle), which is exactly what it
+was not before. Removing them would silently empty the roster of every existing
+deployment on upgrade, until its nodes were upgraded too.
 
 The broker ages each peer from its last **success** — `fresh` → `suspect` (45 s)
 → `mia` (10 min) — and probes absent peers on a backoff instead of every cycle.

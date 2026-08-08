@@ -175,15 +175,29 @@ def build_app(broker: HostBroker):
 
 
 def main():
-    # No seeds by default. Nodes report for duty (POST /peers), so guessing at
-    # localhost ports is not just unnecessary, it is actively wrong: the old
-    # default named polyasr on 8766 while this fleet's polyasr serves 8765, and
-    # chipgen on 8844 where no such process exists. A wrong seed and a dead node
-    # produce identical output, so the guess could never be noticed.
+    # Nodes report for duty (POST /peers), so these localhost guesses are no
+    # longer how membership is *meant* to work — but they stay, as seeds.
     #
-    # LIVESTACK_PEERS remains for nodes too old to announce themselves.
+    # Deleting them was the first instinct and it was wrong. The objection to a
+    # guess was that a wrong seed and a dead node produced identical output
+    # (this fleet's polyasr serves 8765, not the 8766 named here) — and that is
+    # precisely what membership now fixes: a wrong seed shows up in GET /peers
+    # as `mia` with its connect error, probed on a backoff instead of every
+    # cycle. The guess became cheap and visible at the same moment it became
+    # unnecessary.
+    #
+    # What removing them would have cost is real: every deployment that relies
+    # on this default loses its whole roster on upgrade, silently, until its
+    # nodes are also upgraded to announce themselves. zz-tower0 is exactly that
+    # deployment — no LIVESTACK_PEERS in its unit file, three peers found only
+    # by this default.
     peers_env = os.environ.get("LIVESTACK_PEERS", "").strip()
-    peer_urls = [u.strip() for u in peers_env.split(",") if u.strip()] if peers_env else []
+    if peers_env:
+        peer_urls = [u.strip() for u in peers_env.split(",") if u.strip()]
+    else:
+        peer_urls = ["http://127.0.0.1:8766/livestack",   # polyasr
+                     "http://127.0.0.1:8100/livestack",   # polytts
+                     "http://127.0.0.1:8844/livestack"]   # chipgen
     import json
     device_config = {}
     dev_env = os.environ.get("LIVESTACK_DEVICES", "").strip()
