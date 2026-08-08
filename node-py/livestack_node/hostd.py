@@ -15,7 +15,8 @@ loads a heavy unit:
 Run:  python -m livestack_node.hostd
 Config via env:
     LIVESTACK_PEERS      comma-separated /livestack base URLs
-                         (default: polyasr 8766, polytts 8100, chipgen 8844 on localhost)
+                         (default: polyasr 8766, polytts 8100, chipgen 8844 on localhost;
+                         "none" = explicitly peerless, e.g. the build broker)
     LIVESTACK_HOST_ID    default zz-tower0
     LIVESTACK_VRAM_GB    device capacity (default 24)
     LIVESTACK_RESERVED_GB activation/driver slack the planner never allocates (default 2)
@@ -272,8 +273,14 @@ def main():
     # nodes are also upgraded to announce themselves. zz-tower0 is exactly that
     # deployment — no LIVESTACK_PEERS in its unit file, three peers found only
     # by this default.
+    #
+    # The explicit opt-out is "none"/"off"/"-": a peerless broker (the build
+    # broker — only hosted devices, no model nodes at all) should not spend its
+    # reconcile loop probing three localhost guesses that can never answer.
     peers_env = os.environ.get("LIVESTACK_PEERS", "").strip()
-    if peers_env:
+    if peers_env.lower() in ("none", "off", "-"):
+        peer_urls = []
+    elif peers_env:
         peer_urls = [u.strip() for u in peers_env.split(",") if u.strip()]
     else:
         peer_urls = ["http://127.0.0.1:8766/livestack",   # polyasr
