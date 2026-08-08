@@ -18,6 +18,7 @@ This is the single-host degenerate case of the mesh domain planner; the same
 from __future__ import annotations
 
 import os
+import threading
 import time
 
 from typing import Callable, Dict, List, Mapping, Optional
@@ -58,7 +59,8 @@ class HostBroker:
                  log: Callable[[str], None] = lambda *_: None,
                  device_config: Optional[dict] = None,
                  default_capacity: Optional[dict] = None,
-                 membership: Optional[MembershipPolicy] = None):
+                 membership: Optional[MembershipPolicy] = None,
+                 extra_units: Optional[Mapping[str, Unit]] = None):
         # devices: a FIXED list (single-host / tests). If None, devices are
         # DISCOVERED from the peers' reported device_ids (federated / multi-host),
         # each sized from device_config[device_id] or default_capacity. That is the
@@ -74,6 +76,18 @@ class HostBroker:
         # being a candidate, so demand falls back to the GPU with no other
         # special case in the planner.
         self.hosted_available: Dict[str, bool] = {}
+        # Kinds no peer will ever report (e.g. "build" on a peerless BUILD-host
+        # broker). Without them, admit() for such a kind defers "unknown kind".
+        self.extra_units: Dict[str, Unit] = dict(extra_units or {})
+        # The broker's own lease ledger for hosted backends. Peers are ground
+        # truth for what they host, but a hosted device HAS no peer — nobody
+        # else can say how busy it is, so the broker must, or the planner's
+        # concurrency check always sees an empty house. A lease that stops
+        # heartbeating expires: a dead leaseholder must not hold capacity.
+        self.hosted_leases: Dict[str, dict] = {}
+        self.hosted_lease_ttl_s = float(os.environ.get("LIVESTACK_LEASE_TTL_S", "120"))
+        self._lease_lock = threading.Lock()     # the reconcile thread snapshots too
+        self._lease_seq = 0
         # Leak reclaim bookkeeping: peer -> last attempt, and how often to retry.
         self._last_reclaim: Dict[str, float] = {}
         self.reclaim_interval_s = float(os.environ.get("LIVESTACK_RECLAIM_INTERVAL", "120"))
@@ -140,6 +154,68 @@ class HostBroker:
                 available=self.hosted_available.get(did, True),
             ))
         return out
+
+    # -- hosted lease ledger (the broker IS the source of truth here) ---------
+    def _now(self, now: Optional[float] = None) -> float:
+        return now if now is not None else (self._clock() if self._clock else time.time())
+
+    def hosted_checkout(self, device_id: str, kind: str, owner: str,
+                        now: Optional[float] = None) -> str:
+        """Record a lease taken against a hosted backend; returns its id.
+
+        Called when a grant lands on a hosted device — from that moment the
+        device's concurrency budget is one lease tighter, which is exactly what
+        keeps a second admit from double-booking a machine that fits one build.
+        """
+        now = self._now(now)
+        with self._lease_lock:
+            self._lease_seq += 1
+            lease_id = f"{device_id}-{int(now * 1000)}-{self._lease_seq}"
+            self.hosted_leases[lease_id] = {"device_id": device_id, "kind": kind,
+                                            "owner": owner, "created": now, "last_hb": now}
+        return lease_id
+
+    def hosted_heartbeat(self, lease_id: str, now: Optional[float] = None) -> bool:
+        """Refresh a lease; False when unknown or already past TTL. Heartbeat is
+        the leaseholder's proof of life — without it the ledger would leak
+        capacity to every client that died mid-build."""
+        now = self._now(now)
+        with self._lease_lock:
+            lease = self.hosted_leases.get(lease_id)
+            if lease is None or now - lease["last_hb"] > self.hosted_lease_ttl_s:
+                self.hosted_leases.pop(lease_id, None)
+                return False
+            lease["last_hb"] = now
+            return True
+
+    def hosted_release(self, lease_id: str) -> bool:
+        with self._lease_lock:
+            return self.hosted_leases.pop(lease_id, None) is not None
+
+    def set_hosted_available(self, device_id: str, available: bool) -> None:
+        """Flip the health gate hostd's prober feeds. An unhealthy backend simply
+        stops being a candidate; nothing else has to know why."""
+        self.hosted_available[device_id] = available
+
+    def _hosted_placements(self, now: Optional[float] = None) -> List[Placement]:
+        """Live leases per hosted device, as Placements.
+
+        Expires first: a lease older than the TTL is a dead leaseholder, and
+        dead capacity must come back on its own — clients that crash cannot be
+        relied on to release. The survivor count feeds the planner's
+        ``_hosted_has_room`` on the next snapshot.
+        """
+        now = self._now(now)
+        with self._lease_lock:
+            for lid in [lid for lid, l in self.hosted_leases.items()
+                        if now - l["last_hb"] > self.hosted_lease_ttl_s]:
+                del self.hosted_leases[lid]
+            live: Dict[str, Dict[str, int]] = {}
+            for l in self.hosted_leases.values():
+                live.setdefault(l["device_id"], {})
+                live[l["device_id"]][l["kind"]] = live[l["device_id"]].get(l["kind"], 0) + 1
+        return [Placement(kind, did, leases=n)
+                for did, kinds in live.items() for kind, n in kinds.items()]
 
     def register_peer(self, peer: Peer) -> None:
         self.peers.append(peer)
@@ -282,6 +358,13 @@ class HostBroker:
             except Exception:
                 pass
         now = self._clock() if self._clock else 0.0
+        # Config-declared kinds (a hosted backend has no peer to report them).
+        # Peers stay authoritative for the kinds they DO report.
+        for kind, u in self.extra_units.items():
+            units.setdefault(kind, u)
+        # A hosted device has no peer reporting placements either — the broker's
+        # own ledger is the only account of how full it is.
+        placements.extend(self._hosted_placements(now))
         return WorldState(devices=tuple(self._resolve_devices(discovered, measured_caps)),
                           units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
