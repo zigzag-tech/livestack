@@ -95,8 +95,8 @@ root.render(
 ```
 
 Explanation:
-- We import the `SpeechComponents` component and render it within a `Suspense` component.
-- We import `global.css` to apply global tailwind styles.
+- We import the `SpeechComponents` component and render it.
+- We import `globals.css` to apply global tailwind styles.
 
 ### Step 3: Set Up the Backend
 
@@ -121,8 +121,8 @@ main();
 ```
 
 Explanation:
-- We create an Express app and configure it with CORS, JSON body parsing, and serving static files from the `public` directory.
-- We set the port to `4700` and start the server using `ViteExpress.listen()`.
+- We create an Express app and set the port to `4700`.
+- We start the server using `ViteExpress.listen()`, which serves both the API and the frontend.
 
 ### Step 4: Run the App
 
@@ -145,4 +145,4 @@ Note that `dev` script is defined in the `scripts` section in the `package.json`
 Open your browser and navigate to `http://localhost:4700`. You should see the "Start Recording" button. When you click on it, the volume indicator will show a green bar as you speak to the microphone, and the length of the audio (PCM) chunks generated will be logged to the console.
 
 
-That's it for Phase 1! You have successfully set up the frontend to record audio and display the volume indicator. In the [next phase](), we'll add the transcription functionality.
+That's it for Phase 1! You have successfully set up the frontend to record audio and display the volume indicator. In the [next phase](1-speech-app-tutorial-phase2.md), we'll add the transcription functionality.

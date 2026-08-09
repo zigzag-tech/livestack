@@ -1,5 +1,5 @@
 ## @livestack/client
 
-Frontend for livestack.
+Helper functions and React hooks that help display Livestack data in the frontend.
 
-WIP
+Exports `useJobBinding` (with the `JobInfo` type), `useInput`, `useOutput`, and `useStream`. Peer deps: `react >= 18`, `socket.io-client`.

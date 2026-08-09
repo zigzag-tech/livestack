@@ -70,14 +70,17 @@ export const speechLiveflow = Liveflow.define({
     // [START] Add text splitting connection
     conn({
       from: speechChunkToTextSpec,
-      transform: ({ transcript }) => transcript,
+      transform: ({ transcript }) => ({
+        documentId: "speech",
+        content: transcript,
+      }),
       to: textSplittingSpec,
     }),
     // [END] Add text splitting connection
     // [START] Add summarization connection
     conn({
       from: textSplittingSpec,
-      transform: (chunkText) => ({ transcript: chunkText, llmType: "openai" }),
+      transform: ({ chunk }) => ({ transcript: chunk, llmType: "openai" }),
       to: titleSummarizerSepc,
     }),
     // [END] Add summarization connection
