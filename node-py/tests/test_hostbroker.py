@@ -150,3 +150,196 @@ def test_measured_capacity_autosizes_device():
     dev = broker.admit(Request("r1", "big", created_at=1000))
     assert dev == "tower0/gpu0"
     assert ("warm", "big") in peer.calls
+
+
+def test_hosted_backends_are_configured_not_discovered():
+    """Nothing on the host reports a vendor endpoint, so a hosted device can only
+    come from configuration — and it must appear alongside the discovered GPUs
+    rather than instead of them."""
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker(device_config={
+        "gpu0": {"vram_bytes": 24_000_000_000, "reserved": 2_000_000_000},
+        "qwen-sg": {"hosted": True, "concurrency": 8, "cost_bias": -1.0,
+                    "labels": {"region": "apac-sg"}},
+    })
+    devs = {d.id: d for d in b._resolve_devices({"gpu0": "tower0"})}
+    assert set(devs) == {"gpu0", "qwen-sg"}
+    assert devs["gpu0"].hosted is False
+    q = devs["qwen-sg"]
+    assert q.hosted and q.cost_bias == -1.0
+    assert q.capacity == {"concurrency": 8.0}
+    assert q.labels["region"] == "apac-sg"
+    assert q.available is True
+
+    # Health gates it without touching config: mark it down and it stops being
+    # offered, which is the whole fallback story.
+    b.hosted_available["qwen-sg"] = False
+    devs2 = {d.id: d for d in b._resolve_devices({"gpu0": "tower0"})}
+    assert devs2["qwen-sg"].available is False
+
+
+class _LeakyPeer:
+    """A node that has evicted everything and still holds the card — the exact
+    shape of the 2026-08-04 outage."""
+    def __init__(self, base="http://leaky", leak=True):
+        self.base = base
+        self._leak = {"unexplained_bytes": 14_700_000_000,
+                      "reclaimable_bytes": 14_700_000_000} if leak else None
+        self.reclaims = 0
+
+    @property
+    def leak(self):
+        return self._leak
+
+    def reclaim(self):
+        self.reclaims += 1
+        freed = int(self._leak["reclaimable_bytes"]) if self._leak else 0
+        self._leak = None                       # the pool came back
+        return {"freed_bytes": freed}
+
+
+def test_a_leaking_peer_is_asked_to_return_its_pool():
+    """Detection alone could not fix the outage: Harmony's only lever is evicting
+    units, and the leaked memory belonged to no unit. Reclaim is the lever."""
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker()
+    peer = _LeakyPeer()
+    b.register_peer(peer)
+
+    acted = b.sweep_leaks(now=1000.0)
+    assert peer.reclaims == 1
+    assert acted[0]["freed_bytes"] == 14_700_000_000
+    assert acted[0]["unexplained_bytes"] == 14_700_000_000
+
+
+def test_a_healthy_peer_is_left_alone():
+    """Reclaim touches the GPU executor. A sweep that fires on healthy nodes
+    would contend with real work every cycle."""
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker()
+    peer = _LeakyPeer(leak=False)
+    b.register_peer(peer)
+    assert b.sweep_leaks(now=1000.0) == []
+    assert peer.reclaims == 0
+
+
+def test_reclaim_is_throttled_per_peer():
+    """A node whose pool does not come back is reporting a real leak, not a
+    stale cache — worth a log line, not a tight retry loop."""
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker()
+    b.reclaim_interval_s = 120.0
+    peer = _LeakyPeer()
+    peer._leak_sticky = True
+
+    b.register_peer(peer)
+    b.sweep_leaks(now=1000.0)
+    peer._leak = {"unexplained_bytes": 14_700_000_000, "reclaimable_bytes": 0}  # still leaking
+    b.sweep_leaks(now=1060.0)          # inside the window
+    assert peer.reclaims == 1, "must not hammer the GPU executor"
+    b.sweep_leaks(now=1200.0)          # past it
+    assert peer.reclaims == 2
+
+
+def test_one_peer_failing_does_not_stop_the_sweep():
+    from livestack_node.hostbroker import HostBroker
+
+    class _Broken(_LeakyPeer):
+        def reclaim(self):
+            raise RuntimeError("connection refused")
+
+    b = HostBroker()
+    broken, ok = _Broken(base="http://broken"), _LeakyPeer(base="http://ok")
+    b.register_peer(broken)
+    b.register_peer(ok)
+    acted = b.sweep_leaks(now=1000.0)
+    assert ok.reclaims == 1, "a dead peer must not block its neighbours"
+    assert [a["peer"] for a in acted] == ["http://ok"]
+
+
+# --- hosted BUILD hosts (the peerless case) ---------------------------------
+# A build host is a hosted device with a concurrency ceiling; no peer speaks
+# for it, so the broker's own unit config + lease ledger are the whole story.
+
+def make_build_broker(device_config, clock=None):
+    return HostBroker(device_config=device_config,
+                      extra_units={"build": Unit("build", {}, priority=20)},
+                      clock=clock or (lambda: 1000.0))
+
+
+def test_admit_build_on_a_peerless_broker():
+    """Zero peers: the kind comes from config, the device comes from config,
+    and the grant must still land — that is the whole BUILD-host case."""
+    b = make_build_broker({"buildhost-a": {"hosted": True, "concurrency": 1,
+                                           "cost_bias": 0,
+                                           "labels": {"arch": "linux/amd64"}}})
+    assert b.admit(Request("r1", "build", created_at=1000)) == "buildhost-a"
+
+
+def test_selector_picks_the_matching_arch():
+    b = make_build_broker({
+        "buildhost-amd": {"hosted": True, "concurrency": 1,
+                          "labels": {"arch": "linux/amd64"}},
+        "buildhost-arm": {"hosted": True, "concurrency": 1,
+                          "labels": {"arch": "linux/arm64"}},
+    })
+    dev = b.admit(Request("r1", "build", created_at=1000,
+                          selector={"arch": "linux/arm64"}))
+    assert dev == "buildhost-arm"
+
+
+def test_cheaper_hosted_device_wins():
+    # Sorted order puts buildhost-a first; the grant must still go to b, or the
+    # ordering is accidental rather than the bias.
+    b = make_build_broker({
+        "buildhost-a": {"hosted": True, "concurrency": 1, "cost_bias": 2},
+        "buildhost-b": {"hosted": True, "concurrency": 1, "cost_bias": 0},
+    })
+    assert b.admit(Request("r1", "build", created_at=1000)) == "buildhost-b"
+
+
+def test_an_unhealthy_device_is_skipped():
+    b = make_build_broker({
+        "buildhost-a": {"hosted": True, "concurrency": 1, "cost_bias": 0},
+        "buildhost-b": {"hosted": True, "concurrency": 1, "cost_bias": 2},
+    })
+    b.set_hosted_available("buildhost-a", False)
+    assert b.admit(Request("r1", "build", created_at=1000)) == "buildhost-b"
+
+
+def test_concurrency_ceiling_until_release():
+    """concurrency: 1 means ONE build at a time. The second admit must defer
+    until the first lease is released — this is why the ledger exists."""
+    b = make_build_broker({"buildhost-a": {"hosted": True, "concurrency": 1}})
+    lease = b.hosted_checkout("buildhost-a", "build", "ci", now=1000)
+    assert b.admit(Request("r1", "build", created_at=1000)) is None
+    assert b.hosted_release(lease) is True
+    assert b.admit(Request("r2", "build", created_at=1000)) == "buildhost-a"
+
+
+def test_a_lease_older_than_the_ttl_stops_counting():
+    """A leaseholder that died mid-build cannot release; the TTL is how its
+    slot comes back on its own."""
+    t = [1000.0]
+    b = make_build_broker({"buildhost-a": {"hosted": True, "concurrency": 1}},
+                          clock=lambda: t[0])
+    b.hosted_lease_ttl_s = 120.0
+    b.hosted_checkout("buildhost-a", "build", "ci", now=t[0])
+    assert b.admit(Request("r1", "build", created_at=t[0])) is None
+    t[0] += 121.0                        # past the TTL, no heartbeat
+    assert b.admit(Request("r2", "build", created_at=t[0])) == "buildhost-a"
+
+
+def test_a_heartbeat_keeps_the_lease_alive():
+    t = [1000.0]
+    b = make_build_broker({"buildhost-a": {"hosted": True, "concurrency": 1}},
+                          clock=lambda: t[0])
+    b.hosted_lease_ttl_s = 120.0
+    lease = b.hosted_checkout("buildhost-a", "build", "ci", now=t[0])
+    t[0] += 100.0
+    assert b.hosted_heartbeat(lease, now=t[0]) is True
+    t[0] += 100.0                        # 200 s old, but refreshed at 100
+    assert b.admit(Request("r1", "build", created_at=t[0])) is None
+    t[0] += 121.0                        # nothing since 1100 -> expired
+    assert b.admit(Request("r2", "build", created_at=t[0])) == "buildhost-a"
+    assert b.hosted_heartbeat("nope") is False

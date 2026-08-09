@@ -29,7 +29,7 @@ We look forward to seeing your next idea come to life with Livestack!
 
 - [Build Your Own Real Time Conversation Assistant: Transcription, Summarization, and Translation](https://live.dev/docs/documents/_livestack_tutorials.1_speech_app_tutorial.html)
 - Learn the mechanics (single JobSpec): [Minimal Example: Live Counter](https://live.dev/docs/documents/_livestack_tutorials.2_live_counter_tutorial.html)
-- Learn the mechanics: [Minimal Example: Liveflow Zoo] 
+- Learn the mechanics: Minimal Example: Liveflow Zoo
 
 ## Installation
   
@@ -38,7 +38,7 @@ We look forward to seeing your next idea come to life with Livestack!
 npm install @livestack/core @livestack/gateway @livestack/client
 ```
 
-For a detailed walkthrough, choose one of the tutorials from the quickstart section below.
+For a detailed walkthrough, choose one of the tutorials from the quickstart section above. The tutorials are also available locally in the `tutorials/` directory.
 
 
 ## Join the Community
@@ -53,21 +53,21 @@ Livestack aims at providing:
 - Simple, hassle-free bootstrap & deployment process for new AI project.
 - Graph-based liveflows for better reasoning, visual inspection and debugging:
   - Support for multiple input & output streams for every processing node 
-  - Visualization for easy inspection and debugging (as part of Livestack Cloud).
+  - Visualization for easy inspection and debugging (via the local, publishable `@livestack/viz` package, still a work in progress).
 - Built-in data persistence & validation of all in-app activities for easy inspection and model training.
 - Provisioning system that automatically scales your AI project to many machines with zero configuration.
 - Support for hybrid local and cloud deployment.
+- Live speech transcription (via `@livestack/transcribe`, Whisper-based).
 
 ## Features (planned)
-- (WIP) full-stack realtime AI compnents, patterns and guidelines for rapid prototyping, including:
-  - live speech transcription.
+- (WIP) full-stack realtime AI components, patterns and guidelines for rapid prototyping, including:
   - live RAG liveflow.
   - [Game development](https://github.com/zigzag-tech/ready-agent-one)
   -  realtime image generation.
 
 
 
-## Comparism with other frameworks
+## Comparison with other frameworks
 
 
 | Features                                                    | Livestack | Langchain/<br />LangGraph | Llamaindex | ComfyUI | Ray.io |
@@ -82,7 +82,7 @@ Livestack aims at providing:
 | Cloud+on-prem mixed deployment <br />(local + cloud hybrid) |    ✅     |            ❌             |     ❌     |   ❌    | 🔶    |
 | Out-of-the-box data logging                                 |    ✅     |            ❌             |     ❌     |   ❌    | ❌     |
 | Python + JS Hybrid language liveflows                       |    🚧    |            ✅             |     ❌     |   ❌    | ❌     |
-| Official support audio Input & output                       |    🚧    |            ❌             |     ❌     |   ❌    | ❌     |
+| Official support audio Input & output                       | ✅ input<br />🚧 output |            ❌             |     ❌     |   ❌    | ❌     |
 | Official support for Image as output                        |    🚧    |            ❌             |     ❌     |   ✅    | ❌     |
 
 Legend:

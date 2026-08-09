@@ -1,6 +1,12 @@
 # RESTful Model Node — unifying GPU service residence under Livestack
 
-**Status:** design / discussion. No code yet.
+**Status:** implemented. This doc is the design record; the kit ships as
+`node-py/livestack_node` — port 1 `lease.py` (`CapabilityLeaseStore`,
+`acquire_lease`/`heartbeat_lease`/`reap_expired`), port 2 `facade.py` (mounted
+at `/livestack` via `serve.py`), port 3 `coordinator.py` (`LocalCoordinator`,
+`LivestackCoordinator`, pin-aware eviction), port 4 `manager.py`
+(`ModelManager`/`ManagedUnit`, per-unit `request_evict` :285). Where the text
+below says "new" or "missing", read it as the pre-implementation state.
 **Goal:** make every GPU model web server (polyasr, polytts, ollama, chipgen, …)
 a self-similar Livestack *node* so that VRAM stays as free as possible —
 resident only what is actively leased or explicitly pinned — while each server
@@ -73,7 +79,8 @@ is just a lease that never expires.
 
 `InMemoryCapabilityLeaseStore.reapExpired` (`capabilities.ts:160`) deletes the
 lease *record* and does nothing else — **there is no callback to the runtime, so
-no VRAM is freed.** The residence controller (§3, port 3) is the missing bridge.
+no VRAM is freed.** The residence controller (§3, port 3) was the missing
+bridge — since built as `coordinator.py` (pin-aware eviction, :111-218).
 
 ---
 
@@ -99,8 +106,13 @@ POST /lease/{id}/heartbeat            → extend → { expiresAt }
 POST /lease/{id}/release              → release
 POST /model/warm   { unit }           → prewarm (optional; reduces cold start)
 POST /model/evict  { unit }           → force-evict one unit (NOT all)
-POST /model/pin    { unit, pinned }   → seed/remove a permanent lease
+POST /model/reclaim                   → gc + backend allocator free on the GPU executor, reports before/after
+GET  /residence                       → current resident set + device/process memory + leak signal
 ```
+
+As built (`facade.py`): all of the above except `POST /model/pin`, which was
+dropped — pins are declarative, a per-unit `ResidencyPolicy` on the manager
+(`manager.py:43`), not a facade verb.
 
 `polyasr` already ships `GET /health` returning `manager.status()`
 (`server.py:675`) and `POST /model/unload` (`server.py:694`). The facade
@@ -130,10 +142,12 @@ interface ModelRuntime {
 ```
 
 - **polyasr:** `AsrModelManager` already has `load()/unload()/loaded()/status()/touch()`
-  per unit, plus `unload_now()` and `maybe_evict()`. **Gap:** `unload_now()` is
-  all-or-nothing (`polyasr_manager.py:146`) — must become **per-unit evict** so
-  `diarize` can drop while benchday's `asr` stays hot. This is the one
-  non-trivial refactor.
+  per unit, plus `unload_now()` and `maybe_evict()`. **Gap — since closed:**
+  `unload_now()` was all-or-nothing (`polyasr_manager.py:146`); per-unit evict
+  landed instead — `ModelManager.request_evict` (`manager.py:285`), the facade's
+  `POST /model/evict`, and the Rust planner's `plan_idle_sweep`
+  (`shared/src/residency.rs:127`) all evict per unit, so `diarize` can drop
+  while benchday's `asr` stays hot.
 - **polytts:** `ModelManager` (qwen/voxcpm, one-in-VRAM) — same shape, same
   per-unit gap.
 
@@ -187,20 +201,25 @@ with livestack.lease("asr", unit="diarize") as L:   # acquire + auto-heartbeat
 
 If no lease manager is reachable, `lease()` returns a no-op lease and the call
 hits the raw server (which self-manages via its embedded manager). Standalone
-correctness is preserved end-to-end.
+correctness is preserved end-to-end. (Implemented: `client.py` — `lease()` :26,
+`_NoopLease` :21.)
 
 ---
 
 ## 7. Language interop (TS core ↔ Python servers)
 
-- Livestack `core` (TS) is the **canonical spec** and what host/mesh gateways run.
-- `polyasr`/`polytts` are Python. Ship a small `livestack-node-py` package: a
-  faithful port of the ~150-line lease layer + residence controller + REST
-  facade. Port 4 adapters wrap the existing Python managers.
-- The **REST contract is the shared conformance test** — identical request/response
-  vectors run against both the TS and Python implementations so they cannot
-  drift. This is the whole reason "restify": REST is the lingua franca between
-  heterogeneous services and the gateway.
+- **As built:** the canonical decision core is a single Rust planner
+  (`shared/src/residency.rs`), bound into Python via `shared-py` —
+  `core/src/capabilities.ts` is no longer the canonical decision core. One
+  planner on both sides means there is no dual implementation to drift.
+- `polyasr`/`polytts` are Python. The `livestack-node-py` package proposed here
+  exists as `node-py/livestack_node`: the lease layer + residence controller +
+  REST facade, with a full test suite (`node-py/tests`). Port 4 adapters wrap
+  the existing Python managers.
+- The **REST facade remains the interop boundary** — the uniform HTTP surface
+  that lets a Python node and any gateway interoperate. (The original plan of
+  dual TS/Python implementations kept in lockstep by shared REST conformance
+  vectors was superseded by the single Rust planner.)
 
 ---
 
@@ -209,10 +228,10 @@ correctness is preserved end-to-end.
 - **Cold start.** Lease-gated residence means the first call after eviction pays
   the reload (polyasr ~17 GB). Mitigate: warm-on-acquire (lease slightly ahead
   of use), generous TTLs, and a pinned hot set for latency-critical units.
-- **Dual implementation drift.** Mitigated by the shared REST conformance vectors
-  (§7).
-- **Per-unit evict refactor** (§3 port 4) is the only substantive runtime change;
-  everything else is additive.
+- **Dual implementation drift.** Retired — a single Rust planner is the
+  decision core on both sides (§7).
+- **Per-unit evict refactor** (§3 port 4) — landed; it was the only substantive
+  runtime change, everything else was additive.
 - **Thundering reload** if many consumers race after an eviction — the manager's
   existing GPU lock serializes loads; warm-on-acquire smooths it.
 
@@ -220,16 +239,17 @@ correctness is preserved end-to-end.
 
 ## 9. Phasing
 
-1. **Contract + embedded node (reference: polyasr).**
+1. **Contract + embedded node (reference: polyasr).** — done.
    - Define ports 1–4 + REST facade in `core` (TS spec) and `livestack-node-py`.
    - Refactor `AsrModelManager` to per-unit evict; wrap as a `ModelRuntime`.
    - Embedded `InMemoryServiceLeaseManager`; idle-evict re-expressed as TTL leases;
      pins as permanent leases. polyasr runs standalone, self-managing, no network.
-2. **Consumer adoption.**
+2. **Consumer adoption.** — `livestack.lease()` helper shipped (`client.py`).
    - `livestack.lease()` Python helper (no-op when no manager); migrate
      media-corpus `pipeline.py` to lease-then-call.
    - Replicate the kit to polytts.
-3. **Per-host gateway (tower0).**
+3. **Per-host gateway (tower0).** — done; host gateway exists
+   (`hostd.py`/`hostbroker.py`).
    - `RemoteServiceLeaseManager`; stand up one host gateway owning the 3090's
      ledger; register polyasr/polytts/ollama/chipgen nodes; global VRAM budget +
      pin set (e.g. benchday `asr` pinned, `diarize` leasable).
@@ -239,14 +259,13 @@ correctness is preserved end-to-end.
 
 ---
 
-## 10. Open decisions
+## 10. Open decisions — all since resolved as recommended
 
-1. **Kit home & name** — contract in livestack `core` + a `livestack-node-py`
-   package?
-2. **Per-unit residence** — confirm the polyasr/polytts runtime refactor.
-3. **Host gateway timing** — design host-gateway-ready, ship polyasr
-   standalone-embedded first (phase 1), introduce the tower0 host gateway as
-   phase 3?
+1. **Kit home & name** — resolved: contract in livestack + the
+   `node-py/livestack_node` package.
+2. **Per-unit residence** — resolved: per-unit evict implemented (§3 port 4).
+3. **Host gateway timing** — resolved: shipped per the phasing above
+   (`hostd.py`/`hostbroker.py`).
 
 **Recommendation:** contract-in-core + Python kit; per-unit residence; polyasr as
 the reference conformer with the embedded manager first; host gateway phase 3.

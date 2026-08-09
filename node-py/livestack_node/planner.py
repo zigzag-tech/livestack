@@ -108,6 +108,23 @@ class Device:
     capacity: Res
     reserved: Res = field(default_factory=dict)
     labels: Mapping[str, str] = field(default_factory=dict)
+    # --- hosted backends -----------------------------------------------------
+    # A hosted device is somebody else's GPU behind an API (Qwen ASR, a vendor
+    # STT endpoint). It has NO residency: nothing loads, nothing evicts, nothing
+    # idles out, and it can never be a preemption victim. What it does have is a
+    # concurrency ceiling and a price, so it is scheduled by lease count rather
+    # than by bytes.
+    hosted: bool = False
+    # Added to every placement option on this device. NEGATIVE prefers it over a
+    # warm local replica (cost 0) — that is "hosted is the default, the GPU is
+    # for everything else". POSITIVE makes it overflow-only: chosen when a local
+    # placement would need a load or a preemption, not before. One knob, both
+    # policies, and it is the only thing that has to change to flip them.
+    cost_bias: float = 0.0
+    # Health gate. A hosted endpoint that is rate-limiting or down is simply not
+    # a candidate this cycle, so demand falls back to the GPU with no special
+    # case anywhere else in the planner.
+    available: bool = True
 
 
 @dataclass(frozen=True)
@@ -302,6 +319,20 @@ class _World:
         self.actions.append(Defer(request_id=req.id, reason=reason))
 
 
+def _hosted_has_room(world: "_World", d: Device) -> bool:
+    """A hosted backend admits while its concurrent leases are under capacity.
+
+    Local devices schedule RESIDENCE (one resident copy serves unlimited leases);
+    a hosted backend has no residence to schedule, so its scarce resource is
+    in-flight requests. An absent ``concurrency`` capacity means unmetered.
+    """
+    limit = d.capacity.get("concurrency")
+    if limit is None:
+        return True
+    live = sum(p.leases for p in world.w.placements if p.device_id == d.id)
+    return live < limit
+
+
 def _device_matches(d: Device, selector: Mapping[str, str]) -> bool:
     return all(d.labels.get(k) == v for k, v in selector.items())
 
@@ -403,6 +434,16 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
     for d in world.w.devices:
         if not _device_matches(d, {**unit.selector, **req.selector}):
             continue
+        if d.hosted:
+            # No residency to arrange and no locality to speak of — the audio
+            # leaves the host either way. Admission is purely "is it up, and is
+            # there room in the concurrency budget", and the cost is the bias.
+            if not d.available or not _hosted_has_room(world, d):
+                continue
+            opt = _Option(d.id, d.cost_bias, [], needs_load=False)
+            if best is None or opt.cost < best.cost:
+                best = opt
+            continue
         loc_pen = 0.0 if (req.locality_host is None or req.locality_host == d.host_id) \
             else pol.locality_penalty
         # warm: a resident copy serves another lease for free
@@ -434,6 +475,8 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
     #    shed idle, non-pinned, least-important units until non-negative. Honours
     #    anti-thrash + idle-only; a no-op when free >= 0 (the steady state).
     for d in world.devices:
+        if d.hosted:
+            continue    # no bytes to reclaim, and its units are not evictable
         guard = 0
         while any(v < -_EPS for v in W.free(d.id).values()) and guard < 64:
             guard += 1
@@ -496,6 +539,8 @@ def _place_warm(world: _World, kind: str, unit: Unit, pol: PlannerPolicy,
     best_free = -1.0
     victims_for: Dict[str, List[Placement]] = {}
     for d in world.w.devices:
+        if d.hosted:
+            continue    # nothing to keep warm there; a pin floor it cannot hold
         if not _device_matches(d, unit.selector):
             continue
         if _fits(_admission_need(unit), world.free(d.id)):

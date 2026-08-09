@@ -17,12 +17,25 @@ This is the single-host degenerate case of the mesh domain planner; the same
 """
 from __future__ import annotations
 
+import os
+import threading
+import time
+
 from typing import Callable, Dict, List, Mapping, Optional
 
 from .planner import (
     Device, Placement, Request, Unit, WorldState, PlannerPolicy, plan, Residency,
     Load, Evict, Grant, Defer,
 )
+from .membership import MembershipPolicy, PeerRoster, RosterFull
+
+
+def peer_key(peer) -> str:
+    """Stable identity for a peer. A REST peer is identified by its facade URL,
+    which is also what makes registration idempotent across node restarts; a
+    fake in a test has no URL and falls back to object identity. Same rule
+    sweep_leaks already used, lifted so membership and reclaim agree."""
+    return getattr(peer, "base", None) or f"peer-{id(peer)}"
 
 
 class Peer:
@@ -45,7 +58,9 @@ class HostBroker:
                  clock: Optional[Callable[[], float]] = None,
                  log: Callable[[str], None] = lambda *_: None,
                  device_config: Optional[dict] = None,
-                 default_capacity: Optional[dict] = None):
+                 default_capacity: Optional[dict] = None,
+                 membership: Optional[MembershipPolicy] = None,
+                 extra_units: Optional[Mapping[str, Unit]] = None):
         # devices: a FIXED list (single-host / tests). If None, devices are
         # DISCOVERED from the peers' reported device_ids (federated / multi-host),
         # each sized from device_config[device_id] or default_capacity. That is the
@@ -56,8 +71,36 @@ class HostBroker:
         self._clock = clock
         self._log = log
         self.device_config = device_config or {}
+        # Hosted-backend health, keyed by device id. Set by whatever probes the
+        # endpoint (hostd's reconcile loop); an unhealthy backend simply stops
+        # being a candidate, so demand falls back to the GPU with no other
+        # special case in the planner.
+        self.hosted_available: Dict[str, bool] = {}
+        # Kinds no peer will ever report (e.g. "build" on a peerless BUILD-host
+        # broker). Without them, admit() for such a kind defers "unknown kind".
+        self.extra_units: Dict[str, Unit] = dict(extra_units or {})
+        # The broker's own lease ledger for hosted backends. Peers are ground
+        # truth for what they host, but a hosted device HAS no peer — nobody
+        # else can say how busy it is, so the broker must, or the planner's
+        # concurrency check always sees an empty house. A lease that stops
+        # heartbeating expires: a dead leaseholder must not hold capacity.
+        self.hosted_leases: Dict[str, dict] = {}
+        self.hosted_lease_ttl_s = float(os.environ.get("LIVESTACK_LEASE_TTL_S", "120"))
+        self._lease_lock = threading.Lock()     # the reconcile thread snapshots too
+        self._lease_seq = 0
+        # Leak reclaim bookkeeping: peer -> last attempt, and how often to retry.
+        self._last_reclaim: Dict[str, float] = {}
+        self.reclaim_interval_s = float(os.environ.get("LIVESTACK_RECLAIM_INTERVAL", "120"))
         self.default_capacity = default_capacity or {"vram_bytes": 24_000_000_000,
                                                      "reserved": 2_000_000_000}
+        # Membership: who is on this host, and who has gone. Peers passed to the
+        # constructor are SEEDS (an operator said they ought to exist); peers
+        # that arrive via register_url() announced themselves and are pruneable.
+        # See membership.py and _plans/peer-membership.md.
+        self.roster = PeerRoster(membership, clock=clock or time.monotonic, log=log)
+        self._last_probe_error: Dict[str, str] = {}
+        for p in self.peers:
+            self.roster.seed(peer_key(p))
 
     def _resolve_devices(self, discovered: dict,
                          measured_caps: Optional[Mapping[str, Mapping[str, float]]] = None) -> list:
@@ -83,10 +126,177 @@ class HostBroker:
                 reserved = cap.get("reserved", 0)
             out.append(Device(did, hid, capacity={"vram_bytes": vram},
                               reserved={"vram_bytes": reserved}))
+        out.extend(self._hosted_devices())
         return out
+
+    def _hosted_devices(self) -> list:
+        """Hosted backends declared by the operator, appended to the discovered
+        local devices.
+
+        A hosted backend is not discovered — nothing on this host reports it —
+        so it can only ever come from configuration. Entries are the
+        ``device_config`` rows carrying ``hosted: true``; they are ignored by the
+        local-device loop above because no peer discovers their id.
+        """
+        out = []
+        for did, cfg in sorted(self.device_config.items()):
+            if not cfg.get("hosted"):
+                continue
+            capacity = {}
+            if cfg.get("concurrency"):
+                capacity["concurrency"] = float(cfg["concurrency"])
+            out.append(Device(
+                did, cfg.get("host_id", "hosted"),
+                capacity=capacity,
+                labels=cfg.get("labels", {}),
+                hosted=True,
+                cost_bias=float(cfg.get("cost_bias", 0.0)),
+                available=self.hosted_available.get(did, True),
+            ))
+        return out
+
+    # -- hosted lease ledger (the broker IS the source of truth here) ---------
+    def _now(self, now: Optional[float] = None) -> float:
+        return now if now is not None else (self._clock() if self._clock else time.time())
+
+    def hosted_checkout(self, device_id: str, kind: str, owner: str,
+                        now: Optional[float] = None) -> str:
+        """Record a lease taken against a hosted backend; returns its id.
+
+        Called when a grant lands on a hosted device — from that moment the
+        device's concurrency budget is one lease tighter, which is exactly what
+        keeps a second admit from double-booking a machine that fits one build.
+        """
+        now = self._now(now)
+        with self._lease_lock:
+            self._lease_seq += 1
+            lease_id = f"{device_id}-{int(now * 1000)}-{self._lease_seq}"
+            self.hosted_leases[lease_id] = {"device_id": device_id, "kind": kind,
+                                            "owner": owner, "created": now, "last_hb": now}
+        return lease_id
+
+    def hosted_heartbeat(self, lease_id: str, now: Optional[float] = None) -> bool:
+        """Refresh a lease; False when unknown or already past TTL. Heartbeat is
+        the leaseholder's proof of life — without it the ledger would leak
+        capacity to every client that died mid-build."""
+        now = self._now(now)
+        with self._lease_lock:
+            lease = self.hosted_leases.get(lease_id)
+            if lease is None or now - lease["last_hb"] > self.hosted_lease_ttl_s:
+                self.hosted_leases.pop(lease_id, None)
+                return False
+            lease["last_hb"] = now
+            return True
+
+    def hosted_release(self, lease_id: str) -> bool:
+        with self._lease_lock:
+            return self.hosted_leases.pop(lease_id, None) is not None
+
+    def set_hosted_available(self, device_id: str, available: bool) -> None:
+        """Flip the health gate hostd's prober feeds. An unhealthy backend simply
+        stops being a candidate; nothing else has to know why."""
+        self.hosted_available[device_id] = available
+
+    def _hosted_placements(self, now: Optional[float] = None) -> List[Placement]:
+        """Live leases per hosted device, as Placements.
+
+        Expires first: a lease older than the TTL is a dead leaseholder, and
+        dead capacity must come back on its own — clients that crash cannot be
+        relied on to release. The survivor count feeds the planner's
+        ``_hosted_has_room`` on the next snapshot.
+        """
+        now = self._now(now)
+        with self._lease_lock:
+            for lid in [lid for lid, l in self.hosted_leases.items()
+                        if now - l["last_hb"] > self.hosted_lease_ttl_s]:
+                del self.hosted_leases[lid]
+            live: Dict[str, Dict[str, int]] = {}
+            for l in self.hosted_leases.values():
+                live.setdefault(l["device_id"], {})
+                live[l["device_id"]][l["kind"]] = live[l["device_id"]].get(l["kind"], 0) + 1
+        return [Placement(kind, did, leases=n)
+                for did, kinds in live.items() for kind, n in kinds.items()]
 
     def register_peer(self, peer: Peer) -> None:
         self.peers.append(peer)
+        self.roster.seed(peer_key(peer))
+
+    def register_url(self, facade_url: str, make_peer: Callable[[str], Peer],
+                     **meta) -> dict:
+        """A node announcing itself. Idempotent on the facade URL, so a node
+        that restarts re-registers rather than duplicating, and a broker that
+        restarts refills from the nodes within one heartbeat.
+
+        This is the path that makes starting a model server the ONLY action
+        required: the node knows its own facade URL because it is serving it,
+        and the broker's address is a host constant with a working default.
+        """
+        key = facade_url.rstrip("/")
+        existing = next((p for p in self.peers if peer_key(p) == key), None)
+        if existing is None:
+            self.peers.append(make_peer(key))
+        rec = self.roster.register(key, **meta)
+        return {"peer": key, "source": rec.source,
+                "state": self.roster.state_of(key),
+                "peers": len(self.peers)}
+
+    def prune_absent(self) -> List[str]:
+        """Forget registered peers that have been gone past the prune window.
+        Seeds are never pruned and an unset window disables this entirely, so
+        the roster shrinks only where shrinking is provably safe: a registered
+        peer re-announces the moment it returns."""
+        gone = self.roster.prunable()
+        for key in gone:
+            self.peers = [p for p in self.peers if peer_key(p) != key]
+            self.roster.drop(key)
+            self._last_probe_error.pop(key, None)
+            self._log(f"[membership] pruned absent peer: {key}")
+        return gone
+
+    def membership_snapshot(self) -> List[dict]:
+        """Roster with per-peer state, age, and the last probe error — so
+        'is my TTS node gone, or did it just blip?' is answerable without
+        grepping a log."""
+        out = self.roster.snapshot()
+        for row in out:
+            err = self._last_probe_error.get(row["peer"])
+            if err and row["state"] != "fresh":
+                row["last_error"] = err
+        return out
+
+    def sweep_leaks(self, now: Optional[float] = None) -> list:
+        """Ask any peer reporting a leak to return its allocator pool.
+
+        Runs BEFORE planning, because reclaimed memory changes what fits — a
+        plan built against a card that is about to gain 14 GB would evict things
+        it does not need to.
+
+        Throttled per peer: reclaim touches the GPU executor, and hammering it
+        would contend with real work. A node whose pool does not come back is
+        reporting a genuine leak rather than a stale cache, and that is worth
+        seeing in the log rather than retried in a tight loop.
+        """
+        now = now if now is not None else time.time()
+        acted = []
+        for peer in self.peers:
+            try:
+                leak = getattr(peer, "leak", None)
+                if not leak:
+                    continue
+                key = getattr(peer, "base", str(id(peer)))
+                if now - self._last_reclaim.get(key, 0.0) < self.reclaim_interval_s:
+                    continue
+                self._last_reclaim[key] = now
+                result = peer.reclaim() or {}
+                freed = int(result.get("freed_bytes", 0))
+                acted.append({"peer": key, "freed_bytes": freed,
+                              "unexplained_bytes": int(leak.get("unexplained_bytes", 0))})
+                print(f"[harmony] reclaim peer={key} unexplained="
+                      f"{int(leak.get('unexplained_bytes', 0)) / 1e9:.1f}GB "
+                      f"freed={freed / 1e9:.1f}GB", flush=True)
+            except Exception as exc:
+                print(f"[harmony] reclaim failed peer={getattr(peer, 'base', '?')}: {exc}", flush=True)
+        return acted
 
     # -- world assembly (soft state: re-snapshot peers every time) ------------
     def snapshot(self, requests: Optional[List[Request]] = None,
@@ -97,6 +307,13 @@ class HostBroker:
         measured: Dict[str, Dict[str, float]] = {}        # device_id -> measured free
         measured_caps: Dict[str, Dict[str, float]] = {}   # device_id -> measured capacity
         for p in self.peers:
+            key = peer_key(p)
+            # Backoff: a peer already known absent is probed on the roster's slow
+            # cadence, not on every reconcile tick. This is what makes holding a
+            # peer that is not there free rather than costly — and it is why
+            # seeds can be kept indefinitely without paying a connect per cycle.
+            if not self.roster.due_for_probe(key):
+                continue
             try:
                 peer_units = p.units()
                 peer_placements = p.placements()
@@ -106,13 +323,26 @@ class HostBroker:
                 # measured_free still reflects this peer's VRAM (mem_get_info counts all
                 # processes on the card), so co-resident eviction stays safe instead of
                 # snapshot aborting -> the caller fail-opening -> OOM.
-                self._log(f"[hostbroker] peer unreachable, skipping this cycle: {e}")
+                #
+                # The failure is recorded, NOT logged here: printing per cycle is
+                # what produced 92,089 identical lines and 9.2 MB of log while one
+                # peer was down. mark_probed logs the fresh→suspect→mia
+                # transitions, which is where the information actually is.
+                self._last_probe_error[key] = str(e)
+                self.roster.mark_probed(key)
                 continue
+            self.roster.mark_seen(key)
             for kind, unit in peer_units.items():
                 units.setdefault(kind, unit)
             placements.extend(peer_placements)
             try:
                 discovered[p.device_id] = p.host_id
+                # Backfill the roster from what the peer actually reports. A
+                # registration states only where to reach the node; the device
+                # it occupies is the node's own fact, learned by asking it.
+                rec = self.roster._records.get(key)
+                if rec is not None:
+                    rec.device_id, rec.host_id = p.device_id, p.host_id
             except Exception:
                 pass
             try:
@@ -128,6 +358,13 @@ class HostBroker:
             except Exception:
                 pass
         now = self._clock() if self._clock else 0.0
+        # Config-declared kinds (a hosted backend has no peer to report them).
+        # Peers stay authoritative for the kinds they DO report.
+        for kind, u in self.extra_units.items():
+            units.setdefault(kind, u)
+        # A hosted device has no peer reporting placements either — the broker's
+        # own ledger is the only account of how full it is.
+        placements.extend(self._hosted_placements(now))
         return WorldState(devices=tuple(self._resolve_devices(discovered, measured_caps)),
                           units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
@@ -207,6 +444,22 @@ class RestPeer:
     def refresh(self):
         self._snap = _http(f"{self.base}/residence")
         return self._snap
+
+    @property
+    def leak(self):
+        """The node's own report that it holds VRAM its resident units do not
+        explain (see meters.leak_signal). None on a healthy node."""
+        return (self._s() or {}).get("leak")
+
+    def reclaim(self):
+        """Ask the node to hand its allocator pool back to the driver.
+
+        The broker cannot do this itself: the memory belongs to the peer's
+        process, and only that process can release it. This is the lever that
+        was missing when a node reported everything evicted and still held the
+        card — detection without it still needs a human.
+        """
+        return _http(f"{self.base}/model/reclaim", method="POST", body={})
 
     def _s(self):
         return self._snap or self.refresh()

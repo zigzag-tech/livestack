@@ -32,6 +32,70 @@ def cuda_meter(device: int = 0) -> Callable[[], Optional[dict]]:
     return meter
 
 
+def cuda_self_meter(device: int = 0) -> Callable[[], Optional[dict]]:
+    """What THIS process is holding on the GPU, split into live tensors vs the
+    allocator's reserved-but-unused pool.
+
+    `cuda_meter` above answers "how full is the card"; it cannot answer "who is
+    holding it, and is any of it reclaimable". That gap produced a real outage:
+    a TTS node reported every unit `resident: false` — Harmony had evicted them —
+    while the process still held 14.7 GB, because PyTorch's caching allocator
+    keeps freed blocks in its reserved pool. Declared state said "nothing
+    resident", the driver said "full", and the planner had no lever, because you
+    cannot evict what is already evicted. ASR on the same card then failed every
+    request with `CUDA out of memory. Tried to allocate 2.00 MiB`.
+
+    `reserved - allocated` is the reclaimable pool: memory this process owns, is
+    not using, and could hand back with `empty_cache()`.
+    """
+    def meter() -> Optional[dict]:
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                return None
+            return {
+                "allocated_bytes": int(torch.cuda.memory_allocated(device)),
+                "reserved_bytes": int(torch.cuda.memory_reserved(device)),
+                "reclaimable_bytes": int(
+                    torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
+                ),
+            }
+        except Exception:
+            return None
+    return meter
+
+
+def leak_signal(self_usage: Optional[dict], resident_footprint_bytes: int,
+                slack_bytes: int = 1_500_000_000) -> Optional[dict]:
+    """Is this process holding materially more VRAM than its resident units explain?
+
+    Returns None when the reading is unavailable or within `slack_bytes` (kernels,
+    activation, fragmentation all cost real memory that no footprint declares).
+    Otherwise it names the gap — which is the signal that was missing when a node
+    sat on 14.7 GB with nothing resident.
+
+    It is deliberately a SIGNAL, not an action. Calling `empty_cache()` from a
+    monitoring path would fight the allocator on the hot path; the point is that
+    the condition becomes visible — in `/residence`, in the broker's snapshot —
+    an hour after it starts rather than after a neighbouring service dies.
+    """
+    if not self_usage:
+        return None
+    reserved = int(self_usage.get("reserved_bytes", 0))
+    unexplained = reserved - resident_footprint_bytes
+    if unexplained <= slack_bytes:
+        return None
+    return {
+        "unexplained_bytes": int(unexplained),
+        "reserved_bytes": reserved,
+        "resident_footprint_bytes": int(resident_footprint_bytes),
+        "reclaimable_bytes": int(self_usage.get("reclaimable_bytes", 0)),
+        "hint": ("this process holds VRAM its resident units do not explain; "
+                 "an evicted model whose allocator pool was never returned looks "
+                 "exactly like this"),
+    }
+
+
 def mlx_meter() -> Callable[[], Optional[dict]]:
     """Apple unified-memory view via MLX. ``capacity`` = the GPU working-set budget
     Apple recommends; ``free`` = budget minus live MLX allocations. Reclaimable cache
