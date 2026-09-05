@@ -239,7 +239,8 @@ def build_app(broker: HostBroker):
         return broker.fleet_view()
 
     @app.get("/fleet/rank")
-    def fleet_rank(kind: str, vantage: str = "direct", ttl_s: float = 60.0):
+    def fleet_rank(kind: str, vantage: str = "direct", via: str = None,
+                   region: str = None, ttl_s: float = 60.0):
         """Where should a `kind` request START, from this vantage.
 
         Advisory, and bounded: the response carries `generated_at` and `ttl_s`,
@@ -253,7 +254,13 @@ def build_app(broker: HostBroker):
         decided policy would be a second place for it to be wrong.
         """
         from .fleet_rank import rank as _rank
-        result = _rank(broker.fleet_view(), kind, vantage=vantage, ttl_s=ttl_s)
+        result = _rank(broker.fleet_view(), kind, vantage=via or vantage,
+                       ttl_s=ttl_s)
+        # `region` is RECORDED, never applied. It is the asker's region as the
+        # emitter knew it, which is what makes a ledger record readable later —
+        # but the filtering belongs to the caller, and answering as if we had
+        # applied it would be the worst of both.
+        result["asker_region"] = region
         broker.emit_rank(result)
         return {k: v for k, v in result.items() if k != "candidates"}
 
