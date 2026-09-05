@@ -648,3 +648,80 @@ def test_a_dead_peer_is_not_asked_to_reclaim_every_tick():
     # that discovers it is gone. What must not happen is 120 of them.
     assert p.touches <= 1, (
         f"asked a peer membership already calls absent to reclaim {p.touches} times")
+
+
+# -- Phase 2a: the links matrix ----------------------------------------------
+
+def test_links_are_measured_per_host_and_keyed_by_the_remotes_own_id(monkeypatch):
+    """`probe_ms` is a STAR — distance from where this broker sits. A client in
+    Nanjing must not be ranked by Vaughan's view of Nanjing, so each host
+    measures its own row and the fleet broker collects them."""
+    seen = []
+
+    def fake_http(url, body=None, timeout=5):
+        seen.append(url)
+        if "slow" in url:
+            _time.sleep(0.05)
+            return {"host_id": "node-d", "peers": [],
+                    "links": {"node-b": 515.0}}
+        return {"host_id": "node-b", "peers": [], "links": {}}
+
+    monkeypatch.setattr("livestack_node.hostbroker._http", fake_http)
+    br = _fleet_broker([], dispatch=False)
+    br.host_id = "node-a"
+    br.link_peers = ["http://slow:8799", "http://near:8799"]
+    br.measure_links()
+
+    assert all(u.endswith("/peers") for u in seen), \
+        "collection must use the CHEAP endpoint, not /status"
+    assert br.link_ms["node-d"] >= 50
+    assert br.link_ms["node-b"] < 50
+    # The remote's OWN row comes back with it: one GET buys the timing and its
+    # slice of the matrix.
+    assert br.peer_links["node-d"] == {"node-b": 515.0}
+
+    matrix = br.links_view()
+    assert matrix["node-a"]["node-d"] >= 50
+    assert matrix["node-d"]["node-b"] == 515.0
+
+
+def test_a_link_that_cannot_be_measured_is_left_alone_not_zeroed(monkeypatch):
+    """No opinion is the correct answer for a pair we failed to measure. A zero
+    would read as 'adjacent', which is the direction that sends work across an
+    ocean."""
+    def angry(url, body=None, timeout=5):
+        raise ConnectionError("Connection refused")
+
+    monkeypatch.setattr("livestack_node.hostbroker._http", angry)
+    br = _fleet_broker([], dispatch=False)
+    br.link_peers = ["http://gone:8799"]
+    assert br.measure_links() == {}
+    assert br.links_view() == {}
+
+
+def test_an_operator_can_name_a_host_whose_broker_is_too_old_to_say(monkeypatch):
+    monkeypatch.setattr("livestack_node.hostbroker._http",
+                        lambda url, body=None, timeout=5: {"peers": []})
+    br = _fleet_broker([], dispatch=False)
+    br.link_peers = ["node-d=http://100.64.241.1:8799"]
+    br.measure_links()
+    assert "node-d" in br.link_ms, \
+        "without a name the matrix keys by URL and vantage=host:<id> never resolves"
+
+
+def test_the_fleet_view_carries_each_hosts_own_link_row(monkeypatch):
+    monkeypatch.setattr(
+        "livestack_node.hostbroker._http",
+        lambda url, body=None, timeout=5: {
+            "host_id": "node-d", "peers": [],
+            "links": {"node-a": 540.0}})
+    p = _FleetPeer("http://n/livestack", host="node-a",
+                   device="node-a/aaaa")
+    br = _fleet_broker([p], dispatch=False)
+    br.host_id = "node-a"
+    br.link_peers = ["http://100.64.241.1:8799"]
+    br.snapshot([])
+    br.measure_links()
+    view = br.fleet_view()
+    assert view["vantage_host"] == "node-a"
+    assert "node-d" in view["hosts"]["node-a"]["links"]
