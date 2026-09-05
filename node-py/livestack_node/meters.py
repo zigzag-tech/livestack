@@ -16,15 +16,27 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 
-def cuda_meter(device: int = 0) -> Callable[[], Optional[dict]]:
+def cuda_meter(device: Optional[int] = None) -> Callable[[], Optional[dict]]:
     """Driver-level free/total via ``torch.cuda.mem_get_info`` — counts ALL processes
-    on the GPU, not just this one, so it sees contention the fleet didn't declare."""
+    on the GPU, not just this one, so it sees contention the fleet didn't declare.
+
+    ``device=None`` means **the device this process is actually using**, resolved
+    at read time via ``torch.cuda.current_device()``. It used to default to 0,
+    which is right only on a single-GPU host. Measured on xc-tower-ubuntu
+    (2x RTX 3090, one polyasr pinned to each card): both nodes reported the
+    identical pressure, because both metered card 0. Two engines reporting the
+    same number cannot break a tie between themselves, so the load signal was
+    present, plausible, and useless — the failure mode that looks like working
+    software.
+
+    Pass an explicit index to meter a device other than the current one."""
     def meter() -> Optional[dict]:
         try:
             import torch
             if not torch.cuda.is_available():
                 return None
-            free, total = torch.cuda.mem_get_info(device)
+            dev = torch.cuda.current_device() if device is None else device
+            free, total = torch.cuda.mem_get_info(dev)
             return {"capacity": {"vram_bytes": int(total)},
                     "free": {"vram_bytes": int(free)}}
         except Exception:
