@@ -186,6 +186,12 @@ class Grant:
     request_id: str
     kind: str
     device_id: str
+    # Why this grant landed here. Every other action already carried one; a
+    # grant did not, so the ledger could record WHAT was admitted and never why
+    # — which is the half a retrospective actually needs (see
+    # `_plans/decision-ledger.md` §4.1). Defaulted, so no existing constructor
+    # breaks.
+    reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -212,7 +218,8 @@ class Plan:
             elif isinstance(a, Evict):
                 parts.append(f"evict {a.kind}@{a.device_id}")
             elif isinstance(a, Grant):
-                parts.append(f"grant {a.request_id}->{a.kind}@{a.device_id}")
+                parts.append(f"grant {a.request_id}->{a.kind}@{a.device_id}"
+                             + (f" ({a.reason})" if a.reason else ""))
             elif isinstance(a, Defer):
                 parts.append(f"defer {a.request_id} ({a.reason})")
         return "; ".join(parts)
@@ -312,8 +319,9 @@ class _World:
         self.resident[device_id].pop(kind, None)
         self.actions.append(Evict(kind=kind, device_id=device_id, reason=reason))
 
-    def grant(self, req: Request, device_id: str) -> None:
-        self.actions.append(Grant(request_id=req.id, kind=req.kind, device_id=device_id))
+    def grant(self, req: Request, device_id: str, reason: str = "") -> None:
+        self.actions.append(Grant(request_id=req.id, kind=req.kind,
+                                  device_id=device_id, reason=reason))
 
     def defer(self, req: Request, reason: str) -> None:
         self.actions.append(Defer(request_id=req.id, reason=reason))
@@ -505,7 +513,14 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
                     f"preempted by {req.kind} (prio {eff})")
         if opt.needs_load:
             W.load(req.kind, opt.device_id, f"demand: {req.id}")
-        W.grant(req, opt.device_id)
+        if opt.victims:
+            why = ("after evicting "
+                   + ", ".join(sorted(v.kind for v in opt.victims)))
+        elif opt.needs_load:
+            why = "loaded on demand"
+        else:
+            why = "resident"
+        W.grant(req, opt.device_id, why)
 
     # 2) HARD_PIN floor: guarantee >= min_resident warm replicas (mandatory).
     for kind, unit in world.units.items():

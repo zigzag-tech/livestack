@@ -28,6 +28,7 @@ from .planner import (
     Load, Evict, Grant, Defer,
 )
 from .membership import MembershipPolicy, PeerRoster, RosterFull
+from .ledger import Candidate, Decision, JsonlLedger
 
 
 def _res_max(a: Mapping[str, float], b: Mapping[str, float]) -> Dict[str, float]:
@@ -107,7 +108,11 @@ class HostBroker:
                  device_config: Optional[dict] = None,
                  default_capacity: Optional[dict] = None,
                  membership: Optional[MembershipPolicy] = None,
-                 extra_units: Optional[Mapping[str, Unit]] = None):
+                 extra_units: Optional[Mapping[str, Unit]] = None,
+                 dispatch: bool = True,
+                 ledger: Optional[JsonlLedger] = None,
+                 emitter: str = "host-broker",
+                 emitter_id: str = "host-broker"):
         # devices: a FIXED list (single-host / tests). If None, devices are
         # DISCOVERED from the peers' reported device_ids (federated / multi-host),
         # each sized from device_config[device_id] or default_capacity. That is the
@@ -144,7 +149,28 @@ class HostBroker:
         # constructor are SEEDS (an operator said they ought to exist); peers
         # that arrive via register_url() announced themselves and are pruneable.
         # See membership.py and _plans/peer-membership.md.
-        self.roster = PeerRoster(membership, clock=clock or time.monotonic, log=log)
+        # dispatch=False is OBSERVE-ONLY: plan, report, dispatch nothing. It is
+        # the whole safety property of a fleet broker — one card, one master.
+        # Only the host broker on a machine may warm or evict units on that
+        # machine; a second broker with a fleet-wide view would otherwise fight
+        # every host broker it can see. Observe-only is proven by ABSENCE (no
+        # warm/evict lines over a window), which is why the flag gates dispatch
+        # rather than the planning that precedes it: the plan is the product.
+        self.dispatch = dispatch
+        self.ledger = ledger
+        self.emitter = emitter
+        self.emitter_id = emitter_id
+        # Per peer, an EWMA (0.7 old / 0.3 new) of the wall-clock cost of one
+        # snapshot probe. This is the first and cheapest RTT in the system:
+        # already paid for by a probe that has to happen anyway, and measured
+        # from where the broker sits — which is also its limitation, and what
+        # Phase 2's links matrix exists to remove.
+        self.probe_ms: Dict[str, float] = {}
+        self._capabilities: Dict[str, dict] = {}
+        self._capability_at: Dict[str, float] = {}
+        self.capability_ttl_s = float(os.environ.get("LIVESTACK_CAPABILITY_TTL", "15"))
+        self.roster = PeerRoster(membership, clock=clock or time.monotonic, log=log,
+                                 on_transition=self._emit_transition)
         self._last_probe_error: Dict[str, str] = {}
         # (kind, peer) -> Unit, as of the last snapshot. The planner gets the
         # folded per-kind map; this keeps WHO reported what, which the fleet view
@@ -313,6 +339,9 @@ class HostBroker:
             err = self._last_probe_error.get(row["peer"])
             if err and row["state"] != "fresh":
                 row["last_error"] = err
+            ms = self.probe_ms.get(row["peer"])
+            if ms is not None:
+                row["probe_ms"] = round(ms, 1)
         return out
 
     def sweep_leaks(self, now: Optional[float] = None) -> list:
@@ -368,6 +397,7 @@ class HostBroker:
             # seeds can be kept indefinitely without paying a connect per cycle.
             if not self.roster.due_for_probe(key):
                 continue
+            probe_started = time.monotonic()
             try:
                 peer_units = p.units()
                 peer_placements = p.placements()
@@ -385,6 +415,7 @@ class HostBroker:
                 self._last_probe_error[key] = str(e)
                 self.roster.mark_probed(key)
                 continue
+            self._record_probe_ms(key, (time.monotonic() - probe_started) * 1000.0)
             self.roster.mark_seen(key)
             for kind, unit in peer_units.items():
                 per_peer_units[(kind, key)] = unit
@@ -448,6 +479,13 @@ class HostBroker:
         Evicts are applied before loads so VRAM is freed first. Returns the Plan."""
         world = self.snapshot(requests, last_evicted_at)
         p = plan(world, self.policy)
+        self._emit_plan(world, p)
+        if not self.dispatch:
+            # Observe-only. The plan is still computed, recorded and returned —
+            # that is the product of a fleet broker — but nothing is sent to a
+            # peer. One card, one master: only the host broker on a machine may
+            # warm or evict units on that machine.
+            return p
         for ev in p.of(Evict):
             peer = self._peer_for(ev.kind, ev.device_id)
             if peer is not None:
@@ -459,6 +497,201 @@ class HostBroker:
                 self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id}: {ld.reason}")
                 peer.warm(ld.kind)
         return p
+
+
+    # -- distance ------------------------------------------------------------
+    def _record_probe_ms(self, key: str, ms: float) -> None:
+        """EWMA of one peer's snapshot cost, 0.7 old / 0.3 new.
+
+        This is the cheapest possible distance signal: the probe has to happen
+        anyway, so measuring it costs nothing and it is the only latency number
+        the fleet has before Phase 2's links matrix. Its limitation is stated
+        rather than hidden — it is distance FROM WHERE THIS BROKER SITS, so a
+        client in Nanjing must not be ranked by Vaughan's view of Nanjing.
+        """
+        prev = self.probe_ms.get(key)
+        self.probe_ms[key] = ms if prev is None else prev * 0.7 + ms * 0.3
+
+    # -- the fleet view ------------------------------------------------------
+    def _capability_of(self, peer, key: str, now: float) -> Optional[dict]:
+        """One node's readiness descriptor, cached for `capability_ttl_s`.
+
+        Cached because `/fleet` is a poll surface: without a TTL, a UI ticking at
+        1 Hz would probe every node in the fleet every second, and probes to
+        Nanjing cost 0.5-1.5 s each. Soft state, like everything else here — a
+        cache miss just costs one probe.
+        """
+        at = self._capability_at.get(key)
+        if at is not None and now - at < self.capability_ttl_s:
+            return self._capabilities.get(key)
+        cap = getattr(peer, "capability", None)
+        if cap is None:
+            return self._capabilities.get(key)
+        try:
+            got = cap()
+        except Exception as e:
+            self._last_probe_error[key] = str(e)
+            self._capability_at[key] = now
+            # Keep the LAST known descriptor rather than blanking the row: the
+            # row must still say what this node is, and `state`/`last_error`
+            # already say that it cannot be read right now.
+            return self._capabilities.get(key)
+        self._capabilities[key] = got
+        self._capability_at[key] = now
+        return got
+
+    def fleet_view(self) -> dict:
+        """Every node the broker knows, grouped by host — the whole-fleet view.
+
+        The one rule that shapes it: **an absence is a row, never a gap.** A peer
+        that cannot be read this instant still appears, with its state, its age
+        and its last error. A view that silently omits what it cannot reach is
+        the same failure as a roster that cannot go stale: it can only report
+        health, so it cannot report the thing you opened it to find out.
+
+        `probe_ms` is absent until measured, and `load` is absent when the node
+        reports none — absent means NO OPINION, and a consumer must never read it
+        as idle.
+        """
+        now = time.time()
+        rows_by_host: Dict[str, List[dict]] = {}
+        by_key = {peer_key(p): p for p in self.peers}
+        for row in self.membership_snapshot():
+            key = row["peer"]
+            peer = by_key.get(key)
+            cap = self._capability_of(peer, key, now) if peer is not None else None
+            node = {
+                "peer": key,
+                "source": row.get("source"),
+                "state": row["state"],
+                "unseen_seconds": row["unseen_seconds"],
+                "device_id": row.get("device_id"),
+                "kinds": row.get("kinds") or [],
+            }
+            if key in self.probe_ms:
+                node["probe_ms"] = round(self.probe_ms[key], 1)
+            if row.get("last_error"):
+                node["last_error"] = row["last_error"]
+            if cap:
+                node["ready"] = cap.get("ready")
+                node["detail"] = cap.get("detail")
+                if cap.get("device_id"):
+                    node["device_id"] = cap["device_id"]
+                if cap.get("units"):
+                    node["kinds"] = node["kinds"] or [cap.get("kind")]
+                if cap.get("labels"):
+                    node["labels"] = cap["labels"]
+                if isinstance(cap.get("load"), dict):
+                    node["load"] = cap["load"]
+                    dev = cap["load"].get("device")
+                    if isinstance(dev, dict):
+                        node["device_mem"] = dev
+            units = [
+                {"kind": kind, "priority": u.priority,
+                 "residency": int(u.residency),
+                 "footprint": dict(u.footprint)}
+                for (kind, pk), u in sorted(self.peer_units.items()) if pk == key
+            ]
+            if units:
+                node["units"] = units
+            host = (cap or {}).get("host_id") or row.get("host_id") or "unknown"
+            rows_by_host.setdefault(host, []).append(node)
+        return {
+            "dispatch": self.dispatch,
+            "peers": len(self.peers),
+            "generated_at": now,
+            "hosts": {h: {"nodes": sorted(n, key=lambda r: r["peer"])}
+                      for h, n in sorted(rows_by_host.items())},
+        }
+
+    # -- the decision ledger -------------------------------------------------
+    def _emit(self, decision: Decision) -> None:
+        if self.ledger is None:
+            return
+        self.ledger.append(decision)
+
+    def _emit_transition(self, rec, old_state: str, new_state: str) -> None:
+        """One `observe` record per membership TRANSITION — never per tick.
+
+        A per-tick emitter is how a 92,089-line log happened, and membership
+        already learned that lesson: `fresh->suspect`, `suspect->mia` and
+        `mia->fresh` are events, "still gone" is not. Riding the same edge the
+        log line rides is what makes that structural rather than remembered.
+        """
+        if self.ledger is None:
+            return
+        self._emit(Decision(
+            emitter=self.emitter, emitter_id=self.emitter_id,
+            decision="observe",
+            candidates=[Candidate(
+                id=rec.key, host_id=rec.host_id, device_id=rec.device_id,
+                state=new_state,
+                distance_ms=self.probe_ms.get(rec.key),
+                inputs_at=time.time(),
+                outcome="ranked",
+                reason=f"membership: {old_state} -> {new_state}",
+            )],
+            chosen=None,
+            reason=(f"{rec.key} {old_state} -> {new_state} "
+                    f"(unseen {rec.age(self.roster._clock()):.0f}s"
+                    + (f", last_error={self._last_probe_error[rec.key]}"
+                       if self._last_probe_error.get(rec.key) else "")
+                    + ")"),
+        ))
+
+    def _emit_plan(self, world: WorldState, p) -> None:
+        """One record per Evict/Load/Defer/Grant a plan produced.
+
+        Rate is bounded by the plan, not by the clock: a reconcile tick that
+        decides nothing writes nothing. `reason` is the planner's own string —
+        those were already good — and what was missing is the CANDIDATE ROWS
+        around them. `[hostbroker] evict llm@…: relieve measured over-budget
+        pressure` says what happened; it never said what else was possible, so a
+        reader could not tell a correct eviction from a wrong one.
+        """
+        if self.ledger is None:
+            return
+        actions = list(p.actions)
+        if not actions:
+            return
+        by_device: Dict[str, List[Placement]] = {}
+        for pl in world.placements:
+            by_device.setdefault(pl.device_id, []).append(pl)
+        for a in actions:
+            device_id = getattr(a, "device_id", None)
+            kind = getattr(a, "kind", None)
+            decision = {"Evict": "evict", "Load": "load",
+                        "Grant": "grant", "Defer": "defer"}[type(a).__name__]
+            cands: List[Candidate] = []
+            for other_kind, unit in sorted(world.units.items()):
+                resident_here = any(pl.kind == other_kind for pl in
+                                    by_device.get(device_id or "", []))
+                busy = any(pl.kind == other_kind and pl.busy for pl in
+                           by_device.get(device_id or "", []))
+                if other_kind == kind:
+                    outcome, why = "chosen", (getattr(a, "reason", "") or decision)
+                else:
+                    outcome = "ranked"
+                    why = (f"prio {unit.priority}, tier {int(unit.residency)}, "
+                           f"{'resident' if resident_here else 'not resident'}"
+                           + (", busy" if busy else ""))
+                cands.append(Candidate(
+                    id=other_kind, device_id=device_id,
+                    host_id=next((d.host_id for d in world.devices
+                                  if d.id == device_id), None),
+                    resident=resident_here, inputs_at=world.now or time.time(),
+                    outcome=outcome, reason=why,
+                ))
+            free = dict(world.measured_free.get(device_id or "", {}) or {})
+            self._emit(Decision(
+                emitter=self.emitter, emitter_id=self.emitter_id,
+                kind=kind, decision=decision, candidates=cands,
+                chosen=kind,
+                reason=(getattr(a, "reason", "") or decision)
+                       + (f"; measured free {free}" if free else ""),
+                request=({"owner": getattr(a, "request_id", None)}
+                         if hasattr(a, "request_id") else None),
+            ))
 
     def admit(self, request: Request,
               last_evicted_at: Optional[Mapping[str, float]] = None) -> Optional[str]:
@@ -518,7 +751,11 @@ class RestPeer:
         was missing when a node reported everything evicted and still held the
         card — detection without it still needs a human.
         """
-        return _http(f"{self.base}/model/reclaim", method="POST", body={})
+        # `body={}` is what makes this a POST (see `_http`). It previously
+        # passed `method="POST", body={}` as keywords, which `_http` does not
+        # accept — so the one lever that recovers a leaked allocator pool raised
+        # TypeError every time it was pulled, inside the broker's `except`.
+        return _http(f"{self.base}/model/reclaim", {})
 
     def _s(self):
         return self._snap or self.refresh()
@@ -564,6 +801,18 @@ class RestPeer:
         if not dev or not dev.get("capacity"):
             return None
         return dict(dev["capacity"])
+
+    def capability(self):
+        """The node's readiness descriptor, UNCACHED.
+
+        Deliberately not folded into the `_snap` cache that `/residence` uses:
+        `/capability` is the surface carrying `ready`, `detail` and `load`, and
+        load computed at read time is the entire contract (see facade.py). A
+        cached load report would say an engine is idle while it is saturated,
+        which is worse than saying nothing. The caching that `/fleet` needs is
+        a TTL at the BROKER, where the poll rate is known.
+        """
+        return _http(f"{self.base}/capability")
 
     def warm(self, kind):
         _http(f"{self.base}/model/warm", {"unit": kind}, timeout=180)
