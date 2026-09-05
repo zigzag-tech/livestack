@@ -96,6 +96,11 @@ class Target:
     # bonus, and a flat bonus cannot tell 16 ms from 1554 ms, which is the whole
     # gap between xc-mac-studio and zz-tower0 as measured from Vaughan.
     distance_ms: Optional[float] = None
+    # How busy this target is, 0..1, as IT reported. `None` = no opinion, which
+    # is scored as the median of what was reported rather than as idle: reading
+    # silence as spare capacity steers work at the node least able to serve it,
+    # and reading it as saturated strands the quietest engines.
+    utilization: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -135,12 +140,30 @@ class Weights:
     resource: float = 1.0
     budget: float = 1.0
     speed: float = 1.0
-    # Prefers NEAR among the already-feasible. Deliberately smaller than the
-    # others by default: distance is a real cost but a secondary one — a target
-    # that cannot meet the deadline has already been dropped by feasibility, so
-    # what remains is a tie-break between things that all work. Set to 0 to get
-    # exactly the pre-distance behaviour.
-    distance: float = 0.5
+    # Prefers NEAR among the already-feasible, SCALED PER SLA by
+    # `SchedulerPolicy.distance_by_sla` (interactive 1.0 / normal 0.5 / batch
+    # 0.1). The pair of numbers is what makes the two intents come out
+    # differently on the same fleet, and it is chosen rather than tuned:
+    #
+    #   interactive: 2.0 x 1.0 = 2.0  vs utilization 1.0  -> distance decides
+    #   normal:      2.0 x 0.5 = 1.0  vs utilization 1.0  -> balanced
+    #   batch:       2.0 x 0.1 = 0.2  vs utilization 1.0  -> utilization decides
+    #
+    # which is the intended reading: a turn the user is waiting on should stay
+    # near even on a busier card, and a 40-second digest should cross an ocean
+    # to reach an idle one. Set to 0 for exactly the pre-distance behaviour.
+    distance: float = 2.0
+    # Prefers the EMPTIER among the already-feasible.
+    #
+    # Beyond `_plans/fleet-broker.md` §5.2's letter ("that is the only scheduler
+    # change"), and added because without it the design's own §5.3 purpose does
+    # not happen. Feasibility only asks whether a job FITS, so a card three
+    # requests deep tied exactly with an idle one and the tie fell to distance —
+    # which means the caller's own machine, always, since a caller is nearest to
+    # itself. The digest that was meant to make an idle card earn its keep would
+    # have stayed on tower0's single 3090 forever. Defaulted, and 0 restores the
+    # previous behaviour exactly.
+    utilization: float = 1.0
 
 
 # Default deadline slack per SLA class (seconds) — the class picks this; an explicit
@@ -152,10 +175,30 @@ DEFAULT_SLA_SLACK_S: Mapping[Sla, float] = {
 }
 
 
+# How much distance matters, per SLA class, as a multiplier on
+# ``Weights.distance``.
+#
+# A flat distance weight is wrong in both directions and the fleet shows why.
+# An INTERACTIVE request pays the round trip on every turn, so 700 ms of
+# distance is most of what the user feels. A BATCH digest runs for 40 seconds
+# and pays that round trip ONCE — treating the two the same is what would keep
+# every digest pinned to the caller's own card while two idle GPUs sit on
+# another continent, which is the exact situation this scheduler exists to end.
+#
+# So the term is scaled, not dropped: batch still prefers near, all else equal.
+DEFAULT_DISTANCE_BY_SLA: Mapping[Sla, float] = {
+    Sla.INTERACTIVE: 1.0,
+    Sla.NORMAL: 0.5,
+    Sla.BATCH: 0.1,
+}
+
+
 @dataclass(frozen=True)
 class SchedulerPolicy:
     weights: Weights = field(default_factory=Weights)
     sla_slack_s: Mapping[Sla, float] = field(default_factory=lambda: dict(DEFAULT_SLA_SLACK_S))
+    distance_by_sla: Mapping[Sla, float] = field(
+        default_factory=lambda: dict(DEFAULT_DISTANCE_BY_SLA))
     local_bonus: float = 1.0            # resource-term reward for a LOCAL target
     locality_bonus: float = 0.5         # extra reward when the input already lives there
     min_uptime_s: float = 120.0         # anti-thrash: don't deprovision a burst worker this soon
@@ -263,6 +306,12 @@ class _Cand:
     eta: float
     local_bonus: float
     distance_ms: Optional[float] = None
+    utilization: Optional[float] = None
+    # How busy this target is, 0..1, as IT reported. `None` = no opinion, which
+    # is scored as the median of what was reported rather than as idle: reading
+    # silence as spare capacity steers work at the node least able to serve it,
+    # and reading it as saturated strands the quietest engines.
+    utilization: Optional[float] = None
 
 
 class _Fleet:
@@ -310,7 +359,7 @@ def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy) -> Li
             target=t, provision=provision,
             est_cost=t.cost.estimate(job.est_duration_s),
             eta=eta, local_bonus=_local_bonus(t, job, policy),
-            distance_ms=t.distance_ms,
+            distance_ms=t.distance_ms, utilization=t.utilization,
         ))
     if not cands:
         return []
@@ -320,7 +369,8 @@ def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy) -> Li
     return cheaper if cheaper else cands
 
 
-def _score(cand: _Cand, cands: List[_Cand], weights: Weights) -> float:
+def _score(cand: _Cand, cands: List[_Cand], weights: Weights,
+           distance_scale: float = 1.0) -> float:
     """Lower is better. Min-max normalize cost, ETA and distance across the candidate
     set so the weights are comparable, then:
     w_budget*cost + w_speed*eta + w_distance*distance - w_resource*local."""
@@ -330,7 +380,8 @@ def _score(cand: _Cand, cands: List[_Cand], weights: Weights) -> float:
     eta_n = _norm(cand.eta, etas)
     return (weights.budget * cost_n
             + weights.speed * eta_n
-            + weights.distance * _distance_n(cand, cands)
+            + weights.distance * distance_scale * _distance_n(cand, cands)
+            + weights.utilization * _utilization_n(cand, cands)
             - weights.resource * cand.local_bonus)
 
 
@@ -348,6 +399,23 @@ def _distance_n(cand: _Cand, cands: List[_Cand]) -> float:
     if not known:
         return 0.0
     value = cand.distance_ms if cand.distance_ms is not None else max(known)
+    return _norm(value, known + [value])
+
+
+def _utilization_n(cand: _Cand, cands: List[_Cand]) -> float:
+    """Normalized busyness, 0 = emptiest of this candidate set.
+
+    An unreported target scores as the MEDIAN of what was reported — not idle,
+    which would let it win by staying quiet, and not saturated, which would
+    strand every engine that does not publish a load block. With nothing
+    reported at all the term contributes nothing.
+    """
+    known = [c.utilization for c in cands if c.utilization is not None]
+    if not known:
+        return 0.0
+    ordered = sorted(known)
+    median = ordered[len(ordered) // 2]
+    value = cand.utilization if cand.utilization is not None else median
     return _norm(value, known + [value])
 
 
@@ -375,7 +443,10 @@ def schedule(state: FleetState, policy: Optional[SchedulerPolicy] = None) -> Fle
         if not cands:
             actions.append(Queue(job.id, "no feasible target meets the deadline now"))
             continue
-        best = min(cands, key=lambda c: _score(c, cands, pol.weights))
+        # Distance matters per SLA: an interactive turn pays the round trip on
+        # every message; a 40-second batch digest pays it once.
+        d_scale = pol.distance_by_sla.get(job.sla, DEFAULT_DISTANCE_BY_SLA[Sla.NORMAL])
+        best = min(cands, key=lambda c: _score(c, cands, pol.weights, d_scale))
         t = best.target
         if best.provision:
             W.provisioned[t.id] += 1

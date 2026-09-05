@@ -258,3 +258,43 @@ def test_an_interactive_job_too_slow_for_its_own_sla_is_refused():
     # not the work.
     assert admit(BUSY_CN_IDLE_NA, kind="align", sla="batch", estimate_s=60.0,
                  now=1000.0)["granted"] is True
+
+
+# -- distance matters per SLA ------------------------------------------------
+
+def test_a_batch_job_crosses_an_ocean_to_reach_an_idle_card():
+    """§5.3's whole purpose: the digest is what makes an idle card earn its keep
+    and relieves tower0's single 3090. A flat distance weight defeats that — the
+    caller is always nearest to itself, so every digest would stay home. A batch
+    job runs for 40 s and pays the round trip ONCE, so distance is scaled down
+    to 0.1 for it."""
+    view = _view(
+        {"zz-tower0": [_node("http://100.64.0.3:8766/livestack", "zz-tower0",
+                             probe_ms=0.5, in_flight=3, pressure=0.81,
+                             units=ALIGN_COLD)],
+         "xc-tower-ubuntu": [_node("http://100.64.0.18:8766/livestack",
+                                   "xc-tower-ubuntu", probe_ms=708.0, in_flight=0,
+                                   pressure=0.21, units=ALIGN_RESIDENT)]},
+        links={"zz-tower0": {"xc-tower-ubuntu": 708.0}},
+    )
+    # From tower0's OWN vantage: home is 0 ms away and three deep; Toronto is
+    # 708 ms away, idle, and already holding the model.
+    r = admit(view, kind="align", sla="batch", vantage="host:zz-tower0",
+              estimate_s=40.0, now=1000.0)
+    assert r["target"]["host_id"] == "xc-tower-ubuntu", r["reason"]
+
+    # The SAME fleet, the same instant, an INTERACTIVE request: 708 ms is now
+    # most of what the user would feel, so it stays home.
+    quick = admit(view, kind="align", sla="interactive", vantage="host:zz-tower0",
+                  estimate_s=5.0, now=1000.0)
+    assert quick["target"]["host_id"] == "zz-tower0", quick["reason"]
+
+
+def test_batch_still_prefers_near_when_nothing_else_separates_them():
+    """Scaled down, not dropped."""
+    view = _view({"h": [
+        _node("http://near/livestack", "h", probe_ms=2.0, in_flight=0, units=ALIGN_RESIDENT),
+        _node("http://far/livestack", "h", probe_ms=900.0, in_flight=0, units=ALIGN_RESIDENT),
+    ]})
+    r = admit(view, kind="align", sla="batch", now=1000.0)
+    assert r["target"]["target_id"] == "http://near", r["reason"]

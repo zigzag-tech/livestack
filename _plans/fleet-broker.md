@@ -520,6 +520,40 @@ Add one term: **`distance_ms`** on `Target` (from links/probe) and a
 is the only scheduler change; cost/deadline/burst logic is untouched and the
 RunPod/Aliyun tiers remain available for elastic overflow exactly as designed.
 
+**BUILT AS TWO TERMS, NOT ONE, and the sentence above is why it had to be.**
+Implemented 2026-09-05; recorded here rather than done quietly, because it
+exceeds this paragraph's letter.
+
+With `distance_ms` alone, §5.3's whole purpose does not happen. Feasibility only
+asks whether a job FITS, so a card three requests deep tied EXACTLY with an idle
+one, and the tie then fell to distance — which means the caller's own machine,
+always, because a caller is nearest to itself. The media-corpus digest that was
+meant to make an idle card earn its keep would have stayed on tower0's single
+3090 forever, which is the situation the phase exists to end.
+
+So there are two additions, both defaulted and both switchable to 0 for exactly
+the previous behaviour:
+
+* `Weights.utilization` (1.0) prefers the emptier of two feasible targets. An
+  unreported target scores as the MEDIAN of what was reported — not idle, which
+  would let it win by staying quiet, and not saturated, which would strand every
+  engine that publishes no load block.
+* `SchedulerPolicy.distance_by_sla` scales the distance term by intent —
+  interactive 1.0, normal 0.5, batch 0.1 — because an interactive turn pays the
+  round trip on every message and a 40-second digest pays it once. With
+  `Weights.distance` at 2.0 the pair reads:
+
+  | SLA | distance | utilization | decided by |
+  |---|---|---|---|
+  | interactive | 2.0 | 1.0 | distance |
+  | normal | 1.0 | 1.0 | balanced |
+  | batch | 0.2 | 1.0 | utilization |
+
+  Measured on the real fleet from tower0's vantage, same instant, same fleet:
+  an `interactive` align stays on zz-tower0; a `batch` align crosses to
+  xc-tower-ubuntu. That is the behaviour §5.3 and §5.4 both describe, and one
+  term could not produce it.
+
 Placement *within* the chosen host (is `align` resident? will loading it
 evict something?) stays with that host's broker: the fleet broker's answer
 is "go to host H, node N"; the caller's request to N triggers N's own
@@ -638,7 +672,7 @@ Each is one PR; each names its tests and its ledger obligation.
 - [x] 2a links matrix — host brokers `LIVESTACK_LINK_PEERS`, `/status.links` ✅ live on all three GPU hosts. **The relay half is NOT done**: the benchday relay does not yet expose its per-target probe latency on `/inventory`, so `vantage=relay:<id>` resolves to no opinion. `fleet_rank.py` reads `view.relays[<id>].links` and has a test for it, so the consumer is ready and the producer is the missing half
 - [x] 2b `fleet_rank.py` + `GET /fleet/rank` — pure, tests; **ledger emitter**
 - [x] 2c hub consumes rank into manifest (benchday `speech_relay.ts`), region filter stays hub-side, `fleet_rank` field, tests with fake fleet; decide push vs tailnet ✅ shipped as benchday openspec `2026-09-05-fleet-rank-into-the-manifest`; push (§8.1), region filter runs FIRST, isolated-e2e gate green
-- [ ] 3a `distance_ms` + `w_distance` in `fleet_scheduler.py`; `FleetState` from `fleet_view()`; `POST /fleet/admit`; tests; **ledger emitter**
+- [x] 3a `distance_ms` + `w_distance` in `fleet_scheduler.py`; `FleetState` from `fleet_view()`; `POST /fleet/admit`; tests; **ledger emitter** ✅ shipped, plus `Weights.utilization` and `distance_by_sla` — see §5.2, which explains why one term could not do it
 - [ ] 3b media-corpus digest steps call `/fleet/admit`; fallback path; caller-side ledger record on `fleet_unavailable`
 - [ ] 4 multi-URL `LIVESTACK_BROKER_URL`
 - [ ] 5 warm-only cross-host, gated on owner's decision
