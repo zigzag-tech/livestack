@@ -343,11 +343,39 @@ an outage that outlives it. `GET /fleet` reports the quota **actually in force**
 alongside live usage, because a mistyped quota is a safety control that switched
 itself off, and that has to be readable rather than inferred.
 
-**A quota is worth exactly what `Job.owner` is worth.** It is a string the caller
-supplies. On a private mesh where every caller is the operator, fine. The moment
-this fronts public registration the owner MUST arrive from an authenticated
-channel and not a request body, or an account raises its own quota by renaming
-itself. The scheduler cannot enforce that; only the thing that authenticates can.
+### Who is asking
+
+**A quota is worth exactly what `owner` is worth**, so `owner` comes from the
+credential and never from the request body. `LIVESTACK_FLEET_TOKENS` maps a
+bearer token to a principal, and `POST /fleet/admit` requires one:
+
+```json
+{"<token>": {"name": "media-corpus", "owner": "media-corpus"},
+ "<token>": {"name": "hub", "delegate_prefix": "acct_"}}
+```
+
+Two kinds, because two kinds of caller exist. A **fixed** principal is one
+service with one identity — media-corpus's ingest is `media-corpus` and can be
+nothing else; a body naming anyone else is **403**, not a silent override,
+because silent substitution is how a caller ends up debugging the wrong
+account's quota. A **delegating** principal has authenticated somebody else and
+speaks for them — the hub, admitting work for an account that just signed in. It
+may name an owner, but only inside its granted prefix, and that prefix is the
+whole reason this is more than a shared secret: without it, one compromised
+caller is every account.
+
+Tokens are compared in constant time (a dict lookup answers faster for a wrong
+token than a right one, and that difference leaks the token a character at a
+time) and never logged — an 8-char SHA-256 fingerprint stands in.
+
+**What it does not do:** it does not authenticate the END user. A delegating
+principal asserts "I checked this account" and the broker believes it. That is
+the correct trust boundary — the fleet broker cannot verify a benchday login —
+but a delegating token is as strong as the service holding it, so issue one only
+to a service that authenticates its own callers.
+
+Unset means no auth, which makes any quota advisory; the startup line and
+`GET /fleet` both say so rather than leaving it to be discovered.
 
 ## The decision ledger
 

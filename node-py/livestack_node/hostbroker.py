@@ -657,6 +657,13 @@ class HostBroker:
             # failed to parse is a safety control that silently switched off, so
             # the effective value has to be readable rather than inferred from
             # a log line somebody has to think to go and look for.
+            # Auth state beside the quota, because a ceiling counted against an
+            # owner any caller can choose is decorative, and the two facts are
+            # only meaningful together.
+            "auth": {"required": bool(getattr(self, "fleet_principals", None)),
+                     "principals": sorted(
+                         p.name for p in
+                         getattr(self, "fleet_principals", {}).values())},
             "quota": ({"max_concurrent_per_account": pol.max_concurrent_per_account,
                        "account_quotas": dict(pol.account_quotas),
                        "fair_share_penalty_s": pol.fair_share_penalty_s,

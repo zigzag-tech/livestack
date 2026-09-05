@@ -35,6 +35,16 @@ Config via env:
     LIVESTACK_PROBES     health probes for hosted devices:
                          {"buildhost-a": {"cmd": "docker info", "interval_s": 60}}
     LIVESTACK_LEASE_TTL_S hosted-lease expiry without heartbeats (default 120)
+    LIVESTACK_FLEET_TOKENS  bearer token -> principal, as JSON. When set,
+                         POST /fleet/admit REQUIRES a token and the owner comes
+                         from it, never from the body:
+                           {"<tok>": {"name":"media-corpus","owner":"media-corpus"},
+                            "<tok>": {"name":"hub","delegate_prefix":"acct_"}}
+                         A fixed principal is one service with one identity; a
+                         delegating one has authenticated somebody else and may
+                         name an owner inside its prefix. Unset = no auth, which
+                         makes any quota advisory — the startup line says so.
+                         Quote it for systemd (bare double quotes are stripped).
     LIVESTACK_ACCOUNT_QUOTA  max concurrent fleet slots ONE account may hold.
                          UNSET = no ceiling, which is the right default for a
                          single-operator fleet and the WRONG one the day
@@ -119,7 +129,7 @@ def build_broker(peer_urls: List[str], device_config=None,
 
 
 def build_app(broker: HostBroker):
-    from fastapi import FastAPI, Body, HTTPException
+    from fastapi import FastAPI, Body, Header, HTTPException
     app = FastAPI(title="Livestack Harmony broker")
     state = {"last_evicted_at": {}}
     # Hosted-backend health probes (LIVESTACK_PROBES), run on the reconcile
@@ -284,7 +294,7 @@ def build_app(broker: HostBroker):
         return {k: v for k, v in result.items() if k != "candidates"}
 
     @app.post("/fleet/admit")
-    def fleet_admit(payload: dict = Body(...)):
+    def fleet_admit(payload: dict = Body(...), authorization: str = Header(None)):
         """Throw a task at the fleet: "where should this run?"
 
         The answer names a HOST and a NODE, and stops there. Whether the unit is
@@ -299,9 +309,29 @@ def build_app(broker: HostBroker):
         client that crashed cannot be relied on to hand capacity back.
         """
         from .fleet_admit import admit as _admit
+        from .fleet_auth import AuthError, authenticate
         kind = payload.get("kind")
         if not kind:
             raise HTTPException(400, "'kind' required")
+        # WHO, before anything else. The quota is worth exactly what `owner` is
+        # worth, and until this existed `owner` was a string in the body of an
+        # unauthenticated POST — an account raised its own ceiling by renaming
+        # itself. The credential decides; the body is consulted only for a
+        # principal that was granted the right to delegate, and only inside its
+        # prefix.
+        principals = getattr(broker, "fleet_principals", {})
+        if principals:
+            try:
+                owner, principal = authenticate(
+                    principals, authorization, payload.get("owner"))
+            except AuthError as e:
+                raise HTTPException(e.status, e.detail)
+        else:
+            # Auth not configured. Today's behaviour, and the startup line and
+            # GET /fleet both say so — because a quota over an unauthenticated
+            # owner is decorative, and that has to be visible rather than
+            # discovered.
+            owner, principal = (payload.get("owner", "consumer"), None)
         est = (payload.get("estimate") or {}).get("duration_s", 60.0)
         result = _admit(
             broker.fleet_view(), kind=kind,
@@ -310,14 +340,19 @@ def build_app(broker: HostBroker):
             # one caller's crash into an outage that outlives it.
             usage=broker.owner_usage(),
             sla=payload.get("sla", "normal"),
-            owner=payload.get("owner", "consumer"),
+            owner=owner,
             selector=payload.get("selector") or {},
             locality_host=payload.get("locality_host"),
             vantage=payload.get("via") or payload.get("vantage") or "direct",
             estimate_s=float(est),
             policy=getattr(broker, "fleet_policy", None),
         )
-        request = {"owner": payload.get("owner", "consumer"),
+        request = {"owner": owner,
+                   # The principal is recorded BESIDE the owner, not instead of
+                   # it: "the hub, acting for acct_x" and "acct_x itself" are
+                   # different facts, and a retrospective that cannot tell them
+                   # apart cannot answer who actually spent the capacity.
+                   "principal": principal.name if principal else None,
                    "sla": payload.get("sla", "normal"),
                    "vantage": result.get("vantage"),
                    "selector": payload.get("selector") or {},
@@ -542,12 +577,31 @@ def main():
                   flush=True)
             return {}
 
+    from .fleet_auth import load_principals
+    fleet_principals = load_principals(
+        os.environ.get("LIVESTACK_FLEET_TOKENS", ""),
+        log=lambda m: print(m, flush=True))
     fleet_policy = SchedulerPolicy(
         max_concurrent_per_account=_quota_int("LIVESTACK_ACCOUNT_QUOTA"),
         account_quotas=_quota_map("LIVESTACK_ACCOUNT_QUOTAS"),
         fair_share_penalty_s=float(
             os.environ.get("LIVESTACK_FAIR_SHARE_PENALTY_S", "30") or 30),
     )
+    if fleet_principals:
+        print(f"[harmony] /fleet/admit requires a bearer token; "
+              f"{len(fleet_principals)} principal(s): "
+              + ", ".join(sorted(
+                  f"{p.name}"
+                  + (f"->{p.owner}" if p.owner else f"->{p.delegate_prefix}*")
+                  for p in fleet_principals.values())), flush=True)
+    elif fleet_policy.max_concurrent_per_account is not None:
+        # The one combination that is quietly useless: a ceiling counted against
+        # an owner any caller can choose. Said loudly rather than left to be
+        # discovered by whoever eventually reads the ledger.
+        print("[harmony] WARNING account quota is set but LIVESTACK_FLEET_TOKENS "
+              "is NOT — `owner` comes from the request body, so the quota is "
+              "advisory and any caller can spend any account's capacity",
+              flush=True)
     print(f"[harmony] account quota: "
           f"{fleet_policy.max_concurrent_per_account or 'NO CEILING'}"
           f"{f' (overrides: {dict(fleet_policy.account_quotas)})' if fleet_policy.account_quotas else ''}"
@@ -564,6 +618,7 @@ def main():
     broker.host_id = host_id
     broker.link_peers = link_peers
     broker.fleet_policy = fleet_policy
+    broker.fleet_principals = fleet_principals
     import uvicorn
     role = "host broker" if dispatch else "fleet broker (observe-only)"
     print(f"[harmony] {role} on :{port} as {host_id} over {len(broker.peers)} "
