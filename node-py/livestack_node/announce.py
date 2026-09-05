@@ -36,6 +36,29 @@ def broker_url() -> str:
     return (os.environ.get("LIVESTACK_BROKER_URL") or DEFAULT_BROKER_URL).rstrip("/")
 
 
+def facade_answers(facade_url: str, timeout: float = 2.0) -> bool:
+    """Does the facade this node is about to announce actually answer?
+
+    `attach()` starts the registrar thread at import — before uvicorn binds, and
+    long before the model is loadable. A server that never binds must not claim
+    duty, so the node checks its own front door before telling the broker about
+    it. This is the node half of "an announce registers, only a snapshot
+    certifies" (see `membership.py`): the broker stopped trusting announces, and
+    the node stops making ones it cannot back.
+
+    Any failure — connection refused because the bind has not happened, a 503
+    from a server that is up but not ready, a timeout — is False. The registrar
+    then backs off and tries again; it never gives up, because start order is
+    not something a fleet should have to arrange.
+    """
+    req = urllib.request.Request(f"{facade_url.rstrip('/')}/residence", method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return 200 <= getattr(resp, "status", resp.getcode()) < 300
+    except Exception:
+        return False
+
+
 def register_once(facade_url: str, *, host_id: str, kind: str,
                   broker: Optional[str] = None, timeout: float = 3.0) -> dict:
     body = json.dumps({
@@ -54,17 +77,38 @@ def register_once(facade_url: str, *, host_id: str, kind: str,
 def start_registrar(facade_url: str, *, host_id: str, kind: str,
                     interval_s: float = DEFAULT_INTERVAL_S,
                     broker: Optional[str] = None,
-                    log: Callable[[str], None] = print) -> threading.Thread:
+                    log: Callable[[str], None] = print,
+                    answers: Callable[[str], bool] = facade_answers,
+                    register: Optional[Callable[..., dict]] = None
+                    ) -> threading.Thread:
     """Register now, then renew forever. Daemon thread: dies with the process,
     which is correct — a node that has exited should stop claiming duty, and
-    the broker's own aging turns that silence into MIA."""
+    the broker's own aging turns that silence into MIA.
+
+    `answers` and `register` are injection points for tests; production uses the
+    module-level defaults."""
+    register = register or register_once
 
     def _loop():
         backoff = RETRY_MIN_S
         announced = False
         while True:
+            # Self-probe FIRST. The thread starts at import, so on a cold boot
+            # this fails for as long as the server takes to bind — during which
+            # the node says nothing rather than announcing a door that is not
+            # there. Same backoff ladder as an unreachable broker.
+            if not answers(facade_url):
+                if announced:
+                    log(f"[livestack] facade stopped answering; withholding "
+                        f"registration until {facade_url} is back")
+                    announced = False
+                _stop.wait(backoff)
+                backoff = min(backoff * 2, RETRY_MAX_S)
+                if _stop.is_set():
+                    return
+                continue
             try:
-                register_once(facade_url, host_id=host_id, kind=kind, broker=broker)
+                register(facade_url, host_id=host_id, kind=kind, broker=broker)
                 if not announced:
                     log(f"[livestack] reported for duty at {broker or broker_url()} "
                         f"as {facade_url}")
