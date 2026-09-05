@@ -32,8 +32,34 @@ RETRY_MIN_S = 2.0
 RETRY_MAX_S = 60.0
 
 
+def broker_urls() -> list:
+    """Every broker this node reports for duty to.
+
+    `LIVESTACK_BROKER_URL` is a COMMA LIST. One entry is the ordinary case — a
+    node and its host broker on one machine — and two is the fleet case: the
+    host broker that may warm and evict it, and the fleet broker that only wants
+    to know it exists.
+
+    Announcing to both is what lets the fleet broker's `LIVESTACK_PEERS` shrink
+    back to its real meaning. A seed is an operator's statement that a node OUGHT
+    to exist, so its absence is worth reporting; it was never meant to be how
+    membership works, and with 0.1 and 0.2 in place an announce is discovery only
+    and carries no claim about health.
+    """
+    raw = os.environ.get("LIVESTACK_BROKER_URL") or DEFAULT_BROKER_URL
+    out = []
+    for part in raw.split(","):
+        part = part.strip().rstrip("/")
+        if part and part not in out:
+            out.append(part)
+    return out or [DEFAULT_BROKER_URL]
+
+
 def broker_url() -> str:
-    return (os.environ.get("LIVESTACK_BROKER_URL") or DEFAULT_BROKER_URL).rstrip("/")
+    """The FIRST broker, for callers that want one. Kept because a node's own
+    host broker is the first entry by convention and some callers legitimately
+    mean only that one."""
+    return broker_urls()[0]
 
 
 def facade_answers(facade_url: str, timeout: float = 2.0) -> bool:
@@ -61,17 +87,34 @@ def facade_answers(facade_url: str, timeout: float = 2.0) -> bool:
 
 def register_once(facade_url: str, *, host_id: str, kind: str,
                   broker: Optional[str] = None, timeout: float = 3.0) -> dict:
+    """Announce to every configured broker. Raises only if ALL of them failed.
+
+    All, not any: a node's own host broker is what arbitrates its card, and a
+    fleet broker being down must not make the node look unregistered to it. The
+    converse matters too — a node whose host broker is restarting should still
+    reach the fleet — so the loop keeps going and the last error is re-raised
+    only when nothing got through.
+    """
     body = json.dumps({
         "facade_url": facade_url,
         "host_id": host_id,
         "kinds": [kind],
     }).encode()
-    req = urllib.request.Request(
-        f"{broker or broker_url()}/peers", data=body, method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode() or "{}")
+    targets = [broker.rstrip("/")] if broker else broker_urls()
+    out, last = {}, None
+    for base in targets:
+        req = urllib.request.Request(
+            f"{base}/peers", data=body, method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                out = json.loads(resp.read().decode() or "{}")
+        except Exception as e:
+            last = e
+    if not out and last is not None:
+        raise last
+    return out
 
 
 def start_registrar(facade_url: str, *, host_id: str, kind: str,
@@ -110,8 +153,8 @@ def start_registrar(facade_url: str, *, host_id: str, kind: str,
             try:
                 register(facade_url, host_id=host_id, kind=kind, broker=broker)
                 if not announced:
-                    log(f"[livestack] reported for duty at {broker or broker_url()} "
-                        f"as {facade_url}")
+                    log(f"[livestack] reported for duty at "
+                        f"{broker or ', '.join(broker_urls())} as {facade_url}")
                     announced = True
                 backoff = RETRY_MIN_S
                 delay = interval_s

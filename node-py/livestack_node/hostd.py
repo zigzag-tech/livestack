@@ -38,6 +38,11 @@ Config via env:
     LIVESTACK_DISPATCH   "apply" (default) = a host broker, warms and evicts its
                          own host's units. "observe" = a FLEET broker: same
                          planning, same /fleet view, dispatches NOTHING.
+    LIVESTACK_BROKER_URL (read by NODES, not by the broker) comma-separated
+                         brokers a node reports for duty to — its host broker and,
+                         with a fleet broker deployed, that too. Announcing to
+                         both is what lets LIVESTACK_PEERS shrink back to meaning
+                         "the operator says this ought to exist".
     LIVESTACK_LINK_PEERS comma-separated OTHER host brokers' base URLs. Each is
                          timed on the reconcile loop and its own `links` row is
                          collected, so the fleet holds a measured MATRIX rather

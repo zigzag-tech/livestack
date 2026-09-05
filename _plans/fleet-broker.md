@@ -622,6 +622,19 @@ only, so this is safe. Seeds stay as the operator's statement of what ought
 to exist; the fleet's `LIVESTACK_PEERS` shrinks to the nodes an operator wants
 reported as *missing* when absent.
 
+**Shipped 2026-09-05.** One decision worth stating: an announce reaches **all**
+configured brokers and fails only when **none** answered. Not any — a fleet
+broker being down must not make a node look unregistered to the host broker that
+arbitrates its card, and the converse matters too, so a node whose host broker is
+restarting still reaches the fleet. The list is trimmed and de-duplicated,
+because an operator's hand-written list must not create a phantom third broker.
+
+The seed list is deliberately **not** retired on this fleet yet. Every node
+would have to be redeployed with the two-entry `LIVESTACK_BROKER_URL` first, and
+until all of them are, shrinking `LIVESTACK_PEERS` would make the ones left
+behind invisible rather than reported-missing — which is the exact failure the
+seeds exist to prevent. Retiring it is a per-node rollout, not a config edit.
+
 ## 7. Phase 5 — cross-host warm (never evict)
 
 Only after Phases 1–3 have run clean for a period the owner sets. The fleet
@@ -705,7 +718,7 @@ Each is one PR; each names its tests and its ledger obligation.
 - [x] 2c hub consumes rank into manifest (benchday `speech_relay.ts`), region filter stays hub-side, `fleet_rank` field, tests with fake fleet; decide push vs tailnet ✅ shipped as benchday openspec `2026-09-05-fleet-rank-into-the-manifest`; push (§8.1), region filter runs FIRST, isolated-e2e gate green
 - [x] 3a `distance_ms` + `w_distance` in `fleet_scheduler.py`; `FleetState` from `fleet_view()`; `POST /fleet/admit`; tests; **ledger emitter** ✅ shipped, plus `Weights.utilization` and `distance_by_sla` — see §5.2, which explains why one term could not do it
 - [x] 3b media-corpus digest steps call `/fleet/admit`; fallback path; caller-side ledger record on `fleet_unavailable` ✅ shipped in `xc-setup` `media_corpus/broker.py`; all three paths verified on tower0. **Left OFF in the crontab** — see §5.4 for the throughput-model gap that makes turning it on the operator's call
-- [ ] 4 multi-URL `LIVESTACK_BROKER_URL`
+- [x] 4 multi-URL `LIVESTACK_BROKER_URL`
 - [ ] 5 warm-only cross-host, gated on owner's decision
 - [ ] docs: `HARMONY.md` gains a "Fleet" section; benchday `docs/route-load-balancing.md` points here; storage-bounds inventory rows for every new store (`decision-ledger.md` §6)
 
