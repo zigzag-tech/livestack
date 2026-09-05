@@ -635,9 +635,9 @@ Each is one PR; each names its tests and its ledger obligation.
 - [x] 0.6 port picker fixes to `route.rs` + wasm — Rust tests ported from `load_distribution_test.dart`
 - [x] 0.7 fix stale region grants on the hub (§8.5): Mac + xc-tower-ubuntu engines → `na`; hub restart; verify via `/v1/speech/capacity`. Operator env, one line, must precede Phase 2 or the ranking will be filtered by the wrong policy
 - [x] 1 fleet broker observe mode + `probe_ms` + `capability()` + `/fleet` — `hostbroker.py`, `hostd.py`, tests; **ledger emitter** (`decision-ledger.md` §4.2); deploy `livestack-fleetd` on xc-tower-ubuntu; open mac polytts bind; run §3.4
-- [x] 2a links matrix — host brokers `LIVESTACK_LINK_PEERS`, `/status.links`; relay per-target probe latency on `/inventory`
+- [x] 2a links matrix — host brokers `LIVESTACK_LINK_PEERS`, `/status.links` ✅ live on all three GPU hosts. **The relay half is NOT done**: the benchday relay does not yet expose its per-target probe latency on `/inventory`, so `vantage=relay:<id>` resolves to no opinion. `fleet_rank.py` reads `view.relays[<id>].links` and has a test for it, so the consumer is ready and the producer is the missing half
 - [x] 2b `fleet_rank.py` + `GET /fleet/rank` — pure, tests; **ledger emitter**
-- [ ] 2c hub consumes rank into manifest (benchday `speech_relay.ts`), region filter stays hub-side, `fleet_rank` field, tests with fake fleet; decide push vs tailnet
+- [x] 2c hub consumes rank into manifest (benchday `speech_relay.ts`), region filter stays hub-side, `fleet_rank` field, tests with fake fleet; decide push vs tailnet ✅ shipped as benchday openspec `2026-09-05-fleet-rank-into-the-manifest`; push (§8.1), region filter runs FIRST, isolated-e2e gate green
 - [ ] 3a `distance_ms` + `w_distance` in `fleet_scheduler.py`; `FleetState` from `fleet_view()`; `POST /fleet/admit`; tests; **ledger emitter**
 - [ ] 3b media-corpus digest steps call `/fleet/admit`; fallback path; caller-side ledger record on `fleet_unavailable`
 - [ ] 4 multi-URL `LIVESTACK_BROKER_URL`
