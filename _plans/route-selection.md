@@ -138,3 +138,18 @@ them in passing.
 One deliberate difference: sorting here is **stable**, so equal-ranked candidates
 keep input order. Dart's `List.sort` is not stable. Ranking is therefore strictly
 more deterministic in Rust; no conformance case distinguishes them.
+
+**Parity is a thing that breaks, and it did.** Three behavioural changes landed
+in Dart on 2026-09-05 and in Rust only on the same day's fleet-broker Phase 0.6,
+which is a violation of the rule above for the length of that gap: load-aware
+near-tie ranking (`load_aware` + `record_load`, queue depth primary, pressure may
+only raise, applied only inside `explore_band`, both sides must report or load
+decides nothing); forced re-measurement with per-candidate backoff
+(`remeasure_after_ms`, stalest overdue promoted to the front, never-picked
+candidates exempt); and a sample recorded after a forced re-measure REPLACING the
+EWMA rather than smoothing into it. `load_distribution_test.dart` is now ported
+into `route.rs` alongside `mesh_route_test.dart`, so the corpus covers them both.
+
+The lesson is not "remember to port". It is that the corpus is the only thing
+that makes the rule enforceable, so a change without a conformance case is a
+change that will silently fork.

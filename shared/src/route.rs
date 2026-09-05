@@ -428,6 +428,22 @@ struct RouteStat {
     /// task-path failure, where `/health` can answer fine while the task path is
     /// broken (the dictation-stall shape: stream stalled, health 200).
     sticky_quarantine: bool,
+    /// Fraction of the engine's device in use, as the engine itself reported it.
+    /// `None` means the candidate expressed NO OPINION — never "idle".
+    load_pressure: Option<f64>,
+    load_in_flight: Option<i64>,
+    load_at: Option<i64>,
+    /// When this candidate was last actually SELECTED. Drives forced
+    /// re-measurement: a candidate whose score exiled it stops being picked, so
+    /// nothing refreshes the score that exiled it.
+    last_picked_at: Option<i64>,
+    /// Consecutive forced re-measurements that did not make it competitive
+    /// again. Backs the interval off so a genuinely bad engine is not fed real
+    /// traffic forever merely to keep its number fresh.
+    stale_probes: u32,
+    /// Set when this candidate was selected *because* it was overdue. The next
+    /// task latency then REPLACES the EWMA instead of smoothing into it.
+    awaiting_remeasure: bool,
 }
 
 /// Tunables. Defaults match the production reference implementation.
@@ -452,6 +468,27 @@ pub struct PickerConfig {
     /// full sticky quarantine — so a reachable-but-broken node (health 200, task
     /// always fails) stops resurfacing after every cooldown lapse.
     pub transport_quarantine_threshold: u32,
+    /// Break near-ties by the engine's self-reported load. **Opt-in**, and that
+    /// is not a style choice: a transport plane may construct this picker with
+    /// `explore_every: 0` and use it as a state store rather than a selector.
+    /// Turning load on globally would silently start reordering those.
+    pub load_aware: bool,
+    /// A load report older than this is ignored — an engine's business changes
+    /// far faster than a stale number can describe. Ignored means "no opinion",
+    /// which falls back to latency-only ranking.
+    pub load_freshness_ms: i64,
+    /// How long a candidate may go unpicked before it is forced back into the
+    /// exploration slot regardless of `explore_band`. `0` disables.
+    ///
+    /// Without this the picker has a trapdoor: the only thing that refreshes a
+    /// candidate's task EWMA is sending it work, and a bad score is what stops
+    /// the work. Measured on the pre-fix reference implementation, a fast engine
+    /// that queued for four requests was demoted and then received ZERO further
+    /// requests while sitting completely idle — its score was outside
+    /// `explore_band`, which is exactly where exploration is suppressed, so the
+    /// only escape was the EWMA half-life. A momentary burst exiled a healthy
+    /// GPU for a quarter of an hour.
+    pub remeasure_after_ms: i64,
 }
 
 impl Default for PickerConfig {
@@ -465,6 +502,9 @@ impl Default for PickerConfig {
             explore_band: 1.5,
             task_ewma_alpha: 0.3,
             transport_quarantine_threshold: 3,
+            load_aware: false,
+            load_freshness_ms: 20_000,
+            remeasure_after_ms: 90_000,
         }
     }
 }
@@ -500,6 +540,16 @@ pub struct RouteObservation {
     pub consecutive_failures: u32,
     pub consecutive_transport_failures: u32,
     pub sticky_quarantine: bool,
+    /// The engine's own load report as the picker would USE it right now — that
+    /// is, `None` when load is disabled, absent, or stale. A decision record has
+    /// to carry the value the decision used, not the last one ever received.
+    pub load: Option<f64>,
+    pub load_pressure: Option<f64>,
+    pub load_in_flight: Option<i64>,
+    /// True when this candidate is overdue for a forced re-measurement, i.e. its
+    /// score is being kept alive by nothing.
+    pub overdue_for_remeasure: bool,
+    pub stale_probes: u32,
 }
 
 /// A point-in-time view of the whole selection state: what would be chosen now,
@@ -516,6 +566,10 @@ pub struct RouteSnapshot {
     pub routes: Vec<RouteObservation>,
     pub pick_count: u64,
 }
+
+/// Cap on the backoff multiplier applied to `remeasure_after_ms` for a candidate
+/// that keeps re-measuring badly.
+const MAX_STALE_BACKOFF: i64 = 8;
 
 /// Selection state machine. Construct once per logical target, feed it the
 /// current candidate set, drive it with probe/outcome feedback, and ask it for
@@ -582,6 +636,61 @@ impl Picker {
 
     fn cooling(stat: &RouteStat, now_ms: i64) -> bool {
         matches!(stat.cooldown_until, Some(until) if now_ms < until)
+    }
+
+    /// The usable load reading for `stat`, or `None` for no opinion (load
+    /// disabled, absent, or stale past `load_freshness_ms`).
+    ///
+    /// The MAX of pressure and normalized queue depth, and the order matters
+    /// more than it looks. Preferring `pressure` — the first cut — made the
+    /// signal useless on real hardware: device pressure is dominated by the
+    /// RESIDENT MODEL's weights, not by queued work, so two idle engines holding
+    /// the same model on identical cards reported byte-identical pressure, tied,
+    /// and fell straight through to latency — one engine took 100% of a
+    /// 60-request run while the other sat idle. Worse, queueing barely moves
+    /// pressure at all (measured: six concurrent ASR requests shifted it
+    /// 0.1974 -> 0.2028, under half a percent), so the near-constant number was
+    /// shadowing the one that actually tracks busyness.
+    ///
+    /// Queue depth is the direct measure of work waiting. Pressure still counts,
+    /// because it is the only thing that sees contention this engine did not
+    /// create — another process on the same card — but it can only RAISE the
+    /// estimate, never mask a queue.
+    fn live_load(&self, stat: &RouteStat, now_ms: i64) -> Option<f64> {
+        if !self.config.load_aware {
+            return None;
+        }
+        let at = stat.load_at?;
+        if now_ms - at > self.config.load_freshness_ms {
+            return None;
+        }
+        // Concurrency normalized into the same 0..1 space, soft-saturating at 8,
+        // roughly where a single consumer GPU stops being interactive.
+        let by_queue = stat
+            .load_in_flight
+            .map(|n| (n as f64 / 8.0).min(1.0));
+        match (stat.load_pressure, by_queue) {
+            (None, q) => q,
+            (Some(p), None) => Some(p),
+            (Some(p), Some(q)) => Some(p.max(q)),
+        }
+    }
+
+    /// Is this candidate overdue for a forced re-measurement?
+    fn is_overdue(&self, stat: &RouteStat, now_ms: i64) -> bool {
+        if self.config.remeasure_after_ms <= 0 {
+            return false;
+        }
+        let Some(last) = stat.last_picked_at else {
+            return false;
+        };
+        now_ms - last >= self.remeasure_due_ms(stat)
+    }
+
+    /// The backed-off re-measurement interval for one candidate.
+    fn remeasure_due_ms(&self, stat: &RouteStat) -> i64 {
+        let backoff = 1i64 << stat.stale_probes.min(3);
+        self.config.remeasure_after_ms * backoff.min(MAX_STALE_BACKOFF)
     }
 
     /// Lower is better. Learned task latency dominates (it reflects real
@@ -667,9 +776,33 @@ impl Picker {
         scores: &BTreeMap<String, f64>,
         a: &RouteCandidate,
         b: &RouteCandidate,
+        now_ms: i64,
     ) -> Ordering {
         let sa = scores.get(&a.key).copied().unwrap_or(f64::INFINITY);
         let sb = scores.get(&b.key).copied().unwrap_or(f64::INFINITY);
+
+        // Load breaks NEAR-ties only, inside the same band exploration uses. The
+        // engines are not interchangeable: a distant idle GPU does not repay the
+        // round trip to reach it, so a least-loaded-wins policy would be worse
+        // than what it replaces. Outside the band, latency decides unchanged.
+        if self.config.load_aware && sa.is_finite() && sb.is_finite() {
+            let lo = sa.min(sb);
+            let hi = sa.max(sb);
+            if hi <= lo * self.config.explore_band {
+                let la = self.stats.get(&a.key).and_then(|s| self.live_load(s, now_ms));
+                let lb = self.stats.get(&b.key).and_then(|s| self.live_load(s, now_ms));
+                // BOTH must have an opinion. One-sided data would let a
+                // candidate win by staying silent, which is the failure mode
+                // this must not have.
+                if let (Some(la), Some(lb)) = (la, lb) {
+                    let by_load = la.partial_cmp(&lb).unwrap_or(Ordering::Equal);
+                    if by_load != Ordering::Equal {
+                        return by_load;
+                    }
+                }
+            }
+        }
+
         let by_score = sa.partial_cmp(&sb).unwrap_or(Ordering::Equal);
         if by_score != Ordering::Equal {
             return by_score;
@@ -735,8 +868,8 @@ impl Picker {
         let all: Vec<&RouteCandidate> = eligible.iter().chain(gated.iter()).collect();
         let scores = self.effective_scores(&all, now_ms);
 
-        eligible.sort_by(|a, b| self.compare_with(&scores, a, b));
-        gated.sort_by(|a, b| self.compare_with(&scores, a, b));
+        eligible.sort_by(|a, b| self.compare_with(&scores, a, b, now_ms));
+        gated.sort_by(|a, b| self.compare_with(&scores, a, b, now_ms));
 
         if self.config.explore_every > 0
             && eligible.len() >= 2
@@ -753,8 +886,49 @@ impl Picker {
             }
         }
 
+        // Forced re-measurement. Exploration above is deliberately suppressed
+        // outside the band — which is exactly where a candidate's score is most
+        // stale, because nothing has refreshed it since it was demoted. Without
+        // this, a candidate demoted by one burst is never selected again and so
+        // can never be re-measured; the only escape is the EWMA half-life.
+        // Promote the stalest overdue candidate so ONE request re-measures it.
+        if let Some(idx) = self.stalest_overdue(&eligible, now_ms) {
+            if idx != 0 {
+                let c = eligible.remove(idx);
+                eligible.insert(0, c);
+            }
+        }
+
         eligible.extend(gated);
         eligible
+    }
+
+    /// Index of the candidate most overdue for re-measurement, or `None`.
+    /// Backs off per candidate: one that keeps re-measuring badly waits longer
+    /// each time, so a genuinely broken engine is not fed real traffic forever
+    /// just to keep its number fresh.
+    fn stalest_overdue(&self, eligible: &[RouteCandidate], now_ms: i64) -> Option<usize> {
+        if self.config.remeasure_after_ms <= 0 || eligible.len() < 2 {
+            return None;
+        }
+        let mut worst: Option<usize> = None;
+        let mut worst_age = 0i64;
+        for (i, c) in eligible.iter().enumerate() {
+            let Some(stat) = self.stats.get(&c.key) else {
+                continue;
+            };
+            // Never picked at all is not "overdue" — the normal bootstrap path
+            // and exploration already cover a fresh candidate.
+            let Some(last) = stat.last_picked_at else {
+                continue;
+            };
+            let age = now_ms - last;
+            if age >= self.remeasure_due_ms(stat) && age > worst_age {
+                worst = Some(i);
+                worst_age = age;
+            }
+        }
+        worst
     }
 
     /// The current best route, or `None` when there are no candidates. Advances
@@ -768,7 +942,78 @@ impl Picker {
             return None;
         }
         self.pick_count += 1;
-        self.ranked(now_ms, exclude).into_iter().next()
+        let chosen = self.ranked(now_ms, exclude).into_iter().next()?;
+
+        // Only pick_best stamps this. `ranked()` is also called for diagnostics
+        // and snapshots; stamping there would make every observation look like a
+        // selection and suppress the re-measurement this drives.
+        let was_overdue = self
+            .stats
+            .get(&chosen.key)
+            .is_some_and(|s| self.is_overdue(s, now_ms));
+        // A forced re-measurement that lands on a candidate which is still not
+        // the natural leader counts as a miss, and backs its interval off.
+        let competitive = if was_overdue {
+            let refs: Vec<&RouteCandidate> = self.candidates.iter().collect();
+            let scores = self.effective_scores(&refs, now_ms);
+            let best = scores
+                .values()
+                .copied()
+                .filter(|v| v.is_finite())
+                .fold(None::<f64>, |a, b| Some(match a {
+                    Some(a) if a < b => a,
+                    _ => b,
+                }));
+            match (best, scores.get(&chosen.key).copied()) {
+                (Some(best), Some(mine)) if mine.is_finite() => {
+                    mine <= best * self.config.explore_band
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
+        if let Some(stat) = self.stats.get_mut(&chosen.key) {
+            stat.awaiting_remeasure = was_overdue;
+            stat.last_picked_at = Some(now_ms);
+            if was_overdue {
+                stat.stale_probes = if competitive { 0 } else { stat.stale_probes + 1 };
+            }
+        }
+        Some(chosen)
+    }
+
+    /// A candidate reported how busy it is (a livestack node's
+    /// `/livestack/capability` -> `load`). `pressure` is the fraction of its
+    /// device in use, 0..1; `in_flight` is the requests it says it is serving.
+    ///
+    /// Passing neither clears the report back to NO OPINION rather than
+    /// recording idleness. That asymmetry is the whole contract: an engine that
+    /// has gone quiet is the likeliest source of an empty report, and reading
+    /// silence as spare capacity steers traffic at the node least able to serve.
+    pub fn record_load(
+        &mut self,
+        key: &str,
+        pressure: Option<f64>,
+        in_flight: Option<i64>,
+        now_ms: i64,
+    ) {
+        let Some(stat) = self.stats.get_mut(key) else {
+            return;
+        };
+        // A pressure outside 0..1 is not a reading we can use; discard it rather
+        // than clamp, because a clamp turns a malformed report into a confident
+        // one, and a confident wrong answer outranks a missing one.
+        let bad = pressure.is_some_and(|p| p.is_nan() || !(0.0..=1.0).contains(&p));
+        if bad || (pressure.is_none() && in_flight.is_none()) {
+            stat.load_pressure = None;
+            stat.load_in_flight = None;
+            stat.load_at = None;
+            return;
+        }
+        stat.load_pressure = pressure;
+        stat.load_in_flight = in_flight.filter(|n| *n >= 0);
+        stat.load_at = Some(now_ms);
     }
 
     // ---- feedback hooks (caller-driven; the engine does no I/O) ----
@@ -809,10 +1054,27 @@ impl Picker {
         let Some(stat) = self.stats.get_mut(key) else {
             return;
         };
-        stat.task_ewma_ms = Some(match stat.task_ewma_ms {
-            None => ms as f64,
-            Some(prev) => prev * (1.0 - alpha) + ms as f64 * alpha,
-        });
+        // The candidate just produced a fresh measurement, which is the entire
+        // point of forcing it back in. Stamp it so it is not immediately overdue
+        // again on the next tick.
+        stat.last_picked_at = Some(now_ms);
+        if stat.awaiting_remeasure {
+            // This sample exists because we judged the stored EWMA too stale to
+            // trust — that is what forcing the re-measurement meant. Smoothing a
+            // trustworthy sample into an untrustworthy one just carries the
+            // untrustworthiness forward: measured on the pre-fix reference
+            // implementation, an exiled engine needed four separate forced
+            // probes over six minutes to climb back under the band, because each
+            // fresh 40 ms sample moved a stale 216 ms average by only 30%.
+            // Replace it instead, so one good result is enough.
+            stat.awaiting_remeasure = false;
+            stat.task_ewma_ms = Some(ms as f64);
+        } else {
+            stat.task_ewma_ms = Some(match stat.task_ewma_ms {
+                None => ms as f64,
+                Some(prev) => prev * (1.0 - alpha) + ms as f64 * alpha,
+            });
+        }
         stat.task_ewma_at = Some(now_ms);
     }
 
@@ -952,6 +1214,11 @@ impl Picker {
                     consecutive_failures: stat.consecutive_failures,
                     consecutive_transport_failures: stat.consecutive_transport_failures,
                     sticky_quarantine: stat.sticky_quarantine,
+                    load: self.live_load(&stat, now_ms),
+                    load_pressure: stat.load_pressure,
+                    load_in_flight: stat.load_in_flight,
+                    overdue_for_remeasure: self.is_overdue(&stat, now_ms),
+                    stale_probes: stat.stale_probes,
                 }
             })
             .collect::<Vec<_>>();
@@ -1770,5 +2037,375 @@ mod tests {
         let direct = snap.routes.iter().find(|r| r.key == "asr:direct").unwrap();
         assert_eq!(direct.state, RouteState::Quarantined);
         assert!(direct.sticky_quarantine);
+    }
+
+    // -----------------------------------------------------------------------
+    // Load-aware ranking + forced re-measurement.
+    //
+    // Ported from benchday `packages/mesh_route/test/load_distribution_test.dart`,
+    // which is the conformance corpus for this behaviour. The doctrine in
+    // `_plans/route-selection.md` is that any behavioural change lands in both
+    // implementations or in neither; these are the "or in neither" insurance.
+    // -----------------------------------------------------------------------
+
+    /// A simulated engine. `base_ms` is its unloaded first-response latency;
+    /// each in-flight request adds `queue_ms`, which is what saturation actually
+    /// looks like — the engine gets slower, it does not start failing. Health
+    /// probes keep answering fast throughout, which is precisely why latency
+    /// alone is late.
+    struct Engine {
+        key: &'static str,
+        base_ms: i64,
+        queue_ms: i64,
+        served: u32,
+        in_flight: i64,
+    }
+
+    impl Engine {
+        fn new(key: &'static str, base_ms: i64, queue_ms: i64) -> Self {
+            Engine { key, base_ms, queue_ms, served: 0, in_flight: 0 }
+        }
+        fn latency_now(&self) -> i64 {
+            self.base_ms + self.in_flight * self.queue_ms
+        }
+        fn pressure(&self) -> f64 {
+            (self.in_flight as f64 / 8.0).clamp(0.0, 1.0)
+        }
+    }
+
+    /// Drives `ticks` of an 8-way concurrent workload against two engines.
+    fn drive(engines: &mut [Engine; 2], fixed: bool) {
+        let config = if fixed {
+            PickerConfig {
+                load_aware: true,
+                remeasure_after_ms: 30_000,
+                ..PickerConfig::default()
+            }
+        } else {
+            PickerConfig { remeasure_after_ms: 0, ..PickerConfig::default() }
+        };
+        let mut p = Picker::new(config);
+        p.set_candidates(
+            engines
+                .iter()
+                .map(|e| RouteCandidate::new(e.key, RouteKind::Direct, "100.64.0.1"))
+                .collect(),
+        );
+        let mut now = T0;
+        for e in engines.iter() {
+            p.record_reachable(e.key, e.base_ms, now);
+        }
+        // tick -> engines finishing on it
+        let mut finish_at: BTreeMap<i64, Vec<usize>> = BTreeMap::new();
+        for t in 0..400i64 {
+            for i in finish_at.remove(&t).unwrap_or_default() {
+                engines[i].in_flight -= 1;
+            }
+            let live: usize = finish_at.values().map(|v| v.len()).sum();
+            if live < 8 {
+                let key = p.pick_best(now, &none()).unwrap().key;
+                let i = engines.iter().position(|e| e.key == key).unwrap();
+                engines[i].served += 1;
+                p.record_task_latency(key.as_str(), engines[i].latency_now(), now);
+                engines[i].in_flight += 1;
+                p.record_reachable(key.as_str(), engines[i].base_ms, now);
+                finish_at.entry(t + 5).or_default().push(i);
+            }
+            if fixed {
+                for e in engines.iter() {
+                    p.record_load(e.key, Some(e.pressure()), Some(e.in_flight), now);
+                }
+            }
+            now += 1_000;
+        }
+    }
+
+    #[test]
+    fn legacy_as_configured_the_second_engine_gets_nothing() {
+        // The transport plane's configuration: explore_every 0, no load, no
+        // re-measurement. Two IDENTICAL healthy engines, and one gets every
+        // request — the defect this whole port exists to remove.
+        let mut p = Picker::new(PickerConfig {
+            explore_every: 0,
+            remeasure_after_ms: 0,
+            ..PickerConfig::default()
+        });
+        p.set_candidates(vec![
+            RouteCandidate::new("tower", RouteKind::Direct, "100.64.0.1"),
+            RouteCandidate::new("mac", RouteKind::Direct, "100.64.0.1"),
+        ]);
+        p.record_reachable("tower", 40, T0);
+        p.record_reachable("mac", 40, T0);
+        let mut mac = 0;
+        for i in 0..200i64 {
+            let now = T0 + i * 1_000;
+            let key = p.pick_best(now, &none()).unwrap().key;
+            if key == "mac" {
+                mac += 1;
+            }
+            p.record_task_latency(&key, 40, now);
+            p.record_reachable(&key, 40, now);
+        }
+        assert_eq!(mac, 0, "two identical healthy engines, one gets every request");
+    }
+
+    #[test]
+    fn legacy_a_briefly_saturated_engine_is_exiled_while_idle() {
+        let mut engines = [Engine::new("tower", 40, 120), Engine::new("mac", 70, 0)];
+        drive(&mut engines, false);
+        // It DOES shed load off the saturated engine — and overshoots so far the
+        // engine sits at zero in-flight and is never chosen again. Its EWMA can
+        // only be refreshed by traffic, and the demotion is what stopped the
+        // traffic; explore_band suppresses exploration exactly when the score is
+        // most stale.
+        assert!(engines[0].served < 10, "exiled, not merely deprioritized: {}",
+                engines[0].served);
+        assert_eq!(engines[0].in_flight, 0, "and exiled while completely idle");
+    }
+
+    #[test]
+    fn near_ties_split_on_load_instead_of_a_fixed_quota() {
+        let mut engines = [Engine::new("tower", 40, 30), Engine::new("mac", 44, 30)];
+        drive(&mut engines, true);
+        let total = (engines[0].served + engines[1].served) as f64;
+        let minority = engines[0].served.min(engines[1].served) as f64 / total;
+        assert!(minority > 0.30,
+                "load should spread work far past the 20% probe quota, got {minority:.2}");
+    }
+
+    #[test]
+    fn a_saturated_engine_is_re_measured_and_comes_back() {
+        let mut engines = [Engine::new("tower", 40, 120), Engine::new("mac", 70, 0)];
+        drive(&mut engines, true);
+        // tower is genuinely worse under load here, so it SHOULD get the smaller
+        // share — but it must not be stranded at ~1%, which is the exile.
+        assert!(engines[0].served > 20,
+                "a demoted engine must be re-measured, not stranded: {}",
+                engines[0].served);
+    }
+
+    #[test]
+    fn load_is_opt_in_and_the_default_picker_ranks_exactly_as_before() {
+        assert!(!PickerConfig::default().load_aware);
+        let mut p = Picker::new(PickerConfig { explore_every: 0, ..PickerConfig::default() });
+        p.set_candidates(vec![
+            RouteCandidate::new("fast", RouteKind::Direct, "100.64.0.1"),
+            RouteCandidate::new("slow", RouteKind::Direct, "100.64.0.2"),
+        ]);
+        p.record_reachable("fast", 10, T0);
+        p.record_reachable("slow", 12, T0);
+        // Even told the fast one is saturated, a non-load-aware picker ignores it.
+        p.record_load("fast", Some(1.0), None, T0);
+        p.record_load("slow", Some(0.0), None, T0);
+        assert_eq!(p.pick_best(T0, &none()).unwrap().key, "fast");
+    }
+
+    #[test]
+    fn an_absent_load_report_means_no_opinion_never_idle() {
+        let mut p = Picker::new(PickerConfig {
+            explore_every: 0,
+            load_aware: true,
+            ..PickerConfig::default()
+        });
+        p.set_candidates(vec![
+            RouteCandidate::new("busy", RouteKind::Direct, "100.64.0.1"),
+            RouteCandidate::new("silent", RouteKind::Direct, "100.64.0.2"),
+        ]);
+        p.record_reachable("busy", 10, T0);
+        p.record_reachable("silent", 11, T0);
+        p.record_load("busy", Some(0.9), None, T0);
+        // `silent` reports nothing. It must NOT win by staying quiet.
+        assert_eq!(p.pick_best(T0, &none()).unwrap().key, "busy",
+                   "one-sided load data must not decide the comparison");
+    }
+
+    #[test]
+    fn a_stale_load_report_is_discarded() {
+        // remeasure off: this isolates LOAD staleness. Left on, the 5-minute
+        // jump below also makes `b` overdue and the promotion would decide the
+        // pick for an unrelated reason.
+        let mut p = Picker::new(PickerConfig {
+            explore_every: 0,
+            load_aware: true,
+            load_freshness_ms: 20_000,
+            remeasure_after_ms: 0,
+            ..PickerConfig::default()
+        });
+        p.set_candidates(vec![
+            RouteCandidate::new("a", RouteKind::Direct, "100.64.0.1"),
+            RouteCandidate::new("b", RouteKind::Direct, "100.64.0.2"),
+        ]);
+        p.record_reachable("a", 10, T0);
+        p.record_reachable("b", 11, T0);
+        p.record_load("a", Some(0.9), None, T0);
+        p.record_load("b", Some(0.1), None, T0);
+        assert_eq!(p.pick_best(T0, &none()).unwrap().key, "b",
+                   "fresh load decides the near-tie");
+
+        let later = T0 + 5 * 60_000;
+        // Both reports are stale; ranking falls back to latency, where `a` wins.
+        assert_eq!(p.pick_best(later, &none()).unwrap().key, "a");
+    }
+
+    #[test]
+    fn a_malformed_pressure_is_discarded_not_clamped() {
+        let mut p = Picker::new(PickerConfig {
+            explore_every: 0,
+            load_aware: true,
+            ..PickerConfig::default()
+        });
+        p.set_candidates(vec![
+            RouteCandidate::new("a", RouteKind::Direct, "100.64.0.1"),
+            RouteCandidate::new("b", RouteKind::Direct, "100.64.0.2"),
+        ]);
+        p.record_reachable("a", 10, T0);
+        p.record_reachable("b", 11, T0);
+        p.record_load("a", Some(0.9), None, T0);
+        p.record_load("b", Some(7.5), None, T0);   // nonsense
+        // Clamping 7.5 to 1.0 would make `a` look freer and win. Discarding it
+        // leaves one-sided data, which decides nothing, so latency ranks.
+        assert_eq!(p.pick_best(T0, &none()).unwrap().key, "a");
+    }
+
+    #[test]
+    fn queue_depth_is_primary_and_pressure_may_only_raise() {
+        // Two idle engines holding the same model report byte-identical
+        // pressure; the one with work queued must still lose. Preferring
+        // pressure (the first cut) made the signal useless for exactly this.
+        let mut p = Picker::new(PickerConfig {
+            explore_every: 0,
+            load_aware: true,
+            ..PickerConfig::default()
+        });
+        p.set_candidates(vec![
+            RouteCandidate::new("queued", RouteKind::Direct, "100.64.0.1"),
+            RouteCandidate::new("free", RouteKind::Direct, "100.64.0.2"),
+        ]);
+        p.record_reachable("queued", 10, T0);
+        p.record_reachable("free", 11, T0);
+        p.record_load("queued", Some(0.20), Some(4), T0);
+        p.record_load("free", Some(0.20), Some(0), T0);
+        assert_eq!(p.pick_best(T0, &none()).unwrap().key, "free");
+
+        // Pressure RAISES: same empty queue on both, but one card is contended
+        // by a process this engine did not create.
+        p.record_load("queued", Some(0.20), Some(0), T0);
+        p.record_load("free", Some(0.95), Some(0), T0);
+        assert_eq!(p.pick_best(T0, &none()).unwrap().key, "queued");
+    }
+
+    #[test]
+    fn a_forced_re_measurement_replaces_the_ewma_rather_than_smoothing_into_it() {
+        let mut p = Picker::new(PickerConfig {
+            explore_every: 0,
+            remeasure_after_ms: 30_000,
+            ..PickerConfig::default()
+        });
+        p.set_candidates(vec![
+            RouteCandidate::new("exiled", RouteKind::Direct, "100.64.0.1"),
+            RouteCandidate::new("leader", RouteKind::Direct, "100.64.0.2"),
+        ]);
+        p.record_reachable("exiled", 20, T0);
+        p.record_reachable("leader", 20, T0);
+        p.record_task_latency("leader", 40, T0);
+        // One burst leaves `exiled` with a 216 ms average — far outside the
+        // 1.5x band, so exploration will never surface it again.
+        p.record_task_latency("exiled", 216, T0);
+        assert_eq!(p.task_ewma_ms("exiled"), Some(216.0));
+
+        // The leader keeps serving, so its clock stays fresh while the exiled
+        // engine's does not. That asymmetry is the whole mechanism: the only
+        // thing that refreshes a score is being picked.
+        let mid = T0 + 20_000;
+        assert_eq!(p.pick_best(mid, &none()).unwrap().key, "leader");
+        p.record_task_latency("leader", 40, mid);
+
+        let later = T0 + 31_000;
+        assert_eq!(p.pick_best(later, &none()).unwrap().key, "exiled",
+                   "the stalest overdue candidate is promoted to the front");
+        p.record_task_latency("exiled", 40, later);
+        // Smoothing would leave it at 163 and need three more probes spread over
+        // minutes; replacing makes ONE good result enough.
+        assert_eq!(p.task_ewma_ms("exiled"), Some(40.0));
+    }
+
+    #[test]
+    fn a_re_measurement_that_keeps_missing_backs_off() {
+        let mut p = Picker::new(PickerConfig {
+            explore_every: 0,
+            remeasure_after_ms: 30_000,
+            ..PickerConfig::default()
+        });
+        p.set_candidates(vec![
+            RouteCandidate::new("bad", RouteKind::Direct, "100.64.0.1"),
+            RouteCandidate::new("good", RouteKind::Direct, "100.64.0.2"),
+        ]);
+        p.record_reachable("bad", 20, T0);
+        p.record_reachable("good", 20, T0);
+        p.record_task_latency("good", 40, T0);
+        p.record_task_latency("bad", 5000, T0);
+
+        // The good engine keeps serving, so only `bad` goes stale.
+        let mut now = T0 + 20_000;
+        assert_eq!(p.pick_best(now, &none()).unwrap().key, "good");
+        p.record_task_latency("good", 40, now);
+
+        // First forced probe, 31 s after bad's last sample. It is still
+        // terrible, so this counts as a miss and the interval doubles to 60 s.
+        now = T0 + 31_000;
+        assert_eq!(p.pick_best(now, &none()).unwrap().key, "bad");
+        p.record_task_latency("bad", 5000, now);
+
+        // 31 s later it is NOT due again — a genuinely broken engine must not be
+        // fed real traffic every 30 s merely to keep its number fresh.
+        now = T0 + 62_000;
+        assert_eq!(p.pick_best(now, &none()).unwrap().key, "good");
+        p.record_task_latency("good", 40, now);
+
+        // Past the doubled interval it is due again.
+        now = T0 + 93_000;
+        assert_eq!(p.pick_best(now, &none()).unwrap().key, "bad");
+    }
+
+    #[test]
+    fn a_never_picked_candidate_is_not_overdue() {
+        // The normal bootstrap path and exploration already cover a fresh
+        // candidate; treating it as overdue would let a brand-new node jump the
+        // queue on its first tick.
+        let mut p = Picker::new(PickerConfig {
+            explore_every: 0,
+            remeasure_after_ms: 1,
+            ..PickerConfig::default()
+        });
+        p.set_candidates(vec![
+            RouteCandidate::new("proven", RouteKind::Direct, "100.64.0.1"),
+            RouteCandidate::new("fresh", RouteKind::Direct, "100.64.0.2"),
+        ]);
+        p.record_reachable("proven", 200, T0);
+        p.record_task_latency("proven", 400, T0);
+        p.record_reachable("fresh", 20, T0);
+        assert_eq!(p.pick_best(T0 + 10_000, &none()).unwrap().key, "proven");
+    }
+
+    #[test]
+    fn snapshot_carries_the_load_the_decision_would_use() {
+        // The ledger records values, not references: a stale reading must appear
+        // as absent, because that is what the ranking did with it.
+        let mut p = Picker::new(PickerConfig {
+            load_aware: true,
+            load_freshness_ms: 20_000,
+            ..PickerConfig::default()
+        });
+        p.set_candidates(vec![RouteCandidate::new("a", RouteKind::Direct, "100.64.0.1")]);
+        p.record_reachable("a", 10, T0);
+        p.record_load("a", Some(0.5), Some(4), T0);
+        let obs = &p.snapshot(T0).routes[0];
+        assert_eq!(obs.load_pressure, Some(0.5));
+        assert_eq!(obs.load_in_flight, Some(4));
+        assert_eq!(obs.load, Some(0.5));   // max(0.5, 4/8)
+
+        let stale = p.snapshot(T0 + 60_000);
+        assert_eq!(stale.routes[0].load, None, "a stale reading is no opinion");
+        assert_eq!(stale.routes[0].load_pressure, Some(0.5), "but it is still recorded");
     }
 }
