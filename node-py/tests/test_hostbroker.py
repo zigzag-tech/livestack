@@ -359,6 +359,17 @@ from livestack_node.planner import Device as _Device, Placement as _Placement
 from livestack_node.planner import Residency as _Residency, Unit as _Unit
 
 
+class Clock:
+    def __init__(self, t=1000.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, dt):
+        self.t += dt
+
+
 class _FleetPeer:
     """A node whose reachability, cost and reported load the test controls."""
 
@@ -584,3 +595,56 @@ def test_a_grant_now_carries_a_reason():
     p = br.plan_and_apply([Request("r1", "asr", created_at=0)])
     grants = p.of(Grant)
     assert grants and grants[0].reason in ("resident", "loaded on demand")
+
+
+def test_observe_only_does_not_reclaim_either():
+    """Reclaim is a WRITE to another process's allocator. It is not a warm or an
+    evict, which is exactly why it is the exception that gets forgotten —
+    "observe-only" reads as being about the planner."""
+    class _Leaky(_FleetPeer):
+        leak = {"unexplained_bytes": 14_700_000_000}
+
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.reclaims = 0
+
+        def reclaim(self):
+            self.reclaims += 1
+            return {"freed_bytes": 0}
+
+    p = _Leaky("http://leaky/livestack")
+    assert _fleet_broker([p], dispatch=False).sweep_leaks() == []
+    assert p.reclaims == 0
+    _fleet_broker([p]).sweep_leaks()
+    assert p.reclaims == 1, "a HOST broker must still reclaim its own host"
+
+
+def test_a_dead_peer_is_not_asked_to_reclaim_every_tick():
+    """Found live on 2026-09-05: `RestPeer.leak` is a property that GETs
+    /residence, so on a down peer it raised BEFORE `_last_reclaim` was stamped
+    and the throttle was never armed. One "reclaim failed" line per reconcile
+    tick, forever — ~17k lines a day for one dead chipgen. The 92,089-line shape
+    membership was built to end, on a path membership did not cover."""
+    class _Angry(_FleetPeer):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.touches = 0
+
+        @property
+        def leak(self):
+            self.touches += 1
+            raise ConnectionError("Connection refused")
+
+    clock = Clock(1000.0)
+    p = _Angry("http://dead/livestack")
+    p.up = False
+    br = HostBroker(devices=None, peers=[p], clock=clock,
+                    membership=_MPolicy(suspect_after_s=45, mia_after_s=600))
+    for _ in range(120):                # 120 reconcile ticks, 5 s apart
+        br.snapshot([])                 # marks it probed -> suspect -> mia
+        br.sweep_leaks(now=clock.t)
+        clock.advance(5)
+    # One attempt while it was still `fresh` is legitimate — that is the probe
+    # that discovers it is gone. What must not happen is 120 of them.
+    assert p.touches <= 1, (
+        f"asked a peer membership already calls absent to reclaim {p.touches} times")
