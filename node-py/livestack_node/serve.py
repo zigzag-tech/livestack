@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 from .coordinator import LivestackCoordinator
-from .facade import build_router
+from .facade import build_router, resolve_device_id
 from .lease import Capability
 
 
@@ -32,11 +32,17 @@ def _footprint_signature(units: Dict[str, object]) -> str:
 def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
            idle_seconds: int, coload: bool, gpu_call: Callable[[Callable], object],
            prefix: str = "/livestack", device_meter="auto", port=None,
-           readiness: Callable[[], dict] = None):
+           readiness: Callable[[], dict] = None,
+           device_id: Optional[str] = None):
     """``device_meter``: a zero-arg callable -> measured {capacity,free} (see
     meters.py), ``"auto"`` to pick one by backend (CUDA/MLX), or ``None`` to report
     no live memory. Defaulting to "auto" means a node becomes memory-aware on
     redeploy with no server-side change.
+
+    ``device_id`` names the device this node occupies. Omit it and it is derived
+    from the backend (CUDA device UUID / MLX / the legacy ``{host_id}/gpu0``) —
+    see :func:`livestack_node.facade.resolve_device_id`. A node that passes
+    nothing on a single-GPU host keeps exactly today's id.
 
     Each ``manager.run()`` GPU op is bracketed by an :class:`ActivationObserver` that
     measures that unit's exact peak activation and reports it as headroom for the planner
@@ -46,6 +52,11 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     live-measure."""
     from .manager import ModelManager
     from .measure import ActivationTracker, ActivationObserver, alloc_meter
+
+    # Resolve identity BEFORE the meter, because the meter is checked against it:
+    # a meter reading a card this process is not on reports a confident wrong
+    # number, which is worse than reporting none (see meters.auto_meter).
+    device_id = resolve_device_id(host_id, device_id)
 
     if device_meter == "auto":
         from .meters import auto_meter
@@ -75,7 +86,7 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     app.include_router(
         build_router(manager, coordinator, Capability(kind=kind, host_id=host_id),
                      gpu_call, device_meter=device_meter, activation_tracker=tracker,
-                     readiness=readiness),
+                     readiness=readiness, device_id=device_id),
         prefix=prefix,
     )
 
