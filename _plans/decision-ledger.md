@@ -283,13 +283,49 @@ the retention sweeper already follows.
 
 ## 9. Handoff — task list
 
-- [ ] `decision.schema.json` + Python dataclass + generated TS type
-- [ ] rotating JSONL writer in `livestack_node` (size × files, age prune, 32 KiB record cap); tests
-- [ ] host-broker emitter on `plan_and_apply`; `Grant` gains a reason; tests
-- [ ] fleet-broker emitters: `observe` on transitions (P1), `rank` (P2), `admit` (P3)
-- [ ] hub manifest emitter → `activity_events`; `fleet_rank.decision_id` in the manifest
+- [x] `decision.schema.json` + Python dataclass + generated TS type — schema and
+      dataclass shipped (`node-py/livestack_node/decision.schema.json`,
+      `ledger.py`). The hub's TS type is hand-written in `route_decision.ts`
+      rather than GENERATED from the schema; generating it is still open
+- [x] rotating JSONL writer in `livestack_node` (size × files, age prune, 32 KiB record cap); tests
+- [x] host-broker emitter on `plan_and_apply`; `Grant` gains a reason; tests
+- [x] fleet-broker emitters: `observe` on transitions (P1), `rank` (P2), `admit` (P3)
+- [x] hub manifest emitter → `activity_events`; `fleet_rank.decision_id` in the manifest
 - [ ] client `pick` / `failover` records via telemetry; `parent_decision_id`; `X-Livestack-Decision` header + ws `decision=` param; `input.asr.start` carries the id
 - [ ] node-side outcome event on request completion (facade middleware reads the header)
 - [ ] `retro.py` pure functions + `GET /fleet/retro` + `benchday fleet retro`
-- [ ] storage-bounds inventory rows for both JSONL ledgers
-- [ ] isolated-e2e correlation test
+- [x] storage-bounds inventory rows for both JSONL ledgers — plus the hub's
+      `activity_events` `route.decision` rows and the in-memory `FleetRankRegistry`,
+      in benchday `docs/daemon-storage-bounds.md`
+- [ ] isolated-e2e correlation test — the manifest half is asserted
+      (`fleet_rank` reaches the manifest, and a ranking cannot widen it); the
+      JOIN across emitters is not, because §4.4's client emitter does not exist yet
+
+### What shipped, and the one field the design gained
+
+Emitters live: **host broker** (one record per Evict/Load/Grant/Defer a plan
+produced, with the candidate rows the log line never had), **fleet broker**
+(`observe` per membership transition, `rank` per `/fleet/rank`, `admit` per
+`/fleet/admit`), **hub manifest** (one `route.decision` row per
+`/v1/speech/routes`, region-filtered targets present as `filtered` rows,
+`parent_decision_id` naming the fleet rank).
+
+Two things the implementation added that §2 did not have, both because a live
+ledger showed them missing:
+
+* **`decision_id` is a MONOTONIC ULID.** A plain ULID orders by its random
+  component inside a millisecond, so a burst sorts arbitrarily — which the
+  retrospective, replaying a ledger in write order, would have hit immediately.
+* **`dispatched`.** An observe-only broker computes plans constantly and
+  dispatches none of them, so its `evict` records were indistinguishable from a
+  host broker's and a reader would have counted evictions that never happened.
+  In the one artifact whose entire value is being trustable about what happened.
+
+### What is left, and what it is blocked on
+
+The three open items are one story: **nothing yet records an OUTCOME**, so every
+record answers four of §1's five questions and none answers the fifth. The
+client `pick` emitter (§4.4) is the keystone — it is where `parent_decision_id`
+gets used, where `X-Livestack-Decision` starts its journey, and what `retro.py`
+would have anything to join. `retro.py` written before it would have only
+half-records to reason over, which is why it is last rather than first.
