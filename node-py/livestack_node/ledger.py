@@ -163,6 +163,9 @@ class Decision:
     reason: Optional[str] = None
     ttl_s: Optional[float] = None
     parent_decision_id: Optional[str] = None
+    # Did this decision cause anything? None = not applicable (a rank, an
+    # observe). False = computed and deliberately not dispatched.
+    dispatched: Optional[bool] = None
     outcome: Optional[Dict[str, Any]] = None
     decision_id: str = field(default_factory=new_decision_id)
     ts: float = field(default_factory=time.time)

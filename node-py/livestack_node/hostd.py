@@ -264,6 +264,55 @@ def build_app(broker: HostBroker):
         broker.emit_rank(result)
         return {k: v for k, v in result.items() if k != "candidates"}
 
+    @app.post("/fleet/admit")
+    def fleet_admit(payload: dict = Body(...)):
+        """Throw a task at the fleet: "where should this run?"
+
+        The answer names a HOST and a NODE, and stops there. Whether the unit is
+        resident on that node, and whether loading it would evict something,
+        stays with that host's own broker — the caller's request to the node
+        triggers its `manager.ensure` -> its host broker's `/admit`, exactly as
+        today. Two brains, unchanged: a fleet broker that reached into a host's
+        residency would be the second master this design exists not to have.
+
+        The grant carries a `lease_id`. The caller heartbeats it and releases it;
+        a dead caller's lease expires on `LIVESTACK_LEASE_TTL_S`, because a
+        client that crashed cannot be relied on to hand capacity back.
+        """
+        from .fleet_admit import admit as _admit
+        kind = payload.get("kind")
+        if not kind:
+            raise HTTPException(400, "'kind' required")
+        est = (payload.get("estimate") or {}).get("duration_s", 60.0)
+        result = _admit(
+            broker.fleet_view(), kind=kind,
+            sla=payload.get("sla", "normal"),
+            owner=payload.get("owner", "consumer"),
+            selector=payload.get("selector") or {},
+            locality_host=payload.get("locality_host"),
+            vantage=payload.get("via") or payload.get("vantage") or "direct",
+            estimate_s=float(est),
+        )
+        request = {"owner": payload.get("owner", "consumer"),
+                   "sla": payload.get("sla", "normal"),
+                   "vantage": result.get("vantage"),
+                   "selector": payload.get("selector") or {},
+                   "locality_host": payload.get("locality_host")}
+        lease_id = None
+        target = result.get("target")
+        if target:
+            # The ledger is bookkeeping and the grant is the product: a checkout
+            # failure must not void an answer the caller already has.
+            try:
+                lease_id = broker.hosted_checkout(
+                    target["target_id"], kind, request["owner"])
+            except Exception as e:
+                print(f"[harmony] fleet lease checkout failed: {e}", flush=True)
+        broker.emit_admit(result, request, lease_id)
+        out = {k: v for k, v in result.items() if k != "candidates"}
+        out["lease_id"] = lease_id
+        return out
+
     @app.get("/plan")
     def plan_preview():
         world = broker.snapshot([], state["last_evicted_at"])

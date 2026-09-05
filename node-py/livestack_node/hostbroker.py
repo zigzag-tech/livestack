@@ -748,6 +748,25 @@ class HostBroker:
                      "region": result.get("asker_region")},
         ))
 
+    def emit_admit(self, result: dict, request: dict, lease_id=None) -> None:
+        """One `admit` record per `/fleet/admit`, with the full candidate set and
+        the reason each feasible-but-not-chosen target lost.
+
+        Feasible-but-not-chosen is the interesting half. A filtered candidate
+        answers "could it have?"; a ranked one answers "should it have?", and
+        that is the question the operator actually asked of this system.
+        """
+        if self.ledger is None:
+            return
+        self._emit(Decision(
+            emitter=self.emitter, emitter_id=self.emitter_id,
+            kind=result.get("kind"), decision="admit",
+            candidates=list(result.get("candidates") or []),
+            chosen=(result.get("target") or {}).get("target_id"),
+            reason=result.get("reason"),
+            request=request,
+        ))
+
     def _emit_plan(self, world: WorldState, p) -> None:
         """One record per Evict/Load/Defer/Grant a plan produced.
 
@@ -796,7 +815,13 @@ class HostBroker:
                 emitter=self.emitter, emitter_id=self.emitter_id,
                 kind=kind, decision=decision, candidates=cands,
                 chosen=kind,
-                reason=(getattr(a, "reason", "") or decision)
+                # An observe-only broker computes plans constantly and dispatches
+                # none of them. Without saying so, its records are
+                # indistinguishable from a host broker's — and a reader would
+                # count evictions that never happened.
+                dispatched=self.dispatch,
+                reason=("" if self.dispatch else "ADVISORY (observe-only, not dispatched): ")
+                       + (getattr(a, "reason", "") or decision)
                        + (f"; measured free {free}" if free else ""),
                 request=({"owner": getattr(a, "request_id", None)}
                          if hasattr(a, "request_id") else None),
