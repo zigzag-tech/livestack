@@ -139,6 +139,7 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
           estimate_s: float = 60.0,
           concurrency: float = DEFAULT_CONCURRENCY,
           policy: Optional[SchedulerPolicy] = None,
+          usage: Optional[Mapping[str, int]] = None,
           now: Optional[float] = None) -> Dict[str, Any]:
     """Decide where one job should run. Returns the grant and the full candidate
     set, winner and losers alike, each with the reason it landed where it did."""
@@ -154,7 +155,8 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
         locality_host=locality_host,
     )
     plan: FleetPlan = schedule(
-        FleetState(targets=targets, jobs=(job,), now=now), policy)
+        FleetState(targets=targets, jobs=(job,), now=now,
+                   usage=dict(usage or {})), policy)
 
     chosen_id = next((a.target_id for a in plan.actions
                       if isinstance(a, Admit) and a.job_id == job.id), None)
@@ -178,8 +180,11 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
 
     target = by_id.get(chosen_id) if chosen_id else None
     node = f"{chosen_id}/livestack" if chosen_id else None
+    refused_for_quota = bool(
+        deferred and str(getattr(deferred, "reason", "")).startswith("account quota"))
     return {
         "granted": chosen_id is not None,
+        "refused": "account_quota" if refused_for_quota else None,
         "kind": kind,
         "sla": sla,
         "vantage": vantage,
@@ -197,6 +202,14 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
 def _why(chosen_id, rows, deferred, kind, vantage) -> str:
     if chosen_id is None:
         detail = getattr(deferred, "reason", None) if deferred else None
+        if detail and detail.startswith("account quota"):
+            # A quota refusal is a DIFFERENT answer from "the fleet is full",
+            # and a caller that cannot tell them apart retries forever against a
+            # fleet that will never say yes. Name the feasible targets it could
+            # have had, so the record shows the room existed.
+            feasible = sum(1 for r in rows if r.outcome == "ranked")
+            return (f"refused: {detail}; {feasible} target(s) could otherwise "
+                    f"have run {kind}")
         return (f"no fleet target can run {kind} from {vantage}"
                 + (f": {detail}" if detail else "")
                 + f"; {sum(1 for r in rows if r.outcome == 'filtered')} candidate(s) filtered")
