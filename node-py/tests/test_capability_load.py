@@ -119,3 +119,37 @@ def test_server_supplied_load_is_merged_not_replaced():
     load = cap(app)["load"]
     assert load["in_flight"] == 7            # server's count wins
     assert load["pressure"] == pytest.approx(0.6)   # ours survives
+
+
+def test_cuda_meter_defaults_to_the_process_device_not_zero():
+    """`cuda_meter()` used to hardcode device 0, which is right only on a
+    single-GPU host. On a two-GPU box with one engine pinned to each card, both
+    engines reported the SAME pressure — a load signal that is present,
+    plausible, and useless, because two identical numbers cannot break a tie
+    between the two nodes reporting them.
+    """
+    import types
+    from livestack_node import meters
+
+    seen = []
+
+    fake = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            current_device=lambda: 1,
+            mem_get_info=lambda d: (seen.append(d), (8, 16))[1],
+        )
+    )
+    import sys
+    prev = sys.modules.get("torch")
+    sys.modules["torch"] = fake
+    try:
+        meters.cuda_meter()()
+        assert seen == [1], f"metered {seen}, expected the process's own device"
+        meters.cuda_meter(0)()
+        assert seen == [1, 0], "an explicit index must still win"
+    finally:
+        if prev is None:
+            del sys.modules["torch"]
+        else:
+            sys.modules["torch"] = prev
