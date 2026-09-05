@@ -725,3 +725,38 @@ def test_the_fleet_view_carries_each_hosts_own_link_row(monkeypatch):
     view = br.fleet_view()
     assert view["vantage_host"] == "xc-tower-ubuntu"
     assert "zz-tower0" in view["hosts"]["xc-tower-ubuntu"]["links"]
+
+
+def test_an_observe_only_plan_says_it_was_not_dispatched(tmp_path):
+    """Found reading the live ledger: a fleet broker computes plans constantly
+    and dispatches none of them, so its records were indistinguishable from a
+    host broker's — a reader would have counted evictions that never happened.
+    The ledger's whole value is being able to trust what it says happened."""
+    led = JsonlLedger(str(tmp_path / "f.jsonl"))
+    peer = _FleetPeer("http://a/livestack", kind="asr", resident=False)
+    peer._unit = _Unit("asr", {"vram_bytes": 4}, priority=10,
+                       residency=_Residency.HARD_PIN)
+    br = HostBroker(devices=[_Device("h/gpu0", "h", capacity={"vram_bytes": 24})],
+                    peers=[peer], clock=_time.monotonic, ledger=led,
+                    dispatch=False, emitter="fleet-broker", emitter_id="f:8801")
+    br.plan_and_apply([])
+    recs = [r for r in led.read() if r["decision"] == "load"]
+    assert recs, "the plan is still recorded — it is the product"
+    assert recs[0]["dispatched"] is False
+    assert recs[0]["reason"].startswith("ADVISORY (observe-only, not dispatched)")
+    assert peer.warmed == []
+    assert validate(recs[0]) == []
+
+
+def test_a_host_broker_records_its_plan_as_dispatched(tmp_path):
+    led = JsonlLedger(str(tmp_path / "h.jsonl"))
+    peer = _FleetPeer("http://a/livestack", kind="asr", resident=False)
+    peer._unit = _Unit("asr", {"vram_bytes": 4}, priority=10,
+                       residency=_Residency.HARD_PIN)
+    br = HostBroker(devices=[_Device("h/gpu0", "h", capacity={"vram_bytes": 24})],
+                    peers=[peer], clock=_time.monotonic, ledger=led)
+    br.plan_and_apply([])
+    recs = [r for r in led.read() if r["decision"] == "load"]
+    assert recs[0]["dispatched"] is True
+    assert not recs[0]["reason"].startswith("ADVISORY")
+    assert peer.warmed == ["asr"]

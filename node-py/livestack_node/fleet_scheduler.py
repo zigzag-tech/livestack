@@ -86,6 +86,16 @@ class Target:
     running_instances: int = 0                 # up right now (for hysteresis)
     up_since: float = 0.0                       # when the running instance came up
     labels: Mapping[str, str] = field(default_factory=dict)
+    # Measured network distance from the ASKER to this target, in milliseconds.
+    #
+    # `None` means UNMEASURED, and it is scored as the worst measured candidate
+    # rather than as zero — a distance we failed to measure is not evidence of
+    # nearness, and treating it as such is how a fleet sends work across an
+    # ocean on the strength of having no reading. It is measured, not derived
+    # from `host_id`: `locality_host` already expresses "same host" as a flat
+    # bonus, and a flat bonus cannot tell 16 ms from 1554 ms, which is the whole
+    # gap between xc-mac-studio and zz-tower0 as measured from Vaughan.
+    distance_ms: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +135,12 @@ class Weights:
     resource: float = 1.0
     budget: float = 1.0
     speed: float = 1.0
+    # Prefers NEAR among the already-feasible. Deliberately smaller than the
+    # others by default: distance is a real cost but a secondary one — a target
+    # that cannot meet the deadline has already been dropped by feasibility, so
+    # what remains is a tie-break between things that all work. Set to 0 to get
+    # exactly the pre-distance behaviour.
+    distance: float = 0.5
 
 
 # Default deadline slack per SLA class (seconds) — the class picks this; an explicit
@@ -246,6 +262,7 @@ class _Cand:
     est_cost: float
     eta: float
     local_bonus: float
+    distance_ms: Optional[float] = None
 
 
 class _Fleet:
@@ -293,6 +310,7 @@ def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy) -> Li
             target=t, provision=provision,
             est_cost=t.cost.estimate(job.est_duration_s),
             eta=eta, local_bonus=_local_bonus(t, job, policy),
+            distance_ms=t.distance_ms,
         ))
     if not cands:
         return []
@@ -303,15 +321,34 @@ def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy) -> Li
 
 
 def _score(cand: _Cand, cands: List[_Cand], weights: Weights) -> float:
-    """Lower is better. Min-max normalize cost & ETA across the candidate set so the
-    weights are comparable, then: w_budget*cost + w_speed*eta - w_resource*local."""
+    """Lower is better. Min-max normalize cost, ETA and distance across the candidate
+    set so the weights are comparable, then:
+    w_budget*cost + w_speed*eta + w_distance*distance - w_resource*local."""
     costs = [c.est_cost for c in cands]
     etas = [c.eta for c in cands]
     cost_n = _norm(cand.est_cost, costs)
     eta_n = _norm(cand.eta, etas)
     return (weights.budget * cost_n
             + weights.speed * eta_n
+            + weights.distance * _distance_n(cand, cands)
             - weights.resource * cand.local_bonus)
+
+
+def _distance_n(cand: _Cand, cands: List[_Cand]) -> float:
+    """Normalized distance, 0 = nearest of this candidate set.
+
+    An UNMEASURED candidate scores as the FARTHEST measured one, not as zero and
+    not as infinity. Zero would let a target win by never having been probed;
+    infinity would exile it even when it is the only one left. "As bad as the
+    worst thing we did measure" is the reading that is wrong in neither
+    direction. If nothing at all was measured, distance contributes nothing and
+    the other terms decide — which is exactly the pre-distance behaviour.
+    """
+    known = [c.distance_ms for c in cands if c.distance_ms is not None]
+    if not known:
+        return 0.0
+    value = cand.distance_ms if cand.distance_ms is not None else max(known)
+    return _norm(value, known + [value])
 
 
 def _norm(v: float, xs: List[float]) -> float:
