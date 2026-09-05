@@ -98,9 +98,9 @@ simply never *required* any more.
 
 ### Layer 2 — mark MIA
 
-The broker records `last_seen` per peer — advanced by a successful snapshot *or*
-a registration renewal — and derives state from elapsed wall-clock, not from
-counted cycles:
+The broker records `last_seen` per peer — advanced **only by a successful
+snapshot** of the peer's facade, never by a registration renewal — and derives
+state from elapsed wall-clock, not from counted cycles:
 
 | State | When | Effect |
 |---|---|---|
@@ -112,7 +112,18 @@ Three rules earn their place:
 
 **Any single success returns a peer to `fresh` immediately.** Membership is a
 report, not a promise — the same asymmetry the placement planner already uses
-for restore.
+for restore. That holds for **absence**: a blip must not drop a peer.
+
+**Presence needs proof: an announce registers, only a snapshot certifies.** The
+symmetric statement does *not* hold, and reading it as if it did cost a 7-hour
+outage. `attach()` starts the registrar thread at import, before the server
+binds, so a node that never becomes able to serve still POSTs `/peers` every
+30 s. When a renewal advanced `last_seen`, that announce alone kept the peer
+`fresh` forever — xc-mac-studio's polyasr, 2026-09-05, dead for 7 h and listed
+healthy the whole time. A *new* record still gets one grace window of
+`suspect_after_s` to be snapshotted; after that only `HostBroker.snapshot()`
+succeeding against the facade returns it to `fresh`. The node half of this is
+`announce.py`, which no longer announces a facade that does not answer.
 
 **Log on transition, never per cycle.** The 92,089 lines were one line of
 information printed 92,089 times. `fresh→suspect`, `suspect→mia` and

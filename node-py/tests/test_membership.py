@@ -145,6 +145,62 @@ def test_an_unset_prune_window_deletes_nothing():
     assert roster.prunable() == []
 
 
+def test_an_announce_registers_but_does_not_certify():
+    """The 7-hour lie, pinned. xc-mac-studio's polyasr was dead from 03:00 to
+    10:00 on 2026-09-05 and listed `fresh` the whole time, because `attach()`
+    starts the registrar before the server binds and every renewal reset the
+    age. A peer that announces and is never snapshotted must decay on the
+    normal clock."""
+    clock = Clock()
+    roster = PeerRoster(POLICY, clock=clock)
+    roster.register("p")
+    # One grace window to be snapshotted — a brand-new record is not born stale.
+    assert roster.state_of("p") == FRESH
+
+    for _ in range(60):              # 30 minutes of renewals, never snapshotted
+        clock.advance(30)
+        roster.register("p")
+    assert roster.state_of("p") == MIA, "a renewal must not advance the age"
+
+
+def test_a_renewal_does_not_reset_the_age():
+    clock = Clock()
+    roster = PeerRoster(POLICY, clock=clock)
+    roster.register("p")
+    clock.advance(50)
+    assert roster.state_of("p") == SUSPECT
+    roster.register("p")             # the node keeps announcing
+    assert roster.state_of("p") == SUSPECT
+
+
+def test_a_successful_snapshot_still_restores_fresh_at_once():
+    """The fix must not cost the re-admission property: certification is the
+    snapshot, and one is enough."""
+    clock = Clock()
+    roster = PeerRoster(POLICY, clock=clock)
+    roster.register("p")
+    clock.advance(700)
+    assert roster.state_of("p") == MIA
+    roster.mark_seen("p")
+    assert roster.state_of("p") == FRESH
+
+
+def test_a_node_that_only_announces_never_becomes_fresh_at_the_broker():
+    """End to end: the broker's roster must not report a peer whose facade
+    never answers. This is the shape §3.4/4 of the fleet-broker plan verifies
+    against a 10-line script that only POSTs /peers."""
+    clock = Clock()
+    dead = FakePeer("http://announcer/livestack")
+    dead.up = False
+    broker = HostBroker(devices=[Device("gpu0", "h", capacity={"vram": 24})],
+                        peers=[], clock=clock, membership=POLICY)
+    broker.register_url(dead.base, make_peer=lambda _: dead)
+    clock.advance(50)
+    broker.snapshot([])              # the probe fails
+    broker.register_url(dead.base, make_peer=lambda _: dead)   # it keeps announcing
+    assert broker.roster.state_of(dead.base) == SUSPECT
+
+
 def test_a_seed_that_self_registers_stays_a_seed():
     roster = PeerRoster(POLICY, clock=Clock())
     roster.seed("p")
