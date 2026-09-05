@@ -16,6 +16,13 @@ when a second engine received zero traffic.
 
 Ordered by *evidence strength × cost*, not by ambition.
 
+**Answered by two design documents (2026-09-05):** `fleet-broker.md` — the
+phased architecture that closes Tiers 1–3, with per-phase code touchpoints,
+tests, deployment and verification; and `decision-ledger.md` — the
+retrospection requirement that every phase must satisfy, so a future agent
+can read a routing decision and say where it should have gone instead.
+Implementation is handed off from those two; this file stays as the evidence.
+
 ---
 
 ## Tier 1 — defects with a reproduction, small to fix
