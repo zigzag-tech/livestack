@@ -63,7 +63,7 @@ def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
     return f"{host_id}/gpu0"
 
 
-def _load_report(coordinator, status, device_meter):
+def _load_report(coordinator, status, device_meter, in_flight_fn=None):
     """How busy this node is right now, for a consumer deciding where to send
     work. Computed at READ TIME from live state — a cached or periodically
     refreshed number would report an engine idle while it is saturated, which is
@@ -75,17 +75,36 @@ def _load_report(coordinator, status, device_meter):
     quiet is the most likely source of an empty report, and reading silence as
     spare capacity steers traffic at exactly the node least able to serve it.
 
-    `in_flight` counts real leases only. The coordinator issues `__usage__:`
-    leases to keep an idle-evict clock alive; those mark recency, not work, and
-    counting them would make a node that served one request ten minutes ago look
-    permanently busy.
+    `in_flight` is the server's own count when it supplies one (`in_flight_fn`,
+    from `attach(in_flight=)`), and otherwise the count of real leases. The
+    coordinator issues `__usage__:` leases to keep an idle-evict clock alive;
+    those mark recency, not work, and counting them would make a node that
+    served one request ten minutes ago look permanently busy.
+
+    `in_flight_source` says WHICH, and it is the load-bearing field. A node that
+    does not take a lease per request — polyasr streams, harmony-llm proxies —
+    reports 0 leases while saturated, and a consumer cannot tell that from an
+    idle node without being told where the number came from. `"server"` means
+    the engine counted its own work; `"leases"` means we inferred it, and the
+    consumer should weigh it accordingly rather than reading 0 as spare capacity.
     """
     report = {}
 
-    leases = status.get("active_leases") or []
-    in_flight = sum(1 for l in leases
-                    if not str(l.get("owner_id", "")).startswith("__usage__"))
-    report["in_flight"] = in_flight
+    if in_flight_fn is not None:
+        try:
+            report["in_flight"] = max(0, int(in_flight_fn()))
+            report["in_flight_source"] = "server"
+        except Exception:
+            # A counter that throws contributes nothing — do NOT fall back to
+            # the lease count under the "server" label, which would be a
+            # confident wrong answer about how busy this engine is.
+            in_flight_fn = None
+    if in_flight_fn is None:
+        leases = status.get("active_leases") or []
+        report["in_flight"] = sum(
+            1 for l in leases
+            if not str(l.get("owner_id", "")).startswith("__usage__"))
+        report["in_flight_source"] = "leases"
     report["resident_units"] = len(status.get("resident", []) or [])
 
     if device_meter is not None:
@@ -119,7 +138,8 @@ def build_router(manager, coordinator, capability: Capability,
                  device_meter: Optional[Callable[[], Optional[dict]]] = None,
                  activation_tracker=None,
                  readiness: Optional[Callable[[], Optional[dict]]] = None,
-                 device_id: Optional[str] = None):
+                 device_id: Optional[str] = None,
+                 in_flight: Optional[Callable[[], int]] = None):
     # Resolved ONCE, here, so /capability and /residence can never disagree
     # about which device this node is on — a disagreement the broker would read
     # as two devices.
@@ -159,7 +179,7 @@ def build_router(manager, coordinator, capability: Capability,
             "ready": bool(resident),
             "detail": "resident" if resident else "no unit resident",
         }
-        load = _load_report(coordinator, st, device_meter)
+        load = _load_report(coordinator, st, device_meter, in_flight)
         if load is not None:
             out["load"] = load
         if readiness is not None:
@@ -173,7 +193,14 @@ def build_router(manager, coordinator, capability: Capability,
                 # can infer from leases (polyasr knows its concurrent streams).
                 # Merge rather than replace: the server supplies what it knows.
                 if isinstance(supplied.get("load"), dict):
-                    out["load"] = {**(out.get("load") or {}), **supplied["load"]}
+                    merged = {**(out.get("load") or {}), **supplied["load"]}
+                    # A readiness-supplied in_flight is still the SERVER's count,
+                    # so the provenance must follow it. Otherwise a node that
+                    # reports its own streams through the legacy path is labelled
+                    # "leases" and a consumer discounts a number it should trust.
+                    if "in_flight" in supplied["load"]:
+                        merged["in_flight_source"] = "server"
+                    out["load"] = merged
             except Exception as e:
                 # A readiness probe that throws is NOT ready. Reporting the
                 # generic fallback here would claim fitness we just failed to
