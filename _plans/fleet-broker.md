@@ -732,7 +732,7 @@ Each is one PR; each names its tests and its ledger obligation.
 - [x] 3b media-corpus digest steps call `/fleet/admit`; fallback path; caller-side ledger record on `fleet_unavailable` ✅ shipped in `xc-setup` `media_corpus/broker.py`; all three paths verified on tower0. **Left OFF in the crontab** — see §5.4 for the throughput-model gap that makes turning it on the operator's call
 - [x] 4 multi-URL `LIVESTACK_BROKER_URL`
 - [ ] 5 warm-only cross-host, gated on owner's decision
-- [ ] docs: `HARMONY.md` gains a "Fleet" section; benchday `docs/route-load-balancing.md` points here; storage-bounds inventory rows for every new store (`decision-ledger.md` §6)
+- [x] docs: `HARMONY.md` gains a "Fleet" section; benchday `docs/route-load-balancing.md` points here; storage-bounds inventory rows for every new store (`decision-ledger.md` §6)
 
 ## 9a. What Phase 0 exposed (2026-09-05) — open, not fixed here
 
