@@ -629,6 +629,18 @@ arbitrates its card, and the converse matters too, so a node whose host broker i
 restarting still reaches the fleet. The list is trimmed and de-duplicated,
 because an operator's hand-written list must not create a phantom third broker.
 
+**A node announces a LOOPBACK URL, and that had to be fixed for this phase to
+mean anything.** `attach()` built `http://127.0.0.1:{port}{prefix}` — correct for
+the host broker on the same machine, and wrong for a fleet broker anywhere else:
+it would register a peer it can never reach, and that peer would sit `suspect`
+forever with a connect error, reading as a dead node rather than a bad address.
+It also made the fleet broker hold TWO rows for one node — a mesh-addressed seed
+and a loopback registration — which is measurably what happened here before the
+fix. `LIVESTACK_NODE_HOST` states it; the default keeps single-machine
+deployments working with nothing set. Verified: with it set to the mesh address,
+the four local nodes' registrations land on the SAME keys as the seeds and the
+roster is 9 rows, not 12.
+
 The seed list is deliberately **not** retired on this fleet yet. Every node
 would have to be redeployed with the two-entry `LIVESTACK_BROKER_URL` first, and
 until all of them are, shrinking `LIVESTACK_PEERS` would make the ones left

@@ -178,3 +178,31 @@ def test_a_node_that_passes_nothing_keeps_the_legacy_id(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", no_accelerator)
     assert resolve_device_id("h") == "h/gpu0"
+
+
+def test_a_node_can_advertise_a_reachable_host_not_just_loopback(monkeypatch):
+    """A node announces its own facade URL, and until now that was always
+    `127.0.0.1`. Right for the host broker on the same machine; wrong for a
+    fleet broker on another, which would register a peer it can never reach —
+    and that peer would sit `suspect` forever with a connect error, looking like
+    a dead node rather than a misconfigured address.
+
+    The node cannot infer this (it does not reliably know its own mesh address,
+    and a POST shows the broker a source address, not a listening port), so it is
+    the operator's to state — with a default that keeps single-machine
+    deployments working with nothing set."""
+    announced = []
+    monkeypatch.setattr("livestack_node.announce.start_registrar",
+                        lambda url, **kw: announced.append(url))
+    monkeypatch.setenv("LIVESTACK_NODE_HOST", "100.64.0.18")
+    units = {"asr": ManagedUnit("asr", loader=lambda: "m", freer=noop_free,
+                                residency_policy=ResidencyPolicy.UNPINNED)}
+    attach(FastAPI(), host_id="h", kind="polyasr", units=units, idle_seconds=120,
+           coload=True, gpu_call=lambda fn: fn(), port=8766)
+    assert announced == ["http://100.64.0.18:8766/livestack"]
+
+    announced.clear()
+    monkeypatch.delenv("LIVESTACK_NODE_HOST")
+    attach(FastAPI(), host_id="h", kind="polyasr", units=units, idle_seconds=120,
+           coload=True, gpu_call=lambda fn: fn(), port=8766)
+    assert announced == ["http://127.0.0.1:8766/livestack"]

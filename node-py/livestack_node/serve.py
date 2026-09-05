@@ -181,8 +181,20 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     resolved_port = port if port is not None else os.environ.get("LIVESTACK_NODE_PORT")
     if os.environ.get("LIVESTACK_REGISTER", "1") != "0" and resolved_port:
         from .announce import start_registrar
+        # The HOST a node announces itself at. Loopback is right for the host
+        # broker on the same machine and WRONG for a fleet broker on another —
+        # it would register a peer it can never reach, and the peer would sit
+        # `suspect` forever with a connect error, looking like a dead node
+        # rather than a misconfigured address.
+        #
+        # A node cannot infer this: it does not reliably know its own mesh
+        # address, and the URL is the one fact the broker cannot learn from the
+        # POST (which shows it a source address, not a listening port). So it is
+        # the operator's to state, and the default keeps single-machine
+        # deployments working with nothing set.
+        advertise = (os.environ.get("LIVESTACK_NODE_HOST") or "127.0.0.1").strip()
         start_registrar(
-            f"http://127.0.0.1:{int(resolved_port)}{prefix}",
+            f"http://{advertise}:{int(resolved_port)}{prefix}",
             host_id=host_id, kind=kind,
             interval_s=float(os.environ.get("LIVESTACK_REGISTER_INTERVAL", "30")),
         )
