@@ -135,12 +135,74 @@ def mlx_meter() -> Callable[[], Optional[dict]]:
     return meter
 
 
-def auto_meter() -> Optional[Callable[[], Optional[dict]]]:
+def device_matches_process(device_id: Optional[str]) -> Optional[bool]:
+    """Does ``device_id`` name the device this process is actually on?
+
+    Three answers, and the third is the important one:
+
+    * ``True``  — proven the same device.
+    * ``False`` — proven a DIFFERENT device. The node's identity and its meter
+      disagree, so any number the meter produces is about somebody else's card.
+    * ``None``  — cannot tell. An operator-supplied id like ``"qwen-sg"`` says
+      nothing about a CUDA ordinal, and refusing on that would silently disable a
+      working meter across a whole fleet. Unverifiable is not the same as wrong.
+
+    Only the suffix after the last ``/`` is examined, because the host part is a
+    name and names are exactly what 0.3 stopped trusting.
+    """
+    if not device_id:
+        return None
+    suffix = device_id.rsplit("/", 1)[-1]
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return None
+        current = torch.cuda.current_device()
+        if suffix.startswith("gpu") and suffix[3:].isdigit():
+            return int(suffix[3:]) == current
+        if len(suffix) == 8 and all(c in "0123456789abcdef" for c in suffix):
+            import hashlib
+            uuid = getattr(torch.cuda.get_device_properties(current), "uuid", None)
+            if uuid is None:
+                return None
+            return hashlib.sha256(str(uuid).encode()).hexdigest()[:8] == suffix
+    except Exception:
+        return None
+    return None
+
+
+def refusing_meter() -> Callable[[], Optional[dict]]:
+    """A meter that reports nothing. `pressure` then falls to *no opinion*
+    rather than to a confident wrong number, which is the whole distinction the
+    `load` contract rests on."""
+    return lambda: None
+
+
+def auto_meter(device_id: Optional[str] = None,
+               log: Callable[[str], None] = print) -> Optional[Callable[[], Optional[dict]]]:
     """Pick a meter by what's importable + available on this node: CUDA (torch) first,
-    else MLX. ``None`` if neither — the broker falls back to the configured budget."""
+    else MLX. ``None`` if neither — the broker falls back to the configured budget.
+
+    ``device_id`` is the node's resolved identity (see
+    :func:`livestack_node.facade.resolve_device_id`). When it can be PROVEN to
+    name a different device than this process is on, the meter refuses: it
+    reports nothing and says so once. Three separate bugs on 2026-09-05 had one
+    root — two nodes on different cards reporting byte-identical pressure — and
+    the shape of that failure is a plausible number, not an error. A meter that
+    is measuring the wrong card is worse than no meter, because a consumer reads
+    silence as "no opinion" and a wrong number as fact.
+    """
     try:
         import torch
         if torch.cuda.is_available():
+            if device_matches_process(device_id) is False:
+                try:
+                    on = torch.cuda.current_device()
+                except Exception:
+                    on = "?"
+                log(f"[livestack] meter refused: process is on cuda:{on}, "
+                    f"meter would read {device_id}")
+                return refusing_meter()
             return cuda_meter()
     except Exception:
         pass

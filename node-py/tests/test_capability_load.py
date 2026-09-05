@@ -32,7 +32,7 @@ def _mem(capacity, free):
     return {"capacity": {"vram_bytes": capacity}, "free": {"vram_bytes": free}}
 
 
-def make_app(device_meter="absent", readiness=None):
+def make_app(device_meter="absent", readiness=None, in_flight=None):
     units = {
         "asr": ManagedUnit("asr", loader=lambda: "m", freer=noop_free,
                            residency_policy=ResidencyPolicy.HARD_PIN),
@@ -43,7 +43,7 @@ def make_app(device_meter="absent", readiness=None):
         kwargs["device_meter"] = device_meter
     manager, coord = attach(app, host_id="h", kind="polyasr", units=units,
                             idle_seconds=120, coload=True, gpu_call=lambda fn: fn(),
-                            readiness=readiness, **kwargs)
+                            readiness=readiness, in_flight=in_flight, **kwargs)
     return app, manager
 
 
@@ -66,6 +66,7 @@ def test_load_reports_in_flight_and_pressure():
     body = cap(app)
     load = body["load"]
     assert load["in_flight"] == 0
+    assert load["in_flight_source"] == "leases"
     assert load["device"] == {"capacity": 100, "free": 25}
     assert load["pressure"] == pytest.approx(0.75)
     assert "measured_at" in load
@@ -153,3 +154,138 @@ def test_cuda_meter_defaults_to_the_process_device_not_zero():
             del sys.modules["torch"]
         else:
             sys.modules["torch"] = prev
+
+
+# -- in_flight is a contract, not a workaround --------------------------------
+
+def test_a_server_supplied_counter_wins_and_says_so():
+    """polyasr streams and harmony-llm proxies; neither takes a lease per
+    request, so the lease-derived count reads 0 while the engine is saturated.
+    The engine's own counter is the truth, and `in_flight_source` is how a
+    consumer knows it is looking at one."""
+    from livestack_node import counting
+    busy = counting()
+    app, _ = make_app(device_meter=lambda: _mem(100, 100), in_flight=busy)
+    idle = cap(app)["load"]
+    assert idle["in_flight"] == 0
+    assert idle["in_flight_source"] == "server"
+    with busy, busy, busy:
+        load = cap(app)["load"]
+    assert load["in_flight"] == 3
+    assert load["in_flight_source"] == "server"
+    assert cap(app)["load"]["in_flight"] == 0
+
+
+def test_an_absent_counter_is_labelled_leases_so_zero_is_readable():
+    """This is the whole point of the field: without it, "0 because idle" and
+    "0 because this node cannot see its own work" are the same document."""
+    app, _ = make_app(device_meter=lambda: _mem(100, 100))
+    assert cap(app)["load"]["in_flight_source"] == "leases"
+
+
+def test_a_counter_that_throws_falls_back_and_relabels():
+    """It must NOT report the lease count under the "server" label — that would
+    be a confident wrong answer about how busy this engine is."""
+    def angry():
+        raise RuntimeError("counter is gone")
+    app, _ = make_app(device_meter=lambda: _mem(100, 100), in_flight=angry)
+    load = cap(app)["load"]
+    assert load["in_flight"] == 0
+    assert load["in_flight_source"] == "leases"
+
+
+def test_a_readiness_supplied_count_is_still_the_servers_own():
+    """The legacy path polyasr/harmony-llm used before `in_flight=`. A number
+    the server supplied is a server number however it arrived; labelling it
+    "leases" would have a consumer discount a count it should trust."""
+    app, _ = make_app(device_meter=lambda: _mem(100, 40),
+                      readiness=lambda: {"ready": True, "load": {"in_flight": 7}})
+    load = cap(app)["load"]
+    assert load["in_flight"] == 7
+    assert load["in_flight_source"] == "server"
+
+
+def test_the_counter_survives_a_handler_that_raises():
+    from livestack_node import counting
+    busy = counting()
+    try:
+        with busy:
+            raise ValueError("handler blew up")
+    except ValueError:
+        pass
+    assert busy() == 0, "a raised handler must not leave the engine looking busy"
+
+
+# -- the meter must agree with the node's device ------------------------------
+
+def _fake_torch(current, uuid="GPU-aaaa"):
+    import types
+    return types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            current_device=lambda: current,
+            mem_get_info=lambda d: (8, 16),
+            get_device_properties=lambda d: types.SimpleNamespace(uuid=uuid),
+        )
+    )
+
+
+def _with_torch(fake, fn):
+    import sys
+    prev = sys.modules.get("torch")
+    sys.modules["torch"] = fake
+    try:
+        return fn()
+    finally:
+        if prev is None:
+            del sys.modules["torch"]
+        else:
+            sys.modules["torch"] = prev
+
+
+def test_a_meter_pointed_at_another_card_refuses_rather_than_guessing():
+    """Three bugs on 2026-09-05 had one root: two nodes on different cards
+    reporting byte-identical pressure. The shape of that failure is a PLAUSIBLE
+    number, so the only safe answer when identity and meter disagree is silence
+    — `pressure` falls to no opinion instead of to a confident wrong value."""
+    from livestack_node import meters
+    lines = []
+    meter = _with_torch(
+        _fake_torch(current=1),
+        lambda: meters.auto_meter(device_id="h/gpu0", log=lines.append))
+    assert meter() is None
+    assert len(lines) == 1 and "meter refused" in lines[0]
+    assert "cuda:1" in lines[0] and "h/gpu0" in lines[0]
+
+
+def test_a_meter_on_the_right_card_measures_normally():
+    from livestack_node import meters
+    meter = _with_torch(_fake_torch(current=1),
+                        lambda: meters.auto_meter(device_id="h/gpu1"))
+    assert _with_torch(_fake_torch(current=1), meter) == {
+        "capacity": {"vram_bytes": 16}, "free": {"vram_bytes": 8}}
+
+
+def test_a_uuid_derived_id_is_checked_against_the_real_uuid():
+    import hashlib
+    from livestack_node import meters
+    right = hashlib.sha256(b"GPU-aaaa").hexdigest()[:8]
+    wrong = hashlib.sha256(b"GPU-bbbb").hexdigest()[:8]
+    assert _with_torch(_fake_torch(0, "GPU-aaaa"),
+                       lambda: meters.device_matches_process(f"h/{right}")) is True
+    assert _with_torch(_fake_torch(0, "GPU-aaaa"),
+                       lambda: meters.device_matches_process(f"h/{wrong}")) is False
+
+
+def test_an_unverifiable_id_meters_rather_than_refusing():
+    """Refusing on "cannot tell" would silently disable a working meter across a
+    whole fleet of operator-named devices. Unverifiable is not wrong."""
+    from livestack_node import meters
+    assert _with_torch(_fake_torch(0),
+                       lambda: meters.device_matches_process("qwen-sg")) is None
+    meter = _with_torch(_fake_torch(0),
+                        lambda: meters.auto_meter(device_id="qwen-sg"))
+    assert _with_torch(_fake_torch(0), meter) is not None
+    # And no device_id at all is the pre-existing call: meter normally.
+    meter = _with_torch(_fake_torch(0), lambda: meters.auto_meter())
+    assert _with_torch(_fake_torch(0), meter) is not None
