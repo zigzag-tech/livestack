@@ -581,6 +581,37 @@ and relieves tower0's single 3090 at the same time.
   configured gateway) runs the job; nothing is lost; the ledger on the caller
   side records `fleet_unavailable`.
 
+**Results, 2026-09-05, all three against the live fleet.** From `direct`, a
+`batch align` lands on xc-tower-ubuntu and the reason reads
+`http://100.64.0.3:8766 lost on band>=600 (1557ms); free 3/4, in_flight=1,
+pressure=0.6799` — the alternative named, with the numbers. From tower0's own
+vantage, same fleet and same instant: `interactive` stays on zz-tower0,
+`batch` leaves for an idle card. The fallback was driven from the real ingest on
+tower0 against a dead broker: it logged `deciding locally
+(reason=fleet_unavailable)`, `polyasr_url` stayed `127.0.0.1:8766`, and with
+`LIVESTACK_FLEET_URL` unset the whole path is byte-for-byte unchanged.
+
+**Not enabled in the media-corpus crontab, and this is the reason.** With the
+fleet consulted, tower0's `batch align` chose **xc-mac-studio** — 551 ms away,
+`pressure=0.156` against tower0's `0.6799`. That is the scoring working as
+specified and it may still be the wrong answer, for two reasons the design does
+not yet model:
+
+1. **The scheduler has no throughput model.** `_eta` is `est_duration_s`
+   regardless of target, so every LOCAL target is treated as equally fast. An
+   MLX align on a Mac and a CUDA align on a 3090 are not, and nothing in the
+   scoring knows it. Sending a 3090 workload to a laptop-class GPU because it
+   is idler would make digests slower, not faster.
+2. **Resting pressure is not comparable across device classes** — the same
+   finding as §4.4's, and it reaches admission too, not only ranking. The Mac's
+   0.156 on Apple unified memory and a 3090's 0.68 with models resident are not
+   the same quantity.
+
+So the code is shipped, the default is off, and turning it on is the operator's
+call. `LIVESTACK_FLEET_URL=http://100.64.0.18:8801` plus
+`LIVESTACK_FLEET_VANTAGE=host:zz-tower0` in the crontab is the whole change, and
+unsetting it is the whole rollback.
+
 ---
 
 ## 6. Phase 4 — announce to the fleet; retire the seed list
@@ -673,7 +704,7 @@ Each is one PR; each names its tests and its ledger obligation.
 - [x] 2b `fleet_rank.py` + `GET /fleet/rank` — pure, tests; **ledger emitter**
 - [x] 2c hub consumes rank into manifest (benchday `speech_relay.ts`), region filter stays hub-side, `fleet_rank` field, tests with fake fleet; decide push vs tailnet ✅ shipped as benchday openspec `2026-09-05-fleet-rank-into-the-manifest`; push (§8.1), region filter runs FIRST, isolated-e2e gate green
 - [x] 3a `distance_ms` + `w_distance` in `fleet_scheduler.py`; `FleetState` from `fleet_view()`; `POST /fleet/admit`; tests; **ledger emitter** ✅ shipped, plus `Weights.utilization` and `distance_by_sla` — see §5.2, which explains why one term could not do it
-- [ ] 3b media-corpus digest steps call `/fleet/admit`; fallback path; caller-side ledger record on `fleet_unavailable`
+- [x] 3b media-corpus digest steps call `/fleet/admit`; fallback path; caller-side ledger record on `fleet_unavailable` ✅ shipped in `xc-setup` `media_corpus/broker.py`; all three paths verified on tower0. **Left OFF in the crontab** — see §5.4 for the throughput-model gap that makes turning it on the operator's call
 - [ ] 4 multi-URL `LIVESTACK_BROKER_URL`
 - [ ] 5 warm-only cross-host, gated on owner's decision
 - [ ] docs: `HARMONY.md` gains a "Fleet" section; benchday `docs/route-load-balancing.md` points here; storage-bounds inventory rows for every new store (`decision-ledger.md` §6)
