@@ -6,11 +6,61 @@ _gpu_executor) and returns its result, so warm/evict never race in-flight work.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import time
 
 from typing import Callable, Optional
 
 from .lease import Capability
+
+
+def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
+    """The id of the device this node actually occupies.
+
+    It used to be `f"{host_id}/gpu0"` — a string template, correct only on a
+    single-GPU host. Two real costs on xc-tower-ubuntu (2x RTX 3090), 2026-09-05:
+    a second polyasr had to be given a FAKE `host_id` to get its own device id,
+    and a stale one later let the planner co-model a 5 GB ASR engine and a 20 GB
+    LLM onto one card and evict the LLM. Device identity is a fact the node can
+    read; it should not be guessed by its name.
+
+    Resolution order — explicit argument, then `LIVESTACK_DEVICE_ID`, then
+    derived from the backend:
+
+    * CUDA — `{host_id}/{8 hex of the device UUID}`. The UUID is the driver's
+      own identity for the physical card, so two processes pinned to the same
+      card agree and two on different cards differ, with no configuration.
+    * MLX — `{host_id}/mlx0`. Apple unified memory is one device.
+    * neither — `{host_id}/gpu0`, today's value, so a single-GPU node that
+      passes nothing sees no change at all.
+
+    Never raises: identity must not be the thing that stops a node serving.
+    """
+    if explicit:
+        return explicit
+    env = (os.environ.get("LIVESTACK_DEVICE_ID") or "").strip()
+    if env:
+        return env
+    try:
+        import torch
+        if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(torch.cuda.current_device())
+            uuid = getattr(props, "uuid", None)
+            if uuid is not None:
+                short = hashlib.sha256(str(uuid).encode()).hexdigest()[:8]
+                return f"{host_id}/{short}"
+            # A torch too old to expose `uuid` still knows which index it is on,
+            # which is better than pretending every process is on gpu0.
+            return f"{host_id}/gpu{torch.cuda.current_device()}"
+    except Exception:
+        pass
+    try:
+        import mlx.core  # noqa: F401
+        return f"{host_id}/mlx0"
+    except Exception:
+        pass
+    return f"{host_id}/gpu0"
 
 
 def _load_report(coordinator, status, device_meter):
@@ -68,7 +118,12 @@ def build_router(manager, coordinator, capability: Capability,
                  gpu_call: Callable[[Callable], object],
                  device_meter: Optional[Callable[[], Optional[dict]]] = None,
                  activation_tracker=None,
-                 readiness: Optional[Callable[[], Optional[dict]]] = None):
+                 readiness: Optional[Callable[[], Optional[dict]]] = None,
+                 device_id: Optional[str] = None):
+    # Resolved ONCE, here, so /capability and /residence can never disagree
+    # about which device this node is on — a disagreement the broker would read
+    # as two devices.
+    device_id = resolve_device_id(capability.host_id, device_id)
     try:
         from fastapi import APIRouter, Body, HTTPException
     except ImportError as exc:  # pragma: no cover
@@ -97,7 +152,7 @@ def build_router(manager, coordinator, capability: Capability,
         out = {
             "kind": capability.kind,
             "host_id": capability.host_id,
-            "device_id": f"{capability.host_id}/gpu0",
+            "device_id": device_id,
             "labels": dict(capability.labels),
             "units": list(manager.units.keys()),
             "resident": resident,
@@ -247,7 +302,7 @@ def build_router(manager, coordinator, capability: Capability,
                     entry["activation_headroom"] = {"vram_bytes": int(hb)}
             units.append(entry)
         out = {"host_id": capability.host_id,
-               "device_id": f"{capability.host_id}/gpu0",
+               "device_id": device_id,
                "units": units}
         # Live measured device memory (capacity + real free), when a meter is wired.
         # Lets the Harmony planner reconcile against reality, not just footprints.

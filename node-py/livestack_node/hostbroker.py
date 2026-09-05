@@ -21,13 +21,60 @@ import os
 import threading
 import time
 
-from typing import Callable, Dict, List, Mapping, Optional
+from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from .planner import (
     Device, Placement, Request, Unit, WorldState, PlannerPolicy, plan, Residency,
     Load, Evict, Grant, Defer,
 )
 from .membership import MembershipPolicy, PeerRoster, RosterFull
+
+
+def _res_max(a: Mapping[str, float], b: Mapping[str, float]) -> Dict[str, float]:
+    return {k: max(float(a.get(k, 0.0)), float(b.get(k, 0.0)))
+            for k in set(a) | set(b)}
+
+
+def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit]) -> Dict[str, Unit]:
+    """Fold `(kind, peer) -> Unit` reports down to the per-kind map the planner
+    consumes.
+
+    The broker used to do this with `units.setdefault(kind, unit)` — first peer
+    wins, every later report silently dropped. That is wrong whenever two nodes
+    on one host serve the same kind, which is the normal shape here: two polyasr
+    processes on xc-tower-ubuntu, one per card. The planner's `Unit` is per-kind
+    by design (one resident copy serves unlimited leases), and two engines of a
+    kind are two *placements* of it — which `placements` already models. So the
+    fix is not to give the planner a second unit; it is to stop losing the
+    reports and to fold them conservatively:
+
+    * footprint and activation headroom take the elementwise MAX. Under-reserving
+      is the OOM direction, and "whichever peer we happened to probe first" is
+      not a defensible way to choose.
+    * priority takes the MIN (lower = more important) and residency the most
+      pinned tier, for the same reason: the stronger claim wins.
+    * `min_resident` takes the MAX — a fleet-wide warm floor is a floor.
+    """
+    out: Dict[str, Unit] = {}
+    for (kind, _peer), unit in sorted(per_peer.items()):
+        prev = out.get(kind)
+        if prev is None:
+            out[kind] = unit
+            continue
+        out[kind] = Unit(
+            kind=kind,
+            footprint=_res_max(prev.footprint, unit.footprint),
+            priority=min(prev.priority, unit.priority),
+            residency=Residency(min(int(prev.residency), int(unit.residency))),
+            min_resident=max(prev.min_resident, unit.min_resident),
+            reload_cost=max(prev.reload_cost, unit.reload_cost),
+            selector=prev.selector or unit.selector,
+            min_residency_s=max(prev.min_residency_s, unit.min_residency_s),
+            restore_debounce_s=max(prev.restore_debounce_s, unit.restore_debounce_s),
+            activation_headroom=_res_max(prev.activation_headroom,
+                                         unit.activation_headroom),
+        )
+    return out
 
 
 def peer_key(peer) -> str:
@@ -99,6 +146,10 @@ class HostBroker:
         # See membership.py and _plans/peer-membership.md.
         self.roster = PeerRoster(membership, clock=clock or time.monotonic, log=log)
         self._last_probe_error: Dict[str, str] = {}
+        # (kind, peer) -> Unit, as of the last snapshot. The planner gets the
+        # folded per-kind map; this keeps WHO reported what, which the fleet view
+        # needs and the folded map cannot express.
+        self.peer_units: Dict[Tuple[str, str], Unit] = {}
         for p in self.peers:
             self.roster.seed(peer_key(p))
 
@@ -301,7 +352,10 @@ class HostBroker:
     # -- world assembly (soft state: re-snapshot peers every time) ------------
     def snapshot(self, requests: Optional[List[Request]] = None,
                  last_evicted_at: Optional[Mapping[str, float]] = None) -> WorldState:
-        units: Dict[str, Unit] = {}
+        # Keyed by (kind, peer) so two nodes serving one kind on one host are
+        # both recorded rather than the second being dropped by a setdefault.
+        # Folded to the planner's per-kind map by aggregate_units() below.
+        per_peer_units: Dict[Tuple[str, str], Unit] = {}
         placements: List[Placement] = []
         discovered: Dict[str, str] = {}     # device_id -> host_id (federated discovery)
         measured: Dict[str, Dict[str, float]] = {}        # device_id -> measured free
@@ -333,7 +387,7 @@ class HostBroker:
                 continue
             self.roster.mark_seen(key)
             for kind, unit in peer_units.items():
-                units.setdefault(kind, unit)
+                per_peer_units[(kind, key)] = unit
             placements.extend(peer_placements)
             try:
                 discovered[p.device_id] = p.host_id
@@ -358,6 +412,11 @@ class HostBroker:
             except Exception:
                 pass
         now = self._clock() if self._clock else 0.0
+        # What each peer said, kept for the fleet view and for anyone asking
+        # "which node reported this kind" — a question the folded map cannot
+        # answer.
+        self.peer_units = per_peer_units
+        units = aggregate_units(per_peer_units)
         # Config-declared kinds (a hosted backend has no peer to report them).
         # Peers stay authoritative for the kinds they DO report.
         for kind, u in self.extra_units.items():
