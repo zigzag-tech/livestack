@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://livestack.zztech.io/schemas/decision.schema.json",
+  "title": "Decision record",
+  "description": "One placement or routing decision, recorded so a reader who was not present can second-guess it without a live system. See _plans/decision-ledger.md. A record is SUFFICIENT when it answers all five: what was asked, what was known (values, not references), what was chosen and why, why each loser lost, and what happened. A record lacking the last two is a log line, not a decision record.",
+  "type": "object",
+  "required": ["decision_id", "ts", "emitter", "emitter_id", "decision", "candidates"],
+  "additionalProperties": false,
+  "properties": {
+    "decision_id": {
+      "type": "string",
+      "description": "ULID: sortable, unique, and carried downstream so an outcome recorded in another process can be joined back to it.",
+      "minLength": 26,
+      "maxLength": 26
+    },
+    "ts": { "type": "number", "description": "Unix seconds, UTC, float." },
+    "emitter": {
+      "type": "string",
+      "enum": ["host-broker", "fleet-broker", "client-picker", "hub-manifest", "job-caller"]
+    },
+    "emitter_id": { "type": "string", "description": "Which instance, e.g. xc-tower-ubuntu:8801." },
+    "kind": { "type": ["string", "null"], "description": "Unit kind / capability." },
+    "decision": {
+      "type": "string",
+      "enum": ["rank", "admit", "pick", "evict", "load", "grant", "defer", "failover", "observe"]
+    },
+    "request": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "owner": { "type": ["string", "null"], "description": "Account/device/service id. NEVER a secret." },
+        "sla": { "type": ["string", "null"], "enum": ["interactive", "normal", "batch", null] },
+        "vantage": { "type": ["string", "null"], "description": "host:<id> | relay:<id> | region:<r> | client" },
+        "region": { "type": ["string", "null"] },
+        "policy_regions": { "type": ["array", "null"], "items": { "type": "string" } },
+        "selector": { "type": ["object", "null"], "additionalProperties": { "type": "string" } },
+        "locality_host": { "type": ["string", "null"] }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "description": "EVERY candidate considered, winner included. A filtered candidate is a ROW with a reason, never an omission — the absent row is exactly what stops a reader from saying 'it should have gone to X'.",
+      "items": {
+        "type": "object",
+        "required": ["id", "outcome", "reason"],
+        "additionalProperties": true,
+        "properties": {
+          "id": { "type": "string", "description": "target_id / device_id / route key — the emitter's own id." },
+          "host_id": { "type": ["string", "null"] },
+          "device_id": { "type": ["string", "null"] },
+          "state": { "type": ["string", "null"], "description": "Membership state as known." },
+          "ready": { "type": ["boolean", "null"] },
+          "distance_ms": { "type": ["number", "null"], "description": "From the vantage; null = unknown." },
+          "distance_band": { "type": ["string", "null"], "enum": ["<50", "<200", "<600", ">=600", "unknown", null] },
+          "load": {
+            "type": ["object", "null"],
+            "description": "null = NO OPINION, which is not the same as idle.",
+            "additionalProperties": true,
+            "properties": {
+              "in_flight": { "type": ["integer", "null"] },
+              "pressure": { "type": ["number", "null"] },
+              "source": { "type": ["string", "null"], "enum": ["server", "leases", null] }
+            }
+          },
+          "resident": { "type": ["boolean", "null"] },
+          "region": { "type": ["string", "null"] },
+          "inputs_at": {
+            "type": ["number", "null"],
+            "description": "When these inputs were measured. Staleness is a first-class fact: a rank built on a 40 s old reading is a different decision from one built on a 2 s old reading."
+          },
+          "outcome": { "type": "string", "enum": ["chosen", "ranked", "filtered"] },
+          "rank": { "type": ["integer", "null"] },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The term that placed it, or the first rule that eliminated it: 'band<50ms, in_flight=0' / 'filtered: state=suspect'."
+          }
+        }
+      }
+    },
+    "chosen": { "type": ["string", "null"] },
+    "reason": { "type": ["string", "null"], "description": "Why the winner won, in a sentence a human can read." },
+    "ttl_s": { "type": ["number", "null"], "description": "For a rank: how long it was valid." },
+    "parent_decision_id": { "type": ["string", "null"] },
+    "truncated": {
+      "type": ["integer", "null"],
+      "description": "Candidates dropped to keep the record under its size cap."
+    },
+    "outcome": {
+      "type": ["object", "null"],
+      "description": "Filled by a later event joined on decision_id. A decision with no outcome after ttl_s x 10 is 'unknown', which is itself a finding.",
+      "additionalProperties": true,
+      "properties": {
+        "status": { "type": "string", "enum": ["ok", "failed", "failover", "timeout", "unknown"] },
+        "latency_ms": { "type": ["number", "null"] },
+        "served_by": { "type": ["string", "null"] },
+        "failover_from": { "type": ["string", "null"] },
+        "recorded_at": { "type": ["number", "null"] }
+      }
+    }
+  }
+}

@@ -11,6 +11,14 @@ loads a heavy unit:
     POST /admit  {"kind": "align"}   -> {"granted": true, "device_id": "...", "plan": "..."}
     GET  /status                      -> per-node residence snapshot
     GET  /plan                        -> dry-run desired plan (no dispatch)
+    GET  /fleet                       -> the whole-fleet view (see fleet_view())
+
+The same process runs as a FLEET BROKER with ``LIVESTACK_DISPATCH=observe``:
+peers on every host, plans over all of them, and dispatches nothing. That is the
+safety property — one card, one master — and it is proven by absence: no
+``[hostbroker] evict``/``warm`` line may appear in a fleet broker's journal while
+the host brokers' own journals keep showing theirs. See
+``_plans/fleet-broker.md``.
 
 Run:  python -m livestack_node.hostd
 Config via env:
@@ -27,6 +35,17 @@ Config via env:
     LIVESTACK_PROBES     health probes for hosted devices:
                          {"buildhost-a": {"cmd": "docker info", "interval_s": 60}}
     LIVESTACK_LEASE_TTL_S hosted-lease expiry without heartbeats (default 120)
+    LIVESTACK_DISPATCH   "apply" (default) = a host broker, warms and evicts its
+                         own host's units. "observe" = a FLEET broker: same
+                         planning, same /fleet view, dispatches NOTHING.
+    LIVESTACK_CAPABILITY_TTL  seconds a node's /capability descriptor is cached
+                         for the /fleet view (default 15). /fleet is a poll
+                         surface and probes to Nanjing cost 0.5-1.5s each.
+    LIVESTACK_LEDGER     "0" disables decision-ledger emission entirely
+    LIVESTACK_LEDGER_DIR where ledgers are written (default ~/.cache/livestack)
+    LIVESTACK_LEDGER_MAX_MB / _FILES / _AGE_DAYS   the bound. AGE_DAYS is unset
+                         by default and unset means the age window is DISABLED —
+                         a delete-shaped bound must never default to deleting.
 """
 from __future__ import annotations
 
@@ -57,7 +76,8 @@ DEFAULT_FOOTPRINTS = {"asr": 5_070_913_536, "align": 5_295_308_800,
 
 def build_broker(peer_urls: List[str], device_config=None,
                  default_vram_gb: float = 24.0, default_reserved_gb: float = 2.0,
-                 membership=None, extra_units=None) -> HostBroker:
+                 membership=None, extra_units=None, dispatch: bool = True,
+                 ledger=None, emitter_id: str = "host-broker") -> HostBroker:
     """Federated by default: devices are DISCOVERED from the peers (one per reported
     device_id, across however many hosts), sized from device_config[device_id] or the
     default. Point peer_urls at nodes on several hosts and the same broker plans and
@@ -69,7 +89,10 @@ def build_broker(peer_urls: List[str], device_config=None,
                       default_capacity={"vram_bytes": int(default_vram_gb * GB),
                                         "reserved": int(default_reserved_gb * GB)},
                       clock=time.monotonic, log=lambda m: print(m, flush=True),
-                      membership=membership, extra_units=extra_units)
+                      membership=membership, extra_units=extra_units,
+                      dispatch=dispatch, ledger=ledger,
+                      emitter="host-broker" if dispatch else "fleet-broker",
+                      emitter_id=emitter_id)
 
 
 def build_app(broker: HostBroker):
@@ -187,6 +210,18 @@ def build_app(broker: HostBroker):
                            "probe": probe_state.get(did)}
         return {"peers": out, "membership": broker.membership_snapshot(),
                 "last_evicted_at": state["last_evicted_at"], "hosted": hosted}
+
+    @app.get("/fleet")
+    def fleet():
+        """The whole-fleet view: every node the broker knows, grouped by host,
+        with membership state, measured probe distance, readiness and load.
+
+        An absence is a ROW, never a gap — a peer that cannot be read still
+        appears with its state, its age and its last error. A view that omits
+        what it cannot reach can only report health, which is not what anyone
+        opens it to find out.
+        """
+        return broker.fleet_view()
 
     @app.get("/plan")
     def plan_preview():
@@ -325,19 +360,48 @@ def main():
         prune_after_s=float(prune_env) if prune_env else None,
         max_peers=int(os.environ.get("LIVESTACK_MAX_PEERS", "32")),
     )
+    # apply (default) = host broker; observe = fleet broker. The default is what
+    # keeps every existing deployment byte-for-byte unchanged.
+    dispatch = os.environ.get("LIVESTACK_DISPATCH", "apply").strip().lower() != "observe"
+    port = int(os.environ.get("LIVESTACK_BROKER_PORT", "8799"))
+    host_id = os.environ.get("LIVESTACK_HOST_ID", "").strip() or _hostname()
+    emitter_id = f"{host_id}:{port}"
+    from .ledger import ledger_from_env
+    ledger = ledger_from_env(
+        "decisions-" + host_id if dispatch else "fleet-decisions",
+        # The fleet broker sees every host, so it writes more: 64 MiB x 4 to the
+        # host broker's 32 x 4. Both are bounded by the same writer; see rule 10
+        # and `_plans/decision-ledger.md` §6.
+        32 if dispatch else 64,
+        log=lambda m: print(m, flush=True),
+    )
     broker = build_broker(
         peer_urls, device_config=device_config,
         default_vram_gb=float(os.environ.get("LIVESTACK_VRAM_GB", "24")),
         default_reserved_gb=float(os.environ.get("LIVESTACK_RESERVED_GB", "2")),
         membership=membership,
         extra_units=extra_units,
+        dispatch=dispatch, ledger=ledger, emitter_id=emitter_id,
     )
     import uvicorn
-    port = int(os.environ.get("LIVESTACK_BROKER_PORT", "8799"))
-    print(f"[harmony] broker on :{port} over {len(broker.peers)} seeded peers "
-          f"(nodes self-register at POST /peers; GET /peers shows membership)",
-          flush=True)
+    role = "host broker" if dispatch else "fleet broker (observe-only)"
+    print(f"[harmony] {role} on :{port} over {len(broker.peers)} seeded peers "
+          f"(nodes self-register at POST /peers; GET /peers shows membership; "
+          f"GET /fleet shows the fleet)", flush=True)
+    if ledger is not None:
+        print(f"[harmony] decision ledger -> {ledger.path} "
+              f"({ledger.max_bytes // (1024 * 1024)} MiB x {ledger.max_files}"
+              + (f", {ledger.max_age_s / 86400:.0f}d" if ledger.max_age_s
+                 else ", age window disabled") + ")", flush=True)
     uvicorn.run(build_app(broker), host="0.0.0.0", port=port)
+
+
+def _hostname() -> str:
+    import socket
+    try:
+        return socket.gethostname().split(".")[0]
+    except Exception:
+        return "host"
 
 
 if __name__ == "__main__":

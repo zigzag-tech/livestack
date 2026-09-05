@@ -102,10 +102,15 @@ class PeerRoster:
 
     def __init__(self, policy: Optional[MembershipPolicy] = None,
                  clock: Optional[Callable[[], float]] = None,
-                 log: Callable[[str], None] = lambda *_: None):
+                 log: Callable[[str], None] = lambda *_: None,
+                 on_transition: Optional[Callable[[PeerRecord, str, str], None]] = None):
         self.policy = policy or MembershipPolicy()
         self._clock = clock or time.monotonic
         self._log = log
+        # Called with (record, old_state, new_state) on each REPORTED change —
+        # the same edge the log line rides, so a ledger emitter cannot become a
+        # per-tick emitter by accident. "Still gone" is not an event here either.
+        self._on_transition = on_transition
         self._records: Dict[str, PeerRecord] = {}
 
     # -- population ----------------------------------------------------------
@@ -190,6 +195,12 @@ class PeerRoster:
         else:
             self._log(f"[membership] {rec.key} {old} → {new_state} "
                       f"(unseen {rec.age(self._clock()):.0f}s)")
+        if self._on_transition is not None:
+            try:
+                self._on_transition(rec, old, new_state)
+            except Exception as exc:
+                # Observability must never take membership with it.
+                self._log(f"[membership] transition hook failed: {exc}")
 
     def tick(self) -> None:
         """Re-evaluate every peer and log whatever changed.
