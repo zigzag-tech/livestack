@@ -483,17 +483,50 @@ wrong eviction is another host's live engine.
 
 ---
 
-## 8. Open decisions for the owner
+## 8. Decisions — made by the owner 2026-09-05
 
-1. **Hub ↔ fleet path (Phase 2):** hub on the tailnet, or fleet pushes via the
-   daemon channel? (Design prefers push.)
-2. **Fleet broker host:** xc-tower-ubuntu as proposed, or a dedicated small
-   node? It is soft state, so this is a latency/vantage question, not
-   availability.
-3. **Ranking TTL** default 60 s — acceptable staleness for interactive routing?
-4. **Phase 5 at all**, and the clean-run period before it.
-5. **`region` for xc-tower-ubuntu's engines** in the hub grants — currently
-   `na`; confirm the mac is `na` too so they compete as a pair.
+Implementers: these are settled. Do not re-open them in a PR; if one turns
+out to be wrong, say so in the PR and let the owner re-decide.
+
+1. **Hub ↔ fleet path: the fleet broker PUSHES rankings to the hub over the
+   daemon's authenticated outbound channel** — the road speech-capacity
+   announces already travel. The hub stays off the tailnet. Concretely: the
+   xc-tower-ubuntu daemon gains a `fleet_rank` message (same shape as the
+   `/fleet/rank` response, one per `(kind, region)`, on the rank TTL cadence)
+   that the hub stores in memory with `generated_at`/`ttl_s` and the manifest
+   builder reads. A daemon that stops sending leaves the hub with an expired
+   ranking, which it discards. Putting the hub on the tailnet is NOT part of
+   this work.
+2. **Fleet broker host: xc-tower-ubuntu.** Outside the GFW, reaches every
+   node directly. Phase 2's links matrix removes the single-vantage bias.
+3. **Ranking TTL: 60 s.** A starting number, not a principle. A stale ranking
+   costs one bad first guess, because the client picker still probes and
+   fails over. Tune from ledger findings (`decided_on_stale_inputs`), not
+   from intuition.
+4. **Phase 5 is deferred.** Phases 1–3 run first; the owner decides later
+   whether advisory-only is already enough and, if not, what "clean" means
+   before the fleet may warm across hosts. Never evict, regardless.
+5. **Region grants are STALE and must be fixed in Phase 0 — this was
+   "confirm" and turned out to be "fix."** On the hub,
+   `/etc/benchday/hub.env` line 60:
+
+       BENCHDAY_SPEECH_TARGET_REGIONS=qwen-sg=apac-sg,zz-tower0-asr=asia-cn,xc-mac-studio-asr=asia-cn,xc-mac-studio-tts=asia-cn,zz-tower0-tts=asia-cn
+
+   labels the Mac's engines `asia-cn` from before it moved to Toronto
+   (2026-08), and does not list `xc-tower-ubuntu-asr` /
+   `xc-tower-ubuntu-gpu1-asr` at all, so `engineRegion()` in
+   `hub/src/speech_relay.ts` gives them the default — also `asia-cn`. Every
+   Toronto-area engine is currently granted as China. They do compete as a
+   pair, but under the wrong policy region: an NA account whose policy
+   excludes `asia-cn` cannot reach its own local engines, and a CN account
+   can be routed to Toronto. **Required change (operator env, hub restart):**
+
+       BENCHDAY_SPEECH_TARGET_REGIONS=qwen-sg=apac-sg,zz-tower0-asr=asia-cn,zz-tower0-tts=asia-cn,xc-mac-studio-asr=na,xc-mac-studio-tts=na,xc-tower-ubuntu-asr=na,xc-tower-ubuntu-gpu1-asr=na
+
+   Add this as Phase 0 item **0.7** in the handoff list. Region is operator
+   policy, so this is the operator's line to change — recorded here, not
+   changed by the architect. Verify with `GET /v1/speech/capacity`
+   (authenticated): each of the four should show `processing_region: na`.
 
 ## 9. Handoff — task list for implementing agents
 
@@ -505,6 +538,7 @@ Each is one PR; each names its tests and its ledger obligation.
 - [ ] 0.4 `in_flight` contract + `in_flight_source` — `serve.py`, `facade.py`, migrate four servers, tests
 - [ ] 0.5 meter/device agreement — `meters.py`, `serve.py`, tests
 - [ ] 0.6 port picker fixes to `route.rs` + wasm — Rust tests ported from `load_distribution_test.dart`
+- [ ] 0.7 fix stale region grants on the hub (§8.5): Mac + xc-tower-ubuntu engines → `na`; hub restart; verify via `/v1/speech/capacity`. Operator env, one line, must precede Phase 2 or the ranking will be filtered by the wrong policy
 - [ ] 1 fleet broker observe mode + `probe_ms` + `capability()` + `/fleet` — `hostbroker.py`, `hostd.py`, tests; **ledger emitter** (`decision-ledger.md` §4.2); deploy `livestack-fleetd` on xc-tower-ubuntu; open mac polytts bind; run §3.4
 - [ ] 2a links matrix — host brokers `LIVESTACK_LINK_PEERS`, `/status.links`; relay per-target probe latency on `/inventory`
 - [ ] 2b `fleet_rank.py` + `GET /fleet/rank` — pure, tests; **ledger emitter**
