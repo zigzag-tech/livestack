@@ -528,17 +528,27 @@ out to be wrong, say so in the PR and let the owner re-decide.
    changed by the architect. Verify with `GET /v1/speech/capacity`
    (authenticated): each of the four should show `processing_region: na`.
 
+   **APPLIED 2026-09-05** on `root@benchday.zztech.io`, hub restarted, previous
+   file kept at `/etc/benchday/hub.env.bak-region-grants-20260905-093116`. One
+   correction to the verification step: the grants surface on **`GET
+   /v1/speech/routes`**, not `/v1/speech/capacity` — the latter is the
+   daemon-announced capacity roster, a different mechanism whose rows carry
+   `processingRegion: "own"` and are unaffected by this env. Measured after the
+   restart: `xc-mac-studio-asr`, `xc-mac-studio-tts`, `xc-tower-ubuntu-asr` and
+   `xc-tower-ubuntu-gpu1-asr` all `na`; `zz-tower0-*` `asia-cn`; `qwen-sg`
+   `apac-sg`.
+
 ## 9. Handoff — task list for implementing agents
 
 Each is one PR; each names its tests and its ledger obligation.
 
-- [ ] 0.1 membership: announce registers, snapshot certifies — `membership.py`, `peer-membership.md`, tests
-- [ ] 0.2 registrar self-probe — `announce.py`, new `test_announce.py`
-- [ ] 0.3 node-supplied `device_id`; units keyed `(kind, peer)` — `facade.py`, `serve.py`, `hostbroker.py`, tests; migrate polyasr/polytts/harmony-llm units to pass nothing (derived) and verify
-- [ ] 0.4 `in_flight` contract + `in_flight_source` — `serve.py`, `facade.py`, migrate four servers, tests
-- [ ] 0.5 meter/device agreement — `meters.py`, `serve.py`, tests
-- [ ] 0.6 port picker fixes to `route.rs` + wasm — Rust tests ported from `load_distribution_test.dart`
-- [ ] 0.7 fix stale region grants on the hub (§8.5): Mac + xc-tower-ubuntu engines → `na`; hub restart; verify via `/v1/speech/capacity`. Operator env, one line, must precede Phase 2 or the ranking will be filtered by the wrong policy
+- [x] 0.1 membership: announce registers, snapshot certifies — `membership.py`, `peer-membership.md`, tests
+- [x] 0.2 registrar self-probe — `announce.py`, new `test_announce.py`
+- [x] 0.3 node-supplied `device_id`; units keyed `(kind, peer)` — `facade.py`, `serve.py`, `hostbroker.py`, tests; migrate polyasr/polytts/harmony-llm units to pass nothing (derived) and verify
+- [x] 0.4 `in_flight` contract + `in_flight_source` — `serve.py`, `facade.py`, migrate four servers, tests
+- [x] 0.5 meter/device agreement — `meters.py`, `serve.py`, tests
+- [x] 0.6 port picker fixes to `route.rs` + wasm — Rust tests ported from `load_distribution_test.dart`
+- [x] 0.7 fix stale region grants on the hub (§8.5): Mac + xc-tower-ubuntu engines → `na`; hub restart; verify via `/v1/speech/capacity`. Operator env, one line, must precede Phase 2 or the ranking will be filtered by the wrong policy
 - [ ] 1 fleet broker observe mode + `probe_ms` + `capability()` + `/fleet` — `hostbroker.py`, `hostd.py`, tests; **ledger emitter** (`decision-ledger.md` §4.2); deploy `livestack-fleetd` on xc-tower-ubuntu; open mac polytts bind; run §3.4
 - [ ] 2a links matrix — host brokers `LIVESTACK_LINK_PEERS`, `/status.links`; relay per-target probe latency on `/inventory`
 - [ ] 2b `fleet_rank.py` + `GET /fleet/rank` — pure, tests; **ledger emitter**
@@ -548,6 +558,35 @@ Each is one PR; each names its tests and its ledger obligation.
 - [ ] 4 multi-URL `LIVESTACK_BROKER_URL`
 - [ ] 5 warm-only cross-host, gated on owner's decision
 - [ ] docs: `HARMONY.md` gains a "Fleet" section; benchday `docs/route-load-balancing.md` points here; storage-bounds inventory rows for every new store (`decision-ledger.md` §6)
+
+## 9a. What Phase 0 exposed (2026-09-05) — open, not fixed here
+
+Implementing 0.3/0.4/0.7 made three pre-existing facts visible. None is in the
+scope of the items that revealed them, and each is an operator decision.
+
+1. **`polyasr-b` is on card 0, not card 1.** Its systemd unit is described as
+   "polyasr server B (CUDA cuda:1) — xc-tower-ubuntu GPU1" and sets
+   `CUDA_VISIBLE_DEVICES=0`. With derived device ids this is now legible rather
+   than inferred: 8766 and 8767 both report `xc-tower-ubuntu/4bac2869`, while
+   harmony-llm on 8188 reports `.../a46c4c2e`. So the two ASR engines share one
+   3090 and the second card holds only the LLM — which is the opposite of what
+   the fleet's own naming says, and it means "two engines compete as a pair"
+   (§8.5) is true of latency but not of capacity. The hub compounds the naming:
+   `BENCHDAY_ASR_TARGETS` calls 8767 `xc-tower-ubuntu-gpu1-asr`.
+2. **The fake `host_id`s can now be retired, but they are load-bearing.**
+   `POLYASR_HOST_ID=xc-tower-ubuntu-b` and
+   `HARMONY_LLM_HOST_ID=xc-tower-ubuntu-gpu1` were workarounds for the
+   `{host_id}/gpu0` template and are no longer needed for device identity. They
+   are NOT free to change: the hub's speech target ids and the region grants
+   fixed in 0.7 are keyed to those names. Retiring them is one coordinated
+   operator change, not a node-side edit.
+3. **There is no `xc-tower-ubuntu-tts` speech target.** `BENCHDAY_TTS_TARGETS`
+   is unset on the hub, so `parseDirectTtsTargets` falls back to its two-node
+   default (`xc-mac-studio-tts`, `zz-tower0-tts`) — and polytts has been running
+   on xc-tower-ubuntu, unroutable, the whole time. Meanwhile the Mac's polytts
+   is reported `unreachable: ...127.0.0.1:8100` by its own daemon, i.e. not
+   running at all, which makes `zz-tower0-tts` the only live TTS target for an
+   NA account whose policy excludes `asia-cn`.
 
 ## 10. What this deliberately is not
 
