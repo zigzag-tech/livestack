@@ -245,9 +245,22 @@ Suspect/mia thresholds are longer than a host broker's (45/600) because
 cross-mesh probes to Nanjing take 0.5–1.5 s and DERP hiccups are routine; a
 fleet broker that flaps every peer on every hiccup is noise.
 
-**Deployment prerequisite:** xc-mac-studio polytts binds `127.0.0.1` only —
-change its bind to `0.0.0.0` (mesh-reachable; it is already firewalled by the
-tailnet) or the fleet cannot see it.
+**Deployment prerequisite — the diagnosis in this paragraph was WRONG, and the
+real cause is worse.** xc-mac-studio's polytts does not bind `127.0.0.1`: its
+`server.py` has called `uvicorn.run(app, host="0.0.0.0", port=PORT)` all along.
+The reason the fleet cannot see it is that the process **never finishes
+starting**. Measured 2026-09-05: PID 96850, 12 h 20 m elapsed, **3.17 seconds of
+CPU**, log untouched for 12 hours, stopped at `Loading MLX model
+Qwen3-TTS-12Hz-1.7B-Base-8bit …` — blocked, not working. (The elapsed-vs-CPU
+comparison is benchday's 90-second wedge triage, `docs/daemon-startup-wedge-
+diagnosis.md`; it applies verbatim here.) Its log also shows `[livestack]
+reported for duty … as http://127.0.0.1:8100/livestack` from a process that has
+never bound anything — which is exactly what Phase 0.2 stops, and the Mac has
+not been redeployed yet.
+
+So this is not a bind to change; it is a wedged service to fix, and it is
+recorded in §9a rather than done here. The fleet broker lists it correctly
+meanwhile: a row, `suspect` then `mia`, with `Connection refused`.
 
 ### 3.3 `GET /fleet` shape
 
@@ -287,6 +300,18 @@ until measured. `load` is absent when the node reports none.
 
 1. `curl :8801/fleet` lists **three hosts** and nine nodes; `probe_ms` for
    tower0 nodes is ≥ 10× that of local nodes.
+
+   **Measured 2026-09-05: nine nodes, and SIX hosts, not three.** The node count
+   and the distance ratio pass with room — local ~2 ms, xc-mac-studio ~13 ms,
+   zz-tower0 ~530 ms, a ratio of ~250x against a bar of 10x. The host count does
+   not, and the reason is §9a item 2: `xc-tower-ubuntu-b` and
+   `xc-tower-ubuntu-gpu1` are FAKE host ids, so one machine appears as three,
+   and one physical card appears as two devices (`xc-tower-ubuntu/4bac2869` and
+   `xc-tower-ubuntu-b/4bac2869` — same UUID suffix, because it is the same
+   card). The sixth is `unknown`, which is correct: a node that has never been
+   snapshotted has no host to be grouped under, and the view says so rather than
+   guessing. This verification is what turns the workaround from a note into a
+   visible cost.
 2. `journalctl -u livestack-fleetd` contains **no** `[hostbroker] evict` or
    `warm` lines over 10 minutes, while the host brokers' journals continue to
    show their own reconcile activity. (Observe-only is proven by absence.)
@@ -299,6 +324,23 @@ until measured. `load` is absent when the node reports none.
 5. Every decision-ledger record the fleet broker is required to emit in this
    phase (see `decision-ledger.md` §4.2) appears in its ledger with the fields
    named there.
+
+**Results, 2026-09-05, all five run against the live deployment:**
+
+| # | result |
+|---|---|
+| 1 | nine nodes; probe_ms 2 ms local / 13 ms mac / 530 ms tower0 = ~250x (bar: 10x). Six hosts, not three — see above |
+| 2 | **zero** `evict`/`warm`/`reclaim` lines over a full 10 minutes, while the broker logged five real membership transitions in the same window. Observe-only proven by absence, with the host broker's own journal for contrast |
+| 3 | polyasr-b stopped ⇒ `suspect` at 61 s with `Connection refused`; restarted ⇒ `fresh` 30 s later at probe 2.1 ms. The `mia` edge is covered by the mac's genuinely-dead polytts rather than by taking a live ASR engine down for 15 minutes |
+| 4 | a process that ONLY announces — 17 announces over 80 s to a port with nothing behind it — went `fresh → suspect` on the normal clock. Registered, never certified |
+| 5 | one `observe` record per transition (not per tick: the reconcile loop ran ~120 times), every record schema-valid, each naming the state change and the last probe error |
+
+Running §3.4 also found a defect on the path it exercises: `sweep_leaks` armed
+its per-peer throttle *after* touching `peer.leak`, which on a `RestPeer` is a
+property that HTTP-GETs `/residence` — so a down peer raised first and the
+throttle never armed. The host broker had been printing ~17k "reclaim failed"
+lines a day about a chipgen that has been gone for hours. Fixed; the same window
+now shows zero.
 
 ### 3.5 Tests
 
@@ -549,7 +591,7 @@ Each is one PR; each names its tests and its ledger obligation.
 - [x] 0.5 meter/device agreement — `meters.py`, `serve.py`, tests
 - [x] 0.6 port picker fixes to `route.rs` + wasm — Rust tests ported from `load_distribution_test.dart`
 - [x] 0.7 fix stale region grants on the hub (§8.5): Mac + xc-tower-ubuntu engines → `na`; hub restart; verify via `/v1/speech/capacity`. Operator env, one line, must precede Phase 2 or the ranking will be filtered by the wrong policy
-- [ ] 1 fleet broker observe mode + `probe_ms` + `capability()` + `/fleet` — `hostbroker.py`, `hostd.py`, tests; **ledger emitter** (`decision-ledger.md` §4.2); deploy `livestack-fleetd` on xc-tower-ubuntu; open mac polytts bind; run §3.4
+- [x] 1 fleet broker observe mode + `probe_ms` + `capability()` + `/fleet` — `hostbroker.py`, `hostd.py`, tests; **ledger emitter** (`decision-ledger.md` §4.2); deploy `livestack-fleetd` on xc-tower-ubuntu; open mac polytts bind; run §3.4
 - [ ] 2a links matrix — host brokers `LIVESTACK_LINK_PEERS`, `/status.links`; relay per-target probe latency on `/inventory`
 - [ ] 2b `fleet_rank.py` + `GET /fleet/rank` — pure, tests; **ledger emitter**
 - [ ] 2c hub consumes rank into manifest (benchday `speech_relay.ts`), region filter stays hub-side, `fleet_rank` field, tests with fake fleet; decide push vs tailnet
