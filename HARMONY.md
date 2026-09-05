@@ -376,6 +376,7 @@ released in `finally`), and keeps non-GPU work (LLM digest, embeddings) off the 
 | `LIVESTACK_PEER_MIA_SECONDS` | `600` | unseen before a peer is `mia` |
 | `LIVESTACK_PEER_PRUNE_SECONDS` | — | unset ⇒ pruning DISABLED (delete-shaped bound) |
 | `LIVESTACK_DEVICE_ID` | derived | this node's device id; derived from the CUDA device UUID / MLX when unset |
+| `LIVESTACK_BROKER_URL` | `http://127.0.0.1:8799` | read by NODES: a **comma list** of brokers to report for duty to. One entry is a node and its host broker; two is the fleet case. An announce reaches all of them and fails only if none answered — a fleet broker being down must not make a node look unregistered to the broker that arbitrates its card |
 | `LIVESTACK_LEDGER` | `1` | `0` disables decision-ledger emission |
 | `LIVESTACK_LEDGER_DIR` | `~/.cache/livestack` | where ledgers are written |
 | `LIVESTACK_LEDGER_MAX_MB` / `_FILES` / `_AGE_DAYS` | `32`/`4`/— | the ledger bound. `_AGE_DAYS` unset ⇒ age window DISABLED |
