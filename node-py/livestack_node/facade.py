@@ -41,8 +41,14 @@ def _load_report(coordinator, status, device_meter):
     if device_meter is not None:
         try:
             mem = device_meter() or {}
-            cap = int(mem.get("capacity") or 0)
-            free = int(mem.get("free") or 0)
+            # meters.py returns {"capacity": {"vram_bytes": N}, "free": {...}} —
+            # the resource-map shape the planner consumes, NOT flat ints. Read it
+            # as written rather than assuming; the first cut of this function
+            # assumed flat ints, and int() on a dict raised straight into the
+            # except below, so a working CUDA meter reported no pressure at all
+            # and nothing said why.
+            cap = int((mem.get("capacity") or {}).get("vram_bytes") or 0)
+            free = int((mem.get("free") or {}).get("vram_bytes") or 0)
             if cap > 0:
                 report["device"] = {"capacity": cap, "free": free}
                 # Fraction of the device in use, measured at the driver, so it

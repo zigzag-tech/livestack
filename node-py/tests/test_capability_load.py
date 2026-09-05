@@ -23,6 +23,15 @@ from fastapi import FastAPI  # noqa: E402
 from livestack_node import ManagedUnit, ResidencyPolicy, attach, noop_free  # noqa: E402
 
 
+def _mem(capacity, free):
+    """The shape meters.py actually returns. Writing this out rather than a flat
+    dict is the whole point of these tests: the first implementation assumed
+    flat ints, int() on the nested dict raised, and the except swallowed it — so
+    a perfectly working CUDA meter silently reported no pressure in production.
+    """
+    return {"capacity": {"vram_bytes": capacity}, "free": {"vram_bytes": free}}
+
+
 def make_app(device_meter="absent", readiness=None):
     units = {
         "asr": ManagedUnit("asr", loader=lambda: "m", freer=noop_free,
@@ -53,7 +62,7 @@ def cap(app):
 
 
 def test_load_reports_in_flight_and_pressure():
-    app, _ = make_app(device_meter=lambda: {"capacity": 100, "free": 25})
+    app, _ = make_app(device_meter=lambda: _mem(100, 25))
     body = cap(app)
     load = body["load"]
     assert load["in_flight"] == 0
@@ -63,7 +72,7 @@ def test_load_reports_in_flight_and_pressure():
 
 
 def test_a_real_lease_counts_as_in_flight():
-    app, _ = make_app(device_meter=lambda: {"capacity": 100, "free": 100})
+    app, _ = make_app(device_meter=lambda: _mem(100, 100))
 
     async def go():
         async with client_for(app) as c:
@@ -79,7 +88,7 @@ def test_usage_leases_do_not_count_as_work():
     # alive. They mark recency, not work — counting them would leave a node that
     # served one request ten minutes ago looking permanently busy, which is the
     # exact misreport that would strand it.
-    app, manager = make_app(device_meter=lambda: {"capacity": 100, "free": 100})
+    app, manager = make_app(device_meter=lambda: _mem(100, 100))
     manager.ensure("asr")          # takes a __usage__ lease, not a work lease
     assert cap(app)["load"]["in_flight"] == 0
 
@@ -105,7 +114,7 @@ def test_server_supplied_load_is_merged_not_replaced():
     # polyasr knows its own concurrent streams better than we can infer from
     # leases. Its answer wins on the keys it supplies, and the lease/meter facts
     # it does not supply survive.
-    app, _ = make_app(device_meter=lambda: {"capacity": 100, "free": 40},
+    app, _ = make_app(device_meter=lambda: _mem(100, 40),
                       readiness=lambda: {"ready": True, "load": {"in_flight": 7}})
     load = cap(app)["load"]
     assert load["in_flight"] == 7            # server's count wins
