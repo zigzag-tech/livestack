@@ -103,7 +103,7 @@ def targets_from_view(view: dict, kind: str, vantage: str = "direct",
                 capacity={"concurrency": free},
                 cost=CostModel(),          # a machine we already own is sunk cost
                 running=True, elastic=False, labels=labels,
-                distance_ms=dist,
+                distance_ms=dist, utilization=load_value(load),
             ))
             # Kept alongside so the ledger can show what the scheduler saw.
             rejected.append(Candidate(
