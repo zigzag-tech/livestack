@@ -166,6 +166,16 @@ class HostBroker:
         # from where the broker sits — which is also its limitation, and what
         # Phase 2's links matrix exists to remove.
         self.probe_ms: Dict[str, float] = {}
+        # Phase 2: the links MATRIX. probe_ms above is distance from where this
+        # broker sits — a star, and a client in Nanjing must not be ranked by
+        # Vaughan's view of Nanjing. Each host broker measures its own distance
+        # to the other hosts and publishes it; the fleet broker collects them all.
+        # `link_ms` is this broker's own row; `peer_links` is everyone else's.
+        # An unmeasured pair has NO OPINION rather than a default.
+        self.link_peers: List[str] = []
+        self.link_ms: Dict[str, float] = {}
+        self.peer_links: Dict[str, Dict[str, float]] = {}
+        self.host_id: Optional[str] = None
         self._capabilities: Dict[str, dict] = {}
         self._capability_at: Dict[str, float] = {}
         self.capability_ttl_s = float(os.environ.get("LIVESTACK_CAPABILITY_TTL", "15"))
@@ -614,13 +624,66 @@ class HostBroker:
                 node["units"] = units
             host = (cap or {}).get("host_id") or row.get("host_id") or "unknown"
             rows_by_host.setdefault(host, []).append(node)
+        matrix = self.links_view()
         return {
             "dispatch": self.dispatch,
             "peers": len(self.peers),
             "generated_at": now,
-            "hosts": {h: {"nodes": sorted(n, key=lambda r: r["peer"])}
-                      for h, n in sorted(rows_by_host.items())},
+            "vantage_host": self.host_id,
+            "hosts": {
+                h: ({"nodes": sorted(n, key=lambda r: r["peer"])}
+                    | ({"links": matrix[h]} if h in matrix else {}))
+                for h, n in sorted(rows_by_host.items())
+            },
         }
+
+
+    # -- links (Phase 2: from a star to a matrix) ----------------------------
+    def measure_links(self, now: Optional[float] = None) -> Dict[str, float]:
+        """Time a cheap call to each peer BROKER and learn its own link row.
+
+        `/peers` and not `/status`, deliberately: `/status` refreshes every node
+        on the remote host, so a collector polling it would multiply one host's
+        probe cost by the number of collectors. `/peers` is roster state the
+        broker already holds. The same response carries the remote host's own
+        `links`, so one GET buys both the timing and its row of the matrix.
+
+        A link that cannot be measured is left ALONE, not zeroed: no opinion is
+        the correct answer for a pair we failed to measure, and a zero would
+        read as "adjacent".
+        """
+        for entry in self.link_peers:
+            # `url` or `host_id=url`. The explicit form exists because a broker
+            # too old to report its own host_id would otherwise key the matrix by
+            # URL, and `vantage=host:<id>` could never resolve it — so the
+            # operator can name a host before its broker is upgraded, and the
+            # remote's own answer wins once it can give one.
+            named, base = (entry.split("=", 1) if "=" in entry else (None, entry))
+            base = base.rstrip("/")
+            started = time.monotonic()
+            try:
+                doc = _http(f"{base}/peers", timeout=5)
+            except Exception as e:
+                self._last_probe_error[base] = str(e)
+                continue
+            ms = (time.monotonic() - started) * 1000.0
+            hid = doc.get("host_id") or named or base
+            prev = self.link_ms.get(hid)
+            self.link_ms[hid] = ms if prev is None else prev * 0.7 + ms * 0.3
+            links = doc.get("links")
+            if isinstance(links, dict):
+                self.peer_links[hid] = {k: float(v) for k, v in links.items()
+                                        if isinstance(v, (int, float))}
+        return dict(self.link_ms)
+
+    def links_view(self) -> Dict[str, Dict[str, float]]:
+        """The full matrix as this broker knows it: every host's own row, plus
+        this broker's row under its own host id. Unmeasured pairs are absent."""
+        out = {h: dict(row) for h, row in self.peer_links.items()}
+        if self.host_id and self.link_ms:
+            out.setdefault(self.host_id, {}).update(
+                {k: round(v, 1) for k, v in self.link_ms.items()})
+        return out
 
     # -- the decision ledger -------------------------------------------------
     def _emit(self, decision: Decision) -> None:
@@ -655,6 +718,33 @@ class HostBroker:
                     + (f", last_error={self._last_probe_error[rec.key]}"
                        if self._last_probe_error.get(rec.key) else "")
                     + ")"),
+        ))
+
+    def emit_rank(self, result: dict) -> None:
+        """One `rank` record per `/fleet/rank` call, with the FULL candidate set.
+
+        Full, including the rows that were filtered out first, because that is
+        the field the operator's question turns on: shown a decision, a future
+        agent must be able to say "it should have gone to X" — and to check
+        itself. If X's row reads `filtered: state=suspect`, the decision was
+        right given what was known. If it reads `band<50ms; in_flight=0`, the
+        reader can go and ask why load was measured the way it was.
+        """
+        if self.ledger is None:
+            return
+        cands = [Candidate(
+            id=c.target_id, host_id=c.host_id, device_id=c.device_id,
+            state=c.state, ready=c.ready, distance_ms=c.distance_ms,
+            distance_band=c.distance_band, load=c.load, region=None,
+            inputs_at=c.inputs_at, outcome=c.outcome, rank=c.rank,
+            reason=c.reason,
+        ) for c in result.get("candidates", [])]
+        self._emit(Decision(
+            emitter=self.emitter, emitter_id=self.emitter_id,
+            kind=result.get("kind"), decision="rank", candidates=cands,
+            chosen=result.get("chosen"), reason=result.get("reason"),
+            ttl_s=result.get("ttl_s"),
+            request={"vantage": result.get("vantage")},
         ))
 
     def _emit_plan(self, world: WorldState, p) -> None:

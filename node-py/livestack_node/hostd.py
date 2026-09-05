@@ -38,6 +38,10 @@ Config via env:
     LIVESTACK_DISPATCH   "apply" (default) = a host broker, warms and evicts its
                          own host's units. "observe" = a FLEET broker: same
                          planning, same /fleet view, dispatches NOTHING.
+    LIVESTACK_LINK_PEERS comma-separated OTHER host brokers' base URLs. Each is
+                         timed on the reconcile loop and its own `links` row is
+                         collected, so the fleet holds a measured MATRIX rather
+                         than one broker's star. Unmeasured pairs have no opinion.
     LIVESTACK_CAPABILITY_TTL  seconds a node's /capability descriptor is cached
                          for the /fleet view (default 15). /fleet is a poll
                          surface and probes to Nanjing cost 0.5-1.5s each.
@@ -188,8 +192,17 @@ def build_app(broker: HostBroker):
     def peers():
         """Membership with per-peer state and how long each has been unseen —
         so 'is that node gone, or did it blip?' is answerable without grepping
-        a log that used to print the same line every 5 seconds."""
-        return {"peers": broker.membership_snapshot()}
+        a log that used to print the same line every 5 seconds.
+
+        Also the CHEAP endpoint, and that is load-bearing: it is what other
+        brokers time to measure the link between hosts, and what they read this
+        broker's own `links` row from. `/status` would refresh every node on this
+        host per caller, so a collector polling it would multiply this host's
+        probe cost by the number of collectors.
+        """
+        return {"host_id": broker.host_id,
+                "peers": broker.membership_snapshot(),
+                "links": {k: round(v, 1) for k, v in broker.link_ms.items()}}
 
     @app.get("/status")
     def status():
@@ -209,7 +222,9 @@ def build_app(broker: HostBroker):
             hosted[did] = {"available": broker.hosted_available.get(did, True),
                            "probe": probe_state.get(did)}
         return {"peers": out, "membership": broker.membership_snapshot(),
-                "last_evicted_at": state["last_evicted_at"], "hosted": hosted}
+                "last_evicted_at": state["last_evicted_at"], "hosted": hosted,
+                "host_id": broker.host_id,
+                "links": {k: round(v, 1) for k, v in broker.link_ms.items()}}
 
     @app.get("/fleet")
     def fleet():
@@ -222,6 +237,25 @@ def build_app(broker: HostBroker):
         opens it to find out.
         """
         return broker.fleet_view()
+
+    @app.get("/fleet/rank")
+    def fleet_rank(kind: str, vantage: str = "direct", ttl_s: float = 60.0):
+        """Where should a `kind` request START, from this vantage.
+
+        Advisory, and bounded: the response carries `generated_at` and `ttl_s`,
+        and a consumer must DISCARD past the TTL rather than downgrade — a stale
+        ranking is worse than none, because none falls back to a working default
+        while stale looks authoritative. A wrong first guess costs one hop; the
+        client picker still probes and fails over.
+
+        Region is NOT applied here. Region is operator policy, the caller holds
+        it (the hub knows an account's allowed regions), and a fleet broker that
+        decided policy would be a second place for it to be wrong.
+        """
+        from .fleet_rank import rank as _rank
+        result = _rank(broker.fleet_view(), kind, vantage=vantage, ttl_s=ttl_s)
+        broker.emit_rank(result)
+        return {k: v for k, v in result.items() if k != "candidates"}
 
     @app.get("/plan")
     def plan_preview():
@@ -278,6 +312,10 @@ def build_app(broker: HostBroker):
                     # Probe BEFORE planning, so this cycle's snapshot plans
                     # against health that is seconds old, not minutes.
                     _run_probes(time.monotonic())
+                    # Time the links to the other hosts. Cheap (one /peers GET
+                    # each) and it is the only distance signal that is not
+                    # measured from this broker's own vantage.
+                    broker.measure_links()
                     p = broker.plan_and_apply([], state["last_evicted_at"])
                     _track(p)
                     if p.of(Evict) or p.of(Load):
@@ -375,6 +413,8 @@ def main():
         32 if dispatch else 64,
         log=lambda m: print(m, flush=True),
     )
+    link_env = os.environ.get("LIVESTACK_LINK_PEERS", "").strip()
+    link_peers = [u.strip().rstrip("/") for u in link_env.split(",") if u.strip()]
     broker = build_broker(
         peer_urls, device_config=device_config,
         default_vram_gb=float(os.environ.get("LIVESTACK_VRAM_GB", "24")),
@@ -383,9 +423,12 @@ def main():
         extra_units=extra_units,
         dispatch=dispatch, ledger=ledger, emitter_id=emitter_id,
     )
+    broker.host_id = host_id
+    broker.link_peers = link_peers
     import uvicorn
     role = "host broker" if dispatch else "fleet broker (observe-only)"
-    print(f"[harmony] {role} on :{port} over {len(broker.peers)} seeded peers "
+    print(f"[harmony] {role} on :{port} as {host_id} over {len(broker.peers)} "
+          f"seeded peers and {len(link_peers)} link peers "
           f"(nodes self-register at POST /peers; GET /peers shows membership; "
           f"GET /fleet shows the fleet)", flush=True)
     if ledger is not None:
