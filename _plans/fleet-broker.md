@@ -439,6 +439,49 @@ for other reasons.
   containing one).
 - Every ranking emits a ledger record (`decision-ledger.md` §4.2).
 
+**Results, 2026-09-05.** The links matrix is live and measured across all three
+GPU hosts. It is asymmetric, which is the whole reason a matrix beats a star:
+
+| from ↓ / to → | xc-tower-ubuntu | xc-mac-studio | zz-tower0 |
+|---|---|---|---|
+| **xc-tower-ubuntu** | — | 16 ms | 1554 ms |
+| **xc-mac-studio** | 12 ms | — | 767 ms |
+| **zz-tower0** | 605 ms | 950 ms | — |
+
+Vantage inversion, verified: from `direct` the order is
+`18:8766, 18:8767, 2:8765, 3:8766`; from `via=host:zz-tower0` it is
+`3:8766 (0 ms), 18:8766 (763 ms), 2:8765 (1393 ms)`. Saturation, verified: with
+`:8766` held at `in_flight=6`, it ranked **below** the idle `:8767` in the same
+band, and returned above it when the burst drained.
+
+Three things the live run showed that the design did not anticipate:
+
+1. **The resting-pressure comparison is not device-comparable, and it currently
+   decides.** Every sample above ranks xc-mac-studio FIRST — 21 ms away — over
+   two engines 2 ms away, because `in_flight` ties at 0 and pressure then
+   decides: 0.156 on Apple unified memory against 0.6501 on a 3090 holding
+   resident models. §4.2's own prose already knows the shape ("two idle engines
+   holding the same model on **identical cards** reported byte-identical
+   pressure") but the formula `max(in_flight/8, pressure)` is applied across
+   *different* hardware, where resting pressure measures how much model is
+   loaded, not any capacity to serve. The client picker is protected from this
+   by `exploreBand` — load only breaks a NEAR-tie in *latency* terms — and a
+   distance BAND is far wider than that (0–50 ms). **Recommendation for the
+   owner, not applied here because §4.2 is settled:** either gate the pressure
+   term the way the picker does (a ratio band inside the distance band), or use
+   pressure only when it exceeds a contention threshold. Implemented as
+   specified meanwhile, so the behaviour above is the design's, not a bug in it.
+2. **`LIVESTACK_CAPABILITY_TTL` bounds how fast a ranking can react**, and 15 s
+   is long next to a ~1 s transcription: catching the saturation flip needed a
+   sample taken inside the burst. That is not a defect — it is the reason §10's
+   first line holds, that this is not a replacement for the client picker — but
+   it should be stated where someone reads the ranking rather than inferred.
+3. **A fake `host_id` makes an engine unrankable from any remote vantage.**
+   `100.64.0.18:8767` reports host `xc-tower-ubuntu-b`, no host has a link row
+   to that name, so from `host:zz-tower0` or `host:xc-mac-studio` it scores
+   `bandunknown` and sorts last — behind engines on the other side of the
+   Pacific. §9a item 2 costs more than a fragmented view.
+
 ---
 
 ## 5. Phase 3 — job admission ("throw a task at it")
@@ -592,8 +635,8 @@ Each is one PR; each names its tests and its ledger obligation.
 - [x] 0.6 port picker fixes to `route.rs` + wasm — Rust tests ported from `load_distribution_test.dart`
 - [x] 0.7 fix stale region grants on the hub (§8.5): Mac + xc-tower-ubuntu engines → `na`; hub restart; verify via `/v1/speech/capacity`. Operator env, one line, must precede Phase 2 or the ranking will be filtered by the wrong policy
 - [x] 1 fleet broker observe mode + `probe_ms` + `capability()` + `/fleet` — `hostbroker.py`, `hostd.py`, tests; **ledger emitter** (`decision-ledger.md` §4.2); deploy `livestack-fleetd` on xc-tower-ubuntu; open mac polytts bind; run §3.4
-- [ ] 2a links matrix — host brokers `LIVESTACK_LINK_PEERS`, `/status.links`; relay per-target probe latency on `/inventory`
-- [ ] 2b `fleet_rank.py` + `GET /fleet/rank` — pure, tests; **ledger emitter**
+- [x] 2a links matrix — host brokers `LIVESTACK_LINK_PEERS`, `/status.links`; relay per-target probe latency on `/inventory`
+- [x] 2b `fleet_rank.py` + `GET /fleet/rank` — pure, tests; **ledger emitter**
 - [ ] 2c hub consumes rank into manifest (benchday `speech_relay.ts`), region filter stays hub-side, `fleet_rank` field, tests with fake fleet; decide push vs tailnet
 - [ ] 3a `distance_ms` + `w_distance` in `fleet_scheduler.py`; `FleetState` from `fleet_view()`; `POST /fleet/admit`; tests; **ledger emitter**
 - [ ] 3b media-corpus digest steps call `/fleet/admit`; fallback path; caller-side ledger record on `fleet_unavailable`

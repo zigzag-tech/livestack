@@ -744,7 +744,8 @@ class HostBroker:
             kind=result.get("kind"), decision="rank", candidates=cands,
             chosen=result.get("chosen"), reason=result.get("reason"),
             ttl_s=result.get("ttl_s"),
-            request={"vantage": result.get("vantage")},
+            request={"vantage": result.get("vantage"),
+                     "region": result.get("asker_region")},
         ))
 
     def _emit_plan(self, world: WorldState, p) -> None:
