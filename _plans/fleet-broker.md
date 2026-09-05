@@ -418,13 +418,13 @@ picker. Optionally, `MeshRoutePicker` could accept the fleet order as its
 *bootstrap* order so the pessimistic-bootstrap rule ("an unmeasured node
 cannot dethrone a proven one") is seeded correctly; that is a follow-up.
 
-**Hub reachability:** public-la is not on the tailnet, so it cannot reach
-`:8801` on xc-tower-ubuntu. Options, decided by the owner: (a) put the hub on
-the tailnet (the architecture doc already argues for it); (b) have the fleet
-broker *push* rankings to the hub over the daemon's authenticated outbound
-channel, the way speech-capacity announces already travel. (b) reuses a path
-that exists and keeps the hub off the mesh; prefer it unless (a) is decided
-for other reasons.
+**Hub reachability:** **CORRECTED 2026-09-05** — an earlier draft of this
+section claimed public-la could not reach `:8801` on xc-tower-ubuntu.
+Measured (benchday `openspec/changes/title-from-the-local-card/` task A0):
+public-la IS a tailnet node (`100.64.0.19`) with a direct (non-DERP) path to
+the tower (~83 ms), and `curl http://100.64.0.18:8188/health` from the hub
+host returns 200. Option (a) is in effect — the hub reaches the fleet broker
+and the llm node directly.
 
 ### 4.4 Verification
 
