@@ -6,9 +6,56 @@ _gpu_executor) and returns its result, so warm/evict never race in-flight work.
 """
 from __future__ import annotations
 
+import time
+
 from typing import Callable, Optional
 
 from .lease import Capability
+
+
+def _load_report(coordinator, status, device_meter):
+    """How busy this node is right now, for a consumer deciding where to send
+    work. Computed at READ TIME from live state — a cached or periodically
+    refreshed number would report an engine idle while it is saturated, which is
+    worse than reporting nothing.
+
+    Returns None when nothing can actually be measured. That distinction is the
+    contract: a consumer must read an absent report as "no opinion" and fall
+    back to its own latency ranking, NEVER as "idle". An engine that has gone
+    quiet is the most likely source of an empty report, and reading silence as
+    spare capacity steers traffic at exactly the node least able to serve it.
+
+    `in_flight` counts real leases only. The coordinator issues `__usage__:`
+    leases to keep an idle-evict clock alive; those mark recency, not work, and
+    counting them would make a node that served one request ten minutes ago look
+    permanently busy.
+    """
+    report = {}
+
+    leases = status.get("active_leases") or []
+    in_flight = sum(1 for l in leases
+                    if not str(l.get("owner_id", "")).startswith("__usage__"))
+    report["in_flight"] = in_flight
+    report["resident_units"] = len(status.get("resident", []) or [])
+
+    if device_meter is not None:
+        try:
+            mem = device_meter() or {}
+            cap = int(mem.get("capacity") or 0)
+            free = int(mem.get("free") or 0)
+            if cap > 0:
+                report["device"] = {"capacity": cap, "free": free}
+                # Fraction of the device in use, measured at the driver, so it
+                # counts every process on the card and not just ours.
+                report["pressure"] = round(max(0.0, min(1.0, 1.0 - free / cap)), 4)
+        except Exception:
+            # A meter that throws contributes nothing. It must not fabricate a
+            # zero-pressure reading, which would advertise spare capacity we
+            # just failed to establish.
+            pass
+
+    report["measured_at"] = time.time()
+    return report
 
 
 def build_router(manager, coordinator, capability: Capability,
@@ -51,6 +98,9 @@ def build_router(manager, coordinator, capability: Capability,
             "ready": bool(resident),
             "detail": "resident" if resident else "no unit resident",
         }
+        load = _load_report(coordinator, st, device_meter)
+        if load is not None:
+            out["load"] = load
         if readiness is not None:
             try:
                 supplied = readiness() or {}
@@ -58,6 +108,11 @@ def build_router(manager, coordinator, capability: Capability,
                 for k in ("ready", "detail", "model", "concurrency", "region"):
                     if k in supplied:
                         out[k] = supplied[k]
+                # A server that counts its own work reports better load than we
+                # can infer from leases (polyasr knows its concurrent streams).
+                # Merge rather than replace: the server supplies what it knows.
+                if isinstance(supplied.get("load"), dict):
+                    out["load"] = {**(out.get("load") or {}), **supplied["load"]}
             except Exception as e:
                 # A readiness probe that throws is NOT ready. Reporting the
                 # generic fallback here would claim fitness we just failed to
