@@ -358,15 +358,33 @@ class HostBroker:
         """
         now = now if now is not None else time.time()
         acted = []
+        if not self.dispatch:
+            # Reclaim is a WRITE to another process's allocator, so it belongs to
+            # dispatch even though it is not a warm or an evict. An observe-only
+            # broker that reclaimed would be exactly the fight this mode exists
+            # to prevent — and it is the kind of exception that gets forgotten,
+            # because "observe-only" reads as being about the planner.
+            return acted
         for peer in self.peers:
+            key = peer_key(peer)
+            # Throttle BEFORE touching the peer, and skip one membership already
+            # knows is gone. Both matter, and the second was found live on
+            # 2026-09-05: `peer.leak` is a property that HTTP-GETs /residence, so
+            # on a down peer it raised before `_last_reclaim` was ever stamped —
+            # and the throttle was therefore never armed. The result was one
+            # "reclaim failed" line every reconcile tick, for as long as the peer
+            # stayed down: chipgen on this host was printing ~17k lines a day.
+            # That is precisely the 92,089-line shape membership was built to
+            # end, resurrected on a path membership did not cover.
+            if now - self._last_reclaim.get(key, 0.0) < self.reclaim_interval_s:
+                continue
+            if self.roster.state_of(key) != "fresh":
+                continue
+            self._last_reclaim[key] = now
             try:
                 leak = getattr(peer, "leak", None)
                 if not leak:
                     continue
-                key = getattr(peer, "base", str(id(peer)))
-                if now - self._last_reclaim.get(key, 0.0) < self.reclaim_interval_s:
-                    continue
-                self._last_reclaim[key] = now
                 result = peer.reclaim() or {}
                 freed = int(result.get("freed_bytes", 0))
                 acted.append({"peer": key, "freed_bytes": freed,
