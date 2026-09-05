@@ -199,6 +199,39 @@ class SchedulerPolicy:
     sla_slack_s: Mapping[Sla, float] = field(default_factory=lambda: dict(DEFAULT_SLA_SLACK_S))
     distance_by_sla: Mapping[Sla, float] = field(
         default_factory=lambda: dict(DEFAULT_DISTANCE_BY_SLA))
+
+    # -- per-account fairness -------------------------------------------------
+    #
+    # Two mechanisms, because they answer different questions. A CEILING answers
+    # "may this account have another slot at all"; FAIR SHARE answers "whose job
+    # goes first when several want the same room". A fleet with only the first
+    # is fair and rigid; with only the second, one account can still take
+    # everything as long as it asks steadily.
+    #
+    # **What a quota is worth is exactly what `Job.owner` is worth.** It is a
+    # string the caller supplies. On a private mesh where every caller is the
+    # operator, that is fine. The moment this fronts public registration, the
+    # owner MUST arrive from an authenticated channel and not from a request
+    # body, or an account raises its own quota by renaming itself. This module
+    # cannot enforce that — it can only be clear that it is the caller's job.
+    #
+    # None = NO CEILING, and that is the default: an unset bound must never
+    # start refusing work on the deploy that introduces it. It is also the wrong
+    # default the day strangers can register, which is why the fleet broker
+    # surfaces it as one env var rather than burying it here.
+    max_concurrent_per_account: Optional[int] = None
+    # Per-account overrides, for the account that is allowed more (or less).
+    account_quotas: Mapping[str, int] = field(default_factory=dict)
+    # Seconds of urgency an account forfeits per slot it already holds.
+    #
+    # Applied to the EDF ordering rather than replacing it, so it composes: an
+    # account holding four slots has its jobs sorted as two minutes less urgent,
+    # and a genuinely tight deadline still beats a batch job from an idle
+    # account. Set to 0 to disable.
+    #
+    # A no-op on a single-tenant fleet: every job carries the same owner, so
+    # every job takes the same penalty and the order is unchanged.
+    fair_share_penalty_s: float = 30.0
     local_bonus: float = 1.0            # resource-term reward for a LOCAL target
     locality_bonus: float = 0.5         # extra reward when the input already lives there
     min_uptime_s: float = 120.0         # anti-thrash: don't deprovision a burst worker this soon
@@ -269,9 +302,49 @@ class FleetState:
     jobs: Tuple[Job, ...] = ()
     now: float = 0.0
     ledger: Ledger = field(default_factory=Ledger)
+    # Slots each account is holding RIGHT NOW, fleet-wide. Passed in rather than
+    # remembered, like everything else here: the scheduler stays a pure function
+    # and the lease ledger that actually knows this stays its single owner.
+    #
+    # The key is whatever the caller calls an account. That is the whole strength
+    # of the quota and its whole limit — see `SchedulerPolicy`.
+    usage: Mapping[str, int] = field(default_factory=dict)
 
 
 # --- helpers ----------------------------------------------------------------
+def quota_for(owner: str, policy: SchedulerPolicy) -> Optional[int]:
+    """This account's ceiling, or None for no ceiling."""
+    if owner in policy.account_quotas:
+        return policy.account_quotas[owner]
+    return policy.max_concurrent_per_account
+
+
+def over_quota(owner: str, usage: Mapping[str, int],
+               policy: SchedulerPolicy) -> Optional[str]:
+    """The reason this account may not take another slot, or None if it may.
+
+    A REFUSAL, not a deprioritization. An account at its ceiling gets a `Queue`
+    with a sentence naming the count, which a caller can read, log and retry
+    against — where a quiet demotion would look identical to a slow fleet, and
+    the tenant would file a latency bug instead of asking for more quota.
+    """
+    cap = quota_for(owner, policy)
+    if cap is None:
+        return None
+    held = int(usage.get(owner, 0))
+    if held < cap:
+        return None
+    return f"account quota: {owner} holds {held} of {cap} slot(s)"
+
+
+def fair_share_delay(job: Job, usage: Mapping[str, int],
+                     policy: SchedulerPolicy) -> float:
+    """Urgency this job forfeits because its account is already being served."""
+    if policy.fair_share_penalty_s <= 0:
+        return 0.0
+    return policy.fair_share_penalty_s * max(0, int(usage.get(job.owner, 0)))
+
+
 def effective_deadline(job: Job, policy: SchedulerPolicy) -> float:
     if job.deadline is not None:
         return job.deadline
@@ -437,8 +510,18 @@ def schedule(state: FleetState, policy: Optional[SchedulerPolicy] = None) -> Fle
     # job's slack shrinks, so it naturally rises in urgency and eventually forces a
     # burst — no separate aging bookkeeping needed here (the weight resolver handles
     # the global speed-vs-budget lean; see resolve_weights()).
-    jobs = sorted(state.jobs, key=lambda j: (effective_deadline(j, pol), j.created_at, j.id))
+    # Usage is MUTATED as jobs are admitted in this pass, so a burst from one
+    # account cannot slip past its ceiling by arriving together — which is
+    # exactly how a naive per-request check is defeated.
+    usage = dict(state.usage)
+    jobs = sorted(state.jobs, key=lambda j: (
+        effective_deadline(j, pol) + fair_share_delay(j, usage, pol),
+        j.created_at, j.id))
     for job in jobs:
+        refused = over_quota(job.owner, usage, pol)
+        if refused is not None:
+            actions.append(Queue(job.id, refused))
+            continue
         cands = _feasible_candidates(W, job, pol)
         if not cands:
             actions.append(Queue(job.id, "no feasible target meets the deadline now"))
@@ -448,6 +531,7 @@ def schedule(state: FleetState, policy: Optional[SchedulerPolicy] = None) -> Fle
         d_scale = pol.distance_by_sla.get(job.sla, DEFAULT_DISTANCE_BY_SLA[Sla.NORMAL])
         best = min(cands, key=lambda c: _score(c, cands, pol.weights, d_scale))
         t = best.target
+        usage[job.owner] = usage.get(job.owner, 0) + 1
         if best.provision:
             W.provisioned[t.id] += 1
             actions.append(Provision(t.id, job.id, t.tier, best.est_cost,

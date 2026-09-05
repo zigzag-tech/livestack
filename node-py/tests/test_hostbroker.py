@@ -760,3 +760,25 @@ def test_a_host_broker_records_its_plan_as_dispatched(tmp_path):
     assert recs[0]["dispatched"] is True
     assert not recs[0]["reason"].startswith("ADVISORY")
     assert peer.warmed == ["asr"]
+
+
+def test_owner_usage_counts_live_leases_and_forgets_dead_ones():
+    """The quota is computed over this ledger, so a lease nobody heartbeats
+    must not keep counting: that would turn one caller's crash into an outage
+    that outlives it, locking an account out of a fleet that is actually idle."""
+    clock = Clock(1000.0)
+    br = HostBroker(devices=None, peers=[], clock=clock)
+    br.hosted_lease_ttl_s = 120
+    a1 = br.hosted_checkout("dev", "align", "acct-a")
+    br.hosted_checkout("dev", "align", "acct-a")
+    br.hosted_checkout("dev", "align", "acct-b")
+    assert br.owner_usage() == {"acct-a": 2, "acct-b": 1}
+
+    # acct-a keeps ONE lease alive; the other and acct-b's go quiet.
+    clock.advance(100)
+    br.hosted_heartbeat(a1)
+    clock.advance(100)
+    assert br.owner_usage() == {"acct-a": 1}, "a dead lease must stop counting"
+
+    br.hosted_release(a1)
+    assert br.owner_usage() == {}

@@ -35,6 +35,19 @@ Config via env:
     LIVESTACK_PROBES     health probes for hosted devices:
                          {"buildhost-a": {"cmd": "docker info", "interval_s": 60}}
     LIVESTACK_LEASE_TTL_S hosted-lease expiry without heartbeats (default 120)
+    LIVESTACK_ACCOUNT_QUOTA  max concurrent fleet slots ONE account may hold.
+                         UNSET = no ceiling, which is the right default for a
+                         single-operator fleet and the WRONG one the day
+                         strangers can register. A refused admit is a 429 naming
+                         the count, never a silent demotion.
+                         Worth only as much as `owner` is: it is a string the
+                         caller supplies, so fronting public registration means
+                         the owner must arrive from an authenticated channel.
+    LIVESTACK_ACCOUNT_QUOTAS  per-account overrides, e.g. {"media-corpus": 8}
+    LIVESTACK_FAIR_SHARE_PENALTY_S  seconds of urgency an account forfeits per
+                         slot it already holds, applied to the deadline ordering
+                         (default 30; 0 disables). A no-op on a single-tenant
+                         fleet, where every job carries the same owner.
     LIVESTACK_DISPATCH   "apply" (default) = a host broker, warms and evicts its
                          own host's units. "observe" = a FLEET broker: same
                          planning, same /fleet view, dispatches NOTHING.
@@ -64,6 +77,7 @@ from typing import Dict, List
 
 from .hostbroker import HostBroker, RestPeer
 from .membership import MembershipPolicy, RosterFull
+from .fleet_scheduler import SchedulerPolicy
 from .planner import Device, Request, Residency, Unit, Evict, Grant, Load, plan as _plan
 
 GB = 1_000_000_000
@@ -291,18 +305,29 @@ def build_app(broker: HostBroker):
         est = (payload.get("estimate") or {}).get("duration_s", 60.0)
         result = _admit(
             broker.fleet_view(), kind=kind,
+            # From the broker's own lease ledger, expired entries dropped
+            # first — a quota computed over leases nobody heartbeats would turn
+            # one caller's crash into an outage that outlives it.
+            usage=broker.owner_usage(),
             sla=payload.get("sla", "normal"),
             owner=payload.get("owner", "consumer"),
             selector=payload.get("selector") or {},
             locality_host=payload.get("locality_host"),
             vantage=payload.get("via") or payload.get("vantage") or "direct",
             estimate_s=float(est),
+            policy=getattr(broker, "fleet_policy", None),
         )
         request = {"owner": payload.get("owner", "consumer"),
                    "sla": payload.get("sla", "normal"),
                    "vantage": result.get("vantage"),
                    "selector": payload.get("selector") or {},
                    "locality_host": payload.get("locality_host")}
+        if result.get("refused") == "account_quota":
+            # 429, not 200-with-no-target: an account at its ceiling is a
+            # different answer from a full fleet, and a caller that cannot tell
+            # them apart retries forever against a fleet that will never say yes.
+            broker.emit_admit(result, request)
+            raise HTTPException(429, result.get("reason") or "account quota")
         lease_id = None
         target = result.get("target")
         if target:
@@ -476,6 +501,58 @@ def main():
     )
     link_env = os.environ.get("LIVESTACK_LINK_PEERS", "").strip()
     link_peers = [u.strip().rstrip("/") for u in link_env.split(",") if u.strip()]
+    # A MALFORMED QUOTA MUST NOT TAKE THE BROKER DOWN.
+    #
+    # Found the hard way on 2026-09-05: systemd strips the double quotes out of
+    # `Environment={"a": 1}`, so the value arrived as `{a: 1}`, `json.loads`
+    # raised at import, and the fleet broker crash-looped. The typo was mine;
+    # the crash was the code's. Per-account quotas are the setting that changes
+    # most often — a tenant arrives, a tenant leaves — so it is the one most
+    # likely to be mistyped, and a fleet-wide outage is a wildly disproportionate
+    # answer to a missing quote.
+    #
+    # It degrades LOUDLY rather than silently, and `/fleet` reports what is
+    # actually in force, because a config error that quietly disables a safety
+    # control is the failure this is trying to avoid in the first place.
+    def _quota_int(name):
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            print(f"[harmony] {name}={raw!r} is not a number — NO CEILING is in "
+                  f"force; GET /fleet reports the effective quota", flush=True)
+            return None
+
+    def _quota_map(name):
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            return {}
+        try:
+            got = json.loads(raw)
+            if not isinstance(got, dict):
+                raise ValueError("not an object")
+            return {str(k): int(v) for k, v in got.items()}
+        except Exception as e:
+            print(f"[harmony] {name}={raw!r} is not a JSON object of "
+                  f"account->int ({e}) — per-account OVERRIDES are ignored; the "
+                  f"fleet-wide ceiling still applies. NOTE systemd strips double "
+                  f"quotes: write Environment='{name}={{\"acct\": 3}}'",
+                  flush=True)
+            return {}
+
+    fleet_policy = SchedulerPolicy(
+        max_concurrent_per_account=_quota_int("LIVESTACK_ACCOUNT_QUOTA"),
+        account_quotas=_quota_map("LIVESTACK_ACCOUNT_QUOTAS"),
+        fair_share_penalty_s=float(
+            os.environ.get("LIVESTACK_FAIR_SHARE_PENALTY_S", "30") or 30),
+    )
+    print(f"[harmony] account quota: "
+          f"{fleet_policy.max_concurrent_per_account or 'NO CEILING'}"
+          f"{f' (overrides: {dict(fleet_policy.account_quotas)})' if fleet_policy.account_quotas else ''}"
+          f", fair-share penalty {fleet_policy.fair_share_penalty_s:.0f}s",
+          flush=True)
     broker = build_broker(
         peer_urls, device_config=device_config,
         default_vram_gb=float(os.environ.get("LIVESTACK_VRAM_GB", "24")),
@@ -486,6 +563,7 @@ def main():
     )
     broker.host_id = host_id
     broker.link_peers = link_peers
+    broker.fleet_policy = fleet_policy
     import uvicorn
     role = "host broker" if dispatch else "fleet broker (observe-only)"
     print(f"[harmony] {role} on :{port} as {host_id} over {len(broker.peers)} "

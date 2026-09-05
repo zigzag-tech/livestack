@@ -279,6 +279,29 @@ class HostBroker:
         with self._lease_lock:
             return self.hosted_leases.pop(lease_id, None) is not None
 
+    def owner_usage(self, now: Optional[float] = None) -> Dict[str, int]:
+        """Slots each owner is holding, from this broker's own lease ledger.
+
+        Expires first, for the same reason `_hosted_placements` does: a dead
+        caller cannot be relied on to release, and a quota computed over leases
+        nobody is heartbeating would lock an account out of a fleet that is
+        actually idle — turning a crash into an outage that outlives it.
+
+        This ledger is the only thing that knows, which is why the quota is
+        enforced here rather than in the pure scheduler: the scheduler is handed
+        the count and stays a function of its inputs.
+        """
+        now = self._now(now)
+        with self._lease_lock:
+            for lid in [lid for lid, l in self.hosted_leases.items()
+                        if now - l["last_hb"] > self.hosted_lease_ttl_s]:
+                del self.hosted_leases[lid]
+            out: Dict[str, int] = {}
+            for l in self.hosted_leases.values():
+                owner = str(l.get("owner") or "anon")
+                out[owner] = out.get(owner, 0) + 1
+        return out
+
     def set_hosted_available(self, device_id: str, available: bool) -> None:
         """Flip the health gate hostd's prober feeds. An unhealthy backend simply
         stops being a candidate; nothing else has to know why."""
@@ -625,10 +648,19 @@ class HostBroker:
             host = (cap or {}).get("host_id") or row.get("host_id") or "unknown"
             rows_by_host.setdefault(host, []).append(node)
         matrix = self.links_view()
+        pol = getattr(self, "fleet_policy", None)
         return {
             "dispatch": self.dispatch,
             "peers": len(self.peers),
             "generated_at": now,
+            # What is ACTUALLY in force, not what was configured. A quota that
+            # failed to parse is a safety control that silently switched off, so
+            # the effective value has to be readable rather than inferred from
+            # a log line somebody has to think to go and look for.
+            "quota": ({"max_concurrent_per_account": pol.max_concurrent_per_account,
+                       "account_quotas": dict(pol.account_quotas),
+                       "fair_share_penalty_s": pol.fair_share_penalty_s,
+                       "usage": self.owner_usage()} if pol else None),
             "vantage_host": self.host_id,
             "hosts": {
                 h: ({"nodes": sorted(n, key=lambda r: r["peer"])}
@@ -748,7 +780,7 @@ class HostBroker:
                      "region": result.get("asker_region")},
         ))
 
-    def emit_admit(self, result: dict, request: dict, lease_id=None) -> None:
+    def emit_admit(self, result: dict, request: dict, lease_id=None) -> None:  # noqa: D401
         """One `admit` record per `/fleet/admit`, with the full candidate set and
         the reason each feasible-but-not-chosen target lost.
 

@@ -298,3 +298,162 @@ def test_batch_still_prefers_near_when_nothing_else_separates_them():
     ]})
     r = admit(view, kind="align", sla="batch", now=1000.0)
     assert r["target"]["target_id"] == "http://near", r["reason"]
+
+
+# -- per-account fairness ----------------------------------------------------
+#
+# Two mechanisms answering different questions. A CEILING answers "may this
+# account have another slot at all"; FAIR SHARE answers "whose job goes first
+# when several want the same room". A fleet with only the first is fair and
+# rigid; with only the second, one account still takes everything as long as it
+# asks steadily.
+
+from livestack_node.fleet_scheduler import (
+    FleetState, Job, Queue, Sla, over_quota, quota_for, schedule,
+)
+
+QUOTA_2 = SchedulerPolicy(weights=Weights(), max_concurrent_per_account=2)
+
+
+def test_an_account_at_its_ceiling_is_refused_with_the_count():
+    """A refusal, not a demotion. A quiet demotion looks identical to a slow
+    fleet, and the tenant files a latency bug instead of asking for quota."""
+    r = admit(BUSY_CN_IDLE_NA, kind="align", sla="batch", owner="acct-a",
+              usage={"acct-a": 2}, policy=QUOTA_2, now=1000.0)
+    assert r["granted"] is False
+    assert r["refused"] == "account_quota"
+    assert "acct-a holds 2 of 2 slot(s)" in r["reason"]
+    # And it says the room existed — which is what tells "you are capped" apart
+    # from "the fleet is full".
+    assert "could otherwise have run align" in r["reason"]
+
+
+def test_the_same_fleet_still_serves_a_different_account():
+    """The ceiling is per account, so one tenant hitting it must not look like
+    an outage to the next."""
+    capped = admit(BUSY_CN_IDLE_NA, kind="align", sla="batch", owner="acct-a",
+                   usage={"acct-a": 2}, policy=QUOTA_2, now=1000.0)
+    other = admit(BUSY_CN_IDLE_NA, kind="align", sla="batch", owner="acct-b",
+                  usage={"acct-a": 2}, policy=QUOTA_2, now=1000.0)
+    assert capped["granted"] is False
+    assert other["granted"] is True
+
+
+def test_no_ceiling_is_the_default_and_changes_nothing():
+    """An unset bound must never start refusing work on the deploy that
+    introduces it — the same rule the prune windows and the ledger age window
+    already follow."""
+    assert SchedulerPolicy().max_concurrent_per_account is None
+    r = admit(BUSY_CN_IDLE_NA, kind="align", sla="batch", owner="acct-a",
+              usage={"acct-a": 99}, now=1000.0)
+    assert r["granted"] is True
+    assert r["refused"] is None
+
+
+def test_a_per_account_override_beats_the_fleet_wide_ceiling():
+    pol = SchedulerPolicy(max_concurrent_per_account=1,
+                          account_quotas={"media-corpus": 4})
+    assert quota_for("anyone", pol) == 1
+    assert quota_for("media-corpus", pol) == 4
+    ok = admit(BUSY_CN_IDLE_NA, kind="align", sla="batch", owner="media-corpus",
+               usage={"media-corpus": 3}, policy=pol, now=1000.0)
+    assert ok["granted"] is True
+    capped = admit(BUSY_CN_IDLE_NA, kind="align", sla="batch", owner="stranger",
+                   usage={"stranger": 1}, policy=pol, now=1000.0)
+    assert capped["granted"] is False
+
+
+def test_a_burst_from_one_account_cannot_slip_past_the_ceiling_together():
+    """The check is per JOB against usage that grows as the pass admits — which
+    is exactly how a naive per-request check is defeated: send four at once and
+    every one of them sees the pre-burst count."""
+    targets, _ = targets_from_view(BUSY_CN_IDLE_NA, "align")
+    jobs = tuple(
+        Job(id=f"j{i}", kind="align", owner="acct-a", need={"concurrency": 1.0},
+            est_duration_s=40.0, sla=Sla.BATCH, created_at=1000.0)
+        for i in range(5)
+    )
+    plan = schedule(FleetState(targets=targets, jobs=jobs, now=1000.0), QUOTA_2)
+    admitted = [a for a in plan.actions if hasattr(a, "target_id")]
+    queued = [a for a in plan.actions if isinstance(a, Queue)]
+    assert len(admitted) == 2, f"admitted {len(admitted)}, ceiling was 2"
+    assert len(queued) == 3
+    assert all("account quota" in q.reason for q in queued)
+
+
+def test_usage_already_held_counts_against_the_burst():
+    targets, _ = targets_from_view(BUSY_CN_IDLE_NA, "align")
+    jobs = tuple(
+        Job(id=f"j{i}", kind="align", owner="acct-a", need={"concurrency": 1.0},
+            est_duration_s=40.0, sla=Sla.BATCH, created_at=1000.0)
+        for i in range(3)
+    )
+    plan = schedule(
+        FleetState(targets=targets, jobs=jobs, now=1000.0, usage={"acct-a": 1}),
+        QUOTA_2)
+    assert len([a for a in plan.actions if hasattr(a, "target_id")]) == 1
+
+
+def test_fair_share_serves_the_quieter_account_first_under_contention():
+    """Whose job goes first when both want the same room. `acct-busy` already
+    holds three slots; `acct-quiet` holds none and asked a moment later."""
+    targets, _ = targets_from_view(BUSY_CN_IDLE_NA, "align")
+    jobs = (
+        Job(id="busy-1", kind="align", owner="acct-busy", need={"concurrency": 1.0},
+            est_duration_s=40.0, sla=Sla.BATCH, created_at=1000.0),
+        Job(id="quiet-1", kind="align", owner="acct-quiet", need={"concurrency": 1.0},
+            est_duration_s=40.0, sla=Sla.BATCH, created_at=1001.0),
+    )
+    state = FleetState(targets=targets, jobs=jobs, now=1000.0,
+                       usage={"acct-busy": 3})
+    plan = schedule(state, SchedulerPolicy(fair_share_penalty_s=30.0))
+    first = next(a for a in plan.actions if hasattr(a, "target_id"))
+    assert first.job_id == "quiet-1", "the account already being served yields"
+
+    # With the penalty off, the earlier job wins on plain EDF — so the mechanism
+    # under test is the penalty and not the fixture.
+    plain = schedule(state, SchedulerPolicy(fair_share_penalty_s=0.0))
+    assert next(a for a in plain.actions if hasattr(a, "target_id")).job_id == "busy-1"
+
+
+def test_fair_share_does_not_starve_an_urgent_job_behind_an_idle_accounts_batch():
+    """It composes with EDF rather than replacing it. A held slot costs 30 s of
+    urgency; an interactive deadline is worth far more than that, so a tight job
+    from a busy account still beats a batch job from an idle one."""
+    targets, _ = targets_from_view(BUSY_CN_IDLE_NA, "align")
+    jobs = (
+        Job(id="urgent", kind="align", owner="acct-busy", need={"concurrency": 1.0},
+            est_duration_s=5.0, sla=Sla.INTERACTIVE, created_at=1000.0),
+        Job(id="bulk", kind="align", owner="acct-quiet", need={"concurrency": 1.0},
+            est_duration_s=40.0, sla=Sla.BATCH, created_at=1000.0),
+    )
+    plan = schedule(
+        FleetState(targets=targets, jobs=jobs, now=1000.0, usage={"acct-busy": 4}),
+        SchedulerPolicy())
+    assert next(a for a in plan.actions if hasattr(a, "target_id")).job_id == "urgent"
+
+
+def test_fair_share_is_a_no_op_on_a_single_tenant_fleet():
+    """Every job carries the same owner, so every job takes the same penalty and
+    the order is exactly what it was."""
+    targets, _ = targets_from_view(BUSY_CN_IDLE_NA, "align")
+    jobs = tuple(
+        Job(id=f"j{i}", kind="align", owner="me", need={"concurrency": 1.0},
+            est_duration_s=40.0, sla=Sla.BATCH, created_at=1000.0 + i)
+        for i in range(3)
+    )
+    state = FleetState(targets=targets, jobs=jobs, now=1000.0, usage={"me": 7})
+    with_fair = [a.job_id for a in schedule(state, SchedulerPolicy()).actions
+                 if hasattr(a, "target_id")]
+    without = [a.job_id for a in
+               schedule(state, SchedulerPolicy(fair_share_penalty_s=0.0)).actions
+               if hasattr(a, "target_id")]
+    assert with_fair == without
+
+
+def test_over_quota_states_the_rule_it_applied():
+    pol = SchedulerPolicy(max_concurrent_per_account=3)
+    assert over_quota("a", {"a": 2}, pol) is None
+    msg = over_quota("a", {"a": 3}, pol)
+    assert msg and "a holds 3 of 3" in msg
+    assert over_quota("a", {"a": 3}, SchedulerPolicy()) is None

@@ -315,6 +315,40 @@ local host broker, 8800 is buildd on zz-tower2). It is outside the GFW and
 reaches every node directly. Full design and phasing:
 `_plans/fleet-broker.md`.
 
+## Per-account fairness
+
+Two mechanisms, answering different questions. A **ceiling**
+(`LIVESTACK_ACCOUNT_QUOTA`) answers *may this account have another slot at all*;
+**fair share** (`LIVESTACK_FAIR_SHARE_PENALTY_S`) answers *whose job goes first
+when several want the same room*. A fleet with only the first is fair and rigid;
+with only the second, one account still takes everything as long as it asks
+steadily.
+
+An account at its ceiling gets **429 with the count** — `account quota: acct-a
+holds 2 of 2 slot(s); 4 target(s) could otherwise have run asr`. A refusal, not
+a demotion: a quiet demotion is indistinguishable from a slow fleet, and the
+tenant files a latency bug instead of asking for more quota. Naming the targets
+that *were* available is what separates "you are capped" from "the fleet is
+full".
+
+Fair share composes with EDF rather than replacing it. A held slot costs 30 s of
+urgency, so an account holding four has its jobs sorted as two minutes less
+urgent — and a genuinely tight interactive deadline still beats a batch job from
+an idle account. On a single-tenant fleet every job carries the same owner, takes
+the same penalty, and the order is unchanged.
+
+Usage comes from the broker's own lease ledger, expired entries dropped first: a
+quota computed over leases nobody heartbeats would turn one caller's crash into
+an outage that outlives it. `GET /fleet` reports the quota **actually in force**
+alongside live usage, because a mistyped quota is a safety control that switched
+itself off, and that has to be readable rather than inferred.
+
+**A quota is worth exactly what `Job.owner` is worth.** It is a string the caller
+supplies. On a private mesh where every caller is the operator, fine. The moment
+this fronts public registration the owner MUST arrive from an authenticated
+channel and not a request body, or an account raises its own quota by renaming
+itself. The scheduler cannot enforce that; only the thing that authenticates can.
+
 ## The decision ledger
 
 Every placement and routing decision writes a record with enough in it to be
@@ -378,6 +412,9 @@ released in `finally`), and keeps non-GPU work (LLM digest, embeddings) off the 
 | `LIVESTACK_DEVICE_ID` | derived | this node's device id; derived from the CUDA device UUID / MLX when unset |
 | `LIVESTACK_NODE_HOST` | `127.0.0.1` | read by NODES: the address a node announces ITSELF at. Loopback is right for a broker on the same machine and wrong for one anywhere else — an unreachable registration sits `suspect` forever with a connect error, looking like a dead node rather than a bad address. A node cannot infer this, so it is the operator's to state |
 | `LIVESTACK_BROKER_URL` | `http://127.0.0.1:8799` | read by NODES: a **comma list** of brokers to report for duty to. One entry is a node and its host broker; two is the fleet case. An announce reaches all of them and fails only if none answered — a fleet broker being down must not make a node look unregistered to the broker that arbitrates its card |
+| `LIVESTACK_ACCOUNT_QUOTA` | — | max concurrent fleet slots ONE account may hold. **Unset = no ceiling**, the right default for a single-operator fleet and the wrong one the day strangers can register. A refused admit is a **429** naming the count, never a silent demotion |
+| `LIVESTACK_ACCOUNT_QUOTAS` | `{}` | per-account overrides. Quote it for systemd: `Environment='LIVESTACK_ACCOUNT_QUOTAS={"acct": 3}'` — bare double quotes are stripped |
+| `LIVESTACK_FAIR_SHARE_PENALTY_S` | `30` | seconds of urgency an account forfeits per slot it holds, applied to the deadline ordering. `0` disables. A no-op on a single-tenant fleet |
 | `LIVESTACK_LEDGER` | `1` | `0` disables decision-ledger emission |
 | `LIVESTACK_LEDGER_DIR` | `~/.cache/livestack` | where ledgers are written |
 | `LIVESTACK_LEDGER_MAX_MB` / `_FILES` / `_AGE_DAYS` | `32`/`4`/— | the ledger bound. `_AGE_DAYS` unset ⇒ age window DISABLED |
