@@ -12,6 +12,10 @@ per-process **executor** (``ModelManager``/``ManagedUnit``/``ResidencyPolicy``, 
   - LivestackCoordinator : lease-driven Coordinator (resident iff leased-or-pinned).
   - attach()             : the one call polyasr & polytts make, identically, to
                            build a manager + coordinator + REST facade.
+  - counting()           : the server's own in-flight counter, for
+                           ``attach(in_flight=)`` — a node that does not lease
+                           per request must count its own work or report 0 while
+                           saturated.
   - build_router         : the uniform /livestack REST surface.
   - CapabilityLeaseStore : the lease broker (also federatable).
   - lease()              : consumer-side lease context manager.
@@ -54,6 +58,7 @@ _LAZY = {
     "noop_free": ".freeing",
     "build_router": ".facade",
     "attach": ".serve",
+    "counting": ".serve", "WorkCounter": ".serve",
     "lease": ".client",
     "measure_footprint": ".measure",
     "HostBroker": ".hostbroker", "Peer": ".hostbroker", "RestPeer": ".hostbroker",
@@ -85,6 +90,7 @@ __all__ = [
     "free_cuda", "free_mlx", "trim_ram", "noop_free",
     "LivestackCoordinator",
     "attach",
+    "counting", "WorkCounter",
     "build_router",
     "Capability",
     "CapabilityLeaseStore",

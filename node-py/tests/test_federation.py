@@ -61,3 +61,33 @@ def test_devices_discovered_from_peers():
     broker = HostBroker(devices=None, peers=peers, clock=lambda: 0.0)
     w = broker.snapshot()
     assert sorted(d.id for d in w.devices) == ["h1/gpu0", "h2/gpu0"]
+
+
+def test_two_nodes_of_one_kind_on_one_device_are_two_placements_not_two_devices():
+    """The shape on xc-tower-ubuntu: two polyasr processes, one card each — and
+    for a while, two on the SAME card. `units.setdefault(kind, ...)` dropped the
+    second node's report entirely, so whichever peer was probed first decided the
+    footprint the planner reserved for both."""
+    small = Unit("asr", {"vram_bytes": 5 * GB}, priority=10)
+    big = Unit("asr", {"vram_bytes": 9 * GB}, priority=20)
+    a = FedPeer("h", "h/3f9a", {"asr": small}, resident={"asr": False})
+    b = FedPeer("h", "h/3f9a", {"asr": big}, resident={"asr": True})
+    broker = HostBroker(devices=None, peers=[a, b], clock=lambda: 0.0)
+    w = broker.snapshot()
+
+    assert [d.id for d in w.devices] == ["h/3f9a"], "one device, not two"
+    assert len([p for p in w.placements if p.kind == "asr"]) == 2
+    # Both reports survive, keyed by (kind, peer).
+    assert len([k for k in broker.peer_units if k[0] == "asr"]) == 2
+    # The fold is conservative: the LARGER footprint and the STRONGER priority
+    # claim win, rather than "whichever peer answered first".
+    assert w.units["asr"].footprint["vram_bytes"] == 9 * GB
+    assert w.units["asr"].priority == 10
+
+
+def test_a_node_on_its_own_device_is_unaffected_by_the_fold():
+    u = Unit("m", {"vram_bytes": 1 * GB}, priority=20)
+    peers = [FedPeer("h1", "h1/aaaa", {"m": u}), FedPeer("h2", "h2/bbbb", {"m": u})]
+    broker = HostBroker(devices=None, peers=peers, clock=lambda: 0.0)
+    w = broker.snapshot()
+    assert w.units["m"] == u

@@ -6,16 +6,144 @@ _gpu_executor) and returns its result, so warm/evict never race in-flight work.
 """
 from __future__ import annotations
 
+import hashlib
+import os
+import time
+
 from typing import Callable, Optional
 
 from .lease import Capability
+
+
+def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
+    """The id of the device this node actually occupies.
+
+    It used to be `f"{host_id}/gpu0"` — a string template, correct only on a
+    single-GPU host. Two real costs on xc-tower-ubuntu (2x RTX 3090), 2026-09-05:
+    a second polyasr had to be given a FAKE `host_id` to get its own device id,
+    and a stale one later let the planner co-model a 5 GB ASR engine and a 20 GB
+    LLM onto one card and evict the LLM. Device identity is a fact the node can
+    read; it should not be guessed by its name.
+
+    Resolution order — explicit argument, then `LIVESTACK_DEVICE_ID`, then
+    derived from the backend:
+
+    * CUDA — `{host_id}/{8 hex of the device UUID}`. The UUID is the driver's
+      own identity for the physical card, so two processes pinned to the same
+      card agree and two on different cards differ, with no configuration.
+    * MLX — `{host_id}/mlx0`. Apple unified memory is one device.
+    * neither — `{host_id}/gpu0`, today's value, so a single-GPU node that
+      passes nothing sees no change at all.
+
+    Never raises: identity must not be the thing that stops a node serving.
+    """
+    if explicit:
+        return explicit
+    env = (os.environ.get("LIVESTACK_DEVICE_ID") or "").strip()
+    if env:
+        return env
+    try:
+        import torch
+        if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(torch.cuda.current_device())
+            uuid = getattr(props, "uuid", None)
+            if uuid is not None:
+                short = hashlib.sha256(str(uuid).encode()).hexdigest()[:8]
+                return f"{host_id}/{short}"
+            # A torch too old to expose `uuid` still knows which index it is on,
+            # which is better than pretending every process is on gpu0.
+            return f"{host_id}/gpu{torch.cuda.current_device()}"
+    except Exception:
+        pass
+    try:
+        import mlx.core  # noqa: F401
+        return f"{host_id}/mlx0"
+    except Exception:
+        pass
+    return f"{host_id}/gpu0"
+
+
+def _load_report(coordinator, status, device_meter, in_flight_fn=None):
+    """How busy this node is right now, for a consumer deciding where to send
+    work. Computed at READ TIME from live state — a cached or periodically
+    refreshed number would report an engine idle while it is saturated, which is
+    worse than reporting nothing.
+
+    Returns None when nothing can actually be measured. That distinction is the
+    contract: a consumer must read an absent report as "no opinion" and fall
+    back to its own latency ranking, NEVER as "idle". An engine that has gone
+    quiet is the most likely source of an empty report, and reading silence as
+    spare capacity steers traffic at exactly the node least able to serve it.
+
+    `in_flight` is the server's own count when it supplies one (`in_flight_fn`,
+    from `attach(in_flight=)`), and otherwise the count of real leases. The
+    coordinator issues `__usage__:` leases to keep an idle-evict clock alive;
+    those mark recency, not work, and counting them would make a node that
+    served one request ten minutes ago look permanently busy.
+
+    `in_flight_source` says WHICH, and it is the load-bearing field. A node that
+    does not take a lease per request — polyasr streams, harmony-llm proxies —
+    reports 0 leases while saturated, and a consumer cannot tell that from an
+    idle node without being told where the number came from. `"server"` means
+    the engine counted its own work; `"leases"` means we inferred it, and the
+    consumer should weigh it accordingly rather than reading 0 as spare capacity.
+    """
+    report = {}
+
+    if in_flight_fn is not None:
+        try:
+            report["in_flight"] = max(0, int(in_flight_fn()))
+            report["in_flight_source"] = "server"
+        except Exception:
+            # A counter that throws contributes nothing — do NOT fall back to
+            # the lease count under the "server" label, which would be a
+            # confident wrong answer about how busy this engine is.
+            in_flight_fn = None
+    if in_flight_fn is None:
+        leases = status.get("active_leases") or []
+        report["in_flight"] = sum(
+            1 for l in leases
+            if not str(l.get("owner_id", "")).startswith("__usage__"))
+        report["in_flight_source"] = "leases"
+    report["resident_units"] = len(status.get("resident", []) or [])
+
+    if device_meter is not None:
+        try:
+            mem = device_meter() or {}
+            # meters.py returns {"capacity": {"vram_bytes": N}, "free": {...}} —
+            # the resource-map shape the planner consumes, NOT flat ints. Read it
+            # as written rather than assuming; the first cut of this function
+            # assumed flat ints, and int() on a dict raised straight into the
+            # except below, so a working CUDA meter reported no pressure at all
+            # and nothing said why.
+            cap = int((mem.get("capacity") or {}).get("vram_bytes") or 0)
+            free = int((mem.get("free") or {}).get("vram_bytes") or 0)
+            if cap > 0:
+                report["device"] = {"capacity": cap, "free": free}
+                # Fraction of the device in use, measured at the driver, so it
+                # counts every process on the card and not just ours.
+                report["pressure"] = round(max(0.0, min(1.0, 1.0 - free / cap)), 4)
+        except Exception:
+            # A meter that throws contributes nothing. It must not fabricate a
+            # zero-pressure reading, which would advertise spare capacity we
+            # just failed to establish.
+            pass
+
+    report["measured_at"] = time.time()
+    return report
 
 
 def build_router(manager, coordinator, capability: Capability,
                  gpu_call: Callable[[Callable], object],
                  device_meter: Optional[Callable[[], Optional[dict]]] = None,
                  activation_tracker=None,
-                 readiness: Optional[Callable[[], Optional[dict]]] = None):
+                 readiness: Optional[Callable[[], Optional[dict]]] = None,
+                 device_id: Optional[str] = None,
+                 in_flight: Optional[Callable[[], int]] = None):
+    # Resolved ONCE, here, so /capability and /residence can never disagree
+    # about which device this node is on — a disagreement the broker would read
+    # as two devices.
+    device_id = resolve_device_id(capability.host_id, device_id)
     try:
         from fastapi import APIRouter, Body, HTTPException
     except ImportError as exc:  # pragma: no cover
@@ -44,13 +172,16 @@ def build_router(manager, coordinator, capability: Capability,
         out = {
             "kind": capability.kind,
             "host_id": capability.host_id,
-            "device_id": f"{capability.host_id}/gpu0",
+            "device_id": device_id,
             "labels": dict(capability.labels),
             "units": list(manager.units.keys()),
             "resident": resident,
             "ready": bool(resident),
             "detail": "resident" if resident else "no unit resident",
         }
+        load = _load_report(coordinator, st, device_meter, in_flight)
+        if load is not None:
+            out["load"] = load
         if readiness is not None:
             try:
                 supplied = readiness() or {}
@@ -58,6 +189,18 @@ def build_router(manager, coordinator, capability: Capability,
                 for k in ("ready", "detail", "model", "concurrency", "region"):
                     if k in supplied:
                         out[k] = supplied[k]
+                # A server that counts its own work reports better load than we
+                # can infer from leases (polyasr knows its concurrent streams).
+                # Merge rather than replace: the server supplies what it knows.
+                if isinstance(supplied.get("load"), dict):
+                    merged = {**(out.get("load") or {}), **supplied["load"]}
+                    # A readiness-supplied in_flight is still the SERVER's count,
+                    # so the provenance must follow it. Otherwise a node that
+                    # reports its own streams through the legacy path is labelled
+                    # "leases" and a consumer discounts a number it should trust.
+                    if "in_flight" in supplied["load"]:
+                        merged["in_flight_source"] = "server"
+                    out["load"] = merged
             except Exception as e:
                 # A readiness probe that throws is NOT ready. Reporting the
                 # generic fallback here would claim fitness we just failed to
@@ -186,7 +329,7 @@ def build_router(manager, coordinator, capability: Capability,
                     entry["activation_headroom"] = {"vram_bytes": int(hb)}
             units.append(entry)
         out = {"host_id": capability.host_id,
-               "device_id": f"{capability.host_id}/gpu0",
+               "device_id": device_id,
                "units": units}
         # Live measured device memory (capacity + real free), when a meter is wired.
         # Lets the Harmony planner reconcile against reality, not just footprints.

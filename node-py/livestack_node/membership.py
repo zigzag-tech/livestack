@@ -102,10 +102,15 @@ class PeerRoster:
 
     def __init__(self, policy: Optional[MembershipPolicy] = None,
                  clock: Optional[Callable[[], float]] = None,
-                 log: Callable[[str], None] = lambda *_: None):
+                 log: Callable[[str], None] = lambda *_: None,
+                 on_transition: Optional[Callable[[PeerRecord, str, str], None]] = None):
         self.policy = policy or MembershipPolicy()
         self._clock = clock or time.monotonic
         self._log = log
+        # Called with (record, old_state, new_state) on each REPORTED change —
+        # the same edge the log line rides, so a ledger emitter cannot become a
+        # per-tick emitter by accident. "Still gone" is not an event here either.
+        self._on_transition = on_transition
         self._records: Dict[str, PeerRecord] = {}
 
     # -- population ----------------------------------------------------------
@@ -134,8 +139,23 @@ class PeerRoster:
         for k, v in meta.items():
             if v is not None and hasattr(rec, k):
                 setattr(rec, k, v)
-        # Registration IS proof of life — it arrived, so the node is there.
-        self.mark_seen(key)
+        # An announce REGISTERS; only a snapshot CERTIFIES.
+        #
+        # This used to call mark_seen(key) — "registration IS proof of life" —
+        # and that sentence is true of the socket and false of the service.
+        # `attach()` starts the registrar thread at import, before the server
+        # binds, so a process that never becomes able to serve still announces
+        # every 30 s and the renewal reset its age each time. Measured on
+        # xc-mac-studio 2026-09-05: polyasr was dead for 7 hours and listed
+        # `fresh` throughout, because nothing but the announce was ever needed
+        # to keep it there.
+        #
+        # A NEW record still gets `last_seen=now` at creation above — one grace
+        # window of `suspect_after_s` in which to be snapshotted. A RENEWAL now
+        # advances nothing, so the only path back to `fresh` is
+        # `HostBroker.snapshot()` succeeding against the facade, which already
+        # calls mark_seen. Seeds are unaffected; they were never certified by an
+        # announce in the first place.
         return rec
 
     def drop(self, key: str) -> None:
@@ -144,8 +164,10 @@ class PeerRoster:
     # -- liveness ------------------------------------------------------------
 
     def mark_seen(self, key: str) -> None:
-        """A successful snapshot or a renewal. Any single success returns a peer
-        to fresh immediately — membership is a report, not a promise."""
+        """A successful snapshot — the ONLY certification of life. Any single
+        success returns a peer to fresh immediately: for *absence*, membership is
+        a report, not a promise. For *presence* it is the other way round —
+        presence needs proof, and an announce is not one (see `_upsert`)."""
         rec = self._records.get(key)
         if rec is None:
             return
@@ -173,6 +195,12 @@ class PeerRoster:
         else:
             self._log(f"[membership] {rec.key} {old} → {new_state} "
                       f"(unseen {rec.age(self._clock()):.0f}s)")
+        if self._on_transition is not None:
+            try:
+                self._on_transition(rec, old, new_state)
+            except Exception as exc:
+                # Observability must never take membership with it.
+                self._log(f"[membership] transition hook failed: {exc}")
 
     def tick(self) -> None:
         """Re-evaluate every peer and log whatever changed.

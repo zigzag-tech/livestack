@@ -86,6 +86,21 @@ class Target:
     running_instances: int = 0                 # up right now (for hysteresis)
     up_since: float = 0.0                       # when the running instance came up
     labels: Mapping[str, str] = field(default_factory=dict)
+    # Measured network distance from the ASKER to this target, in milliseconds.
+    #
+    # `None` means UNMEASURED, and it is scored as the worst measured candidate
+    # rather than as zero — a distance we failed to measure is not evidence of
+    # nearness, and treating it as such is how a fleet sends work across an
+    # ocean on the strength of having no reading. It is measured, not derived
+    # from `host_id`: `locality_host` already expresses "same host" as a flat
+    # bonus, and a flat bonus cannot tell 16 ms from 1554 ms, which is the whole
+    # gap between xc-mac-studio and zz-tower0 as measured from Vaughan.
+    distance_ms: Optional[float] = None
+    # How busy this target is, 0..1, as IT reported. `None` = no opinion, which
+    # is scored as the median of what was reported rather than as idle: reading
+    # silence as spare capacity steers work at the node least able to serve it,
+    # and reading it as saturated strands the quietest engines.
+    utilization: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -125,6 +140,30 @@ class Weights:
     resource: float = 1.0
     budget: float = 1.0
     speed: float = 1.0
+    # Prefers NEAR among the already-feasible, SCALED PER SLA by
+    # `SchedulerPolicy.distance_by_sla` (interactive 1.0 / normal 0.5 / batch
+    # 0.1). The pair of numbers is what makes the two intents come out
+    # differently on the same fleet, and it is chosen rather than tuned:
+    #
+    #   interactive: 2.0 x 1.0 = 2.0  vs utilization 1.0  -> distance decides
+    #   normal:      2.0 x 0.5 = 1.0  vs utilization 1.0  -> balanced
+    #   batch:       2.0 x 0.1 = 0.2  vs utilization 1.0  -> utilization decides
+    #
+    # which is the intended reading: a turn the user is waiting on should stay
+    # near even on a busier card, and a 40-second digest should cross an ocean
+    # to reach an idle one. Set to 0 for exactly the pre-distance behaviour.
+    distance: float = 2.0
+    # Prefers the EMPTIER among the already-feasible.
+    #
+    # Beyond `_plans/fleet-broker.md` §5.2's letter ("that is the only scheduler
+    # change"), and added because without it the design's own §5.3 purpose does
+    # not happen. Feasibility only asks whether a job FITS, so a card three
+    # requests deep tied exactly with an idle one and the tie fell to distance —
+    # which means the caller's own machine, always, since a caller is nearest to
+    # itself. The digest that was meant to make an idle card earn its keep would
+    # have stayed on tower0's single 3090 forever. Defaulted, and 0 restores the
+    # previous behaviour exactly.
+    utilization: float = 1.0
 
 
 # Default deadline slack per SLA class (seconds) — the class picks this; an explicit
@@ -136,10 +175,63 @@ DEFAULT_SLA_SLACK_S: Mapping[Sla, float] = {
 }
 
 
+# How much distance matters, per SLA class, as a multiplier on
+# ``Weights.distance``.
+#
+# A flat distance weight is wrong in both directions and the fleet shows why.
+# An INTERACTIVE request pays the round trip on every turn, so 700 ms of
+# distance is most of what the user feels. A BATCH digest runs for 40 seconds
+# and pays that round trip ONCE — treating the two the same is what would keep
+# every digest pinned to the caller's own card while two idle GPUs sit on
+# another continent, which is the exact situation this scheduler exists to end.
+#
+# So the term is scaled, not dropped: batch still prefers near, all else equal.
+DEFAULT_DISTANCE_BY_SLA: Mapping[Sla, float] = {
+    Sla.INTERACTIVE: 1.0,
+    Sla.NORMAL: 0.5,
+    Sla.BATCH: 0.1,
+}
+
+
 @dataclass(frozen=True)
 class SchedulerPolicy:
     weights: Weights = field(default_factory=Weights)
     sla_slack_s: Mapping[Sla, float] = field(default_factory=lambda: dict(DEFAULT_SLA_SLACK_S))
+    distance_by_sla: Mapping[Sla, float] = field(
+        default_factory=lambda: dict(DEFAULT_DISTANCE_BY_SLA))
+
+    # -- per-account fairness -------------------------------------------------
+    #
+    # Two mechanisms, because they answer different questions. A CEILING answers
+    # "may this account have another slot at all"; FAIR SHARE answers "whose job
+    # goes first when several want the same room". A fleet with only the first
+    # is fair and rigid; with only the second, one account can still take
+    # everything as long as it asks steadily.
+    #
+    # **What a quota is worth is exactly what `Job.owner` is worth.** It is a
+    # string the caller supplies. On a private mesh where every caller is the
+    # operator, that is fine. The moment this fronts public registration, the
+    # owner MUST arrive from an authenticated channel and not from a request
+    # body, or an account raises its own quota by renaming itself. This module
+    # cannot enforce that — it can only be clear that it is the caller's job.
+    #
+    # None = NO CEILING, and that is the default: an unset bound must never
+    # start refusing work on the deploy that introduces it. It is also the wrong
+    # default the day strangers can register, which is why the fleet broker
+    # surfaces it as one env var rather than burying it here.
+    max_concurrent_per_account: Optional[int] = None
+    # Per-account overrides, for the account that is allowed more (or less).
+    account_quotas: Mapping[str, int] = field(default_factory=dict)
+    # Seconds of urgency an account forfeits per slot it already holds.
+    #
+    # Applied to the EDF ordering rather than replacing it, so it composes: an
+    # account holding four slots has its jobs sorted as two minutes less urgent,
+    # and a genuinely tight deadline still beats a batch job from an idle
+    # account. Set to 0 to disable.
+    #
+    # A no-op on a single-tenant fleet: every job carries the same owner, so
+    # every job takes the same penalty and the order is unchanged.
+    fair_share_penalty_s: float = 30.0
     local_bonus: float = 1.0            # resource-term reward for a LOCAL target
     locality_bonus: float = 0.5         # extra reward when the input already lives there
     min_uptime_s: float = 120.0         # anti-thrash: don't deprovision a burst worker this soon
@@ -210,9 +302,49 @@ class FleetState:
     jobs: Tuple[Job, ...] = ()
     now: float = 0.0
     ledger: Ledger = field(default_factory=Ledger)
+    # Slots each account is holding RIGHT NOW, fleet-wide. Passed in rather than
+    # remembered, like everything else here: the scheduler stays a pure function
+    # and the lease ledger that actually knows this stays its single owner.
+    #
+    # The key is whatever the caller calls an account. That is the whole strength
+    # of the quota and its whole limit — see `SchedulerPolicy`.
+    usage: Mapping[str, int] = field(default_factory=dict)
 
 
 # --- helpers ----------------------------------------------------------------
+def quota_for(owner: str, policy: SchedulerPolicy) -> Optional[int]:
+    """This account's ceiling, or None for no ceiling."""
+    if owner in policy.account_quotas:
+        return policy.account_quotas[owner]
+    return policy.max_concurrent_per_account
+
+
+def over_quota(owner: str, usage: Mapping[str, int],
+               policy: SchedulerPolicy) -> Optional[str]:
+    """The reason this account may not take another slot, or None if it may.
+
+    A REFUSAL, not a deprioritization. An account at its ceiling gets a `Queue`
+    with a sentence naming the count, which a caller can read, log and retry
+    against — where a quiet demotion would look identical to a slow fleet, and
+    the tenant would file a latency bug instead of asking for more quota.
+    """
+    cap = quota_for(owner, policy)
+    if cap is None:
+        return None
+    held = int(usage.get(owner, 0))
+    if held < cap:
+        return None
+    return f"account quota: {owner} holds {held} of {cap} slot(s)"
+
+
+def fair_share_delay(job: Job, usage: Mapping[str, int],
+                     policy: SchedulerPolicy) -> float:
+    """Urgency this job forfeits because its account is already being served."""
+    if policy.fair_share_penalty_s <= 0:
+        return 0.0
+    return policy.fair_share_penalty_s * max(0, int(usage.get(job.owner, 0)))
+
+
 def effective_deadline(job: Job, policy: SchedulerPolicy) -> float:
     if job.deadline is not None:
         return job.deadline
@@ -246,6 +378,13 @@ class _Cand:
     est_cost: float
     eta: float
     local_bonus: float
+    distance_ms: Optional[float] = None
+    utilization: Optional[float] = None
+    # How busy this target is, 0..1, as IT reported. `None` = no opinion, which
+    # is scored as the median of what was reported rather than as idle: reading
+    # silence as spare capacity steers work at the node least able to serve it,
+    # and reading it as saturated strands the quietest engines.
+    utilization: Optional[float] = None
 
 
 class _Fleet:
@@ -293,6 +432,7 @@ def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy) -> Li
             target=t, provision=provision,
             est_cost=t.cost.estimate(job.est_duration_s),
             eta=eta, local_bonus=_local_bonus(t, job, policy),
+            distance_ms=t.distance_ms, utilization=t.utilization,
         ))
     if not cands:
         return []
@@ -302,16 +442,54 @@ def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy) -> Li
     return cheaper if cheaper else cands
 
 
-def _score(cand: _Cand, cands: List[_Cand], weights: Weights) -> float:
-    """Lower is better. Min-max normalize cost & ETA across the candidate set so the
-    weights are comparable, then: w_budget*cost + w_speed*eta - w_resource*local."""
+def _score(cand: _Cand, cands: List[_Cand], weights: Weights,
+           distance_scale: float = 1.0) -> float:
+    """Lower is better. Min-max normalize cost, ETA and distance across the candidate
+    set so the weights are comparable, then:
+    w_budget*cost + w_speed*eta + w_distance*distance - w_resource*local."""
     costs = [c.est_cost for c in cands]
     etas = [c.eta for c in cands]
     cost_n = _norm(cand.est_cost, costs)
     eta_n = _norm(cand.eta, etas)
     return (weights.budget * cost_n
             + weights.speed * eta_n
+            + weights.distance * distance_scale * _distance_n(cand, cands)
+            + weights.utilization * _utilization_n(cand, cands)
             - weights.resource * cand.local_bonus)
+
+
+def _distance_n(cand: _Cand, cands: List[_Cand]) -> float:
+    """Normalized distance, 0 = nearest of this candidate set.
+
+    An UNMEASURED candidate scores as the FARTHEST measured one, not as zero and
+    not as infinity. Zero would let a target win by never having been probed;
+    infinity would exile it even when it is the only one left. "As bad as the
+    worst thing we did measure" is the reading that is wrong in neither
+    direction. If nothing at all was measured, distance contributes nothing and
+    the other terms decide — which is exactly the pre-distance behaviour.
+    """
+    known = [c.distance_ms for c in cands if c.distance_ms is not None]
+    if not known:
+        return 0.0
+    value = cand.distance_ms if cand.distance_ms is not None else max(known)
+    return _norm(value, known + [value])
+
+
+def _utilization_n(cand: _Cand, cands: List[_Cand]) -> float:
+    """Normalized busyness, 0 = emptiest of this candidate set.
+
+    An unreported target scores as the MEDIAN of what was reported — not idle,
+    which would let it win by staying quiet, and not saturated, which would
+    strand every engine that does not publish a load block. With nothing
+    reported at all the term contributes nothing.
+    """
+    known = [c.utilization for c in cands if c.utilization is not None]
+    if not known:
+        return 0.0
+    ordered = sorted(known)
+    median = ordered[len(ordered) // 2]
+    value = cand.utilization if cand.utilization is not None else median
+    return _norm(value, known + [value])
 
 
 def _norm(v: float, xs: List[float]) -> float:
@@ -332,14 +510,28 @@ def schedule(state: FleetState, policy: Optional[SchedulerPolicy] = None) -> Fle
     # job's slack shrinks, so it naturally rises in urgency and eventually forces a
     # burst — no separate aging bookkeeping needed here (the weight resolver handles
     # the global speed-vs-budget lean; see resolve_weights()).
-    jobs = sorted(state.jobs, key=lambda j: (effective_deadline(j, pol), j.created_at, j.id))
+    # Usage is MUTATED as jobs are admitted in this pass, so a burst from one
+    # account cannot slip past its ceiling by arriving together — which is
+    # exactly how a naive per-request check is defeated.
+    usage = dict(state.usage)
+    jobs = sorted(state.jobs, key=lambda j: (
+        effective_deadline(j, pol) + fair_share_delay(j, usage, pol),
+        j.created_at, j.id))
     for job in jobs:
+        refused = over_quota(job.owner, usage, pol)
+        if refused is not None:
+            actions.append(Queue(job.id, refused))
+            continue
         cands = _feasible_candidates(W, job, pol)
         if not cands:
             actions.append(Queue(job.id, "no feasible target meets the deadline now"))
             continue
-        best = min(cands, key=lambda c: _score(c, cands, pol.weights))
+        # Distance matters per SLA: an interactive turn pays the round trip on
+        # every message; a 40-second batch digest pays it once.
+        d_scale = pol.distance_by_sla.get(job.sla, DEFAULT_DISTANCE_BY_SLA[Sla.NORMAL])
+        best = min(cands, key=lambda c: _score(c, cands, pol.weights, d_scale))
         t = best.target
+        usage[job.owner] = usage.get(job.owner, 0) + 1
         if best.provision:
             W.provisioned[t.id] += 1
             actions.append(Provision(t.id, job.id, t.tier, best.est_cost,

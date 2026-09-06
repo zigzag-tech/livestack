@@ -3,7 +3,8 @@ case — polyasr/polytts/chipgen are separate processes). Fake peers stand in fo
 three servers; we assert the broker dispatches the right warm/evict calls."""
 from livestack_node.measure import measure_footprint
 from livestack_node.hostbroker import HostBroker
-from livestack_node.planner import Device, Unit, Placement, Request, Residency
+from livestack_node.planner import Device, Grant, Load, Unit, Placement, Request, Residency
+from livestack_node.ledger import validate
 
 
 class FakePeer:
@@ -343,3 +344,441 @@ def test_a_heartbeat_keeps_the_lease_alive():
     t[0] += 121.0                        # nothing since 1100 -> expired
     assert b.admit(Request("r2", "build", created_at=t[0])) == "buildhost-a"
     assert b.hosted_heartbeat("nope") is False
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 of `_plans/fleet-broker.md`: the fleet broker, observe-only.
+# ---------------------------------------------------------------------------
+
+import time as _time
+
+from livestack_node.hostbroker import peer_key as _peer_key
+from livestack_node.ledger import JsonlLedger
+from livestack_node.membership import MembershipPolicy as _MPolicy
+from livestack_node.planner import Device as _Device, Placement as _Placement
+from livestack_node.planner import Residency as _Residency, Unit as _Unit
+
+
+class Clock:
+    def __init__(self, t=1000.0):
+        self.t = t
+
+    def __call__(self):
+        return self.t
+
+    def advance(self, dt):
+        self.t += dt
+
+
+class _FleetPeer:
+    """A node whose reachability, cost and reported load the test controls."""
+
+    def __init__(self, base, host="h", device="h/gpu0", kind="asr",
+                 units_delay=0.0, ready=True, load=None, resident=True):
+        self.base = base
+        self.host_id = host
+        self.device_id = device
+        self._kind = kind
+        self._unit = _Unit(kind, {"vram_bytes": 4}, priority=10,
+                           residency=_Residency.UNPINNED)
+        self.up = True
+        self.resident = resident
+        self.units_delay = units_delay
+        self.ready = ready
+        self._load = load
+        self.warmed, self.evicted = [], []
+
+    def units(self):
+        if self.units_delay:
+            _time.sleep(self.units_delay)
+        if not self.up:
+            raise ConnectionError("Connection refused")
+        return {self._kind: self._unit}
+
+    def placements(self):
+        return ([_Placement(self._kind, self.device_id, busy=False)]
+                if self.resident else [])
+
+    def device_memory(self):
+        return None
+
+    def device_capacity(self):
+        return None
+
+    def capability(self):
+        if not self.up:
+            raise ConnectionError("Connection refused")
+        out = {"kind": self._kind, "host_id": self.host_id,
+               "device_id": self.device_id, "units": [self._kind],
+               "ready": self.ready, "detail": "resident" if self.ready else "cold",
+               "labels": {"arch": "cuda"}}
+        if self._load is not None:
+            out["load"] = self._load
+        return out
+
+    def warm(self, kind):
+        self.warmed.append(kind)
+
+    def evict(self, kind):
+        self.evicted.append(kind)
+
+
+def _fleet_broker(peers, **kw):
+    return HostBroker(devices=None, peers=peers, clock=_time.monotonic,
+                      membership=_MPolicy(suspect_after_s=60, mia_after_s=900),
+                      **kw)
+
+
+def test_observe_only_plans_but_dispatches_nothing():
+    """The whole safety property: one card, one master. A fleet broker pointed
+    at remote nodes must not fight the host brokers that own them — and the
+    plan is still the product, so it is computed and returned, just not sent."""
+    cold = _FleetPeer("http://a/livestack", kind="asr", resident=False)
+    cold._unit = _Unit("asr", {"vram_bytes": 4}, priority=10,
+                       residency=_Residency.HARD_PIN)
+
+    observer = _fleet_broker([cold], dispatch=False)
+    p = observer.plan_and_apply([])
+    assert p.of(Load), "the plan is still the product of a fleet broker"
+    assert cold.warmed == [] and cold.evicted == [], "observe-only dispatched"
+
+    # The same fixture under the default flag DOES dispatch, so the difference
+    # is the flag and not the setup.
+    applier = _fleet_broker([cold])
+    applier.plan_and_apply([])
+    assert cold.warmed == ["asr"]
+
+
+def test_probe_ms_measures_the_snapshot_it_already_pays_for():
+    slow = _FleetPeer("http://slow/livestack", host="far", device="far/gpu0",
+                      units_delay=0.05)
+    fast = _FleetPeer("http://fast/livestack", host="near", device="near/gpu0")
+    b = _fleet_broker([slow, fast], dispatch=False)
+    b.snapshot([])
+    assert b.probe_ms["http://slow/livestack"] >= 50
+    assert b.probe_ms["http://fast/livestack"] < 50
+
+
+def test_probe_ms_is_an_ewma_that_converges():
+    p = _FleetPeer("http://p/livestack")
+    b = _fleet_broker([p], dispatch=False)
+    b._record_probe_ms("k", 1000.0)
+    assert b.probe_ms["k"] == 1000.0
+    for _ in range(50):
+        b._record_probe_ms("k", 10.0)
+    assert 9.9 <= b.probe_ms["k"] <= 11.0, b.probe_ms["k"]
+
+
+def test_the_fleet_view_groups_by_host_and_carries_load():
+    a = _FleetPeer("http://a/livestack", host="zz-tower0", device="zz-tower0/aaaa",
+                   load={"in_flight": 0, "pressure": 0.51, "in_flight_source": "server",
+                         "device": {"capacity": 25296044032, "free": 12345678901}})
+    b = _FleetPeer("http://b/livestack", host="xc-tower-ubuntu",
+                   device="xc-tower-ubuntu/bbbb")
+    br = _fleet_broker([a, b], dispatch=False)
+    br.snapshot([])
+    view = br.fleet_view()
+
+    assert view["dispatch"] is False
+    assert view["peers"] == 2
+    assert sorted(view["hosts"]) == ["xc-tower-ubuntu", "zz-tower0"]
+    row = view["hosts"]["zz-tower0"]["nodes"][0]
+    assert row["state"] == "fresh"
+    assert row["ready"] is True
+    assert row["device_id"] == "zz-tower0/aaaa"
+    assert row["load"]["pressure"] == 0.51
+    assert row["device_mem"]["free"] == 12345678901
+    assert "probe_ms" in row
+    assert row["units"][0]["kind"] == "asr"
+    # b reports no load at all, and absent must stay absent: a consumer reads it
+    # as NO OPINION, never as idle.
+    assert "load" not in view["hosts"]["xc-tower-ubuntu"]["nodes"][0]
+
+
+def test_an_unreachable_peer_is_a_row_not_a_gap():
+    """A view that omits what it cannot reach can only report health, which is
+    not what anyone opens it to find out."""
+    gone = _FleetPeer("http://gone/livestack", host="zz-tower0")
+    gone.up = False
+    br = _fleet_broker([gone], dispatch=False)
+    br.snapshot([])
+    view = br.fleet_view()
+    rows = [r for h in view["hosts"].values() for r in h["nodes"]]
+    assert len(rows) == 1
+    assert rows[0]["peer"] == "http://gone/livestack"
+    assert "unseen_seconds" in rows[0]
+
+
+def test_the_capability_cache_bounds_what_a_poll_surface_costs():
+    """`/fleet` is polled. Without a TTL a 1 Hz UI would probe every node in the
+    fleet every second, and a probe to Nanjing costs 0.5-1.5 s."""
+    calls = []
+    p = _FleetPeer("http://p/livestack")
+    real = p.capability
+    p.capability = lambda: (calls.append(1), real())[1]
+    br = _fleet_broker([p], dispatch=False)
+    br.capability_ttl_s = 100
+    br.snapshot([])
+    for _ in range(20):
+        br.fleet_view()
+    assert len(calls) == 1, f"probed {len(calls)} times for 20 polls"
+
+
+def test_a_membership_transition_emits_one_ledger_record_not_one_per_tick(tmp_path):
+    """A per-tick emitter is how a 92,089-line log happened. Riding the same
+    edge the log line rides makes 'once per transition' structural."""
+    led = JsonlLedger(str(tmp_path / "fleet.jsonl"))
+    gone = _FleetPeer("http://gone/livestack", host="h")
+    br = HostBroker(devices=None, peers=[gone], clock=_time.monotonic,
+                    membership=_MPolicy(suspect_after_s=0.01, mia_after_s=900),
+                    dispatch=False, ledger=led, emitter="fleet-broker",
+                    emitter_id="xc-tower-ubuntu:8801")
+    br.snapshot([])                        # fresh
+    gone.up = False
+    _time.sleep(0.02)
+    for _ in range(50):                    # 50 reconcile ticks with it down
+        br.roster.tick()
+
+    recs = led.read()
+    observes = [r for r in recs if r["decision"] == "observe"]
+    assert len(observes) == 1, f"{len(observes)} records for one transition"
+    r = observes[0]
+    assert r["emitter"] == "fleet-broker"
+    assert r["emitter_id"] == "xc-tower-ubuntu:8801"
+    assert r["candidates"][0]["state"] == "suspect"
+    assert "fresh -> suspect" in r["candidates"][0]["reason"]
+    assert validate(r) == []
+
+
+def test_a_plan_with_actions_emits_a_record_with_the_candidates_around_it(tmp_path):
+    """`[hostbroker] evict llm@...: relieve measured over-budget pressure` says
+    what happened and never said what else was possible, so a reader could not
+    tell a correct eviction from a wrong one. The reason string was already
+    good; the candidate rows are what was missing."""
+    led = JsonlLedger(str(tmp_path / "host.jsonl"))
+    peer = _FleetPeer("http://a/livestack", kind="asr", resident=False)
+    peer._unit = _Unit("asr", {"vram_bytes": 4}, priority=10,
+                       residency=_Residency.HARD_PIN)
+    br = HostBroker(devices=[_Device("h/gpu0", "h", capacity={"vram_bytes": 24})],
+                    peers=[peer], clock=_time.monotonic, ledger=led,
+                    emitter_id="h:8799")
+    br.plan_and_apply([])
+
+    recs = [r for r in led.read() if r["decision"] in ("load", "evict", "grant")]
+    assert recs, "a plan with actions emitted nothing"
+    r = recs[0]
+    assert r["emitter"] == "host-broker"
+    assert r["chosen"] == "asr"
+    assert r["reason"]
+    assert all(c["reason"] for c in r["candidates"])
+    assert validate(r) == []
+
+
+def test_a_plan_with_no_actions_emits_nothing(tmp_path):
+    """Rate is bounded by the plan, not by the clock — a reconcile tick that
+    decides nothing must write nothing."""
+    led = JsonlLedger(str(tmp_path / "host.jsonl"))
+    peer = _FleetPeer("http://a/livestack", kind="asr")
+    br = HostBroker(devices=[_Device("h/gpu0", "h", capacity={"vram_bytes": 24})],
+                    peers=[peer], clock=_time.monotonic, ledger=led)
+    for _ in range(20):
+        br.plan_and_apply([])
+    assert [r for r in led.read() if r["decision"] != "observe"] == []
+
+
+def test_a_grant_now_carries_a_reason():
+    """Every other action already had one. A grant did not, so the ledger could
+    record WHAT was admitted and never why."""
+    peer = _FleetPeer("http://a/livestack", kind="asr")
+    br = HostBroker(devices=[_Device("h/gpu0", "h", capacity={"vram_bytes": 24})],
+                    peers=[peer], clock=_time.monotonic)
+    p = br.plan_and_apply([Request("r1", "asr", created_at=0)])
+    grants = p.of(Grant)
+    assert grants and grants[0].reason in ("resident", "loaded on demand")
+
+
+def test_observe_only_does_not_reclaim_either():
+    """Reclaim is a WRITE to another process's allocator. It is not a warm or an
+    evict, which is exactly why it is the exception that gets forgotten —
+    "observe-only" reads as being about the planner."""
+    class _Leaky(_FleetPeer):
+        leak = {"unexplained_bytes": 14_700_000_000}
+
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.reclaims = 0
+
+        def reclaim(self):
+            self.reclaims += 1
+            return {"freed_bytes": 0}
+
+    p = _Leaky("http://leaky/livestack")
+    assert _fleet_broker([p], dispatch=False).sweep_leaks() == []
+    assert p.reclaims == 0
+    _fleet_broker([p]).sweep_leaks()
+    assert p.reclaims == 1, "a HOST broker must still reclaim its own host"
+
+
+def test_a_dead_peer_is_not_asked_to_reclaim_every_tick():
+    """Found live on 2026-09-05: `RestPeer.leak` is a property that GETs
+    /residence, so on a down peer it raised BEFORE `_last_reclaim` was stamped
+    and the throttle was never armed. One "reclaim failed" line per reconcile
+    tick, forever — ~17k lines a day for one dead chipgen. The 92,089-line shape
+    membership was built to end, on a path membership did not cover."""
+    class _Angry(_FleetPeer):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            self.touches = 0
+
+        @property
+        def leak(self):
+            self.touches += 1
+            raise ConnectionError("Connection refused")
+
+    clock = Clock(1000.0)
+    p = _Angry("http://dead/livestack")
+    p.up = False
+    br = HostBroker(devices=None, peers=[p], clock=clock,
+                    membership=_MPolicy(suspect_after_s=45, mia_after_s=600))
+    for _ in range(120):                # 120 reconcile ticks, 5 s apart
+        br.snapshot([])                 # marks it probed -> suspect -> mia
+        br.sweep_leaks(now=clock.t)
+        clock.advance(5)
+    # One attempt while it was still `fresh` is legitimate — that is the probe
+    # that discovers it is gone. What must not happen is 120 of them.
+    assert p.touches <= 1, (
+        f"asked a peer membership already calls absent to reclaim {p.touches} times")
+
+
+# -- Phase 2a: the links matrix ----------------------------------------------
+
+def test_links_are_measured_per_host_and_keyed_by_the_remotes_own_id(monkeypatch):
+    """`probe_ms` is a STAR — distance from where this broker sits. A client in
+    Nanjing must not be ranked by Vaughan's view of Nanjing, so each host
+    measures its own row and the fleet broker collects them."""
+    seen = []
+
+    def fake_http(url, body=None, timeout=5):
+        seen.append(url)
+        if "slow" in url:
+            _time.sleep(0.05)
+            return {"host_id": "zz-tower0", "peers": [],
+                    "links": {"xc-mac-studio": 515.0}}
+        return {"host_id": "xc-mac-studio", "peers": [], "links": {}}
+
+    monkeypatch.setattr("livestack_node.hostbroker._http", fake_http)
+    br = _fleet_broker([], dispatch=False)
+    br.host_id = "xc-tower-ubuntu"
+    br.link_peers = ["http://slow:8799", "http://near:8799"]
+    br.measure_links()
+
+    assert all(u.endswith("/peers") for u in seen), \
+        "collection must use the CHEAP endpoint, not /status"
+    assert br.link_ms["zz-tower0"] >= 50
+    assert br.link_ms["xc-mac-studio"] < 50
+    # The remote's OWN row comes back with it: one GET buys the timing and its
+    # slice of the matrix.
+    assert br.peer_links["zz-tower0"] == {"xc-mac-studio": 515.0}
+
+    matrix = br.links_view()
+    assert matrix["xc-tower-ubuntu"]["zz-tower0"] >= 50
+    assert matrix["zz-tower0"]["xc-mac-studio"] == 515.0
+
+
+def test_a_link_that_cannot_be_measured_is_left_alone_not_zeroed(monkeypatch):
+    """No opinion is the correct answer for a pair we failed to measure. A zero
+    would read as 'adjacent', which is the direction that sends work across an
+    ocean."""
+    def angry(url, body=None, timeout=5):
+        raise ConnectionError("Connection refused")
+
+    monkeypatch.setattr("livestack_node.hostbroker._http", angry)
+    br = _fleet_broker([], dispatch=False)
+    br.link_peers = ["http://gone:8799"]
+    assert br.measure_links() == {}
+    assert br.links_view() == {}
+
+
+def test_an_operator_can_name_a_host_whose_broker_is_too_old_to_say(monkeypatch):
+    monkeypatch.setattr("livestack_node.hostbroker._http",
+                        lambda url, body=None, timeout=5: {"peers": []})
+    br = _fleet_broker([], dispatch=False)
+    br.link_peers = ["zz-tower0=http://100.64.0.3:8799"]
+    br.measure_links()
+    assert "zz-tower0" in br.link_ms, \
+        "without a name the matrix keys by URL and vantage=host:<id> never resolves"
+
+
+def test_the_fleet_view_carries_each_hosts_own_link_row(monkeypatch):
+    monkeypatch.setattr(
+        "livestack_node.hostbroker._http",
+        lambda url, body=None, timeout=5: {
+            "host_id": "zz-tower0", "peers": [],
+            "links": {"xc-tower-ubuntu": 540.0}})
+    p = _FleetPeer("http://n/livestack", host="xc-tower-ubuntu",
+                   device="xc-tower-ubuntu/aaaa")
+    br = _fleet_broker([p], dispatch=False)
+    br.host_id = "xc-tower-ubuntu"
+    br.link_peers = ["http://100.64.0.3:8799"]
+    br.snapshot([])
+    br.measure_links()
+    view = br.fleet_view()
+    assert view["vantage_host"] == "xc-tower-ubuntu"
+    assert "zz-tower0" in view["hosts"]["xc-tower-ubuntu"]["links"]
+
+
+def test_an_observe_only_plan_says_it_was_not_dispatched(tmp_path):
+    """Found reading the live ledger: a fleet broker computes plans constantly
+    and dispatches none of them, so its records were indistinguishable from a
+    host broker's — a reader would have counted evictions that never happened.
+    The ledger's whole value is being able to trust what it says happened."""
+    led = JsonlLedger(str(tmp_path / "f.jsonl"))
+    peer = _FleetPeer("http://a/livestack", kind="asr", resident=False)
+    peer._unit = _Unit("asr", {"vram_bytes": 4}, priority=10,
+                       residency=_Residency.HARD_PIN)
+    br = HostBroker(devices=[_Device("h/gpu0", "h", capacity={"vram_bytes": 24})],
+                    peers=[peer], clock=_time.monotonic, ledger=led,
+                    dispatch=False, emitter="fleet-broker", emitter_id="f:8801")
+    br.plan_and_apply([])
+    recs = [r for r in led.read() if r["decision"] == "load"]
+    assert recs, "the plan is still recorded — it is the product"
+    assert recs[0]["dispatched"] is False
+    assert recs[0]["reason"].startswith("ADVISORY (observe-only, not dispatched)")
+    assert peer.warmed == []
+    assert validate(recs[0]) == []
+
+
+def test_a_host_broker_records_its_plan_as_dispatched(tmp_path):
+    led = JsonlLedger(str(tmp_path / "h.jsonl"))
+    peer = _FleetPeer("http://a/livestack", kind="asr", resident=False)
+    peer._unit = _Unit("asr", {"vram_bytes": 4}, priority=10,
+                       residency=_Residency.HARD_PIN)
+    br = HostBroker(devices=[_Device("h/gpu0", "h", capacity={"vram_bytes": 24})],
+                    peers=[peer], clock=_time.monotonic, ledger=led)
+    br.plan_and_apply([])
+    recs = [r for r in led.read() if r["decision"] == "load"]
+    assert recs[0]["dispatched"] is True
+    assert not recs[0]["reason"].startswith("ADVISORY")
+    assert peer.warmed == ["asr"]
+
+
+def test_owner_usage_counts_live_leases_and_forgets_dead_ones():
+    """The quota is computed over this ledger, so a lease nobody heartbeats
+    must not keep counting: that would turn one caller's crash into an outage
+    that outlives it, locking an account out of a fleet that is actually idle."""
+    clock = Clock(1000.0)
+    br = HostBroker(devices=None, peers=[], clock=clock)
+    br.hosted_lease_ttl_s = 120
+    a1 = br.hosted_checkout("dev", "align", "acct-a")
+    br.hosted_checkout("dev", "align", "acct-a")
+    br.hosted_checkout("dev", "align", "acct-b")
+    assert br.owner_usage() == {"acct-a": 2, "acct-b": 1}
+
+    # acct-a keeps ONE lease alive; the other and acct-b's go quiet.
+    clock.advance(100)
+    br.hosted_heartbeat(a1)
+    clock.advance(100)
+    assert br.owner_usage() == {"acct-a": 1}, "a dead lease must stop counting"
+
+    br.hosted_release(a1)
+    assert br.owner_usage() == {}

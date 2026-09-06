@@ -276,6 +276,132 @@ manager, coordinator = attach(
 `coload=True` (ASR's co-resident units) vs `False` (one-model-in-VRAM TTS engines) and
 which unit is HARD_PIN are the only things that differ between servers.
 
+## The fleet broker — one Harmony that can see every host
+
+Everything above is per-HOST: a broker arbitrating the model-server processes
+that share one machine's cards. The **fleet broker** is the same `hostd` process
+with `LIVESTACK_DISPATCH=observe`, pointed at every node on every host. It plans
+over the whole fleet and **dispatches nothing**.
+
+Three rules make it safe to add to a running fleet:
+
+1. **One card, one master.** Only the host broker on a machine may warm, evict
+   or reclaim on that machine. The fleet broker observes. That covers `reclaim`
+   too, which is a write to another process's allocator and is exactly the
+   exception that gets forgotten, because "observe-only" reads as being about
+   the planner.
+2. **Soft state everywhere.** It holds nothing durable. Restart ⇒ refilled from
+   the nodes within one probe cycle. Lose it ⇒ today's behaviour exactly. It is
+   a single point of *insight*, not of failure.
+3. **Consumers degrade to current behaviour when the view is absent or stale.**
+   A stale fleet ranking is discarded, not trusted.
+
+`GET /fleet` is the whole-fleet view, grouped by host. One rule shapes it: **an
+absence is a row, never a gap.** A peer that cannot be read still appears, with
+its state, its age and its last error — a view that omits what it cannot reach
+can only report health, which is not what anyone opens it to find out. `load` is
+absent when the node reports none, and absent means NO OPINION; a consumer that
+reads it as idle steers traffic at the node least able to serve.
+
+`probe_ms` per node is an EWMA (0.7/0.3) of the wall-clock cost of the snapshot
+probe the broker already pays for — the cheapest possible distance signal.
+Measured 2026-09-05 from xc-tower-ubuntu: local nodes ~2 ms, xc-mac-studio
+~13 ms, zz-tower0 ~530 ms. Its limitation is stated rather than hidden: it is
+distance *from where this broker sits*, so a client in Nanjing must not be ranked
+by Vaughan's view of Nanjing. Phase 2's links matrix is what removes that bias.
+
+Live: `livestack-fleetd.service` on **xc-tower-ubuntu**, port 8801 (8799 is the
+local host broker, 8800 is buildd on zz-tower2). It is outside the GFW and
+reaches every node directly. Full design and phasing:
+`_plans/fleet-broker.md`.
+
+## Per-account fairness
+
+Two mechanisms, answering different questions. A **ceiling**
+(`LIVESTACK_ACCOUNT_QUOTA`) answers *may this account have another slot at all*;
+**fair share** (`LIVESTACK_FAIR_SHARE_PENALTY_S`) answers *whose job goes first
+when several want the same room*. A fleet with only the first is fair and rigid;
+with only the second, one account still takes everything as long as it asks
+steadily.
+
+An account at its ceiling gets **429 with the count** — `account quota: acct-a
+holds 2 of 2 slot(s); 4 target(s) could otherwise have run asr`. A refusal, not
+a demotion: a quiet demotion is indistinguishable from a slow fleet, and the
+tenant files a latency bug instead of asking for more quota. Naming the targets
+that *were* available is what separates "you are capped" from "the fleet is
+full".
+
+Fair share composes with EDF rather than replacing it. A held slot costs 30 s of
+urgency, so an account holding four has its jobs sorted as two minutes less
+urgent — and a genuinely tight interactive deadline still beats a batch job from
+an idle account. On a single-tenant fleet every job carries the same owner, takes
+the same penalty, and the order is unchanged.
+
+Usage comes from the broker's own lease ledger, expired entries dropped first: a
+quota computed over leases nobody heartbeats would turn one caller's crash into
+an outage that outlives it. `GET /fleet` reports the quota **actually in force**
+alongside live usage, because a mistyped quota is a safety control that switched
+itself off, and that has to be readable rather than inferred.
+
+### Who is asking
+
+**A quota is worth exactly what `owner` is worth**, so `owner` comes from the
+credential and never from the request body. `LIVESTACK_FLEET_TOKENS` maps a
+bearer token to a principal, and `POST /fleet/admit` requires one:
+
+```json
+{"<token>": {"name": "media-corpus", "owner": "media-corpus"},
+ "<token>": {"name": "hub", "delegate_prefix": "acct_"}}
+```
+
+Two kinds, because two kinds of caller exist. A **fixed** principal is one
+service with one identity — media-corpus's ingest is `media-corpus` and can be
+nothing else; a body naming anyone else is **403**, not a silent override,
+because silent substitution is how a caller ends up debugging the wrong
+account's quota. A **delegating** principal has authenticated somebody else and
+speaks for them — the hub, admitting work for an account that just signed in. It
+may name an owner, but only inside its granted prefix, and that prefix is the
+whole reason this is more than a shared secret: without it, one compromised
+caller is every account.
+
+Tokens are compared in constant time (a dict lookup answers faster for a wrong
+token than a right one, and that difference leaks the token a character at a
+time) and never logged — an 8-char SHA-256 fingerprint stands in.
+
+**What it does not do:** it does not authenticate the END user. A delegating
+principal asserts "I checked this account" and the broker believes it. That is
+the correct trust boundary — the fleet broker cannot verify a benchday login —
+but a delegating token is as strong as the service holding it, so issue one only
+to a service that authenticates its own callers.
+
+Unset means no auth, which makes any quota advisory; the startup line and
+`GET /fleet` both say so rather than leaving it to be discovered.
+
+## The decision ledger
+
+Every placement and routing decision writes a record with enough in it to be
+second-guessed later, with no live system: what was asked, **the values** each
+candidate showed at that instant (with `inputs_at`, so staleness is visible),
+what was chosen and why, **why each loser lost**, and — joined later by
+`decision_id` — what happened. A record missing the last two is a log line, not
+a decision record.
+
+Emitters today: the host broker, on any plan that produced an action (one record
+per Evict/Load/Grant/Defer, with the candidate rows the log line never had); and
+the fleet broker, on each membership *transition*. Rate is bounded at the
+emitter, not by a sampler — a plan with no actions writes nothing, and "still
+gone" is not an event.
+
+Storage is bounded before the first record is written (benchday rule 10):
+`~/.cache/livestack/decisions-<host>.jsonl` at 32 MiB × 4 and
+`fleet-decisions.jsonl` at 64 MiB × 4, enforced by the writer itself.
+`LIVESTACK_LEDGER_AGE_DAYS` is UNSET by default and unset means the age window is
+**disabled** — a delete-shaped bound must never default to deleting on the deploy
+that introduces it. `LIVESTACK_LEDGER=0` turns emission off entirely.
+
+Schema: `node-py/livestack_node/decision.schema.json`. Design:
+`_plans/decision-ledger.md`.
+
 ## Endpoints
 
 Broker (`hostd`, default `:8799`):
@@ -283,6 +409,9 @@ Broker (`hostd`, default `:8799`):
 - `POST /admit {"kind": "align"}` → `{granted, device_id, plan}` — make room *before* a load.
 - `GET /status` → per-node residence snapshot + last-evicted bookkeeping.
 - `GET /plan` → dry-run desired plan, no dispatch.
+- `GET /peers` → membership: per-peer state, how long unseen, last probe error.
+- `GET /fleet` → the whole-fleet view (fleet broker; a host broker answers it
+  too, for the nodes it knows).
 
 Node (`/livestack` facade): `GET /capability`, `GET /health`, `GET /residence`
 (now includes `device_mem`), `POST /lease`, `POST /lease/{id}/heartbeat`,
@@ -303,6 +432,20 @@ released in `finally`), and keeps non-GPU work (LLM digest, embeddings) off the 
 | `LIVESTACK_REPLAN_INTERVAL` | `5` | reconcile-loop period (s); `0` disables |
 | `LIVESTACK_DEVICES` | — | JSON per-device capacity for multi-host federation |
 | `LIVESTACK_BROKER_PORT` | `8799` | broker HTTP port |
+| `LIVESTACK_DISPATCH` | `apply` | `apply` = host broker (warms/evicts/reclaims its own host). `observe` = **fleet broker**: same planning, same `/fleet`, dispatches nothing |
+| `LIVESTACK_CAPABILITY_TTL` | `15` | seconds a node's `/capability` is cached for `/fleet`. That surface is polled, and a probe to Nanjing costs 0.5-1.5 s |
+| `LIVESTACK_PEER_SUSPECT_SECONDS` | `45` | unseen before a peer is `suspect` |
+| `LIVESTACK_PEER_MIA_SECONDS` | `600` | unseen before a peer is `mia` |
+| `LIVESTACK_PEER_PRUNE_SECONDS` | — | unset ⇒ pruning DISABLED (delete-shaped bound) |
+| `LIVESTACK_DEVICE_ID` | derived | this node's device id; derived from the CUDA device UUID / MLX when unset |
+| `LIVESTACK_NODE_HOST` | `127.0.0.1` | read by NODES: the address a node announces ITSELF at. Loopback is right for a broker on the same machine and wrong for one anywhere else — an unreachable registration sits `suspect` forever with a connect error, looking like a dead node rather than a bad address. A node cannot infer this, so it is the operator's to state |
+| `LIVESTACK_BROKER_URL` | `http://127.0.0.1:8799` | read by NODES: a **comma list** of brokers to report for duty to. One entry is a node and its host broker; two is the fleet case. An announce reaches all of them and fails only if none answered — a fleet broker being down must not make a node look unregistered to the broker that arbitrates its card |
+| `LIVESTACK_ACCOUNT_QUOTA` | — | max concurrent fleet slots ONE account may hold. **Unset = no ceiling**, the right default for a single-operator fleet and the wrong one the day strangers can register. A refused admit is a **429** naming the count, never a silent demotion |
+| `LIVESTACK_ACCOUNT_QUOTAS` | `{}` | per-account overrides. Quote it for systemd: `Environment='LIVESTACK_ACCOUNT_QUOTAS={"acct": 3}'` — bare double quotes are stripped |
+| `LIVESTACK_FAIR_SHARE_PENALTY_S` | `30` | seconds of urgency an account forfeits per slot it holds, applied to the deadline ordering. `0` disables. A no-op on a single-tenant fleet |
+| `LIVESTACK_LEDGER` | `1` | `0` disables decision-ledger emission |
+| `LIVESTACK_LEDGER_DIR` | `~/.cache/livestack` | where ledgers are written |
+| `LIVESTACK_LEDGER_MAX_MB` / `_FILES` / `_AGE_DAYS` | `32`/`4`/— | the ledger bound. `_AGE_DAYS` unset ⇒ age window DISABLED |
 
 ## Where it runs
 
@@ -312,6 +455,9 @@ released in `finally`), and keeps non-GPU work (LLM digest, embeddings) off the 
   brokers `polyasr` (MLX) + `polytts` (MLX). MLX meter.
 - **zz-tower2** (no GPU): `livestack-buildd.service` — the peerless **build broker**
   (:8800) arbitrating lodestar build hosts; see "Build hosts" above.
+- **xc-tower-ubuntu** (2x RTX 3090): `livestack-hostd.service` (:8799) brokers
+  `polyasr` x2 + `polytts` + `harmony-llm`; **`livestack-fleetd.service` (:8801)**
+  is the fleet broker — observe-only, peers on all three GPU hosts.
 
 ## Tests
 

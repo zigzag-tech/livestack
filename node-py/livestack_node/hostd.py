@@ -11,6 +11,14 @@ loads a heavy unit:
     POST /admit  {"kind": "align"}   -> {"granted": true, "device_id": "...", "plan": "..."}
     GET  /status                      -> per-node residence snapshot
     GET  /plan                        -> dry-run desired plan (no dispatch)
+    GET  /fleet                       -> the whole-fleet view (see fleet_view())
+
+The same process runs as a FLEET BROKER with ``LIVESTACK_DISPATCH=observe``:
+peers on every host, plans over all of them, and dispatches nothing. That is the
+safety property — one card, one master — and it is proven by absence: no
+``[hostbroker] evict``/``warm`` line may appear in a fleet broker's journal while
+the host brokers' own journals keep showing theirs. See
+``_plans/fleet-broker.md``.
 
 Run:  python -m livestack_node.hostd
 Config via env:
@@ -27,6 +35,49 @@ Config via env:
     LIVESTACK_PROBES     health probes for hosted devices:
                          {"buildhost-a": {"cmd": "docker info", "interval_s": 60}}
     LIVESTACK_LEASE_TTL_S hosted-lease expiry without heartbeats (default 120)
+    LIVESTACK_FLEET_TOKENS  bearer token -> principal, as JSON. When set,
+                         POST /fleet/admit REQUIRES a token and the owner comes
+                         from it, never from the body:
+                           {"<tok>": {"name":"media-corpus","owner":"media-corpus"},
+                            "<tok>": {"name":"hub","delegate_prefix":"acct_"}}
+                         A fixed principal is one service with one identity; a
+                         delegating one has authenticated somebody else and may
+                         name an owner inside its prefix. Unset = no auth, which
+                         makes any quota advisory — the startup line says so.
+                         Quote it for systemd (bare double quotes are stripped).
+    LIVESTACK_ACCOUNT_QUOTA  max concurrent fleet slots ONE account may hold.
+                         UNSET = no ceiling, which is the right default for a
+                         single-operator fleet and the WRONG one the day
+                         strangers can register. A refused admit is a 429 naming
+                         the count, never a silent demotion.
+                         Worth only as much as `owner` is: it is a string the
+                         caller supplies, so fronting public registration means
+                         the owner must arrive from an authenticated channel.
+    LIVESTACK_ACCOUNT_QUOTAS  per-account overrides, e.g. {"media-corpus": 8}
+    LIVESTACK_FAIR_SHARE_PENALTY_S  seconds of urgency an account forfeits per
+                         slot it already holds, applied to the deadline ordering
+                         (default 30; 0 disables). A no-op on a single-tenant
+                         fleet, where every job carries the same owner.
+    LIVESTACK_DISPATCH   "apply" (default) = a host broker, warms and evicts its
+                         own host's units. "observe" = a FLEET broker: same
+                         planning, same /fleet view, dispatches NOTHING.
+    LIVESTACK_BROKER_URL (read by NODES, not by the broker) comma-separated
+                         brokers a node reports for duty to — its host broker and,
+                         with a fleet broker deployed, that too. Announcing to
+                         both is what lets LIVESTACK_PEERS shrink back to meaning
+                         "the operator says this ought to exist".
+    LIVESTACK_LINK_PEERS comma-separated OTHER host brokers' base URLs. Each is
+                         timed on the reconcile loop and its own `links` row is
+                         collected, so the fleet holds a measured MATRIX rather
+                         than one broker's star. Unmeasured pairs have no opinion.
+    LIVESTACK_CAPABILITY_TTL  seconds a node's /capability descriptor is cached
+                         for the /fleet view (default 15). /fleet is a poll
+                         surface and probes to Nanjing cost 0.5-1.5s each.
+    LIVESTACK_LEDGER     "0" disables decision-ledger emission entirely
+    LIVESTACK_LEDGER_DIR where ledgers are written (default ~/.cache/livestack)
+    LIVESTACK_LEDGER_MAX_MB / _FILES / _AGE_DAYS   the bound. AGE_DAYS is unset
+                         by default and unset means the age window is DISABLED —
+                         a delete-shaped bound must never default to deleting.
 """
 from __future__ import annotations
 
@@ -36,6 +87,7 @@ from typing import Dict, List
 
 from .hostbroker import HostBroker, RestPeer
 from .membership import MembershipPolicy, RosterFull
+from .fleet_scheduler import SchedulerPolicy
 from .planner import Device, Request, Residency, Unit, Evict, Grant, Load, plan as _plan
 
 GB = 1_000_000_000
@@ -57,7 +109,8 @@ DEFAULT_FOOTPRINTS = {"asr": 5_070_913_536, "align": 5_295_308_800,
 
 def build_broker(peer_urls: List[str], device_config=None,
                  default_vram_gb: float = 24.0, default_reserved_gb: float = 2.0,
-                 membership=None, extra_units=None) -> HostBroker:
+                 membership=None, extra_units=None, dispatch: bool = True,
+                 ledger=None, emitter_id: str = "host-broker") -> HostBroker:
     """Federated by default: devices are DISCOVERED from the peers (one per reported
     device_id, across however many hosts), sized from device_config[device_id] or the
     default. Point peer_urls at nodes on several hosts and the same broker plans and
@@ -69,11 +122,14 @@ def build_broker(peer_urls: List[str], device_config=None,
                       default_capacity={"vram_bytes": int(default_vram_gb * GB),
                                         "reserved": int(default_reserved_gb * GB)},
                       clock=time.monotonic, log=lambda m: print(m, flush=True),
-                      membership=membership, extra_units=extra_units)
+                      membership=membership, extra_units=extra_units,
+                      dispatch=dispatch, ledger=ledger,
+                      emitter="host-broker" if dispatch else "fleet-broker",
+                      emitter_id=emitter_id)
 
 
 def build_app(broker: HostBroker):
-    from fastapi import FastAPI, Body, HTTPException
+    from fastapi import FastAPI, Body, Header, HTTPException
     app = FastAPI(title="Livestack Harmony broker")
     state = {"last_evicted_at": {}}
     # Hosted-backend health probes (LIVESTACK_PROBES), run on the reconcile
@@ -165,8 +221,17 @@ def build_app(broker: HostBroker):
     def peers():
         """Membership with per-peer state and how long each has been unseen —
         so 'is that node gone, or did it blip?' is answerable without grepping
-        a log that used to print the same line every 5 seconds."""
-        return {"peers": broker.membership_snapshot()}
+        a log that used to print the same line every 5 seconds.
+
+        Also the CHEAP endpoint, and that is load-bearing: it is what other
+        brokers time to measure the link between hosts, and what they read this
+        broker's own `links` row from. `/status` would refresh every node on this
+        host per caller, so a collector polling it would multiply this host's
+        probe cost by the number of collectors.
+        """
+        return {"host_id": broker.host_id,
+                "peers": broker.membership_snapshot(),
+                "links": {k: round(v, 1) for k, v in broker.link_ms.items()}}
 
     @app.get("/status")
     def status():
@@ -186,7 +251,132 @@ def build_app(broker: HostBroker):
             hosted[did] = {"available": broker.hosted_available.get(did, True),
                            "probe": probe_state.get(did)}
         return {"peers": out, "membership": broker.membership_snapshot(),
-                "last_evicted_at": state["last_evicted_at"], "hosted": hosted}
+                "last_evicted_at": state["last_evicted_at"], "hosted": hosted,
+                "host_id": broker.host_id,
+                "links": {k: round(v, 1) for k, v in broker.link_ms.items()}}
+
+    @app.get("/fleet")
+    def fleet():
+        """The whole-fleet view: every node the broker knows, grouped by host,
+        with membership state, measured probe distance, readiness and load.
+
+        An absence is a ROW, never a gap — a peer that cannot be read still
+        appears with its state, its age and its last error. A view that omits
+        what it cannot reach can only report health, which is not what anyone
+        opens it to find out.
+        """
+        return broker.fleet_view()
+
+    @app.get("/fleet/rank")
+    def fleet_rank(kind: str, vantage: str = "direct", via: str = None,
+                   region: str = None, ttl_s: float = 60.0):
+        """Where should a `kind` request START, from this vantage.
+
+        Advisory, and bounded: the response carries `generated_at` and `ttl_s`,
+        and a consumer must DISCARD past the TTL rather than downgrade — a stale
+        ranking is worse than none, because none falls back to a working default
+        while stale looks authoritative. A wrong first guess costs one hop; the
+        client picker still probes and fails over.
+
+        Region is NOT applied here. Region is operator policy, the caller holds
+        it (the hub knows an account's allowed regions), and a fleet broker that
+        decided policy would be a second place for it to be wrong.
+        """
+        from .fleet_rank import rank as _rank
+        result = _rank(broker.fleet_view(), kind, vantage=via or vantage,
+                       ttl_s=ttl_s)
+        # `region` is RECORDED, never applied. It is the asker's region as the
+        # emitter knew it, which is what makes a ledger record readable later —
+        # but the filtering belongs to the caller, and answering as if we had
+        # applied it would be the worst of both.
+        result["asker_region"] = region
+        broker.emit_rank(result)
+        return {k: v for k, v in result.items() if k != "candidates"}
+
+    @app.post("/fleet/admit")
+    def fleet_admit(payload: dict = Body(...), authorization: str = Header(None)):
+        """Throw a task at the fleet: "where should this run?"
+
+        The answer names a HOST and a NODE, and stops there. Whether the unit is
+        resident on that node, and whether loading it would evict something,
+        stays with that host's own broker — the caller's request to the node
+        triggers its `manager.ensure` -> its host broker's `/admit`, exactly as
+        today. Two brains, unchanged: a fleet broker that reached into a host's
+        residency would be the second master this design exists not to have.
+
+        The grant carries a `lease_id`. The caller heartbeats it and releases it;
+        a dead caller's lease expires on `LIVESTACK_LEASE_TTL_S`, because a
+        client that crashed cannot be relied on to hand capacity back.
+        """
+        from .fleet_admit import admit as _admit
+        from .fleet_auth import AuthError, authenticate
+        kind = payload.get("kind")
+        if not kind:
+            raise HTTPException(400, "'kind' required")
+        # WHO, before anything else. The quota is worth exactly what `owner` is
+        # worth, and until this existed `owner` was a string in the body of an
+        # unauthenticated POST — an account raised its own ceiling by renaming
+        # itself. The credential decides; the body is consulted only for a
+        # principal that was granted the right to delegate, and only inside its
+        # prefix.
+        principals = getattr(broker, "fleet_principals", {})
+        if principals:
+            try:
+                owner, principal = authenticate(
+                    principals, authorization, payload.get("owner"))
+            except AuthError as e:
+                raise HTTPException(e.status, e.detail)
+        else:
+            # Auth not configured. Today's behaviour, and the startup line and
+            # GET /fleet both say so — because a quota over an unauthenticated
+            # owner is decorative, and that has to be visible rather than
+            # discovered.
+            owner, principal = (payload.get("owner", "consumer"), None)
+        est = (payload.get("estimate") or {}).get("duration_s", 60.0)
+        result = _admit(
+            broker.fleet_view(), kind=kind,
+            # From the broker's own lease ledger, expired entries dropped
+            # first — a quota computed over leases nobody heartbeats would turn
+            # one caller's crash into an outage that outlives it.
+            usage=broker.owner_usage(),
+            sla=payload.get("sla", "normal"),
+            owner=owner,
+            selector=payload.get("selector") or {},
+            locality_host=payload.get("locality_host"),
+            vantage=payload.get("via") or payload.get("vantage") or "direct",
+            estimate_s=float(est),
+            policy=getattr(broker, "fleet_policy", None),
+        )
+        request = {"owner": owner,
+                   # The principal is recorded BESIDE the owner, not instead of
+                   # it: "the hub, acting for acct_x" and "acct_x itself" are
+                   # different facts, and a retrospective that cannot tell them
+                   # apart cannot answer who actually spent the capacity.
+                   "principal": principal.name if principal else None,
+                   "sla": payload.get("sla", "normal"),
+                   "vantage": result.get("vantage"),
+                   "selector": payload.get("selector") or {},
+                   "locality_host": payload.get("locality_host")}
+        if result.get("refused") == "account_quota":
+            # 429, not 200-with-no-target: an account at its ceiling is a
+            # different answer from a full fleet, and a caller that cannot tell
+            # them apart retries forever against a fleet that will never say yes.
+            broker.emit_admit(result, request)
+            raise HTTPException(429, result.get("reason") or "account quota")
+        lease_id = None
+        target = result.get("target")
+        if target:
+            # The ledger is bookkeeping and the grant is the product: a checkout
+            # failure must not void an answer the caller already has.
+            try:
+                lease_id = broker.hosted_checkout(
+                    target["target_id"], kind, request["owner"])
+            except Exception as e:
+                print(f"[harmony] fleet lease checkout failed: {e}", flush=True)
+        broker.emit_admit(result, request, lease_id)
+        out = {k: v for k, v in result.items() if k != "candidates"}
+        out["lease_id"] = lease_id
+        return out
 
     @app.get("/plan")
     def plan_preview():
@@ -243,6 +433,10 @@ def build_app(broker: HostBroker):
                     # Probe BEFORE planning, so this cycle's snapshot plans
                     # against health that is seconds old, not minutes.
                     _run_probes(time.monotonic())
+                    # Time the links to the other hosts. Cheap (one /peers GET
+                    # each) and it is the only distance signal that is not
+                    # measured from this broker's own vantage.
+                    broker.measure_links()
                     p = broker.plan_and_apply([], state["last_evicted_at"])
                     _track(p)
                     if p.of(Evict) or p.of(Load):
@@ -325,19 +519,126 @@ def main():
         prune_after_s=float(prune_env) if prune_env else None,
         max_peers=int(os.environ.get("LIVESTACK_MAX_PEERS", "32")),
     )
+    # apply (default) = host broker; observe = fleet broker. The default is what
+    # keeps every existing deployment byte-for-byte unchanged.
+    dispatch = os.environ.get("LIVESTACK_DISPATCH", "apply").strip().lower() != "observe"
+    port = int(os.environ.get("LIVESTACK_BROKER_PORT", "8799"))
+    host_id = os.environ.get("LIVESTACK_HOST_ID", "").strip() or _hostname()
+    emitter_id = f"{host_id}:{port}"
+    from .ledger import ledger_from_env
+    ledger = ledger_from_env(
+        "decisions-" + host_id if dispatch else "fleet-decisions",
+        # The fleet broker sees every host, so it writes more: 64 MiB x 4 to the
+        # host broker's 32 x 4. Both are bounded by the same writer; see rule 10
+        # and `_plans/decision-ledger.md` §6.
+        32 if dispatch else 64,
+        log=lambda m: print(m, flush=True),
+    )
+    link_env = os.environ.get("LIVESTACK_LINK_PEERS", "").strip()
+    link_peers = [u.strip().rstrip("/") for u in link_env.split(",") if u.strip()]
+    # A MALFORMED QUOTA MUST NOT TAKE THE BROKER DOWN.
+    #
+    # Found the hard way on 2026-09-05: systemd strips the double quotes out of
+    # `Environment={"a": 1}`, so the value arrived as `{a: 1}`, `json.loads`
+    # raised at import, and the fleet broker crash-looped. The typo was mine;
+    # the crash was the code's. Per-account quotas are the setting that changes
+    # most often — a tenant arrives, a tenant leaves — so it is the one most
+    # likely to be mistyped, and a fleet-wide outage is a wildly disproportionate
+    # answer to a missing quote.
+    #
+    # It degrades LOUDLY rather than silently, and `/fleet` reports what is
+    # actually in force, because a config error that quietly disables a safety
+    # control is the failure this is trying to avoid in the first place.
+    def _quota_int(name):
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            print(f"[harmony] {name}={raw!r} is not a number — NO CEILING is in "
+                  f"force; GET /fleet reports the effective quota", flush=True)
+            return None
+
+    def _quota_map(name):
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            return {}
+        try:
+            got = json.loads(raw)
+            if not isinstance(got, dict):
+                raise ValueError("not an object")
+            return {str(k): int(v) for k, v in got.items()}
+        except Exception as e:
+            print(f"[harmony] {name}={raw!r} is not a JSON object of "
+                  f"account->int ({e}) — per-account OVERRIDES are ignored; the "
+                  f"fleet-wide ceiling still applies. NOTE systemd strips double "
+                  f"quotes: write Environment='{name}={{\"acct\": 3}}'",
+                  flush=True)
+            return {}
+
+    from .fleet_auth import load_principals
+    fleet_principals = load_principals(
+        os.environ.get("LIVESTACK_FLEET_TOKENS", ""),
+        log=lambda m: print(m, flush=True))
+    fleet_policy = SchedulerPolicy(
+        max_concurrent_per_account=_quota_int("LIVESTACK_ACCOUNT_QUOTA"),
+        account_quotas=_quota_map("LIVESTACK_ACCOUNT_QUOTAS"),
+        fair_share_penalty_s=float(
+            os.environ.get("LIVESTACK_FAIR_SHARE_PENALTY_S", "30") or 30),
+    )
+    if fleet_principals:
+        print(f"[harmony] /fleet/admit requires a bearer token; "
+              f"{len(fleet_principals)} principal(s): "
+              + ", ".join(sorted(
+                  f"{p.name}"
+                  + (f"->{p.owner}" if p.owner else f"->{p.delegate_prefix}*")
+                  for p in fleet_principals.values())), flush=True)
+    elif fleet_policy.max_concurrent_per_account is not None:
+        # The one combination that is quietly useless: a ceiling counted against
+        # an owner any caller can choose. Said loudly rather than left to be
+        # discovered by whoever eventually reads the ledger.
+        print("[harmony] WARNING account quota is set but LIVESTACK_FLEET_TOKENS "
+              "is NOT — `owner` comes from the request body, so the quota is "
+              "advisory and any caller can spend any account's capacity",
+              flush=True)
+    print(f"[harmony] account quota: "
+          f"{fleet_policy.max_concurrent_per_account or 'NO CEILING'}"
+          f"{f' (overrides: {dict(fleet_policy.account_quotas)})' if fleet_policy.account_quotas else ''}"
+          f", fair-share penalty {fleet_policy.fair_share_penalty_s:.0f}s",
+          flush=True)
     broker = build_broker(
         peer_urls, device_config=device_config,
         default_vram_gb=float(os.environ.get("LIVESTACK_VRAM_GB", "24")),
         default_reserved_gb=float(os.environ.get("LIVESTACK_RESERVED_GB", "2")),
         membership=membership,
         extra_units=extra_units,
+        dispatch=dispatch, ledger=ledger, emitter_id=emitter_id,
     )
+    broker.host_id = host_id
+    broker.link_peers = link_peers
+    broker.fleet_policy = fleet_policy
+    broker.fleet_principals = fleet_principals
     import uvicorn
-    port = int(os.environ.get("LIVESTACK_BROKER_PORT", "8799"))
-    print(f"[harmony] broker on :{port} over {len(broker.peers)} seeded peers "
-          f"(nodes self-register at POST /peers; GET /peers shows membership)",
-          flush=True)
+    role = "host broker" if dispatch else "fleet broker (observe-only)"
+    print(f"[harmony] {role} on :{port} as {host_id} over {len(broker.peers)} "
+          f"seeded peers and {len(link_peers)} link peers "
+          f"(nodes self-register at POST /peers; GET /peers shows membership; "
+          f"GET /fleet shows the fleet)", flush=True)
+    if ledger is not None:
+        print(f"[harmony] decision ledger -> {ledger.path} "
+              f"({ledger.max_bytes // (1024 * 1024)} MiB x {ledger.max_files}"
+              + (f", {ledger.max_age_s / 86400:.0f}d" if ledger.max_age_s
+                 else ", age window disabled") + ")", flush=True)
     uvicorn.run(build_app(broker), host="0.0.0.0", port=port)
+
+
+def _hostname() -> str:
+    import socket
+    try:
+        return socket.gethostname().split(".")[0]
+    except Exception:
+        return "host"
 
 
 if __name__ == "__main__":

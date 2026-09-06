@@ -126,3 +126,83 @@ def test_a_readiness_probe_that_throws_is_not_ready():
     cap = run(go())
     assert cap["ready"] is False
     assert "model handle is gone" in cap["detail"]
+
+
+# -- device identity ----------------------------------------------------------
+
+def test_an_explicit_device_id_is_reported_on_capability_and_residence():
+    """The node knows which card it is on; the broker must be told, not left to
+    infer it from a name. Before this, a second polyasr on one host needed a FAKE
+    host_id to get its own device id."""
+    units = {"asr": ManagedUnit("asr", loader=lambda: "m", freer=noop_free,
+                                residency_policy=ResidencyPolicy.UNPINNED)}
+    app = FastAPI()
+    attach(app, host_id="h", kind="polyasr", units=units, idle_seconds=120,
+           coload=True, gpu_call=lambda fn: fn(), device_id="h/3f9a1c22")
+
+    async def go():
+        async with client_for(app) as c:
+            return ((await c.get("/livestack/capability")).json(),
+                    (await c.get("/livestack/residence")).json())
+    cap, res = run(go())
+    assert cap["device_id"] == "h/3f9a1c22"
+    # The two endpoints must never disagree — the broker reads them as one node.
+    assert res["device_id"] == cap["device_id"]
+
+
+def test_the_env_names_the_device_when_the_server_does_not(monkeypatch):
+    monkeypatch.setenv("LIVESTACK_DEVICE_ID", "h/from-env")
+    units = {"asr": ManagedUnit("asr", loader=lambda: "m", freer=noop_free,
+                                residency_policy=ResidencyPolicy.UNPINNED)}
+    app = FastAPI()
+    attach(app, host_id="h", kind="polyasr", units=units, idle_seconds=120,
+           coload=True, gpu_call=lambda fn: fn())
+
+    async def go():
+        async with client_for(app) as c:
+            return (await c.get("/livestack/capability")).json()
+    assert run(go())["device_id"] == "h/from-env"
+
+
+def test_a_node_that_passes_nothing_keeps_the_legacy_id(monkeypatch):
+    """No behaviour change for a single-GPU node with no CUDA/MLX present."""
+    monkeypatch.delenv("LIVESTACK_DEVICE_ID", raising=False)
+    from livestack_node.facade import resolve_device_id
+    import builtins
+    real_import = builtins.__import__
+
+    def no_accelerator(name, *a, **k):
+        if name in ("torch", "mlx.core"):
+            raise ImportError(name)
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", no_accelerator)
+    assert resolve_device_id("h") == "h/gpu0"
+
+
+def test_a_node_can_advertise_a_reachable_host_not_just_loopback(monkeypatch):
+    """A node announces its own facade URL, and until now that was always
+    `127.0.0.1`. Right for the host broker on the same machine; wrong for a
+    fleet broker on another, which would register a peer it can never reach —
+    and that peer would sit `suspect` forever with a connect error, looking like
+    a dead node rather than a misconfigured address.
+
+    The node cannot infer this (it does not reliably know its own mesh address,
+    and a POST shows the broker a source address, not a listening port), so it is
+    the operator's to state — with a default that keeps single-machine
+    deployments working with nothing set."""
+    announced = []
+    monkeypatch.setattr("livestack_node.announce.start_registrar",
+                        lambda url, **kw: announced.append(url))
+    monkeypatch.setenv("LIVESTACK_NODE_HOST", "100.64.0.18")
+    units = {"asr": ManagedUnit("asr", loader=lambda: "m", freer=noop_free,
+                                residency_policy=ResidencyPolicy.UNPINNED)}
+    attach(FastAPI(), host_id="h", kind="polyasr", units=units, idle_seconds=120,
+           coload=True, gpu_call=lambda fn: fn(), port=8766)
+    assert announced == ["http://100.64.0.18:8766/livestack"]
+
+    announced.clear()
+    monkeypatch.delenv("LIVESTACK_NODE_HOST")
+    attach(FastAPI(), host_id="h", kind="polyasr", units=units, idle_seconds=120,
+           coload=True, gpu_call=lambda fn: fn(), port=8766)
+    assert announced == ["http://127.0.0.1:8766/livestack"]
