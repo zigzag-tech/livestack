@@ -11,7 +11,7 @@ dependencies = []
 
 [project.optional-dependencies]
 facade = ["fastapi>=0.100"]
-dev = ["pytest>=7", "fastapi>=0.100", "httpx>=0.24"]
+dev = ["pytest>=7", "fastapi>=0.100", "httpx>=0.24", "jsonschema>=4"]
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -162,6 +162,15 @@ pub struct PickerConfig {
     pub explore_band: f64,
     pub task_ewma_alpha: f64,
     pub transport_quarantine_threshold: f64,
+    /// Break near-ties by the engine's self-reported load. Opt-in: a transport
+    /// plane that uses this picker as a state store rather than a selector must
+    /// not start being reordered by it.
+    pub load_aware: bool,
+    /// A load report older than this is ignored — "no opinion", not "idle".
+    pub load_freshness_ms: f64,
+    /// How long a candidate may go unpicked before it is forced back into the
+    /// exploration slot regardless of `explore_band`. 0 disables.
+    pub remeasure_after_ms: f64,
 }
 
 impl From<PickerConfig> for PickerConfigImpl {
@@ -175,6 +184,9 @@ impl From<PickerConfig> for PickerConfigImpl {
             explore_band: c.explore_band,
             task_ewma_alpha: c.task_ewma_alpha,
             transport_quarantine_threshold: c.transport_quarantine_threshold.max(0.0) as u32,
+            load_aware: c.load_aware,
+            load_freshness_ms: c.load_freshness_ms as i64,
+            remeasure_after_ms: c.remeasure_after_ms as i64,
         }
     }
 }
@@ -197,6 +209,14 @@ pub struct RouteObservation {
     pub consecutive_failures: u32,
     pub consecutive_transport_failures: u32,
     pub sticky_quarantine: bool,
+    /// The load reading as the picker would USE it — absent when load is
+    /// disabled, unreported, or stale. A decision record carries the value the
+    /// decision used, not the last one ever received.
+    pub load: Option<f64>,
+    pub load_pressure: Option<f64>,
+    pub load_in_flight: Option<f64>,
+    pub overdue_for_remeasure: bool,
+    pub stale_probes: u32,
 }
 
 impl From<RouteObservationImpl> for RouteObservation {
@@ -217,6 +237,11 @@ impl From<RouteObservationImpl> for RouteObservation {
             consecutive_failures: o.consecutive_failures,
             consecutive_transport_failures: o.consecutive_transport_failures,
             sticky_quarantine: o.sticky_quarantine,
+            load: o.load,
+            load_pressure: o.load_pressure,
+            load_in_flight: o.load_in_flight.map(|v| v as f64),
+            overdue_for_remeasure: o.overdue_for_remeasure,
+            stale_probes: o.stale_probes,
         }
     }
 }
@@ -361,6 +386,21 @@ impl RoutePicker {
     }
 
     /// A completed task's responsiveness (first-byte ms) — the dominant signal.
+    /// A candidate reported how busy it is (a livestack node's
+    /// `/livestack/capability` -> `load`). Pass `undefined`/`null` for a value
+    /// the engine did not report; passing NEITHER clears the report back to no
+    /// opinion rather than recording idleness.
+    pub fn recordLoad(
+        &mut self,
+        key: &str,
+        pressure: Option<f64>,
+        inFlight: Option<f64>,
+        nowMs: f64,
+    ) {
+        self.inner
+            .record_load(key, pressure, inFlight.map(|v| v as i64), nowMs as i64);
+    }
+
     pub fn recordTaskLatency(&mut self, key: &str, ms: f64, nowMs: f64) {
         self.inner.record_task_latency(key, ms as i64, nowMs as i64);
     }
