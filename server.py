@@ -119,6 +119,18 @@ def _attributes_for(spec: dict) -> dict:
         attrs["vision"] = False
     if attrs.get("vision") is None:
         attrs.pop("vision", None)
+    # What this unit SERVES, not what the weights support. Declaring the
+    # weights' 262144 next to a unit serving 16384 is an attribute that LIES:
+    # a `context_len>=32768` requirement would match it and the request would
+    # then be rejected by the very unit that satisfied the clause. An attribute
+    # that lies is worse than one that is missing, because the missing one
+    # fails the clause (silence is not a yes) and the lying one passes it.
+    served = spec.get("max_model_len")
+    if served:
+        try:
+            attrs["context_len"] = int(served)
+        except (TypeError, ValueError):
+            attrs.pop("context_len", None)
     return attrs
 
 
