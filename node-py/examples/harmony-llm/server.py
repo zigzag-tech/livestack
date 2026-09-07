@@ -331,6 +331,43 @@ manager, residence = attach(
 )
 
 
+# A unit whose vLLM died is NOT resident, whatever this process last believed.
+#
+# The subprocess can go without us: OOM-killed, killed by an operator, crashed
+# after startup. The ManagedUnit still holds its model handle, so the node keeps
+# reporting the unit resident and the PLANNER keeps reserving its footprint —
+# budgeting for a model that does not exist. Observed 2026-09-07: a card that was
+# physically empty was reported as 12.88 GB in use, and every placement onto it
+# was refused for want of room that was actually free.
+#
+# So: reconcile against the processes we started, and tell the manager to drop
+# what is gone. Cheap (a poll of Popen.poll()), and it runs regardless of whether
+# anything is asking, because the wrong answer is what a planner reads.
+def _reap_dead_units():
+    while True:
+        time.sleep(float(os.environ.get("HARMONY_LLM_REAP_SECONDS", "20")))
+        try:
+            for name in list(getattr(manager, "resident", ()) or ()):
+                proc = _procs.get(name)
+                if proc is not None and proc.poll() is None:
+                    continue                      # alive
+                if _vllm_up(name=name):
+                    continue                      # someone else's, still serving
+                print(f"[harmony-llm] {name} is marked resident but its vLLM is gone "
+                      f"— dropping it so the planner stops reserving its footprint",
+                      flush=True)
+                _procs.pop(name, None)
+                try:
+                    gpu_call(lambda n=name: manager.request_evict(n))
+                except Exception as e:            # never let the reaper die
+                    print(f"[harmony-llm] reap of {name} failed: {e}", flush=True)
+        except Exception as e:
+            print(f"[harmony-llm] reaper error: {e}", flush=True)
+
+
+threading.Thread(target=_reap_dead_units, daemon=True).start()
+
+
 if WARM_ON_START:
     def _warm_on_start():
         # Give the facade a moment to bind before the first ensure, so the
