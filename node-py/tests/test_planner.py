@@ -3,7 +3,7 @@ a fake ``now`` and GB-valued footprints model the real polyasr/polytts/chipgen
 contention that motivated it (ASR > TTS > chipgen on a 24 GB card)."""
 from livestack_node.planner import (
     Device, Unit, Placement, Request, WorldState, PlannerPolicy, Residency,
-    plan, Load, Evict, Grant, Defer,
+    plan, Load, Evict, Grant, Defer, candidate_kinds,
 )
 
 GB = 1.0  # work in GB
@@ -698,3 +698,28 @@ def test_naming_a_kind_still_means_that_kind():
                    requests=(Request("r1", "llm_small", created_at=1000),), now=1000)
     g = [x for x in plan(w).of(Grant) if x.request_id == "r1"]
     assert g and g[0].kind == "llm_small"
+
+
+def test_requirements_take_ranges_closed_and_open_ended():
+    """Each requirement key carries its own comparison, so bounds compose:
+    `{"params_b>": 7, "params_b<=": 10}` is one closed range, and any number of
+    bounds on any number of attributes works the same way. "A 9B" is expressible
+    as a range rather than a magic name."""
+    units = {
+        "tiny":  Unit("tiny",  {"vram": 2},  attributes={"class": "llm", "params_b": 2}),
+        "small": Unit("small", {"vram": 12}, attributes={"class": "llm", "params_b": 9}),
+        "mid":   Unit("mid",   {"vram": 15}, attributes={"class": "llm", "params_b": 26}),
+        "big":   Unit("big",   {"vram": 21}, attributes={"class": "llm", "params_b": 27}),
+    }
+    w = WorldState(devices=(gpu(),), units=units)
+    ask = lambda req: candidate_kinds(w, Request("r", "", requires=req))
+
+    assert ask({"class": "llm", "params_b>": 7, "params_b<=": 10}) == ["small"]
+    assert ask({"class": "llm", "params_b>=": 7, "params_b<=": 9}) == ["small"]
+    assert ask({"class": "llm", "params_b>": 9, "params_b<": 27}) == ["mid"]
+    assert ask({"class": "llm", "params_b<": 10}) == ["tiny", "small"]
+    # Open-ended, and CHEAPEST-first: "at least 20B" is served by the 26B before
+    # the 27B, so a mixed queue does not load the largest thing that qualifies.
+    assert ask({"class": "llm", "params_b>=": 20}) == ["mid", "big"]
+    # A range nothing falls inside is empty, not a nearest match.
+    assert ask({"class": "llm", "params_b>": 30}) == []
