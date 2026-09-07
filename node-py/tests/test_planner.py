@@ -532,3 +532,21 @@ def test_demand_is_absent_by_default_and_changes_nothing():
     w = WorldState(devices=(gpu(),), units=units(),
                    requests=(Request("r1", "chipgen", created_at=0),), now=100)
     assert any(g.kind == "chipgen" for g in plan(w).of(Grant))
+
+
+def test_an_unknown_kind_is_deferred_not_a_crash():
+    """A request for a unit nobody registered must come back as one deferred
+    request, not take the whole plan down.
+
+    It used to raise KeyError from the sort key — before the loop that handles
+    exactly this case. The broker above then reported its own exception as
+    `granted: True`, and a node acting on that permission loaded a model onto a
+    card the planner had never cleared."""
+    w = WorldState(devices=(gpu(),), units=units(),
+                   requests=(Request("r1", "no_such_unit", created_at=0),
+                             Request("r2", "chipgen", created_at=0)), now=100)
+    p = plan(w)                                     # must not raise
+    deferred = [d for d in p.of(Defer) if d.request_id == "r1"]
+    assert deferred and "unknown" in deferred[0].reason
+    # The rest of the plan still happens: one bad request is not a broken cycle.
+    assert any(g.kind == "chipgen" for g in p.of(Grant))

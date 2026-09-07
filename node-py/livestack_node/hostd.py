@@ -151,6 +151,15 @@ def build_app(broker: HostBroker):
                       kind=kind, owner=payload.get("owner", "consumer"),
                       created_at=time.monotonic(),
                       selector=payload.get("selector") or {})
+        # NOTE on the degrade branch below. It answers `granted: True` for ANY
+        # exception, which tells the caller to proceed — and a caller that loads
+        # a model on that word puts it on a card the planner never cleared.
+        # Observed 2026-09-07: a KeyError inside planning came back as
+        # permission, and a node ran vLLM into a card still holding a 22 GB
+        # model. The narrow fix is below: a plan that places nothing now answers
+        # `granted: False` with a reason, so a refusal and an outage stop
+        # looking alike. Distinguishing FAULTS from refusals inside
+        # `plan_and_apply` is the remaining half and wants its own change.
         try:
             p = broker.plan_and_apply([req], state["last_evicted_at"])
         except Exception as e:  # a peer down etc. — degrade: let the caller proceed
@@ -168,7 +177,9 @@ def build_app(broker: HostBroker):
             except Exception as e:
                 print(f"[harmony] hosted checkout failed dev={dev}: {e}", flush=True)
         return {"granted": dev is not None, "device_id": dev, "plan": p.summary(),
-                "lease_id": lease_id}
+                "lease_id": lease_id,
+                **({} if dev is not None else
+                   {"reason": "the planner could not place it on any device"})}
 
     @app.post("/lease/{lease_id}/heartbeat")
     def lease_heartbeat(lease_id: str):

@@ -616,9 +616,18 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
             W.evict(victim.kind, d.id, "relieve measured over-budget pressure")
 
     # 1) Honour pending demand, most-important (after aging) first, then FIFO.
+    # `.get`, not `[]`. The loop below handles an unknown kind by deferring it
+    # with a reason — but the SORT KEY ran first and raised KeyError, so the
+    # whole plan died instead of one request being deferred. A broker turned
+    # that exception into `granted: True` and a node loaded a model onto a card
+    # the planner had never cleared. An unknown kind sorts last (there is
+    # nothing to be urgent about) and is deferred where it always should have
+    # been.
+    _UNKNOWN = Unit(kind="", footprint={}, priority=1_000_000)
     reqs = sorted(
         world.requests,
-        key=lambda r: (_eff_priority(r, world.units[r.kind], world.now, pol), r.created_at, r.id),
+        key=lambda r: (_eff_priority(r, world.units.get(r.kind, _UNKNOWN), world.now, pol),
+                       r.created_at, r.id),
     )
     for req in reqs:
         unit = world.units.get(req.kind)
