@@ -631,3 +631,70 @@ def test_the_more_wanted_resident_keeps_the_card():
     p = plan(w)
     assert "llm_a" not in kinds_of(p.of(Evict), Evict)
     assert [d for d in p.of(Defer) if d.request_id == "r1"]
+
+
+# --- "just give me a model that can do this" ---------------------------------
+#
+# A caller sending an inference request should not have to know which model is
+# loaded, on which card, or whether anything must move to make room. It states
+# what it needs; the planner resolves it. These pin that contract.
+
+def _catalogue():
+    return {
+        "llm_small": Unit("llm_small", {"vram": 8}, priority=20, residency=Residency.UNPINNED,
+                          reload_cost=20, spread_group="llm", min_residency_s=0,
+                          attributes={"class": "llm", "params_b": 9, "quant": "int4"}),
+        "llm_big": Unit("llm_big", {"vram": 20}, priority=20, residency=Residency.UNPINNED,
+                        reload_cost=60, spread_group="llm", min_residency_s=0,
+                        attributes={"class": "llm", "params_b": 27, "quant": "int4"}),
+        "asr": Unit("asr", {"vram": 5}, priority=10, residency=Residency.UNPINNED,
+                    reload_cost=8, attributes={"class": "asr"}),
+    }
+
+
+def test_a_requirement_picks_a_qualifying_model_without_naming_one():
+    w = WorldState(devices=(gpu("gpu0"),), units=_catalogue(),
+                   requests=(Request("r1", "", created_at=1000,
+                                     requires={"class": "llm", "params_b>=": 20}),),
+                   now=1000)
+    g = [x for x in plan(w).of(Grant) if x.request_id == "r1"]
+    assert g and g[0].kind == "llm_big", "only the 27B satisfies >= 20B"
+
+
+def test_a_requirement_prefers_what_is_already_resident():
+    """The cheapest outcome first: a qualifying model already on a card is used
+    rather than loading another beside it."""
+    w = WorldState(devices=(gpu("gpu0"),), units=_catalogue(),
+                   placements=(Placement("llm_small", "gpu0", loaded_at=0),),
+                   requests=(Request("r1", "", created_at=1000,
+                                     requires={"class": "llm"}),),
+                   now=1000)
+    p = plan(w)
+    g = [x for x in p.of(Grant) if x.request_id == "r1"]
+    assert g and g[0].kind == "llm_small"
+    assert not [l for l in p.of(Load) if l.kind == "llm_big"]
+
+
+def test_a_requirement_nothing_satisfies_says_so():
+    w = WorldState(devices=(gpu("gpu0"),), units=_catalogue(),
+                   requests=(Request("r1", "", created_at=1000,
+                                     requires={"class": "llm", "params_b>=": 400}),),
+                   now=1000)
+    d = [x for x in plan(w).of(Defer) if x.request_id == "r1"]
+    assert d and "no unit satisfies" in d[0].reason
+
+
+def test_an_undeclared_attribute_is_not_a_match():
+    """Silence is not a yes — an unlabelled unit must not satisfy everything."""
+    w = WorldState(devices=(gpu("gpu0"),), units=_catalogue(),
+                   requests=(Request("r1", "", created_at=1000,
+                                     requires={"class": "llm", "vision": True}),),
+                   now=1000)
+    assert [x for x in plan(w).of(Defer) if x.request_id == "r1"]
+
+
+def test_naming_a_kind_still_means_that_kind():
+    w = WorldState(devices=(gpu("gpu0"),), units=_catalogue(),
+                   requests=(Request("r1", "llm_small", created_at=1000),), now=1000)
+    g = [x for x in plan(w).of(Grant) if x.request_id == "r1"]
+    assert g and g[0].kind == "llm_small"
