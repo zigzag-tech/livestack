@@ -225,6 +225,14 @@ class Grant:
     request_id: str
     kind: str
     device_id: str
+    # What the unit may actually USE on that device, after this cycle's
+    # evictions. The planner is the only party that knows it: the node knows its
+    # own units, the operator knows a fraction of a card, and neither can see
+    # what the planner just freed. Handing it over is what stops a unit being
+    # hand-sized in a config file to squeeze into whatever a particular card
+    # happened to have left — which is placement decided by an operator again,
+    # in a different disguise. Empty when the planner did not compute one.
+    budget: Mapping[str, float] = field(default_factory=dict)
     # Why this grant landed here. Every other action already carried one; a
     # grant did not, so the ledger could record WHAT was admitted and never why
     # — which is the half a retrospective actually needs (see
@@ -364,9 +372,11 @@ class _World:
         self.resident[device_id].pop(kind, None)
         self.actions.append(Evict(kind=kind, device_id=device_id, reason=reason))
 
-    def grant(self, req: Request, device_id: str, reason: str = "") -> None:
+    def grant(self, req: Request, device_id: str, reason: str = "",
+              budget: Optional[Res] = None) -> None:
         self.actions.append(Grant(request_id=req.id, kind=req.kind,
-                                  device_id=device_id, reason=reason))
+                                  device_id=device_id, reason=reason,
+                                  budget=dict(budget or {})))
 
     def defer(self, req: Request, reason: str) -> None:
         self.actions.append(Defer(request_id=req.id, reason=reason))
@@ -806,7 +816,10 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
             why = "loaded on demand"
         else:
             why = "resident"
-        W.grant(req, opt.device_id, why)
+        # The budget is the device's free resources as of NOW in the working
+        # copy — after the evictions above and the load below were committed —
+        # which is exactly what this unit may occupy.
+        W.grant(req, opt.device_id, why, budget=W.free(opt.device_id))
 
     # 2) HARD_PIN floor: guarantee >= min_resident warm replicas (mandatory).
     for kind, unit in world.units.items():

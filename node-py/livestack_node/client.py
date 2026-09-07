@@ -74,7 +74,7 @@ def _post(url: str, body: dict) -> dict:
     return json.loads(raw) if raw else {}
 
 
-def admit(kind: str, *, owner_id: str = "node",
+def admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "node",
           timeout: float = 240.0, brokers: Optional[list] = None) -> dict:
     """Ask Harmony to MAKE ROOM for `kind`, and say where it granted it.
 
@@ -108,8 +108,14 @@ def admit(kind: str, *, owner_id: str = "node",
     """
     from .announce import broker_urls
     # No device selector: WHERE it goes is the planner's decision, and pinning it
-    # here would be the caller deciding placement again.
+    # here would be the caller deciding placement again. `requires` goes one
+    # further — WHICH model is also the planner's decision, from a stated need
+    # ({"class": "llm", "params_b>": 7, "params_b<=": 10}). The answer carries
+    # `kind`, because a caller that asked for a capability has no other way to
+    # know what it got.
     body = {"kind": kind, "owner": owner_id}
+    if requires:
+        body["requires"] = dict(requires)
     last = None
     for base in (brokers if brokers is not None else broker_urls()):
         try:

@@ -75,6 +75,7 @@ def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit]) -> Dict[str, Unit]
             activation_headroom=_res_max(prev.activation_headroom,
                                          unit.activation_headroom),
             spread_group=prev.spread_group or unit.spread_group,
+            attributes=dict(prev.attributes or unit.attributes),
         )
     return out
 
@@ -591,7 +592,8 @@ class HostBroker:
                 # one card ignores it; a peer that can see several needs it, or
                 # it would pick for itself and the planner's choice would be a
                 # suggestion. Older nodes ignore the extra field.
-                peer.warm(ld.kind, device=ld.device_id)
+                peer.warm(ld.kind, device=ld.device_id,
+                          budget=dict(getattr(ld, "budget", {}) or {}))
         return p
 
 
@@ -1001,7 +1003,9 @@ class RestPeer:
                                   # Contention class, when the node declares one.
                                   # Absent on nodes that do not, which is every
                                   # node that serves a single model.
-                                  spread_group=u.get("spread_group") or "")
+                                  spread_group=u.get("spread_group") or "",
+                                  # What the unit IS, so a requirement can match it.
+                                  attributes=u.get("attributes") or {})
         return out
 
     def placements(self):
@@ -1036,10 +1040,12 @@ class RestPeer:
         """
         return _http(f"{self.base}/capability")
 
-    def warm(self, kind, device=None):
+    def warm(self, kind, device=None, budget=None):
         body = {"unit": kind}
         if device:
             body["device"] = device
+        if budget:
+            body["budget"] = dict(budget)
         _http(f"{self.base}/model/warm", body, timeout=180)
 
     def evict(self, kind):

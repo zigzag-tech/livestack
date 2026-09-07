@@ -310,7 +310,8 @@ def build_router(manager, coordinator, capability: Capability,
                 status_code=409,
                 detail=f"device '{device}' is not one this node can load on "
                        f"({', '.join(device_candidates)})")
-        gpu_call(lambda: manager.ensure(unit, device=device))
+        budget = payload.get("budget") or None
+        gpu_call(lambda: manager.ensure(unit, device=device, budget=budget))
         return {"resident": sorted(manager.resident), "device": device or device_id}
 
     @router.post("/model/evict")
@@ -379,6 +380,9 @@ def build_router(manager, coordinator, capability: Capability,
             grp = getattr(manager.units.get(kind), "spread_group", "")
             if grp:
                 entry["spread_group"] = grp
+            attrs = getattr(manager.units.get(kind), "attributes", None)
+            if attrs:
+                entry["attributes"] = dict(attrs)
             units.append(entry)
         out = {"host_id": capability.host_id,
                "device_id": device_id,

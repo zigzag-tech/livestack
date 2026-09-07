@@ -24,7 +24,7 @@ class FakePeer:
             return []
         return [Placement(self._unit.kind, self.device_id, loaded_at=0, busy=self._busy)]
 
-    def warm(self, kind, device=None):
+    def warm(self, kind, device=None, budget=None):
         self.calls.append(("warm", kind)); self._resident = True
 
     def evict(self, kind):
@@ -73,7 +73,7 @@ class DownPeer:
     def device_capacity(self):
         raise ConnectionError("peer down")
 
-    def warm(self, kind, device=None):
+    def warm(self, kind, device=None, budget=None):
         raise ConnectionError("peer down")
 
     def evict(self, kind):
@@ -142,7 +142,7 @@ def test_measured_capacity_autosizes_device():
         def placements(self): return []
         def device_memory(self): return {"vram_bytes": 38}
         def device_capacity(self): return {"vram_bytes": 40}
-        def warm(self, kind, device=None): self.calls.append(("warm", kind))
+        def warm(self, kind, device=None, budget=None): self.calls.append(("warm", kind))
         def evict(self, kind): self.calls.append(("evict", kind))
 
     peer = MeteredPeer()
@@ -416,7 +416,7 @@ class _FleetPeer:
             out["load"] = self._load
         return out
 
-    def warm(self, kind, device=None):
+    def warm(self, kind, device=None, budget=None):
         self.warmed.append(kind)
 
     def evict(self, kind):

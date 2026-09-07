@@ -81,21 +81,39 @@ FOOTPRINT = int(float(os.environ.get("HARMONY_LLM_FOOTPRINT_GB", "17")) * (1 << 
 SPREAD_GROUP = os.environ.get("HARMONY_LLM_SPREAD_GROUP", "llm")
 
 
+# Added to every unit's vLLM port. THE reason two nodes can share one unit
+# catalogue: a unit spec names a port, and two processes on one host cannot both
+# bind it. With an offset per node, the SAME units file is declared by the node
+# on card 0 and the node on card 1 — so every model is offered on every GPU and
+# the planner actually has a choice of device.
+#
+# Without this, each node declares its own list, each unit exists on exactly one
+# card in the planner's world, and "which model goes on which GPU" is decided in
+# a service file again — the decision the planner exists to make.
+PORT_OFFSET = int(os.environ.get("HARMONY_LLM_PORT_OFFSET", "0"))
+
+
 def _unit_specs() -> "list[dict]":
     if not _UNITS_ENV:
         return [{"name": "llm", "model": MODEL, "port": VLLM_PORT,
                  "footprint_gb": FOOTPRINT / (1 << 30), "gpu_fraction": GPU_FRACTION,
-                 "max_model_len": MAX_MODEL_LEN, "extra_args": EXTRA_ARGS}]
+                 "max_model_len": MAX_MODEL_LEN, "extra_args": EXTRA_ARGS,
+                 "residency": None, "attributes": {}}]
     out = []
     for spec in json.loads(_UNITS_ENV):
         out.append({
             "name": spec["name"],
             "model": spec["model"],
-            "port": int(spec.get("port", VLLM_PORT)),
+            "port": int(spec.get("port", VLLM_PORT)) + PORT_OFFSET,
             "footprint_gb": float(spec.get("footprint_gb", FOOTPRINT / (1 << 30))),
             "gpu_fraction": str(spec.get("gpu_fraction", GPU_FRACTION)),
             "max_model_len": str(spec.get("max_model_len", MAX_MODEL_LEN) or ""),
             "extra_args": shlex.split(spec.get("extra_args", "")) or EXTRA_ARGS,
+            "residency": spec.get("residency"),
+            # What this unit IS, for requests that state a requirement rather
+            # than a name. Carried verbatim to the broker; the planner compares,
+            # it never interprets.
+            "attributes": dict(spec.get("attributes") or {}),
         })
     if not out:
         raise RuntimeError("HARMONY_LLM_UNITS is set but declares no units")
@@ -129,6 +147,17 @@ _procs: "dict[str, subprocess.Popen]" = {}
 _lock = threading.RLock()
 
 
+def _device_total_bytes() -> float:
+    """Total VRAM of the card this node speaks for, or 0 when unknowable."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return float(torch.cuda.get_device_properties(0).total_memory)
+    except Exception:
+        pass
+    return 0.0
+
+
 def _base_of(name: str) -> str:
     return f"http://127.0.0.1:{SPECS[name]['port']}"
 
@@ -142,7 +171,8 @@ def _vllm_up(timeout: float = 2.0, name: str = "") -> bool:
         return False
 
 
-def _load(name: str = "", device: "str | None" = None):
+def _load(name: str = "", device: "str | None" = None,
+          budget: "dict | None" = None):
     """Start this unit's vLLM and block until it actually serves.
 
     `device` is the placement the PLANNER chose, arriving through
@@ -174,12 +204,31 @@ def _load(name: str = "", device: "str | None" = None):
         # meter and the child all agree.
         if "CUDA_VISIBLE_DEVICES" not in env and CUDA_DEVICE:
             env["CUDA_VISIBLE_DEVICES"] = CUDA_DEVICE
+        # SIZE TO THE BUDGET THE PLANNER GRANTED, when it gave one.
+        #
+        # `gpu_fraction` is a fraction of the WHOLE card, fixed in config, and it
+        # cannot know what else is on that card or what the planner just evicted.
+        # Tuning it by hand to squeeze a model into one card's leftovers is
+        # placement decided by an operator again, and it is wrong the moment the
+        # card's other tenants change. The planner knows the free bytes; use them.
+        fraction = spec["gpu_fraction"]
+        want = float((budget or {}).get("vram_bytes") or 0)
+        if want > 0:
+            total = _device_total_bytes()
+            if total > 0:
+                # Leave the tail of the grant unclaimed: the budget is what is
+                # free, and an engine that takes every last byte leaves nothing
+                # for the allocator's own overhead.
+                fraction = f"{max(0.10, min(0.97, (want * 0.94) / total)):.3f}"
+                print(f"[harmony-llm] {name}: planner granted "
+                      f"{want/(1<<30):.1f} GiB -> --gpu-memory-utilization {fraction}",
+                      flush=True)
         cmd = [
             os.path.join(os.path.dirname(__file__), "venv", "bin", "vllm"),
             "serve", spec["model"],
             "--port", str(spec["port"]),
             "--host", "127.0.0.1",
-            "--gpu-memory-utilization", spec["gpu_fraction"],
+            "--gpu-memory-utilization", fraction,
             "--served-model-name", spec["model"], name, "local",
         ]
         if spec["max_model_len"]:
@@ -282,7 +331,7 @@ _UNITS = {
         # `device` is accepted, so livestack passes the planner's placement in
         # (ManagedUnit introspects the loader). A loader without it is called
         # as before, which is why every other node in the fleet is unaffected.
-        loader=(lambda n=name: (lambda device=None: _load(n, device)))(),
+        loader=(lambda n=name: (lambda device=None, budget=None: _load(n, device, budget)))(),
         freer=(lambda n=name: (lambda: _free(n)))(),
         footprint=int(spec["footprint_gb"] * (1 << 30)),
         # SOFT_PIN. Measured 2026-09-05: an evicted unit takes ~50.7 s to answer
@@ -303,6 +352,7 @@ _UNITS = {
                 or os.environ.get("HARMONY_LLM_RESIDENCY", "SOFT_PIN")).upper()),
         health_check=_health_probe_for(name),
         spread_group=SPREAD_GROUP,
+        attributes=spec.get("attributes") or {},
     )
     for name, spec in SPECS.items()
 }
@@ -425,6 +475,43 @@ def _peer_at(device_id: str) -> "str | None":
     return None
 
 
+def _requirement_from(body_json: dict) -> "dict | None":
+    """A stated NEED instead of a model name, in either of two shapes.
+
+    Body field (what an OpenAI SDK sends via extra_body):
+        {"harmony_requires": {"class": "llm", "params_b>": 7, "params_b<=": 10}}
+    Model string (for clients that can only set `model`):
+        {"model": "require:class=llm,params_b>7,params_b<=10"}
+
+    The point of both is that a caller says what it needs and never learns which
+    model is loaded, on which card, or what had to move — that is the planner's
+    business, and asking a caller to know it is what makes a GPU fleet feel like
+    a set of machines instead of one.
+    """
+    req = body_json.get("harmony_requires")
+    if isinstance(req, dict) and req:
+        return dict(req)
+    model = str(body_json.get("model") or "")
+    if not model.startswith("require:"):
+        return None
+    out: dict = {}
+    for clause in model[len("require:"):].split(","):
+        clause = clause.strip()
+        if not clause:
+            continue
+        for op in (">=", "<=", "!=", ">", "<", "="):
+            if op in clause:
+                name, _, raw = clause.partition(op)
+                key = name.strip() + ("" if op == "=" else op)
+                raw = raw.strip()
+                try:
+                    out[key] = float(raw) if raw.replace(".", "", 1).isdigit() else raw
+                except ValueError:
+                    out[key] = raw
+                break
+    return out or None
+
+
 def _unit_for_model(requested: str) -> str:
     """Which declared unit serves this `model` field.
 
@@ -462,9 +549,13 @@ async def proxy(path: str, request: Request):
     # reloads it through Harmony's admission (which makes room first) rather
     # than racing the planner.
     unit = next(iter(SPECS))
+    requirement = None
     if body:
         try:
-            unit = _unit_for_model(json.loads(body).get("model", ""))
+            parsed_body = json.loads(body)
+            requirement = _requirement_from(parsed_body)
+            if requirement is None:
+                unit = _unit_for_model(parsed_body.get("model", ""))
         except Exception:
             pass
     # ADMISSION FIRST, then load. Loading straight off the request is how a node
@@ -484,10 +575,23 @@ async def proxy(path: str, request: Request):
     # on the card turns a working model into a 503 on every request — observed
     # exactly that way, a benchmark refused against its own loaded model.
     already_here = unit in getattr(manager, "resident", ()) and _vllm_up(name=unit)
+    # A requirement is ALWAYS resolved by the planner: which model satisfies it is
+    # exactly the decision being delegated, so there is nothing to short-circuit.
+    if requirement is not None:
+        already_here = False
     granted, degraded, refused = None, None, None
-    if not already_here and (len(SPECS) > 1 or MULTI_NODE):
+    if not already_here and (requirement is not None or len(SPECS) > 1 or MULTI_NODE):
         try:
-            res = admit(unit, owner_id=f"harmony-llm:{HOST_ID}", timeout=ADMIT_TIMEOUT)
+            res = admit(unit if requirement is None else "",
+                        requires=requirement,
+                        owner_id=f"harmony-llm:{HOST_ID}", timeout=ADMIT_TIMEOUT)
+            served = res.get("kind")
+            if requirement is not None:
+                if not served:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"nothing satisfies {requirement}")
+                unit = served
             granted, degraded = res.get("device_id"), res.get("degraded")
             # A broker that ANSWERED and did not grant has refused. Loading
             # anyway is what admission exists to stop: it puts a model on a card
@@ -495,8 +599,18 @@ async def proxy(path: str, request: Request):
             # else's evicted model at worst.
             if not degraded and not res.get("granted"):
                 refused = res.get("reason") or "the planner did not grant a device"
+        except HTTPException:
+            raise                             # a refusal we raised ourselves, not a fault
         except Exception as e:                # unreachable: arbitration is not the model
             degraded = f"{type(e).__name__}: {e}"
+    if degraded and requirement is not None:
+        # Degrading means "proceed without arbitration", and there is no such
+        # thing for a REQUIREMENT: which model satisfies it is precisely what we
+        # could not ask. Serving whatever this node happens to hold would answer
+        # a different question than the caller asked.
+        raise HTTPException(
+            status_code=503,
+            detail=f"cannot resolve {requirement}: arbitration unavailable ({degraded})")
     if degraded:
         print(f"[harmony-llm] admission unavailable for {unit} "
               f"({degraded}) — loading without it", flush=True)

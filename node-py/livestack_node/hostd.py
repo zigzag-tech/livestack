@@ -144,13 +144,15 @@ def build_app(broker: HostBroker):
 
     @app.post("/admit")
     def admit(payload: dict = Body(...)):
-        kind = payload.get("kind")
-        if not kind:
-            raise HTTPException(400, "'kind' required")
-        req = Request(id=payload.get("id", f"{kind}-{int(time.monotonic() * 1000)}"),
+        kind = payload.get("kind") or ""
+        requires = payload.get("requires") or {}
+        if not kind and not requires:
+            raise HTTPException(400, "'kind' or 'requires' is required")
+        req = Request(id=payload.get("id", f"{kind or 'req'}-{int(time.monotonic() * 1000)}"),
                       kind=kind, owner=payload.get("owner", "consumer"),
                       created_at=time.monotonic(),
-                      selector=payload.get("selector") or {})
+                      selector=payload.get("selector") or {},
+                      requires=requires)
         # NOTE on the degrade branch below. It answers `granted: True` for ANY
         # exception, which tells the caller to proceed — and a caller that loads
         # a model on that word puts it on a card the planner never cleared.
@@ -165,7 +167,9 @@ def build_app(broker: HostBroker):
         except Exception as e:  # a peer down etc. — degrade: let the caller proceed
             return {"granted": True, "device_id": None, "degraded": str(e)}
         _track(p)
-        dev = next((g.device_id for g in p.of(Grant) if g.request_id == req.id), None)
+        grant = next((g for g in p.of(Grant) if g.request_id == req.id), None)
+        dev = grant.device_id if grant is not None else None
+        served_kind = grant.kind if grant is not None else None
         lease_id = None
         if dev is not None and broker.device_config.get(dev, {}).get("hosted"):
             # A hosted grant is only half-done until the ledger knows: without a
@@ -173,10 +177,17 @@ def build_app(broker: HostBroker):
             # A checkout failure must NOT void the grant — the caller got its
             # device; the ledger is bookkeeping, and snapshot expiry heals it.
             try:
-                lease_id = broker.hosted_checkout(dev, kind, req.owner)
+                lease_id = broker.hosted_checkout(dev, served_kind or kind, req.owner)
             except Exception as e:
                 print(f"[harmony] hosted checkout failed dev={dev}: {e}", flush=True)
         return {"granted": dev is not None, "device_id": dev, "plan": p.summary(),
+                # WHICH unit satisfied it. A caller that asked for "an llm >= 20B"
+                # has no other way to know what it got, and it needs the name to
+                # address the completion.
+                "kind": served_kind,
+                # How much room the unit actually has, so the node can size the
+                # engine to it instead of an operator guessing a fraction.
+                "budget": dict(grant.budget) if grant is not None else {},
                 "lease_id": lease_id,
                 **({} if dev is not None else
                    {"reason": "the planner could not place it on any device"})}
