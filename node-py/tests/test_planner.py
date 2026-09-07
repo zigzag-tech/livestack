@@ -550,3 +550,73 @@ def test_an_unknown_kind_is_deferred_not_a_crash():
     assert deferred and "unknown" in deferred[0].reason
     # The rest of the plan still happens: one bad request is not a broken cycle.
     assert any(g.kind == "chipgen" for g in p.of(Grant))
+
+
+# --- equal priority, and one of them is wanted --------------------------------
+
+def _two_llms(demand=None):
+    """Two 15 GB LLMs, SAME priority, one 24 GB card. Only one fits.
+
+    `created_at == now` on purpose: anti-starvation aging would otherwise lift
+    the requester's effective priority well past the resident's (20 -> -60 after
+    1000s), and the ordinary lower-priority preemption path would fire instead
+    of the equal-priority rule these tests are about."""
+    us = {
+        "llm_a": Unit("llm_a", {"vram": 15}, priority=20, residency=Residency.UNPINNED,
+                      reload_cost=30, spread_group="llm", min_residency_s=0),
+        "llm_b": Unit("llm_b", {"vram": 15}, priority=20, residency=Residency.UNPINNED,
+                      reload_cost=30, spread_group="llm", min_residency_s=0),
+    }
+    return WorldState(devices=(gpu("gpu0"),), units=us,
+                      placements=(Placement("llm_a", "gpu0", loaded_at=0),),
+                      requests=(Request("r1", "llm_b", created_at=1000),),
+                      demand=demand or {}, now=1000)
+
+
+def test_an_idle_unwanted_peer_yields_the_card():
+    """Nobody is asking for llm_a; llm_b is. Equal priority must not deadlock the
+    card — otherwise the only way through is an external evict, and that is a
+    race: anything can re-warm the evicted unit before the new one is placed."""
+    p = plan(_two_llms(demand={"llm_b": 12}))
+    assert "llm_a" in kinds_of(p.of(Evict), Evict)
+    assert [g for g in p.of(Grant) if g.kind == "llm_b" and g.device_id == "gpu0"]
+
+
+def test_a_peer_that_is_still_wanted_does_not_yield():
+    """Demand for the resident unit means it is in use; equal priority then
+    protects it, and the requester waits rather than starting a swap war."""
+    p = plan(_two_llms(demand={"llm_a": 9, "llm_b": 12}))
+    assert "llm_a" not in kinds_of(p.of(Evict), Evict)
+    assert [d for d in p.of(Defer) if d.request_id == "r1"]
+
+
+def test_a_busy_peer_never_yields_even_when_unwanted():
+    """`demand` is about queued work, `busy` is about work in flight. A unit
+    serving a request is not a victim no matter what the tally says."""
+    us = {
+        "llm_a": Unit("llm_a", {"vram": 15}, priority=20, residency=Residency.UNPINNED,
+                      reload_cost=30, min_residency_s=0),
+        "llm_b": Unit("llm_b", {"vram": 15}, priority=20, residency=Residency.UNPINNED,
+                      reload_cost=30, min_residency_s=0),
+    }
+    w = WorldState(devices=(gpu("gpu0"),), units=us,
+                   placements=(Placement("llm_a", "gpu0", loaded_at=0, busy=True),),
+                   requests=(Request("r1", "llm_b", created_at=1000),),
+                   demand={"llm_b": 5}, now=1000)
+    assert "llm_a" not in kinds_of(plan(w).of(Evict), Evict)
+
+
+def test_a_pinned_peer_does_not_yield_at_equal_priority():
+    """Only UNPINNED yields on the equal-priority path. SOFT_PIN says 'keep me
+    warm unless someone MORE important needs the room'."""
+    us = {
+        "llm_a": Unit("llm_a", {"vram": 15}, priority=20, residency=Residency.SOFT_PIN,
+                      reload_cost=30, min_residency_s=0),
+        "llm_b": Unit("llm_b", {"vram": 15}, priority=20, residency=Residency.UNPINNED,
+                      reload_cost=30, min_residency_s=0),
+    }
+    w = WorldState(devices=(gpu("gpu0"),), units=us,
+                   placements=(Placement("llm_a", "gpu0", loaded_at=0),),
+                   requests=(Request("r1", "llm_b", created_at=1000),),
+                   demand={"llm_b": 5}, now=1000)
+    assert "llm_a" not in kinds_of(plan(w).of(Evict), Evict)
