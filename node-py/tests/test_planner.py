@@ -427,3 +427,67 @@ def test_hosted_devices_are_exempt_from_measured_pressure_shedding():
         measured_free={"qwen-sg": {"vram_bytes": -99.0}},
     )
     assert plan(w).of(Evict) == []
+
+
+# --- anti-affinity: one LLM per GPU, decided by the planner ------------------
+#
+# The alternative these pin down is pinning each service to a card in its unit
+# file (CUDA_VISIBLE_DEVICES). That decides placement outside the planner, so it
+# cannot adapt: two 15 GB LLMs pinned to one 24 GB card fail forever, and a card
+# that gains a tenant is never noticed.
+
+def _llm_world(placements=(), requests=(), spread=True):
+    """Two 24 GB cards, two DIFFERENT LLM units of 15 GB each."""
+    us = {
+        "llm_a": Unit("llm_a", {"vram": 15}, priority=20, residency=Residency.SOFT_PIN,
+                      reload_cost=50, spread_group="llm" if spread else ""),
+        "llm_b": Unit("llm_b", {"vram": 15}, priority=25, residency=Residency.UNPINNED,
+                      reload_cost=50, spread_group="llm" if spread else ""),
+    }
+    return WorldState(devices=(gpu("gpu0"), gpu("gpu1")), units=us,
+                      placements=placements, requests=requests, now=1000)
+
+
+def test_second_llm_settles_on_the_empty_card():
+    w = _llm_world(
+        placements=(Placement("llm_a", "gpu0", loaded_at=0),),
+        requests=(Request("r1", "llm_b", created_at=0),))
+    p = plan(w)
+    grants = [g for g in p.of(Grant) if g.kind == "llm_b"]
+    assert grants, "llm_b should be placeable — gpu1 is empty"
+    assert grants[0].device_id == "gpu1", (
+        "the second LLM must settle on the free card, not evict its sibling")
+    assert not [e for e in p.of(Evict) if e.kind == "llm_a"]
+
+
+def test_spread_is_a_penalty_not_a_constraint():
+    """With nowhere else to go, siblings still share a card."""
+    us = {
+        "llm_a": Unit("llm_a", {"vram": 8}, priority=20, reload_cost=50, spread_group="llm"),
+        "llm_b": Unit("llm_b", {"vram": 8}, priority=25, reload_cost=50, spread_group="llm"),
+    }
+    w = WorldState(devices=(gpu("gpu0"),), units=us,
+                   placements=(Placement("llm_a", "gpu0", loaded_at=0),),
+                   requests=(Request("r1", "llm_b", created_at=0),), now=1000)
+    grants = [g for g in plan(w).of(Grant) if g.kind == "llm_b"]
+    assert grants and grants[0].device_id == "gpu0"
+
+
+def test_without_a_spread_group_nothing_changes():
+    """The term is inert for units that never opted in."""
+    w = _llm_world(
+        placements=(Placement("llm_a", "gpu0", loaded_at=0),),
+        requests=(Request("r1", "llm_b", created_at=0),), spread=False)
+    p = plan(w)
+    assert [g for g in p.of(Grant) if g.kind == "llm_b"]
+
+
+def test_a_warm_copy_of_the_same_unit_is_still_free():
+    """Anti-affinity is between DIFFERENT units of a class, never against reuse
+    of the unit itself — a resident copy serves another lease at cost 0."""
+    w = _llm_world(
+        placements=(Placement("llm_a", "gpu0", loaded_at=0),),
+        requests=(Request("r1", "llm_a", created_at=0),))
+    grants = [g for g in plan(w).of(Grant) if g.kind == "llm_a"]
+    assert grants and grants[0].device_id == "gpu0"
+    assert not [l for l in plan(w).of(Load) if l.kind == "llm_a"]
