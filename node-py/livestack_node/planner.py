@@ -396,20 +396,44 @@ def _eff_priority(req: Request, unit: Unit, now: float, pol: PlannerPolicy) -> i
     return base - boost  # lower = more important
 
 
+def _yields_at_equal_priority(world: _World, p: Placement, u: Unit) -> bool:
+    """May an EQUAL-priority resident be preempted?
+
+    Only when it is UNPINNED, idle, and nobody is asking for it. Two units of
+    the same class and priority — two LLMs on one card — could otherwise never
+    displace each other, so a model nobody wants keeps the card from one that is
+    being demanded right now, and the only way through was to evict by hand.
+    That external evict is a race: anything can re-warm the unit in the seconds
+    before the new one is placed, and the load then starts against a card that
+    is no longer free (observed 2026-09-07, three seconds apart).
+
+    Demand is the tie-break because it is the thing that distinguishes them:
+    priority says how important a KIND is, demand says whether anyone wants it
+    NOW. A busy unit or one with queued work is never a victim here, so this
+    cannot preempt live work — it only lets a card go to whoever is using it.
+    """
+    if u.residency != Residency.UNPINNED or p.busy or p.leases > 0:
+        return False
+    return float(world.w.demand.get(p.kind, 0.0)) <= 0.0
+
+
 def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: int,
                      pol: PlannerPolicy) -> Optional[List[Placement]]:
     """Minimal set of evictable resident units on ``device_id`` whose removal makes
-    ``need`` fit. Evictable = strictly-lower priority than the requester, not
-    HARD_PIN, past its min-residency, and (by default) idle. Returns None if even
-    evicting all evictables would not fit."""
+    ``need`` fit. Evictable = lower priority than the requester (or equal priority
+    while UNPINNED, idle and unwanted — see below), not HARD_PIN, past its
+    min-residency, and (by default) idle. Returns None if even evicting all
+    evictables would not fit."""
     units = world.w.units
     cands: List[Placement] = []
     for p in world.resident[device_id].values():
         u = units[p.kind]
         if u.residency == Residency.HARD_PIN:
             continue
-        if u.priority <= requester_prio:        # equal/higher importance: never a victim
+        if u.priority < requester_prio:         # more important: never a victim
             continue
+        if u.priority == requester_prio and not _yields_at_equal_priority(world, p, u):
+            continue                            # equal importance and still wanted
         if (world.w.now - p.loaded_at) < u.min_residency_s:   # anti-thrash
             continue
         if p.busy and not pol.allow_busy_preemption:
