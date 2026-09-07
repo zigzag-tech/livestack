@@ -396,7 +396,8 @@ def _eff_priority(req: Request, unit: Unit, now: float, pol: PlannerPolicy) -> i
     return base - boost  # lower = more important
 
 
-def _yields_at_equal_priority(world: _World, p: Placement, u: Unit) -> bool:
+def _yields_at_equal_priority(world: _World, p: Placement, u: Unit,
+                              requester_kind: str) -> bool:
     """May an EQUAL-priority resident be preempted?
 
     Only when it is UNPINNED, idle, and nobody is asking for it. Two units of
@@ -409,16 +410,24 @@ def _yields_at_equal_priority(world: _World, p: Placement, u: Unit) -> bool:
 
     Demand is the tie-break because it is the thing that distinguishes them:
     priority says how important a KIND is, demand says whether anyone wants it
-    NOW. A busy unit or one with queued work is never a victim here, so this
-    cannot preempt live work — it only lets a card go to whoever is using it.
+    NOW. The comparison is RELATIVE — the card goes to whoever wants it more —
+    not "the resident must be at exactly zero". Demand decays continuously, so a
+    strict-zero test leaves a long tail where a model finished with hours ago
+    still holds a card against one being actively requested (measured: 0.47
+    against a live requester, 22 minutes after the last call).
+
+    A busy or leased unit is never a victim here, so this cannot preempt work in
+    flight — it only lets a card go to whoever is actually using it.
     """
     if u.residency != Residency.UNPINNED or p.busy or p.leases > 0:
         return False
-    return float(world.w.demand.get(p.kind, 0.0)) <= 0.0
+    resident = float(world.w.demand.get(p.kind, 0.0))
+    requester = float(world.w.demand.get(requester_kind, 0.0))
+    return resident <= 0.0 or resident < requester
 
 
 def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: int,
-                     pol: PlannerPolicy) -> Optional[List[Placement]]:
+                     pol: PlannerPolicy, requester_kind: str = "") -> Optional[List[Placement]]:
     """Minimal set of evictable resident units on ``device_id`` whose removal makes
     ``need`` fit. Evictable = lower priority than the requester (or equal priority
     while UNPINNED, idle and unwanted — see below), not HARD_PIN, past its
@@ -432,7 +441,8 @@ def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: i
             continue
         if u.priority < requester_prio:         # more important: never a victim
             continue
-        if u.priority == requester_prio and not _yields_at_equal_priority(world, p, u):
+        if u.priority == requester_prio and not _yields_at_equal_priority(
+                world, p, u, requester_kind):
             continue                            # equal importance and still wanted
         if (world.w.now - p.loaded_at) < u.min_residency_s:   # anti-thrash
             continue
@@ -568,7 +578,8 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
                           + _contention_cost(world, d.id, unit, pol), [], needs_load=True,
                           slack=_magnitude(_sub(world.free(d.id), _admission_need(unit))))
         else:
-            victims = _victims_to_free(world, d.id, _admission_need(unit), eff_prio, pol)
+            victims = _victims_to_free(world, d.id, _admission_need(unit), eff_prio, pol,
+                                       req.kind)
             if victims is None:
                 continue
             preempt_cost = sum(world.w.units[v.kind].reload_cost for v in victims)
