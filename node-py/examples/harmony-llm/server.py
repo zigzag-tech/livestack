@@ -408,9 +408,16 @@ def _reap_dead_units():
                       flush=True)
                 _procs.pop(name, None)
                 try:
-                    gpu_call(lambda n=name: manager.request_evict(n))
+                    _gpu_call(lambda n=name: manager.request_evict(n))
                 except Exception as e:            # never let the reaper die
-                    print(f"[harmony-llm] reap of {name} failed: {e}", flush=True)
+                    # Print the TYPE too. This handler swallowed a NameError
+                    # (`gpu_call` for `_gpu_call`) once every 20s for hours: the
+                    # phantom residency was never dropped, the planner kept
+                    # reserving 21 GB for a dead vLLM, and every request 503'd
+                    # with the node reporting itself healthy. A reaper that
+                    # cannot die must still say loudly what stopped it.
+                    print(f"[harmony-llm] reap of {name} failed: "
+                          f"{type(e).__name__}: {e}", flush=True)
         except Exception as e:
             print(f"[harmony-llm] reaper error: {e}", flush=True)
 
