@@ -111,6 +111,16 @@ def _attributes_for(spec: dict) -> dict:
     # Separable reasoning requires a parser. Without one the model still
     # "thinks"; the narration just arrives inline in content.
     attrs["thinking"] = "--reasoning-parser" in joined
+    # Tool calling is a launch-line fact too, and a harsher one: vLLM answers
+    # `tool_choice: "auto"` with a 400 unless BOTH --enable-auto-tool-choice and
+    # --tool-call-parser are set, so a unit lacking them cannot serve a
+    # tool-calling request AT ALL, whatever its weights can do. Declaring
+    # `"tools": true` beside such a unit is the lying attribute this docstring
+    # warns about: the clause would match and the unit would then 400 the very
+    # request it claimed to satisfy. Found 2026-09-07 by sending the Overlord's
+    # own 46 tool schemas at the 27B and getting that 400 back.
+    attrs["tools"] = ("--enable-auto-tool-choice" in joined
+                      and "--tool-call-parser" in joined)
     # A vision-capable model started with --language-model-only is not a vision
     # unit for the purposes of routing, whatever its weights can do.
     if "--language-model-only" not in joined:
@@ -732,6 +742,15 @@ def _derived_requirements(path: str, body_json: dict) -> dict:
     kwargs = body_json.get("chat_template_kwargs")
     if isinstance(kwargs, dict) and kwargs.get("enable_thinking") is True:
         out["thinking"] = True
+
+    # Tools: a request that ships tool schemas has said it needs a unit that can
+    # CALL them, exactly as an image says it needs vision. Nobody should have to
+    # add `tools=true` to a requirement string — the tools are right there in the
+    # body. `tool_choice: "none"` is the one case that ships schemas without
+    # needing the capability, so it does not derive.
+    tools = body_json.get("tools")
+    if isinstance(tools, list) and tools and body_json.get("tool_choice") != "none":
+        out["tools"] = True
     return out
 
 
