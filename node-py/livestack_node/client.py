@@ -94,10 +94,17 @@ def admit(kind: str, *, owner_id: str = "node",
     this returns, so the caller may load as soon as it sees its own device in
     `device_id`.
 
-    Degradation is deliberate and one-way: if no broker answers, the result is
-    `granted: True` with `device_id: None` and a `degraded` reason, and the
-    caller loads as it always did. An arbitration outage must not take a model
-    offline — it only costs the arbitration.
+    Degradation is deliberate and NARROW: only when no broker ANSWERS does this
+    return `granted: True, device_id: None, degraded: <why>`, meaning "proceed
+    as if arbitration did not exist". An arbitration outage must not take a
+    model offline.
+
+    A broker that answers and does not grant is a REFUSAL — `granted: False`
+    with a `reason` — and a caller that loads anyway defeats the point. That
+    distinction was missing on 2026-09-07: a node registered seconds earlier was
+    not yet in the planner's world, the broker turned its own KeyError into
+    `granted: True`, and the node ran vLLM into a card that still held a 22 GB
+    model. Refusal and outage must not look alike.
     """
     from .announce import broker_urls
     # No device selector: WHERE it goes is the planner's decision, and pinning it
