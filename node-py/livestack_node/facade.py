@@ -63,6 +63,43 @@ def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
     return f"{host_id}/gpu0"
 
 
+def resolve_device_candidates(host_id: str, explicit: Optional[str] = None) -> list:
+    """Every device this node could load a unit on, primary first.
+
+    `resolve_device_id` answers "where am I" — a question that only has one
+    answer because a node is normally pinned to a card by CUDA_VISIBLE_DEVICES.
+    That pin decides placement in a service config, outside the planner, and a
+    decision the planner never sees is one it cannot revise when a card fills
+    or frees. It is also what forces one service PROCESS per model per card.
+
+    A node that can see several cards advertises them all and lets Harmony
+    choose which one each unit lands on; alternating demand for two units then
+    settles them one per card and keeps both warm, with no configuration saying
+    so. A node that IS pinned — explicitly, or by LIVESTACK_DEVICE_ID — reports
+    exactly one candidate and behaves as it always has.
+
+    Never raises, never empty: the first entry is always `resolve_device_id`.
+    """
+    primary = resolve_device_id(host_id, explicit)
+    if explicit or (os.environ.get("LIVESTACK_DEVICE_ID") or "").strip():
+        return [primary]                  # the operator named it; do not second-guess
+    out = [primary]
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return out
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
+            uuid = getattr(props, "uuid", None)
+            did = (f"{host_id}/{hashlib.sha256(str(uuid).encode()).hexdigest()[:8]}"
+                   if uuid is not None else f"{host_id}/gpu{i}")
+            if did not in out:
+                out.append(did)
+    except Exception:
+        pass                              # identity must never stop a node serving
+    return out
+
+
 def _load_report(coordinator, status, device_meter, in_flight_fn=None):
     """How busy this node is right now, for a consumer deciding where to send
     work. Computed at READ TIME from live state — a cached or periodically
@@ -144,6 +181,9 @@ def build_router(manager, coordinator, capability: Capability,
     # about which device this node is on — a disagreement the broker would read
     # as two devices.
     device_id = resolve_device_id(capability.host_id, device_id)
+    device_candidates = resolve_device_candidates(capability.host_id, device_id
+                                                  if device_id != resolve_device_id(capability.host_id)
+                                                  else None)
     try:
         from fastapi import APIRouter, Body, HTTPException
     except ImportError as exc:  # pragma: no cover
@@ -173,6 +213,7 @@ def build_router(manager, coordinator, capability: Capability,
             "kind": capability.kind,
             "host_id": capability.host_id,
             "device_id": device_id,
+            "device_candidates": device_candidates,
             "labels": dict(capability.labels),
             "units": list(manager.units.keys()),
             "resident": resident,
@@ -261,8 +302,16 @@ def build_router(manager, coordinator, capability: Capability,
         unit = payload.get("unit")
         if not unit:
             raise HTTPException(status_code=400, detail="'unit' is required")
-        gpu_call(lambda: manager.ensure(unit))
-        return {"resident": sorted(manager.resident)}
+        # `device` is the planner's placement. Units whose loader does not take
+        # one ignore it, so a pinned single-device node is unaffected.
+        device = payload.get("device") or payload.get("device_id")
+        if device and device not in device_candidates:
+            raise HTTPException(
+                status_code=409,
+                detail=f"device '{device}' is not one this node can load on "
+                       f"({', '.join(device_candidates)})")
+        gpu_call(lambda: manager.ensure(unit, device=device))
+        return {"resident": sorted(manager.resident), "device": device or device_id}
 
     @router.post("/model/evict")
     def evict(payload: dict = Body(...)) -> dict:
@@ -330,6 +379,9 @@ def build_router(manager, coordinator, capability: Capability,
             units.append(entry)
         out = {"host_id": capability.host_id,
                "device_id": device_id,
+               # Where this node COULD place a unit, not just where it is. The
+               # planner needs the choice to have a choice.
+               "device_candidates": device_candidates,
                "units": units}
         # Live measured device memory (capacity + real free), when a meter is wired.
         # Lets the Harmony planner reconcile against reality, not just footprints.

@@ -95,17 +95,22 @@ class Unit:
     # reserve tracks reality. Default {} => reserve == footprint => zero behavior
     # change.
     activation_headroom: Res = field(default_factory=dict)
-    # Anti-affinity class. Units sharing a non-empty group REPEL each other, so
-    # the planner settles them one-per-device instead of stacking them on
-    # whichever device it scanned first.
+    # Contention class. Units in the same non-empty group are alternatives for
+    # the same sort of work (two LLMs, two TTS engines) and are therefore the
+    # units most likely to be demanded in alternation.
     #
-    # Why this is a planner concern and not an operator one: the alternative is
-    # pinning each unit to a card in its service config (CUDA_VISIBLE_DEVICES),
-    # which decides placement OUTSIDE the planner and therefore cannot adapt.
-    # Two 15 GB LLMs pinned to one 24 GB card fail forever; the same two, left to
-    # the planner with a spread group, settle one per card and stay correct when
-    # a card gains or loses a tenant. It is a PENALTY, not a constraint: when
-    # there is genuinely nowhere else, they still share.
+    # It does NOT say "spread these". What separates them is DEMAND: see
+    # `_contention_cost`. Placing a unit beside a sibling is free when the
+    # sibling is never asked for and expensive when the queue is full of it,
+    # because that is exactly when the two will evict each other turn after
+    # turn. One-LLM-per-GPU is then something the planner arrives at from the
+    # workload, not a rule it was told — and when demand stops alternating, it
+    # stops paying to keep them apart.
+    #
+    # Why any of this is the planner's business rather than the operator's: the
+    # alternative is pinning each service to a card (CUDA_VISIBLE_DEVICES),
+    # which decides placement outside the planner and cannot adapt. Two 15 GB
+    # LLMs pinned to one 24 GB card fail forever.
     spread_group: str = ""
 
 
@@ -170,6 +175,15 @@ class WorldState:
     now: float = 0.0
     # kind -> epoch when it was last evicted under pressure (for SOFT_PIN restore debounce)
     last_evicted_at: Mapping[str, float] = field(default_factory=dict)
+    # kind -> demand for it: queued jobs plus a decayed count of recent ones.
+    # This is what makes residency a consequence of the WORKLOAD rather than of
+    # configuration. `requests` is only what is admissible right now; a batch of
+    # a thousand queued title jobs and a thousand judge jobs is the fact that
+    # decides whether two LLMs should share a card, and it is not visible in the
+    # in-flight request list. The broker fills this from the queue it already
+    # has. Absent (the default) it is zero for every kind and the planner
+    # behaves exactly as it did before.
+    demand: Mapping[str, float] = field(default_factory=dict)
     # device_id -> MEASURED free resource vector (e.g. {"vram_bytes": ...}) read live
     # off the device this cycle. When present, the planner reconciles it against the
     # static budget and uses the TIGHTER of the two — so placement tracks real free
@@ -244,11 +258,12 @@ class PlannerPolicy:
     max_aging_boost: int = 80           # cap so aging can't invert HARD/UNPINNED tiers entirely
     allow_busy_preemption: bool = False # interrupt busy lower-priority work for a higher req?
     locality_penalty: float = 2.0       # cost added when placing off the data's host
-    # Cost added per unit of the SAME spread_group already resident on a candidate
-    # device. Large enough to outweigh a reload (so an empty second card beats
-    # stacking beside a warm sibling), small enough that a busy preemption
-    # (50.0) still looks worse than sharing.
-    spread_penalty: float = 25.0
+    # Scales the expected cost of future thrash between same-class units sharing
+    # a device (see `_contention_cost`). The cost itself comes from the
+    # WORKLOAD — a sibling's reload cost times how much demand is queued and
+    # recently seen for it — so this is a weight on a measured quantity, not a
+    # fixed penalty standing in for one.
+    contention_weight: float = 1.0
 
 
 # --- the planner ------------------------------------------------------------
@@ -448,27 +463,55 @@ class _Option:
     cost: float
     victims: List[Placement]
     needs_load: bool
+    # Resource left on this device AFTER the placement. Ties on cost are broken
+    # by taking the TIGHTEST fit (best-fit bin packing): an 8 GB unit that can
+    # sit beside an existing tenant should do so, and leave the empty card whole
+    # for something that needs a whole card. First-fit leaves exactly the
+    # fragmentation this avoids — two half-used cards and nowhere to put a 27B.
+    slack: float = 0.0
 
 
-def _spread_penalty(world: _World, device_id: str, unit: Unit,
-                    pol: PlannerPolicy) -> float:
-    """Cost of putting ``unit`` on a device that already hosts its own kind.
+def _contention_cost(world: _World, device_id: str, unit: Unit,
+                     pol: PlannerPolicy) -> float:
+    """Expected future thrash from putting ``unit`` on this device.
 
-    Anti-affinity, charged per resident sibling. A warm copy of the SAME unit is
-    not a sibling — that is the free-reuse case handled before we get here; this
-    is about two DIFFERENT units of one class (two LLMs, two TTS engines) both
-    wanting a card. Without it the cost function is indifferent between an empty
-    device and one already carrying a sibling, and the scan order decides —
-    which is how every LLM ends up on card 0 and card 1 sits idle.
+    For each same-class sibling already resident here that CANNOT co-reside with
+    ``unit`` — the two together exceed what the device can hold — the pair will
+    take turns evicting each other for as long as both are demanded. The
+    expected price of that is the sibling's reload cost times how much demand is
+    waiting for it, so:
+
+        cost = w * SUM over contending siblings of  reload_cost(v) * demand(v)
+
+    Three consequences, all of them the point:
+
+    * A batch that alternates between two LLMs makes each one's demand high, so
+      sharing a card costs a great deal and they settle one per card — without
+      anything anywhere saying "one LLM per GPU".
+    * A sibling nothing is asking for contributes nothing. Residency follows the
+      workload, and stops paying to keep units apart when the alternation stops.
+    * Siblings that genuinely FIT together are not contending at all and cost
+      zero. Co-residence is only a problem when it cannot last.
+
+    `demand` is queued + recently-seen work, so both halves of "historical
+    precedence as well as what's upcoming" are in the same number.
     """
-    if not unit.spread_group or pol.spread_penalty <= 0:
+    if not unit.spread_group or pol.contention_weight <= 0:
         return 0.0
-    siblings = sum(
-        1 for p in world.resident.get(device_id, {}).values()
-        if p.kind != unit.kind
-        and world.w.units.get(p.kind) is not None
-        and world.w.units[p.kind].spread_group == unit.spread_group)
-    return siblings * pol.spread_penalty
+    need = _admission_need(unit)
+    total = 0.0
+    for p in world.resident.get(device_id, {}).values():
+        if p.kind == unit.kind:
+            continue                      # a warm copy of ourselves is reuse, not rivalry
+        v = world.w.units.get(p.kind)
+        if v is None or v.spread_group != unit.spread_group:
+            continue
+        # Do we actually contend? If both fit with the sibling still resident,
+        # nobody evicts anybody and there is nothing to charge for.
+        if _fits(need, world.free(device_id)):
+            continue
+        total += v.reload_cost * float(world.w.demand.get(p.kind, 0.0))
+    return pol.contention_weight * total
 
 
 def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
@@ -494,22 +537,61 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
             else pol.locality_penalty
         # warm: a resident copy serves another lease for free
         if world.is_resident(req.kind, d.id):
-            opt = _Option(d.id, 0.0 + loc_pen, [], needs_load=False)
+            opt = _Option(d.id, 0.0 + loc_pen, [], needs_load=False,
+                          slack=_magnitude(_sub(world.free(d.id), _admission_need(unit))))
         elif _fits(_admission_need(unit), world.free(d.id)):
             opt = _Option(d.id, unit.reload_cost + loc_pen
-                          + _spread_penalty(world, d.id, unit, pol), [], needs_load=True)
+                          + _contention_cost(world, d.id, unit, pol), [], needs_load=True,
+                          slack=_magnitude(_sub(world.free(d.id), _admission_need(unit))))
         else:
             victims = _victims_to_free(world, d.id, _admission_need(unit), eff_prio, pol)
             if victims is None:
                 continue
             preempt_cost = sum(world.w.units[v.kind].reload_cost for v in victims)
             busy_pen = sum(50.0 for v in victims if v.busy)   # discourage interrupting work
+            freed = world.free(d.id)
+            for v in victims:
+                freed = _add(freed, world.w.units[v.kind].footprint)
             opt = _Option(d.id, unit.reload_cost + loc_pen + preempt_cost + busy_pen
-                          + _spread_penalty(world, d.id, unit, pol),
-                          victims, needs_load=True)
-        if best is None or opt.cost < best.cost:
+                          + _contention_cost(world, d.id, unit, pol),
+                          victims, needs_load=True,
+                          slack=_magnitude(_sub(freed, _admission_need(unit))))
+        if best is None or (opt.cost, opt.slack) < (best.cost, best.slack):
             best = opt
     return best
+
+
+def _relocation_for(world: _World, victim: Placement, from_device: str,
+                    pol: PlannerPolicy) -> Optional[str]:
+    """Somewhere else this preempted unit fits right now, or None.
+
+    Eviction under pressure treats a resident unit as expendable: it is dropped
+    and only comes back through the SOFT_PIN restore, a debounce later. But when
+    a big unit needs a whole card and a small one happens to be sitting on it,
+    the right move is not to drop the small one — it is to MOVE it to the card
+    that still has room. Same reload cost either way; the difference is whether
+    it keeps serving.
+
+    Only devices that fit it with no preemption of their own are candidates: a
+    relocation that itself needs to evict somebody is a chain this planner does
+    not attempt in one cycle.
+    """
+    unit = world.w.units.get(victim.kind)
+    if unit is None:
+        return None
+    need = _admission_need(unit)
+    best_id, best_slack = None, None
+    for d in world.w.devices:
+        if d.id == from_device or d.hosted:
+            continue
+        if not _device_matches(d, unit.selector):
+            continue
+        if not _fits(need, world.free(d.id)):
+            continue
+        slack = _magnitude(_sub(world.free(d.id), need))
+        if best_slack is None or slack < best_slack:
+            best_id, best_slack = d.id, slack
+    return best_id
 
 
 def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
@@ -548,14 +630,29 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
         if opt is None:
             W.defer(req, "no device can fit even with preemption")
             continue
+        moved = {}
         for v in opt.victims:
             W.evict(v.kind, opt.device_id,
                     f"preempted by {req.kind} (prio {eff})")
+            # Move it rather than drop it, when somewhere else has room. This is
+            # the case the operator hits constantly: a small model took the empty
+            # card, a model that needs a whole card arrives, and the small one
+            # should step aside — not disappear until a debounce brings it back.
+            dest = _relocation_for(W, v, opt.device_id, pol)
+            if dest is not None:
+                W.load(v.kind, dest, f"relocated from {opt.device_id} to make room for {req.kind}")
+                moved[v.kind] = dest
         if opt.needs_load:
             W.load(req.kind, opt.device_id, f"demand: {req.id}")
         if opt.victims:
-            why = ("after evicting "
-                   + ", ".join(sorted(v.kind for v in opt.victims)))
+            dropped = sorted(v.kind for v in opt.victims if v.kind not in moved)
+            parts = []
+            if moved:
+                parts.append("after relocating "
+                             + ", ".join(f"{k}->{d}" for k, d in sorted(moved.items())))
+            if dropped:
+                parts.append("after evicting " + ", ".join(dropped))
+            why = "; ".join(parts)
         elif opt.needs_load:
             why = "loaded on demand"
         else:
