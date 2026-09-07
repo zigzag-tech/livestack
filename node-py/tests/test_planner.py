@@ -582,14 +582,6 @@ def test_an_idle_unwanted_peer_yields_the_card():
     assert [g for g in p.of(Grant) if g.kind == "llm_b" and g.device_id == "gpu0"]
 
 
-def test_a_peer_that_is_still_wanted_does_not_yield():
-    """Demand for the resident unit means it is in use; equal priority then
-    protects it, and the requester waits rather than starting a swap war."""
-    p = plan(_two_llms(demand={"llm_a": 9, "llm_b": 12}))
-    assert "llm_a" not in kinds_of(p.of(Evict), Evict)
-    assert [d for d in p.of(Defer) if d.request_id == "r1"]
-
-
 def test_a_busy_peer_never_yields_even_when_unwanted():
     """`demand` is about queued work, `busy` is about work in flight. A unit
     serving a request is not a victim no matter what the tally says."""
@@ -620,3 +612,22 @@ def test_a_pinned_peer_does_not_yield_at_equal_priority():
                    requests=(Request("r1", "llm_b", created_at=1000),),
                    demand={"llm_b": 5}, now=1000)
     assert "llm_a" not in kinds_of(plan(w).of(Evict), Evict)
+
+
+def test_the_card_goes_to_whoever_wants_it_more():
+    """Demand decays continuously, so a strict "resident must be at zero" test
+    leaves a long tail where a model finished with long ago still holds a card
+    against one being actively requested. Measured: 0.47 vs a live requester,
+    22 minutes after the last call. The comparison is relative."""
+    w = _two_llms(demand={"llm_a": 0.47, "llm_b": 3.0})
+    p = plan(w)
+    assert "llm_a" in kinds_of(p.of(Evict), Evict)
+    assert [g for g in p.of(Grant) if g.kind == "llm_b"]
+
+
+def test_the_more_wanted_resident_keeps_the_card():
+    """...and the comparison runs the other way too."""
+    w = _two_llms(demand={"llm_a": 9.0, "llm_b": 1.0})
+    p = plan(w)
+    assert "llm_a" not in kinds_of(p.of(Evict), Evict)
+    assert [d for d in p.of(Defer) if d.request_id == "r1"]
