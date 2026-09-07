@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import enum
 import gc
+import inspect
 import time
 import threading
 from contextlib import contextmanager
@@ -45,6 +46,16 @@ class ResidencyPolicy(enum.IntEnum):
     HARD_PIN = 0    # fleet guarantees >= min_resident warm; never evict the last one
     SOFT_PIN = 1    # preferred-warm, evictable under pressure
     UNPINNED = 2    # pure demand-driven (default)
+
+
+def _accepts_device(fn) -> bool:
+    """Does this callable declare a `device` parameter (or **kwargs)?"""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return ("device" in params
+            or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()))
 
 
 class ManagedUnit:
@@ -77,6 +88,12 @@ class ManagedUnit:
         self.health_check = health_check
         self.model: object = None
         self.loaded_at: Optional[float] = None
+        # The device this unit is resident on, when the planner assigned one.
+        self.device: Optional[str] = None
+        try:
+            self.loader_takes_device = _accepts_device(loader)
+        except (TypeError, ValueError):       # builtins / C callables
+            self.loader_takes_device = False
 
     @property
     def loaded(self) -> bool:
@@ -94,15 +111,27 @@ class ManagedUnit:
         except Exception:
             return False
 
-    def load(self) -> object:
+    def load(self, device: "Optional[str]" = None) -> object:
+        """Load, optionally onto a device the PLANNER chose.
+
+        A loader that declares a `device` parameter is told where to load; one
+        that does not is called as before. That introspection is what lets a
+        node stop pinning itself to a card in its service config: the planner
+        can only place what it is allowed to place, and a node that decided its
+        own device via CUDA_VISIBLE_DEVICES has already made the decision the
+        planner exists to make.
+        """
         if self.model is None:
-            self.model = self._loader()
+            self.model = (self._loader(device=device) if self.loader_takes_device
+                          else self._loader())
             self.loaded_at = time.monotonic()
+            self.device = device
         return self.model
 
     def unload(self) -> None:
         self.model = None
         self.loaded_at = None
+        self.device = None
         gc.collect()
         self._freer()
         trim_ram()
@@ -152,8 +181,8 @@ class ModelManager:
         self.coordinator.bind(self)
 
     # --- primitives the coordinator drives (caller holds _guard, GPU thread) ------
-    def _load(self, name: str) -> object:
-        model = self.units[name].load()
+    def _load(self, name: str, device: "Optional[str]" = None) -> object:
+        model = self.units[name].load(device)
         self._planner.commit_loaded(name)
         self._log(f"[harmony] loaded {name} (resident={self._planner.resident()})")
         return model
@@ -177,13 +206,22 @@ class ModelManager:
         return model
 
     # --- public surface (parity with AsrModelManager) -----------------------------
-    def ensure(self, name: str) -> object:
+    def ensure(self, name: str, device: "Optional[str]" = None) -> object:
         """Make ``name`` resident, returning its model, per the coordinator's policy.
-        Resets the idle timer. GPU-thread only."""
+        Resets the idle timer. GPU-thread only.
+
+        ``device`` is the placement the planner chose. It is passed through to
+        the loader for units that accept one and ignored by every unit that does
+        not, so a single-device node behaves exactly as before."""
         if not self._planner.known(name):
             raise KeyError(f"unknown unit: {name}")
         with self._guard:
-            model = self.coordinator.acquire(name)
+            # `Coordinator` is a Protocol other projects implement. Passing an
+            # argument their `acquire` never declared would break them at the
+            # seam, so the assignment is offered only where it is accepted.
+            model = (self.coordinator.acquire(name, device=device)
+                     if _accepts_device(self.coordinator.acquire)
+                     else self.coordinator.acquire(name))
             self.last_used = time.monotonic()
             self._last_ensured = name
             return model

@@ -429,65 +429,106 @@ def test_hosted_devices_are_exempt_from_measured_pressure_shedding():
     assert plan(w).of(Evict) == []
 
 
-# --- anti-affinity: one LLM per GPU, decided by the planner ------------------
+# --- packing and residency as a consequence of the QUEUE ---------------------
 #
-# The alternative these pin down is pinning each service to a card in its unit
-# file (CUDA_VISIBLE_DEVICES). That decides placement outside the planner, so it
-# cannot adapt: two 15 GB LLMs pinned to one 24 GB card fail forever, and a card
-# that gains a tenant is never noticed.
+# What these pin down is that nothing anywhere says "one LLM per GPU". That
+# arrangement is what the planner arrives at when the workload alternates
+# between two models, and it stops paying for it when the workload stops.
+#
+# The alternative they rule out is pinning each service to a card in its unit
+# file (CUDA_VISIBLE_DEVICES): a decision made outside the planner, which
+# therefore cannot adapt when a card fills or frees.
 
-def _llm_world(placements=(), requests=(), spread=True):
-    """Two 24 GB cards, two DIFFERENT LLM units of 15 GB each."""
-    us = {
-        "llm_a": Unit("llm_a", {"vram": 15}, priority=20, residency=Residency.SOFT_PIN,
-                      reload_cost=50, spread_group="llm" if spread else ""),
-        "llm_b": Unit("llm_b", {"vram": 15}, priority=25, residency=Residency.UNPINNED,
-                      reload_cost=50, spread_group="llm" if spread else ""),
+def _llms(small=8, big=20, group="llm"):
+    """A small model and one that needs most of a card."""
+    return {
+        "llm_small": Unit("llm_small", {"vram": small}, priority=20,
+                          reload_cost=30, spread_group=group),
+        "llm_big": Unit("llm_big", {"vram": big}, priority=20,
+                        reload_cost=60, spread_group=group),
     }
-    return WorldState(devices=(gpu("gpu0"), gpu("gpu1")), units=us,
-                      placements=placements, requests=requests, now=1000)
 
 
-def test_second_llm_settles_on_the_empty_card():
-    w = _llm_world(
-        placements=(Placement("llm_a", "gpu0", loaded_at=0),),
-        requests=(Request("r1", "llm_b", created_at=0),))
+def test_alternating_demand_settles_one_llm_per_card():
+    """The queue holds work for both models; they cannot share a card. The
+    planner separates them because co-residence would thrash — not because it
+    was told to."""
+    w = WorldState(devices=(gpu("gpu0"), gpu("gpu1")), units=_llms(),
+                   placements=(Placement("llm_small", "gpu0", loaded_at=0),),
+                   requests=(Request("r1", "llm_big", created_at=0),),
+                   demand={"llm_small": 40, "llm_big": 40}, now=1000)
     p = plan(w)
-    grants = [g for g in p.of(Grant) if g.kind == "llm_b"]
-    assert grants, "llm_b should be placeable — gpu1 is empty"
-    assert grants[0].device_id == "gpu1", (
-        "the second LLM must settle on the free card, not evict its sibling")
-    assert not [e for e in p.of(Evict) if e.kind == "llm_a"]
+    grants = [g for g in p.of(Grant) if g.kind == "llm_big"]
+    assert grants and grants[0].device_id == "gpu1", (
+        "with both models in demand, the big one takes the free card instead of "
+        "evicting the small one")
+    assert not [e for e in p.of(Evict) if e.kind == "llm_small"]
 
 
-def test_spread_is_a_penalty_not_a_constraint():
-    """With nowhere else to go, siblings still share a card."""
-    us = {
-        "llm_a": Unit("llm_a", {"vram": 8}, priority=20, reload_cost=50, spread_group="llm"),
-        "llm_b": Unit("llm_b", {"vram": 8}, priority=25, reload_cost=50, spread_group="llm"),
-    }
-    w = WorldState(devices=(gpu("gpu0"),), units=us,
-                   placements=(Placement("llm_a", "gpu0", loaded_at=0),),
-                   requests=(Request("r1", "llm_b", created_at=0),), now=1000)
-    grants = [g for g in plan(w).of(Grant) if g.kind == "llm_b"]
-    assert grants and grants[0].device_id == "gpu0"
-
-
-def test_without_a_spread_group_nothing_changes():
-    """The term is inert for units that never opted in."""
-    w = _llm_world(
-        placements=(Placement("llm_a", "gpu0", loaded_at=0),),
-        requests=(Request("r1", "llm_b", created_at=0),), spread=False)
+def test_no_demand_for_the_sibling_means_no_reason_to_avoid_it():
+    """Same shape, but nothing is asking for the small model. Keeping the cards
+    apart buys nothing, so the planner is free to preempt it — residency follows
+    the workload."""
+    w = WorldState(devices=(gpu("gpu0"),), units=_llms(),
+                   placements=(Placement("llm_small", "gpu0", loaded_at=0),),
+                   requests=(Request("r1", "llm_big", created_at=0),),
+                   demand={"llm_small": 0, "llm_big": 50}, now=1000)
     p = plan(w)
-    assert [g for g in p.of(Grant) if g.kind == "llm_b"]
+    assert [g for g in p.of(Grant) if g.kind == "llm_big"]
+    assert "llm_small" in kinds_of(p.of(Evict), Evict)
 
 
-def test_a_warm_copy_of_the_same_unit_is_still_free():
-    """Anti-affinity is between DIFFERENT units of a class, never against reuse
-    of the unit itself — a resident copy serves another lease at cost 0."""
-    w = _llm_world(
-        placements=(Placement("llm_a", "gpu0", loaded_at=0),),
-        requests=(Request("r1", "llm_a", created_at=0),))
-    grants = [g for g in plan(w).of(Grant) if g.kind == "llm_a"]
-    assert grants and grants[0].device_id == "gpu0"
-    assert not [l for l in plan(w).of(Load) if l.kind == "llm_a"]
+def test_a_small_unit_takes_the_tighter_card_and_leaves_a_whole_one_free():
+    """Best fit, not first fit. gpu0 is empty; gpu1 already has a tenant and
+    still has room. The small model goes to gpu1 — so a model that needs a whole
+    card can still be placed later."""
+    us = dict(_llms())
+    us["other"] = Unit("other", {"vram": 6}, priority=30, reload_cost=5)
+    w = WorldState(devices=(gpu("gpu0"), gpu("gpu1")), units=us,
+                   placements=(Placement("other", "gpu1", loaded_at=0),),
+                   requests=(Request("r1", "llm_small", created_at=0),),
+                   demand={}, now=1000)
+    loads = [l for l in plan(w).of(Load) if l.kind == "llm_small"]
+    assert loads and loads[0].device_id == "gpu1", (
+        "an 8 GB unit should pack beside the 6 GB tenant, not consume the empty card")
+
+
+def test_a_unit_in_the_way_is_MOVED_not_dropped():
+    """The Tetris case: the small model is sitting on the only card big enough
+    for the 20 GB model, and the other card has room. It steps aside and keeps
+    serving, instead of being evicted until a debounce brings it back."""
+    w = WorldState(
+        # gpu0 (24 GB) is the ONLY card the 20 GB model can ever fit on, and the
+        # small one is sitting on it. gpu1 (14 GB) has room for the small one.
+        devices=(gpu("gpu0", cap=24), gpu("gpu1", cap=14)), units=_llms(),
+        placements=(Placement("llm_small", "gpu0", loaded_at=0),),
+        requests=(Request("r1", "llm_big", created_at=0),),
+        demand={"llm_small": 30, "llm_big": 30}, now=1000)
+    p = plan(w)
+    big = [g for g in p.of(Grant) if g.kind == "llm_big"]
+    assert big and big[0].device_id == "gpu0"
+    assert [e for e in p.of(Evict) if e.kind == "llm_small" and e.device_id == "gpu0"]
+    reload = [l for l in p.of(Load) if l.kind == "llm_small"]
+    assert reload and reload[0].device_id == "gpu1", (
+        "the displaced unit must be relocated to the card with room, not dropped")
+    assert "relocated" in reload[0].reason
+
+
+def test_nothing_is_relocated_when_there_is_nowhere_to_go():
+    """One card. Preemption still means eviction — relocation is an improvement
+    on the victim's fate, never a requirement for the placement to happen."""
+    w = WorldState(devices=(gpu("gpu0"),), units=_llms(),
+                   placements=(Placement("llm_small", "gpu0", loaded_at=0),),
+                   requests=(Request("r1", "llm_big", created_at=0),),
+                   demand={"llm_big": 10}, now=1000)
+    p = plan(w)
+    assert "llm_small" in kinds_of(p.of(Evict), Evict)
+    assert not [l for l in p.of(Load) if l.kind == "llm_small"]
+
+
+def test_demand_is_absent_by_default_and_changes_nothing():
+    """Every existing WorldState omits `demand`; the term is then zero and the
+    planner behaves exactly as it did before it existed."""
+    w = WorldState(devices=(gpu(),), units=units(),
+                   requests=(Request("r1", "chipgen", created_at=0),), now=100)
+    assert any(g.kind == "chipgen" for g in plan(w).of(Grant))
