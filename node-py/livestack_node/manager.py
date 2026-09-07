@@ -73,13 +73,19 @@ class ManagedUnit:
                  footprint: int = 0,
                  residency_policy: ResidencyPolicy = ResidencyPolicy.UNPINNED,
                  min_resident: int = 0,
-                 health_check: "Optional[Callable[[object], bool]]" = None):
+                 health_check: "Optional[Callable[[object], bool]]" = None,
+                 spread_group: str = ""):
         self.name = name
         self._loader = loader
         self._freer = freer
         self.footprint = footprint              # measured-and-cached bytes (0 = unknown)
         self.residency_policy = residency_policy
         self.min_resident = min_resident
+        # Contention class reported to the broker. Units in one group are
+        # alternatives for the same work; the planner charges for co-residence
+        # in proportion to the demand waiting for each, so alternating traffic
+        # separates them without anything declaring that it should.
+        self.spread_group = spread_group
         # Optional FUNCTIONAL liveness probe: given the loaded model, returns True
         # iff the unit is actually producing correct output. This is the signal a
         # heartbeat / process-alive / `/health` check cannot give — a unit can be

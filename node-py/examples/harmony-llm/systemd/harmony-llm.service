@@ -1,0 +1,80 @@
+[Unit]
+Description=Harmony-managed local LLM (vLLM, OpenAI-compatible) — xc-tower-ubuntu
+After=network-online.target livestack-hostd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/harmony-llm
+
+# Same host_id as polyasr-b, deliberately. livestack derives
+# device_id = f"{host_id}/gpu0", so sharing the id is how two units on the SAME
+# physical card (GPU 1: polyasr-b + this) end up on one planner device and get
+# arbitrated against each other. Using the plain host name would have put this
+# on gpu0's device id while it actually runs on gpu1 — the planner would then
+# reserve against the wrong card.
+Environment=HARMONY_LLM_HOST_ID=xc-tower-ubuntu-gpu1
+# Qwen3-8B, not something larger. Chosen from OUR OWN scored evidence rather
+# than a leaderboard: hub/packages/benchday-overlord/src/modelCatalog.ts records
+# a judge-scored bake-off on real title inputs where Qwen3.6-35B-A3B scored 0/12
+# — it echoes raw scrollback and paths instead of abstracting the task — while
+# Qwen3-8B scored 1.42/2 against DeepSeek-V4-Flash's 1.50, inside noise. On this
+# workload the larger model is the worse model. Serving these exact weights
+# locally carries no quality risk at all: it is the same model the hub's title
+# chain already uses, on our own silicon.
+Environment=HARMONY_LLM_MODEL=Qwen/Qwen3-8B
+Environment=HARMONY_LLM_PORT=8188
+Environment=HARMONY_LLM_VLLM_PORT=8189
+# GPU 1. polyasr pins cuda:0; polytts also uses card 1 but is SOFT_PIN and the
+# planner arbitrates between them — that is the point of running this through
+# Harmony rather than letting it pin VRAM.
+# Process-wide, so the wrapper's livestack CUDA meter reads the SAME card the
+# vLLM child runs on. Setting it only on the child leaves the meter — which is
+# what feeds the planner's device pressure — reading card 0.
+# Card 1 is the LLM's alone (polyasr-b moved to card 0).
+Environment=CUDA_VISIBLE_DEVICES=1
+Environment=HARMONY_LLM_CUDA_DEVICE=0
+# vLLM's --gpu-memory-utilization is a fraction of the WHOLE CARD, and memory
+# other processes already hold counts against it. Card 1 also carries polyasr-b
+# (~4.9 GB = 21% of 23.6 GB), so 0.55 left vLLM ~8 GB against 15.3 GB of
+# Qwen3-8B bf16 weights: it loaded the weights and then died with "No available
+# memory for the cache blocks". The number is a budget for the card, not for
+# this process.
+Environment=HARMONY_LLM_GPU_FRACTION=0.85
+# Titles and short summaries do not need a 32k window, and KV cache is what the
+# remaining headroom buys. Qwen3-8B is ~144 KB/token of KV, so 8192 tokens is
+# ~1.2 GB — which fits, where the default context would not.
+Environment=HARMONY_LLM_MAX_MODEL_LEN=16384
+# 0 = never idle-evict. The hub's title timeout is 35 s and attention's is 15 s,
+# but a reload after eviction takes ~50 s, so every idle eviction converts the
+# next title into a fall-through. Card 1 has no other tenant; evicting frees
+# memory nobody can use. livestack coordinator.py: "non-positive TTL never
+# expire" — 0 here means the unit only leaves under measured pressure, which
+# SOFT_PIN still permits.
+Environment=HARMONY_LLM_IDLE_EVICT_SECONDS=0
+Environment=HF_HOME=/home/ubuntu/.cache/huggingface
+Environment=HF_HUB_DISABLE_XET=1
+
+# FlashInfer JIT-compiles its sampling kernel with nvcc at engine start, and
+# Ubuntu 26.04's default gcc is newer than CUDA's host_config.h accepts:
+#   "error -- unsupported GNU version! gcc versions later than 14 are not
+#    supported!"
+# The model loads (15.27 GiB) and the engine then dies in a ninja build, which
+# reads as an engine failure rather than a toolchain one. vLLM's own PyTorch
+# sampler needs no compiler and is ample for title-length generation.
+# The alternative fix is CUDAHOSTCXX=g++-14 if that toolchain is installed.
+Environment=VLLM_USE_FLASHINFER_SAMPLER=0
+
+ExecStart=/home/ubuntu/harmony-llm/venv/bin/python /home/ubuntu/harmony-llm/server.py
+Restart=on-failure
+RestartSec=15
+
+# Bounded by journald (4 GiB / 30 days) — see
+# /etc/systemd/journald.conf.d/10-benchday-gpu-nodes.conf.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

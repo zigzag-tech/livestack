@@ -376,6 +376,9 @@ def build_router(manager, coordinator, capability: Capability,
                 hb = activation_tracker.headroom_bytes(kind)
                 if hb > 0:
                     entry["activation_headroom"] = {"vram_bytes": int(hb)}
+            grp = getattr(manager.units.get(kind), "spread_group", "")
+            if grp:
+                entry["spread_group"] = grp
             units.append(entry)
         out = {"host_id": capability.host_id,
                "device_id": device_id,

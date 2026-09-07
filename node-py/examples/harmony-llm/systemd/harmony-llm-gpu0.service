@@ -1,0 +1,45 @@
+[Unit]
+# The SECOND agent for the same two models — this one speaks for card 0.
+#
+# One process per card, not one process per model. A wrapper is pinned to a card
+# because that is where its CUDA meter reads device pressure from, and a wrapper
+# that saw both cards would report card 0's pressure for a model on card 1. So
+# the pin here is a METERING fact, not a placement decision: both nodes declare
+# BOTH units, and Harmony decides which card each model is resident on. Traffic
+# that alternates between titles and judgments separates them by itself, because
+# co-residence would thrash (livestack planner `_contention_cost`).
+Description=Harmony-managed local LLM (vLLM, OpenAI-compatible) — card 0
+After=network-online.target livestack-hostd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/harmony-llm
+Environment=HARMONY_LLM_HOST_ID=xc-tower-ubuntu-gpu0
+Environment=HARMONY_LLM_UNITS_FILE=/etc/harmony/llm-units-gpu0.json
+Environment=HARMONY_LLM_SPREAD_GROUP=llm
+Environment=HARMONY_LLM_PORT=8190
+Environment=CUDA_VISIBLE_DEVICES=0
+Environment=HARMONY_LLM_CUDA_DEVICE=0
+# UNPINNED and a short idle evict: card 0's other tenants (polyasr x2, polytts)
+# are on-demand and bursty, and an LLM here must yield to them rather than the
+# other way round. Card 1's node keeps SOFT_PIN, where a cold start costs the
+# hub a missed title.
+Environment=HARMONY_LLM_RESIDENCY=UNPINNED
+Environment=HARMONY_LLM_IDLE_EVICT_SECONDS=600
+# Nothing is preloaded here: what lands on this card is the planner's call.
+Environment=HARMONY_LLM_WARM_ON_START=0
+Environment=HF_HOME=/home/ubuntu/.cache/huggingface
+Environment=HF_HUB_DISABLE_XET=1
+Environment=HF_HUB_OFFLINE=1
+Environment=VLLM_USE_FLASHINFER_SAMPLER=0
+Environment=LIVESTACK_BROKER_URL=http://127.0.0.1:8799,http://127.0.0.1:8801
+Environment=LIVESTACK_NODE_HOST=100.64.0.18
+ExecStart=/home/ubuntu/harmony-llm/venv/bin/python /home/ubuntu/harmony-llm/server.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

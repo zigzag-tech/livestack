@@ -19,7 +19,7 @@ class FedPeer:
     def units(self): return self._units
     def placements(self):
         return [Placement(k, self.device_id, loaded_at=0, busy=b) for k, b in self._resident.items()]
-    def warm(self, k): self.calls.append(("warm", k))
+    def warm(self, k, device=None): self.calls.append(("warm", k))
     def evict(self, k): self.calls.append(("evict", k))
 
 
