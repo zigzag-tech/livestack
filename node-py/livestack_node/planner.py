@@ -112,6 +112,11 @@ class Unit:
     # which decides placement outside the planner and cannot adapt. Two 15 GB
     # LLMs pinned to one 24 GB card fail forever.
     spread_group: str = ""
+    # What this unit IS, for requests that state a REQUIREMENT rather than a
+    # name: {"class": "llm", "params_b": 27, "quant": "int4", "ctx": 262144}.
+    # Free-form on purpose — the planner never interprets a key, it only
+    # compares (see `_unit_satisfies`), so a new axis costs no planner change.
+    attributes: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -164,6 +169,14 @@ class Request:
     priority: Optional[int] = None              # default: the unit's priority
     selector: Mapping[str, str] = field(default_factory=dict)
     locality_host: Optional[str] = None         # where the input lives (placement pref)
+    # A REQUIREMENT instead of (or alongside) a kind: "any llm of at least 20B".
+    #   requires={"class": "llm", "params_b>=": 20}
+    # Keys are unit attributes, optionally suffixed with a comparison
+    # (`>=`, `>`, `<=`, `<`, `!=`); bare means equality. When set and `kind` is
+    # empty, the planner resolves the kind itself — which is what lets a queue
+    # of mixed work reshuffle VRAM instead of a caller naming the model and
+    # hoping it is the one that fits.
+    requires: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -357,6 +370,72 @@ class _World:
 
     def defer(self, req: Request, reason: str) -> None:
         self.actions.append(Defer(request_id=req.id, reason=reason))
+
+
+_CMPS = (">=", "<=", "!=", ">", "<")
+
+
+def _unit_satisfies(u: Unit, requires: Mapping[str, object]) -> bool:
+    """Does this unit meet every stated requirement?
+
+    A key may carry a comparison suffix (`params_b>=`); bare keys are equality.
+    A requirement naming an attribute the unit does not declare is NOT met —
+    silence is not a yes, or an unlabelled unit would satisfy everything.
+    """
+    for key, want in requires.items():
+        op = ""
+        name = key
+        for c in _CMPS:
+            if key.endswith(c):
+                op, name = c, key[: -len(c)]
+                break
+        name = name.strip()
+        if name not in u.attributes:
+            return False
+        have = u.attributes[name]
+        try:
+            if op == "":
+                if have != want:
+                    return False
+            elif op == "!=":
+                if have == want:
+                    return False
+            elif op == ">=":
+                if not float(have) >= float(want):
+                    return False
+            elif op == ">":
+                if not float(have) > float(want):
+                    return False
+            elif op == "<=":
+                if not float(have) <= float(want):
+                    return False
+            elif op == "<":
+                if not float(have) < float(want):
+                    return False
+        except (TypeError, ValueError):
+            return False                    # non-numeric where a number was needed
+    return True
+
+
+def candidate_kinds(world: WorldState, req: Request) -> List[str]:
+    """Kinds this request could be served by, best first.
+
+    A named `kind` is honoured as-is — naming a unit still means that unit. With
+    only `requires`, every unit meeting it is a candidate, ordered so the
+    planner tries the cheapest outcome first: already resident, then smaller
+    footprint, then cheaper to load. That ordering is what makes a mixed queue
+    settle instead of thrashing — a request for "an llm >= 20B" is served by the
+    20B already on a card rather than loading a 27B beside it.
+    """
+    if req.kind:
+        return [req.kind]
+    if not req.requires:
+        return []
+    resident = {p.kind for p in world.placements}
+    fits = [k for k, u in world.units.items() if _unit_satisfies(u, req.requires)]
+    return sorted(fits, key=lambda k: (k not in resident,
+                                       _magnitude(world.units[k].footprint),
+                                       world.units[k].reload_cost, k))
 
 
 def _hosted_has_room(world: "_World", d: Device) -> bool:
@@ -659,21 +738,47 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
     # nothing to be urgent about) and is deferred where it always should have
     # been.
     _UNKNOWN = Unit(kind="", footprint={}, priority=1_000_000)
+
+    def _unit_for(r: Request) -> Optional[Unit]:
+        """First kind this request could be served by, for ordering purposes."""
+        for k in candidate_kinds(world, r):
+            u = world.units.get(k)
+            if u is not None:
+                return u
+        return None
+
     reqs = sorted(
         world.requests,
-        key=lambda r: (_eff_priority(r, world.units.get(r.kind, _UNKNOWN), world.now, pol),
+        key=lambda r: (_eff_priority(r, _unit_for(r) or _UNKNOWN, world.now, pol),
                        r.created_at, r.id),
     )
     for req in reqs:
-        unit = world.units.get(req.kind)
-        if unit is None:
-            W.defer(req, "unknown kind")
+        # A request may NAME a unit or merely STATE WHAT IT NEEDS. The caller
+        # should not have to know which model is loaded, on which card, or
+        # whether anything has to move to make room — that is the whole point of
+        # routing inference through a residency planner. Candidates come back
+        # cheapest-outcome-first, so a requirement is served by something already
+        # resident when one qualifies, and only otherwise causes a load.
+        cands = [k for k in candidate_kinds(world, req) if k in world.units]
+        if not cands:
+            # Keep the reason specific: a named kind nobody registered and a
+            # requirement nothing satisfies are different operator problems.
+            W.defer(req, f"no unit satisfies {dict(req.requires)}" if req.requires
+                    else "unknown kind")
             continue
-        eff = _eff_priority(req, unit, world.now, pol)
-        opt = _best_placement(W, req, unit, pol, eff)
-        if opt is None:
+        unit = None
+        opt = None
+        for kind in cands:
+            u = world.units[kind]
+            e = _eff_priority(req, u, world.now, pol)
+            o = _best_placement(W, Request(**{**req.__dict__, "kind": kind}), u, pol, e)
+            if o is not None:
+                unit, opt, eff = u, o, e
+                break
+        if opt is None or unit is None:
             W.defer(req, "no device can fit even with preemption")
             continue
+        req = Request(**{**req.__dict__, "kind": unit.kind})
         moved = {}
         for v in opt.victims:
             W.evict(v.kind, opt.device_id,
