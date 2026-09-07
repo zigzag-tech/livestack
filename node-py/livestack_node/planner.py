@@ -95,6 +95,18 @@ class Unit:
     # reserve tracks reality. Default {} => reserve == footprint => zero behavior
     # change.
     activation_headroom: Res = field(default_factory=dict)
+    # Anti-affinity class. Units sharing a non-empty group REPEL each other, so
+    # the planner settles them one-per-device instead of stacking them on
+    # whichever device it scanned first.
+    #
+    # Why this is a planner concern and not an operator one: the alternative is
+    # pinning each unit to a card in its service config (CUDA_VISIBLE_DEVICES),
+    # which decides placement OUTSIDE the planner and therefore cannot adapt.
+    # Two 15 GB LLMs pinned to one 24 GB card fail forever; the same two, left to
+    # the planner with a spread group, settle one per card and stay correct when
+    # a card gains or loses a tenant. It is a PENALTY, not a constraint: when
+    # there is genuinely nowhere else, they still share.
+    spread_group: str = ""
 
 
 @dataclass(frozen=True)
@@ -232,6 +244,11 @@ class PlannerPolicy:
     max_aging_boost: int = 80           # cap so aging can't invert HARD/UNPINNED tiers entirely
     allow_busy_preemption: bool = False # interrupt busy lower-priority work for a higher req?
     locality_penalty: float = 2.0       # cost added when placing off the data's host
+    # Cost added per unit of the SAME spread_group already resident on a candidate
+    # device. Large enough to outweigh a reload (so an empty second card beats
+    # stacking beside a warm sibling), small enough that a busy preemption
+    # (50.0) still looks worse than sharing.
+    spread_penalty: float = 25.0
 
 
 # --- the planner ------------------------------------------------------------
@@ -433,6 +450,27 @@ class _Option:
     needs_load: bool
 
 
+def _spread_penalty(world: _World, device_id: str, unit: Unit,
+                    pol: PlannerPolicy) -> float:
+    """Cost of putting ``unit`` on a device that already hosts its own kind.
+
+    Anti-affinity, charged per resident sibling. A warm copy of the SAME unit is
+    not a sibling — that is the free-reuse case handled before we get here; this
+    is about two DIFFERENT units of one class (two LLMs, two TTS engines) both
+    wanting a card. Without it the cost function is indifferent between an empty
+    device and one already carrying a sibling, and the scan order decides —
+    which is how every LLM ends up on card 0 and card 1 sits idle.
+    """
+    if not unit.spread_group or pol.spread_penalty <= 0:
+        return 0.0
+    siblings = sum(
+        1 for p in world.resident.get(device_id, {}).values()
+        if p.kind != unit.kind
+        and world.w.units.get(p.kind) is not None
+        and world.w.units[p.kind].spread_group == unit.spread_group)
+    return siblings * pol.spread_penalty
+
+
 def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
                     eff_prio: int) -> Optional[_Option]:
     """Cheapest feasible device for ``req``: warm-resident (cost 0) beats load-in-free
@@ -458,14 +496,16 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
         if world.is_resident(req.kind, d.id):
             opt = _Option(d.id, 0.0 + loc_pen, [], needs_load=False)
         elif _fits(_admission_need(unit), world.free(d.id)):
-            opt = _Option(d.id, unit.reload_cost + loc_pen, [], needs_load=True)
+            opt = _Option(d.id, unit.reload_cost + loc_pen
+                          + _spread_penalty(world, d.id, unit, pol), [], needs_load=True)
         else:
             victims = _victims_to_free(world, d.id, _admission_need(unit), eff_prio, pol)
             if victims is None:
                 continue
             preempt_cost = sum(world.w.units[v.kind].reload_cost for v in victims)
             busy_pen = sum(50.0 for v in victims if v.busy)   # discourage interrupting work
-            opt = _Option(d.id, unit.reload_cost + loc_pen + preempt_cost + busy_pen,
+            opt = _Option(d.id, unit.reload_cost + loc_pen + preempt_cost + busy_pen
+                          + _spread_penalty(world, d.id, unit, pol),
                           victims, needs_load=True)
         if best is None or opt.cost < best.cost:
             best = opt
