@@ -48,14 +48,21 @@ class ResidencyPolicy(enum.IntEnum):
     UNPINNED = 2    # pure demand-driven (default)
 
 
-def _accepts_device(fn) -> bool:
-    """Does this callable declare a `device` parameter (or **kwargs)?"""
+def _accepts(fn, name: str) -> bool:
+    """Does this callable declare `name` (or **kwargs)?
+
+    `Coordinator` is a Protocol other projects implement, so an argument they
+    never declared must not be forced on them."""
     try:
         params = inspect.signature(fn).parameters
     except (TypeError, ValueError):
         return False
-    return ("device" in params
+    return (name in params
             or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()))
+
+
+def _accepts_device(fn) -> bool:
+    return _accepts(fn, "device")
 
 
 class ManagedUnit:
@@ -74,7 +81,8 @@ class ManagedUnit:
                  residency_policy: ResidencyPolicy = ResidencyPolicy.UNPINNED,
                  min_resident: int = 0,
                  health_check: "Optional[Callable[[object], bool]]" = None,
-                 spread_group: str = ""):
+                 spread_group: str = "",
+                 attributes: "Optional[dict]" = None):
         self.name = name
         self._loader = loader
         self._freer = freer
@@ -86,6 +94,9 @@ class ManagedUnit:
         # in proportion to the demand waiting for each, so alternating traffic
         # separates them without anything declaring that it should.
         self.spread_group = spread_group
+        # Declarative description of the unit ({"class":"llm","params_b":27}),
+        # reported to the broker so a request can state a NEED instead of a name.
+        self.attributes = dict(attributes or {})
         # Optional FUNCTIONAL liveness probe: given the loaded model, returns True
         # iff the unit is actually producing correct output. This is the signal a
         # heartbeat / process-alive / `/health` check cannot give — a unit can be
@@ -117,7 +128,8 @@ class ManagedUnit:
         except Exception:
             return False
 
-    def load(self, device: "Optional[str]" = None) -> object:
+    def load(self, device: "Optional[str]" = None,
+             budget: "Optional[dict]" = None) -> object:
         """Load, optionally onto a device the PLANNER chose.
 
         A loader that declares a `device` parameter is told where to load; one
@@ -128,8 +140,12 @@ class ManagedUnit:
         planner exists to make.
         """
         if self.model is None:
-            self.model = (self._loader(device=device) if self.loader_takes_device
-                          else self._loader())
+            kwargs = {}
+            if self.loader_takes_device:
+                kwargs["device"] = device
+            if _accepts(self._loader, "budget"):
+                kwargs["budget"] = budget
+            self.model = self._loader(**kwargs) if kwargs else self._loader()
             self.loaded_at = time.monotonic()
             self.device = device
         return self.model
@@ -187,8 +203,9 @@ class ModelManager:
         self.coordinator.bind(self)
 
     # --- primitives the coordinator drives (caller holds _guard, GPU thread) ------
-    def _load(self, name: str, device: "Optional[str]" = None) -> object:
-        model = self.units[name].load(device)
+    def _load(self, name: str, device: "Optional[str]" = None,
+              budget: "Optional[dict]" = None) -> object:
+        model = self.units[name].load(device, budget)
         self._planner.commit_loaded(name)
         self._log(f"[harmony] loaded {name} (resident={self._planner.resident()})")
         return model
@@ -212,7 +229,8 @@ class ModelManager:
         return model
 
     # --- public surface (parity with AsrModelManager) -----------------------------
-    def ensure(self, name: str, device: "Optional[str]" = None) -> object:
+    def ensure(self, name: str, device: "Optional[str]" = None,
+               budget: "Optional[dict]" = None) -> object:
         """Make ``name`` resident, returning its model, per the coordinator's policy.
         Resets the idle timer. GPU-thread only.
 
@@ -225,8 +243,10 @@ class ModelManager:
             # `Coordinator` is a Protocol other projects implement. Passing an
             # argument their `acquire` never declared would break them at the
             # seam, so the assignment is offered only where it is accepted.
-            model = (self.coordinator.acquire(name, device=device)
-                     if _accepts_device(self.coordinator.acquire)
+            model = (self.coordinator.acquire(name, device=device, budget=budget)
+                     if _accepts(self.coordinator.acquire, "budget")
+                     else self.coordinator.acquire(name, device=device)
+                     if _accepts(self.coordinator.acquire, "device")
                      else self.coordinator.acquire(name))
             self.last_used = time.monotonic()
             self._last_ensured = name

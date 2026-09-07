@@ -36,7 +36,8 @@ class Coordinator(Protocol):
     def bind(self, manager) -> None:
         """Attach the local executor (ModelManager) this coordinator drives."""
 
-    def acquire(self, name: str, device: "Optional[str]" = None) -> object:
+    def acquire(self, name: str, device: "Optional[str]" = None,
+                budget: "Optional[dict]" = None) -> object:
         """Make ``name`` resident and return its model, evicting per policy.
 
         ``device`` is the planner's placement, passed through to the loader."""
@@ -76,7 +77,8 @@ class LocalCoordinator:
     def bind(self, manager) -> None:
         self.mgr = manager
 
-    def acquire(self, name: str, device: "Optional[str]" = None) -> object:
+    def acquire(self, name: str, device: "Optional[str]" = None,
+                budget: "Optional[dict]" = None) -> object:
         m = self.mgr
         # The planner decides eviction (COLOAD vs one-in-VRAM); we execute it.
         evict, load = m._planner.plan_acquire(self.coload, name)
@@ -86,7 +88,8 @@ class LocalCoordinator:
         for n in load:
             # Only the REQUESTED unit takes the assignment; a co-loaded warm-floor
             # unit is not what the planner placed this cycle.
-            model = m._load(n, device if n == name else None)
+            model = m._load(n, device if n == name else None,
+                            budget if n == name else None)
         return model if load else m.units[name].model
 
     def idle_sweep(self) -> bool:
@@ -143,14 +146,15 @@ class LivestackCoordinator:
                 lease_ttl_seconds=(self._usage_ttl or None),
             ))
 
-    def acquire(self, name: str, device: "Optional[str]" = None):
+    def acquire(self, name: str, device: "Optional[str]" = None,
+                budget: "Optional[dict]" = None):
         m = self.mgr
         if not self.coload:
             for other in list(m._resident):
                 if other != name:
                     m._evict(other)
         if name not in m._resident:
-            m._load(name, device)
+            m._load(name, device, budget)
         self._note_usage(name)
         return m.units[name].model
 

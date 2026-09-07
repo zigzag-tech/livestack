@@ -723,3 +723,39 @@ def test_requirements_take_ranges_closed_and_open_ended():
     assert ask({"class": "llm", "params_b>=": 20}) == ["mid", "big"]
     # A range nothing falls inside is empty, not a nearest match.
     assert ask({"class": "llm", "params_b>": 30}) == []
+
+
+def test_a_grant_carries_the_budget_the_unit_may_use():
+    """The planner is the only party that knows how much room a unit actually
+    has: the node knows its own units, the operator knows a fraction of a card,
+    and neither can see what the planner just freed. Without this the operator
+    hand-sizes a model in a config file to squeeze into whatever one card had
+    left — placement decided outside the planner, in a different disguise."""
+    us = {"a": Unit("a", {"vram": 8}, priority=20, residency=Residency.UNPINNED,
+                    reload_cost=5, min_residency_s=0)}
+    w = WorldState(devices=(gpu("gpu0", cap=24, reserved=1),), units=us,
+                   requests=(Request("r1", "a", created_at=1000),), now=1000)
+    g = [x for x in plan(w).of(Grant) if x.request_id == "r1"][0]
+    # 24 capacity - 1 reserved - 8 for the unit itself = 15 left on the device.
+    assert g.budget.get("vram") == 15, g.budget
+
+
+def test_a_grant_budget_reflects_what_eviction_freed():
+    """An eviction in the same cycle changes the answer, which is the whole
+    reason the node cannot compute this for itself."""
+    us = {
+        "a": Unit("a", {"vram": 8}, priority=20, residency=Residency.UNPINNED,
+                  reload_cost=5, min_residency_s=0),
+        # Big enough that "a" genuinely cannot fit beside it, so an eviction
+        # must happen for the grant to exist at all.
+        "squatter": Unit("squatter", {"vram": 18}, priority=20,
+                         residency=Residency.UNPINNED, reload_cost=1, min_residency_s=0),
+    }
+    w = WorldState(devices=(gpu("gpu0", cap=24, reserved=1),), units=us,
+                   placements=(Placement("squatter", "gpu0", loaded_at=0),),
+                   requests=(Request("r1", "a", created_at=1000),),
+                   demand={"a": 5}, now=1000)
+    p = plan(w)
+    assert "squatter" in kinds_of(p.of(Evict), Evict)
+    g = [x for x in p.of(Grant) if x.request_id == "r1"][0]
+    assert g.budget.get("vram") == 15, g.budget
