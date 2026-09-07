@@ -31,6 +31,22 @@ file is fleet infrastructure and belongs where changes are reviewable.
 
   with 10 GB of idle ASR and TTS on that card that nobody had asked to move.
   Enable with `HARMONY_LLM_ADMIT=1` on any node that shares its card.
+* **Residency is PER UNIT** (`"residency"` in the spec), falling back to the node
+  default. One node serves models with different claims on the card: the hub's
+  title model must stay warm because a cold start costs a title, while an eval
+  model used a few times a day must not. With one policy for the whole node, the
+  eval model's SOFT_PIN restore kept re-claiming a card that cannot hold both and
+  evicted titles each cycle.
+* **`coload` is on when a node declares several units.** `coload=False` means
+  acquiring one unit evicts the others IN THIS PROCESS, which is right for a
+  single-model node and wrong the moment one node holds several: the broker's
+  restore of unit A then fights its demand-warm of unit B, each load evicting the
+  other and neither finishing. With several units, eviction belongs to the
+  planner, which knows the footprints and the whole card.
+* **Admission is for LOADING, not for every request.** A unit already resident
+  here has been through admission and is serving; re-asking the planner for
+  permission to use what is on the card turns a working model into a 503 on
+  every call.
 * A node asked for a unit the planner placed elsewhere **forwards** to the node
   that holds it (peer URLs come from the broker's `/peers`; `/status` carries no
   address). Otherwise it would load a second copy on its own card and be
@@ -51,7 +67,8 @@ variables, byte-for-byte as before units existed.
 | `HARMONY_LLM_UNITS_FILE` | path to the unit specs |
 | `HARMONY_LLM_SPREAD_GROUP` | contention class (default `llm`) |
 | `HARMONY_LLM_ADMIT` | ask Harmony for room before loading |
-| `HARMONY_LLM_RESIDENCY` | `SOFT_PIN` (default) / `UNPINNED` / `HARD_PIN` |
+| `HARMONY_LLM_RESIDENCY` | node default: `SOFT_PIN` / `UNPINNED` / `HARD_PIN` |
+| `HARMONY_LLM_COLOAD` | let several units be resident (implied by >1 unit) |
 | `HARMONY_LLM_CUDA_DEVICE` | the card this node speaks for |
 
 `systemd/` holds the deployed units for a two-card host: card 1 `SOFT_PIN`

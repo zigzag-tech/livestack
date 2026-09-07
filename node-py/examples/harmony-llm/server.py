@@ -103,6 +103,18 @@ def _unit_specs() -> "list[dict]":
 
 
 SPECS = {u["name"]: u for u in _unit_specs()}
+
+# coload=False means acquiring ONE unit evicts the others IN THIS PROCESS. That
+# is right for a node with a single model, and wrong the moment a node declares
+# several for one card: the broker's SOFT_PIN restore of unit A and its
+# demand-warm of unit B then fight, each load evicting the other, and neither
+# finishes. Observed 2026-09-07 as a card that kept emptying itself.
+#
+# With several units, eviction belongs to the PLANNER — it knows the footprints,
+# the demand and the whole card, and this process knows only its own units. So a
+# multi-unit node coloads by default and lets Harmony decide what goes.
+COLOAD = os.environ.get("HARMONY_LLM_COLOAD", "").strip().lower() in {"1", "true", "yes"} \
+    or len(SPECS) > 1
 try:
     from livestack_node.facade import resolve_device_id as _rdi
     DEVICE_ID_SELF = _rdi(HOST_ID)
@@ -279,8 +291,16 @@ _UNITS = {
         # HARD_PIN: HARD_PIN means "never preempted", and the point of routing
         # the LLM through Harmony is that it CAN shed the LLM under real
         # pressure — SOFT_PIN still evicts then, HARD_PIN refuses to.
-        residency_policy=getattr(ResidencyPolicy,
-                                 os.environ.get("HARMONY_LLM_RESIDENCY", "SOFT_PIN").upper()),
+        # PER-UNIT, falling back to the node default. One node now serves models
+        # with different claims on the card: the hub's title model must stay warm
+        # (a cold start costs a title), while an eval model used a few times a
+        # day must not. With one policy for the whole node, the judge's SOFT_PIN
+        # restore kept re-claiming a card that cannot hold both, evicting titles
+        # each time round.
+        residency_policy=getattr(
+            ResidencyPolicy,
+            str(spec.get("residency")
+                or os.environ.get("HARMONY_LLM_RESIDENCY", "SOFT_PIN")).upper()),
         health_check=_health_probe_for(name),
         spread_group=SPREAD_GROUP,
     )
@@ -305,7 +325,7 @@ _busy = counting()
 
 manager, residence = attach(
     app, host_id=HOST_ID, kind="llm", units=_UNITS,
-    idle_seconds=IDLE_EVICT_SECONDS, coload=False,
+    idle_seconds=IDLE_EVICT_SECONDS, coload=COLOAD,
     gpu_call=_gpu_call, port=NODE_PORT, readiness=_readiness,
     in_flight=_busy,
 )
@@ -422,15 +442,30 @@ async def proxy(path: str, request: Request):
     # unit is resident on the granted device. Two consequences worth stating:
     # the placement is the planner's, not this node's, and a broker that does
     # not answer degrades to loading locally exactly as before.
-    granted, degraded = None, None
-    if len(SPECS) > 1 or MULTI_NODE:
+    # Admission is for LOADING. A unit already resident here has been through it
+    # and is serving; asking the planner for permission to use what is already
+    # on the card turns a working model into a 503 on every request — observed
+    # exactly that way, a benchmark refused against its own loaded model.
+    already_here = unit in getattr(manager, "resident", ()) and _vllm_up(name=unit)
+    granted, degraded, refused = None, None, None
+    if not already_here and (len(SPECS) > 1 or MULTI_NODE):
         try:
             res = admit(unit, owner_id=f"harmony-llm:{HOST_ID}", timeout=ADMIT_TIMEOUT)
             granted, degraded = res.get("device_id"), res.get("degraded")
-        except Exception as e:                # arbitration must not take us offline
+            # A broker that ANSWERED and did not grant has refused. Loading
+            # anyway is what admission exists to stop: it puts a model on a card
+            # the planner never cleared, which is an OOM at best and someone
+            # else's evicted model at worst.
+            if not degraded and not res.get("granted"):
+                refused = res.get("reason") or "the planner did not grant a device"
+        except Exception as e:                # unreachable: arbitration is not the model
             degraded = f"{type(e).__name__}: {e}"
     if degraded:
-        print(f"[harmony-llm] admission degraded for {unit}: {degraded}", flush=True)
+        print(f"[harmony-llm] admission unavailable for {unit} "
+              f"({degraded}) — loading without it", flush=True)
+    if refused:
+        raise HTTPException(status_code=503,
+                            detail=f"{unit} was not admitted: {refused}")
 
     elsewhere = None
     if granted and DEVICE_ID_SELF and granted != DEVICE_ID_SELF:

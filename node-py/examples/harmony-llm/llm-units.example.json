@@ -5,7 +5,8 @@
     "port": 8189,
     "footprint_gb": 18,
     "gpu_fraction": "0.85",
-    "max_model_len": "16384"
+    "max_model_len": "16384",
+    "residency": "SOFT_PIN"
   },
   {
     "name": "llm_judge",
@@ -13,6 +14,27 @@
     "port": 8191,
     "footprint_gb": 15,
     "gpu_fraction": "0.62",
-    "max_model_len": "16384"
+    "max_model_len": "16384",
+    "residency": "UNPINNED"
+  },
+  {
+    "name": "bench_qwen35_9b",
+    "model": "cyankiwi/Qwen3.5-9B-AWQ-4bit",
+    "port": 8197,
+    "footprint_gb": 12,
+    "gpu_fraction": "0.55",
+    "max_model_len": "16384",
+    "extra_args": "--max-num-seqs 32",
+    "residency": "UNPINNED"
+  },
+  {
+    "name": "bench_qwen38_27b",
+    "model": "dbirks/Qwen3.8-27B-W4A16-AutoRound",
+    "port": 8199,
+    "footprint_gb": 21,
+    "gpu_fraction": "0.96",
+    "max_model_len": "16384",
+    "extra_args": "--max-num-seqs 32",
+    "residency": "UNPINNED"
   }
 ]
