@@ -15,6 +15,25 @@ from typing import Callable, Optional
 from .lease import Capability
 
 
+def _machine_name(fallback: str) -> str:
+    """The MACHINE a device belongs to — the hostname, not a node's chosen name.
+
+    `LIVESTACK_MACHINE_ID` overrides it for hosts whose hostname is unstable
+    (containers). Never raises: identity must not stop a node serving.
+    """
+    env = (os.environ.get("LIVESTACK_MACHINE_ID") or "").strip()
+    if env:
+        return env
+    try:
+        import socket
+        name = socket.gethostname().strip()
+        if name:
+            return name.split(".")[0]
+    except Exception:
+        pass
+    return fallback
+
+
 def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
     """The id of the device this node actually occupies.
 
@@ -28,12 +47,27 @@ def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
     Resolution order — explicit argument, then `LIVESTACK_DEVICE_ID`, then
     derived from the backend:
 
-    * CUDA — `{host_id}/{8 hex of the device UUID}`. The UUID is the driver's
+    * CUDA — `{machine}/{8 hex of the device UUID}`. The UUID is the driver's
       own identity for the physical card, so two processes pinned to the same
       card agree and two on different cards differ, with no configuration.
-    * MLX — `{host_id}/mlx0`. Apple unified memory is one device.
-    * neither — `{host_id}/gpu0`, today's value, so a single-GPU node that
-      passes nothing sees no change at all.
+    * MLX — `{machine}/mlx0`. Apple unified memory is one device.
+    * neither — `{machine}/gpu0`.
+
+    `machine` is the HOSTNAME, not the caller's `host_id`. That distinction is
+    the whole correctness of this function and it was wrong: `host_id` is a name
+    a node picks for itself, so three processes sharing one RTX 3090 announced
+    it as three devices —
+
+        xc-tower-ubuntu/4bac2869        polytts, polyasr
+        xc-tower-ubuntu-b/4bac2869      polyasr #2
+        xc-tower-ubuntu-gpu0/4bac2869   the LLM node
+
+    — same card, three ids. The planner then split one card's free memory three
+    ways, and dispatch could not match a grant to a peer: it placed a unit on
+    `xc-tower-ubuntu/4bac2869` while the only node serving that unit called
+    itself `...-gpu0/4bac2869`, so the grant succeeded and nothing ever loaded.
+    The hostname distinguishes machines, the UUID distinguishes cards, and a
+    node's chosen name distinguishes neither.
 
     Never raises: identity must not be the thing that stops a node serving.
     """
@@ -42,6 +76,7 @@ def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
     env = (os.environ.get("LIVESTACK_DEVICE_ID") or "").strip()
     if env:
         return env
+    machine = _machine_name(host_id)
     try:
         import torch
         if torch.cuda.is_available():
@@ -49,15 +84,15 @@ def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
             uuid = getattr(props, "uuid", None)
             if uuid is not None:
                 short = hashlib.sha256(str(uuid).encode()).hexdigest()[:8]
-                return f"{host_id}/{short}"
+                return f"{machine}/{short}"
             # A torch too old to expose `uuid` still knows which index it is on,
             # which is better than pretending every process is on gpu0.
-            return f"{host_id}/gpu{torch.cuda.current_device()}"
+            return f"{machine}/gpu{torch.cuda.current_device()}"
     except Exception:
         pass
     try:
         import mlx.core  # noqa: F401
-        return f"{host_id}/mlx0"
+        return f"{machine}/mlx0"
     except Exception:
         pass
     return f"{host_id}/gpu0"

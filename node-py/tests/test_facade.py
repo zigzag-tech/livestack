@@ -206,3 +206,26 @@ def test_a_node_can_advertise_a_reachable_host_not_just_loopback(monkeypatch):
     attach(FastAPI(), host_id="h", kind="polyasr", units=units, idle_seconds=120,
            coload=True, gpu_call=lambda fn: fn(), port=8766)
     assert announced == ["http://127.0.0.1:8766/livestack"]
+
+
+def test_device_identity_is_the_card_not_the_node_name():
+    """Three processes sharing one GPU must report ONE device id.
+
+    `host_id` is a name a node picks for itself, so putting it in device
+    identity made one RTX 3090 announce itself three times —
+    xc-tower-ubuntu/4bac2869, xc-tower-ubuntu-b/4bac2869 and
+    xc-tower-ubuntu-gpu0/4bac2869. The planner then split one card's free memory
+    three ways, and dispatch could not match a grant to a peer: a unit was
+    placed on one spelling while the only node serving it answered to another,
+    so the grant succeeded and nothing ever loaded.
+    """
+    from livestack_node.facade import resolve_device_id
+    ids = {resolve_device_id(h) for h in
+           ("xc-tower-ubuntu", "xc-tower-ubuntu-b", "xc-tower-ubuntu-gpu0")}
+    assert len(ids) == 1, f"same machine, same card, different ids: {ids}"
+
+
+def test_an_explicit_device_id_still_wins():
+    """Operator intent is not second-guessed."""
+    from livestack_node.facade import resolve_device_id
+    assert resolve_device_id("anything", "fixed/id") == "fixed/id"
