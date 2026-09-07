@@ -24,7 +24,7 @@ class FakePeer:
             return []
         return [Placement(self._unit.kind, self.device_id, loaded_at=0, busy=self._busy)]
 
-    def warm(self, kind):
+    def warm(self, kind, device=None):
         self.calls.append(("warm", kind)); self._resident = True
 
     def evict(self, kind):
@@ -73,7 +73,7 @@ class DownPeer:
     def device_capacity(self):
         raise ConnectionError("peer down")
 
-    def warm(self, kind):
+    def warm(self, kind, device=None):
         raise ConnectionError("peer down")
 
     def evict(self, kind):
@@ -142,7 +142,7 @@ def test_measured_capacity_autosizes_device():
         def placements(self): return []
         def device_memory(self): return {"vram_bytes": 38}
         def device_capacity(self): return {"vram_bytes": 40}
-        def warm(self, kind): self.calls.append(("warm", kind))
+        def warm(self, kind, device=None): self.calls.append(("warm", kind))
         def evict(self, kind): self.calls.append(("evict", kind))
 
     peer = MeteredPeer()
@@ -416,7 +416,7 @@ class _FleetPeer:
             out["load"] = self._load
         return out
 
-    def warm(self, kind):
+    def warm(self, kind, device=None):
         self.warmed.append(kind)
 
     def evict(self, kind):
@@ -782,3 +782,29 @@ def test_owner_usage_counts_live_leases_and_forgets_dead_ones():
 
     br.hosted_release(a1)
     assert br.owner_usage() == {}
+
+
+def test_demand_decays_and_reaches_the_planner():
+    """The broker's demand tally is what makes residency follow the workload:
+    every request seen counts, and the whole tally halves over a half-life so a
+    burst long past stops deciding placements."""
+    from livestack_node.hostbroker import HostBroker
+    from livestack_node.planner import Request
+
+    b = HostBroker(peers=[])
+    b.demand_half_life_s = 100.0
+    b._note_demand([Request("r1", "llm_title"), Request("r2", "llm_judge")], now=0.0)
+    b._note_demand([Request("r3", "llm_title")], now=0.0)
+    d = b.demand(0.0)
+    assert d["llm_title"] == 2.0 and d["llm_judge"] == 1.0
+
+    # One half-life later, with nothing new: everything is worth half as much.
+    b._note_demand([], now=100.0)
+    d = b.demand(100.0)
+    assert abs(d["llm_title"] - 1.0) < 1e-6
+    assert abs(d["llm_judge"] - 0.5) < 1e-6
+
+    # Long enough and a kind nobody asks for drops out entirely, so it stops
+    # costing anything to place something beside it.
+    b._note_demand([], now=100.0 + 100 * 12)
+    assert "llm_judge" not in b.demand()

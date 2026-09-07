@@ -74,6 +74,7 @@ def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit]) -> Dict[str, Unit]
             restore_debounce_s=max(prev.restore_debounce_s, unit.restore_debounce_s),
             activation_headroom=_res_max(prev.activation_headroom,
                                          unit.activation_headroom),
+            spread_group=prev.spread_group or unit.spread_group,
         )
     return out
 
@@ -84,6 +85,9 @@ def peer_key(peer) -> str:
     fake in a test has no URL and falls back to object identity. Same rule
     sweep_leaks already used, lifted so membership and reclaim agree."""
     return getattr(peer, "base", None) or f"peer-{id(peer)}"
+
+
+_EPS_TIME = 1e-9
 
 
 class Peer:
@@ -506,11 +510,48 @@ class HostBroker:
         # A hosted device has no peer reporting placements either — the broker's
         # own ledger is the only account of how full it is.
         placements.extend(self._hosted_placements(now))
+        self._note_demand(requests or (), now)
         return WorldState(devices=tuple(self._resolve_devices(discovered, measured_caps)),
                           units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
                           now=now, last_evicted_at=dict(last_evicted_at or {}),
-                          measured_free=measured)
+                          measured_free=measured,
+                          demand=self.demand(now))
+
+    # -- demand ----------------------------------------------------------------
+    #
+    # What the planner needs to separate two models is not a rule saying so; it
+    # is the fact that BOTH are being asked for. `requests` alone cannot say
+    # that — it is only what is admissible this instant, and a queue of a
+    # thousand alternating jobs looks the same as one job. So the broker keeps
+    # a decayed count per kind: every request seen adds 1, and the whole tally
+    # halves every `demand_half_life_s`. Recent history and what is queued right
+    # now end up in one number, which is what the placement cost multiplies a
+    # sibling's reload cost by.
+    demand_half_life_s: float = 300.0
+
+    def _note_demand(self, requests, now: float) -> None:
+        if not hasattr(self, "_demand"):
+            self._demand: Dict[str, float] = {}
+            self._demand_at = now
+        # Decay first, so a burst long past stops counting even if nothing new
+        # arrives to trigger an update.
+        dt = max(0.0, now - getattr(self, "_demand_at", now))
+        if dt > 0 and self._demand:
+            factor = 0.5 ** (dt / max(self.demand_half_life_s, _EPS_TIME))
+            for k in list(self._demand):
+                self._demand[k] *= factor
+                if self._demand[k] < 1e-3:
+                    del self._demand[k]
+        self._demand_at = now
+        for r in requests:
+            self._demand[r.kind] = self._demand.get(r.kind, 0.0) + 1.0
+
+    def demand(self, now: Optional[float] = None) -> Dict[str, float]:
+        """Decayed per-kind demand: recent history plus what is queued now."""
+        if not hasattr(self, "_demand"):
+            return {}
+        return dict(self._demand)
 
     # -- dispatch -------------------------------------------------------------
     def _peer_for(self, kind: str, device_id: str) -> Optional[Peer]:
@@ -546,7 +587,11 @@ class HostBroker:
             peer = self._peer_for(ld.kind, ld.device_id)
             if peer is not None:
                 self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id}: {ld.reason}")
-                peer.warm(ld.kind)
+                # Tell the node WHICH device the plan chose. A peer that serves
+                # one card ignores it; a peer that can see several needs it, or
+                # it would pick for itself and the planner's choice would be a
+                # suggestion. Older nodes ignore the extra field.
+                peer.warm(ld.kind, device=ld.device_id)
         return p
 
 
@@ -952,7 +997,11 @@ class RestPeer:
             # Measured peak-activation reserve (absent on nodes that don't report it).
             hdrm = u.get("activation_headroom") or {}
             out[u["kind"]] = Unit(u["kind"], fp, priority=prio,
-                                  residency=Residency(r), activation_headroom=hdrm)
+                                  residency=Residency(r), activation_headroom=hdrm,
+                                  # Contention class, when the node declares one.
+                                  # Absent on nodes that do not, which is every
+                                  # node that serves a single model.
+                                  spread_group=u.get("spread_group") or "")
         return out
 
     def placements(self):
@@ -987,8 +1036,11 @@ class RestPeer:
         """
         return _http(f"{self.base}/capability")
 
-    def warm(self, kind):
-        _http(f"{self.base}/model/warm", {"unit": kind}, timeout=180)
+    def warm(self, kind, device=None):
+        body = {"unit": kind}
+        if device:
+            body["device"] = device
+        _http(f"{self.base}/model/warm", body, timeout=180)
 
     def evict(self, kind):
         _http(f"{self.base}/model/evict", {"unit": kind}, timeout=60)

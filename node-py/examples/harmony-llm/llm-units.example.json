@@ -1,0 +1,18 @@
+[
+  {
+    "name": "llm_title",
+    "model": "Qwen/Qwen3-8B",
+    "port": 8189,
+    "footprint_gb": 18,
+    "gpu_fraction": "0.85",
+    "max_model_len": "16384"
+  },
+  {
+    "name": "llm_judge",
+    "model": "cyankiwi/gemma-4-26B-A4B-it-AWQ-4bit",
+    "port": 8191,
+    "footprint_gb": 15,
+    "gpu_fraction": "0.62",
+    "max_model_len": "16384"
+  }
+]
