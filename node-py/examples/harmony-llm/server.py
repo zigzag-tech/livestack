@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 import shlex
 import signal
 import subprocess
@@ -93,6 +94,46 @@ SPREAD_GROUP = os.environ.get("HARMONY_LLM_SPREAD_GROUP", "llm")
 PORT_OFFSET = int(os.environ.get("HARMONY_LLM_PORT_OFFSET", "0"))
 
 
+def _attributes_for(spec: dict) -> dict:
+    """A unit's attributes, with the launch-line facts DERIVED rather than
+    trusted from the config file.
+
+    `thinking` and `vision` are properties of how vLLM was started, and a
+    hand-declared value that disagrees is the same silent failure in a new
+    place: `"thinking": true` beside a unit with no reasoning parser routes a
+    thinking request to a unit that will leak its narration into `content`.
+    So the launch line wins, always.
+    """
+    attrs = dict(spec.get("attributes") or {})
+    args = spec.get("extra_args")
+    argv = args if isinstance(args, list) else shlex.split(str(args or ""))
+    joined = " ".join(argv)
+    # Separable reasoning requires a parser. Without one the model still
+    # "thinks"; the narration just arrives inline in content.
+    attrs["thinking"] = "--reasoning-parser" in joined
+    # A vision-capable model started with --language-model-only is not a vision
+    # unit for the purposes of routing, whatever its weights can do.
+    if "--language-model-only" not in joined:
+        attrs.setdefault("vision", spec.get("vision"))
+    else:
+        attrs["vision"] = False
+    if attrs.get("vision") is None:
+        attrs.pop("vision", None)
+    # What this unit SERVES, not what the weights support. Declaring the
+    # weights' 262144 next to a unit serving 16384 is an attribute that LIES:
+    # a `context_len>=32768` requirement would match it and the request would
+    # then be rejected by the very unit that satisfied the clause. An attribute
+    # that lies is worse than one that is missing, because the missing one
+    # fails the clause (silence is not a yes) and the lying one passes it.
+    served = spec.get("max_model_len")
+    if served:
+        try:
+            attrs["context_len"] = int(served)
+        except (TypeError, ValueError):
+            attrs.pop("context_len", None)
+    return attrs
+
+
 def _unit_specs() -> "list[dict]":
     if not _UNITS_ENV:
         return [{"name": "llm", "model": MODEL, "port": VLLM_PORT,
@@ -113,7 +154,7 @@ def _unit_specs() -> "list[dict]":
             # What this unit IS, for requests that state a requirement rather
             # than a name. Carried verbatim to the broker; the planner compares,
             # it never interprets.
-            "attributes": dict(spec.get("attributes") or {}),
+            "attributes": _attributes_for(spec),
         })
     if not out:
         raise RuntimeError("HARMONY_LLM_UNITS is set but declares no units")
@@ -482,6 +523,111 @@ def _peer_at(device_id: str) -> "str | None":
     return None
 
 
+# ── the request language ────────────────────────────────────────────────────
+#
+# A closed grammar over an OPEN vocabulary: the shapes below are the whole
+# language, while the attribute names are whatever the units declare. That is
+# what buys expressiveness without turning this into a query engine.
+#
+# The broker's matcher takes flat `key<op>: value` clauses ANDed together, so
+# everything richer is normalized into that shape HERE. The caller gets the
+# expressive surface; the planner keeps the interface it already has.
+_INTERVAL_RE = re.compile(r"^\s*([\[\(])\s*([^,]*)\s*,\s*([^\]\)]*)\s*([\]\)])\s*$")
+
+
+def _split_clauses(text: str) -> "list[str]":
+    """Split `require:` clauses on commas that are NOT inside an interval.
+
+    `params_b=[20,30)` carries a comma that belongs to the interval, not to the
+    clause list. Splitting naively produced `params_b=[20` and `30)` — two
+    unparseable clauses from one valid requirement.
+    """
+    out, depth, cur = [], 0, []
+    for ch in text:
+        if ch in "[(":
+            depth += 1
+        elif ch in "])":
+            depth = max(0, depth - 1)
+        if ch == "," and depth == 0:
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    out.append("".join(cur))
+    return [c for c in (x.strip() for x in out) if c]
+
+
+def _num(raw: str):
+    raw = raw.strip()
+    try:
+        return float(raw) if "." in raw else int(raw)
+    except ValueError:
+        raise ValueError(f"not a number: {raw!r}")
+
+
+def _expand_clause(key: str, val) -> "list[tuple[str, object]]":
+    """One requirement entry -> the flat clauses the broker understands.
+
+    Interval notation is used for ranges because open vs closed bounds are the
+    entire point and every operator-in-the-key spelling gets one of them wrong:
+        "[20,30)"  ->  params_b>=20 AND params_b<30
+        "[20,]"    ->  params_b>=20
+        "(,30]"    ->  params_b<=30
+    """
+    if isinstance(val, str):
+        m = _INTERVAL_RE.match(val)
+        if m:
+            lo_b, lo, hi, hi_b = m.groups()
+            out = []
+            if lo.strip():
+                out.append((key + (">=" if lo_b == "[" else ">"), _num(lo)))
+            if hi.strip():
+                out.append((key + ("<=" if hi_b == "]" else "<"), _num(hi)))
+            if not out:
+                raise ValueError(f"interval {val!r} constrains nothing")
+            return out
+    return [(key, val)]
+
+
+_LOCAL_CMPS = (">=", "<=", "!=", ">", "<")
+
+
+def _local_satisfies(name: str, requires: dict) -> bool:
+    """Does one of THIS node's units meet the requirement?
+
+    Same semantics as the planner's `_unit_satisfies`, including the important
+    one: an attribute the unit does not declare is NOT satisfied. Silence is
+    not a yes, or an unlabelled unit would answer every question.
+    """
+    attrs = _attributes_for(SPECS[name]) if name in SPECS else {}
+    for key, want in requires.items():
+        op, attr = "", key
+        for c in _LOCAL_CMPS:
+            if key.endswith(c):
+                op, attr = c, key[: -len(c)]
+                break
+        attr = attr.strip()
+        if attr not in attrs:
+            return False
+        have = attrs[attr]
+        try:
+            if op == "" and have != want:
+                return False
+            if op == "!=" and have == want:
+                return False
+            if op == ">=" and not float(have) >= float(want):
+                return False
+            if op == ">" and not float(have) > float(want):
+                return False
+            if op == "<=" and not float(have) <= float(want):
+                return False
+            if op == "<" and not float(have) < float(want):
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
+
+
 def _requirement_from(body_json: dict) -> "dict | None":
     """A stated NEED instead of a model name, in either of two shapes.
 
@@ -495,28 +641,98 @@ def _requirement_from(body_json: dict) -> "dict | None":
     business, and asking a caller to know it is what makes a GPU fleet feel like
     a set of machines instead of one.
     """
-    req = body_json.get("harmony_requires")
-    if isinstance(req, dict) and req:
-        return dict(req)
-    model = str(body_json.get("model") or "")
-    if not model.startswith("require:"):
-        return None
+    raw_req = body_json.get("harmony_requires")
+    entries: "list[tuple[str, object]]" = []
+    if isinstance(raw_req, dict) and raw_req:
+        entries = list(raw_req.items())
+    else:
+        model = str(body_json.get("model") or "")
+        if not model.startswith("require:"):
+            return None
+        for clause in _split_clauses(model[len("require:"):]):
+            clause = clause.strip()
+            if not clause:
+                continue
+            # `=` LAST: `params_b>=20` must not partition on the `=`.
+            for op in (">=", "<=", "!=", ">", "<", "="):
+                if op in clause:
+                    name, _, rest = clause.partition(op)
+                    rest = rest.strip()
+                    if op == "=":
+                        entries.append((name.strip(), rest))
+                    else:
+                        entries.append((name.strip() + op, rest))
+                    break
+            else:
+                # FAIL CLOSED. The old code dropped an unparseable clause and
+                # carried on, so `params_b~20` quietly became "no size
+                # requirement" and the caller got whatever was resident.
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"harmony: cannot parse requirement clause {clause!r}")
+
     out: dict = {}
-    for clause in model[len("require:"):].split(","):
-        clause = clause.strip()
-        if not clause:
-            continue
-        for op in (">=", "<=", "!=", ">", "<", "="):
-            if op in clause:
-                name, _, raw = clause.partition(op)
-                key = name.strip() + ("" if op == "=" else op)
-                raw = raw.strip()
-                try:
-                    out[key] = float(raw) if raw.replace(".", "", 1).isdigit() else raw
-                except ValueError:
-                    out[key] = raw
-                break
-    return out or None
+    for key, val in entries:
+        try:
+            for k, v in _expand_clause(str(key), val):
+                # Numeric strings become numbers, and "true"/"false" become
+                # bools: leaving them as strings is how `thinking=true` failed
+                # to match a unit whose attribute is a real boolean.
+                if isinstance(v, str):
+                    low = v.strip().lower()
+                    if low in ("true", "false"):
+                        v = low == "true"
+                    else:
+                        try:
+                            v = _num(v)
+                        except ValueError:
+                            v = v.strip()
+                out[k] = v
+        except ValueError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"harmony: bad requirement {key!r}: {e}")
+    if not out:
+        raise HTTPException(
+            status_code=400,
+            detail="harmony: a requirement was given but constrains nothing")
+    return out
+
+
+def _derived_requirements(path: str, body_json: dict) -> dict:
+    """What the request already tells us. Never ask a caller to declare this.
+
+    A request carrying an image has said it needs vision; a request that turns
+    thinking on has said it needs a unit that can SEPARATE that thinking from
+    the answer. Making the caller restate either is the bookkeeping this system
+    exists to abolish — and in the thinking case, not deriving it is what let a
+    request enable thinking on a unit with no reasoning parser and put the
+    model's narration into a user-visible reply (2026-09-07).
+    """
+    out: dict = {}
+    if "/chat/completions" in path or "/completions" in path:
+        out["class"] = "llm"
+
+    # Vision: an image part anywhere in the messages. Deliberately NOT a
+    # recursive scan for `type: image_url` — arbitrary user JSON containing that
+    # shape is not an image, and treating it as one would route text work to a
+    # vision unit for no reason.
+    for msg in (body_json.get("messages") or []):
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") in ("image_url", "input_image"):
+                    out["vision"] = True
+                    break
+        if out.get("vision"):
+            break
+
+    # Thinking: the PARAMETER implies the CAPABILITY. These are two different
+    # things (see docs/livestack-harmony.md) and conflating them is the bug.
+    kwargs = body_json.get("chat_template_kwargs")
+    if isinstance(kwargs, dict) and kwargs.get("enable_thinking") is True:
+        out["thinking"] = True
+    return out
 
 
 def _unit_for_model(requested: str) -> str:
@@ -557,14 +773,26 @@ async def proxy(path: str, request: Request):
     # than racing the planner.
     unit = next(iter(SPECS))
     requirement = None
+    parsed_body = None
     if body:
         try:
             parsed_body = json.loads(body)
+        except Exception:
+            parsed_body = None            # not JSON: forward untouched, as before
+        if isinstance(parsed_body, dict):
+            # A malformed requirement is a 400 and must NOT be swallowed here.
+            # `except Exception: pass` used to catch it and fall through to "the
+            # first declared unit", so a caller that asked for 27B and typoed the
+            # clause got a 4B model and a 200.
             requirement = _requirement_from(parsed_body)
+            derived = _derived_requirements(path, parsed_body)
+            if derived:
+                # Derived clauses are ANDed in and may only make the query
+                # STRICTER. A caller cannot declare `vision: false` to escape
+                # having sent an image.
+                requirement = {**(requirement or {}), **derived}
             if requirement is None:
                 unit = _unit_for_model(parsed_body.get("model", ""))
-        except Exception:
-            pass
     # ADMISSION FIRST, then load. Loading straight off the request is how a node
     # ends up starting vLLM into whatever memory happens to be free, with 10 GB
     # of idle ASR and TTS on the card that nobody ever asked to move:
@@ -582,10 +810,30 @@ async def proxy(path: str, request: Request):
     # on the card turns a working model into a 503 on every request — observed
     # exactly that way, a benchmark refused against its own loaded model.
     already_here = unit in getattr(manager, "resident", ()) and _vllm_up(name=unit)
-    # A requirement is ALWAYS resolved by the planner: which model satisfies it is
-    # exactly the decision being delegated, so there is nothing to short-circuit.
+    # A requirement is resolved by the planner — EXCEPT when a unit already
+    # resident on this node satisfies it.
+    #
+    # `admit` conflates two questions: "which unit satisfies this?" and "where
+    # may it be placed?". For a resident unit the second has already been
+    # answered — it is on the card, serving. Asking again makes the planner try
+    # to place a 21 GB model onto a card that same model fills, which it
+    # correctly refuses: `the planner could not place it on any device`. Every
+    # declarative request then 503s on a healthy node, which is precisely the
+    # failure the comment above describes ("a benchmark refused against its own
+    # loaded model") — reintroduced here for the requirement path.
+    #
+    # So: satisfied locally AND resident => serve it. Otherwise the planner
+    # decides, exactly as before. Placement authority is unchanged; what is
+    # removed is asking permission for a placement that already happened.
     if requirement is not None:
-        already_here = False
+        local = next((n for n in SPECS
+                      if _local_satisfies(n, requirement)
+                      and n in getattr(manager, "resident", ())
+                      and _vllm_up(name=n)), None)
+        if local:
+            unit, already_here = local, True
+        else:
+            already_here = False
     granted, degraded, refused = None, None, None
     if not already_here and (requirement is not None or len(SPECS) > 1 or MULTI_NODE):
         try:
@@ -593,6 +841,13 @@ async def proxy(path: str, request: Request):
                         requires=requirement,
                         owner_id=f"harmony-llm:{HOST_ID}", timeout=ADMIT_TIMEOUT)
             served = res.get("kind")
+            # Log the planner's answer only when it did NOT grant. A refusal
+            # for a requirement is otherwise invisible: the caller gets a 503
+            # naming what it asked for, and nothing says what the planner
+            # decided or why. That gap cost an afternoon.
+            if requirement is not None and not res.get("granted"):
+                print(f"[harmony-llm] admit(requires={requirement}) refused -> "
+                      f"kind={res.get('kind')!r} reason={res.get('reason')!r}", flush=True)
             if requirement is not None:
                 if not served:
                     raise HTTPException(
@@ -642,6 +897,25 @@ async def proxy(path: str, request: Request):
         except Exception as e:
             raise HTTPException(status_code=503, detail=f"{unit} unavailable: {e}")
         url = f"{_base_of(unit)}/v1/{path}"
+
+    # NORMALIZE before forwarding. Resolving a unit is not the same as ASKING it
+    # for what the requirement implied, and the gap between those two is a
+    # silent failure: `model: "require:..."` reaches a backend whose served
+    # names do not include it, and a requirement that selected a
+    # thinking-capable unit never actually turns thinking ON.
+    if isinstance(parsed_body, dict) and (requirement is not None or "harmony_requires" in parsed_body):
+        out = dict(parsed_body)
+        out.pop("harmony_requires", None)          # ours, not the backend's
+        served = SPECS.get(unit, {}).get("model") or unit
+        if str(out.get("model", "")).startswith("require:") or requirement is not None:
+            out["model"] = served
+        # The parameter the requirement implied. Asking for `thinking` and then
+        # not sending `enable_thinking` gets a capable unit that does not think.
+        if requirement.get("thinking") is True if requirement else False:
+            kw = dict(out.get("chat_template_kwargs") or {})
+            kw.setdefault("enable_thinking", True)
+            out["chat_template_kwargs"] = kw
+        body = json.dumps(out).encode()
 
     headers = {k: v for k, v in request.headers.items()
                if k.lower() not in {"host", "content-length"}}
