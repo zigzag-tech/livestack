@@ -198,3 +198,14 @@ failure. These counters use the existing bounded execution receipt/job store.
 A real 12-task test proves refusal, kernel evidence, cleanup, retained artifact
 and the existing bounded infrastructure retry path. Benchday separately treats
 unclean harness teardown as infrastructure, irrespective of the assertion phase.
+
+Deployment update: worker runtime `7564ee8cd08c9221466e0dd1a5550efa288cb1b7`
+is enabled on Win One after 22 real supervisor/worker/Docker checks passed in
+66.44 s. The authority still runs `cbf8c1f744e580016f02e4925fd90af522363560`;
+its protocol and store did not change. Full handler release
+`23f0f8fccfe881737f2384e7008683a898d9fc37` uses `max_tasks: 2048` and retains
+`preparation.json` and `e2e-result.json` even on infrastructure failure.
+Second full job `b1e02a45dd394cfb99de15fe31691145`, attempt
+`49738f3cea184bc08dc65e39f8ba1008`, is running against the same accepted source
+bundle. This is a validation attempt, not a reported passing gate. Do not
+restart or replace it merely because an observation request times out.
