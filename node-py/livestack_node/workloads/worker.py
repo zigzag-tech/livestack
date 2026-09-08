@@ -1,8 +1,8 @@
 """Persistent one-slot Linux/WSL worker, independent of submitting clients.
 
 Handlers are installed argv vectors. Production workspaces must be a dedicated
-bounded filesystem; Docker handlers require a separate ownership backend and
-are deliberately not supported by this native-process worker yet.
+bounded filesystem. Rootless Docker handlers use a private daemon with containers
+parented inside the same delegated attempt cgroup.
 """
 from __future__ import annotations
 
@@ -13,8 +13,10 @@ from pathlib import Path
 import shutil
 import time
 import uuid
+from urllib.error import HTTPError
 
 from .archive import relative_path, unpack
+from .docker_runtime import remove_data
 from .client import WorkloadClient
 from .lease import LeaseKeeper
 from .model import WorkloadError, encode
@@ -32,8 +34,8 @@ class WorkloadWorker:
         self.workspace = Path(config['workspace']).resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.handlers = config['handlers']
-        if not self.handlers or any(h.get('backend', 'native') != 'native' for h in self.handlers.values()):
-            raise WorkloadError('native worker requires installed native handlers')
+        if not self.handlers or any(h.get('backend', 'native') not in ('native', 'rootless-docker') for h in self.handlers.values()):
+            raise WorkloadError('worker requires installed native or rootless-docker handlers')
         self.transfer = InputTransfer(self.client)
         self.reconciled = False
 
@@ -85,6 +87,7 @@ class WorkloadWorker:
             self.executor.stop(attempt)
             path = self.workspace/attempt
             if path.exists():
+                remove_data(path)
                 shutil.rmtree(path)
             cleaned.append(attempt)
         if cleaned:
@@ -94,6 +97,7 @@ class WorkloadWorker:
         if old:
             path = self.workspace/old['assignment']['attempt_id']
             if path.exists():
+                remove_data(path)
                 shutil.rmtree(path)
         self.journal.clear()
         self.reconciled = True
@@ -123,6 +127,7 @@ class WorkloadWorker:
         root.mkdir(exist_ok=False)
         lease = None
         completion = None
+        output = root/'output'
         try:
             lease = LeaseKeeper(self.client, assignment, root/'lease',
                                 interval=self.config.get('lease_interval', 10)).start()
@@ -134,7 +139,6 @@ class WorkloadWorker:
             bundle = self.transfer.get(spec['input_digest'], root/'input.tar', assignment=assignment)
             unpack(bundle, root/'source', spec['input_digest'])
             bundle.unlink()
-            output = root/'output'
             output.mkdir()
             (root/'request.json').write_text(encode(spec['payload']))
             env = dict(self.config.get('environment', {}))
@@ -148,7 +152,8 @@ class WorkloadWorker:
             self.journal.write(dict(assignment=assignment, phase='running'))
             self.executor.start(attempt, handler['argv'], root/'source', output, env=env,
                 cpu=need['cpu'], memory_bytes=need['memory_bytes'],
-                max_seconds=handler.get('max_seconds', 3600), lease_file=root/'lease')
+                max_seconds=handler.get('max_seconds', 3600), lease_file=root/'lease',
+                rootless_docker=handler.get('backend') == 'rootless-docker')
             last_report = time.monotonic()
             while True:
                 if lease.lost.is_set():
@@ -157,7 +162,8 @@ class WorkloadWorker:
                 if result is not None:
                     code = result['exit_code']
                     outcome = ('succeeded' if code == 0 else
-                        'infrastructure' if code in handler.get('infrastructure_exit_codes', []) else 'product_failure')
+                        'infrastructure' if code in handler.get('infrastructure_exit_codes', []) or
+                        (handler.get('backend') == 'rootless-docker' and code == 75) else 'product_failure')
                     completion = dict(outcome=outcome, result=result)
                     break
                 if time.monotonic()-last_report >= 10:
@@ -174,28 +180,29 @@ class WorkloadWorker:
             # Never acknowledge completion or cleanup while owned work survives.
             try:
                 self.executor.stop(attempt)
+                remove_data(root)
             except Exception:
                 if lease:
                     lease.close()
                 raise
         try:
-            if completion['outcome'] != 'infrastructure':
-                artifacts = []
-                for item in ['command.log', 'command.previous.log'] + handler.get('outputs', []):
-                    relative_path(item)
-                    path = output/item
-                    if not path.exists():
-                        continue
-                    if path.resolve() != path or not path.is_file():
-                        raise WorkloadError('artifact must be a private regular file')
-                    artifact = self.transfer.put(path, assignment=assignment)
-                    artifacts.append(dict(name=item, **artifact))
-                completion['result']['artifacts'] = artifacts
+            artifacts = []
+            declared = handler.get('outputs', []) if completion['outcome'] != 'infrastructure' else []
+            for item in ['command.log', 'command.previous.log'] + declared:
+                relative_path(item)
+                path = output/item
+                if not path.exists():
+                    continue
+                if path.resolve() != path or not path.is_file():
+                    raise WorkloadError('artifact must be a private regular file')
+                artifact = self.transfer.put(path, assignment=assignment)
+                artifacts.append(dict(name=item, **artifact))
+            completion['result']['artifacts'] = artifacts
             completion.update(boot=self.boot, attempt_id=attempt, fence=assignment['fence'],
                               input_digest=assignment['spec']['input_digest'])
             self.journal.write(dict(assignment=assignment, phase='completed', completion=completion))
             self.client.request('worker/complete', completion)
-        except WorkloadError as error:
+        except (WorkloadError, HTTPError) as error:
             if error.status != 409:
                 raise
             self.reconciled = False
