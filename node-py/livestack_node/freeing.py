@@ -7,11 +7,37 @@ from __future__ import annotations
 
 
 def free_cuda() -> None:
+    """Return this process's cached CUDA memory to the driver.
+
+    `empty_cache()` alone is not enough, and the gap cost a card: it can only
+    release a segment with NO live block in it, and PyTorch allocates cuBLAS
+    workspaces THROUGH the caching allocator, per (device, stream), referenced
+    by no Python tensor. Measured on xc-tower-ubuntu 2026-09-08, on a polyasr
+    node that had served for a few minutes and then evicted every unit:
+
+        reserved 3456.1 MB   allocated 9.6 MB   segments 2
+        after empty_cache()          -> unchanged, 0 bytes returned
+        after clearing workspaces    -> allocated 0.0 MB
+        then empty_cache()           -> reserved 0.0 MB, all 3.4 GB returned
+
+    9.6 MB of workspace pinned 3.4 GB, `/model/reclaim` reported `freed=0.0GB`
+    265 times, and the leak Harmony correctly detected had no working lever.
+
+    Synchronize FIRST: the workspaces are freed back to the allocator, so any
+    kernel still using one must have finished. This runs on the GPU executor
+    (nothing else in the process is touching the device) — do not call it from
+    a thread that does not hold that lock.
+    """
     try:
         import torch
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            torch.cuda.synchronize()
+        if not torch.cuda.is_available():
+            return
+        torch.cuda.synchronize()
+        try:
+            torch._C._cuda_clearCublasWorkspaces()
+        except AttributeError:
+            pass          # older torch: nothing to clear, empty_cache is all we have
+        torch.cuda.empty_cache()
     except Exception:
         pass
 

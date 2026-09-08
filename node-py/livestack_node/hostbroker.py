@@ -148,6 +148,18 @@ class HostBroker:
         # Leak reclaim bookkeeping: peer -> last attempt, and how often to retry.
         self._last_reclaim: Dict[str, float] = {}
         self.reclaim_interval_s = float(os.environ.get("LIVESTACK_RECLAIM_INTERVAL", "120"))
+        # A lever that returns nothing must not be pulled on a fixed clock. Some
+        # leaked memory CANNOT be returned by the node it is asked of (bytes
+        # stuck in a segment a live block pins), and against that the 120 s
+        # retry is an infinite loop with a log line in it: 265 identical
+        # `freed=0.0GB` lines in 14 h, measured 2026-09-08 — the same shape as
+        # the 92,089-line membership log this codebase already fixed once.
+        # Back off per peer while nothing comes back, and reset the moment the
+        # picture changes (more leaked, or some returned).
+        self._reclaim_backoff: Dict[str, float] = {}
+        self._reclaim_last_leak: Dict[str, int] = {}
+        self.reclaim_backoff_max_s = float(
+            os.environ.get("LIVESTACK_RECLAIM_BACKOFF_MAX", "3600"))
         self.default_capacity = default_capacity or {"vram_bytes": 24_000_000_000,
                                                      "reserved": 2_000_000_000}
         # Membership: who is on this host, and who has gone. Peers passed to the
@@ -431,7 +443,8 @@ class HostBroker:
             # stayed down: chipgen on this host was printing ~17k lines a day.
             # That is precisely the 92,089-line shape membership was built to
             # end, resurrected on a path membership did not cover.
-            if now - self._last_reclaim.get(key, 0.0) < self.reclaim_interval_s:
+            wait = self._reclaim_backoff.get(key, self.reclaim_interval_s)
+            if now - self._last_reclaim.get(key, 0.0) < wait:
                 continue
             if self.roster.state_of(key) != "fresh":
                 continue
@@ -442,11 +455,32 @@ class HostBroker:
                     continue
                 result = peer.reclaim() or {}
                 freed = int(result.get("freed_bytes", 0))
+                unexplained = int(leak.get("unexplained_bytes", 0))
                 acted.append({"peer": key, "freed_bytes": freed,
-                              "unexplained_bytes": int(leak.get("unexplained_bytes", 0))})
-                print(f"[harmony] reclaim peer={key} unexplained="
-                      f"{int(leak.get('unexplained_bytes', 0)) / 1e9:.1f}GB "
-                      f"freed={freed / 1e9:.1f}GB", flush=True)
+                              "unexplained_bytes": unexplained})
+                changed = unexplained != self._reclaim_last_leak.get(key)
+                self._reclaim_last_leak[key] = unexplained
+                if freed > 0 or changed:
+                    # Something happened: say so, and ask again on the normal
+                    # cadence — the next attempt may well recover more.
+                    self._reclaim_backoff[key] = self.reclaim_interval_s
+                    print(f"[harmony] reclaim peer={key} unexplained="
+                          f"{unexplained / 1e9:.1f}GB freed={freed / 1e9:.1f}GB",
+                          flush=True)
+                else:
+                    # Nothing came back and nothing moved. Asking again in two
+                    # minutes will produce the same nothing, so double the wait
+                    # and stop narrating it. `fragmented` in the node's own leak
+                    # report is what says WHY it cannot come back.
+                    wait = min(self.reclaim_backoff_max_s, wait * 2)
+                    self._reclaim_backoff[key] = wait
+                    if wait >= self.reclaim_backoff_max_s:
+                        pass          # capped: already said, do not say it again
+                    else:
+                        print(f"[harmony] reclaim peer={key} returned nothing of "
+                              f"{unexplained / 1e9:.1f}GB (fragmented="
+                              f"{int(leak.get('fragmented_bytes', 0)) / 1e9:.1f}GB)"
+                              f" — retrying in {wait:.0f}s", flush=True)
             except Exception as exc:
                 print(f"[harmony] reclaim failed peer={getattr(peer, 'base', '?')}: {exc}", flush=True)
         return acted

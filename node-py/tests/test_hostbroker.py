@@ -242,6 +242,55 @@ def test_reclaim_is_throttled_per_peer():
     assert peer.reclaims == 2
 
 
+def test_a_lever_that_returns_nothing_is_pulled_less_and_less():
+    """Some leaked VRAM cannot be returned by the node it is asked of — bytes
+    stuck in a segment that a live block pins. Against that, a fixed 120 s retry
+    is an infinite loop with a log line in it: 265 identical `freed=0.0GB` lines
+    in 14 h on xc-tower-ubuntu, 2026-09-08."""
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker()
+    b.reclaim_interval_s = 120.0
+    peer = _LeakyPeer()
+    # A pool that cannot come back: the leak never changes and nothing is freed.
+    peer._leak = {"unexplained_bytes": 3_400_000_000, "reclaimable_bytes": 0,
+                  "fragmented_bytes": 3_390_000_000}
+    peer.reclaim = lambda: {"freed_bytes": 0}
+    b.register_peer(peer)
+
+    t = 1000.0
+    pulls = 0
+    for _ in range(200):               # ~14 h of 5 s reconcile ticks, compressed
+        t += 120.0
+        if b.sweep_leaks(now=t):
+            pulls += 1
+    # A fixed clock would have pulled it 200 times.
+    assert pulls < 15, f"still hammering a lever that cannot work ({pulls} pulls)"
+    assert b._reclaim_backoff["http://leaky"] >= 3600
+
+
+def test_the_backoff_resets_the_moment_the_picture_changes():
+    """Backing off must not mean going deaf. More leaked, or some returned, is
+    new information and the next sweep should act on it immediately."""
+    from livestack_node.hostbroker import HostBroker
+    b = HostBroker()
+    b.reclaim_interval_s = 120.0
+    peer = _LeakyPeer()
+    peer._leak = {"unexplained_bytes": 3_400_000_000, "reclaimable_bytes": 0}
+    peer.reclaim = lambda: {"freed_bytes": 0}
+    b.register_peer(peer)
+
+    t = 1000.0
+    for _ in range(6):
+        t += 4000.0
+        b.sweep_leaks(now=t)
+    assert b._reclaim_backoff["http://leaky"] > 120.0
+
+    peer._leak = {"unexplained_bytes": 9_000_000_000, "reclaimable_bytes": 0}
+    t += b._reclaim_backoff["http://leaky"] + 1
+    b.sweep_leaks(now=t)
+    assert b._reclaim_backoff["http://leaky"] == 120.0
+
+
 def test_one_peer_failing_does_not_stop_the_sweep():
     from livestack_node.hostbroker import HostBroker
 

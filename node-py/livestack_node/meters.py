@@ -57,20 +57,38 @@ def cuda_self_meter(device: int = 0) -> Callable[[], Optional[dict]]:
     cannot evict what is already evicted. ASR on the same card then failed every
     request with `CUDA out of memory. Tried to allocate 2.00 MiB`.
 
-    `reserved - allocated` is the reclaimable pool: memory this process owns, is
-    not using, and could hand back with `empty_cache()`.
+    `reserved - allocated` was called the reclaimable pool, and it is NOT one.
+    `empty_cache()` releases a SEGMENT, and only a segment with no live block in
+    it — so unused bytes sharing a segment with a live block are not reclaimable
+    by any lever this process has. Measured 2026-09-08: a node reported 3.4 GB
+    "reclaimable" of which `empty_cache()` returned zero, because 9.6 MB of
+    cuBLAS workspace sat in the two segments that held it all. The broker asked
+    it to reclaim 265 times and believed the number each time.
+
+    So the split is three ways, and `reclaimable` now means what its name says:
+
+    * `allocated_bytes`   — live blocks.
+    * `fragmented_bytes`  — free bytes stuck in segments that hold a live block
+      (`inactive_split`). Not returnable until whatever pins the segment goes.
+    * `reclaimable_bytes` — free bytes in wholly-free segments: what
+      `empty_cache()` would actually hand back.
     """
     def meter() -> Optional[dict]:
         try:
             import torch
             if not torch.cuda.is_available():
                 return None
+            reserved = int(torch.cuda.memory_reserved(device))
+            allocated = int(torch.cuda.memory_allocated(device))
+            stats = torch.cuda.memory_stats(device) or {}
+            fragmented = int(stats.get("inactive_split_bytes.all.current", 0))
             return {
-                "allocated_bytes": int(torch.cuda.memory_allocated(device)),
-                "reserved_bytes": int(torch.cuda.memory_reserved(device)),
-                "reclaimable_bytes": int(
-                    torch.cuda.memory_reserved(device) - torch.cuda.memory_allocated(device)
-                ),
+                "allocated_bytes": allocated,
+                "reserved_bytes": reserved,
+                "fragmented_bytes": fragmented,
+                # Never negative: the three readings are sampled from a live
+                # allocator and can disagree by a block between calls.
+                "reclaimable_bytes": max(0, reserved - allocated - fragmented),
             }
         except Exception:
             return None
@@ -102,9 +120,12 @@ def leak_signal(self_usage: Optional[dict], resident_footprint_bytes: int,
         "reserved_bytes": reserved,
         "resident_footprint_bytes": int(resident_footprint_bytes),
         "reclaimable_bytes": int(self_usage.get("reclaimable_bytes", 0)),
+        "fragmented_bytes": int(self_usage.get("fragmented_bytes", 0)),
         "hint": ("this process holds VRAM its resident units do not explain; "
                  "an evicted model whose allocator pool was never returned looks "
-                 "exactly like this"),
+                 "exactly like this. `reclaimable` is what a reclaim would return "
+                 "now; `fragmented` is stuck behind a live block in the same "
+                 "segment and needs whatever pins it to go first"),
     }
 
 

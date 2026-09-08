@@ -288,6 +288,32 @@ facade exposes `POST /model/reclaim`: it runs `gc.collect()` + the backend's
 cannot race a load or a generate) and reports before/after, so the caller can see
 whether anything actually came back rather than assuming.
 
+**`empty_cache()` alone does not pull that lever, and for a month it did not.**
+It releases a SEGMENT, and only one with no live block in it — while PyTorch
+allocates **cuBLAS workspaces through the caching allocator**, per (device,
+stream), referenced by no Python tensor. Measured on xc-tower-ubuntu 2026-09-08,
+on a polyasr node that had served a few requests and then evicted every unit:
+
+```
+reserved 3456.1 MB   allocated 9.6 MB   segments 2
+  after empty_cache()                 -> unchanged, nothing returned
+  after _cuda_clearCublasWorkspaces() -> allocated 0.0 MB
+  then empty_cache()                  -> reserved 0.0 MB, all 3.4 GB returned
+```
+
+9.6 MB of workspace pinned 3.4 GB. `freeing.free_cuda()` now synchronizes,
+clears the workspaces, then empties the cache — in that order, because the
+workspaces go back to the allocator and any kernel using one must have finished.
+
+Two readings were lying about it, and both are fixed. `reclaimable_bytes` was
+`reserved - allocated`, which counted 3.4 GB nobody could return; it now means
+what its name says (free bytes in wholly-free segments), and the bytes stuck
+behind a live block are reported separately as **`fragmented_bytes`**. And the
+broker pulled the lever on a fixed 120 s clock, believing the number each time:
+265 identical `freed=0.0GB` lines in 14 h — the 92,089-line shape again. It now
+**backs off per peer while nothing comes back**, doubling to
+`LIVESTACK_RECLAIM_BACKOFF_MAX` (1 h), and resets the moment the leak changes.
+
 The broker closes the loop in its reconcile pass: `sweep_leaks()` asks any peer
 reporting a `leak` to reclaim, **before** planning — reclaimed memory changes what
 fits, and a plan built against a card that is about to gain 14 GB would evict
