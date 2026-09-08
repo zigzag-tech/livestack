@@ -8,6 +8,33 @@ place, with `.bak-<timestamp>` copies beside it as the entire safety net. Two
 concurrent agents editing it on 2026-09-06/07 is what made that untenable: the
 file is fleet infrastructure and belongs where changes are reviewable.
 
+## Deployment — this checkout IS the deployed source
+
+`xc-tower-ubuntu` runs it: the systemd units execute
+`/home/ubuntu/harmony-llm/venv/bin/python /home/ubuntu/harmony-llm/server.py`,
+where that `server.py` is a **symlink to this file**. The deployment directory
+holds the venv and nothing else. An edit here is an edit in production after a
+restart; there is no copy step and there must not be one.
+
+**Do not `git init` in the deployment directory.** That happened on 2026-09-07 —
+"chore: put harmony-llm under version control", of a file this repository had
+already been versioning — and it forked the deployed copy away for a month.
+Five commits of real work landed in a repo with no remote, on one machine's
+disk, absent from zz-tower0 and zz-tower2: the requirement grammar, the
+resident-unit fix, `context_len` describing what a unit serves, two-sided
+tool-calling derivation, and the 413 context refusal. `1d434b6` among them is
+the hash `benchday/docs/livestack-harmony.md` cites as the fix that made the
+request language usable — a citation that resolved nowhere shared.
+
+The work is reclaimed and that history is kept as an archive ref:
+
+    git log refs/archive/harmony-llm-fork
+
+The paragraph above about `.bak-<timestamp>` copies being the entire safety net
+is why this file was moved here in the first place. The fork undid that, so the
+symlink is the structural fix: the drift cannot reopen while the deployed path
+cannot hold its own bytes.
+
 ## Shape
 
 * vLLM runs as a **subprocess** per unit; the unit's loader/freer start and stop
