@@ -137,8 +137,14 @@ class BlobStore:
             return
         now = self.store.clock()
         with self.store.transaction() as db:
-            rows = db.execute("SELECT digest FROM blobs WHERE state='ready' AND used<? "
-                "AND NOT EXISTS(SELECT 1 FROM jobs WHERE json_extract(spec,'$.input_digest')=blobs.digest)",
+            # Materialize the bounded reference set once, rather than walking
+            # every attempt's JSON again for each object in the content store.
+            rows = db.execute("WITH referenced(digest) AS MATERIALIZED ("
+                "SELECT json_extract(spec,'$.input_digest') FROM jobs UNION "
+                "SELECT json_extract(artifact.value,'$.digest') FROM attempts, "
+                "json_each(attempts.result,'$.result.artifacts') artifact) "
+                "SELECT digest FROM blobs WHERE state='ready' AND used<? "
+                "AND digest NOT IN (SELECT digest FROM referenced)",
                 (now-self.retention_seconds,)).fetchall()
             for row in rows:
                 (self.root/row['digest']).unlink(missing_ok=True)
