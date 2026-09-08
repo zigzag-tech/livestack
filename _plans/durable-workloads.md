@@ -248,3 +248,22 @@ now re-reads the receipt before declaring a stopped execution result missing.
 All 17 worker checks pass on Win One (24.19 s). This establishes the race and
 its correction; the old runtime omitted exception detail, so the original
 full attempt's exact exception cause cannot be conclusively attributed.
+
+Runtime `6fb69e3c8de45ace7645af7af1d23bbea84b49fc` is deployed on Win One,
+with the source cache enabled at 8 GiB / 32 entries / 14-day retention. The
+authority and installed product handlers are unchanged. Deployment occurred
+after the cancelled full retry's cleanup and an empty worker journal.
+
+Two actual enrollment jobs used the same 488,755,200-byte accepted archive:
+`0f51f492e3664d88ab071da2b5890b11` completed in 52.862 s cold;
+`116a618447324c50a837e235a2f1e9f0` completed in 17.634 s warm. The cold job
+succeeded on its first attempt; the warm job required two attempts across
+worker reconciliation (not a systemd service restart). Its final receipt
+matches attempt `2cd4e2ac88ea4e5c88c9993233392a1f`. The worker log names a
+CalledProcessError but omits its command/error detail; this remains to diagnose.
+Both final receipts have zero OOM/task-limit events. The cached archive's
+inode, size and mtime were unchanged, with its usage timestamp refreshed.
+Receipt digests are `c27209b0c9278e47fd060bae209a4f51fdec89ea5ee60d5fb74f0d41d23db85b`
+and `3971a9d74713ea0fc3ea0998a40435356ff3b21e5c5df522baa2a34e02b27dc8`.
+This measures source delivery/extraction and a tiny probe, not E2E or build
+cache performance. The existing render container kept its original start time.
