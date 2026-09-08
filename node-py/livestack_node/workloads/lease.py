@@ -1,0 +1,76 @@
+"""Worker-owned renewals with a monotonic deadline enforced inside the unit."""
+from __future__ import annotations
+
+import math
+import os
+from pathlib import Path
+from threading import Event, Thread
+import time
+
+from .model import WorkloadError
+
+
+class LeaseKeeper:
+    def __init__(self, client, assignment, path, *, interval=10):
+        self.client, self.assignment = client, assignment
+        self.path = Path(path)
+        self.interval = interval
+        self.stopped = Event()
+        self.lost = Event()
+        self.thread = None
+        self.error = None
+        self.remaining = 0
+
+    def _write(self, deadline):
+        temporary = self.path.with_suffix('.tmp')
+        with temporary.open('w') as out:
+            out.write(str(deadline))
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, self.path)
+
+    def renew(self):
+        started = time.monotonic()
+        a = self.assignment
+        result = self.client.request('worker/heartbeat', dict(
+            boot=a['boot'], attempt_id=a['attempt_id'], fence=a['fence']))
+        remaining = result.get('lease_remaining')
+        if not isinstance(remaining, (float, int)) or not math.isfinite(remaining) or remaining <= 0:
+            raise WorkloadError('authority did not provide a finite lease duration', 503)
+        # Count the request's full round trip against the duration. Authority
+        # and worker clocks need not agree. Leave time for wrapper/cgroup stop.
+        deadline = started + remaining - min(1, remaining/4)
+        self.remaining = deadline-time.monotonic()
+        if self.remaining <= 0:
+            raise WorkloadError('renewal arrived after its safe deadline', 503)
+        self._write(deadline)
+
+    def start(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.renew()  # No process can start without a fresh grant.
+        self.thread = Thread(target=self._loop, daemon=True, name='harmony-lease')
+        self.thread.start()
+        return self
+
+    def _loop(self):
+        while not self.stopped.wait(min(self.interval, self.remaining/3)):
+            try:
+                self.renew()
+            except Exception as error:
+                self.error = type(error).__name__
+                self.lost.set()
+                # Fail closed immediately on a refused/unreachable renewal.
+                # If disk writes also fail, the last deadline still expires.
+                try:
+                    self._write(0)
+                except OSError:
+                    pass
+                return
+
+    def close(self):
+        self.stopped.set()
+        if self.thread:
+            self.thread.join(timeout=self.client.timeout+1)
+            if self.thread.is_alive():
+                raise WorkloadError('renewal thread did not stop', 503)
+        self._write(0)
