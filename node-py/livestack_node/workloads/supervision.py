@@ -1,8 +1,8 @@
 """Durable ownership and cgroup supervision for one Linux/WSL worker slot.
 
 No PID-based recovery: systemd unit names are journaled before launch and
-identify the entire cgroup. Docker handlers need an additional container
-ownership adapter; this primitive alone does not fence Docker daemon work.
+identify the entire cgroup. Rootless Docker jobs delegate a subtree and explicitly
+parent every container beneath it; host Docker daemon work is never selected.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ import sys
 import time
 
 from .model import WorkloadError, encode
+from . import docker_runtime
 
 
 class WorkerJournal:
@@ -82,7 +83,7 @@ class SystemdExecutor:
         return dict(line.split('=', 1) for line in reply.stdout.splitlines() if '=' in line)
 
     def start(self, attempt_id, argv, cwd, output, *, env, cpu, memory_bytes,
-              max_seconds=3600, tasks=512, log_bytes=8*1024**2, lease_file=None):
+              max_seconds=3600, tasks=512, log_bytes=8*1024**2, lease_file=None, rootless_docker=False):
         # Limits are operator/handler configuration, never unconstrained argv
         # supplied by a remote caller. Fail closed when cgroups cannot apply.
         for value in (cpu, memory_bytes, max_seconds, tasks, log_bytes):
@@ -94,6 +95,8 @@ class SystemdExecutor:
             raise WorkloadError('attempt already has a unit; reconcile before launch', 409)
         output = Path(output).resolve()
         output.mkdir(parents=True, exist_ok=True)
+        if rootless_docker:
+            argv = docker_runtime.prepare(self.unit(attempt_id), argv, Path(cwd).resolve(), output)
         config = output/'execution.json'
         config.write_text(encode(dict(argv=argv, cwd=str(Path(cwd).resolve()), output=str(output),
                                       env=env, log_bytes=int(log_bytes),
@@ -108,13 +111,15 @@ class SystemdExecutor:
             '--property=CPUQuota='+str(cpu*100)+'%', '--property=TasksMax='+str(int(tasks)),
             '--property=RuntimeMaxSec='+str(max_seconds),
             '--property=StandardOutput=null', '--property=StandardError=null',
-            '--property=NoNewPrivileges=yes',
+            '--property=NoNewPrivileges='+('no' if rootless_docker else 'yes'),
+            *(['--property=Delegate=yes', '--property=DelegateSubgroup=supervisor'] if rootless_docker else []),
             sys.executable, str(wrapper), str(config))
 
     def stop(self, attempt_id):
         """Return only after the owned unit and all its descendants are gone."""
         state = self.inspect(attempt_id)
         if state.get('LoadState') == 'not-found':
+            docker_runtime.cleanup(self.unit(attempt_id))
             return
         group = state.get('ControlGroup')
         self.command('systemctl', '--user', 'stop', self.unit(attempt_id))
@@ -126,6 +131,7 @@ class SystemdExecutor:
             if events.exists() and 'populated 1' in events.read_text():
                 raise WorkloadError('owned cgroup still populated; capacity remains reserved', 503)
         self.command('systemctl', '--user', 'reset-failed', self.unit(attempt_id), check=False)
+        docker_runtime.cleanup(self.unit(attempt_id))
 
     def exit_result(self, output):
         path = Path(output)/'exit.json'

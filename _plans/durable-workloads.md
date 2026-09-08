@@ -105,3 +105,47 @@ Its returned artifact proved the exact source manifest, attempt identity,
 passed 68 checks; the subsequent configurable-quota authority CLI test passed
 locally. E2E/Docker and release handlers are not advertised; product integration
 and full Benchday gate/publish remain required.
+
+## Rootless Docker execution backend
+
+Installed handlers may select `backend: rootless-docker`. The supervisor starts
+RootlessKit in a delegated systemd unit, with its control processes in a
+`supervisor` subgroup and Docker's explicit `--cgroup-parent` pointing to the
+unit itself. This explicit parent is essential: a real Win One probe with only
+rootless mode and `native.cgroupdriver=cgroupfs` put containers in a sibling
+cgroup, outside the job's limit. With delegation and the explicit parent, a real
+container inherited the 2 GiB/one-CPU parent cap and disappeared after unit stop.
+
+The daemon and registered handler share a private user/mount/network namespace.
+Images and writable layers live in the job's `docker-data` on the bounded worker
+filesystem, bind-mounted at a short namespace-local path to avoid Unix-socket
+path limits. Client configuration is private too; inherited Docker contexts or
+Buildx endpoints cannot select a developer's builder. Fixed handler commands
+remain responsible for requesting any exclusive host ports they publish; the
+rootless port driver does not make published host ports collision-free.
+
+Docker logs flow through the existing bounded execution writer. Container logs
+rotate at 4 MiB x 2 per container and all Docker storage remains under the hard
+workspace byte cap. Short RootlessKit control state lives under
+`/run/user/<uid>/hw-<unit-hash>`: one active directory per worker attempt, removed
+only after its cgroup is empty and an owner marker matches. Interrupted attempts
+retain their cleanup claim. Subordinate-UID image files are deleted through a
+bounded-time rootless cleanup command before completion/cleanup acknowledgement.
+The production controller's service cap also covers that cleanup subprocess.
+Exit code 75 is reserved for Docker preparation infrastructure failures.
+
+Win One now has `uidmap`, `rootlesskit`, `slirp4netns` and `docker-buildx`
+installed. Package installation did not replace or restart its host Docker daemon;
+`unchain-render-worker` retained start time `2026-09-08T01:33:09.570642946Z`.
+Live enrollment still advertises only the probe; the new backend is not yet
+connected to Benchday E2E, release handlers, persistent image caches or the train.
+
+Validation on Win One: the complete workload/scheduler suite passed 75 checks
+in 66.57 s, including real Docker container and BuildKit process membership,
+CPU/RAM inheritance, lease-triggered teardown, subordinate-UID layer cleanup,
+HTTP worker source/artifact delivery and product-failure classification. The
+worker's minimal environment now receives a private `XDG_RUNTIME_DIR` and the
+system-administration executable paths Docker needs. Infrastructure failures
+retain bounded log artifacts; uploads refused by a cancellation fence proceed
+to reconciliation instead of escaping the worker as an uncaught HTTP error.
+The host Docker socket's copy-up alias is also removed from the private namespace.

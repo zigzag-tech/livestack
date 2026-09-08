@@ -213,3 +213,53 @@ def test_killed_worker_expires_then_new_process_reconciles_journal(fleet, tmp_pa
             executor.stop(attempt)
         if worker:
             worker.close()
+
+
+@pytest.mark.parametrize('exit_code, expected', [(0, 'succeeded'), (7, 'failed')])
+def test_rootless_worker_delivers_pinned_artifact(fleet, tmp_path, exit_code, expected):
+    import shutil
+    if not all(shutil.which(tool) for tool in ('rootlesskit', 'slirp4netns', 'newuidmap', 'dockerd')):
+        pytest.skip('requires installed rootless Docker prerequisites')
+    store, config, caller, digest = fleet
+    config['handlers']['native.v1']['backend'] = 'rootless-docker'
+    config['capacity']['memory_bytes'] = 512*1024**2
+    job = caller.submit(dict(version=1, key='docker', handler='native.v1', input_digest=digest,
+        need={'cpu': .5, 'memory_bytes': 512*1024**2, 'disk_bytes': 64*1024**2}, payload={'exit': exit_code}))
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        if result['state'] != expected:
+            detail = result['result']
+            logs = []
+            for item in detail.get('result', {}).get('artifacts', []):
+                logs.append(InputTransfer(caller).get(item['digest'], tmp_path/item['name']).read_text()[-3000:])
+            pytest.fail(str(detail)+'\n'+'\n'.join(logs))
+        artifact = next(r for r in result['result']['result']['artifacts'] if r['name'] == 'artifact')
+        received = InputTransfer(caller).get(artifact['digest'], tmp_path/'docker-returned')
+        assert received.read_text() == 'captured bytes'
+        assert worker.journal.read() is None
+        assert list(Path(config['workspace']).iterdir()) == []
+        assert not worker.step()
+    finally:
+        worker.close()
+
+
+def test_infrastructure_failure_retains_log_artifact(fleet, tmp_path):
+    _, config, caller, digest = fleet
+    config['handlers']['native.v1'].update(
+        argv=[sys.executable, '-c', 'print("preparation diagnostic"); raise SystemExit(75)'],
+        infrastructure_exit_codes=[75])
+    job = submit(caller, digest)
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        assert result['state'] == 'queued'
+        assert result['result']['outcome'] == 'infrastructure'
+        refs = result['result']['result']['artifacts']
+        log = next(item for item in refs if item['name'] == 'command.log')
+        assert InputTransfer(caller).get(log['digest'], tmp_path/'diagnostic').read_text() == 'preparation diagnostic\n'
+        assert worker.journal.read() is None
+    finally:
+        worker.close()
