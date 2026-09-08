@@ -18,6 +18,7 @@ Harmony does not have its own repository — it lives inside `livestack`:
 | **Placement planner** | `node-py/livestack_node/planner.py` | The pure cross-process **brain**: `WorldState → Plan` (load/evict/grant/defer). |
 | **Broker daemon** | `node-py/livestack_node/hostd.py` + `hostbroker.py` | The **authority** that runs the planner across processes on a host and dispatches actions. `python -m livestack_node.hostd`. |
 | **Membership** | `node-py/livestack_node/membership.py` + `announce.py` | Who is on this host, and who has gone. Pure roster/state machine + the node-side registrar. |
+| **LLM unit server** | `node-py/examples/harmony-llm/` | A worked `ModelManager`/`Coordinator` implementation: one vLLM subprocess per declared unit, plus the OpenAI-compatible proxy that resolves a stated REQUIREMENT to a unit. This is where the request language (`harmony_requires` / `model: "require:..."`) lives. **It is the reference server, not a toy** — zz-tower-ubuntu runs it. |
 
 `livestack_node/` also carries fleet modules beyond this doc's scope — `client.py`,
 `fleet_dispatch.py`, `fleet_scheduler.py`, `provision.py`, `provision_runpod.py`,
