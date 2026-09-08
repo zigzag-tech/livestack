@@ -1,0 +1,215 @@
+"""Actual HTTP authority, private input transfer and systemd worker execution."""
+import json
+from pathlib import Path
+import subprocess
+import sys
+from threading import Thread
+import time
+
+import pytest
+
+from livestack_node.workloads.archive import capture
+from livestack_node.workloads.client import WorkloadClient
+from livestack_node.workloads.http import Principal, WorkloadServer
+from livestack_node.workloads.model import Limits, WorkloadError
+from livestack_node.workloads.store import WorkloadStore
+from livestack_node.workloads.supervision import SystemdExecutor
+from livestack_node.workloads.transfer import InputTransfer
+from livestack_node.workloads.worker import WorkloadWorker
+
+
+@pytest.fixture
+def fleet(tmp_path):
+    if subprocess.run(['systemctl', '--user', 'show'], capture_output=True).returncode:
+        pytest.skip('requires Linux systemd user manager and cgroup v2')
+    store = WorkloadStore(tmp_path/'authority/jobs.db', handlers={'native.v1'})
+    server = WorkloadServer(('127.0.0.1', 0), store, [
+        Principal('owner', 'a'*32, 'caller', ('native.v1',)),
+        Principal('worker', 'w'*32, 'worker', worker='integration', host='test-host')])
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    script = tmp_path/'installed-handler.py'
+    script.write_text('''import json,os,time
+from pathlib import Path
+request=json.loads(Path(os.environ['HARMONY_REQUEST']).read_text())
+time.sleep(request.get('sleep',0))
+Path(os.environ['HARMONY_OUTPUT'],'artifact').write_text(Path('input').read_text())
+print('finished')
+raise SystemExit(request.get('exit',0))
+''')
+    url = f'http://127.0.0.1:{server.server_port}'
+    config = dict(authority=url, token='w'*32, worker='integration', state_dir=str(tmp_path/'state'),
+        workspace=str(tmp_path/'workspace'), require_dedicated_filesystem=False, lease_interval=.2,
+        capacity={'cpu':1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
+        memory_reserve_bytes=0,disk_reserve_bytes=0,environment={'PATH':'/usr/bin:/bin'},
+        handlers={'native.v1':dict(argv=[sys.executable,str(script)],outputs=['artifact'])})
+    caller = WorkloadClient(url, 'a'*32)
+    source = tmp_path/'source'
+    source.mkdir()
+    (source/'input').write_text('captured bytes')
+    capture(source, ['input'], tmp_path/'source.tar')
+    digest = InputTransfer(caller).put(tmp_path/'source.tar')['digest']
+    (source/'input').write_text('later edits must not enter execution')
+    try:
+        yield store, config, caller, digest
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
+def submit(caller, digest, **payload):
+    return caller.submit(dict(version=1,key='one',handler='native.v1',input_digest=digest,
+        need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},payload=payload))
+
+
+@pytest.mark.parametrize('exit_code, expected', [(0,'succeeded'), (7,'failed')])
+def test_worker_executes_pinned_input_and_returns_owned_artifact(fleet, tmp_path, exit_code, expected):
+    store, config, caller, digest = fleet
+    job = submit(caller, digest, exit=exit_code)
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        assert result['state'] == expected
+        detail = result['result']
+        assert detail['result']['exit_code'] == exit_code
+        refs = detail['result']['artifacts']
+        artifact = next(r for r in refs if r['name'] == 'artifact')
+        received = InputTransfer(caller).get(artifact['digest'], tmp_path/'returned')
+        assert received.read_text() == 'captured bytes'
+        assert worker.journal.read() is None
+        assert list(Path(config['workspace']).iterdir()) == []
+        assert not worker.step()  # Product failure was not retried.
+    finally:
+        worker.close()
+
+
+def test_cancel_running_job_reconciles_before_readvertising_capacity(fleet):
+    store, config, caller, digest = fleet
+    job = submit(caller, digest, sleep=120)
+    worker = WorkloadWorker(config)
+    errors = []
+    def execute():
+        try:
+            worker.step()
+        except Exception as error:
+            errors.append(error)
+    thread = Thread(target=execute)
+    thread.start()
+    try:
+        deadline = time.monotonic()+10
+        while True:
+            journal = worker.journal.read()
+            if journal and journal['phase'] == 'running':
+                break
+            assert time.monotonic() < deadline
+            time.sleep(.05)
+        caller.request('jobs/'+job['id']+'/cancel', {})
+        thread.join(timeout=15)
+        assert not thread.is_alive() and errors == []
+        assert caller.get(job['id'])['state'] == 'cancelled'
+        assert not worker.step()
+        with store.transaction() as db:
+            assert db.execute("SELECT count(*) FROM attempts WHERE state='cleanup'").fetchone()[0] == 0
+    finally:
+        if thread.is_alive():
+            caller.request('jobs/'+job['id']+'/cancel', {})
+            thread.join(timeout=15)
+        worker.close()
+
+
+def test_production_worker_refuses_unbounded_developer_filesystem(fleet):
+    _, config, _, _ = fleet
+    config['require_dedicated_filesystem'] = True
+    worker = WorkloadWorker(config)
+    try:
+        with pytest.raises(WorkloadError, match='dedicated bounded filesystem'):
+            worker.step()
+    finally:
+        worker.close()
+
+
+def test_observe_only_reports_headroom_without_claiming_work(fleet):
+    store, config, caller, digest = fleet
+    config['observe_only'] = True
+    job = submit(caller, digest)
+    worker = WorkloadWorker(config)
+    try:
+        assert not worker.step()
+        assert caller.get(job['id'])['state'] == 'queued'
+        with store.transaction() as db:
+            row = db.execute('SELECT ready,report FROM workers').fetchone()
+            assert not row['ready'] and json.loads(row['report'])['available']['memory_bytes'] > 0
+    finally:
+        worker.close()
+
+
+def test_installed_enrollment_probe_returns_actual_limits(fleet, tmp_path):
+    _, config, caller, digest = fleet
+    script = Path(__file__).parents[1]/'livestack_node/workloads/probe.py'
+    config['handlers']['native.v1'].update(argv=[sys.executable,str(script)], outputs=['probe.json'])
+    job = submit(caller, digest)
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        assert result['state'] == 'succeeded'
+        ref = next(r for r in result['result']['result']['artifacts'] if r['name'] == 'probe.json')
+        path = InputTransfer(caller).get(ref['digest'],tmp_path/'probe-result.json')
+        probe = json.loads(path.read_text())
+        assert int(probe['memory_max']) == 128*1024**2
+        quota, period = map(int, probe['cpu_max'].split())
+        assert quota/period == .1
+        assert len(probe['source_manifest_digest']) == 64
+    finally:
+        worker.close()
+
+
+def test_killed_worker_expires_then_new_process_reconciles_journal(fleet, tmp_path):
+    store, config, caller, digest = fleet
+    store.limits = Limits(lease_seconds=2)
+    job = submit(caller, digest, sleep=120)
+    config_path = tmp_path/'worker.json'
+    config_path.write_text(json.dumps(config))
+    process = subprocess.Popen([sys.executable, '-c',
+        'import json,sys; from livestack_node.workloads.worker import WorkloadWorker; '
+        'w=WorkloadWorker(json.load(open(sys.argv[1]))); w.step()', str(config_path)])
+    executor = SystemdExecutor(config['worker'])
+    attempt, worker = None, None
+    try:
+        deadline = time.monotonic()+15
+        path = Path(config['state_dir'])/'active.json'
+        while True:
+            if path.exists():
+                journal = json.loads(path.read_text())
+                if journal['phase'] == 'running':
+                    attempt = journal['assignment']['attempt_id']
+                    group = executor.inspect(attempt).get('ControlGroup')
+                    if group:
+                        break
+            assert process.poll() is None and time.monotonic() < deadline
+            time.sleep(.05)
+        process.kill()
+        process.wait(timeout=5)
+        cgroup = Path('/sys/fs/cgroup')/group.lstrip('/')
+        deadline = time.monotonic()+10
+        while cgroup.exists() and 'populated 1' in (cgroup/'cgroup.events').read_text():
+            assert time.monotonic() < deadline
+            time.sleep(.1)
+        worker = WorkloadWorker(config)
+        worker.reconcile()
+        assert caller.get(job['id'])['state'] == 'queued'
+        assert worker.journal.read() is None
+        assert list(Path(config['workspace']).iterdir()) == []
+        with store.transaction() as db:
+            assert db.execute("SELECT count(*) FROM attempts WHERE state!='ended'").fetchone()[0] == 0
+        caller.request('jobs/'+job['id']+'/cancel', {})
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        if attempt:
+            executor.stop(attempt)
+        if worker:
+            worker.close()
