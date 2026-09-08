@@ -124,7 +124,12 @@ class SystemdExecutor:
             docker_runtime.cleanup(self.unit(attempt_id))
             return
         group = state.get('ControlGroup')
-        self.command('systemctl', '--user', 'stop', self.unit(attempt_id))
+        stopped = self.command('systemctl', '--user', 'stop', self.unit(attempt_id), check=False)
+        # A transient unit can be collected after inspect and before stop.
+        # Exit 5 alone proves nothing: still verify unit state and the captured
+        # cgroup below before acknowledging cleanup or releasing capacity.
+        if stopped.returncode not in (0, 5):
+            stopped.check_returncode()
         state = self.inspect(attempt_id)
         if state.get('ActiveState') not in ('inactive', 'failed') and state.get('LoadState') != 'not-found':
             raise WorkloadError('owned unit has not stopped; capacity remains reserved', 503)

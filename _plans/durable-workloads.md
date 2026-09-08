@@ -267,3 +267,12 @@ Receipt digests are `c27209b0c9278e47fd060bae209a4f51fdec89ea5ee60d5fb74f0d41d23
 and `3971a9d74713ea0fc3ea0998a40435356ff3b21e5c5df522baa2a34e02b27dc8`.
 This measures source delivery/extraction and a tiny probe, not E2E or build
 cache performance. The existing render container kept its original start time.
+
+The cleanup path has a second reproduced race: a real transient systemd unit
+removed between inspection and stop makes `systemctl stop` exit 5. Previously
+this raised CalledProcessError and left reconciliation to retry completed work.
+Cleanup now accepts that code only while still verifying terminal/missing
+unit state and the captured cgroup's emptiness; other command failures remain
+errors. All 26 real supervision/worker checks pass on Win One in 27.19 s.
+This reproduces a failure matching the warm probe's exception class, although
+the old log did not retain enough detail to prove its exact command.

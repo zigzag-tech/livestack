@@ -60,6 +60,33 @@ def test_restart_journal_stops_grandchildren_and_limits_resources(tmp_path, exec
         journal.close()
 
 
+
+def test_cleanup_accepts_unit_removed_between_inspection_and_stop(tmp_path, executor):
+    # The unit and competing stop are real. Inject only their ordering so the
+    # cleanup race is deterministic instead of a probabilistic timing test.
+    attempt = uuid.uuid4().hex
+    executor.start(attempt, ['/bin/sleep', '30'], tmp_path, tmp_path/'out',
+                   env=dict(os.environ), cpu=.1, memory_bytes=64*1024**2)
+    inspect = executor.inspect
+    observed = False
+    def inspect_then_remove(value):
+        nonlocal observed
+        result = inspect(value)
+        if not observed:
+            observed = True
+            executor.command('systemctl', '--user', 'stop', executor.unit(value))
+            executor.command('systemctl', '--user', 'reset-failed', executor.unit(value), check=False)
+            until(lambda: inspect(value).get('LoadState') == 'not-found')
+        return result
+    executor.inspect = inspect_then_remove
+    try:
+        executor.stop(attempt)
+        assert observed
+        assert inspect(attempt)['LoadState'] == 'not-found'
+    finally:
+        executor.inspect = inspect
+        executor.stop(attempt)
+
 def test_output_is_drained_but_storage_is_bounded(tmp_path, executor):
     attempt = uuid.uuid4().hex
     out = tmp_path/'out'
