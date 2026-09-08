@@ -948,6 +948,82 @@ async def proxy(path: str, request: Request):
         await client.aclose()
         raise HTTPException(status_code=502, detail=f"vllm proxy failed: {e}")
 
+    # A CONTEXT REFUSAL IS A ROUTING FACT, NOT A VENDOR STRING.
+    #
+    # vLLM answers an over-long prompt with a 400 whose text names the numbers
+    # exactly: "maximum context length is 16384 tokens ... your prompt contains
+    # at least 16385 input tokens". Streamed straight through, that arrived in a
+    # user-visible chat bubble as a raw upstream error, and diagnosing it by
+    # hand on 2026-09-08 took reading vLLM logs to discover the Overlord's
+    # prompt (system text plus ~46 tool schemas) had outgrown the unit's window
+    # by ONE token.
+    #
+    # Harmony cannot derive this need up front — token counts depend on the
+    # candidate model's tokenizer and template, which is why
+    # docs/livestack-harmony.md refuses to gate on a body-size estimate. But it
+    # does not have to estimate: the unit MEASURED it and said so. So the answer
+    # is restated in Harmony's own terms, naming the need and whether anything
+    # on this node could serve it — the difference between "the vendor said no"
+    # and "you asked for more context than this node has".
+    if resp.status_code == 400:
+        raw = await resp.aread()
+        await resp.aclose()
+        await client.aclose()
+        text = raw.decode("utf-8", "replace")
+        if "context length" in text.lower():
+            needed = None
+            m = re.search(r"at least (\d+) input tokens", text)
+            if m:
+                # +1: a prompt of exactly N tokens needs room for N, and the
+                # message reports a floor ("at least"), never a ceiling.
+                needed = int(m.group(1))
+            widest, widest_name = 0, None
+            for name in SPECS:
+                served = _attributes_for(SPECS[name]).get("context_len") or 0
+                if int(served) > widest:
+                    widest, widest_name = int(served), name
+            # The window must hold the prompt AND the reserved output, so the
+            # need is input + max_tokens. The first version of this message
+            # compared `needed` against the widest window alone, decided a wider
+            # unit "exists", and named the very unit that had just refused —
+            # because 24561 input fits 24576 and 24561 + 16 does not.
+            reserve = 0
+            if isinstance(parsed_body, dict):
+                try:
+                    reserve = int(parsed_body.get("max_tokens") or 0)
+                except (TypeError, ValueError):
+                    reserve = 0
+            total = None if needed is None else needed + reserve
+            served_here = int(_attributes_for(SPECS[unit]).get("context_len") or 0) if unit in SPECS else 0
+            wider = widest > served_here
+            if total is None:
+                detail = f"{unit} refused this request's context length: {text.strip()[:200]}"
+            elif not wider:
+                detail = (f"this request needs {total} tokens ({needed} input + {reserve} reserved "
+                          f"for output); the widest unit on this node is {unit} at {served_here}. "
+                          f"Nothing here can satisfy it — raise that unit's max_model_len (bounded "
+                          f"by its KV cache) or send less.")
+            else:
+                detail = (f"this request needs {total} tokens ({needed} input + {reserve} reserved "
+                          f"for output) and was served by {unit} at {served_here}. {widest_name} "
+                          f"serves {widest} — state the need, e.g. "
+                          f"require:class=llm,context_len>={total}.")
+            print(f"[harmony-llm] context refusal on {unit}: needed={needed} widest={widest}",
+                  flush=True)
+            raise HTTPException(status_code=413, detail=detail)
+        # Any other 400 is the caller's own and passes through unchanged.
+        _busy.acquire()
+        async def replay_400():
+            try:
+                yield raw
+            finally:
+                _busy.release()
+        return StreamingResponse(
+            replay_400(), status_code=400,
+            headers={k: v for k, v in resp.headers.items()
+                     if k.lower() not in {"content-length", "transfer-encoding"}},
+        )
+
     async def body_iter():
         # The request is in flight until the LAST byte has been streamed to the
         # caller, not until the upstream accepted it — a generation that is still
