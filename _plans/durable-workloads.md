@@ -233,3 +233,18 @@ entries evict at pressure, retained entries do not, and a disabled deletion
 window refuses capacity. Corrupt cached bytes are refused before execution.
 The cache is not yet enabled on the production worker because its current full
 E2E validation attempt is still running. Image/build caches remain separate work.
+
+## Completion observation race
+
+Win One's full attempt `49738f3cea184bc08dc65e39f8ba1008` returned a complete
+324-assertion manifest with clean teardown and three non-quarantined failures,
+but its worker completion was infrastructure/WorkloadError and triggered a retry.
+The retry was cancelled through the authority and cleanup acknowledged.
+
+A real HTTP/SQLite/systemd regression test reproduces a receipt being published
+between the worker's first read and its observation of a stopped unit: before
+the fix, a real exit code 7 becomes a queued infrastructure retry. The worker
+now re-reads the receipt before declaring a stopped execution result missing.
+All 17 worker checks pass on Win One (24.19 s). This establishes the race and
+its correction; the old runtime omitted exception detail, so the original
+full attempt's exact exception cause cannot be conclusively attributed.
