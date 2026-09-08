@@ -276,3 +276,13 @@ unit state and the captured cgroup's emptiness; other command failures remain
 errors. All 26 real supervision/worker checks pass on Win One in 27.19 s.
 This reproduces a failure matching the warm probe's exception class, although
 the old log did not retain enough detail to prove its exact command.
+
+Cleanup fix runtime `d2f6d4898e7adee583eac16784741c73052efcc3` is deployed
+on Win One. Cached probe `b9f710dcb8d14bf2bc20d3954435bffb` completed in
+7.632 s on exactly one attempt (`26081cac35034fc49fddb4ef015bd2de`). The
+downloaded SHA-256-verified receipt matches that attempt, 0.1 CPU / 128 MiB
+limits, and the accepted source manifest. Receipt digest:
+`e39374efc3e8f5c4b59960489652f1db2e4e39b0e95cb29db48132f8503b9218`.
+No OOM/task-limit events were reported; the journal was clear, no job units
+remained, and the render container retained its original start time. This is
+single-attempt runtime/cache proof, not a passing full E2E gate.
