@@ -8,6 +8,7 @@ from pathlib import Path
 from .http import Principal, WorkloadServer
 from .model import Limits
 from .store import WorkloadStore
+from .blobs import BlobStore
 
 
 def main():
@@ -28,7 +29,9 @@ def main():
         store = WorkloadStore(root/'workloads.sqlite', handlers=config['handlers'],
                               limits=Limits(**config.get('limits', {})))
         store.recover()
-        server = WorkloadServer((config.get('bind', '127.0.0.1'), config.get('port', 8802)), store, principals)
+        blobs = BlobStore(store, root/'objects', **config.get('blob_limits', {}))
+        server = WorkloadServer((config.get('bind', '127.0.0.1'), config.get('port', 8802)),
+                                store, principals, blobs=blobs)
         server.blobs.recover()
         logging.info('workload authority started on %s', server.server_address)
         try:
