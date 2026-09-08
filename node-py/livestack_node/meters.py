@@ -128,8 +128,14 @@ def mlx_meter() -> Callable[[], Optional[dict]]:
             except Exception:
                 active = int(mx.metal.get_active_memory())
             free = max(0, total - active)
+            # `unified` is not decoration: on Apple silicon these bytes ARE the
+            # host's RAM, so a reader that adds device capacity to host capacity
+            # reports a machine with twice the memory it has. The device is the
+            # only thing that knows; saying so here is cheaper than every
+            # consumer guessing from a device id that starts with "mlx".
             return {"capacity": {"vram_bytes": total},
-                    "free": {"vram_bytes": free}}
+                    "free": {"vram_bytes": free},
+                    "unified": True}
         except Exception:
             return None
     return meter
@@ -285,3 +291,110 @@ def auto_peak_meter() -> Optional[PeakMeter]:
     except Exception:
         pass
     return None
+
+
+# -- host RAM ---------------------------------------------------------------
+#
+# VRAM is what Harmony arbitrates; it is not all a node OCCUPIES. An ASR server
+# holds decoded audio and feature buffers in host RAM, an LLM wrapper holds a
+# tokenizer and page tables, and a CPU-only node (a build host) holds nothing on
+# a card at all — so a view built from `device_mem` alone shows a machine as
+# empty while it is swapping. The one number that answers "what else is on this
+# machine" is system RAM, and until now no node reported it.
+#
+# stdlib only, by the same rule as the rest of this file: a meter must not add a
+# dependency to every model server in the fleet. psutil is used when the process
+# already has it (exact, and one call) and never required.
+
+_HOST_MEM_MEMO = {"at": 0.0, "value": None}
+
+
+def host_mem(ttl_s: float = 2.0) -> Optional[dict]:
+    """System RAM on this host, and what THIS process holds of it.
+
+        {"total_bytes": ..., "available_bytes": ..., "process_rss_bytes": ...}
+
+    Memoised for `ttl_s` because the macOS path shells out (`vm_stat`, `ps`) and
+    this is read on every `/residence` — a broker with a dozen peers and a
+    dashboard behind it must not fork twice per node per poll. The window is
+    short enough that no reader sees memory that has meaningfully moved.
+
+    Never raises, and reports partial truth rather than none: a host whose
+    `available` cannot be read still reports its total and this process's RSS,
+    which is more than the nothing that a single failed probe used to cost.
+    """
+    import time as _time
+    now = _time.monotonic()
+    if _HOST_MEM_MEMO["value"] is not None and now - _HOST_MEM_MEMO["at"] < ttl_s:
+        return _HOST_MEM_MEMO["value"]
+    out = _read_host_mem()
+    _HOST_MEM_MEMO.update(at=now, value=out)
+    return out
+
+
+def _read_host_mem() -> Optional[dict]:
+    out: dict = {}
+    try:
+        import psutil                      # exact where it is already installed
+        vm = psutil.virtual_memory()
+        out["total_bytes"] = int(vm.total)
+        out["available_bytes"] = int(vm.available)
+        out["process_rss_bytes"] = int(psutil.Process().memory_info().rss)
+        return out
+    except Exception:
+        pass
+    import os
+    import sys
+    try:
+        out["total_bytes"] = int(os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+    except Exception:
+        pass
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/meminfo") as fh:
+                for line in fh:
+                    if line.startswith("MemAvailable:"):
+                        out["available_bytes"] = int(line.split()[1]) * 1024
+                    elif line.startswith("MemTotal:"):
+                        out["total_bytes"] = int(line.split()[1]) * 1024
+        except Exception:
+            pass
+        try:
+            with open("/proc/self/statm") as fh:
+                pages = int(fh.read().split()[1])
+            out["process_rss_bytes"] = pages * os.sysconf("SC_PAGE_SIZE")
+        except Exception:
+            pass
+    elif sys.platform == "darwin":
+        try:
+            import subprocess
+            page = os.sysconf("SC_PAGE_SIZE")
+            vs = subprocess.run(["vm_stat"], capture_output=True, timeout=5,
+                                text=True).stdout
+            pages = {}
+            for line in vs.splitlines():
+                if ":" not in line:
+                    continue
+                k, v = line.split(":", 1)
+                v = v.strip().rstrip(".")
+                if v.isdigit():
+                    pages[k.strip()] = int(v)
+            # What macOS can hand out without evicting anything an app is using:
+            # free, plus the inactive and purgeable pages the VM reclaims on
+            # demand. Activity Monitor's "memory used" is the complement of this.
+            avail = (pages.get("Pages free", 0)
+                     + pages.get("Pages inactive", 0)
+                     + pages.get("Pages speculative", 0)
+                     + pages.get("Pages purgeable", 0))
+            if avail:
+                out["available_bytes"] = avail * page
+        except Exception:
+            pass
+        try:
+            import subprocess
+            rss = subprocess.run(["ps", "-o", "rss=", "-p", str(os.getpid())],
+                                 capture_output=True, timeout=5, text=True).stdout
+            out["process_rss_bytes"] = int(rss.strip()) * 1024
+        except Exception:
+            pass
+    return out or None
