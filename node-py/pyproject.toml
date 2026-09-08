@@ -20,7 +20,7 @@ include = ["livestack_node*"]
 # The dashboard is a data file, not a module: without this an installed wheel
 # serves a broker whose `/` reports the page missing.
 [tool.setuptools.package-data]
-livestack_node = ["ui.html", "*.json"]
+livestack_node = ["ui.html", "*.json", "workloads/*.sql"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

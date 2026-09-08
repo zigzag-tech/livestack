@@ -1,0 +1,54 @@
+"""Stream immutable inputs over the authenticated workload connection."""
+import shutil
+
+from .model import WorkloadError
+
+
+def attempt_owner(store, principal, headers, digest=None):
+    """Workers can access only content of their CURRENT execution attempt."""
+    try:
+        fence = int(headers.get('X-Workload-Fence', ''))
+    except ValueError:
+        raise WorkloadError('attempt authorization required', 403)
+    with store.transaction() as db:
+        store._expire(db, store.clock())
+        store._worker(db, principal.worker, headers.get('X-Workload-Boot'))
+        a = db.execute("SELECT * FROM attempts WHERE id=? AND worker=? AND boot=? AND fence=? AND state='running'",
+                       (headers.get('X-Workload-Attempt'), principal.worker,
+                        headers.get('X-Workload-Boot'), fence)).fetchone()
+        if not a:
+            raise WorkloadError('attempt authorization expired', 409)
+        job = store._job(db, a['job'])
+        if digest is not None and job['spec']['input_digest'] != digest:
+            raise WorkloadError('content is not an input of this attempt', 403)
+        return job['owner']
+
+
+def route_object(handler, principal, method, parts):
+    if len(parts) != 2 or parts[0] != 'objects':
+        return False
+    blobs, store = handler.server.blobs, handler.server.store
+    digest = blobs.digest(parts[1])
+    if method == 'GET':
+        owner = attempt_owner(store, principal, handler.headers, digest) if principal.role == 'worker' else principal.id
+        with blobs.open(owner, digest) as (stream, size):
+            handler.send_response(200)
+            handler.send_header('Content-Type', 'application/octet-stream')
+            handler.send_header('Content-Length', str(size))
+            handler.send_header('Connection', 'close')
+            handler.end_headers()
+            handler.close_connection = True
+            shutil.copyfileobj(stream, handler.wfile, 1024*1024)
+    elif method == 'PUT':
+        owner = attempt_owner(store, principal, handler.headers) if principal.role == 'worker' else principal.id
+        if handler.headers.get('Transfer-Encoding'):
+            raise WorkloadError('transfer encoding is not supported')
+        try:
+            size = int(handler.headers.get('Content-Length', '-1'))
+        except ValueError:
+            raise WorkloadError('invalid content length')
+        result = blobs.put(owner, digest, size, handler.rfile)
+        handler.respond(200, result)
+    else:
+        raise WorkloadError('unsupported object operation', 405)
+    return True
