@@ -130,6 +130,9 @@ def build_broker(peer_urls: List[str], device_config=None,
 
 def build_app(broker: HostBroker):
     from fastapi import FastAPI, Body, Header, HTTPException
+    from fastapi.responses import HTMLResponse
+
+    from .ui import page as ui_page
     app = FastAPI(title="Livestack Harmony broker")
     state = {"last_evicted_at": {}}
     # Hosted-backend health probes (LIVESTACK_PROBES), run on the reconcile
@@ -276,6 +279,18 @@ def build_app(broker: HostBroker):
                 "last_evicted_at": state["last_evicted_at"], "hosted": hosted,
                 "host_id": broker.host_id,
                 "links": {k: round(v, 1) for k, v in broker.link_ms.items()}}
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    def dashboard():
+        """The fleet resource map, for a person rather than a consumer.
+
+        Served by whichever broker is asked: a host broker draws the machine it
+        arbitrates, the fleet broker draws every machine it can see. It is a
+        VIEW — it polls `/fleet` and offers no button that warms, evicts or
+        reclaims, because one card has one master (this one, if it dispatches)
+        and a page that could preempt from a phone is a second one.
+        """
+        return HTMLResponse(ui_page())
 
     @app.get("/fleet")
     def fleet():

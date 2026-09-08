@@ -191,6 +191,9 @@ class HostBroker:
         # folded per-kind map; this keeps WHO reported what, which the fleet view
         # needs and the folded map cannot express.
         self.peer_units: Dict[Tuple[str, str], Unit] = {}
+        # peer -> what that peer reported about itself last snapshot (which units
+        # are resident and busy, its process/host memory), stamped with when.
+        self.peer_report: Dict[str, dict] = {}
         for p in self.peers:
             self.roster.seed(peer_key(p))
 
@@ -365,6 +368,7 @@ class HostBroker:
             self.peers = [p for p in self.peers if peer_key(p) != key]
             self.roster.drop(key)
             self._last_probe_error.pop(key, None)
+            self.peer_report.pop(key, None)
             self._log(f"[membership] pruned absent peer: {key}")
         return gone
 
@@ -476,6 +480,18 @@ class HostBroker:
             for kind, unit in peer_units.items():
                 per_peer_units[(kind, key)] = unit
             placements.extend(peer_placements)
+            # Keep what this peer just said for the fleet view: WHICH units are
+            # resident (the folded world state only carries how many), which are
+            # working, and what the process and host hold. Stamped with the wall
+            # clock it was read at, because a view that cannot say how old it is
+            # presents a peer that stopped answering as one that is idle.
+            rep = {"at": time.time(),
+                   "resident": {pl.kind: bool(pl.busy) for pl in peer_placements}}
+            try:
+                rep.update(p.report())
+            except Exception:
+                pass                      # a Peer need not implement it
+            self.peer_report[key] = rep
             try:
                 discovered[p.device_id] = p.host_id
                 # Backfill the roster from what the peer actually reports. A
@@ -684,14 +700,31 @@ class HostBroker:
                     dev = cap["load"].get("device")
                     if isinstance(dev, dict):
                         node["device_mem"] = dev
+            # What the last snapshot found on this peer. `resident` is the map
+            # the count in `load` cannot give: WHICH units hold the card, and
+            # which of them are working right now.
+            rep = self.peer_report.get(key) or {}
+            resident = rep.get("resident") or {}
             units = [
                 {"kind": kind, "priority": u.priority,
                  "residency": int(u.residency),
-                 "footprint": dict(u.footprint)}
+                 "footprint": dict(u.footprint),
+                 "resident": kind in resident,
+                 "busy": bool(resident.get(kind))}
                 for (kind, pk), u in sorted(self.peer_units.items()) if pk == key
             ]
             if units:
                 node["units"] = units
+            for field in ("process_mem", "host_mem", "leak"):
+                if rep.get(field):
+                    node[field] = rep[field]
+            # How old the two paragraphs above are. The membership row's
+            # `unseen_seconds` ages the ROSTER, which an announce refreshes; this
+            # ages the SNAPSHOT, which only a successful read of the node can.
+            # A consumer that cannot tell them apart shows a wedged node's last
+            # residence as current.
+            if rep.get("at"):
+                node["snapshot_age_s"] = round(max(0.0, now - rep["at"]), 1)
             host = (cap or {}).get("host_id") or row.get("host_id") or "unknown"
             rows_by_host.setdefault(host, []).append(node)
         matrix = self.links_view()
@@ -962,6 +995,18 @@ class RestPeer:
         """The node's own report that it holds VRAM its resident units do not
         explain (see meters.leak_signal). None on a healthy node."""
         return (self._s() or {}).get("leak")
+
+    def report(self):
+        """What the node says about ITSELF, beyond the units the planner places:
+        the process's own VRAM, the host's RAM, and any leak signal.
+
+        The planner has no use for these — it places units, and it already reads
+        measured free memory. A person looking at the fleet cannot do without
+        them: `device_mem` says how full a card is and never who filled it, and
+        nothing at all used to say what a node occupies in host RAM. Read off
+        the snapshot the broker already took, so this costs no extra probe."""
+        s = self._s() or {}
+        return {k: s[k] for k in ("process_mem", "host_mem", "leak") if s.get(k)}
 
     def reclaim(self):
         """Ask the node to hand its allocator pool back to the driver.
