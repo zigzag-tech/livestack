@@ -111,6 +111,16 @@ def _attributes_for(spec: dict) -> dict:
     # Separable reasoning requires a parser. Without one the model still
     # "thinks"; the narration just arrives inline in content.
     attrs["thinking"] = "--reasoning-parser" in joined
+    # Tool calling is a launch-line fact too, and a harsher one: vLLM answers
+    # `tool_choice: "auto"` with a 400 unless BOTH --enable-auto-tool-choice and
+    # --tool-call-parser are set, so a unit lacking them cannot serve a
+    # tool-calling request AT ALL, whatever its weights can do. Declaring
+    # `"tools": true` beside such a unit is the lying attribute this docstring
+    # warns about: the clause would match and the unit would then 400 the very
+    # request it claimed to satisfy. Found 2026-09-07 by sending the Overlord's
+    # own 46 tool schemas at the 27B and getting that 400 back.
+    attrs["tools"] = ("--enable-auto-tool-choice" in joined
+                      and "--tool-call-parser" in joined)
     # A vision-capable model started with --language-model-only is not a vision
     # unit for the purposes of routing, whatever its weights can do.
     if "--language-model-only" not in joined:
@@ -151,6 +161,11 @@ def _unit_specs() -> "list[dict]":
             "max_model_len": str(spec.get("max_model_len", MAX_MODEL_LEN) or ""),
             "extra_args": shlex.split(spec.get("extra_args", "")) or EXTRA_ARGS,
             "residency": spec.get("residency"),
+            # Operator intent, kept OUT of `attributes` on purpose: these say
+            # which unit to pick and which to warm, not what a unit IS, and a
+            # caller must never be able to require them.
+            "default": bool(spec.get("default", False)),
+            "warm_on_start": bool(spec.get("warm_on_start", False)),
             # What this unit IS, for requests that state a requirement rather
             # than a name. Carried verbatim to the broker; the planner compares,
             # it never interprets.
@@ -162,6 +177,24 @@ def _unit_specs() -> "list[dict]":
 
 
 SPECS = {u["name"]: u for u in _unit_specs()}
+
+
+def _selection_rank(name: str) -> "tuple[int, str]":
+    """Stable order among units that ALL satisfy the same requirement.
+
+    Not declaration order. `next(n for n in SPECS ...)` made the answer to
+    "which unit serves an indifferent request?" depend on which line of
+    llm-units.json someone happened to type first: invisible in the config,
+    unmentioned in the docs, and silently different after a reformat. With two
+    interchangeable 27Bs declared, that decides which one every caller that
+    stated no preference gets.
+
+    An operator names the default explicitly with `"default": true`; everything
+    else falls back to the unit NAME, which is stable across edits. This only
+    ever breaks TIES — a requirement has already been applied before this runs,
+    so ranking can never hand back a unit that does not satisfy the request.
+    """
+    return (0 if SPECS[name].get("default") else 1, name)
 
 # coload=False means acquiring ONE unit evicts the others IN THIS PROCESS. That
 # is right for a node with a single model, and wrong the moment a node declares
@@ -471,12 +504,34 @@ if WARM_ON_START:
         # Give the facade a moment to bind before the first ensure, so the
         # load does not race attach's own startup bookkeeping.
         time.sleep(2)
-        try:
-            first = next(iter(SPECS))
-            manager.ensure(first)
-            print(f"[harmony-llm] warm-on-start: {first} resident", flush=True)
-        except Exception as e:
-            print(f"[harmony-llm] warm-on-start failed: {e}", flush=True)
+        # What is hot after a reboot is an OPERATOR decision and must not share
+        # a mechanism with request routing. `next(iter(SPECS))` warmed whichever
+        # unit was declared first, so reordering the config silently changed
+        # what a cold node comes back holding. Units opt in with
+        # `"warm_on_start": true`; absent any, the declared default; absent
+        # both, nothing is warmed and the reason is printed rather than guessed.
+        names = [n for n in sorted(SPECS, key=_selection_rank)
+                 if SPECS[n].get("warm_on_start")]
+        if not names:
+            names = [n for n in sorted(SPECS, key=_selection_rank)
+                     if SPECS[n].get("default")]
+        if not names:
+            print("[harmony-llm] warm-on-start: no unit declares warm_on_start "
+                  "or default — warming nothing", flush=True)
+            return
+        if len(names) > 1:
+            # This process owns ONE card. Warming two units that cannot coload
+            # is the eviction fight described at COLOAD, so say so out loud
+            # instead of letting them take turns unloading each other.
+            print(f"[harmony-llm] warm-on-start: {len(names)} units flagged "
+                  f"({', '.join(names)}) — they must fit this card together",
+                  flush=True)
+        for n in names:
+            try:
+                manager.ensure(n)
+                print(f"[harmony-llm] warm-on-start: {n} resident", flush=True)
+            except Exception as e:
+                print(f"[harmony-llm] warm-on-start failed for {n}: {e}", flush=True)
 
     threading.Thread(target=_warm_on_start, daemon=True).start()
 
@@ -732,6 +787,15 @@ def _derived_requirements(path: str, body_json: dict) -> dict:
     kwargs = body_json.get("chat_template_kwargs")
     if isinstance(kwargs, dict) and kwargs.get("enable_thinking") is True:
         out["thinking"] = True
+
+    # Tools: a request that ships tool schemas has said it needs a unit that can
+    # CALL them, exactly as an image says it needs vision. Nobody should have to
+    # add `tools=true` to a requirement string — the tools are right there in the
+    # body. `tool_choice: "none"` is the one case that ships schemas without
+    # needing the capability, so it does not derive.
+    tools = body_json.get("tools")
+    if isinstance(tools, list) and tools and body_json.get("tool_choice") != "none":
+        out["tools"] = True
     return out
 
 
@@ -826,7 +890,18 @@ async def proxy(path: str, request: Request):
     # decides, exactly as before. Placement authority is unchanged; what is
     # removed is asking permission for a placement that already happened.
     if requirement is not None:
-        local = next((n for n in SPECS
+        # POLICY (not an accident of the fix below): among units that satisfy
+        # the requirement, REUSE ONE THAT IS ALREADY RESIDENT. An eviction and
+        # reload of a 27B measured ~50.7 s on this node, and a caller that
+        # stated no preference between two interchangeable units has no basis
+        # to want that. Deliberately NOT a caller-settable `prefer`: the broker
+        # knows residency and transition cost, the caller does not, and a knob
+        # here would let one indifferent request cost everyone 50 s.
+        #
+        # Consequence worth stating: once an alternative is warm, indifferent
+        # traffic follows it and does not swap back. Only a HARD requirement
+        # that the resident unit fails will pay for a swap.
+        local = next((n for n in sorted(SPECS, key=_selection_rank)
                       if _local_satisfies(n, requirement)
                       and n in getattr(manager, "resident", ())
                       and _vllm_up(name=n)), None)
@@ -928,6 +1003,82 @@ async def proxy(path: str, request: Request):
     except Exception as e:
         await client.aclose()
         raise HTTPException(status_code=502, detail=f"vllm proxy failed: {e}")
+
+    # A CONTEXT REFUSAL IS A ROUTING FACT, NOT A VENDOR STRING.
+    #
+    # vLLM answers an over-long prompt with a 400 whose text names the numbers
+    # exactly: "maximum context length is 16384 tokens ... your prompt contains
+    # at least 16385 input tokens". Streamed straight through, that arrived in a
+    # user-visible chat bubble as a raw upstream error, and diagnosing it by
+    # hand on 2026-09-08 took reading vLLM logs to discover the Overlord's
+    # prompt (system text plus ~46 tool schemas) had outgrown the unit's window
+    # by ONE token.
+    #
+    # Harmony cannot derive this need up front — token counts depend on the
+    # candidate model's tokenizer and template, which is why
+    # docs/livestack-harmony.md refuses to gate on a body-size estimate. But it
+    # does not have to estimate: the unit MEASURED it and said so. So the answer
+    # is restated in Harmony's own terms, naming the need and whether anything
+    # on this node could serve it — the difference between "the vendor said no"
+    # and "you asked for more context than this node has".
+    if resp.status_code == 400:
+        raw = await resp.aread()
+        await resp.aclose()
+        await client.aclose()
+        text = raw.decode("utf-8", "replace")
+        if "context length" in text.lower():
+            needed = None
+            m = re.search(r"at least (\d+) input tokens", text)
+            if m:
+                # +1: a prompt of exactly N tokens needs room for N, and the
+                # message reports a floor ("at least"), never a ceiling.
+                needed = int(m.group(1))
+            widest, widest_name = 0, None
+            for name in SPECS:
+                served = _attributes_for(SPECS[name]).get("context_len") or 0
+                if int(served) > widest:
+                    widest, widest_name = int(served), name
+            # The window must hold the prompt AND the reserved output, so the
+            # need is input + max_tokens. The first version of this message
+            # compared `needed` against the widest window alone, decided a wider
+            # unit "exists", and named the very unit that had just refused —
+            # because 24561 input fits 24576 and 24561 + 16 does not.
+            reserve = 0
+            if isinstance(parsed_body, dict):
+                try:
+                    reserve = int(parsed_body.get("max_tokens") or 0)
+                except (TypeError, ValueError):
+                    reserve = 0
+            total = None if needed is None else needed + reserve
+            served_here = int(_attributes_for(SPECS[unit]).get("context_len") or 0) if unit in SPECS else 0
+            wider = widest > served_here
+            if total is None:
+                detail = f"{unit} refused this request's context length: {text.strip()[:200]}"
+            elif not wider:
+                detail = (f"this request needs {total} tokens ({needed} input + {reserve} reserved "
+                          f"for output); the widest unit on this node is {unit} at {served_here}. "
+                          f"Nothing here can satisfy it — raise that unit's max_model_len (bounded "
+                          f"by its KV cache) or send less.")
+            else:
+                detail = (f"this request needs {total} tokens ({needed} input + {reserve} reserved "
+                          f"for output) and was served by {unit} at {served_here}. {widest_name} "
+                          f"serves {widest} — state the need, e.g. "
+                          f"require:class=llm,context_len>={total}.")
+            print(f"[harmony-llm] context refusal on {unit}: needed={needed} widest={widest}",
+                  flush=True)
+            raise HTTPException(status_code=413, detail=detail)
+        # Any other 400 is the caller's own and passes through unchanged.
+        _busy.acquire()
+        async def replay_400():
+            try:
+                yield raw
+            finally:
+                _busy.release()
+        return StreamingResponse(
+            replay_400(), status_code=400,
+            headers={k: v for k, v in resp.headers.items()
+                     if k.lower() not in {"content-length", "transfer-encoding"}},
+        )
 
     async def body_iter():
         # The request is in flight until the LAST byte has been streamed to the
