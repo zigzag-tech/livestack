@@ -69,3 +69,21 @@ preceding a successful retry. Job retention and its explicit exemptions control
 when these references can be released. The blob sweep materializes this bounded
 reference set once per sweep. Real SQLite/blob tests verify both preservation
 and eventual removal, and reject missing, foreign and mismatched artifacts.
+
+The native worker now polls independently, measures RAM/CPU/disk headroom,
+downloads and verifies the assigned source, launches an installed handler,
+uploads bounded logs and declared artifacts, and acknowledges completion only
+after cgroup cleanup. Its durable journal replays an ambiguous completion or
+reconciles an interrupted attempt after restart. Observe-only reports capacity
+without claiming jobs. Native execution does not yet advertise Docker handlers.
+
+Production workers require a separate bounded filesystem. The root-only
+`workloads.provision_workspace` command exclusively creates an owned ext4 image
+under `/var/lib/livestack-workloads`, installs an enabled systemd mount unit and
+verifies the mounted backing file. It refuses changed sizes or unknown existing
+images. A real Win One 1 GiB fixture proved idempotency, mismatch refusal and
+ENOSPC at its bound, then was removed after verifying loop-device detachment.
+Win One now has its persistent 128 GiB worker filesystem mounted at
+`/var/lib/livestack-workloads/xc-win-1-wsl/workspace`. WSL reports also account for
+configured Windows backing filesystems and their free-space reserve. The
+authority/worker services and Benchday handlers are not deployed yet.
