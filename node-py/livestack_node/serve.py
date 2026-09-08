@@ -18,7 +18,7 @@ import threading
 from typing import Callable, Dict, Optional
 
 from .coordinator import LivestackCoordinator
-from .facade import build_router, resolve_device_id
+from .facade import _machine_name, build_router, resolve_device_id
 from .lease import Capability
 
 
@@ -161,11 +161,22 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     manager = ModelManager(units, idle_seconds, coordinator=coordinator,
                            activation_observer=observer)
 
+    # WHICH PROCESS this is, as opposed to which card it is on or what it calls
+    # itself. A broker routinely holds the same node twice — once as a localhost
+    # seed and once as the address the node announced — and counted it as two,
+    # so one polytts became two resident voxcpm and the planner modelled 35 GB of
+    # units on a 24 GB card. Hostname plus listening port is the one pair that
+    # says "same process" across two URLs; without a port there is no identity to
+    # state, and the broker keeps its old (duplicating) behaviour rather than
+    # guessing one.
+    early_port = port if port is not None else os.environ.get("LIVESTACK_NODE_PORT")
+    node_id = f"{_machine_name(host_id)}:{int(early_port)}" if early_port else None
+
     app.include_router(
         build_router(manager, coordinator, Capability(kind=kind, host_id=host_id),
                      gpu_call, device_meter=device_meter, activation_tracker=tracker,
                      readiness=readiness, device_id=device_id,
-                     in_flight=in_flight),
+                     in_flight=in_flight, node_id=node_id),
         prefix=prefix,
     )
 
@@ -178,7 +189,7 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     # No port ⇒ no registration, silently-but-once. A node embedded in someone
     # else's server is still perfectly usable as a seeded peer; refusing to
     # start over it would be worse than not announcing.
-    resolved_port = port if port is not None else os.environ.get("LIVESTACK_NODE_PORT")
+    resolved_port = early_port
     if os.environ.get("LIVESTACK_REGISTER", "1") != "0" and resolved_port:
         from .announce import start_registrar
         # The HOST a node announces itself at. Loopback is right for the host

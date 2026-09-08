@@ -217,7 +217,8 @@ def build_router(manager, coordinator, capability: Capability,
                  activation_tracker=None,
                  readiness: Optional[Callable[[], Optional[dict]]] = None,
                  device_id: Optional[str] = None,
-                 in_flight: Optional[Callable[[], int]] = None):
+                 in_flight: Optional[Callable[[], int]] = None,
+                 node_id: Optional[str] = None):
     # Resolved ONCE, here, so /capability and /residence can never disagree
     # about which device this node is on — a disagreement the broker would read
     # as two devices.
@@ -253,6 +254,7 @@ def build_router(manager, coordinator, capability: Capability,
         out = {
             "kind": capability.kind,
             "host_id": capability.host_id,
+            "node_id": node_id,
             "device_id": device_id,
             "device_candidates": device_candidates,
             "labels": dict(capability.labels),
@@ -426,6 +428,12 @@ def build_router(manager, coordinator, capability: Capability,
                 entry["attributes"] = dict(attrs)
             units.append(entry)
         out = {"host_id": capability.host_id,
+               # WHICH PROCESS this is. `host_id` is a name a node picks (two
+               # polyasr on one card deliberately differ), and `device_id` is
+               # the card they share — neither says "this is the same server you
+               # already have, reached by another URL", which is what a broker
+               # holding both a localhost seed and an announced address needs.
+               "node_id": node_id,
                "device_id": device_id,
                # Where this node COULD place a unit, not just where it is. The
                # planner needs the choice to have a choice.
