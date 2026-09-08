@@ -1,0 +1,574 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Harmony — fleet resource map</title>
+<style>
+  :root{
+    --bg:#0a0d11; --panel:#11151b; --panel2:#161b22; --line:#222a34; --line2:#2c3541;
+    --ink:#e7edf4; --dim:#8592a3; --dimmer:#5d6875;
+    --amber:#f0a02c; --ok:#3fb950; --warn:#d29922; --bad:#f0533f;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+  }
+  *{box-sizing:border-box}
+  /* Flex and grid children default to min-width:auto, so one long unbreakable
+     string — a mono error from a peer probe — makes the whole page wider than
+     the phone it is read on. This is the only reason the layout ever scrolls
+     sideways, and it must not. */
+  .machine,.dev,.ram,.nodes,.node,.under,.bar,.barwrap,.dev>div,.ram>div{min-width:0}
+  .node span{overflow-wrap:anywhere;min-width:0}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+            font-size:14px;-webkit-text-size-adjust:100%}
+  body{padding:18px 16px 56px;max-width:1180px;margin:0 auto}
+  a{color:inherit}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* ---- header ---- */
+  header{display:flex;flex-wrap:wrap;gap:12px 24px;align-items:baseline;
+         padding-bottom:14px;border-bottom:1px solid var(--line)}
+  h1{margin:0;font-size:19px;font-weight:700;letter-spacing:.14em;color:var(--amber);
+     font-family:var(--mono)}
+  h1 span{color:var(--dim);font-weight:400;letter-spacing:.02em}
+  .stats{display:flex;flex-wrap:wrap;gap:4px 22px;margin-left:auto}
+  .stat{font-family:var(--mono);font-size:12px;color:var(--dim);white-space:nowrap}
+  .stat b{color:var(--ink);font-weight:600}
+  .stat.age b{color:var(--dim)}
+  .stale .stat.age b{color:var(--warn)}
+
+  /* ---- machine ---- */
+  .machine{margin-top:18px;border:1px solid var(--line);border-radius:10px;
+           background:var(--panel);overflow:hidden}
+  .mhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;
+         padding:11px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}
+  .mname{font-family:var(--mono);font-size:15px;font-weight:600;letter-spacing:.02em}
+  .mmeta{margin-left:auto;display:flex;flex-wrap:wrap;gap:4px 16px;
+         font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+  .mmeta b{color:var(--ink);font-weight:600}
+
+  /* ---- device row ---- */
+  .dev{display:grid;grid-template-columns:132px 1fr 92px;gap:14px;align-items:center;
+       padding:13px 14px}
+  .dev + .dev{border-top:1px solid var(--line)}
+  .devname{font-family:var(--mono);font-size:12.5px;line-height:1.5}
+  .devname .id{color:var(--dim);font-size:11px}
+  .devname .procs{color:var(--dimmer);font-size:10.5px}
+  .devtot{font-family:var(--mono);font-size:11.5px;color:var(--dim);text-align:right;
+          line-height:1.45}
+  .devtot b{display:block;color:var(--ink);font-size:13px;font-weight:600}
+
+  .barwrap{position:relative}
+  .tick{position:absolute;top:-7px;bottom:0;width:1px;background:rgba(231,237,244,.55)}
+  .tick::before{content:"";position:absolute;left:-4px;top:-1px;border:4px solid transparent;
+                border-top-color:#e7edf4}
+  .tick::after{content:"";position:absolute;left:-7px;right:-7px;top:-7px;bottom:0}
+  .bar.unread{background:#0c1016}
+  .unread-label{width:100%;color:var(--dimmer);font-size:11px;font-family:var(--mono);
+                justify-content:center;text-align:center}
+  .bar{display:flex;height:52px;border-radius:6px;overflow:hidden;
+       border:1px solid var(--line2);background:#0c1016}
+  .seg{position:relative;min-width:3px;display:flex;flex-direction:column;
+       justify-content:center;padding:0 9px;overflow:hidden;
+       border-right:1px solid rgba(0,0,0,.45)}
+  .seg:last-child{border-right:0}
+  .seg .k{font-family:var(--mono);font-size:11.5px;font-weight:600;white-space:nowrap;
+          overflow:hidden;text-overflow:ellipsis;color:#080c10}
+  .seg .v{font-family:var(--mono);font-size:10.5px;white-space:nowrap;color:rgba(8,12,16,.72)}
+  .seg .w{font-family:var(--mono);font-size:10px;font-weight:700;letter-spacing:.06em;
+          color:#08150c;white-space:nowrap}
+  .seg.narrow .w{display:none}
+  .seg.narrow{padding:0 3px}
+  .seg.narrow .k,.seg.narrow .v{display:none}
+  .seg.free{background:repeating-linear-gradient(135deg,#11161d,#11161d 5px,#0d1218 5px,#0d1218 10px)}
+  .seg.free .k{color:var(--dimmer)}
+  .seg.free .v{color:var(--dimmer)}
+  .seg.other{background:repeating-linear-gradient(135deg,#4b3a52,#4b3a52 5px,#3f3146 5px,#3f3146 10px)}
+  .seg.other .k{color:#e6d8ee}
+  .seg.other .v{color:rgba(230,216,238,.75)}
+  .seg .busy{position:absolute;left:0;right:0;bottom:0;height:3px;background:#08150c;
+             opacity:.55}
+  .seg .busy::after{content:"";position:absolute;inset:0;
+             background:repeating-linear-gradient(90deg,#0a2 0,#0a2 6px,transparent 6px,transparent 12px);
+             animation:flow 1.1s linear infinite}
+  @keyframes flow{to{transform:translateX(12px)}}
+  @media (prefers-reduced-motion:reduce){.seg .busy::after{animation:none}}
+
+  /* ---- ram row ---- */
+  .ram{display:grid;grid-template-columns:132px 1fr 92px;gap:14px;align-items:center;
+       padding:9px 14px 13px;border-top:1px solid var(--line)}
+  .ram .lbl{font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+  .rbar{height:12px;border-radius:3px;overflow:hidden;background:#0c1016;
+        border:1px solid var(--line2);display:flex}
+  .rbar i{display:block;height:100%}
+  .rfill{background:linear-gradient(180deg,#2a6b8f,#22566f)}
+  .rproc{background:linear-gradient(180deg,#3f8fbd,#2f6f95)}
+
+  /* ---- chips under a device ---- */
+  .under{grid-column:2/4;display:flex;flex-wrap:wrap;gap:6px;margin-top:-4px}
+  .chip{font-family:var(--mono);font-size:10.5px;color:var(--dim);border:1px solid var(--line2);
+        border-radius:999px;padding:2px 8px;background:#0e1218;white-space:nowrap}
+  .chip .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px;
+             vertical-align:1px;opacity:.55}
+  .chip.warn{color:var(--warn);border-color:#4a3c19}
+  .chip.bad{color:var(--bad);border-color:#5a2a24}
+
+  /* ---- node lines ---- */
+  .nodes{padding:2px 14px 12px;display:flex;flex-direction:column;gap:5px}
+  .node{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;
+        font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+  .node .kind{color:var(--ink);font-weight:600}
+  .node .st{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase}
+  .st.fresh{color:var(--ok)} .st.suspect{color:var(--warn)} .st.mia{color:var(--bad)}
+  .node .err{color:var(--bad);flex-basis:100%;font-size:10.5px;white-space:normal}
+
+  /* ---- legend / footer ---- */
+  .legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:20px;padding-top:14px;
+          border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .legend .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;
+              vertical-align:-1px}
+  footer{margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--dimmer);
+         display:flex;flex-wrap:wrap;gap:4px 18px}
+  #err{display:none;margin-top:14px;padding:10px 12px;border:1px solid #5a2a24;border-radius:8px;
+       background:#1a0f0e;color:#f7b4a8;font-family:var(--mono);font-size:12px}
+  #err.on{display:block}
+
+  @media (max-width:700px){
+    body{padding:14px 10px 40px}
+    .stats{margin-left:0;width:100%}
+    .dev,.ram{grid-template-columns:1fr;gap:8px;padding:12px 11px}
+    .devtot{text-align:left;display:flex;gap:10px;align-items:baseline}
+    .devtot b{display:inline}
+    .bar{height:46px}
+    .under{grid-column:1}
+    .mmeta{margin-left:0;width:100%}
+  }
+</style>
+
+<header>
+  <h1>HARMONY <span>— fleet resource map</span></h1>
+  <div class="stats" id="stats"></div>
+</header>
+
+<div id="err"></div>
+<main id="fleet"></main>
+
+<div class="legend" id="legend"></div>
+<footer id="foot"></footer>
+
+<script>
+"use strict";
+const GB = 1073741824;
+const REFRESH_MS = 5000;
+
+// Colours are assigned per unit KIND so one model reads the same on every card
+// in the fleet. Known kinds are fixed; anything else hashes into the same ramp,
+// so a node nobody anticipated still gets a stable colour instead of grey.
+const FIXED = {
+  asr:"#3fa7d6", align:"#5bc8af", diarize:"#7fd1b9", qwen:"#e0a13c", voxcpm:"#d98452",
+  cosyvoice:"#c9744f", chipgen:"#9b8bd6", dots:"#b58fd0", build:"#8fa3b8",
+  llm_tiny:"#6fb7e8", llm_small:"#4f93cf", llm_title:"#3d6fa8", llm:"#4f93cf",
+};
+const RAMP = ["#3fa7d6","#5bc8af","#e0a13c","#9b8bd6","#d98452","#7fd1b9","#b58fd0","#6fb7e8"];
+function colour(kind){
+  if (FIXED[kind]) return FIXED[kind];
+  let h = 0; for (const c of kind) h = (h*31 + c.charCodeAt(0)) >>> 0;
+  return RAMP[h % RAMP.length];
+}
+const TIER = ["hard-pin","soft-pin","unpinned"];
+
+const fmt = b => b >= GB ? (b/GB).toFixed(b/GB >= 100 ? 0 : 1)+" GB"
+                         : Math.max(0, Math.round(b/1048576))+" MB";
+const pct = (a,b) => b > 0 ? Math.round(100*a/b)+"%" : "—";
+const el = (tag, cls, txt) => { const e = document.createElement(tag);
+  if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+const ago = s => s == null ? "" : s < 90 ? Math.round(s)+"s" : Math.round(s/60)+"m";
+
+// A node's MACHINE is the first half of its device id — the hostname the card is
+// in. It is deliberately not `host_id`: that is a name a node picks for itself,
+// and five processes on one machine announce five different ones (xc-tower-ubuntu,
+// -b, -gpu0, -gpu1, -bench). Grouping by it draws one machine as five.
+function machineOf(node, host){
+  const d = node.device_id || "";
+  return d.includes("/") ? d.slice(0, d.indexOf("/")) : (host || "unknown");
+}
+
+function model(fleet){
+  const machines = new Map();
+  for (const [host, h] of Object.entries(fleet.hosts || {})) {
+    for (const node of h.nodes || []) {
+      const mname = machineOf(node, host);
+      let m = machines.get(mname);
+      if (!m) machines.set(mname, m = {name:mname, devices:new Map(), orphans:[],
+                                       hostMem:null, hostMemAge:1e9, links:null});
+      if (h.links && !m.links) m.links = h.links;
+      const lb = node.labels || {};
+      if (!m.where) m.where = lb.location || lb.site || lb.region || null;
+      // A node with no device is one that has never been read (mia at startup):
+      // it has no card to sit under, and dropping it would be the gap the fleet
+      // view refuses to leave.
+      if (!node.device_id) { m.orphans.push(node); continue; }
+      let d = m.devices.get(node.device_id);
+      if (!d) m.devices.set(node.device_id, d = {id:node.device_id, nodes:[],
+                                                 capacity:0, free:0, unified:false});
+      d.nodes.push(node);
+      const dm = node.device_mem;
+      // Every node on a card reports the same driver-level numbers; take the
+      // freshest rather than summing, which would multiply one card's memory by
+      // the number of processes sharing it.
+      if (dm && dm.capacity && (node.snapshot_age_s ?? 1e9) <= (d.age ?? 1e9)) {
+        d.capacity = dm.capacity; d.free = dm.free ?? 0;
+        d.unified = !!dm.unified; d.age = node.snapshot_age_s ?? 0;
+      }
+      const hm = node.host_mem, age = node.snapshot_age_s ?? 1e9;
+      if (hm && hm.total_bytes && age < m.hostMemAge) { m.hostMem = hm; m.hostMemAge = age; }
+    }
+  }
+  return [...machines.values()].sort((a,b) => a.name.localeCompare(b.name));
+}
+
+// What actually occupies a card: one segment per resident unit, then whatever
+// the driver says is used that no unit explains, then free. The third number is
+// the one nothing else reports — an allocator pool that was never returned, or
+// a process outside the fleet — and it is exactly what took a card down before
+// it was measurable.
+function segments(dev){
+  const segs = [];
+  for (const node of dev.nodes)
+    for (const u of node.units || [])
+      if (u.resident)
+        segs.push({kind:u.kind, bytes:(u.footprint||{}).vram_bytes || 0, busy:!!u.busy,
+                   tier:TIER[u.residency] || "?", prio:u.priority, node});
+  segs.sort((a,b) => b.bytes - a.bytes);
+  const explained = segs.reduce((n,s) => n + s.bytes, 0);
+  const used = Math.max(0, dev.capacity - dev.free);
+  // Used that no resident unit explains: another process on the card, or an
+  // allocator pool that was evicted and never given back. It is the condition
+  // that took a card down in August, and the only place it is visible.
+  const other = Math.max(0, used - explained);
+  // The bar is the CARD. Free is what is left of the capacity after what is
+  // placed on it — NOT the driver's measured free, which would be added to
+  // declared blocks and draw a 28 GB card as a 43 GB one.
+  const free = Math.max(0, dev.capacity - explained - other);
+  return {segs, explained, used, other, free, over:explained + other > dev.capacity};
+}
+
+// A device with no measured capacity has not been READ — every node on it is
+// down. An empty bar labelled 0 MB would report a card with no memory, which is
+// a different and much calmer statement than "nothing here answers".
+function drawUnread(dev){
+  const wrap = el("div","barwrap");
+  const bar = el("div","bar unread");
+  bar.appendChild(el("div","seg free unread-label",
+    "no node on this device has been read — nothing can be said about it"));
+  wrap.appendChild(bar);
+  return wrap;
+}
+
+function drawBar(dev){
+  const {segs, other, free, over, explained, used} = segments(dev);
+  if (!dev.capacity) return {wrap:drawUnread(dev), over:false, explained, used};
+  const span = Math.max(dev.capacity, explained + other + free, 1);
+  const wrap = el("div","barwrap");
+  const bar = el("div","bar");
+  const add = (cls, kind, bytes, style, title) => {
+    if (bytes <= 0) return;
+    const w = 100*bytes/span;
+    const s = el("div", "seg " + cls + (w < 9 ? " narrow" : ""));
+    s.style.width = w + "%"; if (style) s.style.background = style;
+    s.title = title || (kind + " · " + fmt(bytes));
+    s.appendChild(el("div","k",kind));
+    s.appendChild(el("div","v",fmt(bytes)));
+    if (cls === "working") s.appendChild(el("div","w","serving"));
+    bar.appendChild(s);
+    return s;
+  };
+  for (const s of segs) {
+    const node = add(s.busy ? "working" : "", s.kind, s.bytes, colour(s.kind),
+      `${s.kind} · ${fmt(s.bytes)} · ${s.tier} · priority ${s.prio}` +
+      `\n${s.node.kinds?.[0] || "node"} ${new URL(s.node.peer).port || ""}` +
+      (s.busy ? "\nserving a request now" : ""));
+    if (node && s.busy) node.appendChild(el("div","busy"));
+  }
+  add("other","unattributed", other, null,
+      "used on the card that no resident unit explains — another process, or an " +
+      "allocator pool that was evicted but never returned");
+  add("free","free", free, null, "free");
+  if (!segs.length && !other && !free) bar.appendChild(el("div","seg free"));
+  wrap.appendChild(bar);
+  // Where the DRIVER says the used memory ends. The blocks are what Harmony
+  // has PLACED — declared footprints, which is what the planner reserves — and
+  // the two are routinely not the same number: a footprint is a static estimate
+  // and a lazy backend has not touched half of it yet. Showing the measured
+  // edge is the honest way to say so; flagging every such card as an anomaly
+  // (the first cut did) turns the normal case into an alarm nobody reads.
+  if (dev.capacity > 0) {
+    const tick = el("div","tick");
+    tick.style.left = Math.min(100, 100*used/span) + "%";
+    tick.title = "measured in use: " + fmt(used) + " of " + fmt(dev.capacity) +
+                 "\ndeclared by the units above: " + fmt(explained);
+    wrap.appendChild(tick);
+  }
+  return {wrap, over, explained, used};
+}
+
+function drawDevice(m, dev){
+  const row = el("div","dev");
+  const name = el("div","devname");
+  const cards = [...m.devices.keys()];
+  name.appendChild(el("div", null, cards.length > 1 ? "GPU " + cards.indexOf(dev.id) : "GPU"));
+  name.appendChild(el("div","id", dev.id.split("/")[1] || dev.id));
+  name.appendChild(el("div","procs", dev.nodes.length +
+                      (dev.nodes.length === 1 ? " node" : " nodes")));
+  row.appendChild(name);
+
+  const mid = el("div");
+  const {wrap, over, explained, used} = drawBar(dev);
+  mid.appendChild(wrap);
+
+  const under = el("div","under");
+  // Two polyasr on one card each declare align and diarize. Listing both copies
+  // says nothing the count does not; a "x2" keeps the row readable and still
+  // says the card carries two of them.
+  const cold = new Map();
+  for (const node of dev.nodes)
+    for (const u of node.units || [])
+      if (!u.resident) {
+        const bytes = (u.footprint || {}).vram_bytes || 0;
+        const key = u.kind + "/" + bytes;
+        const hit = cold.get(key);
+        if (hit) hit.n++; else cold.set(key, {u, bytes, n:1});
+      }
+  for (const {u, bytes, n} of cold.values()) {
+    const c = el("div","chip");
+    const dot = el("span","dot"); dot.style.background = colour(u.kind);
+    c.appendChild(dot);
+    c.appendChild(document.createTextNode(
+      u.kind + (n > 1 ? " \u00d7" + n : "") + " " + fmt(bytes)));
+    c.title = `${u.kind} is NOT resident — ${TIER[u.residency]||"?"}, priority ${u.priority}`;
+    under.appendChild(c);
+  }
+  for (const node of dev.nodes) if (node.leak)
+    under.appendChild(Object.assign(el("div","chip bad",
+      "leak " + fmt(node.leak.unexplained_bytes || node.leak.bytes || 0)),
+      {title:"this process holds more than its resident units explain"}));
+  if (explained > dev.capacity) under.appendChild(Object.assign(el("div","chip warn",
+    "over-committed by " + fmt(explained - dev.capacity)),
+    {title:"the units resident here declare more than the card holds"}));
+  if (dev.unified) under.appendChild(Object.assign(el("div","chip","unified memory"),
+    {title:"Apple unified memory — these bytes ARE the host's RAM, not a second pool"}));
+  if (under.children.length) mid.appendChild(under);
+  row.appendChild(mid);
+
+  const tot = el("div","devtot");
+  tot.appendChild(el("b", null, pct(dev.capacity - dev.free, dev.capacity)));
+  tot.appendChild(el("span", null, fmt(dev.capacity - dev.free) + " / " + fmt(dev.capacity)));
+  row.appendChild(tot);
+  return row;
+}
+
+function drawNodes(dev){
+  const box = el("div","nodes");
+  for (const n of dev.nodes) box.appendChild(drawNodeLine(n));
+  return box;
+}
+
+function drawNodeLine(n){
+  const line = el("div","node");
+  const port = (() => { try { return new URL(n.peer).port; } catch { return ""; } })();
+  line.appendChild(el("span","kind", ((n.kinds || [])[0] || "node") + (port ? " :" + port : "")));
+  line.appendChild(el("span","st " + (n.state || ""), n.state || ""));
+  if (n.ready === false) line.appendChild(el("span", null, n.detail || "not ready"));
+  else if (n.detail && n.detail !== "resident") line.appendChild(el("span", null, n.detail));
+  const load = n.load || {};
+  if (load.in_flight != null)
+    line.appendChild(el("span", null, load.in_flight + " in flight" +
+      (load.in_flight_source === "leases" ? " (leases)" : "")));
+  if (n.probe_ms != null) line.appendChild(el("span", null, n.probe_ms + " ms"));
+  if (n.host_mem && n.host_mem.process_rss_bytes)
+    line.appendChild(el("span", null, fmt(n.host_mem.process_rss_bytes) + " rss"));
+  // Two different ages, and they are not interchangeable: `unseen` is how long
+  // since the ROSTER heard anything (an announce counts); `read` is how long
+  // since this node was actually read. A node can be announcing and wedged.
+  if (n.snapshot_age_s != null && n.snapshot_age_s > 15)
+    line.appendChild(el("span", null, "read " + ago(n.snapshot_age_s) + " ago"));
+  if (n.state !== "fresh")
+    line.appendChild(el("span", null, "unseen " + ago(n.unseen_seconds)));
+  if (n.last_error) line.appendChild(el("span","err", n.last_error));
+  return line;
+}
+
+function drawRam(m){
+  const hm = m.hostMem;
+  const row = el("div","ram");
+  const lbl = el("div","lbl", "SYSTEM RAM");
+  row.appendChild(lbl);
+  if (!hm || !hm.total_bytes) {
+    // Absent is not zero. A node too old to report host memory says nothing,
+    // and drawing an empty bar would claim a machine with no RAM in use.
+    const none = el("div","lbl","not reported by any node on this machine");
+    row.appendChild(none); row.appendChild(el("div"));
+    return row;
+  }
+  const total = hm.total_bytes;
+  const used = hm.available_bytes != null ? Math.max(0, total - hm.available_bytes) : null;
+  const rss = [...m.devices.values()].flatMap(d => d.nodes)
+      .reduce((n, x) => n + ((x.host_mem || {}).process_rss_bytes || 0), 0);
+  const bar = el("div","rbar");
+  if (used != null) {
+    const ours = Math.min(rss, used);
+    const mine = el("i","rproc"); mine.style.width = 100*ours/total + "%";
+    mine.title = "Harmony nodes on this machine: " + fmt(ours);
+    const rest = el("i","rfill"); rest.style.width = 100*(used-ours)/total + "%";
+    rest.title = "everything else on this machine: " + fmt(used - ours);
+    bar.appendChild(mine); bar.appendChild(rest);
+  }
+  row.appendChild(bar);
+  const tot = el("div","devtot");
+  tot.appendChild(el("b", null, used != null ? pct(used, total) : "—"));
+  tot.appendChild(el("span", null, (used != null ? fmt(used) + " / " : "") + fmt(total)));
+  row.appendChild(tot);
+  lbl.textContent = "SYSTEM RAM";
+  if (rss) lbl.appendChild(Object.assign(el("div", null, fmt(rss) + " ours"),
+                                         {style:"color:#5d6875"}));
+  return row;
+}
+
+function drawMachine(m){
+  const box = el("div","machine");
+  const head = el("div","mhead");
+  head.appendChild(el("div","mname", m.name));
+  if (m.where) head.appendChild(el("div","chip", m.where));
+  const meta = el("div","mmeta");
+  const devs = [...m.devices.values()];
+  const cap = devs.reduce((n,d) => n + d.capacity, 0);
+  const free = devs.reduce((n,d) => n + d.free, 0);
+  const add = (label, value) => {
+    const s = el("span", null, label + " ");
+    s.appendChild(el("b", null, value)); meta.appendChild(s);
+  };
+  add(devs.length === 1 ? "gpu" : "gpus", String(devs.length));
+  if (cap) add("used", fmt(cap - free) + " / " + fmt(cap));
+  const rtts = Object.entries(m.links || {}).filter(([h]) => h !== m.name);
+  if (rtts.length) add("link", rtts.map(([h,v]) => h + " " + Math.round(v) + "ms").join("  "));
+  head.appendChild(meta);
+  box.appendChild(head);
+
+  for (const dev of devs) { box.appendChild(drawDevice(m, dev)); box.appendChild(drawNodes(dev)); }
+  if (m.orphans.length) {
+    const box2 = el("div","nodes");
+    for (const n of m.orphans) box2.appendChild(drawNodeLine(n));
+    box.appendChild(box2);
+  }
+  box.appendChild(drawRam(m));
+  return box;
+}
+
+function drawLegend(machines){
+  const kinds = new Set();
+  for (const m of machines) for (const d of m.devices.values())
+    for (const n of d.nodes) for (const u of n.units || []) if (u.resident) kinds.add(u.kind);
+  const box = document.getElementById("legend");
+  box.textContent = "";
+  for (const k of [...kinds].sort()) {
+    const s = el("span");
+    const sw = el("span","sw"); sw.style.background = colour(k);
+    s.appendChild(sw); s.appendChild(document.createTextNode(k));
+    box.appendChild(s);
+  }
+  const other = el("span");
+  const o = el("span","sw");
+  o.style.background = "repeating-linear-gradient(135deg,#4b3a52,#4b3a52 4px,#3f3146 4px,#3f3146 8px)";
+  other.appendChild(o); other.appendChild(document.createTextNode("unattributed"));
+  box.appendChild(other);
+  const meas = el("span");
+  const mk = el("span","sw");
+  mk.style.cssText = "background:#e7edf4;width:2px;border-radius:1px;opacity:.7";
+  meas.appendChild(mk);
+  meas.appendChild(document.createTextNode("measured in use (blocks are declared)"));
+  box.appendChild(meas);
+  const fr = el("span");
+  const f = el("span","sw");
+  f.style.background = "repeating-linear-gradient(135deg,#11161d,#11161d 4px,#0d1218 4px,#0d1218 8px)";
+  fr.appendChild(f); fr.appendChild(document.createTextNode("free"));
+  box.appendChild(fr);
+}
+
+function drawStats(fleet, machines){
+  const devs = machines.flatMap(m => [...m.devices.values()]);
+  const cap = devs.reduce((n,d) => n + d.capacity, 0);
+  const free = devs.reduce((n,d) => n + d.free, 0);
+  let resident = 0, busy = 0;
+  for (const d of devs) for (const n of d.nodes) for (const u of n.units || [])
+    { if (u.resident) resident++; if (u.busy) busy++; }
+  const rows = [
+    ["machines", machines.length], ["gpus", devs.length],
+    ["vram", cap ? fmt(cap - free) + " / " + fmt(cap) + "  (" + pct(cap-free, cap) + ")" : "—"],
+    ["resident", resident + (busy ? "  (" + busy + " working)" : "")],
+  ];
+  const box = document.getElementById("stats");
+  box.textContent = "";
+  for (const [k,v] of rows) {
+    const s = el("span","stat", k + " ");
+    s.appendChild(el("b", null, String(v))); box.appendChild(s);
+  }
+  const age = el("span","stat age","updated ");
+  age.appendChild(el("b", null, "just now")); age.id = "age"; box.appendChild(age);
+}
+
+function drawFoot(fleet){
+  const f = document.getElementById("foot");
+  f.textContent = "";
+  const bits = [
+    (fleet.dispatch ? "host broker — warms and evicts" : "fleet broker — observe only"),
+    "vantage " + (fleet.vantage_host || "?"),
+    (fleet.peers || 0) + " peers",
+  ];
+  const q = fleet.quota;
+  if (q) bits.push("quota " + (q.max_concurrent_per_account ?? "none") +
+                   (fleet.auth && fleet.auth.required ? "" : " (advisory — no auth)"));
+  for (const b of bits) f.appendChild(el("span", null, b));
+}
+
+let last = 0, lastFleet = null;
+function render(fleet){
+  lastFleet = fleet; last = Date.now();
+  const machines = model(fleet);
+  const main = document.getElementById("fleet");
+  main.textContent = "";
+  if (!machines.length) main.appendChild(el("div","chip","no nodes — this broker knows no peers"));
+  for (const m of machines) main.appendChild(drawMachine(m));
+  drawStats(fleet, machines);
+  drawLegend(machines);
+  drawFoot(fleet);
+  document.body.classList.remove("stale");
+}
+
+function tickAge(){
+  const a = document.getElementById("age");
+  if (!a || !last) return;
+  const s = (Date.now() - last)/1000;
+  a.querySelector("b").textContent = s < 10 ? "just now" : ago(s) + " ago";
+  document.body.classList.toggle("stale", s > 20);
+}
+
+async function poll(){
+  try {
+    const r = await fetch("fleet", {cache:"no-store"});
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    render(await r.json());
+    document.getElementById("err").classList.remove("on");
+  } catch (e) {
+    // Keep the last view up and say how old it is. A blank page cannot be told
+    // apart from an empty fleet, and this page is opened precisely when
+    // something is wrong.
+    const box = document.getElementById("err");
+    box.textContent = "broker unreachable (" + e.message + ") — showing the last view" +
+                      (last ? ", " + ago((Date.now()-last)/1000) + " old" : "");
+    box.classList.add("on");
+  }
+}
+
+poll();
+setInterval(() => { if (!document.hidden) poll(); }, REFRESH_MS);
+setInterval(tickAge, 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+</script>

@@ -374,7 +374,8 @@ class _FleetPeer:
     """A node whose reachability, cost and reported load the test controls."""
 
     def __init__(self, base, host="h", device="h/gpu0", kind="asr",
-                 units_delay=0.0, ready=True, load=None, resident=True):
+                 units_delay=0.0, ready=True, load=None, resident=True,
+                 busy=False, report=None):
         self.base = base
         self.host_id = host
         self.device_id = device
@@ -386,6 +387,8 @@ class _FleetPeer:
         self.units_delay = units_delay
         self.ready = ready
         self._load = load
+        self.busy = busy
+        self._report = report
         self.warmed, self.evicted = [], []
 
     def units(self):
@@ -396,8 +399,15 @@ class _FleetPeer:
         return {self._kind: self._unit}
 
     def placements(self):
-        return ([_Placement(self._kind, self.device_id, busy=False)]
+        return ([_Placement(self._kind, self.device_id, busy=self.busy)]
                 if self.resident else [])
+
+    def report(self):
+        # A Peer NEED NOT implement this; the peers in the older tests do not,
+        # which is the case that must keep working.
+        if self._report is None:
+            raise AttributeError("report")
+        return dict(self._report)
 
     def device_memory(self):
         return None
@@ -493,6 +503,62 @@ def test_the_fleet_view_groups_by_host_and_carries_load():
     # b reports no load at all, and absent must stay absent: a consumer reads it
     # as NO OPINION, never as idle.
     assert "load" not in view["hosts"]["xc-tower-ubuntu"]["nodes"][0]
+
+
+def test_the_fleet_view_says_which_unit_is_resident_and_which_is_working():
+    """`load.resident_units` is a COUNT. A count cannot answer the question the
+    view exists to answer — what is on this card right now — and a page built on
+    it can only draw a number where the models should be."""
+    working = _FleetPeer("http://a/livestack", host="zz-tower0", kind="asr",
+                         device="zz-tower0/aaaa", busy=True)
+    cold = _FleetPeer("http://b/livestack", host="zz-tower0", kind="qwen",
+                      device="zz-tower0/aaaa", resident=False)
+    br = _fleet_broker([working, cold], dispatch=False)
+    br.snapshot([])
+    rows = {r["peer"]: r for r in br.fleet_view()["hosts"]["zz-tower0"]["nodes"]}
+
+    asr = rows["http://a/livestack"]["units"][0]
+    assert (asr["kind"], asr["resident"], asr["busy"]) == ("asr", True, True)
+    qwen = rows["http://b/livestack"]["units"][0]
+    assert (qwen["kind"], qwen["resident"], qwen["busy"]) == ("qwen", False, False)
+
+
+def test_the_fleet_view_carries_what_a_node_holds_beyond_its_card():
+    """A card's free bytes never say WHO filled it, and nothing said what a node
+    occupies in host RAM — so a machine swapping under a CPU-heavy node read as
+    empty. Both are the node's own report, passed through with its age."""
+    p = _FleetPeer("http://a/livestack", host="zz-tower0", device="zz-tower0/aaaa",
+                   report={"host_mem": {"total_bytes": 64 * 2**30,
+                                        "available_bytes": 8 * 2**30,
+                                        "process_rss_bytes": 12 * 2**30},
+                           "process_mem": {"allocated_bytes": 5 * 2**30,
+                                           "reserved_bytes": 6 * 2**30,
+                                           "reclaimable_bytes": 2**30},
+                           "leak": {"unexplained_bytes": 14 * 2**30}})
+    br = _fleet_broker([p], dispatch=False)
+    br.snapshot([])
+    row = br.fleet_view()["hosts"]["zz-tower0"]["nodes"][0]
+
+    assert row["host_mem"]["available_bytes"] == 8 * 2**30
+    assert row["process_mem"]["reserved_bytes"] == 6 * 2**30
+    assert row["leak"]["unexplained_bytes"] == 14 * 2**30
+    # Ages the SNAPSHOT, not the roster: an announce refreshes `unseen_seconds`
+    # while the node itself has not been read since. A reader that cannot tell
+    # them apart shows a wedged node's last residence as current.
+    assert row["snapshot_age_s"] < 5
+
+
+def test_a_peer_that_reports_nothing_about_itself_is_still_a_full_row():
+    """`report()` is optional on the Peer protocol. A node too old to answer it
+    must lose the extra fields and nothing else."""
+    p = _FleetPeer("http://a/livestack", host="zz-tower0", device="zz-tower0/aaaa")
+    br = _fleet_broker([p], dispatch=False)
+    br.snapshot([])
+    row = br.fleet_view()["hosts"]["zz-tower0"]["nodes"][0]
+
+    assert "host_mem" not in row and "process_mem" not in row
+    assert row["units"][0]["resident"] is True
+    assert "snapshot_age_s" in row
 
 
 def test_an_unreachable_peer_is_a_row_not_a_gap():
