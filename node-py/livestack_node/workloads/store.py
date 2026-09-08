@@ -182,6 +182,7 @@ class WorkloadStore:
     def _assignment(self, db, attempt):
         job = self._job(db, attempt["job"])
         return {"job_id": job["id"], "attempt_id": attempt["id"], "fence": attempt["fence"],
+                "lease_remaining": max(0, attempt["expires"] - self.clock()),
                 "expires": attempt["expires"], "worker": attempt["worker"], "boot": attempt["boot"],
                 "owner": job["owner"], "spec": job["spec"]}
 
@@ -196,7 +197,7 @@ class WorkloadStore:
                 raise WorkloadError("execution lease is no longer valid", 409)
             expires = now + self.limits.lease_seconds
             db.execute("UPDATE attempts SET expires=? WHERE id=?", (expires, attempt_id))
-            return {"expires": expires}
+            return {"expires": expires, "lease_remaining": self.limits.lease_seconds}
 
     def complete(self, worker, boot, attempt_id, fence, *, input_digest, outcome, result):
         if outcome not in ("succeeded", "product_failure", "infrastructure"):

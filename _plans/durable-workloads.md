@@ -36,3 +36,27 @@ Service logs use rotation; SQLite WAL checkpoints constrain journal growth.
 Rollout: isolated store/process failure tests, two real supervised workers, remote
 E2E, then release stages. Win One is WSL Ubuntu via SSH port 2222 for provisioning;
 normal worker traffic is outbound HTTP, with no caller-owned SSH session.
+
+## Execution foundation evidence (2026-09-08)
+
+The Linux/WSL executor uses a deterministic per-attempt systemd user service,
+with cgroup CPUQuota, MemoryMax, MemorySwapMax=0 and TasksMax. A singleton worker
+journal is fsynced before launch; recovery stops the owned unit and verifies its
+cgroup is empty before reporting cleanup. The installed wrapper drains command
+output into two rotating files (8 MiB each by default). Execution descriptors
+and the single active journal are capped at 64 KiB.
+
+Worker-owned heartbeats return a relative lease duration. The worker subtracts
+the full request round trip and a stop margin using its monotonic clock, avoiding
+cross-host wall-clock assumptions. The wrapper checks the local deadline every
+100 ms; it exits on expiration and systemd stops descendants. Renewals therefore
+do not depend on the submitting terminal, and a dead supervisor cannot renew a
+job indefinitely. Expired claims remain reserved until explicit cleanup.
+
+Real local HTTP/SQLite/systemd tests cover caller disconnect, continued renewal,
+cancellation, stale fencing, restart cleanup, resource limits and bounded output.
+The same cgroup CPU/RAM/process, journal-restart, lease-expiry/descendant and log
+probes passed on xc-win-1 WSL through ubuntu@100.64.0.1:2222. The render container
+was left running. This is foundation evidence, not worker enrollment: Docker
+container ownership, filesystem bounds, the persistent worker service and product
+adapters are still required before production handlers may be advertised.
