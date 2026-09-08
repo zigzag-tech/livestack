@@ -185,6 +185,11 @@ class WorkloadWorker:
                     last_report = time.monotonic()
                 state = self.executor.inspect(attempt)
                 if state.get('ActiveState') in ('failed', 'inactive') or state.get('LoadState') == 'not-found':
+                    # The wrapper can publish its receipt and exit between our
+                    # first read and systemd inspection. Classify that receipt
+                    # on the next iteration instead of retrying completed work.
+                    if self.executor.exit_result(output) is not None:
+                        continue
                     raise WorkloadError('execution stopped without a result', 503)
                 time.sleep(.2)
         except Exception as error:

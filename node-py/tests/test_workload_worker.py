@@ -85,6 +85,44 @@ def test_worker_executes_pinned_input_and_returns_owned_artifact(fleet, tmp_path
         worker.close()
 
 
+
+def test_exit_between_receipt_read_and_unit_inspection_preserves_product_failure(fleet):
+    # Only the observation ordering is injected: HTTP, SQLite, the systemd
+    # process, and its atomically published receipt all remain real.
+    _, config, caller, digest = fleet
+    job = submit(caller, digest, exit=7, sleep=.3)
+    worker = WorkloadWorker(config)
+    original = worker.executor.exit_result
+    injected = False
+    def read_then_allow_exit(output):
+        nonlocal injected
+        result = original(output)
+        if result is None and not injected:
+            injected = True
+            attempt = Path(output).parent.name
+            deadline = time.monotonic()+10
+            while time.monotonic() < deadline:
+                state = worker.executor.inspect(attempt)
+                if state.get('ActiveState') in ('inactive', 'failed'):
+                    break
+                time.sleep(.02)
+            else:
+                raise AssertionError('real execution did not finish')
+            assert original(output)['exit_code'] == 7
+        return result
+    worker.executor.exit_result = read_then_allow_exit
+    try:
+        assert worker.step()
+        assert injected
+        result = caller.get(job['id'])
+        assert result['state'] == 'failed', result
+        assert result['result']['outcome'] == 'product_failure'
+        assert result['result']['result']['exit_code'] == 7
+        assert len(result['attempts']) == 1
+        assert not worker.step()
+    finally:
+        worker.close()
+
 def test_task_exhaustion_is_infrastructure_with_a_kernel_receipt(fleet, tmp_path):
     _, config, caller, digest = fleet
     script = Path(config['handlers']['native.v1']['argv'][1])
