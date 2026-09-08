@@ -359,8 +359,11 @@ function drawDevice(m, dev){
   row.appendChild(mid);
 
   const tot = el("div","devtot");
-  tot.appendChild(el("b", null, pct(dev.capacity - dev.free, dev.capacity)));
-  tot.appendChild(el("span", null, fmt(dev.capacity - dev.free) + " / " + fmt(dev.capacity)));
+  // A card nobody could read has no numbers, and "0 MB / 0 MB" is a number —
+  // it reads as an empty card rather than as an unanswered one.
+  tot.appendChild(el("b", null, dev.capacity ? pct(dev.capacity - dev.free, dev.capacity) : "—"));
+  tot.appendChild(el("span", null, dev.capacity
+    ? fmt(dev.capacity - dev.free) + " / " + fmt(dev.capacity) : "not read"));
   row.appendChild(tot);
   return row;
 }
