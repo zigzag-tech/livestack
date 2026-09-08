@@ -149,3 +149,31 @@ system-administration executable paths Docker needs. Infrastructure failures
 retain bounded log artifacts; uploads refused by a cancellation fence proceed
 to reconciliation instead of escaping the worker as an uncaught HTTP error.
 The host Docker socket's copy-up alias is also removed from the private namespace.
+
+## Live dependency workload (2026-09-08)
+
+The authority and Win One worker now load immutable release
+`cbf8c1f744e580016f02e4925fd90af522363560`, superseding the probe-only
+rollout described above. The generic CLI captures, uploads, submits, reads
+status and downloads artifacts using the existing authenticated APIs. It
+requires no build tools on the submitting machine.
+
+Benchday owns the installed `benchday.e2e.dependencies.v1` handler. Job
+`8f61381385a24e94922777cd399e6cfc` transferred a 488,755,200-byte exact-source
+archive and completed four cold locked npm installs on Win One in 58.80 s.
+The submitting process had exited; the worker completed and returned the
+preparation artifact through the authority. Source SHA-256:
+`2961eba795221c4705662d2ad42777392a5716100f870ce8a20552a54f6c8f37`.
+Preparation artifact SHA-256:
+`d380c11f4c1fec88070c6478ed9ab72d7c4badbda3a06295d8d5f4928ca0d976`.
+This proves a real cross-machine dependency job, not a full E2E or release.
+
+Benchday handler release `5fe6524dec8f2aeab10d62e02507c740dd69ecd8` is now
+installed with complete captured-file verification around dependency installs.
+Job `dd4bbd696ce4406eaf1b1172d7dc35ef` validates that stronger handler against
+the same input and succeeded with every captured file preserved. Its preparation
+artifact SHA-256 is
+`ce42b8b0349e631c495435f905430f501b857187cf1356da4bfc83ffcdbcd7c6`. The existing render
+container remained running with start time `2026-09-08T01:33:09.570642946Z`.
+Persistent caches, train/release routing, shared co-resident accounting and
+the full Benchday test/publish gates remain required.
