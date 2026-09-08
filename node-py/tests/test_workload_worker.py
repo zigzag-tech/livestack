@@ -121,6 +121,77 @@ raise SystemExit(code)
         worker.close()
 
 
+def test_worker_reuses_verified_source_without_a_second_download(fleet, tmp_path):
+    store, config, caller, digest = fleet
+    config['input_cache_bytes'] = 64*1024**2
+    first = submit(caller, digest)
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step() and caller.get(first['id'])['state'] == 'succeeded'
+        # Real HTTP authority remains live for claims/heartbeats/completion, but
+        # its source file is unavailable: only a verified cache hit can run.
+        second_spec = dict(caller.get(first['id'])['spec'], key='second')
+        second = caller.submit(second_spec)
+        (Path(store.path).parent/'objects'/digest).unlink()
+        worker.close()
+        worker = WorkloadWorker(config)  # Cache survives a supervisor restart.
+        assert worker.step() and caller.get(second['id'])['state'] == 'succeeded'
+        entries = json.loads((worker.input_cache.root/'index.json').read_text())
+        assert len(entries) == 1
+        assert sum(row['size'] for row in entries.values()) <= config['input_cache_bytes']
+        assert worker.journal.read() is None
+    finally:
+        worker.close()
+
+
+@pytest.mark.parametrize('retain,retention,expected', [(False,86400,'succeeded'), (True,1e-9,'queued'), (False,None,'queued')])
+def test_cache_pressure_respects_retained_inputs_and_disabled_deletion(fleet, tmp_path, retain, retention, expected):
+    _, config, caller, digest = fleet
+    config.update(input_cache_bytes=64*1024**2, input_cache_entries=1, input_cache_retention_seconds=retention)
+    first = caller.submit(dict(version=1,key='retained',handler='native.v1',input_digest=digest,retain=retain,
+        need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},payload={}))
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step() and caller.get(first['id'])['state'] == 'succeeded'
+        source = tmp_path/'new-input'
+        source.mkdir(); (source/'input').write_text('new captured source')
+        capture(source, ['input'], tmp_path/'new.tar')
+        newer = InputTransfer(caller).put(tmp_path/'new.tar')['digest']
+        second = caller.submit(dict(first['spec'],key='newer',input_digest=newer,retain=False))
+        assert worker.step() and caller.get(second['id'])['state'] == expected
+        entries = json.loads((worker.input_cache.root/'index.json').read_text())
+        assert len(entries) == 1
+        assert next(iter(entries.values()))['digest'] == (newer if expected == 'succeeded' else digest)
+        if expected == 'queued':
+            assert caller.get(second['id'])['result']['outcome'] == 'infrastructure'
+            caller.request('jobs/'+second['id']+'/cancel', {})
+    finally:
+        worker.close()
+
+
+def test_corrupted_cached_bytes_cannot_execute(fleet):
+    _, config, caller, digest = fleet
+    config['input_cache_bytes'] = 64*1024**2
+    first = submit(caller, digest)
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step() and caller.get(first['id'])['state'] == 'succeeded'
+        cache = worker.input_cache.root
+        key = next(iter(json.loads((cache/'index.json').read_text())))
+        # Keep the length intact, so a size-only cache check cannot catch this.
+        with (cache/key).open('r+b') as stream:
+            stream.write(b'corrupted')
+        second = caller.submit(dict(first['spec'],key='corrupt-cache'))
+        assert worker.step()
+        result = caller.get(second['id'])
+        assert result['state'] == 'queued' and result['result']['outcome'] == 'infrastructure'
+        assert result['result']['result']['artifacts'] == []
+        assert result['result']['result']['detail'] == 'cached source digest mismatch'
+        caller.request('jobs/'+second['id']+'/cancel', {})
+    finally:
+        worker.close()
+
+
 def test_cancel_running_job_reconciles_before_readvertising_capacity(fleet):
     store, config, caller, digest = fleet
     job = submit(caller, digest, sleep=120)

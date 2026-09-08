@@ -209,3 +209,27 @@ Second full job `b1e02a45dd394cfb99de15fe31691145`, attempt
 `49738f3cea184bc08dc65e39f8ba1008`, is running against the same accepted source
 bundle. This is a validation attempt, not a reported passing gate. Do not
 restart or replace it merely because an observation request times out.
+
+## Worker source cache
+
+`input_cache_bytes` enables an owner-scoped, SHA-256-verified archive cache on
+the worker's dedicated workspace filesystem. It is disabled unless configured.
+`input_cache_entries` is bounded to 1–32; metadata is bounded to 64 KiB and
+atomically fsynced. Misses reserve the maximum accepted transfer before writing
+staging bytes, so downloads cannot temporarily exceed the cache byte budget.
+Every hit verifies the complete archive digest before extraction.
+
+Idle worker steps prune expired entries after restart reconciliation; admission
+may evict least-recently-used unretained entries at capacity. `retain` is sticky
+per owner/digest. A null retention window disables eviction/expiry and a full
+cache refuses rather than deleting content. No pruning runs while an attempt
+uses its input. Crash leftovers are owned, uncommitted staging files and are
+reconciled separately. The dedicated filesystem remains the hard overall bound;
+cache use is automatically reflected in measured disk headroom.
+
+Real HTTP/systemd checks prove a second accepted job runs after the authority's
+source file is removed, including across supervisor restart; ordinary cache
+entries evict at pressure, retained entries do not, and a disabled deletion
+window refuses capacity. Corrupt cached bytes are refused before execution.
+The cache is not yet enabled on the production worker because its current full
+E2E validation attempt is still running. Image/build caches remain separate work.
