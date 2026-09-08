@@ -85,5 +85,23 @@ images. A real Win One 1 GiB fixture proved idempotency, mismatch refusal and
 ENOSPC at its bound, then was removed after verifying loop-device detachment.
 Win One now has its persistent 128 GiB worker filesystem mounted at
 `/var/lib/livestack-workloads/xc-win-1-wsl/workspace`. WSL reports also account for
-configured Windows backing filesystems and their free-space reserve. The
-authority/worker services and Benchday handlers are not deployed yet.
+configured Windows backing filesystems and their free-space reserve.
+
+## Enrollment deployment (2026-09-08)
+
+Livestack main is shipped through `2da5f8fb4ccc155cfc559351044bb3a19233d6b2`.
+The authority runs as the enabled user service `livestack-workload-authority`
+on xc-tower-ubuntu, bound only to `100.64.0.18:8810`, with a 32 GiB object cap.
+Win One runs the enabled user service `livestack-workload-worker`; user lingering
+and its root mount unit are enabled. Both services load the same immutable
+release directory under `~/.local/share/livestack-workload-releases/<commit>`.
+Credentials are private files under `~/.config/livestack-workloads`, outside git.
+
+The worker first reported fresh CPU/RAM/disk headroom in observe-only mode, then
+enabled only `harmony.probe.v1`. Job `adff3bf47b554490855d78a9b9935d68` was submitted
+from the tower and completed by `xc-win-1-wsl` after the submitting process exited.
+Its returned artifact proved the exact source manifest, attempt identity,
+0.1 CPU quota and 128 MiB memory cap. The real Win One workload/scheduler suite
+passed 68 checks; the subsequent configurable-quota authority CLI test passed
+locally. E2E/Docker and release handlers are not advertised; product integration
+and full Benchday gate/publish remain required.
