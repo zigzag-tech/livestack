@@ -6,7 +6,18 @@
     "footprint_gb": 18,
     "gpu_fraction": "0.85",
     "max_model_len": "16384",
-    "residency": "SOFT_PIN"
+    "residency": "SOFT_PIN",
+    "default": true,
+    "warm_on_start": true,
+    "extra_args": "--max-num-seqs 32 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml",
+    "attributes": {
+      "class": "llm",
+      "family": "qwen",
+      "params_b": 8,
+      "quant": "bf16",
+      "refusals": "stock",
+      "revision": "<pin the checkpoint hash the attributes describe>"
+    }
   },
   {
     "name": "llm_judge",
