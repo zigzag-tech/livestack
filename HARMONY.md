@@ -240,7 +240,20 @@ Two additions, both in `meters.py`:
 
 Both surface in `GET /residence` as `process_mem` and `leak`, so the condition is
 visible to the broker and to anyone reading a node — an hour after it starts
-rather than after a neighbour dies.
+rather than after a neighbour dies. `/fleet` passes them through per node,
+alongside `snapshot_age_s` — which ages the **snapshot**, not the roster: an
+announce refreshes `unseen_seconds` while the node itself has not been read
+since, and a reader that cannot tell them apart shows a wedged node's last
+residence as current.
+
+`meters.host_mem()` adds the third number: **system RAM**, and this process's
+RSS of it (`total_bytes` / `available_bytes` / `process_rss_bytes`, stdlib only —
+psutil when the process already has it, `/proc` on Linux, `vm_stat` + `ps` on
+macOS, memoised 2 s because `/residence` is polled). VRAM is what Harmony
+arbitrates; it is not all a node occupies, and a view built from device meters
+alone shows a machine as empty while it swaps. The MLX meter now also reports
+`unified: true`, because on Apple silicon those bytes ARE the host's RAM and a
+consumer that adds the two reports a machine with twice the memory it has.
 
 ### The lever: `POST /model/reclaim`
 
@@ -303,6 +316,11 @@ can only report health, which is not what anyone opens it to find out. `load` is
 absent when the node reports none, and absent means NO OPINION; a consumer that
 reads it as idle steers traffic at the node least able to serve.
 
+Per unit, `/fleet` says `resident` and `busy` — not just how many are resident.
+A count cannot answer the question the view exists to answer (what is on this
+card *right now*), and anything built on it can only draw a number where the
+models should be.
+
 `probe_ms` per node is an EWMA (0.7/0.3) of the wall-clock cost of the snapshot
 probe the broker already pays for — the cheapest possible distance signal.
 Measured 2026-09-05 from xc-tower-ubuntu: local nodes ~2 ms, xc-mac-studio
@@ -314,6 +332,52 @@ Live: `livestack-fleetd.service` on **xc-tower-ubuntu**, port 8801 (8799 is the
 local host broker, 8800 is buildd on zz-tower2). It is outside the GFW and
 reaches every node directly. Full design and phasing:
 `_plans/fleet-broker.md`.
+
+## The page — one screen that says where everything is
+
+Everything above is readable only as JSON. `GET /fleet` is complete and nobody
+holds five hosts, ten nodes, four cards and their resident sets in their head
+from it; the map of what is on which GPU right now got drawn by hand every time
+somebody wanted it. **`GET /`** on any broker draws it: a host broker draws the
+machine it arbitrates, the fleet broker draws every machine it can see.
+
+One self-contained HTML file (`node-py/livestack_node/ui.html`), no build step
+and no CDN — half this fleet is behind the GFW, where a page that fetches a
+framework renders blank, and a dashboard that needs a toolchain to change is one
+that rots. It polls `/fleet` every 5 s and offers **no lever**: no warm, no
+evict, no reclaim. One card, one master — a page that could preempt from a phone
+is a second one.
+
+What it draws, and why each choice is the honest one:
+
+- **Machines, then cards, then units.** The machine is the first half of the
+  DEVICE id — the hostname the card is in — and deliberately not `host_id`,
+  which is a name a node picks for itself: five processes on xc-tower-ubuntu
+  announce five of them (`-b`, `-gpu0`, `-gpu1`, `-bench`) and grouping by it
+  draws one machine as five.
+- **The bar is the card.** Segments are the resident units at their DECLARED
+  footprint — what the planner reserves — and free is what is left of the
+  capacity after them. A caret marks where the DRIVER says the used memory ends.
+  The two are routinely different (a footprint is a static estimate; a lazy
+  backend has not touched half of it), so the measured edge is drawn rather than
+  flagged: the first cut raised an amber warning on every card, which is how a
+  normal condition becomes an alarm nobody reads.
+- **Unattributed is its own block.** Measured used minus what the resident units
+  explain — another process on the card, or an allocator pool that was evicted
+  and never returned. That is the condition that took a card down on 2026-08-04,
+  and this is the only place it is visible at a glance.
+- **System RAM per machine**, with the part the Harmony nodes hold shaded
+  separately. A node is not only what it holds on a card, and a machine with no
+  card at all (a build host) holds nothing else. A machine whose nodes are too
+  old to report it says so — an absent number is never drawn as zero.
+- **An absence is a row.** A peer that cannot be read keeps its row with its
+  state, its age and its last error; a card no live node reports says "no node
+  on this device has been read" instead of showing a 0-byte GPU. When the broker
+  itself stops answering the page keeps the last view and ages it in place — a
+  blank page cannot be told apart from an empty fleet, and this page is opened
+  precisely when something is wrong.
+
+Live: `http://100.64.0.18:8801/` (the fleet broker) and `:8799` on each GPU host.
 
 ## Per-account fairness
 
@@ -406,6 +470,7 @@ Schema: `node-py/livestack_node/decision.schema.json`. Design:
 
 Broker (`hostd`, default `:8799`):
 
+- `GET /` → the fleet resource map, for a person (see "The page").
 - `POST /admit {"kind": "align"}` → `{granted, device_id, plan}` — make room *before* a load.
 - `GET /status` → per-node residence snapshot + last-evicted bookkeeping.
 - `GET /plan` → dry-run desired plan, no dispatch.

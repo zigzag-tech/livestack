@@ -192,6 +192,12 @@ def _load_report(coordinator, status, device_meter, in_flight_fn=None):
             free = int((mem.get("free") or {}).get("vram_bytes") or 0)
             if cap > 0:
                 report["device"] = {"capacity": cap, "free": free}
+                # Unified memory is the SAME bytes as the host's RAM. Dropping
+                # the flag here would leave every consumer of `load.device` to
+                # add a Mac's 30 GB device to its 36 GB host and report a
+                # machine with 66 GB.
+                if mem.get("unified"):
+                    report["device"]["unified"] = True
                 # Fraction of the device in use, measured at the driver, so it
                 # counts every process on the card and not just ours.
                 report["pressure"] = round(max(0.0, min(1.0, 1.0 - free / cap)), 4)
@@ -451,6 +457,17 @@ def build_router(manager, coordinator, capability: Capability,
                 leak = leak_signal(self_usage, resident_fp)
                 if leak:
                     out["leak"] = leak
+        except Exception:
+            pass
+        # System RAM, and this process's share of it. A node is not only what it
+        # holds on a card: an ASR server's buffers, an LLM's page tables and a
+        # CPU-only node's entire working set live here, and a reader with only
+        # `device_mem` sees a machine as empty while it swaps.
+        try:
+            from .meters import host_mem
+            hm = host_mem()
+            if hm:
+                out["host_mem"] = hm
         except Exception:
             pass
         return out
