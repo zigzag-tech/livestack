@@ -73,11 +73,34 @@ reports not-ready rather than falling back to a generic claim of fitness.
 
 Design record: `_plans/peer-membership.md`.
 
+### One process, reached twice, is one node
+
+A broker routinely holds the same server under two URLs: the localhost seed it
+starts with (`http://127.0.0.1:8766/livestack`) and the address the node
+announced (`http://100.64.0.18:8766/livestack`). It counted them as two. On
+xc-tower-ubuntu that made one polytts into two resident `voxcpm` and two polyasr
+into three `asr` — about 35 GB of declared units modelled on a 24 GB card, in
+the broker that decides what to evict. Every host that seeds localhost and also
+runs announcing nodes had it, and nothing said so until the map drew the card.
+
+`node_id` (`hostname:port`, from `attach()`) is the node saying WHICH PROCESS it
+is — `host_id` is a name it picks, `device_id` is the card it shares, and
+neither answers that. A peer whose `node_id` was already seen this snapshot is
+**aliased**, not pruned: it keeps its row with `alias_of`, because a seed is an
+operator saying this ought to exist and an absence must stay a row. The peer the
+NODE announced wins over the one an operator guessed. A node too old to report a
+`node_id` opts out — a broker must not invent an identity and drop a real node
+over a guess.
+
 ## Residency tiers & priority
 
 Residency tier (per unit, mirrors `livestack_node.manager.ResidencyPolicy`):
 
 - **HARD_PIN** — kept warm, never preempted, never the last replica evicted (ASR).
+  A tier is per NODE, and residency is per PROCESS: a second polyasr sharing one
+  card holds its own copy of the weights, so two HARD_PINs are two floors neither
+  of which may ever be preempted. The primary keeps the floor; a replica sets
+  `POLYASR_ASR_RESIDENCY=unpinned` (or `soft_pin`) and earns its residence.
 - **SOFT_PIN** — preferred-warm but preemptible under pressure; restored with
   hysteresis once pressure settles (TTS / voxcpm).
 - **UNPINNED** — pure demand residence; first evicted, last restored (chipgen).

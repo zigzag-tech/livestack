@@ -194,8 +194,18 @@ class HostBroker:
         # peer -> what that peer reported about itself last snapshot (which units
         # are resident and busy, its process/host memory), stamped with when.
         self.peer_report: Dict[str, dict] = {}
+        # peer -> the peer it turned out to be the same process as.
+        self.peer_alias: Dict[str, str] = {}
         for p in self.peers:
             self.roster.seed(peer_key(p))
+
+    def _probe_order(self, peer):
+        """Registered peers before seeded ones. The node's own announced address
+        is a fact; a seed is an operator's guess at the same thing, and when the
+        two turn out to be one process the fact should be the row that survives."""
+        key = peer_key(peer)
+        rec = self.roster._records.get(key)
+        return (0 if rec is not None and rec.source != "seed" else 1, key)
 
     def _resolve_devices(self, discovered: dict,
                          measured_caps: Optional[Mapping[str, Mapping[str, float]]] = None) -> list:
@@ -384,6 +394,9 @@ class HostBroker:
             ms = self.probe_ms.get(row["peer"])
             if ms is not None:
                 row["probe_ms"] = round(ms, 1)
+            alias = self.peer_alias.get(row["peer"])
+            if alias:
+                row["alias_of"] = alias
         return out
 
     def sweep_leaks(self, now: Optional[float] = None) -> list:
@@ -449,7 +462,13 @@ class HostBroker:
         discovered: Dict[str, str] = {}     # device_id -> host_id (federated discovery)
         measured: Dict[str, Dict[str, float]] = {}        # device_id -> measured free
         measured_caps: Dict[str, Dict[str, float]] = {}   # device_id -> measured capacity
-        for p in self.peers:
+        # Registered peers first, so de-duplication below is deterministic AND
+        # keeps the address the node itself announced over an operator's guess at
+        # one. Iterating self.peers in list order would let a localhost seed win
+        # on one host and lose on the next.
+        seen_nodes: Dict[str, str] = {}
+        self.peer_alias = {}
+        for p in sorted(self.peers, key=self._probe_order):
             key = peer_key(p)
             # Backoff: a peer already known absent is probed on the roster's slow
             # cadence, not on every reconcile tick. This is what makes holding a
@@ -477,6 +496,29 @@ class HostBroker:
                 continue
             self._record_probe_ms(key, (time.monotonic() - probe_started) * 1000.0)
             self.roster.mark_seen(key)
+            # THE SAME SERVER, REACHED TWICE. A broker seeded with
+            # http://127.0.0.1:8766 and announced to as http://100.64.0.18:8766
+            # holds two peers for one process, and counted its units twice: one
+            # polytts became two resident voxcpm, two polyasr became three asr,
+            # and the planner modelled 35 GB of units on a 24 GB card (measured
+            # 2026-09-08 on xc-tower-ubuntu, where it had been true for days).
+            # Every host that seeds localhost AND runs announcing nodes had it.
+            #
+            # The duplicate is ALIASED, not pruned: a seed is an operator saying
+            # this ought to exist, and the roster's rule is that an absence stays
+            # a row. It keeps its row with `alias_of`; it just stops being
+            # counted as a second machine's worth of memory.
+            nid = None
+            try:
+                nid = p.node_id
+            except Exception:
+                pass                      # a Peer need not report one
+            if nid:
+                first = seen_nodes.get(nid)
+                if first is not None and first != key:
+                    self.peer_alias[key] = first
+                    continue
+                seen_nodes[nid] = key
             for kind, unit in peer_units.items():
                 per_peer_units[(kind, key)] = unit
             placements.extend(peer_placements)
@@ -1032,6 +1074,12 @@ class RestPeer:
     @property
     def device_id(self):
         return self._s()["device_id"]
+
+    @property
+    def node_id(self):
+        """Which PROCESS this is — hostname:port, as the node states it. None on
+        a node too old to say, which simply opts out of de-duplication."""
+        return (self._s() or {}).get("node_id")
 
     def units(self):
         snap = self.refresh()

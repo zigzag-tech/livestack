@@ -375,7 +375,7 @@ class _FleetPeer:
 
     def __init__(self, base, host="h", device="h/gpu0", kind="asr",
                  units_delay=0.0, ready=True, load=None, resident=True,
-                 busy=False, report=None):
+                 busy=False, report=None, node_id=None):
         self.base = base
         self.host_id = host
         self.device_id = device
@@ -388,6 +388,7 @@ class _FleetPeer:
         self.ready = ready
         self._load = load
         self.busy = busy
+        self.node_id = node_id
         self._report = report
         self.warmed, self.evicted = [], []
 
@@ -559,6 +560,58 @@ def test_a_peer_that_reports_nothing_about_itself_is_still_a_full_row():
     assert "host_mem" not in row and "process_mem" not in row
     assert row["units"][0]["resident"] is True
     assert "snapshot_age_s" in row
+
+
+def test_one_process_reached_twice_is_counted_once():
+    """A broker seeded with http://127.0.0.1:8766 and announced to as
+    http://100.64.0.18:8766 held TWO peers for ONE server and counted its units
+    twice: one polytts became two resident voxcpm, two polyasr became three asr,
+    and the planner modelled 35 GB of units on a 24 GB card. Measured on
+    xc-tower-ubuntu 2026-09-08, where it had been true for days."""
+    seed = _FleetPeer("http://127.0.0.1:8766/livestack", host="h", kind="asr",
+                      device="h/aaaa", node_id="h:8766")
+    announced = _FleetPeer("http://10.0.0.1:8766/livestack", host="h", kind="asr",
+                           device="h/aaaa", node_id="h:8766")
+    br = _fleet_broker([seed], dispatch=False)
+    br.register_peer(announced)          # the node reports for duty
+    world = br.snapshot([])
+
+    assert len(world.placements) == 1, "one process, one resident copy"
+    assert len(br.peer_units) == 1
+    # The address the NODE stated wins; the operator's guess becomes its alias.
+    assert br.peer_alias == {"http://127.0.0.1:8766/livestack":
+                             "http://10.0.0.1:8766/livestack"}
+    rows = {r["peer"]: r for r in br.membership_snapshot()}
+    assert rows["http://127.0.0.1:8766/livestack"]["alias_of"] == \
+        "http://10.0.0.1:8766/livestack"
+    # ...and it is still a ROW. A seed is an operator saying this ought to
+    # exist; aliasing it must not be a quiet way of pruning one.
+    assert len(rows) == 2
+
+
+def test_two_real_nodes_on_one_card_are_still_two():
+    """The de-duplication must not collapse the case it looks like: two polyasr
+    processes genuinely sharing card 0 are two nodes, two resident copies, and
+    two rows — which is exactly what the fleet map showed and what led here."""
+    a = _FleetPeer("http://h:8766/livestack", host="h", kind="asr",
+                   device="h/aaaa", node_id="h:8766")
+    b = _FleetPeer("http://h:8767/livestack", host="h-b", kind="asr",
+                   device="h/aaaa", node_id="h:8767")
+    br = _fleet_broker([a, b], dispatch=False)
+    world = br.snapshot([])
+
+    assert len(world.placements) == 2
+    assert br.peer_alias == {}
+
+
+def test_a_node_that_states_no_identity_is_not_de_duplicated():
+    """No node_id means no claim about which process this is, and a broker must
+    not invent one: a guess that two URLs are one server drops a real node."""
+    a = _FleetPeer("http://127.0.0.1:8766/livestack", host="h", device="h/aaaa")
+    b = _FleetPeer("http://10.0.0.1:8766/livestack", host="h", device="h/aaaa")
+    br = _fleet_broker([a, b], dispatch=False)
+    br.snapshot([])
+    assert br.peer_alias == {}
 
 
 def test_an_unreachable_peer_is_a_row_not_a_gap():
