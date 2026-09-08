@@ -161,6 +161,11 @@ def _unit_specs() -> "list[dict]":
             "max_model_len": str(spec.get("max_model_len", MAX_MODEL_LEN) or ""),
             "extra_args": shlex.split(spec.get("extra_args", "")) or EXTRA_ARGS,
             "residency": spec.get("residency"),
+            # Operator intent, kept OUT of `attributes` on purpose: these say
+            # which unit to pick and which to warm, not what a unit IS, and a
+            # caller must never be able to require them.
+            "default": bool(spec.get("default", False)),
+            "warm_on_start": bool(spec.get("warm_on_start", False)),
             # What this unit IS, for requests that state a requirement rather
             # than a name. Carried verbatim to the broker; the planner compares,
             # it never interprets.
@@ -172,6 +177,24 @@ def _unit_specs() -> "list[dict]":
 
 
 SPECS = {u["name"]: u for u in _unit_specs()}
+
+
+def _selection_rank(name: str) -> "tuple[int, str]":
+    """Stable order among units that ALL satisfy the same requirement.
+
+    Not declaration order. `next(n for n in SPECS ...)` made the answer to
+    "which unit serves an indifferent request?" depend on which line of
+    llm-units.json someone happened to type first: invisible in the config,
+    unmentioned in the docs, and silently different after a reformat. With two
+    interchangeable 27Bs declared, that decides which one every caller that
+    stated no preference gets.
+
+    An operator names the default explicitly with `"default": true`; everything
+    else falls back to the unit NAME, which is stable across edits. This only
+    ever breaks TIES — a requirement has already been applied before this runs,
+    so ranking can never hand back a unit that does not satisfy the request.
+    """
+    return (0 if SPECS[name].get("default") else 1, name)
 
 # coload=False means acquiring ONE unit evicts the others IN THIS PROCESS. That
 # is right for a node with a single model, and wrong the moment a node declares
@@ -481,12 +504,34 @@ if WARM_ON_START:
         # Give the facade a moment to bind before the first ensure, so the
         # load does not race attach's own startup bookkeeping.
         time.sleep(2)
-        try:
-            first = next(iter(SPECS))
-            manager.ensure(first)
-            print(f"[harmony-llm] warm-on-start: {first} resident", flush=True)
-        except Exception as e:
-            print(f"[harmony-llm] warm-on-start failed: {e}", flush=True)
+        # What is hot after a reboot is an OPERATOR decision and must not share
+        # a mechanism with request routing. `next(iter(SPECS))` warmed whichever
+        # unit was declared first, so reordering the config silently changed
+        # what a cold node comes back holding. Units opt in with
+        # `"warm_on_start": true`; absent any, the declared default; absent
+        # both, nothing is warmed and the reason is printed rather than guessed.
+        names = [n for n in sorted(SPECS, key=_selection_rank)
+                 if SPECS[n].get("warm_on_start")]
+        if not names:
+            names = [n for n in sorted(SPECS, key=_selection_rank)
+                     if SPECS[n].get("default")]
+        if not names:
+            print("[harmony-llm] warm-on-start: no unit declares warm_on_start "
+                  "or default — warming nothing", flush=True)
+            return
+        if len(names) > 1:
+            # This process owns ONE card. Warming two units that cannot coload
+            # is the eviction fight described at COLOAD, so say so out loud
+            # instead of letting them take turns unloading each other.
+            print(f"[harmony-llm] warm-on-start: {len(names)} units flagged "
+                  f"({', '.join(names)}) — they must fit this card together",
+                  flush=True)
+        for n in names:
+            try:
+                manager.ensure(n)
+                print(f"[harmony-llm] warm-on-start: {n} resident", flush=True)
+            except Exception as e:
+                print(f"[harmony-llm] warm-on-start failed for {n}: {e}", flush=True)
 
     threading.Thread(target=_warm_on_start, daemon=True).start()
 
@@ -845,7 +890,18 @@ async def proxy(path: str, request: Request):
     # decides, exactly as before. Placement authority is unchanged; what is
     # removed is asking permission for a placement that already happened.
     if requirement is not None:
-        local = next((n for n in SPECS
+        # POLICY (not an accident of the fix below): among units that satisfy
+        # the requirement, REUSE ONE THAT IS ALREADY RESIDENT. An eviction and
+        # reload of a 27B measured ~50.7 s on this node, and a caller that
+        # stated no preference between two interchangeable units has no basis
+        # to want that. Deliberately NOT a caller-settable `prefer`: the broker
+        # knows residency and transition cost, the caller does not, and a knob
+        # here would let one indifferent request cost everyone 50 s.
+        #
+        # Consequence worth stating: once an alternative is warm, indifferent
+        # traffic follows it and does not swap back. Only a HARD requirement
+        # that the resident unit fails will pay for a swap.
+        local = next((n for n in sorted(SPECS, key=_selection_rank)
                       if _local_satisfies(n, requirement)
                       and n in getattr(manager, "resident", ())
                       and _vllm_up(name=n)), None)
