@@ -152,7 +152,7 @@ class WorkloadWorker:
             self.journal.write(dict(assignment=assignment, phase='running'))
             self.executor.start(attempt, handler['argv'], root/'source', output, env=env,
                 cpu=need['cpu'], memory_bytes=need['memory_bytes'],
-                max_seconds=handler.get('max_seconds', 3600), lease_file=root/'lease',
+                max_seconds=handler.get('max_seconds', 3600), tasks=handler.get('max_tasks', 512), lease_file=root/'lease',
                 rootless_docker=handler.get('backend') == 'rootless-docker')
             last_report = time.monotonic()
             while True:
@@ -161,8 +161,10 @@ class WorkloadWorker:
                 result = self.executor.exit_result(output)
                 if result is not None:
                     code = result['exit_code']
+                    resources = result.get('resources', {})
+                    resource_failure = resources.get('oom_kill', 0) > 0 or resources.get('pids_max_events', 0) > 0
                     outcome = ('succeeded' if code == 0 else
-                        'infrastructure' if code in handler.get('infrastructure_exit_codes', []) or
+                        'infrastructure' if resource_failure or code in handler.get('infrastructure_exit_codes', []) or
                         (handler.get('backend') == 'rootless-docker' and code == 75) else 'product_failure')
                     completion = dict(outcome=outcome, result=result)
                     break
@@ -187,7 +189,7 @@ class WorkloadWorker:
                 raise
         try:
             artifacts = []
-            declared = handler.get('outputs', []) if completion['outcome'] != 'infrastructure' else []
+            declared = handler.get('outputs', []) if completion['outcome'] != 'infrastructure' else handler.get('infrastructure_outputs', [])
             for item in ['command.log', 'command.previous.log'] + declared:
                 relative_path(item)
                 path = output/item

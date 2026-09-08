@@ -68,10 +68,19 @@ def test_output_is_drained_but_storage_is_bounded(tmp_path, executor):
             'import sys; sys.stdout.write("x"*1000000); sys.exit(7)'],
             tmp_path, out, env=dict(os.environ), cpu=1, memory_bytes=128*1024**2, log_bytes=4096)
         result = until(lambda: executor.exit_result(out))
-        assert result == {'exit_code': 7}
+        assert result['exit_code'] == 7
+        assert result['resources']['pids_max_events'] == 0
+        assert result['resources']['cpu_usage_usec'] > 0
         assert sum(p.stat().st_size for p in out.glob('*.log')) <= 8192
     finally:
         executor.stop(attempt)
+
+
+@pytest.mark.parametrize('tasks', [0, .5, True, 8193])
+def test_task_budget_cannot_disable_or_escape_the_bound(tmp_path, executor, tasks):
+    with pytest.raises(WorkloadError):
+        executor.start(uuid.uuid4().hex, [sys.executable, '-c', 'pass'], tmp_path, tmp_path/'out',
+                       env=dict(os.environ), cpu=1, memory_bytes=128*1024**2, tasks=tasks)
 
 
 @pytest.mark.parametrize('close_output', [False, True])

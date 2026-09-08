@@ -12,6 +12,7 @@ import subprocess
 import sys
 import selectors
 import time
+from resource_usage import resource_usage
 
 
 def run(config_path):
@@ -57,7 +58,7 @@ def run(config_path):
         code = process.wait()
         temporary = output/'exit.tmp'
         with temporary.open('w') as result:
-            json.dump({'exit_code': code}, result)
+            json.dump({'exit_code': code, 'resources': resource_usage()}, result)
             result.flush()
             os.fsync(result.fileno())
         os.replace(temporary, output/'exit.json')
