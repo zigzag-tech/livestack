@@ -2,6 +2,7 @@
 import shutil
 
 from .model import WorkloadError
+from .blob_references import route_reference
 
 
 def attempt_owner(store, principal, headers, digest=None):
@@ -25,6 +26,8 @@ def attempt_owner(store, principal, headers, digest=None):
 
 
 def route_object(handler, principal, method, parts):
+    if route_reference(handler, principal, method, parts):
+        return True
     if len(parts) != 2 or parts[0] != 'objects':
         return False
     blobs, store = handler.server.blobs, handler.server.store

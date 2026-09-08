@@ -15,6 +15,7 @@ import time
 import uuid
 
 from .model import WorkloadError, name
+from .blob_references import REFERENCE_DDL
 
 
 class BlobStore:
@@ -40,6 +41,7 @@ class BlobStore:
                   owner TEXT NOT NULL, PRIMARY KEY(digest,owner)
                 );
             ''')
+            db.execute(REFERENCE_DDL)
 
     @staticmethod
     def digest(value):
@@ -140,6 +142,7 @@ class BlobStore:
             # Materialize the bounded reference set once, rather than walking
             # every attempt's JSON again for each object in the content store.
             rows = db.execute("WITH referenced(digest) AS MATERIALIZED ("
+                "SELECT value FROM blob_references, json_each(blob_references.digests) UNION "
                 "SELECT json_extract(spec,'$.input_digest') FROM jobs UNION "
                 "SELECT json_extract(artifact.value,'$.digest') FROM attempts, "
                 "json_each(attempts.result,'$.result.artifacts') artifact) "

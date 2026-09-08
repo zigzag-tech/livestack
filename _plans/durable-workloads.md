@@ -286,3 +286,31 @@ limits, and the accepted source manifest. Receipt digest:
 No OOM/task-limit events were reported; the journal was clear, no job units
 remained, and the render container retained its original start time. This is
 single-attempt runtime/cache proof, not a passing full E2E gate.
+
+### Named source references (implemented, not deployed)
+
+`GET/POST /v1/workloads/references/<name>` exposes caller/admin-owned retention
+roots for immutable inputs that are not yet referenced by a job. POST accepts
+exactly `digests` (at most 16 SHA-256 values) and `expected_revision`. Every
+object must already be ready and readable by that principal. Ownership and
+replacement run in the same SQLite transaction as the revision check; stale
+writes receive 409 and identical retries are inert. Worker principals cannot
+change references. Reads reveal only that principal's named root.
+
+The new `blob_references` table holds at most 1024 names globally. Each key is
+bounded by the existing 160-character name validator, each digest array by
+16 entries and a 2048-byte SQL check, and revisions by the safe-integer limit.
+Admission refuses at the name bound. Clearing a root writes an empty array and
+advances its revision, preserving the fence against old requests after reuse.
+Callers should reuse stable workflow names, not create a name per artifact.
+The existing object byte/count bounds still apply; retained content cannot be
+evicted to clear a capacity refusal. Blob pruning excludes the union of named
+roots and existing job/attempt references. Releasing one root never revokes
+another root or a job reference.
+
+Real SQLite/CAS/HTTP tests cover restart, pruning, independent release, owner
+and worker isolation, stale/duplicate updates, concurrent writers, atomic
+refusal, and the structural bounds. This generic primitive is not yet deployed
+or connected to Benchday's automatic publisher. That publisher must coordinate
+its hub publication and pending/current references before it can safely release
+superseded source inputs.
