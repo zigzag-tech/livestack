@@ -7,6 +7,7 @@ parented inside the same delegated attempt cgroup.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -37,6 +38,13 @@ class WorkloadWorker:
         if not self.handlers or any(h.get('backend', 'native') not in ('native', 'rootless-docker') for h in self.handlers.values()):
             raise WorkloadError('worker requires installed native or rootless-docker handlers')
         self.transfer = InputTransfer(self.client)
+        self.input_cache = None
+        if config.get('input_cache_bytes', 0):
+            from .input_cache import InputCache
+            cache_name = 'input-cache-'+hashlib.sha256(config['worker'].encode()).hexdigest()[:16]
+            self.input_cache = InputCache(self.workspace/cache_name, self.transfer,
+                max_bytes=config['input_cache_bytes'], max_entries=config.get('input_cache_entries', 32),
+                retention_seconds=config.get('input_cache_retention_seconds', 14*86400))
         self.reconciled = False
 
     def report(self):
@@ -107,6 +115,8 @@ class WorkloadWorker:
             self.reconciled = False
         if not self.reconciled:
             self.reconcile()
+        if self.input_cache:
+            self.input_cache.prune()
         response = self.register()
         if response['cleanup']:
             self.reconciled = False
@@ -136,9 +146,11 @@ class WorkloadWorker:
             need = spec['need']
             if need.get('cpu', 0) <= 0 or need.get('memory_bytes', 0) < 64*1024**2:
                 raise WorkloadError('native execution requires CPU and at least 64 MiB RAM')
-            bundle = self.transfer.get(spec['input_digest'], root/'input.tar', assignment=assignment)
+            bundle = (self.input_cache.get(assignment) if self.input_cache else
+                      self.transfer.get(spec['input_digest'], root/'input.tar', assignment=assignment))
             unpack(bundle, root/'source', spec['input_digest'])
-            bundle.unlink()
+            if not self.input_cache:
+                bundle.unlink()
             output.mkdir()
             (root/'request.json').write_text(encode(spec['payload']))
             env = dict(self.config.get('environment', {}))
@@ -178,6 +190,8 @@ class WorkloadWorker:
         except Exception as error:
             logging.warning('attempt %s stopped: %s', attempt, type(error).__name__)
             completion = dict(outcome='infrastructure', result={'error':type(error).__name__})
+            if isinstance(error, WorkloadError):
+                completion['result']['detail'] = str(error)[:512]
         finally:
             # Never acknowledge completion or cleanup while owned work survives.
             try:
