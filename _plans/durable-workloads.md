@@ -177,3 +177,24 @@ artifact SHA-256 is
 container remained running with start time `2026-09-08T01:33:09.570642946Z`.
 Persistent caches, train/release routing, shared co-resident accounting and
 the full Benchday test/publish gates remain required.
+
+## Process-budget evidence from the first full Benchday job
+
+Job `c25019d6a8b24599bd537c0d51be7457` built its cold private image and
+started real E2E assertions. It ended when runc could not spawn another process;
+the harness reported assertion-phase failure plus unclean teardown. The fixed
+512-task default was a likely constraint, but the old cgroup was already gone
+before its pids counter was read. Recorded memory counters showed zero OOM
+kills, about 2 GiB anonymous memory and 6 GiB file cache at the 8 GiB cap.
+The worker stopped its cgroup and cleaned the workspace; the host render
+container retained its original start time.
+
+Installed handlers now specify `max_tasks` (default 512, integer 1–8192).
+The bounded wrapper records fixed-size cgroup CPU usage, peak memory, peak
+process count where supported, OOM kills and pids-limit events before exiting.
+A nonzero exit with a resource-limit event is infrastructure, not product
+failure. These counters use the existing bounded execution receipt/job store.
+`infrastructure_outputs` explicitly retains handler diagnostics for such failures.
+A real 12-task test proves refusal, kernel evidence, cleanup, retained artifact
+and the existing bounded infrastructure retry path. Benchday separately treats
+unclean harness teardown as infrastructure, irrespective of the assertion phase.

@@ -85,6 +85,42 @@ def test_worker_executes_pinned_input_and_returns_owned_artifact(fleet, tmp_path
         worker.close()
 
 
+def test_task_exhaustion_is_infrastructure_with_a_kernel_receipt(fleet, tmp_path):
+    _, config, caller, digest = fleet
+    script = Path(config['handlers']['native.v1']['argv'][1])
+    script.write_text('''import os,subprocess
+from pathlib import Path
+children=[]
+code=0
+try:
+    for _ in range(32):
+        children.append(subprocess.Popen(['sleep','10']))
+except BlockingIOError:
+    code=7
+    Path(os.environ['HARMONY_OUTPUT'],'artifact').write_text('task budget reached')
+finally:
+    for child in children: child.terminate()
+    for child in children: child.wait()
+raise SystemExit(code)
+''')
+    config['handlers']['native.v1'].update(max_tasks=12, infrastructure_outputs=['artifact'])
+    job = submit(caller, digest)
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        assert result['state'] == 'queued' and result['reason'] == 'infrastructure retry'
+        assert result['result']['outcome'] == 'infrastructure'
+        detail = result['result']['result']
+        assert detail['exit_code'] == 7 and detail['resources']['pids_max_events'] > 0
+        artifact = next(a for a in detail['artifacts'] if a['name'] == 'artifact')
+        assert InputTransfer(caller).get(artifact['digest'], tmp_path/'receipt').read_text() == 'task budget reached'
+        assert worker.journal.read() is None
+        caller.request('jobs/'+job['id']+'/cancel', {})
+    finally:
+        worker.close()
+
+
 def test_cancel_running_job_reconciles_before_readvertising_capacity(fleet):
     store, config, caller, digest = fleet
     job = submit(caller, digest, sleep=120)

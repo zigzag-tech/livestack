@@ -89,6 +89,8 @@ class SystemdExecutor:
         for value in (cpu, memory_bytes, max_seconds, tasks, log_bytes):
             if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
                 raise WorkloadError('execution limits must be positive and finite')
+        if not isinstance(tasks, int) or not 1 <= tasks <= 8192:
+            raise WorkloadError('task limit must be an integer from 1 to 8192')
         if not argv or not Path(argv[0]).is_absolute():
             raise WorkloadError('installed handler must name an absolute executable')
         if self.inspect(attempt_id).get('LoadState') != 'not-found':
