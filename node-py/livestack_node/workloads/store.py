@@ -218,6 +218,8 @@ class WorkloadStore:
                 return job  # Idempotent acknowledgement, including infrastructure retry.
             if a["state"] != "running" or job["fence"] != fence or job["state"] != "running":
                 raise WorkloadError("attempt has been fenced", 409)
+            from .artifacts import validate_artifacts
+            validate_artifacts(db, job['owner'], result)
             # complete is sent only AFTER owned processes/containers are stopped.
             db.execute("UPDATE attempts SET state='ended',result=? WHERE id=?", (raw, attempt_id))
             state = "succeeded" if outcome == "succeeded" else "failed"

@@ -60,3 +60,12 @@ probes passed on xc-win-1 WSL through ubuntu@100.64.0.1:2222. The render contain
 was left running. This is foundation evidence, not worker enrollment: Docker
 container ownership, filesystem bounds, the persistent worker service and product
 adapters are still required before production handlers may be advertised.
+
+Completion results may name up to 128 artifacts as `{name, digest, size}`.
+The completion transaction verifies each object is ready, owned by the job's
+principal and has the declared size, and rejects duplicate names. Retention
+protects output references from every attempt, including infrastructure attempts
+preceding a successful retry. Job retention and its explicit exemptions control
+when these references can be released. The blob sweep materializes this bounded
+reference set once per sweep. Real SQLite/blob tests verify both preservation
+and eventual removal, and reject missing, foreign and mismatched artifacts.
