@@ -31,7 +31,11 @@ def place(db, now, limits):
         previous = host_free.get(w["host"])
         host_free[w["host"]] = free if previous is None else {
             k: min(previous.get(k, 0), free.get(k, 0)) for k in previous.keys() | free.keys()}
-    for row in db.execute("SELECT * FROM jobs WHERE state='queued' ORDER BY created,id").fetchall():
+    # Priority is caller intent, while Harmony still owns capability/resource
+    # admission and the final worker choice. Legacy persisted specs omit the
+    # field and retain their original priority-zero FIFO behavior.
+    for row in db.execute("SELECT * FROM jobs WHERE state='queued' "
+                          "ORDER BY COALESCE(json_extract(spec,'$.priority'),0) DESC, created, id").fetchall():
         spec = json.loads(row["spec"])
         targets = []
         rejected = []
