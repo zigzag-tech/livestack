@@ -14,7 +14,7 @@ import uuid
 
 from .model import Limits, WorkloadError, encode, identity, labels, name, resources, submission
 
-TERMINAL = ("succeeded", "failed", "cancelled")
+TERMINAL = ("succeeded", "failed", "cancelled", "expired")
 
 
 class WorkloadStore:
@@ -248,13 +248,23 @@ class WorkloadStore:
                    (state, reason, now, attempt["job"], attempt["fence"]))
 
     def _expire(self, db, now):
+        for job in list(db.execute("SELECT id,spec,state FROM jobs WHERE state IN ('queued','running')")):
+            deadline = json.loads(job["spec"]).get("deadline")
+            if deadline is None or deadline > now:
+                continue
+            if job["state"] == "running":
+                db.execute("UPDATE attempts SET state='cleanup' WHERE job=? AND state='running'", (job["id"],))
+                db.execute("UPDATE workers SET ready=0 WHERE id IN "
+                           "(SELECT worker FROM attempts WHERE job=? AND state='cleanup')", (job["id"],))
+            db.execute("UPDATE jobs SET state='expired',reason='execution deadline expired',updated=? "
+                       "WHERE id=? AND state IN ('queued','running')", (now, job["id"]))
         for a in list(db.execute("SELECT * FROM attempts WHERE state='running' AND expires<=?", (now,))):
             self._abandon(db, a, now, "execution lease expired")
 
     def _prune(self, db, now):
         if self.limits.terminal_seconds is None:
             return  # Missing destructive window fails closed; submission still enforces a hard cap.
-        rows = db.execute("SELECT id,updated,retain FROM jobs WHERE state IN ('succeeded','failed','cancelled') "
+        rows = db.execute("SELECT id,updated,retain FROM jobs WHERE state IN ('succeeded','failed','cancelled','expired') "
                           "AND NOT EXISTS (SELECT 1 FROM attempts WHERE job=jobs.id AND state IN ('running','cleanup')) "
                           "ORDER BY updated DESC").fetchall()
         for index, row in enumerate(rows):

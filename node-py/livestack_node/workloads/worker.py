@@ -38,13 +38,17 @@ class WorkloadWorker:
         if not self.handlers or any(h.get('backend', 'native') not in ('native', 'rootless-docker') for h in self.handlers.values()):
             raise WorkloadError('worker requires installed native or rootless-docker handlers')
         self.transfer = InputTransfer(self.client)
+        mirror = None
+        if config.get('input_mirror') is not None:
+            from .input_mirror import InstalledInputMirror
+            mirror = InstalledInputMirror(config['input_mirror'])
         self.input_cache = None
         if config.get('input_cache_bytes', 0):
             from .input_cache import InputCache
             cache_name = 'input-cache-'+hashlib.sha256(config['worker'].encode()).hexdigest()[:16]
             self.input_cache = InputCache(self.workspace/cache_name, self.transfer,
                 max_bytes=config['input_cache_bytes'], max_entries=config.get('input_cache_entries', 32),
-                retention_seconds=config.get('input_cache_retention_seconds', 14*86400))
+                retention_seconds=config.get('input_cache_retention_seconds', 14*86400), mirror=mirror)
         self.reconciled = False
 
     def report(self):

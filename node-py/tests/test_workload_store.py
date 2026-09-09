@@ -107,6 +107,26 @@ def test_expiry_fences_results_and_retains_capacity_until_cleanup(harness):
     assert store.get('owner', job['id'])['fence'] == 2
 
 
+def test_job_deadline_expires_queued_and_fences_running_work(harness):
+    store, now, _ = harness
+    queued = store.submit('owner', request('queued-deadline', deadline=now[0] + 5))
+    now[0] += 6
+    assert store.get('owner', queued['id'])['state'] == 'expired'
+    assert store.get('owner', queued['id'])['reason'] == 'execution deadline expired'
+
+    register(store)
+    running = store.submit('owner', request('running-deadline', deadline=now[0] + 4000))
+    attempt = store.claim('w1', 'boot1')
+    assert attempt['job_id'] == running['id']
+    now[0] += 4001
+    assert store.get('owner', running['id'])['state'] == 'expired'
+    with pytest.raises(WorkloadError, match='fenced'):
+        complete(store, attempt)
+    report = register(store)
+    assert not report['ready']
+    assert report['cleanup'] == [attempt['attempt_id']]
+
+
 def test_worker_boot_change_does_not_free_owned_processes(harness):
     store, _, _ = harness
     register(store)
