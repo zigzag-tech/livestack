@@ -1,7 +1,6 @@
 """Bounded source/artifact transfer over the same authenticated control plane."""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +11,7 @@ import urllib.request
 from .archive import file_digest
 from .blobs import BlobStore
 from .model import WorkloadError
+from .download import download_into
 
 
 class InputTransfer:
@@ -55,25 +55,10 @@ class InputTransfer:
             if file_digest(destination) == digest:
                 return destination
             raise WorkloadError('cached object has wrong digest', 409)
-        request = urllib.request.Request(self.client.url+'objects/'+digest, headers=self.headers(assignment))
         fd, temporary = tempfile.mkstemp(prefix='.download-', dir=destination.parent)
         try:
-            with os.fdopen(fd, 'wb') as out, urllib.request.urlopen(request, timeout=self.client.timeout) as response:
-                size = int(response.headers.get('Content-Length', '-1'))
-                if not 0 <= size <= self.max_bytes:
-                    raise WorkloadError('download byte limit exceeded', 413)
-                count, hasher = 0, hashlib.sha256()
-                while True:
-                    chunk = response.read(min(1024*1024, self.max_bytes-count+1))
-                    if not chunk:
-                        break
-                    count += len(chunk)
-                    if count > size or count > self.max_bytes:
-                        raise WorkloadError('download exceeds declared size', 413)
-                    out.write(chunk)
-                    hasher.update(chunk)
-                if count != size or hasher.hexdigest() != digest:
-                    raise WorkloadError('download content does not match its identity', 409)
+            with os.fdopen(fd, 'wb') as out:
+                download_into(self.client, digest, self.headers(assignment), out, self.max_bytes)
                 out.flush()
                 os.fsync(out.fileno())
             os.replace(temporary, destination)
