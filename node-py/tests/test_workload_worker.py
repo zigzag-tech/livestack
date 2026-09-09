@@ -222,9 +222,11 @@ digest,source=sys.argv[2:]
 shutil.copyfile(source,pathlib.Path(sys.argv[1],digest))
 ''')
     config['output_mirror'] = {'argv':[sys.executable,str(uploader),str(mirror)],'max_seconds':5}
+    config['transfer_timeout'] = 90
     first = submit(caller, digest)
     worker = WorkloadWorker(config)
     try:
+        assert worker.client.timeout == 15 and worker.transfer.client.timeout == 90
         assert worker.step() and caller.get(first['id'])['state'] == 'succeeded'
         result = caller.get(first['id'])['result']['result']
         artifact = next(a for a in result['artifacts'] if a['name'] == 'artifact')
