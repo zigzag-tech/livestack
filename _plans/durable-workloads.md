@@ -287,7 +287,7 @@ No OOM/task-limit events were reported; the journal was clear, no job units
 remained, and the render container retained its original start time. This is
 single-attempt runtime/cache proof, not a passing full E2E gate.
 
-### Named source references (implemented, not deployed)
+### Named source references (authority deployed; product rollout pending)
 
 `GET/POST /v1/workloads/references/<name>` exposes caller/admin-owned retention
 roots for immutable inputs that are not yet referenced by a job. POST accepts
@@ -310,7 +310,28 @@ another root or a job reference.
 
 Real SQLite/CAS/HTTP tests cover restart, pruning, independent release, owner
 and worker isolation, stale/duplicate updates, concurrent writers, atomic
-refusal, and the structural bounds. This generic primitive is not yet deployed
-or connected to Benchday's automatic publisher. That publisher must coordinate
+refusal, and the structural bounds. The authority deployment is verified below; the Benchday publisher integration
+still awaits product rollout. That publisher must coordinate
 its hub publication and pending/current references before it can safely release
 superseded source inputs.
+
+Named-reference authority runtime `d87579ea72e92ec17632e66c120039e3d0c13758`
+was deployed on xc-tower-ubuntu at 2026-09-08 20:20:44 EDT. The authority
+restarted as PID 46130 with zero service restarts; Win One re-registered ready
+with a heartbeat age of 2.7 seconds. All eight existing jobs remained terminal
+and there were no unfinished attempts. The consistent pre-upgrade SQLite
+backup is 81,920 bytes, private, at the authority state's fixed
+`before-reference-api.sqlite` path. Installation refused while any job/attempt
+was live and capped retained runtime directories at three, the archive at
+64 MiB, and this backup at 128 MiB.
+
+The first broad archive extraction refused a tracked virtualenv's absolute
+symlink before touching the service. Deployment instead extracted only the
+committed `node-py/livestack_node` package with the tar data filter and a
+completion marker. The never-activated partial extraction was removed.
+The live reference API returned an empty integration root, and a legitimate
+retain/read/release cycle for source
+`a989f7d311c98ce0bc3acf7891b82094bdab67ba805e23715dfd43489167d27f`
+completed on the separate stable `benchday.authority-rollout` root. It is now
+empty at revision 2. No E2E job was launched for this rollout; the Benchday hub
+integration and source publisher are not yet deployed.
