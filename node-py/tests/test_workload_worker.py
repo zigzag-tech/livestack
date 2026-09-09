@@ -212,6 +212,31 @@ shutil.copyfile(source,sys.argv[3])
         worker.close()
 
 
+def test_worker_mirrors_outputs_by_digest_without_making_cache_availability_authoritative(fleet, tmp_path, monkeypatch):
+    monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (0, 0, 0))
+    _, config, caller, digest = fleet
+    mirror = tmp_path/'output-mirror'; mirror.mkdir()
+    uploader = tmp_path/'upload-mirror.py'
+    uploader.write_text('''import pathlib,shutil,sys
+digest,source=sys.argv[2:]
+shutil.copyfile(source,pathlib.Path(sys.argv[1],digest))
+''')
+    config['output_mirror'] = {'argv':[sys.executable,str(uploader),str(mirror)],'max_seconds':5}
+    first = submit(caller, digest)
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step() and caller.get(first['id'])['state'] == 'succeeded'
+        result = caller.get(first['id'])['result']['result']
+        artifact = next(a for a in result['artifacts'] if a['name'] == 'artifact')
+        mirrored = mirror/artifact['digest']
+        assert mirrored.read_text() == 'captured bytes'
+        uploader.write_text('raise SystemExit(75)\n')
+        second = caller.submit(dict(first['spec'], key='mirror-cache-outage'))
+        assert worker.step() and caller.get(second['id'])['state'] == 'succeeded'
+    finally:
+        worker.close()
+
+
 @pytest.mark.parametrize('retain,retention,expected', [(False,86400,'succeeded'), (True,1e-9,'queued'), (False,None,'queued')])
 def test_cache_pressure_respects_retained_inputs_and_disabled_deletion(fleet, tmp_path, retain, retention, expected):
     _, config, caller, digest = fleet
