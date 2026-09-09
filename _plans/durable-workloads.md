@@ -348,3 +348,15 @@ Authorization is rechecked for every range, including current attempt fences.
 Do not append a JSON response after binary headers have been sent. Range
 support alone is not a recovered worker download; deploy and prove the complete
 client/server path before claiming remote execution reliability.
+
+Client resume implementation: `InputTransfer.get` retains only bytes actually
+written to its private temporary file during the same call, resuming with
+explicit ranges after a connection failure. Range offsets, lengths, total
+size and optional ETag are validated before accepting data; the complete
+SHA-256 still gates destination rename. Initial ordinary GET preserves empty
+object and legacy-authority compatibility; an old authority ignoring a
+nonzero resume is refused. Bounds: 4 MiB resumed ranges, 64 KiB read buffers,
+eight total transient failures (progress does not reset this), one hour total,
+and ceil(max_bytes/4 MiB)+9 HTTP requests. Each failure backs off at most two
+seconds. Authorization/identity errors are terminal, and the existing finally
+cleanup removes partial files on failure. Deployment remains pending.
