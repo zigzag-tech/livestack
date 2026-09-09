@@ -144,6 +144,8 @@ class BlobStore:
             rows = db.execute("WITH referenced(digest) AS MATERIALIZED ("
                 "SELECT value FROM blob_references, json_each(blob_references.digests) UNION "
                 "SELECT json_extract(spec,'$.input_digest') FROM jobs UNION "
+                "SELECT json_extract(input.value,'$.digest') FROM jobs, "
+                "json_each(jobs.spec,'$.input_objects') input UNION "
                 "SELECT json_extract(artifact.value,'$.digest') FROM attempts, "
                 "json_each(attempts.result,'$.result.artifacts') artifact) "
                 "SELECT digest FROM blobs WHERE state='ready' AND used<? "
