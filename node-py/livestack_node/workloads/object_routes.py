@@ -21,7 +21,8 @@ def attempt_owner(store, principal, headers, digest=None):
         if not a:
             raise WorkloadError('attempt authorization expired', 409)
         job = store._job(db, a['job'])
-        if digest is not None and job['spec']['input_digest'] != digest:
+        inputs = {job['spec']['input_digest'], *(item['digest'] for item in job['spec'].get('input_objects', []))}
+        if digest is not None and digest not in inputs:
             raise WorkloadError('content is not an input of this attempt', 403)
         return job['owner']
 

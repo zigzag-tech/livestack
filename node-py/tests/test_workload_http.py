@@ -50,6 +50,23 @@ def test_auth_handler_allowlist_and_owner_isolation(api):
     assert api('worker/claim', {'boot': 'boot'})[0] == 403
 
 
+def test_version_two_inputs_require_owned_exact_objects(api):
+    primary = hashlib.sha256(b'input fixture').hexdigest()
+    missing = hashlib.sha256(b'missing').hexdigest()
+    base = dict(version=2, key='multi', handler='test.v1', input_digest=primary,
+                input_objects=[{'name':'web/web.tar.gz','digest':missing,'size':7}], need={'cpu':1})
+    assert api('jobs', base)[0] == 404
+    # The primary object exists for Alice but is not owned by Bob.
+    assert api('jobs', dict(base, key='foreign', input_objects=[
+        {'name':'copy','digest':primary,'size':len(b'input fixture')}]), token='b'*32)[0] == 404
+    assert api('jobs', dict(base, key='wrong-size', input_objects=[
+        {'name':'copy','digest':primary,'size':1}]))[0] == 400
+    status, job = api('jobs', dict(base, input_objects=[
+        {'name':'copy','digest':primary,'size':len(b'input fixture')}]))
+    assert status == 200 and job['spec']['version'] == 2
+    assert job['spec']['input_objects'][0]['name'] == 'copy'
+
+
 def test_worker_identity_is_bound_to_credential_and_result_is_fenced(api):
     spec = dict(version=1, key='request1', handler='test.v1', input_digest=hashlib.sha256(b'input fixture').hexdigest(), need={'cpu': 1})
     _, job = api('jobs', spec)

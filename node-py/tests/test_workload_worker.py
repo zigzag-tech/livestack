@@ -33,7 +33,10 @@ def fleet(tmp_path):
 from pathlib import Path
 request=json.loads(Path(os.environ['HARMONY_REQUEST']).read_text())
 time.sleep(request.get('sleep',0))
-Path(os.environ['HARMONY_OUTPUT'],'artifact').write_text(Path('input').read_text())
+value=Path('input').read_text()
+if request.get('object'):
+    value+='|'+Path(os.environ['HARMONY_INPUT_OBJECTS'],request['object']).read_text()
+Path(os.environ['HARMONY_OUTPUT'],'artifact').write_text(value)
 print('finished')
 raise SystemExit(request.get('exit',0))
 ''')
@@ -81,6 +84,28 @@ def test_worker_executes_pinned_input_and_returns_owned_artifact(fleet, tmp_path
         assert worker.journal.read() is None
         assert list(Path(config['workspace']).iterdir()) == []
         assert not worker.step()  # Product failure was not retried.
+    finally:
+        worker.close()
+
+
+def test_worker_fetches_only_declared_supplemental_inputs(fleet, tmp_path, monkeypatch):
+    monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (0, 0, 0))
+    _, config, caller, digest = fleet
+    extra = tmp_path/'component.bin'; extra.write_text('accepted component bytes')
+    uploaded = InputTransfer(caller).put(extra)
+    job = caller.submit(dict(version=2,key='multi',handler='native.v1',input_digest=digest,
+        input_objects=[{'name':'components/component.bin',**uploaded}],
+        need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
+        payload={'object':'components/component.bin'}))
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        assert result['state'] == 'succeeded'
+        artifact = next(a for a in result['result']['result']['artifacts'] if a['name'] == 'artifact')
+        returned = InputTransfer(caller).get(artifact['digest'], tmp_path/'multi-result')
+        assert returned.read_text() == 'captured bytes|accepted component bytes'
+        assert list(Path(config['workspace']).iterdir()) == []
     finally:
         worker.close()
 
