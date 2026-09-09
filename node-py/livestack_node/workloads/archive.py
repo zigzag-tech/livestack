@@ -6,7 +6,8 @@ into credentials, mutable external checkouts or runtime state.
 """
 from __future__ import annotations
 
-from contextlib import closing
+from contextlib import closing, ExitStack
+import gzip
 import hashlib
 import json
 import os
@@ -38,13 +39,15 @@ def file_digest(path):
     return h.hexdigest()
 
 
-def capture(root, paths, output, *, provenance=None, max_bytes=2*1024**3, max_files=50000):
+def capture(root, paths, output, *, provenance=None, max_bytes=2*1024**3, max_files=50000, compression="none"):
     """Capture an explicit file set and reject a changing source during capture.
 
     The adapter must capture the complete dependency closure and enumerate it
     again after capture if its selection may change (new/deleted source paths).
     A source that changes during capture is retried by the caller, never mixed.
     """
+    if compression not in ("none", "gzip"):
+        raise WorkloadError("unsupported source compression")
     root = Path(root).resolve()
     names = sorted(set(paths))
     if not names or len(names) > max_files or MANIFEST in names:
@@ -84,7 +87,14 @@ def capture(root, paths, output, *, provenance=None, max_bytes=2*1024**3, max_fi
         (stage/MANIFEST).write_bytes(raw)
         temp = Path(staging)/'bundle.tar'
         modes = {r['path']: r['mode'] for r in records}
-        with tarfile.open(temp, 'w', format=tarfile.PAX_FORMAT) as archive:
+        with ExitStack() as stack:
+            raw = stack.enter_context(temp.open('wb'))
+            # No filename/timestamp in gzip headers: equal captured bytes yield
+            # equal CAS identities across hosts and retries. Raw stays default
+            # until every eligible worker understands compressed inputs.
+            stream = (stack.enter_context(gzip.GzipFile(filename='', mode='wb',
+                      fileobj=raw, compresslevel=3, mtime=0)) if compression == 'gzip' else raw)
+            archive = stack.enter_context(tarfile.open(fileobj=stream, mode='w', format=tarfile.PAX_FORMAT))
             for item in [MANIFEST] + names:
                 path = stage/item
                 info = tarfile.TarInfo(item)
@@ -111,7 +121,9 @@ def unpack(bundle, destination, expected_digest, *, max_bytes=20*1024**3, max_fi
     with tempfile.TemporaryDirectory(prefix='.unpack-', dir=destination.parent) as tmp:
         stage, count, total, seen = Path(tmp)/'tree', 0, 0, set()
         stage.mkdir()
-        with tarfile.open(bundle, 'r:') as archive:
+        with bundle.open('rb') as header:
+            compressed = header.read(2) == b'\x1f\x8b'
+        with tarfile.open(bundle, 'r:gz' if compressed else 'r:') as archive:
             for member in archive:
                 rel = relative_path(member.name)
                 if not member.isfile() or member.name in seen:

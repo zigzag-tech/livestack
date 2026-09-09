@@ -392,3 +392,17 @@ with the 1 MiB sendall writes. 64 KiB writes also failed that test; 16 KiB write
 completed the whole 2 MiB response. The same deadline remains in place. Seven
 real slow-reader/range/resume/transfer checks pass after the change. Authority
 rollout and a completed cross-continent transfer are still required.
+
+### Optional compressed source transport (2026-09-08)
+
+`archive.capture(..., compression='gzip')` now produces deterministic gzip/tar
+bundles (empty gzip filename, zero timestamp, fixed compression level). Raw tar
+remains the default until eligible workers are upgraded. `unpack` accepts both,
+verifies the encoded blob digest first, and preserves expanded-byte/file/mode
+and path bounds. Eight real archive tests pass, including compressed replay,
+legacy extraction, expanded-size refusal and transport-header tampering.
+Measured against the live 229,048,320-byte Benchday input, gzip level 3 produced
+105,261,452 bytes in 4.75 seconds locally. This is a compression measurement,
+not a completed China transfer or throughput guarantee. The active raw input
+job remains untouched; deploy decoder support before enabling compression in
+publishers. No worker is advertising compressed-input support yet.
