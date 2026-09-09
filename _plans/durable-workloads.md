@@ -31,6 +31,12 @@ and a private staging path; its output is byte-capped, SHA-256 verified, fsynced
 and atomically installed. Failure falls back to the attempt-scoped authority path.
 Jobs cannot select the program, credentials, or mirror endpoint.
 
+An accepted absolute job deadline is also an authority-side lifetime bound. A
+queued job becomes `expired` when that time passes. A running job becomes
+`expired`, its attempt enters fenced cleanup, and its worker cannot advertise
+ready again until it proves the owned process stopped. Heartbeats never extend
+the job deadline, and late completion cannot revive the terminal job.
+
 Bounds: 1,000 active jobs; 10,000 retained terminal jobs or 14 days; 3 attempts/job;
 128 workers; 32 active claims/worker; 64 KiB job/result records. Cleanup runs during
 transactions and periodic service sweeps. Referenced input remains pinned; hard
