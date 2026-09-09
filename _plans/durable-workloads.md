@@ -335,3 +335,16 @@ retain/read/release cycle for source
 completed on the separate stable `benchday.authority-rollout` root. It is now
 empty at revision 2. No E2E job was launched for this rollout; the Benchday hub
 integration and source publisher are not yet deployed.
+
+### Resumable immutable transfer — implementation in progress
+
+The first automatically dispatched Benchday full job failed after three input
+transfer attempts. Its authority object still hashes correctly; authority logs
+show socket write timeouts under the 15-second connection limit. At the observed
+cross-continent rate, restarting a roughly 490 MB transfer loses minutes of
+progress. Add authenticated single-byte-range reads over the existing pinned
+blob handle, then bounded client retries with final whole-object digest checks.
+Authorization is rechecked for every range, including current attempt fences.
+Do not append a JSON response after binary headers have been sent. Range
+support alone is not a recovered worker download; deploy and prove the complete
+client/server path before claiming remote execution reliability.

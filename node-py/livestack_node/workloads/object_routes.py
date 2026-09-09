@@ -1,5 +1,5 @@
 """Stream immutable inputs over the authenticated workload connection."""
-import shutil
+from .object_download import send_object
 
 from .model import WorkloadError
 from .blob_references import route_reference
@@ -35,13 +35,7 @@ def route_object(handler, principal, method, parts):
     if method == 'GET':
         owner = attempt_owner(store, principal, handler.headers, digest) if principal.role == 'worker' else principal.id
         with blobs.open(owner, digest) as (stream, size):
-            handler.send_response(200)
-            handler.send_header('Content-Type', 'application/octet-stream')
-            handler.send_header('Content-Length', str(size))
-            handler.send_header('Connection', 'close')
-            handler.end_headers()
-            handler.close_connection = True
-            shutil.copyfileobj(stream, handler.wfile, 1024*1024)
+            send_object(handler, stream, size, digest)
     elif method == 'PUT':
         owner = attempt_owner(store, principal, handler.headers) if principal.role == 'worker' else principal.id
         if handler.headers.get('Transfer-Encoding'):
