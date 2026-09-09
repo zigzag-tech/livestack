@@ -80,12 +80,43 @@ def labels(value) -> dict:
     return dict(value)
 
 
+def input_objects(value) -> list[dict]:
+    if not isinstance(value, list) or not 1 <= len(value) <= 128:
+        raise WorkloadError("input_objects must contain between one and 128 objects")
+    result = []
+    names = set()
+    total = 0
+    for item in value:
+        if not isinstance(item, dict) or set(item) != {"name", "digest", "size"}:
+            raise WorkloadError("invalid input object")
+        object_name = item.get("name")
+        if (not isinstance(object_name, str) or len(object_name) > 240 or object_name.startswith("/")
+                or any(part in ("", ".", "..") for part in object_name.split("/"))
+                or not re.fullmatch(r"[A-Za-z0-9_.@+-]+(?:/[A-Za-z0-9_.@+-]+)*", object_name)):
+            raise WorkloadError("invalid input object name")
+        digest = item.get("digest")
+        size = item.get("size")
+        if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise WorkloadError("input object digest must be SHA-256")
+        if isinstance(size, bool) or not isinstance(size, int) or not 0 <= size <= 2 * 1024**3:
+            raise WorkloadError("invalid input object size")
+        if object_name in names:
+            raise WorkloadError("duplicate input object name")
+        names.add(object_name)
+        total += size
+        if total > 4 * 1024**3:
+            raise WorkloadError("input objects exceed total byte limit")
+        result.append(dict(name=object_name, digest=digest, size=size))
+    return result
+
+
 def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     if not isinstance(value, dict):
         raise WorkloadError("submission must be an object")
-    allowed = {"version", "key", "handler", "input_digest", "payload", "need",
+    allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
                "selector", "estimate_seconds", "deadline", "locality_host", "retain"}
-    if set(value) - allowed or value.get("version") != 1:
+    version = value.get("version")
+    if set(value) - allowed or version not in (1, 2) or (version == 1 and "input_objects" in value):
         raise WorkloadError("unsupported workload schema or fields")
     handler = name(value.get("handler"), "handler")
     if handler not in handlers:
@@ -105,10 +136,12 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
         raise WorkloadError("deadline must be a finite epoch time")
     if not isinstance(value.get("payload", {}), dict) or not isinstance(value.get("retain", False), bool):
         raise WorkloadError("invalid payload or retain flag")
-    result = dict(version=1, key=name(value.get("key"), "key"), handler=handler,
+    result = dict(version=version, key=name(value.get("key"), "key"), handler=handler,
                   input_digest=digest, payload=value.get("payload", {}), need=need,
                   selector=labels(value.get("selector", {})), estimate_seconds=estimate,
                   deadline=deadline, locality_host=value.get("locality_host"), retain=value.get("retain", False))
+    if version == 2:
+        result["input_objects"] = input_objects(value.get("input_objects", []))
     if result["locality_host"] is not None:
         name(result["locality_host"], "locality_host")
     encode(result, limits.record_bytes)

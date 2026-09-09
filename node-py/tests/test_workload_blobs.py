@@ -48,9 +48,15 @@ def test_referenced_inputs_survive_retention(tmp_path):
     blobs = BlobStore(store, tmp_path/'objects', retention_seconds=10)
     data = b'inputs'
     digest = hashlib.sha256(data).hexdigest()
+    component = b'component'
+    component_digest = hashlib.sha256(component).hexdigest()
     blobs.put('alice', digest, len(data), BytesIO(data))
-    store.submit('alice', dict(version=1,key='one',handler='test.v1',input_digest=digest,need={'cpu':1}))
+    blobs.put('alice', component_digest, len(component), BytesIO(component))
+    store.submit('alice', dict(version=2,key='one',handler='test.v1',input_digest=digest,
+        input_objects=[{'name':'component','digest':component_digest,'size':len(component)}],need={'cpu':1}))
     now[0] += 20
     blobs.prune()
     with blobs.open('alice', digest) as (stream,_):
         assert stream.read() == data
+    with blobs.open('alice', component_digest) as (stream,_):
+        assert stream.read() == component

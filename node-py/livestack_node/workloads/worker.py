@@ -166,11 +166,19 @@ class WorkloadWorker:
             unpack(bundle, root/'source', spec['input_digest'])
             if not self.input_cache:
                 bundle.unlink()
+            objects = root/'input-objects'
+            objects.mkdir()
+            for item in spec.get('input_objects', []):
+                destination = objects/item['name']
+                received = self.transfer.get(item['digest'], destination, assignment=assignment)
+                if received.stat().st_size != item['size']:
+                    raise WorkloadError('input object size mismatch', 409)
             output.mkdir()
             (root/'request.json').write_text(encode(spec['payload']))
             env = dict(self.config.get('environment', {}))
             env.update(HOME=str(root/'home'), TMPDIR=str(root/'tmp'),
                        HARMONY_INPUT=str(root/'source'), HARMONY_OUTPUT=str(output),
+                       HARMONY_INPUT_OBJECTS=str(objects),
                        HARMONY_REQUEST=str(root/'request.json'), HARMONY_ATTEMPT=attempt)
             for path in ('home', 'tmp'):
                 (root/path).mkdir()
