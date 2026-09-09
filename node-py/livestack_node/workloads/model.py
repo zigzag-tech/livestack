@@ -114,7 +114,7 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     if not isinstance(value, dict):
         raise WorkloadError("submission must be an object")
     allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
-               "selector", "estimate_seconds", "deadline", "locality_host", "retain"}
+               "selector", "estimate_seconds", "deadline", "priority", "locality_host", "retain"}
     version = value.get("version")
     if set(value) - allowed or version not in (1, 2) or (version == 1 and "input_objects" in value):
         raise WorkloadError("unsupported workload schema or fields")
@@ -134,12 +134,21 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     if deadline is not None and (isinstance(deadline, bool)
             or not isinstance(deadline, (float, int)) or not math.isfinite(deadline) or deadline <= 0):
         raise WorkloadError("deadline must be a finite epoch time")
+    priority = value.get("priority")
+    if priority is not None and (isinstance(priority, bool) or not isinstance(priority, int)
+                                 or not 0 <= priority <= 1_000_000):
+        raise WorkloadError("priority must be an integer in [0, 1000000]")
     if not isinstance(value.get("payload", {}), dict) or not isinstance(value.get("retain", False), bool):
         raise WorkloadError("invalid payload or retain flag")
     result = dict(version=version, key=name(value.get("key"), "key"), handler=handler,
                   input_digest=digest, payload=value.get("payload", {}), need=need,
                   selector=labels(value.get("selector", {})), estimate_seconds=estimate,
-                  deadline=deadline, locality_host=value.get("locality_host"), retain=value.get("retain", False))
+                  deadline=deadline, locality_host=value.get("locality_host"),
+                  retain=value.get("retain", False))
+    # Preserve the canonical bytes of legacy idempotency requests that omitted
+    # priority. Placement treats an absent field as zero.
+    if priority is not None:
+        result["priority"] = priority
     if version == 2:
         result["input_objects"] = input_objects(value.get("input_objects", []))
     if result["locality_host"] is not None:
