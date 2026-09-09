@@ -42,7 +42,7 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 32
 
-    def __init__(self, address, store, principals, *, blobs=None):
+    def __init__(self, address, store, principals, *, blobs=None, artifact_mirror=None):
         if not principals or len(principals) > 128:
             raise ValueError('configure 1..128 workload principals')
         if len({p.token for p in principals}) != len(principals):
@@ -50,6 +50,7 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
         self.configure_connections()
         self.store = store
         self.blobs = blobs or BlobStore(store, __import__("pathlib").Path(store.path).parent/"objects")
+        self.artifact_mirror = artifact_mirror
         self.principals = tuple(principals)
         super().__init__(address, Handler)
 
