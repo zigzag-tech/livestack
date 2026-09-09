@@ -11,6 +11,9 @@ exception into permission and never invokes GPU load/evict actions.
 The service persists jobs, attempts, workers and claims in SQLite WAL. Submission
 is principal-scoped and idempotent. Admission takes an immediate transaction,
 reuses `fleet_scheduler.schedule`, and persists the attempt before returning it.
+An optional bounded integer priority orders queued jobs descending; equal
+priorities remain FIFO, legacy requests omit the field and behave as priority
+zero, and active attempts are never preempted.
 All worker kinds on a physical host share the resource budget. A worker reports
 both configured capacity and measured headroom; absent dimensions cannot grant.
 Workers are authenticated, handlers are installed/allowlisted, and job payloads

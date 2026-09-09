@@ -43,6 +43,7 @@ def test_durable_idempotent_submission_and_principal_scope(harness):
         reopened.submit('alice', request(payload={'changed': True}))
     with pytest.raises(WorkloadError, match='not found'):
         reopened.get('bob', job['id'])
+    assert 'priority' not in job['spec'], 'legacy request identity stays byte-compatible'
 
 
 def test_independent_connections_do_not_double_reserve_physical_ram(harness):
@@ -71,6 +72,17 @@ def test_two_physical_hosts_can_execute_concurrently(harness):
         store.submit('owner', request(k))
     a, b = store.claim('w1', 'boot1'), store.claim('w2', 'boot1')
     assert a and b and a['job_id'] != b['job_id']
+
+
+def test_later_high_priority_job_is_claimed_before_older_batch_work(harness):
+    store, now, _ = harness
+    register(store)
+    older = store.submit('owner', request('older'))
+    now[0] += 1
+    urgent = store.submit('owner', request('urgent', priority=12000))
+    claimed = store.claim('w1', 'boot1')
+    assert claimed['job_id'] == urgent['id']
+    assert store.get('owner', older['id'])['state'] == 'queued'
 
 
 def test_authority_restart_requires_reconciliation_and_keeps_claim(harness):
@@ -228,7 +240,8 @@ def test_unconfigured_deletion_preserves_data_but_admission_stays_bounded(tmp_pa
 
 @pytest.mark.parametrize('extra', [dict(need={'cpu': -1}), dict(need={'cpu': float('nan')}),
                                   dict(need={'cpu': True}), dict(handler='shell'),
-                                  dict(payload=[]), dict(version=2), dict(command='rm -rf /')])
+                                  dict(payload=[]), dict(version=2), dict(command='rm -rf /'),
+                                  dict(priority=True), dict(priority=1.5), dict(priority=1_000_001)])
 def test_invalid_requests_cannot_become_execution(harness, extra):
     s, _, _ = harness
     data = request()
