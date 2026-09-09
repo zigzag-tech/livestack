@@ -38,6 +38,10 @@ class WorkloadWorker:
         if not self.handlers or any(h.get('backend', 'native') not in ('native', 'rootless-docker') for h in self.handlers.values()):
             raise WorkloadError('worker requires installed native or rootless-docker handlers')
         self.transfer = InputTransfer(self.client)
+        self.output_mirror = None
+        if config.get('output_mirror') is not None:
+            from .artifact_mirror import InstalledArtifactMirror
+            self.output_mirror = InstalledArtifactMirror(config['output_mirror'])
         mirror = None
         if config.get('input_mirror') is not None:
             from .input_mirror import InstalledInputMirror
@@ -221,6 +225,13 @@ class WorkloadWorker:
                 if path.resolve() != path or not path.is_file():
                     raise WorkloadError('artifact must be a private regular file')
                 artifact = self.transfer.put(path, assignment=assignment)
+                if self.output_mirror:
+                    try:
+                        self.output_mirror.put(artifact['digest'], path, self.transfer.max_bytes)
+                    except WorkloadError as error:
+                        # The authority CAS remains canonical and downstream
+                        # workers retain their authenticated fallback path.
+                        logging.warning('artifact mirror unavailable for %s: %s', artifact['digest'], error)
                 artifacts.append(dict(name=item, **artifact))
             completion['result']['artifacts'] = artifacts
             completion.update(boot=self.boot, attempt_id=attempt, fence=assignment['fence'],
