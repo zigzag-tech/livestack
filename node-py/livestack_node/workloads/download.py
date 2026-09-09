@@ -7,6 +7,7 @@ import urllib.error
 import urllib.request
 
 from .model import WorkloadError
+from .block_codec import HEADER, read_gzip_block
 
 CHUNK = 4*1024*1024
 
@@ -23,19 +24,24 @@ def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, ma
         # A normal initial GET also supports empty objects and old authorities.
         # Once interrupted, use bounded ranges starting at bytes actually saved.
         request = urllib.request.Request(client.url+'objects/'+digest,
-            headers={**headers, **({'Range': f'bytes={count}-{max(count, requested_end)}'} if total is not None else {})})
+            headers={**headers, HEADER: 'gzip', **({'Range': f'bytes={count}-{max(count, requested_end)}'} if total is not None else {})})
         try:
             with urllib.request.urlopen(request, timeout=min(client.timeout, max(0.1, deadline-time.monotonic()))) as response:
                 length = response.headers.get('Content-Length', '')
                 if not re.fullmatch(r'[0-9]{1,20}', length):
                     raise WorkloadError('invalid download content length', 502)
                 length = int(length)
+                codec = response.headers.get(HEADER)
+                if codec not in (None, 'gzip'):
+                    raise WorkloadError('unsupported block encoding', 502)
+                if codec and response.status != 206:
+                    raise WorkloadError('compressed block requires a range', 502)
                 if response.status == 206:
                     match = re.fullmatch(r'bytes ([0-9]{1,20})-([0-9]{1,20})/([0-9]{1,20})', response.headers.get('Content-Range', ''))
                     if not match:
                         raise WorkloadError('invalid download content range', 502)
                     start, end, size = map(int, match.groups())
-                    if start != count or end < start or end > requested_end or end >= size or length != end-start+1:
+                    if start != count or end < start or end > requested_end or end >= size or (codec is None and length != end-start+1):
                         raise WorkloadError('download range does not match requested offset', 409)
                 elif response.status == 200 and count == 0:
                     # Older authorities ignore Range. A complete first reply
@@ -49,6 +55,10 @@ def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, ma
                 if etag is not None and etag != '"'+digest+'"':
                     raise WorkloadError('download object identity changed', 409)
                 total, remaining = size, length
+                if codec == 'gzip':
+                    decoded = read_gzip_block(response, length, end-start+1, deadline)
+                    out.write(decoded); hasher.update(decoded); count += len(decoded)
+                    continue
                 while remaining:
                     if time.monotonic() >= deadline:
                         raise WorkloadError('download duration budget exhausted', 503)

@@ -30,7 +30,9 @@ def test_resume_through_real_authority_and_fault_proxy(tmp_path, fault):
             ranges.append(self.headers.get('Range'))
             conn = http.client.HTTPConnection('127.0.0.1', authority.server_port, timeout=5)
             try:
-                conn.request('GET', self.path, headers=dict(self.headers))
+                headers = dict(self.headers)
+                headers.pop('X-Harmony-Block-Encoding', None)
+                conn.request('GET', self.path, headers=headers)
                 response = conn.getresponse()
                 self.send_response(response.status)
                 for key, value in response.getheaders():

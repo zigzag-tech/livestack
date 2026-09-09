@@ -406,3 +406,21 @@ Measured against the live 229,048,320-byte Benchday input, gzip level 3 produced
 not a completed China transfer or throughput guarantee. The active raw input
 job remains untouched; deploy decoder support before enabling compression in
 publishers. No worker is advertising compressed-input support yet.
+
+### Encoded blocks preserve queued input identity (2026-09-08)
+
+The private `X-Harmony-Block-Encoding: gzip` negotiation compresses up to 4 MiB
+of an existing immutable object per response. Content-Range names original
+object offsets; Content-Length names wire bytes under this explicit codec.
+This is not HTTP Content-Encoding and generic clients never receive it without
+requesting the extension. First requests select a bounded block; subsequent
+requests use the existing original-byte Range contract. Incompressible blocks
+and legacy peers use raw bytes. The object ETag and final SHA-256 are unchanged.
+The client buffers at most one bounded encoded block, limits decoded output,
+checks gzip integrity, and retries an interrupted block from its original
+byte offset. No disk cache or object mutation is added. Server connections
+remain capped at 32; each encoder handles at most 4 MiB of source at once.
+Real authority/fault-proxy tests pass multi-block resume, corrupt-block refusal,
+empty/small objects, and the existing raw-only/slow-reader regression cases.
+This allows queued raw archives to benefit without rewriting accepted job specs.
+Deployment is pending while the production worker remains observe-only.
