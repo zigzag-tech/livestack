@@ -19,7 +19,7 @@ from .transfer import InputTransfer
 
 
 class InputCache:
-    def __init__(self, root, transfer, *, max_bytes, max_entries=32, retention_seconds=14*86400):
+    def __init__(self, root, transfer, *, max_bytes, max_entries=32, retention_seconds=14*86400, mirror=None):
         if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
             raise WorkloadError('input cache requires a positive byte limit')
         if isinstance(max_entries, bool) or not isinstance(max_entries, int) or not 1 <= max_entries <= 32:
@@ -33,6 +33,7 @@ class InputCache:
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.max_bytes, self.max_entries, self.retention = max_bytes, max_entries, retention_seconds
         self.transfer = InputTransfer(transfer.client, max_bytes=min(max_bytes, transfer.max_bytes))
+        self.mirror = mirror
         self.index = self.root/'index.json'
 
     def _load(self):
@@ -121,7 +122,16 @@ class InputCache:
             used -= rows.pop(old)['size']
             self._save(rows)
             (self.root/old).unlink()
-        path = self.transfer.get(digest, self.root/key, assignment=assignment)
+        path = None
+        if self.mirror:
+            try:
+                path = self.mirror.get(digest, self.root/key, self.transfer.max_bytes)
+            except WorkloadError:
+                # Provider outages and corrupt mirror bytes never weaken the
+                # attempt-scoped authority fallback or its final digest check.
+                path = None
+        if path is None:
+            path = self.transfer.get(digest, self.root/key, assignment=assignment)
         rows[key] = dict(digest=digest, size=path.stat().st_size, used=time.time(), retain=spec.get('retain', False))
         self._save(rows)
         return path
