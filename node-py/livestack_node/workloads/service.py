@@ -9,6 +9,7 @@ from .http import Principal, WorkloadServer
 from .model import Limits
 from .store import WorkloadStore
 from .blobs import BlobStore
+from .artifact_mirror import InstalledArtifactMirror
 
 
 def main():
@@ -30,8 +31,10 @@ def main():
                               limits=Limits(**config.get('limits', {})))
         store.recover()
         blobs = BlobStore(store, root/'objects', **config.get('blob_limits', {}))
+        artifact_mirror = (InstalledArtifactMirror(config['artifact_mirror'])
+                           if config.get('artifact_mirror') is not None else None)
         server = WorkloadServer((config.get('bind', '127.0.0.1'), config.get('port', 8802)),
-                                store, principals, blobs=blobs)
+                                store, principals, blobs=blobs, artifact_mirror=artifact_mirror)
         server.blobs.recover()
         logging.info('workload authority started on %s', server.server_address)
         try:
