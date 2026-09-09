@@ -152,6 +152,13 @@ class Handler(BaseHTTPRequestHandler):
                         raise WorkloadError('handler is not authorized', 403)
                     with self.server.blobs.open(principal.id, body.get('input_digest')):
                         pass
+                    inputs = body.get('input_objects', [])
+                    if not isinstance(inputs, list) or any(not isinstance(item, dict) for item in inputs):
+                        raise WorkloadError('invalid input objects')
+                    for item in inputs:
+                        with self.server.blobs.open(principal.id, item.get('digest')) as (_, size):
+                            if size != item.get('size'):
+                                raise WorkloadError('input object size mismatch')
                     return store.submit(principal.id, body, allowed_handlers=principal.handlers)
                 return {'jobs': store.list_jobs(principal.id)}
             if len(parts) == 2 and parts[0] == 'jobs' and method == 'GET':
