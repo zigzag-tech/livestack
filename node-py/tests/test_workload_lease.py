@@ -13,9 +13,62 @@ from livestack_node.workloads.client import WorkloadClient
 from livestack_node.workloads.http import Principal, WorkloadServer
 from livestack_node.workloads.lease import LeaseKeeper
 from livestack_node.workloads.model import Limits
+from livestack_node.workloads.model import WorkloadError
 from livestack_node.workloads.store import WorkloadStore
 from livestack_node.workloads.supervision import SystemdExecutor
 from livestack_node.workloads.transfer import InputTransfer
+
+
+class LeaseClient:
+    timeout = .1
+
+    def __init__(self, replies):
+        self.replies = iter(replies)
+        self.calls = 0
+
+    def request(self, route, body):
+        self.calls += 1
+        reply = next(self.replies)
+        if isinstance(reply, Exception):
+            raise reply
+        return {'lease_remaining': reply}
+
+
+def test_transient_renewal_retries_within_the_existing_lease(tmp_path):
+    client = LeaseClient([.6, TimeoutError(), .6, .6])
+    lease = LeaseKeeper(client, {'boot':'b', 'attempt_id':'a', 'fence':1},
+                        tmp_path/'lease', interval=.02).start()
+    try:
+        deadline = time.monotonic()+.4
+        while client.calls < 3 and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert client.calls >= 3
+        assert not lease.lost.is_set()
+        assert float((tmp_path/'lease').read_text()) > time.monotonic()
+    finally:
+        lease.close()
+
+
+def test_authority_refusal_revokes_without_waiting_for_expiry(tmp_path):
+    client = LeaseClient([.6, WorkloadError('cancelled', 409)])
+    lease = LeaseKeeper(client, {'boot':'b', 'attempt_id':'a', 'fence':1},
+                        tmp_path/'lease', interval=.02).start()
+    try:
+        assert lease.lost.wait(.3)
+        assert (tmp_path/'lease').read_text() == '0'
+    finally:
+        lease.close()
+
+
+def test_unreachable_authority_cannot_extend_the_existing_lease(tmp_path):
+    client = LeaseClient([.12, *[TimeoutError() for _ in range(20)]])
+    lease = LeaseKeeper(client, {'boot':'b', 'attempt_id':'a', 'fence':1},
+                        tmp_path/'lease', interval=.01).start()
+    try:
+        assert lease.lost.wait(.5)
+        assert (tmp_path/'lease').read_text() == '0'
+    finally:
+        lease.close()
 
 
 def test_worker_renews_after_caller_disconnect_then_cancellation_stops_cgroup(tmp_path):

@@ -20,6 +20,7 @@ class LeaseKeeper:
         self.thread = None
         self.error = None
         self.remaining = 0
+        self.deadline = 0
 
     def _write(self, deadline):
         temporary = self.path.with_suffix('.tmp')
@@ -40,6 +41,7 @@ class LeaseKeeper:
         # Count the request's full round trip against the duration. Authority
         # and worker clocks need not agree. Leave time for wrapper/cgroup stop.
         deadline = started + remaining - min(1, remaining/4)
+        self.deadline = deadline
         self.remaining = deadline-time.monotonic()
         if self.remaining <= 0:
             raise WorkloadError('renewal arrived after its safe deadline', 503)
@@ -52,20 +54,40 @@ class LeaseKeeper:
         self.thread.start()
         return self
 
+    def _lose(self, error):
+        self.error = error
+        try:
+            self._write(0)
+        except OSError:
+            pass
+        finally:
+            self.lost.set()
+
     def _loop(self):
-        while not self.stopped.wait(min(self.interval, self.remaining/3)):
+        retrying = False
+        while True:
+            remaining = self.deadline-time.monotonic()
+            if remaining <= 0:
+                self._lose(self.error or 'LeaseExpired')
+                return
+            delay = min(1 if retrying else self.interval, remaining/3)
+            if self.stopped.wait(delay):
+                return
             try:
                 self.renew()
+                retrying = False
+            except WorkloadError as error:
+                # An explicit authority refusal revokes the lease immediately.
+                # Transport/server failures cannot extend it, but may retry
+                # within the deadline already granted by the authority.
+                if 400 <= error.status < 500:
+                    self._lose(type(error).__name__)
+                    return
+                self.error = type(error).__name__
+                retrying = True
             except Exception as error:
                 self.error = type(error).__name__
-                self.lost.set()
-                # Fail closed immediately on a refused/unreachable renewal.
-                # If disk writes also fail, the last deadline still expires.
-                try:
-                    self._write(0)
-                except OSError:
-                    pass
-                return
+                retrying = True
 
     def close(self):
         self.stopped.set()
