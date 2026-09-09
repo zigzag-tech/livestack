@@ -1,4 +1,5 @@
 """Stream immutable inputs over the authenticated workload connection."""
+import logging
 from .object_download import send_object
 
 from .model import WorkloadError
@@ -45,6 +46,13 @@ def route_object(handler, principal, method, parts):
         except ValueError:
             raise WorkloadError('invalid content length')
         result = blobs.put(owner, digest, size, handler.rfile)
+        if handler.server.artifact_mirror:
+            try:
+                handler.server.artifact_mirror.put(digest, blobs.root/digest, blobs.max_object_bytes)
+            except WorkloadError as error:
+                # The verified CAS write is authoritative. A cache outage must
+                # not make a caller repeat an already accepted object upload.
+                logging.warning('artifact mirror unavailable for %s: %s', digest, error)
         handler.respond(200, result)
     else:
         raise WorkloadError('unsupported object operation', 405)

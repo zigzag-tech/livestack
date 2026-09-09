@@ -30,13 +30,14 @@ from trusted worker configuration. The fetcher receives only the validated diges
 and a private staging path; its output is byte-capped, SHA-256 verified, fsynced,
 and atomically installed. Failure falls back to the attempt-scoped authority path.
 Jobs cannot select the program, credentials, or mirror endpoint.
-After each output is accepted by the authority CAS, a worker may invoke one
-fixed installed regional-mirror uploader with the verified digest and private
-artifact path. The worker checks the source before and after the call; mirror
-failure is reported but does not replace the canonical CAS result or retry a
-completed job. The mirror is a reconstructible cache with its own configured
-retention bound, and downstream workers retain the authenticated authority
-fallback.
+After each object is accepted by the authority CAS, the authority or uploading
+worker may invoke one fixed installed regional-mirror uploader with the verified
+digest and private artifact path. The source is checked before and after the
+call; mirror failure is reported but does not replace the canonical CAS result
+or retry a completed job. The mirror is a reconstructible cache with its own
+configured retention bound, and downstream workers retain the authenticated
+authority fallback. Authority-side upload keeps regional write credentials off
+ordinary workers and makes an output available before its PUT is acknowledged.
 
 An accepted absolute job deadline is also an authority-side lifetime bound. A
 queued job becomes `expired` when that time passes. A running job becomes
