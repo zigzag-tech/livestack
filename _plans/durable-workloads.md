@@ -360,3 +360,23 @@ eight total transient failures (progress does not reset this), one hour total,
 and ceil(max_bytes/4 MiB)+9 HTTP requests. Each failure backs off at most two
 seconds. Authorization/identity errors are terminal, and the existing finally
 cleanup removes partial files on failure. Deployment remains pending.
+
+### Resume runtime deployment — 2026-09-08 21:17 EDT
+
+Runtime `341ad4e29f81a6c7f5c0b8254572e4b88feeca6f` is merged/pushed to
+Livestack main and installed on the tower authority and Win One WSL worker.
+The authority was stopped before checking its durable attempt table; zero
+unfinished attempts allowed the worker upgrade. Referenced runtime releases
+were preserved and unreferenced old installs pruned to three per host, with
+64 MiB archive/cleanup bounds. An initial Win One extraction was attempted
+before SCP completed and refused the partial archive; only that unactivated
+partial runtime was removed, then extraction succeeded after transfer ended.
+
+Authority PID 727824 has zero service restarts; Win One worker PID 265005
+re-registered ready with heartbeat age 1.0 s. The live authority returned
+206 with `Content-Range: bytes 0-31/229048320` and exactly 32 bytes for a
+retained integration input. A full train was submitted through normal
+`benchday test queue`: cargo `tt_fad1b703-493a-4789-9f25-46bcd562a55f`.
+At this checkpoint it was boarding, so no successful transfer or full-suite
+verdict is claimed. The failed earlier job remains terminal and was not
+restarted or rewritten as a success.
