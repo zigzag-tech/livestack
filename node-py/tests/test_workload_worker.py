@@ -182,6 +182,36 @@ def test_worker_reuses_verified_source_without_a_second_download(fleet, tmp_path
         worker.close()
 
 
+def test_worker_prefers_verified_input_mirror_and_falls_back_to_authority(fleet, tmp_path, monkeypatch):
+    monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (0, 0, 0))
+    store, config, caller, digest = fleet
+    mirror = tmp_path/'mirror'; mirror.mkdir()
+    authority_object = Path(store.path).parent/'objects'/digest
+    (mirror/digest).write_bytes(authority_object.read_bytes())
+    fetcher = tmp_path/'fetch-mirror.py'
+    fetcher.write_text('''import pathlib,shutil,sys
+source=pathlib.Path(sys.argv[1],sys.argv[2])
+if not source.is_file(): raise SystemExit(75)
+shutil.copyfile(source,sys.argv[3])
+''')
+    config.update(input_cache_bytes=128*1024**2,
+        input_mirror={'argv':[sys.executable,str(fetcher),str(mirror)],'max_seconds':5})
+    first = submit(caller, digest)
+    authority_object.unlink()
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step() and caller.get(first['id'])['state'] == 'succeeded'
+        source = tmp_path/'fallback-source'; source.mkdir(); (source/'input').write_text('authority fallback')
+        capture(source, ['input'], tmp_path/'fallback.tar')
+        fallback = InputTransfer(caller).put(tmp_path/'fallback.tar')['digest']
+        second = caller.submit(dict(first['spec'], key='mirror-fallback', input_digest=fallback))
+        assert worker.step() and caller.get(second['id'])['state'] == 'succeeded'
+        entries = json.loads((worker.input_cache.root/'index.json').read_text())
+        assert len(entries) == 1 and next(iter(entries.values()))['digest'] == fallback
+    finally:
+        worker.close()
+
+
 @pytest.mark.parametrize('retain,retention,expected', [(False,86400,'succeeded'), (True,1e-9,'queued'), (False,None,'queued')])
 def test_cache_pressure_respects_retained_inputs_and_disabled_deletion(fleet, tmp_path, retain, retention, expected):
     _, config, caller, digest = fleet

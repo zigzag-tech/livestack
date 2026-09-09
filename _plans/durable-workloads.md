@@ -25,6 +25,11 @@ Source objects are SHA-256 addressed. A worker verifies them before extraction
 into a private source root and writes only to separate output state. Dependencies,
 submodules, modes and dirty source provenance belong in the manifest; development
 checkout symlinks and secrets do not. Content and log stores enforce byte limits.
+On a cache miss, a worker may invoke one fixed installed regional-mirror fetcher
+from trusted worker configuration. The fetcher receives only the validated digest
+and a private staging path; its output is byte-capped, SHA-256 verified, fsynced,
+and atomically installed. Failure falls back to the attempt-scoped authority path.
+Jobs cannot select the program, credentials, or mirror endpoint.
 
 Bounds: 1,000 active jobs; 10,000 retained terminal jobs or 14 days; 3 attempts/job;
 128 workers; 32 active claims/worker; 64 KiB job/result records. Cleanup runs during
