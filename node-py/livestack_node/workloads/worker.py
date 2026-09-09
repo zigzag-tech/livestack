@@ -37,7 +37,14 @@ class WorkloadWorker:
         self.handlers = config['handlers']
         if not self.handlers or any(h.get('backend', 'native') not in ('native', 'rootless-docker') for h in self.handlers.values()):
             raise WorkloadError('worker requires installed native or rootless-docker handlers')
-        self.transfer = InputTransfer(self.client)
+        transfer_timeout = config.get('transfer_timeout', self.client.timeout)
+        if (isinstance(transfer_timeout, bool) or not isinstance(transfer_timeout, (int, float)) or
+                not self.client.timeout <= transfer_timeout <= 3600):
+            raise WorkloadError('transfer timeout must be between control timeout and one hour')
+        # Bulk object PUT/GET may cross regions or wait for a configured mirror.
+        # Keep that budget separate so control requests still fail fast.
+        transfer_client = WorkloadClient(config['authority'], config['token'], timeout=transfer_timeout)
+        self.transfer = InputTransfer(transfer_client)
         self.output_mirror = None
         if config.get('output_mirror') is not None:
             from .artifact_mirror import InstalledArtifactMirror
