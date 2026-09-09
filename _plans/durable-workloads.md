@@ -380,3 +380,15 @@ retained integration input. A full train was submitted through normal
 At this checkpoint it was boarding, so no successful transfer or full-suite
 verdict is claimed. The failed earlier job remains terminal and was not
 restarted or rewritten as a success.
+
+### Progressing slow readers — follow-up fix, not deployed
+
+The resumed live full job exhausted its first attempt's transfer retry budget.
+An authenticated 64 KiB range from Win One completed in 1.42 s, while the
+ongoing attempt accumulated only about 6.5 MB over minutes. The authority was
+still aborting streams. A real HTTP test with a bounded send buffer, .3 s
+socket deadline and a reader consuming 4 KiB every .01 s reproduced truncation
+with the 1 MiB sendall writes. 64 KiB writes also failed that test; 16 KiB writes
+completed the whole 2 MiB response. The same deadline remains in place. Seven
+real slow-reader/range/resume/transfer checks pass after the change. Authority
+rollout and a completed cross-continent transfer are still required.

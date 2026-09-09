@@ -32,7 +32,10 @@ def send_object(handler, stream, size, digest):
         handler.end_headers()
         remaining = max(0, end-start+1)
         while remaining:
-            chunk = stream.read(min(1024*1024, remaining))
+            # sendall's deadline covers the entire write, even while bytes are
+            # advancing. A 1 MiB write timed out on the China path despite
+            # continual reads; keep each operation small enough to make progress.
+            chunk = stream.read(min(16*1024, remaining))
             if not chunk:
                 raise OSError('object ended before declared content length')
             handler.wfile.write(chunk)
