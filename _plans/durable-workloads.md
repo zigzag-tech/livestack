@@ -16,6 +16,24 @@ priorities remain FIFO, legacy requests omit the field and behave as priority
 zero, and active attempts are never preempted.
 All worker kinds on a physical host share the resource budget. A worker reports
 both configured capacity and measured headroom; absent dimensions cannot grant.
+
+Admission and execution are separate quantities. `need` is the execution cap the
+worker applies to the attempt's cgroup (`CPUQuota`, `MemoryMax`). The optional
+`admit` vector is what must be free before the work starts; placement fits and
+reserves on it, so admitted vectors on a host always sum within capacity while
+execution caps may oversubscribe it. `admit` may not exceed `need` in any
+dimension nor name a dimension `need` omits, and omitting it submits `need` as
+both -- byte-identical to every request written before the field existed.
+
+Without that separation a job is silently unschedulable on any host whose whole
+capacity equals its `need`, because reported headroom is measured, not nominal:
+CPU headroom is `online CPU - loadavg`, which is strictly below the core count at
+any nonzero load. A 6.0-CPU job therefore never fits a six-core worker even when
+that worker is 98% idle. The rule is general -- **an admission vector must be
+strictly below a candidate host's capacity in every dimension, or that host is
+permanently excluded rather than merely busy** -- and it is invisible in a
+refusal, which reports `insufficient shared host resources` exactly as a
+transiently loaded host does.
 Workers are authenticated, handlers are installed/allowlisted, and job payloads
 cannot supply shell commands. Every attempt carries a fence and input digest.
 
