@@ -249,15 +249,23 @@ class WorkloadStore:
 
     def _expire(self, db, now):
         for job in list(db.execute("SELECT id,spec,state FROM jobs WHERE state IN ('queued','running')")):
-            deadline = json.loads(job["spec"]).get("deadline")
-            if deadline is None or deadline > now:
+            spec = json.loads(job["spec"])
+            deadline = spec.get("deadline")
+            if deadline is None:
                 continue
+            reason = "execution deadline expired"
+            if deadline > now:
+                estimate = spec["estimate_seconds"]
+                if job["state"] != "queued" or deadline - now >= estimate:
+                    continue
+                reason = ("estimated execution cannot fit remaining deadline "
+                          f"({max(0, deadline-now):.0f}s < {estimate:.0f}s)")
             if job["state"] == "running":
                 db.execute("UPDATE attempts SET state='cleanup' WHERE job=? AND state='running'", (job["id"],))
                 db.execute("UPDATE workers SET ready=0 WHERE id IN "
                            "(SELECT worker FROM attempts WHERE job=? AND state='cleanup')", (job["id"],))
-            db.execute("UPDATE jobs SET state='expired',reason='execution deadline expired',updated=? "
-                       "WHERE id=? AND state IN ('queued','running')", (now, job["id"]))
+            db.execute("UPDATE jobs SET state='expired',reason=?,updated=? "
+                       "WHERE id=? AND state IN ('queued','running')", (reason, now, job["id"]))
         for a in list(db.execute("SELECT * FROM attempts WHERE state='running' AND expires<=?", (now,))):
             self._abandon(db, a, now, "execution lease expired")
 
