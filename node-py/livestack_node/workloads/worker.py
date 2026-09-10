@@ -93,9 +93,17 @@ class WorkloadWorker:
         old = self.journal.read()
         if old:
             self.executor.stop(old['assignment']['attempt_id'])
-            if old.get('completion'):
+            completion = old.get('completion')
+            if completion is None and old.get('phase') == 'running':
+                output = self.workspace/old['assignment']['attempt_id']/'output'
+                result = self.executor.exit_result(output)
+                if result is not None:
+                    completion = self._completion_from_exit(old['assignment'], result)
+                    completion = self._attach_artifacts(old['assignment'], completion, output)
+                    self.journal.write(dict(assignment=old['assignment'], phase='completed', completion=completion))
+            if completion:
                 try:
-                    self.client.request('worker/complete', old['completion'])
+                    self.client.request('worker/complete', completion)
                 except WorkloadError as error:
                     if error.status != 409:
                         raise
@@ -124,6 +132,41 @@ class WorkloadWorker:
                 shutil.rmtree(path)
         self.journal.clear()
         self.reconciled = True
+
+    def _completion_from_exit(self, assignment, result):
+        handler = self.handlers[assignment['spec']['handler']]
+        code = result['exit_code']
+        resources = result.get('resources', {})
+        resource_failure = resources.get('oom_kill', 0) > 0 or resources.get('pids_max_events', 0) > 0
+        outcome = ('succeeded' if code == 0 else
+            'infrastructure' if resource_failure or code in handler.get('infrastructure_exit_codes', []) or
+            (handler.get('backend') == 'rootless-docker' and code == 75) else 'product_failure')
+        return dict(outcome=outcome, result=result)
+
+    def _attach_artifacts(self, assignment, completion, output):
+        handler = self.handlers[assignment['spec']['handler']]
+        artifacts = []
+        declared = handler.get('outputs', []) if completion['outcome'] != 'infrastructure' else handler.get('infrastructure_outputs', [])
+        for item in ['command.log', 'command.previous.log'] + declared:
+            relative_path(item)
+            path = Path(output)/item
+            if not path.exists():
+                continue
+            if path.resolve() != path or not path.is_file():
+                raise WorkloadError('artifact must be a private regular file')
+            artifact = self.transfer.put(path, assignment=assignment)
+            if self.output_mirror:
+                try:
+                    self.output_mirror.put(artifact['digest'], path, self.transfer.max_bytes)
+                except WorkloadError as error:
+                    # The authority CAS remains canonical and downstream
+                    # workers retain their authenticated fallback path.
+                    logging.warning('artifact mirror unavailable for %s: %s', artifact['digest'], error)
+            artifacts.append(dict(name=item, **artifact))
+        completion['result']['artifacts'] = artifacts
+        completion.update(boot=assignment['boot'], attempt_id=assignment['attempt_id'], fence=assignment['fence'],
+                          input_digest=assignment['spec']['input_digest'])
+        return completion
 
     def step(self):
         if self.journal.read():
@@ -195,13 +238,7 @@ class WorkloadWorker:
                     raise WorkloadError('execution lease lost', 409)
                 result = self.executor.exit_result(output)
                 if result is not None:
-                    code = result['exit_code']
-                    resources = result.get('resources', {})
-                    resource_failure = resources.get('oom_kill', 0) > 0 or resources.get('pids_max_events', 0) > 0
-                    outcome = ('succeeded' if code == 0 else
-                        'infrastructure' if resource_failure or code in handler.get('infrastructure_exit_codes', []) or
-                        (handler.get('backend') == 'rootless-docker' and code == 75) else 'product_failure')
-                    completion = dict(outcome=outcome, result=result)
+                    completion = self._completion_from_exit(assignment, result)
                     break
                 if time.monotonic()-last_report >= 10:
                     self.register()
@@ -230,27 +267,7 @@ class WorkloadWorker:
                     lease.close()
                 raise
         try:
-            artifacts = []
-            declared = handler.get('outputs', []) if completion['outcome'] != 'infrastructure' else handler.get('infrastructure_outputs', [])
-            for item in ['command.log', 'command.previous.log'] + declared:
-                relative_path(item)
-                path = output/item
-                if not path.exists():
-                    continue
-                if path.resolve() != path or not path.is_file():
-                    raise WorkloadError('artifact must be a private regular file')
-                artifact = self.transfer.put(path, assignment=assignment)
-                if self.output_mirror:
-                    try:
-                        self.output_mirror.put(artifact['digest'], path, self.transfer.max_bytes)
-                    except WorkloadError as error:
-                        # The authority CAS remains canonical and downstream
-                        # workers retain their authenticated fallback path.
-                        logging.warning('artifact mirror unavailable for %s: %s', artifact['digest'], error)
-                artifacts.append(dict(name=item, **artifact))
-            completion['result']['artifacts'] = artifacts
-            completion.update(boot=self.boot, attempt_id=attempt, fence=assignment['fence'],
-                              input_digest=assignment['spec']['input_digest'])
+            completion = self._attach_artifacts(assignment, completion, output)
             self.journal.write(dict(assignment=assignment, phase='completed', completion=completion))
             self.client.request('worker/complete', completion)
         except (WorkloadError, HTTPError) as error:

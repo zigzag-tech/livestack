@@ -19,7 +19,10 @@ from livestack_node.workloads.worker import WorkloadWorker
 
 
 @pytest.fixture
-def fleet(tmp_path):
+def fleet(tmp_path, monkeypatch):
+    # These tests exercise worker execution and reconciliation, not placement
+    # under the developer host's incidental load.
+    monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (0, 0, 0))
     if subprocess.run(['systemctl', '--user', 'show'], capture_output=True).returncode:
         pytest.skip('requires Linux systemd user manager and cgroup v2')
     store = WorkloadStore(tmp_path/'authority/jobs.db', handlers={'native.v1'})
@@ -147,6 +150,41 @@ def test_exit_between_receipt_read_and_unit_inspection_preserves_product_failure
         assert not worker.step()
     finally:
         worker.close()
+
+
+def test_restart_after_exit_receipt_replays_completion_without_new_attempt(fleet, tmp_path, monkeypatch):
+    monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (0, 0, 0))
+    _, config, caller, digest = fleet
+    job = submit(caller, digest, exit=7)
+    worker = WorkloadWorker(config)
+    def interrupt_after_receipt(*_args):
+        raise RuntimeError('simulated supervisor stop before artifact upload')
+
+    worker._attach_artifacts = interrupt_after_receipt
+    try:
+        with pytest.raises(RuntimeError, match='simulated supervisor stop'):
+            worker.step()
+        journal = worker.journal.read()
+        assert journal['phase'] == 'running'
+        attempt = journal['assignment']['attempt_id']
+        assert worker.executor.exit_result(Path(config['workspace'])/attempt/'output')['exit_code'] == 7
+    finally:
+        worker.close()
+
+    recovered = WorkloadWorker(config)
+    try:
+        recovered.reconcile()
+        result = caller.get(job['id'])
+        assert result['state'] == 'failed'
+        assert result['result']['outcome'] == 'product_failure'
+        assert result['result']['result']['exit_code'] == 7
+        assert len(result['attempts']) == 1
+        artifact = next(a for a in result['result']['result']['artifacts'] if a['name'] == 'artifact')
+        assert InputTransfer(caller).get(artifact['digest'], tmp_path/'recovered').read_text() == 'captured bytes'
+        assert recovered.journal.read() is None
+        assert list(Path(config['workspace']).iterdir()) == []
+    finally:
+        recovered.close()
 
 def test_task_exhaustion_is_infrastructure_with_a_kernel_receipt(fleet, tmp_path):
     _, config, caller, digest = fleet
@@ -400,8 +438,9 @@ def test_killed_worker_expires_then_new_process_reconciles_journal(fleet, tmp_pa
     config_path = tmp_path/'worker.json'
     config_path.write_text(json.dumps(config))
     process = subprocess.Popen([sys.executable, '-c',
-        'import json,sys; from livestack_node.workloads.worker import WorkloadWorker; '
-        'w=WorkloadWorker(json.load(open(sys.argv[1]))); w.step()', str(config_path)])
+        'import json,sys; import livestack_node.workloads.worker as worker; '
+        'worker.os.getloadavg=lambda:(0,0,0); '
+        'w=worker.WorkloadWorker(json.load(open(sys.argv[1]))); w.step()', str(config_path)])
     executor = SystemdExecutor(config['worker'])
     attempt, worker = None, None
     try:
