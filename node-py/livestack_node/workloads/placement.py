@@ -39,13 +39,12 @@ def place(db, now, limits):
         spec = json.loads(row["spec"])
         targets = []
         rejected = []
-        for w in workers:
+        compatible = [w for w in workers if spec["handler"] in reports[w["id"]]["handlers"]]
+        for w in compatible:
             report = reports[w["id"]]
             reason = None
             if w["id"] in busy:
                 reason = "worker holds an active attempt or cleanup"
-            elif spec["handler"] not in report["handlers"]:
-                reason = "handler not installed"
             elif any(report["labels"].get(k) != v for k, v in spec["selector"].items()):
                 reason = "required capability absent"
             elif any(host_free[w["host"]].get(k, 0) < n for k, n in spec["need"].items()):
@@ -61,7 +60,12 @@ def place(db, now, limits):
                   locality_host=spec["locality_host"])
         grants = schedule(FleetState(targets=tuple(targets), jobs=(job,), now=now)).of(Admit)
         if not grants:
-            reason = "no fresh, reconciled worker" if not workers else encode(rejected or {"reason": "no target can meet deadline"})
+            if not workers:
+                reason = "no fresh, reconciled worker"
+            elif not compatible:
+                reason = f"no fresh worker advertises handler {spec['handler']}"
+            else:
+                reason = encode(rejected or {"reason": "no target can meet deadline"})
             db.execute("UPDATE jobs SET reason=? WHERE id=?", (reason[:8192], row["id"]))
             continue
         chosen = next(w for w in workers if w["id"] == grants[0].target_id)

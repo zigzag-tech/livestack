@@ -85,6 +85,30 @@ def test_later_high_priority_job_is_claimed_before_older_batch_work(harness):
     assert store.get('owner', older['id'])['state'] == 'queued'
 
 
+def test_placement_excludes_workers_without_requested_handler(harness):
+    store, _, _ = harness
+    register(store, handlers=['build.v1'])
+    job = store.submit('owner', request())
+    assert store.claim('w1', 'boot1') is None
+    observed = store.get('owner', job['id'])
+    assert observed['state'] == 'queued'
+    assert observed['reason'] == 'no fresh worker advertises handler test.v1'
+    assert 'w1' not in observed['reason']
+
+
+def test_placement_refusal_lists_only_compatible_workers(harness):
+    store, _, _ = harness
+    register(store, 'runner', 'runner-host', boot='runner-boot', handlers=['test.v1'])
+    first = store.submit('owner', request('running'))
+    assert store.claim('runner', 'runner-boot')['job_id'] == first['id']
+    register(store, 'stager', 'stager-host', boot='stager-boot', handlers=['build.v1'])
+    waiting = store.submit('owner', request('waiting'))
+    assert store.claim('stager', 'stager-boot') is None
+    reason = store.get('owner', waiting['id'])['reason']
+    assert 'runner' in reason and 'worker holds an active attempt or cleanup' in reason
+    assert 'stager' not in reason and 'handler not installed' not in reason
+
+
 def test_authority_restart_requires_reconciliation_and_keeps_claim(harness):
     store, now, path = harness
     register(store, ram=4)
