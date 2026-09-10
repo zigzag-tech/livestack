@@ -40,7 +40,12 @@ shutil.copyfile(source,pathlib.Path(sys.argv[1],digest))
         first.write_bytes(b'1234567')
         second.write_bytes(b'89')
         receipt = InputTransfer(client).put(first)
-        assert (mirror/receipt['digest']).read_bytes() == b'1234567'
+        mirrored = mirror/receipt['digest']
+        deadline = time.monotonic()+5
+        while not mirrored.exists():
+            assert process.poll() is None and time.monotonic() < deadline
+            time.sleep(.01)
+        assert mirrored.read_bytes() == b'1234567'
         with pytest.raises(urllib.error.HTTPError) as error:
             InputTransfer(client).put(second)
         assert error.value.code == 429
