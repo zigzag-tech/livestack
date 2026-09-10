@@ -114,7 +114,7 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     if not isinstance(value, dict):
         raise WorkloadError("submission must be an object")
     allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
-               "selector", "estimate_seconds", "deadline", "priority", "locality_host", "retain"}
+               "admit", "selector", "estimate_seconds", "deadline", "priority", "locality_host", "retain"}
     version = value.get("version")
     if set(value) - allowed or version not in (1, 2) or (version == 1 and "input_objects" in value):
         raise WorkloadError("unsupported workload schema or fields")
@@ -127,6 +127,17 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     need = resources(value.get("need"))
     if not any(n > 0 for n in need.values()):
         raise WorkloadError("at least one resource must be requested")
+    # Admission and execution are separate quantities: `admit` is what must be
+    # free on a target before work starts, `need` is what the attempt may use.
+    # A job that only requires two cores to make progress can still be allowed
+    # to burst, so a host whose whole capacity equals `need` is not excluded.
+    admit = None
+    if value.get("admit") is not None:
+        admit = resources(value.get("admit"))
+        if set(admit) - set(need):
+            raise WorkloadError("admit may only constrain dimensions that need declares")
+        if any(quantity > need[key] for key, quantity in admit.items()):
+            raise WorkloadError("admit must not exceed need in any dimension")
     estimate = value.get("estimate_seconds", 3600)
     if isinstance(estimate, bool) or not isinstance(estimate, (int, float)) or not 0 < estimate <= 86400:
         raise WorkloadError("estimate_seconds must be in (0, 86400]")
@@ -149,6 +160,10 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     # priority. Placement treats an absent field as zero.
     if priority is not None:
         result["priority"] = priority
+    # Absent means "admit at need", which is the behavior every existing caller
+    # already has; keeping the key out preserves their idempotency bytes.
+    if admit is not None:
+        result["admit"] = admit
     if version == 2:
         result["input_objects"] = input_objects(value.get("input_objects", []))
     if result["locality_host"] is not None:
