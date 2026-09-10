@@ -17,6 +17,8 @@ def place(db, now, limits):
     active = db.execute("SELECT * FROM attempts WHERE state IN ('running','cleanup')").fetchall()
     used, busy = {}, set()
     for a in active:
+        # attempts.need stores what the attempt reserved, which is its admission
+        # vector; a burstable attempt is not charged for capacity it may not use.
         busy.add(a["worker"])
         for key, value in json.loads(a["need"]).items():
             used.setdefault(a["host"], {}).setdefault(key, 0)
@@ -37,6 +39,12 @@ def place(db, now, limits):
     for row in db.execute("SELECT * FROM jobs WHERE state='queued' "
                           "ORDER BY COALESCE(json_extract(spec,'$.priority'),0) DESC, created, id").fetchall():
         spec = json.loads(row["spec"])
+        # Admission and execution are separate quantities. `admit` is both the
+        # fit test and the reservation, so admitted vectors on a host always sum
+        # within its capacity; `need` never enters placement and only caps the
+        # attempt's cgroup. Omitting `admit` submits need as both, which is
+        # exactly the behavior every existing caller already has.
+        admit = spec.get("admit") or spec["need"]
         targets = []
         rejected = []
         compatible = [w for w in workers if spec["handler"] in reports[w["id"]]["handlers"]]
@@ -47,14 +55,14 @@ def place(db, now, limits):
                 reason = "worker holds an active attempt or cleanup"
             elif any(report["labels"].get(k) != v for k, v in spec["selector"].items()):
                 reason = "required capability absent"
-            elif any(host_free[w["host"]].get(k, 0) < n for k, n in spec["need"].items()):
+            elif any(host_free[w["host"]].get(k, 0) < n for k, n in admit.items()):
                 reason = "insufficient shared host resources"
             if reason:
                 rejected.append({"worker": w["id"], "reason": reason})
                 continue
             targets.append(Target(id=w["id"], host_id=w["host"], tier=Tier.LOCAL,
                                   capacity=host_free[w["host"]], labels=report["labels"]))
-        job = Job(id=row["id"], kind=spec["handler"], owner=row["owner"], need=spec["need"],
+        job = Job(id=row["id"], kind=spec["handler"], owner=row["owner"], need=admit,
                   created_at=row["created"], sla=Sla.BATCH, deadline=spec["deadline"],
                   est_duration_s=spec["estimate_seconds"], selector=spec["selector"],
                   locality_host=spec["locality_host"])
@@ -74,9 +82,9 @@ def place(db, now, limits):
         db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created) "
                    "VALUES(?,?,?,?,?,?,'running',?,?,?)",
                    (aid, row["id"], chosen["id"], chosen["boot"], chosen["host"], fence,
-                    encode(spec["need"]), now+limits.lease_seconds, now))
+                    encode(admit), now+limits.lease_seconds, now))
         db.execute("UPDATE jobs SET state='running',fence=?,updated=?,reason=? WHERE id=?",
                    (fence, now, grants[0].reason, row["id"]))
         busy.add(chosen["id"])
-        for k, n in spec["need"].items():
+        for k, n in admit.items():
             host_free[chosen["host"]][k] -= n
