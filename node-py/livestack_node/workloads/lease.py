@@ -21,6 +21,7 @@ class LeaseKeeper:
         self.error = None
         self.remaining = 0
         self.deadline = 0
+        self.liveness = None
 
     def _write(self, deadline):
         temporary = self.path.with_suffix('.tmp')
@@ -54,6 +55,11 @@ class LeaseKeeper:
         self.thread.start()
         return self
 
+    def require_liveness(self, predicate):
+        if not callable(predicate):
+            raise WorkloadError('lease liveness predicate must be callable')
+        self.liveness = predicate
+
     def _lose(self, error):
         self.error = error
         try:
@@ -73,6 +79,16 @@ class LeaseKeeper:
             delay = min(1 if retrying else self.interval, remaining/3)
             if self.stopped.wait(delay):
                 return
+            predicate = self.liveness
+            if predicate is not None:
+                try:
+                    alive = predicate()
+                except Exception as error:
+                    self._lose(type(error).__name__)
+                    return
+                if alive is not True:
+                    self._lose('WorkNotAlive')
+                    return
             try:
                 self.renew()
                 retrying = False
