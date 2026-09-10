@@ -196,6 +196,15 @@ class WorkloadWorker:
         self.execute(assignment)
         return True
 
+    def _execution_live_or_complete(self, attempt, output):
+        if self.executor.exit_result(output) is not None:
+            return True
+        if self.executor.alive(attempt):
+            return True
+        # Close the exit race: the wrapper atomically publishes its receipt
+        # immediately before systemd marks the unit inactive.
+        return self.executor.exit_result(output) is not None
+
     def execute(self, assignment):
         attempt = assignment['attempt_id']
         self.executor.unit(attempt)  # Validate before using identity as a path.
@@ -241,6 +250,10 @@ class WorkloadWorker:
                 cpu=need['cpu'], memory_bytes=need['memory_bytes'],
                 max_seconds=handler.get('max_seconds', 3600), tasks=handler.get('max_tasks', 512), lease_file=root/'lease',
                 rootless_docker=handler.get('backend') == 'rootless-docker')
+            # Once execution starts, worker-process health alone cannot retain
+            # the slot. A live supervised unit or its durable exit receipt must
+            # prove that execution still exists or has reached result handoff.
+            lease.require_liveness(lambda: self._execution_live_or_complete(attempt, output))
             last_report = time.monotonic()
             while True:
                 if lease.lost.is_set():
