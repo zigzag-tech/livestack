@@ -163,6 +163,33 @@ def test_job_deadline_expires_queued_and_fences_running_work(harness):
     assert report['cleanup'] == [attempt['attempt_id']]
 
 
+def test_queued_job_expires_when_estimate_no_longer_fits_deadline(harness):
+    store, now, _ = harness
+    queued = store.submit('owner', request(
+        'queued-fit', deadline=now[0] + 100, estimate_seconds=90))
+    now[0] += 10
+    assert store.get('owner', queued['id'])['state'] == 'queued', (
+        'an estimate that exactly fits the remaining window is still schedulable')
+    now[0] += 1
+    expired = store.get('owner', queued['id'])
+    assert expired['state'] == 'expired'
+    assert expired['reason'] == 'estimated execution cannot fit remaining deadline (89s < 90s)'
+    assert expired['attempts'] == [], 'placement expiry must not invent execution evidence'
+
+
+def test_running_job_keeps_its_absolute_deadline_after_estimate_window_erodes(harness):
+    store, now, _ = harness
+    register(store)
+    running = store.submit('owner', request(
+        'running-fit', deadline=now[0] + 100, estimate_seconds=90))
+    attempt = store.claim('w1', 'boot1')
+    assert attempt['job_id'] == running['id']
+    now[0] += 20
+    assert store.get('owner', running['id'])['state'] == 'running', (
+        'the estimate is an admission bound, not a new deadline for work already running')
+    assert complete(store, attempt)['state'] == 'succeeded'
+
+
 def test_worker_boot_change_does_not_free_owned_processes(harness):
     store, _, _ = harness
     register(store)
