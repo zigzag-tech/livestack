@@ -98,9 +98,18 @@ class WorkloadWorker:
                 output = self.workspace/old['assignment']['attempt_id']/'output'
                 result = self.executor.exit_result(output)
                 if result is not None:
-                    completion = self._completion_from_exit(old['assignment'], result)
-                    completion = self._attach_artifacts(old['assignment'], completion, output)
-                    self.journal.write(dict(assignment=old['assignment'], phase='completed', completion=completion))
+                    try:
+                        completion = self._completion_from_exit(old['assignment'], result)
+                        completion = self._attach_artifacts(old['assignment'], completion, output)
+                        self.journal.write(dict(assignment=old['assignment'], phase='completed', completion=completion))
+                    except (WorkloadError, HTTPError) as error:
+                        # Cancellation or immutable-deadline expiry can fence the
+                        # attempt before a restarted worker uploads its recovered
+                        # receipt. The authority already owns the terminal state;
+                        # abandon these obsolete artifacts so cleanup can finish.
+                        if error.status != 409:
+                            raise
+                        completion = None
             if completion:
                 try:
                     self.client.request('worker/complete', completion)
