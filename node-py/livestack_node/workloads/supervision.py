@@ -82,6 +82,11 @@ class SystemdExecutor:
                              '--property=LoadState,ActiveState,SubState,Result,ControlGroup')
         return dict(line.split('=', 1) for line in reply.stdout.splitlines() if '=' in line)
 
+    def alive(self, attempt_id):
+        state = self.inspect(attempt_id)
+        return (state.get('LoadState') == 'loaded' and
+                state.get('ActiveState') in ('active', 'activating', 'reloading'))
+
     def start(self, attempt_id, argv, cwd, output, *, env, cpu, memory_bytes,
               max_seconds=3600, tasks=512, log_bytes=8*1024**2, lease_file=None, rootless_docker=False):
         # Limits are operator/handler configuration, never unconstrained argv
