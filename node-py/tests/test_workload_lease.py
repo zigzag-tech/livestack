@@ -153,3 +153,69 @@ def test_worker_renews_after_caller_disconnect_then_cancellation_stops_cgroup(tm
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+def test_removed_execution_stops_renewal_and_authority_requeues(tmp_path):
+    """A live worker process cannot keep a vanished supervised unit leased."""
+    if subprocess.run(['systemctl', '--user', 'show'], capture_output=True).returncode:
+        pytest.skip('requires systemd user manager and cgroup v2')
+    store = WorkloadStore(tmp_path/'authority/jobs.db', handlers={'test.v1'}, limits=Limits(lease_seconds=2))
+    server = WorkloadServer(('127.0.0.1', 0), store, [
+        Principal('owner', 'a'*32, 'caller', ('test.v1',)),
+        Principal('worker', 'w'*32, 'worker', worker='test-worker', host='test-host')])
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    lease, assignment = None, None
+    executor = SystemdExecutor('lease-disappeared-integration')
+    worker_pid = os.getpid()
+    try:
+        url = f'http://127.0.0.1:{server.server_port}'
+        caller, worker = WorkloadClient(url, 'a'*32), WorkloadClient(url, 'w'*32)
+        source = tmp_path/'source'
+        source.mkdir()
+        (source/'input').write_text('immutable')
+        capture(source, ['input'], tmp_path/'bundle.tar')
+        digest = InputTransfer(caller).put(tmp_path/'bundle.tar')['digest']
+        job = caller.submit(dict(version=1, key='vanished', handler='test.v1',
+                                 input_digest=digest, need={'cpu':1}))
+        worker.request('worker/report', dict(boot='b1', report=dict(
+            capacity={'cpu':2}, available={'cpu':2}, labels={}, handlers=['test.v1'], ready=True)))
+        assignment = worker.request('worker/claim', {'boot':'b1'})['assignment']
+        output = tmp_path/'out'
+        lease = LeaseKeeper(worker, assignment, tmp_path/'lease', interval=.1).start()
+        executor.start(assignment['attempt_id'], [sys.executable, '-c', 'import time; time.sleep(120)'],
+                       source, output, env=dict(os.environ), cpu=1, memory_bytes=128*1024**2,
+                       lease_file=tmp_path/'lease')
+        lease.require_liveness(lambda: (executor.exit_result(output) is not None or
+                                        executor.alive(assignment['attempt_id'])))
+
+        initial_expiry = assignment['expires']
+        deadline = time.monotonic()+3
+        while store.get('owner', job['id'])['attempts'][0]['expires'] <= initial_expiry:
+            assert time.monotonic() < deadline
+            time.sleep(.05)
+
+        # Remove only the owned execution. The process hosting the worker and
+        # LeaseKeeper remains alive, reproducing the production ghost shape.
+        executor.command('systemctl', '--user', 'stop', executor.unit(assignment['attempt_id']))
+        executor.command('systemctl', '--user', 'reset-failed', executor.unit(assignment['attempt_id']), check=False)
+        assert os.getpid() == worker_pid
+        assert lease.lost.wait(1)
+        stopped_expiry = store.get('owner', job['id'])['attempts'][0]['expires']
+        time.sleep(.35)
+        assert store.get('owner', job['id'])['attempts'][0]['expires'] == stopped_expiry
+
+        time.sleep(max(0, stopped_expiry-time.time()+.1))
+        store.sweep()
+        recovered = store.get('owner', job['id'])
+        assert recovered['state'] == 'queued'
+        assert recovered['reason'] == 'execution lease expired'
+        assert recovered['attempts'][0]['state'] == 'cleanup'
+    finally:
+        if lease:
+            lease.close()
+        if assignment:
+            executor.stop(assignment['attempt_id'])
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
