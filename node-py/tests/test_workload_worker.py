@@ -187,6 +187,24 @@ def test_restart_after_exit_receipt_replays_completion_without_new_attempt(fleet
         recovered.close()
 
 
+def test_executor_exit_race_preserves_the_durable_receipt():
+    class ExitRaceExecutor:
+        def __init__(self):
+            self.reads = 0
+
+        def exit_result(self, _output):
+            self.reads += 1
+            return None if self.reads == 1 else {'exit_code': 0}
+
+        def alive(self, _attempt):
+            return False
+
+    worker = object.__new__(WorkloadWorker)
+    worker.executor = ExitRaceExecutor()
+    assert worker._execution_live_or_complete('a'*32, Path('/unused'))
+    assert worker.executor.reads == 2
+
+
 def test_fenced_recovery_artifact_upload_finishes_cleanup(fleet):
     store, config, caller, digest = fleet
     job = submit(caller, digest, exit=7)

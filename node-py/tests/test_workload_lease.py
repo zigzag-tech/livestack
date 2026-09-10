@@ -71,6 +71,39 @@ def test_unreachable_authority_cannot_extend_the_existing_lease(tmp_path):
         lease.close()
 
 
+@pytest.mark.parametrize('predicate,error', [
+    (lambda: False, 'WorkNotAlive'),
+    (lambda: (_ for _ in ()).throw(OSError('unknown')), 'OSError'),
+])
+def test_unproved_execution_liveness_stops_renewal(tmp_path, predicate, error):
+    client = LeaseClient([.6] * 20)
+    lease = LeaseKeeper(client, {'boot':'b', 'attempt_id':'a', 'fence':1},
+                        tmp_path/'lease', interval=.02).start()
+    try:
+        lease.require_liveness(predicate)
+        assert lease.lost.wait(.3)
+        calls = client.calls
+        time.sleep(.05)
+        assert client.calls == calls
+        assert lease.error == error
+        assert (tmp_path/'lease').read_text() == '0'
+    finally:
+        lease.close()
+
+
+@pytest.mark.parametrize('state,expected', [
+    ({'LoadState':'loaded', 'ActiveState':'active'}, True),
+    ({'LoadState':'loaded', 'ActiveState':'activating'}, True),
+    ({'LoadState':'loaded', 'ActiveState':'inactive'}, False),
+    ({'LoadState':'not-found', 'ActiveState':'inactive'}, False),
+    ({}, False),
+])
+def test_executor_liveness_fails_closed(monkeypatch, state, expected):
+    executor = SystemdExecutor('lease-liveness')
+    monkeypatch.setattr(executor, 'inspect', lambda _attempt: state)
+    assert executor.alive('a'*32) is expected
+
+
 def test_worker_renews_after_caller_disconnect_then_cancellation_stops_cgroup(tmp_path):
     if subprocess.run(['systemctl', '--user', 'show'], capture_output=True).returncode:
         pytest.skip('requires systemd user manager and cgroup v2')
