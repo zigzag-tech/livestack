@@ -186,6 +186,35 @@ def test_restart_after_exit_receipt_replays_completion_without_new_attempt(fleet
     finally:
         recovered.close()
 
+
+def test_fenced_recovery_artifact_upload_finishes_cleanup(fleet):
+    store, config, caller, digest = fleet
+    job = submit(caller, digest, exit=7)
+    worker = WorkloadWorker(config)
+    worker._attach_artifacts = lambda *_args: (_ for _ in ()).throw(
+        RuntimeError('simulated supervisor stop before artifact upload'))
+    try:
+        with pytest.raises(RuntimeError, match='simulated supervisor stop'):
+            worker.step()
+        journal = worker.journal.read()
+        assert journal['phase'] == 'running'
+        attempt = journal['assignment']['attempt_id']
+        assert worker.executor.exit_result(Path(config['workspace'])/attempt/'output')['exit_code'] == 7
+    finally:
+        worker.close()
+
+    caller.request('jobs/'+job['id']+'/cancel', {})
+    recovered = WorkloadWorker(config)
+    try:
+        recovered.reconcile()
+        assert caller.get(job['id'])['state'] == 'cancelled'
+        assert recovered.journal.read() is None
+        assert list(Path(config['workspace']).iterdir()) == []
+        with store.transaction() as db:
+            assert db.execute("SELECT count(*) FROM attempts WHERE state!='ended'").fetchone()[0] == 0
+    finally:
+        recovered.close()
+
 def test_task_exhaustion_is_infrastructure_with_a_kernel_receipt(fleet, tmp_path):
     _, config, caller, digest = fleet
     script = Path(config['handlers']['native.v1']['argv'][1])
