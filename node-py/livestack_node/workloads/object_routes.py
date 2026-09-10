@@ -47,6 +47,10 @@ def route_object(handler, principal, method, parts):
         except ValueError:
             raise WorkloadError('invalid content length')
         result = blobs.put(owner, digest, size, handler.rfile)
+        # The verified authority CAS is canonical. A regional mirror is only a
+        # best-effort cache, so it must not extend the caller's upload or keep a
+        # worker attempt alive after the canonical bytes are durable.
+        handler.respond(200, result)
         if handler.server.artifact_mirror:
             try:
                 handler.server.artifact_mirror.put(digest, blobs.root/digest, blobs.max_object_bytes)
@@ -54,7 +58,6 @@ def route_object(handler, principal, method, parts):
                 # The verified CAS write is authoritative. A cache outage must
                 # not make a caller repeat an already accepted object upload.
                 logging.warning('artifact mirror unavailable for %s: %s', digest, error)
-        handler.respond(200, result)
     else:
         raise WorkloadError('unsupported object operation', 405)
     return True

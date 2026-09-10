@@ -2,7 +2,7 @@
 import json
 import hashlib
 from io import BytesIO
-from threading import Thread
+from threading import Event, Thread
 import urllib.error
 import urllib.request
 
@@ -10,6 +10,8 @@ import pytest
 
 from livestack_node.workloads.http import Principal, WorkloadServer
 from livestack_node.workloads.store import WorkloadStore
+from livestack_node.workloads.client import WorkloadClient
+from livestack_node.workloads.transfer import InputTransfer
 
 
 @pytest.fixture
@@ -48,6 +50,44 @@ def test_auth_handler_allowlist_and_owner_isolation(api):
     assert api('jobs', spec)[1]['id'] == job['id']
     assert api('jobs/'+job['id'], token='b'*32)[0] == 404
     assert api('worker/claim', {'boot': 'boot'})[0] == 403
+
+
+def test_object_put_acknowledges_canonical_cas_before_optional_mirror(tmp_path):
+    class BlockingMirror:
+        def __init__(self):
+            self.started, self.release, self.finished = Event(), Event(), Event()
+
+        def put(self, _digest, _source, _max_bytes):
+            self.started.set()
+            assert self.release.wait(5)
+            self.finished.set()
+
+    store = WorkloadStore(tmp_path/'jobs.db', handlers={'test.v1'})
+    mirror = BlockingMirror()
+    server = WorkloadServer(('127.0.0.1', 0), store, [
+        Principal('alice', 'a'*32, 'caller', ('test.v1',)),
+    ], artifact_mirror=mirror)
+    serving = Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    source = tmp_path/'input'
+    source.write_bytes(b'canonical before cache')
+    client = WorkloadClient(f'http://127.0.0.1:{server.server_port}', 'a'*32)
+    result = {}
+    uploading = Thread(target=lambda: result.update(receipt=InputTransfer(client).put(source)))
+    uploading.start()
+    try:
+        assert mirror.started.wait(2)
+        uploading.join(timeout=1)
+        assert not uploading.is_alive(), 'optional mirror withheld the canonical CAS acknowledgement'
+        assert result['receipt']['digest'] == hashlib.sha256(source.read_bytes()).hexdigest()
+        assert not mirror.finished.is_set()
+    finally:
+        mirror.release.set()
+        uploading.join(timeout=5)
+        assert mirror.finished.wait(5)
+        server.shutdown()
+        serving.join(timeout=5)
+        server.server_close()
 
 
 def test_version_two_inputs_require_owned_exact_objects(api):
