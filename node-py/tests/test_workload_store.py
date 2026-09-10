@@ -258,6 +258,61 @@ def test_stale_or_missing_capacity_and_missing_capability_never_grant(harness):
     assert store.claim('w1', 'boot1') is None
 
 
+def test_admission_vector_admits_a_host_that_could_not_hold_the_execution_cap(harness):
+    """A worker whose whole capacity equals `need` can never be admitted, because
+    reported headroom is always strictly below configured capacity. Fitting on
+    `admit` is what lets such a host serve work it can actually finish."""
+    store, _, _ = harness
+    store.register('w1', 'host1', 'boot1', dict(
+        capacity={'cpu': 6, 'ram': 8}, available={'cpu': 5.8, 'ram': 8},
+        labels={'os': 'linux'}, handlers=['test.v1'], ready=True))
+    blocked = store.submit('owner', request('blocked', need={'cpu': 6, 'ram': 4}))
+    assert store.claim('w1', 'boot1') is None
+    assert 'insufficient shared host resources' in store.get('owner', blocked['id'])['reason']
+    store.cancel('owner', blocked['id'])
+    burstable = store.submit('owner', request('burstable', need={'cpu': 6, 'ram': 4},
+                                              admit={'cpu': 2, 'ram': 4}))
+    assert store.claim('w1', 'boot1')['job_id'] == burstable['id']
+
+
+def test_admitted_vectors_sum_within_capacity_while_caps_may_oversubscribe(harness):
+    """Requests fit, limits may not. Two burstable jobs whose admit vectors both
+    fit are both placed even though their execution caps exceed the host, and the
+    result does not depend on which queued job placement considers first."""
+    store, _, _ = harness
+    register(store, 'a', 'shared', cpu=8, ram=16)
+    register(store, 'b', 'shared', cpu=8, ram=16)
+    for key in ['burst', 'second']:
+        store.submit('owner', request(key, need={'cpu': 8, 'ram': 4}, admit={'cpu': 4, 'ram': 4}))
+    granted = [c for c in (store.claim('a', 'boot1'), store.claim('b', 'boot1')) if c]
+    assert len(granted) == 2 and granted[0]['job_id'] != granted[1]['job_id']
+
+
+def test_admission_reservation_still_bounds_a_shared_host(harness):
+    """Relaxing the fit does not remove the bound: a third admit vector that no
+    longer fits the host's remaining capacity is refused, not oversubscribed."""
+    store, _, _ = harness
+    register(store, 'a', 'shared', cpu=8, ram=16)
+    register(store, 'b', 'shared', cpu=8, ram=16)
+    first = store.submit('owner', request('big', need={'cpu': 8, 'ram': 8},
+                                          admit={'cpu': 6, 'ram': 8}))
+    second = store.submit('owner', request('small', need={'cpu': 8, 'ram': 8},
+                                           admit={'cpu': 6, 'ram': 8}))
+    granted = [c for c in (store.claim('a', 'boot1'), store.claim('b', 'boot1')) if c]
+    assert len(granted) == 1
+    refused = second if granted[0]['job_id'] == first['id'] else first
+    assert 'insufficient shared host resources' in store.get('owner', refused['id'])['reason']
+
+
+def test_absent_admission_vector_keeps_legacy_request_bytes_and_behavior(harness):
+    store, _, path = harness
+    register(store)
+    job = store.submit('owner', request())
+    assert 'admit' not in job['spec'], 'legacy request identity stays byte-compatible'
+    reopened = WorkloadStore(path, handlers={'test.v1', 'build.v1'}, clock=lambda: 1000.0)
+    assert reopened.submit('owner', request())['id'] == job['id']
+
+
 def test_records_and_retention_exemptions_are_bounded(tmp_path):
     now = [1000.0]
     s = WorkloadStore(tmp_path/'jobs.db', handlers={'test.v1'}, clock=lambda: now[0],
@@ -292,7 +347,9 @@ def test_unconfigured_deletion_preserves_data_but_admission_stays_bounded(tmp_pa
 @pytest.mark.parametrize('extra', [dict(need={'cpu': -1}), dict(need={'cpu': float('nan')}),
                                   dict(need={'cpu': True}), dict(handler='shell'),
                                   dict(payload=[]), dict(version=2), dict(command='rm -rf /'),
-                                  dict(priority=True), dict(priority=1.5), dict(priority=1_000_001)])
+                                  dict(priority=True), dict(priority=1.5), dict(priority=1_000_001),
+                                  dict(admit={'cpu': 3}), dict(admit={'gpu': 1}),
+                                  dict(admit={'cpu': -1}), dict(admit='2')])
 def test_invalid_requests_cannot_become_execution(harness, extra):
     s, _, _ = harness
     data = request()
