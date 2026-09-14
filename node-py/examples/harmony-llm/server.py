@@ -534,6 +534,16 @@ if WARM_ON_START:
         # Give the facade a moment to bind before the first ensure, so the
         # load does not race attach's own startup bookkeeping.
         time.sleep(2)
+        # Let the peer list populate before electing: every node announces
+        # itself on startup, and electing off an empty list would make every
+        # node think it is alone and therefore the leader — the duplicate this
+        # election exists to prevent, arrived at from the other side.
+        time.sleep(float(os.environ.get("HARMONY_LLM_WARM_SETTLE", "10")))
+        if not _warms_on_this_node():
+            print(f"[harmony-llm] warm-on-start: another {NODE_KIND} node on "
+                  f"this host warms (we are {HOST_ID}) — warming nothing here; "
+                  f"requests forward to whoever holds the unit", flush=True)
+            return
         # What is hot after a reboot is an OPERATOR decision and must not share
         # a mechanism with request routing. `next(iter(SPECS))` warmed whichever
         # unit was declared first, so reordering the config silently changed
@@ -556,7 +566,70 @@ if WARM_ON_START:
             print(f"[harmony-llm] warm-on-start: {len(names)} units flagged "
                   f"({', '.join(names)}) — they must fit this card together",
                   flush=True)
+        # `warm_on_start` is a claim about the HOST, not about this process:
+        # "this unit should be hot somewhere". Two nodes reading one units file
+        # — the normal shape for a two-card box — each read it as "hot HERE" and
+        # every flagged unit was loaded once per card. Measured on a 2x3090 box:
+        # two 21.7 GB copies of the same 27B, both cards full, and no room left
+        # for the small embedding unit the planner was then asked to place. It
+        # then granted a device no LLM node speaks for, because the same card
+        # carries one device id per tenant.
+        #
+        # A peer that already holds it IS the copy. This is the same question
+        # the serving path asks before forwarding (`_peer_at`); warm-on-start
+        # simply never asked it, and so decided placement locally — the one
+        # thing this file says over and over that admission exists to take away
+        # from a node.
         for n in names:
+            # Fast path: somebody of our kind already holds it. Costs one HTTP
+            # call and skips the planner entirely on the common case — a single
+            # node restarting while its peer stays up.
+            held = _held_elsewhere(n)
+            if held:
+                print(f"[harmony-llm] warm-on-start: {n} already resident at "
+                      f"{held} — not loading a second copy", flush=True)
+                continue
+            # Otherwise ASK THE PLANNER where this belongs, exactly as a request
+            # does. Not decoration: on a cold host both nodes reach this line at
+            # the same moment and neither can see the other resident yet, so
+            # look-then-load duplicates no matter how long either one waits.
+            # `/admit` serializes, and it is the only thing here that can.
+            try:
+                res = admit(n, owner_id=f"harmony-llm:{HOST_ID}",
+                            timeout=ADMIT_TIMEOUT)
+            except Exception as e:
+                # An arbitration outage must not take a model offline — the same
+                # narrow degradation `admit` documents for itself.
+                res = {"granted": True, "device_id": None,
+                       "degraded": f"admit unreachable: {e}"}
+            granted = res.get("device_id")
+            if not res.get("granted") and not res.get("degraded"):
+                print(f"[harmony-llm] warm-on-start: planner refused {n} "
+                      f"({res.get('reason')!r}) — not warming", flush=True)
+                continue
+            # Granted somewhere that is not us. Defer ONLY if a node of our kind
+            # actually speaks for that device: this host gives the same card a
+            # different device id per tenant, so a grant can name a device no
+            # LLM node serves. Deferring to one of those would warm nothing at
+            # all, which is worse than a second copy.
+            if granted and granted != DEVICE_ID_SELF:
+                peer = _peer_at(granted)
+                if peer:
+                    print(f"[harmony-llm] warm-on-start: planner placed {n} on "
+                          f"{granted} ({peer}) — leaving it there", flush=True)
+                    continue
+                print(f"[harmony-llm] warm-on-start: planner placed {n} on "
+                      f"{granted}, which no {NODE_KIND} node serves — warming "
+                      f"here instead", flush=True)
+            # Look once more. `admit` blocks while the broker evicts victims —
+            # minutes, on a full card — and a peer can claim the unit in that
+            # window, which is exactly the window the first check cannot see.
+            held = _held_elsewhere(n)
+            if held:
+                print(f"[harmony-llm] warm-on-start: {n} claimed at {held} "
+                      f"while we waited on the planner — not loading a second "
+                      f"copy", flush=True)
+                continue
             try:
                 manager.ensure(n)
                 print(f"[harmony-llm] warm-on-start: {n} resident", flush=True)
@@ -575,6 +648,82 @@ MULTI_NODE = os.environ.get("HARMONY_LLM_ADMIT", "").strip().lower() in {"1", "t
 # Long: admission BLOCKS while the broker evicts victims and warms the grant,
 # and warming a 15 GB model is minutes, not seconds.
 ADMIT_TIMEOUT = float(os.environ.get("HARMONY_LLM_ADMIT_TIMEOUT", "600"))
+
+
+def _same_kind_peers() -> "list[tuple[str, str]]":
+    """(host_id, base URL) of OTHER live nodes serving our kind, from /peers.
+
+    Excludes us by HOST_ID, which is unique per node (one per card here), not by
+    device_id — two nodes can share a device, which is the whole point.
+    """
+    out: "list[tuple[str, str]]" = []
+    for base in BROKER_URLS:
+        try:
+            rows = httpx.get(f"{base}/peers", timeout=3.0).json()
+        except Exception:
+            continue
+        rows = rows if isinstance(rows, list) else rows.get("peers", [])
+        for r in rows:
+            if r.get("host_id") == HOST_ID:
+                continue                      # ourselves
+            if r.get("state") not in (None, "fresh"):
+                continue                      # mia/stale: not somewhere to defer to
+            kinds = r.get("kinds") or []
+            if kinds and NODE_KIND not in kinds:
+                continue
+            url = (r.get("peer") or "")
+            if url:
+                out.append((str(r.get("host_id") or ""),
+                            url.rsplit("/livestack", 1)[0]))
+        break                                 # first broker that answered
+    return out
+
+
+def _warms_on_this_node() -> bool:
+    """Is THIS the node that honours `warm_on_start`, among our kind on this host?
+
+    `warm_on_start` is a claim about the HOST — "this unit should be hot, once".
+    Two nodes reading one units file (the normal shape for a two-card box) each
+    read it as "hot HERE", and no amount of looking-before-loading separates
+    them: they start in the same second, `/admit` grants each its own free card
+    — a correct answer to "where may I put this?", which is not the question —
+    and both load. Measured on a 2x3090 box: two 21.7 GB copies of one 27B, both
+    cards full, no room left for the small embedding unit the planner was then
+    asked to place.
+
+    Election has no race to lose: every node computes the same answer from the
+    same peer list, with no coordination and no lock. Lowest HOST_ID wins, so
+    the choice is stable across restarts, and a node that finds itself lowest
+    because the previous leader is gone takes over by itself.
+
+    The nodes that do NOT warm are not idle: a request arriving at one resolves
+    through `/admit` and is forwarded to whoever holds the unit, which is the
+    path that already worked and the reason one copy is enough.
+    """
+    peers = [h for h, _ in _same_kind_peers() if h]
+    return sorted({HOST_ID, *peers})[0] == HOST_ID
+
+
+def _held_elsewhere(unit: str) -> "str | None":
+    """A peer of our kind that already HOLDS `unit` — resident or still loading.
+
+    Warm-on-start has to ask this, or a host with one unit flagged
+    `warm_on_start` and two nodes reading the same units file loads that unit
+    ONCE PER NODE. Neither the planner nor residency alone can answer it:
+    `/admit` grants each asker its own free card (a correct answer to "where may
+    I put this?", and the wrong question), and `resident` stays false for the
+    minutes a 27B takes to load — long enough for the peer to look, see nothing,
+    and load its own copy. `loading` is what closes that window.
+    """
+    for _host, b in _same_kind_peers():
+        try:
+            h = httpx.get(f"{b}/health", timeout=3.0).json()
+        except Exception:
+            continue
+        u = (h.get("units") or {}).get(unit)
+        if isinstance(u, dict) and (u.get("resident") or u.get("loading")):
+            return b
+    return None
 
 
 def _peer_at(device_id: str) -> "str | None":
@@ -880,8 +1029,17 @@ def _unit_for_model(requested: str) -> str:
 
 @app.get("/health")
 def health():
+    # `loading` is reported alongside `resident` because the two are different
+    # answers to "is this unit yours?" and only one of them was visible. A peer
+    # deciding whether to warm a unit saw `resident: false` for a unit whose
+    # vLLM had been starting for four minutes, concluded nobody had it, and
+    # loaded a second copy of a 27B onto the other card. A process that exists
+    # but is not yet serving is a CLAIM on that unit, and a claim nobody can see
+    # is the same as no claim at all.
     return {"status": "ok",
-            "units": {n: {"model": SPECS[n]["model"], "resident": _vllm_up(name=n)}
+            "units": {n: {"model": SPECS[n]["model"],
+                          "resident": _vllm_up(name=n),
+                          "loading": n in _procs and not _vllm_up(name=n)}
                       for n in SPECS},
             # Single-unit shape, kept so existing health checks still parse.
             "model": SPECS[next(iter(SPECS))]["model"],
@@ -1026,6 +1184,23 @@ async def proxy(path: str, request: Request):
                 status_code=503,
                 detail=f"{unit} was placed on {granted}, which is not this node "
                        f"and has no reachable peer")
+    # USE THE COPY THAT EXISTS. The planner was asked "where may I put this?"
+    # and answers with a card that is free — for a node whose own card is empty,
+    # that is its own card, every time. It is a correct answer to the wrong
+    # question: a unit already resident (or loading) on a peer of our kind needs
+    # no placement at all, and loading a second copy wastes a whole card to
+    # serve what the host already serves. Observed as two 21.7 GB copies of one
+    # 27B across two 3090s, leaving nowhere to put a 3 GB embedding unit.
+    #
+    # After the `granted` branch, so an explicit placement still wins; before
+    # `manager.ensure`, which is the load this avoids. `already_here` short-
+    # circuits it, so a node serving the unit itself never pays for this.
+    if not elsewhere and not already_here:
+        holder = _held_elsewhere(unit)
+        if holder:
+            print(f"[harmony-llm] {unit} is held by {holder} — forwarding "
+                  f"rather than loading a second copy", flush=True)
+            elsewhere = holder
 
     if elsewhere:
         url = f"{elsewhere}/v1/{path}"
