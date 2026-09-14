@@ -55,7 +55,7 @@
     "gpu_fraction": "0.12",
     "max_model_len": "8192",
     "residency": "UNPINNED",
-    "extra_args": "--task embed --max-num-seqs 32",
+    "extra_args": "--runner pooling --max-num-seqs 32",
     "attributes": {
       "family": "qwen",
       "params_b": 0.6,
