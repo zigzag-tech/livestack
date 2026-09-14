@@ -976,3 +976,76 @@ def test_demand_decays_and_reaches_the_planner():
     # costing anything to place something beside it.
     b._note_demand([], now=100.0 + 100 * 12)
     assert "llm_judge" not in b.demand()
+
+
+# --- a dispatched load is remembered until it arrives -------------------------
+# The real two-card shape: two nodes (one per GPU) read the SAME units file, so
+# both declare every unit. A 27B takes minutes to load and reports not-resident
+# throughout, so the next planning cycle saw no copy and warmed a SECOND one on
+# the other card. Measured on a 2x3090 host as two 21.7 GB copies of one model.
+
+class SlowPeer(FakePeer):
+    """A node whose warm() takes minutes: it accepts the load and keeps
+    reporting not-resident, exactly as vLLM does while weights stream in."""
+
+    def warm(self, kind, device=None, budget=None):
+        self.calls.append(("warm", kind))        # accepted, still not resident
+
+    def arrive(self):
+        self._resident = True
+
+
+def _two_card_host():
+    devs = [Device("gpu0", "tower0", capacity={"vram": 24}, reserved={"vram": 1}),
+            Device("gpu1", "tower0", capacity={"vram": 24}, reserved={"vram": 1})]
+    llm = Unit("llm_title", {"vram": 21}, priority=20,
+               residency=Residency.SOFT_PIN, reload_cost=60)
+    a = SlowPeer("tower0", "gpu0", llm)
+    b = SlowPeer("tower0", "gpu1", llm)
+    clock = {"t": 1000.0}
+    broker = HostBroker(devs, [a, b], clock=lambda: clock["t"])
+    return broker, a, b, clock
+
+
+def test_a_slow_load_is_not_duplicated_on_the_other_card():
+    broker, a, b, clock = _two_card_host()
+    broker.plan_and_apply([])                       # soft-pin restore warms one
+    warmed = [p for p in (a, b) if ("warm", "llm_title") in p.calls]
+    assert len(warmed) == 1, "one copy should be warmed"
+
+    # Minutes pass. It is STILL loading — not resident on any peer.
+    for _ in range(3):
+        clock["t"] += 60
+        broker.plan_and_apply([])
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 1, \
+        "a load already in flight must not be warmed again, here or on the other card"
+
+
+def test_a_request_during_a_slow_load_does_not_warm_a_second_copy():
+    broker, a, b, clock = _two_card_host()
+    broker.plan_and_apply([])
+    clock["t"] += 30
+    broker.plan_and_apply([Request("r1", "llm_title", created_at=clock["t"])])
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 1
+
+
+def test_the_ledger_clears_once_the_unit_arrives():
+    broker, a, b, clock = _two_card_host()
+    broker.plan_and_apply([])
+    warmed = next(p for p in (a, b) if ("warm", "llm_title") in p.calls)
+    warmed.arrive()
+    clock["t"] += 30
+    broker.plan_and_apply([])
+    assert broker._in_flight == {}, "an arrived load is no longer in flight"
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 1
+
+
+def test_a_load_that_never_arrives_expires_and_is_retried():
+    # The safety net: a load that dies silently must not reserve a card forever.
+    broker, a, b, clock = _two_card_host()
+    broker.in_flight_ttl_s = 120.0
+    broker.plan_and_apply([])
+    clock["t"] += 300                                # past the TTL, still absent
+    broker.plan_and_apply([])
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 2, \
+        "an expired in-flight load should be placed again"

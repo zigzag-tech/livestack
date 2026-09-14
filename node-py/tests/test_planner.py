@@ -759,3 +759,70 @@ def test_a_grant_budget_reflects_what_eviction_freed():
     assert "squatter" in kinds_of(p.of(Evict), Evict)
     g = [x for x in p.of(Grant) if x.request_id == "r1"][0]
     assert g.budget.get("vram") == 15, g.budget
+
+
+# --- an in-flight load is a copy that already exists -------------------------
+# A 21.7 GB model takes minutes to load and reports `resident: false` for every
+# one of them. Nothing in the world model said "a copy is already coming", so
+# the planner placed a SECOND copy on the other card — measured on a 2x3090 box
+# as two copies of one 27B, both cards full, no room for a 3 GB embedder.
+
+def two_gpus():
+    return (gpu(id="gpu0", cap=24), gpu(id="gpu1", cap=24))
+
+
+def test_soft_pin_restore_does_not_duplicate_a_loading_unit():
+    # tts is LOADING on gpu0. The SOFT_PIN restore must not start a second copy
+    # on the free card: a copy is already coming.
+    w = WorldState(devices=two_gpus(), units=units(), now=1000,
+                   placements=(Placement("tts", "gpu0", loaded_at=995, loading=True),))
+    assert "tts" not in kinds_of(plan(w).of(Load), Load)
+
+
+def test_hard_pin_floor_does_not_duplicate_a_loading_unit():
+    # Same for the HARD_PIN floor: a loading replica counts toward the floor,
+    # or the floor loads a second copy on every cycle until the first finishes.
+    w = WorldState(devices=two_gpus(), units=units(), now=1000,
+                   placements=(Placement("asr", "gpu0", loaded_at=995, loading=True),))
+    assert "asr" not in kinds_of(plan(w).of(Load), Load)
+
+
+def test_a_request_waits_for_an_in_flight_load_instead_of_loading_elsewhere():
+    # The request path duplicated too: `is_resident` was false for a loading
+    # unit, the loading copy's footprint made its own card not fit, so the
+    # cheapest option became "load a second copy on the empty card".
+    w = WorldState(devices=two_gpus(), units=units(), now=1000,
+                   placements=(Placement("tts", "gpu0", loaded_at=995, loading=True),),
+                   requests=(Request("r1", "tts", created_at=1000),))
+    p = plan(w)
+    assert "tts" not in kinds_of(p.of(Load), Load)
+    assert any(g.kind == "tts" and g.device_id == "gpu0" for g in p.of(Grant))
+
+
+def test_a_warm_copy_is_preferred_over_a_loading_one():
+    # Loading is not free: a unit that can serve NOW beats one still loading.
+    w = WorldState(devices=two_gpus(), units=units(), now=1000,
+                   placements=(Placement("tts", "gpu0", loaded_at=995, loading=True),
+                               Placement("tts", "gpu1", loaded_at=100)),
+                   requests=(Request("r1", "tts", created_at=1000),))
+    p = plan(w)
+    assert any(g.kind == "tts" and g.device_id == "gpu1" for g in p.of(Grant))
+
+
+def test_a_loading_unit_occupies_its_device():
+    # chipgen(5) must not be packed into space a loading tts(9) has committed
+    # but not yet allocated. gpu0: 24 cap - 1 reserved - 9 loading = 14 free, so
+    # it fits; make the card small enough that it does not.
+    small = gpu(id="gpu0", cap=12)
+    w = WorldState(devices=(small,), units=units(), now=1000,
+                   placements=(Placement("tts", "gpu0", loaded_at=995, loading=True),),
+                   requests=(Request("r1", "chipgen", created_at=1000),))
+    p = plan(w)
+    # 12 - 1 - 9 = 2 free; chipgen needs 5. Not loaded, and tts is not evicted
+    # for it (freshly loaded, anti-thrash).
+    assert "chipgen" not in kinds_of(p.of(Load), Load)
+
+
+def test_loading_defaults_false_and_changes_nothing():
+    # Placements built without the new field behave exactly as before.
+    assert Placement("tts", "gpu0").loading is False
