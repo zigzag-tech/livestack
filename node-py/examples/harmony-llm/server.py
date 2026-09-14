@@ -80,6 +80,10 @@ FOOTPRINT = int(float(os.environ.get("HARMONY_LLM_FOOTPRINT_GB", "17")) * (1 << 
 # planner charges for co-residence in proportion to the DEMAND waiting for each,
 # so alternating traffic separates them and idle siblings cost nothing.
 SPREAD_GROUP = os.environ.get("HARMONY_LLM_SPREAD_GROUP", "llm")
+# The kind this node advertises to livestack (see attach() below). Named here so
+# _peer_at can ask "does that peer serve what I serve?" without re-spelling the
+# literal, which is how the two would drift apart.
+NODE_KIND = "llm"
 
 
 # Added to every unit's vLLM port. THE reason two nodes can share one unit
@@ -474,7 +478,7 @@ def _readiness() -> dict:
 _busy = counting()
 
 manager, residence = attach(
-    app, host_id=HOST_ID, kind="llm", units=_UNITS,
+    app, host_id=HOST_ID, kind=NODE_KIND, units=_UNITS,
     idle_seconds=IDLE_EVICT_SECONDS, coload=COLOAD,
     gpu_call=_gpu_call, port=NODE_PORT, readiness=_readiness,
     in_flight=_busy,
@@ -584,6 +588,16 @@ def _peer_at(device_id: str) -> "str | None":
     Without forwarding, a node asked for a unit the planner placed elsewhere
     would load a second copy on its own card — deciding placement again, which
     is the thing admission exists to take away from it.
+
+    A DEVICE IS NOT A NODE. Several livestack nodes share one card — polytts,
+    polyasr and this one all register against the same device — so matching on
+    device_id alone picks whichever co-tenant the broker happens to list first
+    and forwards an LLM request to it. Observed exactly that way: an embeddings
+    call granted `xc-tower-ubuntu/gpu0` was forwarded to the polytts node, which
+    has no /v1/embeddings and answered 404 — a reply that looks like the model
+    is missing rather than like this node sent it to a TTS server. So a peer
+    must also serve OUR kind; one that serves something else is a neighbour on
+    the card, not a stand-in for us.
     """
     if not device_id:
         return None
@@ -595,6 +609,12 @@ def _peer_at(device_id: str) -> "str | None":
         rows = rows if isinstance(rows, list) else rows.get("peers", [])
         for r in rows:
             if r.get("device_id") != device_id:
+                continue
+            # A node that advertises kinds and not ours cannot serve this at
+            # all. An empty list is "did not say", which stays eligible rather
+            # than being treated as a no.
+            kinds = r.get("kinds") or []
+            if kinds and NODE_KIND not in kinds:
                 continue
             url = (r.get("peer") or "")
             if not url or r.get("device_id") == DEVICE_ID_SELF:
@@ -791,15 +811,24 @@ def _derived_requirements(path: str, body_json: dict) -> dict:
     model's narration into a user-visible reply (2026-09-07).
     """
     out: dict = {}
-    if "/chat/completions" in path or "/completions" in path:
+    # No leading slash in either clause: `path` is the {path:path} capture and
+    # arrives WITHOUT the "/v1/" prefix, as "chat/completions" / "completions" /
+    # "embeddings". Spelled "/completions", the second clause matched
+    # "chat/completions" by luck and a bare "completions" not at all — which
+    # derived NO class for /v1/completions and, now that a node can declare a
+    # pooling unit, would let a generation request be routed to one.
+    if "completions" in path:
         out["class"] = "llm"
     # The endpoint says what KIND of work this is, exactly as it does for chat.
+    # No leading slash: `path` is the {path:path} capture and arrives WITHOUT
+    # the "/v1/" prefix, as "embeddings". (The chat clause above matches only
+    # because "chat/completions" happens to contain "/completions".)
     # Without this clause an embedding request derives nothing, falls past
     # candidate_kinds() into _unit_for_model()'s positional fallback, and is
     # served by whichever unit happens to be declared first — a generation unit,
     # which answers /v1/embeddings with a 400. Deriving it is what lets a node
     # declare both kinds and route each correctly.
-    elif "/embeddings" in path:
+    elif "embeddings" in path:
         out["class"] = "embed"
 
     # Vision: an image part anywhere in the messages. Deliberately NOT a
