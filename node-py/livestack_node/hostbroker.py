@@ -21,6 +21,7 @@ import os
 import threading
 import time
 
+from dataclasses import replace
 from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from .planner import (
@@ -36,7 +37,8 @@ def _res_max(a: Mapping[str, float], b: Mapping[str, float]) -> Dict[str, float]
             for k in set(a) | set(b)}
 
 
-def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit]) -> Dict[str, Unit]:
+def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit],
+                    peer_devices: Optional[Mapping[str, str]] = None) -> Dict[str, Unit]:
     """Fold `(kind, peer) -> Unit` reports down to the per-kind map the planner
     consumes.
 
@@ -56,11 +58,22 @@ def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit]) -> Dict[str, Unit]
       pinned tier, for the same reason: the stronger claim wins.
     * `min_resident` takes the MAX — a fleet-wide warm floor is a floor.
     """
+    # Which devices actually have a node serving each kind. A device is not a
+    # server: several nodes share one card and serve different things, so
+    # "24 GB free" is not the same as "this can run here". Empty (no peer
+    # devices supplied) leaves `servable_on` empty, which constrains nothing.
+    peer_devices = peer_devices or {}
+    serves: Dict[str, set] = {}
+    for (kind, peer), _u in per_peer.items():
+        did = peer_devices.get(peer)
+        if did:
+            serves.setdefault(kind, set()).add(did)
+
     out: Dict[str, Unit] = {}
     for (kind, _peer), unit in sorted(per_peer.items()):
         prev = out.get(kind)
         if prev is None:
-            out[kind] = unit
+            out[kind] = replace(unit, servable_on=frozenset(serves.get(kind, ())))
             continue
         out[kind] = Unit(
             kind=kind,
@@ -76,6 +89,7 @@ def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit]) -> Dict[str, Unit]
                                          unit.activation_headroom),
             spread_group=prev.spread_group or unit.spread_group,
             attributes=dict(prev.attributes or unit.attributes),
+            servable_on=frozenset(serves.get(kind, ())),
         )
     return out
 
@@ -142,6 +156,9 @@ class HostBroker:
         # server, so a unit that is merely BUSY reports absent; believing one
         # such sample is enough to re-place a model that never went anywhere.
         self._resident_at: Dict[Tuple[str, str], float] = {}
+        # peer key -> its device id, so `aggregate_units` can say which devices
+        # can actually serve each kind.
+        self._peer_device: Dict[str, str] = {}
         self.residency_grace_s = float(residency_grace_s)
         self.in_flight_ttl_s = float(in_flight_ttl_s)
         self.devices = list(devices) if devices is not None else None
@@ -599,6 +616,12 @@ class HostBroker:
                 seen_nodes[nid] = key
             for kind, unit in peer_units.items():
                 per_peer_units[(kind, key)] = unit
+            # Where this peer lives, so a unit can be constrained to devices
+            # that actually have a node serving it (see `aggregate_units`).
+            try:
+                self._peer_device[key] = p.device_id
+            except Exception:
+                pass
             placements.extend(peer_placements)
             # Keep what this peer just said for the fleet view: WHICH units are
             # resident (the folded world state only carries how many), which are
@@ -639,7 +662,7 @@ class HostBroker:
         # "which node reported this kind" — a question the folded map cannot
         # answer.
         self.peer_units = per_peer_units
-        units = aggregate_units(per_peer_units)
+        units = aggregate_units(per_peer_units, self._peer_device)
         # Config-declared kinds (a hosted backend has no peer to report them).
         # Peers stay authoritative for the kinds they DO report.
         for kind, u in self.extra_units.items():

@@ -692,20 +692,29 @@ def _peer_at(device_id: str) -> "str | None":
         except Exception:
             continue
         rows = rows if isinstance(rows, list) else rows.get("peers", [])
+        # PREFER A POSITIVE MATCH. "Did not say" stayed eligible so an older
+        # node that reports no kinds could still be forwarded to — but the
+        # broker also lists ALIAS rows (the same server reached by a second
+        # address), and those carry no kinds. So the polytts node slipped
+        # through its own alias row and answered an embeddings call with a 404.
+        # A row that names our kind is always the better answer; an undeclared
+        # one is a last resort, not a peer.
+        best = None
         for r in rows:
             if r.get("device_id") != device_id:
-                continue
-            # A node that advertises kinds and not ours cannot serve this at
-            # all. An empty list is "did not say", which stays eligible rather
-            # than being treated as a no.
-            kinds = r.get("kinds") or []
-            if kinds and NODE_KIND not in kinds:
                 continue
             url = (r.get("peer") or "")
             if not url or r.get("device_id") == DEVICE_ID_SELF:
                 continue
-            return url.rsplit("/livestack", 1)[0]
-        return None
+            kinds = r.get("kinds") or []
+            if kinds and NODE_KIND not in kinds:
+                continue
+            base = url.rsplit("/livestack", 1)[0]
+            if kinds:
+                return base                   # says it serves our kind
+            if best is None and not r.get("alias_of"):
+                best = base                   # undeclared, and not a duplicate row
+        return best
     return None
 
 
