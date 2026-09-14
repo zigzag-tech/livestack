@@ -118,7 +118,8 @@ class HostBroker:
                  ledger: Optional[JsonlLedger] = None,
                  emitter: str = "host-broker",
                  emitter_id: str = "host-broker",
-                 in_flight_ttl_s: float = 900.0):
+                 in_flight_ttl_s: float = 900.0,
+                 residency_grace_s: float = 90.0):
         # devices: a FIXED list (single-host / tests). If None, devices are
         # DISCOVERED from the peers' reported device_ids (federated / multi-host),
         # each sized from device_config[device_id] or default_capacity. That is the
@@ -136,6 +137,12 @@ class HostBroker:
         # `_remembered_peer`): a peer that stops answering must not read as a
         # peer that stopped holding.
         self._last_good: Dict[str, dict] = {}
+        # (kind, device_id) -> when we last saw it reported resident. A node
+        # decides residency with a 2-SECOND health probe against its own model
+        # server, so a unit that is merely BUSY reports absent; believing one
+        # such sample is enough to re-place a model that never went anywhere.
+        self._resident_at: Dict[Tuple[str, str], float] = {}
+        self.residency_grace_s = float(residency_grace_s)
         self.in_flight_ttl_s = float(in_flight_ttl_s)
         self.devices = list(devices) if devices is not None else None
         self.peers: List[Peer] = list(peers or [])
@@ -564,6 +571,8 @@ class HostBroker:
             self.roster.mark_seen(key)
             # Last good read, so a peer that stops ANSWERING is not mistaken for
             # a peer that stops HOLDING. See `_remembered_peer`.
+            peer_placements = self._with_recently_resident(
+                peer_units, peer_placements, self._clock() if self._clock else 0.0)
             self._last_good[key] = {"units": peer_units, "placements": peer_placements}
             # THE SAME SERVER, REACHED TWICE. A broker seeded with
             # http://127.0.0.1:8766 and announced to as http://100.64.0.18:8766
@@ -731,6 +740,37 @@ class HostBroker:
             out.append(Placement(key[0], key[1], loaded_at=at, loading=True))
         return out
 
+    def _with_recently_resident(self, units: Mapping[str, Unit],
+                                placements: List[Placement], now: float) -> List[Placement]:
+        """A unit that was resident a moment ago and is reported absent NOW has
+        almost certainly not gone anywhere.
+
+        A node answers "is it resident?" with a 2-second health probe against its
+        own model server, so a unit that is merely busy — generating, or blocked
+        behind a sibling's load — reports absent. Acting on one such sample is
+        enough to warm a second copy of a 21.7 GB model onto the other card,
+        which is the failure this whole area keeps producing in new disguises.
+
+        So residency is STICKY for `residency_grace_s`: a disappearance must
+        persist to be believed. A real eviction is confirmed within a cycle or
+        two, and one this broker ordered is forgotten immediately (see the Evict
+        dispatch), so nothing here delays a deliberate one.
+        """
+        here = {(pl.kind, pl.device_id) for pl in placements}
+        for k in here:
+            self._resident_at[k] = now
+        out = list(placements)
+        for (kind, did), at in list(self._resident_at.items()):
+            if (kind, did) in here:
+                continue
+            if kind not in units:
+                continue                        # this peer does not serve it
+            if now - at > self.residency_grace_s:
+                del self._resident_at[(kind, did)]
+                continue
+            out.append(Placement(kind, did, loaded_at=at))
+        return out
+
     def _remembered_peer(self, key: str) -> "Optional[dict]":
         """What this peer last reported, while it is still plausibly there.
 
@@ -784,6 +824,9 @@ class HostBroker:
                 # An evicted unit is no longer arriving, whatever we dispatched
                 # before. Leaving the entry would reserve the card we just freed.
                 self._in_flight.pop((ev.kind, ev.device_id), None)
+                # An eviction we ordered is not a blink: drop the stickiness so
+                # the card reads free immediately.
+                self._resident_at.pop((ev.kind, ev.device_id), None)
         for ld in p.of(Load):
             peer = self._peer_for(ld.kind, ld.device_id)
             if peer is None:
