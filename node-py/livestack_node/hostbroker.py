@@ -117,11 +117,22 @@ class HostBroker:
                  dispatch: bool = True,
                  ledger: Optional[JsonlLedger] = None,
                  emitter: str = "host-broker",
-                 emitter_id: str = "host-broker"):
+                 emitter_id: str = "host-broker",
+                 in_flight_ttl_s: float = 900.0):
         # devices: a FIXED list (single-host / tests). If None, devices are
         # DISCOVERED from the peers' reported device_ids (federated / multi-host),
         # each sized from device_config[device_id] or default_capacity. That is the
         # whole of "federation": the same plan() runs over one device or many.
+        # (kind, device_id) -> when we dispatched a load that has not yet shown
+        # up as resident. THE BROKER IS THE ONLY PLACE THIS IS KNOWABLE: a node
+        # loading a 21.7 GB model reports `resident: false` for the minutes it
+        # takes, so without this the next planning cycle sees no copy and places
+        # a second one on the other card. Cleared when the peer reports the unit
+        # resident, when we evict it, or after `in_flight_ttl_s` — the last of
+        # which is a safety net, not the mechanism: a load that dies silently
+        # must not reserve a card forever.
+        self._in_flight: Dict[Tuple[str, str], float] = {}
+        self.in_flight_ttl_s = float(in_flight_ttl_s)
         self.devices = list(devices) if devices is not None else None
         self.peers: List[Peer] = list(peers or [])
         self.policy = policy or PlannerPolicy()
@@ -603,6 +614,7 @@ class HostBroker:
         # A hosted device has no peer reporting placements either — the broker's
         # own ledger is the only account of how full it is.
         placements.extend(self._hosted_placements(now))
+        placements.extend(self._in_flight_placements(placements, now))
         self._note_demand(requests or (), now)
         return WorldState(devices=tuple(self._resolve_devices(discovered, measured_caps)),
                           units=units,
@@ -658,6 +670,31 @@ class HostBroker:
                 continue
         return None
 
+    def _in_flight_placements(self, known: List[Placement], now: float) -> List[Placement]:
+        """Loads we dispatched that no peer reports as resident yet.
+
+        Reconciled against what the peers just said, so the ledger cannot drift:
+        a unit that has ARRIVED is dropped (the real placement supersedes it),
+        and one that has neither arrived nor expired is handed to the planner as
+        a placement marked `loading` — it holds the card, it cannot serve yet,
+        and it is emphatically not a reason to start another copy.
+        """
+        arrived = {(pl.kind, pl.device_id) for pl in known}
+        out: List[Placement] = []
+        for key, at in list(self._in_flight.items()):
+            if key in arrived:
+                del self._in_flight[key]            # the load finished
+                continue
+            if now - at > self.in_flight_ttl_s:
+                # Stale: the load died, or the unit was evicted elsewhere. Let
+                # the planner place it again rather than reserve a card forever.
+                self._log(f"[hostbroker] in-flight {key[0]}@{key[1]} expired after "
+                          f"{self.in_flight_ttl_s:.0f}s without becoming resident")
+                del self._in_flight[key]
+                continue
+            out.append(Placement(key[0], key[1], loaded_at=at, loading=True))
+        return out
+
     def plan_and_apply(self, requests: Optional[List[Request]] = None,
                        last_evicted_at: Optional[Mapping[str, float]] = None):
         """Snapshot the fleet, plan, and dispatch every action to the owning peer.
@@ -676,6 +713,9 @@ class HostBroker:
             if peer is not None:
                 self._log(f"[hostbroker] evict {ev.kind}@{ev.device_id}: {ev.reason}")
                 peer.evict(ev.kind)
+                # An evicted unit is no longer arriving, whatever we dispatched
+                # before. Leaving the entry would reserve the card we just freed.
+                self._in_flight.pop((ev.kind, ev.device_id), None)
         for ld in p.of(Load):
             peer = self._peer_for(ld.kind, ld.device_id)
             if peer is not None:
@@ -686,6 +726,11 @@ class HostBroker:
                 # suggestion. Older nodes ignore the extra field.
                 peer.warm(ld.kind, device=ld.device_id,
                           budget=dict(getattr(ld, "budget", {}) or {}))
+                # Remember it is coming. Until the peer reports it resident this
+                # is the only record that it exists at all, and the planner
+                # needs it to not place a second copy next cycle.
+                self._in_flight[(ld.kind, ld.device_id)] = (
+                    self._clock() if self._clock else 0.0)
         return p
 
 

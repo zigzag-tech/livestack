@@ -157,6 +157,17 @@ class Placement:
     loaded_at: float = 0.0
     busy: bool = False              # holds >= 1 active (heartbeating) lease right now
     leases: int = 0
+    # A load DISPATCHED but not yet serving. It holds the card — the weights are
+    # arriving — and it cannot answer a request yet, so it is neither "resident"
+    # nor "absent" and both answers are wrong in a different place.
+    #
+    # Absent was the one the planner believed, and it cost a card: a 21.7 GB
+    # model reports not-resident for the minutes it takes to load, so the
+    # SOFT_PIN restore saw no copy, started a second one on the other card, and
+    # a two-card host ended up holding one model twice with nowhere to put
+    # anything else. `loaded_at` is when the load was DISPATCHED, which is what
+    # makes anti-thrash protect an in-flight load like any other fresh one.
+    loading: bool = False
 
 
 @dataclass(frozen=True)
@@ -356,11 +367,33 @@ class _World:
         return out
 
     def is_resident(self, kind: str, device_id: Optional[str] = None) -> bool:
+        """Can this unit SERVE, here or anywhere? A loading copy cannot."""
+        if device_id is not None:
+            p = self.resident[device_id].get(kind)
+            return p is not None and not p.loading
+        return any(not p.loading for r in self.resident.values()
+                   for k, p in r.items() if k == kind)
+
+    def is_loading(self, kind: str, device_id: Optional[str] = None) -> bool:
+        """Is a copy on its way — dispatched, holding the card, not yet serving?"""
+        if device_id is not None:
+            p = self.resident[device_id].get(kind)
+            return p is not None and p.loading
+        return any(p.loading for r in self.resident.values()
+                   for k, p in r.items() if k == kind)
+
+    def is_present(self, kind: str, device_id: Optional[str] = None) -> bool:
+        """Does a copy EXIST OR IS ONE COMING? The question residency policy has
+        to ask before placing another: a second copy of a unit already arriving
+        wastes a whole card and serves nothing the first will not."""
         if device_id is not None:
             return kind in self.resident[device_id]
         return any(kind in r for r in self.resident.values())
 
     def replicas(self, kind: str) -> int:
+        """Copies that exist or are arriving — see `is_present`. Counting only
+        the ones that can serve makes a pin floor re-load an in-flight replica
+        on every planning cycle until it finishes."""
         return sum(1 for r in self.resident.values() if kind in r)
 
     def load(self, kind: str, device_id: str, reason: str) -> None:
@@ -662,6 +695,17 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
         if world.is_resident(req.kind, d.id):
             opt = _Option(d.id, 0.0 + loc_pen, [], needs_load=False,
                           slack=_magnitude(_sub(world.free(d.id), _admission_need(unit))))
+        elif world.is_loading(req.kind, d.id):
+            # A copy is already arriving here. Waiting for it needs no second
+            # load and no second card, so it must cost LESS than loading again
+            # elsewhere — otherwise the loading copy's own footprint makes its
+            # card look full, the free card looks cheaper, and the request
+            # duplicates the very unit it is waiting for. It costs MORE than
+            # zero, so a copy that can serve now still wins (see the warm branch
+            # above): half a reload is the expected wait, having arrived at a
+            # uniformly random point during it.
+            opt = _Option(d.id, unit.reload_cost / 2.0 + loc_pen, [], needs_load=False,
+                          slack=_magnitude(_sub(world.free(d.id), _admission_need(unit))))
         elif _fits(_admission_need(unit), world.free(d.id)):
             opt = _Option(d.id, unit.reload_cost + loc_pen
                           + _contention_cost(world, d.id, unit, pol), [], needs_load=True,
@@ -834,7 +878,9 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
     # 3) SOFT_PIN restore (best-effort, debounced): bring preferred-warm units back
     #    once pressure has settled and there is room WITHOUT preempting anyone.
     for kind, unit in world.units.items():
-        if unit.residency != Residency.SOFT_PIN or W.is_resident(kind):
+        # `is_present`, not `is_resident`: a copy already on its way is a copy.
+        # Asking "can it serve yet?" here is what started a second one beside it.
+        if unit.residency != Residency.SOFT_PIN or W.is_present(kind):
             continue
         evicted_at = world.last_evicted_at.get(kind)
         if evicted_at is not None and (world.now - evicted_at) < unit.restore_debounce_s:
