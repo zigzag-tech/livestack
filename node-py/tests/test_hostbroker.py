@@ -1085,3 +1085,31 @@ def test_a_node_that_goes_silent_while_loading_still_holds_its_card():
         broker.plan_and_apply([])
     assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 1, \
         "a silent, loading node must not have its work duplicated onto the live card"
+
+
+def test_a_warm_that_times_out_is_still_remembered_as_in_flight():
+    # `warm` has a 180s HTTP timeout and a 27B takes ~5 minutes, so the loads
+    # most worth remembering are exactly the ones whose dispatch cannot confirm.
+    # Recording only on success meant those were forgotten and duplicated.
+    broker, a, b, clock = _two_card_host()
+
+    for peer in (a, b):
+        def boom(kind, device=None, budget=None, _p=peer):
+            _p.calls.append(("warm", kind))
+            raise TimeoutError("read timed out")
+        peer.warm = boom
+
+    broker.plan_and_apply([])
+    assert broker._in_flight, "a dispatch that did not confirm is still in flight"
+    for _ in range(3):
+        clock["t"] += 60
+        broker.plan_and_apply([])
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 1
+
+
+def test_one_unresponsive_peer_does_not_abandon_the_rest_of_the_plan():
+    broker, a, b, clock = _two_card_host()
+    def boom(kind, device=None, budget=None):
+        a.calls.append(("warm", kind)); raise TimeoutError("read timed out")
+    a.warm = boom
+    broker.plan_and_apply([])          # must not raise

@@ -743,20 +743,37 @@ class HostBroker:
                 self._in_flight.pop((ev.kind, ev.device_id), None)
         for ld in p.of(Load):
             peer = self._peer_for(ld.kind, ld.device_id)
-            if peer is not None:
-                self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id}: {ld.reason}")
+            if peer is None:
+                continue
+            self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id}: {ld.reason}")
+            # RECORD BEFORE DISPATCHING. What must be remembered is the DECISION
+            # to put this unit here, and that is already made — it does not
+            # become truer because an HTTP call came back.
+            #
+            # Recording after the call looked equivalent and was not: `warm` has
+            # a 180s timeout and a 27B takes ~5 minutes, so the confirmation
+            # cannot arrive for exactly the loads worth remembering. The call
+            # raised, this line never ran, and the next cycle — seeing no copy
+            # anywhere — warmed a second one on the other card. The dispatch
+            # that "failed" had started the load perfectly well.
+            self._in_flight[(ld.kind, ld.device_id)] = (
+                self._clock() if self._clock else 0.0,
+                getattr(peer, "host_id", "") or "")
+            try:
                 # Tell the node WHICH device the plan chose. A peer that serves
                 # one card ignores it; a peer that can see several needs it, or
                 # it would pick for itself and the planner's choice would be a
                 # suggestion. Older nodes ignore the extra field.
                 peer.warm(ld.kind, device=ld.device_id,
                           budget=dict(getattr(ld, "budget", {}) or {}))
-                # Remember it is coming. Until the peer reports it resident this
-                # is the only record that it exists at all, and the planner
-                # needs it to not place a second copy next cycle.
-                self._in_flight[(ld.kind, ld.device_id)] = (
-                    self._clock() if self._clock else 0.0,
-                    getattr(peer, "host_id", "") or "")
+            except Exception as e:
+                # Keep the record. A warm that does not confirm is usually a
+                # warm still running, and assuming otherwise is what duplicates
+                # the model; `in_flight_ttl_s` bounds the wrong guess. Per-load,
+                # so one unresponsive peer cannot abandon the rest of the plan.
+                self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} did not "
+                          f"confirm ({type(e).__name__}: {e}) — treating it as "
+                          f"in flight")
         return p
 
 
