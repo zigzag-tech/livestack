@@ -131,7 +131,7 @@ class HostBroker:
         # resident, when we evict it, or after `in_flight_ttl_s` — the last of
         # which is a safety net, not the mechanism: a load that dies silently
         # must not reserve a card forever.
-        self._in_flight: Dict[Tuple[str, str], float] = {}
+        self._in_flight: Dict[Tuple[str, str], Tuple[float, str]] = {}
         self.in_flight_ttl_s = float(in_flight_ttl_s)
         self.devices = list(devices) if devices is not None else None
         self.peers: List[Peer] = list(peers or [])
@@ -614,7 +614,12 @@ class HostBroker:
         # A hosted device has no peer reporting placements either — the broker's
         # own ledger is the only account of how full it is.
         placements.extend(self._hosted_placements(now))
-        placements.extend(self._in_flight_placements(placements, now))
+        placements.extend(self._in_flight_placements(placements, now, units))
+        # Keep a card we are loading onto in the world even if its node stopped
+        # answering mid-load (see `_in_flight_devices`). `setdefault`: a peer
+        # that IS answering stays authoritative for its own device.
+        for _did, _host in self._in_flight_devices().items():
+            discovered.setdefault(_did, _host)
         self._note_demand(requests or (), now)
         return WorldState(devices=tuple(self._resolve_devices(discovered, measured_caps)),
                           units=units,
@@ -670,7 +675,8 @@ class HostBroker:
                 continue
         return None
 
-    def _in_flight_placements(self, known: List[Placement], now: float) -> List[Placement]:
+    def _in_flight_placements(self, known: List[Placement], now: float,
+                              units: Mapping[str, Unit]) -> List[Placement]:
         """Loads we dispatched that no peer reports as resident yet.
 
         Reconciled against what the peers just said, so the ledger cannot drift:
@@ -678,10 +684,14 @@ class HostBroker:
         and one that has neither arrived nor expired is handed to the planner as
         a placement marked `loading` — it holds the card, it cannot serve yet,
         and it is emphatically not a reason to start another copy.
+
+        A kind no peer declares any more is skipped: the planner indexes units
+        by kind and a placement for an unknown one is a KeyError, which on a
+        single-node host is every cycle while that node is loading.
         """
         arrived = {(pl.kind, pl.device_id) for pl in known}
         out: List[Placement] = []
-        for key, at in list(self._in_flight.items()):
+        for key, (at, _host) in list(self._in_flight.items()):
             if key in arrived:
                 del self._in_flight[key]            # the load finished
                 continue
@@ -692,8 +702,23 @@ class HostBroker:
                           f"{self.in_flight_ttl_s:.0f}s without becoming resident")
                 del self._in_flight[key]
                 continue
+            if key[0] not in units:
+                continue
             out.append(Placement(key[0], key[1], loaded_at=at, loading=True))
         return out
+
+    def _in_flight_devices(self) -> Dict[str, str]:
+        """device_id -> host_id for cards holding a load we dispatched.
+
+        A NODE GOES SILENT WHILE IT LOADS. harmony-llm's facade blocks on a cold
+        start ("facade stopped answering"), so the peer that is busy loading
+        drops out of discovery — and with it the only evidence its card exists.
+        The in-flight placement was then discarded as belonging to an unknown
+        device, the planner saw no copy anywhere, and warmed a second one on the
+        card that was still answering. Remembering the device is what makes
+        remembering the load mean anything.
+        """
+        return {did: host for (_kind, did), (_at, host) in self._in_flight.items()}
 
     def plan_and_apply(self, requests: Optional[List[Request]] = None,
                        last_evicted_at: Optional[Mapping[str, float]] = None):
@@ -730,7 +755,8 @@ class HostBroker:
                 # is the only record that it exists at all, and the planner
                 # needs it to not place a second copy next cycle.
                 self._in_flight[(ld.kind, ld.device_id)] = (
-                    self._clock() if self._clock else 0.0)
+                    self._clock() if self._clock else 0.0,
+                    getattr(peer, "host_id", "") or "")
         return p
 
 

@@ -1049,3 +1049,39 @@ def test_a_load_that_never_arrives_expires_and_is_retried():
     broker.plan_and_apply([])
     assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 2, \
         "an expired in-flight load should be placed again"
+
+
+def _two_card_discovered_host():
+    """As hostd runs it: devices are DISCOVERED from the peers, not configured.
+    That is the path where a node going silent takes its card with it."""
+    llm = Unit("llm_title", {"vram_bytes": 21}, priority=20,
+               residency=Residency.SOFT_PIN, reload_cost=60)
+    a = SlowPeer("tower0", "gpu0", llm)
+    b = SlowPeer("tower0", "gpu1", llm)
+    clock = {"t": 1000.0}
+    broker = HostBroker(devices=None, peers=[a, b],
+                        device_config={"gpu0": {"vram_bytes": 24, "reserved": 1},
+                                       "gpu1": {"vram_bytes": 24, "reserved": 1}},
+                        clock=lambda: clock["t"])
+    return broker, a, b, clock
+
+
+def test_a_node_that_goes_silent_while_loading_still_holds_its_card():
+    # harmony-llm's facade BLOCKS during a cold load, so the node that is loading
+    # drops out of discovery entirely. The in-flight record must keep both the
+    # placement and its device alive, or the planner sees no copy anywhere and
+    # warms a second one on the card that is still answering.
+    broker, a, b, clock = _two_card_discovered_host()
+    broker.plan_and_apply([])
+    loading = next(p for p in (a, b) if ("warm", "llm_title") in p.calls)
+
+    def dead(*_a, **_k):
+        raise OSError("facade stopped answering")
+    loading.units = dead
+    loading.placements = dead
+
+    for _ in range(3):
+        clock["t"] += 60
+        broker.plan_and_apply([])
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 1, \
+        "a silent, loading node must not have its work duplicated onto the live card"
