@@ -27,7 +27,7 @@ from .planner import (
     Device, Placement, Request, Unit, WorldState, PlannerPolicy, plan, Residency,
     Load, Evict, Grant, Defer,
 )
-from .membership import MembershipPolicy, PeerRoster, RosterFull
+from .membership import MIA, MembershipPolicy, PeerRoster, RosterFull
 from .ledger import Candidate, Decision, JsonlLedger
 
 
@@ -132,6 +132,10 @@ class HostBroker:
         # which is a safety net, not the mechanism: a load that dies silently
         # must not reserve a card forever.
         self._in_flight: Dict[Tuple[str, str], Tuple[float, str]] = {}
+        # peer key -> its last successful units/placements read (see
+        # `_remembered_peer`): a peer that stops answering must not read as a
+        # peer that stopped holding.
+        self._last_good: Dict[str, dict] = {}
         self.in_flight_ttl_s = float(in_flight_ttl_s)
         self.devices = list(devices) if devices is not None else None
         self.peers: List[Peer] = list(peers or [])
@@ -538,9 +542,29 @@ class HostBroker:
                 # transitions, which is where the information actually is.
                 self._last_probe_error[key] = str(e)
                 self.roster.mark_probed(key)
+                # UNREACHABLE IS NOT EMPTY. Dropping the peer dropped its
+                # PLACEMENTS too, so the planner concluded its card held nothing
+                # and re-placed units that were sitting right there. On this host
+                # a node's facade blocks while it loads or serves a big model —
+                # precisely when it holds the most — so one missed probe warmed a
+                # second 21.7 GB copy of a 27B onto the other card.
+                #
+                # Capacity was never the issue (the comment above is right: the
+                # surviving peers' measured_free still counts this one's VRAM).
+                # RESIDENCY was, and it needs the opposite default: keep what it
+                # last held until the roster gives up on it.
+                remembered = self._remembered_peer(key)
+                if remembered is not None:
+                    per_peer_units.update({(k, key): u for k, u in remembered["units"].items()})
+                    placements.extend(remembered["placements"])
+                    for pl in remembered["placements"]:
+                        discovered.setdefault(pl.device_id, self._remembered_host(key))
                 continue
             self._record_probe_ms(key, (time.monotonic() - probe_started) * 1000.0)
             self.roster.mark_seen(key)
+            # Last good read, so a peer that stops ANSWERING is not mistaken for
+            # a peer that stops HOLDING. See `_remembered_peer`.
+            self._last_good[key] = {"units": peer_units, "placements": peer_placements}
             # THE SAME SERVER, REACHED TWICE. A broker seeded with
             # http://127.0.0.1:8766 and announced to as http://100.64.0.18:8766
             # holds two peers for one process, and counted its units twice: one
@@ -706,6 +730,25 @@ class HostBroker:
                 continue
             out.append(Placement(key[0], key[1], loaded_at=at, loading=True))
         return out
+
+    def _remembered_peer(self, key: str) -> "Optional[dict]":
+        """What this peer last reported, while it is still plausibly there.
+
+        The roster already models "plausibly there" — fresh, then suspect, then
+        mia — so this defers to it rather than inventing a second timer. Once a
+        peer is MIA the memory is dropped and its card is genuinely free again;
+        until then, a peer that did not answer is assumed to still hold what it
+        held, because on this fleet the commonest reason a node goes quiet is
+        that it is busy with the very model it holds.
+        """
+        if self.roster.state_of(key) == MIA:
+            self._last_good.pop(key, None)
+            return None
+        return self._last_good.get(key)
+
+    def _remembered_host(self, key: str) -> str:
+        rec = self.roster._records.get(key)
+        return getattr(rec, "host_id", "") or ""
 
     def _in_flight_devices(self) -> Dict[str, str]:
         """device_id -> host_id for cards holding a load we dispatched.
