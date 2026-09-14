@@ -138,12 +138,13 @@ line starts vLLM for pooling and the rest follows on its own:
 ```jsonc
 { "name": "embed_multi", "model": "Qwen/Qwen3-Embedding-0.6B", "port": 8205,
   "footprint_gb": 3, "gpu_fraction": "0.12", "max_model_len": "8192",
-  "extra_args": "--task embed --max-num-seqs 32", "residency": "UNPINNED",
+  "extra_args": "--runner pooling --max-num-seqs 32", "residency": "UNPINNED",
   "attributes": { "params_b": 0.6, "family": "qwen", "dim": 1024 } }
 ```
 
-Note what is NOT declared: `class`. It is DERIVED from `--task embed` (or
-`--runner pooling`, the v0.10+ spelling), because what kind of work a unit
+Note what is NOT declared: `class`. It is DERIVED from `--runner pooling` (or
+`--task embed`, the pre-v0.10 spelling — vLLM 0.28 rejects that one outright
+with `unrecognized arguments`, so check which your build takes), because what kind of work a unit
 serves is a launch-line fact like `thinking` and `tools` — a vLLM started for
 pooling answers `/v1/chat/completions` with a 400 and vice versa, so a
 hand-declared `"class": "llm"` beside `--task embed` is an attribute that lies:
