@@ -1113,3 +1113,27 @@ def test_one_unresponsive_peer_does_not_abandon_the_rest_of_the_plan():
         a.calls.append(("warm", kind)); raise TimeoutError("read timed out")
     a.warm = boom
     broker.plan_and_apply([])          # must not raise
+
+
+def test_a_peer_that_stops_answering_still_holds_what_it_held():
+    # A node's facade blocks while it loads or serves a big model — exactly when
+    # it holds the most. One missed probe used to erase its placements, so the
+    # planner re-placed a unit that was sitting right there.
+    broker, a, b, clock = _two_card_discovered_host()
+    broker.plan_and_apply([])
+    loading = next(p for p in (a, b) if ("warm", "llm_title") in p.calls)
+    loading.arrive()                      # it finished loading and is serving
+    clock["t"] += 30
+    broker.plan_and_apply([])             # observed resident; in-flight cleared
+    assert broker._in_flight == {}
+
+    def busy(*_a, **_k):
+        raise OSError("facade blocked serving a request")
+    loading.units = busy
+    loading.placements = busy
+
+    for _ in range(3):
+        clock["t"] += 30
+        broker.plan_and_apply([])
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 1, \
+        "a busy node's resident model must not be duplicated onto the other card"
