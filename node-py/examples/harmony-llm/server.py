@@ -534,16 +534,10 @@ if WARM_ON_START:
         # Give the facade a moment to bind before the first ensure, so the
         # load does not race attach's own startup bookkeeping.
         time.sleep(2)
-        # Let the peer list populate before electing: every node announces
-        # itself on startup, and electing off an empty list would make every
-        # node think it is alone and therefore the leader — the duplicate this
-        # election exists to prevent, arrived at from the other side.
+        # Let the peer list populate before asking who holds what: every node
+        # announces itself on startup, and a check against an empty list sees no
+        # holder and loads.
         time.sleep(float(os.environ.get("HARMONY_LLM_WARM_SETTLE", "10")))
-        if not _warms_on_this_node():
-            print(f"[harmony-llm] warm-on-start: another {NODE_KIND} node on "
-                  f"this host warms (we are {HOST_ID}) — warming nothing here; "
-                  f"requests forward to whoever holds the unit", flush=True)
-            return
         # What is hot after a reboot is an OPERATOR decision and must not share
         # a mechanism with request routing. `next(iter(SPECS))` warmed whichever
         # unit was declared first, so reordering the config silently changed
@@ -677,31 +671,6 @@ def _same_kind_peers() -> "list[tuple[str, str]]":
                             url.rsplit("/livestack", 1)[0]))
         break                                 # first broker that answered
     return out
-
-
-def _warms_on_this_node() -> bool:
-    """Is THIS the node that honours `warm_on_start`, among our kind on this host?
-
-    `warm_on_start` is a claim about the HOST — "this unit should be hot, once".
-    Two nodes reading one units file (the normal shape for a two-card box) each
-    read it as "hot HERE", and no amount of looking-before-loading separates
-    them: they start in the same second, `/admit` grants each its own free card
-    — a correct answer to "where may I put this?", which is not the question —
-    and both load. Measured on a 2x3090 box: two 21.7 GB copies of one 27B, both
-    cards full, no room left for the small embedding unit the planner was then
-    asked to place.
-
-    Election has no race to lose: every node computes the same answer from the
-    same peer list, with no coordination and no lock. Lowest HOST_ID wins, so
-    the choice is stable across restarts, and a node that finds itself lowest
-    because the previous leader is gone takes over by itself.
-
-    The nodes that do NOT warm are not idle: a request arriving at one resolves
-    through `/admit` and is forwarded to whoever holds the unit, which is the
-    path that already worked and the reason one copy is enough.
-    """
-    peers = [h for h, _ in _same_kind_peers() if h]
-    return sorted({HOST_ID, *peers})[0] == HOST_ID
 
 
 def _held_elsewhere(unit: str) -> "str | None":
