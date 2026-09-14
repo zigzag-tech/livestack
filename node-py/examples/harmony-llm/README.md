@@ -98,6 +98,31 @@ variables, byte-for-byte as before units existed.
 | `HARMONY_LLM_COLOAD` | let several units be resident (implied by >1 unit) |
 | `HARMONY_LLM_CUDA_DEVICE` | the card this node speaks for |
 
+### One copy per host
+
+Several nodes on one box (one per card) read the SAME units file, so every unit
+is declared on every node. That must not mean every node loads it.
+
+Before loading a unit, a node asks whether a peer of its own kind already
+**holds** it — resident, or still loading — and forwards there instead. Both the
+request path and warm-on-start do this. Without it, a two-card host ran two
+21.7 GB copies of one 27B, filled both cards, and had nowhere left to put a 3 GB
+embedding unit.
+
+Two things that do NOT solve this, and why:
+
+- **`/admit`.** The planner answers "where may I put this?", and for a node with
+  a free card the honest answer is "your own card", every time. Correct, and the
+  wrong question.
+- **Checking residency alone.** A 27B is `resident: false` for the minutes it
+  takes to load — long enough for a peer to look, see nothing, and load its own
+  copy. `/health` therefore reports `loading` beside `resident`: a vLLM that is
+  starting is a *claim* on that unit, and a claim nobody can see is no claim.
+
+Which node warms is an operator decision, per node, via
+`HARMONY_LLM_WARM_ON_START`. Nothing elects it — a node cannot infer another's
+willingness to warm, and a node that warms nothing still serves, by forwarding.
+
 ### Embedding units
 
 A node can serve embeddings alongside generation. Declare a unit whose launch
