@@ -574,55 +574,22 @@ if WARM_ON_START:
         # simply never asked it, and so decided placement locally — the one
         # thing this file says over and over that admission exists to take away
         # from a node.
+        # `warm_on_start` is a claim about the HOST — "this unit should be hot,
+        # once". A peer of our kind that already holds it IS that copy, so warm
+        # nothing and let requests forward there (the serving path does this for
+        # itself; see `_held_elsewhere` at the proxy).
+        #
+        # Deliberately NOT routed through `admit`: warming is an operator
+        # decision about what a cold node comes back holding, and a planner that
+        # refuses — as it does while its bookkeeping still reserves a card for a
+        # vLLM that has since died — would leave the node holding nothing at all.
+        # Placement arbitration belongs on the REQUEST path, where a refusal can
+        # be reported to a caller instead of silently yielding an empty node.
         for n in names:
-            # Fast path: somebody of our kind already holds it. Costs one HTTP
-            # call and skips the planner entirely on the common case — a single
-            # node restarting while its peer stays up.
             held = _held_elsewhere(n)
             if held:
-                print(f"[harmony-llm] warm-on-start: {n} already resident at "
-                      f"{held} — not loading a second copy", flush=True)
-                continue
-            # Otherwise ASK THE PLANNER where this belongs, exactly as a request
-            # does. Not decoration: on a cold host both nodes reach this line at
-            # the same moment and neither can see the other resident yet, so
-            # look-then-load duplicates no matter how long either one waits.
-            # `/admit` serializes, and it is the only thing here that can.
-            try:
-                res = admit(n, owner_id=f"harmony-llm:{HOST_ID}",
-                            timeout=ADMIT_TIMEOUT)
-            except Exception as e:
-                # An arbitration outage must not take a model offline — the same
-                # narrow degradation `admit` documents for itself.
-                res = {"granted": True, "device_id": None,
-                       "degraded": f"admit unreachable: {e}"}
-            granted = res.get("device_id")
-            if not res.get("granted") and not res.get("degraded"):
-                print(f"[harmony-llm] warm-on-start: planner refused {n} "
-                      f"({res.get('reason')!r}) — not warming", flush=True)
-                continue
-            # Granted somewhere that is not us. Defer ONLY if a node of our kind
-            # actually speaks for that device: this host gives the same card a
-            # different device id per tenant, so a grant can name a device no
-            # LLM node serves. Deferring to one of those would warm nothing at
-            # all, which is worse than a second copy.
-            if granted and granted != DEVICE_ID_SELF:
-                peer = _peer_at(granted)
-                if peer:
-                    print(f"[harmony-llm] warm-on-start: planner placed {n} on "
-                          f"{granted} ({peer}) — leaving it there", flush=True)
-                    continue
-                print(f"[harmony-llm] warm-on-start: planner placed {n} on "
-                      f"{granted}, which no {NODE_KIND} node serves — warming "
-                      f"here instead", flush=True)
-            # Look once more. `admit` blocks while the broker evicts victims —
-            # minutes, on a full card — and a peer can claim the unit in that
-            # window, which is exactly the window the first check cannot see.
-            held = _held_elsewhere(n)
-            if held:
-                print(f"[harmony-llm] warm-on-start: {n} claimed at {held} "
-                      f"while we waited on the planner — not loading a second "
-                      f"copy", flush=True)
+                print(f"[harmony-llm] warm-on-start: {n} already held by {held} "
+                      f"— not loading a second copy", flush=True)
                 continue
             try:
                 manager.ensure(n)
