@@ -1137,3 +1137,40 @@ def test_a_peer_that_stops_answering_still_holds_what_it_held():
         broker.plan_and_apply([])
     assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 1, \
         "a busy node's resident model must not be duplicated onto the other card"
+
+
+def test_a_resident_unit_that_blinks_out_is_not_immediately_replaced():
+    # A node answers "resident?" with a 2s health probe against its own model
+    # server, so a BUSY unit reports absent. One such sample used to be enough
+    # to warm a second 21.7 GB copy onto the other card.
+    broker, a, b, clock = _two_card_discovered_host()
+    broker.plan_and_apply([])
+    holder = next(p for p in (a, b) if ("warm", "llm_title") in p.calls)
+    holder.arrive()
+    clock["t"] += 30
+    broker.plan_and_apply([])                    # observed resident
+
+    holder._resident = False                     # busy: the probe timed out
+    for _ in range(2):
+        clock["t"] += 20
+        broker.plan_and_apply([])
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 1, \
+        "a busy unit reporting absent must not be re-placed on the other card"
+
+
+def test_a_unit_that_stays_gone_is_eventually_believed():
+    # Stickiness is a debounce, not amnesia: a real disappearance past the grace
+    # window is acted on.
+    broker, a, b, clock = _two_card_discovered_host()
+    broker.residency_grace_s = 60.0
+    broker.plan_and_apply([])
+    holder = next(p for p in (a, b) if ("warm", "llm_title") in p.calls)
+    holder.arrive()
+    clock["t"] += 30
+    broker.plan_and_apply([])
+
+    holder._resident = False
+    clock["t"] += 200                            # well past the grace window
+    broker.plan_and_apply([])
+    assert sum(p.calls.count(("warm", "llm_title")) for p in (a, b)) == 2, \
+        "a unit that is really gone should be placed again"
