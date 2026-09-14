@@ -11,7 +11,6 @@
     "warm_on_start": true,
     "extra_args": "--max-num-seqs 32 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml",
     "attributes": {
-      "class": "llm",
       "family": "qwen",
       "params_b": 8,
       "quant": "bf16",
@@ -47,5 +46,21 @@
     "max_model_len": "16384",
     "extra_args": "--max-num-seqs 32",
     "residency": "UNPINNED"
+  },
+  {
+    "name": "embed_multi",
+    "model": "Qwen/Qwen3-Embedding-0.6B",
+    "port": 8205,
+    "footprint_gb": 3,
+    "gpu_fraction": "0.12",
+    "max_model_len": "8192",
+    "residency": "UNPINNED",
+    "extra_args": "--task embed --max-num-seqs 32",
+    "attributes": {
+      "family": "qwen",
+      "params_b": 0.6,
+      "dim": 1024,
+      "multilingual": true
+    }
   }
 ]

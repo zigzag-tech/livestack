@@ -94,6 +94,16 @@ SPREAD_GROUP = os.environ.get("HARMONY_LLM_SPREAD_GROUP", "llm")
 PORT_OFFSET = int(os.environ.get("HARMONY_LLM_PORT_OFFSET", "0"))
 
 
+def _is_pooling(joined: str) -> bool:
+    """Was this unit started to POOL (embed) rather than GENERATE?
+
+    Two spellings because vLLM renamed the flag: `--task embed` through v0.9,
+    `--runner pooling` from v0.10. Both are matched so a node is not silently
+    misrouted by a vLLM upgrade.
+    """
+    return "--task embed" in joined or "--runner pooling" in joined
+
+
 def _attributes_for(spec: dict) -> dict:
     """A unit's attributes, with the launch-line facts DERIVED rather than
     trusted from the config file.
@@ -108,6 +118,14 @@ def _attributes_for(spec: dict) -> dict:
     args = spec.get("extra_args")
     argv = args if isinstance(args, list) else shlex.split(str(args or ""))
     joined = " ".join(argv)
+    # WHAT KIND OF WORK this unit serves is a launch-line fact, like every other
+    # attribute here. vLLM started for pooling (`--task embed`, or `--runner
+    # pooling` since v0.10) serves /v1/embeddings and answers /v1/chat/completions
+    # with a 400; started for generation it does the exact opposite. So a
+    # hand-declared `"class": "llm"` beside `--task embed` is the lying attribute
+    # this docstring warns about — it would match a chat request's derived
+    # `class=llm` and the unit would then refuse the very request it claimed.
+    attrs["class"] = "embed" if _is_pooling(joined) else "llm"
     # Separable reasoning requires a parser. Without one the model still
     # "thinks"; the narration just arrives inline in content.
     attrs["thinking"] = "--reasoning-parser" in joined
@@ -357,15 +375,23 @@ def _free(name: str = ""):
 
 
 def _health_probe_for(name: str):
-    """A per-unit functional probe bound to that unit's port."""
+    """A per-unit functional probe bound to that unit's port.
+
+    The probe must speak the unit's OWN endpoint: a pooling unit answers a chat
+    completion with a 400, so probing one with chat would mark a perfectly
+    healthy embedder permanently unhealthy — and, because this is the gate on
+    admission, it would never serve a single request.
+    """
     def probe(_model) -> bool:
+        spec = SPECS[name]
+        if _attributes_for(spec).get("class") == "embed":
+            endpoint, payload = "/v1/embeddings", {"model": spec["model"], "input": "ok"}
+        else:
+            endpoint, payload = "/v1/chat/completions", {
+                "model": spec["model"], "max_tokens": 1,
+                "messages": [{"role": "user", "content": "ok"}]}
         try:
-            r = httpx.post(
-                f"{_base_of(name)}/v1/chat/completions",
-                json={"model": SPECS[name]["model"], "max_tokens": 1,
-                      "messages": [{"role": "user", "content": "ok"}]},
-                timeout=30,
-            )
+            r = httpx.post(f"{_base_of(name)}{endpoint}", json=payload, timeout=30)
             return r.status_code == 200
         except Exception:
             return False
@@ -767,6 +793,14 @@ def _derived_requirements(path: str, body_json: dict) -> dict:
     out: dict = {}
     if "/chat/completions" in path or "/completions" in path:
         out["class"] = "llm"
+    # The endpoint says what KIND of work this is, exactly as it does for chat.
+    # Without this clause an embedding request derives nothing, falls past
+    # candidate_kinds() into _unit_for_model()'s positional fallback, and is
+    # served by whichever unit happens to be declared first — a generation unit,
+    # which answers /v1/embeddings with a 400. Deriving it is what lets a node
+    # declare both kinds and route each correctly.
+    elif "/embeddings" in path:
+        out["class"] = "embed"
 
     # Vision: an image part anywhere in the messages. Deliberately NOT a
     # recursive scan for `type: image_url` — arbitrary user JSON containing that
