@@ -98,6 +98,31 @@ variables, byte-for-byte as before units existed.
 | `HARMONY_LLM_COLOAD` | let several units be resident (implied by >1 unit) |
 | `HARMONY_LLM_CUDA_DEVICE` | the card this node speaks for |
 
+### Embedding units
+
+A node can serve embeddings alongside generation. Declare a unit whose launch
+line starts vLLM for pooling and the rest follows on its own:
+
+```jsonc
+{ "name": "embed_multi", "model": "Qwen/Qwen3-Embedding-0.6B", "port": 8205,
+  "footprint_gb": 3, "gpu_fraction": "0.12", "max_model_len": "8192",
+  "extra_args": "--task embed --max-num-seqs 32", "residency": "UNPINNED",
+  "attributes": { "params_b": 0.6, "family": "qwen", "dim": 1024 } }
+```
+
+Note what is NOT declared: `class`. It is DERIVED from `--task embed` (or
+`--runner pooling`, the v0.10+ spelling), because what kind of work a unit
+serves is a launch-line fact like `thinking` and `tools` — a vLLM started for
+pooling answers `/v1/chat/completions` with a 400 and vice versa, so a
+hand-declared `"class": "llm"` beside `--task embed` is an attribute that lies:
+it matches a chat request and the unit then refuses it.
+
+Callers say `require:class=embed`, or nothing at all — `class=embed` is derived
+from the `/v1/embeddings` path exactly as `class=llm` is derived from
+`/chat/completions`, so an ordinary OpenAI embeddings call routes correctly with
+no requirement string. Health probes follow the unit: a pooling unit is probed
+with `/v1/embeddings`, never a chat completion it would refuse.
+
 `systemd/` holds the deployed units for a two-card host: card 1 `SOFT_PIN`
 (a cold start there costs a hub title, measured ~50.7 s against a 35 s timeout),
 card 0 `UNPINNED` with a 10-minute idle evict because it shares with polyasr and
