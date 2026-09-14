@@ -109,14 +109,21 @@ request path and warm-on-start do this. Without it, a two-card host ran two
 21.7 GB copies of one 27B, filled both cards, and had nowhere left to put a 3 GB
 embedding unit.
 
-Two things that do NOT solve this, and why:
+The planner enforces the same thing one layer up, and that is where the real
+fix lives: the host broker records every load it dispatches, and a unit whose
+load is in flight is handed to the planner as a `Placement(loading=True)`. It
+holds its card and cannot serve yet, so the SOFT_PIN restore and the pin floor
+both count it as present and place nothing beside it, while a request waits for
+it instead of loading a second copy elsewhere.
 
-- **`/admit`.** The planner answers "where may I put this?", and for a node with
-  a free card the honest answer is "your own card", every time. Correct, and the
-  wrong question.
-- **Checking residency alone.** A 27B is `resident: false` for the minutes it
-  takes to load — long enough for a peer to look, see nothing, and load its own
-  copy. `/health` therefore reports `loading` beside `resident`: a vLLM that is
+Two things that do NOT solve this on their own, and why:
+
+- **`/admit`.** It answers "where may I put this?", and for a node with a free
+  card the honest answer is "your own card", every time. Correct, and the wrong
+  question — which is why warm-on-start does not route through it.
+- **Checking residency.** A 27B is `resident: false` for the minutes it takes to
+  load — long enough for a peer to look, see nothing, and load its own copy.
+  `/health` therefore reports `loading` beside `resident`: a vLLM that is
   starting is a *claim* on that unit, and a claim nobody can see is no claim.
 
 Which node warms is an operator decision, per node, via
