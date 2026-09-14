@@ -826,3 +826,35 @@ def test_a_loading_unit_occupies_its_device():
 def test_loading_defaults_false_and_changes_nothing():
     # Placements built without the new field behave exactly as before.
     assert Placement("tts", "gpu0").loading is False
+
+
+def test_a_unit_is_not_placed_where_nothing_can_serve_it():
+    # A DEVICE IS NOT A SERVER. Several nodes share one card and serve different
+    # things, so "this card has the most free space" is not "this can run here".
+    # The planner picked a card whose only tenant was a TTS server, the grant was
+    # forwarded to that neighbour, and it answered 404 — a reply that reads like
+    # a missing model rather than a misrouted request.
+    u = {"embed": Unit("embed", {"vram": 3}, residency=Residency.SOFT_PIN,
+                       servable_on=frozenset({"gpu1"}))}
+    w = WorldState(devices=(gpu(id="gpu0", cap=24), gpu(id="gpu1", cap=8)),
+                   units=u, now=1000)
+    loads = {(a.kind, a.device_id) for a in plan(w).of(Load)}
+    assert loads == {("embed", "gpu1")}, "must go where a node serves it, not where it is roomiest"
+
+
+def test_a_request_is_deferred_when_no_serving_device_has_room():
+    u = {"embed": Unit("embed", {"vram": 3}, servable_on=frozenset({"gpu1"})),
+         "big": Unit("big", {"vram": 7}, priority=10)}
+    w = WorldState(devices=(gpu(id="gpu0", cap=24), gpu(id="gpu1", cap=8)),
+                   units=u, now=1000,
+                   placements=(Placement("big", "gpu1", loaded_at=1000),),
+                   requests=(Request("r1", "embed", created_at=1000),))
+    p = plan(w)
+    assert "embed" not in kinds_of(p.of(Load), Load), "gpu0 has room but cannot serve it"
+    assert [d.request_id for d in p.of(Defer)] == ["r1"]
+
+
+def test_servable_on_empty_constrains_nothing():
+    u = {"x": Unit("x", {"vram": 3}, residency=Residency.SOFT_PIN)}
+    w = WorldState(devices=(gpu(id="gpu0", cap=24),), units=u, now=1000)
+    assert "x" in kinds_of(plan(w).of(Load), Load)

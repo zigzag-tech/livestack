@@ -81,6 +81,17 @@ class Unit:
     priority: int = 100                             # lower = more important
     residency: Residency = Residency.UNPINNED
     min_resident: int = 0                           # fleet-wide warm floor (HARD_PIN)
+    # Devices where a node that actually SERVES this unit lives. Empty = unknown,
+    # which means "anywhere" and is exactly the old behaviour.
+    #
+    # A device is not a card and not a server: several nodes share one card, and
+    # they serve different things. Without this the planner ranked devices purely
+    # on free space and picked one whose only tenant was a TTS server — a grant
+    # nobody could honour. The request was then forwarded to that neighbour,
+    # which answered 404 because it has no such endpoint, and the reply read like
+    # the model was missing rather than like it had been sent to the wrong
+    # server. Placement has to be to somewhere the unit can actually run.
+    servable_on: frozenset = field(default_factory=frozenset)
     reload_cost: float = 1.0                        # ~seconds to load; tie-break weight
     selector: Mapping[str, str] = field(default_factory=dict)   # device labels required
     min_residency_s: float = 15.0                  # anti-thrash: no preempt this soon after load
@@ -499,6 +510,12 @@ def _device_matches(d: Device, selector: Mapping[str, str]) -> bool:
     return all(d.labels.get(k) == v for k, v in selector.items())
 
 
+def _can_serve(unit: Unit, d: Device) -> bool:
+    """Does a node that serves this unit live on this device? Unknown => yes,
+    so a peer that reports no device placement constrains nothing."""
+    return not unit.servable_on or d.id in unit.servable_on
+
+
 def _admission_need(unit: Unit) -> Res:
     """VRAM a device must have free to safely ADMIT/place a new load of ``unit``:
     resident weights (``footprint``) plus its transient peak-activation
@@ -678,6 +695,8 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
     best: Optional[_Option] = None
     for d in world.w.devices:
         if not _device_matches(d, {**unit.selector, **req.selector}):
+            continue
+        if not _can_serve(unit, d):
             continue
         if d.hosted:
             # No residency to arrange and no locality to speak of — the audio
@@ -902,6 +921,8 @@ def _place_warm(world: _World, kind: str, unit: Unit, pol: PlannerPolicy,
         if d.hosted:
             continue    # nothing to keep warm there; a pin floor it cannot hold
         if not _device_matches(d, unit.selector):
+            continue
+        if not _can_serve(unit, d):
             continue
         if _fits(_admission_need(unit), world.free(d.id)):
             slack = _magnitude(world.free(d.id))

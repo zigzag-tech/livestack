@@ -2,6 +2,7 @@
 discovered from the peers (one per reported device_id); the same plan() routes a
 request to the host with room (migrate) or preempts the cheaper victim across the
 fleet, then dispatches to the owning host's node."""
+from dataclasses import replace
 from livestack_node.hostbroker import HostBroker
 from livestack_node.planner import Unit, Placement, Request, Residency
 
@@ -90,4 +91,9 @@ def test_a_node_on_its_own_device_is_unaffected_by_the_fold():
     peers = [FedPeer("h1", "h1/aaaa", {"m": u}), FedPeer("h2", "h2/bbbb", {"m": u})]
     broker = HostBroker(devices=None, peers=peers, clock=lambda: 0.0)
     w = broker.snapshot()
-    assert w.units["m"] == u
+    # Every declared property survives the fold untouched...
+    assert replace(w.units["m"], servable_on=frozenset()) == u
+    # ...and the fold ADDS the one thing only it can know: which devices have a
+    # node serving this kind, so the planner cannot place it somewhere nothing
+    # can run it.
+    assert w.units["m"].servable_on == frozenset({"h1/aaaa", "h2/bbbb"})
