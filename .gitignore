@@ -16,3 +16,6 @@ dist/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Python virtualenv — machine-local, never commit (accidentally swept in by a wip-sync auto-commit)
+node-py/.venv/
