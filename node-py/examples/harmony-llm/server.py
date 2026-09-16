@@ -327,6 +327,12 @@ def _load(name: str = "", device: "str | None" = None,
             "--gpu-memory-utilization", fraction,
             "--served-model-name", spec["model"], name, "local",
         ]
+        # Unit priority decides which model may occupy a device. Once callers
+        # share a resident vLLM, request priority is a separate queueing concern.
+        # Enable vLLM's native scheduler so OpenAI requests carrying `priority`
+        # (lower = sooner) are honoured. A unit can explicitly opt back into FCFS.
+        if "--scheduling-policy" not in spec["extra_args"]:
+            cmd += ["--scheduling-policy", "priority"]
         if spec["max_model_len"]:
             cmd += ["--max-model-len", spec["max_model_len"]]
         cmd += spec["extra_args"]
