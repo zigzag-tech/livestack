@@ -10,7 +10,7 @@
     "dist/**/*"
   ],
   "dependencies": {
-    "@livestack/storage-cas": "workspace:*"
+    "@livestack/storage-cas": "*"
   },
   "devDependencies": {
     "@preconstruct/cli": "^2.8.13",

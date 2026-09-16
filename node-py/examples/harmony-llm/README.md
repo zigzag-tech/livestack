@@ -40,6 +40,13 @@ cannot hold its own bytes.
 * vLLM runs as a **subprocess** per unit; the unit's loader/freer start and stop
   it. That is what makes eviction real — terminating the process is the only way
   to return VRAM to the driver.
+* vLLM defaults to **priority request scheduling**. OpenAI-compatible requests
+  can carry an integer `priority`; lower values run sooner among queued
+  requests. Untagged vLLM requests default to `0`, so interactive callers should
+  use a negative value and batch callers a positive value. This is execution
+  priority within a resident model, separate from Harmony's unit/residency
+  priority. Put `--scheduling-policy fcfs` in a unit's `extra_args` only when
+  FIFO behavior is intentionally required.
 * **One node process per card**, because a wrapper's CUDA meter reads the
   pressure the planner acts on, and a wrapper that saw both cards would report
   card 0's pressure for a model on card 1. The pin is a *metering* fact.
