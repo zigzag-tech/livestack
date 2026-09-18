@@ -124,7 +124,8 @@ def run_profile_cell(
         raise ContractError("invalid profiling cell")
     if cell.get("cache_state") != "warm":
         raise ContractError("installed profiling handler currently permits warm cells only")
-    if not isinstance(endpoints, dict) or not isinstance(endpoints.get(cell.get("execution_target")), str):
+    endpoint_key = f"{cell.get('execution_target')}:{cell.get('workload_class')}"
+    if not isinstance(endpoints, dict) or not isinstance(endpoints.get(endpoint_key), str):
         raise ContractError("execution target has no installed endpoint")
     if not isinstance(protected, dict):
         raise ContractError("protected service constraints are required")
@@ -134,7 +135,7 @@ def run_profile_cell(
         raise ContractError("sample_target is outside installed handler bounds")
     if type(concurrency) is not int or not 1 <= concurrency <= 16:
         raise ContractError("concurrency is outside installed handler bounds")
-    endpoint = endpoints[cell["execution_target"]].rstrip("/")
+    endpoint = endpoints[endpoint_key].rstrip("/")
     before_residence, before_health = _protected(endpoint, protected)
     expected_unit = ENGINE_UNITS[cell["workload_class"]]
     if not any(

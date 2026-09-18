@@ -58,7 +58,7 @@ def _cell():
 
 def test_profile_worker_collects_bounded_metadata_only_pack(engine):
     pack = run_profile_cell(
-        _cell(), {"worker-a": engine},
+        _cell(), {"worker-a:tts": engine},
         protected={"abort_on_active_stream_interference": True},
         voice_id="voice",
     )
@@ -75,7 +75,7 @@ def test_profile_worker_refuses_busy_endpoint_without_requests(engine):
     _Engine.busy = True
     with pytest.raises(ContractError, match="protected endpoint is busy"):
         run_profile_cell(
-            _cell(), {"worker-a": engine},
+            _cell(), {"worker-a:tts": engine},
             protected={"abort_on_active_stream_interference": True},
             voice_id="voice",
         )
