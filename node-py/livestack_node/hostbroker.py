@@ -953,6 +953,12 @@ class HostBroker:
                 "state": row["state"],
                 "unseen_seconds": row["unseen_seconds"],
                 "device_id": row.get("device_id"),
+                # Where the node says it is, carried through from its announce.
+                # Reported, never applied here: region is operator policy and
+                # the caller enforces it (`client.choose`). Without it on this
+                # row the policy has nowhere to read from but a hardcoded host
+                # list in every consumer.
+                "region": row.get("region"),
                 "kinds": row.get("kinds") or [],
             }
             if key in self.probe_ms:
