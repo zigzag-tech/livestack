@@ -55,6 +55,30 @@ def broker_urls() -> list:
     return out or [DEFAULT_BROKER_URL]
 
 
+def node_region() -> Optional[str]:
+    """Which region this node is in, as the operator stated it.
+
+    The broker cannot learn this. It can measure how far away a node is from
+    one vantage — and it does, which is what `fleet_rank` orders on — but a
+    measured distance answers "how far from here", never "where is it". Those
+    are different questions the moment a second asker exists: zz-tower0 is 2 ms
+    from a caller in Nanjing and 546 ms from one in Vaughan, and the fact that
+    makes it ineligible for North-American work is neither of those numbers.
+    It is where the machine is.
+
+    So region is announced like `host_id`: a fact about the node that only the
+    node's operator knows. `LIVESTACK_NODE_REGION` is free-form on purpose —
+    the fleet's own vocabulary today is `na` and `cn`, and freezing an enum
+    here would mean a code change to open an office.
+
+    Unset is `None`, and a consumer filtering by region must treat unknown as
+    excluded rather than as a match. A region we failed to learn is not
+    evidence of nearness, for the same reason an unmeasured distance is not.
+    """
+    value = (os.environ.get("LIVESTACK_NODE_REGION") or "").strip().lower()
+    return value or None
+
+
 def broker_url() -> str:
     """The FIRST broker, for callers that want one. Kept because a node's own
     host broker is the first entry by convention and some callers legitimately
@@ -86,6 +110,7 @@ def facade_answers(facade_url: str, timeout: float = 2.0) -> bool:
 
 
 def register_once(facade_url: str, *, host_id: str, kind: str,
+                  region: Optional[str] = None,
                   broker: Optional[str] = None, timeout: float = 3.0) -> dict:
     """Announce to every configured broker. Raises only if ALL of them failed.
 
@@ -99,6 +124,10 @@ def register_once(facade_url: str, *, host_id: str, kind: str,
         "facade_url": facade_url,
         "host_id": host_id,
         "kinds": [kind],
+        # Omitted rather than sent as null when unset: an absent key leaves
+        # whatever the broker already knew (a seed may carry one), while a null
+        # would overwrite it with ignorance on every renewal.
+        **({"region": region} if region else {}),
     }).encode()
     targets = [broker.rstrip("/")] if broker else broker_urls()
     out, last = {}, None
@@ -118,6 +147,7 @@ def register_once(facade_url: str, *, host_id: str, kind: str,
 
 
 def start_registrar(facade_url: str, *, host_id: str, kind: str,
+                    region: Optional[str] = None,
                     interval_s: float = DEFAULT_INTERVAL_S,
                     broker: Optional[str] = None,
                     log: Callable[[str], None] = print,
@@ -151,7 +181,8 @@ def start_registrar(facade_url: str, *, host_id: str, kind: str,
                     return
                 continue
             try:
-                register(facade_url, host_id=host_id, kind=kind, broker=broker)
+                register(facade_url, host_id=host_id, kind=kind,
+                         region=region, broker=broker)
                 if not announced:
                     log(f"[livestack] reported for duty at "
                         f"{broker or ', '.join(broker_urls())} as {facade_url}")

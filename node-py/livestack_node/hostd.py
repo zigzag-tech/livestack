@@ -236,6 +236,7 @@ def build_app(broker: HostBroker):
                                              footprints=DEFAULT_FOOTPRINTS),
                 host_id=payload.get("host_id"),
                 device_id=payload.get("device_id"),
+                region=payload.get("region"),
                 kinds=payload.get("kinds"),
                 readiness=payload.get("readiness"),
             )
