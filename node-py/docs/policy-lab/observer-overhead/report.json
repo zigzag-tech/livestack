@@ -1,0 +1,40 @@
+{
+  "added_p95_ms": 0.014679000000000001,
+  "allowed_added_p95_ms": 5.0,
+  "baseline_p95_ms": 0.002925,
+  "checks": {
+    "bounded_queue": true,
+    "latency_within_limit": true,
+    "lossless_at_measured_load": true,
+    "no_callback_io": true,
+    "sufficient_samples": true
+  },
+  "enabled_p95_ms": 0.017604,
+  "environment": {
+    "platform": "Linux-7.2.3-arch1-3-x86_64-with-glibc2.44",
+    "python_implementation": "CPython",
+    "python_version": "3.11.16"
+  },
+  "kind": "observer_overhead_report",
+  "live_service_performance_claim": false,
+  "measurement": {
+    "baseline_p95_ns": 2925,
+    "dropped_events": 0,
+    "enabled_p95_ns": 17604,
+    "max_queue_bytes": 21505024,
+    "producer_io_calls": 0,
+    "queued_bytes": 4731000,
+    "rejected_events": 0,
+    "samples": 20000
+  },
+  "method": {
+    "clock": "time.perf_counter_ns",
+    "pairing": "alternating baseline/enabled order",
+    "percentile": "nearest-rank p95",
+    "stream_chunk_bytes": 512,
+    "warmup_callbacks": 1000
+  },
+  "schema_version": 1,
+  "scope": "isolated_python_streaming_callback",
+  "status": "passed"
+}
