@@ -79,3 +79,12 @@ def test_profile_worker_refuses_busy_endpoint_without_requests(engine):
             protected={"abort_on_active_stream_interference": True},
             voice_id="voice",
         )
+
+
+def test_tts_profile_requires_explicit_voice_identity(engine):
+    with pytest.raises(ContractError, match="voice identity"):
+        run_profile_cell(
+            _cell(), {"worker-a:tts": engine},
+            protected={"abort_on_active_stream_interference": True},
+            voice_id="",
+        )
