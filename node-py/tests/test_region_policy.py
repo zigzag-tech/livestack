@@ -293,3 +293,62 @@ class TestARemoteNodeStillSaysWhereItIs:
         if cap.get("region"):
             node["region"] = cap["region"]
         assert node["region"] == "na"
+
+
+class TestTheBrokerAppliesAPolicyItIsHanded:
+    """`regions=` in the request is the caller's policy, applied; `region=` is
+    the asker's own region, recorded. The broker still decides neither.
+
+    One implementation of the filter, reachable from any language: the
+    alternative is a TypeScript consumer reimplementing "which hosts are North
+    American" as a literal list.
+    """
+
+    def client(self):
+        from fastapi.testclient import TestClient
+
+        from livestack_node.hostd import build_app
+
+        class _Broker:
+            peers = []
+
+            def fleet_view(self):
+                return view([CN_TTS, NA_TTS])
+
+            def emit_rank(self, result):
+                self.last = result
+
+            def membership_snapshot(self):
+                return []
+
+        return TestClient(build_app(_Broker())), _Broker
+
+    def test_it_filters_to_the_requested_regions(self):
+        client, _ = self.client()
+        body = client.get("/fleet/rank", params={"kind": "polytts", "regions": "na"}).json()
+        assert body["chosen"] == "http://100.64.0.18:8100"
+        assert [t["target_id"] for t in body["targets"]] == ["http://100.64.0.18:8100"]
+        assert body["region_policy"]["allow"] == ["na"]
+        assert any("region cn" in r["why"] for r in body["region_policy"]["rejected"])
+
+    def test_chosen_agrees_with_the_filter_rather_than_outliving_it(self):
+        # A `chosen` the policy just refused is worse than no answer: a caller
+        # reads that field first.
+        client, _ = self.client()
+        body = client.get("/fleet/rank", params={"kind": "polytts", "regions": "jp"}).json()
+        assert body["chosen"] is None
+        assert body["targets"] == []
+        assert "no polytts target in jp" in body["reason"]
+
+    def test_without_a_policy_nothing_is_filtered(self):
+        client, _ = self.client()
+        body = client.get("/fleet/rank", params={"kind": "polytts"}).json()
+        assert len(body["targets"]) == 2
+        assert "region_policy" not in body
+
+    def test_the_askers_own_region_is_still_only_recorded(self):
+        client, _ = self.client()
+        body = client.get("/fleet/rank", params={"kind": "polytts", "region": "na"}).json()
+        assert body["asker_region"] == "na"
+        # Recorded, not applied: both targets survive.
+        assert len(body["targets"]) == 2
