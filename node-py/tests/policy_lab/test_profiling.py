@@ -150,7 +150,8 @@ def test_profile_submission_uses_stable_keys_and_bounded_authorized_jobs():
     assert report["submitted"] == 2
     assert report["job_ids"] == ["job-1", "job-2"]
     assert authority.requests[0]["key"] != authority.requests[1]["key"]
-    assert all(request["need"]["gpu"] > 0 for request in authority.requests)
+    assert all(request["need"]["profile_slot"] == 1 for request in authority.requests)
+    assert all("gpu" not in request["need"] for request in authority.requests)
     assert authority.requests[0]["selector"]["profiling_vantage"] == authority.requests[0]["payload"]["cell"]["requester_vantage"]
     assert authority.requests[0]["payload"]["protected_service"] == _manifest()["protected_service"]
 
