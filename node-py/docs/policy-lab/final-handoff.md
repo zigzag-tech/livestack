@@ -1,9 +1,10 @@
 # Harmony routing policy lab handoff
 
 Status: the offline lab and M0–M5 contract fixtures are implemented. Live routing was
-not changed. The two-region 27B/ASR/TTS domain is **unqualified** because no authorized
-profiling principal/handler or admitted measurement pack was available. No profiling
-job, held-out measured replay, live shadow, or canary was performed.
+not changed. Authorized profiling and a held-out measured replay were performed through
+the durable workload authority, but the multi-vantage 27B/ASR/TTS domain remains
+**unqualified** because only three of 378 profile cells are measured. No live shadow or
+canary was performed.
 
 The pinned incumbent adapter SHA-256 is
 `182eec637bb8bd5c0ca49ae596d4675f608161ef10054e7ca88a86f7c892adc3`.
@@ -22,9 +23,11 @@ artifact was created.
   integration evidence reports every recorder disabled and therefore
   `insufficient_evidence`; no missing caller is extrapolated away.
 - M3: the private evidence directory contains the 378-cell / 37,800-request profiling
-  plan and an empty measured profile pack. Calibration correctly returns exit 4,
-  `insufficient_evidence`, with no certificate. Authorized measurement and held-out
-  incumbent replay remain unperformed.
+  plan, three admitted 100-sample warm profile packs, and a separately admitted
+  20-episode/60-request held-out incumbent replay. Causal LLM→TTS arrivals are recomputed
+  from simulated parent completion; historical waits are not predictions. Qualification
+  remains `insufficient_evidence` with no certificate because cold, prefix-hit, higher
+  concurrency, remaining shapes/windows and CA-vantage cells are unmeasured.
 - M4: cycle manifests, durable-authority submission/idempotency, finite budgets,
   candidate isolation, independent scenario admission, and cycle CLI are implemented.
   The isolated fixture accepts a useful deterministic candidate, rejects an invalid
@@ -62,9 +65,8 @@ attributes completion-timing and state-transition mismatches separately.
 
 ## What is required next
 
-Provision a specifically authorized profiling handler/principal, replace every
-`*-revision-required` placeholder with observed immutable revisions, admit the bounded
-profiling plan, collect at least the frozen sample/window/cold-start minimums, and run
-held-out incumbent replays with causal arrivals and observed external occupancy. Only
-then can calibration produce a domain certificate. A later shadow/canary still requires
-separate release authorization under `canary-runbook.md`.
+Continue the admitted matrix until every claimed shape/cache/concurrency/path has the
+frozen sample, window and cold-start minimums, then repeat independent calibration and
+held-out replay. The installed workers refuse active-service interference and never fall
+back locally. Only complete measured coverage can produce a domain certificate. A later
+shadow/canary still requires separate release authorization under `canary-runbook.md`.
