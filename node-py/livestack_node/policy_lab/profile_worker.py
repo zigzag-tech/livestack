@@ -113,6 +113,83 @@ RUNNERS = {"llm-27b": _llm, "asr": _asr, "tts": _tts}
 ENGINE_UNITS = {"llm-27b": "llm_title", "asr": "asr", "tts": "voxcpm"}
 
 
+def run_heldout_episodes(
+    endpoints: Any,
+    *,
+    execution_targets: Any,
+    protected: Any,
+    voice_id: str,
+    episodes: int,
+) -> dict[str, Any]:
+    """Collect independent incumbent episodes; prediction happens offline."""
+
+    if type(episodes) is not int or not 1 <= episodes <= 100:
+        raise ContractError("held-out episode count must be in [1, 100]")
+    if not isinstance(execution_targets, dict) or set(execution_targets) != set(RUNNERS):
+        raise ContractError("held-out execution targets must cover all workloads")
+    if not voice_id:
+        raise ContractError("TTS profiling requires an explicit voice identity")
+    resolved: dict[str, str] = {}
+    for workload, target in execution_targets.items():
+        key = f"{target}:{workload}"
+        if not isinstance(endpoints, dict) or not isinstance(endpoints.get(key), str):
+            raise ContractError("held-out execution target has no installed endpoint")
+        resolved[workload] = endpoints[key].rstrip("/")
+        residence, _ = _protected(resolved[workload], protected)
+        if not any(
+            unit.get("kind") == ENGINE_UNITS[workload] and unit.get("resident") is True
+            for unit in residence.get("units", []) if isinstance(unit, dict)
+        ):
+            raise ContractError("held-out episode requires already resident engines")
+
+    requests: list[dict[str, Any]] = []
+    origin = time.monotonic_ns()
+    shapes = {"asr": "stream-5s", "llm-27b": "prompt-512-output-128", "tts": "text-20-chars"}
+    for episode in range(episodes):
+        workflow = f"episode-{episode}"
+        completions: dict[str, int] = {}
+        for workload in ("asr", "llm-27b", "tts"):
+            endpoint = resolved[workload]
+            _protected(endpoint, protected)
+            request_id = f"{workflow}-{'llm' if workload == 'llm-27b' else workload}"
+            if workload == "tts":
+                arrival = {
+                    "kind": "after_dependencies",
+                    "dependency_request_ids": [f"{workflow}-llm"],
+                    "think_time_us": 50_000,
+                }
+                time.sleep(0.05)
+            else:
+                arrival = {"kind": "external", "relative_time_us": (time.monotonic_ns() - origin) // 1_000}
+            started_us = (time.monotonic_ns() - origin) // 1_000
+            cell = {"shape": shapes[workload]}
+            result = RUNNERS[workload](endpoint, cell, voice_id, episode)
+            completion_us = started_us + result["completion_us"]
+            completions[request_id] = completion_us
+            requests.append({
+                "request_id": request_id,
+                "workflow_id": workflow,
+                "workload_class": workload,
+                "arrival": arrival,
+                "observed_start_us": started_us,
+                "observed_completion_us": completion_us,
+                "observed_first_output_us": started_us + result["first_output_us"],
+                "observed_external_occupancy": 0,
+                "observed_state": "resident_warm",
+                "execution_target": execution_targets[workload],
+            })
+    return {
+        "schema_version": 1,
+        "kind": "heldout_observation_pack",
+        "status": "complete",
+        "episode_count": episodes,
+        "requests": requests,
+        "metadata_only": True,
+        "contains_predictions": False,
+        "local_or_unreserved_fallback_attempts": 0,
+    }
+
+
 def run_profile_cell(
     cell: Any,
     endpoints: Any,
@@ -172,12 +249,24 @@ def run_profile_cell(
 def main() -> int:
     request = json.loads(Path(os.environ["HARMONY_REQUEST"]).read_text(encoding="utf-8"))
     endpoints = json.loads(os.environ["POLICY_LAB_ENDPOINTS"])
+    output = Path(os.environ["HARMONY_OUTPUT"])
+    if request.get("kind") == "heldout_episode_manifest":
+        pack = run_heldout_episodes(
+            endpoints,
+            execution_targets=request["execution_targets"],
+            protected=request["protected_service"],
+            voice_id=os.environ.get("POLICY_LAB_TTS_VOICE", ""),
+            episodes=request["episodes"],
+        )
+        (output / "heldout-observations.json").write_text(
+            json.dumps(pack, allow_nan=False, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        return 0
     pack = run_profile_cell(
         request["cell"], endpoints,
         protected=request["protected_service"],
         voice_id=os.environ.get("POLICY_LAB_TTS_VOICE", ""),
     )
-    output = Path(os.environ["HARMONY_OUTPUT"])
     (output / "profile-pack.json").write_text(
         json.dumps(pack, allow_nan=False, sort_keys=True) + "\n", encoding="utf-8"
     )

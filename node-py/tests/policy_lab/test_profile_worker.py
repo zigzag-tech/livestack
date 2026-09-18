@@ -5,7 +5,7 @@ from threading import Thread
 import pytest
 
 from livestack_node.policy_lab.contracts import ContractError
-from livestack_node.policy_lab.profile_worker import run_profile_cell
+from livestack_node.policy_lab.profile_worker import run_heldout_episodes, run_profile_cell
 
 
 class _Engine(BaseHTTPRequestHandler):
@@ -16,7 +16,10 @@ class _Engine(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/livestack/residence":
-            body = {"units": [{"kind": "voxcpm", "busy": self.busy, "resident": True}]}
+            body = {"units": [
+                {"kind": kind, "busy": self.busy, "resident": True}
+                for kind in ("voxcpm", "asr", "llm_title")
+            ]}
         elif self.path == "/health":
             body = {"inflight": 0, "model": ["voxcpm"]}
         else:
@@ -88,3 +91,24 @@ def test_tts_profile_requires_explicit_voice_identity(engine):
             protected={"abort_on_active_stream_interference": True},
             voice_id="",
         )
+
+
+def test_heldout_episode_records_causal_arrival_without_predictions(engine):
+    pack = run_heldout_episodes(
+        {
+            "ca-llm:llm-27b": engine,
+            "cn-speech:asr": engine,
+            "cn-speech:tts": engine,
+        },
+        execution_targets={"llm-27b": "ca-llm", "asr": "cn-speech", "tts": "cn-speech"},
+        protected={"abort_on_active_stream_interference": True},
+        voice_id="voice", episodes=1,
+    )
+    rows = {row["request_id"]: row for row in pack["requests"]}
+    assert rows["episode-0-tts"]["arrival"] == {
+        "kind": "after_dependencies",
+        "dependency_request_ids": ["episode-0-llm"],
+        "think_time_us": 50_000,
+    }
+    assert all("simulated_completion_us" not in row for row in rows.values())
+    assert all(row["observed_external_occupancy"] == 0 for row in rows.values())
