@@ -220,8 +220,10 @@ def submit_profile_plan(
                 "cell": cell,
                 "protected_service": plan["protected_service"],
             },
-            "need": {"gpu": 1, "cpu": 1, "memory_bytes": plan["resource_budget"]["memory_bytes"]},
-            "admit": {"gpu": 1},
+            # This slot owns the measurement job. The selected engine remains
+            # the sole owner of its GPU admission through Harmony hostd.
+            "need": {"profile_slot": 1, "cpu": 1, "memory_bytes": 2 * 1024**3},
+            "admit": {"profile_slot": 1},
             # Run from the requester vantage so the measured path includes the
             # real client-to-execution-target network rather than loopback.
             "selector": {"profiling_vantage": cell["requester_vantage"]},
