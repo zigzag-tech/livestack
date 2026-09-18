@@ -79,6 +79,10 @@ class PeerRecord:
     last_probe: float = field(default=-1e9)
     host_id: Optional[str] = None
     device_id: Optional[str] = None
+    # Where this node is, as its operator stated it (`LIVESTACK_NODE_REGION`).
+    # `None` means unknown, which a region filter must read as "not this one"
+    # rather than "any" — see `announce.node_region`.
+    region: Optional[str] = None
     kinds: List[str] = field(default_factory=list)
     readiness: dict = field(default_factory=dict)
     # The state last REPORTED, so transitions can be detected and logged once
@@ -241,6 +245,7 @@ class PeerRoster:
                 "unseen_seconds": round(r.age(now), 1),
                 "host_id": r.host_id,
                 "device_id": r.device_id,
+                "region": r.region,
                 "kinds": list(r.kinds),
                 "readiness": dict(r.readiness),
             }

@@ -64,6 +64,11 @@ class RankedTarget:
     node: str
     host_id: Optional[str]
     device_id: Optional[str]
+    # Where the node says it is. Carried, never ranked on: ordering is measured
+    # distance, and region is operator policy the CALLER applies (see the
+    # module header and `hostd.fleet_rank`). Carrying it is what lets the
+    # caller apply that policy without a hardcoded host list of its own.
+    region: Optional[str]
     state: str
     ready: bool
     distance_ms: Optional[float]
@@ -77,6 +82,7 @@ class RankedTarget:
     def to_wire(self) -> dict:
         return {"target_id": self.target_id, "node": self.node,
                 "host_id": self.host_id, "device_id": self.device_id,
+                "region": self.region,
                 "distance_ms": self.distance_ms,
                 "distance_band": self.distance_band,
                 "load": self.load, "rank": self.rank, "reason": self.reason}
@@ -169,6 +175,7 @@ def rank(view: dict, kind: str, vantage: str = "direct",
             load = node.get("load") if isinstance(node.get("load"), dict) else None
             common = dict(
                 target_id=target_id, node=peer, host_id=host_id,
+                region=node.get("region"),
                 device_id=node.get("device_id"), state=node.get("state", "mia"),
                 ready=bool(node.get("ready")), distance_ms=dist,
                 distance_band=band, load=load,

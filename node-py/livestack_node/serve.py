@@ -204,9 +204,14 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
         # the operator's to state, and the default keeps single-machine
         # deployments working with nothing set.
         advertise = (os.environ.get("LIVESTACK_NODE_HOST") or "127.0.0.1").strip()
+        from .announce import node_region
         start_registrar(
             f"http://{advertise}:{int(resolved_port)}{prefix}",
             host_id=host_id, kind=kind,
+            # Where this machine is. Announced, not inferred: see
+            # `announce.node_region` for why a measured distance cannot answer
+            # it and why a caller must treat unknown as excluded.
+            region=node_region(),
             interval_s=float(os.environ.get("LIVESTACK_REGISTER_INTERVAL", "30")),
         )
 

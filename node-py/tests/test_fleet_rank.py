@@ -206,10 +206,31 @@ def test_an_empty_result_says_why_rather_than_returning_nothing():
 def test_ranking_never_applies_region_policy():
     """Region is operator policy on the grant. A fleet broker that decided it
     would be a second place for it to be wrong — and it does not have the
-    account, so it could only guess."""
+    account, so it could only guess.
+
+    **The wire now CARRIES region, and that is not the same as applying it.**
+    This test used to assert the word never appeared in a target row. Carrying
+    it is reporting what a node declared about itself, exactly like `host_id`
+    and `device_id`; withholding it did not remove the policy question, it
+    moved the answer into every caller as a hardcoded host list — which is the
+    second place to be wrong, N times over.
+
+    What must stay true is the ORDER: ranking is measured distance, then load,
+    then id. So the invariant is asserted directly — the same fleet with every
+    region stripped ranks identically.
+    """
     r = rank(FLEET, "asr")
-    for t in r["targets"]:
-        assert "region" not in t
+    stripped = {
+        "generated_at": FLEET.get("generated_at"),
+        "hosts": {
+            h: {**host, "nodes": [{k: v for k, v in n.items() if k != "region"}
+                                  for n in host.get("nodes", [])]}
+            for h, host in FLEET["hosts"].items()
+        },
+    }
+    assert [t["target_id"] for t in rank(stripped, "asr")["targets"]] == \
+        [t["target_id"] for t in r["targets"]]
+    assert rank(stripped, "asr")["chosen"] == r["chosen"]
 
 
 # -- expiry -------------------------------------------------------------------
