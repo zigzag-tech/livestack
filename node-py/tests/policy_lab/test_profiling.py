@@ -9,38 +9,53 @@ def _manifest():
     return {
         "schema_version": 1,
         "kind": "profiling_manifest",
-        "domain_id": "two-region-speech-llm-v1",
-        "regions": ["region-a", "region-b"],
-        "directions": [["region-a", "region-b"], ["region-b", "region-a"]],
-        "region_hardware": {"region-a": ["gpu-a"], "region-b": ["gpu-b"]},
+        "domain_id": "two-vantage-speech-llm-v1",
+        "requester_vantages": ["vantage-a", "vantage-b"],
+        "execution_targets": {
+            "worker-a": {"hardware_revisions": ["gpu-a"], "processing_scopes": ["scope-a"]},
+            "worker-b": {"hardware_revisions": ["gpu-b"], "processing_scopes": ["scope-b"]},
+        },
+        "network_paths": [
+            {"path_id": "a-to-a", "requester_vantage": "vantage-a", "execution_target": "worker-a"},
+            {"path_id": "b-to-a", "requester_vantage": "vantage-b", "execution_target": "worker-a"},
+            {"path_id": "b-to-b", "requester_vantage": "vantage-b", "execution_target": "worker-b"},
+        ],
         "workloads": [
             {
                 "workload_class": "llm-27b",
+                "network_path_ids": ["a-to-a", "b-to-a"],
+                "target_revisions": {
+                    "worker-a": {"model_revisions": ["llm-rev"], "runtime_revisions": ["runtime-a"]}
+                },
                 "shapes": ["short", "long"],
                 "concurrency": [1, 2],
                 "cache_states": ["cold", "warm"],
-                "model_revisions": ["llm-rev"],
-                "runtime_revisions": ["runtime-rev"],
                 "minimum_samples_per_cell": 100,
                 "minimum_cold_preparations": 20,
             },
             {
                 "workload_class": "asr",
+                "network_path_ids": ["a-to-a", "b-to-b"],
+                "target_revisions": {
+                    "worker-a": {"model_revisions": ["asr-rev"], "runtime_revisions": ["runtime-a"]},
+                    "worker-b": {"model_revisions": ["asr-rev"], "runtime_revisions": ["runtime-b"]},
+                },
                 "shapes": ["stream-10s"],
                 "concurrency": [1],
                 "cache_states": ["warm"],
-                "model_revisions": ["asr-rev"],
-                "runtime_revisions": ["runtime-rev"],
                 "minimum_samples_per_cell": 100,
                 "minimum_cold_preparations": 0,
             },
             {
                 "workload_class": "tts",
+                "network_path_ids": ["a-to-a", "b-to-b"],
+                "target_revisions": {
+                    "worker-a": {"model_revisions": ["tts-rev"], "runtime_revisions": ["runtime-a"]},
+                    "worker-b": {"model_revisions": ["tts-rev"], "runtime_revisions": ["runtime-b"]},
+                },
                 "shapes": ["sentence"],
                 "concurrency": [1],
                 "cache_states": ["warm"],
-                "model_revisions": ["tts-rev"],
-                "runtime_revisions": ["runtime-rev"],
                 "minimum_samples_per_cell": 100,
                 "minimum_cold_preparations": 0,
             },
@@ -61,21 +76,28 @@ def _manifest():
     }
 
 
-def test_profile_plan_expands_two_region_matrix_without_submitting_work():
+def test_profile_plan_expands_vantage_path_matrix_without_submitting_work():
     plan = plan_profile_matrix(_manifest())
-    # Each workload matrix cell is measured in each requester region and window.
+    # Each workload matrix cell is measured over every explicitly allowed path.
     assert plan["cell_count"] == (8 + 1 + 1) * 2 * 3
     assert plan["planned_requests"] == plan["cell_count"] * 100
     assert plan["submission_count"] == 0
     assert plan["execution_status"] == "not_submitted"
     assert plan["authorization_required"] is True
     assert all(cell["sample_target"] >= 100 for cell in plan["cells"])
+    remote_llm = next(
+        cell for cell in plan["cells"]
+        if cell["workload_class"] == "llm-27b" and cell["requester_vantage"] == "vantage-b"
+    )
+    assert remote_llm["execution_target"] == "worker-a"
+    assert remote_llm["network_path_id"] == "b-to-a"
+    assert remote_llm["runtime_revision"] == "runtime-a"
 
 
-def test_profile_plan_rejects_missing_region_direction_or_unbounded_budget():
+def test_profile_plan_rejects_invalid_network_path_or_unbounded_budget():
     bad = _manifest()
-    bad["directions"] = [["region-a", "region-b"]]
-    with pytest.raises(ContractError, match="both regional directions"):
+    bad["network_paths"][0]["execution_target"] = "unknown"
+    with pytest.raises(ContractError, match="execution target"):
         plan_profile_matrix(bad)
 
     bad = _manifest()
@@ -129,3 +151,22 @@ def test_profile_submission_uses_stable_keys_and_bounded_authorized_jobs():
     assert report["job_ids"] == ["job-1", "job-2"]
     assert authority.requests[0]["key"] != authority.requests[1]["key"]
     assert all(request["need"]["gpu"] > 0 for request in authority.requests)
+    assert authority.requests[0]["selector"]["profiling_vantage"] == authority.requests[0]["payload"]["cell"]["requester_vantage"]
+    assert authority.requests[0]["payload"]["protected_service"] == _manifest()["protected_service"]
+
+
+def test_profile_plan_rejects_implicit_or_unknown_workload_paths():
+    bad = _manifest()
+    del bad["workloads"][0]["network_path_ids"]
+    with pytest.raises(ContractError, match="network_path_ids"):
+        plan_profile_matrix(bad)
+
+    bad = _manifest()
+    bad["workloads"][0]["network_path_ids"].append("unknown")
+    with pytest.raises(ContractError, match="unknown network path"):
+        plan_profile_matrix(bad)
+
+    bad = _manifest()
+    bad["workloads"][1]["target_revisions"].pop("worker-b")
+    with pytest.raises(ContractError, match="target_revisions"):
+        plan_profile_matrix(bad)

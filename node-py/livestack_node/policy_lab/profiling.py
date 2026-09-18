@@ -38,26 +38,35 @@ def plan_profile_matrix(manifest: Any) -> dict[str, Any]:
     domain_id = manifest.get("domain_id")
     if not isinstance(domain_id, str) or not domain_id:
         raise ContractError("profiling domain_id is required")
-    regions = _tokens(manifest.get("regions"), "regions", minimum=2)
-    if len(regions) != 2:
-        raise ContractError("initial profiling domain requires exactly two regions")
-    raw_directions = manifest.get("directions")
-    if not isinstance(raw_directions, list):
-        raise ContractError("directions must be a list")
-    directions = {
-        tuple(item) for item in raw_directions
-        if isinstance(item, list) and len(item) == 2 and all(isinstance(part, str) for part in item)
-    }
-    required_directions = {(regions[0], regions[1]), (regions[1], regions[0])}
-    if directions != required_directions:
-        raise ContractError("profiling must cover both regional directions exactly")
-    raw_hardware = manifest.get("region_hardware")
-    if not isinstance(raw_hardware, dict) or set(raw_hardware) != set(regions):
-        raise ContractError("region_hardware must cover each region exactly")
-    region_hardware = {
-        region: _tokens(raw_hardware[region], f"hardware revisions for {region}")
-        for region in regions
-    }
+    vantages = _tokens(manifest.get("requester_vantages"), "requester_vantages", minimum=2)
+    raw_targets = manifest.get("execution_targets")
+    if not isinstance(raw_targets, dict) or not raw_targets:
+        raise ContractError("execution_targets must be a non-empty object")
+    targets: dict[str, dict[str, tuple[str, ...]]] = {}
+    for target_id, target in raw_targets.items():
+        if not isinstance(target_id, str) or not target_id or not isinstance(target, dict):
+            raise ContractError("invalid execution target")
+        if set(target) != {"hardware_revisions", "processing_scopes"}:
+            raise ContractError("execution target fields are incomplete")
+        targets[target_id] = {
+            "hardware_revisions": _tokens(target["hardware_revisions"], f"hardware revisions for {target_id}"),
+            "processing_scopes": _tokens(target["processing_scopes"], f"processing scopes for {target_id}"),
+        }
+    raw_paths = manifest.get("network_paths")
+    if not isinstance(raw_paths, list) or not raw_paths:
+        raise ContractError("network_paths must be a non-empty list")
+    paths: dict[str, dict[str, str]] = {}
+    for path in raw_paths:
+        if not isinstance(path, dict) or set(path) != {"path_id", "requester_vantage", "execution_target"}:
+            raise ContractError("invalid network path")
+        path_id = path.get("path_id")
+        if not isinstance(path_id, str) or not path_id or path_id in paths:
+            raise ContractError("network path IDs must be unique non-empty strings")
+        if path.get("requester_vantage") not in vantages:
+            raise ContractError("network path names an unknown requester vantage")
+        if path.get("execution_target") not in targets:
+            raise ContractError("network path names an unknown execution target")
+        paths[path_id] = dict(path)
 
     windows = _positive_int(manifest.get("observation_windows"), "observation_windows")
     if windows < 3:
@@ -94,8 +103,6 @@ def plan_profile_matrix(manifest: Any) -> dict[str, Any]:
     for workload in sorted(workloads, key=lambda item: item["workload_class"]):
         shapes = _tokens(workload.get("shapes"), "workload shapes")
         cache_states = _tokens(workload.get("cache_states"), "cache states")
-        model_revisions = _tokens(workload.get("model_revisions"), "model revisions")
-        runtime_revisions = _tokens(workload.get("runtime_revisions"), "runtime revisions")
         concurrency = workload.get("concurrency")
         if not isinstance(concurrency, list) or not concurrency:
             raise ContractError("workload concurrency must be a non-empty list")
@@ -113,19 +120,43 @@ def plan_profile_matrix(manifest: Any) -> dict[str, Any]:
         )
         if "cold" in cache_states and cold < 20:
             raise ContractError("cold profile paths require at least 20 preparations")
-        cold_preparations += cold * len(regions)
-        for region in regions:
+        path_ids = _tokens(workload.get("network_path_ids"), "network_path_ids")
+        if any(path_id not in paths for path_id in path_ids):
+            raise ContractError("workload names an unknown network path")
+        execution_targets = {paths[path_id]["execution_target"] for path_id in path_ids}
+        raw_revisions = workload.get("target_revisions")
+        if not isinstance(raw_revisions, dict) or set(raw_revisions) != execution_targets:
+            raise ContractError("target_revisions must exactly cover workload execution targets")
+        revisions: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {}
+        for target_id, target_revisions in raw_revisions.items():
+            if not isinstance(target_revisions, dict) or set(target_revisions) != {
+                "model_revisions", "runtime_revisions"
+            }:
+                raise ContractError("target_revisions fields are incomplete")
+            revisions[target_id] = (
+                _tokens(target_revisions["model_revisions"], "model revisions"),
+                _tokens(target_revisions["runtime_revisions"], "runtime revisions"),
+            )
+        execution_target_count = len(execution_targets)
+        cold_preparations += cold * execution_target_count
+        for path_id in path_ids:
+            path = paths[path_id]
+            target_id = path["execution_target"]
+            model_revisions, runtime_revisions = revisions[target_id]
             for window, shape, parallelism, cache, model, runtime, hardware in itertools.product(
                 range(windows), shapes, sorted(concurrency), cache_states,
-                model_revisions, runtime_revisions, region_hardware[region],
+                model_revisions, runtime_revisions, targets[target_id]["hardware_revisions"],
             ):
                 cells.append({
                     "cell_id": (
-                        f"{workload['workload_class']}:{region}:w{window}:{shape}:c{parallelism}:"
+                        f"{workload['workload_class']}:{path_id}:w{window}:{shape}:c{parallelism}:"
                         f"{cache}:{model}:{runtime}:{hardware}"
                     ),
                     "workload_class": workload["workload_class"],
-                    "requester_region": region,
+                    "requester_vantage": path["requester_vantage"],
+                    "execution_target": target_id,
+                    "network_path_id": path_id,
+                    "processing_scopes": list(targets[target_id]["processing_scopes"]),
                     "observation_window": window,
                     "shape": shape,
                     "concurrency": parallelism,
@@ -139,9 +170,12 @@ def plan_profile_matrix(manifest: Any) -> dict[str, Any]:
         "schema_version": 1,
         "kind": "profiling_plan",
         "domain_id": domain_id,
-        "regions": list(regions),
-        "directions": [list(item) for item in sorted(directions)],
-        "region_hardware": {key: list(value) for key, value in region_hardware.items()},
+        "requester_vantages": list(vantages),
+        "execution_targets": {
+            key: {name: list(value) for name, value in target.items()}
+            for key, target in targets.items()
+        },
+        "network_paths": [paths[key] for key in sorted(paths)],
         "resource_budget": dict(budget),
         "max_duration_seconds": duration,
         "protected_service": dict(protected),
@@ -181,10 +215,16 @@ def submit_profile_plan(
             "key": f"policy-lab-profile/{cell_hash}",
             "handler": handler,
             "input_digest": input_digest,
-            "payload": {"domain_id": plan["domain_id"], "cell": cell},
+            "payload": {
+                "domain_id": plan["domain_id"],
+                "cell": cell,
+                "protected_service": plan["protected_service"],
+            },
             "need": {"gpu": 1, "cpu": 1, "memory_bytes": plan["resource_budget"]["memory_bytes"]},
             "admit": {"gpu": 1},
-            "selector": {"region": cell["requester_region"]},
+            # Run from the requester vantage so the measured path includes the
+            # real client-to-execution-target network rather than loopback.
+            "selector": {"profiling_vantage": cell["requester_vantage"]},
             "estimate_seconds": plan["max_duration_seconds"],
             "retain": True,
         }
