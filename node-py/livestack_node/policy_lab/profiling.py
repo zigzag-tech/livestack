@@ -218,7 +218,9 @@ def submit_profile_plan(
         raise ContractError("profiling input digest must be SHA-256 text")
     job_ids: list[str] = []
     for cell in cells[:max_jobs]:
-        cell_hash = hashlib.sha256(cell["cell_id"].encode("utf-8")).hexdigest()[:24]
+        cell_hash = hashlib.sha256(
+            f"{input_digest}:{cell['cell_id']}".encode("utf-8")
+        ).hexdigest()[:24]
         request = {
             "version": 1,
             "key": f"policy-lab-profile/{cell_hash}",
@@ -236,7 +238,9 @@ def submit_profile_plan(
             # Run from the requester vantage so the measured path includes the
             # real client-to-execution-target network rather than loopback.
             "selector": {"profiling_vantage": cell["requester_vantage"]},
-            "estimate_seconds": plan["max_duration_seconds"],
+            # The manifest ceiling bounds the whole campaign. A single cell
+            # gets a finite scheduler estimate inside the batch SLA horizon.
+            "estimate_seconds": min(plan["max_duration_seconds"], 3600),
             "retain": True,
         }
         try:
