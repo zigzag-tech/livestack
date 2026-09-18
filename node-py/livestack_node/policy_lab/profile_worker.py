@@ -135,6 +135,8 @@ def run_profile_cell(
         raise ContractError("sample_target is outside installed handler bounds")
     if type(concurrency) is not int or not 1 <= concurrency <= 16:
         raise ContractError("concurrency is outside installed handler bounds")
+    if cell["workload_class"] == "tts" and (not isinstance(voice_id, str) or not voice_id):
+        raise ContractError("TTS profiling requires an explicit voice identity")
     endpoint = endpoints[endpoint_key].rstrip("/")
     before_residence, before_health = _protected(endpoint, protected)
     expected_unit = ENGINE_UNITS[cell["workload_class"]]
