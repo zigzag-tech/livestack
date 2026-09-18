@@ -24,6 +24,8 @@ from .policies import (
 )
 from .overhead import measure_observer_overhead
 from .profiling import plan_profile_matrix
+from .profiling import submit_profile_plan
+from .heldout import evaluate_heldout_replay
 from .promotion import CellComparison, evaluate_promotion
 from .smoke import replay_smoke
 
@@ -212,11 +214,34 @@ def _calibrate(args: argparse.Namespace) -> int:
     return {"calibrated": 0, "failed": 3, "insufficient_evidence": 4}[report["status"]]
 
 
-def _cycle_client(config_path: Path) -> WorkloadClient:
+def _authority_client(config_path: Path) -> WorkloadClient:
     config = _read(config_path, max_bytes=65_536)
     if not isinstance(config, dict):
         raise ContractError("authority config must be an object")
     return WorkloadClient(config["authority"], config["token"], timeout=60)
+
+
+def _heldout_evaluate(args: argparse.Namespace) -> int:
+    report = evaluate_heldout_replay(_read(args.dataset))
+    _write_report(
+        args.out, report,
+        "# Held-out causal replay\n\n"
+        f"Status: **{report['status']}**. Historical queue waits are not predictions.\n",
+    )
+    return 0 if report["status"] == "evaluated" else 4
+
+
+def _profile(args: argparse.Namespace) -> int:
+    client = _authority_client(args.authority_config)
+    if args.command == "profile-submit":
+        report = submit_profile_plan(
+            _base_validate(_read(args.plan)), client, handler=args.handler,
+            input_digest=args.input_digest, max_jobs=args.max_jobs,
+        )
+        print(json.dumps(report, allow_nan=False, sort_keys=True))
+        return 0 if report["status"] == "submitted" else 4
+    print(json.dumps(client.get(args.job_id), allow_nan=False, sort_keys=True))
+    return 0
 
 
 def _cycle(args: argparse.Namespace) -> int:
@@ -239,7 +264,7 @@ def _cycle(args: argparse.Namespace) -> int:
             "CPU-only, no live activation. The incumbent is unchanged and the outcome is no-change.\n",
         )
         return 0
-    client = _cycle_client(args.authority_config)
+    client = _authority_client(args.authority_config)
     if args.cycle_command == "submit":
         plan = _base_validate(_read(args.manifest))
         result = submit_cycle(
@@ -297,6 +322,18 @@ def build_parser() -> argparse.ArgumentParser:
     calibrate.add_argument("--observations", type=Path, required=True)
     calibrate.add_argument("--profiles", type=Path, required=True)
     calibrate.add_argument("--out", type=Path, required=True)
+    heldout = subparsers.add_parser("heldout-evaluate")
+    heldout.add_argument("--dataset", type=Path, required=True)
+    heldout.add_argument("--out", type=Path, required=True)
+    profile_submit = subparsers.add_parser("profile-submit")
+    profile_submit.add_argument("--plan", type=Path, required=True)
+    profile_submit.add_argument("--authority-config", type=Path, required=True)
+    profile_submit.add_argument("--handler", default="policy_lab_profile")
+    profile_submit.add_argument("--input-digest", required=True)
+    profile_submit.add_argument("--max-jobs", type=int, required=True)
+    profile_status = subparsers.add_parser("profile-status")
+    profile_status.add_argument("job_id")
+    profile_status.add_argument("--authority-config", type=Path, required=True)
     cycle = subparsers.add_parser("cycle")
     cycle_commands = cycle.add_subparsers(dest="cycle_command", required=True)
     cycle_plan = cycle_commands.add_parser("plan")
@@ -341,6 +378,10 @@ def main(argv: list[str] | None = None) -> int:
             return _profile_plan(args)
         if args.command == "calibrate":
             return _calibrate(args)
+        if args.command == "heldout-evaluate":
+            return _heldout_evaluate(args)
+        if args.command in {"profile-submit", "profile-status"}:
+            return _profile(args)
         if args.command == "cycle":
             return _cycle(args)
         raise ContractError(f"unsupported command: {args.command}")

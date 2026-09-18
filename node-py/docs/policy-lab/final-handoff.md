@@ -44,14 +44,21 @@ uv run python -m livestack_node.policy_lab replay-smoke livestack_node/policy_la
 uv run python -m livestack_node.policy_lab observer-overhead --samples 20000 --warmup 1000 --out /tmp/policy-overhead
 uv run python -m livestack_node.policy_lab completeness --manifest TRACE_MANIFEST.json --out /tmp/completeness
 uv run python -m livestack_node.policy_lab profile-plan --manifest PROFILING_MANIFEST.json --out /tmp/profile-plan
+uv run python -m livestack_node.policy_lab profile-submit --plan /tmp/profile-plan/report.json --authority-config AUTHORITY.json --handler policy_lab_profile --input-digest SHA256 --max-jobs 1
+uv run python -m livestack_node.policy_lab profile-status JOB_ID --authority-config AUTHORITY.json
 uv run python -m livestack_node.policy_lab calibrate --observations CALIBRATION_DATASET.json --profiles PERFORMANCE_PROFILES.json --out /tmp/calibration
+uv run python -m livestack_node.policy_lab heldout-evaluate --dataset HELDOUT_REPLAY_DATASET.json --out /tmp/heldout
 uv run python -m livestack_node.policy_lab cycle plan --config CYCLE_CONFIG.json --out /tmp/cycle-plan
 uv run python -m livestack_node.policy_lab cycle fixture --seed 7 --out /tmp/cycle-fixture
 ```
 
-`completeness` and `calibrate` intentionally return exit 4 when evidence is
-insufficient. `cycle submit`, `cycle status`, and `cycle report` additionally require an
-explicit workload-authority configuration and never fall back to local execution.
+`completeness`, `calibrate`, and `heldout-evaluate` intentionally return exit 4 when
+evidence is insufficient. `profile-submit`, `profile-status`, `cycle submit`, `cycle
+status`, and `cycle report` require an explicit workload-authority configuration.
+Submission refusal is reported and never falls back to local execution. The held-out
+evaluator resolves dependency arrivals from simulated completions, imports only observed
+external occupancy, rejects historical wait/future-queue prediction fields, and
+attributes completion-timing and state-transition mismatches separately.
 
 ## What is required next
 
