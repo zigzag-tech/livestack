@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "kind": "analytic_profile_fixture",
+  "load": {"bytes": 1000, "bytes_per_second": 500, "fixed_us": 100000},
+  "transfer": {"bytes": 1000, "bits_per_second": 4000, "propagation_us": 50000},
+  "execution": {"work_units": 100, "work_units_per_second": 50},
+  "memory": {"weights_bytes": 1000, "staging_bytes": 200, "activation_bytes": 100, "kv_bytes": 200}
+}

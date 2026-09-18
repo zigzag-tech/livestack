@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "m1_benchmark_report",
+  "created_at": "2026-09-17",
+  "evidence_level": "synthetic-only",
+  "qualification": "none",
+  "calibrated": false,
+  "live_performance_claim": false,
+  "scenario_catalog_sha256": "bb64fa6dba7dfaaac74e1b2c719b50bf1770d3da69d511d7277ee6b5dd3bbfc9",
+  "synthetic_profile_sha256": "778ef8af3006367b92737bd6ade07a77e28d46e8464e0f6d3641a5246917b22c",
+  "scenario_count": 32,
+  "mechanics_status": "passed",
+  "policies": [
+    "current-harmony-b0c2b78f",
+    "nearest-ready",
+    "warm-first",
+    "least-predicted-queue",
+    "total-latency-demand-aware"
+  ],
+  "unsupported_or_unqualified": [
+    "real two-region timing accuracy",
+    "unmeasured engine colocation",
+    "live routing readiness",
+    "shadow counterfactual performance",
+    "canary safety"
+  ],
+  "reproduce": [
+    "cd node-py && python -m pytest -q tests/policy_lab",
+    "cd node-py && python -m livestack_node.policy_lab validate livestack_node/policy_lab/fixtures/scenarios-v1.json"
+  ]
+}
