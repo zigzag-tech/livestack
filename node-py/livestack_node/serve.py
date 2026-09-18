@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
+import time
 from typing import Callable, Dict, Optional
 
 from .coordinator import LivestackCoordinator
@@ -100,7 +101,8 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
            prefix: str = "/livestack", device_meter="auto", port=None,
            readiness: Callable[[], dict] = None,
            device_id: Optional[str] = None,
-           in_flight: Optional[Callable[[], int]] = None):
+           in_flight: Optional[Callable[[], int]] = None,
+           preload=None):
     """``device_meter``: a zero-arg callable -> measured {capacity,free} (see
     meters.py), ``"auto"`` to pick one by backend (CUDA/MLX), or ``None`` to report
     no live memory. Defaulting to "auto" means a node becomes memory-aware on
@@ -118,6 +120,11 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     (``load.in_flight_source``: ``"server"`` or ``"leases"``), so a consumer can
     tell "0 because idle" from "0 because this node cannot see its own work".
     :func:`livestack_node.counting` is the usual way to maintain it.
+
+    ``preload`` warms a unit (a name, a list of names, or a zero-arg callable)
+    AFTER the server is answering, not before. Use it instead of loading a
+    model in a startup hook — see :func:`_start_preload` for the deadlock that
+    costs.
 
     Each ``manager.run()`` GPU op is bracketed by an :class:`ActivationObserver` that
     measures that unit's exact peak activation and reports it as headroom for the planner
@@ -215,4 +222,78 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
             interval_s=float(os.environ.get("LIVESTACK_REGISTER_INTERVAL", "30")),
         )
 
+    if preload is not None:
+        _start_preload(preload, manager=manager, gpu_call=gpu_call,
+                       facade_url=(f"http://127.0.0.1:{int(resolved_port)}{prefix}"
+                                   if resolved_port else None))
+
     return manager, coordinator
+
+
+def _start_preload(preload, *, manager, gpu_call, facade_url: Optional[str],
+                   answers: Optional[Callable[[str], bool]] = None,
+                   log: Callable[[str], None] = print,
+                   sleep: Callable[[float], None] = time.sleep,
+                   attempts: int = 30, interval_s: float = 2.0):
+    """Warm a node's units once it is reachable, on a thread of its own.
+
+    **The deadlock this exists to break.** A node that loads its model inside
+    its web framework's startup hook does not bind its port until the load
+    returns. It therefore cannot be snapshotted, so the broker never learns
+    which kinds it hosts — and `admit` for an unknown kind is a REFUSAL, by
+    design, because a refusal and an outage must not look alike. Measured on
+    xc-mac-studio, 2026-09-18: polytts called `manager.ensure("qwen")` from its
+    startup hook, the local broker answered
+    `defer polytts-708943429 (unknown kind)`, and the process sat with no
+    listener, no sockets and no CPU. The fleet saw `mia`, connection refused,
+    for forty-six hours. Nothing was broken except the order.
+
+    Warming after the bind breaks the cycle at the only place it can be broken:
+    the node becomes reachable, the registrar's announce is backed by a facade
+    that answers, the broker snapshots it and learns its kinds, and the warm
+    then asks for admission of something the planner has heard of.
+
+    A node is `ready: false` in the meantime, which the fleet view already
+    models and `fleet_rank` already filters on — so an unwarmed node is not
+    chosen, rather than chosen and slow.
+    """
+    from .announce import facade_answers
+
+    answers = answers or facade_answers
+
+    def _warm_one(item) -> None:
+        if callable(item):
+            gpu_call(item)
+            return
+        gpu_call(lambda: manager.ensure(item))
+
+    items = ([preload] if callable(preload) or isinstance(preload, str)
+             else list(preload))
+
+    def _run() -> None:
+        # Wait for our own front door. Bounded: a server that never binds has a
+        # problem this thread cannot fix, and a warm thread spinning forever
+        # against it would hide that.
+        if facade_url:
+            for _ in range(attempts):
+                if answers(facade_url):
+                    break
+                sleep(interval_s)
+            else:
+                log(f"[livestack] preload gave up: {facade_url} never answered")
+                return
+        for item in items:
+            name = getattr(item, "__name__", item)
+            try:
+                _warm_one(item)
+                log(f"[livestack] preloaded {name}")
+            except Exception as e:  # noqa: BLE001 - a failed warm must not kill the node
+                # Deliberately not fatal. A node that cannot warm is a node
+                # that reports `ready: false` and is not chosen; a node that
+                # exits takes its whole surface with it, including the
+                # endpoints that would have said why.
+                log(f"[livestack] preload of {name} failed: {e}")
+
+    t = threading.Thread(target=_run, name="livestack-preload", daemon=True)
+    t.start()
+    return t
