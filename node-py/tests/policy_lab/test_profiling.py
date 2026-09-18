@@ -159,6 +159,15 @@ def test_profile_submission_uses_stable_keys_and_bounded_authorized_jobs():
     assert all("gpu" not in request["need"] for request in authority.requests)
     assert authority.requests[0]["selector"]["profiling_vantage"] == authority.requests[0]["payload"]["cell"]["requester_vantage"]
     assert authority.requests[0]["payload"]["protected_service"] == _manifest()["protected_service"]
+    assert authority.requests[0]["estimate_seconds"] == 3600
+
+    second = Authority()
+    submit_profile_plan(
+        plan_profile_matrix(_manifest()), second, handler="policy_lab_profile",
+        input_digest="c" * 64, max_jobs=1,
+        cell_ids=("llm-27b:b-to-a:w0:short:c1:warm:llm-rev:runtime-a:gpu-a",),
+    )
+    assert second.requests[0]["key"] != authority.requests[0]["key"]
 
 
 def test_profile_plan_rejects_implicit_or_unknown_workload_paths():
