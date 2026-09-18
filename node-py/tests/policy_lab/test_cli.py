@@ -159,3 +159,35 @@ def test_cycle_plan_does_not_submit_or_install_weekly_trigger(tmp_path):
     assert report["submission_count"] == 0
     assert report["scheduler_installed"] is False
     assert report["weekly_trigger_requested"] is True
+
+
+def test_heldout_evaluate_cli_writes_report(tmp_path):
+    dataset = tmp_path / "heldout.json"
+    _write(dataset, {
+        "schema_version": 1, "kind": "heldout_replay_dataset", "domain_id": "d",
+        "requests": [{
+            "request_id": "r", "workflow_id": "w",
+            "arrival": {"kind": "external", "relative_time_us": 0},
+            "observed_external_occupancy": 0,
+            "observed_completion_us": 10, "simulated_completion_us": 12,
+            "observed_state": "ready", "simulated_state": "ready",
+        }],
+    })
+    out = tmp_path / "heldout-report"
+    result = _run("heldout-evaluate", "--dataset", dataset, "--out", out)
+    assert result.returncode == 0, result.stderr
+    assert json.loads((out / "report.json").read_text())["status"] == "evaluated"
+
+
+def test_profile_status_cli_queries_authority_without_local_execution(tmp_path, monkeypatch):
+    from livestack_node.policy_lab import cli
+
+    config = tmp_path / "authority.json"
+    _write(config, {"authority": "http://authority.invalid", "token": "secret"})
+
+    class Client:
+        def get(self, job_id):
+            return {"id": job_id, "state": "queued"}
+
+    monkeypatch.setattr(cli, "_authority_client", lambda path: Client())
+    assert cli.main(["profile-status", "job-1", "--authority-config", str(config)]) == 0
