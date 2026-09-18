@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import statistics
 from typing import Any
 
 from .causality import resolve_arrival_us, validate_dependency_identity
@@ -17,6 +18,57 @@ FORBIDDEN_PREDICTION_FIELDS = frozenset({
     "actual_future_queue_length",
     "historical_completion_prediction_us",
 })
+
+
+def build_heldout_dataset(
+    observations: Any,
+    profile_packs: Any,
+    *,
+    domain_id: str,
+) -> dict[str, Any]:
+    """Bind independent observations to predictions from frozen component packs."""
+
+    if not isinstance(observations, dict) or observations.get("kind") != "heldout_observation_pack":
+        raise ContractError("held-out observations have wrong kind")
+    if observations.get("contains_predictions") is not False:
+        raise ContractError("held-out observations must not contain predictions")
+    if not isinstance(profile_packs, list) or not profile_packs:
+        raise ContractError("frozen component profile packs are required")
+    predictions: dict[str, int] = {}
+    for pack in profile_packs:
+        if not isinstance(pack, dict) or pack.get("kind") != "measured_profile_pack":
+            raise ContractError("component profile pack has wrong kind")
+        workload = pack.get("cell", {}).get("workload_class")
+        values = [sample.get("completion_us") for sample in pack.get("samples", [])]
+        if not isinstance(workload, str) or not values or any(type(value) is not int or value < 0 for value in values):
+            raise ContractError("component profile pack is incomplete")
+        predictions[workload] = int(statistics.median(values))
+    completions: dict[str, int] = {}
+    rows: list[dict[str, Any]] = []
+    for observed in observations.get("requests", []):
+        workload = observed.get("workload_class")
+        if workload not in predictions:
+            raise ContractError(f"missing frozen prediction for workload: {workload}")
+        arrival_us = resolve_arrival_us(observed, completions)
+        simulated_completion = arrival_us + predictions[workload]
+        completions[observed["request_id"]] = simulated_completion
+        rows.append({
+            "request_id": observed["request_id"],
+            "workflow_id": observed["workflow_id"],
+            "arrival": observed["arrival"],
+            "observed_external_occupancy": observed["observed_external_occupancy"],
+            "observed_completion_us": observed["observed_completion_us"],
+            "simulated_completion_us": simulated_completion,
+            "observed_state": observed["observed_state"],
+            "simulated_state": "resident_warm",
+        })
+    return {
+        "schema_version": 1,
+        "kind": "heldout_replay_dataset",
+        "domain_id": domain_id,
+        "requests": rows,
+        "prediction_source": "frozen_component_pack_median",
+    }
 
 
 def _nonnegative_int(row: dict[str, Any], field: str) -> int:
