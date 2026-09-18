@@ -196,19 +196,28 @@ def submit_profile_plan(
     handler: str,
     input_digest: str,
     max_jobs: int,
+    cell_ids: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Submit only through an injected authorized authority; never execute locally."""
 
     if not isinstance(plan, dict) or plan.get("kind") != "profiling_plan":
         raise ContractError("profile submission requires a profiling plan")
-    if type(max_jobs) is not int or max_jobs <= 0 or max_jobs > len(plan.get("cells", [])):
+    cells = plan.get("cells", [])
+    if cell_ids is not None:
+        if not cell_ids or len(set(cell_ids)) != len(cell_ids):
+            raise ContractError("profile cell IDs must be unique non-empty selections")
+        by_id = {cell.get("cell_id"): cell for cell in cells if isinstance(cell, dict)}
+        if any(cell_id not in by_id for cell_id in cell_ids):
+            raise ContractError("selected profile cell ID is not in the plan")
+        cells = [by_id[cell_id] for cell_id in cell_ids]
+    if type(max_jobs) is not int or max_jobs <= 0 or max_jobs > len(cells):
         raise ContractError("max_jobs must be positive and no larger than the plan")
     if not isinstance(handler, str) or not handler:
         raise ContractError("authorized profiling handler is required")
     if not isinstance(input_digest, str) or len(input_digest) != 64:
         raise ContractError("profiling input digest must be SHA-256 text")
     job_ids: list[str] = []
-    for cell in plan["cells"][:max_jobs]:
+    for cell in cells[:max_jobs]:
         cell_hash = hashlib.sha256(cell["cell_id"].encode("utf-8")).hexdigest()[:24]
         request = {
             "version": 1,

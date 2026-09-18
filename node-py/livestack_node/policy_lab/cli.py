@@ -237,6 +237,7 @@ def _profile(args: argparse.Namespace) -> int:
         report = submit_profile_plan(
             _base_validate(_read(args.plan)), client, handler=args.handler,
             input_digest=args.input_digest, max_jobs=args.max_jobs,
+            cell_ids=tuple(args.cell_id) if args.cell_id else None,
         )
         print(json.dumps(report, allow_nan=False, sort_keys=True))
         return 0 if report["status"] == "submitted" else 4
@@ -331,6 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
     profile_submit.add_argument("--handler", default="policy_lab_profile")
     profile_submit.add_argument("--input-digest", required=True)
     profile_submit.add_argument("--max-jobs", type=int, required=True)
+    profile_submit.add_argument("--cell-id", action="append")
     profile_status = subparsers.add_parser("profile-status")
     profile_status.add_argument("job_id")
     profile_status.add_argument("--authority-config", type=Path, required=True)
