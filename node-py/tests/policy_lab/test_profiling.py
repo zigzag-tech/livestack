@@ -145,11 +145,16 @@ def test_profile_submission_uses_stable_keys_and_bounded_authorized_jobs():
         handler="policy_lab_profile",
         input_digest="b" * 64,
         max_jobs=2,
+        cell_ids=(
+            "llm-27b:b-to-a:w0:short:c1:warm:llm-rev:runtime-a:gpu-a",
+            "tts:b-to-b:w0:sentence:c1:warm:tts-rev:runtime-b:gpu-b",
+        ),
     )
     assert report["status"] == "submitted"
     assert report["submitted"] == 2
     assert report["job_ids"] == ["job-1", "job-2"]
     assert authority.requests[0]["key"] != authority.requests[1]["key"]
+    assert [request["payload"]["cell"]["workload_class"] for request in authority.requests] == ["llm-27b", "tts"]
     assert all(request["need"]["profile_slot"] == 1 for request in authority.requests)
     assert all("gpu" not in request["need"] for request in authority.requests)
     assert authority.requests[0]["selector"]["profiling_vantage"] == authority.requests[0]["payload"]["cell"]["requester_vantage"]
