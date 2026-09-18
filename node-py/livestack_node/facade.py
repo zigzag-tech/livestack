@@ -12,6 +12,7 @@ import time
 
 from typing import Callable, Optional
 
+from .announce import node_region as _node_region
 from .lease import Capability
 
 
@@ -255,6 +256,16 @@ def build_router(manager, coordinator, capability: Capability,
             "kind": capability.kind,
             "host_id": capability.host_id,
             "node_id": node_id,
+            # Where this node is, from its own environment.
+            #
+            # Reported HERE as well as in the announce because the announce
+            # only reaches brokers this node was told about, and a fleet broker
+            # on another host learns remote nodes by SEEDING plus probing —
+            # never by announce. Measured: after regions were announced,
+            # xc-tower-ubuntu's own nodes showed `na` and every remote one
+            # (xc-mac-studio, zz-tower0) still showed `None`, because a seed
+            # carries no region and nothing else on that path did either.
+            "region": _node_region(),
             "device_id": device_id,
             "device_candidates": device_candidates,
             "labels": dict(capability.labels),

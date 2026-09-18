@@ -240,3 +240,56 @@ class TestChoose:
             choose("polytts", allow_regions={"na"},
                    brokers=["http://127.0.0.1:1"], timeout=0.2)
         assert "no broker answered" in str(excinfo.value)
+
+
+class TestARemoteNodeStillSaysWhereItIs:
+    """A seed never announced, and a fleet broker on another host learns every
+    remote node by seeding plus probing. So the capability descriptor has to
+    carry the region too — measured: with only the announce path, every node on
+    the broker's own host reported `na` and every remote one reported `None`.
+    """
+
+    def test_capability_reports_the_environment(self, monkeypatch):
+        monkeypatch.setenv("LIVESTACK_NODE_REGION", "na")
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from livestack_node.facade import build_router
+        from livestack_node.lease import Capability
+
+        class _Coordinator:
+            def status(self):
+                return {"resident": []}
+
+        class _Manager:
+            units = {}
+            coordinator = _Coordinator()
+
+            def status(self):
+                return {"resident": []}
+
+        app = FastAPI()
+        app.include_router(
+            build_router(_Manager(), _Coordinator(),
+                         Capability(kind="polytts", host_id="h"),
+                         lambda fn: fn(), device_meter=None),
+            prefix="/livestack",
+        )
+        body = TestClient(app).get("/livestack/capability").json()
+        assert body["region"] == "na"
+
+    def test_the_fleet_row_prefers_what_the_node_said(self):
+        # The roster may hold an older announce, or none at all for a seed.
+        from livestack_node.membership import PeerRoster
+
+        roster = PeerRoster(clock=lambda: 100.0)
+        roster.seed("http://100.64.0.2:8100/livestack", host_id="xc-mac-studio")
+        row = roster.snapshot()[0]
+        assert row["region"] is None  # a seed carries none
+
+        # `fleet_view` overlays the capability; this is that rule, in the small.
+        node = {"peer": row["peer"], "region": row.get("region")}
+        cap = {"region": "na", "ready": True}
+        if cap.get("region"):
+            node["region"] = cap["region"]
+        assert node["region"] == "na"

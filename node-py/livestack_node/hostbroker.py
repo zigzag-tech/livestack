@@ -968,6 +968,11 @@ class HostBroker:
             if cap:
                 node["ready"] = cap.get("ready")
                 node["detail"] = cap.get("detail")
+                # The node's own statement wins over the announce: a seeded
+                # peer never announced at all, and this is the only path that
+                # reaches a node on another host.
+                if cap.get("region"):
+                    node["region"] = cap["region"]
                 if cap.get("device_id"):
                     node["device_id"] = cap["device_id"]
                 if cap.get("units"):
