@@ -307,7 +307,8 @@ def build_app(broker: HostBroker):
 
     @app.get("/fleet/rank")
     def fleet_rank(kind: str, vantage: str = "direct", via: str = None,
-                   region: str = None, ttl_s: float = 60.0):
+                   region: str = None, regions: str = None,
+                   allow_unknown_region: bool = False, ttl_s: float = 60.0):
         """Where should a `kind` request START, from this vantage.
 
         Advisory, and bounded: the response carries `generated_at` and `ttl_s`,
@@ -316,18 +317,47 @@ def build_app(broker: HostBroker):
         while stale looks authoritative. A wrong first guess costs one hop; the
         client picker still probes and fails over.
 
-        Region is NOT applied here. Region is operator policy, the caller holds
-        it (the hub knows an account's allowed regions), and a fleet broker that
-        decided policy would be a second place for it to be wrong.
+        **The broker still does not DECIDE region; it will APPLY one it is
+        handed.** Those are different things and the difference is the whole
+        design. `region=` remains the asker's own region, recorded and never
+        applied, so a ledger row can be read later. `regions=` is a policy the
+        CALLER states in the request — "only these" — and the broker filters
+        with it, reporting every exclusion and why.
+
+        Filtering here rather than in each caller is not the broker taking the
+        policy over: the answer is a function of the request, and it changes
+        the moment the request does. What it buys is one implementation of the
+        rule instead of one per language — the alternative is a TypeScript
+        consumer reimplementing "which hosts are North American" as a literal
+        list, which is exactly the second place to be wrong that this design
+        exists to avoid.
         """
         from .fleet_rank import rank as _rank
         result = _rank(broker.fleet_view(), kind, vantage=via or vantage,
                        ttl_s=ttl_s)
         # `region` is RECORDED, never applied. It is the asker's region as the
         # emitter knew it, which is what makes a ledger record readable later —
-        # but the filtering belongs to the caller, and answering as if we had
-        # applied it would be the worst of both.
+        # but WHERE the work may run is `regions`, below.
         result["asker_region"] = region
+
+        wanted = [r.strip().lower() for r in (regions or "").split(",") if r.strip()]
+        if wanted:
+            from .client import eligible_targets
+            kept, rejected = eligible_targets(result, allow_regions=set(wanted),
+                                              allow_unknown_region=allow_unknown_region)
+            result["targets"] = kept
+            result["region_policy"] = {"allow": wanted,
+                                       "allow_unknown": bool(allow_unknown_region),
+                                       "rejected": rejected}
+            # The chosen row must agree with the filtered list, or a caller
+            # reading `chosen` gets an answer the policy just refused.
+            result["chosen"] = kept[0]["target_id"] if kept else None
+            if not kept:
+                result["reason"] = (
+                    f"no {kind} target in {'/'.join(wanted)}: "
+                    + "; ".join(f"{r['target_id']} ({r['why']})" for r in rejected[:4])
+                ) or f"no {kind} target in {'/'.join(wanted)}"
+
         broker.emit_rank(result)
         return {k: v for k, v in result.items() if k != "candidates"}
 
