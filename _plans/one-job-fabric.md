@@ -153,6 +153,15 @@ that ignores every field added here behaves exactly as today.
 - [ ] J.4 Caller job list reports cap and running count → verify: `GET jobs` body has `principal: {max_running, running}`.
 - [ ] J.5 `durable-workloads.md` gains a "Three applications" section naming the label, the env, the cap and the principal table; `~/benchday/docs/harmony-worker-enrolment.md` gains the multi-bundle note (filed in benchday) → verify: both documents name `labels.owner` and `HARMONY_OWNER`.
 - [ ] J.6 Production `authority.json` gains the four principals above; an attune handler bundle and the unchain bundle are installed on `xc-tower-e2e-1` → verify: `python3 -m json.tool ~/.config/livestack-workloads/authority.json` lists four caller principals; the worker's `report` advertises `attune.produce_item` and `unchain.render_chunk`.
+- [ ] J.7 A progress channel. The authority has none: a caller sees `queued → running → done`
+      and nothing between, and the jingway adapter's `onProgress` (umbrella requirement "The
+      jingway compute-offload port has a workloads adapter", jingway task W.5) needs a source.
+      The worker publishes a small `progress` reference on the attempt (`{phase, detail?,
+      fraction?}`, the jingway `JobProgressSchema` shape) through `worker/heartbeat`, the store
+      keeps only the latest, and `GET jobs/<id>` returns it → verify:
+      `tests/test_workload_progress.py` — a handler that reports `tts` then `stills` is read
+      back in that order by a polling caller; a heartbeat without progress leaves the last
+      value in place; the field is absent, not null, for a handler that never reports.
 
 ## Gate (Phase B, shared with the jingway and unchain owners)
 
