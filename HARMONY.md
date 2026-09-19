@@ -527,6 +527,36 @@ to a service that authenticates its own callers.
 Unset means no auth, which makes any quota advisory; the startup line and
 `GET /fleet` both say so rather than leaving it to be discovered.
 
+#### The owner header: `X-Harmony-Owner`
+
+One header carries the asserted owner from the hub that authenticated a person
+through to the fleet broker, so an engine fronted by a hub stops erasing the
+app identity at its own door:
+
+    X-Harmony-Owner: benchday:acct_b
+
+An engine that sees it (harmony-llm, polytts, polyasr) admits with that owner
+and marks the admission `owner_asserted: true`; a request **without** the
+header is admitted as the engine's own identity (`harmony-llm:<host>`) and
+marked `owner_asserted: false`, because "the engine spent capacity" and "the
+engine spent capacity on behalf of an account it was never told about" are
+different facts and the ledger keeps them apart.
+
+The header is an **assertion, not a credential**. The engine forwards it to
+`/admit` with the engine's own bearer token, and the broker resolves the owner
+through the engine's principal — *delegating*, with the prefix the engine was
+granted. On this fleet the engines are hub-shared and reachable only on the
+mesh, so their prefix is `""` (any owner): they are trusted to relay what a
+hub asserted. A public engine gets a narrower prefix. The header is not
+`Authorization` because the engines already spend `Authorization` on their own
+API keys — overloading it would make an API key and an owner assertion the
+same string. It is not a body field because `/v1/chat/completions` is an
+OpenAI-shaped body a caller's SDK owns. A header survives every SDK, every
+proxy, and the relay.
+
+Read endpoints (`/fleet`, `/fleet/rank`, `/peers`, `/plan`) record the
+principal when a valid credential is present and stay open otherwise.
+
 ## The decision ledger
 
 Every placement and routing decision writes a record with enough in it to be

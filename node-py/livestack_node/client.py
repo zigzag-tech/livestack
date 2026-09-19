@@ -77,6 +77,7 @@ def _post(url: str, body: dict) -> dict:
 
 
 def admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "node",
+          token: Optional[str] = None, owner_asserted: bool = False,
           timeout: float = 240.0, brokers: Optional[list] = None) -> dict:
     """Ask Harmony to MAKE ROOM for `kind`, and say where it granted it.
 
@@ -107,6 +108,17 @@ def admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "n
     not yet in the planner's world, the broker turned its own KeyError into
     `granted: True`, and the node ran vLLM into a card that still held a 22 GB
     model. Refusal and outage must not look alike.
+
+    `token` is the caller's fleet credential: sent as `Authorization: Bearer`,
+    it is how the broker knows WHO is asking instead of trusting the body's
+    `owner`. Absent means "the broker decides from its own configuration" —
+    against a broker with no principals configured (the whole fleet until the
+    token rollout) that is exactly today's behaviour. `owner_asserted` marks
+    that `owner_id` was vouched for by a fronting engine (its inbound
+    `X-Harmony-Owner` header), not chosen by the engine itself; the admission's
+    ledger record carries the fact so a retrospective can tell "attune spent
+    capacity" from "harmony-llm spent capacity without being told who was
+    asking".
     """
     from .announce import broker_urls
     # No device selector: WHERE it goes is the planner's decision, and pinning it
@@ -118,13 +130,20 @@ def admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "n
     body = {"kind": kind, "owner": owner_id}
     if requires:
         body["requires"] = dict(requires)
+    if owner_asserted:
+        body["owner_asserted"] = True
+    headers = {"Content-Type": "application/json"}
+    if token:
+        # A credential rides its own header, never the body: bodies are logged,
+        # proxied and pasted into bug reports, and a token must survive none of
+        # those. `Authorization` is also what every other fleet endpoint speaks.
+        headers["Authorization"] = f"Bearer {token}"
     last = None
     for base in (brokers if brokers is not None else broker_urls()):
         try:
             data = json.dumps(body).encode("utf-8")
             req = urllib.request.Request(f"{base.rstrip('/')}/admit", data=data,
-                                         headers={"Content-Type": "application/json"},
-                                         method="POST")
+                                         headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else {}
