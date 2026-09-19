@@ -191,6 +191,12 @@ class Request:
     priority: Optional[int] = None              # default: the unit's priority
     selector: Mapping[str, str] = field(default_factory=dict)
     locality_host: Optional[str] = None         # where the input lives (placement pref)
+    # True when `owner` was ASSERTED by a caller a fronting engine trusts (the
+    # engine's inbound `X-Harmony-Owner` header), False when the engine admits
+    # under its own identity because the caller named nobody. Travels with the
+    # Request so the Grant record can mark the fact; defaulted so every
+    # existing constructor is unchanged.
+    owner_asserted: bool = False
     # A REQUIREMENT instead of (or alongside) a kind: "any llm of at least 20B".
     #   requires={"class": "llm", "params_b>=": 20}
     # Keys are unit attributes, optionally suffixed with a comparison
@@ -233,6 +239,12 @@ class Load:
     kind: str
     device_id: str
     reason: str = ""
+    # WHOSE REQUEST brought this load about — the owner of the `Request` whose
+    # planning produced it ("pressure" for a rule-0 shed, "hard-pin floor" for
+    # a pin restore). The ledger names this next to the record, so a reload
+    # is explained from the ledger alone: who needed the room, who brought it
+    # back. Empty only for actions older than the field.
+    caused_by: str = ""
 
 
 @dataclass(frozen=True)
@@ -240,6 +252,10 @@ class Evict:
     kind: str
     device_id: str
     reason: str = ""
+    # WHOSE REQUEST needed the room — same field, same contract as Load. The
+    # 27B reload thrash of 2026-09-19 was diagnosed from journal timestamps
+    # because the ledger could not say who needed the room; this is the fix.
+    caused_by: str = ""
 
 
 @dataclass(frozen=True)
@@ -247,6 +263,17 @@ class Grant:
     request_id: str
     kind: str
     device_id: str
+    # Who is charged for this grant. Not derivable from `request_id` (an id
+    # is not an identity), and the fact a retrospective needs: two apps, one
+    # unit, two owners — the ledger must be able to say which owner each
+    # Grant served. Filled from the Request; empty for actions built by hand.
+    owner: str = ""
+    # True when the owner arrived ASSERTED by a caller the engine trusts
+    # (the `X-Harmony-Owner` header), False when the engine charged the
+    # request to its own identity. The distinction is the difference between
+    # "attune spent capacity" and "harmony-llm spent capacity on attune's
+    # behalf without being told who was asking".
+    owner_asserted: bool = False
     # What the unit may actually USE on that device, after this cycle's
     # evictions. The planner is the only party that knows it: the node knows its
     # own units, the operator knows a fraction of a card, and neither can see
@@ -407,20 +434,26 @@ class _World:
         on every planning cycle until it finishes."""
         return sum(1 for r in self.resident.values() if kind in r)
 
-    def load(self, kind: str, device_id: str, reason: str) -> None:
+    def load(self, kind: str, device_id: str, reason: str,
+             caused_by: str = "") -> None:
         self.resident[device_id][kind] = Placement(kind=kind, device_id=device_id,
                                                     loaded_at=self.w.now)
-        self.actions.append(Load(kind=kind, device_id=device_id, reason=reason))
+        self.actions.append(Load(kind=kind, device_id=device_id, reason=reason,
+                                 caused_by=caused_by))
 
-    def evict(self, kind: str, device_id: str, reason: str) -> None:
+    def evict(self, kind: str, device_id: str, reason: str,
+              caused_by: str = "") -> None:
         self.resident[device_id].pop(kind, None)
-        self.actions.append(Evict(kind=kind, device_id=device_id, reason=reason))
+        self.actions.append(Evict(kind=kind, device_id=device_id, reason=reason,
+                                  caused_by=caused_by))
 
     def grant(self, req: Request, device_id: str, reason: str = "",
               budget: Optional[Res] = None) -> None:
         self.actions.append(Grant(request_id=req.id, kind=req.kind,
                                   device_id=device_id, reason=reason,
-                                  budget=dict(budget or {})))
+                                  budget=dict(budget or {}),
+                                  owner=req.owner,
+                                  owner_asserted=req.owner_asserted))
 
     def defer(self, req: Request, reason: str) -> None:
         self.actions.append(Defer(request_id=req.id, reason=reason))
@@ -841,7 +874,8 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
             # whatever a request needs it to.
             if not world.requests and len(W.resident[d.id]) <= 1:
                 break
-            W.evict(victim.kind, d.id, "relieve measured over-budget pressure")
+            W.evict(victim.kind, d.id, "relieve measured over-budget pressure",
+                    caused_by="pressure")
 
     # 1) Honour pending demand, most-important (after aging) first, then FIFO.
     # `.get`, not `[]`. The loop below handles an unknown kind by deferring it
@@ -896,17 +930,20 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
         moved = {}
         for v in opt.victims:
             W.evict(v.kind, opt.device_id,
-                    f"preempted by {req.kind} (prio {eff})")
+                    f"preempted by {req.kind} (prio {eff})",
+                    caused_by=req.owner)
             # Move it rather than drop it, when somewhere else has room. This is
             # the case the operator hits constantly: a small model took the empty
             # card, a model that needs a whole card arrives, and the small one
             # should step aside — not disappear until a debounce brings it back.
             dest = _relocation_for(W, v, opt.device_id, pol)
             if dest is not None:
-                W.load(v.kind, dest, f"relocated from {opt.device_id} to make room for {req.kind}")
+                W.load(v.kind, dest, f"relocated from {opt.device_id} to make room for {req.kind}",
+                       caused_by=req.owner)
                 moved[v.kind] = dest
         if opt.needs_load:
-            W.load(req.kind, opt.device_id, f"demand: {req.id}")
+            W.load(req.kind, opt.device_id, f"demand: {req.id}",
+                   caused_by=req.owner)
         if opt.victims:
             dropped = sorted(v.kind for v in opt.victims if v.kind not in moved)
             parts = []
@@ -974,13 +1011,15 @@ def _place_warm(world: _World, kind: str, unit: Unit, pol: PlannerPolicy,
             if victims is not None:
                 victims_for[d.id] = victims
     if best_dev is not None:
-        world.load(kind, best_dev, "soft-pin restore" if not mandatory else "hard-pin floor")
+        world.load(kind, best_dev, "soft-pin restore" if not mandatory else "hard-pin floor",
+                   caused_by="soft-pin restore" if not mandatory else "hard-pin floor")
         return True
     if mandatory and victims_for:
         dev = min(victims_for, key=lambda k: sum(world.w.units[v.kind].reload_cost
                                                  for v in victims_for[k]))
         for v in victims_for[dev]:
-            world.evict(v.kind, dev, f"preempted for hard-pin {kind}")
-        world.load(kind, dev, "hard-pin floor")
+            world.evict(v.kind, dev, f"preempted for hard-pin {kind}",
+                        caused_by="hard-pin floor")
+        world.load(kind, dev, "hard-pin floor", caused_by="hard-pin floor")
         return True
     return False
