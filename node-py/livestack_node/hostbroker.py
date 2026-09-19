@@ -1082,10 +1082,15 @@ class HostBroker:
             rows_by_host.setdefault(host, []).append(node)
         matrix = self.links_view()
         pol = getattr(self, "fleet_policy", None)
-        return {
+        relays = relays_from_env()
+        out = {
             "dispatch": self.dispatch,
             "peers": len(self.peers),
             "generated_at": now,
+            # Relay vantages, operator-declared (`LIVESTACK_RELAYS`). A caller
+            # with no links row of its own ranks from `relay:<id>` or
+            # `region:<r>`; these rows are what those vantages measure from.
+            **({"relays": relays} if relays else {}),
             # What is ACTUALLY in force, not what was configured. A quota that
             # failed to parse is a safety control that silently switched off, so
             # the effective value has to be readable rather than inferred from
@@ -1120,6 +1125,7 @@ class HostBroker:
                 for h, n in sorted(rows_by_host.items())
             },
         }
+        return out
 
 
     # -- links (Phase 2: from a star to a matrix) ----------------------------
@@ -1369,6 +1375,45 @@ def _http(url, body=None, timeout=5):
 _RES_TO_PRIO = {0: 10, 1: 20, 2: 30}
 
 
+def relays_from_env(env=None) -> Dict[str, dict]:
+    """`LIVESTACK_RELAYS`: measured link rows for vantage points that are not
+    fleet hosts — a public relay off the tailnet, the hub's edge box::
+
+        {"na-public-la": {"region": "na", "links": {"xc-tower-ubuntu": 41.0}}}
+
+    The operator states the measurements (the fleet cannot reach a relay that
+    is not a livestack host to measure it). A malformed entry is SKIPPED,
+    loudly, by the caller — the same discipline as the quota parse: one typo
+    must not take every relay with it, and a relay whose links failed to parse
+    is a relay whose distances read `unknown`, never a guessed number.
+    """
+    import os
+    raw = ((os.environ if env is None else env).get("LIVESTACK_RELAYS") or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = _json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError("not a JSON object")
+    except Exception as e:
+        print(f"[harmony] LIVESTACK_RELAYS={raw!r} is not a JSON object of "
+              f"relay -> {{region, links}} ({e}) — relay vantages answer "
+              f"'unknown' until it is fixed", flush=True)
+        return {}
+    out: Dict[str, dict] = {}
+    for rid, spec in parsed.items():
+        if not isinstance(spec, dict) or not isinstance(spec.get("links"), dict):
+            print(f"[harmony] LIVESTACK_RELAYS entry {rid!r} skipped: needs "
+                  f"{{'region': ..., 'links': {{host: ms}}}}", flush=True)
+            continue
+        out[str(rid)] = {
+            "region": str(spec.get("region") or "").strip().lower() or None,
+            "links": {str(h): float(ms) for h, ms in spec["links"].items()
+                      if isinstance(ms, (int, float))},
+        }
+    return out
+
+
 class RestPeer:
     """Peer backed by a livestack node's /livestack REST facade (GET /residence,
     POST /model/warm, POST /model/evict). Priority is derived from the residency
@@ -1439,19 +1484,38 @@ class RestPeer:
         out = {}
         for u in snap["units"]:
             r = u["residency"]
-            prio = self._priorities.get(u["kind"], self._prio(r))
+            # Priority precedence: the operator's explicit broker-side override
+            # (`_priorities`) wins; then a priority the NODE declared — it
+            # measured what the unit costs, which outranks the tier-derived
+            # `_RES_TO_PRIO` guess (a UNPINNED LLM is not always priority 30);
+            # then the tier default, exactly as before this existed.
+            declared = u.get("priority")
+            if u["kind"] in self._priorities:
+                prio = self._priorities[u["kind"]]
+            elif declared is not None:
+                prio = int(declared)
+            else:
+                prio = self._prio(r)
             fp = ({"vram_bytes": self._footprints[u["kind"]]}
                   if u["kind"] in self._footprints else u["footprint"])
             # Measured peak-activation reserve (absent on nodes that don't report it).
             hdrm = u.get("activation_headroom") or {}
-            out[u["kind"]] = Unit(u["kind"], fp, priority=prio,
-                                  residency=Residency(r), activation_headroom=hdrm,
-                                  # Contention class, when the node declares one.
-                                  # Absent on nodes that do not, which is every
-                                  # node that serves a single model.
-                                  spread_group=u.get("spread_group") or "",
-                                  # What the unit IS, so a requirement can match it.
-                                  attributes=u.get("attributes") or {})
+            # Declared economics, passed through when set; absent keeps the
+            # planner defaults (15 s floor, 1.0 reload) — a node that declares
+            # nothing plans exactly as it did before the fields existed.
+            out[u["kind"]] = Unit(
+                u["kind"], fp, priority=prio,
+                residency=Residency(r), activation_headroom=hdrm,
+                min_residency_s=(float(u["min_residency_s"])
+                                 if u.get("min_residency_s") is not None else 15.0),
+                reload_cost=(float(u["reload_cost"])
+                             if u.get("reload_cost") is not None else 1.0),
+                # Contention class, when the node declares one.
+                # Absent on nodes that do not, which is every
+                # node that serves a single model.
+                spread_group=u.get("spread_group") or "",
+                # What the unit IS, so a requirement can match it.
+                attributes=u.get("attributes") or {})
         return out
 
     def placements(self):

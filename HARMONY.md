@@ -140,6 +140,29 @@ Two anti-pathology guards: **anti-thrash** (a freshly-loaded unit is protected b
 `restore_debounce_s` before restore) and **anti-starvation** (a deferred request's
 effective priority ages upward so low-priority work is never starved forever).
 
+### Unit economics, declared
+
+Measured on xc-tower-ubuntu 2026-09-19: evicting and reloading the 27B costs
+**~50 s** end to end — and the planner protected it for 15 s (the default
+`min_residency_s`) and tie-broke its reload at `1.0`, the same as the 0.6 B
+embedder. A slow model that is cheap to evict is evicted by everything. Three
+fields are now declarable per unit (harmony-llm unit file → `ManagedUnit` →
+`/residence` → planner `Unit`):
+
+* `min_residency_s` — anti-thrash floor in seconds. The 27B declares `60`.
+* `reload_cost` — what a reload costs, on the planner's tie-break scale. The
+  27B declares `4`.
+* `priority` — an explicit claim on the card, outranking the tier-derived
+  default (`_RES_TO_PRIO` gives every UNPINNED unit 30).
+
+Absent values keep today's defaults exactly: a node that declares nothing
+plans byte-for-byte as it did before the fields existed. When a young load's
+floor is the only thing between a request and the device, the Defer record
+says so — `residency floor: llm loaded 20s ago is protected for 60s` — a
+wait, not a refusal of the request's worth. See
+`examples/harmony-llm/llm-units.example.json` for the 27B declared with its
+measured numbers.
+
 ## Context-awareness: it plans against *measured* reality
 
 Two things keep the plan tied to the real machine, not just declared estimates:

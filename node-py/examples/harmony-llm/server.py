@@ -183,6 +183,14 @@ def _unit_specs() -> "list[dict]":
             "max_model_len": str(spec.get("max_model_len", MAX_MODEL_LEN) or ""),
             "extra_args": shlex.split(spec.get("extra_args", "")) or EXTRA_ARGS,
             "residency": spec.get("residency"),
+            # Unit economics, declared by the operator: how long a fresh load
+            # is protected (a 27B whose measured reload is ~50 s must not be
+            # evicted 15 s in by a 0.6 B embedder), what a reload costs, and
+            # this unit's claim on the card. All optional; absent keeps the
+            # planner's defaults and the tier-derived priority, byte-for-byte.
+            "min_residency_s": spec.get("min_residency_s"),
+            "reload_cost": spec.get("reload_cost"),
+            "priority": spec.get("priority"),
             # Operator intent, kept OUT of `attributes` on purpose: these say
             # which unit to pick and which to warm, not what a unit IS, and a
             # caller must never be able to require them.
@@ -463,6 +471,13 @@ _UNITS = {
         health_check=_health_probe_for(name),
         spread_group=SPREAD_GROUP,
         attributes=spec.get("attributes") or {},
+        # Declared economics (see `_unit_specs`): carried to the coordinator's
+        # /residence report and from there into the planner's Unit. None =
+        # undeclared, and the node's report omits the field so the broker
+        # keeps its defaults.
+        min_residency_s=spec.get("min_residency_s"),
+        reload_cost=spec.get("reload_cost"),
+        priority=spec.get("priority"),
     )
     for name, spec in SPECS.items()
 }
