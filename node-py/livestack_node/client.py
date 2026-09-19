@@ -230,6 +230,73 @@ def eligible_targets(ranking: dict, *, allow_regions=None,
     return kept, rejected
 
 
+def parse_requirements(spec) -> dict:
+    """`"voice:abc,engine:qwen"` -> `{"voice": "abc", "engine": "qwen"}`.
+
+    A string because this arrives as one query parameter, and one parameter
+    that a caller can read back in a log beats four the caller has to
+    remember. Repeating a key keeps the last one — a request that says two
+    voices wants neither ambiguity nor a silent AND.
+    """
+    if not spec:
+        return {}
+    if isinstance(spec, dict):
+        return {str(k): str(v) for k, v in spec.items()}
+    out = {}
+    for clause in str(spec).split(","):
+        clause = clause.strip()
+        if not clause or ":" not in clause:
+            continue
+        key, _, value = clause.partition(":")
+        key, value = key.strip(), value.strip()
+        if key and value:
+            out[key] = value
+    return out
+
+
+def satisfies(inventory, key: str, value: str) -> bool:
+    """Does a node advertising `inventory` have `key` = `value`?
+
+    An entry may be a scalar (`engine: qwen`) or a list (`voice: [id, id]`),
+    and both mean "this node has it". Missing means NO — a node that cannot say
+    it has the voice cannot be sent a request for that voice, and treating
+    silence as a match is the same mistake as treating an unknown region as
+    the local one.
+    """
+    if not isinstance(inventory, dict) or key not in inventory:
+        return False
+    have = inventory[key]
+    if isinstance(have, (list, tuple, set)):
+        return any(str(x) == value for x in have)
+    return str(have) == value
+
+
+def capable_targets(ranking: dict, requirements: dict) -> tuple:
+    """Keep the targets that advertise every requirement; say why for the rest.
+
+    Same shape and same order as `eligible_targets`, and separate from it
+    because the two answer different questions: region is where the caller
+    ALLOWS the work, capability is what the work NEEDS. A node can fail one
+    and pass the other, and a reader of the rejection deserves to know which.
+    """
+    if not requirements:
+        return list(ranking.get("targets") or []), []
+    kept, rejected = [], []
+    for t in ranking.get("targets") or []:
+        inventory = t.get("inventory")
+        missing = [f"{k}={v}" for k, v in requirements.items()
+                   if not satisfies(inventory, k, v)]
+        if missing:
+            advertised = "nothing" if not isinstance(inventory, dict) or not inventory \
+                else "/".join(sorted(inventory))
+            rejected.append({"target_id": t.get("target_id", "?"),
+                             "why": f"does not advertise {', '.join(missing)}"
+                                    f" (advertises {advertised})"})
+            continue
+        kept.append(t)
+    return kept, rejected
+
+
 def choose(kind: str, *, allow_regions=None, allow_unknown_region: bool = False,
            brokers: Optional[list] = None, vantage: Optional[str] = None,
            asker_region: Optional[str] = None, timeout: float = 3.0,

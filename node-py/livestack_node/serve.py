@@ -102,6 +102,7 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
            readiness: Callable[[], dict] = None,
            device_id: Optional[str] = None,
            in_flight: Optional[Callable[[], int]] = None,
+           inventory=None,
            preload=None):
     """``device_meter``: a zero-arg callable -> measured {capacity,free} (see
     meters.py), ``"auto"`` to pick one by backend (CUDA/MLX), or ``None`` to report
@@ -120,6 +121,14 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     (``load.in_flight_source``: ``"server"`` or ``"leases"``), so a consumer can
     tell "0 because idle" from "0 because this node cannot see its own work".
     :func:`livestack_node.counting` is the usual way to maintain it.
+
+    ``inventory`` is what this node HAS, as opposed to what it IS: a mapping
+    like ``{"voice": [...]}``, or a zero-arg callable returning one. It is
+    published on ``/capability`` and reaches the fleet broker, so a caller can
+    ask for "a polytts in North America that has THIS voice" in one request
+    (``/fleet/rank?require=voice:<id>``) instead of resolving a host and then
+    discovering the voice lives on the other one. Pass a callable when the
+    answer changes at runtime — cloning a voice adds one.
 
     ``preload`` warms a unit (a name, a list of names, or a zero-arg callable)
     AFTER the server is answering, not before. Use it instead of loading a
@@ -183,7 +192,7 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
         build_router(manager, coordinator, Capability(kind=kind, host_id=host_id),
                      gpu_call, device_meter=device_meter, activation_tracker=tracker,
                      readiness=readiness, device_id=device_id,
-                     in_flight=in_flight, node_id=node_id),
+                     in_flight=in_flight, node_id=node_id, inventory=inventory),
         prefix=prefix,
     )
 

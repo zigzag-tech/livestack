@@ -219,7 +219,7 @@ def build_router(manager, coordinator, capability: Capability,
                  readiness: Optional[Callable[[], Optional[dict]]] = None,
                  device_id: Optional[str] = None,
                  in_flight: Optional[Callable[[], int]] = None,
-                 node_id: Optional[str] = None):
+                 node_id: Optional[str] = None, inventory=None):
     # Resolved ONCE, here, so /capability and /residence can never disagree
     # about which device this node is on — a disagreement the broker would read
     # as two devices.
@@ -274,6 +274,19 @@ def build_router(manager, coordinator, capability: Capability,
             "ready": bool(resident),
             "detail": "resident" if resident else "no unit resident",
         }
+        # What this node HAS, as opposed to what it IS: the voice ids a TTS
+        # server holds, the models an ASR has on disk. Evaluated per request
+        # rather than snapshotted at attach, because the answer changes while
+        # the process runs — cloning a voice adds one — and a stale inventory
+        # sends work to a node that no longer matches. Never fatal: a node
+        # that cannot list its inventory still serves its kind.
+        if inventory is not None:
+            try:
+                have = inventory() if callable(inventory) else inventory
+                if isinstance(have, dict) and have:
+                    out["inventory"] = {str(k): v for k, v in have.items()}
+            except Exception as e:
+                out["inventory_error"] = str(e)[:200]
         load = _load_report(coordinator, st, device_meter, in_flight)
         if load is not None:
             out["load"] = load
