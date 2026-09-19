@@ -638,6 +638,55 @@ def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: i
     return None
 
 
+def _residency_floor_blocker(world: _World, device_id: str, need: Res,
+                             requester_prio: int, pol: PlannerPolicy,
+                             requester_kind: str = "") -> Optional[tuple]:
+    """`(kind, min_residency_s, age_s)` of a load whose residency floor is what
+    stands between ``need`` and this device — or None when the floor is not the
+    blocker.
+
+    Tells a Defer apart from an ordinary "no room": "no device can fit even
+    with preemption" and "a 27B loaded 20 s ago is protected for 60 s" want
+    opposite responses (wait vs widen), and the ledger record has to say which
+    one a retrospective is looking at. The floor blocks when evicting every
+    resident past its floor would still leave `need` unplaced, but evicting
+    the young ones TOO would fit: the only thing between the request and the
+    device is the anti-thrash protection, and protection is a wait, not a
+    refusal of the request's worth.
+    """
+    units = world.w.units
+    evictable: List[Placement] = []
+    young: List[Placement] = []
+    for p in world.resident[device_id].values():
+        u = units[p.kind]
+        if u.residency == Residency.HARD_PIN:
+            continue
+        if u.priority < requester_prio:         # more important: never a victim
+            continue
+        if u.priority == requester_prio and not _yields_at_equal_priority(
+                world, p, u, requester_kind):
+            continue
+        if p.busy and not pol.allow_busy_preemption:
+            continue
+        (young if (world.w.now - p.loaded_at) < u.min_residency_s
+         else evictable).append(p)
+    freed = dict(world.free(device_id))
+    if _fits(need, freed):
+        return None                             # it fits as-is; no blocker
+    for p in evictable:
+        freed = _add(freed, units[p.kind].footprint)
+    if _fits(need, freed):
+        return None                             # the room exists without the young
+    for p in young:
+        freed = _add(freed, units[p.kind].footprint)
+    if not _fits(need, freed):
+        return None                             # even everything would not fit
+    # Only the floor stands between: name the largest protected load.
+    p = max(young, key=lambda p: _magnitude(units[p.kind].footprint))
+    return (p.kind, units[p.kind].min_residency_s,
+            world.w.now - p.loaded_at)
+
+
 def _shed_victim(world: _World, device_id: str, pol: PlannerPolicy,
                  wanted: "Optional[set]" = None) -> Optional[Placement]:
     """The single least-important evictable resident unit on a device, used to
@@ -924,7 +973,21 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
                 unit, opt, eff = u, o, e
                 break
         if opt is None or unit is None:
-            W.defer(req, "no device can fit even with preemption")
+            reason = "no device can fit even with preemption"
+            # Say WHY when the why is a residency floor: a young load that
+            # would otherwise be the victim is protected, and the caller
+            # should wait for the floor, not give up on the request.
+            blocker = next(
+                (b for d in world.devices if not d.hosted
+                 for b in [_residency_floor_blocker(
+                     W, d.id, _admission_need(u), e, pol, kind)] if b),
+                None)
+            if blocker is not None:
+                b_kind, b_floor, b_age = blocker
+                reason = (f"residency floor: {b_kind} loaded {b_age:.0f}s ago "
+                          f"is protected for {b_floor:.0f}s (min_residency_s); "
+                          f"the room exists behind the floor")
+            W.defer(req, reason)
             continue
         req = Request(**{**req.__dict__, "kind": unit.kind})
         moved = {}

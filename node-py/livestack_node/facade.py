@@ -488,6 +488,20 @@ def build_router(manager, coordinator, capability: Capability,
             attrs = getattr(manager.units.get(kind), "attributes", None)
             if attrs:
                 entry["attributes"] = dict(attrs)
+            # Unit economics the operator declared (the harmony-llm unit
+            # file): emitted ONLY when set, so an undeclared unit's residence
+            # report is byte-for-byte what a node that predates the fields
+            # produces — and the broker keeps its defaults for it.
+            eco = manager.units.get(kind)
+            if getattr(eco, "min_residency_s", None) is not None:
+                entry["min_residency_s"] = float(eco.min_residency_s)
+            if getattr(eco, "reload_cost", None) is not None:
+                entry["reload_cost"] = float(eco.reload_cost)
+            # An explicit priority from the node outranks the broker's
+            # tier-derived default (_RES_TO_PRIO): the node measured what the
+            # unit costs, the tier only guesses.
+            if getattr(eco, "priority", None) is not None:
+                entry["priority"] = int(eco.priority)
             units.append(entry)
         out = {"host_id": capability.host_id,
                # WHICH PROCESS this is. `host_id` is a name a node picks (two
