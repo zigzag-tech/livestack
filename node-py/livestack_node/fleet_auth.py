@@ -38,8 +38,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 from dataclasses import dataclass
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Callable, Dict, Mapping, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -208,3 +209,59 @@ def authenticate(principals: Mapping[str, Principal],
     """
     principal = principal_for(principals, bearer_token(header))
     return resolve_owner(principal, requested_owner), principal
+
+
+def principals_from_env(env: Optional[Mapping[str, str]] = None, *,
+                        file_var: str = "LIVESTACK_FLEET_TOKENS_FILE",
+                        inline_var: str = "LIVESTACK_FLEET_TOKENS",
+                        log: Callable[..., None] = lambda *_: None
+                        ) -> Optional[Dict[str, Principal]]:
+    """The principal table from the environment: ``file_var`` first, inline
+    ``inline_var`` second.
+
+    The file wins because the one secret in the system should not be the one
+    setting that is inline JSON — systemd strips bare double quotes out of
+    inline values (see the crash of 2026-09-05 in hostd.py), and a credential
+    that can be read out of `systemctl show` is a credential that every
+    process on the box shares whether it needed it or not.
+
+    The return value distinguishes the two shapes of "no principals", because
+    they demand opposite behaviour:
+
+    * ``None`` — nothing is configured (neither variable set). Auth is OFF;
+      every endpoint keeps its unauthenticated behaviour.
+    * ``{}`` — a source WAS configured but yielded nothing (a refused
+      world-readable file, a missing file, malformed JSON, or every entry
+      rejected). Auth is ON with an empty table, which FAILS CLOSED: the
+      write endpoints 401 every caller until the operator fixes the source.
+      ``load_principals`` has always promised this ("NO principals loaded, so
+      /fleet/admit will refuse every caller"); without the None/{} split the
+      promise could not be kept, because an empty dict also means "unset".
+    """
+    environ: Mapping[str, str] = os.environ if env is None else env
+    path = (environ.get(file_var) or "").strip()
+    inline = environ.get(inline_var, "")
+    if not path and not (inline or "").strip():
+        return None
+    if path:
+        try:
+            st = os.stat(path)
+        except OSError as e:
+            log(f"[fleet-auth] {file_var}={path!r} cannot be read ({e}) — "
+                f"NO principals loaded; every caller gets 401 until this is "
+                f"fixed. Failing closed, not falling back to {inline_var}: a "
+                f"missing credential file is a config error, and a config "
+                f"error must never silently weaken authentication")
+            return {}
+        if st.st_mode & 0o077:
+            log(f"[fleet-auth] {file_var}={path!r} is mode "
+                f"{oct(st.st_mode & 0o777)}; group/other must have NO access "
+                f"(chmod 0600). Refusing to use it — NO principals loaded, "
+                f"every caller gets 401 until the permissions are fixed. A "
+                f"world-readable token file is a disclosed credential, and a "
+                f"disclosed credential is worse than none because it keeps "
+                f"authorizing")
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            return load_principals(f.read(), log=log)
+    return load_principals(inline, log=log)
