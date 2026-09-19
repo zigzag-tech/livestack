@@ -174,6 +174,9 @@ def rank(view: dict, kind: str, vantage: str = "direct",
     now = time.time() if now is None else now
     rows: List[RankedTarget] = []
     eligible: List[RankedTarget] = []
+    # Fresh, serving this kind, and holding nothing yet. Used only when no warm
+    # node exists: a cold node costs a load, and a load beats "no target".
+    cold: List[RankedTarget] = []
 
     for host_id, host in sorted((view.get("hosts") or {}).items()):
         for node in host.get("nodes") or []:
@@ -207,12 +210,29 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                     **common))
                 continue
             if not node.get("ready"):
-                rows.append(RankedTarget(
-                    outcome="filtered",
-                    reason=f"filtered: not ready ({node.get('detail') or 'no detail'})",
+                # HELD BACK, NOT DISCARDED. For a node whose model loads on
+                # demand, "no unit resident" means cold, not broken — it will
+                # load when asked. Dropping it outright made the first request
+                # after an idle eviction unroutable, so nothing could ever warm
+                # it: measured on xc-tower-ubuntu 2026-09-18, a restarted
+                # polytts left attune failing every item with `no polytts
+                # target in na` while the node sat there, healthy and empty.
+                cold.append(RankedTarget(
+                    outcome="ranked",
+                    reason=f"cold ({node.get('detail') or 'no unit resident'})",
                     **common))
                 continue
             eligible.append(RankedTarget(outcome="ranked", reason="", **common))
+
+    # Warm first, always. A cold node is a candidate only when there is no warm
+    # one anywhere — preferring it otherwise would pay a model load to avoid a
+    # few milliseconds of distance.
+    if not eligible and cold:
+        eligible = cold
+        cold = []
+    rows.extend(RankedTarget(**{**c.__dict__, "outcome": "filtered",
+                                "reason": f"filtered: not ready ({c.reason})"})
+                for c in cold)
 
     lv = {t.target_id: load_value(t.load) for t in eligible}
 
@@ -224,6 +244,9 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                 t.target_id)
 
     eligible.sort(key=key)
+    # Which of the winners is cold, so the answer says the caller is paying for
+    # a model load rather than presenting it as an ordinary placement.
+    cold_ids = {t.target_id for t in eligible if t.reason.startswith("cold")}
     out: List[RankedTarget] = []
     for i, t in enumerate(eligible):
         v = lv[t.target_id]
@@ -239,6 +262,8 @@ def rank(view: dict, kind: str, vantage: str = "direct",
             if t.load.get("pressure") is not None:
                 bits.append(f"pressure={t.load['pressure']}")
             why += "; " + ", ".join(bits) if bits else f"; load={v:.2f}"
+        if t.target_id in cold_ids:
+            why = f"cold, and the only {kind}; {why}"
         out.append(RankedTarget(**{**t.__dict__,
                                    "rank": i + 1,
                                    "outcome": "chosen" if i == 0 else "ranked",

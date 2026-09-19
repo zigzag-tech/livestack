@@ -344,3 +344,41 @@ def test_ranking_never_applies_a_capability_requirement():
         "h2": {"nodes": [_node("http://b/livestack")]},
     })
     assert len(rank(view, "asr")["targets"]) == 2
+
+
+# --- cold nodes: a load beats "no target" ----------------------------------
+
+def test_a_cold_node_is_held_back_while_a_warm_one_exists():
+    # Preferring cold would pay a model load to save a few milliseconds.
+    view = _view({
+        "warm": {"nodes": [_node("http://warm/livestack", probe_ms=200.0)]},
+        "cold": {"nodes": [_node("http://cold/livestack", ready=False,
+                                 detail="no unit resident", probe_ms=1.0)]},
+    })
+    out = rank(view, "asr")
+    assert out["chosen"] == "http://warm"
+    assert [t["target_id"] for t in out["targets"]] == ["http://warm"]
+
+
+def test_a_cold_node_is_chosen_when_there_is_no_warm_one():
+    """For a node whose model loads on demand, "no unit resident" is cold, not
+    broken. Dropping it made the first request after an idle eviction
+    unroutable — so nothing could ever warm it.
+
+    Measured on xc-tower-ubuntu 2026-09-18: a restarted polytts left attune
+    failing every item with `no polytts target in na` while the node sat
+    there, healthy and empty.
+    """
+    view = _view({"cold": {"nodes": [_node("http://cold/livestack", ready=False,
+                                           detail="no unit resident")]}})
+    out = rank(view, "asr")
+    assert out["chosen"] == "http://cold"
+    assert "cold" in out["targets"][0]["reason"]
+
+
+def test_a_broken_node_is_still_refused():
+    # Cold is not the same as unreachable: a node the roster has given up on
+    # stays filtered, however empty its card is.
+    view = _view({"gone": {"nodes": [_node("http://gone/livestack", state="mia",
+                                           ready=False)]}})
+    assert rank(view, "asr")["chosen"] is None
