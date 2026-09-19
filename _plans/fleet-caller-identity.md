@@ -210,47 +210,47 @@ Session-sized; each carries its verification. Letters group by requirement.
 
 ### A. Principals everywhere
 
-- [ ] A.1 `principals_from_env()` reading `LIVESTACK_FLEET_TOKENS_FILE` then `LIVESTACK_FLEET_TOKENS`; refuse a world-readable file → verify: `tests/test_fleet_auth.py::test_tokens_file_wins_and_refuses_mode` passes.
-- [ ] A.2 hostd `/admit` takes `Authorization`, resolves through `authenticate`, 401 without, 403 outside prefix, body owner consulted only for a delegating principal → verify: `tests/test_hostd_admit_auth.py` (three scenarios from the requirement) passes; with no principals configured behaviour is byte-for-byte today's and the startup line says so.
-- [ ] A.3 node facade `/lease`, `/model/warm|evict|reclaim` require a node principal (`LIVESTACK_NODE_TOKENS_FILE`); `/residence`, `/capability`, `/health` stay open → verify: `tests/test_facade_auth.py`; `curl -X POST :8100/livestack/model/evict` without a token → 401.
-- [ ] A.4 read endpoints record `principal` on their ledger rows when a token is present → verify: a rank with a token produces a record whose `request.principal` is set; without, `null`.
+- [x] A.1 `principals_from_env()` reading `LIVESTACK_FLEET_TOKENS_FILE` then `LIVESTACK_FLEET_TOKENS`; refuse a world-readable file → verify: `tests/test_fleet_auth.py::test_tokens_file_wins_and_refuses_mode` passes. Done 2026-09-20 (commit `517cb6f`, suite 24 passed in test_fleet_auth.py); None-means-off vs {}-means-refuse-everyone semantics added so call sites can tell "unset" from "refused".
+- [x] A.2 hostd `/admit` takes `Authorization`, resolves through `authenticate`, 401 without, 403 outside prefix, body owner consulted only for a delegating principal → verify: `tests/test_hostd_admit_auth.py` (three scenarios from the requirement) passes; with no principals configured behaviour is byte-for-byte today's and the startup line says so. Done 2026-09-20 (commit `517cb6f`, 9 passed).
+- [x] A.3 node facade `/lease`, `/model/warm|evict|reclaim` require a node principal (`LIVESTACK_NODE_TOKENS_FILE`); `/residence`, `/capability`, `/health` stay open → verify: `tests/test_facade_auth.py`; `curl -X POST :8100/livestack/model/evict` without a token → 401. Done 2026-09-20 (commit `517cb6f`, 8 passed, in-process equivalent of the curl scenario).
+- [x] A.4 read endpoints record `principal` on their ledger rows when a token is present → verify: a rank with a token produces a record whose `request.principal` is set; without, `null`. Done 2026-09-20 (commit `517cb6f`, in test_hostd_admit_auth.py). Deficiency: `/fleet`, `/peers`, `/plan` emit no ledger rows today, so there is nothing to record principal on there; emit_rank (and later emit_admit) carry it.
 
 ### B. Owner through the engines
 
-- [ ] B.1 `client.admit(kind, owner_id, *, token, requires)` sends `Authorization` → verify: `tests/test_client_admit.py` asserts the header; existing callers without a token still work while hostd has no principals.
-- [ ] B.2 harmony-llm reads `X-Harmony-Owner`, admits with it, marks `owner_asserted` → verify: two requests with two headers against one unit produce two Grant records with two owners (`tests/test_harmony_llm_owner.py`, in-process against a fake broker).
-- [ ] B.3 The header name and semantics documented in `HARMONY.md` ("Who is asking" section) and in `examples/harmony-llm/README.md`; polytts and polyasr changes filed in their repositories against that section → verify: both repositories' READMEs name `X-Harmony-Owner`.
+- [x] B.1 `client.admit(kind, owner_id, *, token, requires)` sends `Authorization` → verify: `tests/test_client_admit.py` asserts the header; existing callers without a token still work while hostd has no principals. Done 2026-09-20 (commit `17016aa`, 4 passed).
+- [x] B.2 harmony-llm reads `X-Harmony-Owner`, admits with it, marks `owner_asserted` → verify: two requests with two headers against one unit produce two Grant records with two owners (`tests/test_harmony_llm_owner.py`, in-process against a fake broker). Done 2026-09-20 (commits `17016aa`+`ee3edda`, 3 passed, real broker+planner+ledger in-process; Grant gained `owner`/`owner_asserted`).
+- [x] B.3 The header name and semantics documented in `HARMONY.md` ("Who is asking" section) and in `examples/harmony-llm/README.md`; polytts and polyasr changes filed in their repositories against that section → verify: both repositories' READMEs name `X-Harmony-Owner`. Done 2026-09-20 (HARMONY.md + harmony-llm README in `17016aa`; polytts README `f482d7b`, polyasr README `0627cef`). Deficiency: polytts and polyasr are passive nodes with no admit call of their own — the identity-bearing surface is the lease `owner_id` made by their callers; READMEs record that instead of inventing a hook.
 
 ### C. Attributable ledger
 
-- [ ] C.1 `Load`/`Evict` gain `caused_by`; the planner fills it from the request it is making room for, `"pressure"` for rule 0 → verify: `tests/test_planner_caused_by.py` — an eviction for request R carries R's owner.
-- [ ] C.2 `_emit_plan` writes `request_id` and `caused_by` under their own names → verify: `tests/test_ledger_attribution.py` reads one Evict and one Load back with both owners; `decision-ledger.md` updated.
-- [ ] C.3 Gate script `scripts/explain_reload.py <ledger> <kind>` prints the owner pair for the last reload → verify: run against the NA fleetd ledger after one deliberate 27B evict+reload; output names the two owners with no journal consulted.
+- [x] C.1 `Load`/`Evict` gain `caused_by`; the planner fills it from the request it is making room for, `"pressure"` for rule 0 → verify: `tests/test_planner_caused_by.py` — an eviction for request R carries R's owner. Done 2026-09-20 (commit `9cfca2c`, 4 passed; pin-floor/soft-pin restores name the policy, not an invented owner).
+- [x] C.2 `_emit_plan` writes `request_id` and `caused_by` under their own names → verify: `tests/test_ledger_attribution.py` reads one Evict and one Load back with both owners; `decision-ledger.md` updated. Done 2026-09-20 (commit `9cfca2c`, 3 passed; rename re-verified by grep — no reader of `request.owner` existed).
+- [x] C.3 Gate script `scripts/explain_reload.py <ledger> <kind>` prints the owner pair for the last reload → verify: run against the NA fleetd ledger after one deliberate 27B evict+reload; output names the two owners with no journal consulted. Script done 2026-09-20 (commit `9cfca2c`, at `node-py/scripts/explain_reload.py`, synthetic-ledger test in test_ledger_attribution.py); the production run is part of gate R.4 below.
 
 ### D. Region on admission
 
-- [ ] D.1 `/fleet/admit` accepts `regions` + `allow_unknown_region`, filters before scheduling, records `region_policy` → verify: `tests/test_fleet_admit_regions.py` — NA-only with only CN warm refuses naming CN, or places on a cold NA node when one exists.
-- [ ] D.2 Candidate rows carry `region` (`hostbroker.py:1207`) → verify: a rank record's rejected row shows `region: cn`.
+- [x] D.1 `/fleet/admit` accepts `regions` + `allow_unknown_region`, filters before scheduling, records `region_policy` → verify: `tests/test_fleet_admit_regions.py` — NA-only with only CN warm refuses naming CN, or places on a cold NA node when one exists. Done 2026-09-20 (commit `e367438`, 4 passed; emit_rank's ledger request also gained `region_policy` so the "same way rank records it" phrase is literal).
+- [x] D.2 Candidate rows carry `region` (`hostbroker.py:1207`) → verify: a rank record's rejected row shows `region: cn`. Done 2026-09-20 (commit `e367438`, tests/test_region_policy.py 12 passed).
 
 ### E. Prefix ceilings
 
-- [ ] E.1 `quota_for` longest-prefix match; `over_quota` aggregates by prefix and names `aggregate` → verify: `tests/test_prefix_quota.py` — the umbrella scenario (`attune:` 4, `acct_a` holds 3, `acct_b` asks 2 → 429 with aggregate count; `acct_b` not over its own).
-- [ ] E.2 `GET /fleet` reports exact and prefix ceilings and per-prefix usage → verify: response has `quota.prefix_usage`.
+- [x] E.1 `quota_for` longest-prefix match; `over_quota` aggregates by prefix and names `aggregate` → verify: `tests/test_prefix_quota.py` — the umbrella scenario (`attune:` 4, `acct_a` holds 3, `acct_b` asks 2 → 429 with aggregate count; `acct_b` not over its own). Done 2026-09-20 (commit `e367438`, 8 passed; exact entry wins over prefix, owner ceiling and each enclosing prefix ceiling checked independently).
+- [x] E.2 `GET /fleet` reports exact and prefix ceilings and per-prefix usage → verify: response has `quota.prefix_usage`. Done 2026-09-20 (commit `e367438`, same 8; `quota.prefix_quotas` + `quota.prefix_usage` alongside the untouched exact fields).
 
 ### F. Declarable unit economics
 
-- [ ] F.1 Unit file → `ManagedUnit` → `/residence` → `Unit` carries `min_residency_s`, `reload_cost`, `priority` → verify: `tests/test_unit_economics_roundtrip.py`; `examples/harmony-llm/llm-units.example.json` shows the 27B with `min_residency_s: 60, reload_cost: 4`.
-- [ ] F.2 Planner honours a node-declared priority over `_RES_TO_PRIO` → verify: `tests/test_planner_declared_priority.py` — two UNPINNED LLMs with priorities 20 and 30: the 30 yields.
-- [ ] F.3 Declare the 27B's measured reload on xc-tower-ubuntu's unit files → verify: `/residence` on both cards shows the fields; `GET /plan` after a 20 s-old load with a pending embedder shows a Defer naming the residency floor.
+- [x] F.1 Unit file → `ManagedUnit` → `/residence` → `Unit` carries `min_residency_s`, `reload_cost`, `priority` → verify: `tests/test_unit_economics_roundtrip.py`; `examples/harmony-llm/llm-units.example.json` shows the 27B with `min_residency_s: 60, reload_cost: 4`. Done 2026-09-20 (commit `24d37ec`, 4 passed; node-declared priority outranks `_RES_TO_PRIO`, operator `_priorities` still wins; absent = byte-for-byte defaults).
+- [x] F.2 Planner honours a node-declared priority over `_RES_TO_PRIO` → verify: `tests/test_planner_declared_priority.py` — two UNPINNED LLMs with priorities 20 and 30: the 30 yields. Done 2026-09-20 (commit `24d37ec`, 3 passed).
+- [ ] F.3 Declare the 27B's measured reload on xc-tower-ubuntu's unit files → verify: `/residence` on both cards shows the fields; `GET /plan` after a 20 s-old load with a pending embedder shows a Defer naming the residency floor. Mechanism done 2026-09-20 (commit `24d37ec`: the residency-floor Defer reason did not exist and was added, `residency floor: llm27 loaded 20s ago is protected for 60s (min_residency_s)`, tested); the operator half on xc-tower-ubuntu is part of the rollout (R.2/R.4).
 
 ### G. Declared-origin ranking
 
-- [ ] G.1 `vantage=region:<r>` in `distance_to`; response carries `vantage_used` → verify: `tests/test_rank_region_vantage.py`.
-- [ ] G.2 `LIVESTACK_RELAYS` measured and emitted as `view["relays"]` → verify: a rank with `vantage=relay:na-public-la` returns non-`unknown` bands.
+- [x] G.1 `vantage=region:<r>` in `distance_to`; response carries `vantage_used` → verify: `tests/test_rank_region_vantage.py`. Done 2026-09-20 (commit `24d37ec`, 5 passed; median of member links rows, `unknown` when unmeasured, never a guess).
+- [x] G.2 `LIVESTACK_RELAYS` measured and emitted as `view["relays"]` → verify: a rank with `vantage=relay:na-public-la` returns non-`unknown` bands. Done 2026-09-20 (commit `24d37ec`, in the same 5; `relay:<id>` distance scope already existed — only the view population was missing. Relay links are operator-declared env, not probeable, so `fleet_view` re-reads the env each call.)
 
 ### H. Scope on admission
 
-- [ ] H.1 Node announce may carry `scope`; `targets_from_view` rejects an out-of-scope target naming it → verify: `tests/test_scope_filter.py` — self-scoped node excluded for another owner, included for its own.
+- [x] H.1 Node announce may carry `scope`; `targets_from_view` rejects an out-of-scope target naming it → verify: `tests/test_scope_filter.py` — self-scoped node excluded for another owner, included for its own. Done 2026-09-20 (commit `e367438`, 7 passed; `LIVESTACK_NODE_SCOPE` env, namespace match rule shared between announce and admit sides).
 
 ### R. Token rollout (operations; the gate of Phase A)
 
