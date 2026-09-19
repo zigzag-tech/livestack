@@ -1296,8 +1296,25 @@ class HostBroker:
                 reason=("" if self.dispatch else "ADVISORY (observe-only, not dispatched): ")
                        + (getattr(a, "reason", "") or decision)
                        + (f"; measured free {free}" if free else ""),
-                request=({"owner": getattr(a, "request_id", None)}
-                         if hasattr(a, "request_id") else None),
+                # Each action kind names what it knows under its OWN name.
+                # Grant/Defer are answerable to a request: `request_id`.
+                # Load/Evict are consequences of one: `caused_by`, the owner
+                # whose request made the room or brought the unit back
+                # ("pressure" for a rule-0 shed). RENAMED 2026-09-20: Grant
+                # and Defer used to carry their request id under the key
+                # `owner` — a reader digging `request.owner` for an account
+                # name found an id instead. No reader of the old key existed
+                # in this repository (verified by grep); see
+                # `_plans/decision-ledger.md`.
+                request=({
+                    "request_id": a.request_id,
+                    "owner": a.owner,
+                    "owner_asserted": a.owner_asserted,
+                } if isinstance(a, Grant) else {
+                    "request_id": a.request_id,
+                } if isinstance(a, Defer) else {
+                    "caused_by": getattr(a, "caused_by", None),
+                }),
             ))
 
     def admit(self, request: Request,
