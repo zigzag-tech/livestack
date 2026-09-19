@@ -605,16 +605,26 @@ def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: i
     return None
 
 
-def _shed_victim(world: _World, device_id: str, pol: PlannerPolicy) -> Optional[Placement]:
+def _shed_victim(world: _World, device_id: str, pol: PlannerPolicy,
+                 wanted: "Optional[set]" = None) -> Optional[Placement]:
     """The single least-important evictable resident unit on a device, used to
     relieve *measured* over-budget pressure when there is no pending request to
     drive eviction. Evictable = not HARD_PIN, past its min-residency (anti-thrash),
-    and idle unless busy-preemption is allowed. None if nothing may be shed."""
+    and idle unless busy-preemption is allowed. None if nothing may be shed.
+
+    `wanted` is the set of kinds pending demand could be served by, and nothing
+    in it is shed here. Evicting the unit the queue is waiting for relieves
+    nothing — the space frees, the next rule loads it straight back, and on a
+    27B that round trip is 2m15s of loading during which every caller gets a
+    503. Demand-driven eviction still happens; it happens in rule 1, where the
+    request that needs the room decides what moves."""
     units = world.w.units
     cands: List[Placement] = []
     for p in world.resident[device_id].values():
         u = units[p.kind]
         if u.residency == Residency.HARD_PIN:
+            continue
+        if wanted and p.kind in wanted:
             continue
         if (world.w.now - p.loaded_at) < u.min_residency_s:
             continue
@@ -791,13 +801,30 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
     #    external process grabbed VRAM, a model is bigger than declared, etc.) —
     #    shed idle, non-pinned, least-important units until non-negative. Honours
     #    anti-thrash + idle-only; a no-op when free >= 0 (the steady state).
+    # WHAT THE QUEUE IS WAITING FOR IS NOT SPARE CAPACITY.
+    #
+    # Shedding the unit pending demand wants relieves nothing: the space frees,
+    # rule 1 loads it straight back, and nobody is served in between. On a 27B
+    # that round trip is 2m15s. Measured on xc-tower-ubuntu 2026-09-18, with
+    # three applications all asking for the same abliterated 27B: loaded
+    # 21:54:21, evicted 21:54:23; loaded 21:56:50, evicted 21:56:51; loaded
+    # 22:18:46, evicted 22:18:50 — "relieve measured over-budget pressure"
+    # every time, on a card whose only tenant WAS the thing being asked for.
+    # The model spent its life loading and every caller got a 503.
+    #
+    # Demand-driven eviction is unaffected: rule 1 evicts what it must to place
+    # a request, and it will not evict a unit to make room for itself.
+    wanted_kinds: set = set()
+    for _r in world.requests:
+        wanted_kinds.update(candidate_kinds(world, _r))
+
     for d in world.devices:
         if d.hosted:
             continue    # no bytes to reclaim, and its units are not evictable
         guard = 0
         while any(v < -_EPS for v in W.free(d.id).values()) and guard < 64:
             guard += 1
-            victim = _shed_victim(W, d.id, pol)
+            victim = _shed_victim(W, d.id, pol, wanted_kinds)
             if victim is None:
                 break
             W.evict(victim.kind, d.id, "relieve measured over-budget pressure")

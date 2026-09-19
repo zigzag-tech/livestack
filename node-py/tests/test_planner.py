@@ -317,6 +317,50 @@ def test_measured_free_forces_request_driven_eviction_of_unpinned():
     assert any(g.kind == "align" and g.device_id == "gpu0" for g in p.of(Grant))
 
 
+def test_the_unit_the_queue_is_waiting_for_is_not_shed_as_spare_capacity():
+    """A 27B alone on a card, over budget, with requests for that same 27B.
+
+    Shedding it relieves nothing — the space frees, rule 1 loads it back, and
+    nobody is served in between. Measured on xc-tower-ubuntu 2026-09-18, where
+    three applications all wanted one abliterated 27B: loaded 21:54:21,
+    evicted 21:54:23; loaded 21:56:50, evicted 21:56:51; loaded 22:18:46,
+    evicted 22:18:50. Each reload is 2m15s and every caller gets a 503 for the
+    duration, so the model spent its life loading and served almost nothing.
+    """
+    u = units()
+    u["big"] = Unit("big", {"vram": 22}, priority=10, residency=Residency.SOFT_PIN,
+                    reload_cost=135)
+    w = WorldState(devices=(gpu(),), units=u,
+                   placements=(Placement("big", "gpu0", loaded_at=0),),
+                   # Well past `min_residency_s`, so anti-thrash is not what
+                   # spares it — the rule under test is.
+                   requests=(Request("r1", "big", created_at=9000),), now=9000,
+                   # Reality is tighter than the model: the card reports
+                   # nothing free, so with the device's 1 GB reserve the
+                   # reconciled free is negative and rule 0 wants a victim.
+                   measured_free={"gpu0": {"vram": 0}})
+    p = plan(w)
+    assert kinds_of(p.of(Evict), Evict) == []
+    assert any(g.kind == "big" for g in p.of(Grant)), "it is resident and wanted; serve it"
+
+
+def test_pressure_is_still_relieved_by_shedding_what_nobody_wants():
+    # The other half: an idle unit nothing is waiting for is still shed when
+    # reality is worse than the model assumed. Only the WANTED unit is spared.
+    u = units()
+    u["big"] = Unit("big", {"vram": 12}, priority=10, residency=Residency.SOFT_PIN,
+                    reload_cost=135)
+    u["idle_one"] = Unit("idle_one", {"vram": 8}, priority=50,
+                         residency=Residency.UNPINNED, reload_cost=3)
+    w = WorldState(devices=(gpu(),), units=u,
+                   placements=(Placement("big", "gpu0", loaded_at=0),
+                               Placement("idle_one", "gpu0", loaded_at=0)),
+                   requests=(Request("r1", "big", created_at=9000),), now=9000,
+                   measured_free={"gpu0": {"vram": 0}})
+    p = plan(w)
+    assert kinds_of(p.of(Evict), Evict) == ["idle_one"]
+
+
 # --- hosted backends --------------------------------------------------------
 #
 # A hosted backend is somebody else's GPU behind an API (Qwen ASR). It has no
