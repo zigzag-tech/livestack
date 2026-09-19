@@ -218,7 +218,14 @@ def build_app(broker: HostBroker):
                       kind=kind, owner=owner,
                       created_at=time.monotonic(),
                       selector=payload.get("selector") or {},
-                      requires=requires)
+                      requires=requires,
+                      # Set only when a fronting engine vouched for `owner`
+                      # via its inbound X-Harmony-Owner header; the Grant
+                      # record carries it so the ledger can tell an asserted
+                      # owner from the engine's own identity. Never trusted
+                      # from an anonymous caller to LIFT an owner — it only
+                      # annotates whichever owner the credential path resolved.
+                      owner_asserted=bool(payload.get("owner_asserted")))
         # NOTE on the degrade branch below. It answers `granted: True` for ANY
         # exception, which tells the caller to proceed — and a caller that loads
         # a model on that word puts it on a card the planner never cleared.
