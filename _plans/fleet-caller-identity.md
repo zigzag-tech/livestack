@@ -201,11 +201,38 @@ Source addresses seen by each service, with who they are. This is the list that 
 | `100.64.0.19` | harmony-llm 727, polyasr 3.7k+1.8k | | **benchday hub** (`public-la`): title chain, ASR finalize |
 | `100.64.0.12` | polyasr 2.7k+1.2k, gpu0 18 | | **zz-tower2**: media-corpus ingest and the relay's ASR targets |
 | `100.64.0.3` | harmony-llm 2.4k, polytts 45, fleetd rank 13, hostd `GET /peers` 23k | | **zz-tower0**: CN node announcing and reading peers; a CN caller of the NA 27B (benchday's chips or a script — identify) |
-| `10.0.0.244` (MAC `78:e6:1c:1c:e7:86`), `10.0.0.94`, `10.0.0.71` (MAC `9c:53:22:6a:de:07`) | polyasr 2.9k+1.4k, 1.9k+1k, 123+119 | | LAN addresses on the Vaughan subnet reaching polyasr directly — benchday's direct engine route from phones or the Mac Studio's LAN address. **Unresolved; resolve by MAC before rollout.** |
+| `10.0.0.244` (MAC `78:e6:1c:1c:e7:86` at measure time), `10.0.0.94`, `10.0.0.71` (MAC `9c:53:22:6a:de:07`) | polyasr 2.9k+1.4k, 1.9k+1k, 123+119 | | **Resolved 2026-09-20 (R.1):** `10.0.0.94` is xc-tower-ubuntu itself (`ip -4 addr` shows `10.0.0.94/24` on eno1; the Mac Studio's arp names it `xc-tower` and its `/etc/hosts` maps `10.0.0.94` → xc-tower) — local clients reaching polyasr via the LAN address, all `GET /health`. `10.0.0.244` at measure time was an **Honor Android phone** (OUI `78:e6:1c` = Honor Device Co., Ltd., registered 2024-04-26): the phone polls `GET /health` (2.8k/48 h) and posts `POST /v1/audio/transcriptions` — the direct engine route from phones. The fleet's Honor devices are the `xc-magical` pair (see CN table), so this is the user's Honor Magic phone on the Vaughan LAN. `10.0.0.71` is a **TP-Link Systems device** (OUI `9c:53:22`, registered 2022-09-21 — an access point/router, not a phone): xc-tower-ubuntu's neighbour table shows that one MAC answering ARP for five IPs (`10.0.0.25`, `.45`, `.71`, `.113`, `.244`), i.e. a TP-Link AP/NAT box that phone traffic transits — its 170 health polls are phone/app traffic seen at the AP's address. As of 2026-09-20 evening the TP-Link MAC answers for `.244` too (the Honor phone's lease moved or it now associates via the AP); the Honor MAC was captured in the NA journals at measure time. |
 
-Not measured: the CN broker on zz-tower0. Two ssh attempts on 2026-09-20 timed out (the
-Canada→China mesh leg, see `xc-setup/docs/mesh.md`); task R.1 repeats the inventory from a CN
-host.
+### CN half (measured 2026-09-20 on zz-tower0)
+
+48 h of journals, from the CN GPU box itself (100.64.0.3). Port map, corrected from the
+brief: **livestack-hostd listens on 8799, polyasr on 8766, chipgen (a benchday
+Qwen3-1.7B chip-generation node, `chipgen.service`) holds 8844, polytts on 8100.**
+
+| Source | Seen by | Requests / 48 h | Who |
+|---|---|---|---|
+| `127.0.0.1` | polytts 18.3k residence + 5.1k capability + 1.9k `POST /tts` + 121 `/tts/stream`, polyasr 14.6k residence + 3.6k capability + 52 `/v1/align/manifest`, chipgen 15.1k residence + 4.4k capability | | the box's own announce/probe loops and local TTS/align clients (unchain pipeline scripts); polytts also 72 evict / 70 reclaim / 47 warm from localhost operator or script levers |
+| `100.64.0.18` | polytts 13.2k residence + 1.4k capability, polyasr 13.7k capability + 8.4k residence + 1.3k health, chipgen 13.1k capability + 10.8k residence + 378 `POST /pane_status` + 56 `POST /pane_ask` + 7 `POST /assets_curate` | | xc-tower-ubuntu — the **NA fleet broker's peer polls** (the `/livestack/*` port pattern matches), plus benchday pane-ask/status traffic driving chipgen |
+| `100.64.0.12` | chipgen 5.4k `POST /generate` + 696 `POST /rerank` + 379 `POST /assets_curate` + 42 pane_status + 25 pane_ask, polyasr 1.0k health + 13 `POST /v1/audio/transcriptions` | | **zz-tower2**: media-corpus ingest and the benchday relay's ASR targets (same role as on NA) |
+| `100.64.0.19` | polyasr 1.4k health (+2 transcriptions) | | **benchday hub** (`public-la`) health probes of the CN ASR |
+| `100.64.0.8` | polyasr 626 health | | **xc-magical-obkxml3w** — the user's Android phone (Honor Magic; active on the mesh from a Canadian IP) polling CN polyasr directly |
+| `100.64.0.7` | polyasr 240 health (+2 `POST /v1/audio/transcriptions`) | | **xc-magical** — the same phone's earlier tailnet identity (now offline; superseded by the `obkxml3w` enrolment) |
+| `100.64.0.3` | chipgen 2, polyasr 2 | | zz-tower0 self-probes via its mesh address |
+| — | **livestack-hostd (8799): not measurable** | | CN hostd logs no requests anywhere: journal carries only systemd start/stop lines (0 access lines across its entire history), it does not appear in `/var/log/syslog`, and it writes no log file. Its inbound callers over 48 h are therefore not journal-attributable. Inbound is expected to be the NA fleet broker's peer polls (symmetric to the 23k `GET /peers` from 100.64.0.3 seen by NA hostd) and the local engines' admits on 127.0.0.1, but that is inference, not measurement. Fixing hostd's request logging is a precondition for the CN rehearsal (R.3): a 401 from an unlogged caller cannot be attributed. |
+
+R.1 evidence: polytts counted from `journalctl -u polytts --since "48 hours ago"` (48,793
+lines; exact window is Sep 18 07:48 → **Sep 19 15:46** — uvicorn access lines stopped
+reaching the journal after that while the service kept listening; the last ~16 h of the
+window is unlogged). polyasr counted from the last 45,000 access lines of
+`~/polyasr/cuda/logs/polyasr.log` (1,986,003 access lines since 2026-06-22, no timestamps,
+mean ≈22k/day, so the tail window is ≈48–60 h). chipgen counted from `/var/log/syslog`
+(`python[1090561]` lines, ISO timestamps, exact 48 h). unchain-asr-worker holds no HTTP
+listener: it is an outbound portable-livestack worker registering CN ASR capacity with
+zz-tower2's direct gateway (100.64.0.12:3125); 2 pinned socket connections in the window.
+No logged source was left unidentified: every 100.64.0.x source maps to the tailscale
+status list. New versus the NA inventory: the two phone identities 100.64.0.7/100.64.0.8
+(they were invisible from NA because they call the CN polyasr directly over the mesh —
+the same direct-engine-route pattern as the Honor phone on the Vaughan LAN).
 
 Principals to issue, from the inventory:
 
@@ -265,12 +292,13 @@ Session-sized; each carries its verification. Letters group by requirement.
 ### H. Scope on admission
 
 - [x] H.1 Node announce may carry `scope`; `targets_from_view` rejects an out-of-scope target naming it → verify: `tests/test_scope_filter.py` — self-scoped node excluded for another owner, included for its own. Done 2026-09-20 (commit `e367438`, 7 passed; `LIVESTACK_NODE_SCOPE` env, namespace match rule shared between announce and admit sides).
+- [ ] A.5 hostd (fleet broker and host broker) and the node facade log every mutating request and every auth refusal with source address, status and principal name — the R.3 gate is "zero 401s from an address not in the inventory", and a refusal nobody logged is unattributable by construction. Measured deficiency 2026-09-20 (R.1): `livestack-hostd` on zz-tower0:8799 has logged **zero** requests in its entire journal history; uvicorn access lines for the other services also do not reliably reach the journal. → verify: with logging landed, `journalctl -u <svc>` after a tokenless `POST /admit` shows one line naming the source address and the 401; a granted admit with a token names the principal.
 
 ### R. Token rollout (operations; the gate of Phase A)
 
-- [ ] R.1 Complete the inventory from a CN host (zz-tower0's fleetd/hostd/polytts/polyasr journals) and resolve the three LAN addresses by MAC → verify: the inventory table above has no "unresolved" row.
+- [x] R.1 Complete the inventory from a CN host (zz-tower0's fleetd/hostd/polytts/polyasr journals) and resolve the three LAN addresses by MAC → verify: the inventory table above has no "unresolved" row. Done 2026-09-20 (plan commit after `25e5239`): the CN half is measured and recorded in the inventory section below; the three LAN rows resolve to xc-tower-ubuntu itself (`10.0.0.94`, its own eno1 + /etc/hosts), the user's Honor phone (`10.0.0.244`, OUI 78:e6:1c Honor Device, the xc-magical pair's vendor), and a TP-Link AP/NAT box (`10.0.0.71`, OUI 9c:53:22, one MAC answering ARP for five leases). No *logged* CN source is unidentified; the unloggable one is hostd, which is deficiency A.5 above.
 - [ ] R.2 Issue the principals in the table; each caller's configuration gains its token (`ATTUNE_FLEET_TOKEN`, `BENCHDAY_FLEET_TOKEN`, media-corpus's ingest, the engines' delegating tokens) → verify: every caller logs a successful admit with its principal name.
-- [ ] R.3 Set `LIVESTACK_FLEET_TOKENS_FILE` on the **CN** fleetd first; run ≥ 24 h → verify: the CN ledger has zero 401s from an address not in the inventory.
+- [ ] R.3 Stand up the CN rehearsal broker on zz-tower0 (a `livestack-fleetd` in `LIVESTACK_DISPATCH=observe` mode peering with the CN nodes, the NA broker's mirror of the same shape), set `LIVESTACK_FLEET_TOKENS_FILE` on it first; run ≥ 24 h → verify: the CN journal has zero 401s from an address not in the inventory — which requires A.5's request logging, else a 401 is unattributable by construction.
 - [ ] R.4 Then NA → verify (the Phase A gate): `GET /fleet` on xc-tower-ubuntu reports `auth.required: true` and the quota in force; over one hour every LLM, TTS and ASR Grant names an owner from the principal table; `scripts/explain_reload.py` attributes one deliberate 27B reload from the ledger alone.
 
 ## Gates
