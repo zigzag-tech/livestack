@@ -666,6 +666,43 @@ def test_a_duplicate_that_fails_its_probe_is_still_a_duplicate():
     assert len(world.placements) == 1, "a flaky probe must not double the card"
 
 
+def test_a_node_that_holds_nothing_does_not_re_assert_another_nodes_copy():
+    """Sticky residency is per NODE, not per (kind, device).
+
+    Two LLM nodes on this host read ONE units file, so both DECLARE
+    `llm_small` while only one holds it. The stickiness was keyed by
+    `(kind, device)` and gated on "does this peer serve the kind", so the node
+    holding nothing re-asserted the other node's copy — on the other node's
+    card. Measured on xc-tower-ubuntu 2026-09-18: `llm_small` and `ocr_ovis2`
+    each counted twice on one 24 GB card, the 15.3 GB 27B would not fit beside
+    the phantoms, and every scene plan in the feed failed with
+    `AI_APICallError: Service Unavailable`.
+    """
+    holder = _FleetPeer("http://h:8188/livestack", host="h", kind="llm_small",
+                        device="h/card1", node_id="h:8188", resident=True)
+    idle = _FleetPeer("http://h:8190/livestack", host="h", kind="llm_small",
+                      device="h/card0", node_id="h:8190", resident=False)
+    br = _fleet_broker([holder, idle], dispatch=False)
+
+    first = br.snapshot([])
+    assert len(first.placements) == 1, "only one node holds it"
+    # A second cycle is where the memory speaks: the idle node declares the
+    # same kind, and must not inherit the holder's copy.
+    second = br.snapshot([])
+    assert [(pl.kind, pl.device_id) for pl in second.placements] == [("llm_small", "h/card1")]
+
+
+def test_the_holder_still_keeps_its_own_copy_through_a_blink():
+    # The other half: stickiness must still work for the node that HAS it, or
+    # a busy node's 2-second health probe evicts a 21.7 GB model on a blink.
+    holder = _FleetPeer("http://h:8188/livestack", host="h", kind="llm_small",
+                        device="h/card1", node_id="h:8188", resident=True)
+    br = _fleet_broker([holder], dispatch=False)
+    assert len(br.snapshot([]).placements) == 1
+    holder.resident = False                      # busy, not evicted
+    assert len(br.snapshot([]).placements) == 1
+
+
 def test_two_real_nodes_on_one_card_are_still_two():
     """The de-duplication must not collapse the case it looks like: two polyasr
     processes genuinely sharing card 0 are two nodes, two resident copies, and

@@ -159,7 +159,11 @@ class HostBroker:
         # decides residency with a 2-SECOND health probe against its own model
         # server, so a unit that is merely BUSY reports absent; believing one
         # such sample is enough to re-place a model that never went anywhere.
-        self._resident_at: Dict[Tuple[str, str], float] = {}
+        # (peer key, kind, device) -> when that PEER last reported it resident.
+        # Keyed by peer, not by (kind, device) alone: see
+        # `_with_recently_resident`, where a shared key made every node that
+        # merely DECLARES a unit re-assert another node's copy of it.
+        self._resident_at: Dict[Tuple[str, str, str], float] = {}
         # peer key -> its device id, so `aggregate_units` can say which devices
         # can actually serve each kind.
         self._peer_device: Dict[str, str] = {}
@@ -622,7 +626,7 @@ class HostBroker:
             # Last good read, so a peer that stops ANSWERING is not mistaken for
             # a peer that stops HOLDING. See `_remembered_peer`.
             peer_placements = self._with_recently_resident(
-                peer_units, peer_placements, self._clock() if self._clock else 0.0)
+                peer_units, peer_placements, self._clock() if self._clock else 0.0, key)
             self._last_good[key] = {"units": peer_units, "placements": peer_placements}
             try:
                 if p.node_id:
@@ -804,7 +808,8 @@ class HostBroker:
         return out
 
     def _with_recently_resident(self, units: Mapping[str, Unit],
-                                placements: List[Placement], now: float) -> List[Placement]:
+                                placements: List[Placement], now: float,
+                                key: str = "") -> List[Placement]:
         """A unit that was resident a moment ago and is reported absent NOW has
         almost certainly not gone anywhere.
 
@@ -818,18 +823,31 @@ class HostBroker:
         persist to be believed. A real eviction is confirmed within a cycle or
         two, and one this broker ordered is forgotten immediately (see the Evict
         dispatch), so nothing here delays a deliberate one.
+
+        **The memory belongs to the PEER that reported it.** It used to be keyed
+        by `(kind, device)` alone, and the check for "does this peer serve it"
+        was the unit NAME — so on a host whose two LLM nodes read one units
+        file, both declare `llm_small`, and the node holding nothing re-asserted
+        the other node's copy on the other node's card. Measured on
+        xc-tower-ubuntu 2026-09-18: `llm_small` and `ocr_ovis2` each appeared
+        twice on one 24 GB card, the planner could not fit the 15.3 GB 27B
+        beside two phantoms, and answered every request for it with "could not
+        place it on any device" — which reaches the feed as
+        `AI_APICallError: Service Unavailable` and fails every scene plan.
         """
         here = {(pl.kind, pl.device_id) for pl in placements}
-        for k in here:
-            self._resident_at[k] = now
+        for kind, did in here:
+            self._resident_at[(key, kind, did)] = now
         out = list(placements)
-        for (kind, did), at in list(self._resident_at.items()):
+        for (peer_of, kind, did), at in list(self._resident_at.items()):
+            if peer_of != key:
+                continue                        # another node's memory
             if (kind, did) in here:
                 continue
             if kind not in units:
                 continue                        # this peer does not serve it
             if now - at > self.residency_grace_s:
-                del self._resident_at[(kind, did)]
+                del self._resident_at[(peer_of, kind, did)]
                 continue
             out.append(Placement(kind, did, loaded_at=at))
         return out
@@ -889,7 +907,9 @@ class HostBroker:
                 self._in_flight.pop((ev.kind, ev.device_id), None)
                 # An eviction we ordered is not a blink: drop the stickiness so
                 # the card reads free immediately.
-                self._resident_at.pop((ev.kind, ev.device_id), None)
+                for remembered in [k for k in self._resident_at
+                                   if k[1] == ev.kind and k[2] == ev.device_id]:
+                    self._resident_at.pop(remembered, None)
         for ld in p.of(Load):
             peer = self._peer_for(ld.kind, ld.device_id)
             if peer is None:
