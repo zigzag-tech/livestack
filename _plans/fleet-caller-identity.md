@@ -9,11 +9,25 @@ number. Written 2026-09-20 from source and from the running NA fleet.
 
 ## Why
 
-Harmony's identity story is one endpoint deep, and that endpoint is switched off.
+Harmony's identity story is one endpoint deep, and that endpoint was measured
+wrong.
 
-- **`LIVESTACK_FLEET_TOKENS` is unset on the production fleetd** (`systemctl cat
-  livestack-fleetd.service` on xc-tower-ubuntu, 2026-09-20: zero occurrences). Every quota
-  is advisory and the startup line says so (`hostd.py:693-697`).
+- **`LIVESTACK_FLEET_TOKENS` on the production fleetd — corrected 2026-09-20.** The
+  original survey (and this plan's first draft) reported it unset, from
+  `systemctl cat livestack-fleetd.service` on xc-tower-ubuntu. That check was
+  silently incomplete: the drop-in `/etc/systemd/system/livestack-fleetd.service.d/30-auth.conf`
+  is mode `0600 root`, so `systemctl cat` as `ubuntu` printed "Permission
+  denied" and omitted it. Measured with sudo the same day: the drop-in exists,
+  dated **2026-09-05**, and sets two principals — `media-corpus` (fixed) and
+  `hub` (delegating, prefix `acct_`). `GET /fleet` on the NA broker answers
+  `auth.required: true` with exactly those two principal names. So a minimal
+  token table predates this plan by two weeks; what has NOT happened is the
+  inventory, the engine/hub caller issuance, the CN rehearsal, or any of the
+  A–H mechanics (the xc-tower-ubuntu checkout runs `e6cbd7a5`, code from
+  before this plan existed). The requirement's discipline therefore applies to
+  the **expansion**: no further principals, and no reliance on the new
+  mechanics, until R.1–R.3 are done. Measurement lesson recorded here so it is
+  not relearned: fleetd config checks on that host need `sudo systemctl cat`.
 - **hostd `POST /admit` has no auth and no identity check** — `hostd.py:148-158`: the handler
   takes `payload: dict = Body(...)` and `owner=payload.get("owner", "consumer")`. The node's
   `POST /livestack/lease` defaults `owner_id` to `"anonymous"` (`facade.py:325-336`), and
