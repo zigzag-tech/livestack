@@ -151,6 +151,10 @@ class HostBroker:
         # `_remembered_peer`): a peer that stops answering must not read as a
         # peer that stopped holding.
         self._last_good: Dict[str, dict] = {}
+        # peer key -> the node id that peer last reported. Remembered across
+        # cycles so two addresses for one process stay one node even when one
+        # of them fails a probe; see `snapshot`.
+        self._node_id_seen: Dict[str, str] = {}
         # (kind, device_id) -> when we last saw it reported resident. A node
         # decides residency with a 2-SECOND health probe against its own model
         # server, so a unit that is merely BUSY reports absent; believing one
@@ -541,8 +545,37 @@ class HostBroker:
         # on one host and lose on the next.
         seen_nodes: Dict[str, str] = {}
         self.peer_alias = {}
-        for p in sorted(self.peers, key=self._probe_order):
+        ordered = sorted(self.peers, key=self._probe_order)
+        # THE DUPLICATE MUST BE RESOLVED BEFORE THE PROBE, not after it.
+        #
+        # The live de-duplication below reads `p.node_id`, which requires the
+        # probe to have succeeded. When one of the two aliases for a node FAILS
+        # its probe, the unreachable branch adds that alias's remembered
+        # placements and `continue`s — never reaching the live check — while
+        # the other alias adds the same node's live placements. One node is
+        # then counted twice.
+        #
+        # Measured on xc-tower-ubuntu, 2026-09-18: `llm_small` and `ocr_ovis2`
+        # each appeared twice on device a46c4c2e, a 24 GB card, so the planner
+        # could not fit `llm_title` (15.3 GB) and answered every request for a
+        # 27B with "could not place it on any device". The node's facade blocks
+        # while it serves, so the flaky probe is not an edge case: it is what
+        # a busy node looks like.
+        #
+        # So an alias is settled from the node ids already LEARNED, before any
+        # probe this cycle, and a peer that is not the canonical key for its
+        # node is skipped whole — no live placements, no remembered ones.
+        canonical: Dict[str, str] = {}
+        for peer in ordered:
+            known = self._node_id_seen.get(peer_key(peer))
+            if known:
+                canonical.setdefault(known, peer_key(peer))
+        for p in ordered:
             key = peer_key(p)
+            known_nid = self._node_id_seen.get(key)
+            if known_nid and canonical.get(known_nid) not in (None, key):
+                self.peer_alias[key] = canonical[known_nid]
+                continue
             # Backoff: a peer already known absent is probed on the roster's slow
             # cadence, not on every reconcile tick. This is what makes holding a
             # peer that is not there free rather than costly — and it is why
@@ -591,6 +624,13 @@ class HostBroker:
             peer_placements = self._with_recently_resident(
                 peer_units, peer_placements, self._clock() if self._clock else 0.0)
             self._last_good[key] = {"units": peer_units, "placements": peer_placements}
+            try:
+                if p.node_id:
+                    # Remembered across cycles so the alias survives a probe
+                    # failure — see the pre-pass above.
+                    self._node_id_seen[key] = p.node_id
+            except Exception:
+                pass                      # a Peer need not report one
             # THE SAME SERVER, REACHED TWICE. A broker seeded with
             # http://127.0.0.1:8766 and announced to as http://100.64.0.18:8766
             # holds two peers for one process, and counted its units twice: one

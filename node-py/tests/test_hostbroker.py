@@ -638,6 +638,34 @@ def test_one_process_reached_twice_is_counted_once():
     assert len(rows) == 2
 
 
+def test_a_duplicate_that_fails_its_probe_is_still_a_duplicate():
+    """The de-duplication ran only on a SUCCESSFUL probe, because it read
+    `node_id` off the answer. When one of the two addresses for a node failed —
+    and a node's facade blocks while it serves, so a busy node is exactly when
+    it fails — the unreachable branch added that address's REMEMBERED
+    placements and skipped the check, while the live address added the same
+    node's real ones. One process, counted twice.
+
+    Measured on xc-tower-ubuntu 2026-09-18: `llm_small` and `ocr_ovis2` each
+    appeared twice on one 24 GB card, so the planner could not fit the 15.3 GB
+    27B and answered every request for it with "could not place it on any
+    device". Every scene plan in the feed failed for an hour.
+    """
+    seed = _FleetPeer("http://127.0.0.1:8766/livestack", host="h", kind="asr",
+                      device="h/aaaa", node_id="h:8766")
+    announced = _FleetPeer("http://10.0.0.1:8766/livestack", host="h", kind="asr",
+                           device="h/aaaa", node_id="h:8766")
+    br = _fleet_broker([seed], dispatch=False)
+    br.register_peer(announced)
+    # One good cycle, so both addresses have stated who they are.
+    assert len(br.snapshot([]).placements) == 1
+
+    # Now the winner stops answering — busy, not gone.
+    announced.up = False
+    world = br.snapshot([])
+    assert len(world.placements) == 1, "a flaky probe must not double the card"
+
+
 def test_two_real_nodes_on_one_card_are_still_two():
     """The de-duplication must not collapse the case it looks like: two polyasr
     processes genuinely sharing card 0 are two nodes, two resident copies, and
