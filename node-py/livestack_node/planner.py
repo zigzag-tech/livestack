@@ -827,6 +827,20 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
             victim = _shed_victim(W, d.id, pol, wanted_kinds)
             if victim is None:
                 break
+            # AND, with nothing pending at all, do not empty the device.
+            #
+            # `wanted_kinds` is empty between requests, and a warm-on-start
+            # load lands exactly there: unit resident, queue empty, reconciled
+            # free negative because that unit is large. Shedding the only
+            # tenant then relieves nothing — no one is waiting for the space,
+            # and the soft-pin reloads it. Measured on xc-tower-ubuntu after
+            # the `wanted_kinds` guard was already deployed: loaded 22:43:00,
+            # evicted 22:43:05, for the fourth time that hour.
+            #
+            # With demand present this does not apply, and rule 1 still evicts
+            # whatever a request needs it to.
+            if not world.requests and len(W.resident[d.id]) <= 1:
+                break
             W.evict(victim.kind, d.id, "relieve measured over-budget pressure")
 
     # 1) Honour pending demand, most-important (after aging) first, then FIFO.

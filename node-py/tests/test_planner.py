@@ -344,6 +344,26 @@ def test_the_unit_the_queue_is_waiting_for_is_not_shed_as_spare_capacity():
     assert any(g.kind == "big" for g in p.of(Grant)), "it is resident and wanted; serve it"
 
 
+def test_an_idle_card_with_one_tenant_is_not_emptied_for_nobody():
+    """Warm-on-start, no queue: the unit is resident, nothing is pending, and
+    reconciled free is negative because that unit is large.
+
+    Measured on xc-tower-ubuntu 2026-09-18 — loaded 22:43:00, evicted
+    22:43:05 — with the `wanted_kinds` guard already in place. Between
+    requests there is no demand to protect, so that guard does not fire, and
+    shedding the only tenant frees space nobody asked for and costs a 2m15s
+    reload before the next caller is served.
+    """
+    u = units()
+    u["big"] = Unit("big", {"vram": 22}, priority=10, residency=Residency.SOFT_PIN,
+                    reload_cost=135)
+    w = WorldState(devices=(gpu(),), units=u,
+                   placements=(Placement("big", "gpu0", loaded_at=0),),
+                   requests=(), now=9000,
+                   measured_free={"gpu0": {"vram": 0}})
+    assert kinds_of(plan(w).of(Evict), Evict) == []
+
+
 def test_pressure_is_still_relieved_by_shedding_what_nobody_wants():
     # The other half: an idle unit nothing is waiting for is still shed when
     # reality is worse than the model assumed. Only the WANTED unit is spared.
