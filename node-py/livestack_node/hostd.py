@@ -77,6 +77,11 @@ Config via env:
                          timed on the reconcile loop and its own `links` row is
                          collected, so the fleet holds a measured MATRIX rather
                          than one broker's star. Unmeasured pairs have no opinion.
+    LIVESTACK_RELAYS     JSON of relay vantage points the fleet cannot measure
+                         itself: {"<id>": {"region": "na", "links": {"<host>":
+                         <ms>}}}. A caller with no links row ranks from
+                         `vantage=relay:<id>`; declared links are carried into
+                         the fleet view as `relays`.
     LIVESTACK_CAPABILITY_TTL  seconds a node's /capability descriptor is cached
                          for the /fleet view (default 15). /fleet is a poll
                          surface and probes to Nanjing cost 0.5-1.5s each.
