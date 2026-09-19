@@ -962,12 +962,12 @@ def _derived_requirements(path: str, body_json: dict) -> dict:
     return out
 
 
-def _unit_for_model(requested: str) -> str:
-    """Which declared unit serves this `model` field.
+def _named_unit(requested: str) -> "str | None":
+    """The unit this `model` field NAMES, or None if it names nothing here.
 
-    Accepts the unit name, the model id, or the legacy alias `local`. An
-    unknown model resolves to the first declared unit rather than erroring,
-    which keeps every existing caller — all of which send `local` — working.
+    Separate from `_unit_for_model` because the difference matters: naming a
+    unit is a caller's decision and must be honoured, while naming nothing is
+    a caller with no opinion and may be resolved however the node likes.
     """
     r = (requested or "").strip()
     if r in SPECS:
@@ -975,7 +975,17 @@ def _unit_for_model(requested: str) -> str:
     for name, spec in SPECS.items():
         if spec["model"] == r:
             return name
-    return next(iter(SPECS))
+    return None
+
+
+def _unit_for_model(requested: str) -> str:
+    """Which declared unit serves this `model` field.
+
+    Accepts the unit name, the model id, or the legacy alias `local`. An
+    unknown model resolves to the first declared unit rather than erroring,
+    which keeps every existing caller — all of which send `local` — working.
+    """
+    return _named_unit(requested) or next(iter(SPECS))
 
 
 @app.get("/health")
@@ -1022,13 +1032,51 @@ async def proxy(path: str, request: Request):
             # clause got a 4B model and a 200.
             requirement = _requirement_from(parsed_body)
             derived = _derived_requirements(path, parsed_body)
-            if derived:
+            named = _named_unit(parsed_body.get("model", ""))
+            if requirement is not None and derived:
                 # Derived clauses are ANDed in and may only make the query
                 # STRICTER. A caller cannot declare `vision: false` to escape
                 # having sent an image.
-                requirement = {**(requirement or {}), **derived}
-            if requirement is None:
-                unit = _unit_for_model(parsed_body.get("model", ""))
+                requirement = {**requirement, **derived}
+            elif requirement is None and named:
+                # A CALLER THAT NAMES A UNIT HAS CHOSEN ONE.
+                #
+                # `derived` is non-empty for every chat request — the path
+                # alone yields `class=llm` — so ANDing it in unconditionally
+                # made `requirement` non-None for ALL of them, the `model`
+                # field was never read, and the request was resolved as "any
+                # unit of class llm", preferring one already resident.
+                #
+                # Measured on xc-tower-ubuntu 2026-09-18: a request naming
+                # `llm_title` (a 27B) was answered by `llm_small` (a 9B) with
+                # 200 OK and nothing in the exchange saying so, because the 9B
+                # was the warm one. The caller's own words were discarded by
+                # the machinery meant to add to them.
+                #
+                # So a named unit IS the selection; what the request implies is
+                # CHECKED against it rather than used to re-pick. A named unit
+                # that cannot do what the request needs is an error the caller
+                # can act on, not a silent reroute to one that can.
+                unit = named
+                # Said, not refused. `_local_satisfies` treats an undeclared
+                # attribute as unmet — rightly, for a search over units — but
+                # a unit's attribute list is routinely thinner than the unit:
+                # `llm_title` serves tools through `--enable-auto-tool-choice`
+                # and declares no `tools` attribute. Turning that into a 400
+                # would break working callers over a declaration gap, so the
+                # caller's choice stands and the gap is printed for whoever
+                # maintains the units file.
+                unmet = {k: v for k, v in (derived or {}).items()
+                         if not _local_satisfies(named, {k: v})}
+                if unmet:
+                    print(f"[harmony-llm] {named} was named explicitly and does not declare "
+                          f"{unmet}, which this request implies — serving it anyway. State a "
+                          f"requirement instead of a model name to have the planner choose.",
+                          flush=True)
+            elif requirement is None:
+                requirement = derived or None
+                if requirement is None:
+                    unit = _unit_for_model(parsed_body.get("model", ""))
     # ADMISSION FIRST, then load. Loading straight off the request is how a node
     # ends up starting vLLM into whatever memory happens to be free, with 10 GB
     # of idle ASR and TTS on the card that nobody ever asked to move:
@@ -1100,6 +1148,14 @@ async def proxy(path: str, request: Request):
                     raise HTTPException(
                         status_code=503,
                         detail=f"nothing satisfies {requirement}")
+                # WHICH unit a requirement resolved to, every time it changes
+                # the answer. Only refusals were logged, so a grant that chose
+                # a different model than the caller had in mind left no trace
+                # at all — the whole reason it took a response body's `model`
+                # field to notice a 27B request being served by a 9B.
+                if served != unit:
+                    print(f"[harmony-llm] {requirement} -> {served}"
+                          + (f" (request named {unit})" if unit else ""), flush=True)
                 unit = served
             granted, degraded = res.get("device_id"), res.get("degraded")
             # A broker that ANSWERED and did not grant has refused. Loading
