@@ -220,7 +220,7 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
         # the operator's to state, and the default keeps single-machine
         # deployments working with nothing set.
         advertise = (os.environ.get("LIVESTACK_NODE_HOST") or "127.0.0.1").strip()
-        from .announce import node_region
+        from .announce import node_region, node_scope
         start_registrar(
             f"http://{advertise}:{int(resolved_port)}{prefix}",
             host_id=host_id, kind=kind,
@@ -228,6 +228,10 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
             # `announce.node_region` for why a measured distance cannot answer
             # it and why a caller must treat unknown as excluded.
             region=node_region(),
+            # Who this node is pooled for, as the operator or the enrolling
+            # hub stated it (`LIVESTACK_NODE_SCOPE`). Absent announces no
+            # scope, which is the fleet default: pooled for everyone.
+            scope=node_scope(),
             interval_s=float(os.environ.get("LIVESTACK_REGISTER_INTERVAL", "30")),
         )
 
