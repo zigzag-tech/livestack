@@ -254,40 +254,6 @@ def _device_total_bytes() -> float:
     return 0.0
 
 
-def _footprint_bytes(spec: dict) -> int:
-    """What this unit really takes on the card, not what its weights weigh.
-
-    A vLLM unit does not occupy its model size: it pre-allocates a KV cache up
-    to `--gpu-memory-utilization`, so `gpu_fraction` of the WHOLE card is the
-    honest number. `footprint_gb` is a weights-shaped figure somebody wrote by
-    hand, and when it is the smaller of the two the planner believes a card has
-    room it does not have.
-
-    That gap is not cosmetic. Measured on xc-tower-ubuntu 2026-09-18:
-    `llm_title` declared 21 GiB and held 21.6 GiB of a 23.6 GiB card at
-    `gpu_fraction 0.96`. With a second unit on the same card the reconciled
-    free went negative, and planner rule 0 — "relieve measured over-budget
-    pressure" — shed the largest evictable unit, which was the 27B. Its
-    SOFT_PIN then restored it, two minutes and fifteen seconds of loading
-    later, and the cycle repeated: loaded 21:54:21, evicted 21:54:23, loaded
-    21:56:50, evicted 21:56:51. The model spent its life loading and every
-    request got a 503 while it did.
-
-    Nothing about that is a residency policy failing to hold a model that
-    demand wants. It is the planner being told the wrong size and correctly
-    acting on it. So the larger of the two figures wins, and a card that can
-    hold exactly one big model is planned as a card that holds exactly one.
-    """
-    declared = float(spec.get("footprint_gb") or 0) * (1 << 30)
-    total = _device_total_bytes()
-    try:
-        fraction = float(spec.get("gpu_fraction") or 0)
-    except (TypeError, ValueError):
-        fraction = 0.0
-    reserved = total * fraction if (total > 0 and 0 < fraction <= 1) else 0.0
-    return int(max(declared, reserved))
-
-
 def _base_of(name: str) -> str:
     return f"http://127.0.0.1:{SPECS[name]['port']}"
 
@@ -477,7 +443,7 @@ _UNITS = {
         # as before, which is why every other node in the fleet is unaffected.
         loader=(lambda n=name: (lambda device=None, budget=None: _load(n, device, budget)))(),
         freer=(lambda n=name: (lambda: _free(n)))(),
-        footprint=_footprint_bytes(spec),
+        footprint=int(spec["footprint_gb"] * (1 << 30)),
         # SOFT_PIN. Measured 2026-09-05: an evicted unit takes ~50.7 s to answer
         # its first request, against the hub's 35 s title timeout and 15 s
         # attention timeout — a cold start is a missed title every time. Not
