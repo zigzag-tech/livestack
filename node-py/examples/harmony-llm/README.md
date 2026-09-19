@@ -105,6 +105,22 @@ variables, byte-for-byte as before units existed.
 | `HARMONY_LLM_COLOAD` | let several units be resident (implied by >1 unit) |
 | `HARMONY_LLM_CUDA_DEVICE` | the card this node speaks for |
 
+### What NOT to offer
+
+A unit that exists is a unit something will be given, and a caller that asked
+for a 27B and silently received a 9B has no way to know. Measured on
+xc-tower-ubuntu 2026-09-18: a request naming `llm_title` came back with
+`"model": "cyankiwi/Qwen3.5-9B-AWQ-4bit"` in the response body, because the 27B
+could not be placed and a smaller sibling could — while the 9B's 12 GB on a
+24 GB card was itself why the 21 GB unit would not fit.
+
+So the fleet does not offer a 9B at all: no application has a use for it that
+the 27B or `llm_tiny` does not serve better, and its only effect was to occupy
+the card the 27B needed. Removed from this host's units file on 2026-09-18,
+after which `llm_title` loaded on start and
+`require:class=llm,params_b=[20,30),refusals=abliterated` resolved to
+`twolven/Qwen3.8-27B-abliterated-AWQ-MTP` again.
+
 ### One copy per host
 
 Several nodes on one box (one per card) read the SAME units file, so every unit
