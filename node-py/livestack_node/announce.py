@@ -79,6 +79,56 @@ def node_region() -> Optional[str]:
     return value or None
 
 
+def node_scope() -> Optional[dict]:
+    """Who this node is pooled FOR, as the operator or the enrolling hub
+    stated it (`LIVESTACK_NODE_SCOPE`, a JSON object)::
+
+        {"kind": "owner", "id": "sorbonne"}
+
+    `kind` is `owner` | `org` | `realm`; `id` is the namespace. A node with a
+    scope is a GRANT, announced like region: the broker cannot learn who a box
+    belongs to by probing it, and a fleet that places another account's work
+    on a self-scoped GPU has spent a resource its owner never offered. The
+    admission path rejects an out-of-scope owner with the scope named.
+
+    Matching is by namespace: an owner is admitted when it equals `id` or
+    lives under it (`id` + `:` prefix) — `sorbonne` and `sorbonne:acct_1`
+    both fit a scope of `sorbonne`. For `org` and `realm` the same rule
+    applies to whatever id the grant names; the fleet does not yet resolve
+    owners to organisations, so the grant speaks in owner namespaces.
+
+    A malformed value is None, announced as no scope at all: a typo must not
+    half-scope a node into a state nobody can reason about.
+    """
+    raw = (os.environ.get("LIVESTACK_NODE_SCOPE") or "").strip()
+    if not raw:
+        return None
+    try:
+        scope = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(scope, dict):
+        return None
+    kind = str(scope.get("kind") or "").strip().lower()
+    ident = str(scope.get("id") or "").strip()
+    if kind not in ("owner", "org", "realm") or not ident:
+        return None
+    return {"kind": kind, "id": ident}
+
+
+def _scope_admits(scope: Optional[dict], owner: str) -> bool:
+    """Does `scope` admit `owner`? No scope admits everyone (it is the
+    default, and the fleet's pooled nodes); a scope admits owners in its
+    namespace. Kept here, beside the parse, so the announce side and the
+    admission side cannot drift on what a grant means."""
+    if not isinstance(scope, dict):
+        return True
+    ident = str(scope.get("id") or "")
+    if not ident:
+        return True
+    return owner == ident or owner.startswith(ident + ":")
+
+
 def broker_url() -> str:
     """The FIRST broker, for callers that want one. Kept because a node's own
     host broker is the first entry by convention and some callers legitimately
@@ -111,6 +161,7 @@ def facade_answers(facade_url: str, timeout: float = 2.0) -> bool:
 
 def register_once(facade_url: str, *, host_id: str, kind: str,
                   region: Optional[str] = None,
+                  scope: Optional[dict] = None,
                   broker: Optional[str] = None, timeout: float = 3.0) -> dict:
     """Announce to every configured broker. Raises only if ALL of them failed.
 
@@ -128,6 +179,11 @@ def register_once(facade_url: str, *, host_id: str, kind: str,
         # whatever the broker already knew (a seed may carry one), while a null
         # would overwrite it with ignorance on every renewal.
         **({"region": region} if region else {}),
+        # Who this node is pooled for. Announced only when set; unset is the
+        # fleet default (a pooled node admits every owner) and must stay
+        # invisible rather than announcing "no scope" over whatever a seed
+        # carried.
+        **({"scope": scope} if scope else {}),
     }).encode()
     targets = [broker.rstrip("/")] if broker else broker_urls()
     out, last = {}, None
@@ -148,6 +204,7 @@ def register_once(facade_url: str, *, host_id: str, kind: str,
 
 def start_registrar(facade_url: str, *, host_id: str, kind: str,
                     region: Optional[str] = None,
+                    scope: Optional[dict] = None,
                     interval_s: float = DEFAULT_INTERVAL_S,
                     broker: Optional[str] = None,
                     log: Callable[[str], None] = print,
@@ -182,7 +239,7 @@ def start_registrar(facade_url: str, *, host_id: str, kind: str,
                 continue
             try:
                 register(facade_url, host_id=host_id, kind=kind,
-                         region=region, broker=broker)
+                         region=region, scope=scope, broker=broker)
                 if not announced:
                     log(f"[livestack] reported for duty at "
                         f"{broker or ', '.join(broker_urls())} as {facade_url}")

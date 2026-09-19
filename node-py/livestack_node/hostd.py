@@ -307,6 +307,11 @@ def build_app(broker: HostBroker):
                 host_id=payload.get("host_id"),
                 device_id=payload.get("device_id"),
                 region=payload.get("region"),
+                # Who this node is pooled for, as the operator or the
+                # enrolling hub stated it. Passed through uninterpreted:
+                # the roster records the grant; the admission path enforces
+                # it (`fleet_admit.targets_from_view`).
+                scope=payload.get("scope"),
                 kinds=payload.get("kinds"),
                 readiness=payload.get("readiness"),
             )
@@ -503,8 +508,54 @@ def build_app(broker: HostBroker):
             # discovered.
             owner, principal = (payload.get("owner", "consumer"), None)
         est = (payload.get("estimate") or {}).get("duration_s", 60.0)
+        # WHERE the work may run, stated by the caller and APPLIED here — the
+        # same policy shape `GET /fleet/rank?regions=` accepts. Filtering
+        # before scheduling (not scoring after) is what guarantees the answer
+        # never places outside the policy: a region the caller refused cannot
+        # win, place second and get chosen by default, or appear in the
+        # granted target. `/fleet/rank` already moved callers onto this
+        # contract; admission silently dropping the guarantee on the way in
+        # was the gap (see `_plans/fleet-caller-identity.md`, requirement
+        # "Region policy holds on the admission path").
+        view = broker.fleet_view()
+        wanted = [r.strip().lower()
+                  for r in str(payload.get("regions") or "").split(",") if r.strip()]
+        allow_unknown = bool(payload.get("allow_unknown_region"))
+        region_policy = None
+        if wanted:
+            from .client import eligible_targets
+            # eligible_targets speaks the ranker's row shape: one row per node
+            # with its declared region. Unknown region is excluded unless the
+            # caller explicitly allows it — silence is not a match.
+            rows = [{"target_id": (n.get("peer", "")[:-len("/livestack")]
+                                   if n.get("peer", "").endswith("/livestack")
+                                   else n.get("peer", "")),
+                     "region": n.get("region")}
+                    for h in (view.get("hosts") or {}).values()
+                    for n in (h.get("nodes") or [])]
+            kept, rejected = eligible_targets(
+                {"targets": rows}, allow_regions=set(wanted),
+                allow_unknown_region=allow_unknown)
+            kept_ids = {r["target_id"] for r in kept}
+            # Filter into a COPY: the view belongs to the broker, and the
+            # next caller (or the same caller retrying) must see the fleet
+            # as it is, not as the last request's policy left it.
+            view = {
+                **view,
+                "hosts": {
+                    host_id: {**h, "nodes": [
+                        n for n in (h.get("nodes") or [])
+                        if ((n.get("peer", "")[:-len("/livestack")]
+                             if n.get("peer", "").endswith("/livestack")
+                             else n.get("peer", "")) in kept_ids)]}
+                    for host_id, h in (view.get("hosts") or {}).items()
+                },
+            }
+            region_policy = {"allow": wanted,
+                             "allow_unknown": allow_unknown,
+                             "rejected": rejected}
         result = _admit(
-            broker.fleet_view(), kind=kind,
+            view, kind=kind,
             # From the broker's own lease ledger, expired entries dropped
             # first — a quota computed over leases nobody heartbeats would turn
             # one caller's crash into an outage that outlives it.
@@ -517,6 +568,20 @@ def build_app(broker: HostBroker):
             estimate_s=float(est),
             policy=getattr(broker, "fleet_policy", None),
         )
+        if region_policy is not None:
+            result["region_policy"] = region_policy
+            if (not result.get("granted")
+                    and result.get("refused") != "account_quota"
+                    and region_policy["rejected"]):
+                # A refusal names the excluded targets, the same sentence
+                # /fleet/rank uses: "no llm target in na: http://cn (region
+                # cn, wanted na)". A caller must be able to tell "the fleet
+                # has no room" from "the room exists and your policy refused
+                # it" — those want opposite responses.
+                result["reason"] = (
+                    f"no {kind} target in {'/'.join(region_policy['allow'])}: "
+                    + "; ".join(f"{r['target_id']} ({r['why']})"
+                                for r in region_policy["rejected"][:4]))
         request = {"owner": owner,
                    # The principal is recorded BESIDE the owner, not instead of
                    # it: "the hub, acting for acct_x" and "acct_x itself" are
@@ -526,7 +591,12 @@ def build_app(broker: HostBroker):
                    "sla": payload.get("sla", "normal"),
                    "vantage": result.get("vantage"),
                    "selector": payload.get("selector") or {},
-                   "locality_host": payload.get("locality_host")}
+                   "locality_host": payload.get("locality_host"),
+                   # The region policy in force and every row it rejected, so
+                   # the admit record shows the placement the policy forbade
+                   # beside the one it allowed — the same shape /fleet/rank
+                   # records.
+                   "region_policy": region_policy}
         if result.get("refused") == "account_quota":
             # 429, not 200-with-no-target: an account at its ceiling is a
             # different answer from a full fleet, and a caller that cannot tell

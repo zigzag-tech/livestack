@@ -83,6 +83,10 @@ class PeerRecord:
     # `None` means unknown, which a region filter must read as "not this one"
     # rather than "any" — see `announce.node_region`.
     region: Optional[str] = None
+    # Who this node is pooled FOR (`LIVESTACK_NODE_SCOPE` / the enrolling
+    # hub's grant): {"kind": "owner"|"org"|"realm", "id": ...}. `None` is the
+    # fleet default — a pooled node admits every owner.
+    scope: Optional[dict] = None
     kinds: List[str] = field(default_factory=list)
     readiness: dict = field(default_factory=dict)
     # The state last REPORTED, so transitions can be detected and logged once
@@ -246,6 +250,7 @@ class PeerRoster:
                 "host_id": r.host_id,
                 "device_id": r.device_id,
                 "region": r.region,
+                "scope": r.scope,
                 "kinds": list(r.kinds),
                 "readiness": dict(r.readiness),
             }

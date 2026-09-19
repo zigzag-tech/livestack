@@ -352,3 +352,54 @@ class TestTheBrokerAppliesAPolicyItIsHanded:
         assert body["asker_region"] == "na"
         # Recorded, not applied: both targets survive.
         assert len(body["targets"]) == 2
+
+
+class TestRankLedgerRowsCarryTheNodeRegion:
+    """D.2: the rank record's candidate rows stop hard-coding region=None, so
+    a rejected row reads `region: cn` beside its `filtered: region cn` reason
+    — a retrospective should not have to join the fleet view to learn where
+    the excluded node was."""
+
+    def test_a_rejected_candidates_region_lands_in_the_ledger_row(self, tmp_path):
+        from fastapi.testclient import TestClient
+
+        from livestack_node.hostbroker import HostBroker
+        from livestack_node.hostd import build_app
+        from livestack_node.ledger import JsonlLedger
+
+        led = JsonlLedger(str(tmp_path / "decisions.jsonl"))
+
+        class _Broker:
+            peers = []
+            fleet_principals = None
+
+            def __init__(self):
+                self.records = []
+
+            def fleet_view(self):
+                return view([CN_TTS, NA_TTS])
+
+            def emit_rank(self, result):
+                self.records.append(result)
+
+            def membership_snapshot(self):
+                return []
+
+        broker = _Broker()
+        client = TestClient(build_app(broker))
+        client.get("/fleet/rank", params={"kind": "polytts", "regions": "na"})
+
+        # emit_rank on the real broker is what writes the ledger row; drive it
+        # with the captured result and read the record back.
+        real = HostBroker(devices=[], peers=[], clock=lambda: 1000.0,
+                          ledger=led)
+        real.emit_rank(broker.records[0])
+        rec = led.read()[0]
+        by_id = {c["id"]: c for c in rec["candidates"]}
+        assert by_id["http://100.64.0.3:8100"]["region"] == "cn"
+        assert by_id["http://100.64.0.18:8100"]["region"] == "na"
+        # And the region policy + rejected rows are in the ledger request,
+        # the same shape admission records (D.1).
+        assert rec["request"]["region_policy"]["allow"] == ["na"]
+        assert any("region cn" in r["why"]
+                   for r in rec["request"]["region_policy"]["rejected"])

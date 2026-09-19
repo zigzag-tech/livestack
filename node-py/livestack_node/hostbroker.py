@@ -1019,6 +1019,9 @@ class HostBroker:
                 # row the policy has nowhere to read from but a hardcoded host
                 # list in every consumer.
                 "region": row.get("region"),
+                # Who this node is pooled for (from its announce): a grant the
+                # admission path enforces. Absent = pooled for everyone.
+                "scope": row.get("scope"),
                 "kinds": row.get("kinds") or [],
             }
             if key in self.probe_ms:
@@ -1097,7 +1100,19 @@ class HostBroker:
             "quota": ({"max_concurrent_per_account": pol.max_concurrent_per_account,
                        "account_quotas": dict(pol.account_quotas),
                        "fair_share_penalty_s": pol.fair_share_penalty_s,
-                       "usage": self.owner_usage()} if pol else None),
+                       "usage": self.owner_usage(),
+                       # Ceilings and usage per PREFIX, so a reader can see the
+                       # aggregate an application answers to without recomputing
+                       # it: `attune: 4 (used 3)`. Exact ceilings live in
+                       # account_quotas; these are the keys ending in ':'.
+                       "prefix_quotas": {k: v for k, v in
+                                         pol.account_quotas.items() if k.endswith(":")},
+                       "prefix_usage": {k: sum(n for o, n in
+                                               self.owner_usage().items()
+                                               if o.startswith(k))
+                                        for k in pol.account_quotas
+                                        if k.endswith(":")}}
+                      if pol else None),
             "vantage_host": self.host_id,
             "hosts": {
                 h: ({"nodes": sorted(n, key=lambda r: r["peer"])}
@@ -1204,7 +1219,12 @@ class HostBroker:
         cands = [Candidate(
             id=c.target_id, host_id=c.host_id, device_id=c.device_id,
             state=c.state, ready=c.ready, distance_ms=c.distance_ms,
-            distance_band=c.distance_band, load=c.load, region=None,
+            distance_band=c.distance_band, load=c.load,
+            # The node's own region, so a rejected row reads
+            # `filtered: region cn, wanted na` beside the region itself — a
+            # retrospective should not have to join the fleet view to learn
+            # where the excluded node was.
+            region=getattr(c, "region", None),
             inputs_at=c.inputs_at, outcome=c.outcome, rank=c.rank,
             reason=c.reason,
         ) for c in result.get("candidates", [])]
@@ -1218,7 +1238,11 @@ class HostBroker:
                      # WHO asked, when they presented a valid credential;
                      # null for an anonymous read. Beside — never instead of —
                      # the owner fields for the same reason as on admit.
-                     "principal": result.get("principal")},
+                     "principal": result.get("principal"),
+                     # The caller's region policy and every row it rejected,
+                     # so the ledger record shows the placement the policy
+                     # forbade — not just the one it allowed.
+                     "region_policy": result.get("region_policy")},
         ))
 
     def emit_admit(self, result: dict, request: dict, lease_id=None) -> None:  # noqa: D401
