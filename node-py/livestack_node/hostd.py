@@ -348,20 +348,6 @@ def build_app(broker: HostBroker):
         # but WHERE the work may run is `regions`, below.
         result["asker_region"] = region
 
-        from .client import capable_targets, parse_requirements
-        requirements = parse_requirements(require)
-        if requirements:
-            kept, rejected = capable_targets(result, requirements)
-            result["targets"] = kept
-            result["capability_policy"] = {"require": requirements, "rejected": rejected}
-            result["chosen"] = kept[0]["target_id"] if kept else None
-            if not kept:
-                need = ", ".join(f"{k}={v}" for k, v in requirements.items())
-                result["reason"] = (
-                    f"no {kind} target advertising {need}: "
-                    + "; ".join(f"{r['target_id']} ({r['why']})" for r in rejected[:4])
-                ) or f"no {kind} target advertising {need}"
-
         wanted = [r.strip().lower() for r in (regions or "").split(",") if r.strip()]
         if wanted:
             from .client import eligible_targets
@@ -379,6 +365,23 @@ def build_app(broker: HostBroker):
                     f"no {kind} target in {'/'.join(wanted)}: "
                     + "; ".join(f"{r['target_id']} ({r['why']})" for r in rejected[:4])
                 ) or f"no {kind} target in {'/'.join(wanted)}"
+
+        # Capability AFTER region, so the reason names the rule that actually
+        # emptied the list. Run first, it emptied `targets` and the region
+        # filter then overwrote its message with "no polytts target in na" —
+        # true, and not why.
+        from .client import capable_targets, parse_requirements
+        requirements = parse_requirements(require)
+        if requirements:
+            kept, rejected = capable_targets(result, requirements)
+            result["targets"] = kept
+            result["capability_policy"] = {"require": requirements, "rejected": rejected}
+            result["chosen"] = kept[0]["target_id"] if kept else None
+            if not kept and rejected:
+                need = ", ".join(f"{k}={v}" for k, v in requirements.items())
+                result["reason"] = (
+                    f"no {kind} target advertising {need}: "
+                    + "; ".join(f"{r['target_id']} ({r['why']})" for r in rejected[:4]))
 
         broker.emit_rank(result)
         return {k: v for k, v in result.items() if k != "candidates"}
