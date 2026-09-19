@@ -5,6 +5,8 @@ string a caller put in the body of an unauthenticated POST. These pin the two
 properties that make it worth something: a fixed principal cannot rename itself,
 and a delegating principal cannot step outside the prefix it was granted.
 """
+import os
+
 import pytest
 
 from livestack_node.fleet_auth import (
@@ -159,6 +161,63 @@ def test_unparseable_config_loads_nothing_and_says_what_systemd_does():
 def test_an_empty_config_is_empty_not_an_error():
     assert load_principals("") == {}
     assert load_principals("   ") == {}
+
+
+# -- where the config comes from ----------------------------------------------
+#
+# The file wins over the inline env because the one secret in the system should
+# not be the one setting that is inline JSON — systemd strips bare double
+# quotes, and `systemctl show` exposes inline values to every local process.
+
+from livestack_node.fleet_auth import principals_from_env
+
+
+def test_tokens_file_wins_and_refuses_mode(tmp_path, monkeypatch):
+    f = tmp_path / "tokens.json"
+    f.write_text(CONFIG)
+    os.chmod(f, 0o600)
+    monkeypatch.setenv("LIVESTACK_FLEET_TOKENS_FILE", str(f))
+    # Inline env set to something DIFFERENT: it must lose to the file.
+    monkeypatch.setenv(
+        "LIVESTACK_FLEET_TOKENS",
+        '{"%s": {"name": "inline-only", "owner": "inline-only"}}' % ("i" * 40))
+
+    got = principals_from_env()
+    assert got == PRINCIPALS, "the file wins over the inline env"
+    assert "inline-only" not in {p.name for p in got.values()}
+
+    # World-readable (any group/other bit) → refused, loudly, and failing
+    # CLOSED: no principals at all, so every caller 401s until the operator
+    # fixes the permissions. A disclosed credential must not keep authorizing.
+    os.chmod(f, 0o644)
+    lines = []
+    assert principals_from_env(log=lines.append) == {}
+    assert any("chmod 0600" in l for l in lines)
+    assert any("Refusing" in l for l in lines)
+    # The file path is fine to log; the TOKENS inside it never are.
+    assert not any(TOK_FIXED in l for l in lines)
+
+    # Group-readable-only is refused too — the check is "any group/other bit".
+    os.chmod(f, 0o640)
+    assert principals_from_env(log=lines.append) == {}
+
+    # No file variable at all → the inline env is used (today's behaviour).
+    monkeypatch.delenv("LIVESTACK_FLEET_TOKENS_FILE")
+    inline = principals_from_env()
+    assert inline["i" * 40].name == "inline-only"
+
+    # A set-but-missing file fails closed rather than silently falling back to
+    # the inline env — a typo in the path must not weaken authentication.
+    monkeypatch.setenv("LIVESTACK_FLEET_TOKENS_FILE", str(tmp_path / "gone.json"))
+    lines = []
+    assert principals_from_env(log=lines.append) == {}
+    assert any("cannot be read" in l for l in lines)
+
+    # Nothing configured at all is a THIRD state: None, meaning auth is OFF.
+    # It must not be confused with the empty table, which fails closed.
+    monkeypatch.delenv("LIVESTACK_FLEET_TOKENS_FILE")
+    monkeypatch.delenv("LIVESTACK_FLEET_TOKENS")
+    assert principals_from_env() is None
 
 
 def test_resolve_owner_is_pure_and_needs_no_framework():

@@ -228,9 +228,43 @@ def build_router(manager, coordinator, capability: Capability,
                                                   if device_id != resolve_device_id(capability.host_id)
                                                   else None)
     try:
-        from fastapi import APIRouter, Body, HTTPException
+        from fastapi import APIRouter, Body, Depends, Header, HTTPException
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("livestack_node.facade requires fastapi") from exc
+
+    # WHO may pull the node's levers. Same shape and same rules as the fleet
+    # token table (one file, mode 0600, refused if world-readable) — see
+    # fleet_auth.principals_from_env. Unset means every endpoint keeps today's
+    # open behaviour, which is the right default for a single-operator fleet
+    # and exactly what an unconfigured deployment must see.
+    from .fleet_auth import principals_from_env
+    node_principals = principals_from_env(
+        file_var="LIVESTACK_NODE_TOKENS_FILE",
+        inline_var="LIVESTACK_NODE_TOKENS",
+        log=lambda m: print(m, flush=True))
+    if node_principals:
+        print(f"[livestack] /lease and /model/* require a bearer token; "
+              f"{len(node_principals)} principal(s): "
+              + ", ".join(sorted(p.name for p in node_principals.values())),
+              flush=True)
+
+    def _require_node_principal(authorization: str = Header(None)):
+        """Gate for the endpoints that change what is resident. A warm, an
+        evict, a reclaim and a lease all move GPU bytes or hold capacity, so
+        they carry the same requirement as the broker's writes: a valid node
+        credential, 401 without one. The read endpoints (/residence,
+        /capability, /health) deliberately stay open — a consumer must be able
+        to discover a node it cannot yet authenticate to. ``None`` (no source
+        configured) keeps today's open behaviour; an empty table (source
+        configured but refused or malformed) FAILS CLOSED — 401 for everyone,
+        an alarm state, never silent."""
+        if node_principals is None:
+            return None
+        from .fleet_auth import AuthError, bearer_token, principal_for
+        try:
+            return principal_for(node_principals, bearer_token(authorization))
+        except AuthError as e:
+            raise HTTPException(status_code=e.status, detail=e.detail)
 
     router = APIRouter()
 
@@ -323,7 +357,8 @@ def build_router(manager, coordinator, capability: Capability,
         return {"status": "ok", "residence": coordinator.status()}
 
     @router.post("/lease")
-    def acquire(payload: dict = Body(...)) -> dict:
+    def acquire(payload: dict = Body(...),
+                _principal=Depends(_require_node_principal)) -> dict:
         kind = payload.get("kind")
         if not kind:
             raise HTTPException(status_code=400, detail="'kind' is required")
@@ -365,7 +400,8 @@ def build_router(manager, coordinator, capability: Capability,
         freeing.trim_ram()
 
     @router.post("/model/warm")
-    def warm(payload: dict = Body(...)) -> dict:
+    def warm(payload: dict = Body(...),
+             _principal=Depends(_require_node_principal)) -> dict:
         unit = payload.get("unit")
         if not unit:
             raise HTTPException(status_code=400, detail="'unit' is required")
@@ -382,7 +418,8 @@ def build_router(manager, coordinator, capability: Capability,
         return {"resident": sorted(manager.resident), "device": device or device_id}
 
     @router.post("/model/evict")
-    def evict(payload: dict = Body(...)) -> dict:
+    def evict(payload: dict = Body(...),
+              _principal=Depends(_require_node_principal)) -> dict:
         unit = payload.get("unit")
         if not unit:
             raise HTTPException(status_code=400, detail="'unit' is required")
@@ -392,7 +429,8 @@ def build_router(manager, coordinator, capability: Capability,
         return {"resident": sorted(manager.resident)}
 
     @router.post("/model/reclaim")
-    def reclaim(payload: dict = Body(default={})) -> dict:
+    def reclaim(payload: dict = Body(default={}),
+                _principal=Depends(_require_node_principal)) -> dict:
         """Hand the allocator's reserved-but-unused pool back to the driver.
 
         Eviction drops a model; it does NOT necessarily return that model's VRAM.

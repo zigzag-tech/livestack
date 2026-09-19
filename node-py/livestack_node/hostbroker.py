@@ -1090,10 +1090,10 @@ class HostBroker:
             # Auth state beside the quota, because a ceiling counted against an
             # owner any caller can choose is decorative, and the two facts are
             # only meaningful together.
-            "auth": {"required": bool(getattr(self, "fleet_principals", None)),
+            "auth": {"required": getattr(self, "fleet_principals", None) is not None,
                      "principals": sorted(
                          p.name for p in
-                         getattr(self, "fleet_principals", {}).values())},
+                         (getattr(self, "fleet_principals", None) or {}).values())},
             "quota": ({"max_concurrent_per_account": pol.max_concurrent_per_account,
                        "account_quotas": dict(pol.account_quotas),
                        "fair_share_penalty_s": pol.fair_share_penalty_s,
@@ -1214,7 +1214,11 @@ class HostBroker:
             chosen=result.get("chosen"), reason=result.get("reason"),
             ttl_s=result.get("ttl_s"),
             request={"vantage": result.get("vantage"),
-                     "region": result.get("asker_region")},
+                     "region": result.get("asker_region"),
+                     # WHO asked, when they presented a valid credential;
+                     # null for an anonymous read. Beside — never instead of —
+                     # the owner fields for the same reason as on admit.
+                     "principal": result.get("principal")},
         ))
 
     def emit_admit(self, result: dict, request: dict, lease_id=None) -> None:  # noqa: D401
