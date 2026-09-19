@@ -102,3 +102,47 @@ def test_it_does_not_hold_the_caller():
     assert t.is_alive()
     slow.set()
     drain(t)
+
+
+def test_a_callable_is_not_marshalled_through_the_nodes_gpu_executor():
+    """The second deadlock, measured on xc-tower-ubuntu 2026-09-18.
+
+    A node's GPU executor is normally ONE worker — Metal thread affinity and
+    MPS both require it — and a node's own warm thunk marshals to that same
+    executor. Wrapping the thunk in `gpu_call` occupies the one worker; the
+    thunk then submits to the same pool and waits for a worker that will never
+    come. polytts hung on its first load, nothing became resident, and every
+    /tts afterwards queued behind the wedged worker: a TTS node answering
+    /health with 200 and synthesizing nothing.
+    """
+    import concurrent.futures
+
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        loaded = []
+
+        def gpu_call(fn):
+            return pool.submit(fn).result()
+
+        # Exactly polytts's shape: the caller's thunk marshals for itself.
+        def warm():
+            return pool.submit(lambda: loaded.append("voxcpm")).result()
+
+        t = _start_preload(warm, manager=FakeManager(), gpu_call=gpu_call,
+                           facade_url=None, log=lambda m: None, sleep=lambda s: None)
+        drain(t, timeout=5.0)
+        assert loaded == ["voxcpm"]
+    finally:
+        pool.shutdown(wait=False)
+
+
+def test_a_name_is_still_marshalled_because_the_framework_chose_where():
+    # The other half of the rule: for a NAME, the framework decides where the
+    # load runs, so it must use the node's own GPU call.
+    manager = FakeManager()
+    where = []
+    t = _start_preload("qwen", manager=manager,
+                       gpu_call=lambda fn: (where.append("gpu"), fn())[1],
+                       facade_url=None, log=lambda m: None, sleep=lambda s: None)
+    drain(t)
+    assert manager.ensured == ["qwen"] and where == ["gpu"]

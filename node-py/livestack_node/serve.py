@@ -271,8 +271,22 @@ def _start_preload(preload, *, manager, gpu_call, facade_url: Optional[str],
     answers = answers or facade_answers
 
     def _warm_one(item) -> None:
+        # A CALLABLE runs as it is, on this thread. A NAME is marshalled with
+        # `gpu_call`, because the framework is the one deciding where that load
+        # happens.
+        #
+        # The difference is not a style choice, it is a deadlock. A node's GPU
+        # executor is normally a single worker — Metal thread affinity and MPS
+        # both require it — and a caller's own warm thunk marshals to that same
+        # executor. Wrapping it means `gpu_call(thunk)` occupies the one worker
+        # and the thunk then submits to the same pool and waits for a worker
+        # that will never come. Measured on xc-tower-ubuntu, 2026-09-18:
+        # polytts warmed through `_gpu_executor.submit(...).result()`, the
+        # preload thread hung on the first load, nothing ever became resident
+        # and every /tts after it queued behind the wedged worker — a TTS node
+        # that answered /health with 200 and synthesized nothing at all.
         if callable(item):
-            gpu_call(item)
+            item()
             return
         gpu_call(lambda: manager.ensure(item))
 
