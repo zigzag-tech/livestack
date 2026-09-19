@@ -309,3 +309,38 @@ def test_distance_to_is_pure_and_returns_none_rather_than_guessing():
     assert distance_to(FLEET, "zz-tower0", FAR, "host:xc-mac-studio") == 520.0
     assert distance_to(FLEET, "zz-tower0", FAR, "nonsense") is None
     assert distance_to(FLEET, None, FAR, "host:xc-mac-studio") is None
+
+
+# --- inventory: what a node HAS, as opposed to what it IS -------------------
+#
+# A polytts serves the kind `polytts` wherever it runs, but a synthesis names
+# a voice_id and a voice exists on the node it was cloned on. Placement that
+# knows only the kind sends an English item to the node holding 57 Chinese
+# clones, and polytts answers `404 Unknown voice_id`. The fix is not a table
+# of which host holds what — that table is wrong the first time somebody
+# clones a voice — but the node saying what it has and the caller asking.
+
+def test_a_nodes_inventory_reaches_the_ranked_row():
+    view = _view({"h1": {"nodes": [dict(_node("http://a/livestack"),
+                                        inventory={"voice": ["v1", "v2"]})]}})
+    row = rank(view, "asr")["targets"][0]
+    assert row["inventory"] == {"voice": ["v1", "v2"]}
+
+
+def test_a_node_that_says_nothing_carries_no_inventory_rather_than_an_empty_one():
+    # Absent and empty are different answers: "I did not say" is not "I have
+    # none", and the requirement filter refuses both — but a reader of the row
+    # should be able to tell which node is an old build.
+    view = _view({"h1": {"nodes": [_node("http://a/livestack")]}})
+    assert rank(view, "asr")["targets"][0]["inventory"] is None
+
+
+def test_ranking_never_applies_a_capability_requirement():
+    # Same rule as region: `rank` orders, the caller's policy filters. A
+    # requirement applied here would be a second place for placement policy
+    # to live.
+    view = _view({
+        "h1": {"nodes": [dict(_node("http://a/livestack"), inventory={"voice": ["v1"]})]},
+        "h2": {"nodes": [_node("http://b/livestack")]},
+    })
+    assert len(rank(view, "asr")["targets"]) == 2

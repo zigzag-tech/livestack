@@ -979,6 +979,12 @@ class HostBroker:
                     node["kinds"] = node["kinds"] or [cap.get("kind")]
                 if cap.get("labels"):
                     node["labels"] = cap["labels"]
+                # What the node HAS — a TTS server's voice ids, an ASR's
+                # models. Carried so a caller can require one in the request
+                # (`/fleet/rank?require=voice:<id>`) rather than resolve a
+                # host and then find the voice is on the other one.
+                if isinstance(cap.get("inventory"), dict):
+                    node["inventory"] = cap["inventory"]
                 if isinstance(cap.get("load"), dict):
                     node["load"] = cap["load"]
                     dev = cap["load"].get("device")

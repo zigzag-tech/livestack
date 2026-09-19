@@ -308,6 +308,7 @@ def build_app(broker: HostBroker):
     @app.get("/fleet/rank")
     def fleet_rank(kind: str, vantage: str = "direct", via: str = None,
                    region: str = None, regions: str = None,
+                   require: str = None,
                    allow_unknown_region: bool = False, ttl_s: float = 60.0):
         """Where should a `kind` request START, from this vantage.
 
@@ -316,6 +317,13 @@ def build_app(broker: HostBroker):
         ranking is worse than none, because none falls back to a working default
         while stale looks authoritative. A wrong first guess costs one hop; the
         client picker still probes and fails over.
+
+        `require=` is the same idea for capability: `require=voice:3240e99…`
+        keeps only the nodes that ADVERTISE that voice. It is what lets a
+        caller ask for "a polytts in North America that has this voice" in one
+        request, instead of resolving a host and then discovering the voice is
+        on the other one. A node that advertises nothing is not a match — a
+        server that cannot say it has the voice cannot be sent the request.
 
         **The broker still does not DECIDE region; it will APPLY one it is
         handed.** Those are different things and the difference is the whole
@@ -339,6 +347,20 @@ def build_app(broker: HostBroker):
         # emitter knew it, which is what makes a ledger record readable later —
         # but WHERE the work may run is `regions`, below.
         result["asker_region"] = region
+
+        from .client import capable_targets, parse_requirements
+        requirements = parse_requirements(require)
+        if requirements:
+            kept, rejected = capable_targets(result, requirements)
+            result["targets"] = kept
+            result["capability_policy"] = {"require": requirements, "rejected": rejected}
+            result["chosen"] = kept[0]["target_id"] if kept else None
+            if not kept:
+                need = ", ".join(f"{k}={v}" for k, v in requirements.items())
+                result["reason"] = (
+                    f"no {kind} target advertising {need}: "
+                    + "; ".join(f"{r['target_id']} ({r['why']})" for r in rejected[:4])
+                ) or f"no {kind} target advertising {need}"
 
         wanted = [r.strip().lower() for r in (regions or "").split(",") if r.strip()]
         if wanted:

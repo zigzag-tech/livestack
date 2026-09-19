@@ -78,11 +78,20 @@ class RankedTarget:
     outcome: str                       # chosen | ranked | filtered
     reason: str
     rank: Optional[int] = None
+    # What the node says it HAS, beyond the kind it serves: a TTS server's
+    # voice ids, an ASR's models. Distinct from `labels`, which are device
+    # selectors matched one-to-one for a lease; this is an inventory, and its
+    # values are usually lists. Carried for the same reason as `region` and
+    # ranked on for the same reason as `region` — never. It is what lets a
+    # caller state "a polytts that has THIS voice" in the request instead of
+    # keeping a table of which host holds what, a table that is wrong the
+    # first time somebody clones a voice.
+    inventory: Optional[Dict[str, Any]] = None
 
     def to_wire(self) -> dict:
         return {"target_id": self.target_id, "node": self.node,
                 "host_id": self.host_id, "device_id": self.device_id,
-                "region": self.region,
+                "region": self.region, "inventory": self.inventory,
                 "distance_ms": self.distance_ms,
                 "distance_band": self.distance_band,
                 "load": self.load, "rank": self.rank, "reason": self.reason}
@@ -177,6 +186,7 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                 target_id=target_id, node=peer, host_id=host_id,
                 region=node.get("region"),
                 device_id=node.get("device_id"), state=node.get("state", "mia"),
+                inventory=node.get("inventory") if isinstance(node.get("inventory"), dict) else None,
                 ready=bool(node.get("ready")), distance_ms=dist,
                 distance_band=band, load=load,
                 inputs_at=view.get("generated_at"),
