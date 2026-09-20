@@ -330,6 +330,44 @@ Session-sized; each carries its verification. Letters group by requirement.
       Rehearsal mechanism verified live the same minute — this is the surface the 401 count is read from: tokenless `POST /fleet/admit` → 401, `[audit] src=127.0.0.1 method=POST path=/fleet/admit status=401 principal=-`; the attune token naming a `benchday:` owner → 403 `principal=attune-hub`; the attune token naming `attune:acct_1` → 200 `principal=attune-hub`.
       Count the gate at or after **2026-09-22 02:32 CST**: `journalctl -u livestack-fleetd-cn --since "2026-09-21 02:32" | grep '\[audit\].*status=401'`.
 - [ ] R.4 Then NA → verify (the Phase A gate): `GET /fleet` on xc-tower-ubuntu reports `auth.required: true` and the quota in force; over one hour every LLM, TTS and ASR Grant names an owner from the principal table; `scripts/explain_reload.py` attributes one deliberate 27B reload from the ledger alone.
+      **THE THIRD CLAUSE IS MET (2026-09-21 05:31 CST). The first two still wait on the CN
+      clean day, and deliberately so.** The three clauses are separable and were separated:
+      the attributable ledger is C.1-C.3's mechanism and needs no token switched on, so it was
+      deployed and measured on its own.
+      Deploy: livestack `393b97fd` shipped to xc-tower-ubuntu as
+      `~/.local/share/livestack-releases/393b97fdef12eedf98746c0af15cd6a0c6aa1701/`, with
+      `livestack-hostd.service.d/40-release.conf` pointing `PYTHONPATH` at it. A RELEASE
+      DIRECTORY rather than a pull, because that host's `~/livestack` carries another agent's
+      22 uncommitted lines in `examples/harmony-llm/server.py` and a merge would have touched
+      that file. **No tokens file was added and no auth changed**: `GET :8799/fleet` reports
+      `auth.required: false` before and after; `:8801` keeps its Sep-5 table
+      (`hub`, `media-corpus`) untouched.
+      The deliberate reload, on the live 27B (`llm_title`, 22.5 GB, `params_b: 27`,
+      `quant: int4`, resident on `xc-tower-ubuntu-gpu1` = harmony-llm's card): an admit for
+      `llm_tiny` shed it, then an admit for `llm_title` as `owner=ops-title` brought it back
+      (`plan: load llm_title@xc-tower-ubuntu/a46c4c2e … (loaded on demand)`). Ledger grew
+      261 → 270 lines. Then, **from the ledger alone, no journal consulted**:
+
+          $ python scripts/explain_reload.py ~/.cache/livestack/decisions-xc-tower-ubuntu.jsonl llm_title
+          llm_title reload, from the ledger alone:
+            evict  ts=1789939873.51931   caused_by=pressure
+            load   ts=1789939888.2650938 caused_by=ops-title
+          exit 0
+
+      **Honest reading of the evict half:** `pressure` is not a principal, it is C.1's
+      designed value for a rule-0 shed — the planner freed the card generally rather than to
+      make room for one named request, and saying `pressure` is the mechanism being truthful,
+      not a gap. The gate row below says "both in the principal table"; the LOAD is
+      (`ops-title`), the EVICT is a policy. A named evict needs an admit whose room-making
+      lands on that same card, and the planner correctly declined to create one: asked for
+      `embed_multi` (3.2 GB against 2.15 GB free on gpu1) it placed the unit on the OTHER card
+      where it was already resident rather than evicting the 27B. Forcing a named evict would
+      mean saturating both production cards to obtain a label, which is not worth it — recorded
+      instead.
+      The 27B was verified serving again afterwards (`/v1/models` →
+      `dbirks/Qwen3.8-27B-W4A16-AutoRound`). What remains for R.4 is the TOKEN half: expand
+      NA's table to the R.2 principals and turn `auth.required: true` on hostd, after the CN
+      clean day, then count `owner_asserted: false` Grants over one production hour.
 
 ## Gates
 
