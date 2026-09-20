@@ -310,8 +310,25 @@ Session-sized; each carries its verification. Letters group by requirement.
       `BENCHDAY_FLEET_TOKEN` on the hub, `HARMONY_LLM_FLEET_TOKEN` / engine tokens on their
       hosts, media-corpus's ingest env) and watch each caller log a successful admit under its
       principal name.
+      **Sequencing corrected 2026-09-21.** The remaining half of R.2 cannot be verified before
+      R.4: every caller in the table (attune on xc-mac-studio, the benchday hub on public-la,
+      harmony-llm on xc-tower-ubuntu, media-corpus's ingest) admits against the **NA** broker,
+      which still holds the Sep-5 `hub`/`acct_` table. Handing those callers their new tokens
+      before NA's table is replaced turns each of them into a 401 — the table and the callers'
+      tokens are one atomic switch, and that switch is R.4. What R.2 could deliver
+      independently, and did, is the table itself and its correctness (the `"*"` fix recorded
+      under R.3). The rest is carried into R.4 rather than left as a half-applied rollout.
+      Finding recorded while distributing: of the six engine principals only **harmony-llm**
+      has an admit call of its own (`HARMONY_LLM_FLEET_TOKEN`,
+      `examples/harmony-llm/server.py:639`). polytts and polyasr are passive nodes — B.3
+      already records that their identity-bearing surface is the lease `owner_id` their
+      callers make, not an admit of their own — so `polytts@*` / `polyasr@*` belong to the
+      node-facade token surface (`LIVESTACK_NODE_TOKENS_FILE`, task A.3), not to `/admit`.
 - [ ] R.3 Stand up the CN rehearsal broker on zz-tower0 (a `livestack-fleetd` in `LIVESTACK_DISPATCH=observe` mode peering with the CN nodes, the NA broker's mirror of the same shape), set `LIVESTACK_FLEET_TOKENS_FILE` on it first; run ≥ 24 h → verify: the CN journal has zero 401s from an address not in the inventory — which requires A.5's request logging, else a 401 is unattributable by construction.
-      Stand-up done 2026-09-20: `livestack-fleetd-cn.service` on zz-tower0 (observe mode, port 8801, peers = the three CN node facades, links peers mirroring the NA broker, journal output), verified `GET :8801/fleet` → `auth.required: false`, `peers: 3`. **The rehearsal clock has NOT started** — no tokens file yet. What remains for R.3: issue the principal table (R.2), add `LIVESTACK_FLEET_TOKENS_FILE` to the unit, point the CN nodes' `LIVESTACK_BROKER_URL` comma list at it so real traffic flows through it, then hold ≥ 24 h and count unattributed 401s in the journal.
+      Stand-up done 2026-09-20: `livestack-fleetd-cn.service` on zz-tower0 (observe mode, port 8801, peers = the three CN node facades, links peers mirroring the NA broker, journal output), verified `GET :8801/fleet` → `auth.required: false`, `peers: 3`. **The rehearsal clock STARTED 2026-09-21 02:32 CST (UTC+8).** Both remaining steps landed on zz-tower0: (1) drop-in `livestack-fleetd-cn.service.d/10-tokens.conf` sets `LIVESTACK_FLEET_TOKENS_FILE=/home/ubuntu/fleet-tokens/principals-2026-09-20.json`, so `GET :8801/fleet` reports `auth.required: true` and the startup line reads `11 principal(s)`; (2) drop-in `30-cn-rehearsal-broker.conf` on `polytts`, `polyasr` and `chipgen` sets `LIVESTACK_BROKER_URL=http://127.0.0.1:8799,http://127.0.0.1:8801`, so the three CN nodes report for duty to the rehearsal broker as well as to their host broker — `GET :8801/peers` shows three `source: registered` rows beside the three seeds (the seeds collapse onto them by `alias_of` as each is probed).
+      **Deficiency found and fixed, not worked around** (commit `0252bff`): the six engine principals R.2 minted carried the table's `delegate_prefix: ""` and ALL SIX were dropped at load — `load_principals` reads `""` as absent and refuses it — so the rehearsal would have counted six of its own callers as unexplained 401s. `fleet_auth.RELAY_ANY` (`"*"`) is now the one prefix that means every owner; `""` is still refused (a typo must not mint that principal) and the refusal names the wildcard. Live: 11/11 principals load where 5/11 did.
+      Rehearsal mechanism verified live the same minute — this is the surface the 401 count is read from: tokenless `POST /fleet/admit` → 401, `[audit] src=127.0.0.1 method=POST path=/fleet/admit status=401 principal=-`; the attune token naming a `benchday:` owner → 403 `principal=attune-hub`; the attune token naming `attune:acct_1` → 200 `principal=attune-hub`.
+      Count the gate at or after **2026-09-22 02:32 CST**: `journalctl -u livestack-fleetd-cn --since "2026-09-21 02:32" | grep '\[audit\].*status=401'`.
 - [ ] R.4 Then NA → verify (the Phase A gate): `GET /fleet` on xc-tower-ubuntu reports `auth.required: true` and the quota in force; over one hour every LLM, TTS and ASR Grant names an owner from the principal table; `scripts/explain_reload.py` attributes one deliberate 27B reload from the ledger alone.
 
 ## Gates
