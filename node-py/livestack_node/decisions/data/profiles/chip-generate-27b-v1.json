@@ -1,0 +1,24 @@
+{
+  "profile_id": "chip-generate-27b-v1:unqualified",
+  "task": "chip_generate_27b",
+  "language": "multilingual",
+  "max_len": 1024,
+  "head_max_len": 256,
+  "packing_version": "decision-pack-v1",
+  "option_order": [],
+  "templates": {
+    "system": "Suggest at most six source-grounded next-input replies for a coverage gap. Temperature 0. Do not invent approvals.",
+    "thinking": "off",
+    "tools": false,
+    "temperature": 0,
+    "max_tokens": 1024
+  },
+  "calibration_hash": "unqualified",
+  "qualification_hash": "unqualified",
+  "physical_kinds": [],
+  "harmony_requires": {
+    "class": "llm",
+    "benchday_profile": "chip_generate_27b_v1",
+    "params_b": "[26,28)"
+  }
+}

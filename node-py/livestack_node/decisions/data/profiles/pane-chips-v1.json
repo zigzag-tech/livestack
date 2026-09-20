@@ -1,0 +1,19 @@
+{
+  "profile_id": "pane-chips-v1:unqualified",
+  "task": "pane_chips",
+  "language": "multilingual",
+  "max_len": 1024,
+  "head_max_len": 256,
+  "packing_version": "decision-pack-v1",
+  "option_order": ["false", "true"],
+  "templates": {
+    "noul_instructions": "Is this candidate a useful, grounded next input for this user in the supplied current conversation? Candidate: {candidate}"
+  },
+  "calibration_hash": "unqualified",
+  "qualification_hash": "unqualified",
+  "physical_kinds": ["laya_multilingual_cuda_v1", "laya_multilingual_mlx_v1"],
+  "harmony_requires": {
+    "class": "decision",
+    "benchday_profile": "pane_chips_v1"
+  }
+}
