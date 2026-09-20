@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://benchday.zztech.io/schemas/typed-decision/v1/profile.schema.json",
+  "title": "Typed decision logical profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile_id",
+    "task",
+    "language",
+    "max_len",
+    "head_max_len",
+    "packing_version",
+    "option_order",
+    "templates",
+    "calibration_hash",
+    "qualification_hash"
+  ],
+  "properties": {
+    "profile_id": { "type": "string", "minLength": 1 },
+    "task": { "type": "string", "enum": ["pane_attention", "pane_chips", "pane_ask_27b", "chip_generate_27b"] },
+    "language": { "type": "string", "enum": ["multilingual", "english"] },
+    "max_len": { "type": "integer", "enum": [512, 1024] },
+    "head_max_len": { "type": "integer", "enum": [192, 256] },
+    "packing_version": { "type": "string", "const": "decision-pack-v1" },
+    "option_order": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" }
+    },
+    "templates": { "type": "object" },
+    "calibration_hash": { "type": "string" },
+    "qualification_hash": { "type": "string" },
+    "physical_kinds": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "harmony_requires": { "type": "object" }
+  }
+}

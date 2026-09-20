@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://benchday.zztech.io/schemas/typed-decision/v1/slate.schema.json",
+  "title": "Laya chip slate envelope v2",
+  "description": "A successful complete result, including an empty abstention, is an explicit value. Absence is not a successful empty slate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "slate_id",
+    "evidence_revision",
+    "policy_revision",
+    "vocabulary_revision",
+    "evaluation_generation",
+    "outcome",
+    "chips",
+    "source_coverage"
+  ],
+  "properties": {
+    "version": { "type": "integer", "const": 2 },
+    "slate_id": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "evidence_revision": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "policy_revision": { "type": "string", "minLength": 1 },
+    "vocabulary_revision": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "evaluation_generation": { "type": "integer", "minimum": 0 },
+    "outcome": {
+      "type": "string",
+      "enum": ["selected", "abstained", "fallback", "unavailable"]
+    },
+    "chips": {
+      "type": "array",
+      "maxItems": 3,
+      "items": { "$ref": "#/definitions/chip" }
+    },
+    "source_coverage": {
+      "type": "string",
+      "enum": ["complete", "omitted_older", "insufficient"]
+    },
+    "degraded_reason": { "type": ["string", "null"] }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "outcome": { "const": "selected" } } },
+      "then": {
+        "properties": { "chips": { "minItems": 1, "maxItems": 3 } }
+      }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "abstained" } } },
+      "then": {
+        "properties": { "chips": { "maxItems": 0 } }
+      }
+    }
+  ],
+  "definitions": {
+    "chip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "reply",
+        "label",
+        "origins",
+        "usefulness",
+        "score_bucket",
+        "intent_family"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "reply": { "type": "string", "minLength": 1 },
+        "label": { "type": "string", "minLength": 1 },
+        "origins": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["frequency", "offered", "generated"] }
+        },
+        "question_id": { "type": ["string", "null"] },
+        "usefulness": { "type": "number", "minimum": 0, "maximum": 1 },
+        "score_bucket": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "intent_family": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "case": "H02/H03 ZH blocking question",
+  "identity": {
+    "account_domain": "acct_dev",
+    "realm": "realm_dev",
+    "node": "xc-tower-ubuntu",
+    "pane_incarnation": "pane%1:gen3",
+    "conversation_id": "conv-zh-1",
+    "binding_generation": 4,
+    "message_ids": [
+      "m-user-zh",
+      "m-agent-zh"
+    ],
+    "content_hashes": [
+      "sha256:0bb0acb5ba6d89b546c72f6f346a6cf22d940710cc95cd3d5c634874fe001b16",
+      "sha256:c1b64c1793d8f80a51da8ae79fe1f65d3f13fce3cd1ff382db511eea450def5e"
+    ],
+    "turn_epoch": 12,
+    "lifecycle_generation": 2,
+    "human_input_generation": 7
+  },
+  "request": {
+    "schema_version": "benchday.decision.v1",
+    "request_id": "req-zh-1",
+    "profile_id": "pane-attention-v1:unqualified",
+    "evidence_revision": "sha256:ce884133ed673060f71953b6827c63450b718e3716edb92dd7c4cac70a423e80",
+    "deadline_at_ms": 1800000000000,
+    "attempt_id": "req-zh-1-a1",
+    "state": {
+      "current_agent_message": "我该用哪个数据库，Postgres 还是 SQLite？",
+      "preceding_user_message": "请用 Postgres。",
+      "recent_turns": [],
+      "execution": "settled",
+      "source_coverage": "complete"
+    },
+    "questions": [
+      {
+        "id": "attention",
+        "type": "choice",
+        "instructions": "Classify the current assistant turn's human obligation.",
+        "criteria": {
+          "question": "A current blocking request for the user's answer or decision.",
+          "working": "The agent is describing work it is continuing now.",
+          "self_waiting": "The agent is waiting for its own tool, job, or external event, not the user's answer.",
+          "finished_turn": "The agent reports its turn concluded, without a blocking request.",
+          "idle": "No current work or outstanding human request is established by readable context.",
+          "unknown": "The supplied evidence cannot distinguish these states."
+        }
+      }
+    ]
+  }
+}
