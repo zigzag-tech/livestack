@@ -471,6 +471,30 @@ def _unit_satisfies(u: Unit, requires: Mapping[str, object]) -> bool:
     return True
 
 
+# SPECIALIST-ONLY ATTRIBUTES. A unit declaring one (e.g. `ocr: true`) serves
+# work that generic demand can never imply — nothing derives `ocr` from a
+# request, and no generic consumer states it — so the ONLY way such a unit ever
+# gets selected is a requirement that happened to match on a shared attribute
+# like `class: llm`. That selection is pure harm: it stops a real LLM unit to
+# load a specialist model that answers language work badly. Measured on
+# xc-tower-ubuntu 2026-09-19: a generic {class: llm} request was placed on
+# `ocr_ovis2`, which stopped the resident 27B to do it. Naming the unit still
+# works — an explicit choice never passes through candidate selection.
+_SPECIALIST_ONLY_ATTRS = ("ocr",)
+
+
+def _specialist_only(u: Unit, requires: Mapping[str, object]) -> bool:
+    """Unit declares a specialist attribute the requirement does not name."""
+    for attr in _SPECIALIST_ONLY_ATTRS:
+        if attr in requires:
+            continue
+        val = (u.attributes or {}).get(attr)
+        if val is True or (isinstance(val, str)
+                           and val.strip().lower() in ("true", "1", "yes")):
+            return True
+    return False
+
+
 def candidate_kinds(world: WorldState, req: Request) -> List[str]:
     """Kinds this request could be served by, best first.
 
@@ -486,7 +510,9 @@ def candidate_kinds(world: WorldState, req: Request) -> List[str]:
     if not req.requires:
         return []
     resident = {p.kind for p in world.placements}
-    fits = [k for k, u in world.units.items() if _unit_satisfies(u, req.requires)]
+    fits = [k for k, u in world.units.items()
+            if _unit_satisfies(u, req.requires)
+            and not _specialist_only(u, req.requires)]
     return sorted(fits, key=lambda k: (k not in resident,
                                        _magnitude(world.units[k].footprint),
                                        world.units[k].reload_cost, k))
