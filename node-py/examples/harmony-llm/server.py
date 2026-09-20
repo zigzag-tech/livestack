@@ -27,6 +27,7 @@ import time
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from livestack_node.decisions.simple_jev import SimpleJevError, classify as simple_jev_classify
 
 HOST_ID = os.environ.get("HARMONY_LLM_HOST_ID", "xc-tower-ubuntu")
 MODEL = os.environ.get("HARMONY_LLM_MODEL", "Qwen/Qwen3-8B")
@@ -1005,6 +1006,35 @@ def health():
             # Single-unit shape, kept so existing health checks still parse.
             "model": SPECS[next(iter(SPECS))]["model"],
             "resident": any(_vllm_up(name=n) for n in SPECS)}
+
+
+@app.post("/v1/classifier")
+async def classifier(request: Request):
+    """Simple Jev v1 scoring through this node's normal resident-model route."""
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="classifier body must be JSON") from exc
+
+    owner = request.headers.get("x-harmony-owner")
+    authorization = request.headers.get("authorization")
+
+    async def invoke_chat(body: dict) -> dict:
+        headers = {"content-type": "application/json"}
+        if owner:
+            headers["x-harmony-owner"] = owner
+        if authorization:
+            headers["authorization"] = authorization
+        async with httpx.AsyncClient(timeout=float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300"))) as client:
+            response = await client.post(f"http://127.0.0.1:{NODE_PORT}/v1/chat/completions", json=body, headers=headers)
+        if response.status_code >= 400:
+            raise HTTPException(status_code=response.status_code, detail=response.text[:1000])
+        return response.json()
+
+    try:
+        return JSONResponse(await simple_jev_classify(payload, invoke_chat))
+    except SimpleJevError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.api_route("/v1/{path:path}", methods=["GET", "POST"])
