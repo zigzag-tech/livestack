@@ -1,0 +1,55 @@
+{
+  "model": "/Users/ubuntu/models/laya-multilingual-mlx",
+  "model_revision": "aac6fef/laya-multilingual-mlx",
+  "device": "arm",
+  "backend": "mlx",
+  "load_ms": 485.41,
+  "short": {
+    "ms": 663.18,
+    "choice": "self_waiting",
+    "probabilities": {
+      "question": 0.0873,
+      "working": 0.1445,
+      "self_waiting": 0.6241,
+      "finished_turn": 0.0252,
+      "idle": 0.0369,
+      "unknown": 0.082
+    },
+    "memory": {
+      "active_bytes": 643832354,
+      "cache_bytes": 105757330,
+      "peak_bytes": 749561536,
+      "host_rss_bytes": 1161314304
+    },
+    "id_set_ok": true,
+    "finite": true
+  },
+  "max_context": {
+    "ms": 23.56,
+    "choice": "finished_turn",
+    "memory": {
+      "active_bytes": 643832354,
+      "cache_bytes": 479351970,
+      "peak_bytes": 1017669270,
+      "host_rss_bytes": 1162215424
+    }
+  },
+  "chip_50": {
+    "ms": 248.93,
+    "n": 50,
+    "id_set_ok": true,
+    "memory": {
+      "active_bytes": 643832354,
+      "cache_bytes": 1178085302,
+      "peak_bytes": 1261987006,
+      "host_rss_bytes": 1163526144
+    },
+    "sample": {
+      "c00": 0.5636,
+      "c01": 0.5111,
+      "c02": 0.5436
+    }
+  },
+  "memory_hash": "4fb05b56db3e0c5f93d46f3d30e6c6e39c8bed82a0e092c11f128893ef30d4e9",
+  "cpu_fallback": false
+}
