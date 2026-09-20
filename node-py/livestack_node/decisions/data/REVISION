@@ -1,0 +1,7 @@
+typed-decision-contract-v1.0.0
+schema_version: benchday.decision.v1
+packing_version: decision-pack-v1
+linked_livestack_plan: _plans/typed-decision-inference.md
+linked_benchday_change: openspec/changes/route-pane-decisions-through-harmony
+# Frozen 2026-09-20. Qualification hashes stay "unqualified" until Q01–Q04
+# and real CUDA+MLX reports exist. Default hub policy remains legacy.
