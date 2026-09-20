@@ -43,6 +43,11 @@ Config via env:
                          token and the owner comes from it, never the body:
                            {"<tok>": {"name":"media-corpus","owner":"media-corpus"},
                             "<tok>": {"name":"hub","delegate_prefix":"acct_"}}
+                         `"delegate_prefix": "*"` is the ONE prefix that means
+                         every owner: the engine case, where the caller asserts
+                         the owner and the engine only relays it. An empty or
+                         absent prefix is refused, so that principal cannot be
+                         minted by a typo.
                          A fixed principal is one service with one identity; a
                          delegating one has authenticated somebody else and may
                          name an owner inside its prefix. Unset = no auth,
@@ -832,7 +837,7 @@ def main():
                   flush=True)
             return {}
 
-    from .fleet_auth import principals_from_env
+    from .fleet_auth import RELAY_ANY, principals_from_env
     fleet_principals = principals_from_env(log=lambda m: print(m, flush=True))
     fleet_policy = SchedulerPolicy(
         max_concurrent_per_account=_quota_int("LIVESTACK_ACCOUNT_QUOTA"),
@@ -860,7 +865,9 @@ def main():
               f"{len(fleet_principals)} principal(s): "
               + ", ".join(sorted(
                   f"{p.name}"
-                  + (f"->{p.owner}" if p.owner else f"->{p.delegate_prefix}*")
+                  + (f"->{p.owner}" if p.owner
+                     else "->ANY OWNER" if p.delegate_prefix == RELAY_ANY
+                     else f"->{p.delegate_prefix}*")
                   for p in fleet_principals.values())), flush=True)
     else:
         # A source was configured but yielded nothing (refused file, malformed
