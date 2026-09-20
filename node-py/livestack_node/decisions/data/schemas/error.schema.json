@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://benchday.zztech.io/schemas/typed-decision/v1/error.schema.json",
+  "title": "Typed decision error envelope",
+  "description": "Errors never look like a successful empty or negative decision.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "outcome", "cause", "http_status"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "benchday.decision.v1" },
+    "request_id": { "type": "string" },
+    "outcome": { "type": "string", "const": "error" },
+    "cause": {
+      "type": "string",
+      "enum": [
+        "unauthorized",
+        "forbidden",
+        "invalid_input",
+        "unsupported_profile",
+        "broker_unavailable",
+        "profile_unavailable",
+        "insufficient_context",
+        "invalid_output",
+        "cancelled",
+        "deadline_exceeded",
+        "capacity",
+        "unhealthy"
+      ]
+    },
+    "http_status": {
+      "type": "integer",
+      "enum": [400, 401, 403, 422, 429, 503, 504]
+    },
+    "detail": { "type": "string" }
+  }
+}

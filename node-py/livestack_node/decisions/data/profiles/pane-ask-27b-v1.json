@@ -1,0 +1,24 @@
+{
+  "profile_id": "pane-ask-27b-v1:unqualified",
+  "task": "pane_ask_27b",
+  "language": "multilingual",
+  "max_len": 1024,
+  "head_max_len": 256,
+  "packing_version": "decision-pack-v1",
+  "option_order": [],
+  "templates": {
+    "system": "Extract the user-directed question already present in admitted source evidence. Return JSON only.",
+    "thinking": "off",
+    "tools": false,
+    "temperature": 0,
+    "max_tokens": 1024
+  },
+  "calibration_hash": "unqualified",
+  "qualification_hash": "unqualified",
+  "physical_kinds": [],
+  "harmony_requires": {
+    "class": "llm",
+    "benchday_profile": "pane_ask_27b_v1",
+    "params_b": "[26,28)"
+  }
+}

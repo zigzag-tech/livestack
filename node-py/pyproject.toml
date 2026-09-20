@@ -12,6 +12,21 @@ dependencies = []
 [project.optional-dependencies]
 facade = ["fastapi>=0.100"]
 dev = ["pytest>=7", "fastapi>=0.100", "httpx>=0.24", "jsonschema>=4"]
+# Typed-decision extras are mutually exclusive install surfaces. CUDA must not
+# pull MLX; Mac/MLX must not pull PyTorch or a CUDA runtime. Model artifact
+# hashes are pinned at qualification, not by these extras.
+decision-cuda = [
+    "torch>=2.4,<2.11",
+    "transformers>=4.44,<5",
+    "huggingface-hub>=0.24",
+    "numpy>=1.26",
+    "accelerate>=0.33",
+]
+decision-mlx = [
+    "mlx>=0.21,<0.30",
+    "huggingface-hub>=0.24",
+    "numpy>=1.26",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -20,7 +35,15 @@ include = ["livestack_node*"]
 # The dashboard is a data file, not a module: without this an installed wheel
 # serves a broker whose `/` reports the page missing.
 [tool.setuptools.package-data]
-livestack_node = ["ui.html", "*.json", "workloads/*.sql"]
+livestack_node = [
+    "ui.html",
+    "*.json",
+    "workloads/*.sql",
+    "decisions/data/*",
+    "decisions/data/schemas/*",
+    "decisions/data/profiles/*",
+    "decisions/data/fixtures/*",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
