@@ -86,6 +86,41 @@ cannot hold its own bytes.
   address). Otherwise it would load a second copy on its own card and be
   choosing placement again.
 
+## Resident-model classifier
+
+`POST /v1/classifier` implements the open Simple Jev v1 text-classification
+contract on top of the same model already served by Harmony. It does not load a
+classifier checkpoint. Each question is compiled to an unfinished assistant
+answer and scored from one-token log probabilities returned by the normal
+`/v1/chat/completions` route, so admission, residency, forwarding, caller
+identity, and the exact served model remain visible and shared with chat.
+
+The endpoint accepts exactly one of `state` or text-only `messages`, plus
+`choice`, `score`, or `noul` questions. This adapter currently supports at most
+20 options per question because the deployed vLLM OpenAI surface returns at
+most 20 top-token log probabilities. Responses include the actual model ID and
+`template_version: "v1"`. Choice probabilities are conditional on the supplied
+options; callers must calibrate thresholds and account for candidate-order
+effects on their own data.
+
+```json
+{
+  "model": "local",
+  "state": "Mia owns a red bicycle.",
+  "questions": {
+    "color": {
+      "type": "choice",
+      "instructions": "What color is Mia's bicycle?",
+      "criteria": {"red": null, "blue": null}
+    }
+  }
+}
+```
+
+The compiler and scorer live in
+`livestack_node.decisions.simple_jev`; applications should call the Harmony
+endpoint rather than copy the prompt contract.
+
 ## Config
 
 `HARMONY_LLM_UNITS_FILE` — a JSON array of unit specs (see
