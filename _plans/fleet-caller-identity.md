@@ -298,6 +298,18 @@ Session-sized; each carries its verification. Letters group by requirement.
 
 - [x] R.1 Complete the inventory from a CN host (zz-tower0's fleetd/hostd/polytts/polyasr journals) and resolve the three LAN addresses by MAC → verify: the inventory table above has no "unresolved" row. Done 2026-09-20 (plan commit after `25e5239`): the CN half is measured and recorded in the inventory section below; the three LAN rows resolve to xc-tower-ubuntu itself (`10.0.0.94`, its own eno1 + /etc/hosts), the user's Honor phone (`10.0.0.244`, OUI 78:e6:1c Honor Device, the xc-magical pair's vendor), and a TP-Link AP/NAT box (`10.0.0.71`, OUI 9c:53:22, one MAC answering ARP for five leases). No *logged* CN source is unidentified; the unloggable one is hostd, which is deficiency A.5 above.
 - [ ] R.2 Issue the principals in the table; each caller's configuration gains its token (`ATTUNE_FLEET_TOKEN`, `BENCHDAY_FLEET_TOKEN`, media-corpus's ingest, the engines' delegating tokens) → verify: every caller logs a successful admit with its principal name.
+      Tokens minted 2026-09-20 into `~/fleet-tokens/principals-2026-09-20.json` (mode 0600, 11
+      principals, on zz-tower0 — the ops box; never in any repository). Migration note: the
+      table already live on NA since Sep 5 names its delegating principal `hub` with prefix
+      `acct_`, predating the app-namespace contract (`<app>:acct_<id>`). R.2's `benchday-hub`
+      (prefix `benchday:`) supersedes it, which requires benchday's title chain to change its
+      admit owner from `acct_<id>` to `benchday:acct_<id>` — that is benchday's
+      `title-from-the-local-card` §8/D1 line and is filed there, not patched around here. The
+      old `hub` row is removed from NA only after the CN rehearsal passes. What remains for
+      R.2: distribute each caller's token (`ATTUNE_FLEET_TOKEN` in the Mac's attune `.env`,
+      `BENCHDAY_FLEET_TOKEN` on the hub, `HARMONY_LLM_FLEET_TOKEN` / engine tokens on their
+      hosts, media-corpus's ingest env) and watch each caller log a successful admit under its
+      principal name.
 - [ ] R.3 Stand up the CN rehearsal broker on zz-tower0 (a `livestack-fleetd` in `LIVESTACK_DISPATCH=observe` mode peering with the CN nodes, the NA broker's mirror of the same shape), set `LIVESTACK_FLEET_TOKENS_FILE` on it first; run ≥ 24 h → verify: the CN journal has zero 401s from an address not in the inventory — which requires A.5's request logging, else a 401 is unattributable by construction.
       Stand-up done 2026-09-20: `livestack-fleetd-cn.service` on zz-tower0 (observe mode, port 8801, peers = the three CN node facades, links peers mirroring the NA broker, journal output), verified `GET :8801/fleet` → `auth.required: false`, `peers: 3`. **The rehearsal clock has NOT started** — no tokens file yet. What remains for R.3: issue the principal table (R.2), add `LIVESTACK_FLEET_TOKENS_FILE` to the unit, point the CN nodes' `LIVESTACK_BROKER_URL` comma list at it so real traffic flows through it, then hold ≥ 24 h and count unattributed 401s in the journal.
 - [ ] R.4 Then NA → verify (the Phase A gate): `GET /fleet` on xc-tower-ubuntu reports `auth.required: true` and the quota in force; over one hour every LLM, TTS and ASR Grant names an owner from the principal table; `scripts/explain_reload.py` attributes one deliberate 27B reload from the ledger alone.
