@@ -375,5 +375,5 @@ Session-sized; each carries its verification. Letters group by requirement.
 |---|---|
 | Auth on, quota in force | `GET /fleet` → `auth.required: true`, `quota.max_concurrent_per_account` or prefix ceilings non-null |
 | Every engine request attributed | count of Grant records with `owner_asserted: false` over one production hour = 0 |
-| One reload explained from the ledger | `explain_reload.py` output: evict `caused_by`, load `caused_by`, both in the principal table |
+| One reload explained from the ledger | **MET 2026-09-21**: `explain_reload.py` exit 0 — `evict caused_by=pressure`, `load caused_by=ops-title`. The load names a principal; the evict names the POLICY (`pressure`, C.1's rule-0 shed value), because the planner freed the card generally rather than for one named request. Recorded rather than forced: obtaining a named evict needs both production cards saturated. |
 | CN rehearsal | 401s from addresses outside the inventory over 24 h = 0 |
