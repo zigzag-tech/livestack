@@ -71,8 +71,9 @@ class ManagedUnit:
     loader() -> the loaded model object(s) (opaque to the manager).
     freer()  -> backend-specific GPU/Metal cache free (e.g. free_cuda/free_mlx).
 
-    ``footprint``/``residency_policy``/``min_resident`` are declarative metadata the
-    coordinator reports to the broker; they do not change local behaviour.
+    ``footprint``/``residency_policy``/``min_resident``/``min_residency_s``/
+    ``reload_cost``/``priority`` are declarative metadata the coordinator
+    reports to the broker; they do not change local behaviour.
     """
 
     def __init__(self, name: str, loader: Callable[[], object],
@@ -82,13 +83,26 @@ class ManagedUnit:
                  min_resident: int = 0,
                  health_check: "Optional[Callable[[object], bool]]" = None,
                  spread_group: str = "",
-                 attributes: "Optional[dict]" = None):
+                 attributes: "Optional[dict]" = None,
+                 # Unit economics, declared by the operator (the harmony-llm unit
+                 # file). None = undeclared: /residence omits the field and the
+                 # broker keeps its own defaults, so a node that declares
+                 # nothing is byte-for-byte the node it was. Declared, they
+                 # reach the planner: a young 27B whose measured reload is ~50 s
+                 # is protected for that long and stops being evicted by a
+                 # 0.6 B embedder that happens to ask during the load.
+                 min_residency_s: "Optional[float]" = None,
+                 reload_cost: "Optional[float]" = None,
+                 priority: "Optional[int]" = None):
         self.name = name
         self._loader = loader
         self._freer = freer
         self.footprint = footprint              # measured-and-cached bytes (0 = unknown)
         self.residency_policy = residency_policy
         self.min_resident = min_resident
+        self.min_residency_s = min_residency_s
+        self.reload_cost = reload_cost
+        self.priority = priority
         # Contention class reported to the broker. Units in one group are
         # alternatives for the same work; the planner charges for co-residence
         # in proportion to the demand waiting for each, so alternating traffic

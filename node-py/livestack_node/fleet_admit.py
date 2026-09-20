@@ -29,6 +29,9 @@ from .fleet_scheduler import (
     Target, Tier, schedule,
 )
 from .ledger import Candidate, distance_band
+# The ONE definition of what a scope grant admits, shared with the announce
+# side so the node stating a grant and the broker enforcing it cannot drift.
+from .announce import _scope_admits
 
 SLA_BY_NAME = {"interactive": Sla.INTERACTIVE, "normal": Sla.NORMAL, "batch": Sla.BATCH}
 
@@ -39,7 +42,8 @@ DEFAULT_CONCURRENCY = 4.0
 
 
 def targets_from_view(view: dict, kind: str, vantage: str = "direct",
-                      concurrency: float = DEFAULT_CONCURRENCY) -> tuple:
+                      concurrency: float = DEFAULT_CONCURRENCY,
+                      owner: str = "") -> tuple:
     """Every fleet node that could serve `kind`, as scheduler `Target`s, plus the
     rows for the ones that could not and why.
 
@@ -48,6 +52,13 @@ def targets_from_view(view: dict, kind: str, vantage: str = "direct",
     means no opinion, and refusing to schedule anything that has not reported is
     how a fleet strands its quietest engines. The uncertainty is recorded in the
     candidate's reason instead, where a later reader can see it.
+
+    A node row may carry `scope: {"kind", "id"}` — who that node is pooled for.
+    A scoped node is a GRANT: when `owner` is named, a scope that does not
+    admit the owner is rejected with the scope named, because placing another
+    account's work on a self-scoped GPU spends a resource its owner never
+    offered. Matching is by namespace (`owner == id` or `owner` under `id:`);
+    see `announce._scope_admits` for the one definition both sides share.
     """
     targets: List[Target] = []
     rejected: List[Candidate] = []
@@ -71,6 +82,13 @@ def targets_from_view(view: dict, kind: str, vantage: str = "direct",
                 rejected.append(Candidate(outcome="filtered",
                                           reason=f"filtered: does not host {kind}",
                                           **common))
+                continue
+            scope = node.get("scope")
+            if not _scope_admits(scope, owner):
+                rejected.append(Candidate(
+                    outcome="filtered",
+                    reason=f"filtered: scoped to {scope.get('kind')} {scope.get('id')}",
+                    **common))
                 continue
             if node.get("state") != "fresh":
                 rejected.append(Candidate(
@@ -144,7 +162,8 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
     """Decide where one job should run. Returns the grant and the full candidate
     set, winner and losers alike, each with the reason it landed where it did."""
     now = time.time() if now is None else now
-    targets, rows = targets_from_view(view, kind, vantage=vantage, concurrency=concurrency)
+    targets, rows = targets_from_view(view, kind, vantage=vantage,
+                                      concurrency=concurrency, owner=owner)
     job = Job(
         id=f"{kind}-{int(now * 1000)}", kind=kind, owner=owner,
         need={"concurrency": 1.0},

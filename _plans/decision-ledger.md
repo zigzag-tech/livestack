@@ -321,6 +321,28 @@ ledger showed them missing:
   host broker's and a reader would have counted evictions that never happened.
   In the one artifact whose entire value is being trustable about what happened.
 
+### 2026-09-20 — the attribution rename (`fleet-caller-identity`, tasks C.1–C.2)
+
+The host broker's plan records changed shape, in two ways that only ADD
+information; no field was removed from any other record type:
+
+* **The request id is named `request_id`.** Grant and Defer records used to
+  carry their request id under the key `request.owner` — a reader digging
+  `request.owner` for an account name found an id instead. Grant/Defer
+  records now write `request={"request_id": ...}`; Grant adds `owner` (the
+  account the grant was charged to) and `owner_asserted` (true when a
+  fronting engine vouched the owner via `X-Harmony-Owner`). Verified before
+  the rename: no reader of `request.owner` on Grant records exists in this
+  repository (grep over py/ts/js/md, excluding `_plans/` and `node_modules`).
+* **Load and Evict records carry `request={"caused_by": ...}`** — the owner
+  of the request whose planning produced the action (`"pressure"` for a
+  rule-0 shed, `"hard-pin floor"` / `"soft-pin restore"` for pin actions with
+  no request behind them). This is what lets
+  `node-py/scripts/explain_reload.py <ledger> <kind>` attribute a reload —
+  who needed the room, who brought the unit back — from the ledger alone.
+  The 27B reload thrash of 2026-09-19 was diagnosed from journal timestamps
+  because the ledger could not say this.
+
 ### What is left, and what it is blocked on
 
 The three open items are one story: **nothing yet records an OUTCOME**, so every

@@ -184,6 +184,14 @@ def _unit_specs() -> "list[dict]":
             "max_model_len": str(spec.get("max_model_len", MAX_MODEL_LEN) or ""),
             "extra_args": shlex.split(spec.get("extra_args", "")) or EXTRA_ARGS,
             "residency": spec.get("residency"),
+            # Unit economics, declared by the operator: how long a fresh load
+            # is protected (a 27B whose measured reload is ~50 s must not be
+            # evicted 15 s in by a 0.6 B embedder), what a reload costs, and
+            # this unit's claim on the card. All optional; absent keeps the
+            # planner's defaults and the tier-derived priority, byte-for-byte.
+            "min_residency_s": spec.get("min_residency_s"),
+            "reload_cost": spec.get("reload_cost"),
+            "priority": spec.get("priority"),
             # Operator intent, kept OUT of `attributes` on purpose: these say
             # which unit to pick and which to warm, not what a unit IS, and a
             # caller must never be able to require them.
@@ -464,6 +472,13 @@ _UNITS = {
         health_check=_health_probe_for(name),
         spread_group=SPREAD_GROUP,
         attributes=spec.get("attributes") or {},
+        # Declared economics (see `_unit_specs`): carried to the coordinator's
+        # /residence report and from there into the planner's Unit. None =
+        # undeclared, and the node's report omits the field so the broker
+        # keeps its defaults.
+        min_residency_s=spec.get("min_residency_s"),
+        reload_cost=spec.get("reload_cost"),
+        priority=spec.get("priority"),
     )
     for name, spec in SPECS.items()
 }
@@ -616,6 +631,13 @@ MULTI_NODE = os.environ.get("HARMONY_LLM_ADMIT", "").strip().lower() in {"1", "t
 # Long: admission BLOCKS while the broker evicts victims and warms the grant,
 # and warming a 15 GB model is minutes, not seconds.
 ADMIT_TIMEOUT = float(os.environ.get("HARMONY_LLM_ADMIT_TIMEOUT", "600"))
+# This engine's fleet credential. Sent as Authorization on every /admit; the
+# broker resolves the owner above against this token's principal (delegating,
+# prefix "" — a mesh-reachable engine relays what its hub asserted). Unset =
+# no header, which is exactly right until the token rollout reaches this
+# deployment: against a broker with no principals configured the admission
+# path is unchanged.
+_FLEET_TOKEN = os.environ.get("HARMONY_LLM_FLEET_TOKEN") or None
 
 
 def _same_kind_peers() -> "list[tuple[str, str]]":
@@ -1183,10 +1205,21 @@ async def proxy(path: str, request: Request):
             already_here = False
     granted, degraded, refused = None, None, None
     if not already_here and (requirement is not None or len(SPECS) > 1 or MULTI_NODE):
+        # WHO IS ASKING, asserted by the hub that authenticated this caller and
+        # relayed here as X-Harmony-Owner (see HARMONY.md, "Who is asking").
+        # The header is an ASSERTION, not a credential: this engine is reachable
+        # only on the mesh, so it is trusted to relay what its hub vouched for,
+        # and the fleet broker resolves the owner against THIS engine's
+        # delegating token. Absent header => the caller was anonymous to the
+        # hub too, and the admission is charged to the engine's own identity,
+        # marked owner_asserted=False so the ledger can tell the two apart.
+        asserted = (request.headers.get("x-harmony-owner") or "").strip()
         try:
             res = admit(unit if requirement is None else "",
                         requires=requirement,
-                        owner_id=f"harmony-llm:{HOST_ID}", timeout=ADMIT_TIMEOUT)
+                        owner_id=asserted or f"harmony-llm:{HOST_ID}",
+                        owner_asserted=bool(asserted),
+                        token=_FLEET_TOKEN, timeout=ADMIT_TIMEOUT)
             served = res.get("kind")
             # Log the planner's answer only when it did NOT grant. A refusal
             # for a requirement is otherwise invisible: the caller gets a 503

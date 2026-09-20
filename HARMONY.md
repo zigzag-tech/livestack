@@ -140,6 +140,29 @@ Two anti-pathology guards: **anti-thrash** (a freshly-loaded unit is protected b
 `restore_debounce_s` before restore) and **anti-starvation** (a deferred request's
 effective priority ages upward so low-priority work is never starved forever).
 
+### Unit economics, declared
+
+Measured on xc-tower-ubuntu 2026-09-19: evicting and reloading the 27B costs
+**~50 s** end to end — and the planner protected it for 15 s (the default
+`min_residency_s`) and tie-broke its reload at `1.0`, the same as the 0.6 B
+embedder. A slow model that is cheap to evict is evicted by everything. Three
+fields are now declarable per unit (harmony-llm unit file → `ManagedUnit` →
+`/residence` → planner `Unit`):
+
+* `min_residency_s` — anti-thrash floor in seconds. The 27B declares `60`.
+* `reload_cost` — what a reload costs, on the planner's tie-break scale. The
+  27B declares `4`.
+* `priority` — an explicit claim on the card, outranking the tier-derived
+  default (`_RES_TO_PRIO` gives every UNPINNED unit 30).
+
+Absent values keep today's defaults exactly: a node that declares nothing
+plans byte-for-byte as it did before the fields existed. When a young load's
+floor is the only thing between a request and the device, the Defer record
+says so — `residency floor: llm loaded 20s ago is protected for 60s` — a
+wait, not a refusal of the request's worth. See
+`examples/harmony-llm/llm-units.example.json` for the 27B declared with its
+measured numbers.
+
 ## Context-awareness: it plans against *measured* reality
 
 Two things keep the plan tied to the real machine, not just declared estimates:
@@ -526,6 +549,36 @@ to a service that authenticates its own callers.
 
 Unset means no auth, which makes any quota advisory; the startup line and
 `GET /fleet` both say so rather than leaving it to be discovered.
+
+#### The owner header: `X-Harmony-Owner`
+
+One header carries the asserted owner from the hub that authenticated a person
+through to the fleet broker, so an engine fronted by a hub stops erasing the
+app identity at its own door:
+
+    X-Harmony-Owner: benchday:acct_b
+
+An engine that sees it (harmony-llm, polytts, polyasr) admits with that owner
+and marks the admission `owner_asserted: true`; a request **without** the
+header is admitted as the engine's own identity (`harmony-llm:<host>`) and
+marked `owner_asserted: false`, because "the engine spent capacity" and "the
+engine spent capacity on behalf of an account it was never told about" are
+different facts and the ledger keeps them apart.
+
+The header is an **assertion, not a credential**. The engine forwards it to
+`/admit` with the engine's own bearer token, and the broker resolves the owner
+through the engine's principal — *delegating*, with the prefix the engine was
+granted. On this fleet the engines are hub-shared and reachable only on the
+mesh, so their prefix is `""` (any owner): they are trusted to relay what a
+hub asserted. A public engine gets a narrower prefix. The header is not
+`Authorization` because the engines already spend `Authorization` on their own
+API keys — overloading it would make an API key and an owner assertion the
+same string. It is not a body field because `/v1/chat/completions` is an
+OpenAI-shaped body a caller's SDK owns. A header survives every SDK, every
+proxy, and the relay.
+
+Read endpoints (`/fleet`, `/fleet/rank`, `/peers`, `/plan`) record the
+principal when a valid credential is present and stay open otherwise.
 
 ## The decision ledger
 
