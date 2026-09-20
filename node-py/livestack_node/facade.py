@@ -219,7 +219,8 @@ def build_router(manager, coordinator, capability: Capability,
                  readiness: Optional[Callable[[], Optional[dict]]] = None,
                  device_id: Optional[str] = None,
                  in_flight: Optional[Callable[[], int]] = None,
-                 node_id: Optional[str] = None, inventory=None):
+                 node_id: Optional[str] = None, inventory=None,
+                 node_principals=None):
     # Resolved ONCE, here, so /capability and /residence can never disagree
     # about which device this node is on — a disagreement the broker would read
     # as two devices.
@@ -236,12 +237,15 @@ def build_router(manager, coordinator, capability: Capability,
     # token table (one file, mode 0600, refused if world-readable) — see
     # fleet_auth.principals_from_env. Unset means every endpoint keeps today's
     # open behaviour, which is the right default for a single-operator fleet
-    # and exactly what an unconfigured deployment must see.
-    from .fleet_auth import principals_from_env
-    node_principals = principals_from_env(
-        file_var="LIVESTACK_NODE_TOKENS_FILE",
-        inline_var="LIVESTACK_NODE_TOKENS",
-        log=lambda m: print(m, flush=True))
+    # and exactly what an unconfigured deployment must see. attach() may pass
+    # a pre-computed table so the app's audit middleware resolves principals
+    # against the SAME one; standalone callers (tests) get the env default.
+    if node_principals is None:
+        from .fleet_auth import principals_from_env
+        node_principals = principals_from_env(
+            file_var="LIVESTACK_NODE_TOKENS_FILE",
+            inline_var="LIVESTACK_NODE_TOKENS",
+            log=lambda m: print(m, flush=True))
     if node_principals:
         print(f"[livestack] /lease and /model/* require a bearer token; "
               f"{len(node_principals)} principal(s): "

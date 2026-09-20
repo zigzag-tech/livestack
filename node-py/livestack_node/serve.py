@@ -188,11 +188,27 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     early_port = port if port is not None else os.environ.get("LIVESTACK_NODE_PORT")
     node_id = f"{_machine_name(host_id)}:{int(early_port)}" if early_port else None
 
+    # One journal line per mutating request and per auth refusal, with source
+    # address and principal name — the same audit trail hostd writes (see
+    # request_log.py). The principal table is shared with the router's gate
+    # so a logged name is the name the gate resolved, and vice versa.
+    from .fleet_auth import principals_from_env
+    node_principals = principals_from_env(
+        file_var="LIVESTACK_NODE_TOKENS_FILE",
+        inline_var="LIVESTACK_NODE_TOKENS",
+        log=lambda m: print(m, flush=True))
+    from . import request_log
+    request_log.attach(
+        app,
+        principal_for=lambda headers: request_log.principal_label(
+            headers.get("authorization"), node_principals))
+
     app.include_router(
         build_router(manager, coordinator, Capability(kind=kind, host_id=host_id),
                      gpu_call, device_meter=device_meter, activation_tracker=tracker,
                      readiness=readiness, device_id=device_id,
-                     in_flight=in_flight, node_id=node_id, inventory=inventory),
+                     in_flight=in_flight, node_id=node_id, inventory=inventory,
+                     node_principals=node_principals),
         prefix=prefix,
     )
 

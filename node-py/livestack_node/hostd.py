@@ -146,6 +146,16 @@ def build_app(broker: HostBroker):
 
     from .ui import page as ui_page
     app = FastAPI(title="Livestack Harmony broker")
+    # One journal line per mutating request and per auth refusal, with source
+    # address and principal name — the evidence the R.3 inventory gate reads
+    # ("zero 401s from an address not in the inventory"). Reads stay silent;
+    # see request_log.py for the reasoning and what is never logged.
+    from . import request_log
+    request_log.attach(
+        app,
+        principal_for=lambda headers: request_log.principal_label(
+            headers.get("authorization"),
+            getattr(broker, "fleet_principals", None)))
     state = {"last_evicted_at": {}}
     # Hosted-backend health probes (LIVESTACK_PROBES), run on the reconcile
     # loop's cadence. probe_state is what /status reports under "hosted".
