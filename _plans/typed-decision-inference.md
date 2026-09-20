@@ -1,9 +1,10 @@
 # Typed-decision inference through Harmony
 
-**Status:** in progress. Livestack owns the generic cross-architecture decision
-service, admission, physical CUDA/MLX kinds, and worker adapters. Benchday owns
-the consuming attention/chip contracts and OpenSpec archive. **Neither
-repository archives the other.** The frozen contract revision is
+**Status:** closed — plumbing shipped; portable profile **not** complete.
+Livestack owns the generic cross-architecture decision service, admission,
+physical CUDA/MLX kinds, and worker adapters. Benchday owns the consuming
+attention/chip contracts and OpenSpec archive. **Neither repository archives
+the other.** The frozen contract revision is
 `typed-decision-contract-v1.0.0` (`schema_version: benchday.decision.v1`).
 
 Linked Benchday change:
@@ -75,7 +76,18 @@ broker.
 
 ## Completion
 
-Close this plan only when: the contract revision is unchanged or explicitly
-bumped, pytest for the decision ingress is green, CUDA and MLX qualification
-reports exist (or the portable profile is explicitly not complete), and
-Benchday's linked change has shipped evidence. Missing gates stay open.
+Closed 2026-09-20 with the portable profile explicitly **not** complete:
+
+- Contract `typed-decision-contract-v1.0.0` unchanged. pytest for the
+  decision ingress is green (`test_decision_contract.py`,
+  `test_decision_service.py`, `test_upstream_map.py`).
+- Real CUDA (`convaiinnovations/laya-multilingual` on RTX 3090) and native
+  MLX (`aac6fef/laya-multilingual-mlx` on xc-mac-studio arm64) H09 reports
+  exist. Short-status argmax agrees (`question`); P(question) Δ=0.079 and
+  max-context labels disagree (`working` vs `finished_turn`). Tolerance
+  0.01 is not met. Profile ids stay `*:unqualified`.
+- Q01–Q04 sealed datasets were not scored (insufficient-bucket). Do not
+  enable serve.
+- Benchday hub plumbing shipped hub-only (train
+  20260920T074509Z-2900416). Linked OpenSpec change remains unarchived
+  until a later enablement qualifies. Missing gates stay open.
