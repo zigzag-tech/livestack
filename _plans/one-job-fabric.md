@@ -147,13 +147,13 @@ that ignores every field added here behaves exactly as today.
 
 ## Tasks
 
-- [ ] J.1 `labels` on submission with the reserved `owner` key; `delegate_prefix` on `Principal`; 403 outside the prefix; labels persisted and returned → verify: `tests/test_workload_labels.py` — attune-hub submits with `owner=attune:acct_a` (accepted), with `owner=benchday:acct_b` (403), unchain (no prefix) with any `owner` (403).
-- [ ] J.2 Attempt environment carries `HARMONY_OWNER`, `HARMONY_FLEET_URL`, `HARMONY_FLEET_TOKEN`; `lease_helper` admits, heartbeats, releases; cleanup releases leftovers from `leases.json` → verify: `tests/test_worker_lease_env.py` against a fake fleet broker — the Grant names the label owner; a handler killed mid-run leaves no live lease.
-- [ ] J.3 `max_running` + `on_cap` on `Principal`; placement skips capped principals without blocking others; 429 on `refuse` → verify: `tests/test_placement_principal_cap.py` — the umbrella scenario (40 queued at cap 2, one thumbnail from another principal placed next).
-- [ ] J.4 Caller job list reports cap and running count → verify: `GET jobs` body has `principal: {max_running, running}`.
-- [ ] J.5 `durable-workloads.md` gains a "Three applications" section naming the label, the env, the cap and the principal table; `~/benchday/docs/harmony-worker-enrolment.md` gains the multi-bundle note (filed in benchday) → verify: both documents name `labels.owner` and `HARMONY_OWNER`.
+- [x] J.1 `labels` on submission with the reserved `owner` key; `delegate_prefix` on `Principal`; 403 outside the prefix; labels persisted and returned → verify: `tests/test_workload_labels.py` — attune-hub submits with `owner=attune:acct_a` (accepted), with `owner=benchday:acct_b` (403), unchain (no prefix) with any `owner` (403). Done 2026-09-20 (commit `2be3494`, 6 passed; refusals reuse `fleet_auth.resolve_owner` so the two surfaces can't drift; ≤16-label cap enforced in submission after the 64-cap helper).
+- [x] J.2 Attempt environment carries `HARMONY_OWNER`, `HARMONY_FLEET_URL`, `HARMONY_FLEET_TOKEN`; `lease_helper` admits, heartbeats, releases; cleanup releases leftovers from `leases.json` → verify: `tests/test_worker_lease_env.py` against a fake fleet broker — the Grant names the label owner; a handler killed mid-run leaves no live lease. Done 2026-09-20 (commit `2be3494`, 3 passed incl. a real-systemd kill test; `lease_helper` is ~100 lines not ~60 because cleanup + progress live there too; cleanup is worker-side — the authority holds no fleet credential — and tolerates a dead broker via lease TTL; a SIGTERM-killed handler requeues by existing semantics, the lease guarantee is what the test pins).
+- [x] J.3 `max_running` + `on_cap` on `Principal`; placement skips capped principals without blocking others; 429 on `refuse` → verify: `tests/test_placement_principal_cap.py` — the umbrella scenario (40 queued at cap 2, one thumbnail from another principal placed next). Done 2026-09-20 (commit `2be3494`, 3 passed — the 40 queued jobs carried HIGHER priority than the thumbnail and still never blocked it).
+- [x] J.4 Caller job list reports cap and running count → verify: `GET jobs` body has `principal: {max_running, running}`. Done 2026-09-20 (commit `2be3494`, asserted in the cap test file).
+- [x] J.5 `durable-workloads.md` gains a "Three applications" section naming the label, the env, the cap and the principal table; `~/benchday/docs/harmony-worker-enrolment.md` gains the multi-bundle note (filed in benchday) → verify: both documents name `labels.owner` and `HARMONY_OWNER`. Done 2026-09-20 for the livestack half (commit `90680e8`); the benchday half of this task moves with benchday's execution change.
 - [ ] J.6 Production `authority.json` gains the four principals above; an attune handler bundle and the unchain bundle are installed on `xc-tower-e2e-1` → verify: `python3 -m json.tool ~/.config/livestack-workloads/authority.json` lists four caller principals; the worker's `report` advertises `attune.produce_item` and `unchain.render_chunk`.
-- [ ] J.7 A progress channel. The authority has none: a caller sees `queued → running → done`
+- [x] J.7 A progress channel. The authority has none: a caller sees `queued → running → done`
       and nothing between, and the jingway adapter's `onProgress` (umbrella requirement "The
       jingway compute-offload port has a workloads adapter", jingway task W.5) needs a source.
       The worker publishes a small `progress` reference on the attempt (`{phase, detail?,
@@ -162,6 +162,8 @@ that ignores every field added here behaves exactly as today.
       `tests/test_workload_progress.py` — a handler that reports `tts` then `stills` is read
       back in that order by a polling caller; a heartbeat without progress leaves the last
       value in place; the field is absent, not null, for a handler that never reports.
+      Done 2026-09-20 (commit `2be3494`, 2 passed; malformed progress refused not stored;
+      additive wire — old workers/new authorities and new workers/old authorities both fine).
 
 ## Gate (Phase B, shared with the jingway and unchain owners)
 
