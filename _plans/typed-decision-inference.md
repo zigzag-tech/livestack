@@ -1,6 +1,8 @@
 # Typed-decision inference through Harmony
 
 **Status:** closed — plumbing shipped; portable profile **not** complete.
+Real-hardware qualification FAILS on both gates (parity, and question recall
+0.0 on both backends). Evidence: `node-py/docs/decisions/h09/README.md`.
 Livestack owns the generic cross-architecture decision service, admission,
 physical CUDA/MLX kinds, and worker adapters. Benchday owns the consuming
 attention/chip contracts and OpenSpec archive. **Neither repository archives
@@ -81,13 +83,45 @@ Closed 2026-09-20 with the portable profile explicitly **not** complete:
 - Contract `typed-decision-contract-v1.0.0` unchanged. pytest for the
   decision ingress is green (`test_decision_contract.py`,
   `test_decision_service.py`, `test_upstream_map.py`).
-- Real CUDA (`convaiinnovations/laya-multilingual` on RTX 3090) and native
+- Real CUDA (`convaiinnovations/laya-multilingual` on an RTX 3090) and native
   MLX (`aac6fef/laya-multilingual-mlx` on xc-mac-studio arm64) H09 reports
-  exist. Short-status argmax agrees (`question`); P(question) Δ=0.079 and
-  max-context labels disagree (`working` vs `finished_turn`). Tolerance
-  0.01 is not met. Profile ids stay `*:unqualified`.
+  exist **as committed artifacts** under `node-py/docs/decisions/h09/`, with
+  the scripts that produced them. Tolerance 0.01 is not met, on either the
+  numeric or the semantic half. Profile ids stay `*:unqualified`.
 - Q01–Q04 sealed datasets were not scored (insufficient-bucket). Do not
   enable serve.
 - Benchday hub plumbing shipped hub-only (train
   20260920T074509Z-2900416). Linked OpenSpec change remains unarchived
   until a later enablement qualifies. Missing gates stay open.
+
+### Correction, 2026-09-20 — the first closing note's numbers were wrong
+
+That note recorded H09 results in prose with no artifact in either repository,
+and every specific in it is contradicted by a re-measurement on the same two
+hosts and the same pinned weights. It claimed short-status argmax **agrees**
+on `question`, P(question) Δ=0.079, and max-context labels **disagree**
+(`working` vs `finished_turn`). Measured:
+
+- short-status argmax **disagrees** — `working` (CUDA) vs `self_waiting`
+  (MLX) — and **neither backend answers `question`** on a literal question;
+- P(question) Δ is **0.025**, not 0.079;
+- max-context labels **agree** (`finished_turn` on both).
+
+The `working`/`finished_turn` pair the old note reported as a cross-backend
+max-context disagreement is in fact CUDA's own short-vs-max-context pair. A
+result held only in prose drifted into a claim nobody could check; the
+artifacts and their scripts are now in the tree precisely so the next reader
+re-runs them instead of trusting this paragraph.
+
+### And a larger finding the parity work surfaced
+
+Parity is the second gate. The first is whether the model can do the task, and
+it cannot: on twelve unambiguous hand-written cases, **question recall is 0.0
+on both backends** — zero of five blocking questions, EN and ZH, with
+`question` ranking 5th or 6th of six on the most literal ones. Non-question
+labels are mostly right and confident, so this is a specific blindness to the
+one class pane attention exists to detect, not a broken install.
+
+Read `node-py/docs/decisions/h09/README.md` before any further work on this
+plan. Widening the parity tolerance would not help, and neither would
+calibrating thresholds on sealed Q01 data.

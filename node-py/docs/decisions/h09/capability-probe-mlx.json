@@ -1,0 +1,117 @@
+{
+  "backend": "mlx",
+  "n": 12,
+  "accuracy": 0.4167,
+  "question_recall": 0.0,
+  "chance_accuracy": 0.1667,
+  "rows": [
+    {
+      "id": "q-en-choice",
+      "expected": "question",
+      "got": "self_waiting",
+      "ok": false,
+      "p_expected": 0.0984,
+      "p_question": 0.0984,
+      "rank_of_expected": 4
+    },
+    {
+      "id": "q-en-permission",
+      "expected": "question",
+      "got": "working",
+      "ok": false,
+      "p_expected": 0.0359,
+      "p_question": 0.0359,
+      "rank_of_expected": 6
+    },
+    {
+      "id": "q-en-clarify",
+      "expected": "question",
+      "got": "working",
+      "ok": false,
+      "p_expected": 0.0437,
+      "p_question": 0.0437,
+      "rank_of_expected": 5
+    },
+    {
+      "id": "q-zh-choice",
+      "expected": "question",
+      "got": "unknown",
+      "ok": false,
+      "p_expected": 0.0726,
+      "p_question": 0.0726,
+      "rank_of_expected": 3
+    },
+    {
+      "id": "q-zh-permission",
+      "expected": "question",
+      "got": "working",
+      "ok": false,
+      "p_expected": 0.1285,
+      "p_question": 0.1285,
+      "rank_of_expected": 5
+    },
+    {
+      "id": "w-en-progress",
+      "expected": "working",
+      "got": "working",
+      "ok": true,
+      "p_expected": 0.7811,
+      "p_question": 0.0023,
+      "rank_of_expected": 1
+    },
+    {
+      "id": "w-en-editing",
+      "expected": "working",
+      "got": "working",
+      "ok": true,
+      "p_expected": 0.5717,
+      "p_question": 0.018,
+      "rank_of_expected": 1
+    },
+    {
+      "id": "w-zh-progress",
+      "expected": "working",
+      "got": "idle",
+      "ok": false,
+      "p_expected": 0.2181,
+      "p_question": 0.0133,
+      "rank_of_expected": 3
+    },
+    {
+      "id": "f-en-done",
+      "expected": "finished_turn",
+      "got": "finished_turn",
+      "ok": true,
+      "p_expected": 0.8594,
+      "p_question": 0.0043,
+      "rank_of_expected": 1
+    },
+    {
+      "id": "f-zh-done",
+      "expected": "finished_turn",
+      "got": "finished_turn",
+      "ok": true,
+      "p_expected": 0.9552,
+      "p_question": 0.0024,
+      "rank_of_expected": 1
+    },
+    {
+      "id": "s-en-waiting",
+      "expected": "self_waiting",
+      "got": "self_waiting",
+      "ok": true,
+      "p_expected": 0.979,
+      "p_question": 0.0003,
+      "rank_of_expected": 1
+    },
+    {
+      "id": "s-en-build",
+      "expected": "self_waiting",
+      "got": "working",
+      "ok": false,
+      "p_expected": 0.2091,
+      "p_question": 0.0073,
+      "rank_of_expected": 2
+    }
+  ]
+}

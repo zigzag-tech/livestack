@@ -1,0 +1,117 @@
+{
+  "backend": "cuda",
+  "n": 12,
+  "accuracy": 0.5,
+  "question_recall": 0.0,
+  "chance_accuracy": 0.1667,
+  "rows": [
+    {
+      "id": "q-en-choice",
+      "expected": "question",
+      "got": "working",
+      "ok": false,
+      "p_expected": 0.2696,
+      "p_question": 0.2696,
+      "rank_of_expected": 2
+    },
+    {
+      "id": "q-en-permission",
+      "expected": "question",
+      "got": "finished_turn",
+      "ok": false,
+      "p_expected": 0.0154,
+      "p_question": 0.0154,
+      "rank_of_expected": 6
+    },
+    {
+      "id": "q-en-clarify",
+      "expected": "question",
+      "got": "working",
+      "ok": false,
+      "p_expected": 0.0204,
+      "p_question": 0.0204,
+      "rank_of_expected": 5
+    },
+    {
+      "id": "q-zh-choice",
+      "expected": "question",
+      "got": "unknown",
+      "ok": false,
+      "p_expected": 0.0594,
+      "p_question": 0.0594,
+      "rank_of_expected": 2
+    },
+    {
+      "id": "q-zh-permission",
+      "expected": "question",
+      "got": "finished_turn",
+      "ok": false,
+      "p_expected": 0.0484,
+      "p_question": 0.0484,
+      "rank_of_expected": 3
+    },
+    {
+      "id": "w-en-progress",
+      "expected": "working",
+      "got": "working",
+      "ok": true,
+      "p_expected": 0.8882,
+      "p_question": 0.0011,
+      "rank_of_expected": 1
+    },
+    {
+      "id": "w-en-editing",
+      "expected": "working",
+      "got": "working",
+      "ok": true,
+      "p_expected": 0.5786,
+      "p_question": 0.0207,
+      "rank_of_expected": 1
+    },
+    {
+      "id": "w-zh-progress",
+      "expected": "working",
+      "got": "finished_turn",
+      "ok": false,
+      "p_expected": 0.3193,
+      "p_question": 0.0127,
+      "rank_of_expected": 2
+    },
+    {
+      "id": "f-en-done",
+      "expected": "finished_turn",
+      "got": "finished_turn",
+      "ok": true,
+      "p_expected": 0.9482,
+      "p_question": 0.001,
+      "rank_of_expected": 1
+    },
+    {
+      "id": "f-zh-done",
+      "expected": "finished_turn",
+      "got": "finished_turn",
+      "ok": true,
+      "p_expected": 0.9589,
+      "p_question": 0.0011,
+      "rank_of_expected": 1
+    },
+    {
+      "id": "s-en-waiting",
+      "expected": "self_waiting",
+      "got": "self_waiting",
+      "ok": true,
+      "p_expected": 0.9995,
+      "p_question": 0.0,
+      "rank_of_expected": 1
+    },
+    {
+      "id": "s-en-build",
+      "expected": "self_waiting",
+      "got": "self_waiting",
+      "ok": true,
+      "p_expected": 0.2754,
+      "p_question": 0.0063,
+      "rank_of_expected": 1
+    }
+  ]
+}
