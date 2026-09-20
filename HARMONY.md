@@ -93,6 +93,25 @@ NODE announced wins over the one an operator guessed. A node too old to report a
 `node_id` opts out — a broker must not invent an identity and drop a real node
 over a guess.
 
+**The alias is settled before the probe, not after it.** Reading `node_id` off
+the answer means no answer, no de-duplication — and a node's facade blocks
+while it serves, so a failed probe is what a BUSY node looks like, not a rare
+one. When one of the two addresses failed, the unreachable branch added that
+address's remembered placements and skipped the check while the live address
+added the same node's real ones. Measured on xc-tower-ubuntu 2026-09-18:
+`llm_small` and `ocr_ovis2` each counted twice on one 24 GB card, the planner
+could not fit a 15.3 GB model beside the phantoms, and every request for it
+came back `could not place it on any device`. Node ids already learned settle
+the alias before any probe in the cycle.
+
+**Sticky residency belongs to the node that reported it.** The memory that
+stops a busy node's blink from looking like an eviction is keyed per peer. It
+was keyed by `(kind, device)` across the whole broker, with "does this peer
+serve it" tested by unit NAME — so on a host whose two LLM nodes read one
+units file, both DECLARE `llm_small` while one holds it, and the node holding
+nothing re-asserted the other node's copy on the other node's card, every
+cycle.
+
 ## Residency tiers & priority
 
 Residency tier (per unit, mirrors `livestack_node.manager.ResidencyPolicy`):
@@ -136,6 +155,23 @@ Two things keep the plan tied to the real machine, not just declared estimates:
    cannot cause an OOM grant. When real free goes negative vs. the static model, the
    planner **sheds** idle, non-pinned, least-important units to relieve the pressure
    (`planner.plan` step 0).
+
+   **Two things step 0 will not shed**, both learned the same way — by watching a
+   27B load for 2m15s, get shed seconds later, and load again:
+
+   - **A unit pending demand is waiting for.** The space frees, step 1 loads it
+     straight back, and nobody is served in between. Measured on xc-tower-ubuntu
+     2026-09-18, with three applications all requiring one abliterated 27B:
+     loaded 21:54:21, evicted 21:54:23; loaded 21:56:50, evicted 21:56:51.
+   - **The last tenant on a device, when nothing is pending at all.** Between
+     requests there is no demand to protect, and a warm-on-start load lands
+     exactly there: unit resident, queue empty, reconciled free negative because
+     that unit is large. Shedding it frees space nobody asked for.
+
+   A deficit with one tenant is a DECLARATION problem — that unit is bigger than
+   the model assumed — not contention, and evicting the tenant fixes neither.
+   Demand-driven eviction is untouched: step 1 evicts whatever a request needs,
+   and will not evict a unit to make room for itself.
 
 2. **Proactive reconcile loop** (`hostd`, `LIVESTACK_REPLAN_INTERVAL`, default 5 s).
    Planning is otherwise pull-based (it runs at each `/admit` — synchronously, *before*
@@ -527,6 +563,8 @@ Broker (`hostd`, default `:8799`):
 - `GET /peers` → membership: per-peer state, how long unseen, last probe error.
 - `GET /fleet` → the whole-fleet view (fleet broker; a host broker answers it
   too, for the nodes it knows).
+- `GET /fleet/rank?kind=&regions=&require=` → where a request for `kind`
+  should start. See below.
 
 Node (`/livestack` facade): `GET /capability`, `GET /health`, `GET /residence`
 (now includes `device_mem`), `POST /lease`, `POST /lease/{id}/heartbeat`,
@@ -535,6 +573,66 @@ Node (`/livestack` facade): `GET /capability`, `GET /health`, `GET /residence`
 A batch consumer (e.g. the meeting-digest pipeline) is a good Harmony citizen: it
 `/admit`s, holds residence leases on the units it needs for the run (heartbeated,
 released in `finally`), and keeps non-GPU work (LLM digest, embeddings) off the card.
+
+## Asking for a node that HAS the thing
+
+`GET /fleet/rank` orders every node serving a kind by *measured* distance and
+nothing else. What a caller may state alongside it:
+
+```
+GET /fleet/rank?kind=polytts&regions=na&require=voice:3240e992b30405b7
+```
+
+- **`regions=`** is the caller's policy about WHERE the work may run. The
+  broker applies it and reports every exclusion with its reason. It does not
+  decide the policy — that is the caller's — it applies one it is handed.
+- **`require=`** is what the work NEEDS, as `key:value` clauses. A node is a
+  candidate only if it ADVERTISES the entry, in the `inventory` it publishes
+  on `/capability`. A list entry matches any member, a scalar matches itself,
+  and **silence is never a match**: a node that cannot say it has the voice
+  cannot be sent a request for that voice, the same rule an unknown region
+  already gets.
+
+A node publishes its inventory by passing `inventory=` to `attach()` — a
+mapping, or a zero-arg callable when the answer changes at runtime:
+
+```python
+attach(app, kind="polytts", …, inventory=lambda: {"voice": list(voice_registry)})
+```
+
+**Why this exists.** A polytts serves `polytts` wherever it runs, but a
+synthesis names a `voice_id` and a voice exists on the node it was cloned on.
+Placement that knows only the kind sends an English item to the node holding
+57 Chinese clones and gets `404 Unknown voice_id` — the placement layer having
+done exactly what it was asked, because it was asked the wrong question. The
+answer is not a table of which host holds what: that table is wrong the first
+time somebody clones a voice.
+
+Refusals name the rule that refused:
+
+```
+no polytts target advertising voice=v1: http://…:8100 (does not advertise
+voice=v1 (advertises voice))
+```
+
+Capability is applied AFTER region so the reason names the rule that actually
+emptied the list; run first, it emptied `targets` and the region filter
+overwrote its message with "no polytts target in na" — true, and not why.
+
+### Cold nodes
+
+A node whose model loads on demand reports `ready: false` when nothing is
+resident. That is cold, not broken, and it used to be filtered out of
+placement entirely — so the first request after an idle eviction had nowhere
+to go and nothing could ever warm it. Measured on xc-tower-ubuntu 2026-09-18:
+a restarted polytts left its consumer failing every item with `no polytts
+target in na` while the node sat there, healthy and empty.
+
+A warm node still wins every time; a cold one is used only when there is no
+warm one anywhere, and the answer says so — `cold, and the only polytts;
+band<50 (3ms)` — because a caller about to wait two minutes for a load
+deserves to know that is what it is waiting for. A node the roster has given
+up on stays filtered, however empty its card.
 
 ## Config (env)
 
