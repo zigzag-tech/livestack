@@ -17,6 +17,8 @@ from .blobs import BlobStore
 from .object_routes import route_object
 from .network import BoundedRequests
 
+from ..fleet_auth import AuthError, Principal as FleetPrincipal, resolve_owner
+
 
 @dataclass(frozen=True)
 class Principal:
@@ -26,6 +28,13 @@ class Principal:
     handlers: tuple[str, ...] = ()
     worker: str | None = None
     host: str | None = None
+    # Owners this caller may name in labels.owner, by prefix (the same word
+    # fleet_auth.Principal uses). None: a fixed principal whose jobs are owned
+    # by itself; it may not set labels.owner at all.
+    delegate_prefix: str | None = None
+    # Per-principal cap on concurrently running attempts (J.3).
+    max_running: int | None = None
+    on_cap: str = "queue"  # "queue" (default) | "refuse"
 
     def __post_init__(self):
         name(self.id, "principal")
@@ -36,6 +45,13 @@ class Principal:
             name(self.host, 'host')
         elif not self.handlers:
             raise ValueError('caller/admin must declare allowed handlers')
+        if self.delegate_prefix is not None and self.delegate_prefix:
+            name(self.delegate_prefix, "delegate_prefix")
+        if (isinstance(self.max_running, bool) or self.max_running is not None
+                and (not isinstance(self.max_running, int) or self.max_running < 1)):
+            raise ValueError('max_running must be a positive integer or None')
+        if self.on_cap not in ('queue', 'refuse'):
+            raise ValueError('on_cap must be "queue" or "refuse"')
 
 
 class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
@@ -52,6 +68,8 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
         self.blobs = blobs or BlobStore(store, __import__("pathlib").Path(store.path).parent/"objects")
         self.artifact_mirror = artifact_mirror
         self.principals = tuple(principals)
+        # The store enforces per-principal caps in placement and submission.
+        store.bind_principals(self.principals)
         super().__init__(address, Handler)
 
     def service_actions(self):
@@ -143,6 +161,27 @@ class Handler(BaseHTTPRequestHandler):
             logging.exception('workload request failed')
             self.respond(503, {'error': 'workload authority unavailable; no execution grant'})
 
+    def _authorized_labels(self, principal, body):
+        """labels.owner is reserved: it must sit inside the caller's
+        delegate_prefix, refused exactly as /fleet/admit refuses an owner
+        outside a delegating principal's prefix."""
+        tags = body.get('labels', {})
+        if not isinstance(tags, dict):
+            raise WorkloadError('invalid labels')
+        owner = tags.get('owner')
+        if owner is None:
+            return
+        if not isinstance(owner, str):
+            return  # model.submission's labels validation refuses it with 400
+        if principal.delegate_prefix is None:
+            raise WorkloadError(
+                f"'{principal.id}' has no delegate_prefix and cannot set labels.owner", 403)
+        try:
+            resolve_owner(FleetPrincipal(name=principal.id,
+                                         delegate_prefix=principal.delegate_prefix), owner)
+        except AuthError as error:
+            raise WorkloadError(error.detail, error.status) from error
+
     def route(self, principal, method, parts, body):
         store = self.server.store
         if principal.role in ('caller', 'admin'):
@@ -150,6 +189,7 @@ class Handler(BaseHTTPRequestHandler):
                 if method == 'POST':
                     if body.get('handler') not in principal.handlers:
                         raise WorkloadError('handler is not authorized', 403)
+                    self._authorized_labels(principal, body)
                     with self.server.blobs.open(principal.id, body.get('input_digest')):
                         pass
                     inputs = body.get('input_objects', [])
@@ -160,7 +200,8 @@ class Handler(BaseHTTPRequestHandler):
                             if size != item.get('size'):
                                 raise WorkloadError('input object size mismatch')
                     return store.submit(principal.id, body, allowed_handlers=principal.handlers)
-                return {'jobs': store.list_jobs(principal.id)}
+                return {'jobs': store.list_jobs(principal.id),
+                        'principal': store.principal_status(principal.id)}
             if len(parts) == 2 and parts[0] == 'jobs' and method == 'GET':
                 return store.get(principal.id, parts[1])
             if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'cancel' and method == 'POST':
@@ -172,7 +213,8 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ['worker', 'claim']:
                 return {'assignment': store.claim(principal.worker, body['boot'])}
             if parts == ['worker', 'heartbeat']:
-                return store.heartbeat(principal.worker, body['boot'], body['attempt_id'], body['fence'])
+                return store.heartbeat(principal.worker, body['boot'], body['attempt_id'], body['fence'],
+                                       progress=body.get('progress'))
             if parts == ['worker', 'complete']:
                 return store.complete(principal.worker, body['boot'], body['attempt_id'], body['fence'],
                                       input_digest=body['input_digest'], outcome=body['outcome'], result=body['result'])

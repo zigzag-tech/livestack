@@ -96,6 +96,7 @@ class WorkloadWorker:
             completion = old.get('completion')
             if completion is None and old.get('phase') == 'running':
                 output = self.workspace/old['assignment']['attempt_id']/'output'
+                self._release_fleet_leases(output)
                 result = self.executor.exit_result(output)
                 if result is not None:
                     try:
@@ -205,6 +206,41 @@ class WorkloadWorker:
         # immediately before systemd marks the unit inactive.
         return self.executor.exit_result(output) is not None
 
+    def _attempt_env(self, assignment, root, output, objects, attempt):
+        """The handler's environment. Ownership metadata travels with the job:
+        HARMONY_OWNER is the end user's owner string (labels.owner) when the
+        submitter named one, else the submitting principal itself."""
+        env = dict(self.config.get('environment', {}))
+        spec = assignment['spec']
+        owner = (spec.get('labels') or {}).get('owner') or assignment['owner']
+        env.update(HOME=str(root/'home'), TMPDIR=str(root/'tmp'),
+                   HARMONY_INPUT=str(root/'source'), HARMONY_OUTPUT=str(output),
+                   HARMONY_INPUT_OBJECTS=str(objects),
+                   HARMONY_REQUEST=str(root/'request.json'), HARMONY_ATTEMPT=attempt,
+                   HARMONY_OWNER=owner)
+        if self.config.get('fleet_url'):
+            env['HARMONY_FLEET_URL'] = self.config['fleet_url']
+        if self.config.get('fleet_token'):
+            env['HARMONY_FLEET_TOKEN'] = self.config['fleet_token']
+        return env
+
+    def _release_fleet_leases(self, output):
+        """Release fleet residency leases the handler recorded in
+        $HARMONY_OUTPUT/leases.json, even after a crash. A dead fleet broker
+        must not wedge attempt cleanup: leases expire by TTL, so failures are
+        logged and swallowed."""
+        url = self.config.get('fleet_url')
+        if not url:
+            return
+        from .lease_helper import release_leftovers
+        try:
+            released = release_leftovers(url, Path(output)/'leases.json')
+        except Exception as error:
+            logging.warning('fleet lease cleanup failed for %s: %s', output, error)
+            return
+        for lease_id in released:
+            logging.info('released fleet lease %s from %s', lease_id, output)
+
     def execute(self, assignment):
         attempt = assignment['attempt_id']
         self.executor.unit(attempt)  # Validate before using identity as a path.
@@ -216,7 +252,8 @@ class WorkloadWorker:
         output = root/'output'
         try:
             lease = LeaseKeeper(self.client, assignment, root/'lease',
-                                interval=self.config.get('lease_interval', 10)).start()
+                                interval=self.config.get('lease_interval', 10),
+                                progress_path=output/'progress.json').start()
             spec = assignment['spec']
             handler = self.handlers[spec['handler']]
             need = spec['need']
@@ -236,11 +273,7 @@ class WorkloadWorker:
                     raise WorkloadError('input object size mismatch', 409)
             output.mkdir()
             (root/'request.json').write_text(encode(spec['payload']))
-            env = dict(self.config.get('environment', {}))
-            env.update(HOME=str(root/'home'), TMPDIR=str(root/'tmp'),
-                       HARMONY_INPUT=str(root/'source'), HARMONY_OUTPUT=str(output),
-                       HARMONY_INPUT_OBJECTS=str(objects),
-                       HARMONY_REQUEST=str(root/'request.json'), HARMONY_ATTEMPT=attempt)
+            env = self._attempt_env(assignment, root, output, objects, attempt)
             for path in ('home', 'tmp'):
                 (root/path).mkdir()
             if lease.lost.is_set():
@@ -288,6 +321,7 @@ class WorkloadWorker:
                 if lease:
                     lease.close()
                 raise
+        self._release_fleet_leases(output)
         try:
             completion = self._attach_artifacts(assignment, completion, output)
             self.journal.write(dict(assignment=assignment, phase='completed', completion=completion))

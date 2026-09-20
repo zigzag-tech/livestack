@@ -80,6 +80,26 @@ def labels(value) -> dict:
     return dict(value)
 
 
+def progress(value) -> dict:
+    """The jingway JobProgressSchema shape: {phase, detail?, fraction?}."""
+    if not isinstance(value, dict) or set(value) - {"phase", "detail", "fraction"}:
+        raise WorkloadError("progress must carry phase and optional detail/fraction")
+    name(value.get("phase"), "progress phase")
+    result = {"phase": value["phase"]}
+    detail = value.get("detail")
+    if detail is not None:
+        if not isinstance(detail, str) or len(detail) > 1024:
+            raise WorkloadError("invalid progress detail")
+        result["detail"] = detail
+    fraction = value.get("fraction")
+    if fraction is not None:
+        if (isinstance(fraction, bool) or not isinstance(fraction, (float, int))
+                or not math.isfinite(fraction) or not 0 <= fraction <= 1):
+            raise WorkloadError("progress fraction must be in [0, 1]")
+        result["fraction"] = float(fraction)
+    return result
+
+
 def input_objects(value) -> list[dict]:
     if not isinstance(value, list) or not 1 <= len(value) <= 128:
         raise WorkloadError("input_objects must contain between one and 128 objects")
@@ -114,7 +134,8 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     if not isinstance(value, dict):
         raise WorkloadError("submission must be an object")
     allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
-               "admit", "selector", "estimate_seconds", "deadline", "priority", "locality_host", "retain"}
+               "admit", "selector", "labels", "estimate_seconds", "deadline", "priority",
+               "locality_host", "retain"}
     version = value.get("version")
     if set(value) - allowed or version not in (1, 2) or (version == 1 and "input_objects" in value):
         raise WorkloadError("unsupported workload schema or fields")
@@ -151,11 +172,20 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
         raise WorkloadError("priority must be an integer in [0, 1000000]")
     if not isinstance(value.get("payload", {}), dict) or not isinstance(value.get("retain", False), bool):
         raise WorkloadError("invalid payload or retain flag")
+    job_labels = labels(value.get("labels", {}))
+    if len(job_labels) > 16:
+        raise WorkloadError("a submission carries at most 16 labels")
     result = dict(version=version, key=name(value.get("key"), "key"), handler=handler,
                   input_digest=digest, payload=value.get("payload", {}), need=need,
                   selector=labels(value.get("selector", {})), estimate_seconds=estimate,
                   deadline=deadline, locality_host=value.get("locality_host"),
                   retain=value.get("retain", False))
+    # `labels.owner` is reserved for the end user's owner string and is
+    # authorized at the HTTP boundary against the caller's delegate_prefix,
+    # exactly as /fleet/admit refuses an owner outside a delegating principal.
+    # Keeping the key out when absent preserves legacy idempotency bytes.
+    if job_labels:
+        result["labels"] = job_labels
     # Preserve the canonical bytes of legacy idempotency requests that omitted
     # priority. Placement treats an absent field as zero.
     if priority is not None:

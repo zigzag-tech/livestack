@@ -12,7 +12,9 @@ import sqlite3
 import time
 import uuid
 
-from .model import Limits, WorkloadError, encode, identity, labels, name, resources, submission
+from .model import (Limits, WorkloadError, encode, identity, labels, name, resources,
+                    submission)
+from .model import progress as validate_progress
 
 TERMINAL = ("succeeded", "failed", "cancelled", "expired")
 
@@ -23,11 +25,23 @@ class WorkloadStore:
         self.handlers = set(handlers)
         self.limits = limits or Limits()
         self.clock = clock
+        # Principals are bound by the HTTP server (service.py / WorkloadServer).
+        # A standalone store has no caps and behaves exactly as before binding.
+        self.principals = {}
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         with closing(self.connect()) as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA journal_size_limit=16777216")
             db.executescript(Path(__file__).with_name("schema.sql").read_text())
+            # Additive migrations for databases created before these columns.
+            if "labels" not in {row[1] for row in db.execute("PRAGMA table_info(jobs)")}:
+                db.execute("ALTER TABLE jobs ADD COLUMN labels TEXT NOT NULL DEFAULT '{}'")
+            if "progress" not in {row[1] for row in db.execute("PRAGMA table_info(attempts)")}:
+                db.execute("ALTER TABLE attempts ADD COLUMN progress TEXT")
+
+    def bind_principals(self, principals):
+        """The caller-principal table, for per-principal caps and the job list."""
+        self.principals = {p.id: p for p in principals}
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
@@ -60,12 +74,30 @@ class WorkloadStore:
         if row is None or (owner is not None and row["owner"] != owner):
             raise WorkloadError("job not found", 404)
         result = dict(row)
+        result["labels"] = json.loads(result["labels"] or "{}")
+        # Only the latest reported progress is kept; absent means never reported.
+        latest = db.execute("SELECT progress FROM attempts WHERE job=? AND progress IS NOT NULL "
+                            "ORDER BY fence DESC LIMIT 1", (job_id,)).fetchone()
+        if latest:
+            result["progress"] = json.loads(latest["progress"])
         result["spec"] = json.loads(result["spec"])
         result["result"] = json.loads(result["result"]) if result["result"] else None
         result["attempts"] = [dict(a) for a in db.execute(
             "SELECT id,worker,boot,host,fence,state,expires FROM attempts WHERE job=? ORDER BY fence",
             (job_id,))]
         return result
+
+    def _running(self, db, owner):
+        return db.execute("SELECT count(*) FROM attempts a JOIN jobs j ON a.job=j.id "
+                          "WHERE j.owner=? AND a.state='running'", (owner,)).fetchone()[0]
+
+    def principal_status(self, owner):
+        """The caller's cap and current running count for the job list (J.4)."""
+        principal = self.principals.get(owner)
+        with self.transaction() as db:
+            self._expire(db, self.clock())
+            return {"max_running": principal.max_running if principal else None,
+                    "running": self._running(db, owner)}
 
     def submit(self, owner, request, *, allowed_handlers=None):
         name(owner, "owner")
@@ -82,14 +114,21 @@ class WorkloadStore:
                 return self._job(db, old["id"])
             self._expire(db, now)
             self._prune(db, now)
+            principal = self.principals.get(owner)
+            if (principal is not None and principal.on_cap == "refuse"
+                    and principal.max_running is not None):
+                running = self._running(db, owner)
+                if running >= principal.max_running:
+                    raise WorkloadError(f"principal at max_running ({running})", 429)
             active = db.execute("SELECT count(*) FROM jobs WHERE state IN ('queued','running')").fetchone()[0]
             total = db.execute("SELECT count(*) FROM jobs").fetchone()[0]
             if active >= self.limits.active_jobs or total >= self.limits.active_jobs + self.limits.terminal_jobs:
                 raise WorkloadError("job storage capacity exhausted", 429)
             jid = uuid.uuid4().hex
-            db.execute("INSERT INTO jobs(id,owner,request_key,request_hash,spec,state,created,updated,retain) "
-                       "VALUES(?,?,?,?,?,'queued',?,?,?)",
-                       (jid, owner, spec["key"], digest, encode(spec), now, now, spec["retain"]))
+            db.execute("INSERT INTO jobs(id,owner,request_key,request_hash,spec,state,created,updated,labels,retain) "
+                       "VALUES(?,?,?,?,?,'queued',?,?,?,?)",
+                       (jid, owner, spec["key"], digest, encode(spec), now, now,
+                        encode(spec.get("labels", {})), spec["retain"]))
             return self._job(db, jid)
 
     def get(self, owner, job_id):
@@ -174,7 +213,7 @@ class WorkloadStore:
                                   (worker, boot)).fetchone()
             if existing:
                 return self._assignment(db, existing)
-            place(db, now, self.limits)
+            place(db, now, self.limits, self.principals)
             assigned = db.execute("SELECT * FROM attempts WHERE worker=? AND boot=? AND state='running' ORDER BY created LIMIT 1",
                                   (worker, boot)).fetchone()
             return self._assignment(db, assigned) if assigned else None
@@ -186,8 +225,9 @@ class WorkloadStore:
                 "expires": attempt["expires"], "worker": attempt["worker"], "boot": attempt["boot"],
                 "owner": job["owner"], "spec": job["spec"]}
 
-    def heartbeat(self, worker, boot, attempt_id, fence):
+    def heartbeat(self, worker, boot, attempt_id, fence, *, progress=None):
         now = self.clock()
+        latest = encode(validate_progress(progress), self.limits.record_bytes) if progress is not None else None
         with self.transaction() as db:
             self._expire(db, now)
             self._worker(db, worker, boot)
@@ -196,7 +236,10 @@ class WorkloadStore:
             if not attempt:
                 raise WorkloadError("execution lease is no longer valid", 409)
             expires = now + self.limits.lease_seconds
-            db.execute("UPDATE attempts SET expires=? WHERE id=?", (expires, attempt_id))
+            # A heartbeat without progress leaves the last reported value in
+            # place; progress is an overwrite, never an append.
+            db.execute("UPDATE attempts SET expires=?,progress=COALESCE(?,progress) WHERE id=?",
+                       (expires, latest, attempt_id))
             return {"expires": expires, "lease_remaining": self.limits.lease_seconds}
 
     def complete(self, worker, boot, attempt_id, fence, *, input_digest, outcome, result):
