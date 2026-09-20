@@ -1,0 +1,52 @@
+{
+  "model": "/home/ubuntu/models/laya-multilingual",
+  "model_revision": "convaiinnovations/laya-multilingual",
+  "device": "NVIDIA GeForce RTX 3090",
+  "backend": "cuda",
+  "load_ms": 14076.14,
+  "short": {
+    "ms": 497.7,
+    "choice": "working",
+    "probabilities": {
+      "question": 0.062,
+      "working": 0.5595,
+      "self_waiting": 0.1536,
+      "finished_turn": 0.1334,
+      "idle": 0.0284,
+      "unknown": 0.063
+    },
+    "memory": {
+      "allocated_bytes": 1317402112,
+      "reserved_bytes": 1589641216,
+      "peak_allocated_bytes": 1579797504
+    },
+    "id_set_ok": true,
+    "finite": true
+  },
+  "max_context": {
+    "ms": 46.54,
+    "choice": "finished_turn",
+    "memory": {
+      "allocated_bytes": 1317402112,
+      "reserved_bytes": 1612709888,
+      "peak_allocated_bytes": 1588129280
+    }
+  },
+  "chip_50": {
+    "ms": 60.65,
+    "n": 50,
+    "id_set_ok": true,
+    "memory": {
+      "allocated_bytes": 1317402112,
+      "reserved_bytes": 1700790272,
+      "peak_allocated_bytes": 1668853248
+    },
+    "sample": {
+      "c00": 0.862,
+      "c01": 0.8592,
+      "c02": 0.8713
+    }
+  },
+  "memory_hash": "4c5faa0e11e992f38409a3ba8cf077812f7967cc1bc7e5936457a4c5e76e1de7",
+  "cpu_fallback": false
+}

@@ -1,0 +1,10 @@
+{
+  "bundle_id": "pane-attention-thresholds-v1",
+  "question": { "probability": 0.85, "margin": 0.20 },
+  "negative": { "probability": 0.90, "margin": 0.20 },
+  "chip_useful": { "probability": 0.65 },
+  "score_bucket": "floor(p*100)",
+  "choice_tie_break": "profile_option_order",
+  "probability_sum_tolerance": 1e-3,
+  "notes": "Qualification may raise these floors. Lowering them changes the policy contract."
+}

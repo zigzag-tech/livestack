@@ -1,0 +1,47 @@
+{
+  "case": "S05 identity",
+  "base": {
+    "account_domain": "acct_dev",
+    "realm": "realm_dev",
+    "node": "xc-tower-ubuntu",
+    "pane_incarnation": "pane%1:gen3",
+    "conversation_id": "conv-en-1",
+    "binding_generation": 4,
+    "message_ids": [
+      "m-user-1",
+      "m-agent-1"
+    ],
+    "content_hashes": [
+      "sha256:5b53d026aa56f886adaadc8e22a8d8e347d1535fcf1c3667ce8e03ebb188b80b",
+      "sha256:1a9b1df824fcb969a15475f1031c592b88ba8211112eddcc99f9ff2f25a29ba8"
+    ],
+    "turn_epoch": 12,
+    "lifecycle_generation": 2,
+    "human_input_generation": 7
+  },
+  "base_revision": "sha256:b92c54b2f0220c7d530c85b6521c00a810d626fcba0bfa1614d0a2c57c975409",
+  "future_human_input": {
+    "account_domain": "acct_dev",
+    "realm": "realm_dev",
+    "node": "xc-tower-ubuntu",
+    "pane_incarnation": "pane%1:gen3",
+    "conversation_id": "conv-en-1",
+    "binding_generation": 4,
+    "message_ids": [
+      "m-user-1",
+      "m-agent-1"
+    ],
+    "content_hashes": [
+      "sha256:5b53d026aa56f886adaadc8e22a8d8e347d1535fcf1c3667ce8e03ebb188b80b",
+      "sha256:1a9b1df824fcb969a15475f1031c592b88ba8211112eddcc99f9ff2f25a29ba8"
+    ],
+    "turn_epoch": 12,
+    "lifecycle_generation": 2,
+    "human_input_generation": 8
+  },
+  "future_revision": "sha256:637aaac50b08a333c5f11ffd3730214f3f4e009e06596e7ef296131d9d6f01d7",
+  "stale_timestamps_rejected_fields": [
+    "observed_at_ms",
+    "read_at_ms"
+  ]
+}

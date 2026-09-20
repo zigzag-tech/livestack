@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://benchday.zztech.io/schemas/typed-decision/v1/result.schema.json",
+  "title": "Typed decision success result",
+  "description": "Complete answers only. Partial answer sets are unusable. Errors use error.schema.json, never answers:{} plus success.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "evidence_revision",
+    "profile_id",
+    "outcome",
+    "answers",
+    "execution",
+    "coverage"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "benchday.decision.v1"
+    },
+    "request_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "evidence_revision": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "profile_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "outcome": { "type": "string", "const": "ok" },
+    "packed_state_hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "answers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "oneOf": [
+          { "$ref": "#/definitions/choiceAnswer" },
+          { "$ref": "#/definitions/noulAnswer" }
+        ]
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend",
+        "implementation_id",
+        "model_revision",
+        "tokenizer_hash",
+        "calibration_hash",
+        "packing_version",
+        "precision",
+        "queue_ms",
+        "load_ms",
+        "inference_ms",
+        "total_ms"
+      ],
+      "properties": {
+        "backend": { "type": "string", "enum": ["cuda", "mlx"] },
+        "implementation_id": { "type": "string", "minLength": 1 },
+        "model_revision": { "type": "string", "minLength": 1 },
+        "tokenizer_hash": { "type": "string", "minLength": 1 },
+        "calibration_hash": { "type": "string", "minLength": 1 },
+        "packing_version": { "type": "string", "const": "decision-pack-v1" },
+        "precision": { "type": "string", "minLength": 1 },
+        "queue_ms": { "type": "number", "minimum": 0 },
+        "load_ms": { "type": "number", "minimum": 0 },
+        "inference_ms": { "type": "number", "minimum": 0 },
+        "total_ms": { "type": "number", "minimum": 0 }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["original_tokens", "used_tokens", "omitted_turns", "decisive_span_complete"],
+      "properties": {
+        "original_tokens": { "type": "integer", "minimum": 0 },
+        "used_tokens": { "type": "integer", "minimum": 0 },
+        "omitted_turns": { "type": "integer", "minimum": 0 },
+        "decisive_span_complete": { "type": "boolean" }
+      }
+    }
+  },
+  "definitions": {
+    "choiceAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "choice", "probabilities"],
+      "properties": {
+        "type": { "type": "string", "const": "choice" },
+        "choice": { "type": "string", "minLength": 1 },
+        "probabilities": {
+          "type": "object",
+          "minProperties": 2,
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    },
+    "noulAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "probability"],
+      "properties": {
+        "type": { "type": "string", "const": "noul" },
+        "probability": { "type": "number" }
+      }
+    }
+  }
+}

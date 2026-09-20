@@ -1,0 +1,7 @@
+{
+  "policy_id": "laya-intent-aliases-v1",
+  "families": {
+    "confirm": ["yes", "y", "proceed", "do it", "go ahead", "ok", "okay", "sure", "confirm", "approved", "lgtm"]
+  },
+  "notes": "Opposite answers must never share a family. Offered literal alternatives stay distinct even when a near-duplicate heuristic would conflate them."
+}

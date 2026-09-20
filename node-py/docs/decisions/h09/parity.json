@@ -1,0 +1,91 @@
+{
+  "tolerance": 0.01,
+  "noul_threshold": 0.65,
+  "cuda_report": {
+    "device": "NVIDIA GeForce RTX 3090",
+    "model_revision": "convaiinnovations/laya-multilingual"
+  },
+  "mlx_report": {
+    "device": "arm",
+    "model_revision": "aac6fef/laya-multilingual-mlx"
+  },
+  "semantic": {
+    "short": {
+      "cuda": "working",
+      "mlx": "self_waiting",
+      "agree": false
+    },
+    "max_context": {
+      "cuda": "finished_turn",
+      "mlx": "finished_turn",
+      "agree": true
+    }
+  },
+  "short_probability_deltas": {
+    "question": 0.0253,
+    "working": 0.415,
+    "self_waiting": 0.4705,
+    "finished_turn": 0.1082,
+    "idle": 0.0085,
+    "unknown": 0.019
+  },
+  "noul": {
+    "c00": {
+      "cuda": 0.862,
+      "mlx": 0.5636,
+      "delta": 0.2984,
+      "cuda_admits": true,
+      "mlx_admits": false,
+      "same_decision": false
+    },
+    "c01": {
+      "cuda": 0.8592,
+      "mlx": 0.5111,
+      "delta": 0.3481,
+      "cuda_admits": true,
+      "mlx_admits": false,
+      "same_decision": false
+    },
+    "c02": {
+      "cuda": 0.8713,
+      "mlx": 0.5436,
+      "delta": 0.3277,
+      "cuda_admits": true,
+      "mlx_admits": false,
+      "same_decision": false
+    }
+  },
+  "latency_ms": {
+    "load": {
+      "cuda": 14076.14,
+      "mlx": 485.41
+    },
+    "short": {
+      "cuda": 497.7,
+      "mlx": 663.18
+    },
+    "max_context": {
+      "cuda": 46.54,
+      "mlx": 23.56
+    },
+    "chip_50": {
+      "cuda": 60.65,
+      "mlx": 248.93
+    }
+  },
+  "findings": [
+    "short: argmax disagrees (working vs self_waiting)",
+    "short P(question): delta 0.0253 exceeds 0.01",
+    "short P(working): delta 0.4150 exceeds 0.01",
+    "short P(self_waiting): delta 0.4705 exceeds 0.01",
+    "short P(finished_turn): delta 0.1082 exceeds 0.01",
+    "short P(unknown): delta 0.0190 exceeds 0.01",
+    "noul c00: delta 0.2984 exceeds 0.01",
+    "noul c00: SAME policy yields opposite slates (cuda admits, mlx drops)",
+    "noul c01: delta 0.3481 exceeds 0.01",
+    "noul c01: SAME policy yields opposite slates (cuda admits, mlx drops)",
+    "noul c02: delta 0.3277 exceeds 0.01",
+    "noul c02: SAME policy yields opposite slates (cuda admits, mlx drops)"
+  ],
+  "verdict": "fail"
+}

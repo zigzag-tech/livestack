@@ -1,0 +1,31 @@
+{
+  "profile_id": "pane-attention-v1:unqualified",
+  "task": "pane_attention",
+  "language": "multilingual",
+  "max_len": 1024,
+  "head_max_len": 256,
+  "packing_version": "decision-pack-v1",
+  "option_order": ["question", "working", "self_waiting", "finished_turn", "idle", "unknown"],
+  "templates": {
+    "attention": {
+      "id": "attention",
+      "type": "choice",
+      "instructions": "Classify the current assistant turn's human obligation.",
+      "criteria": {
+        "question": "A current blocking request for the user's answer or decision.",
+        "working": "The agent is describing work it is continuing now.",
+        "self_waiting": "The agent is waiting for its own tool, job, or external event, not the user's answer.",
+        "finished_turn": "The agent reports its turn concluded, without a blocking request.",
+        "idle": "No current work or outstanding human request is established by readable context.",
+        "unknown": "The supplied evidence cannot distinguish these states."
+      }
+    }
+  },
+  "calibration_hash": "unqualified",
+  "qualification_hash": "unqualified",
+  "physical_kinds": ["laya_multilingual_cuda_v1", "laya_multilingual_mlx_v1"],
+  "harmony_requires": {
+    "class": "decision",
+    "benchday_profile": "pane_attention_v1"
+  }
+}

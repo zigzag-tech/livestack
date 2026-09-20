@@ -757,6 +757,38 @@ def test_an_undeclared_attribute_is_not_a_match():
     assert [x for x in plan(w).of(Defer) if x.request_id == "r1"]
 
 
+def test_a_specialist_unit_is_not_a_candidate_for_generic_demand():
+    """A unit declaring `ocr: true` serves work generic demand can never imply
+    — nothing derives `ocr`, so a requirement that merely matches `class: llm`
+    must never place it (measured 2026-09-19: a generic request stopped the
+    resident 27B to load `ocr_ovis2`). Stating `ocr` explicitly is the only
+    door in; naming the unit is another (naming bypasses selection entirely)."""
+    units = dict(_catalogue())
+    units["ocr"] = Unit("ocr", {"vram": 9}, priority=20, residency=Residency.UNPINNED,
+                        reload_cost=30, spread_group="llm", min_residency_s=0,
+                        attributes={"class": "llm", "params_b": 8, "ocr": True})
+    w = WorldState(devices=(gpu("gpu0"),), units=units,
+                   requests=(Request("r1", "", created_at=1000,
+                                     requires={"class": "llm"}),),
+                   now=1000)
+    g = [x for x in plan(w).of(Grant) if x.request_id == "r1"]
+    assert g and g[0].kind == "llm_small", "generic demand skips the OCR unit"
+    assert not [l for l in plan(w).of(Load) if l.kind == "ocr"]
+
+    w_ocr = WorldState(devices=(gpu("gpu0"),), units=units,
+                       requests=(Request("r2", "", created_at=1000,
+                                         requires={"class": "llm", "ocr": True}),),
+                       now=1000)
+    g2 = [x for x in plan(w_ocr).of(Grant) if x.request_id == "r2"]
+    assert g2 and g2[0].kind == "ocr", "stating ocr explicitly still selects it"
+
+    w_named = WorldState(devices=(gpu("gpu0"),), units=units,
+                         requests=(Request("r3", "ocr", created_at=1000),),
+                         now=1000)
+    g3 = [x for x in plan(w_named).of(Grant) if x.request_id == "r3"]
+    assert g3 and g3[0].kind == "ocr", "naming the unit is still an explicit choice"
+
+
 def test_naming_a_kind_still_means_that_kind():
     w = WorldState(devices=(gpu("gpu0"),), units=_catalogue(),
                    requests=(Request("r1", "llm_small", created_at=1000),), now=1000)

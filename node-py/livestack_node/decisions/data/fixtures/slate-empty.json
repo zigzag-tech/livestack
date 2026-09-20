@@ -1,0 +1,15 @@
+{
+  "case": "C05 explicit empty abstention",
+  "slate": {
+    "version": 2,
+    "slate_id": "sha256:befc865f2dd2e59dae3ff83ebc9c2c8e077086c3f741dab23a913049bb713df3",
+    "evidence_revision": "sha256:b92c54b2f0220c7d530c85b6521c00a810d626fcba0bfa1614d0a2c57c975409",
+    "policy_revision": "laya-chips-v1:unqualified",
+    "vocabulary_revision": "sha256:bcd5b9b7224e4186f4eb7e3f9274f86c3042cd7f5dc7ea4d79eab38baffc3e51",
+    "evaluation_generation": 17,
+    "outcome": "abstained",
+    "chips": [],
+    "source_coverage": "complete",
+    "degraded_reason": null
+  }
+}
