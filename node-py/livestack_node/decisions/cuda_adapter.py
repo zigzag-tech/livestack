@@ -11,6 +11,7 @@ from typing import Any, Dict, Mapping, Optional
 
 from .contract import ContractError, load_profile, validate_request, validate_result
 from .packing import pack_request
+from .upstream_map import map_upstream_answer
 
 
 class CudaLayaAdapter:
