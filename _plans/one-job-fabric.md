@@ -153,6 +153,31 @@ that ignores every field added here behaves exactly as today.
 - [x] J.4 Caller job list reports cap and running count → verify: `GET jobs` body has `principal: {max_running, running}`. Done 2026-09-20 (commit `2be3494`, asserted in the cap test file).
 - [x] J.5 `durable-workloads.md` gains a "Three applications" section naming the label, the env, the cap and the principal table; `~/benchday/docs/harmony-worker-enrolment.md` gains the multi-bundle note (filed in benchday) → verify: both documents name `labels.owner` and `HARMONY_OWNER`. Done 2026-09-20 for the livestack half (commit `90680e8`); the benchday half of this task moves with benchday's execution change.
 - [ ] J.6 Production `authority.json` gains the four principals above; an attune handler bundle and the unchain bundle are installed on `xc-tower-e2e-1` → verify: `python3 -m json.tool ~/.config/livestack-workloads/authority.json` lists four caller principals; the worker's `report` advertises `attune.produce_item` and `unchain.render_chunk`.
+      **Blocked on the SAME NA deploy as fleet-caller-identity R.4, measured 2026-09-21 — this
+      is a sequencing fact, not a missing task.** The live authority
+      (`livestack-workload-authority.service`, a *user* unit on xc-tower-ubuntu, bound
+      `100.64.0.18:8810`) runs from a PINNED RELEASE directory, not from the checkout:
+      `PYTHONPATH=/home/ubuntu/.local/share/livestack-workload-releases/5b1458f27d01d49d6563fb753b82426b3a036ed2/node-py`.
+      Neither that release nor xc-tower-ubuntu's `~/livestack` checkout (`dfcd1d4c`, which
+      cannot even resolve `2be3494`) carries `max_running`, `on_cap` or `delegate_prefix` —
+      J.3/J.4's fields. Writing the four principals into `authority.json` today would
+      therefore add four caller rows whose CEILINGS THE SERVER IGNORES, which is worse than
+      not writing them: the cap would read as configured and enforce nothing.
+      Live state recorded for the cutover: 10 principals (`benchday-owner` caller;
+      `policy-lab-profiler` caller; 8 workers incl. `xc-tower-e2e-1/2`, `xc-win-1-wsl`,
+      `xc-tower-stager`, `xc-mac-studio-harmony`), handler allowlist of 10 specs, none of them
+      `attune.*` or `unchain.*`, no principal carrying any of the three new fields.
+      Cutover order, once R.4's NA deploy lands (livestack main is pushed — `d5635e0` — so the
+      deploy is a pull + a new release directory + repointing the unit):
+        1. publish a release dir from a livestack containing `2be3494`, repoint
+           `livestack-workload-authority.service`'s PYTHONPATH, restart;
+        2. add the four caller principals WITH their ceilings (`attune-hub` max_running 2 over
+           `attune.produce_item` + `attune.source_fetch`; `benchday-hub` 4; `unchain`;
+           `sorbonne` 1) and extend the handler allowlist;
+        3. install the attune and unchain handler bundles on the workers, then read the
+           `report` back for the two specs above.
+      The reason both phases share one deploy: Phase A's broker and Phase B's authority are
+      the same Python package on the same host.
 - [x] J.7 A progress channel. The authority has none: a caller sees `queued → running → done`
       and nothing between, and the jingway adapter's `onProgress` (umbrella requirement "The
       jingway compute-offload port has a workloads adapter", jingway task W.5) needs a source.
