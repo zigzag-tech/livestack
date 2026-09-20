@@ -188,11 +188,27 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     early_port = port if port is not None else os.environ.get("LIVESTACK_NODE_PORT")
     node_id = f"{_machine_name(host_id)}:{int(early_port)}" if early_port else None
 
+    # One journal line per mutating request and per auth refusal, with source
+    # address and principal name — the same audit trail hostd writes (see
+    # request_log.py). The principal table is shared with the router's gate
+    # so a logged name is the name the gate resolved, and vice versa.
+    from .fleet_auth import principals_from_env
+    node_principals = principals_from_env(
+        file_var="LIVESTACK_NODE_TOKENS_FILE",
+        inline_var="LIVESTACK_NODE_TOKENS",
+        log=lambda m: print(m, flush=True))
+    from . import request_log
+    request_log.attach(
+        app,
+        principal_for=lambda headers: request_log.principal_label(
+            headers.get("authorization"), node_principals))
+
     app.include_router(
         build_router(manager, coordinator, Capability(kind=kind, host_id=host_id),
                      gpu_call, device_meter=device_meter, activation_tracker=tracker,
                      readiness=readiness, device_id=device_id,
-                     in_flight=in_flight, node_id=node_id, inventory=inventory),
+                     in_flight=in_flight, node_id=node_id, inventory=inventory,
+                     node_principals=node_principals),
         prefix=prefix,
     )
 
@@ -220,7 +236,7 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
         # the operator's to state, and the default keeps single-machine
         # deployments working with nothing set.
         advertise = (os.environ.get("LIVESTACK_NODE_HOST") or "127.0.0.1").strip()
-        from .announce import node_region
+        from .announce import node_region, node_scope
         start_registrar(
             f"http://{advertise}:{int(resolved_port)}{prefix}",
             host_id=host_id, kind=kind,
@@ -228,6 +244,10 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
             # `announce.node_region` for why a measured distance cannot answer
             # it and why a caller must treat unknown as excluded.
             region=node_region(),
+            # Who this node is pooled for, as the operator or the enrolling
+            # hub stated it (`LIVESTACK_NODE_SCOPE`). Absent announces no
+            # scope, which is the fleet default: pooled for everyone.
+            scope=node_scope(),
             interval_s=float(os.environ.get("LIVESTACK_REGISTER_INTERVAL", "30")),
         )
 

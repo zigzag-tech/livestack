@@ -26,6 +26,12 @@ test is a decision nobody tests.
 The delegation prefix is the whole reason this is not just "a shared secret".
 Without it, one compromised caller is every account.
 
+One prefix does mean every account, and it is written `"*"` (:data:`RELAY_ANY`)
+so that it can only ever be chosen deliberately. The engines need it: harmony-llm
+admits under the owner its caller asserted in `X-Harmony-Owner`, and its callers
+are every application on the fleet, so no prefix bounds the set. An empty or
+absent prefix is still REFUSED, because a typo must not mint that principal.
+
 **What this does NOT do**, stated so nobody assumes otherwise: it does not
 authenticate the END USER. A delegating principal asserts "I checked this
 account", and the fleet broker believes it. That is the correct trust boundary —
@@ -38,8 +44,17 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 from dataclasses import dataclass
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Callable, Dict, Mapping, Optional, Tuple
+
+
+#: The one `delegate_prefix` that matches every owner. Spelled as a literal
+#: wildcard rather than as the empty string, because "" is what a typo, a
+#: missing value and a deliberate "anyone" all look like, and those three must
+#: not be the same thing at a security boundary. An owner id never starts with
+#: this character, so the wildcard cannot collide with a real prefix.
+RELAY_ANY = "*"
 
 
 @dataclass(frozen=True)
@@ -52,6 +67,8 @@ class Principal:
     #: The one owner this token may act as, or None when it delegates.
     owner: Optional[str] = None
     #: Owners this token may name, by prefix. None when it is fixed.
+    #: :data:`RELAY_ANY` ("*") means every owner — the engine case, where the
+    #: caller asserts the owner and the engine only relays it.
     delegate_prefix: Optional[str] = None
 
     @property
@@ -128,8 +145,23 @@ def load_principals(raw: str,
             continue
         if not owner and not prefix:
             log(f"[fleet-auth] token {fp} ({name}) rejected: names neither an "
-                f"owner nor a delegate_prefix, so it could act as anyone")
+                f"owner nor a delegate_prefix, so it could act as anyone. A "
+                f"principal that really must relay ANY owner says so with "
+                f"`\"delegate_prefix\": \"{RELAY_ANY}\"` — never by leaving the "
+                f"field empty or absent")
             continue
+        if prefix == RELAY_ANY:
+            # The engines are the reason this exists: harmony-llm, polytts and
+            # polyasr admit under the owner their CALLER asserted (the
+            # `X-Harmony-Owner` header), and their callers are every
+            # application on the fleet. No prefix can cover that set, so the
+            # honest spelling is a wildcard. It is loud on purpose: a `*`
+            # principal is as strong as every application token at once, which
+            # is a thing to notice in a journal, not to discover in a ledger.
+            log(f"[fleet-auth] token {fp} ({name}) RELAYS ANY OWNER "
+                f"(delegate_prefix \"{RELAY_ANY}\") — it is as strong as every "
+                f"application token combined; issue it only to an engine that "
+                f"relays an owner asserted by an authenticated caller")
         out[token] = Principal(name=name,
                                owner=str(owner) if owner else None,
                                delegate_prefix=str(prefix) if prefix else None)
@@ -187,6 +219,12 @@ def resolve_owner(principal: Principal, requested: Optional[str]) -> str:
         raise AuthError(
             400, f"'{principal.name}' is a delegating principal and must name "
                  f"an `owner`; it has no identity of its own to charge")
+    if principal.delegate_prefix == RELAY_ANY:
+        # An engine relaying its caller's asserted owner: any owner is in
+        # scope by construction. The named owner still reaches the ledger, so
+        # the request stays attributable even though the prefix does not bound
+        # it.
+        return asked
     if not asked.startswith(principal.delegate_prefix or ""):
         # The prefix is what stops one compromised delegating caller from being
         # every account. Without it a hub token could spend media-corpus's quota
@@ -208,3 +246,59 @@ def authenticate(principals: Mapping[str, Principal],
     """
     principal = principal_for(principals, bearer_token(header))
     return resolve_owner(principal, requested_owner), principal
+
+
+def principals_from_env(env: Optional[Mapping[str, str]] = None, *,
+                        file_var: str = "LIVESTACK_FLEET_TOKENS_FILE",
+                        inline_var: str = "LIVESTACK_FLEET_TOKENS",
+                        log: Callable[..., None] = lambda *_: None
+                        ) -> Optional[Dict[str, Principal]]:
+    """The principal table from the environment: ``file_var`` first, inline
+    ``inline_var`` second.
+
+    The file wins because the one secret in the system should not be the one
+    setting that is inline JSON — systemd strips bare double quotes out of
+    inline values (see the crash of 2026-09-05 in hostd.py), and a credential
+    that can be read out of `systemctl show` is a credential that every
+    process on the box shares whether it needed it or not.
+
+    The return value distinguishes the two shapes of "no principals", because
+    they demand opposite behaviour:
+
+    * ``None`` — nothing is configured (neither variable set). Auth is OFF;
+      every endpoint keeps its unauthenticated behaviour.
+    * ``{}`` — a source WAS configured but yielded nothing (a refused
+      world-readable file, a missing file, malformed JSON, or every entry
+      rejected). Auth is ON with an empty table, which FAILS CLOSED: the
+      write endpoints 401 every caller until the operator fixes the source.
+      ``load_principals`` has always promised this ("NO principals loaded, so
+      /fleet/admit will refuse every caller"); without the None/{} split the
+      promise could not be kept, because an empty dict also means "unset".
+    """
+    environ: Mapping[str, str] = os.environ if env is None else env
+    path = (environ.get(file_var) or "").strip()
+    inline = environ.get(inline_var, "")
+    if not path and not (inline or "").strip():
+        return None
+    if path:
+        try:
+            st = os.stat(path)
+        except OSError as e:
+            log(f"[fleet-auth] {file_var}={path!r} cannot be read ({e}) — "
+                f"NO principals loaded; every caller gets 401 until this is "
+                f"fixed. Failing closed, not falling back to {inline_var}: a "
+                f"missing credential file is a config error, and a config "
+                f"error must never silently weaken authentication")
+            return {}
+        if st.st_mode & 0o077:
+            log(f"[fleet-auth] {file_var}={path!r} is mode "
+                f"{oct(st.st_mode & 0o777)}; group/other must have NO access "
+                f"(chmod 0600). Refusing to use it — NO principals loaded, "
+                f"every caller gets 401 until the permissions are fixed. A "
+                f"world-readable token file is a disclosed credential, and a "
+                f"disclosed credential is worse than none because it keeps "
+                f"authorizing")
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            return load_principals(f.read(), log=log)
+    return load_principals(inline, log=log)

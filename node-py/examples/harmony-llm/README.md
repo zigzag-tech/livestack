@@ -139,6 +139,23 @@ variables, byte-for-byte as before units existed.
 | `HARMONY_LLM_RESIDENCY` | node default: `SOFT_PIN` / `UNPINNED` / `HARD_PIN` |
 | `HARMONY_LLM_COLOAD` | let several units be resident (implied by >1 unit) |
 | `HARMONY_LLM_CUDA_DEVICE` | the card this node speaks for |
+| `HARMONY_LLM_FLEET_TOKEN` | this engine's fleet bearer token, sent as `Authorization` on every `/admit` (unset = no header; right until the token rollout) |
+
+### Who is asking — `X-Harmony-Owner`
+
+A hub that authenticated a person relays who they are on every engine request:
+
+    X-Harmony-Owner: benchday:acct_b
+
+This node reads that header on its OpenAI surface (`/v1/chat/completions`,
+`/v1/completions`, `/v1/embeddings`) and admits with the asserted owner,
+marked `owner_asserted: true` in the ledger. A request **without** the header
+is admitted as this node's own identity, `harmony-llm:<HOST_ID>`, marked
+`owner_asserted: false`. The header is an assertion, not a credential: the
+broker resolves the owner against this node's delegating fleet token
+(`HARMONY_LLM_FLEET_TOKEN`), so a caller cannot pick an owner the node's
+principal was not granted. See `HARMONY.md` → "Who is asking" for the full
+contract, shared verbatim by polytts and polyasr.
 
 ### What NOT to offer
 

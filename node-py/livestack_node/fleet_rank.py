@@ -36,6 +36,7 @@ The order is lexicographic and each level is there for a reason:
 """
 from __future__ import annotations
 
+import statistics
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -128,6 +129,12 @@ def distance_to(view: dict, node_host: Optional[str], node_row: dict,
       the asking host is local, and no probe is needed to know that.
     * `relay:<id>` — the relay's own measured distance to the node's host, when
       the relay reports one.
+    * `region:<r>` — the MEDIAN of the measured link rows of the hosts in
+      region `r` to the node's host. A caller off the tailnet has no links row
+      of its own; rather than answer from the fleet broker's vantage (which is
+      wherever the broker happens to sit), it borrows the region's own
+      measurements — the same links a node inside that region would use.
+      Unmeasured pairs contribute nothing; no row at all means no opinion.
 
     None means UNMEASURED, which sorts last. It never becomes a default: a
     default distance is a guess wearing a measurement's clothes.
@@ -148,6 +155,36 @@ def distance_to(view: dict, node_host: Optional[str], node_row: dict,
         row = (view.get("relays", {}) or {}).get(name) or {}
         ms = (row.get("links") or {}).get(node_host)
         return float(ms) if isinstance(ms, (int, float)) else None
+    if scope == "region":
+        name = name.lower()
+        links: List[float] = []
+        for host_id, host in (view.get("hosts") or {}).items():
+            host = host or {}
+            if _host_region(host) != name:
+                continue
+            ms = (host.get("links") or {}).get(node_host)
+            if isinstance(ms, (int, float)):
+                links.append(float(ms))
+        if not links:
+            return None
+        # Median (statistics.median): one fast outlier host must not define a
+        # region, and an even member count averages rather than picks the
+        # larger.
+        return statistics.median(links)
+    return None
+
+
+def _host_region(host: dict) -> Optional[str]:
+    """A host's region, as its nodes declare it (the first that says).
+
+    Hosts in the fleet view carry region on their NODE rows — one host, one
+    region in practice, and a node that has not said is unknown, which a
+    region vantage must not count as a member.
+    """
+    for node in host.get("nodes") or []:
+        region = (node.get("region") or "").strip().lower()
+        if region:
+            return region
     return None
 
 
@@ -274,6 +311,11 @@ def rank(view: dict, kind: str, vantage: str = "direct",
     return {
         "kind": kind,
         "vantage": vantage,
+        # WHICH vantage answered. A caller that asked for region:na (or a
+        # relay) gets the region's/relay's own measurements back — this field
+        # is the receipt, so a ranking is never silently re-based onto the
+        # fleet broker's own vantage by a path that ignored the ask.
+        "vantage_used": vantage,
         "generated_at": now,
         "ttl_s": ttl_s,
         "chosen": chosen,

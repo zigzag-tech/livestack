@@ -10,12 +10,24 @@ from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedul
 from .model import encode
 
 
-def place(db, now, limits):
+def place(db, now, limits, principals=None):
     workers = db.execute("SELECT * FROM workers WHERE ready=1 AND seen>? ORDER BY id",
                          (now-limits.fresh_seconds,)).fetchall()
     reports = {w["id"]: json.loads(w["report"]) for w in workers}
     active = db.execute("SELECT * FROM attempts WHERE state IN ('running','cleanup')").fetchall()
     used, busy = {}, set()
+    # Per-principal concurrency cap: running attempts per job owner, counted
+    # before the queued loop. A capped owner is skipped, never a blocker —
+    # later owners' jobs still place.
+    running = {}
+    for a in active:
+        if a["state"] != "running":
+            continue
+        job_row = db.execute("SELECT owner FROM jobs WHERE id=?", (a["job"],)).fetchone()
+        if job_row:
+            running[job_row["owner"]] = running.get(job_row["owner"], 0) + 1
+    caps = {pid: p.max_running for pid, p in (principals or {}).items()
+            if getattr(p, "max_running", None) is not None}
     for a in active:
         # attempts.need stores what the attempt reserved, which is its admission
         # vector; a burstable attempt is not charged for capacity it may not use.
@@ -39,6 +51,11 @@ def place(db, now, limits):
     for row in db.execute("SELECT * FROM jobs WHERE state='queued' "
                           "ORDER BY COALESCE(json_extract(spec,'$.priority'),0) DESC, created, id").fetchall():
         spec = json.loads(row["spec"])
+        cap = caps.get(row["owner"])
+        if cap is not None and running.get(row["owner"], 0) >= cap:
+            db.execute("UPDATE jobs SET reason=? WHERE id=?",
+                       (f"principal at max_running ({cap})", row["id"]))
+            continue
         # Admission and execution are separate quantities. `admit` is both the
         # fit test and the reservation, so admitted vectors on a host always sum
         # within its capacity; `need` never enters placement and only caps the
@@ -86,5 +103,6 @@ def place(db, now, limits):
         db.execute("UPDATE jobs SET state='running',fence=?,updated=?,reason=? WHERE id=?",
                    (fence, now, grants[0].reason, row["id"]))
         busy.add(chosen["id"])
+        running[row["owner"]] = running.get(row["owner"], 0) + 1
         for k, n in admit.items():
             host_free[chosen["host"]][k] -= n

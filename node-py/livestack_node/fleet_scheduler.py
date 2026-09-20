@@ -313,10 +313,34 @@ class FleetState:
 
 # --- helpers ----------------------------------------------------------------
 def quota_for(owner: str, policy: SchedulerPolicy) -> Optional[int]:
-    """This account's ceiling, or None for no ceiling."""
+    """This owner's ceiling, or None for no ceiling.
+
+    An exact entry in `account_quotas` wins. Otherwise the LONGEST prefix key
+    ending in `:` that `owner` starts with — `attune:acct_a` answers to the
+    `attune:` ceiling when no exact row exists, so one config line caps a whole
+    application: `{"attune:": 4, "attune:acct_a": 2, "benchday:": 6}`.
+    """
     if owner in policy.account_quotas:
         return policy.account_quotas[owner]
+    best_len, best = 0, None
+    for key, cap in policy.account_quotas.items():
+        if key.endswith(":") and owner.startswith(key) and len(key) > best_len:
+            best_len, best = len(key), cap
+    if best is not None:
+        return best
     return policy.max_concurrent_per_account
+
+
+def _prefix_ceiling_keys(owner: str, policy: SchedulerPolicy) -> List[str]:
+    """Every aggregate (prefix) ceiling this owner answers to, longest first.
+
+    An owner answers to ALL its enclosing prefixes at once, not just the
+    longest: `attune:acct_b` with its own ceiling of 6 is still inside
+    `attune:`'s ceiling of 4, and the tighter one is the one that fires.
+    """
+    keys = [k for k in policy.account_quotas
+            if k.endswith(":") and owner.startswith(k)]
+    return sorted(keys, key=len, reverse=True)
 
 
 def over_quota(owner: str, usage: Mapping[str, int],
@@ -327,14 +351,27 @@ def over_quota(owner: str, usage: Mapping[str, int],
     with a sentence naming the count, which a caller can read, log and retry
     against — where a quiet demotion would look identical to a slow fleet, and
     the tenant would file a latency bug instead of asking for more quota.
+
+    Two ceilings are checked independently, and each refusal names the count
+    IN FORCE — the one that fired:
+
+    * the owner's OWN ceiling, counted over exactly `owner`'s slots;
+    * every enclosing prefix ceiling, counted as the AGGREGATE over all owners
+      under that prefix. `attune:` capped at 4 with `acct_a` holding 3 refuses
+      `acct_b`'s second job at aggregate 4 — and the sentence says so, so the
+      refusal is read as "the application is full", not "you are".
     """
-    cap = quota_for(owner, policy)
-    if cap is None:
-        return None
-    held = int(usage.get(owner, 0))
-    if held < cap:
-        return None
-    return f"account quota: {owner} holds {held} of {cap} slot(s)"
+    held_own = int(usage.get(owner, 0))
+    own_cap = quota_for(owner, policy)
+    if own_cap is not None and held_own >= own_cap:
+        return f"account quota: {owner} holds {held_own} of {own_cap} slot(s)"
+    for key in _prefix_ceiling_keys(owner, policy):
+        cap = policy.account_quotas[key]
+        held = sum(int(n) for o, n in usage.items() if o.startswith(key))
+        if held >= cap:
+            return (f"account quota: {owner} holds {held} of {cap} slot(s) "
+                    f"(aggregate over '{key}')")
+    return None
 
 
 def fair_share_delay(job: Job, usage: Mapping[str, int],

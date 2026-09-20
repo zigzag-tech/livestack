@@ -35,16 +35,28 @@ Config via env:
     LIVESTACK_PROBES     health probes for hosted devices:
                          {"buildhost-a": {"cmd": "docker info", "interval_s": 60}}
     LIVESTACK_LEASE_TTL_S hosted-lease expiry without heartbeats (default 120)
-    LIVESTACK_FLEET_TOKENS  bearer token -> principal, as JSON. When set,
-                         POST /fleet/admit REQUIRES a token and the owner comes
-                         from it, never from the body:
+    LIVESTACK_FLEET_TOKENS_FILE  mode-0600 JSON file of bearer token ->
+                         principal, read FIRST (the file wins over the inline
+                         env; a world-readable file is REFUSED — see
+                         fleet_auth.principals_from_env). When principals
+                         exist, POST /admit and POST /fleet/admit REQUIRE a
+                         token and the owner comes from it, never the body:
                            {"<tok>": {"name":"media-corpus","owner":"media-corpus"},
                             "<tok>": {"name":"hub","delegate_prefix":"acct_"}}
+                         `"delegate_prefix": "*"` is the ONE prefix that means
+                         every owner: the engine case, where the caller asserts
+                         the owner and the engine only relays it. An empty or
+                         absent prefix is refused, so that principal cannot be
+                         minted by a typo.
                          A fixed principal is one service with one identity; a
                          delegating one has authenticated somebody else and may
-                         name an owner inside its prefix. Unset = no auth, which
-                         makes any quota advisory — the startup line says so.
-                         Quote it for systemd (bare double quotes are stripped).
+                         name an owner inside its prefix. Unset = no auth,
+                         which makes any quota advisory — the startup line and
+                         GET /fleet both say so. Quote the inline form for
+                         systemd (bare double quotes are stripped).
+    LIVESTACK_FLEET_TOKENS  inline fallback of the same JSON, used only when
+                         the file variable is unset. Prefer the file: the one
+                         secret in the system should not be inline JSON.
     LIVESTACK_ACCOUNT_QUOTA  max concurrent fleet slots ONE account may hold.
                          UNSET = no ceiling, which is the right default for a
                          single-operator fleet and the WRONG one the day
@@ -70,6 +82,11 @@ Config via env:
                          timed on the reconcile loop and its own `links` row is
                          collected, so the fleet holds a measured MATRIX rather
                          than one broker's star. Unmeasured pairs have no opinion.
+    LIVESTACK_RELAYS     JSON of relay vantage points the fleet cannot measure
+                         itself: {"<id>": {"region": "na", "links": {"<host>":
+                         <ms>}}}. A caller with no links row ranks from
+                         `vantage=relay:<id>`; declared links are carried into
+                         the fleet view as `relays`.
     LIVESTACK_CAPABILITY_TTL  seconds a node's /capability descriptor is cached
                          for the /fleet view (default 15). /fleet is a poll
                          surface and probes to Nanjing cost 0.5-1.5s each.
@@ -83,7 +100,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .hostbroker import HostBroker, RestPeer
 from .membership import MembershipPolicy, RosterFull
@@ -134,6 +151,16 @@ def build_app(broker: HostBroker):
 
     from .ui import page as ui_page
     app = FastAPI(title="Livestack Harmony broker")
+    # One journal line per mutating request and per auth refusal, with source
+    # address and principal name — the evidence the R.3 inventory gate reads
+    # ("zero 401s from an address not in the inventory"). Reads stay silent;
+    # see request_log.py for the reasoning and what is never logged.
+    from . import request_log
+    request_log.attach(
+        app,
+        principal_for=lambda headers: request_log.principal_label(
+            headers.get("authorization"),
+            getattr(broker, "fleet_principals", None)))
     state = {"last_evicted_at": {}}
     # Hosted-backend health probes (LIVESTACK_PROBES), run on the reconcile
     # loop's cadence. probe_state is what /status reports under "hosted".
@@ -145,17 +172,80 @@ def build_app(broker: HostBroker):
         for ev in p.of(Evict):
             state["last_evicted_at"][ev.kind] = time.monotonic()
 
+    def _read_principal(broker, authorization) -> Optional[str]:
+        """The principal NAME a credential on a READ endpoint resolves to, or
+        None. Reads stay open — no credential, unknown token, or auth not
+        configured all mean "anonymous" and are recorded as such (null), never
+        refused: the refusal machinery belongs to the write endpoints."""
+        principals = getattr(broker, "fleet_principals", None)
+        if not principals or not authorization:
+            return None
+        from .fleet_auth import AuthError, bearer_token, principal_for
+        try:
+            return principal_for(principals, bearer_token(authorization)).name
+        except AuthError:
+            return None
+
     @app.post("/admit")
-    def admit(payload: dict = Body(...)):
+    def admit(payload: dict = Body(...), authorization: str = Header(None)):
         kind = payload.get("kind") or ""
         requires = payload.get("requires") or {}
         if not kind and not requires:
             raise HTTPException(400, "'kind' or 'requires' is required")
+        # WHO, before the request is planned — exactly as /fleet/admit: the
+        # credential decides the owner; the body is consulted only for a
+        # principal that was granted delegation, and only inside its prefix.
+        # With no auth SOURCE configured (None) this is skipped entirely and
+        # the owner comes from the body, byte-for-byte the unauthenticated
+        # behaviour. An empty-but-configured table ({}: refused file,
+        # malformed source) is the opposite state — auth ON with nobody
+        # admitted, failing closed.
+        principals = getattr(broker, "fleet_principals", None)
+        if principals is not None:
+            from .fleet_auth import AuthError, authenticate
+            try:
+                owner, principal = authenticate(
+                    principals, authorization, payload.get("owner"))
+            except AuthError as e:
+                # 403 from a DELEGATING principal is ledgered under the
+                # principal's name: a known caller tried to spend capacity
+                # outside the prefix it was granted, and that attempt is a
+                # fact a retrospective needs. A fixed principal naming a
+                # mismatched owner is a caller confusing its own identity —
+                # refused, and recorded against NEITHER owner, because nothing
+                # was spent and attributing a refusal to an account it never
+                # acted as would pollute that account's record. A 401 has no
+                # principal to name, so it writes nothing.
+                if e.status == 403:
+                    from .fleet_auth import bearer_token, principal_for
+                    try:
+                        who = principal_for(principals,
+                                            bearer_token(authorization))
+                    except AuthError:
+                        who = None
+                    if who is not None and who.delegates:
+                        broker.emit_admit(
+                            {"kind": kind or None, "candidates": [],
+                             "target": None, "reason": e.detail,
+                             "refused": "auth_prefix"},
+                            {"owner": payload.get("owner") or None,
+                             "principal": who.name,
+                             "refused": e.detail})
+                raise HTTPException(e.status, e.detail)
+        else:
+            owner, principal = (payload.get("owner", "consumer"), None)
         req = Request(id=payload.get("id", f"{kind or 'req'}-{int(time.monotonic() * 1000)}"),
-                      kind=kind, owner=payload.get("owner", "consumer"),
+                      kind=kind, owner=owner,
                       created_at=time.monotonic(),
                       selector=payload.get("selector") or {},
-                      requires=requires)
+                      requires=requires,
+                      # Set only when a fronting engine vouched for `owner`
+                      # via its inbound X-Harmony-Owner header; the Grant
+                      # record carries it so the ledger can tell an asserted
+                      # owner from the engine's own identity. Never trusted
+                      # from an anonymous caller to LIFT an owner — it only
+                      # annotates whichever owner the credential path resolved.
+                      owner_asserted=bool(payload.get("owner_asserted")))
         # NOTE on the degrade branch below. It answers `granted: True` for ANY
         # exception, which tells the caller to proceed — and a caller that loads
         # a model on that word puts it on a card the planner never cleared.
@@ -237,6 +327,11 @@ def build_app(broker: HostBroker):
                 host_id=payload.get("host_id"),
                 device_id=payload.get("device_id"),
                 region=payload.get("region"),
+                # Who this node is pooled for, as the operator or the
+                # enrolling hub stated it. Passed through uninterpreted:
+                # the roster records the grant; the admission path enforces
+                # it (`fleet_admit.targets_from_view`).
+                scope=payload.get("scope"),
                 kinds=payload.get("kinds"),
                 readiness=payload.get("readiness"),
             )
@@ -309,7 +404,8 @@ def build_app(broker: HostBroker):
     def fleet_rank(kind: str, vantage: str = "direct", via: str = None,
                    region: str = None, regions: str = None,
                    require: str = None,
-                   allow_unknown_region: bool = False, ttl_s: float = 60.0):
+                   allow_unknown_region: bool = False, ttl_s: float = 60.0,
+                   authorization: str = Header(None)):
         """Where should a `kind` request START, from this vantage.
 
         Advisory, and bounded: the response carries `generated_at` and `ttl_s`,
@@ -347,6 +443,12 @@ def build_app(broker: HostBroker):
         # emitter knew it, which is what makes a ledger record readable later —
         # but WHERE the work may run is `regions`, below.
         result["asker_region"] = region
+        # WHO asked, when they said: a read stays open without a credential,
+        # but a VALID one is recorded on the ledger row beside the owner, so a
+        # retrospective can tell "the hub, looking" from "nobody, looking".
+        # Reads never refuse over a bad token — that is what the write
+        # endpoints are for.
+        result["principal"] = _read_principal(broker, authorization)
 
         wanted = [r.strip().lower() for r in (regions or "").split(",") if r.strip()]
         if wanted:
@@ -412,8 +514,8 @@ def build_app(broker: HostBroker):
         # itself. The credential decides; the body is consulted only for a
         # principal that was granted the right to delegate, and only inside its
         # prefix.
-        principals = getattr(broker, "fleet_principals", {})
-        if principals:
+        principals = getattr(broker, "fleet_principals", None)
+        if principals is not None:
             try:
                 owner, principal = authenticate(
                     principals, authorization, payload.get("owner"))
@@ -426,8 +528,54 @@ def build_app(broker: HostBroker):
             # discovered.
             owner, principal = (payload.get("owner", "consumer"), None)
         est = (payload.get("estimate") or {}).get("duration_s", 60.0)
+        # WHERE the work may run, stated by the caller and APPLIED here — the
+        # same policy shape `GET /fleet/rank?regions=` accepts. Filtering
+        # before scheduling (not scoring after) is what guarantees the answer
+        # never places outside the policy: a region the caller refused cannot
+        # win, place second and get chosen by default, or appear in the
+        # granted target. `/fleet/rank` already moved callers onto this
+        # contract; admission silently dropping the guarantee on the way in
+        # was the gap (see `_plans/fleet-caller-identity.md`, requirement
+        # "Region policy holds on the admission path").
+        view = broker.fleet_view()
+        wanted = [r.strip().lower()
+                  for r in str(payload.get("regions") or "").split(",") if r.strip()]
+        allow_unknown = bool(payload.get("allow_unknown_region"))
+        region_policy = None
+        if wanted:
+            from .client import eligible_targets
+            # eligible_targets speaks the ranker's row shape: one row per node
+            # with its declared region. Unknown region is excluded unless the
+            # caller explicitly allows it — silence is not a match.
+            rows = [{"target_id": (n.get("peer", "")[:-len("/livestack")]
+                                   if n.get("peer", "").endswith("/livestack")
+                                   else n.get("peer", "")),
+                     "region": n.get("region")}
+                    for h in (view.get("hosts") or {}).values()
+                    for n in (h.get("nodes") or [])]
+            kept, rejected = eligible_targets(
+                {"targets": rows}, allow_regions=set(wanted),
+                allow_unknown_region=allow_unknown)
+            kept_ids = {r["target_id"] for r in kept}
+            # Filter into a COPY: the view belongs to the broker, and the
+            # next caller (or the same caller retrying) must see the fleet
+            # as it is, not as the last request's policy left it.
+            view = {
+                **view,
+                "hosts": {
+                    host_id: {**h, "nodes": [
+                        n for n in (h.get("nodes") or [])
+                        if ((n.get("peer", "")[:-len("/livestack")]
+                             if n.get("peer", "").endswith("/livestack")
+                             else n.get("peer", "")) in kept_ids)]}
+                    for host_id, h in (view.get("hosts") or {}).items()
+                },
+            }
+            region_policy = {"allow": wanted,
+                             "allow_unknown": allow_unknown,
+                             "rejected": rejected}
         result = _admit(
-            broker.fleet_view(), kind=kind,
+            view, kind=kind,
             # From the broker's own lease ledger, expired entries dropped
             # first — a quota computed over leases nobody heartbeats would turn
             # one caller's crash into an outage that outlives it.
@@ -440,6 +588,20 @@ def build_app(broker: HostBroker):
             estimate_s=float(est),
             policy=getattr(broker, "fleet_policy", None),
         )
+        if region_policy is not None:
+            result["region_policy"] = region_policy
+            if (not result.get("granted")
+                    and result.get("refused") != "account_quota"
+                    and region_policy["rejected"]):
+                # A refusal names the excluded targets, the same sentence
+                # /fleet/rank uses: "no llm target in na: http://cn (region
+                # cn, wanted na)". A caller must be able to tell "the fleet
+                # has no room" from "the room exists and your policy refused
+                # it" — those want opposite responses.
+                result["reason"] = (
+                    f"no {kind} target in {'/'.join(region_policy['allow'])}: "
+                    + "; ".join(f"{r['target_id']} ({r['why']})"
+                                for r in region_policy["rejected"][:4]))
         request = {"owner": owner,
                    # The principal is recorded BESIDE the owner, not instead of
                    # it: "the hub, acting for acct_x" and "acct_x itself" are
@@ -449,7 +611,12 @@ def build_app(broker: HostBroker):
                    "sla": payload.get("sla", "normal"),
                    "vantage": result.get("vantage"),
                    "selector": payload.get("selector") or {},
-                   "locality_host": payload.get("locality_host")}
+                   "locality_host": payload.get("locality_host"),
+                   # The region policy in force and every row it rejected, so
+                   # the admit record shows the placement the policy forbade
+                   # beside the one it allowed — the same shape /fleet/rank
+                   # records.
+                   "region_policy": region_policy}
         if result.get("refused") == "account_quota":
             # 429, not 200-with-no-target: an account at its ceiling is a
             # different answer from a full fleet, and a caller that cannot tell
@@ -670,31 +837,46 @@ def main():
                   flush=True)
             return {}
 
-    from .fleet_auth import load_principals
-    fleet_principals = load_principals(
-        os.environ.get("LIVESTACK_FLEET_TOKENS", ""),
-        log=lambda m: print(m, flush=True))
+    from .fleet_auth import RELAY_ANY, principals_from_env
+    fleet_principals = principals_from_env(log=lambda m: print(m, flush=True))
     fleet_policy = SchedulerPolicy(
         max_concurrent_per_account=_quota_int("LIVESTACK_ACCOUNT_QUOTA"),
         account_quotas=_quota_map("LIVESTACK_ACCOUNT_QUOTAS"),
         fair_share_penalty_s=float(
             os.environ.get("LIVESTACK_FAIR_SHARE_PENALTY_S", "30") or 30),
     )
-    if fleet_principals:
-        print(f"[harmony] /fleet/admit requires a bearer token; "
+    if fleet_principals is None:
+        # Auth off is a STATE, not an absence — said out loud at startup and
+        # reported by GET /fleet, because the day tokens flip on nobody should
+        # have to diff journals to notice.
+        print("[harmony] fleet auth is OFF — no principal source configured "
+              "(LIVESTACK_FLEET_TOKENS_FILE or LIVESTACK_FLEET_TOKENS); "
+              "`owner` comes from the request body", flush=True)
+        if fleet_policy.max_concurrent_per_account is not None:
+            # The one combination that is quietly useless: a ceiling counted
+            # against an owner any caller can choose. Said loudly rather than
+            # left to be discovered by whoever eventually reads the ledger.
+            print("[harmony] WARNING account quota is set but fleet auth is "
+                  "OFF — `owner` comes from the request body, so the quota is "
+                  "advisory and any caller can spend any account's capacity",
+                  flush=True)
+    elif fleet_principals:
+        print(f"[harmony] /admit and /fleet/admit require a bearer token; "
               f"{len(fleet_principals)} principal(s): "
               + ", ".join(sorted(
                   f"{p.name}"
-                  + (f"->{p.owner}" if p.owner else f"->{p.delegate_prefix}*")
+                  + (f"->{p.owner}" if p.owner
+                     else "->ANY OWNER" if p.delegate_prefix == RELAY_ANY
+                     else f"->{p.delegate_prefix}*")
                   for p in fleet_principals.values())), flush=True)
-    elif fleet_policy.max_concurrent_per_account is not None:
-        # The one combination that is quietly useless: a ceiling counted against
-        # an owner any caller can choose. Said loudly rather than left to be
-        # discovered by whoever eventually reads the ledger.
-        print("[harmony] WARNING account quota is set but LIVESTACK_FLEET_TOKENS "
-              "is NOT — `owner` comes from the request body, so the quota is "
-              "advisory and any caller can spend any account's capacity",
-              flush=True)
+    else:
+        # A source was configured but yielded nothing (refused file, malformed
+        # JSON, every entry rejected). Failing closed, per load_principals'
+        # own promise — this is an alarm state, not "auth off".
+        print("[harmony] fleet auth is ON but the principal table is EMPTY "
+              "— every caller gets 401 until the token source is fixed. A "
+              "broker that cannot identify anyone must refuse everyone, not "
+              "admit anyone", flush=True)
     print(f"[harmony] account quota: "
           f"{fleet_policy.max_concurrent_per_account or 'NO CEILING'}"
           f"{f' (overrides: {dict(fleet_policy.account_quotas)})' if fleet_policy.account_quotas else ''}"

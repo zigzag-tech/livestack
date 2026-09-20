@@ -219,7 +219,8 @@ def build_router(manager, coordinator, capability: Capability,
                  readiness: Optional[Callable[[], Optional[dict]]] = None,
                  device_id: Optional[str] = None,
                  in_flight: Optional[Callable[[], int]] = None,
-                 node_id: Optional[str] = None, inventory=None):
+                 node_id: Optional[str] = None, inventory=None,
+                 node_principals=None):
     # Resolved ONCE, here, so /capability and /residence can never disagree
     # about which device this node is on — a disagreement the broker would read
     # as two devices.
@@ -228,9 +229,46 @@ def build_router(manager, coordinator, capability: Capability,
                                                   if device_id != resolve_device_id(capability.host_id)
                                                   else None)
     try:
-        from fastapi import APIRouter, Body, HTTPException
+        from fastapi import APIRouter, Body, Depends, Header, HTTPException
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError("livestack_node.facade requires fastapi") from exc
+
+    # WHO may pull the node's levers. Same shape and same rules as the fleet
+    # token table (one file, mode 0600, refused if world-readable) — see
+    # fleet_auth.principals_from_env. Unset means every endpoint keeps today's
+    # open behaviour, which is the right default for a single-operator fleet
+    # and exactly what an unconfigured deployment must see. attach() may pass
+    # a pre-computed table so the app's audit middleware resolves principals
+    # against the SAME one; standalone callers (tests) get the env default.
+    if node_principals is None:
+        from .fleet_auth import principals_from_env
+        node_principals = principals_from_env(
+            file_var="LIVESTACK_NODE_TOKENS_FILE",
+            inline_var="LIVESTACK_NODE_TOKENS",
+            log=lambda m: print(m, flush=True))
+    if node_principals:
+        print(f"[livestack] /lease and /model/* require a bearer token; "
+              f"{len(node_principals)} principal(s): "
+              + ", ".join(sorted(p.name for p in node_principals.values())),
+              flush=True)
+
+    def _require_node_principal(authorization: str = Header(None)):
+        """Gate for the endpoints that change what is resident. A warm, an
+        evict, a reclaim and a lease all move GPU bytes or hold capacity, so
+        they carry the same requirement as the broker's writes: a valid node
+        credential, 401 without one. The read endpoints (/residence,
+        /capability, /health) deliberately stay open — a consumer must be able
+        to discover a node it cannot yet authenticate to. ``None`` (no source
+        configured) keeps today's open behaviour; an empty table (source
+        configured but refused or malformed) FAILS CLOSED — 401 for everyone,
+        an alarm state, never silent."""
+        if node_principals is None:
+            return None
+        from .fleet_auth import AuthError, bearer_token, principal_for
+        try:
+            return principal_for(node_principals, bearer_token(authorization))
+        except AuthError as e:
+            raise HTTPException(status_code=e.status, detail=e.detail)
 
     router = APIRouter()
 
@@ -323,7 +361,8 @@ def build_router(manager, coordinator, capability: Capability,
         return {"status": "ok", "residence": coordinator.status()}
 
     @router.post("/lease")
-    def acquire(payload: dict = Body(...)) -> dict:
+    def acquire(payload: dict = Body(...),
+                _principal=Depends(_require_node_principal)) -> dict:
         kind = payload.get("kind")
         if not kind:
             raise HTTPException(status_code=400, detail="'kind' is required")
@@ -365,7 +404,8 @@ def build_router(manager, coordinator, capability: Capability,
         freeing.trim_ram()
 
     @router.post("/model/warm")
-    def warm(payload: dict = Body(...)) -> dict:
+    def warm(payload: dict = Body(...),
+             _principal=Depends(_require_node_principal)) -> dict:
         unit = payload.get("unit")
         if not unit:
             raise HTTPException(status_code=400, detail="'unit' is required")
@@ -382,7 +422,8 @@ def build_router(manager, coordinator, capability: Capability,
         return {"resident": sorted(manager.resident), "device": device or device_id}
 
     @router.post("/model/evict")
-    def evict(payload: dict = Body(...)) -> dict:
+    def evict(payload: dict = Body(...),
+              _principal=Depends(_require_node_principal)) -> dict:
         unit = payload.get("unit")
         if not unit:
             raise HTTPException(status_code=400, detail="'unit' is required")
@@ -392,7 +433,8 @@ def build_router(manager, coordinator, capability: Capability,
         return {"resident": sorted(manager.resident)}
 
     @router.post("/model/reclaim")
-    def reclaim(payload: dict = Body(default={})) -> dict:
+    def reclaim(payload: dict = Body(default={}),
+                _principal=Depends(_require_node_principal)) -> dict:
         """Hand the allocator's reserved-but-unused pool back to the driver.
 
         Eviction drops a model; it does NOT necessarily return that model's VRAM.
@@ -450,6 +492,20 @@ def build_router(manager, coordinator, capability: Capability,
             attrs = getattr(manager.units.get(kind), "attributes", None)
             if attrs:
                 entry["attributes"] = dict(attrs)
+            # Unit economics the operator declared (the harmony-llm unit
+            # file): emitted ONLY when set, so an undeclared unit's residence
+            # report is byte-for-byte what a node that predates the fields
+            # produces — and the broker keeps its defaults for it.
+            eco = manager.units.get(kind)
+            if getattr(eco, "min_residency_s", None) is not None:
+                entry["min_residency_s"] = float(eco.min_residency_s)
+            if getattr(eco, "reload_cost", None) is not None:
+                entry["reload_cost"] = float(eco.reload_cost)
+            # An explicit priority from the node outranks the broker's
+            # tier-derived default (_RES_TO_PRIO): the node measured what the
+            # unit costs, the tier only guesses.
+            if getattr(eco, "priority", None) is not None:
+                entry["priority"] = int(eco.priority)
             units.append(entry)
         out = {"host_id": capability.host_id,
                # WHICH PROCESS this is. `host_id` is a name a node picks (two

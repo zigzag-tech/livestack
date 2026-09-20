@@ -464,3 +464,69 @@ Real authority/fault-proxy tests pass multi-block resume, corrupt-block refusal,
 empty/small objects, and the existing raw-only/slow-reader regression cases.
 This allows queued raw archives to benefit without rewriting accepted job specs.
 Deployment is pending while the production worker remains observe-only.
+
+## Three applications, one authority (2026-09-20)
+
+Planned in `_plans/one-job-fabric.md` (umbrella `hub-and-compute-convergence`):
+attune submits `attune.produce_item`, benchday submits `benchday.thumbnail`,
+unchain submits `unchain.render_chunk` — one workload authority, three caller
+principals, no second job broker. Four additions carry it:
+
+- **The owner label.** Submission accepts a `labels` map (at most 16 entries);
+  the reserved `labels.owner` carries the end user's fleet owner string
+  (`<app>:acct_<id>`). It is authorized at the HTTP boundary exactly as
+  `/fleet/admit`: it must start with the caller's `delegate_prefix`, otherwise
+  403, and a principal without `delegate_prefix` may not set it at all. Labels
+  persist on the job row (`jobs.labels`) and are returned by list/get, so a hub
+  can ask "what is running for acct_a". A hub authenticates many people with
+  one credential; account provisioning stays the hub's job, not the
+  authority's.
+- **The lease on the worker.** The attempt environment carries
+  `HARMONY_OWNER` (the label owner, else the principal id),
+  `HARMONY_FLEET_URL` and `HARMONY_FLEET_TOKEN` (a delegating fleet principal
+  for the worker, from its configuration). A model-bound handler admits
+  through `POST $HARMONY_FLEET_URL/fleet/admit` with
+  `Authorization: Bearer $HARMONY_FLEET_TOKEN` and `owner: $HARMONY_OWNER`, so
+  the fleet ledger's Grant names the end user, not the worker; it heartbeats
+  and releases the lease. `livestack_node.workloads.lease_helper` does this
+  for Python handlers and records admitted lease ids in
+  `$HARMONY_OUTPUT/leases.json`. Attempt cleanup releases every lease still
+  recorded there — including after a crashed or killed handler — so fleet
+  capacity cannot outlive the attempt. The authority still places by CPU,
+  memory and disk only; GPU residency remains Harmony's question at run time,
+  never the authority's at placement time.
+- **The per-principal cap.** `Principal` gains `max_running` and
+  `on_cap: "queue"|"refuse"` (default `queue`). Placement counts running
+  attempts per job owner before the queued loop and skips a capped owner's
+  jobs with `reason="principal at max_running (N)"` without blocking later
+  owners, so one application's backlog cannot starve another's. `refuse`
+  answers submission 429 naming the count. `GET /v1/workloads/jobs` reports
+  the caller's `principal: {max_running, running}`.
+- **The principal table.** `authority.json` names the callers beside
+  benchday's existing principal: `attune-hub` (`delegate_prefix: "attune:"`,
+  `attune.produce_item`, `attune.source_connector`, `max_running: 2`),
+  `benchday-hub` (`"benchday:"`, the thumbnail/title/ASR/E2E/release
+  handlers, `max_running: 4`), `unchain` (the render/TTS/ASR handlers, no
+  prefix — its jobs are owned by the principal itself) and `sorbonne`
+  (a capped `max_running: 1` teaching tenant). Handlers reach workers as
+  immutable per-application bundles named in the worker configuration; the
+  multi-bundle note lives in benchday's
+  `~/benchday/docs/harmony-worker-enrolment.md`.
+
+The wire and the durable state machine stay backward compatible: a caller
+that ignores every new field behaves exactly as before, legacy specs keep
+their idempotency bytes, and old databases gain `jobs.labels` /
+`attempts.progress` columns additively at open. A progress channel rides the
+existing worker heartbeat: a handler writes `$HARMONY_OUTPUT/progress.json`
+(`{phase, detail?, fraction?}`, the jingway JobProgressSchema shape), the
+worker forwards it, the store keeps only the latest, and `GET jobs/<id>`
+returns it — absent, not null, when never reported.
+
+Verified 2026-09-20: `tests/test_workload_labels.py` (owner inside/outside
+prefix, prefixless refusal, persistence), `tests/test_worker_lease_env.py`
+against a fake fleet broker (Grant names the label owner; a killed handler
+leaves no live lease), `tests/test_placement_principal_cap.py` (40 queued
+attune jobs at cap 2 never block a benchday thumbnail; 429 on refuse;
+job-list `principal` block) and `tests/test_workload_progress.py` (a handler
+reporting `tts` then `stills` is read back in order; missing-heartbeat and
+absent cases).

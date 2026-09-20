@@ -45,7 +45,10 @@
     "gpu_fraction": "0.96",
     "max_model_len": "16384",
     "extra_args": "--max-num-seqs 32",
-    "residency": "UNPINNED"
+    "residency": "UNPINNED",
+    "min_residency_s": 60,
+    "reload_cost": 4,
+    "priority": 20
   },
   {
     "name": "embed_multi",
