@@ -794,6 +794,17 @@ def _expand_clause(key: str, val) -> "list[tuple[str, object]]":
 _LOCAL_CMPS = (">=", "<=", "!=", ">", "<")
 
 
+# SPECIALIST-ONLY ATTRIBUTES, mirroring the planner's rule (planner.py
+# `_specialist_only`): a unit declaring one (e.g. `ocr: true`) serves work
+# generic demand can never imply, so a requirement that merely matches
+# `class=llm` must never land on it — not via the broker's placement, and not
+# via the local resident-reuse path below. Measured 2026-09-19: a generic chat
+# request was answered by the OCR unit, which had stopped the resident 27B to
+# load. Stating the attribute in the requirement, or naming the unit, still
+# works — only generic selection is refused.
+_LOCAL_SPECIALIST_ONLY = ("ocr",)
+
+
 def _local_satisfies(name: str, requires: dict) -> bool:
     """Does one of THIS node's units meet the requirement?
 
@@ -802,6 +813,17 @@ def _local_satisfies(name: str, requires: dict) -> bool:
     not a yes, or an unlabelled unit would answer every question.
     """
     attrs = _attributes_for(SPECS[name]) if name in SPECS else {}
+    # A specialist-only attribute must be NAMED to be served by. `_attributes_for`
+    # derives class/thinking/tools/vision from the launch line but never `ocr`,
+    # so nothing generic can imply it — a unit declaring it that matched on
+    # `class=llm` alone would be the Sep 19 poach all over again.
+    for attr in _LOCAL_SPECIALIST_ONLY:
+        if attr in requires:
+            continue
+        val = attrs.get(attr)
+        if val is True or (isinstance(val, str)
+                           and val.strip().lower() in ("true", "1", "yes")):
+            return False
     for key, want in requires.items():
         op, attr = "", key
         for c in _LOCAL_CMPS:
