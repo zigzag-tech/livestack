@@ -10,7 +10,7 @@ import os
 import pytest
 
 from livestack_node.fleet_auth import (
-    AuthError, Principal, authenticate, bearer_token, fingerprint,
+    RELAY_ANY, AuthError, Principal, authenticate, bearer_token, fingerprint,
     load_principals, principal_for, resolve_owner,
 )
 
@@ -226,3 +226,58 @@ def test_resolve_owner_is_pure_and_needs_no_framework():
     hub = Principal(name="hub", delegate_prefix="acct_")
     assert resolve_owner(hub, "acct_1") == "acct_1"
     assert principal_for(PRINCIPALS, TOK_HUB).name == "hub"
+
+
+# -- the engine principal: relays any owner, and says so ----------------------
+#
+# harmony-llm, polytts and polyasr admit under the owner their CALLER asserted
+# (`X-Harmony-Owner`), and their callers are every application on the fleet. No
+# prefix bounds that set. The plan's principal table therefore writes the
+# engines as delegating with an empty prefix — and an empty prefix is exactly
+# what a typo looks like, so the loader refuses it and the wildcard `*` is the
+# one spelling that works. These pin both halves.
+
+TOK_ENGINE = "e" * 40
+
+
+def test_an_empty_delegate_prefix_is_refused_and_names_the_wildcard():
+    """The six engine tokens minted for R.2 carried `"delegate_prefix": ""` and
+    every one was dropped at load, silently turning six callers into 401s. The
+    refusal stays — but it now tells the operator what to write instead."""
+    lines = []
+    got = load_principals(
+        '{"%s": {"name": "harmony-llm@host", "delegate_prefix": ""}}' % TOK_ENGINE,
+        log=lines.append)
+    assert got == {}
+    assert any("could act as anyone" in l and '"*"' in l for l in lines)
+
+
+def test_the_wildcard_prefix_loads_relays_any_owner_and_is_loud():
+    lines = []
+    table = load_principals(
+        '{"%s": {"name": "harmony-llm@host", "delegate_prefix": "*"}}' % TOK_ENGINE,
+        log=lines.append)
+    who = table[TOK_ENGINE]
+    assert who.delegates and who.delegate_prefix == RELAY_ANY
+    assert any("RELAYS ANY OWNER" in l for l in lines), \
+        "a principal as strong as every app token must be visible in the journal"
+
+    # Any owner passes, from any application namespace...
+    for owner in ("attune:acct_7", "benchday:acct_1", "media-corpus", "sorbonne"):
+        assert authenticate(table, f"Bearer {TOK_ENGINE}", owner) == (owner, who)
+
+    # ...but it still has no identity of its own to charge: an engine that
+    # forgot to relay an owner is a bug, not an anonymous grant.
+    with pytest.raises(AuthError) as e:
+        authenticate(table, f"Bearer {TOK_ENGINE}", None)
+    assert e.value.status == 400
+
+
+def test_the_wildcard_is_not_a_prefix_match_on_a_star():
+    """`*` is a sentinel, not a character an owner may start with: a bounded
+    principal granted the literal prefix `*` would be a different (and absurd)
+    thing, and the sentinel must not leak into ordinary prefix matching."""
+    bounded = Principal(name="hub", delegate_prefix="attune:")
+    with pytest.raises(AuthError) as e:
+        resolve_owner(bounded, "*anything")
+    assert e.value.status == 403
