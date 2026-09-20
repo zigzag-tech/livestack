@@ -1,0 +1,9 @@
+{
+  "cuda_extra_name": "decision-cuda",
+  "mlx_extra_name": "decision-mlx",
+  "cuda_must_include": ["torch", "transformers"],
+  "cuda_must_exclude": ["mlx", "mlx-lm", "mlx_lm"],
+  "mlx_must_include": ["mlx"],
+  "mlx_must_exclude": ["torch", "transformers", "nvidia-cublas", "nvidia-cuda-runtime", "cuda"],
+  "notes": "Clean CUDA-side install excludes MLX. Mac-side install excludes PyTorch/CUDA runtime dependencies. Pin exact artifact hashes during qualification; these extras only pin the install surface."
+}

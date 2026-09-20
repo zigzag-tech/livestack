@@ -1,0 +1,52 @@
+{
+  "case": "H02/H03 EN blocking question",
+  "identity": {
+    "account_domain": "acct_dev",
+    "realm": "realm_dev",
+    "node": "xc-tower-ubuntu",
+    "pane_incarnation": "pane%1:gen3",
+    "conversation_id": "conv-en-1",
+    "binding_generation": 4,
+    "message_ids": [
+      "m-user-1",
+      "m-agent-1"
+    ],
+    "content_hashes": [
+      "sha256:5b53d026aa56f886adaadc8e22a8d8e347d1535fcf1c3667ce8e03ebb188b80b",
+      "sha256:1a9b1df824fcb969a15475f1031c592b88ba8211112eddcc99f9ff2f25a29ba8"
+    ],
+    "turn_epoch": 12,
+    "lifecycle_generation": 2,
+    "human_input_generation": 7
+  },
+  "request": {
+    "schema_version": "benchday.decision.v1",
+    "request_id": "req-en-1",
+    "profile_id": "pane-attention-v1:unqualified",
+    "evidence_revision": "sha256:b92c54b2f0220c7d530c85b6521c00a810d626fcba0bfa1614d0a2c57c975409",
+    "deadline_at_ms": 1800000000000,
+    "attempt_id": "req-en-1-a1",
+    "state": {
+      "current_agent_message": "Which database should I use, Postgres or SQLite?",
+      "preceding_user_message": "please use postgres",
+      "recent_turns": [],
+      "execution": "settled",
+      "source_coverage": "complete"
+    },
+    "questions": [
+      {
+        "id": "attention",
+        "type": "choice",
+        "instructions": "Classify the current assistant turn's human obligation.",
+        "criteria": {
+          "question": "A current blocking request for the user's answer or decision.",
+          "working": "The agent is describing work it is continuing now.",
+          "self_waiting": "The agent is waiting for its own tool, job, or external event, not the user's answer.",
+          "finished_turn": "The agent reports its turn concluded, without a blocking request.",
+          "idle": "No current work or outstanding human request is established by readable context.",
+          "unknown": "The supplied evidence cannot distinguish these states."
+        }
+      }
+    ]
+  }
+}

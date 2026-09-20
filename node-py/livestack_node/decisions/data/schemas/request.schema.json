@@ -1,0 +1,126 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://benchday.zztech.io/schemas/typed-decision/v1/request.schema.json",
+  "title": "Typed decision request",
+  "description": "POST /v1/decisions body. Owner is derived from credentials, never from an arbitrary account_id field.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "profile_id",
+    "evidence_revision",
+    "deadline_at_ms",
+    "state",
+    "questions"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "benchday.decision.v1"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "profile_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "evidence_revision": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "deadline_at_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Unix epoch milliseconds. Zero is a placeholder and MUST be rejected."
+    },
+    "attempt_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "packed_state_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Required on chip rescue; worker refuses a mismatch with the frozen initial pack."
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current_agent_message",
+        "preceding_user_message",
+        "recent_turns",
+        "execution",
+        "source_coverage"
+      ],
+      "properties": {
+        "current_agent_message": { "type": "string" },
+        "preceding_user_message": { "type": "string" },
+        "recent_turns": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "text"],
+            "properties": {
+              "role": { "type": "string", "enum": ["assistant", "user"] },
+              "text": { "type": "string" }
+            }
+          }
+        },
+        "execution": {
+          "type": "string",
+          "enum": ["settled", "running", "unknown"]
+        },
+        "source_coverage": {
+          "type": "string",
+          "enum": ["complete", "omitted_older", "insufficient"]
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 60,
+      "items": { "$ref": "#/definitions/question" }
+    }
+  },
+  "definitions": {
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "instructions"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96
+        },
+        "type": {
+          "type": "string",
+          "enum": ["choice", "noul"]
+        },
+        "instructions": {
+          "type": "string",
+          "minLength": 1
+        },
+        "criteria": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "if": {
+        "properties": { "type": { "const": "choice" } }
+      },
+      "then": {
+        "required": ["criteria"]
+      }
+    }
+  }
+}

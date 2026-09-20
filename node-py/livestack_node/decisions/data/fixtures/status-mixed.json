@@ -1,0 +1,52 @@
+{
+  "case": "H02/H03 mixed EN/ZH blocking question",
+  "identity": {
+    "account_domain": "acct_dev",
+    "realm": "realm_dev",
+    "node": "xc-tower-ubuntu",
+    "pane_incarnation": "pane%1:gen3",
+    "conversation_id": "conv-mixed-1",
+    "binding_generation": 4,
+    "message_ids": [
+      "m-user-mx",
+      "m-agent-mx"
+    ],
+    "content_hashes": [
+      "sha256:593921fe2d4006b102706c6d47c0550dde83e2653fd0235a69bebe74fd8ac817",
+      "sha256:0df1dc24b80d7fa870a79e00155e84d4519c6e85e49b1063aee4be3c77844d8f"
+    ],
+    "turn_epoch": 12,
+    "lifecycle_generation": 2,
+    "human_input_generation": 7
+  },
+  "request": {
+    "schema_version": "benchday.decision.v1",
+    "request_id": "req-mx-1",
+    "profile_id": "pane-attention-v1:unqualified",
+    "evidence_revision": "sha256:754de380b3782b9f93790c944e610eda98eeb2832ebe7958b2dd949686599375",
+    "deadline_at_ms": 1800000000000,
+    "attempt_id": "req-mx-1-a1",
+    "state": {
+      "current_agent_message": "Deploy to 北京 or keep it on xc-tower-ubuntu?",
+      "preceding_user_message": "use the 北京 cluster",
+      "recent_turns": [],
+      "execution": "settled",
+      "source_coverage": "complete"
+    },
+    "questions": [
+      {
+        "id": "attention",
+        "type": "choice",
+        "instructions": "Classify the current assistant turn's human obligation.",
+        "criteria": {
+          "question": "A current blocking request for the user's answer or decision.",
+          "working": "The agent is describing work it is continuing now.",
+          "self_waiting": "The agent is waiting for its own tool, job, or external event, not the user's answer.",
+          "finished_turn": "The agent reports its turn concluded, without a blocking request.",
+          "idle": "No current work or outstanding human request is established by readable context.",
+          "unknown": "The supplied evidence cannot distinguish these states."
+        }
+      }
+    ]
+  }
+}
