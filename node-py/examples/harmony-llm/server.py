@@ -235,9 +235,14 @@ def _selection_rank(name: str) -> "tuple[int, str]":
 #
 # With several units, eviction belongs to the PLANNER — it knows the footprints,
 # the demand and the whole card, and this process knows only its own units. So a
-# multi-unit node coloads by default and lets Harmony decide what goes.
-COLOAD = os.environ.get("HARMONY_LLM_COLOAD", "").strip().lower() in {"1", "true", "yes"} \
-    or len(SPECS) > 1
+# multi-unit node coloads by default and lets Harmony decide what goes. An
+# explicit false is a local safety invariant for a node whose units cannot fit
+# together: even if the broker's residence snapshot briefly lags, the manager
+# evicts this process's other unit before loading rather than trusting a stale
+# grant and running vLLM into occupied VRAM.
+_coload_env = os.environ.get("HARMONY_LLM_COLOAD")
+COLOAD = (len(SPECS) > 1) if _coload_env is None else \
+    _coload_env.strip().lower() in {"1", "true", "yes"}
 try:
     from livestack_node.facade import resolve_device_id as _rdi
     DEVICE_ID_SELF = _rdi(HOST_ID)
@@ -1221,6 +1226,22 @@ async def proxy(path: str, request: Request):
                         owner_asserted=bool(asserted),
                         token=_FLEET_TOKEN, timeout=ADMIT_TIMEOUT)
             served = res.get("kind")
+            # A loading transition temporarily withholds this facade's fleet
+            # registration. During that gap the broker can answer "nothing
+            # satisfies" even though this process's static catalogue declares
+            # the requested unit. Falling back only to a LOCAL exact match is
+            # safe: the manager still enforces coload policy before loading, so
+            # an exclusive single-GPU deployment evicts its other local unit.
+            # This is not a placement guess for an arbitrary peer.
+            if requirement is not None and not served:
+                local_declared = next((n for n in sorted(SPECS, key=_selection_rank)
+                                       if _local_satisfies(n, requirement)), None)
+                if local_declared:
+                    print(f"[harmony-llm] broker temporarily forgot {requirement}; "
+                          f"using locally declared {local_declared}", flush=True)
+                    served = local_declared
+                    res = {**res, "kind": served, "granted": True,
+                           "device_id": DEVICE_ID_SELF, "reason": None}
             # Log the planner's answer only when it did NOT grant. A refusal
             # for a requirement is otherwise invisible: the caller gets a 503
             # naming what it asked for, and nothing says what the planner
