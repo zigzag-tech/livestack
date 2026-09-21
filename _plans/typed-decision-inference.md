@@ -1,8 +1,37 @@
 # Typed-decision inference through Harmony
 
-**Status:** closed — plumbing shipped; portable profile **not** complete.
-Real-hardware qualification FAILS on both gates (parity, and question recall
-0.0 on both backends). Evidence: `node-py/docs/decisions/h09/README.md`.
+**Status:** closed — plumbing shipped; the portable CUDA/MLX profile was
+**abandoned, not completed**, and a different model now serves the capability.
+
+Real-hardware qualification FAILED on both gates (cross-architecture parity,
+and question recall **0.0 on both backends**). Evidence:
+`node-py/docs/decisions/h09/README.md`. Laya was retired on 2026-09-21.
+
+**What serves it instead (2026-09-21).** Benchday's consuming side now routes
+to the typed-decision classifier Harmony already serves on one resident 27B —
+a SINGLE runtime, so the CUDA/MLX pair this plan was built around no longer
+exists as a requirement anywhere. On 691 held-out judge-adjudicated episodes
+over 99 distinct panes it scores blocking recall **0.9466**, clustered 95% CI
+**[0.9104, 0.9755]** — the lower bound clears the 0.90 gate that Laya missed by
+the whole interval. Against the rule classifier on the same panes it misses 14
+blocking panes to the rule's 64.
+
+Two consequences for anyone reading this plan as Livestack's record:
+
+- **The two physical kinds below (`laya_multilingual_cuda_v1`,
+  `laya_multilingual_mlx_v1`) are dead.** Nothing requests them. The generic
+  decision service, scoped admission and worker-adapter work this plan
+  delivered are NOT dead — they are what the replacement runs on, and they were
+  the parts worth building.
+- **The "both hardware reports" precondition in `Contract` below is void.** One
+  qualified backend is a qualified backend; it is simply not an equivalence
+  claim. Benchday's delta specs were reworded on 2026-09-21 to require that
+  each backend qualify on its own evidence rather than to mandate a pair.
+
+Benchday side: `openspec/changes/route-pane-decisions-through-harmony`
+(`q01-clustered-evidence.md`, `jev-supersedes-laya.md`). Neither repository
+archives the other, and Benchday's change is NOT archived — it still has
+unenabled rollout work.
 Livestack owns the generic cross-architecture decision service, admission,
 physical CUDA/MLX kinds, and worker adapters. Benchday owns the consuming
 attention/chip contracts and OpenSpec archive. **Neither repository archives
