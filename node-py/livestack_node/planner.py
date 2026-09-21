@@ -594,11 +594,11 @@ def _eff_priority(req: Request, unit: Unit, now: float, pol: PlannerPolicy) -> i
     return base - boost  # lower = more important
 
 
-def _yields_at_equal_priority(world: _World, p: Placement, u: Unit,
-                              requester_kind: str) -> bool:
+def _yields_at_equal_priority(_world: _World, p: Placement, u: Unit,
+                              _requester_kind: str) -> bool:
     """May an EQUAL-priority resident be preempted?
 
-    Only when it is UNPINNED, idle, and nobody is asking for it. Two units of
+    Only when it is UNPINNED and idle. Two units of
     the same class and priority — two LLMs on one card — could otherwise never
     displace each other, so a model nobody wants keeps the card from one that is
     being demanded right now, and the only way through was to evict by hand.
@@ -606,22 +606,19 @@ def _yields_at_equal_priority(world: _World, p: Placement, u: Unit,
     before the new one is placed, and the load then starts against a card that
     is no longer free (observed 2026-09-07, three seconds apart).
 
-    Demand is the tie-break because it is the thing that distinguishes them:
-    priority says how important a KIND is, demand says whether anyone wants it
-    NOW. The comparison is RELATIVE — the card goes to whoever wants it more —
-    not "the resident must be at exactly zero". Demand decays continuously, so a
-    strict-zero test leaves a long tail where a model finished with hours ago
-    still holds a card against one being actively requested (measured: 0.47
-    against a live requester, 22 minutes after the last call).
+    Reaching this function already means the planner is handling a live request.
+    Historical demand must not veto that request: a high-volume model otherwise
+    starves a lower-volume peer even after becoming idle. This happened when a
+    title model's accumulated demand prevented the embedding model from ever
+    taking their shared card, and then in reverse after embedding was loaded.
+    The unit's minimum-residency window is the anti-thrash guard between swaps.
 
     A busy or leased unit is never a victim here, so this cannot preempt work in
     flight — it only lets a card go to whoever is actually using it.
     """
     if u.residency != Residency.UNPINNED or p.busy or p.leases > 0:
         return False
-    resident = float(world.w.demand.get(p.kind, 0.0))
-    requester = float(world.w.demand.get(requester_kind, 0.0))
-    return resident <= 0.0 or resident < requester
+    return True
 
 
 def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: int,
