@@ -1,10 +1,11 @@
 # livestack-shared-wasm
 
 wasm-bindgen bindings exposing types from the `livestack-shared` Rust crate to
-JavaScript/TypeScript: `DefGraph`, instantiated-graph, and route types
-(`src/def_graph_wasm.rs`, `src/instantiated_graph_wasm.rs`, `src/route_wasm.rs`).
+JavaScript/TypeScript: `DefGraph` and instantiated-graph types
+(`src/def_graph_wasm.rs`, `src/instantiated_graph_wasm.rs`).
 
-Published to npm as `@livestack/shared-wasm` (v0.0.32).
+Published to npm as `@livestack/shared-wasm` (v0.0.33). Route-selection
+exports were removed in 0.0.33 and now belong to private Meshlink.
 
 ## Build
 

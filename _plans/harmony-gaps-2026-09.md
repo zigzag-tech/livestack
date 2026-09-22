@@ -55,11 +55,10 @@ at import time, before uvicorn binds. It should self-probe
 Cheap, and it would have made the mac's wedge visible as *absent* within a
 minute instead of *fresh* for seven hours.
 
-### 1.3 Route-core drift — the Dart picker has fixes `route.rs` does not
+### 1.3 Route-core drift — RESOLVED, then moved to Meshlink
 
-`route-selection.md` is explicit: *"Any behavioural change must land in both or
-in neither."* On 2026-09-05 three behavioural changes landed in benchday's
-`packages/mesh_route` and **not** in `shared/src/route.rs`:
+Historical finding: on 2026-09-05 three behavioral changes landed in
+Benchday's picker before the former Livestack core:
 
 - load-aware near-tie breaking (`loadAware`, `recordLoad`, queue depth primary,
   pressure can only raise the estimate);
@@ -71,8 +70,8 @@ in neither."* On 2026-09-05 three behavioural changes landed in benchday's
 `0% / 100%` before, `44% / 56%` after. The conformance corpus that keeps the two
 implementations honest now has cases Rust cannot pass.
 
-**Fix:** port all three to `route.rs` with the same test cases
-(`load_distribution_test.dart` → Rust), then the wasm binding follows for free.
+They were ported and tested, then the complete Rust core and WASM wrapper moved
+to private Meshlink in 2026-09. Livestack no longer carries a duplicate picker.
 This is the cheapest item on the list and the only one that is a doctrine
 violation rather than a gap.
 
