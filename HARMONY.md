@@ -655,8 +655,10 @@ store itself on every claim and deleting only TERMINAL rows.
 is **disabled**. A pending create is the one thing this store exists to remember,
 so a bound that could forget one would trade a bounded disk for an unbounded bill.
 
-Design: `_plans/fleetd-weave-jev.md`; requirements:
-`openspec/changes/fleet-provisioning-operations/`.
+Design: `_plans/fleetd-weave-jev.md`. Requirements (current truth):
+`openspec/specs/fleet-provisioning-operations/`, `fleet-supervision-loop/`,
+`fleet-incident-classification/`. Activation — declaring pools, and promoting the
+classifier out of shadow — is `openspec/changes/fleet-provisioning-activation/`.
 
 ## Endpoints
 

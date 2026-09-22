@@ -12,10 +12,17 @@ TypeScript.
 **Not yet true, and it matters:** no broker on this fleet has `LIVESTACK_FLEET_POOLS`
 set, so nothing has provisioned anything for real. The classifier rung has no
 qualification receipt (`fleetd/receipts/README.md` says what would produce one) and
-runs only in `shadow`. Those two are the remaining tasks of the OpenSpec change, and
-the change is NOT archivable until they are done.
+runs only in `shadow`.
 
-OpenSpec change: `openspec/changes/fleet-provisioning-operations/`.
+Both are the same kind of thing — handing a running process an authority it does not
+yet have — and neither is an engineering decision. They are carried in
+`openspec/changes/fleet-provisioning-activation/`, and this line becomes SHIPPED
+(shadow) with the receipt's numbers when that lands.
+
+OpenSpec: requirements are current truth in `openspec/specs/`
+(`fleet-provisioning-operations`, `fleet-supervision-loop`,
+`fleet-incident-classification`); the change that built them is archived at
+`openspec/changes/archive/2026-09-22-fleet-provisioning-operations/`.
 
 **Companions:** `fleet-broker.md` (phases 0–4 shipped), `fleet-scheduler.md` (§8 is
 STALE: `schedule()` IS wired via `fleet_admit.py`), `decision-ledger.md` (SHIPPED as `ledger.py` +
