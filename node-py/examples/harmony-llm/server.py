@@ -556,7 +556,10 @@ def _reap_dead_units():
                       flush=True)
                 _procs.pop(name, None)
                 try:
-                    _gpu_call(lambda n=name: manager.request_evict(n))
+                    # Keep lock order manager -> GPU, the same as `ensure`.
+                    # Taking `_lock` first here while an ensure holds the
+                    # manager guard and waits for `_lock` deadlocks both paths.
+                    manager.request_evict(name)
                 except Exception as e:            # never let the reaper die
                     # Print the TYPE too. This handler swallowed a NameError
                     # (`gpu_call` for `_gpu_call`) once every 20s for hours: the
