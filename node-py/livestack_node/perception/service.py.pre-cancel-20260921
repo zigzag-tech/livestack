@@ -1,0 +1,75 @@
+"""Authenticated Harmony perception endpoint with admitted backend dispatch."""
+from __future__ import annotations
+
+from typing import Any, Callable, Mapping
+
+from livestack_node.fleet_auth import AuthError, authenticate
+
+from .contract import PerceptionContractError, validate_request, validate_result
+
+
+class PerceptionService:
+    def __init__(self, *, principals: Mapping, backends: Mapping[str, Any], admit: Callable[..., dict]):
+        self.principals = principals
+        self.backends = dict(backends)
+        self.admit = admit
+
+    def handle(self, payload: Mapping[str, Any], headers: Mapping[str, str | None]) -> tuple[int, dict]:
+        request_id = str(payload.get("requestId") or "unknown")
+        try:
+            realm = (headers.get("x-harmony-realm") or "").strip()
+            if not realm:
+                raise PerceptionContractError("invalid_input", "X-Harmony-Realm is required", 403)
+            try:
+                owner, _principal = authenticate(
+                    self.principals, headers.get("authorization"), headers.get("x-harmony-owner")
+                )
+            except AuthError as exc:
+                cause = "unauthorized" if exc.status == 401 else "invalid_input"
+                raise PerceptionContractError(cause, exc.detail, exc.status) from exc
+            request = validate_request(payload)
+            grant = self.admit(request=request, owner=owner, realm=realm)
+            backend_name = grant.get("backend")
+            backend = self.backends.get(backend_name)
+            if backend is None:
+                raise PerceptionContractError("unavailable", f"no worker for admitted backend {backend_name}", 503, retryable=True)
+            result = backend.infer(request, grant=grant)
+            return 200, validate_result(result, request=request)
+        except PerceptionContractError as exc:
+            return exc.status, exc.envelope(request_id)
+        except Exception as exc:
+            return 500, PerceptionContractError("inference_failed", str(exc), 500, retryable=False).envelope(request_id)
+
+    def direct_worker(self, payload: Mapping[str, Any]) -> tuple[int, dict]:
+        request_id = str(payload.get("requestId") or "unknown")
+        error = PerceptionContractError("invalid_input", "direct worker access bypasses Harmony admission", 403)
+        return error.status, error.envelope(request_id)
+
+
+def build_app(service: PerceptionService):
+    from fastapi import Body, FastAPI, Header
+    from fastapi.responses import JSONResponse
+
+    app = FastAPI()
+
+    @app.post("/v1/perception")
+    def perception(
+        payload: dict = Body(...),
+        authorization: str | None = Header(default=None),
+        x_harmony_realm: str | None = Header(default=None),
+        x_harmony_owner: str | None = Header(default=None),
+    ):
+        status, body = service.handle(payload, {
+            "authorization": authorization,
+            "x-harmony-realm": x_harmony_realm,
+            "x-harmony-owner": x_harmony_owner,
+        })
+        return JSONResponse(body, status_code=status)
+
+    @app.post("/v1/worker/perception")
+    def direct_worker(payload: dict = Body(...)):
+        status, body = service.direct_worker(payload)
+        return JSONResponse(body, status_code=status)
+
+    app.state.perception_service = service
+    return app
