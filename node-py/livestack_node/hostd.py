@@ -425,6 +425,12 @@ def build_app(broker: HostBroker):
              "kinds": list(p.kinds),
              "adapter": p.provider in getattr(broker, "fleet_providers", {})}
             for p in pools]
+        demand = getattr(broker, "fleet_demand", None)
+        if demand is not None:
+            # What the fleet was asked for and could not give, still inside its
+            # TTL. Reported because "nothing bursts" and "nothing was asked for"
+            # are opposite problems that look identical in a plan.
+            view["demand"] = demand.snapshot()
         store = getattr(broker, "operation_store", None)
         if store is not None:
             active = store.active()
@@ -662,6 +668,18 @@ def build_app(broker: HostBroker):
                    # beside the one it allowed — the same shape /fleet/rank
                    # records.
                    "region_policy": region_policy}
+        # UNMET DEMAND. Recorded only for a capacity refusal: an account at its
+        # ceiling does not need a bigger fleet, and renting one would not admit
+        # its next job either. See `fleet_demand` for why this is a decaying
+        # signal rather than a queue.
+        demand = getattr(broker, "fleet_demand", None)
+        if (demand is not None and not result.get("granted")
+                and result.get("refused") != "account_quota"):
+            demand.record(
+                kind=kind, owner=owner, sla=payload.get("sla", "normal"),
+                regions=wanted, selector=payload.get("selector") or {},
+                est_duration_s=float(est),
+                reason=result.get("reason") or "")
         if result.get("refused") == "account_quota":
             # 429, not 200-with-no-target: an account at its ceiling is a
             # different answer from a full fleet, and a caller that cannot tell
@@ -725,8 +743,17 @@ def build_app(broker: HostBroker):
         regions = tuple(r.strip().lower()
                         for r in str(payload.get("regions") or "").split(",")
                         if r.strip())
+        # The caller's own queue, plus the demand the broker itself could not
+        # place. Without the second half a job answered with `Queue` never
+        # reaches a plan, and a burst the scheduler would authorise never
+        # happens — the seam this closes.
+        jobs = list(payload.get("jobs") or [])
+        if payload.get("include_demand", True) and getattr(broker, "fleet_demand", None):
+            known = {str(j.get("job_id")) for j in jobs}
+            jobs += [j for j in broker.fleet_demand.jobs()
+                     if j["job_id"] not in known]
         return build_plan(
-            broker.fleet_view(), payload.get("jobs") or [], owner=owner,
+            broker.fleet_view(), jobs, owner=owner,
             policy=getattr(broker, "fleet_policy", None) or SchedulerPolicy(),
             pools=getattr(broker, "fleet_pools", ()),
             store=_ops_store(), usage=broker.owner_usage(),
@@ -1165,6 +1192,7 @@ def main():
     # which is the correct behaviour for every host broker and for a fleet
     # broker nobody has given a budget to.
     import json as _json
+    from .fleet_demand import DemandRegister
     from .fleet_operations import store_from_env
     from .fleet_ops_api import providers_from_env
     from .fleet_pools import parse_pools
@@ -1184,6 +1212,13 @@ def main():
         broker.fleet_worker_env = {}
         _say(f"[fleet] LIVESTACK_FLEET_WORKER_ENV is malformed ({e}); provisioned "
              f"workers will boot with NO broker address and will never announce")
+    broker.fleet_demand = DemandRegister(
+        ttl_s=float(os.environ.get("LIVESTACK_DEMAND_TTL_S", "120")),
+        max_entries=int(os.environ.get("LIVESTACK_DEMAND_MAX", "256")),
+        log=_say)
+    _say(f"[fleet] demand register: {broker.fleet_demand.max_entries} shape(s), "
+         f"{broker.fleet_demand.ttl_s:.0f}s TTL (a decaying signal, not a queue: "
+         f"a caller that stops asking stops counting)")
     broker.operation_store = store_from_env(
         ledger=ledger, emitter_id=emitter_id, log=_say)
     _say(f"[fleet] operation store -> {broker.operation_store.path} "

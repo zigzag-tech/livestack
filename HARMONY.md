@@ -624,6 +624,30 @@ rather than by a rule someone has to remember. An interactive request either
 lands on a node with room now or is queued; it is never held waiting for a
 machine to boot.
 
+## Unmet demand — how a refusal becomes a burst
+
+`POST /fleet/admit` answers one job and keeps nothing; the supervision loop plans
+over a queue its caller hands it. Nothing joined the two, so a job the broker
+answered with `Queue` never reached a plan and a burst the scheduler would have
+authorised never happened.
+
+The join is a **decaying signal, not a queue**. A capacity refusal is recorded in
+a bounded, in-memory register with a short TTL (`LIVESTACK_DEMAND_TTL_S`, default
+120 s; `LIVESTACK_DEMAND_MAX` shapes, default 256). `POST /fleet/plan` adds live
+demand to whatever jobs the caller passed, and `GET /fleet` reports it.
+
+Why not a queue: a queue can hold work whose caller gave up ten minutes ago, and
+renting a machine for it spends money for nothing. Demand has to be CURRENT to
+justify spending, so a caller that stops retrying stops counting — and the retry
+behaviour callers already have is what keeps a live signal alive. A restart
+forgetting the register is correct for the same reason.
+
+Two things it deliberately does not do. **A quota refusal is never demand**: an
+account at its ceiling does not need a bigger fleet, and renting one would not
+admit its next job. And **forty refusals of one shape are one job, not forty** —
+a pool instance serves several concurrent jobs, and the pool's own
+`max_instances` plus the next tick are what scale it further.
+
 ## Provisioning — the fleet renting a machine, and knowing that it did
 
 `schedule()` has always been able to emit `Provision`. Nothing dispatched one,
