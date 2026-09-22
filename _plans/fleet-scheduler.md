@@ -91,9 +91,25 @@ deadline: Optional[float]  # explicit; overrides the class default
 est_duration_s: float      # to compute ETA per target
 ```
 
-`ETA(target) = queue_wait + provision_latency_s + est_duration_s`. A target is
-deadline-feasible iff `now + ETA <= deadline`. Sorbonne teacher-upload = **BATCH**
-(async, show-progress, cost-first); a future live path = **INTERACTIVE**.
+`ETA(target) = queue_wait + provision_latency_s`. A target is deadline-feasible
+iff `now + ETA <= deadline`. Sorbonne teacher-upload = **BATCH** (async,
+show-progress, cost-first); a future live path = **INTERACTIVE**.
+
+**Corrected 2026-09-22: ETA is time-to-START, and this line used to add
+`est_duration_s`.** The code followed the old line, which made a deadline mean
+"must have FINISHED by then" — so `Sla.INTERACTIVE`'s 30 s slack read as "must
+complete within 30 s", and `fleet_admit`'s own default 60 s estimate was
+infeasible on a **completely idle fleet**. Every interactive caller that did not
+state an estimate was refused with *no feasible target meets the deadline now*,
+which is the sentence a FULL fleet produces. It was latent rather than live only
+because every caller on this fleet sends `batch` (attune `fleet.ts`,
+media-corpus `broker.py`, `workloads/lease_helper.py`).
+
+`est_duration_s` is still carried and still used — it is what `CostModel.estimate`
+prices. It just does not belong in a feasibility test about waiting. Ranking is
+unchanged by the correction: `_score` min-max normalizes ETAs across the candidate
+set and the estimate is a property of the job, so removing it subtracts the same
+constant from every candidate (`test_dropping_the_runtime_from_eta_did_not_move_the_ranking`).
 
 ## 4. Budget is soft — a cost term + a pressure signal, never a gate
 
