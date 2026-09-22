@@ -205,6 +205,12 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
         "granted": chosen_id is not None,
         "refused": "account_quota" if refused_for_quota else None,
         "kind": kind,
+        # The scheduler's own id for this job, surfaced rather than kept
+        # private. It is the join key: the admit record, the lease, the
+        # provisioning operation and the placement all name the same job, and
+        # without it a retrospective has to guess which admit went with which
+        # machine by looking at timestamps.
+        "job_id": job.id,
         "sla": sla,
         "vantage": vantage,
         "generated_at": now,

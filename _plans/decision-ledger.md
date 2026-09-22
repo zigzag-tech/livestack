@@ -1,6 +1,12 @@
 # Decision Ledger — every placement and routing decision leaves enough behind to be second-guessed
 
-**Status:** DESIGN, ready for implementation handoff. 2026-09-05.
+**Status:** SHIPPED (corrected 2026-09-22; this line read "DESIGN" long after
+the ledger was writing records). `ledger.py` is the bounded JSONL writer;
+`hostbroker.py` emits `rank`, `admit`, `observe` and the planner's
+`evict`/`load`/`grant`/`defer`. Added 2026-09-22: `claim` and `operation`, one
+record per provisioning claim outcome and per lifecycle transition, joinable to
+the admit record by `job_id` — and `admit` now records the `lease_id` it handed
+out, which it accepted as an argument and dropped on the floor until then.
 **Applies to:** every phase of `fleet-broker.md`, the existing host broker,
 and benchday's client-side route picker. Read this before implementing any
 of them; each adds an emitter.
