@@ -161,10 +161,19 @@ still open: speed-aging, spot-reclaim handling, per-project budgets.
 ## 8. Where it lives & how it's tested
 
 - `node-py/livestack_node/fleet_scheduler.py` — the pure `schedule()` + dataclasses.
-- **Not yet wired:** no `hostd`/`fleetd` assembles `FleetState` yet — `hostd.py`/
-  `hostbroker.py` never import the scheduler; today only the tests build a
-  `FleetState`. The plan is still broker `/status` + the ledger in, `FleetPlan`
-  actions out.
+- **WIRED** (corrected 2026-09-22; this section said "not yet wired" long after
+  it was). `POST /fleet/admit` → `fleet_admit.py` → `schedule()` has been live
+  since phase 4 of `fleet-broker.md` — one job at a time, `Admit`/`Queue` only.
+  `POST /fleet/plan` → `fleet_ops_api.build_plan()` → `schedule()` plans a whole
+  queue, over running fleet nodes AND the elastic pools declared in
+  `LIVESTACK_FLEET_POOLS`; that is the path on which `Provision` and
+  `Deprovision` first became reachable. `POST /fleet/operations` dispatches them
+  through the durable lifecycle in `fleet_operations.py`.
+- The `FleetState` a broker assembles: targets from the fleet view
+  (`fleet_admit.targets_from_view`) plus `fleet_pools.pool_targets`; `usage` from
+  the broker's own lease ledger PLUS the creates in flight — leaving the second
+  out is how an owner at its ceiling is handed four more machines before any of
+  them announce.
 - `node-py/tests/test_fleet_scheduler.py` + `node-py/tests/test_fleet_dispatch.py` —
   mirror `test_planner.py`/`test_federation.py`:
   prefer-local when local idle; burst SPOT under queue pressure; RunPod *only* when a

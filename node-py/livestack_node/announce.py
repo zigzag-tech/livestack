@@ -79,6 +79,23 @@ def node_region() -> Optional[str]:
     return value or None
 
 
+def node_operation_id() -> Optional[str]:
+    """The provisioning operation this node was created for, or None.
+
+    Set by the fleet broker in the instance's boot environment
+    (`LIVESTACK_OPERATION_ID`) at the moment it calls the provider. A node that
+    nobody provisioned has none, and that is the common case.
+
+    Announced for one reason: it is the only thing that makes a create's success
+    PROVABLE. The broker wrote the id before it spent the money; the node repeats
+    it back once it is serving; the two are joined. Anything weaker — a new node
+    appearing, a count going up — is a coincidence that happens to be true most
+    of the time, which is the worst kind of evidence to bill against.
+    """
+    value = (os.environ.get("LIVESTACK_OPERATION_ID") or "").strip()
+    return value or None
+
+
 def node_scope() -> Optional[dict]:
     """Who this node is pooled FOR, as the operator or the enrolling hub
     stated it (`LIVESTACK_NODE_SCOPE`, a JSON object)::
@@ -162,6 +179,7 @@ def facade_answers(facade_url: str, timeout: float = 2.0) -> bool:
 def register_once(facade_url: str, *, host_id: str, kind: str,
                   region: Optional[str] = None,
                   scope: Optional[dict] = None,
+                  operation_id: Optional[str] = None,
                   broker: Optional[str] = None, timeout: float = 3.0) -> dict:
     """Announce to every configured broker. Raises only if ALL of them failed.
 
@@ -184,6 +202,9 @@ def register_once(facade_url: str, *, host_id: str, kind: str,
         # invisible rather than announcing "no scope" over whatever a seed
         # carried.
         **({"scope": scope} if scope else {}),
+        # Omitted when absent, like the two above: a node that was not
+        # provisioned must not overwrite a recorded correlation with a null.
+        **({"operation_id": operation_id} if operation_id else {}),
     }).encode()
     targets = [broker.rstrip("/")] if broker else broker_urls()
     out, last = {}, None
@@ -205,6 +226,7 @@ def register_once(facade_url: str, *, host_id: str, kind: str,
 def start_registrar(facade_url: str, *, host_id: str, kind: str,
                     region: Optional[str] = None,
                     scope: Optional[dict] = None,
+                    operation_id: Optional[str] = None,
                     interval_s: float = DEFAULT_INTERVAL_S,
                     broker: Optional[str] = None,
                     log: Callable[[str], None] = print,
@@ -239,7 +261,8 @@ def start_registrar(facade_url: str, *, host_id: str, kind: str,
                 continue
             try:
                 register(facade_url, host_id=host_id, kind=kind,
-                         region=region, scope=scope, broker=broker)
+                         region=region, scope=scope,
+                         operation_id=operation_id, broker=broker)
                 if not announced:
                     log(f"[livestack] reported for duty at "
                         f"{broker or ', '.join(broker_urls())} as {facade_url}")
