@@ -57,6 +57,10 @@ Config via env:
     LIVESTACK_FLEET_TOKENS  inline fallback of the same JSON, used only when
                          the file variable is unset. Prefer the file: the one
                          secret in the system should not be inline JSON.
+    LIVESTACK_NODE_CONTROL_TOKEN_FILE mode-0600 file containing the bearer token
+                         hostd sends when it warms, evicts, or reclaims a node.
+                         Reads remain unauthenticated. Required when nodes set
+                         LIVESTACK_NODE_TOKENS_FILE.
     LIVESTACK_ACCOUNT_QUOTA  max concurrent fleet slots ONE account may hold.
                          UNSET = no ceiling, which is the right default for a
                          single-operator fleet and the WRONG one the day
@@ -127,13 +131,16 @@ DEFAULT_FOOTPRINTS = {"asr": 5_070_913_536, "align": 5_295_308_800,
 def build_broker(peer_urls: List[str], device_config=None,
                  default_vram_gb: float = 24.0, default_reserved_gb: float = 2.0,
                  membership=None, extra_units=None, dispatch: bool = True,
-                 ledger=None, emitter_id: str = "host-broker") -> HostBroker:
+                 ledger=None, emitter_id: str = "host-broker",
+                 node_control_token: Optional[str] = None) -> HostBroker:
     """Federated by default: devices are DISCOVERED from the peers (one per reported
     device_id, across however many hosts), sized from device_config[device_id] or the
     default. Point peer_urls at nodes on several hosts and the same broker plans and
     dispatches across all their GPUs. extra_units declares kinds no peer will ever
     report (the peerless case: a BUILD host whose "build" unit lives only in config)."""
-    peers = [RestPeer(u, priorities=DEFAULT_PRIORITIES, footprints=DEFAULT_FOOTPRINTS)
+    peers = [RestPeer(u, priorities=DEFAULT_PRIORITIES,
+                      fallback_footprints=DEFAULT_FOOTPRINTS,
+                      control_token=node_control_token)
              for u in peer_urls]
     return HostBroker(devices=None, peers=peers, device_config=device_config or {},
                       default_capacity={"vram_bytes": int(default_vram_gb * GB),
@@ -322,8 +329,10 @@ def build_app(broker: HostBroker):
         try:
             return broker.register_url(
                 url,
-                make_peer=lambda u: RestPeer(u, priorities=DEFAULT_PRIORITIES,
-                                             footprints=DEFAULT_FOOTPRINTS),
+                make_peer=lambda u: RestPeer(
+                    u, priorities=DEFAULT_PRIORITIES,
+                    fallback_footprints=DEFAULT_FOOTPRINTS,
+                    control_token=getattr(broker, "node_control_token", None)),
                 host_id=payload.get("host_id"),
                 device_id=payload.get("device_id"),
                 region=payload.get("region"),
@@ -710,6 +719,28 @@ def build_app(broker: HostBroker):
     return app
 
 
+def _node_control_token_from_env(env=None) -> Optional[str]:
+    """Read hostd's outbound node-control credential without putting it in argv.
+
+    A configured file must be private and contain one non-empty token. Failure is
+    fatal: silently dropping the credential turns broker dispatch into repeated
+    401s while admission still appears to work.
+    """
+    from pathlib import Path
+    source = os.environ if env is None else env
+    filename = (source.get("LIVESTACK_NODE_CONTROL_TOKEN_FILE") or "").strip()
+    if not filename:
+        return None
+    path = Path(filename)
+    mode = path.stat().st_mode & 0o777
+    if mode & 0o077:
+        raise RuntimeError(f"node control token file must be mode 0600: {path}")
+    token = path.read_text().strip()
+    if not token or "\n" in token:
+        raise RuntimeError(f"node control token file must contain one token: {path}")
+    return token
+
+
 def main():
     # Nodes report for duty (POST /peers), so these localhost guesses are no
     # longer how membership is *meant* to work — but they stay, as seeds.
@@ -882,6 +913,7 @@ def main():
           f"{f' (overrides: {dict(fleet_policy.account_quotas)})' if fleet_policy.account_quotas else ''}"
           f", fair-share penalty {fleet_policy.fair_share_penalty_s:.0f}s",
           flush=True)
+    node_control_token = _node_control_token_from_env()
     broker = build_broker(
         peer_urls, device_config=device_config,
         default_vram_gb=float(os.environ.get("LIVESTACK_VRAM_GB", "24")),
@@ -889,7 +921,9 @@ def main():
         membership=membership,
         extra_units=extra_units,
         dispatch=dispatch, ledger=ledger, emitter_id=emitter_id,
+        node_control_token=node_control_token,
     )
+    broker.node_control_token = node_control_token
     broker.host_id = host_id
     broker.link_peers = link_peers
     broker.fleet_policy = fleet_policy

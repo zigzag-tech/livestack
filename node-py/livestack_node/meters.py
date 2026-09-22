@@ -335,10 +335,10 @@ def host_mem(ttl_s: float = 2.0) -> Optional[dict]:
 
         {"total_bytes": ..., "available_bytes": ..., "process_rss_bytes": ...}
 
-    Memoised for `ttl_s` because the macOS path shells out (`vm_stat`, `ps`) and
-    this is read on every `/residence` — a broker with a dozen peers and a
-    dashboard behind it must not fork twice per node per poll. The window is
-    short enough that no reader sees memory that has meaningfully moved.
+    Memoised because this is read on every `/residence` — a broker with a dozen
+    peers and a dashboard behind it must not repeat system probes per poll. The
+    macOS fallback deliberately uses in-process Mach APIs: forking `vm_stat` or
+    `ps` from a multithreaded MLX process can deadlock a concurrent model load.
 
     Never raises, and reports partial truth rather than none: a host whose
     `available` cannot be read still reports its total and this process's RSS,
@@ -388,34 +388,32 @@ def _read_host_mem() -> Optional[dict]:
             pass
     elif sys.platform == "darwin":
         try:
-            import subprocess
-            page = os.sysconf("SC_PAGE_SIZE")
-            vs = subprocess.run(["vm_stat"], capture_output=True, timeout=5,
-                                text=True).stdout
-            pages = {}
-            for line in vs.splitlines():
-                if ":" not in line:
-                    continue
-                k, v = line.split(":", 1)
-                v = v.strip().rstrip(".")
-                if v.isdigit():
-                    pages[k.strip()] = int(v)
-            # What macOS can hand out without evicting anything an app is using:
-            # free, plus the inactive and purgeable pages the VM reclaims on
-            # demand. Activity Monitor's "memory used" is the complement of this.
-            avail = (pages.get("Pages free", 0)
-                     + pages.get("Pages inactive", 0)
-                     + pages.get("Pages speculative", 0)
-                     + pages.get("Pages purgeable", 0))
-            if avail:
-                out["available_bytes"] = avail * page
-        except Exception:
-            pass
-        try:
-            import subprocess
-            rss = subprocess.run(["ps", "-o", "rss=", "-p", str(os.getpid())],
-                                 capture_output=True, timeout=5, text=True).stdout
-            out["process_rss_bytes"] = int(rss.strip()) * 1024
+            import ctypes
+
+            class _TimeValue(ctypes.Structure):
+                _fields_ = [("seconds", ctypes.c_int32),
+                            ("microseconds", ctypes.c_int32)]
+
+            class _MachTaskBasicInfo(ctypes.Structure):
+                _fields_ = [("virtual_size", ctypes.c_uint64),
+                            ("resident_size", ctypes.c_uint64),
+                            ("resident_size_max", ctypes.c_uint64),
+                            ("user_time", _TimeValue),
+                            ("system_time", _TimeValue),
+                            ("policy", ctypes.c_int32),
+                            ("suspend_count", ctypes.c_int32)]
+
+            lib = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            lib.mach_task_self.restype = ctypes.c_uint32
+            lib.task_info.argtypes = [ctypes.c_uint32, ctypes.c_int,
+                                      ctypes.c_void_p,
+                                      ctypes.POINTER(ctypes.c_uint32)]
+            info = _MachTaskBasicInfo()
+            count = ctypes.c_uint32(ctypes.sizeof(info) // ctypes.sizeof(ctypes.c_int32))
+            # MACH_TASK_BASIC_INFO = 20. KERN_SUCCESS = 0.
+            if lib.task_info(lib.mach_task_self(), 20, ctypes.byref(info),
+                             ctypes.byref(count)) == 0:
+                out["process_rss_bytes"] = int(info.resident_size)
         except Exception:
             pass
     return out or None

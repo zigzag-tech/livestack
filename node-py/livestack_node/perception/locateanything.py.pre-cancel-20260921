@@ -1,0 +1,346 @@
+"""LocateAnything adapters for the shared Harmony perception contract.
+
+Runtime-specific loaders are injected so CUDA and MLX dependencies stay on
+their own machines. Both adapters share parsing, validation, coordinate
+decoding, termination limits, and provenance semantics.
+"""
+from __future__ import annotations
+
+import hashlib
+import base64
+import contextlib
+import os
+import re
+import sys
+import tempfile
+import time
+import traceback
+from pathlib import Path
+from typing import Callable, Mapping
+
+from .contract import PerceptionContractError
+
+_GROUP = re.compile(r"<ref>(.*?)</ref>(.*?)(?=<ref>|<\|im_end\|>|$)", re.DOTALL)
+_BOX = re.compile(r"<box>\s*<(-?\d+)>\s*<(-?\d+)>\s*<(-?\d+)>\s*<(-?\d+)>\s*</box>")
+
+
+@contextlib.contextmanager
+def _materialized_image(image: Mapping):
+    temporary = None
+    if image.get("contentBase64"):
+        try:
+            data = base64.b64decode(image["contentBase64"], validate=True)
+        except (ValueError, TypeError) as exc:
+            raise PerceptionContractError("invalid_input", "contentBase64 is not valid base64", 422) from exc
+        suffix = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+                  "image/tiff": ".tiff"}[image["mediaType"]]
+        handle = tempfile.NamedTemporaryFile(prefix="harmony-perception-", suffix=suffix, delete=False)
+        handle.write(data)
+        handle.close()
+        temporary = Path(handle.name)
+        path = temporary
+    else:
+        ref = image["objectRef"]
+        path = Path(ref[7:] if ref.startswith("file://") else ref)
+        if not path.is_file():
+            raise PerceptionContractError("invalid_input", "image object is unavailable to the admitted worker", 422)
+        data = path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != image["sha256"]:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        raise PerceptionContractError("invalid_input", "image bytes do not match declared sha256", 422)
+    try:
+        yield path
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def parse_grounding(raw: str, *, image: Mapping, queries: list[Mapping], max_items: int) -> tuple[list[dict], bool, list[dict]]:
+    by_text = {query["text"].strip(): query["id"] for query in queries}
+    seen_queries: set[str] = set()
+    observations: list[dict] = []
+    truncated = False
+    for ref, body in _GROUP.findall(raw):
+        query_id = by_text.get(ref.strip())
+        if query_id is None:
+            continue
+        seen_queries.add(query_id)
+        for match in _BOX.finditer(body):
+            if len(observations) >= max_items:
+                truncated = True
+                break
+            x1, y1, x2, y2 = (max(0, min(1000, int(value))) for value in match.groups())
+            if x2 <= x1 or y2 <= y1:
+                continue
+            box = {
+                "xMin": x1 * image["width"] / 1000,
+                "yMin": y1 * image["height"] / 1000,
+                "xMax": x2 * image["width"] / 1000,
+                "yMax": y2 * image["height"] / 1000,
+            }
+            observations.append({
+                "id": f"{image['id']}:{query_id}:{len(observations)}",
+                "imageId": image["id"], "queryId": query_id,
+                "geometry": {"kind": "box", "box": box}, "attributes": {},
+            })
+        if truncated:
+            break
+    unprocessed = [{"id": query["id"], "cause": "model returned no parseable box"}
+                   for query in queries if query["id"] not in seen_queries]
+    return observations, truncated, unprocessed
+
+
+class LocateAnythingAdapter:
+    """Common adapter; ``generate(path, prompt, max_tokens)`` is backend-native."""
+
+    def __init__(self, *, backend: str, device: str, implementation: str,
+                 model: str, model_revision: str, precision: str,
+                 preprocessing_revision: str,
+                 generate: Callable[[Path, str, int], tuple[str, dict]]):
+        if backend not in ("cuda", "mlx"):
+            raise ValueError("LocateAnything backend must be cuda or mlx")
+        self.backend = backend
+        self.device = device
+        self.implementation = implementation
+        self.model = model
+        self.model_revision = model_revision
+        self.precision = precision
+        self.preprocessing_revision = preprocessing_revision
+        self.generate = generate
+
+    def infer(self, request: Mapping, *, grant: Mapping) -> dict:
+        if request["task"]["type"] != "grounding":
+            raise PerceptionContractError("unsupported", "LocateAnything supports grounding requests", 422)
+        if request.get("requirements", {}).get("backend") not in (None, self.backend):
+            raise PerceptionContractError("unsupported", "admitted backend violates request requirement", 422)
+        if len(request["images"]) != 1:
+            raise PerceptionContractError("unsupported", "LocateAnything adapter accepts one image per request", 422)
+        image = request["images"][0]
+        queries = request["task"]["queries"]
+        prompt = "</c>".join(query["text"] for query in queries)
+        max_tokens = request.get("limits", {}).get("maxOutputTokens", 512)
+        started = time.perf_counter()
+        with _materialized_image(image) as path:
+            raw, metrics = self.generate(path, prompt, max_tokens)
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        observations, capped, unprocessed = parse_grounding(
+            raw, image=image, queries=queries,
+            max_items=request.get("limits", {}).get("maxItems", 4096),
+        )
+        token_truncated = bool(metrics.get("truncated", False))
+        outcome = "ok" if observations and not unprocessed else "partial" if observations else "empty"
+        return {
+            "schemaVersion": "jingway.perception.v1", "requestId": request["requestId"],
+            "outcome": outcome, "observations": observations, "unprocessed": unprocessed,
+            "truncated": capped or token_truncated,
+            "rawOutputSha256": hashlib.sha256(raw.encode()).hexdigest(),
+            "execution": {
+                "backend": self.backend, "device": grant.get("device", self.device),
+                "implementation": self.implementation, "model": self.model,
+                "modelRevision": self.model_revision, "precision": self.precision,
+                "preprocessingRevision": self.preprocessing_revision,
+                "coldLoadMs": float(metrics.get("cold_load_ms", 0)),
+                "queueMs": float(grant.get("queue_ms", 0)),
+                "inferenceMs": float(metrics.get("inference_ms", elapsed_ms)),
+                "totalMs": float(metrics.get("total_ms", elapsed_ms + float(grant.get("queue_ms", 0)))),
+                **({"peakMemoryBytes": int(metrics["peak_memory_bytes"])} if metrics.get("peak_memory_bytes") is not None else {}),
+            },
+        }
+
+
+class CudaLocateAnythingRuntime:
+    """Persistent official NVIDIA runtime; never falls back to CPU."""
+
+    def __init__(self, snapshot: str | Path | None = None):
+        configured = snapshot or os.environ.get("LOCATEANYTHING_SNAPSHOT")
+        self.snapshot = Path(configured) if configured else None
+        self._runtime = self._tokenizer = self._model = None
+        self._load_ms = 0.0
+
+    def _load(self):
+        if self._model is not None:
+            return
+        try:
+            import torch
+        except ImportError as exc:
+            raise PerceptionContractError("unavailable", "PyTorch is not installed", 503, retryable=True) from exc
+        if not torch.cuda.is_available():
+            raise PerceptionContractError("unavailable", "CUDA unavailable; CPU fallback is refused", 503, retryable=True)
+        if self.snapshot is None or not self.snapshot.is_dir():
+            raise PerceptionContractError("unavailable", "pinned LocateAnything snapshot is unavailable", 503, retryable=True)
+        started = time.perf_counter()
+        sys.path.insert(0, str(self.snapshot))
+        try:
+            from batch_utils import hybrid_runtime
+            tokenizer, _processor, model = hybrid_runtime.load()
+        finally:
+            if sys.path[0] == str(self.snapshot):
+                sys.path.pop(0)
+        if not any(parameter.is_cuda for parameter in model.parameters()):
+            raise PerceptionContractError("unavailable", "LocateAnything did not load on CUDA", 503)
+        self._runtime, self._tokenizer, self._model = hybrid_runtime, tokenizer, model
+        self._load_ms = (time.perf_counter() - started) * 1000
+
+    def close(self) -> None:
+        """Drop both wrapper references and the upstream module's global cache."""
+        runtime = self._runtime
+        self._runtime = self._tokenizer = self._model = None
+        self._load_ms = 0.0
+        if runtime is not None:
+            # NVIDIA's helper caches the model in module globals. Clearing only
+            # ManagedUnit.model therefore reports an eviction while retaining
+            # the full allocation. Remove the authoritative upstream cache too.
+            for name in ("_model", "_tok", "_proc"):
+                if hasattr(runtime, name):
+                    setattr(runtime, name, None)
+
+    def __call__(self, path: Path, prompt: str, max_tokens: int) -> tuple[str, dict]:
+        self._load()
+        import torch
+        torch.cuda.reset_peak_memory_stats()
+        image = self._runtime.load_pil(path)
+        inputs = self._runtime._proc_full(image, prompt)
+        started = time.perf_counter()
+        generated = self._model.generate(
+            **inputs, tokenizer=self._tokenizer, generation_mode="slow",
+            max_new_tokens=max_tokens, do_sample=False, use_cache=True, repetition_penalty=1.1,
+        )
+        torch.cuda.synchronize()
+        inference_ms = (time.perf_counter() - started) * 1000
+        if isinstance(generated, str):
+            raw = generated
+            generated_tokens = None
+        else:
+            completion = generated[:, inputs["input_ids"].shape[1]:]
+            generated_tokens = int(completion.shape[1])
+            raw = self._tokenizer.batch_decode(completion, skip_special_tokens=False)[0]
+        metrics = {
+            "cold_load_ms": self._load_ms,
+            "inference_ms": inference_ms,
+            "total_ms": inference_ms + self._load_ms,
+            "peak_memory_bytes": int(torch.cuda.max_memory_allocated()),
+            "truncated": generated_tokens is not None and generated_tokens >= max_tokens and "<|im_end|>" not in raw,
+        }
+        self._load_ms = 0.0
+        return raw, metrics
+
+
+def _mlx_worker(connection, model_id: str, revision: str | None) -> None:
+    """Own MLX in a spawned process so load/infer/evict have one main thread."""
+    try:
+        import mlx.core as mx
+        import mlx_vlm
+        if sys.platform != "darwin":
+            raise RuntimeError("MLX backend requires Apple Silicon")
+        started = time.perf_counter()
+        model, processor = mlx_vlm.load(model_id, revision=revision, lazy=False)
+        mx.eval(model.parameters())
+        connection.send({"status": "ready",
+                         "cold_load_ms": (time.perf_counter() - started) * 1000})
+        while True:
+            message = connection.recv()
+            if message["op"] == "close":
+                break
+            if message["op"] != "infer":
+                raise RuntimeError(f"unknown MLX worker operation {message['op']!r}")
+            from mlx_vlm import apply_chat_template, generate
+            mx.reset_peak_memory()
+            formatted = apply_chat_template(
+                processor, model.config, message["prompt"], num_images=1)
+            started = time.perf_counter()
+            result = generate(
+                model, processor, formatted, image=message["path"],
+                max_tokens=message["max_tokens"], temperature=0.0, verbose=False)
+            inference_ms = (time.perf_counter() - started) * 1000
+            connection.send({
+                "status": "ok", "raw": result.text,
+                "inference_ms": inference_ms,
+                "peak_memory_bytes": int(float(result.peak_memory) * 1_000_000_000),
+                "generated_tokens": int(getattr(result, "generation_tokens", 0)),
+            })
+    except BaseException as exc:
+        try:
+            connection.send({"status": "error", "error": str(exc),
+                             "traceback": traceback.format_exc()})
+        except BaseException:
+            pass
+    finally:
+        connection.close()
+
+
+class MlxLocateAnythingRuntime:
+    """Persistent spawned Apple-Silicon runtime; CPU fallback is unsupported."""
+
+    def __init__(self, model: str = "mlx-community/LocateAnything-3B-8bit",
+                 revision: str | None = None):
+        self.model_id = model
+        self.revision = revision
+        self._process = self._connection = None
+        self._load_ms = 0.0
+
+    def _receive(self, stage: str, timeout: float = 600) -> dict:
+        if self._connection is None or not self._connection.poll(timeout):
+            raise PerceptionContractError(
+                "unavailable", f"MLX worker timed out during {stage}", 503, retryable=True)
+        message = self._connection.recv()
+        if message.get("status") == "error":
+            raise PerceptionContractError(
+                "unavailable", f"MLX worker failed during {stage}: {message.get('error')}",
+                503, retryable=True)
+        return message
+
+    def _load(self):
+        if self._process is not None and self._process.is_alive():
+            return
+        if sys.platform != "darwin":
+            raise PerceptionContractError("unavailable", "MLX backend requires Apple Silicon", 503)
+        import multiprocessing
+        parent, child = multiprocessing.get_context("spawn").Pipe()
+        process = multiprocessing.get_context("spawn").Process(
+            target=_mlx_worker, args=(child, self.model_id, self.revision),
+            name="harmony-locateanything-mlx", daemon=True)
+        process.start()
+        child.close()
+        self._process, self._connection = process, parent
+        message = self._receive("cold load")
+        if message.get("status") != "ready":
+            raise PerceptionContractError("unavailable", "MLX worker returned no ready signal",
+                                          503, retryable=True)
+        self._load_ms = float(message["cold_load_ms"])
+        print(f"[perception] mlx load complete ms={self._load_ms:.1f}", flush=True)
+
+    def __call__(self, path: Path, prompt: str, max_tokens: int) -> tuple[str, dict]:
+        self._load()
+        self._connection.send({"op": "infer", "path": str(path), "prompt": prompt,
+                               "max_tokens": max_tokens})
+        result = self._receive("inference")
+        inference_ms = float(result["inference_ms"])
+        raw = result["raw"]
+        metrics = {
+            "cold_load_ms": self._load_ms,
+            "inference_ms": inference_ms,
+            "total_ms": inference_ms + self._load_ms,
+            "peak_memory_bytes": int(result["peak_memory_bytes"]),
+            "truncated": (result["generated_tokens"] >= max_tokens
+                          and "<|im_end|>" not in raw),
+        }
+        self._load_ms = 0.0
+        return raw, metrics
+
+    def close(self) -> None:
+        connection, process = self._connection, self._process
+        self._connection = self._process = None
+        self._load_ms = 0.0
+        if connection is not None:
+            try:
+                connection.send({"op": "close"})
+            except (BrokenPipeError, EOFError, OSError):
+                pass
+            connection.close()
+        if process is not None:
+            process.join(timeout=10)
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
