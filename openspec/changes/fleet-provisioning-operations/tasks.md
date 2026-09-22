@@ -1,14 +1,22 @@
 ## 1. Deterministic lifecycle (Python) — before any model touches spending
 
-- [ ] 1.1 `fleet_operations.py`: state machine + SQLite store (bounded by count and age, enforcer named) with `operation_id`, `idempotency_key`, principal/owner, provider ids, structured error. Tests: every legal transition, every illegal one refused. Ledger: `operation.transition` record per transition.
-- [ ] 1.2 Atomic claim: owner + prefix `over_quota`, pending creates, admission usage, region — under one writer lock. Tests: concurrent claims, quota boundary, region-outside refused. Ledger: `operation.claim` accepted/refused with reason.
-- [ ] 1.3 Restart reconciliation: on startup and on `uncertain`, query provider by idempotency key; resolve to `created`/`rejected`; never re-create. Tests (fake provider): accepted-create/lost-reply, restart mid-create, late completion after cancel — one billed create per logical operation.
-- [ ] 1.4 `POST /fleet/plan` (serialized `FleetPlan`, stable ids, pools with exclusion reasons, reservations, policy version; uncertainty preserved). Tests: plan is a pure read, reserves nothing; unknown `in_flight` surfaces as `uncertainty`.
-- [ ] 1.5 `POST /fleet/operations` claim-then-dispatch, `GET /fleet/operations/{id}`; `409` on stale plan version. Same principals as `/fleet/admit`. Tests: auth refusals ledgered with source/principal.
-- [ ] 1.6 Reusable-worker adapter (Aliyun first): create with `operation_id` in the instance's announce env; `announced` only on the correlated receipt + `ready`. Tests: a fresh node without the id does not green the operation.
-- [ ] 1.7 Drain-gated deprovision: drain claim, zero leases/jobs, no pending admission, final re-check. Tests: busy-worker drain refused; `schedule()`'s `Deprovision` alone never releases.
-- [ ] 1.8 Ledger: `emit_admit` records `lease_id`; operation records joinable to admit/placement records by `job_id`. Tests: one query reconstructs an operation's history end to end.
-- [ ] 1.9 Docs: `_plans/fleet-scheduler.md` §8 and `_plans/decision-ledger.md` status corrected; `HARMONY.md` Fleet section gains the operation API; storage-bounds row for the operation store.
+Done 2026-09-22. `fleet_operations.py` (lifecycle + store), `fleet_workers.py`
+(the provider seam + the Aliyun ECS adapter), `fleet_pools.py` (elastic pools as
+operator config), `fleet_ops_api.py` (plan/claim/observe), wired in `hostd.py`.
+Tests: `test_fleet_operations.py`, `test_fleet_workers.py`, `test_fleet_pools.py`,
+`test_fleet_ops_api.py` — 71 tests, all green; the suite's 52 pre-existing
+failures (a starlette/httpx `TestClient` incompatibility in this environment) are
+unchanged from `main`.
+
+- [x] 1.1 `fleet_operations.py`: state machine + SQLite store (bounded by count and age, enforcer named) with `operation_id`, `idempotency_key`, principal/owner, provider ids, structured error. Tests: every legal transition, every illegal one refused. Ledger: `operation.transition` record per transition.
+- [x] 1.2 Atomic claim: owner + prefix `over_quota`, pending creates, admission usage, region — under one writer lock. Tests: concurrent claims, quota boundary, region-outside refused. Ledger: `operation.claim` accepted/refused with reason.
+- [x] 1.3 Restart reconciliation: on startup and on `uncertain`, query provider by idempotency key; resolve to `created`/`rejected`; never re-create. Tests (fake provider): accepted-create/lost-reply, restart mid-create, late completion after cancel — one billed create per logical operation.
+- [x] 1.4 `POST /fleet/plan` (serialized `FleetPlan`, stable ids, pools with exclusion reasons, reservations, policy version; uncertainty preserved). Tests: plan is a pure read, reserves nothing; unknown `in_flight` surfaces as `uncertainty`.
+- [x] 1.5 `POST /fleet/operations` claim-then-dispatch, `GET /fleet/operations/{id}`; `409` on stale plan version. Same principals as `/fleet/admit`. Tests: auth refusals ledgered with source/principal.
+- [x] 1.6 Reusable-worker adapter (Aliyun first): create with `operation_id` in the instance's announce env; `announced` only on the correlated receipt + `ready`. Tests: a fresh node without the id does not green the operation.
+- [x] 1.7 Drain-gated deprovision: drain claim, zero leases/jobs, no pending admission, final re-check. Tests: busy-worker drain refused; `schedule()`'s `Deprovision` alone never releases.
+- [x] 1.8 Ledger: `emit_admit` records `lease_id`; operation records joinable to admit/placement records by `job_id`. Tests: one query reconstructs an operation's history end to end.
+- [x] 1.9 Docs: `_plans/fleet-scheduler.md` §8 and `_plans/decision-ledger.md` status corrected; `HARMONY.md` Fleet section gains the operation API; storage-bounds row for the operation store.
 
 ## 2. Supervision loop (`livestack/fleetd/`, TS)
 
