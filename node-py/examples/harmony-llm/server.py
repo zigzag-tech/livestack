@@ -15,6 +15,7 @@ This process holds no GPU memory of its own; it is a facade plus a proxy.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import re
@@ -436,6 +437,41 @@ def _health_probe(_model) -> bool:
         return r.status_code == 200
     except Exception:
         return False
+
+
+# ONE client for the loopback hop to vLLM, not one per request.
+#
+# `httpx.AsyncClient()` builds a connection pool AND an SSL context at
+# construction — the latter reads the system CA bundle, which is why an
+# exhausted descriptor table surfaces as `ssl.create_default_context()` raising
+# EMFILE rather than as a socket error. Measured here 2026-09-22 03:48:29: a
+# burst of 71 `/v1/classifier` requests in one second against the default 1024
+# soft limit produced `OSError: [Errno 24] Too many open files` and five HTTP
+# 500s. Simple Jev loops over questions, so ONE classifier call is several of
+# these hops.
+#
+# A shared client pools the loopback connections instead of opening and
+# discarding one set per request. It is never closed on a request path — the
+# process outlives every request, and closing it would break every request
+# after the first.
+_SHARED_CLIENT = None  # type: ignore[var-annotated]
+_SHARED_CLIENT_LOCK = asyncio.Lock()
+
+
+async def _shared_client() -> httpx.AsyncClient:
+    """The process-wide client for loopback calls to the vLLM unit."""
+    global _SHARED_CLIENT
+    if _SHARED_CLIENT is None:
+        async with _SHARED_CLIENT_LOCK:
+            if _SHARED_CLIENT is None:
+                _SHARED_CLIENT = httpx.AsyncClient(
+                    timeout=float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")),
+                    # Bounded on purpose. Unbounded pooling against a single
+                    # upstream is the same descriptor problem one layer down.
+                    limits=httpx.Limits(max_connections=int(
+                        os.environ.get("HARMONY_LLM_MAX_CONNECTIONS", "64")),
+                        max_keepalive_connections=16))
+    return _SHARED_CLIENT
 
 
 app = FastAPI(title="harmony-llm", version="1.0.0")
@@ -1094,8 +1130,9 @@ async def classifier(request: Request):
             headers["x-harmony-owner"] = owner
         if authorization:
             headers["authorization"] = authorization
-        async with httpx.AsyncClient(timeout=float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300"))) as client:
-            response = await client.post(f"http://127.0.0.1:{NODE_PORT}/v1/chat/completions", json=body, headers=headers)
+        client = await _shared_client()
+        response = await client.post(
+            f"http://127.0.0.1:{NODE_PORT}/v1/chat/completions", json=body, headers=headers)
         if response.status_code >= 400:
             raise HTTPException(status_code=response.status_code, detail=response.text[:1000])
         return response.json()
