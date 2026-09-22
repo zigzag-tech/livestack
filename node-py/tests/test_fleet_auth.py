@@ -281,3 +281,44 @@ def test_the_wildcard_is_not_a_prefix_match_on_a_star():
     with pytest.raises(AuthError) as e:
         resolve_owner(bounded, "*anything")
     assert e.value.status == 403
+
+
+def test_a_file_that_stats_but_cannot_be_opened_fails_closed_rather_than_raising(tmp_path):
+    """`os.stat` succeeds on a file this process may not READ — a 0600 file owned
+    by another user in a traversable directory is exactly that shape, and it is
+    what a credential table looks like when it is installed as root for a service
+    running as somebody else.
+
+    The docstring promises `{}` and fail-closed for every unusable source. An
+    uncaught PermissionError broke that promise in the worst place: measured
+    2026-09-22, it surfaced as 73 HTTP 500s from a live endpoint over six
+    minutes instead of 401s and one startup line.
+    """
+    import os
+    from livestack_node.fleet_auth import principals_from_env
+
+    path = tmp_path / "principals.json"
+    path.write_text('{"%s": {"name": "x", "owner": "x"}}' % ("t" * 40))
+    os.chmod(path, 0o600)
+
+    real_open = open
+
+    def refuse(file, *a, **kw):
+        if str(file) == str(path):
+            raise PermissionError(13, "Permission denied", str(path))
+        return real_open(file, *a, **kw)
+
+    said = []
+    import builtins
+    builtins.open = refuse
+    try:
+        table = principals_from_env(
+            env={"LIVESTACK_FLEET_TOKENS_FILE": str(path)}, log=said.append)
+    finally:
+        builtins.open = real_open
+
+    assert table == {}, "an unreadable source must fail closed, not raise"
+    assert table is not None, "{} and None mean opposite things"
+    joined = " ".join(said)
+    assert "cannot be opened" in joined
+    assert "readable by the user this service runs as" in joined

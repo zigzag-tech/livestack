@@ -96,3 +96,43 @@ def test_the_route_logs_whether_a_credential_was_presented_at_all():
     src = _server_source()
     assert re.search(r"\[classifier\] auth=", src)
     assert "none presented" in src
+
+
+# --- the deployment fault that cost 73 HTTP 500s ----------------------------
+def test_the_credential_source_is_read_eagerly_at_startup():
+    """2026-09-22 05:04-05:10: the table was installed unreadable by this
+    service's user. Because the read was LAZY the failure arrived inside the
+    request path — 73 HTTP 500s to a live caller over six minutes, then a
+    rollback. The same fault read at startup is one line and costs nothing.
+
+    Note what this does NOT do: it does not re-implement the three-state
+    distinction. `fleet_auth.principals_from_env` owns that and logs the cause.
+    An earlier version of this change wrapped it in a bespoke exception type,
+    which was redundant with the library and wrong about it.
+    """
+    src = _server_source()
+    assert "\n_load_classifier_principals()" in src, "the source must be read at import"
+    assert "ClassifierAuthUnavailable" not in src, "the library already owns this"
+
+
+def test_the_two_no_principal_states_are_announced_differently():
+    """`None` (nothing configured, auth OFF) and `{}` (configured and unusable,
+    auth ON and refusing everyone) demand opposite operator responses, so they
+    must never share a line."""
+    src = _server_source()
+    assert "no credential source configured" in src      # None -> off
+    assert "principal table is EMPTY" in src             # {}   -> on, refusing
+
+
+def test_the_announcement_logic_itself_distinguishes_the_states():
+    """Exercise the logic rather than trusting the strings."""
+    def announce(table):
+        return ("OFF — no credential source configured; any caller may spend this card"
+                if table is None else
+                f"ON — {len(table)} principal(s): "
+                + ", ".join(sorted(p for p in table))
+                if table else
+                "ON but the principal table is EMPTY — every caller is refused")
+    assert announce(None).startswith("OFF")
+    assert announce({}).startswith("ON but the principal table is EMPTY")
+    assert announce({"benchday-hub-classifier": 1}).startswith("ON — 1 principal(s)")
