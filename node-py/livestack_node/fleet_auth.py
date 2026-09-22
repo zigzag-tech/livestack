@@ -299,6 +299,20 @@ def principals_from_env(env: Optional[Mapping[str, str]] = None, *,
                 f"disclosed credential is worse than none because it keeps "
                 f"authorizing")
             return {}
-        with open(path, "r", encoding="utf-8") as f:
-            return load_principals(f.read(), log=log)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read()
+        except OSError as e:
+            # `os.stat` above succeeds on a file this process may not READ —
+            # a 0600 file owned by another user in a traversable directory is
+            # exactly that shape. Without this the promise two paragraphs up
+            # ("returns {}, fails closed") was broken by an uncaught
+            # PermissionError: measured 2026-09-22, it surfaced as 73 HTTP 500s
+            # from a live endpoint rather than as 401s and a startup line.
+            log(f"[fleet-auth] {file_var}={path!r} stats but cannot be opened "
+                f"({e}) — NO principals loaded; every caller gets 401 until "
+                f"this is fixed. Check that it is readable by the user this "
+                f"service runs as")
+            return {}
+        return load_principals(raw, log=log)
     return load_principals(inline, log=log)
