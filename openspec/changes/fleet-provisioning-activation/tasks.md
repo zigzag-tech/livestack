@@ -18,19 +18,28 @@
 
 ## 2. Close the admit→burst seam
 
-- [ ] 2.1 **Decide who owns the queue**, and record the decision with its reasons.
-      Three shapes, and they are not equivalent: (a) `hostd` retains jobs it answered
-      with `Queue` and `fleetd` reads them — the broker gains state it has so far
-      refused to hold; (b) `POST /fleet/plan` grows an "include the broker's queued
-      jobs" mode — same state, narrower surface; (c) the caller keeps its own queue and
-      re-presents it — no new broker state, and every caller has to implement it.
-      Until one is chosen, `Queue` is a dead end and no burst can ever be triggered by
-      a real request.
-- [ ] 2.2 Implement it. Verify: a job the broker answers with `Queue` appears in a
-      subsequent `POST /fleet/plan` and, when a pool is feasible for its SLA, produces
-      a `provision`. Tests: a queued job reaches a plan; a job that was admitted does
-      not; a queued job whose SLA cannot tolerate the provision latency stays queued.
-      Ledger: the `admit` record and the later `operation` records join on `job_id`.
+- [x] 2.1 **Decided 2026-09-22: none of the three — a decaying demand SIGNAL, not a
+      queue.** The three shapes offered were (a) `hostd` retains queued jobs, (b)
+      `/fleet/plan` reads them, (c) callers re-present their own. (a) and (b) share a
+      defect the option list did not name: a retained queue can hold work whose caller
+      gave up ten minutes ago, and provisioning for it spends money for nothing. (c)
+      has no new broker state but requires every caller to implement a queue, and none
+      do.
+      `fleet_demand.DemandRegister` takes the useful half of (a) without the defect:
+      `/fleet/admit` records a CAPACITY refusal (never a quota refusal — an account at
+      its ceiling does not need a bigger fleet) into a bounded, TTL'd, in-memory
+      register. Demand must be CURRENT to justify spending, so a caller that stops
+      retrying stops counting within the TTL, and the existing retry behaviour of
+      attune and media-corpus is what keeps a live signal alive. In memory on purpose:
+      a restart forgetting it is correct, because demand older than the restart is not
+      demand.
+- [x] 2.2 Implemented: `node-py/livestack_node/fleet_demand.py`, recorded in the
+      `/fleet/admit` route, consumed by `/fleet/plan` (`include_demand`, default true),
+      reported on `GET /fleet`. One job per SHAPE, never one per refusal — turning a
+      refusal count into a job count is how a brief spike rents a datacentre. Tests:
+      `tests/test_fleet_demand.py` (13) — it forgets, it is bounded, it does not
+      inflate, and demand reaches a plan and produces a `provision` when a pool is
+      feasible for its SLA (and never for `interactive`).
 - [ ] 2.3 Verify the interactive path end to end on the deployed broker: an `asr`
       admit with `sla=interactive` is granted when a node has room, is queued when
       none does, and is NEVER placed on a cold pool. Evidence recorded in this change.
