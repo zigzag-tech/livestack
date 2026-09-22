@@ -89,3 +89,28 @@ def test_an_undeclared_attribute_is_not_a_yes(srv):
     # Which is why naming a unit warns rather than refuses: a unit's attribute
     # list is routinely thinner than the unit.
     assert not srv._local_satisfies("llm_small", {"refusals": "abliterated"})
+
+
+def test_request_is_counted_before_its_unit_becomes_resident(srv):
+    observed = []
+
+    def ensure():
+        observed.append(int(srv._busy))
+        return object()
+
+    before = int(srv._busy)
+    assert srv._ensure_while_counted(ensure) is not None
+    assert observed == [before + 1]
+    # A successful load hands the count through send to the response body.
+    assert int(srv._busy) == before + 1
+    srv._busy.release()
+
+
+def test_request_count_is_released_when_unit_load_fails(srv):
+    def ensure():
+        raise RuntimeError("load failed before resident")
+
+    before = int(srv._busy)
+    with pytest.raises(RuntimeError, match="before resident"):
+        srv._ensure_while_counted(ensure)
+    assert int(srv._busy) == before
