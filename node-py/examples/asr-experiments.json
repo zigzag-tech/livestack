@@ -1,0 +1,19 @@
+[
+  {
+    "id": "benchday-asr-r2t2-vs-qwen-v1",
+    "kind": "polyasr",
+    "cohorts": ["en-live", "zh-live"],
+    "control": "qwen",
+    "variants": ["qwen", "r2t2"],
+    "exploration_share": 0.1,
+    "control_floor": 0.1,
+    "min_samples": 100,
+    "confidence": 0.95,
+    "hysteresis_margin": 0.01,
+    "guardrails": {"max_failure_rate": 0.03, "max_finalization_ms": 5000},
+    "retention_days": 30,
+    "max_observations": 100000,
+    "promoted": null,
+    "paused": false
+  }
+]
