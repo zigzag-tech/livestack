@@ -477,13 +477,36 @@ _CLASSIFIER_PRINCIPALS = _UNSET
 
 
 def _classifier_principals():
-    """The principal table, read once. `None` = no source configured = auth off."""
+    """The principal table, read once at startup. `None` = nothing configured
+    = auth off; `{}` = a source was configured and yielded nothing, which fails
+    closed. `fleet_auth.principals_from_env` owns that distinction and logs the
+    cause; this only makes the read EAGER.
+
+    Eager because the alternative was measured 2026-09-22 05:04-05:10: the table
+    was installed unreadable by this service's user, the lazy read raised inside
+    the request path, and a live caller took 73 HTTP 500s over six minutes. The
+    same fault read at startup is one line and costs nothing.
+    """
     global _CLASSIFIER_PRINCIPALS
     if _CLASSIFIER_PRINCIPALS is _UNSET:
-        from livestack_node.fleet_auth import principals_from_env
-        _CLASSIFIER_PRINCIPALS = principals_from_env(
-            log=lambda m: print(m, flush=True))
+        _load_classifier_principals()
     return _CLASSIFIER_PRINCIPALS
+
+
+def _load_classifier_principals():
+    """Read the credential source, and say which of the three states we are in."""
+    global _CLASSIFIER_PRINCIPALS
+    from livestack_node.fleet_auth import principals_from_env
+    _CLASSIFIER_PRINCIPALS = table = principals_from_env(
+        log=lambda m: print(m, flush=True))
+    print(f"[classifier] auth is "
+          + ("OFF — no credential source configured; any caller may spend this card"
+             if table is None else
+             f"ON — {len(table)} principal(s): "
+             + ", ".join(sorted(p.name for p in table.values()))
+             if table else
+             "ON but the principal table is EMPTY — every caller is refused"),
+          flush=True)
 
 _SHARED_CLIENT = None  # type: ignore[var-annotated]
 _SHARED_CLIENT_LOCK = asyncio.Lock()
@@ -506,6 +529,10 @@ async def _shared_client() -> httpx.AsyncClient:
 
 
 app = FastAPI(title="harmony-llm", version="1.0.0")
+
+# EAGER. The whole point: a credential source that cannot be read is a startup
+# line, not a per-request 500 discovered by whoever was calling at the time.
+_load_classifier_principals()
 
 
 def _gpu_call(fn):
