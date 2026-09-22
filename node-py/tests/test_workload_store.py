@@ -356,3 +356,55 @@ def test_invalid_requests_cannot_become_execution(harness, extra):
     data.update(extra)
     with pytest.raises(WorkloadError):
         s.submit('owner', data)
+
+
+def test_a_small_worker_does_not_shrink_the_host_for_its_larger_peers(harness):
+    """A worker's reported availability is already clamped to its own capacity,
+    so taking the elementwise MINIMUM across a host conflated "this worker is
+    small" with "this host is full".
+
+    Measured on xc-tower-ubuntu 2026-09-22: a 1 GiB policy-lab worker serving an
+    unrelated handler pinned the host's disk figure to 1 GiB on a machine with
+    560 GiB free, and every 16 GiB E2E admission was refused as "insufficient
+    shared host resources" while three peers on that host each reported
+    142-192 GiB. The fleet's E2E gate was unreachable for a day."""
+    store, _, _ = harness
+    register(store, 'big', 'shared', cpu=8, ram=64, handlers=['test.v1'])
+    register(store, 'tiny', 'shared', cpu=2, ram=1, handlers=['build.v1'])
+    job = store.submit('owner', request('needs-room', need={'cpu': 4, 'ram': 16}))
+    claim = store.claim('big', 'boot1')
+    assert claim is not None and claim['job_id'] == job['id'], \
+        store.get('owner', job['id'])['reason']
+
+
+def test_a_job_is_refused_by_the_worker_it_would_run_on_not_only_the_host(harness):
+    """The other half of the same change. The old code tested the collapsed host
+    figure alone, which was safe only because the minimum happened to include
+    the smallest worker. Reading the host's least-clamped view requires checking
+    the worker's own room too, or a tiny worker would be handed a huge job."""
+    store, _, _ = harness
+    register(store, 'big', 'shared', cpu=8, ram=64, handlers=['test.v1'])
+    register(store, 'tiny', 'shared', cpu=2, ram=1, handlers=['test.v1'])
+    job = store.submit('owner', request('too-big-for-tiny', need={'cpu': 2, 'ram': 32}))
+    assert store.claim('tiny', 'boot1') is None, 'tiny must not take a 32 GiB job'
+    # No reason assertion here: placement has already targeted the job at `big`,
+    # so the job's reason reads as its placement, not as tiny's refusal. What
+    # matters is which worker may claim it.
+    claim = store.claim('big', 'boot1')
+    assert claim is not None and claim['job_id'] == job['id']
+
+
+def test_reservations_still_bound_a_host_with_mixed_worker_sizes(harness):
+    """Reading the least-clamped host view must not remove the double-count
+    guard. The guard is the per-host reservation sum, not the minimum, so a
+    second job that no longer fits is still refused."""
+    store, _, _ = harness
+    register(store, 'big', 'shared', cpu=8, ram=64, handlers=['test.v1'])
+    register(store, 'also-big', 'shared', cpu=8, ram=64, handlers=['test.v1'])
+    register(store, 'tiny', 'shared', cpu=2, ram=1, handlers=['build.v1'])
+    first = store.submit('owner', request('first', need={'cpu': 4, 'ram': 48}))
+    second = store.submit('owner', request('second', need={'cpu': 4, 'ram': 48}))
+    granted = [c for c in (store.claim('big', 'boot1'), store.claim('also-big', 'boot1')) if c]
+    assert len(granted) == 1, 'two 48 GiB reservations must not both fit 64 GiB'
+    refused = second if granted[0]['job_id'] == first['id'] else first
+    assert 'insufficient shared host resources' in store.get('owner', refused['id'])['reason']

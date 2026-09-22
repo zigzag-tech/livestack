@@ -35,16 +35,46 @@ def place(db, now, limits, principals=None):
         for key, value in json.loads(a["need"]).items():
             used.setdefault(a["host"], {}).setdefault(key, 0)
             used[a["host"]][key] += value
-    # Conservative intersection across execution environments on one physical
-    # host: WSL and Windows cannot advertise two independent copies of its RAM.
-    host_free = {}
+    # Two different quantities, previously collapsed into one minimum.
+    #
+    # `worker_free` is what THIS worker may take: its configured capacity,
+    # clamped by what it observes free. `host_free` is what the HOST has: every
+    # worker on a host measures the same physical machine, so the LEAST-clamped
+    # observation is the truest one, not the most-clamped.
+    #
+    # Taking the elementwise minimum conflated "this worker is small" with
+    # "this host is full", because a worker's reported availability is already
+    # clamped to its own capacity by `WorkloadWorker.report`. A deliberately
+    # small worker therefore dragged the whole host down to its size.
+    #
+    # Measured on xc-tower-ubuntu 2026-09-22: a 1 GiB policy-lab worker pinned
+    # host_free.disk to 1 GiB on a machine with 560 GiB free, while three other
+    # workers on that same host each reported 142-192 GiB. Every 16 GiB E2E
+    # admission was refused as "insufficient shared host resources", so the
+    # fleet's E2E gate was unreachable for a day by a worker serving an
+    # unrelated handler.
+    #
+    # Double counting is still prevented, by the mechanism that actually
+    # prevents it: `used` sums every active attempt's reservation PER HOST and
+    # is subtracted from both quantities, so a second admission on a host sees
+    # the first one's claim. The minimum was belt-and-braces on top of that,
+    # and it is what broke.
+    #
+    # Both bounds are now tested at placement: a job must fit the host AND the
+    # worker it would run on. The old code checked only the (collapsed) host
+    # figure, which was safe only because the minimum happened to include the
+    # smallest worker.
+    worker_free, host_observed = {}, {}
     for w in workers:
         report = reports[w["id"]]
-        free = {k: max(0, min(v, report["available"].get(k, 0)) - used.get(w["host"], {}).get(k, 0))
-                for k, v in report["capacity"].items()}
-        previous = host_free.get(w["host"])
-        host_free[w["host"]] = free if previous is None else {
-            k: min(previous.get(k, 0), free.get(k, 0)) for k in previous.keys() | free.keys()}
+        observed = {k: min(v, report["available"].get(k, 0)) for k, v in report["capacity"].items()}
+        reserved = used.get(w["host"], {})
+        worker_free[w["id"]] = {k: max(0, v - reserved.get(k, 0)) for k, v in observed.items()}
+        previous = host_observed.get(w["host"])
+        host_observed[w["host"]] = observed if previous is None else {
+            k: max(previous.get(k, 0), observed.get(k, 0)) for k in previous.keys() | observed.keys()}
+    host_free = {h: {k: max(0, v - used.get(h, {}).get(k, 0)) for k, v in obs.items()}
+                 for h, obs in host_observed.items()}
     # Priority is caller intent, while Harmony still owns capability/resource
     # admission and the final worker choice. Legacy persisted specs omit the
     # field and retain their original priority-zero FIFO behavior.
@@ -72,7 +102,11 @@ def place(db, now, limits, principals=None):
                 reason = "worker holds an active attempt or cleanup"
             elif any(report["labels"].get(k) != v for k, v in spec["selector"].items()):
                 reason = "required capability absent"
-            elif any(host_free[w["host"]].get(k, 0) < n for k, n in admit.items()):
+            elif any(min(host_free[w["host"]].get(k, 0), worker_free[w["id"]].get(k, 0)) < n
+                     for k, n in admit.items()):
+                # One reason for both bounds: a caller can act on neither
+                # differently, and the distinct figures are already in the
+                # worker report the refusal is recorded against.
                 reason = "insufficient shared host resources"
             if reason:
                 rejected.append({"worker": w["id"], "reason": reason})
