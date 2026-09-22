@@ -71,7 +71,14 @@ class RunpodProvisioner(Provisioner):
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(
             url, data=data, method=method,
-            headers={"Authorization": f"Bearer {self._key()}", "content-type": "application/json"})
+            # An explicit User-Agent is REQUIRED: RunPod's REST host sits behind
+            # Cloudflare, which answers urllib's default `Python-urllib/x.y` with
+            # 403 "error code: 1010" -- indistinguishable from a bad key unless
+            # you read the body. Measured 2026-09-22: same key, no UA -> 403,
+            # this UA -> 200. The GraphQL host does not filter, so pricing kept
+            # working while every pod create failed as a "capacity miss".
+            headers={"Authorization": f"Bearer {self._key()}", "content-type": "application/json",
+                     "User-Agent": "livestack-provision/1.0"})
         # The REST API intermittently resets the connection; retry transient
         # (non-HTTP) errors so one reset doesn't abort a run.
         for attempt in range(4):
