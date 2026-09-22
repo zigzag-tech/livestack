@@ -17,12 +17,21 @@
       **`pools: []`, so the broker still cannot provision** — that is 1.1, and it is
       the only thing standing between here and a real operation.
 
-- [x] 1.0b **Credential installed and proven, 2026-09-22.** Located on zz-tower2 at
+- [x] 1.0b **Credential installed, proven, then REMOVED, 2026-09-22.** Located on zz-tower2 at
       `/etc/default/unchain-gateway` (the unchain gateway's key — the ECS/ECI/ACR/OSS
       one). Only the two `ALIBABA_CLOUD_ACCESS_KEY_*` lines were copied host-to-host
       into `/etc/livestack/fleet-provider.env` (`0600 root:root`, 116 bytes); the value
       was never displayed. Proven with `scripts/check_provider_credentials.py`:
       *OK: aliyun answered DescribeInstances in cn-heyuan.* Read-only, nothing created.
+      **Removed the same day**, once the ledger showed no burst demand exists (12
+      `/fleet/admit` calls in 17 days, zero capacity refusals). `shred -u` on the file
+      plus a restart — removing the file alone leaves the key in the running process's
+      environment, which was verified before and after: 2 key names in the old process,
+      0 in the new one. Broker healthy after: 17 peers / 17 fresh / `pools: []`.
+      A broad OSS+ACR+ECS key sitting on a host for a capability that will never run is
+      strictly worse than not having copied it. The inert drop-in
+      (`80-provider-credentials.conf`, an OPTIONAL `EnvironmentFile`) stays, so
+      activation remains one file away; `ACTIVATION.md` §1 is still the procedure.
       **Two findings this turned up, both worth acting on separately:**
       (a) the source file is `mode=664 owner=ubuntu:ubuntu` — the Alibaba key is
       readable by any user on zz-tower2. Not caused by this change and not fixed by it;
