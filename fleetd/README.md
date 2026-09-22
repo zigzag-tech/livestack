@@ -67,7 +67,7 @@ in one process produce schemas that are structurally identical and fail
 ## One departure from the design sketch
 
 `_plans/fleetd-weave-jev.md` §3 draws one weave per tick with the operation steps
-inside it. `openspec/changes/fleet-provisioning-operations/specs/fleet-supervision-loop/`
+inside it. `openspec/specs/fleet-supervision-loop/`
 requires escalations to open in a conversation **per job**, so that a blocked
 operation does not stop an unrelated job from being admitted. Both hold if the
 tick is split where the ownership changes: one read-only block

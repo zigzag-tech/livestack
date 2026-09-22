@@ -689,7 +689,7 @@ def build_app(broker: HostBroker):
     # Three routes with a strict division of labour: /fleet/plan READS,
     # /fleet/operations SPENDS, GET /fleet/operations/{id} OBSERVES. See
     # `fleet_ops_api` for why they are separate from /fleet/admit, and
-    # `openspec/changes/fleet-provisioning-operations/` for the requirements
+    # `openspec/specs/fleet-provisioning-operations/` for the requirements
     # they implement.
     def _ops_store():
         store = getattr(broker, "operation_store", None)
