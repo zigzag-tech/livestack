@@ -75,14 +75,37 @@ reconciled. **Do not declare a pool until this passes.**
 This is the line that grants spending authority. Start with a ceiling you would
 not mind paying in full by accident.
 
+A pool needs PLACEMENT as well as a price. ECS refuses `RunInstances` without a
+security group, and an instance with no vSwitch has no VPC to join. The fleet's
+own working values are in `~/.aliyun/unchain-render.env` on zz-tower2
+(`ALIYUN_ECS_SECURITY_GROUP_ID`, `ALIYUN_ECS_VSWITCH_ID`, `ALIYUN_ECS_ZONE_ID`,
+`ALIYUN_ECS_IMAGE_ID`, `ALIYUN_ECS_KEY_PAIR_NAME`).
+
 ```bash
 sudo tee /etc/systemd/system/livestack-fleetd.service.d/90-pools.conf >/dev/null <<'CONF'
 [Service]
-Environment='LIVESTACK_FLEET_POOLS=[{"id":"heyuan-spot","provider":"aliyun","tier":"SPOT","region":"cn-heyuan","instance_type":"ecs.g8i.2xlarge","cost_per_hour":<¥/h>,"max_instances":1,"kinds":["asr"]}]'
-Environment='LIVESTACK_FLEET_WORKER_ENV={"LIVESTACK_BROKER_URL":"http://100.64.0.18:8801"}'
+Environment='LIVESTACK_FLEET_POOLS=[{"id":"heyuan-spot","provider":"aliyun","tier":"SPOT","region":"cn-heyuan","instance_type":"ecs.g8i.2xlarge","cost_per_hour":<¥/h>,"spot_price_limit":<¥/h ceiling>,"max_instances":1,"kinds":["asr"],"security_group_id":"sg-…","vswitch_id":"vsw-…","zone_id":"cn-heyuan-…","image_id":"m-…","internet_max_bandwidth_out_mbit":5}]'
+Environment='LIVESTACK_FLEET_WORKER_ENV={"LIVESTACK_BROKER_URL":"http://<reachable-from-that-VPC>:8801"}'
 CONF
 sudo systemctl daemon-reload && sudo systemctl restart livestack-fleetd
 ```
+
+`internet_max_bandwidth_out_mbit` defaults to **0**, which is a real choice and
+not a safe one to inherit by accident: a worker with no public egress cannot
+reach a broker outside its VPC, so it boots, never announces, and fails on its
+deadline **while billing**. Leave it 0 only if the instance joins the mesh or the
+broker address is VPC-internal.
+
+The startup line tells you whether the declaration can actually buy anything:
+
+```
+[fleet] 1 elastic pool(s): heyuan-spot SPOT aliyun/cn-heyuan …
+[fleet] pool 'heyuan-spot' buys SPOT (SpotStrategy=SpotAsPriceGo), price limit ¥…/h
+```
+
+If instead it says `CANNOT PROVISION: …`, the pool is missing placement and every
+create will be refused as `request_or_workload_fault` — fix the declaration
+rather than letting it claim operations that cannot succeed.
 
 `LIVESTACK_FLEET_WORKER_ENV` must be an address a machine **in that region** can
 reach. A mesh IP works only if the instance joins the mesh; otherwise use the
