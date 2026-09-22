@@ -408,3 +408,56 @@ def test_reservations_still_bound_a_host_with_mixed_worker_sizes(harness):
     assert len(granted) == 1, 'two 48 GiB reservations must not both fit 64 GiB'
     refused = second if granted[0]['job_id'] == first['id'] else first
     assert 'insufficient shared host resources' in store.get('owner', refused['id'])['reason']
+
+
+def test_a_cleanup_hold_from_a_vanished_worker_stops_charging_its_host(harness):
+    """A cleanup hold charges its host until the worker acknowledges it, because
+    the attempt's containers may still be running there. A worker that is GONE
+    never acknowledges, and nothing else released the hold, so the charge was
+    permanent.
+
+    Measured 2026-09-22: xc-mac-studio-harmony held one for 26 hours with its
+    lease 26 hours expired, staying busy and keeping its host short that
+    attempt's vector for a day."""
+    store, now, _ = harness
+    register(store, 'gone', 'shared', cpu=8, ram=64)
+    register(store, 'live', 'shared', cpu=8, ram=64)
+    held = store.submit('owner', request('held', need={'cpu': 4, 'ram': 48}))
+    attempt = store.claim('gone', 'boot1')
+    assert attempt['job_id'] == held['id']
+
+    # The lease lapses, fencing the attempt into cleanup, and `gone` never
+    # comes back to acknowledge it.
+    now[0] += store.limits.lease_seconds + 1
+    assert store.get('owner', held['id'])['state'] == 'queued'
+
+    # Still inside the cleanup window: the hold is honoured, so a second large
+    # job cannot take the host.
+    blocked = store.submit('owner', request('blocked', need={'cpu': 4, 'ram': 48}))
+    register(store, 'live', 'shared', cpu=8, ram=64)
+    assert store.claim('live', 'boot1') is None, 'the hold must still be charged'
+
+    # Past it, the vanished worker's hold no longer denies the host.
+    now[0] += store.limits.cleanup_seconds
+    register(store, 'live', 'shared', cpu=8, ram=64)
+    claim = store.claim('live', 'boot1')
+    assert claim is not None, store.get('owner', blocked['id'])['reason']
+    assert claim['job_id'] in (held['id'], blocked['id'])
+
+
+def test_a_released_hold_is_still_reported_to_the_worker_that_returns(harness):
+    """Releasing the RESERVATION must not forget the OBLIGATION. The containers
+    are stopped by the worker acting on its cleanup report, so an attempt stays
+    in cleanup however long its worker has been away."""
+    store, now, _ = harness
+    register(store, 'w1', 'host1', 'boot1')
+    job = store.submit('owner', request('abandoned'))
+    attempt = store.claim('w1', 'boot1')
+    assert attempt is not None and attempt['job_id'] == job['id']
+    now[0] += store.limits.lease_seconds + 1
+    store.get('owner', job['id'])
+
+    now[0] += store.limits.cleanup_seconds * 3
+    report = register(store, 'w1', 'host1', 'boot1')
+    assert report['cleanup'] == [attempt['attempt_id']], \
+        'a returning worker must still be told to clean up'

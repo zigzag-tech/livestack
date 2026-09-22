@@ -14,7 +14,31 @@ def place(db, now, limits, principals=None):
     workers = db.execute("SELECT * FROM workers WHERE ready=1 AND seen>? ORDER BY id",
                          (now-limits.fresh_seconds,)).fetchall()
     reports = {w["id"]: json.loads(w["report"]) for w in workers}
-    active = db.execute("SELECT * FROM attempts WHERE state IN ('running','cleanup')").fetchall()
+    # A cleanup hold keeps charging its host until the worker acknowledges it,
+    # deliberately: the attempt's containers may still be consuming that host
+    # (see the store module docstring). But a worker that is GONE never
+    # acknowledges, and nothing else releases the hold, so the charge became
+    # permanent.
+    #
+    # Measured 2026-09-22: `xc-mac-studio-harmony` had held one for 26 hours
+    # with its lease 26 hours expired. It stayed marked busy and its host
+    # stayed short that attempt's vector for a day.
+    #
+    # Holding capacity while a worker might still be running the attempt is
+    # caution; holding it forever is a leak that denies a shared host to
+    # everyone. Worker liveness is the evidence, and `cleanup_seconds` is far
+    # longer than any plausible cleanup, so this drops only holds that nobody
+    # can still be honouring.
+    #
+    # The attempt STAYS in `cleanup`. The obligation and the reservation are
+    # different things wearing one state: a worker that returns is still told
+    # to clean up (`register` reports it), which is what actually stops its
+    # containers.
+    active = db.execute(
+        "SELECT a.* FROM attempts a JOIN workers w ON w.id=a.worker "
+        "WHERE a.state IN ('running','cleanup') "
+        "AND NOT (a.state='cleanup' AND w.seen<?)",
+        (now-limits.cleanup_seconds,)).fetchall()
     used, busy = {}, set()
     # Per-principal concurrency cap: running attempts per job owner, counted
     # before the queued loop. A capped owner is skipped, never a blocker —

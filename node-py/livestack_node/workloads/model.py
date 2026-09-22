@@ -26,11 +26,16 @@ class Limits:
     record_bytes: int = 65536
     fresh_seconds: float = 60
     lease_seconds: float = 120
+    # How long a cleanup hold may outlive the worker that owes its
+    # acknowledgement. Generous against an ordinary worker restart, bounded
+    # against a worker that never returns -- see `WorkloadStore._expire`.
+    cleanup_seconds: float = 3600
     terminal_seconds: float | None = 14 * 86400
 
     def __post_init__(self):
         for name in ("active_jobs", "terminal_jobs", "workers", "claims_per_worker",
-                     "attempts", "record_bytes", "fresh_seconds", "lease_seconds"):
+                     "attempts", "record_bytes", "fresh_seconds", "lease_seconds",
+                     "cleanup_seconds"):
             value = getattr(self, name)
             if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be positive and finite")
