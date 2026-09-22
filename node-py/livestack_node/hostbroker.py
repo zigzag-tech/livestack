@@ -1362,11 +1362,13 @@ import json as _json
 import urllib.request as _urlreq
 
 
-def _http(url, body=None, timeout=5):
+def _http(url, body=None, timeout=5, headers=None):
     data = _json.dumps(body).encode() if body is not None else None
     method = "POST" if body is not None else "GET"
+    request_headers = {"Content-Type": "application/json"}
+    request_headers.update(headers or {})
     req = _urlreq.Request(url, data=data,
-                          headers={"Content-Type": "application/json"}, method=method)
+                          headers=request_headers, method=method)
     with _urlreq.urlopen(req, timeout=timeout) as r:
         raw = r.read().decode()
     return _json.loads(raw) if raw else {}
@@ -1419,11 +1421,15 @@ class RestPeer:
     POST /model/warm, POST /model/evict). Priority is derived from the residency
     tier unless overridden. One snapshot per planning cycle."""
 
-    def __init__(self, base_url, priority_for=None, priorities=None, footprints=None):
+    def __init__(self, base_url, priority_for=None, priorities=None, footprints=None,
+                 fallback_footprints=None, control_token=None):
         self.base = base_url.rstrip("/")
         self._prio = priority_for or (lambda r: _RES_TO_PRIO.get(r, 100))
         self._priorities = priorities or {}   # explicit kind->priority overrides
         self._footprints = footprints or {}   # explicit kind->vram_bytes overrides
+        self._fallback_footprints = fallback_footprints or {}
+        self._control_headers = ({"Authorization": f"Bearer {control_token}"}
+                                 if control_token else None)
         self._snap = None
 
     def refresh(self):
@@ -1460,7 +1466,7 @@ class RestPeer:
         # passed `method="POST", body={}` as keywords, which `_http` does not
         # accept — so the one lever that recovers a leaked allocator pool raised
         # TypeError every time it was pulled, inside the broker's `except`.
-        return _http(f"{self.base}/model/reclaim", {})
+        return _http(f"{self.base}/model/reclaim", {}, headers=self._control_headers)
 
     def _s(self):
         return self._snap or self.refresh()
@@ -1496,8 +1502,15 @@ class RestPeer:
                 prio = int(declared)
             else:
                 prio = self._prio(r)
-            fp = ({"vram_bytes": self._footprints[u["kind"]]}
-                  if u["kind"] in self._footprints else u["footprint"])
+            reported = u.get("footprint") or {}
+            if u["kind"] in self._footprints:
+                fp = {"vram_bytes": self._footprints[u["kind"]]}
+            elif any(float(value) > 0 for value in reported.values()):
+                fp = reported
+            elif u["kind"] in self._fallback_footprints:
+                fp = {"vram_bytes": self._fallback_footprints[u["kind"]]}
+            else:
+                fp = reported
             # Measured peak-activation reserve (absent on nodes that don't report it).
             hdrm = u.get("activation_headroom") or {}
             # Declared economics, passed through when set; absent keeps the
@@ -1556,7 +1569,9 @@ class RestPeer:
             body["device"] = device
         if budget:
             body["budget"] = dict(budget)
-        _http(f"{self.base}/model/warm", body, timeout=180)
+        _http(f"{self.base}/model/warm", body, timeout=180,
+              headers=self._control_headers)
 
     def evict(self, kind):
-        _http(f"{self.base}/model/evict", {"unit": kind}, timeout=60)
+        _http(f"{self.base}/model/evict", {"unit": kind}, timeout=60,
+              headers=self._control_headers)

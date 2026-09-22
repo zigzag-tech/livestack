@@ -505,17 +505,18 @@ def _readiness() -> dict:
 _busy = counting()
 
 
-async def _send_while_counted(client, req):
-    """Count work while vLLM is processing before response headers exist.
+def _ensure_while_counted(ensure):
+    """Reserve the facade before a unit starts loading for this request.
 
-    A streamed send returns only after upstream headers arrive. The resident
-    unit is already busy during that wait, and reporting zero lets another
-    admission evict it out from under its first request after a model swap.
-    On success, ownership of this count passes to the response body iterator.
+    Once a newly loaded unit reports resident, queued admission can immediately
+    evict it. Counting only when the upstream request is sent leaves a gap
+    between `manager.ensure()` making the unit visible and the handler reaching
+    `client.send()`. On success, ownership passes through send to the response
+    body iterator.
     """
     _busy.acquire()
     try:
-        return await client.send(req, stream=True)
+        return ensure()
     except BaseException:
         _busy.release()
         raise
@@ -555,7 +556,10 @@ def _reap_dead_units():
                       flush=True)
                 _procs.pop(name, None)
                 try:
-                    _gpu_call(lambda n=name: manager.request_evict(n))
+                    # Keep lock order manager -> GPU, the same as `ensure`.
+                    # Taking `_lock` first here while an ensure holds the
+                    # manager guard and waits for `_lock` deadlocks both paths.
+                    manager.request_evict(name)
                 except Exception as e:            # never let the reaper die
                     # Print the TYPE too. This handler swallowed a NameError
                     # (`gpu_call` for `_gpu_call`) once every 20s for hours: the
@@ -1332,10 +1336,11 @@ async def proxy(path: str, request: Request):
             elsewhere = holder
 
     if elsewhere:
+        _busy.acquire()
         url = f"{elsewhere}/v1/{path}"
     else:
         try:
-            manager.ensure(unit)
+            _ensure_while_counted(lambda: manager.ensure(unit))
         except Exception as e:
             raise HTTPException(status_code=503, detail=f"{unit} unavailable: {e}")
         url = f"{_base_of(unit)}/v1/{path}"
@@ -1366,9 +1371,10 @@ async def proxy(path: str, request: Request):
     try:
         req = client.build_request(request.method, url, content=body, headers=headers,
                                    params=dict(request.query_params))
-        resp = await _send_while_counted(client, req)
+        resp = await client.send(req, stream=True)
     except Exception as e:
         await client.aclose()
+        _busy.release()
         raise HTTPException(status_code=502, detail=f"vllm proxy failed: {e}")
 
     # A CONTEXT REFUSAL IS A ROUTING FACT, NOT A VENDOR STRING.

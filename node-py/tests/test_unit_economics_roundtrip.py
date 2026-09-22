@@ -68,6 +68,19 @@ def test_the_broker_turns_the_report_into_a_planner_unit():
     assert units["embed"].reload_cost == 1.0
 
 
+def test_reported_footprint_wins_and_legacy_default_only_fills_zero():
+    from livestack_node.hostbroker import RestPeer
+
+    peer = RestPeer("http://node", fallback_footprints={"qwen": 9_000, "old": 7_000})
+    peer.refresh = lambda: {"units": [
+        {"kind": "qwen", "footprint": {"vram_bytes": 3_000}, "residency": 2},
+        {"kind": "old", "footprint": {"vram_bytes": 0}, "residency": 2},
+    ]}
+    units = peer.units()
+    assert units["qwen"].footprint == {"vram_bytes": 3_000}
+    assert units["old"].footprint == {"vram_bytes": 7_000}
+
+
 def test_the_unit_file_accepts_the_three_fields(monkeypatch):
     """The harmony-llm unit file parser: declared fields land on the spec and
     the ManagedUnit; absent fields stay None and never reach /residence."""
