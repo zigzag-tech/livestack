@@ -38,7 +38,7 @@ must not start deleting history on the deploy that introduces it.
 Purity, and where it stopped: the two brains stay pure. This is the authority
 around them, so it owns a file, a clock and a lock, and it is tested against a
 fake provider rather than a mock of one. See
-``openspec/changes/fleet-provisioning-operations/`` and
+``openspec/specs/fleet-provisioning-operations/`` and
 ``_plans/fleetd-weave-jev.md``.
 """
 from __future__ import annotations

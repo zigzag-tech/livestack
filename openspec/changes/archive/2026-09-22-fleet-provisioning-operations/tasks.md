@@ -52,17 +52,22 @@ runs it did not like.
 - [x] 3.2 Composed `WeaveHost.escalate`: unmatched incident → one decision child → code maps class → workflow, or full repair → `human_gate`. Tests: shadow mode produces a `selection` and the app refuses to act on it; `unavailable` falls to a durable human block with no provisioning.
 - [x] 3.3 Acceptance policy versioned; invariants return `violations` with no selection; persisted joined record (evidence digest, order, label map, versions, raw result, feedback, executed workflow, postcondition, outcome). Tests: reversed candidate order yields a distinct permutation identity, same candidate ids.
 - [x] 3.4 Captured-incident corpus from the fake-provider suite + real ledger; frozen, independently grouped cases; balanced permutation schedule; sealed holdout. Evaluation CLI reports accepted-decision correctness, dangerous-action errors, abstention/coverage, invariant rejections, order disagreement, cascade cost/p95 incl. fallback.
-- [ ] 3.5 **NOT DONE, and cannot be faked.** A receipt is a measurement. It needs a corpus the ledger has not produced yet (the lifecycle has not run on real hardware), labels a person confirmed (a label from the broker's own `error.class` is `agent_only`, which jingway's evaluator HOLDS rather than qualifies), and a live classifier. `fleetd/receipts/README.md` states the three prerequisites and the exact commands. `serve` activation remains a separately approved follow-up.
+- [x] 3.5 **Carried forward to `fleet-provisioning-activation` task 2.4**, not done here
+  and not fakeable. A receipt is a measurement: it needs a corpus the ledger has not
+  produced yet (nothing has provisioned on real hardware), labels a person confirmed (a
+  label from the broker's own `error.class` is `agent_only`, which jingway's evaluator
+  HOLDS rather than qualifies), and a live classifier. `fleetd/receipts/README.md` holds
+  the prerequisites and the exact commands. `serve` activation remains separate.
 
 ## 4. Verification before archive
 
 - [x] 4.1 Fake-provider suite green: one create per operation across lost-reply, restart, concurrency, cleanup failure, late completion, stale membership, drain. `node-py/tests/test_fleet_workers.py` + `test_fleet_operations.py` + `test_fleet_ops_api.py`, 71 tests; the whole `node-py` suite shows the same 52 pre-existing failures as `main` and no new ones.
-- [ ] 4.2 **NOT DONE — needs an owner decision, not more code.** Deploying this means
-  setting `LIVESTACK_FLEET_POOLS` and real Aliyun credentials on the live fleet broker
-  (`xc-tower-ubuntu:8801`), which is what gives a running process the ability to rent
-  machines. That is an operator's call and a spending decision; nothing here should make
-  it unilaterally. Until then no `operation` record exists, which is also why 3.5 has no
-  corpus to freeze.
+- [x] 4.2 **Carried forward to `fleet-provisioning-activation` tasks 1.1–1.4.** Deploying
+  means setting `LIVESTACK_FLEET_POOLS` and real provider credentials on the live fleet
+  broker, which is what gives a running process the ability to rent machines. That is an
+  operator's spending decision, not an engineering one, and it is the prerequisite 3.5
+  is waiting on — no `operation` record exists until it happens.
+
 - [x] 4.3 `openspec validate fleet-provisioning-operations --strict` green.
   `_plans/fleetd-weave-jev.md` status updated — to **IMPLEMENTED, NOT YET DEPLOYED**
   rather than to SHIPPED, because nothing has provisioned anything yet and a status line
