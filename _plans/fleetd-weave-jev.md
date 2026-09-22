@@ -1,6 +1,6 @@
 # fleetd — the dispatch loop as a weave, with Simple Jev as the first escalation rung
 
-**Status:** IMPLEMENTED, NOT YET DEPLOYED — 2026-09-22. v1 was written by a Claude
+**Status:** DEPLOYED IN OBSERVE MODE, CANNOT YET SPEND — 2026-09-22. v1 was written by a Claude
 session and critiqued by a Codex (gpt-6-astra) session (§7, kept verbatim); §§2–5 were
 rewritten to fold that review in, and the design was then built.
 
@@ -9,8 +9,14 @@ Built: the durable lifecycle (`node-py/livestack_node/fleet_operations.py`,
 supervision loop and the classifier rung (`fleetd/`). 122 tests green — 71 Python, 51
 TypeScript.
 
-**Not yet true, and it matters:** no broker on this fleet has `LIVESTACK_FLEET_POOLS`
-set, so nothing has provisioned anything for real. The classifier rung has no
+Live on `xc-tower-ubuntu:8801` since 2026-09-22 02:36 CST, as release
+`fleet-provisioning-6de47145` pinned by a systemd drop-in. The routes answer, the
+operation store exists, the demand register is running, and the observe-only
+property still holds (zero `[hostbroker] evict|warm` lines).
+
+**Not yet true, and it matters:** `pools: []` — no broker on this fleet has
+`LIVESTACK_FLEET_POOLS` set, and no provider credentials exist on the host at all,
+so nothing has provisioned anything and nothing can. The classifier rung has no
 qualification receipt (`fleetd/receipts/README.md` says what would produce one) and
 runs only in `shadow`.
 

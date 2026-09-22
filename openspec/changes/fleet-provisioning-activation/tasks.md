@@ -1,6 +1,26 @@
 ## 1. Activate the lifecycle (operator)
 
-- [ ] 1.1 Declare `LIVESTACK_FLEET_POOLS` on the fleet broker with one pool, a real
+- [x] 1.0 **Ship the lifecycle to the fleet broker WITHOUT pools.** Done 2026-09-22
+      02:36 CST on `xc-tower-ubuntu:8801`. livestack `6de47145` cut to
+      `~/.local/share/livestack-releases/fleet-provisioning-6de47145/`, pinned by
+      `livestack-fleetd.service.d/70-fleet-provisioning.conf`. A release directory
+      rather than a pull, per the convention in `_plans/fleet-caller-identity.md` R.4 —
+      rollback is `rm` of that one drop-in plus a restart.
+      Evidence: `GET /fleet/operations` → `200 {"operations":[]}`; `GET /fleet/ledger`
+      → `200` with records; `GET /fleet` now carries `pools: []`, `demand` (256 shapes,
+      120 s TTL) and `operations` (store at
+      `~/.cache/livestack/fleet-operations.sqlite3`, bound 5000, age window disabled).
+      Membership converged to 18 peers / 15 hosts / 18 fresh (pre-restart baseline:
+      18 / 15 / 17). Zero tracebacks since restart. **The observe-only property still
+      holds and is proven by absence: zero `[hostbroker] evict|warm` lines in this
+      journal.** The host broker on `:8799` is unaffected (`200`).
+      **`pools: []`, so the broker still cannot provision** — that is 1.1, and it is
+      the only thing standing between here and a real operation.
+
+- [ ] 1.1 **BLOCKED: no provider credentials exist on this fleet.** A search of the
+      broker host found no `ALIBABA_CLOUD_ACCESS_KEY_*` / `ALIYUN_ACCESS_KEY_*` in the
+      environment, the systemd units, the shell profiles or `~/.aliyun`. Declare
+      `LIVESTACK_FLEET_POOLS` on the fleet broker with one pool, a real
       price and a `max_instances` ceiling the owner has agreed to; set
       `LIVESTACK_FLEET_WORKER_ENV` to the broker address a machine in that region can
       actually reach. Verify: `GET /fleet` reports the pools and `adapter: true`.
