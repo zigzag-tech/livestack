@@ -28,6 +28,7 @@ import time
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from livestack_node import request_log as _request_log
 from livestack_node.decisions.simple_jev import SimpleJevError, classify as simple_jev_classify
 
 HOST_ID = os.environ.get("HARMONY_LLM_HOST_ID", "xc-tower-ubuntu")
@@ -454,6 +455,36 @@ def _health_probe(_model) -> bool:
 # discarding one set per request. It is never closed on a request path — the
 # process outlives every request, and closing it would break every request
 # after the first.
+# WHO MAY SPEND THIS CARD.
+#
+# `/v1/classifier` had no credential check of any kind. Measured 2026-09-22:
+# 1,697 calls in 24 h from ONE off-fleet host at a public address, every one
+# `principal=-`, bursting to 71 requests per second — legitimate traffic (the
+# benchday hub classifying pane attention), but the only thing standing between
+# that endpoint and anyone else who found it was that nobody had.
+#
+# Same source and same semantics as `hostd`'s admission auth, deliberately: a
+# second spelling of "who is asking" is a second thing to get wrong.
+# `principals_from_env` returns None when NOTHING is configured, and None means
+# AUTH IS OFF — today's behaviour, byte for byte — while an empty table means a
+# source was configured and yielded nothing, which fails CLOSED. Both are said
+# out loud at startup, because a security control that quietly disabled itself
+# is the failure this guards.
+#: Sentinel for "not read yet", distinct from None, which is a real answer
+#: meaning NOTHING IS CONFIGURED and therefore auth is off.
+_UNSET = object()
+_CLASSIFIER_PRINCIPALS = _UNSET
+
+
+def _classifier_principals():
+    """The principal table, read once. `None` = no source configured = auth off."""
+    global _CLASSIFIER_PRINCIPALS
+    if _CLASSIFIER_PRINCIPALS is _UNSET:
+        from livestack_node.fleet_auth import principals_from_env
+        _CLASSIFIER_PRINCIPALS = principals_from_env(
+            log=lambda m: print(m, flush=True))
+    return _CLASSIFIER_PRINCIPALS
+
 _SHARED_CLIENT = None  # type: ignore[var-annotated]
 _SHARED_CLIENT_LOCK = asyncio.Lock()
 
@@ -1123,6 +1154,23 @@ async def classifier(request: Request):
 
     owner = request.headers.get("x-harmony-owner")
     authorization = request.headers.get("authorization")
+
+    # UNCONDITIONAL, with the condition in the message. A line that appeared
+    # only on refusal could not answer the question this endpoint actually
+    # raised — "does the caller present a credential at all?" — until the day
+    # somebody turned enforcement on and found out by breaking it.
+    principals = _classifier_principals()
+    label = _request_log.principal_label(authorization, principals)
+    print(f"[classifier] auth={'REQUIRED' if principals is not None else 'off'} "
+          f"credential={label or 'none presented'}", flush=True)
+    if principals is not None:
+        from livestack_node.fleet_auth import AuthError, authenticate
+        try:
+            # The owner header is the delegated account, checked against the
+            # principal's prefix exactly as `/fleet/admit` checks it.
+            authenticate(principals, authorization, owner)
+        except AuthError as e:
+            raise HTTPException(status_code=e.status, detail=e.detail)
 
     async def invoke_chat(body: dict) -> dict:
         headers = {"content-type": "application/json"}
