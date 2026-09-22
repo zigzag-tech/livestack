@@ -341,6 +341,10 @@ def build_app(broker: HostBroker):
                 # the roster records the grant; the admission path enforces
                 # it (`fleet_admit.targets_from_view`).
                 scope=payload.get("scope"),
+                # The provisioning operation that created this node, as the
+                # node states it. Recorded uninterpreted; the operation store
+                # is what joins it back to the create it paid for.
+                operation_id=payload.get("operation_id"),
                 kinds=payload.get("kinds"),
                 readiness=payload.get("readiness"),
             )
@@ -407,7 +411,33 @@ def build_app(broker: HostBroker):
         what it cannot reach can only report health, which is not what anyone
         opens it to find out.
         """
-        return broker.fleet_view()
+        view = broker.fleet_view()
+        # The elastic pools in force and the operations outstanding, beside the
+        # machines that exist. A reader asking "why did nothing burst?" needs to
+        # see that NO pool is configured, and one asking "what is this instance
+        # doing on my bill?" needs to see the operation that created it —
+        # neither is answerable from a list of nodes.
+        pools = getattr(broker, "fleet_pools", ())
+        view["pools"] = [
+            {"id": p.id, "provider": p.provider, "tier": p.tier.name,
+             "region": p.region, "instance_type": p.instance_type,
+             "cost_per_hour": p.cost_per_hour, "max_instances": p.max_instances,
+             "kinds": list(p.kinds),
+             "adapter": p.provider in getattr(broker, "fleet_providers", {})}
+            for p in pools]
+        store = getattr(broker, "operation_store", None)
+        if store is not None:
+            active = store.active()
+            view["operations"] = {
+                "active": [op.to_dict() for op in active],
+                # Reported rather than discovered. An operation whose ledger
+                # write failed still applied, and the gap in the audit trail is
+                # a fact an operator has to be able to see without grepping.
+                "observability_degraded": [op.operation_id for op in active
+                                           if op.observability_degraded],
+                "store": store.path,
+            }
+        return view
 
     @app.get("/fleet/rank")
     def fleet_rank(kind: str, vantage: str = "direct", via: str = None,
@@ -653,6 +683,143 @@ def build_app(broker: HostBroker):
         out["lease_id"] = lease_id
         return out
 
+
+    # --- the provisioning control plane (v1) --------------------------------
+    #
+    # Three routes with a strict division of labour: /fleet/plan READS,
+    # /fleet/operations SPENDS, GET /fleet/operations/{id} OBSERVES. See
+    # `fleet_ops_api` for why they are separate from /fleet/admit, and
+    # `openspec/changes/fleet-provisioning-operations/` for the requirements
+    # they implement.
+    def _ops_store():
+        store = getattr(broker, "operation_store", None)
+        if store is None:
+            # Not configured is a 501, never an empty answer: a loop told "no
+            # operations" by a broker that has no store would conclude the fleet
+            # is idle and keep planning against a control plane that is not there.
+            raise HTTPException(501, "this broker has no operation store "
+                                     "(set LIVESTACK_LEDGER_DIR / run as a "
+                                     "fleet broker)")
+        return store
+
+    def _ops_owner(authorization, payload):
+        from .fleet_auth import AuthError, authenticate
+        principals = getattr(broker, "fleet_principals", None)
+        if principals is None:
+            return payload.get("owner", "consumer"), None
+        try:
+            return authenticate(principals, authorization, payload.get("owner"))
+        except AuthError as e:
+            raise HTTPException(e.status, e.detail)
+
+    @app.post("/fleet/plan")
+    def fleet_plan(payload: dict = Body(default={}), authorization: str = Header(None)):
+        """The whole plan for a caller-supplied queue. A READ: it reserves
+        nothing, so calling it twice costs nothing and changes nothing.
+
+        It reports what `/fleet/admit` never could: the actions for every job at
+        once, the pools that were excluded and why, the reservations already
+        outstanding, and the inputs the fleet did not actually know."""
+        from .fleet_ops_api import build_plan
+        owner, principal = _ops_owner(authorization, payload)
+        regions = tuple(r.strip().lower()
+                        for r in str(payload.get("regions") or "").split(",")
+                        if r.strip())
+        return build_plan(
+            broker.fleet_view(), payload.get("jobs") or [], owner=owner,
+            policy=getattr(broker, "fleet_policy", None) or SchedulerPolicy(),
+            pools=getattr(broker, "fleet_pools", ()),
+            store=_ops_store(), usage=broker.owner_usage(),
+            allow_regions=regions,
+            vantage=payload.get("via") or payload.get("vantage") or "direct")
+
+    @app.post("/fleet/operations")
+    def fleet_operation(payload: dict = Body(...), authorization: str = Header(None)):
+        """Claim, then act. The claim is durable and synchronous; the provider
+        call is not, so losing this reply costs nothing — the operation is
+        already on disk and already counted against its owner's quota."""
+        from .fleet_ops_api import (ActionRefused, deprovision, plan_is_current,
+                                    provision)
+        store = _ops_store()
+        owner, principal = _ops_owner(authorization, payload)
+        action = payload.get("action") or {}
+        pools = getattr(broker, "fleet_pools", ())
+        policy = getattr(broker, "fleet_policy", None) or SchedulerPolicy()
+        stale = plan_is_current(payload.get("plan_version") or "", policy=policy,
+                                pools=pools, now=time.time(),
+                                max_age_s=float(os.environ.get(
+                                    "LIVESTACK_PLAN_MAX_AGE_S", "120")))
+        if stale:
+            raise HTTPException(409, stale)
+        kind = str(action.get("type") or "")
+        try:
+            if kind == "provision":
+                key = str(payload.get("idempotency_key") or "").strip()
+                if not key:
+                    # Refused rather than generated. A key the broker invented is
+                    # a key the caller cannot repeat, which is the same as having
+                    # none the moment a reply is lost.
+                    raise HTTPException(400, "'idempotency_key' is required for a "
+                                             "provision; the caller must choose it "
+                                             "so it can repeat it")
+                return provision(
+                    action, store=store, pools=pools,
+                    providers=getattr(broker, "fleet_providers", {}),
+                    owner=owner, principal=principal.name if principal else None,
+                    plan_version=payload.get("plan_version") or "",
+                    idempotency_key=key, policy=policy,
+                    usage=broker.owner_usage(),
+                    announce_env=getattr(broker, "fleet_worker_env", {}),
+                    allow_regions=tuple(
+                        r.strip().lower()
+                        for r in str(payload.get("regions") or "").split(",")
+                        if r.strip()),
+                    allow_unknown_region=bool(payload.get("allow_unknown_region")),
+                    log=lambda m: print(m, flush=True))
+            if kind == "deprovision":
+                return deprovision(
+                    action, store=store,
+                    providers=getattr(broker, "fleet_providers", {}),
+                    busy=lambda node: _drain_blocked(broker, node),
+                    log=lambda m: print(m, flush=True))
+        except ActionRefused as e:
+            raise HTTPException(e.status, e.detail)
+        raise HTTPException(400, f"action type {kind!r} is not one of "
+                                 f"'provision' / 'deprovision'")
+
+    @app.get("/fleet/ledger")
+    def fleet_ledger(since: float = 0.0, limit: int = 200, kind: str = None):
+        """Decision records, newest last — the retrospective, over HTTP.
+
+        Read-only and deliberately narrow. It exists because the supervision
+        loop's repair surface includes "read what this broker decided recently",
+        and a repair turn that had to ssh into the broker to answer that would
+        be a repair surface in name only. The records carry no secrets by
+        construction (see `ledger.py`); `owner` is an id.
+        """
+        led = getattr(broker, "ledger", None)
+        if led is None:
+            raise HTTPException(501, "this broker writes no decision ledger "
+                                     "(LIVESTACK_LEDGER=0)")
+        return {"records": led.read(since=since or None, kind=kind,
+                                    limit=max(1, min(int(limit), 1000))),
+                "path": led.path}
+
+    @app.get("/fleet/operations")
+    def fleet_operations():
+        """Every operation that is not terminal — what a supervision tick
+        supervises, and what an operator reads when a burst went wrong."""
+        return {"operations": [op.to_dict() for op in _ops_store().active()]}
+
+    @app.get("/fleet/operations/{operation_id}")
+    def fleet_operation_state(operation_id: str):
+        """The correlated facts a gate reads: the state, the receipts, the
+        structured error. Never the HTTP status of the dispatch that started it."""
+        op = _ops_store().get(operation_id)
+        if op is None:
+            raise HTTPException(404, f"no operation {operation_id!r}")
+        return op.to_dict()
+
     @app.get("/plan")
     def plan_preview():
         world = broker.snapshot([], state["last_evicted_at"])
@@ -712,6 +879,13 @@ def build_app(broker: HostBroker):
                     # each) and it is the only distance signal that is not
                     # measured from this broker's own vantage.
                     broker.measure_links()
+                    # Correlate: a node carrying an operation's id and
+                    # reporting ready is the only thing that greens that
+                    # operation. Cheap (it reads the view the tick already
+                    # built) and it must happen on the broker's own clock —
+                    # an operation whose supervision loop is down still has to
+                    # stop being a pending create.
+                    _settle_operations(broker)
                     p = broker.plan_and_apply([], state["last_evicted_at"])
                     _track(p)
                     if p.of(Evict) or p.of(Load):
@@ -723,6 +897,54 @@ def build_app(broker: HostBroker):
                          daemon=True).start()
 
     return app
+
+
+def _settle_operations(broker) -> None:
+    """Green the operations whose node has announced, and fail the ones whose
+    deadline passed. Both on the broker's own tick, so an operation's fate does
+    not depend on the supervision loop being alive.
+
+    Silence is not success and it is not failure either: an operation that is
+    neither correlated nor expired simply stays where it is, still counted, and
+    `GET /fleet/operations` still shows it.
+    """
+    store = getattr(broker, "operation_store", None)
+    if store is None:
+        return
+    from .fleet_workers import announce_from_view
+    for op in announce_from_view(store, broker.fleet_view()):
+        print(f"[fleet] {op.operation_id} announced as {op.node_id}", flush=True)
+    for op in store.expire():
+        print(f"[fleet] {op.operation_id} FAILED: {op.reason} "
+              f"(instance {op.provider_instance_id or 'unknown'} may still be "
+              f"billing)", flush=True)
+
+
+def _drain_blocked(broker, node_id: str) -> Optional[str]:
+    """Why this node may not be released, or None.
+
+    Three independent reasons, each named rather than folded into a boolean:
+    a live lease, a membership row that still says the node is serving, and the
+    node simply not being one this broker can see. The last one matters — a node
+    that has fallen out of the view is not evidence that it is empty, it is
+    evidence that we cannot tell, and "cannot tell" must not read as "safe".
+    """
+    held = broker.leases_on(node_id)
+    if held:
+        return f"{held} active lease(s) on {node_id}"
+    view = broker.fleet_view()
+    row = next((n for h in (view.get("hosts") or {}).values()
+                for n in (h.get("nodes") or [])
+                if (n.get("peer", "")[: -len("/livestack")]
+                    if n.get("peer", "").endswith("/livestack")
+                    else n.get("peer", "")) == node_id), None)
+    if row is None:
+        return (f"{node_id} is not in the fleet view; its state is unknown, "
+                f"which is not the same as empty")
+    in_flight = (row.get("load") or {}).get("in_flight")
+    if isinstance(in_flight, (int, float)) and in_flight > 0:
+        return f"{node_id} reports in_flight={in_flight}"
+    return None
 
 
 def _node_control_token_from_env(env=None) -> Optional[str]:
@@ -934,6 +1156,48 @@ def main():
     broker.link_peers = link_peers
     broker.fleet_policy = fleet_policy
     broker.fleet_principals = fleet_principals
+
+    # --- the provisioning control plane -------------------------------------
+    #
+    # Pools are an OPERATOR statement (which machines, where, at what price, how
+    # many) — livestack cannot discover willingness or price. With none declared
+    # the broker plans and admits exactly as before and can never provision,
+    # which is the correct behaviour for every host broker and for a fleet
+    # broker nobody has given a budget to.
+    import json as _json
+    from .fleet_operations import store_from_env
+    from .fleet_ops_api import providers_from_env
+    from .fleet_pools import parse_pools
+    _say = lambda m: print(m, flush=True)  # noqa: E731
+    broker.fleet_pools = parse_pools(
+        os.environ.get("LIVESTACK_FLEET_POOLS", ""), log=_say)
+    broker.fleet_providers = providers_from_env(broker.fleet_pools, log=_say)
+    # What a provisioned worker needs in its environment to find its way home.
+    # `LIVESTACK_OPERATION_ID` is added per operation by the runner; everything
+    # else is operator config, because only the operator knows which address of
+    # this broker a machine in another datacentre can actually reach.
+    try:
+        broker.fleet_worker_env = {
+            str(k): str(v) for k, v in
+            _json.loads(os.environ.get("LIVESTACK_FLEET_WORKER_ENV", "") or "{}").items()}
+    except Exception as e:
+        broker.fleet_worker_env = {}
+        _say(f"[fleet] LIVESTACK_FLEET_WORKER_ENV is malformed ({e}); provisioned "
+             f"workers will boot with NO broker address and will never announce")
+    broker.operation_store = store_from_env(
+        ledger=ledger, emitter_id=emitter_id, log=_say)
+    _say(f"[fleet] operation store -> {broker.operation_store.path} "
+         f"(bound: {broker.operation_store.max_records} records"
+         + (f", {broker.operation_store.max_age_s / 86400:.0f}d"
+            if broker.operation_store.max_age_s else ", age window disabled") + ")")
+    # RECONCILE BEFORE SERVING. An operation caught mid-create by the last
+    # shutdown is resolved by asking the provider, never by creating again —
+    # and until it is resolved it keeps holding its owner's quota. Doing this
+    # after the port is open would let a claim race a create whose outcome is
+    # still unknown.
+    from .fleet_workers import recover_all
+    recover_all(broker.operation_store, broker.fleet_providers, log=_say)
+
     import uvicorn
     role = "host broker" if dispatch else "fleet broker (observe-only)"
     print(f"[harmony] {role} on :{port} as {host_id} over {len(broker.peers)} "

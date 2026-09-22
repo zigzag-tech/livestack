@@ -605,6 +605,59 @@ that introduces it. `LIVESTACK_LEDGER=0` turns emission off entirely.
 Schema: `node-py/livestack_node/decision.schema.json`. Design:
 `_plans/decision-ledger.md`.
 
+## Provisioning — the fleet renting a machine, and knowing that it did
+
+`schedule()` has always been able to emit `Provision`. Nothing dispatched one,
+because nothing declared a pool to provision INTO and nothing recorded a create
+durably enough to be safe. Both now exist.
+
+**Pools are operator configuration, not discovery.** `LIVESTACK_FLEET_POOLS` is a
+JSON list: which machine shape, in which region, at what price, up to how many at
+once. Livestack cannot learn willingness or price from a cloud API. With none
+declared the broker plans and admits exactly as before and can never provision —
+the right behaviour for every host broker and for a fleet broker nobody has given
+a budget to. A malformed value yields **no** pools and says so at startup, for the
+same reason a malformed quota does: half a pool list is a fleet bursting into the
+wrong region at the wrong price.
+
+```
+LIVESTACK_FLEET_POOLS='[{"id":"heyuan-spot","provider":"aliyun","tier":"SPOT",
+  "region":"cn-heyuan","instance_type":"ecs.g8i.2xlarge","cost_per_hour":2.1,
+  "max_instances":2,"kinds":["llm"]}]'
+LIVESTACK_FLEET_WORKER_ENV='{"LIVESTACK_BROKER_URL":"http://100.64.0.18:8801"}'
+```
+
+**One logical operation results in at most one billed create.** Everything in
+`fleet_operations.py` serves that sentence. `creating` is written to disk with an
+idempotency key BEFORE the provider is called, so a process that dies in between
+comes back to that row, marks it `uncertain`, and RECONCILES it by asking the
+provider — it never retries. `uncertain` is a first-class state, because "the
+provider did not answer" is not "the provider said no", and a control plane that
+cannot tell them apart will eventually choose the expensive reading of silence.
+
+A **claim** is atomic across the owner's ceiling, every enclosing prefix ceiling,
+the slots already leased and the creates already in flight, under one writer lock.
+Checked separately, two claims at the boundary both pass.
+
+`announced` requires a **correlated** receipt: the fleet broker puts
+`LIVESTACK_OPERATION_ID` in the instance's boot environment, the node announces it
+back (`announce.node_operation_id`), and only a node carrying *this* operation's id
+and reporting `ready` greens it. "A fresh node appeared" is a coincidence that
+happens to be true most of the time, which is the worst kind of evidence to bill
+against. `released` requires a drain claim, an empty node and a final authoritative
+re-check under the writer lock — `schedule()`'s `Deprovision` is a proposal
+computed from a view, never a proof.
+
+Bound (rule 10): the store is `fleet-operations.sqlite3` beside the decision
+ledger, at most `LIVESTACK_OPERATIONS_MAX` records (default 5000), enforced by the
+store itself on every claim and deleting only TERMINAL rows.
+`LIVESTACK_OPERATIONS_AGE_DAYS` is UNSET by default and unset means the age window
+is **disabled**. A pending create is the one thing this store exists to remember,
+so a bound that could forget one would trade a bounded disk for an unbounded bill.
+
+Design: `_plans/fleetd-weave-jev.md`; requirements:
+`openspec/changes/fleet-provisioning-operations/`.
+
 ## Endpoints
 
 Broker (`hostd`, default `:8799`):
@@ -618,6 +671,15 @@ Broker (`hostd`, default `:8799`):
   too, for the nodes it knows).
 - `GET /fleet/rank?kind=&regions=&require=` → where a request for `kind`
   should start. See below.
+- `POST /fleet/plan` → the whole plan for a caller-supplied queue. A **read**:
+  it reserves nothing. Reports the actions, the pools excluded and why, the
+  reservations outstanding, and `uncertainty` — the inputs the fleet did not
+  actually know.
+- `POST /fleet/operations` → claim, then act. `{"action": {...}, "plan_version":
+  ..., "idempotency_key": ...}`. The claim is a durable, synchronous write; the
+  provider call is not, so losing the reply costs nothing.
+- `GET /fleet/operations` / `GET /fleet/operations/{id}` → what is outstanding,
+  and the correlated facts about one operation. See "Provisioning" below.
 
 Node (`/livestack` facade): `GET /capability`, `GET /health`, `GET /residence`
 (now includes `device_mem`), `POST /lease`, `POST /lease/{id}/heartbeat`,

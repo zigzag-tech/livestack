@@ -898,9 +898,15 @@ function canonicalizeAliyunParams(params: Record<string, string>): string {
 }
 
 function percentEncode(value: string): string {
+  // RFC 3986 unreserved set is A-Za-z0-9-_.~ and the Aliyun RPC signature spec
+  // wants everything else escaped. encodeURIComponent alone is NOT that: it
+  // also leaves !'()* literal. `*` was already handled here; `!'()` were not,
+  // so a tag value or instance name containing one of them signed differently
+  // from what the server computed — reported as a bare SignatureDoesNotMatch
+  // with no indication of which character did it.
   return encodeURIComponent(value)
+    .replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
     .replace(/\+/g, "%20")
-    .replace(/\*/g, "%2A")
     .replace(/%7E/g, "~");
 }
 
