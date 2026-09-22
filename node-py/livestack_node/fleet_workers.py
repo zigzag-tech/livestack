@@ -88,6 +88,31 @@ class WorkerSpec:
     bootstrap: str = ""
     announce_env: Mapping[str, str] = field(default_factory=dict)
     labels: Mapping[str, str] = field(default_factory=dict)
+    # --- placement. Not optional in any modern account ---------------------
+    #
+    # `RunInstances` REQUIRES a security group, and a VPC instance requires a
+    # vSwitch. Without them the call is refused, so a pool that omits them can
+    # only ever produce a claimed operation that then fails — quota held, no
+    # machine, and a `request_or_workload_fault` to read afterwards. They are
+    # checked before the call instead; see `AliyunEcsWorkerProvider.validate_spec`.
+    zone_id: Optional[str] = None
+    vswitch_id: Optional[str] = None
+    security_group_id: Optional[str] = None
+    key_pair_name: Optional[str] = None
+    # A worker with no public egress cannot reach a broker outside its VPC, so
+    # it boots, never announces, and fails on its deadline WHILE BILLING. Zero
+    # is a legitimate choice (mesh-joined or VPC-internal broker) and therefore
+    # has to be stated rather than defaulted into.
+    internet_charge_type: str = "PayByTraffic"
+    internet_max_bandwidth_out_mbit: int = 0
+    # --- price --------------------------------------------------------------
+    #
+    # Set from the pool's TIER by `fleet_pools.spec_for`. A pool declared SPOT
+    # whose create omits `SpotStrategy` is billed at ON-DEMAND rates while the
+    # planner scores it at the spot price it advertised — the scheduler then
+    # prefers it *because* it is cheap, and only the invoice disagrees.
+    spot_strategy: Optional[str] = None
+    spot_price_limit: Optional[float] = None
 
 
 class WorkerProvider(abc.ABC):
@@ -113,6 +138,15 @@ class WorkerProvider(abc.ABC):
     @abc.abstractmethod
     def terminate(self, instance_id: str) -> None:
         """Idempotent delete."""
+
+    def validate_spec(self, spec: WorkerSpec) -> List[str]:
+        """Why this spec cannot produce an instance, or an empty list.
+
+        Checked BEFORE the claim wherever possible, because the alternative is a
+        claimed operation that holds its owner's quota and then fails on a
+        parameter the broker could have seen was missing at startup.
+        """
+        return []
 
 
 # --- the runner -------------------------------------------------------------
@@ -356,8 +390,29 @@ class AliyunEcsWorkerProvider(WorkerProvider):
         return json.loads(text) if text.strip() else {}
 
     # -- the contract --------------------------------------------------------
+    def validate_spec(self, spec: WorkerSpec) -> List[str]:
+        """What ECS will refuse, said here instead of after a claim."""
+        problems: List[str] = []
+        if not spec.security_group_id:
+            problems.append(
+                "security_group_id is required: RunInstances is refused without one")
+        if not spec.vswitch_id:
+            problems.append(
+                "vswitch_id is required: an instance with no vSwitch has no VPC to join")
+        if not spec.instance_type:
+            problems.append("instance_type is required")
+        if not (spec.region or self.region):
+            problems.append("region is required")
+        return problems
+
     def create(self, *, operation_id: str, idempotency_key: str,
                spec: WorkerSpec) -> str:
+        problems = self.validate_spec(spec)
+        if problems:
+            # Before any HTTP call, so nothing is billed and the operation is
+            # classified as our fault rather than as a capacity shortage.
+            raise RequestRejected(
+                f"the pool's spec cannot produce an instance: {'; '.join(problems)}")
         params: Dict[str, str] = {
             "RegionId": spec.region or self.region,
             "InstanceType": spec.instance_type,
@@ -379,6 +434,23 @@ class AliyunEcsWorkerProvider(WorkerProvider):
             params["ImageId"] = spec.image_id
         else:
             params["ImageFamily"] = spec.image_family
+        # Placement. `validate_spec` has already refused a spec missing these.
+        params["SecurityGroupId"] = spec.security_group_id or ""
+        params["VSwitchId"] = spec.vswitch_id or ""
+        if spec.zone_id:
+            params["ZoneId"] = spec.zone_id
+        if spec.key_pair_name:
+            params["KeyPairName"] = spec.key_pair_name
+        if spec.internet_max_bandwidth_out_mbit:
+            params["InternetChargeType"] = spec.internet_charge_type
+            params["InternetMaxBandwidthOut"] = str(
+                int(spec.internet_max_bandwidth_out_mbit))
+        # Price. Omitting this on a pool the planner scored as SPOT is the
+        # expensive kind of silent failure: the bill disagrees with the plan.
+        if spec.spot_strategy:
+            params["SpotStrategy"] = spec.spot_strategy
+            if spec.spot_price_limit is not None:
+                params["SpotPriceLimit"] = str(float(spec.spot_price_limit))
         for i, (k, v) in enumerate(self._tags(operation_id, idempotency_key,
                                               spec).items(), start=1):
             params[f"Tag.{i}.Key"] = k

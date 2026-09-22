@@ -7,6 +7,7 @@ a control plane rents two.
 """
 import base64
 import urllib.error
+from dataclasses import replace
 
 import pytest
 
@@ -22,7 +23,11 @@ from livestack_node.fleet_workers import (
 from livestack_node.provision import CapacityError
 
 
+# A spec that could actually produce an instance. It carries a security group and
+# a vSwitch because ECS refuses RunInstances without them — a fixture that omits
+# them describes a pool that can only ever fail.
 SPEC = WorkerSpec(region="cn-heyuan", instance_type="ecs.g8i.2xlarge",
+                  security_group_id="sg-1", vswitch_id="vsw-1",
                   announce_env={"LIVESTACK_BROKER_URL": "http://broker:8801"})
 
 
@@ -326,3 +331,96 @@ def test_a_node_falling_out_of_the_view_does_not_change_the_operation(tmp_path):
     assert announce_from_view(st, view([{"peer": "http://burst-1", "ready": True,
                                          "operation_id": op.operation_id}])) == []
     assert st.get(op.operation_id).state == "released"
+
+
+# --- what ECS actually requires, and what a price tier actually buys --------
+FULL = WorkerSpec(region="cn-heyuan", instance_type="ecs.g8i.2xlarge",
+                  security_group_id="sg-1", vswitch_id="vsw-1",
+                  announce_env={"LIVESTACK_BROKER_URL": "http://broker:8801"})
+
+
+def _sent(spec, **kw):
+    seen = {}
+
+    def transport(_endpoint, body):
+        import urllib.parse
+        seen.update(dict(urllib.parse.parse_qsl(body.decode())))
+        return '{"InstanceIdSets":{"InstanceIdSet":["i-abc"]}}'
+
+    p = AliyunEcsWorkerProvider(access_key_id="k", access_key_secret="s",
+                                transport=transport, region="cn-heyuan", **kw)
+    p.create(operation_id="OP1", idempotency_key="key-1", spec=spec)
+    return seen
+
+
+def test_a_spec_without_a_security_group_is_refused_before_any_call():
+    """ECS refuses RunInstances without one, so a pool that omits it can only
+    produce a claimed operation that then fails — quota held, no machine."""
+    p = AliyunEcsWorkerProvider(access_key_id="k", access_key_secret="s",
+                                transport=lambda *_: pytest.fail("no call may be made"))
+    spec = WorkerSpec(region="cn-heyuan", instance_type="x", vswitch_id="vsw-1")
+    assert any("security_group_id" in v for v in p.validate_spec(spec))
+    with pytest.raises(RequestRejected) as e:
+        p.create(operation_id="OP", idempotency_key="k", spec=spec)
+    assert "security_group_id" in str(e.value)
+
+
+def test_a_spec_without_a_vswitch_is_refused_too():
+    p = AliyunEcsWorkerProvider(access_key_id="k", access_key_secret="s",
+                                transport=lambda *_: pytest.fail("no call may be made"))
+    spec = WorkerSpec(region="cn-heyuan", instance_type="x", security_group_id="sg-1")
+    with pytest.raises(RequestRejected):
+        p.create(operation_id="OP", idempotency_key="k", spec=spec)
+
+
+def test_placement_reaches_the_wire():
+    sent = _sent(replace(FULL, zone_id="cn-heyuan-b", key_pair_name="kp-1"))
+    assert sent["SecurityGroupId"] == "sg-1"
+    assert sent["VSwitchId"] == "vsw-1"
+    assert sent["ZoneId"] == "cn-heyuan-b"
+    assert sent["KeyPairName"] == "kp-1"
+
+
+def test_public_egress_is_stated_never_defaulted():
+    """A worker with no egress cannot reach a broker outside its VPC: it boots,
+    never announces, and fails on its deadline WHILE BILLING."""
+    assert "InternetMaxBandwidthOut" not in _sent(FULL)
+    sent = _sent(replace(FULL, internet_max_bandwidth_out_mbit=5))
+    assert sent["InternetMaxBandwidthOut"] == "5"
+    assert sent["InternetChargeType"] == "PayByTraffic"
+
+
+def test_a_spot_pool_actually_buys_spot():
+    """The money bug this exists to prevent: a pool declared SPOT whose create
+    omits SpotStrategy is billed at ON-DEMAND rates while the planner scores it
+    at the spot price it advertised. The scheduler then prefers it *because* it
+    looks cheap, and only the invoice disagrees."""
+    from livestack_node.fleet_pools import parse_pools, spec_for
+    from livestack_node.fleet_scheduler import Tier
+
+    pools = parse_pools(
+        '[{"id":"s","provider":"aliyun","tier":"SPOT","region":"cn-heyuan",'
+        ' "instance_type":"x","security_group_id":"sg-1","vswitch_id":"vsw-1",'
+        ' "spot_price_limit":3.5},'
+        ' {"id":"o","provider":"aliyun","tier":"ONDEMAND","region":"cn-heyuan",'
+        '  "instance_type":"x","security_group_id":"sg-1","vswitch_id":"vsw-1"}]')
+    spot, ondemand = pools
+    assert spot.tier is Tier.SPOT
+    sent = _sent(spec_for(spot))
+    assert sent["SpotStrategy"] == "SpotAsPriceGo"
+    assert sent["SpotPriceLimit"] == "3.5"
+    # An on-demand pool must NOT quietly become spot either.
+    assert "SpotStrategy" not in _sent(spec_for(ondemand))
+
+
+def test_the_pool_declaration_carries_placement_into_the_spec():
+    from livestack_node.fleet_pools import parse_pools, spec_for
+    pool = parse_pools(
+        '[{"id":"p","provider":"aliyun","tier":"SPOT","region":"cn-heyuan",'
+        ' "instance_type":"x","security_group_id":"sg-9","vswitch_id":"vsw-9",'
+        ' "zone_id":"cn-heyuan-b","key_pair_name":"kp",'
+        ' "internet_max_bandwidth_out_mbit":5}]')[0]
+    spec = spec_for(pool, announce_env={"LIVESTACK_BROKER_URL": "http://b"})
+    assert (spec.security_group_id, spec.vswitch_id) == ("sg-9", "vsw-9")
+    assert spec.internet_max_bandwidth_out_mbit == 5
+    assert AliyunEcsWorkerProvider(access_key_id="k", access_key_secret="s").validate_spec(spec) == []
