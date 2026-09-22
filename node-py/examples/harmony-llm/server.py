@@ -111,6 +111,48 @@ def _is_pooling(joined: str) -> bool:
     return "--task embed" in joined or "--runner pooling" in joined
 
 
+def _adapters_for(spec: dict) -> "dict[str, tuple[str, int]]":
+    """The LoRA adapters a unit is started with: name -> (path, rank).
+
+    Declared in the units file as ``"adapters": {"chips-v1": "/path/to/adapter"}``.
+    The rank is READ from the adapter's own ``adapter_config.json`` rather than
+    declared, for the same reason the other launch-line facts are derived: a
+    hand-typed ``--max-lora-rank`` below an adapter's real rank makes vLLM refuse
+    it at load, and one above it wastes the card's memory on every batch.
+
+    An adapter whose config cannot be read is DROPPED, loudly, and therefore has
+    no attribute: a request that names it gets 503 "nothing satisfies", never a
+    silent answer from the base model it was trying not to be.
+    """
+    out: "dict[str, tuple[str, int]]" = {}
+    for name, path in sorted((spec.get("adapters") or {}).items()):
+        try:
+            with open(os.path.join(str(path), "adapter_config.json"), "r", encoding="utf-8") as fh:
+                rank = int(json.load(fh)["r"])
+        except Exception as e:  # noqa: BLE001 -- any unreadable adapter is excluded
+            print(f"[harmony-llm] unit {spec.get('name')}: adapter {name!r} at {path} "
+                  f"is NOT served ({type(e).__name__}: {e})", flush=True)
+            continue
+        out[str(name)] = (str(path), rank)
+    return out
+
+
+def _lora_launch_args(spec: dict) -> "list[str]":
+    """The vLLM flags that serve a unit's adapters beside its base model.
+
+    One engine answers both: a request naming the base model gets the base
+    weights and one naming an adapter gets base + adapter, in the SAME batch.
+    That is the whole point on a single card -- the typed-decision classifier
+    and a chip adapter share one resident 27B instead of needing two.
+    """
+    adapters = _adapters_for(spec)
+    if not adapters:
+        return []
+    return (["--enable-lora", "--max-loras", str(len(adapters)),
+             "--max-lora-rank", str(max(r for _, r in adapters.values())),
+             "--lora-modules"] + [f"{n}={p}" for n, (p, _) in adapters.items()])
+
+
 def _attributes_for(spec: dict) -> dict:
     """A unit's attributes, with the launch-line facts DERIVED rather than
     trusted from the config file.
@@ -166,6 +208,14 @@ def _attributes_for(spec: dict) -> dict:
             attrs["context_len"] = int(served)
         except (TypeError, ValueError):
             attrs.pop("context_len", None)
+    # One attribute per adapter the launch line will actually load, so the
+    # clause `adapter=<name>` selects a unit that serves it and nothing else.
+    # Derived from the same resolution as the flags: it cannot claim an adapter
+    # the engine was not started with.
+    for key in [k for k in attrs if k.startswith("adapter.")]:
+        attrs.pop(key)
+    for name in _adapters_for(spec):
+        attrs[f"adapter.{name}"] = True
     return attrs
 
 
@@ -203,6 +253,7 @@ def _unit_specs() -> "list[dict]":
             # than a name. Carried verbatim to the broker; the planner compares,
             # it never interprets.
             "attributes": _attributes_for(spec),
+            "adapters": dict(spec.get("adapters") or {}),
         })
     if not out:
         raise RuntimeError("HARMONY_LLM_UNITS is set but declares no units")
@@ -352,6 +403,8 @@ def _load(name: str = "", device: "str | None" = None,
         if spec["max_model_len"]:
             cmd += ["--max-model-len", spec["max_model_len"]]
         cmd += spec["extra_args"]
+        if "--enable-lora" not in spec["extra_args"]:
+            cmd += _lora_launch_args(spec)
         print(f"[harmony-llm] starting vLLM for {name}"
               f"{f' (planner chose {device})' if device else ''}: {' '.join(cmd)}", flush=True)
         proc = subprocess.Popen(cmd, env=env, start_new_session=True)
@@ -917,6 +970,14 @@ def _expand_clause(key: str, val) -> "list[tuple[str, object]]":
         "[20,]"    ->  params_b>=20
         "(,30]"    ->  params_b<=30
     """
+    # `adapter=chips-v1` asks for a unit serving that LoRA. Units carry one
+    # boolean attribute per adapter, so this is an ordinary equality clause the
+    # broker's planner compares without knowing what an adapter is.
+    if key == "adapter":
+        name = str(val).strip()
+        if not name:
+            raise ValueError("adapter= names no adapter")
+        return [(f"adapter.{name}", True)]
     if isinstance(val, str):
         m = _INTERVAL_RE.match(val)
         if m:
@@ -1468,6 +1529,16 @@ async def proxy(path: str, request: Request):
         served = SPECS.get(unit, {}).get("model") or unit
         if str(out.get("model", "")).startswith("require:") or requirement is not None:
             out["model"] = served
+        # vLLM selects a LoRA by serving it under the adapter's own name. A
+        # requirement that asked for an adapter and was then sent to the base
+        # model's name would get the base weights and a 200 -- the exact silent
+        # substitution this normalisation exists to prevent.
+        wanted = [k[len("adapter."):] for k in (requirement or {}) if k.startswith("adapter.")]
+        if len(wanted) > 1:
+            raise HTTPException(status_code=400,
+                                detail=f"harmony: one request can use one adapter, asked for {wanted}")
+        if wanted:
+            out["model"] = wanted[0]
         # The parameter the requirement implied. Asking for `thinking` and then
         # not sending `enable_thinking` gets a capable unit that does not think.
         if requirement.get("thinking") is True if requirement else False:
