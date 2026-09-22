@@ -173,18 +173,16 @@ different cards reporting byte-identical pressure.
 
 ### 0.6 Route-core parity (doctrine violation, not a gap)
 
-**Files:** `shared/src/route.rs`, `shared-wasm/src/route_wasm.rs`.
-**Change:** port the three 2026-09-05 changes from benchday
-`packages/mesh_route/lib/mesh_route.dart` to `route.rs`, with the
-`load_distribution_test.dart` cases ported as Rust tests:
+**Retired:** completed before the endpoint picker moved to private Meshlink.
+The former `shared/src/route.rs` and WASM wrapper no longer exist in
+Livestack; Meshlink owns these behaviors and their conformance tests:
 (a) `load_aware` + `record_load(key, pressure, in_flight)`, queue depth
 primary, pressure may only raise the estimate, applied only inside
 `explore_band`, both sides must report or load decides nothing;
 (b) `remeasure_after` with per-candidate backoff — the stalest overdue
 eligible candidate is promoted to the front; never-picked candidates exempt;
 (c) a sample recorded after a forced re-measure **replaces** the EWMA.
-**Why first:** `route-selection.md` — *"Any behavioural change must land in
-both or in neither."* Currently it is in one.
+The old dual-edit doctrine is superseded by the single Meshlink Rust owner.
 
 ---
 
