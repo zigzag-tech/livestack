@@ -59,6 +59,10 @@ in one process produce schemas that are structurally identical and fail
 | `handbacks.ts` | The closed effect surface a repair turn may drive. |
 | `tick.ts` | `fleetTick()` — the weave. |
 | `observability.ts` | Joins jingway's repair records and step summaries to `operation_id`. |
+| `incident.ts` | The versioned incident packet. Required evidence refuses rather than trims. |
+| `classify.ts` | The Simple Jev rung: one `failure_class` question, code-owned invariants, the persisted record. |
+| `escalation.ts` | The composed host that puts the classifier between the table and a full repair turn. |
+| `corpus.ts` | Turning ledger incidents into frozen, grouped evaluation cases. |
 
 ## One departure from the design sketch
 
@@ -71,3 +75,36 @@ tick is split where the ownership changes: one read-only block
 run concurrently, each with its own host. The gates and the effect surface are
 identical either way; only the conversation boundary moved, and it moved to
 where the spec put it.
+
+
+## The classifier rung (shadow only)
+
+An incident nobody registered a workflow for gets one bounded Choice question —
+`failure_class` over `capacity_shortage | request_or_workload_fault |
+provider_fault | uncertain_effect | needs_investigation` — on the model Harmony
+already serves. **Code** maps the accepted class to exactly one registered
+workflow. The model never names a tier, never provisions, never touches region,
+quota or budget.
+
+That split is not squeamishness. On four short, distinct triage labels this
+transport shows ~10% order instability (jingway `docs/decision-models.md`). Ten
+percent is usable for "which workflow should run"; it is not usable for "should
+we rent the expensive thing" — and a one-token answer that could select
+`LAST_RESORT` would bypass the guard that makes "last resort" literal.
+
+Three refusals, each because the alternative is worse than no answer:
+
+- **No runner-up.** A code invariant that rejects the winner returns
+  `violations` and no selection. Taking second place is code overruling a model
+  with a guess.
+- **No acting in shadow.** The selection is recorded with its order, its
+  probabilities and the workflow it *would* have run — and nothing happens.
+- **No recursive provisioning.** An unreachable classifier is a durable human
+  block. It runs on the fleet's own LLM capacity; bursting to restore it is a
+  spending loop with an outage for a trigger.
+
+Evaluation: `scripts/incident-corpus.mts` (capture + freeze, grouped by
+operation), `scripts/observe-incidents.mts` (a balanced permutation schedule
+against a live classifier), then jingway's `scripts/evaluate-decisions.ts` to
+score. `receipts/README.md` says why there is no receipt yet and what would
+produce one.
