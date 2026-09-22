@@ -787,6 +787,24 @@ def build_app(broker: HostBroker):
         raise HTTPException(400, f"action type {kind!r} is not one of "
                                  f"'provision' / 'deprovision'")
 
+    @app.get("/fleet/ledger")
+    def fleet_ledger(since: float = 0.0, limit: int = 200, kind: str = None):
+        """Decision records, newest last — the retrospective, over HTTP.
+
+        Read-only and deliberately narrow. It exists because the supervision
+        loop's repair surface includes "read what this broker decided recently",
+        and a repair turn that had to ssh into the broker to answer that would
+        be a repair surface in name only. The records carry no secrets by
+        construction (see `ledger.py`); `owner` is an id.
+        """
+        led = getattr(broker, "ledger", None)
+        if led is None:
+            raise HTTPException(501, "this broker writes no decision ledger "
+                                     "(LIVESTACK_LEDGER=0)")
+        return {"records": led.read(since=since or None, kind=kind,
+                                    limit=max(1, min(int(limit), 1000))),
+                "path": led.path}
+
     @app.get("/fleet/operations")
     def fleet_operations():
         """Every operation that is not terminal — what a supervision tick
