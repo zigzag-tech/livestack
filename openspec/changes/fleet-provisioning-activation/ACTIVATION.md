@@ -45,6 +45,31 @@ ENV
 The drop-in that reads it is already written and inert until the file exists:
 `/etc/systemd/system/livestack-fleetd.service.d/80-provider-credentials.conf`.
 
+**`sudo -e` needs a real TTY.** Run it from an ordinary shell on the host, not
+through Claude Code's `!` prefix — `!` is non-interactive and the editor exits
+with *Standard input is not a terminal*, leaving a 0-byte file. Either edit it in
+a real terminal, or write it host-to-host without displaying it:
+
+```bash
+ssh <holding-host> 'sudo grep -h "^ALIBABA_CLOUD_ACCESS_KEY" ~/.aliyun/unchain-render.env'   | sudo tee /etc/livestack/fleet-provider.env >/dev/null
+```
+
+The file is read at process start, so `sudo systemctl restart livestack-fleetd`
+afterwards or the running process still has nothing.
+
+## 1b. Prove the credential works before declaring a pool
+
+```bash
+sudo systemctl restart livestack-fleetd
+python3 node-py/scripts/check_provider_credentials.py --region cn-heyuan
+```
+
+It calls `DescribeInstances` — read-only, free, and the exact call
+`AliyunEcsWorkerProvider.find` makes. That call is what resolves an uncertain
+create, so a credential that can create but not describe produces precisely the
+state this design exists to avoid: a machine that is billing and cannot be
+reconciled. **Do not declare a pool until this passes.**
+
 ## 2. Declare ONE pool, small
 
 This is the line that grants spending authority. Start with a ceiling you would
