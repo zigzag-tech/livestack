@@ -16,22 +16,41 @@
       `shadow`. Verify: the green path shows zero escalations, and every recorded
       selection has `applied: false`.
 
-## 2. Qualify the classifier rung
+## 2. Close the admit→burst seam
 
-- [ ] 2.1 `scripts/incident-corpus.mts` against the broker's ledger. Verify: the
+- [ ] 2.1 **Decide who owns the queue**, and record the decision with its reasons.
+      Three shapes, and they are not equivalent: (a) `hostd` retains jobs it answered
+      with `Queue` and `fleetd` reads them — the broker gains state it has so far
+      refused to hold; (b) `POST /fleet/plan` grows an "include the broker's queued
+      jobs" mode — same state, narrower surface; (c) the caller keeps its own queue and
+      re-presents it — no new broker state, and every caller has to implement it.
+      Until one is chosen, `Queue` is a dead end and no burst can ever be triggered by
+      a real request.
+- [ ] 2.2 Implement it. Verify: a job the broker answers with `Queue` appears in a
+      subsequent `POST /fleet/plan` and, when a pool is feasible for its SLA, produces
+      a `provision`. Tests: a queued job reaches a plan; a job that was admitted does
+      not; a queued job whose SLA cannot tolerate the provision latency stays queued.
+      Ledger: the `admit` record and the later `operation` records join on `job_id`.
+- [ ] 2.3 Verify the interactive path end to end on the deployed broker: an `asr`
+      admit with `sla=interactive` is granted when a node has room, is queued when
+      none does, and is NEVER placed on a cold pool. Evidence recorded in this change.
+
+## 3. Qualify the classifier rung
+
+- [ ] 3.1 `scripts/incident-corpus.mts` against the broker's ledger. Verify: the
       report names the classes it is too thin to speak for, rather than a bare total.
-- [ ] 2.2 Confirm labels with a person for at least the holdout, so no case is
+- [ ] 3.2 Confirm labels with a person for at least the holdout, so no case is
       `agent_only`. Verify: jingway's evaluator no longer HOLDS the holdout.
-- [ ] 2.3 `scripts/observe-incidents.mts` over the balanced schedule against the live
+- [ ] 3.3 `scripts/observe-incidents.mts` over the balanced schedule against the live
       classifier, then jingway's `scripts/evaluate-decisions.ts`. Verify: the report
       carries accepted-decision correctness, dangerous-action errors counted
       separately from misses, abstention and coverage, invariant rejections, order
       disagreement over distinct orderings, and full-cascade cost and p95 including
       the fallback.
-- [ ] 2.4 Publish the receipt under `fleetd/receipts/`, and update
+- [ ] 3.4 Publish the receipt under `fleetd/receipts/`, and update
       `_plans/fleetd-weave-jev.md` to SHIPPED (shadow) with the numbers.
 
-## 3. Verification before archive
+## 4. Verification before archive
 
-- [ ] 3.1 Evidence for 1.2, 1.3 and 1.4 recorded in this change.
-- [ ] 3.2 `openspec validate --specs` green.
+- [ ] 4.1 Evidence for 1.2, 1.3, 1.4 and 2.3 recorded in this change.
+- [ ] 4.2 `openspec validate --specs` green.
