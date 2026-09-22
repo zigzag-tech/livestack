@@ -404,6 +404,7 @@ def build_app(broker: HostBroker):
     def fleet_rank(kind: str, vantage: str = "direct", via: str = None,
                    region: str = None, regions: str = None,
                    require: str = None,
+                   prefer: str = None,
                    allow_unknown_region: bool = False, ttl_s: float = 60.0,
                    authorization: str = Header(None)):
         """Where should a `kind` request START, from this vantage.
@@ -437,8 +438,13 @@ def build_app(broker: HostBroker):
         exists to avoid.
         """
         from .fleet_rank import rank as _rank
+        from .preferences import PreferenceError, parse_preferences
+        try:
+            preferences = parse_preferences(prefer)
+        except PreferenceError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         result = _rank(broker.fleet_view(), kind, vantage=via or vantage,
-                       ttl_s=ttl_s)
+                       ttl_s=ttl_s, prefer=preferences)
         # `region` is RECORDED, never applied. It is the asker's region as the
         # emitter knew it, which is what makes a ledger record readable later —
         # but WHERE the work may run is `regions`, below.
