@@ -56,6 +56,14 @@ runs it did not like.
 
 ## 4. Verification before archive
 
-- [ ] 4.1 Fake-provider suite green: one create per operation across lost-reply, restart, concurrency, cleanup failure, late completion, stale membership, drain.
-- [ ] 4.2 Deployed on the fleet broker host in observe+shadow: operations flow, ledger joins, zero model effects. Evidence recorded in the change.
-- [ ] 4.3 `openspec validate --specs` green; `_plans/fleetd-weave-jev.md` status updated to SHIPPED (shadow).
+- [x] 4.1 Fake-provider suite green: one create per operation across lost-reply, restart, concurrency, cleanup failure, late completion, stale membership, drain. `node-py/tests/test_fleet_workers.py` + `test_fleet_operations.py` + `test_fleet_ops_api.py`, 71 tests; the whole `node-py` suite shows the same 52 pre-existing failures as `main` and no new ones.
+- [ ] 4.2 **NOT DONE — needs an owner decision, not more code.** Deploying this means
+  setting `LIVESTACK_FLEET_POOLS` and real Aliyun credentials on the live fleet broker
+  (`xc-tower-ubuntu:8801`), which is what gives a running process the ability to rent
+  machines. That is an operator's call and a spending decision; nothing here should make
+  it unilaterally. Until then no `operation` record exists, which is also why 3.5 has no
+  corpus to freeze.
+- [x] 4.3 `openspec validate fleet-provisioning-operations --strict` green.
+  `_plans/fleetd-weave-jev.md` status updated — to **IMPLEMENTED, NOT YET DEPLOYED**
+  rather than to SHIPPED, because nothing has provisioned anything yet and a status line
+  that said otherwise would be the first thing to mislead the next reader.

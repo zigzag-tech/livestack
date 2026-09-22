@@ -282,3 +282,47 @@ def test_a_missing_credential_is_a_refused_request():
     p = AliyunEcsWorkerProvider(access_key_id="", access_key_secret="")
     with pytest.raises(RequestRejected):
         p.call("DescribeInstances", {})
+
+
+# --- the two failures that outlive the request ------------------------------
+def test_a_cleanup_failure_leaves_the_instance_id_on_record(tmp_path):
+    """Released-but-still-running is money burning with nobody watching. The
+    release still applies — a node that is empty must come back — but the
+    provider id survives in the record, because reaping it by hand is the only
+    remaining move and it needs the id."""
+    st = store(tmp_path)
+    p = FakeWorkerProvider()
+    op = run_provision(st, claimed(st), p, SPEC)
+    st.announce(op.operation_id, ready=True, node="http://burst-1")
+
+    def boom(_iid):
+        raise RuntimeError("provider API 500")
+
+    p.terminate = boom
+    released = st.release(op.operation_id, busy=lambda: None)
+    try:
+        p.terminate(released.provider_instance_id)
+    except RuntimeError:
+        pass
+    assert released.state == "released"
+    assert st.get(op.operation_id).provider_instance_id == "fake-i-1"
+
+
+def test_a_node_falling_out_of_the_view_does_not_change_the_operation(tmp_path):
+    """Stale membership. A node that has gone MIA is not evidence that anything
+    happened to its operation — it is evidence that we cannot see it, and
+    "cannot see" must never read as either success or release."""
+    st = store(tmp_path)
+    op = run_provision(st, claimed(st), FakeWorkerProvider(), SPEC)
+    announce_from_view(st, view([{"peer": "http://burst-1", "ready": True,
+                                  "operation_id": op.operation_id}]))
+    assert st.get(op.operation_id).state == ANNOUNCED
+
+    # The view no longer lists it at all.
+    assert announce_from_view(st, view([])) == []
+    assert st.get(op.operation_id).state == ANNOUNCED
+    # And a node that reappears carrying a RELEASED operation's id greens nothing.
+    st.release(op.operation_id, busy=lambda: None)
+    assert announce_from_view(st, view([{"peer": "http://burst-1", "ready": True,
+                                         "operation_id": op.operation_id}])) == []
+    assert st.get(op.operation_id).state == "released"

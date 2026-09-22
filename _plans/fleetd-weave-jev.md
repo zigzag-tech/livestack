@@ -1,8 +1,21 @@
 # fleetd — the dispatch loop as a weave, with Simple Jev as the first escalation rung
 
-**Status:** DRAFT v2, 2026-09-22. Nothing here is built. v1 was written by a Claude
+**Status:** IMPLEMENTED, NOT YET DEPLOYED — 2026-09-22. v1 was written by a Claude
 session and critiqued by a Codex (gpt-6-astra) session (§7, kept verbatim); §§2–5 were
-rewritten to fold that review in. OpenSpec change: `openspec/changes/fleet-provisioning-operations/`.
+rewritten to fold that review in, and the design was then built.
+
+Built: the durable lifecycle (`node-py/livestack_node/fleet_operations.py`,
+`fleet_workers.py`, `fleet_pools.py`, `fleet_ops_api.py`, routes in `hostd.py`), the
+supervision loop and the classifier rung (`fleetd/`). 122 tests green — 71 Python, 51
+TypeScript.
+
+**Not yet true, and it matters:** no broker on this fleet has `LIVESTACK_FLEET_POOLS`
+set, so nothing has provisioned anything for real. The classifier rung has no
+qualification receipt (`fleetd/receipts/README.md` says what would produce one) and
+runs only in `shadow`. Those two are the remaining tasks of the OpenSpec change, and
+the change is NOT archivable until they are done.
+
+OpenSpec change: `openspec/changes/fleet-provisioning-operations/`.
 
 **Companions:** `fleet-broker.md` (phases 0–4 shipped), `fleet-scheduler.md` (§8 is
 STALE: `schedule()` IS wired via `fleet_admit.py`), `decision-ledger.md` (SHIPPED as `ledger.py` +
