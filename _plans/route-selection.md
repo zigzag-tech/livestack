@@ -1,8 +1,9 @@
-# Route selection — a livestack capability
+# Route selection — retired from Livestack
 
-Status: **core landed** (`shared/src/route.rs`, 39 tests) + **TS/wasm binding
-landed** (`shared-wasm/src/route_wasm.rs`). Python and Dart bindings are the
-remaining work; see "Bindings" below.
+Status: **RETIRED 2026-09-21.** The canonical Rust core and WASM binding moved
+to private Meshlink, which owns client endpoint selection. Livestack removed
+these unused public exports in 0.0.33 and remains independently buildable.
+This file is historical rationale only; it no longer requires dual edits.
 
 ## What this is
 
