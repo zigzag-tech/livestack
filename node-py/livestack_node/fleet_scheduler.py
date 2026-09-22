@@ -394,11 +394,28 @@ def _selector_matches(target: Target, selector: Mapping[str, str]) -> bool:
 
 
 def _eta(target: Target, job: Job) -> float:
-    """Wall-clock until ``job`` finishes on ``target``: (provision if cold) + runtime.
-    MVP does not model deep queue-wait — a target is only a candidate if it has room
-    now (running) or an instance to spin (pool), so wait is 0 or the provision cost."""
-    warmup = 0.0 if target.running else target.provision_latency_s
-    return warmup + job.est_duration_s
+    """Wall-clock until ``job`` can START on ``target``: 0 if it is running with room,
+    the provision cost if the instance has to be spun up first.
+
+    **Time-to-start, not time-to-finish** (corrected 2026-09-22). This used to add
+    ``job.est_duration_s``, which made an SLA deadline mean "must have FINISHED by
+    then" — and that is not what an SLA class is. ``Sla.INTERACTIVE``'s 30 s became
+    "must complete within 30 s", so `fleet_admit`'s default 60 s estimate was
+    infeasible on a completely idle fleet: every interactive caller that did not
+    state an estimate was refused with *no feasible target meets the deadline now*,
+    which reads exactly like a full fleet when the fleet is empty.
+
+    The docstring above this line already said the intended thing — "wait is 0 or the
+    provision cost" — and then the code added the runtime anyway.
+
+    **Ranking is unchanged by this correction, and that is checkable rather than
+    hoped.** ``_score`` min-max normalizes the ETAs across the candidate set, and
+    dropping ``est_duration_s`` subtracts the SAME constant from every candidate for
+    a given job (the estimate is a property of the job, not of the target). A
+    constant shift leaves a min-max normalization identical, so only FEASIBILITY
+    moves — which was the defect.
+    """
+    return 0.0 if target.running else target.provision_latency_s
 
 
 def _local_bonus(target: Target, job: Job, policy: SchedulerPolicy) -> float:

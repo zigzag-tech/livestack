@@ -244,20 +244,72 @@ def test_targets_carry_the_device_id_so_a_grant_can_name_the_card():
     assert r["target"]["device_id"] == "xc-tower-ubuntu/dev"
 
 
-def test_an_interactive_job_too_slow_for_its_own_sla_is_refused():
-    """Found by the tests, not by review: INTERACTIVE carries a 30 s deadline
-    slack, so a 60 s job under it is infeasible EVERYWHERE and the fleet says so
-    rather than granting a target that cannot meet the promise. It is the
-    scheduler's existing deadline logic working — worth pinning here because the
-    refusal reads like a bug until you see which term produced it."""
-    r = admit(BUSY_CN_IDLE_NA, kind="align", sla="interactive", estimate_s=60.0,
-              now=1000.0)
-    assert r["granted"] is False
-    assert "no fleet target can run align" in r["reason"]
-    # A batch job of the same length is fine — the difference is the promise,
-    # not the work.
-    assert admit(BUSY_CN_IDLE_NA, kind="align", sla="batch", estimate_s=60.0,
+def test_an_interactive_job_is_admitted_to_a_node_that_has_room_now():
+    """An SLA deadline gates when a job may START, not when it must have finished.
+
+    This test used to assert the opposite, and pinned a bug as behaviour. Its own
+    docstring said the refusal "reads like a bug until you see which term produced
+    it" — it read like one because it was one: `_eta` added `est_duration_s`, so
+    INTERACTIVE's 30 s slack meant "must COMPLETE within 30 s", and `admit`'s own
+    default 60 s estimate was therefore infeasible on a completely idle fleet. Every
+    interactive caller that did not state an estimate was refused with *no feasible
+    target meets the deadline now* — indistinguishable from a full fleet.
+
+    Nothing on this fleet sent `interactive` yet (attune, media-corpus and
+    `lease_helper` all send `batch`), which is why it was never reported.
+    """
+    for estimate in (None, 8.0, 60.0, 600.0):
+        kw = {} if estimate is None else {"estimate_s": estimate}
+        r = admit(BUSY_CN_IDLE_NA, kind="align", sla="interactive", now=1000.0, **kw)
+        assert r["granted"] is True, (estimate, r["reason"])
+    # And the default is the case that mattered: a caller that states no estimate
+    # at all must not be refused by a fleet with room.
+    assert admit(BUSY_CN_IDLE_NA, kind="align", sla="interactive",
                  now=1000.0)["granted"] is True
+
+
+def test_an_interactive_job_still_refuses_a_target_it_cannot_reach_in_time():
+    """The promise still binds — it binds on WAITING, which is the thing an SLA
+    class is about. A target that cannot take the job for longer than the slack is
+    infeasible however fast the job itself would be."""
+    from livestack_node.fleet_scheduler import (
+        CostModel, FleetState, Job, Queue, Sla, Target, Tier, schedule)
+    cold = Target(id="pool", host_id="pool", tier=Tier.SPOT,
+                  capacity={"concurrency": 4.0}, cost=CostModel(per_hour=2.0),
+                  provision_latency_s=240.0, running=False, elastic=True,
+                  max_instances=2)
+    def plan_for(sla):
+        job = Job(id="j", kind="align", need={"concurrency": 1.0}, owner="o",
+                  created_at=1000.0, sla=sla, est_duration_s=8.0)
+        return schedule(FleetState(targets=(cold,), jobs=(job,), now=1000.0))
+    # 240 s of provisioning against 30 s of interactive slack: never.
+    assert [type(a) for a in plan_for(Sla.INTERACTIVE).actions] == [Queue]
+    # The same cold pool is fine for work that can wait.
+    assert [type(a) for a in plan_for(Sla.BATCH).actions] != [Queue]
+
+
+def test_dropping_the_runtime_from_eta_did_not_move_the_ranking():
+    """The correction changes FEASIBILITY and nothing else, and that is checkable.
+
+    `_score` min-max normalizes the ETAs across the candidate set, and
+    `est_duration_s` is a property of the JOB, not of the target — so removing it
+    subtracts the same constant from every candidate, and a constant shift leaves a
+    min-max normalization identical.
+    """
+    from livestack_node.fleet_scheduler import _eta
+    from livestack_node.fleet_scheduler import CostModel, Job, Target, Tier
+
+    job = Job(id="j", kind="align", owner="o", est_duration_s=900.0)
+    running = Target(id="r", host_id="h", tier=Tier.LOCAL, capacity={"concurrency": 1.0})
+    cold = Target(id="c", host_id="h", tier=Tier.SPOT, capacity={"concurrency": 1.0},
+                  cost=CostModel(per_hour=1.0), provision_latency_s=240.0,
+                  running=False, elastic=True)
+    now_etas = [_eta(running, job), _eta(cold, job)]
+    then_etas = [e + job.est_duration_s for e in now_etas]      # the old formula
+    def norm(xs):
+        lo, hi = min(xs), max(xs)
+        return [0.0 for _ in xs] if hi - lo < 1e-9 else [(x - lo) / (hi - lo) for x in xs]
+    assert norm(now_etas) == norm(then_etas)
 
 
 # -- distance matters per SLA ------------------------------------------------

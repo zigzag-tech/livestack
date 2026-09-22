@@ -40,3 +40,18 @@ lost, and what happened — joinable to the admit record and the lease by
 #### Scenario: Reconstructing the first burst a month later
 - **WHEN** an operator queries the ledger by the `job_id` of the first provisioned job
 - **THEN** one query yields the admit decision with its candidate set, the lease id, every operation transition, the correlated announce and the eventual release
+
+### Requirement: A queued job is not a dead end
+
+A job the broker answers with `Queue` SHALL be reachable by the supervision
+loop's next plan, so that demand the scheduler could satisfy by provisioning
+actually reaches a provisioning decision. Which process owns that queue SHALL be
+stated, with its reasons, before it is built.
+
+#### Scenario: A job queued because the fleet is full
+- **WHEN** `POST /fleet/admit` answers `Queue` for a job whose SLA tolerates the provision latency of a feasible pool
+- **THEN** that job appears in a subsequent plan and produces a `provision` action, joined to its admit record by `job_id`
+
+#### Scenario: A job queued under an SLA no pool can meet
+- **WHEN** an `interactive` job is queued and every pool's provision latency exceeds its deadline slack
+- **THEN** it stays queued and no operation is claimed for it — a promise the fleet cannot keep is not kept by spending
