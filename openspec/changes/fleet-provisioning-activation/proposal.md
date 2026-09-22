@@ -18,12 +18,21 @@ The design record is `_plans/fleetd-weave-jev.md`; what is stale in it is its
 status line, which will say IMPLEMENTED, NOT YET DEPLOYED until this change
 lands. The prerequisites and exact commands are in `fleetd/receipts/README.md`.
 
+A third thing surfaced while tracing what a quick `asr` request actually does:
+**nothing feeds `fleetd` a queue.** `fleetTick` plans over a queue its caller
+hands it, `POST /fleet/admit` answers one job at a time and keeps no queue, and
+nothing joins the two. So a job the broker answers with `Queue` never reaches a
+plan, and a burst that the scheduler would authorise never happens. The
+lifecycle is built and the loop is built; the wire between them is not.
+
 ## What Changes
 
 - Declare pools on the fleet broker and record the first real operations,
   their ledger joins, and evidence that the model path produced no effects.
 - Build the incident corpus from those records, confirm its labels, run the
   balanced schedule against the live classifier, and publish a receipt.
+- Close the admit→burst seam: decide who owns the queue of jobs the broker
+  could not place, and give `fleetd` a way to read it.
 - **Only then** consider promoting the classifier from `shadow` to `serve`,
   which is a separate explicit activation and is NOT granted by this change.
 
@@ -35,8 +44,9 @@ lands. The prerequisites and exact commands are in `fleetd/receipts/README.md`.
 ## Impact
 
 `hostd`'s environment on the fleet broker host; `openspec/specs/` gains one
-capability. No source change is expected — if one turns out to be needed, that
-is a finding worth its own change.
+capability. The admit→burst seam is the one part that needs source, and its
+shape is a real decision (see task 2.1) rather than a gap to be filled in
+passing.
 
 ## Non-goals
 

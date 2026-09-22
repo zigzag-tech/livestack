@@ -605,6 +605,25 @@ that introduces it. `LIVESTACK_LEDGER=0` turns emission off entirely.
 Schema: `node-py/livestack_node/decision.schema.json`. Design:
 `_plans/decision-ledger.md`.
 
+## Speed intent — what an SLA deadline actually gates
+
+`Sla.INTERACTIVE | NORMAL | BATCH` sets a default deadline slack (30 s / 30 min /
+12 h), and a target is a candidate only if the job can **START** within it:
+`ETA = 0` for a running node with room, `provision_latency_s` for a pool that has
+to be spun up first. A caller may override the class with an explicit `deadline`.
+
+It gates STARTING, not finishing (corrected 2026-09-22 — `_eta` used to add the
+job's own estimated runtime). That made an interactive request with the default
+60 s estimate infeasible on an idle fleet, refused with *no feasible target meets
+the deadline now* — the same sentence a full fleet produces. Nothing was hitting
+it, because every caller on this fleet sends `batch`.
+
+The consequence worth knowing: **interactive work can never burst onto a cold
+pool.** 240 s of provisioning does not fit inside 30 s of slack, by arithmetic
+rather than by a rule someone has to remember. An interactive request either
+lands on a node with room now or is queued; it is never held waiting for a
+machine to boot.
+
 ## Provisioning — the fleet renting a machine, and knowing that it did
 
 `schedule()` has always been able to emit `Provision`. Nothing dispatched one,
