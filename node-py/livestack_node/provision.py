@@ -29,7 +29,7 @@ import contextlib
 import signal
 import subprocess
 from dataclasses import dataclass, field
-from typing import List, Mapping, Optional
+from typing import Tuple, List, Mapping, Optional
 
 
 # --- errors -----------------------------------------------------------------
@@ -55,6 +55,11 @@ class ComputeSpec:
     gpu_hint: Optional[str] = None             # optional preferred SKU substring
     image: Optional[str] = None                # container image / AMI (provider default if None)
     env: Mapping[str, str] = field(default_factory=dict)   # extra instance env
+    disk_gb: int = 40                          # container disk; a 20 GB+ model plus its runtime needs more
+    # Acceptable host CUDA versions (e.g. ("12.8", "12.9")). Empty = any. A wheel
+    # built for a newer CUDA than the host driver fails at first kernel launch,
+    # long after the box started billing.
+    cuda_versions: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

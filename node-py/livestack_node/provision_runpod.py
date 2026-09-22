@@ -130,7 +130,8 @@ class RunpodProvisioner(Provisioner):
         st, r = self._req("POST", REST, {
             "name": spec.name, "imageName": spec.image or DEFAULT_IMAGE,
             "gpuTypeIds": [offer.sku], "gpuCount": 1, "cloudType": offer.zone,
-            "containerDiskInGb": 40, "ports": ["22/tcp"], "env": env,
+            "containerDiskInGb": spec.disk_gb, "ports": ["22/tcp"], "env": env,
+            **({"allowedCudaVersions": list(spec.cuda_versions)} if spec.cuda_versions else {}),
         })
         if not (st == 201 and r.get("id")):
             # Out of stock / rejected: nothing was created, so this is a capacity
