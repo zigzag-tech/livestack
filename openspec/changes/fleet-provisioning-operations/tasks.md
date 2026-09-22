@@ -39,11 +39,20 @@ clean.
 
 ## 3. Simple Jev classification — shadow
 
-- [ ] 3.1 `DecisionProfile` for `failure_class` via `HarmonyClassifierAdapter`; incident packet schema versioned; tokenizer count against the compiled prompt; oversized required evidence refuses. Tests: refusal paths, no credential in traces.
-- [ ] 3.2 Composed `WeaveHost.escalate`: unmatched incident → one decision child → code maps class → workflow, or full repair → `human_gate`. Tests: shadow mode produces a `selection` and the app refuses to act on it; `unavailable` falls to a durable human block with no provisioning.
-- [ ] 3.3 Acceptance policy versioned; invariants return `violations` with no selection; persisted joined record (evidence digest, order, label map, versions, raw result, feedback, executed workflow, postcondition, outcome). Tests: reversed candidate order yields a distinct permutation identity, same candidate ids.
-- [ ] 3.4 Captured-incident corpus from the fake-provider suite + real ledger; frozen, independently grouped cases; balanced permutation schedule; sealed holdout. Evaluation CLI reports accepted-decision correctness, dangerous-action errors, abstention/coverage, invariant rejections, order disagreement, cascade cost/p95 incl. fallback.
-- [ ] 3.5 Qualification receipt under `openspec/changes/fleet-provisioning-operations/receipts/`. `serve` activation is NOT a task here — it is a separately approved follow-up.
+3.1–3.4 done 2026-09-22 in `fleetd/`: `incident.ts` (the versioned packet),
+`classify.ts` (profile, classes, code-owned invariants, the persisted record),
+`escalation.ts` (the composed `WeaveHost.escalate`), `corpus.ts` +
+`scripts/incident-corpus.mts` + `scripts/observe-incidents.mts`. Tests:
+`classify.test.ts` (17), `escalation.test.ts` (6), `corpus.test.ts` (7).
+Scoring is deliberately jingway's `scripts/evaluate-decisions.ts` rather than a
+second evaluator here — an evaluator that also collects can quietly drop the
+runs it did not like.
+
+- [x] 3.1 `DecisionProfile` for `failure_class` via `HarmonyClassifierAdapter`; incident packet schema versioned; tokenizer count against the compiled prompt; oversized required evidence refuses. Tests: refusal paths, no credential in traces.
+- [x] 3.2 Composed `WeaveHost.escalate`: unmatched incident → one decision child → code maps class → workflow, or full repair → `human_gate`. Tests: shadow mode produces a `selection` and the app refuses to act on it; `unavailable` falls to a durable human block with no provisioning.
+- [x] 3.3 Acceptance policy versioned; invariants return `violations` with no selection; persisted joined record (evidence digest, order, label map, versions, raw result, feedback, executed workflow, postcondition, outcome). Tests: reversed candidate order yields a distinct permutation identity, same candidate ids.
+- [x] 3.4 Captured-incident corpus from the fake-provider suite + real ledger; frozen, independently grouped cases; balanced permutation schedule; sealed holdout. Evaluation CLI reports accepted-decision correctness, dangerous-action errors, abstention/coverage, invariant rejections, order disagreement, cascade cost/p95 incl. fallback.
+- [ ] 3.5 **NOT DONE, and cannot be faked.** A receipt is a measurement. It needs a corpus the ledger has not produced yet (the lifecycle has not run on real hardware), labels a person confirmed (a label from the broker's own `error.class` is `agent_only`, which jingway's evaluator HOLDS rather than qualifies), and a live classifier. `fleetd/receipts/README.md` states the three prerequisites and the exact commands. `serve` activation remains a separately approved follow-up.
 
 ## 4. Verification before archive
 
