@@ -1225,6 +1225,26 @@ def main():
          f"(bound: {broker.operation_store.max_records} records"
          + (f", {broker.operation_store.max_age_s / 86400:.0f}d"
             if broker.operation_store.max_age_s else ", age window disabled") + ")")
+    # A pool the adapter cannot actually build from is reported AT STARTUP, not
+    # at the first burst. The alternative is a claimed operation that holds its
+    # owner's quota and then fails on a parameter that was missing all along.
+    from .fleet_pools import spec_for as _spec_for
+    for _pool in broker.fleet_pools:
+        _adapter = broker.fleet_providers.get(_pool.provider)
+        if _adapter is None:
+            continue
+        _problems = _adapter.validate_spec(
+            _spec_for(_pool, announce_env=broker.fleet_worker_env))
+        if _problems:
+            _say(f"[fleet] pool {_pool.id!r} CANNOT PROVISION: "
+                 + "; ".join(_problems)
+                 + ". It will be planned and every create will be refused as "
+                   "request_or_workload_fault. Fix the declaration.")
+        elif _pool.tier.name == "SPOT":
+            _say(f"[fleet] pool {_pool.id!r} buys SPOT (SpotStrategy=SpotAsPriceGo)"
+                 + (f", price limit ¥{_pool.spot_price_limit}/h"
+                    if _pool.spot_price_limit is not None else ", provider cap"))
+
     # RECONCILE BEFORE SERVING. An operation caught mid-create by the last
     # shutdown is resolved by asking the provider, never by creating again —
     # and until it is resolved it keeps holding its owner's quota. Doing this
