@@ -13,7 +13,6 @@ These tests pin the two halves: what the caller NAMES is honoured, and what
 the request IMPLIES is still derived when the caller named nothing.
 """
 import importlib.util
-import asyncio
 import sys
 from pathlib import Path
 
@@ -92,28 +91,26 @@ def test_an_undeclared_attribute_is_not_a_yes(srv):
     assert not srv._local_satisfies("llm_small", {"refusals": "abliterated"})
 
 
-def test_request_is_counted_while_waiting_for_upstream_headers(srv):
+def test_request_is_counted_before_its_unit_becomes_resident(srv):
     observed = []
 
-    class Client:
-        async def send(self, req, stream):
-            observed.append(int(srv._busy))
-            return object()
+    def ensure():
+        observed.append(int(srv._busy))
+        return object()
 
     before = int(srv._busy)
-    assert asyncio.run(srv._send_while_counted(Client(), object())) is not None
+    assert srv._ensure_while_counted(ensure) is not None
     assert observed == [before + 1]
-    # A successful send hands the count to the streaming response body.
+    # A successful load hands the count through send to the response body.
     assert int(srv._busy) == before + 1
     srv._busy.release()
 
 
-def test_request_count_is_released_when_send_fails(srv):
-    class Client:
-        async def send(self, req, stream):
-            raise RuntimeError("upstream failed before headers")
+def test_request_count_is_released_when_unit_load_fails(srv):
+    def ensure():
+        raise RuntimeError("load failed before resident")
 
     before = int(srv._busy)
-    with pytest.raises(RuntimeError, match="before headers"):
-        asyncio.run(srv._send_while_counted(Client(), object()))
+    with pytest.raises(RuntimeError, match="before resident"):
+        srv._ensure_while_counted(ensure)
     assert int(srv._busy) == before

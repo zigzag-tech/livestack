@@ -1,0 +1,13 @@
+# Isolated CUDA worker environment for the PaddleOCR-VL Harmony provider.
+# Install torch/torchvision from https://download.pytorch.org/whl/cu129 first.
+torch==2.11.0+cu129
+torchvision==0.26.0+cu129
+transformers==5.16.1
+tokenizers==0.23.2
+pillow==12.3.0
+fastapi==0.141.1
+uvicorn==0.52.4
+psutil==7.2.2
+httpx==0.28.1
+pydantic==2.13.5
+jsonschema==4.26.0
