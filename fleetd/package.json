@@ -1,0 +1,23 @@
+{
+  "name": "@livestack/fleetd",
+  "version": "0.0.1",
+  "description": "The fleet supervision loop: a jingway weave over Harmony's provisioning control plane.",
+  "type": "module",
+  "scripts": {
+    "link-jingway": "node scripts/link-jingway.mjs",
+    "pretest": "node scripts/link-jingway.mjs",
+    "test": "tsx --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "jingway-framework": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "tsx": "^4.19.2",
+    "typescript": "6.0.3"
+  },
+  "peerDependencies": {
+    "zod": "^4"
+  }
+}

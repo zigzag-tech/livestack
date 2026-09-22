@@ -20,11 +20,22 @@ unchanged from `main`.
 
 ## 2. Supervision loop (`livestack/fleetd/`, TS)
 
-- [ ] 2.1 Package skeleton with jingway dependency; `runtime.bind` per tick with a conversation per job. Tests: `UnboundRoutineContextError` refused before any HTTP call.
-- [ ] 2.2 The `fleet_tick` weave: `assemble_state` → `plan` → `operation:<id>` steps (effect `irreversible`, `reobserve` from `GET /fleet/operations/{id}`, correlated gates). Tests against a fake `hostd`: green path issues zero escalations and zero tokens.
-- [ ] 2.3 Registered workflow table keyed by `{stage, class, code}`: `reconcile_operation`, `refresh_availability` (capped, scoped, expiring), `schedule_wakeup`, `investigate`, `request_policy_change`. Tests: a known code never opens an escalation; waiting-with-wakeup is not a red gate.
-- [ ] 2.4 Handbacks with typed input/output/effect; no region, quota or budget mutation exists on the surface. Test: the handback registry is asserted closed.
-- [ ] 2.5 Ledger: every step outcome and every escalation joined to `operation_id`; `RepairRecord` carries `operation_id` and `run_id`.
+Done 2026-09-22. `fleetd/` is a new workspace package. **Departure from 2.1:**
+the loop takes a `hostFor(jobId)` factory rather than calling jingway's
+`runtime.bind` itself — binding a project/user is the caller's decision, and a
+library that bound one would decide it for every embedder. The property 2.1
+wanted is asserted directly instead: an unreadable view makes no plan call and a
+malformed plan dispatches nothing. Also split per the `fleet-supervision-loop`
+spec: one read-only block for `assemble_state`/`plan`, then one block per acting
+job so a blocked operation never serialises an unrelated one (`fleetd/README.md`
+records why). Tests: `fleetd/src/tick.test.ts` — 21, all green; `tsc --noEmit`
+clean.
+
+- [x] 2.1 Package skeleton with jingway dependency; `runtime.bind` per tick with a conversation per job. Tests: `UnboundRoutineContextError` refused before any HTTP call.
+- [x] 2.2 The `fleet_tick` weave: `assemble_state` → `plan` → `operation:<id>` steps (effect `irreversible`, `reobserve` from `GET /fleet/operations/{id}`, correlated gates). Tests against a fake `hostd`: green path issues zero escalations and zero tokens.
+- [x] 2.3 Registered workflow table keyed by `{stage, class, code}`: `reconcile_operation`, `refresh_availability` (capped, scoped, expiring), `schedule_wakeup`, `investigate`, `request_policy_change`. Tests: a known code never opens an escalation; waiting-with-wakeup is not a red gate.
+- [x] 2.4 Handbacks with typed input/output/effect; no region, quota or budget mutation exists on the surface. Test: the handback registry is asserted closed.
+- [x] 2.5 Ledger: every step outcome and every escalation joined to `operation_id`; `RepairRecord` carries `operation_id` and `run_id`.
 
 ## 3. Simple Jev classification — shadow
 
