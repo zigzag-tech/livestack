@@ -17,10 +17,22 @@
       **`pools: []`, so the broker still cannot provision** — that is 1.1, and it is
       the only thing standing between here and a real operation.
 
-- [ ] 1.1 **BLOCKED: no provider credentials exist on this fleet.** A search of the
-      broker host found no `ALIBABA_CLOUD_ACCESS_KEY_*` / `ALIYUN_ACCESS_KEY_*` in the
-      environment, the systemd units, the shell profiles or `~/.aliyun`. Declare
-      `LIVESTACK_FLEET_POOLS` on the fleet broker with one pool, a real
+- [x] 1.0b **Credential installed and proven, 2026-09-22.** Located on zz-tower2 at
+      `/etc/default/unchain-gateway` (the unchain gateway's key — the ECS/ECI/ACR/OSS
+      one). Only the two `ALIBABA_CLOUD_ACCESS_KEY_*` lines were copied host-to-host
+      into `/etc/livestack/fleet-provider.env` (`0600 root:root`, 116 bytes); the value
+      was never displayed. Proven with `scripts/check_provider_credentials.py`:
+      *OK: aliyun answered DescribeInstances in cn-heyuan.* Read-only, nothing created.
+      **Two findings this turned up, both worth acting on separately:**
+      (a) the source file is `mode=664 owner=ubuntu:ubuntu` — the Alibaba key is
+      readable by any user on zz-tower2. Not caused by this change and not fixed by it;
+      it should be `0600`.
+      (b) this key carries OSS and ACR access as well as ECS. The recommendation to
+      mint a RAM user scoped to `RunInstances`/`DescribeInstances`/`DeleteInstances` in
+      one region still stands — it narrows a leak from "read the content store and push
+      to the registry" to "rented machines in cn-heyuan".
+- [ ] 1.1 **Credential done (1.0b); the POOL declaration is what remains.** A search of the
+      Declare `LIVESTACK_FLEET_POOLS` on the fleet broker with one pool, a real
       price and a `max_instances` ceiling the owner has agreed to; set
       `LIVESTACK_FLEET_WORKER_ENV` to the broker address a machine in that region can
       actually reach. Verify: `GET /fleet` reports the pools and `adapter: true`.
