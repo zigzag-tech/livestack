@@ -13,6 +13,7 @@ These tests pin the two halves: what the caller NAMES is honoured, and what
 the request IMPLIES is still derived when the caller named nothing.
 """
 import importlib.util
+import asyncio
 import sys
 from pathlib import Path
 
@@ -89,3 +90,30 @@ def test_an_undeclared_attribute_is_not_a_yes(srv):
     # Which is why naming a unit warns rather than refuses: a unit's attribute
     # list is routinely thinner than the unit.
     assert not srv._local_satisfies("llm_small", {"refusals": "abliterated"})
+
+
+def test_request_is_counted_while_waiting_for_upstream_headers(srv):
+    observed = []
+
+    class Client:
+        async def send(self, req, stream):
+            observed.append(int(srv._busy))
+            return object()
+
+    before = int(srv._busy)
+    assert asyncio.run(srv._send_while_counted(Client(), object())) is not None
+    assert observed == [before + 1]
+    # A successful send hands the count to the streaming response body.
+    assert int(srv._busy) == before + 1
+    srv._busy.release()
+
+
+def test_request_count_is_released_when_send_fails(srv):
+    class Client:
+        async def send(self, req, stream):
+            raise RuntimeError("upstream failed before headers")
+
+    before = int(srv._busy)
+    with pytest.raises(RuntimeError, match="before headers"):
+        asyncio.run(srv._send_while_counted(Client(), object()))
+    assert int(srv._busy) == before

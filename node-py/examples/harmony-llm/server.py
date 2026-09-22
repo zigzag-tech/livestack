@@ -504,6 +504,22 @@ def _readiness() -> dict:
 # `in_flight_source: "server"` so a consumer can tell that 0 means idle.
 _busy = counting()
 
+
+async def _send_while_counted(client, req):
+    """Count work while vLLM is processing before response headers exist.
+
+    A streamed send returns only after upstream headers arrive. The resident
+    unit is already busy during that wait, and reporting zero lets another
+    admission evict it out from under its first request after a model swap.
+    On success, ownership of this count passes to the response body iterator.
+    """
+    _busy.acquire()
+    try:
+        return await client.send(req, stream=True)
+    except BaseException:
+        _busy.release()
+        raise
+
 manager, residence = attach(
     app, host_id=HOST_ID, kind=NODE_KIND, units=_UNITS,
     idle_seconds=IDLE_EVICT_SECONDS, coload=COLOAD,
@@ -1350,7 +1366,7 @@ async def proxy(path: str, request: Request):
     try:
         req = client.build_request(request.method, url, content=body, headers=headers,
                                    params=dict(request.query_params))
-        resp = await client.send(req, stream=True)
+        resp = await _send_while_counted(client, req)
     except Exception as e:
         await client.aclose()
         raise HTTPException(status_code=502, detail=f"vllm proxy failed: {e}")
@@ -1373,9 +1389,12 @@ async def proxy(path: str, request: Request):
     # on this node could serve it — the difference between "the vendor said no"
     # and "you asked for more context than this node has".
     if resp.status_code == 400:
-        raw = await resp.aread()
-        await resp.aclose()
-        await client.aclose()
+        try:
+            raw = await resp.aread()
+        finally:
+            await resp.aclose()
+            await client.aclose()
+            _busy.release()
         text = raw.decode("utf-8", "replace")
         if "context length" in text.lower():
             needed = None
@@ -1419,12 +1438,8 @@ async def proxy(path: str, request: Request):
                   flush=True)
             raise HTTPException(status_code=413, detail=detail)
         # Any other 400 is the caller's own and passes through unchanged.
-        _busy.acquire()
         async def replay_400():
-            try:
-                yield raw
-            finally:
-                _busy.release()
+            yield raw
         return StreamingResponse(
             replay_400(), status_code=400,
             headers={k: v for k, v in resp.headers.items()
@@ -1443,7 +1458,6 @@ async def proxy(path: str, request: Request):
             await client.aclose()
             _busy.release()
 
-    _busy.acquire()
     return StreamingResponse(
         body_iter(), status_code=resp.status_code,
         headers={k: v for k, v in resp.headers.items()
