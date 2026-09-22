@@ -59,6 +59,17 @@ class Pool:
     bootstrap: str = ""
     labels: Mapping[str, str] = field(default_factory=dict)
     env: Mapping[str, str] = field(default_factory=dict)
+    # Placement. An operator states these because only an operator knows which
+    # VPC the fleet's workers belong in; see `WorkerSpec` for why a pool without
+    # them can only ever produce a failed create.
+    zone_id: Optional[str] = None
+    vswitch_id: Optional[str] = None
+    security_group_id: Optional[str] = None
+    key_pair_name: Optional[str] = None
+    internet_charge_type: str = "PayByTraffic"
+    internet_max_bandwidth_out_mbit: int = 0
+    # Ceiling for a SPOT pool, per hour. `None` = the provider's own cap.
+    spot_price_limit: Optional[float] = None
 
 
 def parse_pools(raw: str, *, log: Callable[[str], None] = lambda *_: None
@@ -163,7 +174,15 @@ def pool_targets(pools: Tuple[Pool, ...], *, kinds: Tuple[str, ...] = (),
 
 def spec_for(pool: Pool, *, announce_env: Optional[Mapping[str, str]] = None
              ) -> WorkerSpec:
-    """The worker spec one instance of ``pool`` should be created with."""
+    """The worker spec one instance of ``pool`` should be created with.
+
+    **The spot strategy is derived from the TIER, never stated separately.** A
+    pool declared `SPOT` whose create omits `SpotStrategy` is billed at
+    on-demand rates while the planner scores it at the spot price the pool
+    advertised — so the scheduler prefers it precisely *because* it looks cheap,
+    and only the invoice ever disagrees. Deriving it means the declaration and
+    the purchase cannot drift apart.
+    """
     return WorkerSpec(
         region=pool.region, instance_type=pool.instance_type,
         name_prefix=f"livestack-{pool.id}",
@@ -173,4 +192,11 @@ def spec_for(pool: Pool, *, announce_env: Optional[Mapping[str, str]] = None
         auto_release_hours=pool.auto_release_hours,
         bootstrap=pool.bootstrap,
         announce_env={**dict(pool.env), **dict(announce_env or {})},
-        labels=dict(pool.labels))
+        labels=dict(pool.labels),
+        zone_id=pool.zone_id, vswitch_id=pool.vswitch_id,
+        security_group_id=pool.security_group_id,
+        key_pair_name=pool.key_pair_name,
+        internet_charge_type=pool.internet_charge_type,
+        internet_max_bandwidth_out_mbit=pool.internet_max_bandwidth_out_mbit,
+        spot_strategy=("SpotAsPriceGo" if pool.tier is Tier.SPOT else None),
+        spot_price_limit=pool.spot_price_limit)
