@@ -9,11 +9,11 @@
 # This node once read the SAME units file as the card-1 node (the two-nodes-
 # declare-every-unit shape), on the theory that the planner would settle which
 # card each model lands on. On this host that shape was wrong twice over, and
-# `70-embed-only.conf` is what ended that, on 2026-09-23, and the README section
-# "The deployed split" is what it cost. The UNITS_FILE line below carries the
-# same value, so a fresh install from this file needs no drop-in; the deployed
-# host still has one, redundantly, because the base unit there was corrected in
-# the drop-in rather than in place.
+# It ended on 2026-09-23. The README section "The deployed split" is what it
+# cost. The fix arrived as a `70-embed-only.conf` drop-in and was folded into the
+# UNITS_FILE line below the same day, so there is ONE place to read what this
+# node declares — a drop-in that contradicts its base unit is how the next reader
+# concludes the wrong thing about which file is in force.
 Description=Harmony-managed local LLM slot on GPU 0 — xc-tower-ubuntu
 After=network-online.target livestack-hostd.service
 Wants=network-online.target
