@@ -111,8 +111,32 @@ def test_a_node_that_is_not_fresh_or_not_ready_is_a_filtered_row():
     filtered = {c.id: c.reason for c in r["candidates"] if c.outcome == "filtered"}
     assert "state=suspect" in filtered["http://gone"]
     assert "Connection refused" in filtered["http://gone"]
-    assert "not ready" in filtered["http://cold"]
+    # Cold is a candidate, not a filtered row -- it just loses to a warm node.
+    assert "http://cold" not in filtered
     assert "does not host align" in filtered["http://tts"]
+
+
+def test_a_cold_node_is_chosen_when_it_is_the_only_one():
+    # Residency is the host's decision, reached through the caller's request.
+    # A healthy node evicted for another kind on a shared card must still be
+    # routable, or it is never reloaded (attune TTS/LLM, 2026-09-23).
+    view = _view({"h": [
+        _node("http://cold/livestack", "h", ready=False, probe_ms=2.0,
+              detail="no unit resident", units=ALIGN_COLD),
+    ]})
+    r = admit(view, kind="align", now=1000.0)
+    assert r["target"]["target_id"] == "http://cold"
+
+
+def test_an_unready_node_that_failed_its_probe_is_still_filtered():
+    view = _view({"h": [
+        _node("http://broken/livestack", "h", ready=False, probe_ms=2.0,
+              detail="readiness probe failed: boom", units=ALIGN_COLD),
+    ]})
+    r = admit(view, kind="align", now=1000.0)
+    assert r["target"] is None
+    filtered = {c.id: c.reason for c in r["candidates"] if c.outcome == "filtered"}
+    assert "not ready" in filtered["http://broken"]
 
 
 def test_a_saturated_node_is_filtered_with_the_number_that_saturated_it():
