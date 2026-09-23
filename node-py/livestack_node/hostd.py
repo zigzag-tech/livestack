@@ -292,13 +292,18 @@ def build_app(broker: HostBroker):
                 **({} if dev is not None else
                    {"reason": "the planner could not place it on any device"})}
 
-    @app.post("/lease/{lease_id}/heartbeat")
+    # `:path`, because a fleet lease id names its device and a hosted device
+    # id is a URL (`http://100.64.0.18:8190-<ms>-<seq>`). A bare `{lease_id}`
+    # cannot match once the server decodes the `%2F`s, so every release and
+    # heartbeat for such a lease was a 404 and it lived out its TTL — enough
+    # to hold a caller's whole quota between calls (attune, 2026-09-23).
+    @app.post("/lease/{lease_id:path}/heartbeat")
     def lease_heartbeat(lease_id: str):
         """Proof of life from a hosted leaseholder. Unknown/expired is a False,
         not an error — the answer the client needs is 'do I still hold the slot'."""
         return {"ok": broker.hosted_heartbeat(lease_id)}
 
-    @app.post("/lease/{lease_id}/release")
+    @app.post("/lease/{lease_id:path}/release")
     def lease_release(lease_id: str):
         return {"ok": broker.hosted_release(lease_id)}
 
