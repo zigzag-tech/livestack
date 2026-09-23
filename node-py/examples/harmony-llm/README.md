@@ -50,11 +50,14 @@ cannot hold its own bytes.
 * **One node process per card**, because a wrapper's CUDA meter reads the
   pressure the planner acts on, and a wrapper that saw both cards would report
   card 0's pressure for a model on card 1. The pin is a *metering* fact.
-* **Every node declares every unit.** Which card a model is resident on is the
-  planner's answer, derived from queued demand: two models in one
+* **A node declares what it can actually serve.** Where a model is resident is
+  the planner's answer, derived from queued demand: two models in one
   `spread_group` that cannot co-reside cost each other in proportion to the
-  demand waiting for them, so alternating traffic settles them one per card and
-  stops paying for the separation when the alternation stops.
+  demand waiting for them, so alternating traffic settles them one per card.
+  That reasoning only holds for units the node could hold *either* way — a node
+  declaring a unit its card has no room for advertises capacity that does not
+  exist, and Harmony ranks it warm for a kind it can only proxy. See
+  "The deployed split" below.
 * **Admission before load.** A request calls `livestack_node.client.admit()`
   first: the broker plans, evicts victims on their own nodes, warms the grant,
   and answers with the device. Loading straight off the request is how a node
@@ -167,16 +170,77 @@ could not be placed and a smaller sibling could — while the 9B's 12 GB on a
 24 GB card was itself why the 21 GB unit would not fit.
 
 So the fleet does not offer a 9B at all: no application has a use for it that
-the 27B or `llm_tiny` does not serve better, and its only effect was to occupy
-the card the 27B needed. Removed from this host's units file on 2026-09-18,
+the 27B does not serve better, and its only effect was to occupy the card the
+27B needed. (`llm_tiny` went the same way on 2026-09-23, for the same reason —
+see "The deployed split".) Removed from this host's units file on 2026-09-18,
 after which `llm_title` loaded on start and
 `require:class=llm,params_b=[20,30),refusals=abliterated` resolved to
 `twolven/Qwen3.8-27B-abliterated-AWQ-MTP` again.
 
+### The deployed split (2026-09-23)
+
+`xc-tower-ubuntu` has two cards and one node process each. They read **disjoint
+units files**:
+
+| node | port | units file | units | card |
+|---|---|---|---|---|
+| `harmony-llm` | 8188 | `/etc/harmony/llm-units.json` | `llm_title` (27B, 21 GB) | 1 |
+| `harmony-llm-gpu0` | 8190 | `/etc/harmony/llm-units-gpu0.json` | `embed_multi` (0.6B, 3 GB) | 0 |
+
+`llm-units.example.json` and `llm-units-gpu0.example.json` are copies of those
+two files. On the deployed host the card-0 node reaches its file through
+`systemd/harmony-llm-gpu0.service.d/70-embed-only.conf`, which overrides a base
+unit that still names the shared one; the base unit HERE names the right file
+directly, so a fresh install needs no drop-in. Both are kept because both are
+deployed.
+
+It was not always so, and the cost is worth recording because the shape that
+produced it is the one the bullet above used to recommend.
+
+**Both nodes read the shared file.** The card-0 node therefore declared
+`llm_title` too — on a card whose other tenants (polyasr x2, polytts, OCR) leave
+about 4.4 GiB free, where a 21 GB unit cannot go. It never loaded one; it
+*forwarded* to card 1, through its own `_busy` semaphore. Measured 2026-09-23
+with the hub's own payload: card 1 direct answered **0.41 s at 50-way
+concurrency**; card 0's proxy answered 0.94 s at x1 and **p50 7.46 s at x25**,
+aborting 10 of 25. The hub's typed-decision client resolved to `:8190` and
+**86% of its classifier calls hit the 8 s budget**. From the outside network,
+endpoint, payload and client all looked healthy, because each of them was.
+
+**They also shared PORTS.** Same file, no distinct `HARMONY_LLM_PORT_OFFSET`, so
+each node's "is my vLLM up?" probe was answered by the *other* node's engine.
+The card-0 node reported `serving llm_title, embed_multi` while running neither,
+and won every `kind=llm` lookup on the strength of it. `_readiness` now excludes
+foreign listeners and names `HARMONY_LLM_PORT_OFFSET` when it finds one — but
+disjoint unit sets make the offset unnecessary in the first place, which is why
+the split is the fix and the probe is the backstop.
+
+Two more changes came with it:
+
+- **`llm_tiny` is gone.** Across two cards the fleet wants exactly one 27B and
+  no second general LLM: a smaller sibling's only demonstrated effect here was
+  occupying the card the 27B needed (see "What NOT to offer", same failure one
+  size down).
+- **Card 0 is the embedder, permanently.** Not a placement decree — the 3 GB
+  unit is the only declared unit that fits 4.4 GiB, so arithmetic decides it.
+  Nothing pins a model to a card anywhere in these files.
+
+Harmony-side fixes that keep this from recurring silently, both in
+`node-py/livestack_node/`: `fleet_rank.warm_for(node, kind)` puts a node with a
+classed unit set but nothing resident for that kind on the COLD list, and
+`hostbroker.fleet_view()` now carries each unit's `attributes` so `warm_for` can
+see the class at all. The benchday hub asks `/fleet/rank?kind=llm` instead of
+deriving an endpoint itself. After both, the hub's abort rate went **86% → 6.6%**.
+
+The residual name is dishonest: `llm_title` is the fleet's only LLM and is used
+for far more than titles. Renaming it touches every consumer that names it and
+has not been done.
+
 ### One copy per host
 
-Several nodes on one box (one per card) read the SAME units file, so every unit
-is declared on every node. That must not mean every node loads it.
+When several nodes on one box DO declare the same unit — which the split above
+no longer does here, but which is the general case — that must not mean every
+node loads it.
 
 Before loading a unit, a node asks whether a peer of its own kind already
 **holds** it — resident, or still loading — and forwards there instead. Both the
@@ -231,10 +295,11 @@ from the `/v1/embeddings` path exactly as `class=llm` is derived from
 no requirement string. Health probes follow the unit: a pooling unit is probed
 with `/v1/embeddings`, never a chat completion it would refuse.
 
-`systemd/` holds the deployed units for a two-card host: card 1 `SOFT_PIN`
-(a cold start there costs a hub title, measured ~50.7 s against a 35 s timeout),
-card 0 `UNPINNED` with a 10-minute idle evict because it shares with polyasr and
-polytts.
+`systemd/` holds the deployed units and drop-ins for this two-card host,
+comments included: card 1 never idle-evicts (it has no other tenant, so evicting
+frees memory nobody can use, and a reload costs ~50 s against a 35 s title
+timeout), card 0 evicts after 15 minutes because it shares with the OCR and TTS
+workers.
 
 **This is a copy of a deployed file, not the deployment.** Changing it here does
 not change the running service; sync deliberately.
