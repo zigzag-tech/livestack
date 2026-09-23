@@ -188,11 +188,11 @@ units files**:
 | `harmony-llm-gpu0` | 8190 | `/etc/harmony/llm-units-gpu0.json` | `embed_multi` (0.6B, 3 GB) | 0 |
 
 `llm-units.example.json` and `llm-units-gpu0.example.json` are copies of those
-two files. On the deployed host the card-0 node reaches its file through
-`systemd/harmony-llm-gpu0.service.d/70-embed-only.conf`, which overrides a base
-unit that still names the shared one; the base unit HERE names the right file
-directly, so a fresh install needs no drop-in. Both are kept because both are
-deployed.
+two files, and `systemd/` holds the units that read them. Each node's
+`HARMONY_LLM_UNITS_FILE` is stated once, in its own unit — the fix shipped as a
+`70-embed-only.conf` drop-in and was folded back into the base unit the same day,
+because a drop-in silently overriding a base unit that still named the shared
+file is exactly the ambiguity this whole section is about.
 
 It was not always so, and the cost is worth recording because the shape that
 produced it is the one the bullet above used to recommend.
