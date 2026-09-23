@@ -177,6 +177,16 @@ after which `llm_title` loaded on start and
 `require:class=llm,params_b=[20,30),refusals=abliterated` resolved to
 `twolven/Qwen3.8-27B-abliterated-AWQ-MTP` again.
 
+**Do not copy that requirement string.** Both the clause and the model in it are
+retired: the fleet serves `dbirks/Qwen3.8-27B-W4A16-AutoRound`, a stock
+quantization, and **no unit declares `refusals` at all** — so a clause naming it
+matches nothing and 503s rather than relaxing. Ask
+`require:class=llm,params_b=[20,30)`. `refusals` remains a legal attribute in the
+grammar (`stock` / `abliterated` / `finetuned`, documented in `HARMONY.md`); it is
+simply that nothing declares it, which is the correct behaviour for an open
+vocabulary and not a bug. The line above is kept because it records what resolved
+on 2026-09-18.
+
 ### The deployed split (2026-09-23)
 
 `xc-tower-ubuntu` has two cards and one node process each. They read **disjoint
