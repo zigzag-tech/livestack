@@ -97,7 +97,20 @@ def targets_from_view(view: dict, kind: str, vantage: str = "direct",
                            + (f" ({node['last_error'][:80]})" if node.get("last_error") else ""),
                     **common))
                 continue
-            if not node.get("ready"):
+            # COLD is not UNREADY. The facade reports `ready` as "a unit is
+            # resident", and says exactly "no unit resident" when that is the
+            # only thing wrong -- a failed readiness probe says something else.
+            # Residency is the host broker's call, made when the caller's own
+            # request reaches the node (this module's first principle), so a
+            # healthy node that merely has nothing loaded is a candidate: it is
+            # scored as fully utilized, so any warm node wins, but it is not
+            # excluded. Excluded, a node evicted to make room for another
+            # kind on a shared card was never routed to and so never reloaded:
+            # attune's TTS and LLM on xc-tower-ubuntu's card 0, 2026-09-23.
+            cold = (not node.get("ready")
+                    and node.get("detail") == "no unit resident"
+                    and bool(node.get("units")))
+            if not node.get("ready") and not cold:
                 rejected.append(Candidate(
                     outcome="filtered",
                     reason=f"filtered: not ready ({node.get('detail') or 'no detail'})",
@@ -121,7 +134,7 @@ def targets_from_view(view: dict, kind: str, vantage: str = "direct",
                 capacity={"concurrency": free},
                 cost=CostModel(),          # a machine we already own is sunk cost
                 running=True, elastic=False, labels=labels,
-                distance_ms=dist, utilization=load_value(load),
+                distance_ms=dist, utilization=1.0 if cold else load_value(load),
             ))
             # Kept alongside so the ledger can show what the scheduler saw.
             rejected.append(Candidate(
