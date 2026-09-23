@@ -205,6 +205,33 @@ def _serves(node_row: dict, kind: str) -> bool:
     return kind in kinds
 
 
+def warm_for(node: dict, kind: str) -> Optional[bool]:
+    """Is this node holding something that can serve `kind` RIGHT NOW?
+
+    `True` it is, `False` it provably is not, and `None` when the node does not
+    publish enough to say — which is treated as warm, so a node that predates
+    per-unit attributes behaves exactly as it does today.
+
+    READY IS PER-NODE; RESIDENCY IS PER-UNIT, and conflating them is what this
+    answers. Measured on xc-tower-ubuntu 2026-09-23: `xc-tower-ubuntu-gpu0`
+    reported `ready: true` while the only unit resident on it was a 0.6B
+    embedder. It advertises `kinds: ['llm']`, it sorts first, and it has no vLLM
+    of its own — so it won every `kind=llm` lookup and forwarded each request
+    upstream through a serialising proxy. Single calls answered in 0.9 s and
+    every external check said healthy; at 25 concurrent, p50 was 7.5 s and 10 of
+    25 blew an 8 s deadline. The node was warm. It was not warm FOR LLM.
+    """
+    units = node.get("units")
+    if not isinstance(units, list) or not units:
+        return None
+    classed = [u for u in units
+               if isinstance(u, dict) and (u.get("attributes") or {}).get("class")]
+    if not classed:
+        return None                      # nothing to judge on; today's behaviour
+    return any(u.get("resident") and (u.get("attributes") or {}).get("class") == kind
+               for u in classed)
+
+
 def rank(view: dict, kind: str, vantage: str = "direct",
          now: Optional[float] = None, ttl_s: float = DEFAULT_TTL_S,
          prefer: Optional[List[Dict[str, Any]]] = None) -> dict:
@@ -263,6 +290,19 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                 cold.append(RankedTarget(
                     outcome="ranked",
                     reason=f"cold ({node.get('detail') or 'no unit resident'})",
+                    **common))
+                continue
+            # Warm for SOMETHING is not warm for THIS. A node holding only an
+            # embedding model is cold for `llm` however ready it reports, and
+            # the existing "warm first, always" rule below then keeps it out of
+            # the running whenever a genuinely warm node exists.
+            if warm_for(node, kind) is False:
+                held = ", ".join(sorted(
+                    u.get("kind", "?") for u in (node.get("units") or [])
+                    if isinstance(u, dict) and u.get("resident"))) or "nothing"
+                cold.append(RankedTarget(
+                    outcome="ranked",
+                    reason=f"cold (no {kind} unit resident; holding {held})",
                     **common))
                 continue
             eligible.append(RankedTarget(outcome="ranked", reason="", **common))
