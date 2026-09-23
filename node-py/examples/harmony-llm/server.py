@@ -1447,8 +1447,26 @@ async def proxy(path: str, request: Request):
             unit, already_here = local, True
         else:
             already_here = False
+    # A PEER ALREADY HOLDING A SATISFYING UNIT NEEDS NO ADMISSION. Admission is
+    # for LOADING (above); a copy resident on a peer of our kind was admitted
+    # when it loaded. Asking again blocked every such request on the planner
+    # for ~4.5 s before the forward below -- measured 2026-09-22 on
+    # xc-tower-ubuntu, where every request entering via the GPU-0 node for the
+    # 27B held by the GPU-1 node took 5.19 s against 0.27 s direct, and the
+    # typed-decision classifier enters that way. Same holder check as before,
+    # just asked first; placement authority is unchanged for anything that
+    # actually has to load.
+    held_peer = None
+    if not already_here:
+        cands = ([n for n in sorted(SPECS, key=_selection_rank) if _local_satisfies(n, requirement)]
+                 if requirement is not None else [unit])
+        for n in cands:
+            h = _held_elsewhere(n)
+            if h:
+                unit, held_peer = n, h
+                break
     granted, degraded, refused = None, None, None
-    if not already_here and (requirement is not None or len(SPECS) > 1 or MULTI_NODE):
+    if not already_here and not held_peer and (requirement is not None or len(SPECS) > 1 or MULTI_NODE):
         # WHO IS ASKING, asserted by the hub that authenticated this caller and
         # relayed here as X-Harmony-Owner (see HARMONY.md, "Who is asking").
         # The header is an ASSERTION, not a credential: this engine is reachable
@@ -1528,7 +1546,7 @@ async def proxy(path: str, request: Request):
         raise HTTPException(status_code=503,
                             detail=f"{unit} was not admitted: {refused}")
 
-    elsewhere = None
+    elsewhere = held_peer
     if granted and DEVICE_ID_SELF and granted != DEVICE_ID_SELF:
         elsewhere = _peer_at(granted)
         if elsewhere is None:
