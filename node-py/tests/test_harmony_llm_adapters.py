@@ -86,3 +86,20 @@ def test_callers_that_do_not_ask_for_an_adapter_are_unchanged(srv):
 def test_an_empty_adapter_clause_is_refused(srv):
     with pytest.raises(Exception):
         srv._requirement_from({"model": "require:class=llm,adapter="})
+
+
+def test_an_adapter_named_as_the_model_is_asked_for_by_requirement(srv):
+    # The forwarding hop. A node that resolves `adapter=chips-v1` and forwards
+    # to the peer holding the unit sends `model: "chips-v1"` -- the name vLLM
+    # selects a LoRA by. The peer must read that as the adapter requirement;
+    # treating it as an unknown name resolved "any llm" and rewrote `model` to
+    # the BASE, so the caller got base weights and a 200 (seen 2026-09-22).
+    req = srv._requirement_from({"model": "chips-v1"})
+    assert req == {"adapter.chips-v1": True}
+    assert srv._local_satisfies("llm_title", req)
+    assert not srv._local_satisfies("llm_small", req)
+
+
+def test_an_unknown_model_name_is_still_not_a_requirement(srv):
+    assert srv._requirement_from({"model": "some-model-we-do-not-have"}) is None
+    assert srv._requirement_from({"model": "llm_title"}) is None
