@@ -356,3 +356,108 @@ def test_invalid_requests_cannot_become_execution(harness, extra):
     data.update(extra)
     with pytest.raises(WorkloadError):
         s.submit('owner', data)
+
+
+def test_a_small_worker_does_not_shrink_the_host_for_its_larger_peers(harness):
+    """A worker's reported availability is already clamped to its own capacity,
+    so taking the elementwise MINIMUM across a host conflated "this worker is
+    small" with "this host is full".
+
+    Measured on xc-tower-ubuntu 2026-09-22: a 1 GiB policy-lab worker serving an
+    unrelated handler pinned the host's disk figure to 1 GiB on a machine with
+    560 GiB free, and every 16 GiB E2E admission was refused as "insufficient
+    shared host resources" while three peers on that host each reported
+    142-192 GiB. The fleet's E2E gate was unreachable for a day."""
+    store, _, _ = harness
+    register(store, 'big', 'shared', cpu=8, ram=64, handlers=['test.v1'])
+    register(store, 'tiny', 'shared', cpu=2, ram=1, handlers=['build.v1'])
+    job = store.submit('owner', request('needs-room', need={'cpu': 4, 'ram': 16}))
+    claim = store.claim('big', 'boot1')
+    assert claim is not None and claim['job_id'] == job['id'], \
+        store.get('owner', job['id'])['reason']
+
+
+def test_a_job_is_refused_by_the_worker_it_would_run_on_not_only_the_host(harness):
+    """The other half of the same change. The old code tested the collapsed host
+    figure alone, which was safe only because the minimum happened to include
+    the smallest worker. Reading the host's least-clamped view requires checking
+    the worker's own room too, or a tiny worker would be handed a huge job."""
+    store, _, _ = harness
+    register(store, 'big', 'shared', cpu=8, ram=64, handlers=['test.v1'])
+    register(store, 'tiny', 'shared', cpu=2, ram=1, handlers=['test.v1'])
+    job = store.submit('owner', request('too-big-for-tiny', need={'cpu': 2, 'ram': 32}))
+    assert store.claim('tiny', 'boot1') is None, 'tiny must not take a 32 GiB job'
+    # No reason assertion here: placement has already targeted the job at `big`,
+    # so the job's reason reads as its placement, not as tiny's refusal. What
+    # matters is which worker may claim it.
+    claim = store.claim('big', 'boot1')
+    assert claim is not None and claim['job_id'] == job['id']
+
+
+def test_reservations_still_bound_a_host_with_mixed_worker_sizes(harness):
+    """Reading the least-clamped host view must not remove the double-count
+    guard. The guard is the per-host reservation sum, not the minimum, so a
+    second job that no longer fits is still refused."""
+    store, _, _ = harness
+    register(store, 'big', 'shared', cpu=8, ram=64, handlers=['test.v1'])
+    register(store, 'also-big', 'shared', cpu=8, ram=64, handlers=['test.v1'])
+    register(store, 'tiny', 'shared', cpu=2, ram=1, handlers=['build.v1'])
+    first = store.submit('owner', request('first', need={'cpu': 4, 'ram': 48}))
+    second = store.submit('owner', request('second', need={'cpu': 4, 'ram': 48}))
+    granted = [c for c in (store.claim('big', 'boot1'), store.claim('also-big', 'boot1')) if c]
+    assert len(granted) == 1, 'two 48 GiB reservations must not both fit 64 GiB'
+    refused = second if granted[0]['job_id'] == first['id'] else first
+    assert 'insufficient shared host resources' in store.get('owner', refused['id'])['reason']
+
+
+def test_a_cleanup_hold_from_a_vanished_worker_stops_charging_its_host(harness):
+    """A cleanup hold charges its host until the worker acknowledges it, because
+    the attempt's containers may still be running there. A worker that is GONE
+    never acknowledges, and nothing else released the hold, so the charge was
+    permanent.
+
+    Measured 2026-09-22: xc-mac-studio-harmony held one for 26 hours with its
+    lease 26 hours expired, staying busy and keeping its host short that
+    attempt's vector for a day."""
+    store, now, _ = harness
+    register(store, 'gone', 'shared', cpu=8, ram=64)
+    register(store, 'live', 'shared', cpu=8, ram=64)
+    held = store.submit('owner', request('held', need={'cpu': 4, 'ram': 48}))
+    attempt = store.claim('gone', 'boot1')
+    assert attempt['job_id'] == held['id']
+
+    # The lease lapses, fencing the attempt into cleanup, and `gone` never
+    # comes back to acknowledge it.
+    now[0] += store.limits.lease_seconds + 1
+    assert store.get('owner', held['id'])['state'] == 'queued'
+
+    # Still inside the cleanup window: the hold is honoured, so a second large
+    # job cannot take the host.
+    blocked = store.submit('owner', request('blocked', need={'cpu': 4, 'ram': 48}))
+    register(store, 'live', 'shared', cpu=8, ram=64)
+    assert store.claim('live', 'boot1') is None, 'the hold must still be charged'
+
+    # Past it, the vanished worker's hold no longer denies the host.
+    now[0] += store.limits.cleanup_seconds
+    register(store, 'live', 'shared', cpu=8, ram=64)
+    claim = store.claim('live', 'boot1')
+    assert claim is not None, store.get('owner', blocked['id'])['reason']
+    assert claim['job_id'] in (held['id'], blocked['id'])
+
+
+def test_a_released_hold_is_still_reported_to_the_worker_that_returns(harness):
+    """Releasing the RESERVATION must not forget the OBLIGATION. The containers
+    are stopped by the worker acting on its cleanup report, so an attempt stays
+    in cleanup however long its worker has been away."""
+    store, now, _ = harness
+    register(store, 'w1', 'host1', 'boot1')
+    job = store.submit('owner', request('abandoned'))
+    attempt = store.claim('w1', 'boot1')
+    assert attempt is not None and attempt['job_id'] == job['id']
+    now[0] += store.limits.lease_seconds + 1
+    store.get('owner', job['id'])
+
+    now[0] += store.limits.cleanup_seconds * 3
+    report = register(store, 'w1', 'host1', 'boot1')
+    assert report['cleanup'] == [attempt['attempt_id']], \
+        'a returning worker must still be told to clean up'

@@ -41,6 +41,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from .preferences import preference_key
+
 from .ledger import distance_band
 
 DEFAULT_TTL_S = 60.0
@@ -88,14 +90,17 @@ class RankedTarget:
     # keeping a table of which host holds what, a table that is wrong the
     # first time somebody clones a voice.
     inventory: Optional[Dict[str, Any]] = None
+    preferences: Optional[List[Dict[str, Any]]] = None
 
     def to_wire(self) -> dict:
-        return {"target_id": self.target_id, "node": self.node,
-                "host_id": self.host_id, "device_id": self.device_id,
-                "region": self.region, "inventory": self.inventory,
-                "distance_ms": self.distance_ms,
-                "distance_band": self.distance_band,
-                "load": self.load, "rank": self.rank, "reason": self.reason}
+        result = {"target_id": self.target_id, "node": self.node,
+                  "host_id": self.host_id, "device_id": self.device_id,
+                  "region": self.region, "inventory": self.inventory,
+                  "distance_ms": self.distance_ms,
+                  "distance_band": self.distance_band,
+                  "load": self.load, "rank": self.rank, "reason": self.reason}
+        result["preferences"] = self.preferences
+        return result
 
 
 def load_value(load: Optional[Dict[str, Any]]) -> Optional[float]:
@@ -200,8 +205,36 @@ def _serves(node_row: dict, kind: str) -> bool:
     return kind in kinds
 
 
+def warm_for(node: dict, kind: str) -> Optional[bool]:
+    """Is this node holding something that can serve `kind` RIGHT NOW?
+
+    `True` it is, `False` it provably is not, and `None` when the node does not
+    publish enough to say — which is treated as warm, so a node that predates
+    per-unit attributes behaves exactly as it does today.
+
+    READY IS PER-NODE; RESIDENCY IS PER-UNIT, and conflating them is what this
+    answers. Measured on xc-tower-ubuntu 2026-09-23: `xc-tower-ubuntu-gpu0`
+    reported `ready: true` while the only unit resident on it was a 0.6B
+    embedder. It advertises `kinds: ['llm']`, it sorts first, and it has no vLLM
+    of its own — so it won every `kind=llm` lookup and forwarded each request
+    upstream through a serialising proxy. Single calls answered in 0.9 s and
+    every external check said healthy; at 25 concurrent, p50 was 7.5 s and 10 of
+    25 blew an 8 s deadline. The node was warm. It was not warm FOR LLM.
+    """
+    units = node.get("units")
+    if not isinstance(units, list) or not units:
+        return None
+    classed = [u for u in units
+               if isinstance(u, dict) and (u.get("attributes") or {}).get("class")]
+    if not classed:
+        return None                      # nothing to judge on; today's behaviour
+    return any(u.get("resident") and (u.get("attributes") or {}).get("class") == kind
+               for u in classed)
+
+
 def rank(view: dict, kind: str, vantage: str = "direct",
-         now: Optional[float] = None, ttl_s: float = DEFAULT_TTL_S) -> dict:
+         now: Optional[float] = None, ttl_s: float = DEFAULT_TTL_S,
+         prefer: Optional[List[Dict[str, Any]]] = None) -> dict:
     """Order the fleet's nodes for one `(kind, vantage)`.
 
     Returns every candidate, winner and losers alike, each with the reason it
@@ -259,6 +292,19 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                     reason=f"cold ({node.get('detail') or 'no unit resident'})",
                     **common))
                 continue
+            # Warm for SOMETHING is not warm for THIS. A node holding only an
+            # embedding model is cold for `llm` however ready it reports, and
+            # the existing "warm first, always" rule below then keeps it out of
+            # the running whenever a genuinely warm node exists.
+            if warm_for(node, kind) is False:
+                held = ", ".join(sorted(
+                    u.get("kind", "?") for u in (node.get("units") or [])
+                    if isinstance(u, dict) and u.get("resident"))) or "nothing"
+                cold.append(RankedTarget(
+                    outcome="ranked",
+                    reason=f"cold (no {kind} unit resident; holding {held})",
+                    **common))
+                continue
             eligible.append(RankedTarget(outcome="ranked", reason="", **common))
 
     # Warm first, always. A cold node is a candidate only when there is no warm
@@ -273,9 +319,14 @@ def rank(view: dict, kind: str, vantage: str = "direct",
 
     lv = {t.target_id: load_value(t.load) for t in eligible}
 
+    preference_receipts = {}
+
     def key(t: RankedTarget):
         v = lv[t.target_id]
-        return (_BAND_ORDER.get(t.distance_band, 4),
+        pref_key, receipt = preference_key(t.inventory, prefer or [], now)
+        preference_receipts[t.target_id] = receipt
+        return (pref_key,
+                _BAND_ORDER.get(t.distance_band, 4),
                 0 if v is not None else 1,      # an opinion outranks silence
                 v if v is not None else 0.0,
                 t.target_id)
@@ -301,7 +352,11 @@ def rank(view: dict, kind: str, vantage: str = "direct",
             why += "; " + ", ".join(bits) if bits else f"; load={v:.2f}"
         if t.target_id in cold_ids:
             why = f"cold, and the only {kind}; {why}"
-        out.append(RankedTarget(**{**t.__dict__,
+        receipt = preference_receipts.get(t.target_id, [])
+        if receipt:
+            decisive = next((p for p in receipt if p.get("matched") or p.get("comparable")), None)
+            why = f"preference={decisive or 'no opinion'}; " + why
+        out.append(RankedTarget(**{**t.__dict__, "preferences": receipt,
                                    "rank": i + 1,
                                    "outcome": "chosen" if i == 0 else "ranked",
                                    "reason": why}))
@@ -318,6 +373,7 @@ def rank(view: dict, kind: str, vantage: str = "direct",
         "vantage_used": vantage,
         "generated_at": now,
         "ttl_s": ttl_s,
+        "prefer": prefer or [],
         "chosen": chosen,
         "reason": _summary(out, rows, kind, vantage),
         "targets": [t.to_wire() for t in out],

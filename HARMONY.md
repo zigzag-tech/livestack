@@ -605,6 +605,104 @@ that introduces it. `LIVESTACK_LEDGER=0` turns emission off entirely.
 Schema: `node-py/livestack_node/decision.schema.json`. Design:
 `_plans/decision-ledger.md`.
 
+## Speed intent — what an SLA deadline actually gates
+
+`Sla.INTERACTIVE | NORMAL | BATCH` sets a default deadline slack (30 s / 30 min /
+12 h), and a target is a candidate only if the job can **START** within it:
+`ETA = 0` for a running node with room, `provision_latency_s` for a pool that has
+to be spun up first. A caller may override the class with an explicit `deadline`.
+
+It gates STARTING, not finishing (corrected 2026-09-22 — `_eta` used to add the
+job's own estimated runtime). That made an interactive request with the default
+60 s estimate infeasible on an idle fleet, refused with *no feasible target meets
+the deadline now* — the same sentence a full fleet produces. Nothing was hitting
+it, because every caller on this fleet sends `batch`.
+
+The consequence worth knowing: **interactive work can never burst onto a cold
+pool.** 240 s of provisioning does not fit inside 30 s of slack, by arithmetic
+rather than by a rule someone has to remember. An interactive request either
+lands on a node with room now or is queued; it is never held waiting for a
+machine to boot.
+
+## Unmet demand — how a refusal becomes a burst
+
+`POST /fleet/admit` answers one job and keeps nothing; the supervision loop plans
+over a queue its caller hands it. Nothing joined the two, so a job the broker
+answered with `Queue` never reached a plan and a burst the scheduler would have
+authorised never happened.
+
+The join is a **decaying signal, not a queue**. A capacity refusal is recorded in
+a bounded, in-memory register with a short TTL (`LIVESTACK_DEMAND_TTL_S`, default
+120 s; `LIVESTACK_DEMAND_MAX` shapes, default 256). `POST /fleet/plan` adds live
+demand to whatever jobs the caller passed, and `GET /fleet` reports it.
+
+Why not a queue: a queue can hold work whose caller gave up ten minutes ago, and
+renting a machine for it spends money for nothing. Demand has to be CURRENT to
+justify spending, so a caller that stops retrying stops counting — and the retry
+behaviour callers already have is what keeps a live signal alive. A restart
+forgetting the register is correct for the same reason.
+
+Two things it deliberately does not do. **A quota refusal is never demand**: an
+account at its ceiling does not need a bigger fleet, and renting one would not
+admit its next job. And **forty refusals of one shape are one job, not forty** —
+a pool instance serves several concurrent jobs, and the pool's own
+`max_instances` plus the next tick are what scale it further.
+
+## Provisioning — the fleet renting a machine, and knowing that it did
+
+`schedule()` has always been able to emit `Provision`. Nothing dispatched one,
+because nothing declared a pool to provision INTO and nothing recorded a create
+durably enough to be safe. Both now exist.
+
+**Pools are operator configuration, not discovery.** `LIVESTACK_FLEET_POOLS` is a
+JSON list: which machine shape, in which region, at what price, up to how many at
+once. Livestack cannot learn willingness or price from a cloud API. With none
+declared the broker plans and admits exactly as before and can never provision —
+the right behaviour for every host broker and for a fleet broker nobody has given
+a budget to. A malformed value yields **no** pools and says so at startup, for the
+same reason a malformed quota does: half a pool list is a fleet bursting into the
+wrong region at the wrong price.
+
+```
+LIVESTACK_FLEET_POOLS='[{"id":"heyuan-spot","provider":"aliyun","tier":"SPOT",
+  "region":"cn-heyuan","instance_type":"ecs.g8i.2xlarge","cost_per_hour":2.1,
+  "max_instances":2,"kinds":["llm"]}]'
+LIVESTACK_FLEET_WORKER_ENV='{"LIVESTACK_BROKER_URL":"http://100.64.0.18:8801"}'
+```
+
+**One logical operation results in at most one billed create.** Everything in
+`fleet_operations.py` serves that sentence. `creating` is written to disk with an
+idempotency key BEFORE the provider is called, so a process that dies in between
+comes back to that row, marks it `uncertain`, and RECONCILES it by asking the
+provider — it never retries. `uncertain` is a first-class state, because "the
+provider did not answer" is not "the provider said no", and a control plane that
+cannot tell them apart will eventually choose the expensive reading of silence.
+
+A **claim** is atomic across the owner's ceiling, every enclosing prefix ceiling,
+the slots already leased and the creates already in flight, under one writer lock.
+Checked separately, two claims at the boundary both pass.
+
+`announced` requires a **correlated** receipt: the fleet broker puts
+`LIVESTACK_OPERATION_ID` in the instance's boot environment, the node announces it
+back (`announce.node_operation_id`), and only a node carrying *this* operation's id
+and reporting `ready` greens it. "A fresh node appeared" is a coincidence that
+happens to be true most of the time, which is the worst kind of evidence to bill
+against. `released` requires a drain claim, an empty node and a final authoritative
+re-check under the writer lock — `schedule()`'s `Deprovision` is a proposal
+computed from a view, never a proof.
+
+Bound (rule 10): the store is `fleet-operations.sqlite3` beside the decision
+ledger, at most `LIVESTACK_OPERATIONS_MAX` records (default 5000), enforced by the
+store itself on every claim and deleting only TERMINAL rows.
+`LIVESTACK_OPERATIONS_AGE_DAYS` is UNSET by default and unset means the age window
+is **disabled**. A pending create is the one thing this store exists to remember,
+so a bound that could forget one would trade a bounded disk for an unbounded bill.
+
+Design: `_plans/fleetd-weave-jev.md`. Requirements (current truth):
+`openspec/specs/fleet-provisioning-operations/`, `fleet-supervision-loop/`,
+`fleet-incident-classification/`. Activation — declaring pools, and promoting the
+classifier out of shadow — is `openspec/changes/fleet-provisioning-activation/`.
+
 ## Endpoints
 
 Broker (`hostd`, default `:8799`):
@@ -618,6 +716,15 @@ Broker (`hostd`, default `:8799`):
   too, for the nodes it knows).
 - `GET /fleet/rank?kind=&regions=&require=` → where a request for `kind`
   should start. See below.
+- `POST /fleet/plan` → the whole plan for a caller-supplied queue. A **read**:
+  it reserves nothing. Reports the actions, the pools excluded and why, the
+  reservations outstanding, and `uncertainty` — the inputs the fleet did not
+  actually know.
+- `POST /fleet/operations` → claim, then act. `{"action": {...}, "plan_version":
+  ..., "idempotency_key": ...}`. The claim is a durable, synchronous write; the
+  provider call is not, so losing the reply costs nothing.
+- `GET /fleet/operations` / `GET /fleet/operations/{id}` → what is outstanding,
+  and the correlated facts about one operation. See "Provisioning" below.
 
 Node (`/livestack` facade): `GET /capability`, `GET /health`, `GET /residence`
 (now includes `device_mem`), `POST /lease`, `POST /lease/{id}/heartbeat`,

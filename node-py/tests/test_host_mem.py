@@ -18,10 +18,9 @@ def test_it_reports_this_machines_memory():
         assert 0 < m["available_bytes"] <= m["total_bytes"]
 
 
-def test_it_is_memoised_so_a_polled_page_does_not_fork_per_read():
-    """The macOS path shells out to `vm_stat` and `ps`. `/residence` is read by
-    the broker on every reconcile and by anything watching it, so an unmemoised
-    meter forks twice per node per poll."""
+def test_it_is_memoised_so_a_polled_page_does_not_probe_per_read():
+    """`/residence` is read by the broker on every reconcile and by anything
+    watching it, so the system meter must remain memoised."""
     calls = []
     import livestack_node.meters as meters
     real = meters._read_host_mem

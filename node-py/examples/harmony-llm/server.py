@@ -15,6 +15,7 @@ This process holds no GPU memory of its own; it is a facade plus a proxy.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import re
@@ -27,6 +28,7 @@ import time
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from livestack_node import request_log as _request_log
 from livestack_node.decisions.simple_jev import SimpleJevError, classify as simple_jev_classify
 
 HOST_ID = os.environ.get("HARMONY_LLM_HOST_ID", "xc-tower-ubuntu")
@@ -109,6 +111,48 @@ def _is_pooling(joined: str) -> bool:
     return "--task embed" in joined or "--runner pooling" in joined
 
 
+def _adapters_for(spec: dict) -> "dict[str, tuple[str, int]]":
+    """The LoRA adapters a unit is started with: name -> (path, rank).
+
+    Declared in the units file as ``"adapters": {"chips-v1": "/path/to/adapter"}``.
+    The rank is READ from the adapter's own ``adapter_config.json`` rather than
+    declared, for the same reason the other launch-line facts are derived: a
+    hand-typed ``--max-lora-rank`` below an adapter's real rank makes vLLM refuse
+    it at load, and one above it wastes the card's memory on every batch.
+
+    An adapter whose config cannot be read is DROPPED, loudly, and therefore has
+    no attribute: a request that names it gets 503 "nothing satisfies", never a
+    silent answer from the base model it was trying not to be.
+    """
+    out: "dict[str, tuple[str, int]]" = {}
+    for name, path in sorted((spec.get("adapters") or {}).items()):
+        try:
+            with open(os.path.join(str(path), "adapter_config.json"), "r", encoding="utf-8") as fh:
+                rank = int(json.load(fh)["r"])
+        except Exception as e:  # noqa: BLE001 -- any unreadable adapter is excluded
+            print(f"[harmony-llm] unit {spec.get('name')}: adapter {name!r} at {path} "
+                  f"is NOT served ({type(e).__name__}: {e})", flush=True)
+            continue
+        out[str(name)] = (str(path), rank)
+    return out
+
+
+def _lora_launch_args(spec: dict) -> "list[str]":
+    """The vLLM flags that serve a unit's adapters beside its base model.
+
+    One engine answers both: a request naming the base model gets the base
+    weights and one naming an adapter gets base + adapter, in the SAME batch.
+    That is the whole point on a single card -- the typed-decision classifier
+    and a chip adapter share one resident 27B instead of needing two.
+    """
+    adapters = _adapters_for(spec)
+    if not adapters:
+        return []
+    return (["--enable-lora", "--max-loras", str(len(adapters)),
+             "--max-lora-rank", str(max(r for _, r in adapters.values())),
+             "--lora-modules"] + [f"{n}={p}" for n, (p, _) in adapters.items()])
+
+
 def _attributes_for(spec: dict) -> dict:
     """A unit's attributes, with the launch-line facts DERIVED rather than
     trusted from the config file.
@@ -164,6 +208,14 @@ def _attributes_for(spec: dict) -> dict:
             attrs["context_len"] = int(served)
         except (TypeError, ValueError):
             attrs.pop("context_len", None)
+    # One attribute per adapter the launch line will actually load, so the
+    # clause `adapter=<name>` selects a unit that serves it and nothing else.
+    # Derived from the same resolution as the flags: it cannot claim an adapter
+    # the engine was not started with.
+    for key in [k for k in attrs if k.startswith("adapter.")]:
+        attrs.pop(key)
+    for name in _adapters_for(spec):
+        attrs[f"adapter.{name}"] = True
     return attrs
 
 
@@ -201,6 +253,7 @@ def _unit_specs() -> "list[dict]":
             # than a name. Carried verbatim to the broker; the planner compares,
             # it never interprets.
             "attributes": _attributes_for(spec),
+            "adapters": dict(spec.get("adapters") or {}),
         })
     if not out:
         raise RuntimeError("HARMONY_LLM_UNITS is set but declares no units")
@@ -235,9 +288,14 @@ def _selection_rank(name: str) -> "tuple[int, str]":
 #
 # With several units, eviction belongs to the PLANNER — it knows the footprints,
 # the demand and the whole card, and this process knows only its own units. So a
-# multi-unit node coloads by default and lets Harmony decide what goes.
-COLOAD = os.environ.get("HARMONY_LLM_COLOAD", "").strip().lower() in {"1", "true", "yes"} \
-    or len(SPECS) > 1
+# multi-unit node coloads by default and lets Harmony decide what goes. An
+# explicit false is a local safety invariant for a node whose units cannot fit
+# together: even if the broker's residence snapshot briefly lags, the manager
+# evicts this process's other unit before loading rather than trusting a stale
+# grant and running vLLM into occupied VRAM.
+_coload_env = os.environ.get("HARMONY_LLM_COLOAD")
+COLOAD = (len(SPECS) > 1) if _coload_env is None else \
+    _coload_env.strip().lower() in {"1", "true", "yes"}
 try:
     from livestack_node.facade import resolve_device_id as _rdi
     DEVICE_ID_SELF = _rdi(HOST_ID)
@@ -276,6 +334,28 @@ def _vllm_up(timeout: float = 2.0, name: str = "") -> bool:
         return False
 
 
+def _foreign_listener(name: str) -> bool:
+    """Is this unit's port answered by a vLLM THIS node did not start?
+
+    `_vllm_up` asks the port, not the process, so on a host where two nodes read
+    one units file without distinct HARMONY_LLM_PORT_OFFSETs, each node's
+    "is my vLLM up?" is answered by the OTHER node's engine. Measured on
+    xc-tower-ubuntu 2026-09-22: a bulk run of embedding requests reached the
+    GPU-1 node, which does not hold `embed_multi`; the GPU-0 node did, on the
+    same port 8210. The GPU-1 node ensured `embed_multi` locally -- with
+    coload off that STOPPED the resident 27B -- and then reported its "own"
+    embedder ready at once, because the port already answered. Titles and the
+    typed-decision classifier were down 14:09-14:22, and the two nodes then
+    took turns starting and stopping the 27B on its shared port.
+
+    A listener we did not start is someone else's engine. Use it; never evict
+    our own residents to "load" what is already being served.
+    """
+    p = _procs.get(name)
+    ours = p is not None and p.poll() is None
+    return not ours and _vllm_up(name=name)
+
+
 def _load(name: str = "", device: "str | None" = None,
           budget: "dict | None" = None):
     """Start this unit's vLLM and block until it actually serves.
@@ -298,6 +378,13 @@ def _load(name: str = "", device: "str | None" = None,
         p = _procs.get(name)
         if p is not None and p.poll() is None and _vllm_up(name=name):
             return p
+        # Starting here would bind-fail, yet the readiness poll below would see
+        # the other engine answer and report OUR load a success.
+        if _foreign_listener(name):
+            raise RuntimeError(
+                f"{name}: port {spec['port']} is already served by a vLLM this node did not "
+                f"start; refusing to load a second copy. Give each node on this host its own "
+                f"HARMONY_LLM_PORT_OFFSET.")
         env = dict(os.environ)
         # Only set this if the unit did not already. Setting it ONLY here is a
         # trap: the child then runs on the right card while THIS process — which
@@ -345,6 +432,8 @@ def _load(name: str = "", device: "str | None" = None,
         if spec["max_model_len"]:
             cmd += ["--max-model-len", spec["max_model_len"]]
         cmd += spec["extra_args"]
+        if "--enable-lora" not in spec["extra_args"]:
+            cmd += _lora_launch_args(spec)
         print(f"[harmony-llm] starting vLLM for {name}"
               f"{f' (planner chose {device})' if device else ''}: {' '.join(cmd)}", flush=True)
         proc = subprocess.Popen(cmd, env=env, start_new_session=True)
@@ -433,7 +522,99 @@ def _health_probe(_model) -> bool:
         return False
 
 
+# ONE client for the loopback hop to vLLM, not one per request.
+#
+# `httpx.AsyncClient()` builds a connection pool AND an SSL context at
+# construction — the latter reads the system CA bundle, which is why an
+# exhausted descriptor table surfaces as `ssl.create_default_context()` raising
+# EMFILE rather than as a socket error. Measured here 2026-09-22 03:48:29: a
+# burst of 71 `/v1/classifier` requests in one second against the default 1024
+# soft limit produced `OSError: [Errno 24] Too many open files` and five HTTP
+# 500s. Simple Jev loops over questions, so ONE classifier call is several of
+# these hops.
+#
+# A shared client pools the loopback connections instead of opening and
+# discarding one set per request. It is never closed on a request path — the
+# process outlives every request, and closing it would break every request
+# after the first.
+# WHO MAY SPEND THIS CARD.
+#
+# `/v1/classifier` had no credential check of any kind. Measured 2026-09-22:
+# 1,697 calls in 24 h from ONE off-fleet host at a public address, every one
+# `principal=-`, bursting to 71 requests per second — legitimate traffic (the
+# benchday hub classifying pane attention), but the only thing standing between
+# that endpoint and anyone else who found it was that nobody had.
+#
+# Same source and same semantics as `hostd`'s admission auth, deliberately: a
+# second spelling of "who is asking" is a second thing to get wrong.
+# `principals_from_env` returns None when NOTHING is configured, and None means
+# AUTH IS OFF — today's behaviour, byte for byte — while an empty table means a
+# source was configured and yielded nothing, which fails CLOSED. Both are said
+# out loud at startup, because a security control that quietly disabled itself
+# is the failure this guards.
+#: Sentinel for "not read yet", distinct from None, which is a real answer
+#: meaning NOTHING IS CONFIGURED and therefore auth is off.
+_UNSET = object()
+_CLASSIFIER_PRINCIPALS = _UNSET
+
+
+def _classifier_principals():
+    """The principal table, read once at startup. `None` = nothing configured
+    = auth off; `{}` = a source was configured and yielded nothing, which fails
+    closed. `fleet_auth.principals_from_env` owns that distinction and logs the
+    cause; this only makes the read EAGER.
+
+    Eager because the alternative was measured 2026-09-22 05:04-05:10: the table
+    was installed unreadable by this service's user, the lazy read raised inside
+    the request path, and a live caller took 73 HTTP 500s over six minutes. The
+    same fault read at startup is one line and costs nothing.
+    """
+    global _CLASSIFIER_PRINCIPALS
+    if _CLASSIFIER_PRINCIPALS is _UNSET:
+        _load_classifier_principals()
+    return _CLASSIFIER_PRINCIPALS
+
+
+def _load_classifier_principals():
+    """Read the credential source, and say which of the three states we are in."""
+    global _CLASSIFIER_PRINCIPALS
+    from livestack_node.fleet_auth import principals_from_env
+    _CLASSIFIER_PRINCIPALS = table = principals_from_env(
+        log=lambda m: print(m, flush=True))
+    print(f"[classifier] auth is "
+          + ("OFF — no credential source configured; any caller may spend this card"
+             if table is None else
+             f"ON — {len(table)} principal(s): "
+             + ", ".join(sorted(p.name for p in table.values()))
+             if table else
+             "ON but the principal table is EMPTY — every caller is refused"),
+          flush=True)
+
+_SHARED_CLIENT = None  # type: ignore[var-annotated]
+_SHARED_CLIENT_LOCK = asyncio.Lock()
+
+
+async def _shared_client() -> httpx.AsyncClient:
+    """The process-wide client for loopback calls to the vLLM unit."""
+    global _SHARED_CLIENT
+    if _SHARED_CLIENT is None:
+        async with _SHARED_CLIENT_LOCK:
+            if _SHARED_CLIENT is None:
+                _SHARED_CLIENT = httpx.AsyncClient(
+                    timeout=float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")),
+                    # Bounded on purpose. Unbounded pooling against a single
+                    # upstream is the same descriptor problem one layer down.
+                    limits=httpx.Limits(max_connections=int(
+                        os.environ.get("HARMONY_LLM_MAX_CONNECTIONS", "64")),
+                        max_keepalive_connections=16))
+    return _SHARED_CLIENT
+
+
 app = FastAPI(title="harmony-llm", version="1.0.0")
+
+# EAGER. The whole point: a credential source that cannot be read is a startup
+# line, not a per-request 500 discovered by whoever was calling at the time.
+_load_classifier_principals()
 
 
 def _gpu_call(fn):
@@ -499,6 +680,23 @@ def _readiness() -> dict:
 # `in_flight_source: "server"` so a consumer can tell that 0 means idle.
 _busy = counting()
 
+
+def _ensure_while_counted(ensure):
+    """Reserve the facade before a unit starts loading for this request.
+
+    Once a newly loaded unit reports resident, queued admission can immediately
+    evict it. Counting only when the upstream request is sent leaves a gap
+    between `manager.ensure()` making the unit visible and the handler reaching
+    `client.send()`. On success, ownership passes through send to the response
+    body iterator.
+    """
+    _busy.acquire()
+    try:
+        return ensure()
+    except BaseException:
+        _busy.release()
+        raise
+
 manager, residence = attach(
     app, host_id=HOST_ID, kind=NODE_KIND, units=_UNITS,
     idle_seconds=IDLE_EVICT_SECONDS, coload=COLOAD,
@@ -534,7 +732,10 @@ def _reap_dead_units():
                       flush=True)
                 _procs.pop(name, None)
                 try:
-                    _gpu_call(lambda n=name: manager.request_evict(n))
+                    # Keep lock order manager -> GPU, the same as `ensure`.
+                    # Taking `_lock` first here while an ensure holds the
+                    # manager guard and waits for `_lock` deadlocks both paths.
+                    manager.request_evict(name)
                 except Exception as e:            # never let the reaper die
                     # Print the TYPE too. This handler swallowed a NameError
                     # (`gpu_call` for `_gpu_call`) once every 20s for hours: the
@@ -613,6 +814,11 @@ if WARM_ON_START:
                 print(f"[harmony-llm] warm-on-start: {n} already held by {held} "
                       f"— not loading a second copy", flush=True)
                 continue
+            if _foreign_listener(n):
+                print(f"[harmony-llm] warm-on-start: {n}'s port {SPECS[n]['port']} is already "
+                      f"served by a vLLM this node did not start — not loading. Two nodes "
+                      f"share this port: give each its own HARMONY_LLM_PORT_OFFSET.", flush=True)
+                continue
             try:
                 manager.ensure(n)
                 print(f"[harmony-llm] warm-on-start: {n} resident", flush=True)
@@ -656,7 +862,12 @@ def _same_kind_peers() -> "list[tuple[str, str]]":
         for r in rows:
             if r.get("host_id") == HOST_ID:
                 continue                      # ourselves
-            if r.get("state") not in (None, "fresh"):
+            # `suspect` is a missed heartbeat, not a death: a node busy serving
+            # exactly the unit being asked about is the one most likely to be
+            # late. Skipping it made a busy holder look like no holder, and the
+            # asker loaded its own copy (the 2026-09-22 eviction). The /health
+            # probe in _held_elsewhere is the liveness check; only `mia` is out.
+            if r.get("state") not in (None, "fresh", "suspect"):
                 continue                      # mia/stale: not somewhere to defer to
             kinds = r.get("kinds") or []
             if kinds and NODE_KIND not in kinds:
@@ -798,6 +1009,14 @@ def _expand_clause(key: str, val) -> "list[tuple[str, object]]":
         "[20,]"    ->  params_b>=20
         "(,30]"    ->  params_b<=30
     """
+    # `adapter=chips-v1` asks for a unit serving that LoRA. Units carry one
+    # boolean attribute per adapter, so this is an ordinary equality clause the
+    # broker's planner compares without knowing what an adapter is.
+    if key == "adapter":
+        name = str(val).strip()
+        if not name:
+            raise ValueError("adapter= names no adapter")
+        return [(f"adapter.{name}", True)]
     if isinstance(val, str):
         m = _INTERVAL_RE.match(val)
         if m:
@@ -894,6 +1113,13 @@ def _requirement_from(body_json: dict) -> "dict | None":
     else:
         model = str(body_json.get("model") or "")
         if not model.startswith("require:"):
+            # An ADAPTER's name as the model is how vLLM selects a LoRA, and so
+            # it is what a node that resolved `adapter=<name>` forwards to the
+            # peer holding the unit. Read it back as that requirement: treated
+            # as an unknown name it resolved "any llm" and the normalisation
+            # below rewrote `model` to the base -- base weights and a 200.
+            if any(model in (SPECS[n].get("adapters") or {}) for n in SPECS):
+                return {f"adapter.{model}": True}
             return None
         for clause in _split_clauses(model[len("require:"):]):
             clause = clause.strip()
@@ -1063,14 +1289,32 @@ async def classifier(request: Request):
     owner = request.headers.get("x-harmony-owner")
     authorization = request.headers.get("authorization")
 
+    # UNCONDITIONAL, with the condition in the message. A line that appeared
+    # only on refusal could not answer the question this endpoint actually
+    # raised — "does the caller present a credential at all?" — until the day
+    # somebody turned enforcement on and found out by breaking it.
+    principals = _classifier_principals()
+    label = _request_log.principal_label(authorization, principals)
+    print(f"[classifier] auth={'REQUIRED' if principals is not None else 'off'} "
+          f"credential={label or 'none presented'}", flush=True)
+    if principals is not None:
+        from livestack_node.fleet_auth import AuthError, authenticate
+        try:
+            # The owner header is the delegated account, checked against the
+            # principal's prefix exactly as `/fleet/admit` checks it.
+            authenticate(principals, authorization, owner)
+        except AuthError as e:
+            raise HTTPException(status_code=e.status, detail=e.detail)
+
     async def invoke_chat(body: dict) -> dict:
         headers = {"content-type": "application/json"}
         if owner:
             headers["x-harmony-owner"] = owner
         if authorization:
             headers["authorization"] = authorization
-        async with httpx.AsyncClient(timeout=float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300"))) as client:
-            response = await client.post(f"http://127.0.0.1:{NODE_PORT}/v1/chat/completions", json=body, headers=headers)
+        client = await _shared_client()
+        response = await client.post(
+            f"http://127.0.0.1:{NODE_PORT}/v1/chat/completions", json=body, headers=headers)
         if response.status_code >= 400:
             raise HTTPException(status_code=response.status_code, detail=response.text[:1000])
         return response.json()
@@ -1203,8 +1447,26 @@ async def proxy(path: str, request: Request):
             unit, already_here = local, True
         else:
             already_here = False
+    # A PEER ALREADY HOLDING A SATISFYING UNIT NEEDS NO ADMISSION. Admission is
+    # for LOADING (above); a copy resident on a peer of our kind was admitted
+    # when it loaded. Asking again blocked every such request on the planner
+    # for ~4.5 s before the forward below -- measured 2026-09-22 on
+    # xc-tower-ubuntu, where every request entering via the GPU-0 node for the
+    # 27B held by the GPU-1 node took 5.19 s against 0.27 s direct, and the
+    # typed-decision classifier enters that way. Same holder check as before,
+    # just asked first; placement authority is unchanged for anything that
+    # actually has to load.
+    held_peer = None
+    if not already_here:
+        cands = ([n for n in sorted(SPECS, key=_selection_rank) if _local_satisfies(n, requirement)]
+                 if requirement is not None else [unit])
+        for n in cands:
+            h = _held_elsewhere(n)
+            if h:
+                unit, held_peer = n, h
+                break
     granted, degraded, refused = None, None, None
-    if not already_here and (requirement is not None or len(SPECS) > 1 or MULTI_NODE):
+    if not already_here and not held_peer and (requirement is not None or len(SPECS) > 1 or MULTI_NODE):
         # WHO IS ASKING, asserted by the hub that authenticated this caller and
         # relayed here as X-Harmony-Owner (see HARMONY.md, "Who is asking").
         # The header is an ASSERTION, not a credential: this engine is reachable
@@ -1221,6 +1483,22 @@ async def proxy(path: str, request: Request):
                         owner_asserted=bool(asserted),
                         token=_FLEET_TOKEN, timeout=ADMIT_TIMEOUT)
             served = res.get("kind")
+            # A loading transition temporarily withholds this facade's fleet
+            # registration. During that gap the broker can answer "nothing
+            # satisfies" even though this process's static catalogue declares
+            # the requested unit. Falling back only to a LOCAL exact match is
+            # safe: the manager still enforces coload policy before loading, so
+            # an exclusive single-GPU deployment evicts its other local unit.
+            # This is not a placement guess for an arbitrary peer.
+            if requirement is not None and not served:
+                local_declared = next((n for n in sorted(SPECS, key=_selection_rank)
+                                       if _local_satisfies(n, requirement)), None)
+                if local_declared:
+                    print(f"[harmony-llm] broker temporarily forgot {requirement}; "
+                          f"using locally declared {local_declared}", flush=True)
+                    served = local_declared
+                    res = {**res, "kind": served, "granted": True,
+                           "device_id": DEVICE_ID_SELF, "reason": None}
             # Log the planner's answer only when it did NOT grant. A refusal
             # for a requirement is otherwise invisible: the caller gets a 503
             # naming what it asked for, and nothing says what the planner
@@ -1268,7 +1546,7 @@ async def proxy(path: str, request: Request):
         raise HTTPException(status_code=503,
                             detail=f"{unit} was not admitted: {refused}")
 
-    elsewhere = None
+    elsewhere = held_peer
     if granted and DEVICE_ID_SELF and granted != DEVICE_ID_SELF:
         elsewhere = _peer_at(granted)
         if elsewhere is None:
@@ -1294,11 +1572,22 @@ async def proxy(path: str, request: Request):
                   f"rather than loading a second copy", flush=True)
             elsewhere = holder
 
+    foreign = not elsewhere and not already_here and _foreign_listener(unit)
+    if foreign:
+        print(f"[harmony-llm] {unit}: port {SPECS[unit]['port']} is served by a vLLM this "
+              f"node did not start -- forwarding to it rather than loading, which would "
+              f"evict this node's residents. Two nodes share this port: give each its own "
+              f"HARMONY_LLM_PORT_OFFSET.", flush=True)
+
     if elsewhere:
+        _busy.acquire()
         url = f"{elsewhere}/v1/{path}"
+    elif foreign:
+        _busy.acquire()
+        url = f"{_base_of(unit)}/v1/{path}"
     else:
         try:
-            manager.ensure(unit)
+            _ensure_while_counted(lambda: manager.ensure(unit))
         except Exception as e:
             raise HTTPException(status_code=503, detail=f"{unit} unavailable: {e}")
         url = f"{_base_of(unit)}/v1/{path}"
@@ -1314,6 +1603,16 @@ async def proxy(path: str, request: Request):
         served = SPECS.get(unit, {}).get("model") or unit
         if str(out.get("model", "")).startswith("require:") or requirement is not None:
             out["model"] = served
+        # vLLM selects a LoRA by serving it under the adapter's own name. A
+        # requirement that asked for an adapter and was then sent to the base
+        # model's name would get the base weights and a 200 -- the exact silent
+        # substitution this normalisation exists to prevent.
+        wanted = [k[len("adapter."):] for k in (requirement or {}) if k.startswith("adapter.")]
+        if len(wanted) > 1:
+            raise HTTPException(status_code=400,
+                                detail=f"harmony: one request can use one adapter, asked for {wanted}")
+        if wanted:
+            out["model"] = wanted[0]
         # The parameter the requirement implied. Asking for `thinking` and then
         # not sending `enable_thinking` gets a capable unit that does not think.
         if requirement.get("thinking") is True if requirement else False:
@@ -1332,6 +1631,7 @@ async def proxy(path: str, request: Request):
         resp = await client.send(req, stream=True)
     except Exception as e:
         await client.aclose()
+        _busy.release()
         raise HTTPException(status_code=502, detail=f"vllm proxy failed: {e}")
 
     # A CONTEXT REFUSAL IS A ROUTING FACT, NOT A VENDOR STRING.
@@ -1352,9 +1652,12 @@ async def proxy(path: str, request: Request):
     # on this node could serve it — the difference between "the vendor said no"
     # and "you asked for more context than this node has".
     if resp.status_code == 400:
-        raw = await resp.aread()
-        await resp.aclose()
-        await client.aclose()
+        try:
+            raw = await resp.aread()
+        finally:
+            await resp.aclose()
+            await client.aclose()
+            _busy.release()
         text = raw.decode("utf-8", "replace")
         if "context length" in text.lower():
             needed = None
@@ -1398,12 +1701,8 @@ async def proxy(path: str, request: Request):
                   flush=True)
             raise HTTPException(status_code=413, detail=detail)
         # Any other 400 is the caller's own and passes through unchanged.
-        _busy.acquire()
         async def replay_400():
-            try:
-                yield raw
-            finally:
-                _busy.release()
+            yield raw
         return StreamingResponse(
             replay_400(), status_code=400,
             headers={k: v for k, v in resp.headers.items()
@@ -1422,7 +1721,6 @@ async def proxy(path: str, request: Request):
             await client.aclose()
             _busy.release()
 
-    _busy.acquire()
     return StreamingResponse(
         body_iter(), status_code=resp.status_code,
         headers={k: v for k, v in resp.headers.items()

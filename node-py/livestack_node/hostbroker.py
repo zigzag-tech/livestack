@@ -379,6 +379,23 @@ class HostBroker:
                 out[owner] = out.get(owner, 0) + 1
         return out
 
+    def leases_on(self, device_id: str, now: Optional[float] = None) -> int:
+        """Live leases booked against one target. Expired ones are dropped first,
+        for the same reason `owner_usage` drops them: a crashed caller cannot
+        release, and counting its ghost would make a node undrainable forever.
+
+        This is what a deprovision's busy-check reads. It is deliberately a
+        COUNT and not a boolean — the refusal names the number, and "1 active
+        lease" is a sentence an operator can act on where "busy" is not.
+        """
+        now = self._now(now)
+        with self._lease_lock:
+            for lid in [lid for lid, l in self.hosted_leases.items()
+                        if now - l["last_hb"] > self.hosted_lease_ttl_s]:
+                del self.hosted_leases[lid]
+            return sum(1 for l in self.hosted_leases.values()
+                       if l.get("device_id") == device_id)
+
     def set_hosted_available(self, device_id: str, available: bool) -> None:
         """Flip the health gate hostd's prober feeds. An unhealthy backend simply
         stops being a candidate; nothing else has to know why."""
@@ -1022,6 +1039,12 @@ class HostBroker:
                 # Who this node is pooled for (from its announce): a grant the
                 # admission path enforces. Absent = pooled for everyone.
                 "scope": row.get("scope"),
+                # The provisioning operation that created this node, if the
+                # fleet broker created it. Carried into the view because the
+                # view is where a create is CORRELATED with the node it paid
+                # for — `fleet_operations` greens an operation only on a node
+                # that states this operation's own id and reports ready.
+                "operation_id": row.get("operation_id"),
                 "kinds": row.get("kinds") or [],
             }
             if key in self.probe_ms:
@@ -1063,7 +1086,15 @@ class HostBroker:
                  "residency": int(u.residency),
                  "footprint": dict(u.footprint),
                  "resident": kind in resident,
-                 "busy": bool(resident.get(kind))}
+                 "busy": bool(resident.get(kind)),
+                 # WHAT THIS UNIT IS, carried through from the node's own
+                 # `/residence`. Without it the view says a node hosts `llm`
+                 # and cannot say that the only thing resident on it is an
+                 # embedding model — which is how a ranker hands out a node
+                 # that must proxy every LLM request it is sent. Emitted only
+                 # when the node published some, so a node that predates
+                 # attributes produces a byte-identical row.
+                 **({"attributes": dict(u.attributes)} if getattr(u, "attributes", None) else {})}
                 for (kind, pk), u in sorted(self.peer_units.items()) if pk == key
             ]
             if units:
@@ -1261,13 +1292,30 @@ class HostBroker:
         """
         if self.ledger is None:
             return
+        granted = bool(result.get("granted"))
         self._emit(Decision(
             emitter=self.emitter, emitter_id=self.emitter_id,
             kind=result.get("kind"), decision="admit",
             candidates=list(result.get("candidates") or []),
             chosen=(result.get("target") or {}).get("target_id"),
             reason=result.get("reason"),
-            request=request,
+            # `job_id` is the join key. The admit record, the lease and any
+            # provisioning operation raised for this job all name it, so
+            # "which machine did that request end up on, and what did it cost"
+            # is one query rather than an argument about timestamps.
+            request={**request, "job_id": result.get("job_id")},
+            dispatched=granted,
+            # WHAT HAPPENED, which is the half a log line never has. A grant
+            # with no lease is not the same answer as a grant with one: the
+            # capacity was promised and never booked, and the next caller will
+            # be told the machine is free. Recording the lease id is what lets
+            # a reader follow this decision into the lease ledger and out the
+            # other side.
+            outcome=({"status": "ok" if lease_id else "failed",
+                      "recorded_at": time.time(),
+                      "served_by": (result.get("target") or {}).get("node"),
+                      "lease_id": lease_id}
+                     if granted else None),
         ))
 
     def _emit_plan(self, world: WorldState, p) -> None:

@@ -17,6 +17,8 @@ from .admission import (LOCATEANYTHING_CUDA_UNIT, LOCATEANYTHING_MLX_UNIT,
 from .contract import PerceptionContractError
 from .locateanything import (CudaLocateAnythingRuntime, LocateAnythingAdapter,
                              MlxLocateAnythingRuntime)
+from .remote import (RemotePerceptionAdapter, load_remote_routes,
+                     matching_route, read_token)
 from .service import PerceptionService, build_app
 
 def _post_json(url: str, payload: dict, token: str | None = None, timeout: float = 600) -> dict:
@@ -50,6 +52,7 @@ def create_app():
     busy = counting()
     gpu_lock = threading.Lock()
     holder: dict[str, object] = {}
+    remote_routes = load_remote_routes(os.environ.get("HARMONY_PERCEPTION_REMOTE_ROUTES_FILE"))
     # Metal model lifecycle calls must remain on one owned thread. Running MLX
     # initialization in an arbitrary AnyIO request worker can block inside the
     # provider loader; the same executor also makes warm/infer/evict ordering
@@ -98,6 +101,10 @@ def create_app():
 
     def admit(*, request, owner, realm):
         required = request.get("requirements", {})
+        remote = matching_route(remote_routes, required)
+        if remote is not None:
+            return {"backend": f"remote:{remote['name']}", "device": "harmony-federated",
+                    "queue_ms": 0, "owner": owner, "realm": realm}
         wanted_model = required.get("model")
         if wanted_model not in (None, model_id, unit):
             raise PerceptionContractError("unsupported", f"model {wanted_model!r} is not served by this node", 422)
@@ -126,7 +133,12 @@ def create_app():
         precision="bf16" if backend_name == "cuda" else "int8",
         preprocessing_revision=f"locateanything-{backend_name}-{model_revision}", generate=generate,
     )
-    service = PerceptionService(principals=principals, backends={backend_name: adapter}, admit=admit)
+    backends = {backend_name: adapter}
+    for route in remote_routes:
+        backends[f"remote:{route['name']}"] = RemotePerceptionAdapter(
+            url=route["url"], token=read_token(route["tokenFile"]),
+            timeout=float(route.get("timeoutSeconds", 900)))
+    service = PerceptionService(principals=principals, backends=backends, admit=admit)
     app = build_app(service)
 
     manager, coordinator = attach(
