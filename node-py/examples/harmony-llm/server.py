@@ -1113,6 +1113,13 @@ def _requirement_from(body_json: dict) -> "dict | None":
     else:
         model = str(body_json.get("model") or "")
         if not model.startswith("require:"):
+            # An ADAPTER's name as the model is how vLLM selects a LoRA, and so
+            # it is what a node that resolved `adapter=<name>` forwards to the
+            # peer holding the unit. Read it back as that requirement: treated
+            # as an unknown name it resolved "any llm" and the normalisation
+            # below rewrote `model` to the base -- base weights and a 200.
+            if any(model in (SPECS[n].get("adapters") or {}) for n in SPECS):
+                return {f"adapter.{model}": True}
             return None
         for clause in _split_clauses(model[len("require:"):]):
             clause = clause.strip()
