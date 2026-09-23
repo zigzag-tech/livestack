@@ -184,7 +184,7 @@ units files**:
 
 | node | port | units file | units | card |
 |---|---|---|---|---|
-| `harmony-llm` | 8188 | `/etc/harmony/llm-units.json` | `llm_title` (27B, 21 GB) | 1 |
+| `harmony-llm` | 8188 | `/etc/harmony/llm-units.json` | `llm_general` (27B, 21 GB) | 1 |
 | `harmony-llm-gpu0` | 8190 | `/etc/harmony/llm-units-gpu0.json` | `embed_multi` (0.6B, 3 GB) | 0 |
 
 `llm-units.example.json` and `llm-units-gpu0.example.json` are copies of those
@@ -198,7 +198,7 @@ It was not always so, and the cost is worth recording because the shape that
 produced it is the one the bullet above used to recommend.
 
 **Both nodes read the shared file.** The card-0 node therefore declared
-`llm_title` too — on a card whose other tenants (polyasr x2, polytts, OCR) leave
+the 27B too — on a card whose other tenants (polyasr x2, polytts, OCR) leave
 about 4.4 GiB free, where a 21 GB unit cannot go. It never loaded one; it
 *forwarded* to card 1, through its own `_busy` semaphore. Measured 2026-09-23
 with the hub's own payload: card 1 direct answered **0.41 s at 50-way
@@ -232,9 +232,42 @@ classed unit set but nothing resident for that kind on the COLD list, and
 see the class at all. The benchday hub asks `/fleet/rank?kind=llm` instead of
 deriving an endpoint itself. After both, the hub's abort rate went **86% → 6.6%**.
 
-The residual name is dishonest: `llm_title` is the fleet's only LLM and is used
-for far more than titles. Renaming it touches every consumer that names it and
-has not been done.
+### The unit is `llm_general`, not `llm_title`
+
+Renamed 2026-09-23. It had been the *title* unit when the fleet had several LLMs;
+once it became the only one it served titles, chip ranking, the Simple Jev
+classifier, asset curation, judging and bulk extraction, and the name said none
+of that. A name that describes one caller invites the next reader to add a second
+unit for their own caller, which is how a 24 GiB card ended up holding a 9B that
+starved the 27B everything actually wanted ("What NOT to offer", above).
+
+Named for the SLOT, deliberately, not the model. `tools/title-bakeoff` in
+benchday rewrites this unit's `model` in place, so `qwen38_27b` would go stale
+the first time the weights changed — the same dishonesty one axis over. What the
+weights are belongs in `attributes` (`params_b`, `family`, `quant`, `context_len`),
+where a caller's requirement string can match on it.
+
+**Almost nothing named it, which is the point of the requirement grammar.** The
+benchday hub asks for
+`require:class=llm,family=qwen,params_b=[20,30)` and never learned a unit name;
+the same is true of jingway's provider chain and of every OpenAI-shaped caller
+sending `"model": "local"`. What did name it: `policy_lab/profile_worker.py` and
+`ui.html` here, and in benchday `ml/lora/chipgen` (`CHIPGEN_REMOTE_LLM_UNIT`),
+`ml/lora/cs/judges.py` (`BENCHDAY_LOCAL_JUDGE_UNIT`),
+`tools/title-bakeoff/set-unit-model.py`, and the `--served-model-name` lists in
+`ml/lora/chip27b/`.
+
+**A stale caller does not fail loudly, and that is a known gap.**
+`_unit_for_model` resolves an unknown name to the FIRST declared unit rather than
+refusing, so `"model": "llm_title"` still answers here — correctly today, because
+card 1 declares exactly one unit. The moment it declares two, that fallback is
+the "asked for a 27B, served a 9B" defect again. `_named_unit` already reports
+the distinction; nothing yet refuses on it.
+
+Historical passages in this file and in the archived OpenSpec changes that cite
+`llm_title` are left as written: that was the name at the time, and rewriting
+measurement narration to use a name that did not exist when it was measured makes
+the evidence harder to trust, not easier.
 
 ### One copy per host
 

@@ -16,7 +16,7 @@ or it was evicted and never came back, and both are answers worth printing
 loudly rather than silently.
 
 Run from the node-py directory (or anywhere, with livestack_node importable):
-    cd node-py && python scripts/explain_reload.py ~/.cache/livestack/decisions-xc-tower-ubuntu.jsonl llm_title
+    cd node-py && python scripts/explain_reload.py ~/.cache/livestack/decisions-xc-tower-ubuntu.jsonl llm_general
 """
 from __future__ import annotations
 
@@ -77,7 +77,7 @@ def explain(ledger_path: str, kind: str, out=sys.stdout) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("ledger", help="path to a decision-ledger JSONL file")
-    ap.add_argument("kind", help="unit kind, e.g. llm_title")
+    ap.add_argument("kind", help="unit kind, e.g. llm_general")
     args = ap.parse_args(argv)
     return explain(args.ledger, args.kind)
 
