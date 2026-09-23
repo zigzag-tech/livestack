@@ -236,7 +236,7 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
         # the operator's to state, and the default keeps single-machine
         # deployments working with nothing set.
         advertise = (os.environ.get("LIVESTACK_NODE_HOST") or "127.0.0.1").strip()
-        from .announce import node_region, node_scope
+        from .announce import node_operation_id, node_region, node_scope
         start_registrar(
             f"http://{advertise}:{int(resolved_port)}{prefix}",
             host_id=host_id, kind=kind,
@@ -248,6 +248,10 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
             # hub stated it (`LIVESTACK_NODE_SCOPE`). Absent announces no
             # scope, which is the fleet default: pooled for everyone.
             scope=node_scope(),
+            # The create that paid for this box, if one did. It is what turns
+            # "a node appeared" into "THIS operation succeeded" — see
+            # `announce.node_operation_id`.
+            operation_id=node_operation_id(),
             interval_s=float(os.environ.get("LIVESTACK_REGISTER_INTERVAL", "30")),
         )
 

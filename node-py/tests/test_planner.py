@@ -689,12 +689,12 @@ def test_the_card_goes_to_whoever_wants_it_more():
     assert [g for g in p.of(Grant) if g.kind == "llm_b"]
 
 
-def test_the_more_wanted_resident_keeps_the_card():
-    """...and the comparison runs the other way too."""
+def test_live_request_displaces_historically_more_wanted_idle_resident():
+    """Historical demand cannot starve a live request for an idle peer."""
     w = _two_llms(demand={"llm_a": 9.0, "llm_b": 1.0})
     p = plan(w)
-    assert "llm_a" not in kinds_of(p.of(Evict), Evict)
-    assert [d for d in p.of(Defer) if d.request_id == "r1"]
+    assert "llm_a" in kinds_of(p.of(Evict), Evict)
+    assert [g for g in p.of(Grant) if g.kind == "llm_b"]
 
 
 # --- "just give me a model that can do this" ---------------------------------

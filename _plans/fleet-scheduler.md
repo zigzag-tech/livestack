@@ -91,9 +91,25 @@ deadline: Optional[float]  # explicit; overrides the class default
 est_duration_s: float      # to compute ETA per target
 ```
 
-`ETA(target) = queue_wait + provision_latency_s + est_duration_s`. A target is
-deadline-feasible iff `now + ETA <= deadline`. Sorbonne teacher-upload = **BATCH**
-(async, show-progress, cost-first); a future live path = **INTERACTIVE**.
+`ETA(target) = queue_wait + provision_latency_s`. A target is deadline-feasible
+iff `now + ETA <= deadline`. Sorbonne teacher-upload = **BATCH** (async,
+show-progress, cost-first); a future live path = **INTERACTIVE**.
+
+**Corrected 2026-09-22: ETA is time-to-START, and this line used to add
+`est_duration_s`.** The code followed the old line, which made a deadline mean
+"must have FINISHED by then" — so `Sla.INTERACTIVE`'s 30 s slack read as "must
+complete within 30 s", and `fleet_admit`'s own default 60 s estimate was
+infeasible on a **completely idle fleet**. Every interactive caller that did not
+state an estimate was refused with *no feasible target meets the deadline now*,
+which is the sentence a FULL fleet produces. It was latent rather than live only
+because every caller on this fleet sends `batch` (attune `fleet.ts`,
+media-corpus `broker.py`, `workloads/lease_helper.py`).
+
+`est_duration_s` is still carried and still used — it is what `CostModel.estimate`
+prices. It just does not belong in a feasibility test about waiting. Ranking is
+unchanged by the correction: `_score` min-max normalizes ETAs across the candidate
+set and the estimate is a property of the job, so removing it subtracts the same
+constant from every candidate (`test_dropping_the_runtime_from_eta_did_not_move_the_ranking`).
 
 ## 4. Budget is soft — a cost term + a pressure signal, never a gate
 
@@ -161,10 +177,19 @@ still open: speed-aging, spot-reclaim handling, per-project budgets.
 ## 8. Where it lives & how it's tested
 
 - `node-py/livestack_node/fleet_scheduler.py` — the pure `schedule()` + dataclasses.
-- **Not yet wired:** no `hostd`/`fleetd` assembles `FleetState` yet — `hostd.py`/
-  `hostbroker.py` never import the scheduler; today only the tests build a
-  `FleetState`. The plan is still broker `/status` + the ledger in, `FleetPlan`
-  actions out.
+- **WIRED** (corrected 2026-09-22; this section said "not yet wired" long after
+  it was). `POST /fleet/admit` → `fleet_admit.py` → `schedule()` has been live
+  since phase 4 of `fleet-broker.md` — one job at a time, `Admit`/`Queue` only.
+  `POST /fleet/plan` → `fleet_ops_api.build_plan()` → `schedule()` plans a whole
+  queue, over running fleet nodes AND the elastic pools declared in
+  `LIVESTACK_FLEET_POOLS`; that is the path on which `Provision` and
+  `Deprovision` first became reachable. `POST /fleet/operations` dispatches them
+  through the durable lifecycle in `fleet_operations.py`.
+- The `FleetState` a broker assembles: targets from the fleet view
+  (`fleet_admit.targets_from_view`) plus `fleet_pools.pool_targets`; `usage` from
+  the broker's own lease ledger PLUS the creates in flight — leaving the second
+  out is how an owner at its ceiling is handed four more machines before any of
+  them announce.
 - `node-py/tests/test_fleet_scheduler.py` + `node-py/tests/test_fleet_dispatch.py` —
   mirror `test_planner.py`/`test_federation.py`:
   prefer-local when local idle; burst SPOT under queue pressure; RunPod *only* when a

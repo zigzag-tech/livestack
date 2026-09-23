@@ -29,7 +29,7 @@ import contextlib
 import signal
 import subprocess
 from dataclasses import dataclass, field
-from typing import List, Mapping, Optional
+from typing import Tuple, List, Mapping, Optional
 
 
 # --- errors -----------------------------------------------------------------
@@ -55,6 +55,11 @@ class ComputeSpec:
     gpu_hint: Optional[str] = None             # optional preferred SKU substring
     image: Optional[str] = None                # container image / AMI (provider default if None)
     env: Mapping[str, str] = field(default_factory=dict)   # extra instance env
+    disk_gb: int = 40                          # container disk; a 20 GB+ model plus its runtime needs more
+    # Acceptable host CUDA versions (e.g. ("12.8", "12.9")). Empty = any. A wheel
+    # built for a newer CUDA than the host driver fails at first kernel launch,
+    # long after the box started billing.
+    cuda_versions: Tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -89,11 +94,17 @@ _KEEPALIVE = ["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4"]
 
 
 def _ssh(host: str, port: int, user: str, cmd: str, *, check: bool = True,
-         timeout: int = 600) -> subprocess.CompletedProcess:
+         timeout: int = 600, capture: bool = False) -> subprocess.CompletedProcess:
     # keepalive is load-bearing for long exec: an idle channel (output buffered
     # behind `| tail`) is dropped by NAT/proxy idle timeouts mid-run.
+    #
+    # `capture` returns the remote stdout/stderr as text instead of streaming it
+    # to ours. Without it `.stdout` is always None, so a workload that polls a
+    # remote status file reads "" forever and never sees the job finish -- the
+    # pod keeps billing until a human kills the driver.
     return subprocess.run(["ssh", *_SSH_OPTS, *_KEEPALIVE, "-p", str(port),
-                           f"{user}@{host}", cmd], check=check, timeout=timeout)
+                           f"{user}@{host}", cmd], check=check, timeout=timeout,
+                          capture_output=capture, text=capture or None)
 
 
 def _scp_up(host: str, port: int, user: str, src: str, dst: str, *,
@@ -128,8 +139,8 @@ class ComputeHandle:
     user: str = "root"
     offer: Optional[Offer] = None
 
-    def exec(self, cmd: str, *, check: bool = True, timeout: int = 600):
-        return _ssh(self.host, self.port, self.user, cmd, check=check, timeout=timeout)
+    def exec(self, cmd: str, *, check: bool = True, timeout: int = 600, capture: bool = False):
+        return _ssh(self.host, self.port, self.user, cmd, check=check, timeout=timeout, capture=capture)
 
     def push(self, src: str, dst: str, *, recursive: bool = False, timeout: int = 600) -> None:
         _scp_up(self.host, self.port, self.user, src, dst, recursive=recursive, timeout=timeout)

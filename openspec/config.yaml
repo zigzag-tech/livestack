@@ -1,0 +1,29 @@
+schema: spec-driven
+
+# Project context — shown to AI when creating artifacts.
+context: |
+  Livestack: the fleet's job broker (gateway), content stores, and Harmony —
+  the declarative inference broker / GPU-residency arbiter. A caller says what
+  it NEEDS; Harmony picks the model, makes room, loads it, serves.
+
+  Two pure brains in node-py/livestack_node/: planner.py (`plan()`, what is
+  resident where) and fleet_scheduler.py (`schedule()`, run now / queue /
+  provision / burst). hostd.py + hostbroker.py are the authority that assembles
+  their inputs and dispatches their actions. ledger.py is the decision ledger.
+  decisions/simple_jev.py compiles a bounded Choice question into a one-token
+  decision on the model a node already serves (POST /v1/classifier).
+
+  Conventions:
+  - Brains stay pure and inference-free; inference lives in the loop around them.
+  - Host brokers are the sole residency authorities (_plans/fleet-broker.md §1).
+  - Every placement/routing decision leaves a ledger record (_plans/decision-ledger.md).
+  - Absence and failure must not look alike: unknown is never zero.
+  - Design records live in _plans/*.md; HARMONY.md is the operator reference.
+
+rules:
+  proposal:
+    - Name the _plans/*.md design record the change realises, and what in it is stale.
+  design:
+    - State which process owns each piece of durable state and how ids cross the boundary.
+  tasks:
+    - Every task names its tests and its ledger obligation.

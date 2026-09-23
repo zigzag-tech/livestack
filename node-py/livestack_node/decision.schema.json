@@ -56,7 +56,9 @@
         "grant",
         "defer",
         "failover",
-        "observe"
+        "observe",
+        "claim",
+        "operation"
       ]
     },
     "request": {

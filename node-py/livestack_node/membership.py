@@ -87,6 +87,18 @@ class PeerRecord:
     # hub's grant): {"kind": "owner"|"org"|"realm", "id": ...}. `None` is the
     # fleet default — a pooled node admits every owner.
     scope: Optional[dict] = None
+    # The provisioning operation that CREATED this node, as the node itself
+    # states it (`LIVESTACK_OPERATION_ID`, put there by the create call).
+    # `None` for every node that was not provisioned by the fleet broker, which
+    # is most of them.
+    #
+    # It exists so that "did my create succeed?" is answerable by CORRELATION
+    # rather than by coincidence. Without it the only available evidence is "a
+    # node became fresh around the right time", and on a live fleet something is
+    # always becoming fresh around the right time — so an operation would go
+    # green on another operation's machine, and a create that actually failed
+    # would look like one that worked.
+    operation_id: Optional[str] = None
     kinds: List[str] = field(default_factory=list)
     readiness: dict = field(default_factory=dict)
     # The state last REPORTED, so transitions can be detected and logged once
@@ -251,6 +263,7 @@ class PeerRoster:
                 "device_id": r.device_id,
                 "region": r.region,
                 "scope": r.scope,
+                "operation_id": r.operation_id,
                 "kinds": list(r.kinds),
                 "readiness": dict(r.readiness),
             }
