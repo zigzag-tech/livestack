@@ -1086,7 +1086,15 @@ class HostBroker:
                  "residency": int(u.residency),
                  "footprint": dict(u.footprint),
                  "resident": kind in resident,
-                 "busy": bool(resident.get(kind))}
+                 "busy": bool(resident.get(kind)),
+                 # WHAT THIS UNIT IS, carried through from the node's own
+                 # `/residence`. Without it the view says a node hosts `llm`
+                 # and cannot say that the only thing resident on it is an
+                 # embedding model — which is how a ranker hands out a node
+                 # that must proxy every LLM request it is sent. Emitted only
+                 # when the node published some, so a node that predates
+                 # attributes produces a byte-identical row.
+                 **({"attributes": dict(u.attributes)} if getattr(u, "attributes", None) else {})}
                 for (kind, pk), u in sorted(self.peer_units.items()) if pk == key
             ]
             if units:
