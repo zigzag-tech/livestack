@@ -666,10 +666,40 @@ _UNITS = {
 
 
 def _readiness() -> dict:
-    live = [n for n in SPECS if _vllm_up(name=n)]
+    """What this node can serve ITSELF, not what answers on its ports.
+
+    `_vllm_up` asks the PORT. On a host where two nodes read one units file
+    without distinct `HARMONY_LLM_PORT_OFFSET`s, the other node's engine answers
+    — so this node reported `ready: true` and `serving llm_title, embed_multi`
+    for units it never started and does not hold.
+
+    Measured on xc-tower-ubuntu 2026-09-23: `xc-tower-ubuntu-gpu0` ran no vLLM
+    at all, yet advertised `kinds: ['llm']`, `ready: true` and both units. It
+    sorts before `-gpu1`, so it won every `kind=llm` lookup and forwarded each
+    request into gpu1's engine through this node's serialising proxy: 0.9 s at
+    concurrency 1, p50 7.5 s at 25, and ~86% of the hub's classifier calls
+    aborted on an 8 s deadline. `_foreign_listener` already told this module the
+    difference; readiness simply did not ask it.
+
+    A listener we did not start is someone else's engine. Saying so is the
+    difference between a node that is cold — which the fleet handles, and which
+    loads on demand — and a node that claims to be warm and is a proxy.
+    """
+    live = [n for n in SPECS if _vllm_up(name=n) and not _foreign_listener(n)]
+    foreign = [n for n in SPECS if _foreign_listener(n)]
+    if live:
+        detail = "serving " + ", ".join(live)
+    elif foreign:
+        # NAMED, not silent. This is a misconfiguration an operator can fix in
+        # one line, and the node is the only thing positioned to notice it.
+        detail = ("no unit resident; " + ", ".join(foreign)
+                  + " on this host are served by a vLLM this node did not start "
+                    "— give each node its own HARMONY_LLM_PORT_OFFSET")
+    else:
+        detail = "no unit resident"
     return {
         "ready": bool(live),
-        "detail": ("serving " + ", ".join(live)) if live else "no unit resident",
+        "detail": detail,
         "model": ", ".join(SPECS[n]["model"] for n in live) or MODEL,
     }
 
