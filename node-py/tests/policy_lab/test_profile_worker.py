@@ -18,7 +18,7 @@ class _Engine(BaseHTTPRequestHandler):
         if self.path == "/livestack/residence":
             body = {"units": [
                 {"kind": kind, "busy": self.busy, "resident": True}
-                for kind in ("voxcpm", "asr", "llm_title")
+                for kind in ("voxcpm", "asr", "llm_general")
             ]}
         elif self.path == "/health":
             body = {"inflight": 0, "model": ["voxcpm"]}

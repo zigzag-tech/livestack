@@ -65,8 +65,8 @@ Environment=HARMONY_LLM_MAX_MODEL_LEN=8192
 Environment=HARMONY_LLM_IDLE_EVICT_SECONDS=900
 
 # DISJOINT UNIT SETS, one file per node. Card 0 has ~4.4 GiB free after its
-# other tenants, so `llm_title` (21 GB) cannot be placed here — yet this node
-# declared it while reading the shared file, and won kind=llm lookups it could
+# other tenants, so the 27B (21 GB, `llm_general`) cannot be placed here — yet
+# this node declared it while reading the shared file, and won kind=llm lookups it could
 # only serve by proxying to card 1 through a serialising semaphore (p50 7.46 s
 # at x25, 86% of hub classifier calls aborting; card 1 answered the same load in
 # 0.41 s). Sharing the file also meant sharing ports with no distinct

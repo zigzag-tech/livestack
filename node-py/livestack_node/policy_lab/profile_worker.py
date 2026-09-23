@@ -103,14 +103,14 @@ def _llm(endpoint: str, cell: dict[str, Any], _voice_id: str, sample: int) -> di
     prompt_tokens, output_tokens = map(int, match.groups())
     prompt = (f"profile-{sample} " + "token " * prompt_tokens)[: prompt_tokens * 6]
     body = json.dumps({
-        "model": "llm_title", "messages": [{"role": "user", "content": prompt}],
+        "model": "llm_general", "messages": [{"role": "user", "content": prompt}],
         "max_tokens": output_tokens, "temperature": 0, "stream": True,
     }).encode()
     return _post(endpoint + "/v1/chat/completions", body, "application/json")
 
 
 RUNNERS = {"llm-27b": _llm, "asr": _asr, "tts": _tts}
-ENGINE_UNITS = {"llm-27b": "llm_title", "asr": "asr", "tts": "voxcpm"}
+ENGINE_UNITS = {"llm-27b": "llm_general", "asr": "asr", "tts": "voxcpm"}
 
 
 def run_heldout_episodes(

@@ -1,6 +1,6 @@
 [
  {
-  "name": "llm_title",
+  "name": "llm_general",
   "model": "dbirks/Qwen3.8-27B-W4A16-AutoRound",
   "port": 8189,
   "footprint_gb": 21,
