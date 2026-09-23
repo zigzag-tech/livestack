@@ -1,14 +1,20 @@
 [Unit]
-# The SECOND agent for the same two models — this one speaks for card 0.
+# The card-0 Harmony node. It serves the EMBEDDER, and nothing else.
 #
-# One process per card, not one process per model. A wrapper is pinned to a card
+# One process per card, not one process per model: a wrapper is pinned to a card
 # because that is where its CUDA meter reads device pressure from, and a wrapper
-# that saw both cards would report card 0's pressure for a model on card 1. So
-# the pin here is a METERING fact, not a placement decision: both nodes declare
-# BOTH units, and Harmony decides which card each model is resident on. Traffic
-# that alternates between titles and judgments separates them by itself, because
-# co-residence would thrash (livestack planner `_contention_cost`).
-Description=Harmony-managed local LLM (vLLM, OpenAI-compatible) — card 0
+# that saw both cards would report card 0's pressure for a model on card 1. The
+# pin is a METERING fact.
+#
+# This node once read the SAME units file as the card-1 node (the two-nodes-
+# declare-every-unit shape), on the theory that the planner would settle which
+# card each model lands on. On this host that shape was wrong twice over, and
+# `70-embed-only.conf` is what ended that, on 2026-09-23, and the README section
+# "The deployed split" is what it cost. The UNITS_FILE line below carries the
+# same value, so a fresh install from this file needs no drop-in; the deployed
+# host still has one, redundantly, because the base unit there was corrected in
+# the drop-in rather than in place.
+Description=Harmony-managed local LLM slot on GPU 0 — xc-tower-ubuntu
 After=network-online.target livestack-hostd.service
 Wants=network-online.target
 
@@ -17,29 +23,70 @@ Type=simple
 User=ubuntu
 Group=ubuntu
 WorkingDirectory=/home/ubuntu/harmony-llm
+
+# WHY THIS EXISTS. There was exactly one LLM slot on this box, pinned to card 1,
+# so `llm_title` (27B, ~22 GiB), `llm_tiny` (4B) and `embed_multi` (0.6B) all
+# contended for one 23.6 GiB card. Serving the 0.6B embedder meant EVICTING the
+# 27B: measured 2026-09-21, ten model loads in ninety minutes, each leaving the
+# classifier refused or hung for minutes. Downstream that read as 25% of
+# pane-status classifications aborting in runs of up to 48, and chip ranking
+# falling back to the legacy bar in the same windows.
+#
+# Harmony was placing correctly — it had nowhere else to put them. Card 0 had
+# ~14 GiB free and no LLM slot. This is CAPACITY REGISTRATION, not unit pinning:
+# nothing here names a model and no `llm-units.json` entry is bound to a card.
+# The planner decides what goes where; a 22 GiB unit cannot fit the budget
+# below, so the 27B stays on card 1 by arithmetic rather than by decree.
 Environment=HARMONY_LLM_HOST_ID=xc-tower-ubuntu-gpu0
-Environment=HARMONY_LLM_UNITS_FILE=/etc/harmony/llm-units-gpu0.json
-Environment=HARMONY_LLM_SPREAD_GROUP=llm
-Environment=HARMONY_LLM_PORT=8190
 Environment=CUDA_VISIBLE_DEVICES=0
 Environment=HARMONY_LLM_CUDA_DEVICE=0
-# UNPINNED and a short idle evict: card 0's other tenants (polyasr x2, polytts)
-# are on-demand and bursty, and an LLM here must yield to them rather than the
-# other way round. Card 1's node keeps SOFT_PIN, where a cold start costs the
-# hub a missed title.
-Environment=HARMONY_LLM_RESIDENCY=UNPINNED
-Environment=HARMONY_LLM_IDLE_EVICT_SECONDS=600
-# Nothing is preloaded here: what lands on this card is the planner's call.
-Environment=HARMONY_LLM_WARM_ON_START=0
-Environment=HF_HOME=/home/ubuntu/.cache/huggingface
-Environment=HF_HUB_DISABLE_XET=1
-Environment=HF_HUB_OFFLINE=1
-Environment=VLLM_USE_FLASHINFER_SAMPLER=0
+Environment=HARMONY_LLM_PORT=8190
+Environment=HARMONY_LLM_VLLM_PORT=8191
+
+# DEVICE IDENTITY IS NOT THE HOST_ID. livestack's `resolve_device_id` derives
+# `{hostname}/{8 hex of the CUDA device UUID}` (facade.py), so this slot lands on
+# the SAME planner device as polytts, polyasr-b and the three OCR workers —
+# which is what makes the planner arbitrate them against each other instead of
+# splitting one card six ways. The sibling unit's comment still describes the
+# old `f"{host_id}/gpu0"` template; that was fixed 2026-09-05 and the comment
+# did not follow. Do not pick a host_id for device-identity reasons.
+
+# A fraction of the WHOLE CARD, and other processes' memory counts against it.
+# Card 0 holds ~9.9 GiB of OCR + TTS, so 0.60 of 23.6 GiB leaves vLLM roughly
+# 4.3 GiB — ample for the 0.6B embedder, tight for the 4B AWQ, nowhere near the
+# 27B. Deliberately conservative: histo's OCR and voxlert's polytts are tenants
+# here, and starving them to feed a chip ranker would be a bad trade.
+Environment=HARMONY_LLM_GPU_FRACTION=0.60
+Environment=HARMONY_LLM_MAX_MODEL_LEN=8192
+
+# Idle-evict ON here, unlike card 1. Card 1 has no other tenant, so evicting
+# frees memory nobody can use; card 0 does, so a slot holding VRAM it is not
+# using is taking it from the OCR workers.
+Environment=HARMONY_LLM_IDLE_EVICT_SECONDS=900
+
+# DISJOINT UNIT SETS, one file per node. Card 0 has ~4.4 GiB free after its
+# other tenants, so `llm_title` (21 GB) cannot be placed here — yet this node
+# declared it while reading the shared file, and won kind=llm lookups it could
+# only serve by proxying to card 1 through a serialising semaphore (p50 7.46 s
+# at x25, 86% of hub classifier calls aborting; card 1 answered the same load in
+# 0.41 s). Sharing the file also meant sharing ports with no distinct
+# HARMONY_LLM_PORT_OFFSET, so each node's "is my vLLM up?" was answered by the
+# OTHER node's engine: this one reported `serving llm_title, embed_multi` while
+# running nothing of its own.
+#
+# Disjoint sets fix both: nothing here to misadvertise, and 8210 is gpu0's alone
+# so no offset is needed.
+Environment=HARMONY_LLM_UNITS_FILE=/etc/harmony/llm-units-gpu0.json
 Environment=LIVESTACK_BROKER_URL=http://127.0.0.1:8799,http://127.0.0.1:8801
 Environment=LIVESTACK_NODE_HOST=100.64.0.18
+Environment=LIVESTACK_NODE_REGION=na
+Environment=HF_HOME=/home/ubuntu/.cache/huggingface
+Environment=HF_HUB_DISABLE_XET=1
+Environment=VLLM_USE_FLASHINFER_SAMPLER=0
+
 ExecStart=/home/ubuntu/harmony-llm/venv/bin/python /home/ubuntu/harmony-llm/server.py
 Restart=on-failure
-RestartSec=10
+RestartSec=15
 
 [Install]
 WantedBy=multi-user.target
