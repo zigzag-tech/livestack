@@ -334,6 +334,28 @@ def _vllm_up(timeout: float = 2.0, name: str = "") -> bool:
         return False
 
 
+def _foreign_listener(name: str) -> bool:
+    """Is this unit's port answered by a vLLM THIS node did not start?
+
+    `_vllm_up` asks the port, not the process, so on a host where two nodes read
+    one units file without distinct HARMONY_LLM_PORT_OFFSETs, each node's
+    "is my vLLM up?" is answered by the OTHER node's engine. Measured on
+    xc-tower-ubuntu 2026-09-22: a bulk run of embedding requests reached the
+    GPU-1 node, which does not hold `embed_multi`; the GPU-0 node did, on the
+    same port 8210. The GPU-1 node ensured `embed_multi` locally -- with
+    coload off that STOPPED the resident 27B -- and then reported its "own"
+    embedder ready at once, because the port already answered. Titles and the
+    typed-decision classifier were down 14:09-14:22, and the two nodes then
+    took turns starting and stopping the 27B on its shared port.
+
+    A listener we did not start is someone else's engine. Use it; never evict
+    our own residents to "load" what is already being served.
+    """
+    p = _procs.get(name)
+    ours = p is not None and p.poll() is None
+    return not ours and _vllm_up(name=name)
+
+
 def _load(name: str = "", device: "str | None" = None,
           budget: "dict | None" = None):
     """Start this unit's vLLM and block until it actually serves.
@@ -356,6 +378,13 @@ def _load(name: str = "", device: "str | None" = None,
         p = _procs.get(name)
         if p is not None and p.poll() is None and _vllm_up(name=name):
             return p
+        # Starting here would bind-fail, yet the readiness poll below would see
+        # the other engine answer and report OUR load a success.
+        if _foreign_listener(name):
+            raise RuntimeError(
+                f"{name}: port {spec['port']} is already served by a vLLM this node did not "
+                f"start; refusing to load a second copy. Give each node on this host its own "
+                f"HARMONY_LLM_PORT_OFFSET.")
         env = dict(os.environ)
         # Only set this if the unit did not already. Setting it ONLY here is a
         # trap: the child then runs on the right card while THIS process — which
@@ -785,6 +814,11 @@ if WARM_ON_START:
                 print(f"[harmony-llm] warm-on-start: {n} already held by {held} "
                       f"— not loading a second copy", flush=True)
                 continue
+            if _foreign_listener(n):
+                print(f"[harmony-llm] warm-on-start: {n}'s port {SPECS[n]['port']} is already "
+                      f"served by a vLLM this node did not start — not loading. Two nodes "
+                      f"share this port: give each its own HARMONY_LLM_PORT_OFFSET.", flush=True)
+                continue
             try:
                 manager.ensure(n)
                 print(f"[harmony-llm] warm-on-start: {n} resident", flush=True)
@@ -828,7 +862,12 @@ def _same_kind_peers() -> "list[tuple[str, str]]":
         for r in rows:
             if r.get("host_id") == HOST_ID:
                 continue                      # ourselves
-            if r.get("state") not in (None, "fresh"):
+            # `suspect` is a missed heartbeat, not a death: a node busy serving
+            # exactly the unit being asked about is the one most likely to be
+            # late. Skipping it made a busy holder look like no holder, and the
+            # asker loaded its own copy (the 2026-09-22 eviction). The /health
+            # probe in _held_elsewhere is the liveness check; only `mia` is out.
+            if r.get("state") not in (None, "fresh", "suspect"):
                 continue                      # mia/stale: not somewhere to defer to
             kinds = r.get("kinds") or []
             if kinds and NODE_KIND not in kinds:
@@ -1508,9 +1547,19 @@ async def proxy(path: str, request: Request):
                   f"rather than loading a second copy", flush=True)
             elsewhere = holder
 
+    foreign = not elsewhere and not already_here and _foreign_listener(unit)
+    if foreign:
+        print(f"[harmony-llm] {unit}: port {SPECS[unit]['port']} is served by a vLLM this "
+              f"node did not start -- forwarding to it rather than loading, which would "
+              f"evict this node's residents. Two nodes share this port: give each its own "
+              f"HARMONY_LLM_PORT_OFFSET.", flush=True)
+
     if elsewhere:
         _busy.acquire()
         url = f"{elsewhere}/v1/{path}"
+    elif foreign:
+        _busy.acquire()
+        url = f"{_base_of(unit)}/v1/{path}"
     else:
         try:
             _ensure_while_counted(lambda: manager.ensure(unit))
