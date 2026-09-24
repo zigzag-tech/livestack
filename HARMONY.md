@@ -648,6 +648,11 @@ structure is code, the weights are a versioned artifact. Change:
   `npm run policy-approve -- <proposalId> --shadow|--activate` and reverts with
   `npm run policy-revert -- livestack.fleet.choose_target`
   (`LIVESTACK_POLICY_ADMIN_TOKEN_FILE`). Nothing promotes itself.
+- **Hand-authored revisions** (exploration, a confirmed objective) go through the ledger
+  too: `npm run policy-publish -- <artifact.json> [--confirm-objective]` — `parent_version`
+  must be the ledger's active version; the version comes from `livestack-policy artifact
+  hash`. Never a raw `PUT`: the ledger would disagree with the broker and the improver
+  stops with `policy_projection_drift`.
 
 ## Speed intent — what an SLA deadline actually gates
 
