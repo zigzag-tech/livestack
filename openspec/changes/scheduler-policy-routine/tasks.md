@@ -75,7 +75,7 @@ Task 5 needs Jingway groups 5–6 merged.
 - [x] 4.2 Build the Python module (`maturin develop -m native/policy/py/Cargo.toml` in a test venv) and write `node-py/tests/test_policy_differential.py` per §4 (10 000 cases, seed 20260924, mismatches written as fixtures). Skip it with a named reason if `livestack_policy` is not importable. The rollout checklist in 6.x requires it to have RUN, not skipped.
   Tests: that file. Ledger: none.
   Verify: `cd node-py && python -m pytest tests/test_policy_differential.py -q -rs` shows `passed`, not `skipped`.
-- [ ] 4.3 Replay self-check. The policy stream is already in the J§6.2 format, so the CLI reads it directly and nothing needs extracting. Run `livestack-policy selfcheck --records '<dir>/livestack.fleet.choose_target.jsonl*'` against records written by a local `hostd` in a test (live records exist only after 6.2). Re-run it on a copied day of live records after 6.3.
+- [x] 4.3 Replay self-check. The policy stream is already in the J§6.2 format, so the CLI reads it directly and nothing needs extracting. Run `livestack-policy selfcheck --records '<dir>/livestack.fleet.choose_target.jsonl*'` against records written by a local `hostd` in a test (live records exist only after 6.2). Re-run it on a copied day of live records after 6.3.
   Tests: `node-py/tests/test_policy_selfcheck.py` (spawns the CLI over test-written records). Ledger: none.
   Verify: the test passes, and after 6.3 `receipts/selfcheck-<date>.md` shows `self_check: passed`.
 
