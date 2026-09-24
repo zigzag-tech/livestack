@@ -9,8 +9,8 @@ members = ["family", "py", "cli"]
 # .cargo/config.toml.example to .cargo/config.toml (gitignored). If the git
 # fetch fails with "no authentication methods succeeded", build with
 # CARGO_NET_GIT_FETCH_WITH_CLI=true.
-jingway-policy = { git = "ssh://git@github.com/zigzag-tech/jingway.git", rev = "858bbb8aa362ffc71c62637faab241cdbb94416c" }
-jingway-policy-py = { git = "ssh://git@github.com/zigzag-tech/jingway.git", rev = "858bbb8aa362ffc71c62637faab241cdbb94416c" }
+jingway-policy = { git = "ssh://git@github.com/zigzag-tech/jingway.git", rev = "3ae721fc8dcad671d91c0138fbc3b770696826b6" }
+jingway-policy-py = { git = "ssh://git@github.com/zigzag-tech/jingway.git", rev = "3ae721fc8dcad671d91c0138fbc3b770696826b6" }
 livestack-policy-family = { path = "family" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
