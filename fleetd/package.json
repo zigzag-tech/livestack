@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "policy-improver": "tsx scripts/policy-improver.mts",
     "policy-approve": "tsx scripts/policy-approve.mts",
-    "policy-revert": "tsx scripts/policy-approve.mts --revert"
+    "policy-revert": "tsx scripts/policy-approve.mts --revert",
+    "policy-publish": "tsx scripts/policy-publish.mts"
   },
   "dependencies": {
     "jingway-framework": "*"
