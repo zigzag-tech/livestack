@@ -200,7 +200,7 @@ export async function revertPolicy(o: RevertOptions): Promise<ApproveResult> {
   return { ok: true, message: `${o.policyId} reverted to ${target.version} (was ${active.version}).` };
 }
 
-function driftOf(active: LedgerActivation, status: BrokerPolicyStatus): string | null {
+export function driftOf(active: LedgerActivation, status: BrokerPolicyStatus): string | null {
   if (status.source === 'file' && status.active.version === active.version) return null;
   return `policy_projection_drift: the activation ledger says ${active.version} is active; the broker `
     + (status.source === 'file' ? `decides with ${status.active.version}` : 'runs on compiled defaults')
