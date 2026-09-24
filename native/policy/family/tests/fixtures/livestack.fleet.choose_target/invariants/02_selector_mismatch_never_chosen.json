@@ -1,0 +1,76 @@
+{
+  "name": "selector_mismatch_never_chosen",
+  "statement": "A candidate whose labels do not match the job's selector is never chosen, for any params. The mismatched candidate is LOCAL, free, nearest, idlest and holds the job's input.",
+  "context": {
+    "now": 1788600000.0,
+    "job": {
+      "id": "asr-1788600000000",
+      "sla": "normal",
+      "created_at": 1788600000.0,
+      "deadline": null,
+      "est_duration_s": 60.0,
+      "locality_host": "xc-mac-studio"
+    }
+  },
+  "candidates": [
+    {
+      "id": "mac",
+      "features": {
+        "host_id": "xc-mac-studio",
+        "tier": "LOCAL",
+        "running": true,
+        "elastic": false,
+        "selector_match": false,
+        "fits_now": true,
+        "headroom_ok": false,
+        "fits_instance": false,
+        "provision_latency_s": 0.0,
+        "cost_per_hour": 0.0,
+        "cost_per_job": 0.0,
+        "distance_ms": 0.5,
+        "utilization": 0.0
+      }
+    },
+    {
+      "id": "tower0",
+      "features": {
+        "host_id": "zz-tower0",
+        "tier": "LOCAL",
+        "running": true,
+        "elastic": false,
+        "selector_match": true,
+        "fits_now": true,
+        "headroom_ok": false,
+        "fits_instance": false,
+        "provision_latency_s": 0.0,
+        "cost_per_hour": 0.0,
+        "cost_per_job": 0.0,
+        "distance_ms": 30.0,
+        "utilization": 0.7
+      }
+    },
+    {
+      "id": "aliyun-spot",
+      "features": {
+        "host_id": "aliyun-spot",
+        "tier": "SPOT",
+        "running": true,
+        "elastic": false,
+        "selector_match": true,
+        "fits_now": true,
+        "headroom_ok": false,
+        "fits_instance": false,
+        "provision_latency_s": 0.0,
+        "cost_per_hour": 0.4,
+        "cost_per_job": 0.0,
+        "distance_ms": 8.0,
+        "utilization": 0.2
+      }
+    }
+  ],
+  "expect": {
+    "never_chosen": [
+      "mac"
+    ]
+  }
+}

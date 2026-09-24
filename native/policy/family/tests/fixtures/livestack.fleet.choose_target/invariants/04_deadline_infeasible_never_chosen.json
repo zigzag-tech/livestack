@@ -1,0 +1,76 @@
+{
+  "name": "deadline_infeasible_never_chosen",
+  "statement": "A candidate that cannot start before the job's deadline is never chosen, for any params. The job carries an explicit deadline 10 s out, so no sla_slack_s value can rescue it; the infeasible pool is LOCAL, free, nearest and idlest.",
+  "context": {
+    "now": 1788600000.0,
+    "job": {
+      "id": "asr-1788600000000",
+      "sla": "batch",
+      "created_at": 1788600000.0,
+      "deadline": 1788600010.0,
+      "est_duration_s": 60.0,
+      "locality_host": null
+    }
+  },
+  "candidates": [
+    {
+      "id": "slow-pool",
+      "features": {
+        "host_id": "slow-pool",
+        "tier": "LOCAL",
+        "running": false,
+        "elastic": true,
+        "selector_match": true,
+        "fits_now": false,
+        "headroom_ok": true,
+        "fits_instance": true,
+        "provision_latency_s": 600.0,
+        "cost_per_hour": 0.0,
+        "cost_per_job": 0.0,
+        "distance_ms": 0.5,
+        "utilization": 0.0
+      }
+    },
+    {
+      "id": "tower0",
+      "features": {
+        "host_id": "zz-tower0",
+        "tier": "LOCAL",
+        "running": true,
+        "elastic": false,
+        "selector_match": true,
+        "fits_now": true,
+        "headroom_ok": false,
+        "fits_instance": false,
+        "provision_latency_s": 0.0,
+        "cost_per_hour": 0.0,
+        "cost_per_job": 0.0,
+        "distance_ms": 30.0,
+        "utilization": 0.7
+      }
+    },
+    {
+      "id": "aliyun-spot",
+      "features": {
+        "host_id": "aliyun-spot",
+        "tier": "SPOT",
+        "running": true,
+        "elastic": false,
+        "selector_match": true,
+        "fits_now": true,
+        "headroom_ok": false,
+        "fits_instance": false,
+        "provision_latency_s": 0.0,
+        "cost_per_hour": 0.4,
+        "cost_per_job": 0.0,
+        "distance_ms": 8.0,
+        "utilization": 0.2
+      }
+    }
+  ],
+  "expect": {
+    "never_chosen": [
+      "slow-pool"
+    ]
+  }
+}
