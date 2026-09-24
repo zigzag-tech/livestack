@@ -6,8 +6,11 @@
   "scripts": {
     "link-jingway": "node scripts/link-jingway.mjs",
     "pretest": "node scripts/link-jingway.mjs",
-    "test": "tsx --test src/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "tsx --test src/*.test.ts src/policy/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "policy-improver": "tsx scripts/policy-improver.mts",
+    "policy-approve": "tsx scripts/policy-approve.mts",
+    "policy-revert": "tsx scripts/policy-approve.mts --revert"
   },
   "dependencies": {
     "jingway-framework": "*"

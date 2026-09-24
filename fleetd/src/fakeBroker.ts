@@ -6,6 +6,9 @@
  * after a malformed plan, no escalation on the green path, no model on a
  * failure the table already knows.
  */
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import {
   BrokerUnreachable,
   OperationRefused,
@@ -17,6 +20,12 @@ import {
   type PlanAction,
   type StructuredError,
 } from './client.js';
+import type {
+  BrokerPolicyStatus,
+  PolicyBroker,
+  PolicyPutResult,
+  PolicyRevertResult,
+} from './policy/broker.js';
 
 export const NOW = 1_700_000_000;
 
@@ -120,3 +129,86 @@ export class FakeBroker implements FleetClient {
 
 export const unreachable = () => new BrokerUnreachable('/fleet', new Error('ECONNREFUSED'));
 export const refused = (status: number, detail: string) => new OperationRefused(status, detail);
+
+// ---------------------------------------------------------------------------
+// The broker's policy routes (design §6), for the policy improver's tests.
+// ---------------------------------------------------------------------------
+
+interface FakeArtifact {
+  version: string;
+  [key: string]: unknown;
+}
+
+/**
+ * The broker's policy files as hostd keeps them — active, previous, shadow — written to a
+ * real policy directory, because the improver's bootstrap reads `<id>.active.json` from it.
+ * It does not validate (the real route validates natively); it counts, so tests can assert
+ * what was NOT published.
+ */
+export class FakePolicyBroker implements PolicyBroker {
+  readonly calls: string[] = [];
+  active: FakeArtifact | null = null;
+  previous: FakeArtifact | null = null;
+  shadow: FakeArtifact[] = [];
+  /** Reported version override, to simulate a broker deciding with something else. */
+  reportActive: string | null = null;
+  failPut: Error | null = null;
+
+  constructor(readonly policyDir: string, readonly policyId: string) {
+    mkdirSync(policyDir, { recursive: true });
+  }
+
+  /** Put an artifact in place as a person would have (task 6.3), without counting a call. */
+  seed(artifact: FakeArtifact): void {
+    this.active = artifact;
+    this.write();
+  }
+
+  async status(policyId: string): Promise<BrokerPolicyStatus> {
+    this.calls.push(`status:${policyId}`);
+    const version = this.reportActive ?? this.active?.version ?? 'b3:defaults';
+    return {
+      policy_id: policyId,
+      source: this.active || this.reportActive ? 'file' : 'defaults',
+      active: { version },
+      previous: { version: this.previous?.version ?? null },
+      shadow: this.shadow.map((s) => ({ version: s.version })),
+      degraded: this.active ? [] : ['policy_artifact_missing'],
+    };
+  }
+
+  async put(policyId: string, role: 'active' | 'shadow', body: unknown): Promise<PolicyPutResult> {
+    this.calls.push(`put:${role}`);
+    if (this.failPut) throw this.failPut;
+    const previous = this.active?.version ?? null;
+    if (role === 'active') {
+      if (this.active) this.previous = this.active;
+      this.active = body as FakeArtifact;
+    } else {
+      this.shadow = body as FakeArtifact[];
+    }
+    this.write();
+    return {
+      policy_id: policyId,
+      role,
+      version: role === 'active' ? (body as FakeArtifact).version : (body as FakeArtifact[]).map((a) => a.version),
+      previous_version: role === 'active' ? previous : null,
+    };
+  }
+
+  async revert(policyId: string): Promise<PolicyRevertResult> {
+    this.calls.push('revert');
+    if (!this.previous) throw new OperationRefused(409, 'no previous artifact to revert to');
+    [this.active, this.previous] = [this.previous, this.active];
+    this.write();
+    return { policy_id: policyId, version: this.active!.version, previous_version: this.previous?.version ?? null };
+  }
+
+  private write(): void {
+    const file = (role: string) => join(this.policyDir, `${this.policyId}.${role}.json`);
+    for (const [role, value] of [['active', this.active], ['previous', this.previous]] as const) {
+      if (value) writeFileSync(file(role), JSON.stringify(value));
+      else rmSync(file(role), { force: true });
+    }
+  }
+}
