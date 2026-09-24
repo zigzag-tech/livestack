@@ -88,7 +88,7 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "jingway-policy"
 version = "0.1.0"
-source = "git+ssh://git@github.com/zigzag-tech/jingway.git?rev=858bbb8aa362ffc71c62637faab241cdbb94416c#858bbb8aa362ffc71c62637faab241cdbb94416c"
+source = "git+ssh://git@github.com/zigzag-tech/jingway.git?rev=3ae721fc8dcad671d91c0138fbc3b770696826b6#3ae721fc8dcad671d91c0138fbc3b770696826b6"
 dependencies = [
  "blake3",
  "serde",
@@ -99,7 +99,7 @@ dependencies = [
 [[package]]
 name = "jingway-policy-py"
 version = "0.1.0"
-source = "git+ssh://git@github.com/zigzag-tech/jingway.git?rev=858bbb8aa362ffc71c62637faab241cdbb94416c#858bbb8aa362ffc71c62637faab241cdbb94416c"
+source = "git+ssh://git@github.com/zigzag-tech/jingway.git?rev=3ae721fc8dcad671d91c0138fbc3b770696826b6#3ae721fc8dcad671d91c0138fbc3b770696826b6"
 dependencies = [
  "jingway-policy",
  "pyo3",
