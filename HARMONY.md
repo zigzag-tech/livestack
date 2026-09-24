@@ -605,6 +605,50 @@ that introduces it. `LIVESTACK_LEDGER=0` turns emission off entirely.
 Schema: `node-py/livestack_node/decision.schema.json`. Design:
 `_plans/decision-ledger.md`.
 
+## Scheduler policy — the target choice is a tunable, recorded policy
+
+The fleet broker's per-job target choice (`fleet_scheduler.schedule()`) runs as the
+compiled policy `livestack.fleet.choose_target` (jingway's compiled-policy tier). The
+structure is code, the weights are a versioned artifact. Change:
+`openspec/changes/scheduler-policy-routine/`.
+
+- **Native vs reference** — `LIVESTACK_POLICY_NATIVE`: `0` pure-Python reference only;
+  `auto` (default) the Rust module `livestack_policy` when importable, else the reference
+  and degraded; `compare` runs both, ACTS ON THE REFERENCE, counts every disagreement and
+  writes each case to `$LIVESTACK_POLICY_DIR/mismatches/` (≤ 100 files).
+- **Artifacts** live in `$LIVESTACK_POLICY_DIR` (default `~/.local/share/livestack/policy/`):
+  `<policy_id>.active.json`, `.previous.json`, `.shadow.json`. They are changed ONLY by
+  `PUT /fleet/policy/{policy_id}?role=active|shadow` (principal with `policy_admin`;
+  403 with fleet auth off, 503 without the native validator, 422 listing every
+  violation). No file → compiled defaults (= the pre-policy scheduler exactly) and
+  degraded `policy_artifact_missing`. A file that fails validation leaves the previous
+  artifact in force.
+- **Revert without anything else running** — `POST /fleet/policy/{policy_id}/revert`
+  swaps `.previous.json` back in. No model, no improver needed.
+- **Records** — every `/fleet/admit` that CHOSE a target is written, non-blocking, to
+  `$LIVESTACK_POLICY_DIR/records/livestack.fleet.choose_target.jsonl*` (jingway
+  `policy_decision/v1`), bounded by `LIVESTACK_POLICY_RECORDS_MAX_MB` ×
+  `LIVESTACK_POLICY_RECORDS_FILES` (default 128 MiB × 16 ≈ 41 days at the measured
+  ~885 granted admits/h); `LIVESTACK_POLICY_RECORDS_AGE_DAYS` unset = age pruning off.
+  Refusals are NOT written there (counted as `skipped_no_choice`); they stay in the
+  decision ledger. Lease release/expiry appends outcomes (`lease_held_s`,
+  `lease_expired`, and `caller_ok`/`job_wall_s` when the caller sends
+  `{status, wall_s}` on release). The admit ledger record carries only a pointer.
+- **Self traffic** — principals in `LIVESTACK_POLICY_SELF_PRINCIPALS` are flagged
+  `self_traffic` and excluded from tuning objectives by default.
+- **Reading it** — `GET /fleet` → `policy` and `GET /fleet/policy/{policy_id}`: `source`
+  (`file`/`defaults`), active/previous versions, `mode`, mismatches, recorder stats,
+  `skipped_no_choice`, and a `degraded` list (`policy_artifact_missing`,
+  `policy_artifact_invalid`, `policy_native_mismatch`, `policy_native_unavailable`,
+  `policy_records_unavailable`, `policy_records_dropped`, `policy_records_error`,
+  exploration disabled for lack of the native module). Empty list = healthy.
+- **Tuning** — `fleetd`'s `npm run policy-improver -- --once` (env
+  `LIVESTACK_POLICY_IMPROVER_DB`, `LIVESTACK_POLICY_BIN` = the `livestack-policy`
+  replay CLI, `LIVESTACK_POLICY_DIR`) proposes; a person promotes with
+  `npm run policy-approve -- <proposalId> --shadow|--activate` and reverts with
+  `npm run policy-revert -- livestack.fleet.choose_target`
+  (`LIVESTACK_POLICY_ADMIN_TOKEN_FILE`). Nothing promotes itself.
+
 ## Speed intent — what an SLA deadline actually gates
 
 `Sla.INTERACTIVE | NORMAL | BATCH` sets a default deadline slack (30 s / 30 min /

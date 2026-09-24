@@ -131,6 +131,15 @@ unwired) so "prefer-local" is measured, not asserted.
 
 ## 5. Weights vary over time — a layered `WeightPolicy`
 
+> **Status note (2026-09-24):** `resolve_weights` below is implemented and tested but
+> **not wired** — production builds `SchedulerPolicy()` with default weights
+> (`hostd.py`). The mechanism that actually ships is the policy artifact of
+> `livestack.fleet.choose_target` (`openspec/changes/scheduler-policy-routine/`,
+> HARMONY.md "Scheduler policy"): weights are a versioned artifact tuned from recorded
+> decisions and outcomes by the jingway improver, each promotion approved by a person.
+> Time-of-day/pressure would enter as context features of a family v2, not via this
+> resolver.
+
 Weights live on the fleet-side `SchedulerPolicy.weights` (`fleet_scheduler.py`) —
 the placement `PlannerPolicy` is untouched. A resolver composes three layers,
 last-wins:
@@ -173,6 +182,9 @@ registry slot, not yet implemented.
 **Full:** continuous auto weight adjustment (queue/deadline/cost pressure) —
 **done** (`resolve_weights`), provisioning hysteresis — **done** (`min_uptime_s`);
 still open: speed-aging, spot-reclaim handling, per-project budgets.
+
+(2026-09-24: "done (`resolve_weights`)" means implemented, not in production — see the
+§5 status note; the evidence-tuned weights ship as the `choose_target` policy artifact.)
 
 ## 8. Where it lives & how it's tested
 
