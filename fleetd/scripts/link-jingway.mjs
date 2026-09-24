@@ -34,8 +34,10 @@ console.log(`[fleetd] jingway-framework -> ${source}`);
 // jingway `ZodType`s, and two zod instances in one process produce schemas that
 // are structurally identical and fail `instanceof` — which surfaces as a
 // validation that silently never matches rather than as a version error. One
-// copy, the framework's.
-for (const dep of ['zod', '@types/node']) {
+// copy, the framework's. `kysely` likewise: the policy improver builds its own
+// `Kysely` over jingway's PGLite dialect and hands it to jingway's activation
+// service and migrations, which were typed and written against jingway's copy.
+for (const dep of ['zod', '@types/node', 'kysely']) {
   const from = join(source, 'node_modules', dep);
   if (!existsSync(from)) {
     console.error(`[fleetd] ${source} has no node_modules/${dep}; run its install first.`);
