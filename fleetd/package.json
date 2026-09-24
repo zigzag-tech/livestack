@@ -6,7 +6,7 @@
   "scripts": {
     "link-jingway": "node scripts/link-jingway.mjs",
     "pretest": "node scripts/link-jingway.mjs",
-    "test": "tsx --test src/*.test.ts",
+    "test": "tsx --test src/*.test.ts src/policy/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
