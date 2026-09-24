@@ -125,3 +125,19 @@ def test_a_host_broker_without_a_runtime_releases_as_before(tmp_path):
     lid = b.hosted_checkout("http://n:8100", "llm", "o", decision_id=DID)
     assert TestClient(build_app(b)).post(f"/lease/{lid}/release",
                                          json={"status": "ok", "wall_s": 3}).json() == {"ok": True}
+
+
+def test_outcomes_are_stamped_with_wall_time_not_the_lease_clock(tmp_path):
+    # The lease clock is `time.monotonic()` in production (seconds since boot).
+    # Durations use it; timestamps must not, or the improver's time window never
+    # joins an outcome to its decision. Found on the first live deploy.
+    import time
+    clock = Clock(t=1_564_358.0)
+    b, rec = _broker(tmp_path, clock)
+    lid = b.hosted_checkout("http://n:8100", "llm", "o", decision_id=DID)
+    clock.t += 5
+    before = time.time()
+    TestClient(build_app(b)).post(f"/lease/{lid}/release")
+    stamps = [o["ts"] for o in rec.of("policy_outcome")]
+    assert stamps and all(before - 1 <= ts <= time.time() + 1 for ts in stamps)
+    assert _outcomes(rec)[(DID, "lease_held_s")][0] == 5.0
