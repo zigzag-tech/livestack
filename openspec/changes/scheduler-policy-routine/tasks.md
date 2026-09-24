@@ -104,7 +104,7 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 6. Deploy (compare mode first)
 
-- [ ] 6.1 Build the production artifacts on a Linux x86_64 host that is not the tower: `maturin build --release -m native/policy/py/Cargo.toml` produces an abi3 wheel. Unzip `livestack_policy.abi3.so` from it. Also run `cargo build --release -p livestack-policy-cli`. Check glibc: `objdump -T livestack_policy.abi3.so | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1` must be ≤ the tower's `ldd --version`.
+- [x] 6.1 Build the production artifacts on a Linux x86_64 host that is not the tower: `maturin build --release -m native/policy/py/Cargo.toml` produces an abi3 wheel. Unzip `livestack_policy.abi3.so` from it. Also run `cargo build --release -p livestack-policy-cli`. Check glibc: `objdump -T livestack_policy.abi3.so | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1` must be ≤ the tower's `ldd --version`.
   Tests: import smoke with the tower's interpreter version (3.12) in a matching venv on the build host: `python -c "import livestack_policy; print(livestack_policy.families())"`. Ledger: none.
   Verify: both artifacts exist and the smoke prints the family.
 - [ ] 6.2 **[ASK]** Create a new release directory `~/.local/share/livestack-releases/scheduler-policy-<shortsha>/`, following the pattern of the existing releases named in the `livestack-fleetd` drop-ins (see `systemctl cat livestack-fleetd`). Put `node-py/` from this commit there, copy `livestack_policy.abi3.so` into `node-py/`, and copy the CLI into `bin/`. Write a NEW drop-in that points `PYTHONPATH` at it and sets:
