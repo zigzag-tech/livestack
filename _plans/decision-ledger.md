@@ -137,6 +137,25 @@ emitter waits for another; a decision with no outcome after `ttl_s × 10` is
 `outcome.status = unknown`, which is itself a finding (a request that was
 never answered, or a pipeline that dropped the header).
 
+**Shipped for `/fleet/admit` (2026-09-24, `scheduler-policy-routine`, policy `livestack.fleet.choose_target`).** The admit's
+`decision_id` is minted before deciding, returned in the response and stored on the
+hosted lease. On release/expiry the broker appends outcome records
+(`lease_held_s`, `lease_expired`, plus `caller_ok`/`job_wall_s` when the caller sends
+`{status, wall_s}` on release — `workloads/lease_helper.py` does) keyed by that id.
+They go to the policy record stream, not this ledger: this ledger retained only
+13.6 h on the fleet broker (64 MiB × 4 at ~7.5 KB/admit record) and a synchronous append
+costs 305–446 µs, so it cannot hold a multi-week tuning window. The admit record here
+carries a pointer `policy: {decision_id, artifact_version, chosen, explored}`.
+
+Bounds of the stores this added (rule 10):
+
+| store | bound | enforcer |
+|---|---|---|
+| policy record stream `$LIVESTACK_POLICY_DIR/records/` | 128 MiB × 16 (≈ 2 GiB). Measured: ~2,469 B per granted admit incl. outcomes × 885/h = 52.4 MB/day → **≈ 41 days**. Age window unset = disabled. | native `Recorder` rotation |
+| `$LIVESTACK_POLICY_DIR` artifacts | 3 files + `mismatches/` ≤ 100 | the PUT route (rename); `PolicyRuntime` prunes mismatches |
+| policy-improver PGLite | newest 365 proposals per policy; activations kept | improver, end of each run |
+| policy-improver scratch | deleted at end of each run | improver |
+
 ## 4. Emitters — who writes what
 
 ### 4.1 Host broker (`hostbroker.py`, exists today)

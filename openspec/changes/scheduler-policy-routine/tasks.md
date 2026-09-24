@@ -136,7 +136,7 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 8. Docs and archive
 
-- [ ] 8.1 Update the stale design records per `proposal.md`: add a status note to `_plans/fleet-scheduler.md` §5/§7 (resolve_weights unwired; the policy artifact is the shipped mechanism), add the outcome join to `_plans/decision-ledger.md` §3, and add a "Scheduler policy" section to `HARMONY.md` (operator reference: routes, modes, revert, where files live, how to read `/fleet` policy status).
+- [x] 8.1 Update the stale design records per `proposal.md`: add a status note to `_plans/fleet-scheduler.md` §5/§7 (resolve_weights unwired; the policy artifact is the shipped mechanism), add the outcome join to `_plans/decision-ledger.md` §3, and add a "Scheduler policy" section to `HARMONY.md` (operator reference: routes, modes, revert, where files live, how to read `/fleet` policy status).
   Tests: none. Ledger: none. Verify: `rg -n "choose_target" _plans/fleet-scheduler.md _plans/decision-ledger.md HARMONY.md` finds all three.
 - [ ] 8.2 `openspec validate scheduler-policy-routine --strict`, then after 7.3 `openspec archive scheduler-policy-routine`.
   Verify: `openspec validate --specs` exits 0.
