@@ -683,12 +683,13 @@ class PolicyRuntime:
             self._log(f"[policy] could not write mismatch case: {e}")
 
     # -- recording ---------------------------------------------------------------
-    def record_decision(self, decision: dict, *, principal: Optional[str],
+    def record_decision(self, decision: Optional[dict], *, principal: Optional[str],
                         ts: Optional[float] = None) -> bool:
         """Write one committed decision to the policy stream (J§6.2). A decision
-        that chose nothing is NOT written (design §1); it is counted in
+        that chose nothing — or none at all, for a quota refusal that never
+        reached the choice — is NOT written (design §1); it is counted in
         ``skipped_no_choice``. Returns True iff the record was queued."""
-        if decision.get("chosen") is None:
+        if decision is None or decision.get("chosen") is None:
             with self._lock:
                 self.skipped_no_choice += 1
             return False

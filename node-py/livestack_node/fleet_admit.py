@@ -171,9 +171,16 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
           concurrency: float = DEFAULT_CONCURRENCY,
           policy: Optional[SchedulerPolicy] = None,
           usage: Optional[Mapping[str, int]] = None,
-          now: Optional[float] = None) -> Dict[str, Any]:
+          now: Optional[float] = None,
+          runtime=None, decision_id: Optional[str] = None) -> Dict[str, Any]:
     """Decide where one job should run. Returns the grant and the full candidate
-    set, winner and losers alike, each with the reason it landed where it did."""
+    set, winner and losers alike, each with the reason it landed where it did.
+
+    ``runtime`` is the broker's ``PolicyRuntime`` (None: the reference with
+    ``policy``'s params) and ``decision_id`` the id this choice is decided and
+    recorded under. The policy decision itself comes back as
+    ``policy_decision`` (None for a quota refusal, which never reaches the
+    choice) for the caller to record; it is not part of any response."""
     now = time.time() if now is None else now
     targets, rows = targets_from_view(view, kind, vantage=vantage,
                                       concurrency=concurrency, owner=owner)
@@ -188,7 +195,9 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
     )
     plan: FleetPlan = schedule(
         FleetState(targets=targets, jobs=(job,), now=now,
-                   usage=dict(usage or {})), policy)
+                   usage=dict(usage or {})), policy,
+        runtime=runtime,
+        decision_ids={job.id: decision_id} if decision_id else None)
 
     chosen_id = next((a.target_id for a in plan.actions
                       if isinstance(a, Admit) and a.job_id == job.id), None)
@@ -224,6 +233,9 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
         # without it a retrospective has to guess which admit went with which
         # machine by looking at timestamps.
         "job_id": job.id,
+        # The policy decision's id (minted by the caller before deciding): the
+        # join key into the policy record stream and to the lease's outcome.
+        "decision_id": decision_id,
         "sla": sla,
         "vantage": vantage,
         "generated_at": now,
@@ -234,6 +246,7 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
         "reason": _why(chosen_id, out_rows, deferred, kind, vantage),
         "candidates": out_rows,
         "plan": plan.summary() if hasattr(plan, "summary") else None,
+        "policy_decision": plan.decisions.get(job.id),
     }
 
 

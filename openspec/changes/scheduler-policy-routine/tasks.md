@@ -47,7 +47,7 @@ Task 5 needs Jingway groups 5–6 merged.
 - [x] 3.1 Extend `decision.schema.json` and `ledger.py` with ONLY the optional admit pointer `policy: {decision_id, artifact_version, chosen, explored}`. Decision and outcome records do NOT go into this ledger (§1); do not add record kinds here.
   Tests: `test_ledger.py`: a schema-valid admit record with and without the pointer. Ledger: **adds the pointer to `admit`**.
   Verify: `cd node-py && python -m pytest tests/test_ledger.py tests/test_ledger_attribution.py -q`.
-- [ ] 3.2 In `/fleet/admit` (`hostd.py`) and `fleet_admit.admit()`:
+- [x] 3.2 In `/fleet/admit` (`hostd.py`) and `fleet_admit.admit()`:
   1. Mint `decision_id = ledger.new_decision_id()` before `schedule()`.
   2. Pass `runtime=broker.policy_runtime` and `decision_ids={job.id: decision_id}`.
   3. When `chosen` is not `None`, have `PolicyRuntime` write `plan.decisions[job.id]` as a J§6.2 record (refusals are skipped and counted in `skipped_no_choice`, §1) to the policy stream, with `self_traffic` computed from `LIVESTACK_POLICY_SELF_PRINCIPALS` and the authenticated principal. Put the pointer on the admit ledger record.
