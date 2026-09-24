@@ -125,7 +125,7 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 7. Turning it on (person-gated)
 
-- [ ] 7.1 **[ASK]** Present §11 Q1 (objective and floors) to the operator, with the admit rate and days-to-2 000 from 0.1. Record the answer in the activation payload via a new hand-authored artifact revision. Changing only the objective in the activation payload does not change the artifact version.
+- [x] 7.1 **[ASK]** Present §11 Q1 (objective and floors) to the operator, with the admit rate and days-to-2 000 from 0.1. Record the answer in the activation payload via a new hand-authored artifact revision. Changing only the objective in the activation payload does not change the artifact version.
   Tests: none. Ledger: none. Verify: `GET` the activation from the improver DB shows the confirmed objective and `approvedBy`.
 - [ ] 7.2 **[ASK]** Present exploration (§5; recommended `epsilon=0.05`, `margin=0.25`) with its concrete cost: roughly 5% of admits that have a near-tied alternative go to the second-best running machine. On a yes, publish a new artifact with exploration enabled.
   Tests: 24 h later, from the ledger: the observed explored fraction is within ±50% of the expectation computed from the explore-set sizes (the positive control that exploration is actually happening); zero explored choices of non-running or LAST_RESORT targets. Ledger: explored decisions now carry propensities < 1.
