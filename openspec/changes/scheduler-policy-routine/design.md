@@ -32,6 +32,14 @@ A 7-day improver window cannot live there, and the policy block would make both 
 worse. The native Recorder is non-blocking (J§6.4) and gets its own bound sized in DAYS
 (§9). The ledger keeps its operator-audit role unchanged plus a pointer for the join.
 
+**Only committed choices are written** (operator decision 2026-09-24). A decision whose
+`chosen` is `None` (no eligible target — "no target in region", deadline, capacity) and a
+quota refusal (which never reaches `decide`) are NOT written to the policy stream: they
+carry nothing to learn from (OPE excludes them as degenerate) and, during a caller's retry
+loop, would dominate the stream. They remain in the audit ledger exactly as today. The
+recorder therefore counts them separately (`status().skipped_no_choice`) so their volume
+stays visible.
+
 **When the native module is absent** (mode `0`, or `auto` without the module), no policy
 records are written — the Recorder is native — and `/fleet` reports degraded
 `policy_records_unavailable`. That is loud, not silent, and compare mode (the only

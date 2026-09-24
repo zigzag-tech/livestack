@@ -41,7 +41,7 @@ exploration disabled.
 
 ### Requirement: Every committed choice is recorded with what replay needs
 
-Each `/fleet/admit` decision SHALL be written, without blocking the request, as a
+Each `/fleet/admit` decision that chose a target SHALL be written, without blocking the request, as a
 `jingway.policy_decision/v1` record to the bounded policy record stream, carrying the
 artifact version, family, full context and candidate features, rows, greedy and chosen ids,
 explore set, propensities, exploration settings, `self_traffic` and any shadow choices. The
@@ -52,6 +52,10 @@ the native module is absent, the broker SHALL report it as degraded.
 #### Scenario: Record replays to itself
 - **WHEN** the replay CLI self-checks a day of admit records
 - **THEN** every record reproduces its logged rows, greedy, chosen and propensities
+
+#### Scenario: Refusal is not recorded in the stream
+- **WHEN** an admit finds no eligible target, or is refused for quota
+- **THEN** no policy stream record is written, the audit ledger records it as before, and `skipped_no_choice` increments
 
 #### Scenario: Recorder saturated
 - **WHEN** the record stream's writer stalls and its queue fills
