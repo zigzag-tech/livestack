@@ -533,3 +533,22 @@ def test_over_quota_states_the_rule_it_applied():
     msg = over_quota("a", {"a": 3}, pol)
     assert msg and "a holds 3 of 3" in msg
     assert over_quota("a", {"a": 3}, SchedulerPolicy()) is None
+
+
+# -- the target choice as a policy (scheduler-policy-routine task 3.2) --------
+
+def test_admit_decides_under_the_callers_decision_id_and_hands_back_the_decision():
+    r = admit(BUSY_CN_IDLE_NA, kind="align", sla="batch", owner="media-corpus",
+              now=1000.0, decision_id="01JDECISIONIDAAAAAAAAAAAAA")
+    assert r["decision_id"] == "01JDECISIONIDAAAAAAAAAAAAA"
+    d = r["policy_decision"]
+    assert d["decision_id"] == "01JDECISIONIDAAAAAAAAAAAAA"
+    assert d["chosen"] == r["target"]["target_id"]
+    assert [c["id"] for c in d["candidates"]] == [row["id"] for row in d["rows"]]
+
+
+def test_a_quota_refusal_never_reaches_the_choice():
+    r = admit(BUSY_CN_IDLE_NA, kind="align", owner="acct",
+              policy=SchedulerPolicy(max_concurrent_per_account=1),
+              usage={"acct": 1}, now=1000.0, decision_id="01JDECISIONIDAAAAAAAAAAAAB")
+    assert r["refused"] == "account_quota" and r["policy_decision"] is None

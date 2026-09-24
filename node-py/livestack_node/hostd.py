@@ -104,7 +104,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .hostbroker import HostBroker, RestPeer
 from .membership import MembershipPolicy, RosterFull
@@ -304,8 +304,14 @@ def build_app(broker: HostBroker):
         return {"ok": broker.hosted_heartbeat(lease_id)}
 
     @app.post("/lease/{lease_id:path}/release")
-    def lease_release(lease_id: str):
-        return {"ok": broker.hosted_release(lease_id)}
+    def lease_release(lease_id: str, payload: Optional[dict] = Body(default=None)):
+        """Hand the slot back. An optional body ``{"status": "ok"|"failed",
+        "wall_s": <seconds>}`` reports how the job went; it becomes the
+        lease's `caller_ok`/`job_wall_s` outcome (scheduler-policy-routine
+        §1). A value that is not exactly that shape is REFUSED (422), never
+        coerced: an outcome that was guessed is worse than none."""
+        extra = _release_report(payload or {})
+        return {"ok": broker.hosted_release(lease_id, **extra)}
 
     @app.post("/devices/{device_id}/health")
     def device_health(device_id: str, payload: dict = Body(...)):
@@ -448,6 +454,15 @@ def build_app(broker: HostBroker):
                                            if op.observability_degraded],
                 "store": store.path,
             }
+        runtime = getattr(broker, "policy_runtime", None)
+        if runtime is not None:
+            # The target-choice policy's state, and what is wrong with it. This
+            # broker has no subsystem-health mechanism, so the degradations are
+            # listed here (scheduler-policy-routine design §7): running on
+            # defaults, native/reference disagreement, a refused artifact, a
+            # missing native module, a record stream dropping or unavailable.
+            view["policy"] = runtime.status()
+            view["degraded"] = list(view["policy"]["degraded"])
         return view
 
     @app.get("/fleet/rank")
@@ -561,6 +576,7 @@ def build_app(broker: HostBroker):
         """
         from .fleet_admit import admit as _admit
         from .fleet_auth import AuthError, authenticate
+        from .ledger import new_decision_id
         kind = payload.get("kind")
         if not kind:
             raise HTTPException(400, "'kind' required")
@@ -630,6 +646,11 @@ def build_app(broker: HostBroker):
             region_policy = {"allow": wanted,
                              "allow_unknown": allow_unknown,
                              "rejected": rejected}
+        # Minted BEFORE deciding: it seeds exploration (Jingway design §5.1),
+        # and it is the join key from this admit's ledger record to its policy
+        # decision, its lease, and the lease's outcome.
+        decision_id = new_decision_id()
+        runtime = getattr(broker, "policy_runtime", None)
         result = _admit(
             view, kind=kind,
             # From the broker's own lease ledger, expired entries dropped
@@ -643,7 +664,24 @@ def build_app(broker: HostBroker):
             vantage=payload.get("via") or payload.get("vantage") or "direct",
             estimate_s=float(est),
             policy=getattr(broker, "fleet_policy", None),
+            runtime=runtime, decision_id=decision_id,
         )
+        decision = result.pop("policy_decision", None)
+        pointer = None
+        if runtime is not None:
+            # Only a committed choice is recorded; a refusal (no target, or a
+            # quota refusal, which never reached the choice) is only counted.
+            runtime.record_decision(decision, principal=(
+                principal.name if principal else None))
+            if (runtime.recorder is not None and decision is not None
+                    and decision.get("chosen") is not None):
+                # The ledger's pointer into the policy stream. Absent when the
+                # stream is unavailable, so it never names a record that was
+                # never written (a dropped one is counted as a gap instead).
+                pointer = {"decision_id": decision_id,
+                           "artifact_version": decision["artifact_version"],
+                           "chosen": decision["chosen"],
+                           "explored": bool(decision["explored"])}
         if region_policy is not None:
             result["region_policy"] = region_policy
             if (not result.get("granted")
@@ -698,14 +736,73 @@ def build_app(broker: HostBroker):
             # failure must not void an answer the caller already has.
             try:
                 lease_id = broker.hosted_checkout(
-                    target["target_id"], kind, request["owner"])
+                    target["target_id"], kind, request["owner"],
+                    decision_id=decision_id if pointer else None)
             except Exception as e:
                 print(f"[harmony] fleet lease checkout failed: {e}", flush=True)
-        broker.emit_admit(result, request, lease_id)
+        if pointer is not None:
+            broker.emit_admit(result, request, lease_id, policy=pointer)
+        else:
+            broker.emit_admit(result, request, lease_id)
         out = {k: v for k, v in result.items() if k != "candidates"}
         out["lease_id"] = lease_id
         return out
 
+
+    # --- the scheduler policy artifact (scheduler-policy-routine design §6) --
+    def _policy_runtime(policy_id: str):
+        from .policy_runtime import POLICY_ID
+        if policy_id != POLICY_ID:
+            raise HTTPException(404, f"no policy {policy_id!r}; this broker serves {POLICY_ID}")
+        runtime = getattr(broker, "policy_runtime", None)
+        if runtime is None:
+            raise HTTPException(503, "this broker runs no policy runtime (fleet broker only)")
+        return runtime
+
+    def _policy_admin(authorization):
+        """Publishing changes routing for everyone: it needs an authenticated
+        principal carrying `policy_admin`, and auth OFF refuses outright."""
+        from .fleet_auth import POLICY_ADMIN, AuthError, bearer_token, principal_for
+        principals = getattr(broker, "fleet_principals", None)
+        if principals is None:
+            raise HTTPException(403, "policy publishing requires fleet auth")
+        try:
+            who = principal_for(principals, bearer_token(authorization))
+        except AuthError as e:
+            raise HTTPException(e.status, e.detail)
+        if not who.can(POLICY_ADMIN):
+            raise HTTPException(403, f"'{who.name}' does not carry {POLICY_ADMIN}")
+        return who
+
+    @app.put("/fleet/policy/{policy_id}")
+    def fleet_policy_put(policy_id: str, role: str = "active",
+                         payload: Any = Body(...), authorization: str = Header(None)):
+        """Publish an artifact (``role=active``) or up to two shadows
+        (``role=shadow``, a JSON array). Validated by the native module, which
+        recomputes the version; written atomically, previous kept."""
+        from .policy_runtime import PolicyRouteError
+        _policy_admin(authorization)
+        runtime = _policy_runtime(policy_id)
+        try:
+            return runtime.publish(role, payload)
+        except PolicyRouteError as e:
+            raise HTTPException(e.status, e.detail)
+
+    @app.get("/fleet/policy/{policy_id}")
+    def fleet_policy_get(policy_id: str):
+        return _policy_runtime(policy_id).status()
+
+    @app.post("/fleet/policy/{policy_id}/revert")
+    def fleet_policy_revert(policy_id: str, authorization: str = Header(None)):
+        """Swap the previous artifact back in. A file swap: no model, no
+        improver, nothing a bad policy can lock out."""
+        from .policy_runtime import PolicyRouteError
+        _policy_admin(authorization)
+        runtime = _policy_runtime(policy_id)
+        try:
+            return runtime.revert()
+        except PolicyRouteError as e:
+            raise HTTPException(e.status, e.detail)
 
     # --- the provisioning control plane (v1) --------------------------------
     #
@@ -763,7 +860,8 @@ def build_app(broker: HostBroker):
             pools=getattr(broker, "fleet_pools", ()),
             store=_ops_store(), usage=broker.owner_usage(),
             allow_regions=regions,
-            vantage=payload.get("via") or payload.get("vantage") or "direct")
+            vantage=payload.get("via") or payload.get("vantage") or "direct",
+            runtime=getattr(broker, "policy_runtime", None))
 
     @app.post("/fleet/operations")
     def fleet_operation(payload: dict = Body(...), authorization: str = Header(None)):
@@ -777,10 +875,13 @@ def build_app(broker: HostBroker):
         action = payload.get("action") or {}
         pools = getattr(broker, "fleet_pools", ())
         policy = getattr(broker, "fleet_policy", None) or SchedulerPolicy()
+        runtime = getattr(broker, "policy_runtime", None)
         stale = plan_is_current(payload.get("plan_version") or "", policy=policy,
                                 pools=pools, now=time.time(),
                                 max_age_s=float(os.environ.get(
-                                    "LIVESTACK_PLAN_MAX_AGE_S", "120")))
+                                    "LIVESTACK_PLAN_MAX_AGE_S", "120")),
+                                artifact_version=(runtime.artifact_version
+                                                  if runtime is not None else None))
         if stale:
             raise HTTPException(409, stale)
         kind = str(action.get("type") or "")
@@ -929,6 +1030,29 @@ def build_app(broker: HostBroker):
                          daemon=True).start()
 
     return app
+
+
+def _release_report(body: dict) -> dict:
+    """``hosted_release`` keywords from a release body, or HTTP 422."""
+    import math
+    from fastapi import HTTPException
+    problems = []
+    out = {}
+    if "status" in body:
+        if body["status"] not in ("ok", "failed"):
+            problems.append(f"status must be \"ok\" or \"failed\", got {body['status']!r}")
+        else:
+            out["caller_ok"] = body["status"] == "ok"
+    if "wall_s" in body:
+        w = body["wall_s"]
+        if (isinstance(w, bool) or not isinstance(w, (int, float))
+                or not math.isfinite(w) or w < 0):
+            problems.append(f"wall_s must be a non-negative number, got {w!r}")
+        else:
+            out["job_wall_s"] = float(w)
+    if problems:
+        raise HTTPException(422, "; ".join(problems))
+    return out
 
 
 def _settle_operations(broker) -> None:
@@ -1188,6 +1312,20 @@ def main():
     broker.link_peers = link_peers
     broker.fleet_policy = fleet_policy
     broker.fleet_principals = fleet_principals
+    if not dispatch:
+        # The target choice as a compiled policy (scheduler-policy-routine).
+        # Fleet broker only: it is the one process whose /fleet/admit places
+        # jobs fleet-wide, and the one whose choices are recorded.
+        from .policy_runtime import PolicyRuntime
+        broker.policy_runtime = PolicyRuntime.from_env(
+            log=lambda m: print(m, flush=True))
+        _ps = broker.policy_runtime.status()
+        print(f"[policy] {_ps['policy_id']}: source={_ps['source']} "
+              f"version={_ps['active']['version']} mode={_ps['mode']} "
+              f"native={_ps['native']} records="
+              f"{_ps['records']['unavailable'] or _ps['records']['stream']}"
+              + (f" DEGRADED: {', '.join(_ps['degraded'])}" if _ps["degraded"] else ""),
+              flush=True)
 
     # --- the provisioning control plane -------------------------------------
     #
