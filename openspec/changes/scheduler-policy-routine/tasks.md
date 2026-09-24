@@ -81,7 +81,7 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 5. Improver host in fleetd (needs Jingway groups 5–6 merged)
 
-- [ ] 5.1 `fleetd/src/policy/source.ts`: `StreamPolicySource implements PolicyRecordSource` (J§9.1). It reads `$LIVESTACK_POLICY_DIR/records/livestack.fleet.choose_target.jsonl*` (rotated files included, oldest first) and yields decision records, outcome records and `recorder_gap` records. The improver runs on the broker host, so this is a local read. A missing rotated file inside the window is reported as a gap, never skipped silently.
+- [x] 5.1 `fleetd/src/policy/source.ts`: `StreamPolicySource implements PolicyRecordSource` (J§9.1). It reads `$LIVESTACK_POLICY_DIR/records/livestack.fleet.choose_target.jsonl*` (rotated files included, oldest first) and yields decision records, outcome records and `recorder_gap` records. The improver runs on the broker host, so this is a local read. A missing rotated file inside the window is reported as a gap, never skipped silently.
   Tests: `source.test.ts` with fixture stream files, including a missing rotation and a `recorder_gap`. Ledger: none.
   Verify: `cd fleetd && npm test && npm run typecheck`.
 - [ ] 5.2 `fleetd/src/policy/improver.ts` and the `npm run policy-improver -- --once` entry point. Each run:
