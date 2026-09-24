@@ -1,0 +1,12 @@
+# Local development: build against a local jingway checkout instead of the
+# pinned git rev. Copy to .cargo/config.toml (gitignored) and adjust the paths
+# (cargo does not expand `~`).
+[patch."ssh://git@github.com/zigzag-tech/jingway.git"]
+jingway-policy = { path = "/Users/ubuntu/jingway/core/crates/policy" }
+jingway-policy-py = { path = "/Users/ubuntu/jingway/core/crates/policy-py" }
+
+# Without the patch: cargo's built-in git client cannot use the ssh agent on
+# some hosts ("no authentication methods succeeded"); the git CLI can.
+# Equivalent to CARGO_NET_GIT_FETCH_WITH_CLI=true.
+[net]
+git-fetch-with-cli = true

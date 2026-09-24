@@ -1,0 +1,13 @@
+[package]
+name = "livestack-policy-family"
+version = "0.1.0"
+edition = "2021"
+description = "Policy family livestack.fleet.choose_target (per-job fleet target choice)"
+
+[dependencies]
+jingway-policy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+jingway-policy = { workspace = true, features = ["cli"] }

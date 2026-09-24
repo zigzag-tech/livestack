@@ -1,0 +1,17 @@
+[package]
+name = "livestack-policy-py"
+version = "0.1.0"
+edition = "2021"
+description = "Python module livestack_policy: livestack policy families via jingway-policy-py"
+
+[lib]
+name = "livestack_policy"
+crate-type = ["cdylib"]
+
+[dependencies]
+jingway-policy = { workspace = true, features = ["recorder"] }
+jingway-policy-py = { workspace = true }
+livestack-policy-family = { workspace = true }
+# `extension-module` is added by maturin (pyproject.toml), not here, so that
+# `cargo test --workspace` can still link this cdylib against libpython.
+pyo3 = { version = "0.23", features = ["abi3-py38"] }
