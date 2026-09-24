@@ -81,10 +81,10 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 5. Improver host in fleetd (needs Jingway groups 5–6 merged)
 
-- [ ] 5.1 `fleetd/src/policy/source.ts`: `StreamPolicySource implements PolicyRecordSource` (J§9.1). It reads `$LIVESTACK_POLICY_DIR/records/livestack.fleet.choose_target.jsonl*` (rotated files included, oldest first) and yields decision records, outcome records and `recorder_gap` records. The improver runs on the broker host, so this is a local read. A missing rotated file inside the window is reported as a gap, never skipped silently.
+- [x] 5.1 `fleetd/src/policy/source.ts`: `StreamPolicySource implements PolicyRecordSource` (J§9.1). It reads `$LIVESTACK_POLICY_DIR/records/livestack.fleet.choose_target.jsonl*` (rotated files included, oldest first) and yields decision records, outcome records and `recorder_gap` records. The improver runs on the broker host, so this is a local read. A missing rotated file inside the window is reported as a gap, never skipped silently.
   Tests: `source.test.ts` with fixture stream files, including a missing rotation and a `recorder_gap`. Ledger: none.
   Verify: `cd fleetd && npm test && npm run typecheck`.
-- [ ] 5.2 `fleetd/src/policy/improver.ts` and the `npm run policy-improver -- --once` entry point. Each run:
+- [x] 5.2 `fleetd/src/policy/improver.ts` and the `npm run policy-improver -- --once` entry point. Each run:
   1. Open PGLite at `$LIVESTACK_POLICY_IMPROVER_DB`.
   2. Bootstrap: if the activation ledger has no `livestack.fleet.choose_target`, activate the artifact currently on the broker (`GET /fleet/policy/...`) as hand-authored.
   3. Reconcile: the broker's active version must equal the ledger's, else report `policy_projection_drift` and stop.
@@ -98,7 +98,7 @@ Task 5 needs Jingway groups 5–6 merged.
   `PolicyPublisher` = an authenticated `PUT` to the broker, with the token from `$LIVESTACK_POLICY_ADMIN_TOKEN_FILE`.
   Tests: `improver.test.ts` against a fake broker (reuse `fakeBroker.ts`) and fixture streams: bootstrap, drift, a no-proposal run naming its reason, a proposal run on a synthetic ledger where a param change truly improves the objective. Ledger: none (it reads).
   Verify: `cd fleetd && npm test && npm run typecheck`.
-- [ ] 5.3 `fleetd/src/policy/approve.ts` CLI: `npm run policy-approve -- <proposalId> [--shadow|--activate]`. It records `human_patch_approval` with the operator id from `$USER`, then PUTs the artifact as shadow or active. `--activate` refuses unless the proposal has passed the shadow rung. Also `npm run policy-revert -- livestack.fleet.choose_target`: the activation transition first, then `POST …/revert`.
+- [x] 5.3 `fleetd/src/policy/approve.ts` CLI: `npm run policy-approve -- <proposalId> [--shadow|--activate]`. It records `human_patch_approval` with the operator id from `$USER`, then PUTs the artifact as shadow or active. `--activate` refuses unless the proposal has passed the shadow rung. Also `npm run policy-revert -- livestack.fleet.choose_target`: the activation transition first, then `POST …/revert`.
   Tests: `approve.test.ts`. Ledger: none.
   Verify: `cd fleetd && npm test`.
 

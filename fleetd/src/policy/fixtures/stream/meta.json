@@ -1,0 +1,76 @@
+{
+  "active": {
+    "exploration": {
+      "enabled": true,
+      "epsilon": 0.1,
+      "margin": 0.25
+    },
+    "family": {
+      "id": "livestack.fleet.choose_target",
+      "version": 1
+    },
+    "params": {
+      "distance_by_sla.batch": 0.1,
+      "distance_by_sla.interactive": 1.0,
+      "distance_by_sla.normal": 0.5,
+      "local_bonus": 1.0,
+      "locality_bonus": 0.5,
+      "sla_slack_s.batch": 43200.0,
+      "sla_slack_s.interactive": 30.0,
+      "sla_slack_s.normal": 1800.0,
+      "w_budget": 1.0,
+      "w_distance": 2.0,
+      "w_resource": 1.0,
+      "w_speed": 1.0,
+      "w_utilization": 1.0
+    },
+    "parent_version": null,
+    "policy_id": "livestack.fleet.choose_target",
+    "provenance": {
+      "created_at": "2026-09-21T00:00:00Z",
+      "created_by": "human:fixture",
+      "notes": "fleetd policy-improver test fixture"
+    },
+    "schema": "jingway.policy_artifact/v1",
+    "version": "b3:e7726fe689f4d250e761815defb1ca72e2754507e8ca2e43c1bf508a185da7f7"
+  },
+  "decisions": 600,
+  "self_principal": "livestack:fleetd",
+  "shadow": {
+    "exploration": {
+      "enabled": true,
+      "epsilon": 0.1,
+      "margin": 0.25
+    },
+    "family": {
+      "id": "livestack.fleet.choose_target",
+      "version": 1
+    },
+    "params": {
+      "distance_by_sla.batch": 0.1,
+      "distance_by_sla.interactive": 1.0,
+      "distance_by_sla.normal": 0.5,
+      "local_bonus": 1.0,
+      "locality_bonus": 0.5,
+      "sla_slack_s.batch": 43200.0,
+      "sla_slack_s.interactive": 30.0,
+      "sla_slack_s.normal": 1800.0,
+      "w_budget": 1.5,
+      "w_distance": 2.0,
+      "w_resource": 1.0,
+      "w_speed": 1.0,
+      "w_utilization": 1.0
+    },
+    "parent_version": "b3:e7726fe689f4d250e761815defb1ca72e2754507e8ca2e43c1bf508a185da7f7",
+    "policy_id": "livestack.fleet.choose_target",
+    "provenance": {
+      "created_at": "2026-09-21T00:00:00Z",
+      "created_by": "human:fixture",
+      "notes": "fixture shadow"
+    },
+    "schema": "jingway.policy_artifact/v1",
+    "version": "b3:143fce6fa69b36630da3dcb9b1bdef5c22f1fd814a34a9aa708e5b598fb02df1"
+  },
+  "spacing_s": 600.0,
+  "t0": 1790000000.0
+}
