@@ -24,7 +24,7 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 0. Baseline
 
-- [ ] 0.1 The baseline receipt is already in `receipts/baseline-benchmark.md` (2026-09-24). It measured the ledger's retention (fleet: 13.6 h) but NOT who is admitting. From the live fleet broker (read-only), group the `"decision": "admit"` records in `~/.cache/livestack/fleet-decisions.jsonl*` on xc-tower-ubuntu by `request.owner` and `request.principal`, per hour. Report the average and peak admit rate, the top 5 callers, and whether the ~1.8 admits/s bursts look like a retry loop (the same owner/kind repeating within seconds with no lease released). Append this to the receipt as section "admit traffic". If it is a retry loop, STOP and tell the operator before continuing: it would dominate every estimate this change produces.
+- [x] 0.1 The baseline receipt is already in `receipts/baseline-benchmark.md` (2026-09-24). It measured the ledger's retention (fleet: 13.6 h) but NOT who is admitting. From the live fleet broker (read-only), group the `"decision": "admit"` records in `~/.cache/livestack/fleet-decisions.jsonl*` on xc-tower-ubuntu by `request.owner` and `request.principal`, per hour. Report the average and peak admit rate, the top 5 callers, and whether the ~1.8 admits/s bursts look like a retry loop (the same owner/kind repeating within seconds with no lease released). Append this to the receipt as section "admit traffic". If it is a retry loop, STOP and tell the operator before continuing: it would dominate every estimate this change produces.
   Tests: none. Ledger: none. Verify: the receipt has an "admit traffic" section with the rates and top callers.
 
 ## 1. Golden corpus BEFORE any refactor
