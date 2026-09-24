@@ -44,7 +44,7 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 3. Recording and outcomes
 
-- [ ] 3.1 Extend `decision.schema.json` and `ledger.py` with ONLY the optional admit pointer `policy: {decision_id, artifact_version, chosen, explored}`. Decision and outcome records do NOT go into this ledger (§1); do not add record kinds here.
+- [x] 3.1 Extend `decision.schema.json` and `ledger.py` with ONLY the optional admit pointer `policy: {decision_id, artifact_version, chosen, explored}`. Decision and outcome records do NOT go into this ledger (§1); do not add record kinds here.
   Tests: `test_ledger.py`: a schema-valid admit record with and without the pointer. Ledger: **adds the pointer to `admit`**.
   Verify: `cd node-py && python -m pytest tests/test_ledger.py tests/test_ledger_attribution.py -q`.
 - [ ] 3.2 In `/fleet/admit` (`hostd.py`) and `fleet_admit.admit()`:

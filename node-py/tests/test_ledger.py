@@ -89,6 +89,29 @@ def test_a_full_record_validates():
     assert validate(_decision().to_dict()) == []
 
 
+def test_an_admit_record_validates_with_and_without_the_policy_pointer():
+    """scheduler-policy-routine task 3.1: the admit record gains ONLY an
+    optional pointer into the policy record stream."""
+    plain = _decision(decision="admit")
+    assert "policy" not in plain.to_dict()
+    assert validate(plain.to_dict()) == []
+    did = new_decision_id()
+    pointed = _decision(decision="admit", decision_id=did,
+                        policy={"decision_id": did, "artifact_version": "b3:6f1c",
+                                "chosen": "xc-tower-ubuntu-asr", "explored": False})
+    assert pointed.to_dict()["policy"]["decision_id"] == did
+    assert validate(pointed.to_dict()) == []
+
+
+def test_the_policy_pointer_carries_nothing_else():
+    d = _decision(decision="admit",
+                  policy={"decision_id": new_decision_id(), "artifact_version": "b3:x",
+                          "chosen": None, "explored": False, "rows": []})
+    assert any(p.startswith("policy") for p in validate(d.to_dict()))
+    d = _decision(decision="admit", policy={"decision_id": new_decision_id()})
+    assert any(p.startswith("policy") for p in validate(d.to_dict()))
+
+
 def test_a_candidate_without_a_reason_is_not_a_decision_record():
     """A record that cannot say why a loser lost is a log line. The whole point
     is the field that lets a reader check the verdict."""
