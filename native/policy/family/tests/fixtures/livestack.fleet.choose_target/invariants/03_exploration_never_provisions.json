@@ -1,0 +1,76 @@
+{
+  "name": "exploration_never_provisions",
+  "statement": "With exploration on, a running=false candidate (an elastic pool: choosing it spends money) is never chosen unless it is greedy. Here the pool is weakly dominated on every term by the first running candidate, so it is never greedy (ties go to the earlier candidate) and is within any margin of greedy when the weights are small: only the explorable rule keeps exploration off it.",
+  "context": {
+    "now": 1788600000.0,
+    "job": {
+      "id": "asr-1788600000000",
+      "sla": "batch",
+      "created_at": 1788600000.0,
+      "deadline": null,
+      "est_duration_s": 60.0,
+      "locality_host": null
+    }
+  },
+  "candidates": [
+    {
+      "id": "tower0",
+      "features": {
+        "host_id": "zz-tower0",
+        "tier": "LOCAL",
+        "running": true,
+        "elastic": false,
+        "selector_match": true,
+        "fits_now": true,
+        "headroom_ok": false,
+        "fits_instance": false,
+        "provision_latency_s": 0.0,
+        "cost_per_hour": 0.0,
+        "cost_per_job": 0.0,
+        "distance_ms": 20.0,
+        "utilization": 0.5
+      }
+    },
+    {
+      "id": "aliyun-pool",
+      "features": {
+        "host_id": "aliyun-pool",
+        "tier": "SPOT",
+        "running": false,
+        "elastic": true,
+        "selector_match": true,
+        "fits_now": false,
+        "headroom_ok": true,
+        "fits_instance": true,
+        "provision_latency_s": 90.0,
+        "cost_per_hour": 1.2,
+        "cost_per_job": 0.0,
+        "distance_ms": 200.0,
+        "utilization": 0.9
+      }
+    },
+    {
+      "id": "xc-tower",
+      "features": {
+        "host_id": "xc-tower-ubuntu",
+        "tier": "SPOT",
+        "running": true,
+        "elastic": false,
+        "selector_match": true,
+        "fits_now": true,
+        "headroom_ok": false,
+        "fits_instance": false,
+        "provision_latency_s": 0.0,
+        "cost_per_hour": 0.0,
+        "cost_per_job": 0.0,
+        "distance_ms": 2.0,
+        "utilization": 0.1
+      }
+    }
+  ],
+  "expect": {
+    "never_chosen": [
+      "aliyun-pool"
+    ]
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "name": "last_resort_never_while_cheaper_feasible",
+  "statement": "LAST_RESORT (RunPod) is never eligible, so never chosen greedily or by exploration, while a cheaper tier is feasible \u2014 for any params. The RunPod candidate here is running, free, nearest and idlest, so it would win every scored term if the guard did not exist.",
+  "context": {
+    "now": 1788600000.0,
+    "job": {
+      "id": "asr-1788600000000",
+      "sla": "interactive",
+      "created_at": 1788600000.0,
+      "deadline": null,
+      "est_duration_s": 60.0,
+      "locality_host": null
+    }
+  },
+  "candidates": [
+    {
+      "id": "tower0",
+      "features": {
+        "host_id": "zz-tower0",
+        "tier": "LOCAL",
+        "running": true,
+        "elastic": false,
+        "selector_match": true,
+        "fits_now": true,
+        "headroom_ok": false,
+        "fits_instance": false,
+        "provision_latency_s": 0.0,
+        "cost_per_hour": 0.0,
+        "cost_per_job": 0.0,
+        "distance_ms": 40.0,
+        "utilization": 0.8
+      }
+    },
+    {
+      "id": "runpod",
+      "features": {
+        "host_id": "runpod",
+        "tier": "LAST_RESORT",
+        "running": true,
+        "elastic": false,
+        "selector_match": true,
+        "fits_now": true,
+        "headroom_ok": false,
+        "fits_instance": false,
+        "provision_latency_s": 0.0,
+        "cost_per_hour": 0.0,
+        "cost_per_job": 0.0,
+        "distance_ms": 1.0,
+        "utilization": 0.0
+      }
+    },
+    {
+      "id": "aliyun-spot",
+      "features": {
+        "host_id": "aliyun-spot",
+        "tier": "SPOT",
+        "running": true,
+        "elastic": false,
+        "selector_match": true,
+        "fits_now": true,
+        "headroom_ok": false,
+        "fits_instance": false,
+        "provision_latency_s": 0.0,
+        "cost_per_hour": 0.4,
+        "cost_per_job": 0.0,
+        "distance_ms": 5.0,
+        "utilization": 0.1
+      }
+    }
+  ],
+  "expect": {
+    "never_chosen": [
+      "runpod"
+    ]
+  }
+}
