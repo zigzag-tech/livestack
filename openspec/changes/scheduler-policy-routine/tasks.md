@@ -107,7 +107,7 @@ Task 5 needs Jingway groups 5–6 merged.
 - [x] 6.1 Build the production artifacts on a Linux x86_64 host that is not the tower: `maturin build --release -m native/policy/py/Cargo.toml` produces an abi3 wheel. Unzip `livestack_policy.abi3.so` from it. Also run `cargo build --release -p livestack-policy-cli`. Check glibc: `objdump -T livestack_policy.abi3.so | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1` must be ≤ the tower's `ldd --version`.
   Tests: import smoke with the tower's interpreter version (3.12) in a matching venv on the build host: `python -c "import livestack_policy; print(livestack_policy.families())"`. Ledger: none.
   Verify: both artifacts exist and the smoke prints the family.
-- [ ] 6.2 **[ASK]** Create a new release directory `~/.local/share/livestack-releases/scheduler-policy-<shortsha>/`, following the pattern of the existing releases named in the `livestack-fleetd` drop-ins (see `systemctl cat livestack-fleetd`). Put `node-py/` from this commit there, copy `livestack_policy.abi3.so` into `node-py/`, and copy the CLI into `bin/`. Write a NEW drop-in that points `PYTHONPATH` at it and sets:
+- [x] 6.2 **[ASK]** Create a new release directory `~/.local/share/livestack-releases/scheduler-policy-<shortsha>/`, following the pattern of the existing releases named in the `livestack-fleetd` drop-ins (see `systemctl cat livestack-fleetd`). Put `node-py/` from this commit there, copy `livestack_policy.abi3.so` into `node-py/`, and copy the CLI into `bin/`. Write a NEW drop-in that points `PYTHONPATH` at it and sets:
   - `LIVESTACK_POLICY_NATIVE=compare`
   - `LIVESTACK_POLICY_RECORDS_MAX_MB` / `LIVESTACK_POLICY_RECORDS_FILES` (from 3.3)
   - `LIVESTACK_POLICY_DIR`
@@ -119,7 +119,7 @@ Task 5 needs Jingway groups 5–6 merged.
 - [ ] 6.3 **[ASK]** After ≥ 7 days and ≥ 5 000 decisions in compare mode with `mismatches == 0` (or as many as the admit rate from 0.1 allows; if that is fewer than 5 000 in 7 days, report the actual count and ask), switch the drop-in to `LIVESTACK_POLICY_NATIVE=auto`. PUT the first artifact: today's defaults, `exploration.enabled=false`, `provenance.created_by: "human:<operator>"`. Re-run the 4.3 selfcheck on live data.
   Tests: selfcheck passed on ≥ 1 day of live records. Ledger: records now carry the artifact's version rather than the defaults' marker.
   Verify: `receipts/native-cutover-<date>.md` with the mismatch count, selfcheck summary and `GET /fleet/policy/livestack.fleet.choose_target` output.
-- [ ] 6.4 **[ASK]** Install the systemd user timer `livestack-policy-improver.timer` (daily, 04:17 local, `Persistent=true`), which runs `npm run policy-improver -- --once` from the release's fleetd. Record its storage bounds in `_plans/decision-ledger.md` and add the §9 table there.
+- [x] 6.4 **[ASK]** Install the systemd user timer `livestack-policy-improver.timer` (daily, 04:17 local, `Persistent=true`), which runs `npm run policy-improver -- --once` from the release's fleetd. Record its storage bounds in `_plans/decision-ledger.md` and add the §9 table there.
   Tests: one manual `systemctl --user start livestack-policy-improver.service`; its journal shows the summary. Ledger: none.
   Verify: `receipts/improver-first-run-<date>.md` containing the summary.
 
