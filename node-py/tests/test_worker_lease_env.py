@@ -59,12 +59,14 @@ class FakeFleetBroker:
                     return
                 if len(parts) == 3 and parts[0] == 'lease' and parts[2] == 'release':
                     broker.releases.append(parts[1])
+                    broker.release_bodies.append(body)
                     broker.live.discard(parts[1])
                     self._send({'ok': True})
                     return
                 self._send({'error': 'unknown route'})
 
         self.admits, self.releases, self.live = [], [], set()
+        self.release_bodies = []
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -131,6 +133,31 @@ def test_cleanup_releases_leases_left_by_a_crashed_handler(tmp_path, fleet_broke
     assert fleet_broker.releases == [lease['lease_id']]
     assert not fleet_broker.live, 'a crashed handler leaves no live lease'
     assert not (output/'leases.json').exists()
+    # A crash-recovery cleanup never watched the workload: it reports nothing.
+    assert fleet_broker.release_bodies == [{}]
+
+
+def test_release_reports_the_workloads_status_and_wall_time(tmp_path, fleet_broker):
+    """scheduler-policy-routine 3.4: the release body carries how the job went,
+    which the fleet broker joins to the decision that placed it."""
+    worker = WorkloadWorker(worker_config(tmp_path, 'http://127.0.0.1:1',
+                                          fleet_url=fleet_broker.url, fleet_token='f'*32))
+    output = tmp_path/'output'
+    output.mkdir()
+    lease_helper.admit(fleet_broker.url, 'f'*32, 'attune:acct_a', 'polytts', output_dir=output)
+    worker._release_fleet_leases(output, status='ok', wall_s=41.23456)
+    assert fleet_broker.release_bodies == [{'status': 'ok', 'wall_s': 41.235}]
+    lease_helper.release(fleet_broker.url, 'lease-9', status='failed', wall_s=2)
+    assert fleet_broker.release_bodies[-1] == {'status': 'failed', 'wall_s': 2.0}
+
+
+def test_a_failed_release_does_not_fail_the_workload(tmp_path, fleet_broker):
+    worker = WorkloadWorker(worker_config(tmp_path, 'http://127.0.0.1:1',
+                                          fleet_url='http://127.0.0.1:1', fleet_token='f'*32))
+    output = tmp_path/'output'
+    output.mkdir()
+    (output/'leases.json').write_text(json.dumps(['lease-x']))
+    worker._release_fleet_leases(output, status='ok', wall_s=1.0)   # must not raise
 
 
 @pytest.fixture
@@ -207,6 +234,9 @@ def test_grant_names_label_owner_and_killed_handler_leaves_no_live_lease(authori
         worker.close()
     assert broker.releases == ['lease-0'], broker.releases
     assert not broker.live, 'a killed handler leaves no live lease'
+    # The worker watched it run, so the release says how it went.
+    [body] = broker.release_bodies
+    assert body['status'] == 'failed' and body['wall_s'] > 0
     result = caller.get(job['id'])
     assert result['state'] in ('queued', 'failed'), \
         'a handler killed without an exit receipt is an infrastructure retry'
