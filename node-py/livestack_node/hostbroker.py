@@ -404,15 +404,19 @@ class HostBroker:
             return
         end = min(now, lease["last_hb"] + self.hosted_lease_ttl_s) if expired else now
         src = "hostd.lease_expiry" if expired else "hostd.lease_release"
+        # No `ts=`: the runtime stamps WALL time. `now` is this broker's lease
+        # clock, which in production is `time.monotonic()` -- right for the
+        # duration above (both ends on one clock), wrong as a timestamp. Passed
+        # through, it wrote outcomes dated ~1970 (seconds since boot), and the
+        # improver's time window never joined them to their decisions
+        # (first live deploy, 2026-09-24).
         rt.record_outcome(did, "lease_held_s", max(0.0, end - lease["created"]),
-                          source=src, ts=now)
-        rt.record_outcome(did, "lease_expired", 1.0 if expired else 0.0,
-                          source=src, ts=now)
+                          source=src)
+        rt.record_outcome(did, "lease_expired", 1.0 if expired else 0.0, source=src)
         if caller_ok is not None:
-            rt.record_outcome(did, "caller_ok", 1.0 if caller_ok else 0.0,
-                              source=src, ts=now)
+            rt.record_outcome(did, "caller_ok", 1.0 if caller_ok else 0.0, source=src)
         if job_wall_s is not None:
-            rt.record_outcome(did, "job_wall_s", float(job_wall_s), source=src, ts=now)
+            rt.record_outcome(did, "job_wall_s", float(job_wall_s), source=src)
 
     def owner_usage(self, now: Optional[float] = None) -> Dict[str, int]:
         """Slots each owner is holding, from this broker's own lease ledger.
