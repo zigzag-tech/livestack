@@ -304,8 +304,14 @@ def build_app(broker: HostBroker):
         return {"ok": broker.hosted_heartbeat(lease_id)}
 
     @app.post("/lease/{lease_id:path}/release")
-    def lease_release(lease_id: str):
-        return {"ok": broker.hosted_release(lease_id)}
+    def lease_release(lease_id: str, payload: Optional[dict] = Body(default=None)):
+        """Hand the slot back. An optional body ``{"status": "ok"|"failed",
+        "wall_s": <seconds>}`` reports how the job went; it becomes the
+        lease's `caller_ok`/`job_wall_s` outcome (scheduler-policy-routine
+        §1). A value that is not exactly that shape is REFUSED (422), never
+        coerced: an outcome that was guessed is worse than none."""
+        extra = _release_report(payload or {})
+        return {"ok": broker.hosted_release(lease_id, **extra)}
 
     @app.post("/devices/{device_id}/health")
     def device_health(device_id: str, payload: dict = Body(...)):
@@ -960,6 +966,29 @@ def build_app(broker: HostBroker):
                          daemon=True).start()
 
     return app
+
+
+def _release_report(body: dict) -> dict:
+    """``hosted_release`` keywords from a release body, or HTTP 422."""
+    import math
+    from fastapi import HTTPException
+    problems = []
+    out = {}
+    if "status" in body:
+        if body["status"] not in ("ok", "failed"):
+            problems.append(f"status must be \"ok\" or \"failed\", got {body['status']!r}")
+        else:
+            out["caller_ok"] = body["status"] == "ok"
+    if "wall_s" in body:
+        w = body["wall_s"]
+        if (isinstance(w, bool) or not isinstance(w, (int, float))
+                or not math.isfinite(w) or w < 0):
+            problems.append(f"wall_s must be a non-negative number, got {w!r}")
+        else:
+            out["job_wall_s"] = float(w)
+    if problems:
+        raise HTTPException(422, "; ".join(problems))
+    return out
 
 
 def _settle_operations(broker) -> None:

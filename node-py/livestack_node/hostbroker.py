@@ -190,6 +190,10 @@ class HostBroker:
         # heartbeating expires: a dead leaseholder must not hold capacity.
         self.hosted_leases: Dict[str, dict] = {}
         self.hosted_lease_ttl_s = float(os.environ.get("LIVESTACK_LEASE_TTL_S", "120"))
+        # The fleet broker's PolicyRuntime (set by hostd), which appends each
+        # policy-granted lease's outcome to the policy record stream when the
+        # lease ends. None on a host broker: nothing is recorded.
+        self.policy_runtime = None
         self._lease_lock = threading.Lock()     # the reconcile thread snapshots too
         self._lease_seq = 0
         # Leak reclaim bookkeeping: peer -> last attempt, and how often to retry.
@@ -352,15 +356,63 @@ class HostBroker:
         now = self._now(now)
         with self._lease_lock:
             lease = self.hosted_leases.get(lease_id)
-            if lease is None or now - lease["last_hb"] > self.hosted_lease_ttl_s:
-                self.hosted_leases.pop(lease_id, None)
+            if lease is None:
                 return False
-            lease["last_hb"] = now
-            return True
+            if now - lease["last_hb"] <= self.hosted_lease_ttl_s:
+                lease["last_hb"] = now
+                return True
+            del self.hosted_leases[lease_id]
+        self._lease_outcome(lease, now, expired=True)
+        return False
 
-    def hosted_release(self, lease_id: str) -> bool:
+    def hosted_release(self, lease_id: str, *, caller_ok: Optional[bool] = None,
+                       job_wall_s: Optional[float] = None,
+                       now: Optional[float] = None) -> bool:
+        """Hand a lease back. ``caller_ok``/``job_wall_s`` are what the caller
+        reported about its job, if it did; they are recorded, never invented."""
+        now = self._now(now)
         with self._lease_lock:
-            return self.hosted_leases.pop(lease_id, None) is not None
+            lease = self.hosted_leases.pop(lease_id, None)
+        if lease is None:
+            return False
+        self._lease_outcome(lease, now, expired=False, caller_ok=caller_ok,
+                            job_wall_s=job_wall_s)
+        return True
+
+    def _expire_leases_locked(self, now: float) -> List[dict]:
+        """Drop every lease past its TTL; returns them. Caller holds the lock and
+        emits their outcomes (``_lease_outcome``) AFTER releasing it."""
+        gone = []
+        for lid in [lid for lid, l in self.hosted_leases.items()
+                    if now - l["last_hb"] > self.hosted_lease_ttl_s]:
+            gone.append(self.hosted_leases.pop(lid))
+        return gone
+
+    def _lease_outcome(self, lease: dict, now: float, *, expired: bool,
+                       caller_ok: Optional[bool] = None,
+                       job_wall_s: Optional[float] = None) -> None:
+        """Append this lease's outcome records (Jingway design §6.3) under the
+        policy decision that granted it. A lease without one — from `/admit`, or
+        granted while no record stream existed — emits nothing.
+
+        An expired lease is held until it EXPIRED (last heartbeat + TTL), not
+        until whichever later request happened to reap it: reaping is lazy, and
+        its timing says nothing about the job."""
+        rt = self.policy_runtime
+        did = lease.get("decision_id")
+        if rt is None or not did:
+            return
+        end = min(now, lease["last_hb"] + self.hosted_lease_ttl_s) if expired else now
+        src = "hostd.lease_expiry" if expired else "hostd.lease_release"
+        rt.record_outcome(did, "lease_held_s", max(0.0, end - lease["created"]),
+                          source=src, ts=now)
+        rt.record_outcome(did, "lease_expired", 1.0 if expired else 0.0,
+                          source=src, ts=now)
+        if caller_ok is not None:
+            rt.record_outcome(did, "caller_ok", 1.0 if caller_ok else 0.0,
+                              source=src, ts=now)
+        if job_wall_s is not None:
+            rt.record_outcome(did, "job_wall_s", float(job_wall_s), source=src, ts=now)
 
     def owner_usage(self, now: Optional[float] = None) -> Dict[str, int]:
         """Slots each owner is holding, from this broker's own lease ledger.
@@ -376,13 +428,13 @@ class HostBroker:
         """
         now = self._now(now)
         with self._lease_lock:
-            for lid in [lid for lid, l in self.hosted_leases.items()
-                        if now - l["last_hb"] > self.hosted_lease_ttl_s]:
-                del self.hosted_leases[lid]
+            expired = self._expire_leases_locked(now)
             out: Dict[str, int] = {}
             for l in self.hosted_leases.values():
                 owner = str(l.get("owner") or "anon")
                 out[owner] = out.get(owner, 0) + 1
+        for l in expired:
+            self._lease_outcome(l, now, expired=True)
         return out
 
     def leases_on(self, device_id: str, now: Optional[float] = None) -> int:
@@ -396,11 +448,12 @@ class HostBroker:
         """
         now = self._now(now)
         with self._lease_lock:
-            for lid in [lid for lid, l in self.hosted_leases.items()
-                        if now - l["last_hb"] > self.hosted_lease_ttl_s]:
-                del self.hosted_leases[lid]
-            return sum(1 for l in self.hosted_leases.values()
-                       if l.get("device_id") == device_id)
+            expired = self._expire_leases_locked(now)
+            n = sum(1 for l in self.hosted_leases.values()
+                    if l.get("device_id") == device_id)
+        for l in expired:
+            self._lease_outcome(l, now, expired=True)
+        return n
 
     def set_hosted_available(self, device_id: str, available: bool) -> None:
         """Flip the health gate hostd's prober feeds. An unhealthy backend simply
@@ -417,13 +470,13 @@ class HostBroker:
         """
         now = self._now(now)
         with self._lease_lock:
-            for lid in [lid for lid, l in self.hosted_leases.items()
-                        if now - l["last_hb"] > self.hosted_lease_ttl_s]:
-                del self.hosted_leases[lid]
+            expired = self._expire_leases_locked(now)
             live: Dict[str, Dict[str, int]] = {}
             for l in self.hosted_leases.values():
                 live.setdefault(l["device_id"], {})
                 live[l["device_id"]][l["kind"]] = live[l["device_id"]].get(l["kind"], 0) + 1
+        for l in expired:
+            self._lease_outcome(l, now, expired=True)
         return [Placement(kind, did, leases=n)
                 for did, kinds in live.items() for kind, n in kinds.items()]
 
