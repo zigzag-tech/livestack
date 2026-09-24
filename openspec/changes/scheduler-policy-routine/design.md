@@ -412,4 +412,3 @@ a retry loop would dominate every estimate. Task 0.1 does this.
    callers report `wall_s` at release (task 4.2 makes `lease_helper.py` do so). Is that
    the right thing to optimise, or is it time-to-start once pools exist?
 2. **When to enable exploration** (task 7.2), and at what ε.
-3. **Envelope for auto-promotion.** Default: none, so every promotion is a person's.
