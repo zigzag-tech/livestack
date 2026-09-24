@@ -1,0 +1,16 @@
+[package]
+name = "livestack-policy-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Replay CLI for livestack policy families"
+
+[[bin]]
+name = "livestack-policy"
+path = "src/main.rs"
+
+[dependencies]
+jingway-policy = { workspace = true, features = ["cli"] }
+livestack-policy-family = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

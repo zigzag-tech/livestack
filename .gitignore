@@ -19,3 +19,7 @@ __pycache__/
 
 # Python virtualenv — machine-local, never commit (accidentally swept in by a wip-sync auto-commit)
 node-py/.venv/
+
+# native policy workspace (native/policy): build output + local jingway [patch]
+native/policy/target
+native/policy/.cargo/config.toml
