@@ -67,14 +67,31 @@ def heartbeat(fleet_url, lease_id):
     return bool(_post(fleet_url.rstrip('/') + f'/lease/{lease_id}/heartbeat', None, {}).get('ok'))
 
 
-def release(fleet_url, lease_id):
-    return bool(_post(fleet_url.rstrip('/') + f'/lease/{lease_id}/release', None, {}).get('ok'))
+def _report(status=None, wall_s=None):
+    """The release body: how the job went, when known. The broker records it
+    as the lease's `caller_ok`/`job_wall_s` outcome and refuses (422) any
+    other shape, so only what was actually measured is sent."""
+    body = {}
+    if status is not None:
+        body['status'] = status
+    if wall_s is not None:
+        body['wall_s'] = round(max(0.0, float(wall_s)), 3)
+    return body
 
 
-def release_leftovers(fleet_url, leases_path):
+def release(fleet_url, lease_id, *, status=None, wall_s=None):
+    """Hand the slot back. `status` is "ok" or "failed" and `wall_s` the
+    workload's wall time, when the caller knows them."""
+    return bool(_post(fleet_url.rstrip('/') + f'/lease/{lease_id}/release', None,
+                      _report(status, wall_s)).get('ok'))
+
+
+def release_leftovers(fleet_url, leases_path, *, status=None, wall_s=None):
     """Release every lease recorded in leases.json (attempt cleanup after a
     normal or crashed handler). Returns the released ids; the record is
-    consumed so a replayed completion does not re-release."""
+    consumed so a replayed completion does not re-release. `status`/`wall_s`
+    describe the workload that held them, when known (a crash-recovery
+    cleanup knows neither and sends neither)."""
     path = Path(leases_path)
     try:
         leases = json.loads(path.read_text())
@@ -82,7 +99,7 @@ def release_leftovers(fleet_url, leases_path):
         return []
     released = []
     for lease_id in leases:
-        if release(fleet_url, lease_id):
+        if release(fleet_url, lease_id, status=status, wall_s=wall_s):
             released.append(lease_id)
     path.unlink(missing_ok=True)
     return released
