@@ -29,7 +29,7 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 1. Golden corpus BEFORE any refactor
 
-- [ ] 1.1 Write `node-py/tests/policy_golden/generate.py` (seed 20260924) producing 5 000 random `FleetState`s as described in §3, and a recorder that writes `golden.jsonl` (for each state: the state as JSON, `schedule(state).summary()`, and the action tuples as `[type, job_id, target_id|None, reason]`). Commit the generator AND `golden.jsonl`. If it exceeds 5 MB, gzip it.
+- [x] 1.1 Write `node-py/tests/policy_golden/generate.py` (seed 20260924) producing 5 000 random `FleetState`s as described in §3, and a recorder that writes `golden.jsonl` (for each state: the state as JSON, `schedule(state).summary()`, and the action tuples as `[type, job_id, target_id|None, reason]`). Commit the generator AND `golden.jsonl`. If it exceeds 5 MB, gzip it.
   Tests: `node-py/tests/test_policy_golden.py`, which regenerates and compares. It must pass on the unmodified code. Ledger: none.
   Verify: `cd node-py && python -m pytest tests/test_policy_golden.py -q`.
 
