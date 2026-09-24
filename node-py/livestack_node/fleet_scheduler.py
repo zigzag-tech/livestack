@@ -277,6 +277,11 @@ FleetAction = Union[Admit, Provision, Queue, Deprovision]
 @dataclass(frozen=True)
 class FleetPlan:
     actions: Tuple[FleetAction, ...]
+    # job_id -> the policy decision that placed it (the Jingway `Decision`
+    # shape, as a dict: rows, greedy, chosen, propensities, context and
+    # candidates). Only jobs that reached the target choice have one; a job
+    # refused for quota never does. See `policy_runtime`.
+    decisions: Mapping[str, dict] = field(default_factory=dict)
 
     def of(self, cls) -> List[FleetAction]:
         return [a for a in self.actions if isinstance(a, cls)]
@@ -459,28 +464,47 @@ class _Fleet:
         return max(0, t.max_instances - t.running_instances - self.provisioned.get(t.id, 0))
 
 
-def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy) -> List[_Cand]:
+def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy, *,
+                         rejected: Optional[List[Tuple[str, str]]] = None) -> List[_Cand]:
     """Every target that can run ``job`` AND meet its deadline. Applies the RunPod
-    last-resort guard: LAST_RESORT is dropped whenever a cheaper tier is feasible."""
+    last-resort guard: LAST_RESORT is dropped whenever a cheaper tier is feasible.
+
+    ``rejected``, when given, receives ``(target_id, reason_code)`` for every
+    target this drops, in the order it drops them — the reason codes of
+    ``livestack.fleet.choose_target`` (scheduler-policy-routine design §2.4).
+    It exists so the policy reference (``policy_runtime.choose_target_reference``)
+    reuses THIS function rather than a copy of it that could drift."""
     dl = effective_deadline(job, policy)
     cands: List[_Cand] = []
     for t in fleet.state.targets:
         if not _selector_matches(t, job.selector):
+            if rejected is not None:
+                rejected.append((t.id, "filtered:selector"))
             continue
         eta = _eta(t, job)
         if fleet.now + eta > dl + _EPS:                # cannot meet the deadline
+            if rejected is not None:
+                rejected.append((t.id, "filtered:deadline"))
             continue
         if t.running:
             if not _fits(job.need, fleet.free.get(t.id, {})):
+                if rejected is not None:
+                    rejected.append((t.id, "filtered:no_room"))
                 continue                                # no room right now
             provision = False
         elif t.elastic:
             if fleet.headroom(t) <= 0:                  # pool at its instance cap
+                if rejected is not None:
+                    rejected.append((t.id, "filtered:pool_at_cap"))
                 continue
             if not _fits(job.need, t.capacity):         # one instance can't hold the job
+                if rejected is not None:
+                    rejected.append((t.id, "filtered:instance_too_small"))
                 continue
             provision = True
         else:
+            if rejected is not None:
+                rejected.append((t.id, "filtered:cold_not_elastic"))
             continue                                    # cold, non-elastic: unusable
         cands.append(_Cand(
             target=t, provision=provision,
@@ -493,6 +517,9 @@ def _feasible_candidates(fleet: _Fleet, job: Job, policy: SchedulerPolicy) -> Li
     # RunPod last-resort guard (lexicographic, before the weighted score): only keep
     # LAST_RESORT candidates if NO cheaper tier is feasible.
     cheaper = [c for c in cands if c.target.tier < Tier.LAST_RESORT]
+    if cheaper and rejected is not None:
+        rejected.extend((c.target.id, "filtered:last_resort_guard")
+                        for c in cands if c.target.tier >= Tier.LAST_RESORT)
     return cheaper if cheaper else cands
 
 
@@ -554,11 +581,33 @@ def _norm(v: float, xs: List[float]) -> float:
 
 
 # --- the scheduler ----------------------------------------------------------
-def schedule(state: FleetState, policy: Optional[SchedulerPolicy] = None) -> FleetPlan:
-    """Compute the fleet admission/burst plan for ``state``. Pure function."""
+def schedule(state: FleetState, policy: Optional[SchedulerPolicy] = None, *,
+             runtime=None,
+             decision_ids: Optional[Mapping[str, str]] = None) -> FleetPlan:
+    """Compute the fleet admission/burst plan for ``state``. Pure function.
+
+    Each job's TARGET CHOICE is made by ``runtime.decide`` — the compiled policy
+    ``livestack.fleet.choose_target`` (see ``policy_runtime``). Everything that
+    depends on state mutated across jobs stays here: EDF order, quotas, the
+    free-capacity and pool-headroom bookkeeping, and deprovision.
+
+    ``runtime=None`` uses the reference implementation with this ``policy``'s
+    own weights, bonuses and slacks and no exploration, which is exactly the
+    pre-policy behaviour (proved by ``tests/test_policy_golden.py``).
+    ``decision_ids`` maps a job id to the id its decision is recorded (and
+    exploration seeded) under; a job without one decides under ``""``.
+    """
+    from .policy_runtime import build_ctx_and_candidates, reference_runtime
     pol = policy or SchedulerPolicy()
+    if runtime is None:
+        runtime = reference_runtime(pol)
+    ids = decision_ids or {}
+    by_id: Dict[str, Target] = {}
+    for t in state.targets:
+        by_id.setdefault(t.id, t)
     W = _Fleet(state)
     actions: List[FleetAction] = []
+    decisions: Dict[str, dict] = {}
 
     # Place jobs earliest-effective-deadline first (EDF). As `now` advances a waiting
     # job's slack shrinks, so it naturally rises in urgency and eventually forces a
@@ -576,24 +625,25 @@ def schedule(state: FleetState, policy: Optional[SchedulerPolicy] = None) -> Fle
         if refused is not None:
             actions.append(Queue(job.id, refused))
             continue
-        cands = _feasible_candidates(W, job, pol)
-        if not cands:
+        ctx, cand_rows = build_ctx_and_candidates(job, W, state.targets, pol)
+        decision = runtime.decide(ctx, cand_rows, ids.get(job.id, ""))
+        decisions[job.id] = decision
+        chosen = decision["chosen"]
+        if chosen is None:
             actions.append(Queue(job.id, "no feasible target meets the deadline now"))
             continue
-        # Distance matters per SLA: an interactive turn pays the round trip on
-        # every message; a 40-second batch digest pays it once.
-        d_scale = pol.distance_by_sla.get(job.sla, DEFAULT_DISTANCE_BY_SLA[Sla.NORMAL])
-        best = min(cands, key=lambda c: _score(c, cands, pol.weights, d_scale))
-        t = best.target
+        t = by_id[chosen]
+        est_cost = t.cost.estimate(job.est_duration_s)
         usage[job.owner] = usage.get(job.owner, 0) + 1
-        if best.provision:
+        if not t.running:
+            # Only an elastic pool survives the choice while not running.
             W.provisioned[t.id] += 1
-            actions.append(Provision(t.id, job.id, t.tier, best.est_cost,
+            actions.append(Provision(t.id, job.id, t.tier, est_cost,
                                      reason=f"burst {t.tier.name}: no cheaper running room"))
         else:
             W.free[t.id] = _sub(W.free[t.id], job.need)
             W.admitted_to.add(t.id)
-            actions.append(Admit(job.id, t.id, best.est_cost,
+            actions.append(Admit(job.id, t.id, est_cost,
                                  reason="run on existing " + t.tier.name))
 
     # Deprovision hysteresis: an elastic, non-local, currently-running target that
@@ -614,7 +664,7 @@ def schedule(state: FleetState, policy: Optional[SchedulerPolicy] = None) -> Fle
             continue
         actions.append(Deprovision(t.id, "idle burst worker, no demand"))
 
-    return FleetPlan(tuple(actions))
+    return FleetPlan(tuple(actions), decisions)
 
 
 # --- weight resolution (time-of-day base -> auto pressure -> manual override) ---
