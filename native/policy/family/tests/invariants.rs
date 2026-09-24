@@ -6,9 +6,8 @@
 //! points, with exploration off and at MAX_EPSILON with a margin wide enough to
 //! admit every eligible candidate.
 //!
-//! (The Jingway CLI at the pinned rev has no `replay --expect` yet — that is
-//! Jingway task 6.3 — so the fixtures are exercised here, through the same
-//! `decide` the CLI and the Python module call.)
+//! The same fixtures also run through the CLI's `replay --expect` (Jingway task
+//! 6.3) in `cli/tests/cli.rs`; this sweep covers far more of the param space.
 
 mod common;
 

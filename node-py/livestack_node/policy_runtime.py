@@ -292,7 +292,11 @@ def defaults_artifact() -> dict:
             "version": "", "parent_version": None,
             "params": dict(DEFAULT_PARAMS),
             "exploration": {"enabled": False, "epsilon": 0.0, "margin": 0.0},
+            # created_at is required by the crate's artifact schema; a fixed
+            # stamp keeps this artifact identical across processes (it is not
+            # hashed, J§3.2).
             "provenance": {"created_by": "code:defaults",
+                           "created_at": "1970-01-01T00:00:00Z",
                            "notes": "fleet_scheduler.py defaults"}}
 
 
@@ -319,13 +323,13 @@ class NativePolicy:
 
     def version_of(self, art: dict) -> Optional[str]:
         """The artifact version, computed by the crate (J§3.2: Python never
-        hashes). None when this build of the module has no ``artifact_version``
-        — the jingway-policy-py surface of 2026-09-24 exposes only
-        ``load_artifact``, which refuses an artifact whose version field is not
-        already correct, so the compiled defaults cannot be loaded natively
-        without it."""
+        hashes) with ``artifact_version(dict)`` (jingway-policy-py since
+        jingway 9c951fa). None when an older build of the module lacks it:
+        ``load_artifact`` refuses an artifact whose version field is not
+        already correct, so the compiled defaults then fall back to the
+        reference."""
         fn = getattr(self.m, "artifact_version", None)
-        return fn(_json.dumps(art)) if fn is not None else None
+        return fn(art) if fn is not None else None
 
     def recorder(self, **cfg):
         return self.m.Recorder(**cfg)

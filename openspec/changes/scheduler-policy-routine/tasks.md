@@ -72,10 +72,10 @@ Task 5 needs Jingway groups 5–6 merged.
 - [x] 4.1 Create `native/policy/` exactly as §4, pinned to the merged Jingway commit. Implement `ChooseTarget` per §2 with `ID = "livestack.fleet.choose_target"`, `VERSION = 1`, `MAX_EPSILON = 0.10`, and the param space of §2.3.
   Tests: `cargo test` in `native/policy`, covering one unit test per reason code and the four invariant fixtures of §4 (run through `livestack-policy replay --expect`). Ledger: none.
   Verify: `cd native/policy && cargo test --workspace && cargo run -p livestack-policy-cli -- families | jq -e '.[0].id=="livestack.fleet.choose_target"'`.
-- [ ] 4.2 Build the Python module (`maturin develop -m native/policy/py/Cargo.toml` in a test venv) and write `node-py/tests/test_policy_differential.py` per §4 (10 000 cases, seed 20260924, mismatches written as fixtures). Skip it with a named reason if `livestack_policy` is not importable. The rollout checklist in 6.x requires it to have RUN, not skipped.
+- [x] 4.2 Build the Python module (`maturin develop -m native/policy/py/Cargo.toml` in a test venv) and write `node-py/tests/test_policy_differential.py` per §4 (10 000 cases, seed 20260924, mismatches written as fixtures). Skip it with a named reason if `livestack_policy` is not importable. The rollout checklist in 6.x requires it to have RUN, not skipped.
   Tests: that file. Ledger: none.
   Verify: `cd node-py && python -m pytest tests/test_policy_differential.py -q -rs` shows `passed`, not `skipped`.
-- [ ] 4.3 Replay self-check. The policy stream is already in the J§6.2 format, so the CLI reads it directly and nothing needs extracting. Run `livestack-policy selfcheck --records '<dir>/livestack.fleet.choose_target.jsonl*'` against records written by a local `hostd` in a test (live records exist only after 6.2). Re-run it on a copied day of live records after 6.3.
+- [x] 4.3 Replay self-check. The policy stream is already in the J§6.2 format, so the CLI reads it directly and nothing needs extracting. Run `livestack-policy selfcheck --records '<dir>/livestack.fleet.choose_target.jsonl*'` against records written by a local `hostd` in a test (live records exist only after 6.2). Re-run it on a copied day of live records after 6.3.
   Tests: `node-py/tests/test_policy_selfcheck.py` (spawns the CLI over test-written records). Ledger: none.
   Verify: the test passes, and after 6.3 `receipts/selfcheck-<date>.md` shows `self_check: passed`.
 
@@ -104,7 +104,7 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 6. Deploy (compare mode first)
 
-- [ ] 6.1 Build the production artifacts on a Linux x86_64 host that is not the tower: `maturin build --release -m native/policy/py/Cargo.toml` produces an abi3 wheel. Unzip `livestack_policy.abi3.so` from it. Also run `cargo build --release -p livestack-policy-cli`. Check glibc: `objdump -T livestack_policy.abi3.so | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1` must be ≤ the tower's `ldd --version`.
+- [x] 6.1 Build the production artifacts on a Linux x86_64 host that is not the tower: `maturin build --release -m native/policy/py/Cargo.toml` produces an abi3 wheel. Unzip `livestack_policy.abi3.so` from it. Also run `cargo build --release -p livestack-policy-cli`. Check glibc: `objdump -T livestack_policy.abi3.so | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1` must be ≤ the tower's `ldd --version`.
   Tests: import smoke with the tower's interpreter version (3.12) in a matching venv on the build host: `python -c "import livestack_policy; print(livestack_policy.families())"`. Ledger: none.
   Verify: both artifacts exist and the smoke prints the family.
 - [ ] 6.2 **[ASK]** Create a new release directory `~/.local/share/livestack-releases/scheduler-policy-<shortsha>/`, following the pattern of the existing releases named in the `livestack-fleetd` drop-ins (see `systemctl cat livestack-fleetd`). Put `node-py/` from this commit there, copy `livestack_policy.abi3.so` into `node-py/`, and copy the CLI into `bin/`. Write a NEW drop-in that points `PYTHONPATH` at it and sets:
