@@ -98,7 +98,7 @@ Task 5 needs Jingway groups 5–6 merged.
   `PolicyPublisher` = an authenticated `PUT` to the broker, with the token from `$LIVESTACK_POLICY_ADMIN_TOKEN_FILE`.
   Tests: `improver.test.ts` against a fake broker (reuse `fakeBroker.ts`) and fixture streams: bootstrap, drift, a no-proposal run naming its reason, a proposal run on a synthetic ledger where a param change truly improves the objective. Ledger: none (it reads).
   Verify: `cd fleetd && npm test && npm run typecheck`.
-- [ ] 5.3 `fleetd/src/policy/approve.ts` CLI: `npm run policy-approve -- <proposalId> [--shadow|--activate]`. It records `human_patch_approval` with the operator id from `$USER`, then PUTs the artifact as shadow or active. `--activate` refuses unless the proposal has passed the shadow rung. Also `npm run policy-revert -- livestack.fleet.choose_target`: the activation transition first, then `POST …/revert`.
+- [x] 5.3 `fleetd/src/policy/approve.ts` CLI: `npm run policy-approve -- <proposalId> [--shadow|--activate]`. It records `human_patch_approval` with the operator id from `$USER`, then PUTs the artifact as shadow or active. `--activate` refuses unless the proposal has passed the shadow rung. Also `npm run policy-revert -- livestack.fleet.choose_target`: the activation transition first, then `POST …/revert`.
   Tests: `approve.test.ts`. Ledger: none.
   Verify: `cd fleetd && npm test`.
 
