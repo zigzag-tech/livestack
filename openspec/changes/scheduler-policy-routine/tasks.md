@@ -69,7 +69,7 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 4. Native crate (needs Jingway groups 1–4 merged)
 
-- [ ] 4.1 Create `native/policy/` exactly as §4, pinned to the merged Jingway commit. Implement `ChooseTarget` per §2 with `ID = "livestack.fleet.choose_target"`, `VERSION = 1`, `MAX_EPSILON = 0.10`, and the param space of §2.3.
+- [x] 4.1 Create `native/policy/` exactly as §4, pinned to the merged Jingway commit. Implement `ChooseTarget` per §2 with `ID = "livestack.fleet.choose_target"`, `VERSION = 1`, `MAX_EPSILON = 0.10`, and the param space of §2.3.
   Tests: `cargo test` in `native/policy`, covering one unit test per reason code and the four invariant fixtures of §4 (run through `livestack-policy replay --expect`). Ledger: none.
   Verify: `cd native/policy && cargo test --workspace && cargo run -p livestack-policy-cli -- families | jq -e '.[0].id=="livestack.fleet.choose_target"'`.
 - [ ] 4.2 Build the Python module (`maturin develop -m native/policy/py/Cargo.toml` in a test venv) and write `node-py/tests/test_policy_differential.py` per §4 (10 000 cases, seed 20260924, mismatches written as fixtures). Skip it with a named reason if `livestack_policy` is not importable. The rollout checklist in 6.x requires it to have RUN, not skipped.
