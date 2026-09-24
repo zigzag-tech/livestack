@@ -122,5 +122,5 @@ and its implementation swappable.
   matters, it becomes a context feature in family v2.
 - Not training a cost or latency predictor. Outcomes are recorded so one can be trained
   later.
-- Not auto-promotion. The artifact ships with no envelope, so every promotion needs a
-  person until someone chooses an envelope (Jingway design §14 Q2).
+- No automatic promotion. Every promotion is approved by a person (operator decision
+  2026-09-24: several manual rounds first; Jingway design §10.3).
