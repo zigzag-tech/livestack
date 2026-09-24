@@ -24,7 +24,7 @@ Task 5 needs Jingway groups 5–6 merged.
 
 ## 0. Baseline
 
-- [ ] 0.1 The baseline receipt is already in `receipts/baseline-benchmark.md` (2026-09-24). It measured the ledger's retention (fleet: 13.6 h) but NOT who is admitting. From the live fleet broker (read-only), group the `"decision": "admit"` records in `~/.cache/livestack/fleet-decisions.jsonl*` on xc-tower-ubuntu by `request.owner` and `request.principal`, per hour. Report the average and peak admit rate, the top 5 callers, and whether the ~1.8 admits/s bursts look like a retry loop (the same owner/kind repeating within seconds with no lease released). Append this to the receipt as section "admit traffic". If it is a retry loop, STOP and tell the operator before continuing: it would dominate every estimate this change produces.
+- [x] 0.1 The baseline receipt is already in `receipts/baseline-benchmark.md` (2026-09-24). It measured the ledger's retention (fleet: 13.6 h) but NOT who is admitting. From the live fleet broker (read-only), group the `"decision": "admit"` records in `~/.cache/livestack/fleet-decisions.jsonl*` on xc-tower-ubuntu by `request.owner` and `request.principal`, per hour. Report the average and peak admit rate, the top 5 callers, and whether the ~1.8 admits/s bursts look like a retry loop (the same owner/kind repeating within seconds with no lease released). Append this to the receipt as section "admit traffic". If it is a retry loop, STOP and tell the operator before continuing: it would dominate every estimate this change produces.
   Tests: none. Ledger: none. Verify: the receipt has an "admit traffic" section with the rates and top callers.
 
 ## 1. Golden corpus BEFORE any refactor
@@ -63,6 +63,9 @@ Task 5 needs Jingway groups 5–6 merged.
 - [ ] 3.4 `node-py/livestack_node/workloads/lease_helper.py`: send `{status, wall_s}` on release (wall time measured around the workload). Keep release best-effort as it is today: a failed release still must not fail the workload.
   Tests: extend the lease_helper test (find it: `rg -ln lease_helper node-py/tests`) to assert the body is sent. Ledger: none directly (it feeds 3.3).
   Verify: `cd node-py && python -m pytest $(rg -l lease_helper node-py/tests) -q`.
+- [ ] 3.5 Policy routes per §6: `PUT /fleet/policy/{policy_id}?role=active|shadow`, `GET /fleet/policy/{policy_id}`, `POST /fleet/policy/{policy_id}/revert` in `hostd.py`, plus the `policy_admin` principal capability in `fleet_auth` (token-file schema), atomic write (temp+fsync+rename, previous kept), 403 when fleet auth is off, 503 when the native validator is unavailable, 422 with all violations. The validator is INJECTABLE on PolicyRuntime (`validator=` callable returning `(version, violations)`); production uses `livestack_policy.load_artifact` when importable, tests inject a fake. `GET /fleet` includes `policy: PolicyRuntime.status()`.
+  Tests: `test_policy_routes.py` covering every scenario of the spec requirement "Only a validated, authorised artifact changes routing" (auth off, native unavailable, out-of-bounds → 422 list, revert without a model) plus "a file that fails validation keeps the previous artifact". Ledger: none.
+  Verify: `cd node-py && python -m pytest tests/test_policy_routes.py -q`.
 
 ## 4. Native crate (needs Jingway groups 1–4 merged)
 

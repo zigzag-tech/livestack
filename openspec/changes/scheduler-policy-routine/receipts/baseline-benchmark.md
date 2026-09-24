@@ -282,3 +282,76 @@ Outputs are in `out/` (tower) and `out/mac/` (mac, copied back): `*.log` plus pe
 
 - **Mac leftovers:** `/tmp/jingway-hot-bench/{venv312,target (136 MB),wheels}` are throwaway and safe to delete.
 - **Tower leftovers:** `bench/tmp/` holds the scratch ledgers written by the A5 bench.
+
+## 7. Admit traffic (task 0.1)
+
+Measured 2026-09-24 ~18:05 UTC, **read-only**: one Python pass over
+`~/.cache/livestack/fleet-decisions.jsonl*` on xc-tower-ubuntu (4 files, 235 MB). No service
+was touched. Scripts: `census.py`/`census2.py`/`census3.py` in the agent scratchpad (not
+committed; they are ~40-line group-bys over `ts`, `request.owner`, `request.principal`,
+`kind`, `outcome.status` and `reason`).
+
+**Window:** 29,076 admit records over **25.67 h** (2026-09-23 16:xx → 2026-09-24 18:0x UTC).
+Other decisions in the same files: observe 619, load 599, evict 582, rank 2. Every admit
+is `sla=batch`.
+
+| rate | all admits | admits that got a lease (`outcome.status=ok`, 22,711) |
+|---|---|---|
+| average | **1,133 /h (0.31 /s)** | **885 /h (0.25 /s)** |
+| peak hour | 5,890 (09-23 17 UTC, 1.64 /s) | 4,139 |
+| peak minute | 1,304 | 363 |
+| peak second | **195** | 110 |
+
+Quiet hours (09-23 19 UTC onward) run 400–1,200 admits/h, almost all granted.
+
+**Callers.** Three owners and two principals account for everything:
+
+| owner | principal | kind | admits |
+|---|---|---|---|
+| `attune:acct_c082baa1-…` | `attune` | llm | 24,843 |
+| `attune:corpus` | `attune` | llm | 3,709 |
+| `attune:acct_c082baa1-…` | `attune-worker` | polytts | 174 |
+| `attune:acct_c082baa1-…` | `attune-worker` | polyasr | 169 |
+| `attune:acct_c082baa1-…` | `attune-worker` | llm | 162 |
+| `attune:probe` | `attune-worker` | polytts/polyasr/llm | 19 |
+
+The `attune-worker` traffic is steady (median gap ~445 s per owner/kind). All the volume is
+principal `attune`, kind `llm`.
+
+**Refusals.** 6,365 admits (21.9 %) got no lease (`outcome` = `{}`):
+- `no llm target in na: …` (region policy `allow:[na]` rejects every target): 4,298
+- `refused: account quota: … holds 8 of 8 slot(s)`: acct 1,263, `attune:corpus` 796
+- `no polytts target in na`: 8
+
+### Verdict: **a retry loop is present.**
+
+By the task's test (the same owner/kind repeating within seconds with no lease), the
+refusals come almost entirely in tight loops:
+- **42 episodes** of ≥ 10 consecutive refusals for one owner/kind/reason with < 5 s between
+  admits. They hold **5,403 admits**, 85 % of all refusals and 18.6 % of all admits.
+- Each retry carries a fresh `job_id` (`llm-<ms>`, 29,024 distinct ids for 29,076 admits),
+  so this is the client re-admitting, not the broker replaying.
+- It has no backoff. The inter-admit gap is ~5 ms, and episodes run at **45–190 admits/s**.
+  Largest episodes:
+  - acct, `no llm target in na`, 09-23 18:32:44 UTC: 690 admits in 7.1 s (98 /s)
+  - `attune:corpus`, quota full, 09-23 16:29:05 UTC: 362 admits in 1.9 s (189 /s)
+- Most of the volume came on 09-23 between 16 and 18 UTC. That window is the "~1.8
+  admits/s" burst the earlier section measured: 30–63 % of each of those hours was refusals.
+  Smaller loops recur through the whole window, e.g. 160 refusals at 02 UTC and 100–110
+  at 04 UTC and 07 UTC.
+
+**What it does to this change's estimates:**
+- The refused admits are not policy exposures worth tuning on. Each one is a decision with
+  no feasible target, or one refused by quota, and repeated hundreds of times per second.
+- If they were recorded, they would dominate the record stream's size during bursts, and
+  so the task 3.3 sizing.
+- Granted admits look like genuine traffic: ~885 /h average, one principal, fresh job ids,
+  no refusal in between. They still peak at 110 /s, which with an 8-slot quota means leases
+  far shorter than one second.
+
+For sizing (task 3.3), use the **granted** rate: 885 /h average (21.2 k/day). The all-admit
+rate is 1,133 /h, and it includes the loop.
+
+**Stopped here, per task 0.1:** the operator decides what happens to the attune retry
+behaviour (client-side backoff on `refused`/`no target`, or broker-side rate limiting)
+before this change continues.
