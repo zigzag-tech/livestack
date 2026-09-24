@@ -224,17 +224,19 @@ class WorkloadWorker:
             env['HARMONY_FLEET_TOKEN'] = self.config['fleet_token']
         return env
 
-    def _release_fleet_leases(self, output):
+    def _release_fleet_leases(self, output, *, status=None, wall_s=None):
         """Release fleet residency leases the handler recorded in
         $HARMONY_OUTPUT/leases.json, even after a crash. A dead fleet broker
         must not wedge attempt cleanup: leases expire by TTL, so failures are
-        logged and swallowed."""
+        logged and swallowed. `status`/`wall_s` report how the workload went,
+        when this process watched it run."""
         url = self.config.get('fleet_url')
         if not url:
             return
         from .lease_helper import release_leftovers
         try:
-            released = release_leftovers(url, Path(output)/'leases.json')
+            released = release_leftovers(url, Path(output)/'leases.json',
+                                         status=status, wall_s=wall_s)
         except Exception as error:
             logging.warning('fleet lease cleanup failed for %s: %s', output, error)
             return
@@ -249,6 +251,7 @@ class WorkloadWorker:
         root.mkdir(exist_ok=False)
         lease = None
         completion = None
+        started = None
         output = root/'output'
         try:
             lease = LeaseKeeper(self.client, assignment, root/'lease',
@@ -279,6 +282,7 @@ class WorkloadWorker:
             if lease.lost.is_set():
                 raise WorkloadError('execution lease lost during preparation', 409)
             self.journal.write(dict(assignment=assignment, phase='running'))
+            started = time.monotonic()
             self.executor.start(attempt, handler['argv'], root/'source', output, env=env,
                 cpu=need['cpu'], memory_bytes=need['memory_bytes'],
                 max_seconds=handler.get('max_seconds', 3600), tasks=handler.get('max_tasks', 512), lease_file=root/'lease',
@@ -321,7 +325,13 @@ class WorkloadWorker:
                 if lease:
                     lease.close()
                 raise
-        self._release_fleet_leases(output)
+        # The workload's wall time and verdict go back with the fleet leases it
+        # held: the fleet broker joins them to the decision that placed it.
+        self._release_fleet_leases(
+            output,
+            status=None if started is None else
+            'ok' if completion['outcome'] == 'succeeded' else 'failed',
+            wall_s=None if started is None else time.monotonic() - started)
         try:
             completion = self._attach_artifacts(assignment, completion, output)
             self.journal.write(dict(assignment=assignment, phase='completed', completion=completion))

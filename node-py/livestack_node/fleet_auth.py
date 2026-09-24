@@ -46,7 +46,7 @@ import hmac
 import json
 import os
 from dataclasses import dataclass
-from typing import Callable, Dict, Mapping, Optional, Tuple
+from typing import Callable, Dict, FrozenSet, Mapping, Optional, Tuple
 
 
 #: The one `delegate_prefix` that matches every owner. Spelled as a literal
@@ -55,6 +55,14 @@ from typing import Callable, Dict, Mapping, Optional, Tuple
 #: not be the same thing at a security boundary. An owner id never starts with
 #: this character, so the wildcard cannot collide with a real prefix.
 RELAY_ANY = "*"
+
+#: May publish, shadow and revert the fleet broker's scheduler policy artifact
+#: (`PUT /fleet/policy/{id}`, `POST .../revert`). It changes routing for every
+#: caller, so it is granted per token and never implied by an owner.
+POLICY_ADMIN = "policy_admin"
+#: Every capability a token may carry. An unknown one is dropped, loudly: a
+#: typo must never grant something, and must not lock the caller out either.
+CAPABILITIES = frozenset({POLICY_ADMIN})
 
 
 @dataclass(frozen=True)
@@ -70,10 +78,15 @@ class Principal:
     #: :data:`RELAY_ANY` ("*") means every owner — the engine case, where the
     #: caller asserts the owner and the engine only relays it.
     delegate_prefix: Optional[str] = None
+    #: Extra rights beyond admitting work (see :data:`CAPABILITIES`).
+    capabilities: FrozenSet[str] = frozenset()
 
     @property
     def delegates(self) -> bool:
         return self.delegate_prefix is not None
+
+    def can(self, capability: str) -> bool:
+        return capability in self.capabilities
 
 
 class AuthError(Exception):
@@ -108,7 +121,12 @@ def load_principals(raw: str,
     Shape::
 
         {"<token>": {"name": "media-corpus", "owner": "media-corpus"},
-         "<token>": {"name": "hub", "delegate_prefix": "acct_"}}
+         "<token>": {"name": "hub", "delegate_prefix": "acct_"},
+         "<token>": {"name": "policy-improver", "owner": "livestack:policy",
+                     "capabilities": ["policy_admin"]}}
+
+    A capability is an extra right on top of the principal's identity; the
+    token still names exactly one owner or one prefix.
     """
     raw = (raw or "").strip()
     if not raw:
@@ -162,9 +180,24 @@ def load_principals(raw: str,
                 f"(delegate_prefix \"{RELAY_ANY}\") — it is as strong as every "
                 f"application token combined; issue it only to an engine that "
                 f"relays an owner asserted by an authenticated caller")
+        caps = spec.get("capabilities") or []
+        if not isinstance(caps, list):
+            log(f"[fleet-auth] token {fp} ({name}): `capabilities` is not a "
+                f"list; granting none")
+            caps = []
+        unknown = sorted(str(c) for c in caps if c not in CAPABILITIES)
+        if unknown:
+            log(f"[fleet-auth] token {fp} ({name}): unknown capability "
+                f"{', '.join(unknown)} dropped (known: "
+                f"{', '.join(sorted(CAPABILITIES))})")
+        granted = frozenset(c for c in caps if c in CAPABILITIES)
+        if granted:
+            log(f"[fleet-auth] token {fp} ({name}) carries "
+                f"{', '.join(sorted(granted))}")
         out[token] = Principal(name=name,
                                owner=str(owner) if owner else None,
-                               delegate_prefix=str(prefix) if prefix else None)
+                               delegate_prefix=str(prefix) if prefix else None,
+                               capabilities=granted)
     return out
 
 

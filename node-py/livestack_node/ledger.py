@@ -167,6 +167,10 @@ class Decision:
     # observe). False = computed and deliberately not dispatched.
     dispatched: Optional[bool] = None
     outcome: Optional[Dict[str, Any]] = None
+    # Admit records only: `{decision_id, artifact_version, chosen, explored}`,
+    # the pointer that joins this audit record to its full policy decision in
+    # the separate policy record stream (scheduler-policy-routine design §1).
+    policy: Optional[Dict[str, Any]] = None
     decision_id: str = field(default_factory=new_decision_id)
     ts: float = field(default_factory=time.time)
 

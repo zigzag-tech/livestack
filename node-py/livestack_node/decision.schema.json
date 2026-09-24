@@ -339,6 +339,40 @@
         }
       }
     },
+    "policy": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Admit records only: a pointer into the policy record stream ($LIVESTACK_POLICY_DIR/records/livestack.fleet.choose_target.jsonl*), where the full decision and its outcomes live. The decision and outcome records themselves are NEVER written to this ledger (scheduler-policy-routine design \u00a71).",
+      "required": [
+        "decision_id",
+        "artifact_version",
+        "chosen",
+        "explored"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "decision_id": {
+          "type": "string",
+          "minLength": 26,
+          "maxLength": 26
+        },
+        "artifact_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "chosen": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "explored": {
+          "type": "boolean"
+        }
+      }
+    },
     "dispatched": {
       "type": [
         "boolean",

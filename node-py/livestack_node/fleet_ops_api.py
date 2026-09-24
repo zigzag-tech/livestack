@@ -146,7 +146,8 @@ def job_from_request(row: Mapping[str, Any], *, owner: str,
         locality_host=row.get("locality_host"))
 
 
-def policy_digest(policy: SchedulerPolicy, pools: Tuple[Pool, ...]) -> str:
+def policy_digest(policy: SchedulerPolicy, pools: Tuple[Pool, ...],
+                  artifact_version: Optional[str] = None) -> str:
     """A short digest of everything a plan's arithmetic depended on that is NOT
     the fleet view: the weights, the ceilings, the pools and their prices.
 
@@ -154,8 +155,12 @@ def policy_digest(policy: SchedulerPolicy, pools: Tuple[Pool, ...]) -> str:
     is normal; the POLICY moving under a plan means the plan was computed
     against rules that no longer apply, and acting on it would spend money by
     yesterday's decision.
+
+    ``artifact_version`` is the active target-choice policy artifact
+    (``PolicyRuntime``): a new artifact changes where jobs go, so it changes
+    the digest. Omitted when no runtime decides, so that digest is unchanged.
     """
-    blob = json.dumps({
+    fields = {
         "weights": [policy.weights.resource, policy.weights.budget,
                     policy.weights.speed],
         "quotas": dict(sorted(policy.account_quotas.items())),
@@ -163,7 +168,10 @@ def policy_digest(policy: SchedulerPolicy, pools: Tuple[Pool, ...]) -> str:
         "pools": sorted((p.id, p.provider, p.tier.name, p.region,
                          p.instance_type, p.cost_per_hour, p.max_instances)
                         for p in pools),
-    }, sort_keys=True, separators=(",", ":"))
+    }
+    if artifact_version is not None:
+        fields["artifact_version"] = artifact_version
+    blob = json.dumps(fields, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode()).hexdigest()[:12]
 
 
@@ -185,10 +193,15 @@ def build_plan(view: Mapping[str, Any], job_rows, *, owner: str,
                policy: SchedulerPolicy, pools: Tuple[Pool, ...],
                store: OperationStore, usage: Mapping[str, int],
                allow_regions: Tuple[str, ...] = (), vantage: str = "direct",
-               now: Optional[float] = None) -> dict:
+               now: Optional[float] = None, runtime=None) -> dict:
     """The whole answer for ``POST /fleet/plan``. A pure-ish read: it touches the
     operation store only to COUNT what is already reserved, and reserves nothing
-    itself."""
+    itself.
+
+    ``runtime`` (the broker's ``PolicyRuntime``) decides each target choice
+    GREEDILY: this route is called every tick for the same queued jobs, and
+    exploring here would re-draw every tick and flap a job between targets
+    (scheduler-policy-routine design §5). Nothing on this path is recorded."""
     now = time.time() if now is None else now
     jobs = tuple(job_from_request(r, owner=owner, now=now) for r in job_rows)
     kinds = tuple(dict.fromkeys(j.kind for j in jobs if j.kind))
@@ -205,8 +218,10 @@ def build_plan(view: Mapping[str, Any], job_rows, *, owner: str,
     for o, n in store.pending_usage().items():
         combined[o] = combined.get(o, 0) + n
     plan = schedule(FleetState(targets=targets, jobs=jobs, now=now,
-                               usage=combined), policy)
-    digest = policy_digest(policy, pools)
+                               usage=combined), policy,
+                    runtime=runtime.without_exploration() if runtime is not None else None)
+    artifact_version = runtime.artifact_version if runtime is not None else None
+    digest = policy_digest(policy, pools, artifact_version)
     generated_at = float(view.get("generated_at") or now)
     return {
         "api": API_VERSION,
@@ -241,12 +256,15 @@ def build_plan(view: Mapping[str, Any], job_rows, *, owner: str,
                    "max_concurrent_per_account": policy.max_concurrent_per_account,
                    "account_quotas": dict(policy.account_quotas)},
         "actions": [serialize_action(a) for a in plan.actions],
+        "artifact_version": artifact_version,
+        "exploration": "off_on_plan_path",
     }
 
 
 def plan_is_current(plan_version: str, *, policy: SchedulerPolicy,
                     pools: Tuple[Pool, ...], now: float,
-                    max_age_s: float = DEFAULT_PLAN_MAX_AGE_S) -> Optional[str]:
+                    max_age_s: float = DEFAULT_PLAN_MAX_AGE_S,
+                    artifact_version: Optional[str] = None) -> Optional[str]:
     """Why this plan may no longer be acted on, or None."""
     try:
         api, digest, stamp = str(plan_version).split(".", 2)
@@ -254,7 +272,7 @@ def plan_is_current(plan_version: str, *, policy: SchedulerPolicy,
         return f"plan_version {plan_version!r} is not a {API_VERSION} plan version"
     if api != API_VERSION:
         return f"plan_version is {api}, this broker speaks {API_VERSION}"
-    if digest != policy_digest(policy, pools):
+    if digest != policy_digest(policy, pools, artifact_version):
         return ("the policy or the pool set changed since this plan was computed; "
                 "take a new plan")
     age = now - float(stamp)
