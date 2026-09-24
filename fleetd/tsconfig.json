@@ -16,16 +16,7 @@
     "skipLibCheck": true,
     "types": [
       "node"
-    ],
-    // jingway's improver modules (tunePolicy.ts, ladder.ts) import their own package as
-    // 'jingway-framework/experiment/index.js', a subpath jingway's package.json does not
-    // export ('./experiment' only). Inside jingway its own tsconfig paths resolve it; a
-    // consumer gets ERR_PACKAGE_PATH_NOT_EXPORTED at import. tsc and tsx both honour this
-    // mapping, so the policy improver can use them unmodified. Remove it once jingway
-    // exports './experiment/*' (or imports that module by its exported name).
-    "paths": {
-      "jingway-framework/experiment/index.js": ["./node_modules/jingway-framework/src/experiment/index.ts"]
-    }
+    ]
   },
   "exclude": [
     "node_modules"
