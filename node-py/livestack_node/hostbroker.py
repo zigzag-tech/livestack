@@ -324,19 +324,25 @@ class HostBroker:
         return now if now is not None else (self._clock() if self._clock else time.time())
 
     def hosted_checkout(self, device_id: str, kind: str, owner: str,
-                        now: Optional[float] = None) -> str:
+                        now: Optional[float] = None,
+                        decision_id: Optional[str] = None) -> str:
         """Record a lease taken against a hosted backend; returns its id.
 
         Called when a grant lands on a hosted device — from that moment the
         device's concurrency budget is one lease tighter, which is exactly what
         keeps a second admit from double-booking a machine that fits one build.
+
+        ``decision_id`` is the recorded policy decision that granted it (from
+        ``/fleet/admit``); the lease's outcome is appended under it when the
+        lease ends. A lease without one emits no outcome.
         """
         now = self._now(now)
         with self._lease_lock:
             self._lease_seq += 1
             lease_id = f"{device_id}-{int(now * 1000)}-{self._lease_seq}"
             self.hosted_leases[lease_id] = {"device_id": device_id, "kind": kind,
-                                            "owner": owner, "created": now, "last_hb": now}
+                                            "owner": owner, "created": now, "last_hb": now,
+                                            "decision_id": decision_id}
         return lease_id
 
     def hosted_heartbeat(self, lease_id: str, now: Optional[float] = None) -> bool:
@@ -1282,7 +1288,8 @@ class HostBroker:
                      "region_policy": result.get("region_policy")},
         ))
 
-    def emit_admit(self, result: dict, request: dict, lease_id=None) -> None:  # noqa: D401
+    def emit_admit(self, result: dict, request: dict, lease_id=None,
+                   policy: Optional[dict] = None) -> None:  # noqa: D401
         """One `admit` record per `/fleet/admit`, with the full candidate set and
         the reason each feasible-but-not-chosen target lost.
 
@@ -1293,7 +1300,11 @@ class HostBroker:
         if self.ledger is None:
             return
         granted = bool(result.get("granted"))
+        # The id `/fleet/admit` minted before deciding, when it did: the same
+        # id names the policy decision, the lease, and the lease's outcome.
+        ids = {"decision_id": result["decision_id"]} if result.get("decision_id") else {}
         self._emit(Decision(
+            **ids, policy=policy,
             emitter=self.emitter, emitter_id=self.emitter_id,
             kind=result.get("kind"), decision="admit",
             candidates=list(result.get("candidates") or []),
