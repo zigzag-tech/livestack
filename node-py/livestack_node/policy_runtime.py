@@ -738,6 +738,76 @@ class PolicyRuntime:
         if self.recorder is not None:
             self.recorder.close()
 
+    # -- publishing (design §6; the routes are thin wrappers) ----------------------
+    def publish(self, role: str, body: Any) -> dict:
+        """Validate and atomically write an artifact (``role="active"``) or up to
+        two (``role="shadow"``, a list). The previous active file is kept as
+        ``.previous.json``. Raises :class:`PolicyRouteError` (503 without a
+        validator, 422 listing every violation); writes nothing unless every
+        artifact in the body is valid."""
+        if role not in ("active", "shadow"):
+            raise PolicyRouteError(400, f"role must be active or shadow, got {role!r}")
+        if self.validator is None:
+            raise PolicyRouteError(503, "cannot validate artifact without livestack_policy")
+        arts = body if role == "shadow" else [body]
+        if role == "shadow" and (not isinstance(body, list) or len(body) > MAX_SHADOWS):
+            raise PolicyRouteError(422, {"violations": [{
+                "code": "shadow_invalid",
+                "detail": f"role=shadow takes a JSON array of at most {MAX_SHADOWS} artifacts"}]})
+        violations, versions = [], []
+        for i, art in enumerate(arts):
+            where = f"[{i}] " if role == "shadow" else ""
+            version, found = self.validator(_json.dumps(art))
+            found = list(found)
+            if isinstance(art, dict) and art.get("policy_id") != POLICY_ID:
+                found.append({"code": "policy_id_mismatch",
+                              "detail": f"policy_id {art.get('policy_id')!r}, "
+                                        f"this route serves {POLICY_ID}"})
+            violations += [{**v, "detail": where + str(v.get("detail", ""))} for v in found]
+            versions.append(version)
+        if violations:
+            raise PolicyRouteError(422, {"violations": violations})
+        _os.makedirs(self.policy_dir, exist_ok=True)
+        with self._lock:
+            previous = None
+            if role == "active":
+                cur = self._path("active")
+                if _os.path.exists(cur):
+                    with open(cur, "rb") as fh:
+                        _atomic_write(self._path("previous"), fh.read())
+                    previous = self._active.version if self._active else None
+                _atomic_write(cur, _json.dumps(body, sort_keys=True).encode())
+            else:
+                _atomic_write(self._path("shadow"), _json.dumps(body, sort_keys=True).encode())
+        self.reload_if_changed(force=True)
+        return {"policy_id": POLICY_ID, "role": role,
+                "version": versions[0] if role == "active" else versions,
+                "previous_version": previous}
+
+    def revert(self) -> dict:
+        """Swap ``.previous.json`` back into ``.active.json`` (the old active
+        becomes the previous, so a revert can itself be reverted). A file swap,
+        by design: no model, no improver, nothing that can be locked out."""
+        with self._lock:
+            prev, cur = self._path("previous"), self._path("active")
+            if not _os.path.exists(prev):
+                raise PolicyRouteError(409, "no previous artifact to revert to")
+            with open(prev, "rb") as fh:
+                old = fh.read()
+            current = None
+            if _os.path.exists(cur):
+                with open(cur, "rb") as fh:
+                    current = fh.read()
+            _atomic_write(cur, old)
+            if current is not None:
+                _atomic_write(prev, current)
+            else:
+                _os.remove(prev)
+        self._log(f"[policy] reverted {POLICY_ID} to its previous artifact")
+        self.reload_if_changed(force=True)
+        return {"policy_id": POLICY_ID, "version": self.artifact_version,
+                "previous_version": self._previous_version}
+
     # -- status --------------------------------------------------------------------
     def status(self) -> dict:
         """For ``GET /fleet`` and ``GET /fleet/policy/{id}`` (design §6, §7)."""
@@ -808,6 +878,24 @@ class PolicyRuntime:
             # Unset means the age window is DISABLED (a delete-shaped bound
             # never defaults to deleting).
             records_age_days=int(age) if age else None, **kw)
+
+
+class PolicyRouteError(Exception):
+    """A refusal from ``publish``/``revert`` with the HTTP status it maps to."""
+
+    def __init__(self, status: int, detail):
+        super().__init__(str(detail))
+        self.status, self.detail = status, detail
+
+
+def _atomic_write(path: str, data: bytes) -> None:
+    """Write temp, fsync, rename: a reader sees the old file or the new one."""
+    tmp = f"{path}.tmp.{_os.getpid()}"
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+        fh.flush()
+        _os.fsync(fh.fileno())
+    _os.replace(tmp, path)
 
 
 class _GreedyView:

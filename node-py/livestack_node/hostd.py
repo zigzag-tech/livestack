@@ -104,7 +104,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .hostbroker import HostBroker, RestPeer
 from .membership import MembershipPolicy, RosterFull
@@ -454,6 +454,15 @@ def build_app(broker: HostBroker):
                                            if op.observability_degraded],
                 "store": store.path,
             }
+        runtime = getattr(broker, "policy_runtime", None)
+        if runtime is not None:
+            # The target-choice policy's state, and what is wrong with it. This
+            # broker has no subsystem-health mechanism, so the degradations are
+            # listed here (scheduler-policy-routine design §7): running on
+            # defaults, native/reference disagreement, a refused artifact, a
+            # missing native module, a record stream dropping or unavailable.
+            view["policy"] = runtime.status()
+            view["degraded"] = list(view["policy"]["degraded"])
         return view
 
     @app.get("/fleet/rank")
@@ -739,6 +748,61 @@ def build_app(broker: HostBroker):
         out["lease_id"] = lease_id
         return out
 
+
+    # --- the scheduler policy artifact (scheduler-policy-routine design §6) --
+    def _policy_runtime(policy_id: str):
+        from .policy_runtime import POLICY_ID
+        if policy_id != POLICY_ID:
+            raise HTTPException(404, f"no policy {policy_id!r}; this broker serves {POLICY_ID}")
+        runtime = getattr(broker, "policy_runtime", None)
+        if runtime is None:
+            raise HTTPException(503, "this broker runs no policy runtime (fleet broker only)")
+        return runtime
+
+    def _policy_admin(authorization):
+        """Publishing changes routing for everyone: it needs an authenticated
+        principal carrying `policy_admin`, and auth OFF refuses outright."""
+        from .fleet_auth import POLICY_ADMIN, AuthError, bearer_token, principal_for
+        principals = getattr(broker, "fleet_principals", None)
+        if principals is None:
+            raise HTTPException(403, "policy publishing requires fleet auth")
+        try:
+            who = principal_for(principals, bearer_token(authorization))
+        except AuthError as e:
+            raise HTTPException(e.status, e.detail)
+        if not who.can(POLICY_ADMIN):
+            raise HTTPException(403, f"'{who.name}' does not carry {POLICY_ADMIN}")
+        return who
+
+    @app.put("/fleet/policy/{policy_id}")
+    def fleet_policy_put(policy_id: str, role: str = "active",
+                         payload: Any = Body(...), authorization: str = Header(None)):
+        """Publish an artifact (``role=active``) or up to two shadows
+        (``role=shadow``, a JSON array). Validated by the native module, which
+        recomputes the version; written atomically, previous kept."""
+        from .policy_runtime import PolicyRouteError
+        _policy_admin(authorization)
+        runtime = _policy_runtime(policy_id)
+        try:
+            return runtime.publish(role, payload)
+        except PolicyRouteError as e:
+            raise HTTPException(e.status, e.detail)
+
+    @app.get("/fleet/policy/{policy_id}")
+    def fleet_policy_get(policy_id: str):
+        return _policy_runtime(policy_id).status()
+
+    @app.post("/fleet/policy/{policy_id}/revert")
+    def fleet_policy_revert(policy_id: str, authorization: str = Header(None)):
+        """Swap the previous artifact back in. A file swap: no model, no
+        improver, nothing a bad policy can lock out."""
+        from .policy_runtime import PolicyRouteError
+        _policy_admin(authorization)
+        runtime = _policy_runtime(policy_id)
+        try:
+            return runtime.revert()
+        except PolicyRouteError as e:
+            raise HTTPException(e.status, e.detail)
 
     # --- the provisioning control plane (v1) --------------------------------
     #
