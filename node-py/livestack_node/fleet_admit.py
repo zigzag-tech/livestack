@@ -32,6 +32,7 @@ from .ledger import Candidate, distance_band
 # The ONE definition of what a scope grant admits, shared with the announce
 # side so the node stating a grant and the broker enforcing it cannot drift.
 from .announce import _scope_admits
+from .mesh_peer import facade_id
 
 SLA_BY_NAME = {"interactive": Sla.INTERACTIVE, "normal": Sla.NORMAL, "batch": Sla.BATCH}
 
@@ -65,7 +66,7 @@ def targets_from_view(view: dict, kind: str, vantage: str = "direct",
     for host_id, host in sorted((view.get("hosts") or {}).items()):
         for node in host.get("nodes") or []:
             peer = node.get("peer", "")
-            base = peer[: -len("/livestack")] if peer.endswith("/livestack") else peer
+            base = facade_id(peer)
             dist = distance_to(view, host_id, node, vantage)
             load = node.get("load") if isinstance(node.get("load"), dict) else None
             common = dict(
