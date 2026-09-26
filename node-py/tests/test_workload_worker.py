@@ -292,7 +292,7 @@ def test_worker_reuses_verified_source_without_a_second_download(fleet, tmp_path
         worker.close()
 
 
-def test_worker_prefers_verified_input_mirror_and_falls_back_to_authority(fleet, tmp_path, monkeypatch):
+def test_worker_prefers_verified_input_mirror_and_falls_back_to_authority(fleet, tmp_path, monkeypatch, caplog):
     monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (0, 0, 0))
     store, config, caller, digest = fleet
     mirror = tmp_path/'mirror'; mirror.mkdir()
@@ -316,6 +316,8 @@ shutil.copyfile(source,sys.argv[3])
         fallback = InputTransfer(caller).put(tmp_path/'fallback.tar')['digest']
         second = caller.submit(dict(first['spec'], key='mirror-fallback', input_digest=fallback))
         assert worker.step() and caller.get(second['id'])['state'] == 'succeeded'
+        assert any('input mirror miss' in record.getMessage() and fallback[:12] in record.getMessage()
+                   for record in caplog.records), 'a mirror miss must name its fallback'
         entries = json.loads((worker.input_cache.root/'index.json').read_text())
         assert len(entries) == 1 and next(iter(entries.values()))['digest'] == fallback
     finally:

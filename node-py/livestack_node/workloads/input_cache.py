@@ -6,6 +6,7 @@ None retention disables eviction/expiry; capacity exhaustion refuses admission.
 """
 import hashlib
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -126,9 +127,13 @@ class InputCache:
         if self.mirror:
             try:
                 path = self.mirror.get(digest, self.root/key, self.transfer.max_bytes)
-            except WorkloadError:
+            except WorkloadError as error:
                 # Provider outages and corrupt mirror bytes never weaken the
                 # attempt-scoped authority fallback or its final digest check.
+                # The fallback is still an anomaly worth naming: a mirror miss
+                # costs the cross-region transfer the mirror exists to avoid.
+                logging.warning('input mirror miss for %s: %s; falling back to authority transfer',
+                                digest[:12], error)
                 path = None
         if path is None:
             path = self.transfer.get(digest, self.root/key, assignment=assignment)
