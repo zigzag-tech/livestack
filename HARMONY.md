@@ -442,6 +442,67 @@ local host broker, 8800 is buildd on zz-tower2). It is outside the GFW and
 reaches every node directly. Full design and phasing:
 `_plans/fleet-broker.md`.
 
+## Connectivity backbone — meshlink, outbound-only
+
+Nodes do not need a reachable IP to join the fleet. A node behind NAT, on a
+laptop, or on a network that allows only outbound 443 attaches **outbound** to a
+meshlink relay and announces its `mesh://<realm>/<daemon_id>/livestack` name;
+brokers and callers dial that name through the tunnel, which terminates on the
+node's loopback facade. Nothing dials in. The relay is the meshlink
+`mesh_relay` package (one process serves multiple realms); the wire is
+meshlink's mux; the route policy is meshlink's Rust core
+(`mesh-route-py`); the attachment is meshlink's `mesh_outbound_py` port. The
+full integration record is `_plans/meshlink-backbone-plan.md` and the five
+decisions in `_plans/meshlink-backbone-decisions.md` (DR-1..DR-5).
+
+**A peer is an opaque URL string in both rosters.** `http(s)://` peers keep
+working side by side with `mesh://` peers — `make_peer` is the single
+scheme-dispatch point (`http` → RestPeer, `mesh` → MeshPeer, anything else
+refused by name), used by seeding, registration and the fleet broker alike.
+Membership, planning and pruning never look inside the URL, which is what makes
+migration incremental: flip one host at a time, HTTP stays as the permanent
+fallback for LAN/VPC peers. A mixed roster (one HTTP peer + one mesh peer in
+the same broker) is tested in `tests/test_mixed_roster.py`; the consolidated
+no-inbound journey (attach → register → probe → `/fleet/admit` → warm/evict →
+relay restart → key rotation → quota refusal) is `tests/test_mesh_e2e.py`.
+
+**Realm isolation is cryptographic.** Livestack runs in its own relay realm
+(`livestack`) with its own ed25519 attachment key and its own HMAC cap-key
+ring; the caps a caller presents must wear the realm's configured token
+cosmetics (`typ`/`aud`) or the relay refuses the door. Benchday's realm on the
+same relay process is untouched — a benchday cap presented against the
+livestack realm is the cross-realm spoof shape and is refused (tested in
+`tests/test_mesh_peer.py`).
+
+**Identity is the operator-assigned `daemon_id`, not the key** (DR-2):
+`mesh://livestack/<daemon_id>/livestack` names the node, and rotating either
+the daemon's ed25519 key or the caller's cap-key ring changes nothing about
+who the fleet thinks this node is. Rotation overlaps on a verify window: the
+relay verifies every key in the ring until its tokens pass TTL + grace, so
+in-flight tunnels survive a rotation and new mints wear the new key
+(`tests/test_relay_rotation.py`).
+
+**Failure semantics over tunnels.** A dial failure that carries a NAMED
+degradation — `mesh_tunnel_down` (tunnel dead) or `relay_quota` (the relay's
+per-account quota refused the dial with 429, DR-3) — demotes the peer to
+`suspect` on the event with a fast re-probe (`LIVESTACK_MESH_SUSPECT_PROBE_S`,
+default 10 s), instead of waiting `LIVESTACK_PEER_SUSPECT_SECONDS` of silence.
+Placements survive on the remembered read until `mia` at
+`LIVESTACK_PEER_MIA_SECONDS` — a relay restart never evicts a GPU placement,
+and the row's `degradation` field names which of the two failures it was, so
+"transient tunnel-down, re-attaching" and "the relay is refusing us" never
+read alike. `relay_quota` is deliberately NOT failed over to another relay:
+the quota binds the caller's account, which is the same at every relay. The
+relay quota also stacks under Livestack's own `LIVESTACK_ACCOUNT_QUOTA` — the
+relay caps streams per realm+account at the door, the fleet broker caps slots
+per account at admission.
+
+**Health surface.** A mesh-attached node's `/livestack/health` carries a
+`mesh` subsystem: `absent` (not configured — healthy, status `ok`) versus
+`degraded` with the attach failure named (relay unreachable, bad config). A
+failed attach never boot-blocks: the loopback facade keeps serving and the
+supervisor retries on the port's 1 s → 60 s backoff.
+
 ## The page — one screen that says where everything is
 
 Everything above is readable only as JSON. `GET /fleet` is complete and nobody
@@ -862,6 +923,18 @@ up on stays filtered, however empty its card.
 | `LIVESTACK_DEVICE_ID` | derived | this node's device id; derived from the CUDA device UUID / MLX when unset |
 | `LIVESTACK_NODE_HOST` | `127.0.0.1` | read by NODES: the address a node announces ITSELF at. Loopback is right for a broker on the same machine and wrong for one anywhere else — an unreachable registration sits `suspect` forever with a connect error, looking like a dead node rather than a bad address. A node cannot infer this, so it is the operator's to state |
 | `LIVESTACK_BROKER_URL` | `http://127.0.0.1:8799` | read by NODES: a **comma list** of brokers to report for duty to. One entry is a node and its host broker; two is the fleet case. An announce reaches all of them and fails only if none answered — a fleet broker being down must not make a node look unregistered to the broker that arbitrates its card |
+| `LIVESTACK_MESH_ENABLED` | unset | `1` attaches this node outbound to the mesh relay; `0` refuses even a daemon-id-shaped `LIVESTACK_NODE_HOST`. Any other value RAISES — the node must not guess whether it belongs on the mesh. Unset, mesh is on iff `LIVESTACK_NODE_HOST` is daemon-id-shaped (no dot, no `://`) |
+| `LIVESTACK_NODE_HOST` (as daemon id) | `127.0.0.1` | a daemon-id-shaped value (`gpu-box-7`) IS the node's mesh name: it resolves to `mesh://<realm>/<value>/livestack` with no second flag. A value with a dot or scheme is a hostname/URL as before |
+| `LIVESTACK_MESH_DAEMON_ID` | — | the node's mesh identity (wins over a daemon-id-shaped `LIVESTACK_NODE_HOST`). Required when mesh is enabled and the host is not daemon-id-shaped; identity is this id, NOT the ed25519 key — key rotation must not mint a new peer (DR-2) |
+| `LIVESTACK_MESH_DAEMON_KEY` / `_FILE` | generated per boot | the daemon's ed25519 key answering the relay's challenge. Unset ⇒ generated ephemeral and logged — identity rides on `daemon_id`, so nothing the fleet can observe changes. The `_FILE` form carries the fleet's 0600 discipline and wins over the inline value |
+| `LIVESTACK_RELAY_URLS` | — | comma list of relay base URLs (`wss://relay:443`) the node attaches outbound to, and callers open doors on |
+| `LIVESTACK_RELAY_IDS` | — | JSON map relay URL → relay id (the `bdrt1`/`bdsr1` claims name it; a guessed id is a refused attach, and a refused door must not read as a dead relay) |
+| `LIVESTACK_RELAY_REALM` | `livestack` | the relay realm this node/caller belongs to. Caps must wear the realm's token cosmetics or the door refuses them (cross-realm spoof shape) |
+| `LIVESTACK_RELAY_KEY` / `_FILE` | — | the realm minting key (ed25519, PKCS#8): signs `bdrt1` attachments (node side) — `0600` discipline, `_FILE` wins |
+| `LIVESTACK_RELAY_CAP_KEYS` | — | the caller-side cap-key ring, same JSON the relay's `relayKeyRingFromEnv` accepts: `[{"kid","secret","active"}]`. Every key verifies until its tokens pass TTL + grace; `active` mints. Rotation = presenting a ring with the next key active |
+| `LIVESTACK_RELAY_CAPABILITY_TYPE` / `_AUDIENCE` / `LIVESTACK_RELAY_ATTACHMENT_AUDIENCE` | realm defaults | the realm's token cosmetics (DR-4) — set to match the relay's realm record at deploy time; a mismatch is a named refusal, not a silent fallback |
+| `LIVESTACK_RELAY_QUOTA_MAX_STREAMS` / `_MAX_REQ_PER_MIN` / `_MAX_STREAM_SECONDS` | relay defaults | the caller-side declaration of the relay's per-account quota (DR-3). Stacked limits: the relay caps streams per realm+account at the door, `LIVESTACK_ACCOUNT_QUOTA` caps slots per account at admission |
+| `LIVESTACK_MESH_SUSPECT_PROBE_S` | `10` | the fast re-probe cadence while a mesh peer carries a NAMED degradation (`mesh_tunnel_down`, `relay_quota`). Age still owns `mia` — the override never applies there, so a long-dead seed is not re-dialled forever |
 | `LIVESTACK_ACCOUNT_QUOTA` | — | max concurrent fleet slots ONE account may hold. **Unset = no ceiling**, the right default for a single-operator fleet and the wrong one the day strangers can register. A refused admit is a **429** naming the count, never a silent demotion |
 | `LIVESTACK_ACCOUNT_QUOTAS` | `{}` | per-account overrides. Quote it for systemd: `Environment='LIVESTACK_ACCOUNT_QUOTAS={"acct": 3}'` — bare double quotes are stripped |
 | `LIVESTACK_FAIR_SHARE_PENALTY_S` | `30` | seconds of urgency an account forfeits per slot it holds, applied to the deadline ordering. `0` disables. A no-op on a single-tenant fleet |
