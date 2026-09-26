@@ -85,6 +85,8 @@ DEFAULT_RENEWAL_LEAD_SECONDS = 60
 #: relay serves each realm its own configured cosmetics; these defaults are
 #: what the livestack realm wears, and each is env-overridable.
 DEFAULT_REALM = "livestack"
+DEFAULT_ROUTE_PREFIX = "/livestack-relay"
+DEFAULT_DOOR_PATH = "/livestack-attach"
 DEFAULT_ATTACHMENT_AUDIENCE = "livestack-relay-attachment"
 DEFAULT_CAPABILITY_TYPE = "livestack-relay-capability"
 DEFAULT_CAPABILITY_AUDIENCE = "livestack-relay"

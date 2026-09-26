@@ -109,16 +109,12 @@ MESH_SCHEME = "mesh"
 #: (meshlink server.ts `authorizeDaemon` — hard-coded there, so this names it).
 DAEMON_DOOR_SCOPE = "terminal.proxy"
 
-#: The relay route-prefix cosmetic stripped before route matching. The
-#: livestack realm's INTENDED cosmetic is "/livestack-relay" (DR-4), but the
-#: pinned meshlink build only applies a realm's custom routePrefix to the
-#: relay's HTTP request path — its WebSocket upgrade handler matches routes
-#: without stripping the configured prefix, so a WS door under any non-default
-#: prefix 404s (found 2026-09-26, Phase 5 harness bring-up). Until that lands
-#: in meshlink, the only prefix a WS door can carry is the package default;
-#: per-relay overrides arrive via RelayRoute.route_prefix the day the relay
-#: honors them.
-DEFAULT_ROUTE_PREFIX = "/benchday-relay"
+#: The livestack realm's route-prefix cosmetic (DR-4) — the prefix the relay
+#: strips before route matching, served per-realm by the pinned meshlink build
+#: (MESHLINK.lock). RelayRoute.route_prefix defaults to it; a relay serving
+#: the livestack realm under a different prefix is configured with that prefix
+#: explicitly.
+LIVESTACK_ROUTE_PREFIX = relay_control.DEFAULT_ROUTE_PREFIX
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +194,7 @@ class RelayRoute:
     url: str
     relay_id: str
     region: str = "local"
-    route_prefix: str = DEFAULT_ROUTE_PREFIX
+    route_prefix: str = LIVESTACK_ROUTE_PREFIX
 
     def door_url(self, route: str, daemon_id: str, cap: str) -> str:
         path = f"{self.route_prefix}/{route}/{urllib.parse.quote(daemon_id)}"
@@ -269,7 +265,7 @@ class MeshPeer(RestPeer):
                  relay_config: Optional[relay_control.RelayConfig] = None,
                  account_id: str = "livestack-broker",
                  device_id: str = "broker",
-                 route_prefix: str = DEFAULT_ROUTE_PREFIX,
+                 route_prefix: str = LIVESTACK_ROUTE_PREFIX,
                  priorities: Optional[Mapping[str, int]] = None,
                  fallback_footprints: Optional[Mapping[str, int]] = None,
                  control_token: Optional[str] = None,

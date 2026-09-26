@@ -58,10 +58,21 @@ const tunnels = new RelayTunnels({
     realm === cfg.realm ? cfg.attachmentAudience : undefined,
 });
 
+// Realm-aware door authorization, mirroring meshlink's realm_door_e2e
+// buildRealmEngine: every presented realm key authorizes, this relay process
+// answers for the livestack realm, and each realm's configured typ/aud is
+// what its caps must carry — a cap wearing the package default's (benchday)
+// cosmetics against the livestack realm is refused. No `keyRing`: the realm
+// keys alone authorize the door (relay chaining would need keyRing alongside).
+const BENCHDAY_CLAIMS = {
+  typ: 'benchday-speech-relay-capability',
+  aud: 'benchday-speech-relay',
+};
+
 const engine = createRelayServer(
   {
     relayId: cfg.relayId,
-    keyRing: { verify: cfg.capKeys, active: cfg.capKeys[0]?.kid },
+    keyRing: null,
     quota,
     tunnels,
     maxBodyBytes: 8 * 1024 * 1024,
@@ -70,6 +81,13 @@ const engine = createRelayServer(
     inventory: () => ({}),
     routePrefix: cfg.routePrefix,
     doorPath: cfg.doorPath,
+    realmKeys: cfg.realmCapKeys,
+    targetRealm: cfg.realm,
+    legacyRealm: 'benchday',
+    claimsForRealm: (realm) =>
+      realm === cfg.realm
+        ? { typ: cfg.capabilityType, aud: cfg.capabilityAudience }
+        : BENCHDAY_CLAIMS,
   },
   {
     routes: [{ pattern: `/${cfg.route}/:target`, kind: 'daemon_ws', transport: 'ws' }],

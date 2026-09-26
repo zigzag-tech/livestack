@@ -34,30 +34,24 @@ OUTBOUND_PKG = MESHLINK_REPO / "packages" / "mesh_outbound_py"
 REALM = "livestack"
 RELAY_ID = "relay-near"
 ROUTE = "livestack"
-# The relay DEFAULT route prefix. The livestack realm's intended cosmetic is
-# "/livestack-relay" (mesh_peer.DEFAULT_ROUTE_PREFIX), but the pinned relay
-# build only applies a custom routePrefix to its HTTP request path — the
-# WebSocket upgrade handler matches routes WITHOUT stripping the configured
-# prefix (meshlink server.ts), so a WS door 404s under any non-default
-# prefix. The harness therefore serves the default until that lands in
-# meshlink; this is a harness constraint, not a livestack design choice.
-ROUTE_PREFIX = "/benchday-relay"
-DOOR_PATH = "/livestack-attach"
+# The livestack realm's cosmetics (DR-4), served by the real relay engine at
+# the pinned meshlink build (MESHLINK.lock): the WS upgrade strips the realm's
+# routePrefix before route matching, and the engine verifies door caps against
+# the realm's configured typ/aud — so the harness serves the livestack prefix
+# and caps wear livestack claims, exactly as production deploys them.
+ROUTE_PREFIX = relay_control.DEFAULT_ROUTE_PREFIX
+DOOR_PATH = relay_control.DEFAULT_DOOR_PATH
 ACCOUNT_ID = "acct_livestack"
 CALLER_ACCOUNT = "broker-acct"
 CALLER_DEVICE = "broker-box"
+CAP_TYPE = relay_control.DEFAULT_CAPABILITY_TYPE
+CAP_AUDIENCE = relay_control.DEFAULT_CAPABILITY_AUDIENCE
 
-# The caller-cap cosmetics the pinned relay build verifies at its door. The
-# engine's authorize() calls verifySpeechRelayCapability WITHOUT passing the
-# realm's configured typ/aud (meshlink server.ts), so the door only accepts
-# the package's compiled-in benchday cosmetics — the realm-aware
-# claimsForRealm path exists but the engine never uses it (found 2026-09-26,
-# Phase 5 harness bring-up; second meshlink-side gap alongside the WS
-# routePrefix one). Door caps must therefore wear these until meshlink wires
-# realm cosmetics through; realm isolation stays cryptographic (keys, realm
-# binding), which is the DR-1 property that matters.
-CAP_TYPE = "benchday-speech-relay-capability"
-CAP_AUDIENCE = "benchday-speech-relay"
+# The compiled-in cosmetics of the relay package's DEFAULT (benchday) realm.
+# A door cap wearing these against the livestack realm is the cross-realm
+# spoof shape and must be refused (DR-4; asserted in test_mesh_peer.py).
+BENCHDAY_CAP_TYPE = "benchday-speech-relay-capability"
+BENCHDAY_CAP_AUDIENCE = "benchday-speech-relay"
 
 # ---------------------------------------------------------------------------
 # meshlink package availability (skip loudly, never pass silently)
@@ -224,8 +218,17 @@ class RelayHarness:
              json.dumps({
                  "realm": REALM, "relayId": RELAY_ID, "route": ROUTE,
                  "routePrefix": ROUTE_PREFIX, "doorPath": DOOR_PATH,
-                 "hubPub": MeshKeys.hub_pub_b64(), "capKeys": cap_keys,
+                 "hubPub": MeshKeys.hub_pub_b64(),
+                 # Realm-tagged verify keys: the engine's multi-realm form
+                 # (realmKeys/targetRealm/claimsForRealm) authorizes the door
+                 # per realm, so a cap wears the livestack realm's cosmetics
+                 # or is refused — mirroring meshlink's realm_door_e2e config.
+                 "realmCapKeys": [
+                     {"kid": k["kid"], "secret": k["secret"], "realm": REALM}
+                     for k in cap_keys],
                  "attachmentAudience": relay_control.DEFAULT_ATTACHMENT_AUDIENCE,
+                 "capabilityType": relay_control.DEFAULT_CAPABILITY_TYPE,
+                 "capabilityAudience": relay_control.DEFAULT_CAPABILITY_AUDIENCE,
              })],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, env={**os.environ, "MESHLINK_REPO": str(MESHLINK_REPO)})
