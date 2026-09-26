@@ -576,3 +576,55 @@ def test_infrastructure_failure_retains_log_artifact(fleet, tmp_path):
         assert worker.journal.read() is None
     finally:
         worker.close()
+
+
+def test_infrastructure_verdict_ships_undeclared_run_logs(fleet, tmp_path):
+    """The run's own logs are the evidence of why execution died. An
+    infrastructure verdict ships every *.log even when the handler declared
+    none, and nothing that is not a log."""
+    _, config, caller, digest = fleet
+    script = Path(config['handlers']['native.v1']['argv'][1])
+    script.write_text('''import os
+from pathlib import Path
+Path(os.environ['HARMONY_OUTPUT'],'run.log').write_text('the tail says why')
+Path(os.environ['HARMONY_OUTPUT'],'notes.txt').write_text('not evidence')
+raise SystemExit(75)
+''')
+    config['handlers']['native.v1'].update(infrastructure_exit_codes=[75])
+    job = submit(caller, digest)
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        assert result['result']['outcome'] == 'infrastructure'
+        refs = result['result']['result']['artifacts']
+        names = {item['name'] for item in refs}
+        assert 'run.log' in names and 'notes.txt' not in names
+        log = next(item for item in refs if item['name'] == 'run.log')
+        assert InputTransfer(caller).get(log['digest'], tmp_path/'run.log').read_text() == 'the tail says why'
+    finally:
+        worker.close()
+
+
+def test_infrastructure_failure_records_the_cause_a_caller_can_reach(fleet, tmp_path, monkeypatch):
+    """A starved link used to end attempts with `detail: download retry budget
+    exhausted` and no underlying error anywhere a caller could reach. Every
+    infrastructure verdict carries the failing cause."""
+    _, config, caller, digest = fleet
+    job = submit(caller, digest)
+    worker = WorkloadWorker(config)
+    def broken(*_args, **_kwargs):
+        raise EOFError('truncated block on a starved link')
+    monkeypatch.setattr(worker.transfer, 'get', broken)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        assert result['state'] == 'queued' and result['reason'] == 'infrastructure retry'
+        assert result['result']['outcome'] == 'infrastructure'
+        detail = result['result']['result']
+        assert detail['error'] == 'EOFError'
+        assert detail['detail'] == 'truncated block on a starved link'
+        assert worker.journal.read() is None
+        caller.request('jobs/'+job['id']+'/cancel', {})
+    finally:
+        worker.close()

@@ -74,9 +74,11 @@ def test_resume_through_real_authority_and_fault_proxy(tmp_path, fault):
             assert not list(tmp_path.glob('.download-*'))
             assert len(ranges) == 2, 'identity errors are not retried'
         else:
-            with destination.open('wb') as out, pytest.raises(WorkloadError, match='retry budget'):
+            with destination.open('wb') as out, pytest.raises(WorkloadError, match='retry budget') as caught:
                 download_into(client, receipt['digest'], {'Authorization': 'Bearer '+client.token}, out,
                               4*1024*1024, max_failures=2)
+            assert 'last error:' in str(caught.value), \
+                'the budget verdict must carry the transport failure that caused it'
             assert len(ranges) == 3, 'progress does not reset the total retry bound'
     finally:
         proxy.shutdown(); proxy_thread.join(5); proxy.server_close()

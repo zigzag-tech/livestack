@@ -1,5 +1,6 @@
 """Real SQLite transactions and independent clients, no emulated lease store."""
 from concurrent.futures import ThreadPoolExecutor
+import json
 import sqlite3
 
 import pytest
@@ -461,3 +462,66 @@ def test_a_released_hold_is_still_reported_to_the_worker_that_returns(harness):
     report = register(store, 'w1', 'host1', 'boot1')
     assert report['cleanup'] == [attempt['attempt_id']], \
         'a returning worker must still be told to clean up'
+
+
+def attempt_row(path, attempt_id):
+    db = sqlite3.connect(path)
+    try:
+        return db.execute("SELECT state,result FROM attempts WHERE id=?", (attempt_id,)).fetchone()
+    finally:
+        db.close()
+
+
+def test_an_abandoned_attempt_and_job_carry_the_terminal_reason(harness):
+    """xc-win-1-wsl attempts ended `state='ended', result=NULL` after lease
+    expiry: a caller could not tell an abandoned run from a healthy empty one.
+    Absence and failure must never look alike."""
+    store, now, path = harness
+    register(store)
+    job = store.submit('owner', request())
+    attempt = store.claim('w1', 'boot1')
+    assert attempt is not None
+    now[0] += store.limits.lease_seconds + 1
+    store.sweep()
+    requeued = store.get('owner', job['id'])
+    assert requeued['reason'] == 'execution lease expired'
+    assert requeued['result']['outcome'] == 'infrastructure'
+    assert requeued['result']['result']['detail'] == 'execution lease expired'
+    register(store, cleaned=[attempt['attempt_id']])
+    state, raw = attempt_row(path, attempt['attempt_id'])
+    assert state == 'ended' and raw is not None
+    assert json.loads(raw)['result']['detail'] == 'execution lease expired'
+
+
+def test_the_cleanup_flip_cannot_end_an_attempt_without_a_result(harness):
+    """Structural backstop for cleanup paths not written yet: whatever moved an
+    attempt to cleanup, the row may never end state='ended', result=NULL."""
+    store, now, path = harness
+    register(store)
+    store.submit('owner', request())
+    attempt = store.claim('w1', 'boot1')
+    assert attempt is not None
+    db = sqlite3.connect(path)
+    db.execute("UPDATE attempts SET state='cleanup',result=NULL WHERE id=?", (attempt['attempt_id'],))
+    db.commit()
+    db.close()
+    register(store, cleaned=[attempt['attempt_id']])
+    state, raw = attempt_row(path, attempt['attempt_id'])
+    assert state == 'ended' and raw is not None
+    assert json.loads(raw)['result']['detail'] == 'cleanup ended without a worker result'
+
+
+def test_a_cancelled_attempt_and_job_carry_the_terminal_reason(harness):
+    store, now, path = harness
+    register(store)
+    job = store.submit('owner', request())
+    attempt = store.claim('w1', 'boot1')
+    assert attempt is not None
+    cancelled = store.cancel('owner', job['id'])
+    assert cancelled['state'] == 'cancelled'
+    assert cancelled['result']['result']['detail'] == 'cancelled by owner'
+    state, raw = attempt_row(path, attempt['attempt_id'])
+    assert state == 'cleanup' and raw is not None
+    register(store, cleaned=[attempt['attempt_id']])
+    state, raw = attempt_row(path, attempt['attempt_id'])
+    assert state == 'ended' and json.loads(raw)['result']['detail'] == 'cancelled by owner'

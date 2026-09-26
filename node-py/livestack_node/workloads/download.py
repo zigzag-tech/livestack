@@ -1,6 +1,7 @@
 """Bounded in-process resume for immutable input downloads."""
 import hashlib
 import http.client
+import logging
 import re
 import time
 import urllib.error
@@ -13,13 +14,19 @@ from .block_codec import HEADER, read_gzip_block
 CHUNK = 4*1024*1024
 
 
+def _last_cause(error):
+    """Every budget verdict carries the transport failure that caused it."""
+    return '' if error is None else f'; last error: {type(error).__name__}: {error}'
+
+
 def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, max_seconds=3600):
     count, total, failures, requests = 0, None, 0, 0
     hasher = hashlib.sha256()
     deadline = time.monotonic()+max_seconds
+    last_error = None
     while total is None or count < total:
         if time.monotonic() >= deadline or requests >= (max_bytes+CHUNK-1)//CHUNK+max_failures+1:
-            raise WorkloadError('download duration/request budget exhausted', 503)
+            raise WorkloadError('download duration/request budget exhausted'+_last_cause(last_error), 503)
         requests += 1
         requested_end = min(count+CHUNK, max_bytes)-1
         # A normal initial GET also supports empty objects and old authorities.
@@ -64,7 +71,7 @@ def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, ma
                     continue
                 while remaining:
                     if time.monotonic() >= deadline:
-                        raise WorkloadError('download duration budget exhausted', 503)
+                        raise WorkloadError('download duration budget exhausted'+_last_cause(last_error), 503)
                     chunk = response.read1(min(65536, remaining))
                     if not chunk:
                         raise ConnectionError('download stream ended early')
@@ -77,12 +84,16 @@ def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, ma
                 raise
             error.close()
             failures += 1
-        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead):
+            last_error = error
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as error:
             failures += 1
+            last_error = error
         else:
             continue
+        logging.warning('download %s failed %d/%d after %d bytes: %s',
+                        digest[:12], failures, max_failures, count, last_error)
         if failures > max_failures:
-            raise WorkloadError('download retry budget exhausted', 503)
+            raise WorkloadError('download retry budget exhausted'+_last_cause(last_error), 503) from last_error
         time.sleep(min(0.25*2**(failures-1), 2, max(0, deadline-time.monotonic())))
     if count != total or hasher.hexdigest() != digest:
         raise WorkloadError('download content does not match its identity', 409)

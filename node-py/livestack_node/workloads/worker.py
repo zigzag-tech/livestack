@@ -12,6 +12,7 @@ import logging
 import os
 from pathlib import Path
 import shutil
+import sys
 import time
 import uuid
 from urllib.error import HTTPError
@@ -153,6 +154,15 @@ class WorkloadWorker:
             (handler.get('backend') == 'rootless-docker' and code == 75) else 'product_failure')
         return dict(outcome=outcome, result=result)
 
+    def _close_lease(self, lease, attempt, in_flight):
+        # A stuck renewal thread must never mask the error being propagated.
+        try:
+            lease.close()
+        except Exception as error:
+            logging.warning('lease close failed for %s: %s: %s', attempt, type(error).__name__, error)
+            if in_flight is None:
+                raise
+
     def _attach_artifacts(self, assignment, completion, output):
         handler = self.handlers[assignment['spec']['handler']]
         artifacts = []
@@ -173,6 +183,24 @@ class WorkloadWorker:
                     # workers retain their authenticated fallback path.
                     logging.warning('artifact mirror unavailable for %s: %s', artifact['digest'], error)
             artifacts.append(dict(name=item, **artifact))
+        if completion['outcome'] == 'infrastructure':
+            # Run logs are the evidence of why execution died; ship them even
+            # when the handler declared no outputs. Best effort per file: a log
+            # that cannot upload must never block the result handoff, and it
+            # rides the canonical path only (diagnostics, not program inputs).
+            shipped = {artifact['name'] for artifact in artifacts}
+            logs = sorted(Path(output).glob('*.log')) + sorted(Path(output).parent.glob('*.log'))
+            for path in logs[:16]:
+                if path.name in shipped:
+                    continue
+                shipped.add(path.name)
+                try:
+                    artifact = self.transfer.put(path, assignment=assignment)
+                except Exception as error:
+                    logging.warning('infrastructure log %s not shipped: %s: %s',
+                                    path.name, type(error).__name__, error)
+                    continue
+                artifacts.append(dict(name=path.name, **artifact))
         completion['result']['artifacts'] = artifacts
         completion.update(boot=assignment['boot'], attempt_id=assignment['attempt_id'], fence=assignment['fence'],
                           input_digest=assignment['spec']['input_digest'])
@@ -312,10 +340,10 @@ class WorkloadWorker:
                     raise WorkloadError('execution stopped without a result', 503)
                 time.sleep(.2)
         except Exception as error:
-            logging.warning('attempt %s stopped: %s', attempt, type(error).__name__)
+            detail = str(error)[:512] or type(error).__name__
+            logging.warning('attempt %s stopped: %s: %s', attempt, type(error).__name__, detail)
             completion = dict(outcome='infrastructure', result={'error':type(error).__name__})
-            if isinstance(error, WorkloadError):
-                completion['result']['detail'] = str(error)[:512]
+            completion['result']['detail'] = detail
         finally:
             # Never acknowledge completion or cleanup while owned work survives.
             try:
@@ -323,7 +351,7 @@ class WorkloadWorker:
                 remove_data(root)
             except Exception:
                 if lease:
-                    lease.close()
+                    self._close_lease(lease, attempt, sys.exc_info()[0])
                 raise
         # The workload's wall time and verdict go back with the fleet leases it
         # held: the fleet broker joins them to the decision that placed it.
@@ -342,7 +370,7 @@ class WorkloadWorker:
             self.reconciled = False
         finally:
             if lease:
-                lease.close()
+                self._close_lease(lease, attempt, sys.exc_info()[0])
         # Keep evidence until authority acknowledgement; failed network writes
         # leave the journal and root for the next reconciliation pass.
         shutil.rmtree(root)
