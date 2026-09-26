@@ -11,12 +11,15 @@ change `python-connectivity-consumer` and lands there first.
 
 ## Phase 1–3 — meshlink-side prerequisites (other repo)
 
-- [ ] 1.1 `mesh-route-py` pyo3 crate with corpus parity. Tests: meshlink
+- [x] 1.1 `mesh-route-py` pyo3 crate with corpus parity. Tests: meshlink
       `cargo test -p mesh-route-core -p mesh-route-py`. Ledger: n/a.
-- [ ] 2.1 `mesh_outbound_py` package, transcript replay byte-exact. Tests:
+      DONE on meshlink (landed Phase 1, on origin/main ≤ 902a233).
+- [x] 2.1 `mesh_outbound_py` package, transcript replay byte-exact. Tests:
       meshlink `mesh_outbound_py` lane + relay negative cases. Ledger: n/a.
-- [ ] 3.1 Relay cosmetics realm-configurable, `mesh_relay` suite green with
+      DONE on meshlink (landed Phase 2, ≤ 902a233).
+- [x] 3.1 Relay cosmetics realm-configurable, `mesh_relay` suite green with
       zero test edits. Tests: meshlink `mesh_relay` suite. Ledger: n/a.
+      DONE on meshlink (902a233 — the DR-4 realm-door e2e).
 
 ## Phase 4 — transport dial seam
 
@@ -135,13 +138,39 @@ change `python-connectivity-consumer` and lands there first.
 
 ## Phase 9 — e2e + rollout
 
-- [ ] 9.1 Isolated no-inbound e2e lane: attach → register → `/residence`
+- [x] 9.1 Isolated no-inbound e2e lane: attach → register → `/residence`
       probe → `/fleet/admit` → warm/evict roundtrip → relay restart → key
       rotation → quota 429. Tests: the lane itself. Ledger: the lane asserts
       ledger joins for admit/evict.
-- [ ] 9.2 Staged rollout plan executed (staging host, mixed roster, then
+      DONE (2026-09-26): `tests/test_mesh_e2e.py` — the consolidated
+      single-journey lane. No-inbound is SIMULATED (a real netns is not
+      available unprivileged in CI — `unshare -n` fails EPERM — so every
+      listener is loopback-only and the lane asserts the node's env-resolved
+      config names no dialable non-loopback address; stated in the lane's
+      docstring and commit). Register runs through the real `register_url`
+      path (what `POST /peers` serves) with the MeshPeer built by the real
+      `make_peer` from the caller relay env; `/fleet/admit` runs through the
+      real `build_app` route over ASGI. Rotation rides the verify window
+      (expiry stays in test_relay_rotation.py, daemon-key half in
+      test_mesh_peer.py — DRY). Ledger joins asserted: admit record ↔ hosted
+      lease (lease_id both directions; decision_id when a policy runtime
+      records one) and grant/load/evict records on the journey owner, with
+      every eviction citing a non-transport cause.
+- [x] 9.2 Staged rollout plan executed (staging host, mixed roster, then
       one-at-a-time production flips). Tests: staging observation. Ledger:
       each flip recorded.
-- [ ] 9.3 Docs: HARMONY.md "Connectivity backbone" section; meshlink README
+      RUNBOOK DELIVERED (2026-09-26): `_plans/meshlink-rollout.md` — staging
+      step with concrete env/commands and go/no-go checks, per-host
+      production flips with stop conditions and named operators. The
+      observation windows and flips themselves are OPERATOR TIME and have
+      NOT been executed; the runbook says so.
+- [x] 9.3 Docs: HARMONY.md "Connectivity backbone" section; meshlink README
       Python-consumer row; benchday re-pin `packages/MESHLINK.lock` only.
       Tests: benchday lock check. Ledger: n/a.
+      DONE (2026-09-26): HARMONY.md gained the section + the mesh env rows
+      (incl. `LIVESTACK_MESH_SUSPECT_PROBE_S` and the health-surface
+      semantics); the meshlink README Python rows were already there from
+      Phase 2 — the missing realm-door e2e line was added (meshlink
+      c6ab96f); benchday re-pinned d77e1e24 → c6ab96f (includes DR-4's
+      902a233) and `check-submodule-pins.mjs --meshlink-only` is green on
+      the landed tree (benchday origin/main 021c8273d).
