@@ -163,30 +163,11 @@ def make_peer(url, *, priorities=None, fallback_footprints=None,
 def _relay_ids_for(urls) -> Dict[str, str]:
     """Relay URL → relay_id for capability minting.
 
-    `LIVESTACK_RELAY_IDS` is JSON {"<url>": "<relay_id>"}. A relay without a
-    mapping is SKIPPED, loudly: the cap's relay_id claim is verified against
-    the relay's own id, so minting for a guessed id produces tokens that are
-    born refused (`relay_mismatch`) — a named config error beats that."""
-    raw = (os.environ.get("LIVESTACK_RELAY_IDS") or "").strip()
-    mapping: Dict[str, str] = {}
-    if raw:
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict):
-                mapping = {str(k): str(v) for k, v in parsed.items()}
-        except ValueError:
-            print(f"[hostd] LIVESTACK_RELAY_IDS={raw!r} is not a JSON object — "
-                  "relay ids unknown", flush=True)
-    out = {}
-    for u in urls:
-        rid = mapping.get(u)
-        if rid:
-            out[u] = rid
-        else:
-            print(f"[hostd] relay {u!r} skipped: no relay_id in "
-                  "LIVESTACK_RELAY_IDS — caps minted for a guessed relay_id "
-                  "would be refused as relay_mismatch", flush=True)
-    return out
+    The parser lives in relay_control (next to the minting both sides mint
+    against); hostd keeps this name so its call sites and its historical
+    unprefixed skip lines stay unchanged."""
+    return relay_control.relay_ids_from_env(
+        urls, log=lambda m: print(m, flush=True))
 
 
 def build_broker(peer_urls: List[str], device_config=None,

@@ -443,6 +443,46 @@ class RelayQuotaConfig:
                    max_stream_seconds=num("LIVESTACK_RELAY_QUOTA_MAX_STREAM_SECONDS"))
 
 
+def relay_ids_from_env(urls: Sequence[str], env: Optional[Mapping[str, str]] = None,
+                       log: Optional[Callable[..., None]] = None) -> dict:
+    """Relay URL → relay_id for token minting, from ``LIVESTACK_RELAY_IDS``.
+
+    ``LIVESTACK_RELAY_IDS`` is JSON ``{"<url>": "<relay_id>"}``. A relay without
+    a mapping is SKIPPED, loudly: the ``relay_id`` claim in both token kinds is
+    verified against the relay's own id, so minting for a guessed id produces
+    tokens that are born refused (``relay_mismatch``) — a named config error
+    beats that. Both the broker side (hostd's mesh peers) and the node side
+    (mesh_attach's attachments) mint against relay ids, so the parser lives
+    here once, next to the minting it serves.
+
+    ``log`` receives the skip lines; the default prints them. Callers that want
+    their own prefix wrap it (hostd passes a plain print to keep its historical
+    unprefixed lines)."""
+    env = os.environ if env is None else env
+    if log is None:
+        log = lambda m: print(m, flush=True)  # noqa: E731
+    raw = (env.get("LIVESTACK_RELAY_IDS") or "").strip()
+    mapping = {}
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                mapping = {str(k): str(v) for k, v in parsed.items()}
+        except ValueError:
+            log(f"LIVESTACK_RELAY_IDS={raw!r} is not a JSON object — "
+                "relay ids unknown")
+    out = {}
+    for u in urls:
+        rid = mapping.get(u)
+        if rid:
+            out[u] = rid
+        else:
+            log(f"relay {u!r} skipped: no relay_id in LIVESTACK_RELAY_IDS — "
+                "tokens minted for a guessed relay_id would be refused as "
+                "relay_mismatch")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Config surface
 # ---------------------------------------------------------------------------

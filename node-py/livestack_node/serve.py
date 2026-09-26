@@ -186,7 +186,35 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     # state, and the broker keeps its old (duplicating) behaviour rather than
     # guessing one.
     early_port = port if port is not None else os.environ.get("LIVESTACK_NODE_PORT")
-    node_id = f"{_machine_name(host_id)}:{int(early_port)}" if early_port else None
+
+    # Mesh identity (DR-2) resolves from the environment BEFORE node_id: for a
+    # mesh-attached node the stable identity is realm+daemon_id, not
+    # hostname:port — key rotation must not mint a new peer. The state holder
+    # is created here so /health names "mesh attach failed" distinctly from
+    # "no mesh configured" no matter which path attach() takes.
+    from . import mesh_attach
+    mesh_state = mesh_attach.MeshAttachState()
+    mesh_target = None
+    try:
+        mesh_target = mesh_attach.resolve_mesh_target()
+        if mesh_target is None:
+            mesh_state.mark_absent()
+    except ValueError as e:
+        # Misconfiguration is a named degradation, never a boot failure: the
+        # node still serves loopback; the health surface says why it is not
+        # on the mesh (mesh_attach.resolve_mesh_target documents the env).
+        mesh_state.mark_failed(f"mesh_attach_misconfigured: {e}")
+
+    if mesh_target is not None and early_port:
+        # DR-2: realm+daemon_id IS the identity — the ed25519 key proves
+        # possession at the relay door but never names the node, and the
+        # loopback hostname:port describes the tunnel's termination, not the
+        # node. This must equal MeshPeer.node_id for the same daemon.
+        node_id = mesh_target.node_id
+    elif early_port:
+        node_id = f"{_machine_name(host_id)}:{int(early_port)}"
+    else:
+        node_id = None
 
     # One journal line per mutating request and per auth refusal, with source
     # address and principal name — the same audit trail hostd writes (see
@@ -208,7 +236,8 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
                      gpu_call, device_meter=device_meter, activation_tracker=tracker,
                      readiness=readiness, device_id=device_id,
                      in_flight=in_flight, node_id=node_id, inventory=inventory,
-                     node_principals=node_principals),
+                     node_principals=node_principals,
+                     subsystems={"mesh": mesh_state.snapshot}),
         prefix=prefix,
     )
 
@@ -235,10 +264,26 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
         # POST (which shows it a source address, not a listening port). So it is
         # the operator's to state, and the default keeps single-machine
         # deployments working with nothing set.
+        #
+        # SCHEME-AWARE: a mesh-attached node announces its mesh name, not an
+        # http URL. `LIVESTACK_NODE_HOST` may itself BE the daemon_id (no dot,
+        # no '://' — the rule mesh_attach.looks_like_daemon_id documents), or
+        # the mesh may be enabled/daemon-named by the LIVESTACK_MESH_* envs
+        # with HOST left as a reachable address for non-mesh consumers.
         advertise = (os.environ.get("LIVESTACK_NODE_HOST") or "127.0.0.1").strip()
+        if mesh_target is not None:
+            announced = mesh_target.advertised_url_for(prefix)
+            # The self-probe stays on loopback: the announced mesh URL names a
+            # door at the far end of this node's OWN tunnel, and dialing it
+            # from here is a self-dial through the relay (see
+            # announce.facade_answers — two addresses, one door).
+            probe_url = f"http://127.0.0.1:{int(resolved_port)}{prefix}"
+        else:
+            announced = f"http://{advertise}:{int(resolved_port)}{prefix}"
+            probe_url = None
         from .announce import node_operation_id, node_region, node_scope
         start_registrar(
-            f"http://{advertise}:{int(resolved_port)}{prefix}",
+            announced,
             host_id=host_id, kind=kind,
             # Where this machine is. Announced, not inferred: see
             # `announce.node_region` for why a measured distance cannot answer
@@ -253,7 +298,34 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
             # `announce.node_operation_id`.
             operation_id=node_operation_id(),
             interval_s=float(os.environ.get("LIVESTACK_REGISTER_INTERVAL", "30")),
+            probe_url=probe_url,
         )
+
+    # Mesh attach (Phase 6 of the meshlink backbone): the facade exists as an
+    # ASGI app now — attach outbound so brokers and callers can dial this node
+    # through the relay at its announced mesh URL. The attach loop runs on
+    # background threads and reports through mesh_state: it NEVER blocks this
+    # function and NEVER stops the loopback facade. A failed attach is a named
+    # degradation on /health; absence (mesh not configured) stays "absent".
+    # The outbound port terminates every tunnel stream as one loopback HTTP
+    # request, so the facade need not be bound yet — no stream arrives before
+    # the broker learns the peer, and the announce is gated on the loopback
+    # self-probe.
+    if mesh_target is not None and resolved_port:
+        try:
+            from . import relay_control
+            relay_config = relay_control.RelayConfig.from_env(
+                log=lambda m: print(m, flush=True))
+            mesh_attach.start_mesh_attach(
+                f"http://127.0.0.1:{int(resolved_port)}",
+                relay_config=relay_config,
+                daemon_id=mesh_target.daemon_id,
+                state=mesh_state,
+                log=lambda m: print(m, flush=True))
+        except Exception as e:  # noqa: BLE001 - attach failure never boot-blocks
+            mesh_state.mark_failed(f"mesh attach start failed: {e}")
+            print(f"[livestack] mesh attach could not start — serving loopback "
+                  f"only, health surface names the failure: {e}", flush=True)
 
     if preload is not None:
         _start_preload(preload, manager=manager, gpu_call=gpu_call,

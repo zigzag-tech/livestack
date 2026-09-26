@@ -10,7 +10,7 @@ import hashlib
 import os
 import time
 
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 
 from .announce import node_region as _node_region
 from .lease import Capability
@@ -220,10 +220,18 @@ def build_router(manager, coordinator, capability: Capability,
                  device_id: Optional[str] = None,
                  in_flight: Optional[Callable[[], int]] = None,
                  node_id: Optional[str] = None, inventory=None,
-                 node_principals=None):
+                 node_principals=None,
+                 subsystems: Optional[Mapping[str, Callable[[], Mapping]]] = None):
     # Resolved ONCE, here, so /capability and /residence can never disagree
     # about which device this node is on — a disagreement the broker would read
     # as two devices.
+    #
+    # ``subsystems`` are the named health probes /health merges in beside
+    # ``residence`` — name -> zero-arg callable -> a small dict carrying at
+    # least ``state``. Healthy states (``ok``/``absent``/``attached``) leave
+    # the overall status alone; anything else degrades it, named. A probe that
+    # THROWS degrades too, with the error named — a crashing health probe is
+    # itself a degradation signal (jidoka).
     device_id = resolve_device_id(capability.host_id, device_id)
     device_candidates = resolve_device_candidates(capability.host_id, device_id
                                                   if device_id != resolve_device_id(capability.host_id)
@@ -358,7 +366,19 @@ def build_router(manager, coordinator, capability: Capability,
 
     @router.get("/health")
     def health() -> dict:
-        return {"status": "ok", "residence": coordinator.status()}
+        out = {"status": "ok", "residence": coordinator.status()}
+        for name, probe in (subsystems or {}).items():
+            try:
+                snap = dict(probe() or {})
+            except Exception as e:  # noqa: BLE001 - a crashing probe IS a signal
+                snap = {"state": "error", "error": f"health probe failed: {e}"}
+            out[name] = snap
+            # Healthy states keep "ok"; anything else degrades the surface by
+            # name. HTTP stays 200 — the bytes carry the truth, and the broker
+            # self-probe gates on /residence, not on this status word.
+            if snap.get("state") not in (None, "ok", "absent", "attached"):
+                out["status"] = "degraded"
+        return out
 
     @router.post("/lease")
     def acquire(payload: dict = Body(...),
