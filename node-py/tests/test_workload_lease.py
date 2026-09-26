@@ -210,6 +210,8 @@ def test_removed_execution_stops_renewal_and_authority_requeues(tmp_path):
         recovered = store.get('owner', job['id'])
         assert recovered['state'] == 'queued'
         assert recovered['reason'] == 'execution lease expired'
+        assert recovered['result']['result']['detail'] == 'execution lease expired', \
+            'an abandoned job must carry its terminal reason as a result'
         assert recovered['attempts'][0]['state'] == 'cleanup'
     finally:
         if lease:

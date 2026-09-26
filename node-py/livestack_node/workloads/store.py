@@ -187,7 +187,10 @@ class WorkloadStore:
                     raise WorkloadError("unknown cleanup attempt", 409)
                 if row["state"] == "running":
                     self._abandon(db, row, now, "worker confirmed process stopped")
-                db.execute("UPDATE attempts SET state='ended' WHERE id=? AND state='cleanup'", (aid,))
+                # Structural backstop: no attempt row may end without a result,
+                # whatever path moved it to cleanup.
+                db.execute("UPDATE attempts SET state='ended',result=COALESCE(result,?) WHERE id=? AND state='cleanup'",
+                           (self._terminal_result(db, row["job"], "cleanup ended without a worker result"), aid))
             dirty = db.execute("SELECT count(*) FROM attempts WHERE worker=? AND state='cleanup'", (worker_id,)).fetchone()[0]
             ready = bool(body["ready"] and not dirty)
             db.execute("UPDATE workers SET ready=? WHERE id=?", (ready, worker_id))
@@ -277,18 +280,30 @@ class WorkloadStore:
         with self.transaction() as db:
             job = self._job(db, job_id, owner)
             if job["state"] not in TERMINAL:
-                db.execute("UPDATE attempts SET state='cleanup' WHERE job=? AND state='running'", (job_id,))
+                raw = self._terminal_result(db, job_id, "cancelled by owner")
+                db.execute("UPDATE attempts SET state='cleanup',result=COALESCE(result,?) WHERE job=? AND state='running'",
+                           (raw, job_id))
                 db.execute("UPDATE workers SET ready=0 WHERE id IN (SELECT worker FROM attempts WHERE job=? AND state='cleanup')", (job_id,))
-                db.execute("UPDATE jobs SET state='cancelled',reason='cancelled by owner',updated=? WHERE id=?",
-                           (self.clock(), job_id))
+                db.execute("UPDATE jobs SET state='cancelled',reason='cancelled by owner',result=?,updated=? WHERE id=?",
+                           (raw, self.clock(), job_id))
             return self._job(db, job_id)
 
+    def _terminal_result(self, db, job_id, reason):
+        """The verdict every terminal row must carry. Absence and failure must
+        never look alike: an abandoned attempt names what ended it."""
+        spec = json.loads(db.execute("SELECT spec FROM jobs WHERE id=?", (job_id,)).fetchone()["spec"])
+        return encode({"outcome": "infrastructure", "input_digest": spec.get("input_digest"),
+                       "result": {"error": "abandoned", "detail": reason, "artifacts": []}},
+                      self.limits.record_bytes)
+
     def _abandon(self, db, attempt, now, reason):
-        db.execute("UPDATE attempts SET state='cleanup' WHERE id=?", (attempt["id"],))
+        raw = self._terminal_result(db, attempt["job"], reason)
+        # COALESCE: the first terminal reason for an attempt is the true one.
+        db.execute("UPDATE attempts SET state='cleanup',result=COALESCE(result,?) WHERE id=?", (raw, attempt["id"]))
         db.execute("UPDATE workers SET ready=0 WHERE id=?", (attempt["worker"],))
         state = "queued" if attempt["fence"] < self.limits.attempts else "failed"
-        db.execute("UPDATE jobs SET state=?,reason=?,updated=? WHERE id=? AND fence=? AND state='running'",
-                   (state, reason, now, attempt["job"], attempt["fence"]))
+        db.execute("UPDATE jobs SET state=?,reason=?,result=?,updated=? WHERE id=? AND fence=? AND state='running'",
+                   (state, reason, raw, now, attempt["job"], attempt["fence"]))
 
     def _expire(self, db, now):
         for job in list(db.execute("SELECT id,spec,state FROM jobs WHERE state IN ('queued','running')")):
@@ -303,12 +318,14 @@ class WorkloadStore:
                     continue
                 reason = ("estimated execution cannot fit remaining deadline "
                           f"({max(0, deadline-now):.0f}s < {estimate:.0f}s)")
+            raw = self._terminal_result(db, job["id"], reason)
             if job["state"] == "running":
-                db.execute("UPDATE attempts SET state='cleanup' WHERE job=? AND state='running'", (job["id"],))
+                db.execute("UPDATE attempts SET state='cleanup',result=COALESCE(result,?) WHERE job=? AND state='running'",
+                           (raw, job["id"]))
                 db.execute("UPDATE workers SET ready=0 WHERE id IN "
                            "(SELECT worker FROM attempts WHERE job=? AND state='cleanup')", (job["id"],))
-            db.execute("UPDATE jobs SET state='expired',reason=?,updated=? "
-                       "WHERE id=? AND state IN ('queued','running')", (reason, now, job["id"]))
+            db.execute("UPDATE jobs SET state='expired',reason=?,result=?,updated=? "
+                       "WHERE id=? AND state IN ('queued','running')", (reason, raw, now, job["id"]))
         for a in list(db.execute("SELECT * FROM attempts WHERE state='running' AND expires<=?", (now,))):
             self._abandon(db, a, now, "execution lease expired")
 

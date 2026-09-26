@@ -25,7 +25,7 @@ def main():
                 if not worker.step():
                     time.sleep(2)
             except Exception as error:
-                logging.warning('worker waiting after %s', type(error).__name__)
+                logging.warning('worker waiting after %s: %s', type(error).__name__, str(error)[:512])
                 time.sleep(5)
     finally:
         worker.close()
