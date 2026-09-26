@@ -9,4 +9,4 @@
 # never saw, so one lock covers both. Benchday owns its own separate pin
 # (packages/MESHLINK.lock); the two pins may differ and neither governs the
 # other. scripts/check-meshlink-pin.mjs fails CI on drift.
-MESHLINK_REV=1ceea00451279701a0d41f4058903e6578525af7
+MESHLINK_REV=13a0e1ca082bfccbb165e5e643f1f076873ce89f
