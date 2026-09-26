@@ -38,6 +38,12 @@ change `python-connectivity-consumer` and lands there first.
       `mesh_tunnel_down` / `relay_quota` named degradations. 7 tests against
       the real `createRelayServer` + real `mesh_outbound_py` attachment,
       including relay-restart and key-rotation (DR-2) drills.
+      NOTE (2026-09-26, meshlink 902a233): the two Phase-5 relay workarounds
+      this task carried (forcing the benchday route prefix; minting door caps
+      with benchday typ/aud) are REMOVED — the relay now strips the realm
+      prefix at the WS upgrade and verifies realm cosmetics, so MeshPeer
+      requests doors under `/livestack-relay` with livestack claims; see the
+      DR-4 cosmetics test in test_mesh_peer.py.
 - [x] 5.2 Scheme selection in `make_peer` / `build_broker`; scheme-aware
       suffix strips. Tests: mixed-roster broker test (one HTTP peer + one
       mesh peer) in `tests/test_mixed_roster.py`. Ledger: membership records
@@ -69,9 +75,14 @@ change `python-connectivity-consumer` and lands there first.
       verified against the real mesh_relay package over node — TTL clamp,
       `seconds_until_refresh`, cap key ring with rotate/retire overlap, env
       config with 0600 key-file discipline, DR-3 quota declaration.
-      OPEN: the rotation DRILL itself needs the mesh outbound package
-      (in-flight tunnels surviving a live rotation); the ring API is shaped
-      for it.
+      DONE (drill half, 2026-09-26): `tests/test_relay_rotation.py` drives a
+      real tunnel through the relay harness — a slow request settles across a
+      live k1→k2 rotation, a pre-minted k1 cap keeps opening the WS door on
+      the verify window, k2 mints verify, and the door refuses k1 only after
+      TTL + the relay's 30 s grace, after which the ring retires k1 (k2
+      unaffected). The bdrt1 identity half (daemon key rotation keeps
+      node_id, DR-2) is `test_mesh_peer.py::test_key_rotation_keeps_broker_
+      identity_stable`.
 - [x] 7.2 `MESHLINK.lock` + drift check script. Tests: check script fails on
       fabricated drift. Ledger: n/a.
 
