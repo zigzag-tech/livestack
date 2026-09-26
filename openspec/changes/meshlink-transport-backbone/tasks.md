@@ -88,11 +88,50 @@ change `python-connectivity-consumer` and lands there first.
 
 ## Phase 8 — liveness
 
-- [ ] 8.1 Tunnel-down → `suspect`, not `mia`; relay restart never evicts
+- [x] 8.1 Tunnel-down → `suspect`, not `mia`; relay restart never evicts
       placements. Tests: relay-restart drill asserting placements survive.
       Ledger: every eviction on a mesh peer must cite a non-transport cause.
-- [ ] 8.2 Warm timeout / in-flight TTL reconciliation over tunnels. Tests:
+      DONE (2026-09-26): a probe failure carrying a NAMED degradation
+      (`MeshTunnelDown`/`RelayQuotaExceeded` — only MeshPeer's dial raises
+      these; urllib-era RestPeer failures never carry one, so the http path
+      is provably unchanged) demotes the peer to `suspect` ON THE EVENT via
+      `PeerRoster.mark_degraded` (membership.py): fresh→suspect at age 0 with
+      a fast re-probe cadence (`mesh_suspect_probe_s`, default 10 s, env
+      `LIVESTACK_MESH_SUSPECT_PROBE_S`), placements kept by the existing
+      `_remembered_peer` rule until `mia` at 600 s — age still owns mia, and
+      the override never applies there, so a long-dead seed is not
+      re-dialled every few seconds forever. One recovery (a successful
+      snapshot) clears the demotion back to fresh. Drills:
+      `test_mixed_roster.py::test_relay_restart_drill_placements_survive_
+      suspect_zero_evictions` extends Phase 5's naming test at the broker
+      level (no duplication): suspect at age 0 on tunnel loss, remembered
+      placement feeds the world across the episode, fast re-probe re-attaches
+      after `relay_up` with zero evictions on either transport, and the
+      observe records carry `request.membership{degradation,
+      suspect_after_s, mia_after_s, probe_every_s}` — every knob joined by
+      decision_id. Evict ledger records gain `request.transport_degradation`
+      when the target device belongs to a transport-degraded peer, so an
+      eviction on a mesh peer cites the planner's non-transport cause beside
+      the transport state. State-machine units: 4 new tests in
+      `test_membership.py`.
+- [x] 8.2 Warm timeout / in-flight TTL reconciliation over tunnels. Tests:
       dropped tunnel surfaces as failed warm. Ledger: n/a.
+      DONE (2026-09-26): the warm path needed one reconciliation, now proven
+      by drill rather than assumed. (a) RestPeer.warm's 180 s semantics ARE
+      preserved over tunnels — MeshPeer._dial budgets every await against the
+      caller's timeout, so a stalled tunnel surfaces well inside the window
+      (proof: `test_warm_over_stalled_tunnel_fails_within_warm_window_not_
+      stuck`, ceiling-asserted at 60 s, actual ~ms). (b) The 900 s in-flight
+      record was NOT reconciled: `plan_and_apply` kept it even when the dial
+      died before the request was sent, reserving the card against a load
+      that never started. `MeshPeerError` now carries `dispatched` (False
+      for door-refused/429/connect-timeout/no-candidate failures, True for
+      mid-response deaths where the load may genuinely be running); the
+      broker drops the in-flight record and logs "failed before dispatch"
+      when `dispatched is False`, keeping the bounded-TTL behavior for the
+      ambiguous mid-response case. Drill asserts the in-flight record is
+      gone, the warm never reached the facade, and a re-warm over the
+      recovered tunnel succeeds.
 
 ## Phase 9 — e2e + rollout
 

@@ -126,6 +126,19 @@ class MeshPeerError(RuntimeError):
     assigns the class, so a probe failure can be attributed without parsing
     message text."""
     degradation = "mesh_peer_error"
+    #: True when the request bytes were handed to the tunnel before the
+    #: failure — a warm that dies mid-response may still be running on the
+    #: node, so the broker keeps its in-flight record (its 900 s safety net
+    #: bounds the wrong guess). False when the dial died before the request
+    #: was sent (door refused, quota, connect timeout, no candidates) —
+    #: nothing was dispatched, and an in-flight record would reserve the card
+    #: against a load that never started.
+    dispatched = True
+
+
+def _not_dispatched(exc: "MeshPeerError") -> "MeshPeerError":
+    exc.dispatched = False
+    return exc
 
 
 class MeshTunnelDown(MeshPeerError):
@@ -367,9 +380,9 @@ class MeshPeer(RestPeer):
         with self._picker_lock:
             order = self._picker.ranked(now_ms, None) or []
         if not order:
-            raise MeshTunnelDown(
+            raise _not_dispatched(MeshTunnelDown(
                 f"mesh_tunnel_down: no relay candidates configured for "
-                f"{self.base!r}")
+                f"{self.base!r}"))
         last: Optional[BaseException] = None
         for key in order:
             relay = self._relays.get(key)
@@ -399,9 +412,14 @@ class MeshPeer(RestPeer):
                 self._picker.record_task_latency(key, elapsed_ms, now_ms)
                 self._picker.record_success(key, now_ms)
             return result
-        raise MeshTunnelDown(
+        final = MeshTunnelDown(
             f"mesh_tunnel_down: all {len(order)} relay route(s) failed for "
             f"{method} {path}: {last}")
+        if isinstance(last, MeshPeerError):
+            # Aggregate failures inherit the furthest-known dispatch state:
+            # every relay dying at its door means nothing was sent anywhere.
+            final.dispatched = last.dispatched
+        raise final
 
     def _mint_cap(self, relay: RelayRoute) -> str:
         cap, _payload = self._relay_config.mint_capability_for(
@@ -426,19 +444,19 @@ class MeshPeer(RestPeer):
             status = (getattr(response, "status_code", None)
                       or getattr(response, "status", None) or 0)
             if status == 429:
-                raise RelayQuotaExceeded(
+                raise _not_dispatched(RelayQuotaExceeded(
                     f"relay_quota: relay {relay.relay_id} refused the dial with "
-                    f"429 (per-account stream quota, DR-3)") from e
-            raise MeshTunnelDown(
+                    f"429 (per-account stream quota, DR-3)")) from e
+            raise _not_dispatched(MeshTunnelDown(
                 f"mesh_tunnel_down: relay {relay.relay_id} refused the upgrade "
-                f"with HTTP {status}") from e
+                f"with HTTP {status}")) from e
         except asyncio.TimeoutError as e:
-            raise MeshTunnelDown(
-                f"mesh_tunnel_down: relay {relay.relay_id} dial timed out") from e
+            raise _not_dispatched(MeshTunnelDown(
+                f"mesh_tunnel_down: relay {relay.relay_id} dial timed out")) from e
         except OSError as e:
-            raise MeshTunnelDown(
+            raise _not_dispatched(MeshTunnelDown(
                 f"mesh_tunnel_down: cannot reach relay {relay.relay_id} "
-                f"at {relay.url}: {e}") from e
+                f"at {relay.url}: {e}")) from e
         try:
             return await self._exchange(ws, method, path, headers, body, deadline)
         finally:
