@@ -5,8 +5,9 @@ import json
 import threading
 import time
 import urllib.error
-import urllib.request
 from pathlib import Path
+
+from livestack_node import transport
 
 from .contract import PerceptionContractError
 
@@ -35,8 +36,7 @@ class RemotePerceptionAdapter:
             "X-Harmony-Realm": grant["realm"],
             "X-Harmony-Owner": grant["owner"],
         }
-        outbound = urllib.request.Request(
-            self.url, json.dumps(request).encode(), headers=headers, method="POST")
+        target, path = transport.split_target(self.url)
         finished = threading.Event()
         def propagate_cancel():
             if control is None:
@@ -44,12 +44,13 @@ class RemotePerceptionAdapter:
             while not finished.wait(0.025):
                 if not control.cancelled():
                     continue
-                cancel = urllib.request.Request(
-                    self.url.rstrip("/") + f"/{request['requestId']}/cancel",
-                    b"{}", headers=headers, method="POST")
+                cancel_target, cancel_path = transport.split_target(
+                    self.url.rstrip("/") + f"/{request['requestId']}/cancel")
                 for _ in range(3):
                     try:
-                        urllib.request.urlopen(cancel, timeout=5).close()
+                        transport.dial(cancel_target, "POST", cancel_path,
+                                       headers=headers, body=b"{}",
+                                       timeout=5)
                         return
                     except Exception:
                         time.sleep(0.05)
@@ -57,7 +58,9 @@ class RemotePerceptionAdapter:
         monitor = threading.Thread(target=propagate_cancel, daemon=True)
         monitor.start()
         try:
-            with urllib.request.urlopen(outbound, timeout=self.timeout) as response:
+            with transport.dial_stream(target, "POST", path, headers=headers,
+                                       body=json.dumps(request).encode(),
+                                       timeout=self.timeout) as response:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
             try:

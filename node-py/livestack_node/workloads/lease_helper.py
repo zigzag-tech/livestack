@@ -12,7 +12,8 @@ import json
 import os
 from pathlib import Path
 import urllib.error
-import urllib.request
+
+from livestack_node import transport
 
 from .model import WorkloadError, progress as validate_progress
 
@@ -21,10 +22,12 @@ def _post(url, token, body):
     headers = {'Content-Type': 'application/json'}
     if token:
         headers['Authorization'] = 'Bearer ' + token
-    request = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers)
+    target, path = transport.split_target(url)
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read())
+        _status, _headers, raw = transport.dial(
+            target, 'POST', path, headers=headers,
+            body=json.dumps(body).encode(), timeout=30)
+        return json.loads(raw)
     except urllib.error.HTTPError as error:
         try:
             detail = json.loads(error.read(65536)).get('error') or error.reason

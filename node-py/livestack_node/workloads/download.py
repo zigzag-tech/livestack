@@ -4,7 +4,8 @@ import http.client
 import re
 import time
 import urllib.error
-import urllib.request
+
+from livestack_node import transport
 
 from .model import WorkloadError
 from .block_codec import HEADER, read_gzip_block
@@ -23,10 +24,12 @@ def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, ma
         requested_end = min(count+CHUNK, max_bytes)-1
         # A normal initial GET also supports empty objects and old authorities.
         # Once interrupted, use bounded ranges starting at bytes actually saved.
-        request = urllib.request.Request(client.url+'objects/'+digest,
-            headers={**headers, HEADER: 'gzip', **({'Range': f'bytes={count}-{max(count, requested_end)}'} if total is not None else {})})
+        target, path = transport.split_target(client.url+'objects/'+digest)
         try:
-            with urllib.request.urlopen(request, timeout=min(client.timeout, max(0.1, deadline-time.monotonic()))) as response:
+            with transport.dial_stream(
+                    target, 'GET', path,
+                    headers={**headers, HEADER: 'gzip', **({'Range': f'bytes={count}-{max(count, requested_end)}'} if total is not None else {})},
+                    timeout=min(client.timeout, max(0.1, deadline-time.monotonic()))) as response:
                 length = response.headers.get('Content-Length', '')
                 if not re.fullmatch(r'[0-9]{1,20}', length):
                     raise WorkloadError('invalid download content length', 502)

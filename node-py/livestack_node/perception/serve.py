@@ -5,10 +5,9 @@ import json
 import os
 import threading
 import urllib.error
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-from livestack_node import attach, counting
+from livestack_node import attach, counting, transport
 from livestack_node.fleet_auth import principals_from_env
 from livestack_node.manager import ManagedUnit, ResidencyPolicy
 
@@ -25,10 +24,12 @@ def _post_json(url: str, payload: dict, token: str | None = None, timeout: float
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(url, json.dumps(payload).encode(), headers=headers, method="POST")
+    target, path = transport.split_target(url)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.load(response)
+        _status, _headers, raw = transport.dial(
+            target, "POST", path, headers=headers,
+            body=json.dumps(payload).encode(), timeout=timeout)
+        return json.loads(raw)
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise PerceptionContractError("unavailable", f"Harmony admission failed: {exc}", 503, retryable=True) from exc
 
