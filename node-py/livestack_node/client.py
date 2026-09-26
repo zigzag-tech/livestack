@@ -15,9 +15,10 @@ import threading
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 from contextlib import contextmanager
 from typing import Iterator, Optional
+
+from . import transport
 
 
 class _NoopLease:
@@ -70,10 +71,11 @@ def lease(
 
 def _post(url: str, body: dict) -> dict:
     data = json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        raw = resp.read().decode("utf-8")
-    return json.loads(raw) if raw else {}
+    target, path = transport.split_target(url)
+    _status, _headers, raw = transport.dial(
+        target, "POST", path,
+        headers={"Content-Type": "application/json"}, body=data, timeout=5)
+    return json.loads(raw.decode("utf-8")) if raw else {}
 
 
 def admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "node",
@@ -142,11 +144,10 @@ def admit(kind: str = "", *, requires: Optional[dict] = None, owner_id: str = "n
     for base in (brokers if brokers is not None else broker_urls()):
         try:
             data = json.dumps(body).encode("utf-8")
-            req = urllib.request.Request(f"{base.rstrip('/')}/admit", data=data,
-                                         headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read().decode("utf-8")
-            return json.loads(raw) if raw else {}
+            _status, _headers, raw = transport.dial(
+                base, "POST", "/admit", headers=headers, body=data,
+                timeout=timeout)
+            return json.loads(raw.decode("utf-8")) if raw else {}
         except (urllib.error.URLError, OSError, ValueError) as e:
             last = e
             continue
@@ -193,8 +194,9 @@ def rank_snapshot(kind: str, *, brokers: Optional[list] = None,
     last = None
     for base in (brokers if brokers is not None else broker_urls()):
         try:
-            with urllib.request.urlopen(f"{base.rstrip('/')}/fleet/rank?{qs}", timeout=timeout) as resp:
-                return json.loads(resp.read().decode() or "{}")
+            _status, _headers, raw = transport.dial(
+                base, "GET", f"/fleet/rank?{qs}", timeout=timeout)
+            return json.loads(raw.decode() or "{}")
         except (urllib.error.URLError, OSError, ValueError) as e:
             last = e
             continue

@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import json
 import urllib.error
-import urllib.request
+
+from livestack_node import transport
 
 from .model import WorkloadError, encode
 
@@ -17,15 +18,16 @@ class WorkloadClient:
         self.timeout = timeout
 
     def request(self, route, body=None):
-        req = urllib.request.Request(self.url + route,
-            data=encode(body).encode() if body is not None else None,
-            headers={'Authorization': 'Bearer '+self.token, 'Content-Type': 'application/json'})
+        target, path = transport.split_target(self.url + route)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                data = response.read(8*1024*1024 + 1)
-                if len(data) > 8*1024*1024:
-                    raise WorkloadError('authority response exceeds byte limit', 502)
-                return json.loads(data)
+            _status, _headers, data = transport.dial(
+                target, 'POST' if body is not None else 'GET', path,
+                headers={'Authorization': 'Bearer '+self.token, 'Content-Type': 'application/json'},
+                body=encode(body).encode() if body is not None else None,
+                timeout=self.timeout)
+            if len(data) > 8*1024*1024:
+                raise WorkloadError('authority response exceeds byte limit', 502)
+            return json.loads(data)
         except urllib.error.HTTPError as error:
             try:
                 detail = json.loads(error.read(65536)).get('error', 'workload request refused')

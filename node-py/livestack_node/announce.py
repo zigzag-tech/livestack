@@ -20,9 +20,9 @@ from __future__ import annotations
 import json
 import os
 import threading
-import urllib.error
-import urllib.request
 from typing import Callable, Optional
+
+from . import transport
 
 DEFAULT_BROKER_URL = "http://127.0.0.1:8799"
 DEFAULT_INTERVAL_S = 30.0
@@ -168,10 +168,10 @@ def facade_answers(facade_url: str, timeout: float = 2.0) -> bool:
     then backs off and tries again; it never gives up, because start order is
     not something a fleet should have to arrange.
     """
-    req = urllib.request.Request(f"{facade_url.rstrip('/')}/residence", method="GET")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return 200 <= getattr(resp, "status", resp.getcode()) < 300
+        status, _headers, _body = transport.dial(
+            facade_url, "GET", "/residence", timeout=timeout)
+        return 200 <= status < 300
     except Exception:
         return False
 
@@ -209,13 +209,12 @@ def register_once(facade_url: str, *, host_id: str, kind: str,
     targets = [broker.rstrip("/")] if broker else broker_urls()
     out, last = {}, None
     for base in targets:
-        req = urllib.request.Request(
-            f"{base}/peers", data=body, method="POST",
-            headers={"Content-Type": "application/json"},
-        )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                out = json.loads(resp.read().decode() or "{}")
+            _status, _headers, raw = transport.dial(
+                base, "POST", "/peers",
+                headers={"Content-Type": "application/json"},
+                body=body, timeout=timeout)
+            out = json.loads(raw.decode() or "{}")
         except Exception as e:
             last = e
     if not out and last is not None:

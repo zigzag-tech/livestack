@@ -20,10 +20,10 @@ change `python-connectivity-consumer` and lands there first.
 
 ## Phase 4 — transport dial seam
 
-- [ ] 4.1 `livestack_node/transport.py` with `dial()`; urllib behavior moved,
+- [x] 4.1 `livestack_node/transport.py` with `dial()`; urllib behavior moved,
       not rewritten. Tests: new `tests/test_transport.py` (record/replay
       fake). Ledger: n/a (mechanism, no decisions).
-- [ ] 4.2 Re-point every dial site in the seam survey; provider cloud APIs
+- [x] 4.2 Re-point every dial site in the seam survey; provider cloud APIs
       exempt. Tests: `cd node-py && python -m pytest -q` green. Ledger: n/a.
 
 ## Phase 5 — MeshPeer + scheme-aware identity

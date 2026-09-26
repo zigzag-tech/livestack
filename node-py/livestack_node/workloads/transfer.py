@@ -5,8 +5,8 @@ import json
 import os
 from pathlib import Path
 import tempfile
-import urllib.error
-import urllib.request
+
+from livestack_node import transport
 
 from .archive import file_digest
 from .blobs import BlobStore
@@ -36,16 +36,16 @@ class InputTransfer:
         headers = self.headers(assignment)
         headers.update({'Content-Type': 'application/octet-stream', 'Content-Length': str(size)})
         with source.open('rb') as stream:
-            request = urllib.request.Request(self.client.url+'objects/'+digest,
-                                             data=stream, headers=headers, method='PUT')
-            with urllib.request.urlopen(request, timeout=self.client.timeout) as response:
-                body = response.read(65537)
-                if len(body) > 65536:
-                    raise WorkloadError('upload response exceeds bound', 502)
-                result = json.loads(body)
-                if result.get('digest') != digest or result.get('size') != size:
-                    raise WorkloadError('upload acknowledgement mismatch', 502)
-                return result
+            target, path = transport.split_target(self.client.url+'objects/'+digest)
+            _status, _headers, body = transport.dial(
+                target, 'PUT', path, headers=headers, body=stream,
+                timeout=self.client.timeout)
+            if len(body) > 65536:
+                raise WorkloadError('upload response exceeds bound', 502)
+            result = json.loads(body)
+            if result.get('digest') != digest or result.get('size') != size:
+                raise WorkloadError('upload acknowledgement mismatch', 502)
+            return result
 
     def get(self, digest, destination, *, assignment=None):
         digest = BlobStore.digest(digest)

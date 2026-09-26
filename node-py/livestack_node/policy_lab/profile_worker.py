@@ -10,16 +10,18 @@ from pathlib import Path
 import re
 import time
 from typing import Any
-import urllib.request
 import uuid
 import wave
+
+from livestack_node import transport
 
 from .contracts import ContractError
 
 
 def _json(url: str) -> dict[str, Any]:
-    with urllib.request.urlopen(url, timeout=10) as response:
-        value = json.loads(response.read(1_000_001))
+    target, path = transport.split_target(url)
+    _status, _headers, raw = transport.dial(target, "GET", path, timeout=10)
+    value = json.loads(raw[:1_000_001])
     if not isinstance(value, dict):
         raise ContractError("engine metadata response must be an object")
     return value
@@ -44,11 +46,13 @@ def _shape_number(shape: str, pattern: str) -> int:
 
 
 def _post(url: str, body: bytes, content_type: str, *, timeout: int = 900) -> dict[str, int]:
-    request = urllib.request.Request(url, data=body, headers={"Content-Type": content_type})
+    target, path = transport.split_target(url)
     started = time.monotonic_ns()
     first = None
     received = 0
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with transport.dial_stream(target, "POST", path,
+                               headers={"Content-Type": content_type},
+                               body=body, timeout=timeout) as response:
         while True:
             chunk = response.read(64 * 1024)
             if not chunk:

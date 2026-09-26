@@ -61,71 +61,36 @@ class TestNodeDeclaresIt:
         monkeypatch.setenv("LIVESTACK_NODE_REGION", "   ")
         assert node_region() is None
 
-    def test_announce_carries_it(self):
-        sent = {}
-
-        def fake_urlopen(req, timeout=None):  # pragma: no cover - trivial shim
-            raise AssertionError("not used")
-
-        import json as _json
-
-        def capture(facade_url, **kw):
-            sent.update(kw)
-            return {}
-
-        # register_once builds the body; exercise it through a broker stub.
-        import urllib.request as _ur
-
-        class _Resp:
-            def read(self):
-                return b"{}"
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
-
+    def test_announce_carries_it(self, monkeypatch):
         posted = []
 
-        def urlopen(req, timeout=None):
-            posted.append(_json.loads(req.data.decode()))
-            return _Resp()
+        def fake_dial(target, method, path, headers=None, body=None,
+                      timeout=None):
+            import json as _json
+            posted.append(_json.loads(body.decode()))
+            return 200, {}, b"{}"
 
-        old = _ur.urlopen
-        _ur.urlopen = urlopen
-        try:
-            register_once("http://n:1/livestack", host_id="h", kind="polytts",
-                          region="na", broker="http://b:8799")
-        finally:
-            _ur.urlopen = old
+        # register_once builds the body; capture it at the transport seam.
+        monkeypatch.setattr("livestack_node.transport.dial", fake_dial)
+        register_once("http://n:1/livestack", host_id="h", kind="polytts",
+                      region="na", broker="http://b:8799")
 
         assert posted[0]["region"] == "na"
 
-    def test_an_unset_region_is_omitted_rather_than_nulled(self):
+    def test_an_unset_region_is_omitted_rather_than_nulled(self, monkeypatch):
         # A null on every renewal would overwrite a region the broker already
         # knew from a seed.
-        import json as _json
-        import urllib.request as _ur
-
-        class _Resp:
-            def read(self):
-                return b"{}"
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):
-                return False
-
         posted = []
-        old = _ur.urlopen
-        _ur.urlopen = lambda req, timeout=None: (posted.append(_json.loads(req.data.decode())), _Resp())[1]
-        try:
-            register_once("http://n:1/livestack", host_id="h", kind="polytts",
-                          broker="http://b:8799")
-        finally:
-            _ur.urlopen = old
+
+        def fake_dial(target, method, path, headers=None, body=None,
+                      timeout=None):
+            import json as _json
+            posted.append(_json.loads(body.decode()))
+            return 200, {}, b"{}"
+
+        monkeypatch.setattr("livestack_node.transport.dial", fake_dial)
+        register_once("http://n:1/livestack", host_id="h", kind="polytts",
+                      broker="http://b:8799")
         assert "region" not in posted[0]
 
 

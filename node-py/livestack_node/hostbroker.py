@@ -1475,7 +1475,8 @@ class HostBroker:
 
 
 import json as _json
-import urllib.request as _urlreq
+
+from . import transport
 
 
 def _http(url, body=None, timeout=5, headers=None):
@@ -1483,11 +1484,11 @@ def _http(url, body=None, timeout=5, headers=None):
     method = "POST" if body is not None else "GET"
     request_headers = {"Content-Type": "application/json"}
     request_headers.update(headers or {})
-    req = _urlreq.Request(url, data=data,
-                          headers=request_headers, method=method)
-    with _urlreq.urlopen(req, timeout=timeout) as r:
-        raw = r.read().decode()
-    return _json.loads(raw) if raw else {}
+    target, path = transport.split_target(url)
+    _status, _headers, raw = transport.dial(
+        target, method, path, headers=request_headers, body=data,
+        timeout=timeout)
+    return _json.loads(raw.decode()) if raw else {}
 
 
 _RES_TO_PRIO = {0: 10, 1: 20, 2: 30}
