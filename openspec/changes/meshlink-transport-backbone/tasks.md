@@ -51,11 +51,11 @@ change `python-connectivity-consumer` and lands there first.
 
 ## Phase 6 — announce path
 
-- [ ] 6.1 Loopback self-probe documented; scheme-aware advertised URLs;
+- [x] 6.1 Loopback self-probe documented; scheme-aware advertised URLs;
       `node_id` = daemon_id for mesh nodes. Tests: `tests/test_announce_mesh.py`
       (boot with inbound blocked). Ledger: announce/join records name the
       mesh target.
-- [ ] 6.2 Node attach loop with renewal timer; failed attach reports
+- [x] 6.2 Node attach loop with renewal timer; failed attach reports
       unhealthy, never boot-blocks. Tests: attach-failure test asserting
       health surface. Ledger: n/a.
 

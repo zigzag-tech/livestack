@@ -163,6 +163,20 @@ def facade_answers(facade_url: str, timeout: float = 2.0) -> bool:
     certifies" (see `membership.py`): the broker stopped trusting announces, and
     the node stops making ones it cannot back.
 
+    **Two addresses, one door (mesh nodes).** For a mesh-attached node the URL
+    announced to brokers is `mesh://<realm>/<daemon_id>/...` — a door that only
+    exists at the far end of this node's OWN outbound relay tunnel. This probe
+    must NEVER be pointed at that URL: dialing it from the node itself is a
+    self-dial, a round trip out through the relay and back that tests the
+    tunnel, not the facade, and would deadlock the moment the attach loop waits
+    on the facade (the circular self-probe Phase 6 exists to break). The probe
+    dials LOOPBACK — the tunnel's termination point, this same process's
+    uvicorn — because loopback answering is exactly the condition that makes
+    the mesh URL answerable: the port terminates every tunnel stream as one
+    loopback HTTP request. `start_registrar(probe_url=...)` is how a mesh node
+    announces one address while probing the other; do not "fix" this by
+    unifying them.
+
     Any failure — connection refused because the bind has not happened, a 503
     from a server that is up but not ready, a timeout — is False. The registrar
     then backs off and tries again; it never gives up, because start order is
@@ -228,6 +242,7 @@ def start_registrar(facade_url: str, *, host_id: str, kind: str,
                     operation_id: Optional[str] = None,
                     interval_s: float = DEFAULT_INTERVAL_S,
                     broker: Optional[str] = None,
+                    probe_url: Optional[str] = None,
                     log: Callable[[str], None] = print,
                     answers: Callable[[str], bool] = facade_answers,
                     register: Optional[Callable[..., dict]] = None
@@ -236,19 +251,29 @@ def start_registrar(facade_url: str, *, host_id: str, kind: str,
     which is correct — a node that has exited should stop claiming duty, and
     the broker's own aging turns that silence into MIA.
 
+    `probe_url` is the self-probe target; it defaults to `facade_url`. A mesh
+    node passes its LOOPBACK facade URL here while `facade_url` is the
+    announced `mesh://...` address — the probe must dial the door this process
+    actually serves, never its own mesh URL (a self-dial through the relay;
+    see `facade_answers`). The announced URL and the registered payload are
+    always `facade_url` itself.
+
     `answers` and `register` are injection points for tests; production uses the
     module-level defaults."""
     register = register or register_once
+    probe = probe_url or facade_url
 
     def _loop():
         backoff = RETRY_MIN_S
         announced = False
         while True:
-            # Self-probe FIRST. The thread starts at import, so on a cold boot
-            # this fails for as long as the server takes to bind — during which
-            # the node says nothing rather than announcing a door that is not
-            # there. Same backoff ladder as an unreachable broker.
-            if not answers(facade_url):
+            # Self-probe FIRST, against the probe URL — loopback for a mesh
+            # node, the facade URL itself otherwise. The thread starts at
+            # import, so on a cold boot this fails for as long as the server
+            # takes to bind — during which the node says nothing rather than
+            # announcing a door that is not there. Same backoff ladder as an
+            # unreachable broker.
+            if not answers(probe):
                 if announced:
                     log(f"[livestack] facade stopped answering; withholding "
                         f"registration until {facade_url} is back")
