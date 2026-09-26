@@ -526,6 +526,8 @@ class HostBroker:
         'is my TTS node gone, or did it just blip?' is answerable without
         grepping a log."""
         out = self.roster.snapshot()
+        transports = {peer_key(p): getattr(p, "transport", None)
+                      for p in self.peers}
         for row in out:
             err = self._last_probe_error.get(row["peer"])
             if err and row["state"] != "fresh":
@@ -536,6 +538,12 @@ class HostBroker:
             alias = self.peer_alias.get(row["peer"])
             if alias:
                 row["alias_of"] = alias
+            # Join metadata (design.md "Ledger"): a peer that names its
+            # transport (mesh peers do) records it on the membership row, so
+            # mesh-attributable incidents are queriable without parsing URLs.
+            transport = transports.get(row["peer"])
+            if transport:
+                row["transport"] = transport
         return out
 
     def sweep_leaks(self, now: Optional[float] = None) -> list:
@@ -1549,8 +1557,14 @@ class RestPeer:
                                  if control_token else None)
         self._snap = None
 
+    def _http(self, url, body=None, timeout=5, headers=None):
+        """One facade dial. Dispatches through the METHOD (not the module
+        function) so a subclass can re-point it: MeshPeer overrides this to
+        run the same requests over a meshlink tunnel instead of urllib."""
+        return _http(url, body, timeout, headers)
+
     def refresh(self):
-        self._snap = _http(f"{self.base}/residence")
+        self._snap = self._http(f"{self.base}/residence")
         return self._snap
 
     @property
@@ -1583,7 +1597,7 @@ class RestPeer:
         # passed `method="POST", body={}` as keywords, which `_http` does not
         # accept — so the one lever that recovers a leaked allocator pool raised
         # TypeError every time it was pulled, inside the broker's `except`.
-        return _http(f"{self.base}/model/reclaim", {}, headers=self._control_headers)
+        return self._http(f"{self.base}/model/reclaim", {}, headers=self._control_headers)
 
     def _s(self):
         return self._snap or self.refresh()
@@ -1678,7 +1692,7 @@ class RestPeer:
         which is worse than saying nothing. The caching that `/fleet` needs is
         a TTL at the BROKER, where the poll rate is known.
         """
-        return _http(f"{self.base}/capability")
+        return self._http(f"{self.base}/capability")
 
     def warm(self, kind, device=None, budget=None):
         body = {"unit": kind}
@@ -1686,9 +1700,9 @@ class RestPeer:
             body["device"] = device
         if budget:
             body["budget"] = dict(budget)
-        _http(f"{self.base}/model/warm", body, timeout=180,
-              headers=self._control_headers)
+        self._http(f"{self.base}/model/warm", body, timeout=180,
+                   headers=self._control_headers)
 
     def evict(self, kind):
-        _http(f"{self.base}/model/evict", {"unit": kind}, timeout=60,
-              headers=self._control_headers)
+        self._http(f"{self.base}/model/evict", {"unit": kind}, timeout=60,
+                   headers=self._control_headers)

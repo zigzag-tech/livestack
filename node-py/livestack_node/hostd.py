@@ -102,11 +102,14 @@ Config via env:
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from typing import Any, Dict, List, Optional
 
 from .hostbroker import HostBroker, RestPeer
+from .mesh_peer import MeshPeer, RelayRoute, facade_id
+from . import relay_control
 from .membership import MembershipPolicy, RosterFull
 from .fleet_scheduler import SchedulerPolicy
 from .planner import Device, Request, Residency, Unit, Evict, Grant, Load, plan as _plan
@@ -128,6 +131,64 @@ DEFAULT_FOOTPRINTS = {"asr": 5_070_913_536, "align": 5_295_308_800,
                       "qwen": 9_393_143_808, "chipgen": 5_259_657_216}
 
 
+def make_peer(url, *, priorities=None, fallback_footprints=None,
+              control_token=None, relay_config=None, relay_account=None,
+              relay_device=None) -> RestPeer:
+    """Scheme-selecting Peer factory: the one place a roster URL is turned into
+    a dialer. `http(s)://` → RestPeer (unchanged); `mesh://` → MeshPeer over
+    the meshlink relay stack. Anything else is refused by name — an unmapped
+    scheme must not fall through to urllib and fail there as "unknown url
+    type", forty minutes later, in a different process."""
+    if url.startswith(("http://", "https://")):
+        return RestPeer(url, priorities=priorities,
+                        fallback_footprints=fallback_footprints,
+                        control_token=control_token)
+    if url.startswith("mesh://"):
+        import socket
+        cfg = relay_config
+        if cfg is None:
+            cfg = relay_control.RelayConfig.from_env()
+        relays = [RelayRoute(url=u, relay_id=rid) for u, rid in
+                  _relay_ids_for(cfg.urls).items()]
+        return MeshPeer(url, relays=relays, relay_config=cfg,
+                        account_id=relay_account or "livestack-broker",
+                        device_id=relay_device or socket.gethostname(),
+                        priorities=priorities,
+                        fallback_footprints=fallback_footprints,
+                        control_token=control_token)
+    raise ValueError(f"unsupported peer URL scheme in {url!r} "
+                     "(expected http(s):// or mesh://)")
+
+
+def _relay_ids_for(urls) -> Dict[str, str]:
+    """Relay URL → relay_id for capability minting.
+
+    `LIVESTACK_RELAY_IDS` is JSON {"<url>": "<relay_id>"}. A relay without a
+    mapping is SKIPPED, loudly: the cap's relay_id claim is verified against
+    the relay's own id, so minting for a guessed id produces tokens that are
+    born refused (`relay_mismatch`) — a named config error beats that."""
+    raw = (os.environ.get("LIVESTACK_RELAY_IDS") or "").strip()
+    mapping: Dict[str, str] = {}
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                mapping = {str(k): str(v) for k, v in parsed.items()}
+        except ValueError:
+            print(f"[hostd] LIVESTACK_RELAY_IDS={raw!r} is not a JSON object — "
+                  "relay ids unknown", flush=True)
+    out = {}
+    for u in urls:
+        rid = mapping.get(u)
+        if rid:
+            out[u] = rid
+        else:
+            print(f"[hostd] relay {u!r} skipped: no relay_id in "
+                  "LIVESTACK_RELAY_IDS — caps minted for a guessed relay_id "
+                  "would be refused as relay_mismatch", flush=True)
+    return out
+
+
 def build_broker(peer_urls: List[str], device_config=None,
                  default_vram_gb: float = 24.0, default_reserved_gb: float = 2.0,
                  membership=None, extra_units=None, dispatch: bool = True,
@@ -137,10 +198,14 @@ def build_broker(peer_urls: List[str], device_config=None,
     device_id, across however many hosts), sized from device_config[device_id] or the
     default. Point peer_urls at nodes on several hosts and the same broker plans and
     dispatches across all their GPUs. extra_units declares kinds no peer will ever
-    report (the peerless case: a BUILD host whose "build" unit lives only in config)."""
-    peers = [RestPeer(u, priorities=DEFAULT_PRIORITIES,
-                      fallback_footprints=DEFAULT_FOOTPRINTS,
-                      control_token=node_control_token)
+    report (the peerless case: a BUILD host whose "build" unit lives only in config).
+
+    Peer URLs keep their scheme: http(s) facade URLs become RestPeers, mesh://
+    URLs become MeshPeers — to planning and membership both remain opaque
+    URL-keyed records."""
+    peers = [make_peer(u, priorities=DEFAULT_PRIORITIES,
+                       fallback_footprints=DEFAULT_FOOTPRINTS,
+                       control_token=node_control_token)
              for u in peer_urls]
     return HostBroker(devices=None, peers=peers, device_config=device_config or {},
                       default_capacity={"vram_bytes": int(default_vram_gb * GB),
@@ -340,7 +405,7 @@ def build_app(broker: HostBroker):
         try:
             return broker.register_url(
                 url,
-                make_peer=lambda u: RestPeer(
+                make_peer=lambda u: make_peer(
                     u, priorities=DEFAULT_PRIORITIES,
                     fallback_footprints=DEFAULT_FOOTPRINTS,
                     control_token=getattr(broker, "node_control_token", None)),
@@ -619,9 +684,7 @@ def build_app(broker: HostBroker):
             # eligible_targets speaks the ranker's row shape: one row per node
             # with its declared region. Unknown region is excluded unless the
             # caller explicitly allows it — silence is not a match.
-            rows = [{"target_id": (n.get("peer", "")[:-len("/livestack")]
-                                   if n.get("peer", "").endswith("/livestack")
-                                   else n.get("peer", "")),
+            rows = [{"target_id": facade_id(n.get("peer", "")),
                      "region": n.get("region")}
                     for h in (view.get("hosts") or {}).values()
                     for n in (h.get("nodes") or [])]
@@ -637,9 +700,7 @@ def build_app(broker: HostBroker):
                 "hosts": {
                     host_id: {**h, "nodes": [
                         n for n in (h.get("nodes") or [])
-                        if ((n.get("peer", "")[:-len("/livestack")]
-                             if n.get("peer", "").endswith("/livestack")
-                             else n.get("peer", "")) in kept_ids)]}
+                        if facade_id(n.get("peer", "")) in kept_ids]}
                     for host_id, h in (view.get("hosts") or {}).items()
                 },
             }
@@ -1091,9 +1152,7 @@ def _drain_blocked(broker, node_id: str) -> Optional[str]:
     view = broker.fleet_view()
     row = next((n for h in (view.get("hosts") or {}).values()
                 for n in (h.get("nodes") or [])
-                if (n.get("peer", "")[: -len("/livestack")]
-                    if n.get("peer", "").endswith("/livestack")
-                    else n.get("peer", "")) == node_id), None)
+                if facade_id(n.get("peer", "")) == node_id), None)
     if row is None:
         return (f"{node_id} is not in the fleet view; its state is unknown, "
                 f"which is not the same as empty")

@@ -28,13 +28,26 @@ change `python-connectivity-consumer` and lands there first.
 
 ## Phase 5 — MeshPeer + scheme-aware identity
 
-- [ ] 5.1 `MeshPeer` over the meshlink stack (`ls-h1` envelope, one stream
+- [x] 5.1 `MeshPeer` over the meshlink stack (`ls-h1` envelope, one stream
       per request). Tests: `tests/test_mesh_peer.py` against the real relay
       package (no hand-rolled mux fake — rule 11). Ledger: n/a.
-- [ ] 5.2 Scheme selection in `make_peer` / `build_broker`; scheme-aware
+      DONE (2026-09-26): `mesh_peer.py` — MeshPeer subclasses RestPeer and
+      re-points only the `_http` dial at the tunnel (both halves speak the
+      ls-h1 envelope; the relay caller door is a raw byte pipe, the mux lives
+      target-side). Relay candidates ranked by the mesh-route-py Picker;
+      `mesh_tunnel_down` / `relay_quota` named degradations. 7 tests against
+      the real `createRelayServer` + real `mesh_outbound_py` attachment,
+      including relay-restart and key-rotation (DR-2) drills.
+- [x] 5.2 Scheme selection in `make_peer` / `build_broker`; scheme-aware
       suffix strips. Tests: mixed-roster broker test (one HTTP peer + one
       mesh peer) in `tests/test_mixed_roster.py`. Ledger: membership records
       join with `transport=mesh` metadata (design.md).
+      DONE (2026-09-26): `hostd.make_peer` (http→RestPeer, mesh→MeshPeer,
+      else refused by name) is the single scheme-dispatch point, used by both
+      `build_broker` and the `/peers` register path; `transport.dial` refuses
+      mesh:// at the seam by name (mesh dials flow through MeshPeer, not the
+      urllib seam). The three `/livestack` strips share one scheme-aware
+      `facade_id()`. Membership rows carry `transport=mesh` for mesh peers.
 
 ## Phase 6 — announce path
 

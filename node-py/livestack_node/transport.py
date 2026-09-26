@@ -15,9 +15,12 @@ redirects, TLS verification, header casing, and the error surface
 `urllib.error.URLError` / `TimeoutError` / `OSError` on connection failure)
 are urllib's own, so call sites keep their existing `except` clauses.
 
-Later phases put a second implementation behind this seam (meshlink tunnels,
-Phase 5 MeshPeer). The signature is the contract; a `mesh://` target will
-resolve through the same `(target, method, path, headers, body)` call.
+Mesh dials do NOT flow through this seam: a `mesh://` target is refused here
+by name (see `_refuse_mesh_scheme`). Mesh needs a per-request WSS stream, a
+minted `bdsr1` capability and route policy from the mesh-route Picker, all of
+which live in MeshPeer; peers are scheme-selected at construction
+(hostd.make_peer), so the (target, method, path, headers, body) contract here
+stays urllib-shaped HTTP only.
 """
 from __future__ import annotations
 
@@ -54,6 +57,18 @@ def split_target(url: str) -> Tuple[str, str]:
     return target, path
 
 
+def _refuse_mesh_scheme(target: str) -> None:
+    """Mesh dials do NOT flow through this seam: a `mesh://` target needs a
+    per-request WSS stream, a minted `bdsr1` capability and route policy from
+    the mesh-route Picker — all of which live in MeshPeer (hostd.make_peer).
+    urllib would only fail here as an 'unknown url type' error that names
+    nothing; refusing at the seam names the right door."""
+    if target.startswith("mesh://"):
+        raise ValueError(
+            f"mesh:// target {target!r} dials through MeshPeer, not "
+            "transport.dial — peers are scheme-selected at construction")
+
+
 def dial_stream(target: str, method: str, path: str,
                 headers: Optional[Mapping[str, str]] = None,
                 body: Body = None,
@@ -64,6 +79,7 @@ def dial_stream(target: str, method: str, path: str,
     Error behavior is urllib.urlopen's, unchanged: `HTTPError` on HTTP >= 400
     (error body readable from the exception), `URLError`/`TimeoutError` on
     connection failure."""
+    _refuse_mesh_scheme(target)
     url = target.rstrip("/") + (path if path.startswith("/") else "/" + path)
     req = urllib.request.Request(
         url, data=body, headers=dict(headers or {}), method=method)
