@@ -122,6 +122,71 @@ def test_backoff_slows_probing_of_an_absent_peer():
     assert roster.due_for_probe("p")
 
 
+# -- event-driven demotion (Phase 8: a NAMED degradation demotes on the event)
+
+def test_a_named_degradation_demotes_on_the_event_not_the_age():
+    """A dial that dies with a NAMED degradation (mesh_tunnel_down,
+    relay_quota) demotes fresh→suspect at age 0. The exception is stronger
+    evidence than silence: over a tunnel a refused door says the node was
+    never asked, and the fast re-probe is what catches a relay restart in
+    seconds instead of discovering it at the next age threshold. Age still
+    owns mia — only sustained unreachability drops placements."""
+    clock = Clock()
+    roster = PeerRoster(POLICY, clock=clock)
+    roster.seed("p")
+    roster.mark_degraded("p", probe_every_s=10.0)
+    assert roster.state_of("p") == SUSPECT        # age 0, already suspect
+    assert not roster.due_for_probe("p")          # fast cadence armed instead
+    clock.advance(10)
+    assert roster.due_for_probe("p")
+
+
+def test_event_demotion_clears_on_one_success():
+    clock = Clock()
+    roster = PeerRoster(POLICY, clock=clock)
+    roster.seed("p")
+    roster.mark_degraded("p", probe_every_s=10.0)
+    assert roster.state_of("p") == SUSPECT
+    roster.mark_seen("p")
+    assert roster.state_of("p") == FRESH
+    # The override goes with the demotion: a fresh peer probes every cycle
+    # again, not on the fast cadence.
+    assert roster.due_for_probe("p")
+
+
+def test_event_demotion_does_not_delay_or_hold_off_mia():
+    """The override elevates fresh→suspect and nothing more: mia still lands
+    at `mia_after_s` of unreachability, and at mia the fast cadence is
+    dropped — a long-dead seed is never pruned, so without that drop it would
+    be re-dialled every few seconds forever."""
+    clock = Clock()
+    roster = PeerRoster(POLICY, clock=clock)
+    roster.seed("p")
+    roster.mark_degraded("p", probe_every_s=10.0)
+    clock.advance(600)
+    assert roster.state_of("p") == MIA
+    roster.mark_probed("p")
+    assert not roster.due_for_probe("p")   # mia cadence (120s), not the override
+    clock.advance(120)
+    assert roster.due_for_probe("p")
+
+
+def test_event_demotion_logs_the_transition_once_not_per_failure():
+    """The 92,089-line discipline applies to the new rung too: one log line
+    for the episode, no matter how many failed probes mark it."""
+    clock = Clock()
+    lines = []
+    roster = PeerRoster(POLICY, clock=clock, log=lines.append)
+    roster.seed("p")
+    lines.clear()
+    for _ in range(50):
+        roster.mark_probed("p")
+        roster.mark_degraded("p", probe_every_s=10.0)
+        clock.advance(1)
+    assert len(lines) == 1
+    assert "suspect" in lines[0]
+
+
 # -- seeds vs registrations ---------------------------------------------------
 
 def test_a_registered_peer_is_pruned_but_a_seed_never_is():

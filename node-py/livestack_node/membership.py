@@ -62,9 +62,17 @@ def classify(age_s: float, policy: MembershipPolicy) -> str:
     return FRESH
 
 
-def probe_interval(state: str, policy: MembershipPolicy) -> float:
+def probe_interval(state: str, policy: MembershipPolicy,
+                   override_s: Optional[float] = None) -> float:
+    # The override is a fast re-probe cadence granted by an event-driven
+    # demotion (see `PeerRoster.mark_degraded`). It never applies at mia: a
+    # peer that has been gone for `mia_after_s` is not mid-recovery, and a
+    # seed is never pruned, so without this line a long-dead mesh peer would
+    # be re-dialled every few seconds forever.
     if state == MIA:
         return policy.mia_probe_every_s
+    if override_s is not None:
+        return override_s
     if state == SUSPECT:
         return policy.suspect_probe_every_s
     return policy.fresh_probe_every_s
@@ -104,12 +112,26 @@ class PeerRecord:
     # The state last REPORTED, so transitions can be detected and logged once
     # instead of once per cycle. "still gone" is not an event.
     reported_state: str = FRESH
+    # EVENT-DRIVEN demotion (Phase 8, meshlink backbone): the instant a dial
+    # failed with a NAMED degradation (tunnel down, relay quota), stamped by
+    # `PeerRoster.mark_degraded`. Elevates fresh→suspect without waiting for
+    # `suspect_after_s` of age — over a tunnel a refused door is a strong
+    # signal, unlike an HTTP facade that blocks while busy. Age remains the
+    # authority for mia (`only sustained unreachability drops placements`),
+    # and one successful snapshot clears the demotion back to fresh.
+    degraded_since: Optional[float] = None
+    # Fast re-probe cadence while event-degraded (None ⇒ the policy's
+    # state-based cadence). Cleared with the demotion; never applied at mia.
+    probe_override_s: Optional[float] = None
 
     def age(self, now: float) -> float:
         return max(0.0, now - self.last_seen)
 
     def state(self, now: float, policy: MembershipPolicy) -> str:
-        return classify(self.age(now), policy)
+        by_age = classify(self.age(now), policy)
+        if by_age == FRESH and self.degraded_since is not None:
+            return SUSPECT
+        return by_age
 
 
 class RosterFull(Exception):
@@ -194,7 +216,32 @@ class PeerRoster:
         now = self._clock()
         rec.last_seen = now
         rec.last_probe = now
+        # Recovery clears an event-driven demotion along with everything else:
+        # the fast re-probe cadence exists to FIND this moment, not to outlive it.
+        rec.degraded_since = None
+        rec.probe_override_s = None
         self._note_transition(rec, FRESH)
+
+    def mark_degraded(self, key: str, *, probe_every_s: Optional[float] = None) -> None:
+        """A probe failed with a NAMED degradation (mesh_tunnel_down,
+        relay_quota) — the dial died at the relay door, so the node was never
+        asked. Demote on the EVENT rather than after `suspect_after_s` of
+        silence: a tunnel-down is a strong, attributable signal, and the fast
+        re-probe is what catches a relay restart within seconds instead of
+        discovering it at the next age threshold. Placements are untouched —
+        `_remembered_peer` keeps them until mia exactly as for an age-based
+        suspect. Idempotent per episode: the transition fires once, and
+        `mark_seen` is the only way back to fresh."""
+        rec = self._records.get(key)
+        if rec is None:
+            return
+        now = self._clock()
+        rec.last_probe = now
+        if probe_every_s is not None:
+            rec.probe_override_s = float(probe_every_s)
+        if rec.degraded_since is None:
+            rec.degraded_since = now
+        self._note_transition(rec, rec.state(now, self.policy))
 
     def mark_probed(self, key: str) -> None:
         """A probe was attempted and failed. Records the attempt so backoff
@@ -242,7 +289,8 @@ class PeerRoster:
         if rec is None:
             return True
         now = self._clock()
-        interval = probe_interval(rec.state(now, self.policy), self.policy)
+        interval = probe_interval(rec.state(now, self.policy), self.policy,
+                                  override_s=rec.probe_override_s)
         return (now - rec.last_probe) >= interval
 
     def state_of(self, key: str) -> str:

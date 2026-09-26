@@ -28,7 +28,7 @@ from .planner import (
     Device, Placement, Request, Unit, WorldState, PlannerPolicy, plan, Residency,
     Load, Evict, Grant, Defer,
 )
-from .membership import MIA, MembershipPolicy, PeerRoster, RosterFull
+from .membership import MIA, MembershipPolicy, PeerRoster, RosterFull, probe_interval
 from .ledger import Candidate, Decision, JsonlLedger
 
 
@@ -133,7 +133,8 @@ class HostBroker:
                  emitter: str = "host-broker",
                  emitter_id: str = "host-broker",
                  in_flight_ttl_s: float = 900.0,
-                 residency_grace_s: float = 90.0):
+                 residency_grace_s: float = 90.0,
+                 mesh_suspect_probe_s: Optional[float] = None):
         # devices: a FIXED list (single-host / tests). If None, devices are
         # DISCOVERED from the peers' reported device_ids (federated / multi-host),
         # each sized from device_config[device_id] or default_capacity. That is the
@@ -169,6 +170,14 @@ class HostBroker:
         self._peer_device: Dict[str, str] = {}
         self.residency_grace_s = float(residency_grace_s)
         self.in_flight_ttl_s = float(in_flight_ttl_s)
+        # Phase 8 (meshlink backbone): re-probe cadence for a peer demoted to
+        # suspect by a NAMED transport degradation (tunnel down / relay quota)
+        # — the event-driven rung membership's age-based suspect sits above.
+        # Short, because the whole point is catching a relay restart within
+        # seconds; bounded, because the override never applies at mia.
+        self.mesh_suspect_probe_s = float(
+            mesh_suspect_probe_s if mesh_suspect_probe_s is not None
+            else os.environ.get("LIVESTACK_MESH_SUSPECT_PROBE_S", 10.0))
         self.devices = list(devices) if devices is not None else None
         self.peers: List[Peer] = list(peers or [])
         self.policy = policy or PlannerPolicy()
@@ -250,6 +259,14 @@ class HostBroker:
         self.roster = PeerRoster(membership, clock=clock or time.monotonic, log=log,
                                  on_transition=self._emit_transition)
         self._last_probe_error: Dict[str, str] = {}
+        # peer key -> the STABLE degradation name (mesh_tunnel_down,
+        # relay_quota) of the last probe failure that carried one. Only
+        # MeshPeer's dial raises exceptions with a `degradation` attribute —
+        # urllib-era RestPeer failures never do — so this map is empty for an
+        # all-HTTP roster and the http membership path is untouched. The name
+        # (not the message text) is what membership rows, transition records
+        # and evict citations key on.
+        self._probe_degradation: Dict[str, str] = {}
         # (kind, peer) -> Unit, as of the last snapshot. The planner gets the
         # folded per-kind map; this keeps WHO reported what, which the fleet view
         # needs and the folded map cannot express.
@@ -517,6 +534,7 @@ class HostBroker:
             self.peers = [p for p in self.peers if peer_key(p) != key]
             self.roster.drop(key)
             self._last_probe_error.pop(key, None)
+            self._probe_degradation.pop(key, None)
             self.peer_report.pop(key, None)
             self._log(f"[membership] pruned absent peer: {key}")
         return gone
@@ -544,6 +562,12 @@ class HostBroker:
             transport = transports.get(row["peer"])
             if transport:
                 row["transport"] = transport
+            # The stable degradation name behind a non-fresh state, when the
+            # last failure carried one: "transient tunnel-down, re-attaching"
+            # and "node actually dying" must be distinguishable on the row.
+            degradation = self._probe_degradation.get(row["peer"])
+            if degradation and row["state"] != "fresh":
+                row["degradation"] = degradation
         return out
 
     def sweep_leaks(self, now: Optional[float] = None) -> list:
@@ -691,6 +715,20 @@ class HostBroker:
                 # transitions, which is where the information actually is.
                 self._last_probe_error[key] = str(e)
                 self.roster.mark_probed(key)
+                degradation = getattr(e, "degradation", None)
+                if degradation is not None:
+                    # A NAMED degradation: the dial died at the relay door and
+                    # the node was never asked (tunnel down, quota refused).
+                    # Demote on the EVENT — suspect now, fast re-probe — rather
+                    # than waiting `suspect_after_s` of silence to say what the
+                    # exception already said. AFTER mark_probed, which notes
+                    # the age-derived state: run first it would flip a
+                    # fresh-aged peer straight back to fresh. Placements are
+                    # kept by `_remembered_peer` until mia, exactly as for an
+                    # age-based suspect, so a relay restart cannot evict.
+                    self._probe_degradation[key] = degradation
+                    self.roster.mark_degraded(
+                        key, probe_every_s=self.mesh_suspect_probe_s)
                 # UNREACHABLE IS NOT EMPTY. Dropping the peer dropped its
                 # PLACEMENTS too, so the planner concluded its card held nothing
                 # and re-placed units that were sitting right there. On this host
@@ -711,6 +749,7 @@ class HostBroker:
                 continue
             self._record_probe_ms(key, (time.monotonic() - probe_started) * 1000.0)
             self.roster.mark_seen(key)
+            self._probe_degradation.pop(key, None)
             # Last good read, so a peer that stops ANSWERING is not mistaken for
             # a peer that stops HOLDING. See `_remembered_peer`.
             peer_placements = self._with_recently_resident(
@@ -1024,13 +1063,26 @@ class HostBroker:
                 peer.warm(ld.kind, device=ld.device_id,
                           budget=dict(getattr(ld, "budget", {}) or {}))
             except Exception as e:
-                # Keep the record. A warm that does not confirm is usually a
-                # warm still running, and assuming otherwise is what duplicates
-                # the model; `in_flight_ttl_s` bounds the wrong guess. Per-load,
-                # so one unresponsive peer cannot abandon the rest of the plan.
-                self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} did not "
-                          f"confirm ({type(e).__name__}: {e}) — treating it as "
-                          f"in flight")
+                if getattr(e, "dispatched", True) is False:
+                    # The dial died BEFORE the request reached the node (relay
+                    # door refused, quota, tunnel down at connect — MeshPeer
+                    # marks these `dispatched=False`). Nothing is loading; the
+                    # in-flight record written above would reserve the card for
+                    # `in_flight_ttl_s` against a warm that never started. Drop
+                    # it so a dropped tunnel surfaces as a FAILED warm inside
+                    # the warm window, not a stuck in-flight that outlives it.
+                    self._in_flight.pop((ld.kind, ld.device_id), None)
+                    self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} failed "
+                              f"before dispatch ({type(e).__name__}: {e}) — load "
+                              f"never started, not tracking it in flight")
+                else:
+                    # Keep the record. A warm that does not confirm is usually a
+                    # warm still running, and assuming otherwise is what duplicates
+                    # the model; `in_flight_ttl_s` bounds the wrong guess. Per-load,
+                    # so one unresponsive peer cannot abandon the rest of the plan.
+                    self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} did not "
+                              f"confirm ({type(e).__name__}: {e}) — treating it as "
+                              f"in flight")
         return p
 
 
@@ -1290,9 +1342,16 @@ class HostBroker:
         already learned that lesson: `fresh->suspect`, `suspect->mia` and
         `mia->fresh` are events, "still gone" is not. Riding the same edge the
         log line rides is what makes that structural rather than remembered.
+
+        Every knob that decided the transition is recorded on the row
+        (Phase 8 ledger obligation): the age thresholds, the effective re-probe
+        cadence (including an event-driven demotion's fast override), and the
+        stable degradation name when the transition is attributable to one.
         """
         if self.ledger is None:
             return
+        degradation = self._probe_degradation.get(rec.key)
+        policy = self.roster.policy
         self._emit(Decision(
             emitter=self.emitter, emitter_id=self.emitter_id,
             decision="observe",
@@ -1305,8 +1364,18 @@ class HostBroker:
                 reason=f"membership: {old_state} -> {new_state}",
             )],
             chosen=None,
+            request={"membership": {
+                # None for an age-based transition; a stable name
+                # (mesh_tunnel_down / relay_quota) for an event-driven one.
+                "degradation": degradation,
+                "suspect_after_s": policy.suspect_after_s,
+                "mia_after_s": policy.mia_after_s,
+                "probe_every_s": probe_interval(new_state, policy,
+                                                override_s=rec.probe_override_s),
+            }},
             reason=(f"{rec.key} {old_state} -> {new_state} "
                     f"(unseen {rec.age(self.roster._clock()):.0f}s"
+                    + (f", degradation={degradation}" if degradation else "")
                     + (f", last_error={self._last_probe_error[rec.key]}"
                        if self._last_probe_error.get(rec.key) else "")
                     + ")"),
@@ -1417,6 +1486,19 @@ class HostBroker:
             kind = getattr(a, "kind", None)
             decision = {"Evict": "evict", "Load": "load",
                         "Grant": "grant", "Defer": "defer"}[type(a).__name__]
+            # Task 8.1's ledger obligation: an eviction that lands on a peer
+            # whose current failure is a NAMED transport degradation must say
+            # so beside the planner's own (non-transport) cause, so a
+            # retrospective can tell "evicted under memory pressure" from
+            # "evicted while the tunnel was down". `_peer_device` is soft
+            # state from the last successful snapshot — no peer is dialled to
+            # build this record.
+            transport_degradation = None
+            if decision == "evict":
+                for peer_key_, did in self._peer_device.items():
+                    if did == device_id and self._probe_degradation.get(peer_key_):
+                        transport_degradation = self._probe_degradation[peer_key_]
+                        break
             cands: List[Candidate] = []
             for other_kind, unit in sorted(world.units.items()):
                 resident_here = any(pl.kind == other_kind for pl in
@@ -1468,6 +1550,8 @@ class HostBroker:
                     "request_id": a.request_id,
                 } if isinstance(a, Defer) else {
                     "caused_by": getattr(a, "caused_by", None),
+                    **({"transport_degradation": transport_degradation}
+                       if transport_degradation else {}),
                 }),
             ))
 
