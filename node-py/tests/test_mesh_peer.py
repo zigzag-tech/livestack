@@ -22,9 +22,10 @@ import time
 import pytest
 
 import mesh_stack
-from mesh_stack import (CALLER_ACCOUNT, CALLER_DEVICE, CAP_AUDIENCE, CAP_TYPE,
+from mesh_stack import (BENCHDAY_CAP_AUDIENCE, BENCHDAY_CAP_TYPE,
+                        CALLER_ACCOUNT, CALLER_DEVICE, CAP_AUDIENCE, CAP_TYPE,
                         Facade, MeshKeys, REALM, RELAY_ID, RelayHarness,
-                        start_attach, stop_attach, wait_attached)
+                        ROUTE_PREFIX, start_attach, stop_attach, wait_attached)
 
 mesh_stack.load_meshlink()          # skips the whole module, loudly, if absent
 
@@ -200,6 +201,39 @@ def test_relay_429_is_named_relay_quota(stack):
         stack.facade.slow_seconds = 0.0
         holder.join(timeout=10)
     assert not errors, f"the held stream broke: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# DR-4: the WS door serves the livestack realm's real cosmetics
+# ---------------------------------------------------------------------------
+
+def test_realm_cosmetics_at_the_ws_door(stack):
+    """The pinned relay strips the realm's routePrefix at the WS upgrade and
+    verifies door caps against the realm's typ/aud (meshlink 902a233 — the
+    two Phase-5 workarounds are removed, so the REAL behavior is asserted):
+    the door lives under /livestack-relay and a cap wearing the benchday
+    realm's cosmetics is refused there, not tunneled."""
+    route = RelayRoute(url=stack.harness.relay_url, relay_id=RELAY_ID)
+    assert route.route_prefix == ROUTE_PREFIX == "/livestack-relay"
+    door = route.door_url("livestack", DAEMON_ID, "cap")
+    assert door.startswith(f"{stack.harness.relay_url}/livestack-relay/livestack/{DAEMON_ID}?cap=")
+
+    # Negative half: same ring, same claims EXCEPT the cosmetics — the
+    # cross-realm spoof shape. The relay refuses the upgrade with 401
+    # (bad_capability_type) and the peer names it, never an empty success.
+    ring = relay_control.CapKeyRing(
+        [relay_control.CapKey(k["kid"], k["secret"])
+         for k in MeshKeys.cap_ring_keys], active_kid="k1")
+    spoof_cfg = relay_control.RelayConfig(
+        urls=(stack.harness.relay_url,), realm=REALM, cap_ring=ring,
+        capability_type=BENCHDAY_CAP_TYPE, capability_audience=BENCHDAY_CAP_AUDIENCE)
+    spoof = _make_peer(stack.harness, relay_config=spoof_cfg)
+    try:
+        with pytest.raises(MeshTunnelDown) as ei:
+            spoof.refresh()
+        assert "HTTP 401" in str(ei.value)
+    finally:
+        spoof.close()
 
 
 # ---------------------------------------------------------------------------
