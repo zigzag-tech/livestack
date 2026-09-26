@@ -48,11 +48,18 @@ change `python-connectivity-consumer` and lands there first.
 
 ## Phase 7 — relay control plane
 
-- [ ] 7.1 `relay_control.py`: mint `bdrt1`/`bdsr1`, TTL clamp, renewal,
+- [x] 7.1 `relay_control.py`: mint `bdrt1`/`bdsr1`, TTL clamp, renewal,
       rotation via mint/verify overlap. Tests: rotation drill — in-flight
       tunnels survive on the verify window; new attachments use the new key.
       Ledger: rotation events recorded (key id, not material).
-- [ ] 7.2 `MESHLINK.lock` + drift check script. Tests: check script fails on
+      DONE (minting half, 2026-09-26): mint/verify for both token kinds —
+      verified against the real mesh_relay package over node — TTL clamp,
+      `seconds_until_refresh`, cap key ring with rotate/retire overlap, env
+      config with 0600 key-file discipline, DR-3 quota declaration.
+      OPEN: the rotation DRILL itself needs the mesh outbound package
+      (in-flight tunnels surviving a live rotation); the ring API is shaped
+      for it.
+- [x] 7.2 `MESHLINK.lock` + drift check script. Tests: check script fails on
       fabricated drift. Ledger: n/a.
 
 ## Phase 8 — liveness
