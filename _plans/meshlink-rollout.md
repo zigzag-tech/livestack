@@ -1,8 +1,8 @@
 # Meshlink backbone — staged rollout runbook
 
-**Status: WRITTEN, NOT EXECUTED.** This runbook names the exact steps, checks
-and go/no-go criteria for flipping the fleet onto the meshlink backbone
-(plan Phase 9.2). The week-long observation windows are operator time; nothing
+**Status: EXECUTED 2026-09-26/27** (production; the runbook below is retained
+as the procedure record). Per-host end state is appended at the bottom under
+"Executed — 2026-09-26". The week-long observation windows are operator time; nothing
 in this document has been performed against real hosts yet.
 
 **Prerequisites (all landed, green on origin/main):**
@@ -126,3 +126,66 @@ The relay operator is on call for every flip (quota, cosmetics, key ring).
 **Ledger note (task 9.2's obligation):** record each flip in the decision
 ledger as an `observe`/membership event naming the host, the daemon_id and
 the flip timestamp (the membership rows already carry `transport=mesh`).
+
+---
+
+## Executed — 2026-09-26/27 (production rollout record)
+
+Quota decision (operator-approved): **32 streams / 1200 req-min per account**
+for the `livestack` realm (`maxStreamSeconds` inherits the global 3600).
+Realm record: cosmetics `routePrefix=/livestack-relay`, `doorPath=/livestack-attach`,
+`attachmentAudience=livestack-relay-attachment`, cap typ/aud `livestack-relay-*`;
+HMAC ring kid `lsk1`; 15 ed25519 attachment pubkeys (one per facade identity).
+
+**Relay doors (both serve benchday + livestack realms):**
+
+- `zz-tower2-cn` — `https://tower2.zztech.cc:3389` — benchday relay on
+  127.0.0.1:8767, livestack door process `livestack-relay` on 127.0.0.1:8768
+  (nginx `/livestack-relay/` → 8768). Env: `/etc/benchday/regional-relay.env`
+  (+ `/etc/benchday/livestack-relay-overrides.env`).
+- `hto-histo-na` — `https://hto.zztech.io` — same topology, managed from
+  zz-tower2 over ssh.
+
+Deploy-script truth (benchday origin/main ≥ `1accb01d3`): realms-mode doors
+write `BENCHDAY_RELAY_REALM` as a realm NAME; a realm file with an empty
+`capabilityKeys.verify` is refused; the script installs the second door
+service itself (meshlink DR-4: one engine per realm door) and points nginx at
+it. Hub wiring: multi-realm `RelayTunnels` carries per-realm
+`attachmentAudienceForRealm`; non-benchday door processes skip the benchday
+projection/probe loop.
+
+**Fleet state:**
+
+| daemon_id | host | state |
+|---|---|---|
+| tower-asr-1 | xc-tower-ubuntu (polyasr) | attached (via CN door) |
+| tower-tts | xc-tower-ubuntu (polytts) | attached (both doors) |
+| tower-asr-2 | xc-tower-ubuntu (polyasr-b) | mesh env staged; engine cold-start blocked by GPU capacity (also needs `HF_HUB_OFFLINE=1`, installed as drop-in) — attaches on next successful start |
+| tower-llm | xc-tower-ubuntu (harmony-llm) | mesh env staged; restart deferred — GPU1 has no room for its 0.85 fraction |
+| t0-asr-1 | zz-tower0 (polyasr) | attached |
+| t0-tts | zz-tower0 (polytts) | attached |
+| t0-chipgen | zz-tower0 | staged; chipgen service has no mesh-capable node-py path yet |
+| mac-asr-1 / mac-tts | xc-mac-studio | daemon keys staged on host; mac facades are standalone checkouts without the mesh attach path — needs the livestack node facade before flipping |
+| (spares) tower-perc-1..6 | — | keys registered in the realm; reserved for future perception facades |
+
+Brokers: `livestack-fleetd` (tower) and `livestack-fleetd-cn` (tower0) both
+carry the relay env (`LIVESTACK_RELAY_URLS/IDS/CAP_KEYS`, CN broker prefers the
+CN door). Tower broker roster shows `mesh://livestack/tower-asr-1/livestack`
+registered.
+
+Node drop-in shape (all flipped hosts):
+`LIVESTACK_MESH_ENABLED=1`, `LIVESTACK_MESH_DAEMON_ID=<id>`,
+`LIVESTACK_MESH_DAEMON_KEY_FILE` + `LIVESTACK_RELAY_KEY_FILE` (same ed25519
+key — bdrt1 is minted with it and verified against its registered pubkey),
+`LIVESTACK_RELAY_URLS`, `LIVESTACK_RELAY_IDS` (single-quoted JSON —
+systemd strips inner quotes otherwise), `LIVESTACK_RELAY_REALM=livestack`.
+The port (`mesh_outbound_py` + `websockets` + `cryptography`) is linked into
+each node venv via a `mesh_outbound_py-dev.pth`. `/etc/livestack/mesh/` is
+root:<svc-user> 0750, keys 0600 service-user owned; `cap-keys.json` stays
+root-only.
+
+Notable incidents during the rollout (all fixed, see benchday commits up to
+`1accb01d3`): fingerprint-vs-name door selector crash-loop; empty
+`capabilityKeys.verify`; `Environment=` vs `EnvironmentFile=` precedence;
+nginx sed flipping both locations; stale `dist/` silently rebundled; a stray
+`python3 -m http.server 8766` on tower0 squatting the polyasr port.
