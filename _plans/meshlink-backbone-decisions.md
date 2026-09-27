@@ -135,3 +135,16 @@ re-pin only).
 - **Multi-broker fanout worry (rejected):** the relay mux is multi-session
   (cap 32); one node serving several brokers is a supported shape, not a
   hazard.
+
+## Deploy-time decisions (2026-09-26 rollout)
+
+- **Realm quota (DR-3): 32 streams / 1200 req-min per account**, set in the
+  production `livestack` realm record at door deploy time;
+  `maxStreamSeconds` inherits the global 3600. Chosen to sit under
+  `LIVESTACK_ACCOUNT_QUOTA` with headroom for the current fleet fan-out
+  (4 announcing nodes per broker, mux cap 32). Recorded in
+  `_plans/meshlink-rollout.md` § Executed.
+- **Topology: one engine process per realm door** (meshlink DR-4) on each
+  public relay: benchday door on 8767, `livestack-relay` door service on
+  8768, nginx prefix per door. Scripted in benchday
+  `scripts/deploy-regional-relays.sh` (≥ `1accb01d3`).
