@@ -32,9 +32,14 @@ def test_fp8_two_adapters():
     assert m.kv_tokens == 37981
     assert abs(m.kv_bytes / GIB - 1.66) < 0.005
     assert abs(m.cuda_graphs / GIB - 0.90) < 0.005
-    # The footprint the planner will use is the engine's own sum, well above
-    # the declared 21 GB the unit file still carried.
+    # What the card holds (KV fills the budget) vs the least the engine needs
+    # (KV for one 24,576-token request): 23.51 vs ~22.9 GiB. Both above the
+    # declared 21 GB; neither is the admission number yet (design §8b).
     assert m.footprint / GIB > 23.0
+    per_token = m.kv_bytes / m.kv_tokens
+    assert m.min_footprint == int(m.weights_nontorch + m.peak_activation + m.cuda_graphs
+                                  + per_token * 24576)
+    assert 22.5 < m.min_footprint / GIB < m.footprint / GIB
 
 
 def test_truncated_log_is_unknown_naming_the_missing_lines():
