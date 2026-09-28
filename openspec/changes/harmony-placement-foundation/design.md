@@ -319,6 +319,23 @@ measurement is reported beside it for composition. Adopting it for admission nee
 a planner change: no device reserve for units whose footprint is measured, or a
 per-unit reserve. That is its own change, and task 2.2 stays open until it lands.
 
+## 8c. The reserve fix (2026-09-28)
+
+`planner._World.reserve(device, for_unit)` charges `Device.reserved` only when some
+unit in play (the residents, plus the unit being placed) has a declared footprint.
+When every one is measured (`footprint_source` in `MEASURED_SOURCES`), their
+activation is already inside their footprints and the reserve is waived. `free()`
+takes the unit being placed, and every admission fit check passes it. A measured
+unit also carries `admission_footprint` (the engine's `min_footprint`). Admission
+needs that; residence charges `footprint`, what the card actually holds.
+`RestPeer.units` adopts both from the node's `measured` report. A report that did not
+parse keeps the declared prior.
+
+Pinned by `tests/test_planner_measured_reserve.py`, with the old double count as a
+negative control: with a request pending elsewhere (which lifts the sole-tenant
+guard), a declared 25.24e9 B unit is shed from a 25.30e9 B card with a 2 GB reserve,
+and a measured one is not.
+
 ## 9. harmony-llm's source of truth
 
 `~/harmony-llm/server.py` is a symlink to this repo's
