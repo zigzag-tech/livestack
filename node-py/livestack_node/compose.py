@@ -41,6 +41,7 @@ DEFAULT_SEQS = (16, 32)
 TRACE_S = 21 * 86400                 # the demand log's own retention
 WINDOW_S, WINDOW_COUNT, WINDOW_STRIDE_S = 6 * 3600, 3, 86400
 SERVED_HOURS = 24
+FULL_DETAIL_ROWS = 5                 # cheapest alternatives recorded in full; see _decision_record
 NOT_APPLIED_AFTER_S = 7 * 86400
 
 
@@ -228,16 +229,33 @@ def fetch_facts(urls: Sequence[str], since: float, timeout: float = 30.0) -> Lis
 
 def _decision_record(dec: cm.CompositionDecision, *, emitter_id: str, snapshot: Optional[str],
                      now: float) -> Decision:
+    # FIT THE LEDGER'S 32 KiB RECORD BY CONSTRUCTION. The writer sheds
+    # candidate rows from the back when a record is over its cap, and the first
+    # production run lost the live composition that way. Scored rows keep their
+    # full prediction and cost; a filtered row keeps what filtered it (its
+    # composition, reason and predicted KV tokens). The live and chosen rows
+    # are never compacted and are checked below.
     cands = []
+    scored = sorted((r for r in dec.candidates if r.cost is not None and not r.live),
+                    key=lambda r: (r.cost.total, r.hash))
+    top = {id(r) for r in scored[:FULL_DETAIL_ROWS]}
     for r in dec.candidates:
         total = r.cost.total if r.cost else None
+        full = r.live or r.outcome == "chosen" or id(r) in top
+        detail = {"composition": r.composition.to_json(), "live": r.live,
+                  "feasibility": r.feasibility}
+        if full:
+            detail["cost"] = r.cost.to_json() if r.cost else None
+            detail["prediction"] = r.prediction.to_json() if r.prediction else None
+        else:
+            if total is not None:
+                detail["cost_total"] = round(total, 3)
+            if r.prediction is not None:
+                detail["kv_tokens"] = r.prediction.kv_tokens
         cands.append(Candidate(
             id=r.hash, outcome=r.outcome, device_id=r.device,
             reason=(r.reason if r.reason else f"cost {total:.1f}" if total is not None else "unscored"),
-            detail={"composition": r.composition.to_json(), "live": r.live,
-                    "feasibility": r.feasibility,
-                    "cost": r.cost.to_json() if r.cost else None,
-                    "prediction": r.prediction.to_json() if r.prediction else None}))
+            detail=detail))
     return Decision(emitter="composition", emitter_id=emitter_id, decision="compose",
                     kind="llm", candidates=cands, chosen=dec.chosen_hash, reason=dec.reason,
                     # The decider and weights ride in `request` (what was asked
@@ -262,6 +280,14 @@ def propose(facts_list: Sequence[Mapping], *, ledger: Optional[JsonlLedger],
                 if store is not None else None)
     rec = _decision_record(dec, emitter_id=emitter_id, snapshot=snapshot, now=now)
     written = ledger.append(rec) if ledger is not None else None
+    if written is not None:
+        kept = {c["id"] for c in written.get("candidates", [])}
+        must = {r.hash for r in dec.candidates if r.live or r.outcome == "chosen"}
+        if not must <= kept:
+            # Named, not silent: the record exists but lost a row the spec
+            # requires. The full decision is still in `out` and the snapshot.
+            print(f"[compose] ledger record {rec.decision_id} truncated away "
+                  f"{sorted(must - kept)} (live/chosen rows)", file=sys.stderr, flush=True)
     return {"decision_id": rec.decision_id, "recorded": written is not None,
             "snapshot": snapshot, "notes": notes, "decision": dec.to_json(),
             "units_diff": units_diff(facts_list, dec.chosen)}
