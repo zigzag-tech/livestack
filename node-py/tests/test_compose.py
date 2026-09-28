@@ -92,7 +92,7 @@ def test_without_jemm_demand_it_keeps(tmp_path):
 
 
 def test_unknown_card_size_is_named_not_zero():
-    f = facts()
+    f = facts(rows=())
     f["capacity_bytes"] = None
     f["units"][0]["measured"] = None
     f["units"][0]["gpu_fraction"] = 0.96
@@ -130,3 +130,20 @@ def test_a_proposal_never_applied_is_marked_after_seven_days(tmp_path):
     assert compose.join_outcomes(led, [never], now=T0 + 8 * 86400) == 1
     last = led.read()[-1]
     assert last["outcome"]["kind"] == "not_applied" and last["outcome"]["status"] == "unknown"
+
+
+def test_card_size_comes_from_the_engine_not_nvidia_smi():
+    """nvidia-smi says 24.0 GiB; vLLM budgets against the 23.56 GiB CUDA exposes.
+    With nvidia-smi's number the bf16 two-adapter composition looked feasible on
+    2026-09-28 (28,133 KV tokens predicted); vLLM refuses to start it."""
+    f = facts(rows=(BF16, FP8))
+    f["capacity_bytes"] = 24576 * (1 << 20)            # what nvidia-smi reports
+    f["units"][0]["measured"] = FP8                     # the live engine's own report
+    out = compose.propose([f], ledger=None, store=None, now=T0, params={"lens": [24576], "seqs": [32]})
+    two_bf16 = [c for c in out["decision"]["candidates"]
+                if sorted(c["composition"]["adapters"]) == ["chips", "jemm"]
+                and c["composition"]["kv_dtype"] == "auto"]
+    assert two_bf16 and all(c["reason"] == "filtered:infeasible:kv_tokens<max_model_len" for c in two_bf16)
+    state, notes = compose.state_from_facts([f], now=T0)
+    assert abs(state.devices[0].capacity / (1 << 30) - 23.56) < 0.02
+    assert notes == []
