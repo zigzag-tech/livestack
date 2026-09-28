@@ -1737,25 +1737,16 @@ class RestPeer:
                 fp = reported
             # Measured peak-activation reserve (absent on nodes that don't report it).
             hdrm = u.get("activation_headroom") or {}
-            # THE ENGINE'S OWN REPORT BEATS THE DECLARED NUMBER. A node that
-            # parsed its engine's startup lines reports the whole footprint
-            # (weights + activation + KV + CUDA graphs); the activation is
-            # inside it, so no separate headroom is reserved on top. A node
-            # whose engine report did NOT parse says `unknown`, and the unit
-            # is then charged the device's whole capacity: an unknown cost is
-            # not a small one, and co-placing beside it is exactly the guess
-            # this exists to stop. An operator override still wins.
-            measured = u.get("measured") or {}
-            source = u.get("footprint_source") or "declared"
-            if u["kind"] not in self._footprints:
-                if source == "unknown":
-                    cap = self.device_capacity()
-                    if cap:
-                        fp, hdrm = dict(cap), {}
-                elif measured.get("footprint"):
-                    fp, hdrm = {"vram_bytes": float(measured["footprint"])}, {}
-            else:
-                source = "declared"
+            # The node says where its `footprint` number came from; the broker
+            # carries that label into ledger rows and snapshots. It does NOT
+            # swap in the `measured` report: a measured footprint already holds
+            # the activation the device reserve was sized to cover, so charging
+            # both double-counts, and on xc-tower-ubuntu that made a reload of
+            # the 27B unplaceable (2026-09-28). Using the measurement for
+            # admission waits on fixing that reserve (openspec
+            # harmony-placement-foundation, design §8b).
+            source = ("declared" if u["kind"] in self._footprints
+                      else u.get("footprint_source") or "declared")
             # Declared economics, passed through when set; absent keeps the
             # planner defaults (15 s floor, 1.0 reload) — a node that declares
             # nothing plans exactly as it did before the fields existed.

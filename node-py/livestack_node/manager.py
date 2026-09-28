@@ -102,6 +102,9 @@ class ManagedUnit:
         # or `Unknown.to_json()`), set by the node after a load. None = never
         # measured: the footprint above is then a declared prior.
         self.measured_cost: "Optional[dict]" = None
+        # Where `footprint` came from. "declared" until a node deliberately
+        # adopts a measurement as its admission number.
+        self.footprint_source: str = "declared"
         # Node-specific facts for /residence (e.g. the demand log's counters).
         self.extra_report: "Optional[Callable[[], dict]]" = None
         self.residency_policy = residency_policy

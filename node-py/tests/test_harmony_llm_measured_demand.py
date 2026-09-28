@@ -81,7 +81,11 @@ def test_measured_cost_replaces_the_declared_footprint(srv):
     unit = srv._UNITS["llm_general"]
     assert unit.measured_cost["kv_tokens"] == 37981
     assert unit.measured_cost["source"] == "vllm-startup"
-    assert unit.footprint > 23 * (1 << 30) > 21 * (1 << 30)
+    # Reported, not adopted for admission (design §8b): the declared prior stays.
+    assert unit.footprint == 21 * (1 << 30)
+    assert unit.measured_cost["footprint"] > 23 * (1 << 30)
+    # The least it can run with: KV for one 24,576-token request, not the whole pool.
+    assert 22.5 * (1 << 30) < unit.measured_cost["min_footprint"] < unit.measured_cost["footprint"]
     rows = srv._COSTS.load()
     chash = srv._COMPOSITION["llm_general"]
     assert rows[chash]["composition"]["kv_dtype"] == "fp8"

@@ -9,7 +9,10 @@
 - Journal: `llm_general: measured 23.51 GiB (weights 18.39, activation 2.56, KV 1.66 =
   37981 tokens, graphs 0.90) for sha256:ef0458d1b1f3…`
 - `/residence`: `footprint {"vram_bytes": 25243670282}`, `footprint_source: vllm-startup`,
-  was the declared 21 GB.
+  was the declared 21 GB. **Reverted the same hour** (design §8b): with the broker's 2 GB
+  device reserve, the card's 25.30e9 B left about 23.3e9 B, so a reload of `llm_general`
+  would have been unplaceable. `footprint` is back to the declared prior, and the
+  measurement (including `min_footprint`) is reported beside it.
 - Demand log live at `~/.cache/livestack/demand/xc-tower-ubuntu-gpu1.jsonl`, first
   records with real token counts (e.g. 1,612 prompt / 55 completion, 9.1 s).
   `owner_ns` is `null` on current traffic: the hub still sends unprefixed owners
