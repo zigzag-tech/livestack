@@ -23,9 +23,10 @@ every gap this change closes:
   startup, CUDA 12.9's nvcc refused the system gcc-15, and `llm_general` crash-looped for
   about 5 minutes before a manual rollback.
 - **Demand was unknowable per adapter.** The only history was vLLM's 10-second
-  `Running/Waiting/KV usage` journal lines. Over 7 days they show concurrency never
-  above 11 (with `--max-num-seqs 32`), queueing in ~10% of samples at 91–100% KV usage,
-  and up to 112 requests waiting. Nothing says which adapter or caller those requests
+  `Running/Waiting/KV usage` journal lines. The journal only reaches back to
+  2026-09-26 (about two days, 7,192 samples). Those show concurrency never above 11
+  (with `--max-num-seqs 32`), requests waiting in ~10% of samples at every KV-usage
+  level (most often 80–90%, not only when the cache is full), and up to 112 waiting. Nothing says which adapter or caller those requests
   were, or how long their prompts were.
 
 This is an optimization problem: choose compositions that minimise a defined cost under
@@ -84,8 +85,9 @@ is on record to train and replay against. That is the foundation this change lay
    snapshot pointer). When a proposed composition is later applied, the first measured
    startup and the next window of demand-log outcomes are joined to it by
    `parent_decision_id`. That includes predicted-vs-measured memory.
-7. **Propose, never apply.** A dry-run endpoint `GET /composition` on the host broker
-   returns the proposal and a diff against the live units file. Applying it stays a
+7. **Propose, never apply.** `python -m livestack_node.compose` reads each
+   harmony-llm node's `GET /composition/facts`, records the decision, and prints the
+   proposal as a diff against the live units file. Applying it stays a
    person's action in this change. The apply-and-verify gates are specified so a later
    woven routine can carry them out.
 
@@ -108,10 +110,11 @@ is on record to train and replay against. That is the foundation this change lay
 
 - `node-py/livestack_node/`: new `composition.py` (pure) and `composition_replay.py`
   (the admission model); `hostbroker.py` (snapshot pointer on `_emit_plan`,
-  `GET /composition`); `ledger.py` (snapshot store and its bound); `facade.py`
+  replayable plan records); `ledger.py` (`Candidate.detail`, `snapshot`); `snapshots.py`,
+  `replay_plan.py`, `compose.py` (new); `facade.py`
   (`/residence` carries measured cost).
-- `~/harmony-llm/server.py` (not in this repo): startup-line parser, demand-log writer.
-  Its source of truth needs settling; see design §9.
+- `node-py/examples/harmony-llm/server.py` (what `~/harmony-llm/server.py` symlinks to):
+  wiring for the new `vllm_startup.py` and `demand_log.py` modules.
 - `HARMONY.md`: operator reference for measured cost, the demand log, and reading a
   composition proposal.
 - No change to request routing, `/v1/classifier`, callers, or the request language.

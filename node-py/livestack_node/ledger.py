@@ -145,6 +145,9 @@ class Candidate:
     region: Optional[str] = None
     inputs_at: Optional[float] = None
     rank: Optional[int] = None
+    # Emitter-specific values the row was judged on (a composition's
+    # prediction and cost breakdown). Values, not references, like the rest.
+    detail: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.distance_band is None:
@@ -171,6 +174,9 @@ class Decision:
     # the pointer that joins this audit record to its full policy decision in
     # the separate policy record stream (scheduler-policy-routine design §1).
     policy: Optional[Dict[str, Any]] = None
+    # `sha256:` of the stored state the decision was made on (snapshots.py),
+    # so the decision can be re-run rather than only read.
+    snapshot: Optional[str] = None
     decision_id: str = field(default_factory=new_decision_id)
     ts: float = field(default_factory=time.time)
 
@@ -237,6 +243,15 @@ class JsonlLedger:
         except Exception as exc:      # pragma: no cover - a record that will not serialize
             self._log(f"[ledger] unserializable record dropped: {exc}")
             return None
+        return payload if self._write(payload) else None
+
+    def append_record(self, payload: dict) -> bool:
+        """Write one already-shaped JSON record under the same bound. For
+        streams that share this writer's rotation and age window but are not
+        decisions (the inference demand log)."""
+        return self._write(payload)
+
+    def _write(self, payload: dict) -> bool:
         line = json.dumps(payload, separators=(",", ":"), sort_keys=True)
         try:
             with self._lock:
@@ -252,8 +267,8 @@ class JsonlLedger:
             # Emitting is observability. It is never worth failing a placement
             # or a route for, so a full disk degrades to silence, once.
             self._log(f"[ledger] write failed: {exc}")
-            return None
-        return payload
+            return False
+        return True
 
     def _encode(self, decision: Decision) -> dict:
         payload = decision.to_dict()

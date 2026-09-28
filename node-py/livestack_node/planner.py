@@ -128,6 +128,12 @@ class Unit:
     # Free-form on purpose — the planner never interprets a key, it only
     # compares (see `_unit_satisfies`), so a new axis costs no planner change.
     attributes: Mapping[str, object] = field(default_factory=dict)
+    # Where `footprint` came from: "vllm-startup" (the engine's own report),
+    # "declared" (an operator's number, a prior), or "unknown" (the engine
+    # became ready but its report did not parse; the footprint is then the
+    # device's whole capacity, never 0). Carried so a ledger row and a replay
+    # snapshot say how much to trust the number.
+    footprint_source: str = "declared"
 
 
 @dataclass(frozen=True)

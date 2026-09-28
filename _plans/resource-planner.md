@@ -57,6 +57,10 @@ not weights. So:
 - `Unit.footprint` MUST be `measured_weights + peak_activation_headroom`, not just
   resident weights. Measure `torch.cuda.max_memory_allocated` delta on first real
   run and cache it.
+  **Stale for vLLM units (2026-09-28):** harmony-llm declared `footprint_gb` and
+  measured nothing. It now reports the engine's own startup breakdown (weights,
+  activation, KV, CUDA graphs) as the footprint, and `unknown` when that does not
+  parse. See openspec `harmony-placement-foundation` and HARMONY.md, "Unit composition".
 - `Device.reserved` carries permanent slack the planner never allocates.
 - Grants are verified against **real** free VRAM (NVML) before load — trust but
   verify; other tenants (a stray notebook, gnome-shell) exist.
