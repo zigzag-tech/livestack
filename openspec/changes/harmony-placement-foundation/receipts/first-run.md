@@ -48,3 +48,24 @@ current, light traffic). Its record lists, among others:
   batch cap other than 32 has ever been measured here.
 
 The two earlier records with bugs stay in the ledger as they were written.
+
+## Measured cost drives admission (task 2.2, design §8c)
+
+- Fix on `main` `b9d7fc9b`. The host broker was released as `df4a0154` on branch
+  `release/hostd-measured-admission`: the pinned `978cfa1e` plus only this fix (the
+  planner taken whole from main, where the only changes since `978cfa1e` are this
+  fix; hostbroker got just the `RestPeer` hunk). Installed at
+  `~/.local/share/livestack-releases/measured-admission-df4a0154`, selected by
+  `/etc/systemd/system/livestack-hostd.service.d/70-measured-admission.conf`.
+  Rollback: delete that drop-in, `daemon-reload`, restart.
+- Tests on the release: 998 passed and the same 2 pre-existing failures as
+  `978cfa1e` (991 passed); the 7 new tests pass.
+- Dry run before the switch: the release's planner on the live `/status`
+  snapshots gave an empty idle plan under both old and new code. After a simulated
+  eviction, both reload `llm_general` onto `a46c4c2e`; the new code admits on the
+  24.61e9 B minimum with no reserve.
+- The switch took about 4 s. All four residents were re-announced within about
+  20 s. There were no evictions, and vLLM served throughout.
+- Live: the release's `RestPeer` on `http://127.0.0.1:8188/livestack` reads
+  `llm_general` as footprint 25,243,670,282 B, admission 24,614,586,656 B, source
+  `vllm-startup`, no separate headroom.
