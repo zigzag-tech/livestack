@@ -147,3 +147,15 @@ def test_card_size_comes_from_the_engine_not_nvidia_smi():
     state, notes = compose.state_from_facts([f], now=T0)
     assert abs(state.devices[0].capacity / (1 << 30) - 23.56) < 0.02
     assert notes == []
+
+
+def test_the_recorded_decision_keeps_the_live_row_under_the_size_cap(tmp_path):
+    """The first production run's record exceeded the ledger's 32 KiB cap and
+    the writer shed the live composition's row. With the full search space
+    (3 lengths x 2 caps x 2 dtypes x 4 adapter sets) the record must fit."""
+    led = JsonlLedger(str(tmp_path / "c.jsonl"))
+    compose.propose([facts(rows=(BF16, FP8))], ledger=led, store=None, now=T0)
+    rec = led.read()[0]
+    assert not rec.get("truncated")
+    assert any(c["detail"]["live"] for c in rec["candidates"])
+    assert len(json.dumps(rec, separators=(",", ":"), sort_keys=True)) <= 32 * 1024   # as the ledger measures
