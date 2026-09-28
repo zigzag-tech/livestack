@@ -128,6 +128,18 @@ class Unit:
     # Free-form on purpose — the planner never interprets a key, it only
     # compares (see `_unit_satisfies`), so a new axis costs no planner change.
     attributes: Mapping[str, object] = field(default_factory=dict)
+    # Where `footprint` came from: "vllm-startup" (the engine's own report),
+    # "declared" (an operator's number, a prior), or "unknown" (the engine
+    # became ready but its report did not parse; the footprint is then the
+    # device's whole capacity, never 0). Carried so a ledger row and a replay
+    # snapshot say how much to trust the number.
+    footprint_source: str = "declared"
+    # What a NEW load needs to be admitted, when that differs from what the
+    # resident unit holds. A vLLM engine sizes its KV pool to the budget it is
+    # granted, so its measured `footprint` is as big as its last grant; what it
+    # cannot start without is its measured MINIMUM (weights + activation +
+    # CUDA graphs + KV for one max-length request). Empty = `footprint`.
+    admission_footprint: Res = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -377,14 +389,41 @@ class _World:
                 h = _add(h, hr)
         return h
 
-    def free(self, device_id: str) -> Dict[str, float]:
+    def reserve(self, device_id: str, for_unit: Optional[Unit] = None) -> Dict[str, float]:
+        """The device's permanent slack, CHARGED ONLY WHERE IT HAS A JOB.
+
+        `Device.reserved` exists to cover activation memory that declared,
+        weights-only footprints leave out. A footprint the engine measured
+        already contains its activation, so charging the reserve on top counts
+        it twice. On xc-tower-ubuntu (2026-09-28) that made the measured 27B
+        unplaceable on the very card it runs on: 25.30e9 B minus a 2 GB reserve
+        is less than its 24.6e9 B minimum. And because step 0 sheds any device
+        whose `free` goes negative, charging it to a RESIDENT measured unit
+        would evict it outright.
+
+        So the reserve is waived when every unit in play (the residents, plus
+        the one being placed) has a measured footprint. One declared unit
+        brings it back, whole: the reserve protects that unit's unmodelled
+        activation, and it is not divisible by unit."""
         d = self.devices[device_id]
+        units = [self.w.units[k] for k in self.resident[device_id]]
+        if for_unit is not None and for_unit.kind not in self.resident[device_id]:
+            units.append(for_unit)
+        if units and all(u.footprint_source in MEASURED_SOURCES for u in units):
+            return {}
+        return dict(d.reserved)
+
+    def free(self, device_id: str, for_unit: Optional[Unit] = None) -> Dict[str, float]:
+        """Free capacity on the device. Pass `for_unit` when asking whether THAT
+        unit fits: the reserve depends on who would be resident (see `reserve`)."""
+        d = self.devices[device_id]
+        reserved = self.reserve(device_id, for_unit)
         # Reserve resident units' measured peak-activation on top of the static
         # `reserved` slack, so admitting/backfilling another unit can't consume the
         # space a resident unit needs when it next runs (prevents runtime OOM, not
         # just load-time). Zero when no unit declares headroom => unchanged.
         hdrm = self._resident_headroom(device_id)
-        budget = _sub(_sub(_sub(d.capacity, d.reserved), self.used(device_id)), hdrm)
+        budget = _sub(_sub(_sub(d.capacity, reserved), self.used(device_id)), hdrm)
         meas = self.w.measured_free.get(device_id) if self.w.measured_free else None
         if not meas:
             return budget
@@ -398,7 +437,7 @@ class _World:
         # delta = used_now - used_at_snapshot (positive => we loaded => less real free).
         delta = _sub(self.used(device_id), self._used_at_snapshot.get(device_id, {}))
         adjusted = _sub(meas, delta)
-        avail = _sub(_sub(adjusted, d.reserved), hdrm)
+        avail = _sub(_sub(adjusted, reserved), hdrm)
         out = dict(budget)
         for k, v in avail.items():
             out[k] = min(budget.get(k, v), v)
@@ -575,6 +614,11 @@ def _can_serve(unit: Unit, d: Device) -> bool:
     return not unit.servable_on or d.id in unit.servable_on
 
 
+# Footprint sources that already CONTAIN the unit's activation memory: the
+# engine measured everything it holds. See `_World.reserve`.
+MEASURED_SOURCES = frozenset({"vllm-startup"})
+
+
 def _admission_need(unit: Unit) -> Res:
     """VRAM a device must have free to safely ADMIT/place a new load of ``unit``:
     resident weights (``footprint``) plus its transient peak-activation
@@ -582,6 +626,8 @@ def _admission_need(unit: Unit) -> Res:
     steady-state residence accounting (``_World.used``) still charges ``footprint``
     alone, so headroom prevents an OOM grant without permanently inflating the
     resident memory model. Default (no headroom) => ``footprint`` unchanged."""
+    if unit.admission_footprint:
+        return unit.admission_footprint         # measured: activation already inside
     if not unit.activation_headroom:
         return unit.footprint
     return _add(unit.footprint, unit.activation_headroom)
@@ -622,7 +668,8 @@ def _yields_at_equal_priority(_world: _World, p: Placement, u: Unit,
 
 
 def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: int,
-                     pol: PlannerPolicy, requester_kind: str = "") -> Optional[List[Placement]]:
+                     pol: PlannerPolicy, requester_kind: str = "",
+                     unit: Optional[Unit] = None) -> Optional[List[Placement]]:
     """Minimal set of evictable resident units on ``device_id`` whose removal makes
     ``need`` fit. Evictable = lower priority than the requester (or equal priority
     while UNPINNED, idle and unwanted — see below), not HARD_PIN, past its
@@ -650,7 +697,7 @@ def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: i
                               -_magnitude(units[p.kind].footprint),
                               units[p.kind].reload_cost))
     chosen: List[Placement] = []
-    freed = dict(world.free(device_id))
+    freed = dict(world.free(device_id, unit))
     if _fits(need, freed):
         return []
     for p in cands:
@@ -663,7 +710,8 @@ def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: i
 
 def _residency_floor_blocker(world: _World, device_id: str, need: Res,
                              requester_prio: int, pol: PlannerPolicy,
-                             requester_kind: str = "") -> Optional[tuple]:
+                             requester_kind: str = "",
+                             unit: Optional[Unit] = None) -> Optional[tuple]:
     """`(kind, min_residency_s, age_s)` of a load whose residency floor is what
     stands between ``need`` and this device — or None when the floor is not the
     blocker.
@@ -693,7 +741,7 @@ def _residency_floor_blocker(world: _World, device_id: str, need: Res,
             continue
         (young if (world.w.now - p.loaded_at) < u.min_residency_s
          else evictable).append(p)
-    freed = dict(world.free(device_id))
+    freed = dict(world.free(device_id, unit))
     if _fits(need, freed):
         return None                             # it fits as-is; no blocker
     for p in evictable:
@@ -796,7 +844,7 @@ def _contention_cost(world: _World, device_id: str, unit: Unit,
             continue
         # Do we actually contend? If both fit with the sibling still resident,
         # nobody evicts anybody and there is nothing to charge for.
-        if _fits(need, world.free(device_id)):
+        if _fits(need, world.free(device_id, unit)):
             continue
         total += v.reload_cost * float(world.w.demand.get(p.kind, 0.0))
     return pol.contention_weight * total
@@ -828,7 +876,7 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
         # warm: a resident copy serves another lease for free
         if world.is_resident(req.kind, d.id):
             opt = _Option(d.id, 0.0 + loc_pen, [], needs_load=False,
-                          slack=_magnitude(_sub(world.free(d.id), _admission_need(unit))))
+                          slack=_magnitude(_sub(world.free(d.id, unit), _admission_need(unit))))
         elif world.is_loading(req.kind, d.id):
             # A copy is already arriving here. Waiting for it needs no second
             # load and no second card, so it must cost LESS than loading again
@@ -839,19 +887,19 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
             # above): half a reload is the expected wait, having arrived at a
             # uniformly random point during it.
             opt = _Option(d.id, unit.reload_cost / 2.0 + loc_pen, [], needs_load=False,
-                          slack=_magnitude(_sub(world.free(d.id), _admission_need(unit))))
-        elif _fits(_admission_need(unit), world.free(d.id)):
+                          slack=_magnitude(_sub(world.free(d.id, unit), _admission_need(unit))))
+        elif _fits(_admission_need(unit), world.free(d.id, unit)):
             opt = _Option(d.id, unit.reload_cost + loc_pen
                           + _contention_cost(world, d.id, unit, pol), [], needs_load=True,
-                          slack=_magnitude(_sub(world.free(d.id), _admission_need(unit))))
+                          slack=_magnitude(_sub(world.free(d.id, unit), _admission_need(unit))))
         else:
             victims = _victims_to_free(world, d.id, _admission_need(unit), eff_prio, pol,
-                                       req.kind)
+                                       req.kind, unit=unit)
             if victims is None:
                 continue
             preempt_cost = sum(world.w.units[v.kind].reload_cost for v in victims)
             busy_pen = sum(50.0 for v in victims if v.busy)   # discourage interrupting work
-            freed = world.free(d.id)
+            freed = world.free(d.id, unit)
             for v in victims:
                 freed = _add(freed, world.w.units[v.kind].footprint)
             opt = _Option(d.id, unit.reload_cost + loc_pen + preempt_cost + busy_pen
@@ -888,9 +936,9 @@ def _relocation_for(world: _World, victim: Placement, from_device: str,
             continue
         if not _device_matches(d, unit.selector):
             continue
-        if not _fits(need, world.free(d.id)):
+        if not _fits(need, world.free(d.id, unit)):
             continue
-        slack = _magnitude(_sub(world.free(d.id), need))
+        slack = _magnitude(_sub(world.free(d.id, unit), need))
         if best_slack is None or slack < best_slack:
             best_id, best_slack = d.id, slack
     return best_id
@@ -1003,7 +1051,7 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
             blocker = next(
                 (b for d in world.devices if not d.hosted
                  for b in [_residency_floor_blocker(
-                     W, d.id, _admission_need(u), e, pol, kind)] if b),
+                     W, d.id, _admission_need(u), e, pol, kind, unit=u)] if b),
                 None)
             if blocker is not None:
                 b_kind, b_floor, b_age = blocker
@@ -1088,12 +1136,13 @@ def _place_warm(world: _World, kind: str, unit: Unit, pol: PlannerPolicy,
             continue
         if not _can_serve(unit, d):
             continue
-        if _fits(_admission_need(unit), world.free(d.id)):
-            slack = _magnitude(world.free(d.id))
+        if _fits(_admission_need(unit), world.free(d.id, unit)):
+            slack = _magnitude(world.free(d.id, unit))
             if slack > best_free:
                 best_free, best_dev = slack, d.id
         elif mandatory:
-            victims = _victims_to_free(world, d.id, _admission_need(unit), unit.priority, pol)
+            victims = _victims_to_free(world, d.id, _admission_need(unit), unit.priority, pol,
+                                       unit=unit)
             if victims is not None:
                 victims_for[d.id] = victims
     if best_dev is not None:
