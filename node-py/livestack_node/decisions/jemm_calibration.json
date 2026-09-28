@@ -1,0 +1,24 @@
+{
+  "id": "jemm-card-verified-int4-2026-09-28",
+  "temperature": 1.3480874159655591,
+  "temperature_source": "adapter card; a refit on this deployment did not clearly beat it",
+  "threshold": 0.9872681877423998,
+  "threshold_source": "adapter card (bf16 base), NOT refit: 98 rows cannot fit a 0.99 tail",
+  "source": "fitted by scripts/fit_jemm_calibration.py on 98 held-out pane-status rows x 2 candidate orders against the served int4 base (dbirks/Qwen3.8-27B-W4A16-AutoRound, fp8 KV); binary NLL of P(question) vs gold asking",
+  "fit_report": {
+    "n_rows": 98,
+    "n_samples": 196,
+    "positives": 64,
+    "argmax_binary_accuracy": 0.9184,
+    "card_temperature": {
+      "t": 1.3480874159655591,
+      "nll": 0.2281,
+      "ece": 0.0473
+    },
+    "fitted_temperature": {
+      "t": 1.55,
+      "nll": 0.2248,
+      "ece": 0.0439
+    }
+  }
+}
