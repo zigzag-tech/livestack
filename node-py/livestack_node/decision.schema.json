@@ -31,7 +31,8 @@
         "fleet-broker",
         "client-picker",
         "hub-manifest",
-        "job-caller"
+        "job-caller",
+        "composition"
       ]
     },
     "emitter_id": {
@@ -58,7 +59,8 @@
         "failover",
         "observe",
         "claim",
-        "operation"
+        "operation",
+        "compose"
       ]
     },
     "request": {
@@ -379,6 +381,13 @@
         "null"
       ],
       "description": "Did this decision CAUSE anything? False for a plan an observe-only broker computed and did not dispatch. Without it a reader cannot tell an eviction that happened from one that was merely contemplated \u2014 and a fleet broker contemplates evictions constantly, because computing the plan is its whole job."
+    },
+    "snapshot": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "sha256: of the stored WorldState (plan records) or CompositionState (compose records) the decision was made on; see snapshots.py. Lets the decision be re-run, not only read."
     }
   }
 }

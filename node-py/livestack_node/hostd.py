@@ -1249,6 +1249,10 @@ def main():
         32 if dispatch else 64,
         log=lambda m: print(m, flush=True),
     )
+    from .snapshots import snapshot_store_from_env
+    snapshot_store = (snapshot_store_from_env("decisions-" + host_id if dispatch else "fleet-decisions",
+                                              log=lambda m: print(m, flush=True))
+                      if ledger is not None else None)
     link_env = os.environ.get("LIVESTACK_LINK_PEERS", "").strip()
     link_peers = [u.strip().rstrip("/") for u in link_env.split(",") if u.strip()]
     # A MALFORMED QUOTA MUST NOT TAKE THE BROKER DOWN.
@@ -1350,6 +1354,7 @@ def main():
     broker.node_control_token = node_control_token
     broker.host_id = host_id
     broker.link_peers = link_peers
+    broker.snapshot_store = snapshot_store
     broker.fleet_policy = fleet_policy
     broker.fleet_principals = fleet_principals
     if not dispatch:

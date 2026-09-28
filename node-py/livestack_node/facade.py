@@ -506,6 +506,19 @@ def build_router(manager, coordinator, capability: Capability,
                 hb = activation_tracker.headroom_bytes(kind)
                 if hb > 0:
                     entry["activation_headroom"] = {"vram_bytes": int(hb)}
+            measured = getattr(unit, "measured_cost", None)
+            if measured:
+                entry["measured"] = dict(measured)
+                entry["footprint_source"] = ("unknown" if measured.get("measured") == "unknown"
+                                             else measured.get("source") or "vllm-startup")
+            else:
+                entry["footprint_source"] = "declared"
+            extra = getattr(unit, "extra_report", None)
+            if extra is not None:
+                try:
+                    entry.update(extra() or {})
+                except Exception as exc:          # a report must never cost the residence view
+                    entry["extra_report_error"] = f"{type(exc).__name__}: {exc}"
             grp = getattr(manager.units.get(kind), "spread_group", "")
             if grp:
                 entry["spread_group"] = grp

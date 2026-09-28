@@ -30,6 +30,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from livestack_node import request_log as _request_log
 from livestack_node.decisions.simple_jev import SimpleJevError, classify as simple_jev_classify
+from livestack_node.demand_log import (UnitCostStore, UsageTail, demand_log_from_env,
+                                       owner_namespace, requirement_hash)
+from livestack_node.vllm_startup import (REQUIRED as _STARTUP_REQUIRED, StartupCapture,
+                                         composition_hash, key_from_launch)
 
 HOST_ID = os.environ.get("HARMONY_LLM_HOST_ID", "xc-tower-ubuntu")
 MODEL = os.environ.get("HARMONY_LLM_MODEL", "Qwen/Qwen3-8B")
@@ -254,6 +258,9 @@ def _unit_specs() -> "list[dict]":
             # it never interprets.
             "attributes": _attributes_for(spec),
             "adapters": dict(spec.get("adapters") or {}),
+            # The unquantized model this one quantizes, as adapters name it; lets
+            # the composer consider adapters on disk that no unit loads yet.
+            "lora_base": spec.get("lora_base"),
         })
     if not out:
         raise RuntimeError("HARMONY_LLM_UNITS is set but declares no units")
@@ -308,6 +315,68 @@ VLLM_BASE = f"http://127.0.0.1:{VLLM_PORT}"   # single-unit compatibility alias
 # is its residency.
 _procs: "dict[str, subprocess.Popen]" = {}
 _lock = threading.RLock()
+
+# WHAT EACH ENGINE SAID IT COSTS, and which composition it said it for. Set
+# after every successful start from the engine's own startup lines
+# (livestack_node/vllm_startup.py); the declared `footprint_gb` is only a
+# prior until then. Keyed by unit name.
+_COMPOSITION: "dict[str, str]" = {}
+_COSTS = UnitCostStore(os.environ.get("HARMONY_UNIT_COSTS_FILE") or os.path.join(
+    os.path.expanduser("~"), ".cache", "livestack", "unit-costs.jsonl"))
+# One record per forwarded request (openspec: inference-demand-log). Disabled,
+# and saying so, when HARMONY_DEMAND_LOG_AGE_DAYS is unset.
+DEMAND = demand_log_from_env(HOST_ID, log=lambda m: print(m, flush=True))
+
+
+def _tee_engine_output(proc: subprocess.Popen, capture: StartupCapture) -> None:
+    """Pass the engine's output through to our own stdout (the journal still
+    gets every line) while the capture keeps the few it needs. Runs until the
+    engine exits: a pipe nobody drains would block vLLM on its next log line."""
+    for line in iter(proc.stdout.readline, ""):
+        print(line, end="", flush=True)
+        capture.feed(line)
+
+
+def _record_measurement(name: str, spec: dict, cmd: list, capture: StartupCapture) -> None:
+    """Turn the captured startup lines into the unit's measured cost.
+
+    The lines print before the server answers, but the tee thread may still be
+    a moment behind the readiness poll, so wait briefly for them. Whatever
+    arrives, the unit gets an answer: a MeasuredCost, or `unknown` naming the
+    lines that never came. Never 0, and never the declared prior silently."""
+    deadline = time.time() + 10
+    probe = capture.result()
+    while getattr(probe, "unmatched", None) and time.time() < deadline:
+        time.sleep(0.2)
+        probe = capture.result()
+    adapters = {n: r for n, (_, r) in _adapters_for(spec).items()}
+    serve_args = cmd[3:]                      # after `vllm serve <model>`
+    key = key_from_launch(spec["model"], serve_args, adapters,
+                          engine_version=getattr(probe, "engine_version", ""))
+    chash = composition_hash(key)
+    result = capture.result(composition_hash=chash, now=time.time())
+    row = result.to_json()
+    _COMPOSITION[name] = chash
+    unit = _UNITS.get(name)
+    if unit is not None:
+        unit.measured_cost = row
+        if row.get("measured") != "unknown":
+            unit.footprint = int(row["footprint"])
+    if row.get("measured") == "unknown":
+        print(f"[harmony-llm] {name}: engine memory report did NOT parse "
+              f"(missing {row['unmatched']}); footprint is UNKNOWN, not "
+              f"{spec.get('footprint_gb')} GB", flush=True)
+        return
+    print(f"[harmony-llm] {name}: measured {row['footprint']/(1<<30):.2f} GiB "
+          f"(weights {row['weights_nontorch']/(1<<30):.2f}, activation "
+          f"{row['peak_activation']/(1<<30):.2f}, KV {row['kv_bytes']/(1<<30):.2f} = "
+          f"{row['kv_tokens']} tokens, graphs {row['cuda_graphs']/(1<<30):.2f}) "
+          f"for {chash[:19]}", flush=True)
+    try:
+        _COSTS.put({**row, "unit": name, "host_id": HOST_ID,
+                    "composition": json.loads(key.canonical())})
+    except Exception as exc:              # persistence is for proposals, never for serving
+        print(f"[harmony-llm] {name}: could not persist measured cost: {exc}", flush=True)
 
 
 def _device_total_bytes() -> float:
@@ -436,8 +505,13 @@ def _load(name: str = "", device: "str | None" = None,
             cmd += _lora_launch_args(spec)
         print(f"[harmony-llm] starting vLLM for {name}"
               f"{f' (planner chose {device})' if device else ''}: {' '.join(cmd)}", flush=True)
-        proc = subprocess.Popen(cmd, env=env, start_new_session=True)
+        proc = subprocess.Popen(cmd, env=env, start_new_session=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, bufsize=1)
         _procs[name] = proc
+        capture = StartupCapture()
+        threading.Thread(target=_tee_engine_output, args=(proc, capture),
+                         name=f"vllm-out-{name}", daemon=True).start()
         deadline = time.time() + float(os.environ.get("HARMONY_LLM_START_TIMEOUT", "900"))
         while time.time() < deadline:
             if proc.poll() is not None:
@@ -451,6 +525,7 @@ def _load(name: str = "", device: "str | None" = None,
                     f"see `journalctl -u harmony-llm` for its stderr")
             if _vllm_up(name=name):
                 print(f"[harmony-llm] vLLM ready: {name}", flush=True)
+                _record_measurement(name, spec, cmd, capture)
                 return proc
             time.sleep(2)
         _free(name)
@@ -663,6 +738,8 @@ _UNITS = {
     )
     for name, spec in SPECS.items()
 }
+for _u in _UNITS.values():
+    _u.extra_report = lambda: {"demand_log": DEMAND.status()}
 
 
 def _readiness() -> dict:
@@ -1308,6 +1385,83 @@ def health():
             "resident": any(_vllm_up(name=n) for n in SPECS)}
 
 
+def _card_total_bytes() -> "int | None":
+    """The card's total memory from nvidia-smi, or None when unknowable.
+
+    NOT `_device_total_bytes()`: that asks torch, and a first torch.cuda call
+    creates a CUDA context in THIS process — hundreds of MB taken from a card
+    whose engine leaves ~1 GiB free, to answer a read-only question."""
+    dev = (os.environ.get("CUDA_VISIBLE_DEVICES") or CUDA_DEVICE or "0").split(",")[0]
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits",
+                              "-i", dev], capture_output=True, text=True, timeout=5)
+        return int(float(out.stdout.strip().splitlines()[0]) * (1 << 20)) if out.returncode == 0 else None
+    except Exception:
+        return None
+
+
+@app.get("/composition/facts")
+def composition_facts(since: float = 0.0, limit: int = 50_000):
+    """Everything a composition decision reads from this node: each unit's live
+    composition (as launched, not as declared elsewhere), every measured cost
+    this host has recorded, the engine facts, and the demand trace since
+    `since`. Read-only; the composer (livestack_node/compose.py) decides and
+    nothing here applies anything."""
+    from livestack_node.demand_log import read_demand
+    from livestack_node.vllm_startup import _flag
+    units = []
+    for name, spec in SPECS.items():
+        args = list(spec.get("extra_args") or [])
+        units.append({
+            "name": name, "model": spec["model"],
+            "adapters": {n: r for n, (_, r) in _adapters_for(spec).items()},
+            "adapter_paths": dict(spec.get("adapters") or {}),
+            # Which unquantized model this served one is a quantization of, as
+            # the adapters on disk name it (`base_model_name_or_path`). Declared,
+            # because nothing in a quantized checkpoint says so reliably; a unit
+            # without it can only be composed with the adapters it already has.
+            "lora_base": spec.get("lora_base"),
+            "kv_dtype": _flag(args, "--kv-cache-dtype") or "auto",
+            "max_model_len": int(spec.get("max_model_len") or 0),
+            "max_num_seqs": int(_flag(args, "--max-num-seqs") or 0),
+            "gpu_fraction": float(spec.get("gpu_fraction") or 0),
+            "extra_args": " ".join(args),
+            "residency": str(spec.get("residency") or os.environ.get("HARMONY_LLM_RESIDENCY", "SOFT_PIN")).upper(),
+            "resident": name in getattr(manager, "resident", ()),
+            "composition_hash": _COMPOSITION.get(name),
+            "measured": getattr(_UNITS.get(name), "measured_cost", None),
+        })
+    catalogue = []
+    root = os.environ.get("HARMONY_ADAPTER_DIR", "/var/lib/harmony/adapters")
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        names = []
+    for n in names:
+        try:
+            with open(os.path.join(root, n, "adapter_config.json"), "r", encoding="utf-8") as fh:
+                cfg = json.load(fh)
+            catalogue.append({"name": n, "path": os.path.join(root, n), "rank": int(cfg["r"]),
+                              "lora_base": cfg.get("base_model_name_or_path")})
+        except Exception as exc:          # named, not skipped: an unreadable adapter is a finding
+            catalogue.append({"name": n, "path": os.path.join(root, n), "error": f"{type(exc).__name__}: {exc}"})
+    trace = read_demand(DEMAND.path, since, limit) if DEMAND.enabled else []
+    return {
+        "host_id": HOST_ID, "device_id": DEVICE_ID_SELF,
+        "capacity_bytes": _card_total_bytes(),
+        # Engine facts as data: which KV dtypes this host's engine can start
+        # with. fp8 needs the gcc-14 NVCC drop-in on xc-tower-ubuntu, so it is
+        # listed only where an operator has said so.
+        "kv_dtypes": [d.strip() for d in os.environ.get("HARMONY_KV_DTYPES", "auto").split(",") if d.strip()],
+        "units": units,
+        "adapter_catalogue": catalogue,
+        "measured_rows": list(_COSTS.load().values()),
+        "demand_log": DEMAND.status(),
+        "trace": trace, "trace_truncated": len(trace) >= limit,
+        "now": time.time(),
+    }
+
+
 @app.post("/v1/classifier")
 async def classifier(request: Request):
     """Simple Jev v1 scoring through this node's normal resident-model route."""
@@ -1337,7 +1491,7 @@ async def classifier(request: Request):
             raise HTTPException(status_code=e.status, detail=e.detail)
 
     async def invoke_chat(body: dict) -> dict:
-        headers = {"content-type": "application/json"}
+        headers = {"content-type": "application/json", "x-harmony-origin": "classifier"}
         if owner:
             headers["x-harmony-owner"] = owner
         if authorization:
@@ -1355,8 +1509,53 @@ async def classifier(request: Request):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+_DEMAND_PATHS = {"chat/completions", "completions", "embeddings"}
+
+
+def _note_demand(ctx: dict, outcome: str, status: int, tail: "UsageTail | None" = None) -> None:
+    """One demand record for a request this node served or refused itself.
+    A request forwarded to a peer is that peer's record, not ours."""
+    if ctx.get("path") not in _DEMAND_PATHS or ctx.get("forwarded"):
+        return
+    prompt, completion = tail.tokens() if tail is not None else (None, None)
+    unit = ctx.get("unit")
+    DEMAND.record(
+        ts=ctx["t0"], unit=unit, composition_hash=_COMPOSITION.get(unit or ""),
+        adapter=ctx.get("adapter"), route=ctx.get("route") or ctx.get("path"),
+        owner_ns=ctx.get("owner_ns"), principal=ctx.get("principal"),
+        requirement_hash=ctx.get("requirement_hash"),
+        prompt_tokens=prompt, completion_tokens=completion,
+        elapsed_ms=round((time.time() - ctx["t0"]) * 1000, 1), queue_ms=None,
+        outcome=outcome, http_status=status)
+
+
+def _outcome_for(status: int, detail: str = "") -> str:
+    if status == 503 and "nothing satisfies" in detail:
+        return "unsatisfied"
+    if status in (502, 504):
+        return "transport"
+    return "refused"
+
+
 @app.api_route("/v1/{path:path}", methods=["GET", "POST"])
 async def proxy(path: str, request: Request):
+    """Serve the request and leave one demand record for it, whatever happens."""
+    ctx = {"t0": time.time(), "path": path,
+           "route": request.headers.get("x-harmony-origin"),
+           "owner_ns": owner_namespace(request.headers.get("x-harmony-owner"))}
+    try:
+        ctx["principal"] = _request_log.principal_label(
+            request.headers.get("authorization"), _classifier_principals())
+    except Exception:
+        ctx["principal"] = None
+    try:
+        return await _proxy_impl(path, request, ctx)
+    except HTTPException as e:
+        _note_demand(ctx, _outcome_for(e.status_code, str(e.detail)), e.status_code)
+        raise
+
+
+async def _proxy_impl(path: str, request: Request, ctx: dict):
     """OpenAI-compatible surface. Every call goes through `manager.ensure`, so a
     request against an evicted unit reloads it through Harmony's admission
     (which makes room first) rather than racing the planner."""
@@ -1609,6 +1808,9 @@ async def proxy(path: str, request: Request):
               f"evict this node's residents. Two nodes share this port: give each its own "
               f"HARMONY_LLM_PORT_OFFSET.", flush=True)
 
+    ctx["unit"] = unit
+    ctx["requirement_hash"] = requirement_hash(requirement)
+    ctx["forwarded"] = bool(elsewhere or foreign)
     if elsewhere:
         _busy.acquire()
         url = f"{elsewhere}/v1/{path}"
@@ -1643,6 +1845,7 @@ async def proxy(path: str, request: Request):
                                 detail=f"harmony: one request can use one adapter, asked for {wanted}")
         if wanted:
             out["model"] = wanted[0]
+            ctx["adapter"] = wanted[0]
         # The parameter the requirement implied. Asking for `thinking` and then
         # not sending `enable_thinking` gets a capable unit that does not think.
         if requirement.get("thinking") is True if requirement else False:
@@ -1689,6 +1892,10 @@ async def proxy(path: str, request: Request):
             await client.aclose()
             _busy.release()
         text = raw.decode("utf-8", "replace")
+        if "context length" not in text.lower():
+            _t = UsageTail()
+            _t.feed(raw)
+            _note_demand(ctx, "refused", 400, _t)
         if "context length" in text.lower():
             needed = None
             m = re.search(r"at least (\d+) input tokens", text)
@@ -1743,13 +1950,17 @@ async def proxy(path: str, request: Request):
         # The request is in flight until the LAST byte has been streamed to the
         # caller, not until the upstream accepted it — a generation that is still
         # producing tokens is still occupying the card.
+        tail = UsageTail()
         try:
             async for chunk in resp.aiter_raw():
+                tail.feed(chunk)
                 yield chunk
         finally:
             await resp.aclose()
             await client.aclose()
             _busy.release()
+            _note_demand(ctx, "ok" if resp.status_code < 400 else "refused",
+                         resp.status_code, tail)
 
     return StreamingResponse(
         body_iter(), status_code=resp.status_code,

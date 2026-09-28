@@ -666,6 +666,102 @@ that introduces it. `LIVESTACK_LEDGER=0` turns emission off entirely.
 Schema: `node-py/livestack_node/decision.schema.json`. Design:
 `_plans/decision-ledger.md`.
 
+Plan records also carry `snapshot`: the `sha256:` of the exact `WorldState` and
+`PlannerPolicy` that plan was made on, stored once per distinct state under
+`~/.cache/livestack/snapshots/decisions-<host>/` (gzip, deduped, 512 MiB cap via
+`LIVESTACK_SNAPSHOT_MAX_MB`, plus the ledger's age window). `python -m
+livestack_node.replay_plan --since 3600` re-runs every recorded plan from its
+snapshot and exits non-zero on any mismatch. Candidate rows name each unit's
+footprint and its source (`vllm-startup`, `declared`, `unknown`).
+
+## Unit composition — what a card SHOULD run, proposed, never applied
+
+The planner loads and evicts the units it is given. **Composition** decides what a
+unit is: its base model, LoRA adapters, KV dtype, context length and batch cap.
+Openspec change `harmony-placement-foundation`. Three inputs, then one decider.
+
+**Measured cost.** harmony-llm pipes each vLLM's output through
+`livestack_node/vllm_startup.py` (the journal still gets every line), and after
+ready it reports the engine's own numbers on `/residence` as `measured` with
+`footprint_source`. Those numbers are weights + non-torch, peak activation, KV bytes
+and tokens, and CUDA graphs, which sit outside the `--gpu-memory-utilization`
+budget. The planner then charges the measured total, not `footprint_gb`. A report
+that does not parse is `footprint_source: unknown`, and the broker charges that unit
+the whole card. Measurements persist per composition hash in
+`~/.cache/livestack/unit-costs.jsonl` (256 rows).
+
+**Demand log.** One JSONL record per request the node itself serves or refuses:
+`ts, unit, composition_hash, adapter, route (classifier|chat/completions|…),
+owner_ns, principal, requirement_hash, prompt_tokens, completion_tokens,
+elapsed_ms, queue_ms (null: not measurable yet), outcome, http_status`.
+- **No token count is ever a 0 placeholder.** Tokens are read from the tail of the
+  response. A stream without `usage` records `null`.
+- **No person's id.** `owner_ns` is the namespace only (`benchday:`). An
+  unprefixed owner gives `null`.
+- **Location:** `~/.cache/livestack/demand/<host_id>.jsonl`, 64 MiB × 8.
+- **Age window:** `HARMONY_DEMAND_LOG_AGE_DAYS`, intended value **21**. **Unset
+  disables the log** and `/residence` says why.
+- **Drops are counted.** Writes go through a bounded queue off the request path;
+  a full queue drops the record and counts it in `demand_log.dropped`.
+
+**Facts.** `GET :8188/composition/facts?since=<epoch>` (read-only) returns:
+- the live units as launched, each unit's `lora_base`, and every measured row;
+- `adapter_catalogue`: every directory in `HARMONY_ADAPTER_DIR` (default
+  `/var/lib/harmony/adapters`) with its rank and trained base; an unreadable one is
+  listed with its error;
+- `kv_dtypes` from `HARMONY_KV_DTYPES` (default `auto`). This is an engine fact
+  recorded as data: fp8 on xc-tower-ubuntu needs the gcc-14 drop-in below;
+- the demand trace.
+
+A unit's `lora_base` is the unquantized model it quantizes (for `llm_general`,
+`Qwen/Qwen3.8-27B`). An adapter on disk is a candidate for a unit only when its
+`base_model_name_or_path` matches that unit's `lora_base`.
+
+**Propose.** `python -m livestack_node.compose` (from `node-py/`) fetches the facts
+(`LIVESTACK_COMPOSITION_FACTS`, default `http://127.0.0.1:8188/composition/facts`) and
+enumerates every composition the search allows. For each candidate:
+- `feasible()` checks the hard limits in code: memory budget, CUDA graphs outside
+  it, KV tokens ≥ `max_model_len`, adapter base and rank, KV dtype on this engine,
+  no truncation of the trace, HARD_PIN;
+- `cost()` scores it by replaying the trace through a KV-pool/batch/adapter-slot
+  admission model, with weights from `composition_weights/v1.json` in
+  request-seconds.
+
+It keeps the live composition unless a candidate beats it by more than the change
+cost (restart downtime × rate × unserved, plus 600 per never-started flag). The
+output is one ledger decision in `~/.cache/livestack/composition-<host>.jsonl`
+(`emitter: composition`, `decision: compose`, every candidate with its prediction and
+cost in `detail`, the facts stored as its `snapshot`), plus the proposal as a diff of
+the units file. Other modes:
+- `--no-record` prints without writing;
+- `--replay <decision_id>` re-runs a decision from its snapshot;
+- `--outcomes` joins what happened to past proposals, each exactly once: the first
+  measurement of the chosen composition (predicted vs measured per term), hourly
+  served counts for 24 h, and `not_applied` after 7 days.
+
+**Applying a proposal is a person's action**, gated in this order:
+1. Back up the units file.
+2. Apply the diff.
+3. Restart `harmony-llm`. `llm_general` measured 125–145 s down.
+4. Check that the engine is ready.
+5. Check that `/residence` `measured` is within the prediction's margin.
+6. Check that `kv_tokens` ≥ `max_model_len`.
+7. Check that the first demand records are `ok`.
+8. If any check fails, restore the backup.
+
+Known limits of v1 (design §8a, §6):
+- Only two measured rows exist today, so per-adapter deltas assume KV dtype does not
+  move weights or activation.
+- The admission model under-predicts queueing below a full KV cache (the journal
+  shows waiting at 80–90%).
+- It proposes one device's change at a time.
+
+**fp8 KV on xc-tower-ubuntu needs gcc-14.** FlashInfer JIT-compiles its fp8
+prefill kernel at startup, and CUDA 12.9's nvcc refuses the system gcc-15.
+`/etc/systemd/system/harmony-llm.service.d/40-nvcc-gcc14.conf` sets
+`NVCC_PREPEND_FLAGS=-ccbin /usr/bin/g++-14`. Without it the unit crash-loops, as it
+did for about 5 minutes on 2026-09-28.
+
 ## Scheduler policy — the target choice is a tunable, recorded policy
 
 The fleet broker's per-job target choice (`fleet_scheduler.schedule()`) runs as the
