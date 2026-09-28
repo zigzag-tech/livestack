@@ -114,13 +114,28 @@ def state_from_facts(facts_list: Sequence[Mapping], *, now: float,
                     adapters[a["name"]] = cm.Adapter(a["name"], unit["model"], int(a["rank"]))
             if unit.get("residency") == "HARD_PIN":
                 pins.add((dev, unit["model"]))
-        capacity = facts.get("capacity_bytes")
+        # THE CARD AS THE ENGINE SEES IT. vLLM sizes its budget against the
+        # memory CUDA exposes (23.56 GiB on a 3090), not nvidia-smi's total
+        # (24.0 GiB). Using nvidia-smi's number handed the composer 0.42 GiB of
+        # budget that does not exist, and on 2026-09-28 that alone made the
+        # bf16 two-adapter composition, which vLLM refuses to start, look
+        # feasible. So: budget / fraction from a measurement of this card,
+        # whenever one exists; nvidia-smi only as a named fallback.
+        capacity = None
         fraction = float(u.get("gpu_fraction") or 0)
         m = (u.get("measured") or {})
         if m.get("gpu_fraction"):
             fraction = float(m["gpu_fraction"])
-        if not capacity and m.get("budget") and fraction:
-            capacity = int(m["budget"] / fraction)
+        engine_seen = [r for r in rows if r.get("budget") and r.get("gpu_fraction")]
+        if m.get("budget") and m.get("gpu_fraction"):
+            capacity = int(m["budget"] / float(m["gpu_fraction"]))
+        elif engine_seen:
+            r = max(engine_seen, key=lambda r: r.get("measured_at") or 0)
+            capacity = int(r["budget"] / float(r["gpu_fraction"]))
+        elif facts.get("capacity_bytes"):
+            capacity = int(facts["capacity_bytes"])
+            notes.append(f"{dev}: card size from nvidia-smi ({capacity / GIB:.2f} GiB); the engine "
+                         f"sees less, so predictions near the limit are optimistic until measured")
         if not capacity or not fraction:
             notes.append(f"{dev}: card size or budget fraction unknown; left out (never sized at 0)")
             continue
