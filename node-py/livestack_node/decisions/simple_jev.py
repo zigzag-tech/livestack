@@ -161,6 +161,9 @@ def score_branch(plan: Mapping[str, Any], alternatives: list[Mapping[str, Any]],
 
 async def classify(payload: Mapping[str, Any], invoke_chat: Callable[[dict], Awaitable[dict]]) -> dict:
     request = validate_request(payload)
+    options = request.get("options") or {}
+    if options.get("template") == "jemm":
+        return await _classify_jemm(request, options, invoke_chat)
     answers = {}
     input_tokens = 0
     served_model = None
@@ -190,3 +193,32 @@ async def classify(payload: Mapping[str, Any], invoke_chat: Callable[[dict], Awa
         served_model = model
     return {"model": served_model or request.get("model", "local"), "template_version": "v1",
             "answers": answers, "usage": {"input_tokens": input_tokens, "output_tokens": len(answers)}}
+
+
+async def _classify_jemm(request: Mapping[str, Any], options: Mapping[str, Any],
+                         invoke_chat: Callable[[dict], Awaitable[dict]]) -> dict:
+    """The JEMM template (decisions/jemm.py): its own prompt, served through the
+    `jemm` adapter, scored with a temperature fitted on this deployment."""
+    from . import jemm
+    if "state" not in request:
+        raise SimpleJevError("template jemm takes `state`, not `messages`")
+    cal = jemm.calibration()
+    adapter = str(options.get("adapter") or "jemm")
+    answers, input_tokens, served_model = {}, 0, None
+    for qid, question in request["questions"].items():
+        messages, plan = jemm.compile_question(request["state"], question, max_options=MAX_OPTIONS)
+        response = await invoke_chat(jemm.request_body(request.get("model", "local"), messages,
+                                                       plan["labels"], adapter, MAX_OPTIONS))
+        try:
+            alternatives = response["choices"][0]["logprobs"]["content"][0]["top_logprobs"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise SimpleJevError("model response did not contain next-token logprobs") from exc
+        answers[qid] = jemm.score(plan, alternatives, cal)
+        input_tokens += int((response.get("usage") or {}).get("prompt_tokens") or 0)
+        model = response.get("model")
+        if served_model is not None and model != served_model:
+            raise SimpleJevError("question branches were served by different model revisions")
+        served_model = model
+    return {"model": served_model or adapter, "template_version": jemm.TEMPLATE_VERSION,
+            "calibration": cal.get("id"), "answers": answers,
+            "usage": {"input_tokens": input_tokens, "output_tokens": len(answers)}}
