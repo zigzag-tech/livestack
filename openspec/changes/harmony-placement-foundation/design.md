@@ -26,8 +26,9 @@ xc-tower-ubuntu GPU 1 (RTX 3090, 23.56 GiB). vLLM's startup lines, before → af
 | Units file (the live composition) | a person; harmony-llm reads it | `/etc/harmony/llm-units*.json` | n/a (config) |
 | Measured unit cost | harmony-llm (parses its own vLLM) | in memory + `/residence`; last measurement per composition hash persisted in `~/.cache/livestack/unit-costs.jsonl` | one row per composition hash, 256 rows, oldest dropped |
 | Demand log | harmony-llm (proxy path) | `~/.cache/livestack/demand/<unit>.jsonl*` | size × files **and** age; §3 |
-| WorldState snapshots | HostBroker | `~/.cache/livestack/snapshots/<sha256>.json.zst` | age window matching the ledger's, plus a byte cap; §4 |
-| Composition decisions + outcomes | HostBroker | the existing JSONL ledger (`ledger.py`) | the ledger's existing bound |
+| WorldState snapshots | HostBroker | `~/.cache/livestack/snapshots/decisions-<host>/<sha256>.json.gz` | age window matching the ledger's, plus a 512 MiB cap; §4 |
+| Composition decisions + outcomes | the composer CLI (`compose.py`), the only writer | `~/.cache/livestack/composition-<host>.jsonl`, same `JsonlLedger` writer and bounds | 8 MiB × 4 files, the ledger's age window |
+| Composition inputs (node facts) | the composer CLI | `~/.cache/livestack/snapshots/composition-<host>/` | as WorldState snapshots |
 | Cost-weights artifact | a person (via review) | `node-py/livestack_node/composition_weights/v<N>.json`, content hash `sha256:` | versioned in git |
 
 Ids that cross a boundary:
@@ -184,10 +185,17 @@ The weights are a versioned artifact. v1 is hand-set, recorded, and reviewed lik
 
 Requests arrive at their logged `ts` and hold `prompt + completion` tokens for a service
 time, taken from the logged `elapsed_ms` of requests of similar length on the same base.
-It is a model, so it is validated before it is trusted. Replayed against 7 days of the
-live composition, its running and waiting counts must match the journal's 10-second
-`Running/Waiting` samples within a tolerance recorded in the tests. The known shape it
-must reproduce: never more than 11 running, queueing at 91–100% KV.
+It is a model, so it is validated before it is trusted. Replayed against the live
+composition's demand log, its running and waiting counts must match the journal's
+10-second `Running/Waiting` samples within a tolerance recorded in the tests. That
+end-to-end check needs the demand log, which did not exist before this change. It is a
+skipped test that names that input, not a pass. What the journal already shows (about
+two days, fixture `tests/fixtures/composition/journal-llm_general-2026-09-28.json`):
+never more than 11 running, and requests waiting at **every** KV-usage level, most often
+80–90%. The v1 model reserves prompt + completion at admission, so it can only queue
+when the pool is ≥ ~91% full. It therefore under-predicts queueing below a full cache.
+That gap is pinned by a strict expected-failure test, so a model change that closes it
+is noticed.
 
 Demand for the next window is estimated from the trace by two comparisons: an
 exponentially decayed recent rate, and "same hour last week". A proposal is scored
@@ -236,7 +244,11 @@ A composition run is one ledger `Decision`:
   its cost breakdown, capped at the ledger's 64 by lowest cost, with the live composition
   always kept;
 - `chosen` and `reason`;
-- `policy: {composer, composer_version, weights: "sha256:…"}` and `snapshot`.
+- `request: {composer, composer_version, weights: "sha256:…", candidates_total,
+  filtered}` and `snapshot`. `request` rather than `policy`: the ledger schema reserves
+  `policy` for the scheduler's compiled-policy pointer and closes it.
+- Each candidate row carries its composition, feasibility, prediction and cost
+  breakdown in `detail`: values, not references.
 
 Outcomes are joined later by `parent_decision_id`:
 - `outcome: measured`, the first `MeasuredCost` for the chosen `composition_hash` with
@@ -259,22 +271,58 @@ seconds-scale state. §10 asks whether it should become one.
 - Jingway-principal demand (`owner_ns: jingway`) is recorded but tagged `self_traffic` and
   excluded from cost.
 
+## 8a. What implementation changed (2026-09-28)
+
+- **The composer is a CLI, not a host-broker route.** `livestack-hostd` on
+  xc-tower-ubuntu runs a pinned release directory (`warm-for-kind-978cfa1e`) that is
+  far behind `main`: `main` has since gained the meshlink backbone and the policy
+  runtime. Adding the route would have meant shipping all of that unrelated work to
+  the residency authority. The CLI is also the ledger's only writer, so there is no
+  multi-process rotation race. A later broker release can call `compose.propose()`
+  from a route.
+- **harmony-llm serves `GET /composition/facts`** (read-only): live units as
+  launched, measured rows, the adapter catalogue on disk, engine KV dtypes
+  (`HARMONY_KV_DTYPES`), and the demand trace. Card size comes from `nvidia-smi`,
+  never torch: a torch CUDA call would create a context and take VRAM from a card
+  with about 1 GiB free.
+- **Adapters on disk count.** On 2026-09-28 JEMM was only a directory. A unit may
+  declare `lora_base` (the unquantized model it is a quantization of, as adapters'
+  `base_model_name_or_path` names it). Catalogue adapters with that base are
+  candidates for the unit.
+- **The change cost is in request-seconds.** It is restart downtime × expected rate ×
+  `unserved` (30), plus 600 per never-started flag. The first version multiplied by a
+  unitless 3.
+- **Ties break toward the smaller change, then the longer context, then the hash.**
+  A hash tie-break once chose a 16k-context bf16 composition over 24k fp8 on a trace
+  too light to separate them.
+- **Snapshots are gzip, not zstd.** The package is stdlib-only.
+
 ## 9. harmony-llm's source of truth
 
-`~/harmony-llm/server.py` is deployed from a directory that is not a git repository.
-Tasks 2 and 3 edit it. Before they start, it needs a home: either vendored into this repo
-under `harmony-llm/` or given its own repo. Until then, every change to it is
-unreviewable and every host's copy may differ. This is §10's first question.
+`~/harmony-llm/server.py` is a symlink to this repo's
+`node-py/examples/harmony-llm/server.py`, and production on xc-tower-ubuntu (the only
+host running `harmony-llm.service`) executes the `~/livestack` main checkout directly.
+So it is already version-controlled, and **merging to `main` in that checkout is a
+deploy that takes effect at the next restart**. New logic goes in `livestack_node`
+modules (`vllm_startup.py`, `demand_log.py`) that `server.py` imports, which keeps
+the 1,763-line server from growing further and makes the logic testable without it.
 
-## 10. Open questions for a person (ask; do not decide)
+## 10. Decisions (2026-09-28)
 
-1. Where should harmony-llm's source live: vendored into livestack, or its own repo?
-   Tasks 2–3 are blocked on this.
-2. Should composition become a Jingway `PolicyFamily` later, or stay a sibling that
-   shares only the record format and the replay tooling? This change assumes a sibling.
-3. Are 21 days of demand-log retention, and namespace-only owner identity, acceptable?
-4. Initial cost weights: how much is one minute of `llm_general` downtime worth against
-   one second of queueing, summed over a day?
-5. Should `max_num_seqs` and `kv_dtype` be in the search space from day one? Including
-   them is what would have found fp8, and it is also what would have proposed the
-   compile-trap flag before the engine-facts row existed.
+The owner asked for the recommended answer to each open question:
+
+1. **Source of truth:** already in this repo (§9). No move needed.
+2. **Compiled policy:** composition is a **sibling** of Jingway's `PolicyFamily`. It
+   shares the decision/outcome record shape and replay discipline, not the Rust family
+   contract. Revisit once a learned proposer exists and needs OPE over its propensities.
+3. **Demand log:** 21-day retention, principal namespace only, as specified in §3.
+4. **Cost weights v1**, in request-seconds of delay (hand-set, reviewed like code):
+   `queue_s` = 1.0 per request-second queued; `unserved` = 30 per request with no
+   serving unit on the host; `swap_stall` = 0.5 s × alternations (a prior until swaps
+   are measured); `change_cost` = restart downtime (measured: 125–145 s for
+   `llm_general`) × expected request rate in the apply window × 3, plus a risk prior of
+   600 for each launch flag the host has never started with.
+5. **Search space:** `kv_dtype` and `max_num_seqs` are in it from day one.
+   Availability is gated by per-host engine facts (for example, fp8 KV requires the
+   `NVCC_PREPEND_FLAGS` gcc-14 drop-in on xc-tower-ubuntu), and a never-started flag
+   pays the risk prior above.

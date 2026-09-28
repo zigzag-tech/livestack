@@ -130,6 +130,7 @@ class HostBroker:
                  extra_units: Optional[Mapping[str, Unit]] = None,
                  dispatch: bool = True,
                  ledger: Optional[JsonlLedger] = None,
+                 snapshot_store=None,
                  emitter: str = "host-broker",
                  emitter_id: str = "host-broker",
                  in_flight_ttl_s: float = 900.0,
@@ -147,6 +148,7 @@ class HostBroker:
         # resident, when we evict it, or after `in_flight_ttl_s` — the last of
         # which is a safety net, not the mechanism: a load that dies silently
         # must not reserve a card forever.
+        self.snapshot_store = snapshot_store
         self._in_flight: Dict[Tuple[str, str], Tuple[float, str]] = {}
         # peer key -> its last successful units/placements read (see
         # `_remembered_peer`): a peer that stops answering must not read as a
@@ -1481,6 +1483,11 @@ class HostBroker:
         by_device: Dict[str, List[Placement]] = {}
         for pl in world.placements:
             by_device.setdefault(pl.device_id, []).append(pl)
+        # The state this plan was made on, stored once and referenced by every
+        # action row, so the plan can be re-run (`replay_plan.py`) and not only
+        # read. None when no store is wired or the write failed (counted there).
+        snapshot = (self.snapshot_store.put(world, self.policy)
+                    if self.snapshot_store is not None else None)
         for a in actions:
             device_id = getattr(a, "device_id", None)
             kind = getattr(a, "kind", None)
@@ -1512,6 +1519,8 @@ class HostBroker:
                     why = (f"prio {unit.priority}, tier {int(unit.residency)}, "
                            f"{'resident' if resident_here else 'not resident'}"
                            + (", busy" if busy else ""))
+                fp_gb = float((unit.footprint or {}).get("vram_bytes", 0)) / (1 << 30)
+                why += f"; footprint {fp_gb:.2f} GiB ({unit.footprint_source})"
                 cands.append(Candidate(
                     id=other_kind, device_id=device_id,
                     host_id=next((d.host_id for d in world.devices
@@ -1523,7 +1532,7 @@ class HostBroker:
             self._emit(Decision(
                 emitter=self.emitter, emitter_id=self.emitter_id,
                 kind=kind, decision=decision, candidates=cands,
-                chosen=kind,
+                chosen=kind, snapshot=snapshot,
                 # An observe-only broker computes plans constantly and dispatches
                 # none of them. Without saying so, its records are
                 # indistinguishable from a host broker's — and a reader would
@@ -1728,6 +1737,25 @@ class RestPeer:
                 fp = reported
             # Measured peak-activation reserve (absent on nodes that don't report it).
             hdrm = u.get("activation_headroom") or {}
+            # THE ENGINE'S OWN REPORT BEATS THE DECLARED NUMBER. A node that
+            # parsed its engine's startup lines reports the whole footprint
+            # (weights + activation + KV + CUDA graphs); the activation is
+            # inside it, so no separate headroom is reserved on top. A node
+            # whose engine report did NOT parse says `unknown`, and the unit
+            # is then charged the device's whole capacity: an unknown cost is
+            # not a small one, and co-placing beside it is exactly the guess
+            # this exists to stop. An operator override still wins.
+            measured = u.get("measured") or {}
+            source = u.get("footprint_source") or "declared"
+            if u["kind"] not in self._footprints:
+                if source == "unknown":
+                    cap = self.device_capacity()
+                    if cap:
+                        fp, hdrm = dict(cap), {}
+                elif measured.get("footprint"):
+                    fp, hdrm = {"vram_bytes": float(measured["footprint"])}, {}
+            else:
+                source = "declared"
             # Declared economics, passed through when set; absent keeps the
             # planner defaults (15 s floor, 1.0 reload) — a node that declares
             # nothing plans exactly as it did before the fields existed.
@@ -1743,7 +1771,8 @@ class RestPeer:
                 # node that serves a single model.
                 spread_group=u.get("spread_group") or "",
                 # What the unit IS, so a requirement can match it.
-                attributes=u.get("attributes") or {})
+                attributes=u.get("attributes") or {},
+                footprint_source=source)
         return out
 
     def placements(self):

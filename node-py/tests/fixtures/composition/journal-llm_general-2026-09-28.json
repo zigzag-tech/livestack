@@ -1,0 +1,130 @@
+{
+ "source": "xc-tower-ubuntu journal, unit harmony-llm (vLLM 0.28.0 10-second 'Engine 000: ... Running: N reqs, Waiting: N reqs[, Deferred: N reqs], GPU KV cache usage: X%' lines), extracted 2026-09-28",
+ "how": "journalctl -u harmony-llm --since -7d --no-pager -o short-unix | grep -E 'Running: [0-9]+ reqs' ; split at the first 'GPU KV cache size: 37,981 tokens' line (ts 1790565512, the chips+jemm/fp8 restart); deciles are floor(kv%/10)*10 capped at 100",
+ "caveat": "journald retained only ~2 days (2026-09-26 05:33 .. 2026-09-28) although --since -7d was asked; the 'waiting only at 91-100% KV' claim in the design does NOT hold in these samples (waiting>0 is seen at every KV decile, mode 80-90%). Waiting also counts vLLM 0.28's Deferred requests and requests queued for reasons other than KV (prefill token budget, LoRA load), and KV usage is instantaneous at the sample while vLLM allocates KV incrementally, not prompt+completion up front.",
+ "windows": [
+  {
+   "composition": "chips-settinghead-v1 / bf16 (auto) / 24576 / 32",
+   "kv_tokens": 29749,
+   "first_ts": 1790415212,
+   "last_ts": 1790565411,
+   "samples": 6915,
+   "max_running": 11,
+   "running_hist": {
+    "0": 4095,
+    "1": 1412,
+    "2": 248,
+    "3": 112,
+    "4": 111,
+    "5": 111,
+    "6": 110,
+    "7": 179,
+    "8": 172,
+    "9": 137,
+    "10": 141,
+    "11": 87
+   },
+   "samples_waiting": 946,
+   "max_waiting": 112,
+   "kv_usage_decile_hist_all": {
+    "0": 4181,
+    "10": 622,
+    "20": 659,
+    "30": 198,
+    "40": 136,
+    "50": 153,
+    "60": 173,
+    "70": 200,
+    "80": 376,
+    "90": 201,
+    "100": 16
+   },
+   "kv_usage_decile_hist_when_waiting": {
+    "0": 2,
+    "10": 7,
+    "20": 13,
+    "30": 23,
+    "40": 36,
+    "50": 65,
+    "60": 123,
+    "70": 160,
+    "80": 321,
+    "90": 180,
+    "100": 16
+   },
+   "samples_with_deferred_field": 440,
+   "samples_waiting_beyond_deferred": 311,
+   "max_running_by_kv_decile": {
+    "0": 1,
+    "10": 2,
+    "20": 3,
+    "30": 4,
+    "40": 5,
+    "50": 6,
+    "60": 7,
+    "70": 8,
+    "80": 10,
+    "90": 11,
+    "100": 11
+   }
+  },
+  {
+   "composition": "chips-settinghead-v1+jemm / fp8 / 24576 / 32",
+   "kv_tokens": 37981,
+   "first_ts": 1790565571,
+   "last_ts": 1790570221,
+   "samples": 277,
+   "max_running": 8,
+   "running_hist": {
+    "0": 207,
+    "1": 16,
+    "2": 9,
+    "3": 1,
+    "4": 1,
+    "5": 4,
+    "6": 14,
+    "7": 18,
+    "8": 7
+   },
+   "samples_waiting": 45,
+   "max_waiting": 18,
+   "kv_usage_decile_hist_all": {
+    "0": 207,
+    "10": 16,
+    "20": 4,
+    "30": 5,
+    "40": 2,
+    "60": 4,
+    "70": 13,
+    "80": 18,
+    "90": 6,
+    "100": 2
+   },
+   "kv_usage_decile_hist_when_waiting": {
+    "10": 1,
+    "20": 2,
+    "30": 1,
+    "40": 2,
+    "60": 3,
+    "70": 11,
+    "80": 18,
+    "90": 5,
+    "100": 2
+   },
+   "samples_with_deferred_field": 14,
+   "samples_waiting_beyond_deferred": 10,
+   "max_running_by_kv_decile": {
+    "0": 0,
+    "10": 1,
+    "20": 2,
+    "30": 2,
+    "40": 4,
+    "60": 5,
+    "70": 6,
+    "80": 7,
+    "90": 8,
+    "100": 8
+   }
+  }
+ ]
+}
