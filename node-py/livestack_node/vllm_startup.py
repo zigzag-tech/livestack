@@ -66,9 +66,20 @@ class MeasuredCost:
         """What the card really holds for this unit while it is resident."""
         return self.weights_nontorch + self.peak_activation + self.kv_bytes + self.cuda_graphs
 
+    @property
+    def min_footprint(self) -> int:
+        """The least the engine needs: everything but the ELASTIC part of the KV
+        cache. vLLM sizes KV to fill its budget, so `footprint` is as large as
+        the grant, not a requirement; what it cannot run without is KV for one
+        request of the length it was started with."""
+        per_token = self.kv_bytes / self.kv_tokens if self.kv_tokens else 0
+        return int(self.weights_nontorch + self.peak_activation + self.cuda_graphs
+                   + per_token * self.max_concurrency_at)
+
     def to_json(self) -> dict:
         out = asdict(self)
         out["footprint"] = self.footprint
+        out["min_footprint"] = self.min_footprint
         return out
 
 

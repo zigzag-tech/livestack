@@ -359,9 +359,15 @@ def _record_measurement(name: str, spec: dict, cmd: list, capture: StartupCaptur
     _COMPOSITION[name] = chash
     unit = _UNITS.get(name)
     if unit is not None:
+        # REPORTED, NOT YET THE ADMISSION NUMBER. `unit.footprint` stays the
+        # declared prior. On xc-tower-ubuntu the measured minimum (weights +
+        # activation + graphs + KV for one max-length request, ~24.6e9 B) plus
+        # the broker's default 2 GB device reserve exceeds the card (25.3e9 B):
+        # the reserve exists to cover activation that declared footprints omit,
+        # and a measured footprint already contains it. Handing the planner the
+        # measurement before that double count is fixed made a reload of this
+        # unit unplaceable (2026-09-28). See HARMONY.md, "Unit composition".
         unit.measured_cost = row
-        if row.get("measured") != "unknown":
-            unit.footprint = int(row["footprint"])
     if row.get("measured") == "unknown":
         print(f"[harmony-llm] {name}: engine memory report did NOT parse "
               f"(missing {row['unmatched']}); footprint is UNKNOWN, not "

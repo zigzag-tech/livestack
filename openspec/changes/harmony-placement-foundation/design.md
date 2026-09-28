@@ -297,6 +297,28 @@ seconds-scale state. §10 asks whether it should become one.
   too light to separate them.
 - **Snapshots are gzip, not zstd.** The package is stdlib-only.
 
+## 8b. Why the measurement is not yet the admission number (2026-09-28)
+
+The first deploy made harmony-llm report the measured 25.24e9 B as `llm_general`'s
+`footprint`. The broker sizes card `a46c4c2e` at its measured 25.30e9 B minus the
+default 2 GB reserve (`LIVESTACK_RESERVED_GB`), which leaves about 23.3e9 B. The unit
+stayed resident, but any reload through admission would have been unplaceable.
+Reverted the same hour. Two things were wrong at once:
+
+- **The full measured footprint is not a requirement.** vLLM sizes its KV pool to fill
+  the budget it is given. What it cannot run without is weights + activation + CUDA
+  graphs + KV for one request of its `max_model_len`: `MeasuredCost.min_footprint`,
+  about 24.6e9 B here.
+- **The device reserve double-counts.** It exists (`planner.Device` docstring) to
+  cover activation memory that declared, weights-only footprints omit. A measured
+  footprint already contains the activation. Even the minimum, 24.6e9 B, plus the
+  2 GB reserve exceeds the card.
+
+So `footprint` stays the declared prior (`footprint_source: declared`), and the
+measurement is reported beside it for composition. Adopting it for admission needs
+a planner change: no device reserve for units whose footprint is measured, or a
+per-unit reserve. That is its own change, and task 2.2 stays open until it lands.
+
 ## 9. harmony-llm's source of truth
 
 `~/harmony-llm/server.py` is a symlink to this repo's

@@ -682,12 +682,16 @@ Openspec change `harmony-placement-foundation`. Three inputs, then one decider.
 
 **Measured cost.** harmony-llm pipes each vLLM's output through
 `livestack_node/vllm_startup.py` (the journal still gets every line), and after
-ready it reports the engine's own numbers on `/residence` as `measured` with
-`footprint_source`. Those numbers are weights + non-torch, peak activation, KV bytes
+ready it reports the engine's own numbers on `/residence` as `measured`, beside the
+declared `footprint`. Those numbers are weights + non-torch, peak activation, KV bytes
 and tokens, and CUDA graphs, which sit outside the `--gpu-memory-utilization`
-budget. The planner then charges the measured total, not `footprint_gb`. A report
-that does not parse is `footprint_source: unknown`, and the broker charges that unit
-the whole card. Measurements persist per composition hash in
+budget. `measured.min_footprint` is the least it can run with: weights, activation,
+graphs, and KV for one full-length request, since the rest of the KV pool is elastic.
+**Admission still charges the declared `footprint`** (`footprint_source: declared`).
+The broker's 2 GB device reserve covers activation that declared footprints leave
+out, so charging a measured footprint as well double-counts it, and on
+xc-tower-ubuntu it made the 27B unplaceable (design §8b of the openspec change). A
+report that does not parse is `measured: unknown`. Measurements persist per composition hash in
 `~/.cache/livestack/unit-costs.jsonl` (256 rows).
 
 **Demand log.** One JSONL record per request the node itself serves or refuses:
