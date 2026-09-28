@@ -1561,6 +1561,25 @@ class RestPeer:
                 fp = reported
             # Measured peak-activation reserve (absent on nodes that don't report it).
             hdrm = u.get("activation_headroom") or {}
+            # THE ENGINE'S OWN REPORT BEATS THE DECLARED NUMBER, now that the
+            # planner stops double-counting it (`_World.reserve`). Residence is
+            # charged what the card holds (`footprint`, KV pool included);
+            # admission needs only the engine's minimum (`min_footprint`: KV
+            # for one max-length request), because vLLM sizes its pool to the
+            # grant. The activation is inside both, so no separate headroom.
+            # A report that did not parse (`measured: unknown`) keeps the
+            # declared prior, labelled so. An operator override still wins.
+            measured = u.get("measured") or {}
+            adm = {}
+            if (u["kind"] in self._footprints or measured.get("measured") == "unknown"
+                    or not measured.get("footprint") or not measured.get("min_footprint")):
+                source = ("declared" if u["kind"] in self._footprints
+                          else u.get("footprint_source") or "declared")
+            else:
+                fp = {"vram_bytes": float(measured["footprint"])}
+                adm = {"vram_bytes": float(measured["min_footprint"])}
+                hdrm = {}
+                source = measured.get("source") or "vllm-startup"
             # Declared economics, passed through when set; absent keeps the
             # planner defaults (15 s floor, 1.0 reload) — a node that declares
             # nothing plans exactly as it did before the fields existed.
@@ -1576,7 +1595,9 @@ class RestPeer:
                 # node that serves a single model.
                 spread_group=u.get("spread_group") or "",
                 # What the unit IS, so a requirement can match it.
-                attributes=u.get("attributes") or {})
+                attributes=u.get("attributes") or {},
+                footprint_source=source,
+                admission_footprint=adm)
         return out
 
     def placements(self):
