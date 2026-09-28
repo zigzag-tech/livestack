@@ -762,6 +762,30 @@ prefill kernel at startup, and CUDA 12.9's nvcc refuses the system gcc-15.
 `NVCC_PREPEND_FLAGS=-ccbin /usr/bin/g++-14`. Without it the unit crash-loops, as it
 did for about 5 minutes on 2026-09-28.
 
+### The JEMM template for `/v1/classifier` (opt-in)
+
+`POST /v1/classifier` compiles a choice question into a one-token decision on the
+base model (Simple Jev v1). With `"options": {"template": "jemm"}` it uses
+`livestack_node/decisions/jemm.py` instead:
+- **Prompt:** JEMM's own prompt, as its model card specifies it.
+- **Model:** the `jemm` LoRA adapter (a `require:` model gains `,adapter=jemm`).
+- **Scoring:** the temperature in `decisions/jemm_calibration.json`. The response
+  reports `template_version: jemm-v1`, the calibration id, and a per-answer
+  `undecided` flag (top probability below the card's threshold). The flag is
+  reported, never acted on.
+
+Limits and status:
+- Choice questions and `state` only; anything else is refused by name.
+- Up to 20 candidates (vLLM's `top_logprobs` ceiling), not the card's 32.
+- The card's temperature was fitted on the bf16 base. It was checked against the
+  int4 base on the 98-row held-out pane-status set with
+  `scripts/fit_jemm_calibration.py`. A refit did not clearly beat it (NLL 0.2248 vs
+  0.2281, worse ECE), so the card's value stands, recorded with that report.
+- On that set JEMM scores about 0.91 binary accuracy against about 0.85 for Simple
+  Jev. That is about six rows of difference, which is not qualification.
+- **Nothing in production sends `template: jemm` yet.** The benchday hub still uses
+  Simple Jev v1.
+
 ## Scheduler policy — the target choice is a tunable, recorded policy
 
 The fleet broker's per-job target choice (`fleet_scheduler.schedule()`) runs as the
