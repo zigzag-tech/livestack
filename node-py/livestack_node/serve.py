@@ -16,7 +16,7 @@ import hashlib
 import os
 import threading
 import time
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .coordinator import LivestackCoordinator
 from .facade import _machine_name, build_router, resolve_device_id
@@ -89,6 +89,38 @@ class WorkCounter:
 
     async def __aexit__(self, *_exc) -> None:
         self.__exit__()
+
+
+def announce_targets(mesh_target, prefix: str, port: int,
+                     node_host: Optional[str]) -> List[Tuple[str, Optional[str]]]:
+    """Every (announced URL, self-probe URL) this node registers.
+
+    A mesh identity is ADDITIVE to the http one (meshlink-rollout.md: "HTTP
+    peers are never deprecated; mixed rosters are the tested steady state").
+    Announcing only the mesh name made the node vanish from every broker that
+    cannot dial `mesh://` — measured 2026-09-27 on xc-tower-ubuntu: hostd and
+    fleetd ran releases older than MeshPeer, `tower-llm` sat MIA for 17 h with
+    "unknown url type: mesh", and every 27B consumer lost its only unit. The
+    broker de-duplicates the pair by node_id, which the facade reports as the
+    mesh identity for both (DR-2), so announcing twice never counts one GPU
+    twice.
+
+    The http URL is dropped only when `LIVESTACK_NODE_HOST` IS the daemon_id:
+    that operator said this node has no reachable address.
+    """
+    from . import mesh_attach
+    host = (node_host or "127.0.0.1").strip()
+    targets: List[Tuple[str, Optional[str]]] = []
+    if mesh_target is not None:
+        # The self-probe stays on loopback: the mesh URL names a door at the
+        # far end of this node's OWN tunnel, and dialing it from here is a
+        # self-dial through the relay (announce.facade_answers).
+        targets.append((mesh_target.advertised_url_for(prefix),
+                        f"http://127.0.0.1:{port}{prefix}"))
+        if mesh_attach.looks_like_daemon_id(host):
+            return targets
+    targets.append((f"http://{host}:{port}{prefix}", None))
+    return targets
 
 
 def counting() -> WorkCounter:
@@ -265,41 +297,31 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
         # the operator's to state, and the default keeps single-machine
         # deployments working with nothing set.
         #
-        # SCHEME-AWARE: a mesh-attached node announces its mesh name, not an
-        # http URL. `LIVESTACK_NODE_HOST` may itself BE the daemon_id (no dot,
-        # no '://' — the rule mesh_attach.looks_like_daemon_id documents), or
-        # the mesh may be enabled/daemon-named by the LIVESTACK_MESH_* envs
-        # with HOST left as a reachable address for non-mesh consumers.
-        advertise = (os.environ.get("LIVESTACK_NODE_HOST") or "127.0.0.1").strip()
-        if mesh_target is not None:
-            announced = mesh_target.advertised_url_for(prefix)
-            # The self-probe stays on loopback: the announced mesh URL names a
-            # door at the far end of this node's OWN tunnel, and dialing it
-            # from here is a self-dial through the relay (see
-            # announce.facade_answers — two addresses, one door).
-            probe_url = f"http://127.0.0.1:{int(resolved_port)}{prefix}"
-        else:
-            announced = f"http://{advertise}:{int(resolved_port)}{prefix}"
-            probe_url = None
+        # SCHEME-AWARE: a mesh-attached node announces its mesh name, and ALSO
+        # its http URL unless `LIVESTACK_NODE_HOST` is itself the daemon_id —
+        # see `announce_targets`.
         from .announce import node_operation_id, node_region, node_scope
-        start_registrar(
-            announced,
-            host_id=host_id, kind=kind,
-            # Where this machine is. Announced, not inferred: see
-            # `announce.node_region` for why a measured distance cannot answer
-            # it and why a caller must treat unknown as excluded.
-            region=node_region(),
-            # Who this node is pooled for, as the operator or the enrolling
-            # hub stated it (`LIVESTACK_NODE_SCOPE`). Absent announces no
-            # scope, which is the fleet default: pooled for everyone.
-            scope=node_scope(),
-            # The create that paid for this box, if one did. It is what turns
-            # "a node appeared" into "THIS operation succeeded" — see
-            # `announce.node_operation_id`.
-            operation_id=node_operation_id(),
-            interval_s=float(os.environ.get("LIVESTACK_REGISTER_INTERVAL", "30")),
-            probe_url=probe_url,
-        )
+        for announced, probe_url in announce_targets(
+                mesh_target, prefix, int(resolved_port),
+                os.environ.get("LIVESTACK_NODE_HOST")):
+            start_registrar(
+                announced,
+                host_id=host_id, kind=kind,
+                # Where this machine is. Announced, not inferred: see
+                # `announce.node_region` for why a measured distance cannot answer
+                # it and why a caller must treat unknown as excluded.
+                region=node_region(),
+                # Who this node is pooled for, as the operator or the enrolling
+                # hub stated it (`LIVESTACK_NODE_SCOPE`). Absent announces no
+                # scope, which is the fleet default: pooled for everyone.
+                scope=node_scope(),
+                # The create that paid for this box, if one did. It is what turns
+                # "a node appeared" into "THIS operation succeeded" — see
+                # `announce.node_operation_id`.
+                operation_id=node_operation_id(),
+                interval_s=float(os.environ.get("LIVESTACK_REGISTER_INTERVAL", "30")),
+                probe_url=probe_url,
+            )
 
     # Mesh attach (Phase 6 of the meshlink backbone): the facade exists as an
     # ASGI app now — attach outbound so brokers and callers can dial this node
