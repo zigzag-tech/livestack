@@ -159,3 +159,14 @@ def test_the_recorded_decision_keeps_the_live_row_under_the_size_cap(tmp_path):
     assert not rec.get("truncated")
     assert any(c["detail"]["live"] for c in rec["candidates"])
     assert len(json.dumps(rec, separators=(",", ":"), sort_keys=True)) <= 32 * 1024   # as the ledger measures
+
+
+def test_an_oversized_record_drops_rows_itself_never_the_live_one(tmp_path, monkeypatch):
+    import livestack_node.ledger as L
+    monkeypatch.setattr(L, "MAX_RECORD_BYTES", 12 * 1024)
+    led = JsonlLedger(str(tmp_path / "c.jsonl"))
+    compose.propose([facts(rows=(BF16, FP8))], ledger=led, store=None, now=T0)
+    rec = led.read()[0]
+    assert not rec.get("truncated")
+    assert rec["request"]["omitted_for_size"] > 0
+    assert any(c["detail"]["live"] for c in rec["candidates"])

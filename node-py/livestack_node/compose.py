@@ -256,13 +256,37 @@ def _decision_record(dec: cm.CompositionDecision, *, emitter_id: str, snapshot: 
             id=r.hash, outcome=r.outcome, device_id=r.device,
             reason=(r.reason if r.reason else f"cost {total:.1f}" if total is not None else "unscored"),
             detail=detail))
+    # Then GUARANTEE the fit rather than hope for it: while the encoded record
+    # is over the ledger's cap, drop the most expensive non-live, non-chosen
+    # row ourselves and count it. The ledger's own shedding does not know
+    # which rows the spec requires, so it must never be the one to choose.
+    from .ledger import MAX_RECORD_BYTES
+    keep_ids = {r.hash for r in dec.candidates if r.live or r.outcome == "chosen"}
+    order = {r.hash: (r.cost.total if r.cost else float("inf")) for r in dec.candidates}
+    omitted = 0
+
+    def size(cs) -> int:
+        probe = Decision(emitter="composition", emitter_id=emitter_id, decision="compose",
+                         kind="llm", candidates=cs, chosen=dec.chosen_hash, reason=dec.reason,
+                         request={**dict(dec.policy), "candidates_total": dec.candidates_total,
+                                  "filtered": dict(dec.filtered), "omitted_for_size": omitted},
+                         snapshot=snapshot, ts=now)
+        return len(json.dumps(probe.to_dict(), separators=(",", ":"), sort_keys=True))
+
+    while size(cands) > MAX_RECORD_BYTES - 512:
+        droppable = [c for c in cands if c.id not in keep_ids]
+        if not droppable:
+            break
+        worst = max(droppable, key=lambda c: (order.get(c.id, float("inf")), c.id))
+        cands.remove(worst)
+        omitted += 1
     return Decision(emitter="composition", emitter_id=emitter_id, decision="compose",
                     kind="llm", candidates=cands, chosen=dec.chosen_hash, reason=dec.reason,
                     # The decider and weights ride in `request` (what was asked
                     # of whom): the ledger's `policy` field is reserved for the
                     # scheduler's compiled-policy pointer and is schema-closed.
                     request={**dict(dec.policy), "candidates_total": dec.candidates_total,
-                             "filtered": dict(dec.filtered)},
+                             "filtered": dict(dec.filtered), "omitted_for_size": omitted},
                     snapshot=snapshot, ts=now)
 
 
