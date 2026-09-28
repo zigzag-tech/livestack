@@ -6,7 +6,7 @@
   "footprint_gb": 21,
   "gpu_fraction": "0.96",
   "max_model_len": "24576",
-  "extra_args": "--max-num-seqs 32 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml",
+  "extra_args": "--max-num-seqs 32 --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_xml --kv-cache-dtype fp8",
   "residency": "UNPINNED",
   "attributes": {
    "class": "llm",
@@ -19,7 +19,9 @@
   "default": true,
   "warm_on_start": true,
   "adapters": {
-   "chips-settinghead-v1": "/var/lib/harmony/adapters/chips-settinghead-v1"
-  }
+   "chips-settinghead-v1": "/var/lib/harmony/adapters/chips-settinghead-v1",
+   "jemm": "/var/lib/harmony/adapters/jemm"
+  },
+  "lora_base": "Qwen/Qwen3.8-27B"
  }
 ]

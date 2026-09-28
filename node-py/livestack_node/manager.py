@@ -98,6 +98,12 @@ class ManagedUnit:
         self._loader = loader
         self._freer = freer
         self.footprint = footprint              # measured-and-cached bytes (0 = unknown)
+        # The engine's own startup report (`vllm_startup.MeasuredCost.to_json()`
+        # or `Unknown.to_json()`), set by the node after a load. None = never
+        # measured: the footprint above is then a declared prior.
+        self.measured_cost: "Optional[dict]" = None
+        # Node-specific facts for /residence (e.g. the demand log's counters).
+        self.extra_report: "Optional[Callable[[], dict]]" = None
         self.residency_policy = residency_policy
         self.min_resident = min_resident
         self.min_residency_s = min_residency_s

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "why": "Hand-set 2026-09-28 (design section 10, decision 4), reviewed like code. Unit: request-seconds of delay. Cost weights only move cost(); memory_margin is a safety parameter read by feasible() and is NOT a cost weight. Change a value by adding v2.json, never by editing this file: decisions record this file's sha256. change_cost = restart_downtime_s x expected request rate x unserved (each request arriving during the restart goes unserved, 30 request-seconds) + risk_prior_per_new_flag per never-started launch flag.",
+  "queue_s": 1.0,
+  "unserved": 30.0,
+  "swap_stall_s": 0.5,
+  "restart_downtime_s": 145.0,
+  "risk_prior_per_new_flag": 600.0,
+  "memory_margin": 0.1
+}
