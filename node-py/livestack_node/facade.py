@@ -506,13 +506,14 @@ def build_router(manager, coordinator, capability: Capability,
                 hb = activation_tracker.headroom_bytes(kind)
                 if hb > 0:
                     entry["activation_headroom"] = {"vram_bytes": int(hb)}
+            # `footprint_source` names where the NUMBER in `footprint` came from.
+            # The engine's own measurement rides beside it as `measured`, for
+            # composition and for inspection, until admission can use it (see
+            # harmony-llm `_record_measurement`).
             measured = getattr(unit, "measured_cost", None)
+            entry["footprint_source"] = getattr(unit, "footprint_source", "declared")
             if measured:
                 entry["measured"] = dict(measured)
-                entry["footprint_source"] = ("unknown" if measured.get("measured") == "unknown"
-                                             else measured.get("source") or "vllm-startup")
-            else:
-                entry["footprint_source"] = "declared"
             extra = getattr(unit, "extra_report", None)
             if extra is not None:
                 try:
