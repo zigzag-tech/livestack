@@ -687,10 +687,13 @@ declared `footprint`. Those numbers are weights + non-torch, peak activation, KV
 and tokens, and CUDA graphs, which sit outside the `--gpu-memory-utilization`
 budget. `measured.min_footprint` is the least it can run with: weights, activation,
 graphs, and KV for one full-length request, since the rest of the KV pool is elastic.
-**Admission still charges the declared `footprint`** (`footprint_source: declared`).
-The broker's 2 GB device reserve covers activation that declared footprints leave
-out, so charging a measured footprint as well double-counts it, and on
-xc-tower-ubuntu it made the 27B unplaceable (design §8b of the openspec change). A
+**The broker adopts the measurement.** Residence charges `measured.footprint`,
+admission needs `measured.min_footprint`, and the unit is labelled
+`footprint_source: vllm-startup`. The device reserve (`LIVESTACK_RESERVED_GB`)
+covers activation that declared footprints leave out, so it is charged only while
+some unit on the device, or the one being placed, is declared. Charging it on top of
+a measured footprint once made the 27B unplaceable on its own card (design §8b–§8c
+of the openspec change). A
 report that does not parse is `measured: unknown`. Measurements persist per composition hash in
 `~/.cache/livestack/unit-costs.jsonl` (256 rows).
 
