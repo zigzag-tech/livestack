@@ -29,7 +29,7 @@
   Tests: planner unit test for all three sources, including that `unknown` blocks
   co-placement on that device.
   Ledger: the `plan()` candidate rows carry footprint `source`. Verify: `pytest node-py/tests/test_planner_measured.py`.
-- [ ] 2.3 **[ASK]** Deploy to xc-tower-ubuntu. Confirm `llm_general` reports the
+- [x] 2.3 **[ASK]** Deploy to xc-tower-ubuntu. Confirm `llm_general` reports the
   measured cost and that `plan()` output is unchanged except for the footprint value.
   Tests: 2.1–2.2 green. Ledger: the first plan after deploy shows `source: vllm-startup`.
   Verify: `GET /plan` before/after diff.
@@ -46,7 +46,7 @@
   Tests: records for base, adapter and classifier requests; a streamed request without
   usage gets `null`; no owner id appears anywhere in the file.
   Ledger: none. Verify: replay the fixture requests, then check with `jq`.
-- [ ] 3.3 **[ASK]** Deploy with logging on. After 24 h, check the record count against
+- [ ] 3.3 **[ASK]** Deploy with logging on (DEPLOYED 2026-09-28 04:58 UTC; the 24 h count check is still open, see receipts/first-run.md). After 24 h, check the record count against
   vLLM's `vllm:request_success_total` delta for the same window.
   Tests: 3.1–3.2. Ledger: none. Verify: counts agree within the dropped counter.
 - [x] 3.4 Add both logs to the storage inventory in `HARMONY.md` (bound and enforcer).
@@ -109,7 +109,7 @@
   Tests: a measurement for the chosen hash writes one `measured` row with the
   `parent_decision_id`; none for 7 days writes `not_applied`.
   Ledger: **new** outcome rows. Verify: `jq 'select(.parent_decision_id)'` on the ledger.
-- [ ] 6.3 **[ASK]** First real run on xc-tower-ubuntu. Record the proposal as a receipt,
+- [x] 6.3 **[ASK]** First real run on xc-tower-ubuntu. Record the proposal as a receipt,
   including whether it would have kept today's chips + jemm/fp8 composition.
   Tests: 6.1–6.2. Ledger: one `compose` decision. Verify: the receipt in `receipts/first-run.md`.
 
