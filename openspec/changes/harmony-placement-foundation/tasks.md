@@ -24,7 +24,7 @@
   Tests: fake engine emitting fixture lines, then `/residence` shows the parsed values;
   unparseable output shows `measured: "unknown"` and increments the counter.
   Ledger: none (the node reports; the broker records). Verify: `curl /residence | jq .units[].measured`.
-- [ ] 2.2 (REOPENED, design §8b) `RestPeer.units` uses the measured footprint when present, the declared value
+- [x] 2.2 (reopened, then fixed: design §8c) `RestPeer.units` uses the measured footprint when present, the declared value
   as `source: "declared"` otherwise, and the device budget when `unknown`.
   Tests: planner unit test for all three sources, including that `unknown` blocks
   co-placement on that device.
