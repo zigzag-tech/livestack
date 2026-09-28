@@ -173,6 +173,19 @@ carry the relay env (`LIVESTACK_RELAY_URLS/IDS/CAP_KEYS`, CN broker prefers the
 CN door). Tower broker roster shows `mesh://livestack/tower-asr-1/livestack`
 registered.
 
+**Correction, 2026-09-27 — registered is not dialable.** Neither tower broker
+can dial a `mesh://` peer. Both run pinned releases older than MeshPeer
+(`4f4167dd`): `livestack-hostd` (:8799, `393b97fd`, 09-21, and no relay env at
+all) and `livestack-fleetd` (:8801, `scheduler-policy-78fe4fb7`, 09-24). Every
+mesh row there sits MIA with `<urlopen error unknown url type: mesh>`. It was
+invisible until 09-27 04:45, when a host restart activated `tower-llm`'s staged
+mesh env: the node then announced ONLY its mesh name, the 27B went MIA for 17 h,
+and every Simple Jev / title / chip call lost its only unit. Fixed node-side in
+`81feea50` (a mesh identity is additive: nodes announce http too);
+harmony-llm, polytts and polyasr were restarted onto it. Brokers still
+need a MeshPeer-capable release before any mesh-only node (`LIVESTACK_NODE_HOST`
+= daemon_id) can join; check with `curl :8799/fleet` for `unknown url type`.
+
 Node drop-in shape (all flipped hosts):
 `LIVESTACK_MESH_ENABLED=1`, `LIVESTACK_MESH_DAEMON_ID=<id>`,
 `LIVESTACK_MESH_DAEMON_KEY_FILE` + `LIVESTACK_RELAY_KEY_FILE` (same ed25519
