@@ -61,38 +61,57 @@ def _fetch_block(client, digest, headers, start, total, deadline):
         return bytes(data)
 
 
+BLOCK_RETRIES = 2
+
+
+def _transient(error):
+    """True for the failures the sequential loop also retries; integrity failures are never transient."""
+    if isinstance(error, WorkloadError):
+        return error.status not in (409, 413)
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in (408, 429, 500, 502, 503, 504)
+    return isinstance(error, (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead))
+
+
 def _parallel_tail(client, digest, headers, out, hasher, count, total, deadline, parallel):
     """Fetch [count, total) with up to `parallel` blocks in flight; return the contiguous count.
 
-    Blocks are written and hashed strictly in order, so `count` is always a contiguous verified-later
-    prefix and the sequential loop can resume from it. Memory is bounded by parallel x CHUNK. A
-    transient failure or a short block just returns early (the sequential loop, with its own retry
-    budget, finishes the object); an integrity failure raises.
+    Blocks are written and hashed strictly in order, so `count` is always a contiguous prefix and
+    the sequential loop can resume from it. Memory is bounded by parallel x CHUNK. One dropped
+    connection must not cost the whole fan-out (on a lossy path it happens every few dozen
+    blocks), so a failed block is refetched in place up to BLOCK_RETRIES times; only a block that
+    keeps failing, or a short block, returns early so the sequential loop (with its own retry
+    budget) finishes the object. An integrity failure raises.
     """
     starts = deque(range(count, total, CHUNK))
-    pending = deque()
+    pending, tries = deque(), {}
+    submit = lambda pool, start: pool.submit(_fetch_block, client, digest, headers, start, total, deadline)
     with ThreadPoolExecutor(max_workers=parallel) as pool:
         try:
             while starts or pending:
                 while starts and len(pending) < parallel:
                     start = starts.popleft()
-                    pending.append((start, pool.submit(_fetch_block, client, digest, headers, start, total, deadline)))
+                    pending.append((start, submit(pool, start)))
                 start, future = pending.popleft()
                 try:
                     data = future.result()
-                except WorkloadError as error:
-                    if error.status in (409, 413):
+                except Exception as error:
+                    if not _transient(error):
+                        if isinstance(error, urllib.error.HTTPError):
+                            error.close()
                         raise
-                    raise ConnectionError(str(error)) from error
-                except urllib.error.HTTPError as error:
-                    if error.code not in (408, 429, 500, 502, 503, 504):
-                        raise
-                    error.close()
-                    raise ConnectionError('HTTP %d' % error.code) from error
+                    if isinstance(error, urllib.error.HTTPError):
+                        error.close()
+                    tries[start] = tries.get(start, 0)+1
+                    if tries[start] > BLOCK_RETRIES or time.monotonic() >= deadline:
+                        raise ConnectionError('block at %d failed %d times: %s' % (start, tries[start], error)) from error
+                    time.sleep(min(0.25*tries[start], max(0, deadline-time.monotonic())))
+                    pending.appendleft((start, submit(pool, start)))  # head of the line: order is preserved
+                    continue
                 out.write(data); hasher.update(data); count += len(data)
                 if len(data) != min(CHUNK, total-start):
                     break
-        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as error:
+        except ConnectionError as error:
             logging.warning('parallel download %s stopped at %d/%d: %s; finishing sequentially',
                             digest[:12], count, total, error)
         finally:
