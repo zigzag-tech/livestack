@@ -61,6 +61,40 @@ class WorkloadWorker:
                 max_bytes=config['input_cache_bytes'], max_entries=config.get('input_cache_entries', 32),
                 retention_seconds=config.get('input_cache_retention_seconds', 14*86400), mirror=mirror)
         self.reconciled = False
+        self._host_pressure_state = None
+
+    def _host_memory_limit(self):
+        """Memory the HOST says it can spare, or None when no host is configured.
+
+        A worker inside a VM sees only the guest's /proc/meminfo, which stays
+        healthy while the host swaps: on 2026-09-28 a Lima guest reported ~15 GB
+        available while a leaking emulator held 32 GB of its 36 GB macOS host, the
+        guest missed lease renewals, and every attempt ended as an unexplained
+        infrastructure failure. A host-side publisher writes
+        {"ts": <epoch s>, "available_memory_bytes": <int>} to a file the guest can
+        read; a missing, stale or malformed file reports 0, never "no limit" —
+        absence of the reading must not look like absence of pressure.
+        """
+        spec = self.config.get('host_pressure')
+        if spec is None:
+            return None
+        limit, state = 0, 'unreadable'
+        try:
+            reading = json.loads(Path(spec['path']).read_text())
+            available, stamp = reading['available_memory_bytes'], reading['ts']
+            if any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in (available, stamp)) or available < 0:
+                state = 'malformed'
+            elif time.time()-stamp > spec.get('max_age_seconds', 120):
+                state = 'stale'
+            else:
+                limit, state = int(available), 'ok'
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        if state != self._host_pressure_state:
+            (logging.info if state == 'ok' else logging.warning)(
+                'host pressure reading %s (reporting %d bytes available from it)', state, limit)
+            self._host_pressure_state = state
+        return limit
 
     def report(self):
         capacity = dict(self.config['capacity'])
@@ -76,6 +110,9 @@ class WorkloadWorker:
         available = dict(capacity)
         available['memory_bytes'] = max(0, min(capacity['memory_bytes'],
             free_memory-self.config.get('memory_reserve_bytes', 1024**3)))
+        host_limit = self._host_memory_limit()
+        if host_limit is not None:
+            available['memory_bytes'] = min(available['memory_bytes'], host_limit)
         available['disk_bytes'] = max(0, min(capacity['disk_bytes'],
             stats.f_bavail*stats.f_frsize-self.config.get('disk_reserve_bytes', 1024**3)))
         for path in self.config.get('backing_filesystems', []):
