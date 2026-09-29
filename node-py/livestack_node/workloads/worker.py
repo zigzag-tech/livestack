@@ -20,7 +20,7 @@ from urllib.error import HTTPError
 from .archive import relative_path, unpack
 from .docker_runtime import remove_data
 from .client import WorkloadClient
-from .lease import LeaseKeeper
+from .lease import LeaseKeeper, retry_transient, transient
 from .model import WorkloadError, encode
 from .supervision import SystemdExecutor, WorkerJournal
 from .transfer import InputTransfer
@@ -372,9 +372,18 @@ class WorkloadWorker:
                 if result is not None:
                     completion = self._completion_from_exit(assignment, result)
                     break
-                if time.monotonic()-last_report >= 10:
-                    self.register()
+                if time.monotonic()-last_report >= self.config.get('status_report_seconds', 10):
                     last_report = time.monotonic()
+                    try:
+                        self.register()
+                    except Exception as error:
+                        # A blip in reaching the authority must not kill a healthy
+                        # attempt: the lease keeper owns the fence and stops us
+                        # when the lease is really refused or expired.
+                        if not transient(error):
+                            raise
+                        logging.warning('attempt %s: authority unreachable for status report (lease has %.0fs left): %s: %s',
+                                        attempt, max(0, lease.deadline-time.monotonic()), type(error).__name__, error)
                 state = self.executor.inspect(attempt)
                 if state.get('ActiveState') in ('failed', 'inactive') or state.get('LoadState') == 'not-found':
                     # The wrapper can publish its receipt and exit between our
@@ -406,9 +415,16 @@ class WorkloadWorker:
             'ok' if completion['outcome'] == 'succeeded' else 'failed',
             wall_s=None if started is None else time.monotonic() - started)
         try:
-            completion = self._attach_artifacts(assignment, completion, output)
+            # The upload is idempotent by digest and the lease keeper is still
+            # renewing: ride out a short authority outage instead of dropping
+            # the finished result. Exhaustion raises with the cause named.
+            handoff = dict(budget=self.config.get('handoff_retry_seconds', 60),
+                           keep_going=lambda: lease is None or not lease.lost.is_set())
+            completion = retry_transient(lambda: self._attach_artifacts(assignment, completion, output),
+                                         'attempt %s result upload' % attempt, **handoff)
             self.journal.write(dict(assignment=assignment, phase='completed', completion=completion))
-            self.client.request('worker/complete', completion)
+            retry_transient(lambda: self.client.request('worker/complete', completion),
+                            'attempt %s completion' % attempt, **handoff)
         except (WorkloadError, HTTPError) as error:
             if error.status != 409:
                 raise

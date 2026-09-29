@@ -1,21 +1,60 @@
 """Worker-owned renewals with a monotonic deadline enforced inside the unit."""
 from __future__ import annotations
 
+import http.client
 import json
+import logging
 import math
 import os
 from pathlib import Path
 from threading import Event, Thread
 import time
+import urllib.error
 
 from .model import WorkloadError, progress as validate_progress
 
 
+def transient(error):
+    """True for a failure that says only "the authority could not be reached
+    just now": connection refused/reset, timeout, or a 502/503/504 from the
+    edge. An answer from the authority (409 fence, 404, ...) is never transient,
+    and neither is a local fault."""
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code in (502, 503, 504)
+    if isinstance(error, WorkloadError):
+        return error.status in (502, 503, 504)
+    return isinstance(error, (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException))
+
+
+def retry_transient(call, what, *, budget, keep_going=lambda: True, first_delay=.5, max_delay=5):
+    """Run call(), retrying transient failures with bounded backoff for at most
+    `budget` seconds while keep_going() holds. A non-transient failure, or the
+    last transient one once the budget is spent, is raised unchanged after a
+    log line naming the cause."""
+    give_up = time.monotonic()+budget
+    delay = first_delay
+    while True:
+        try:
+            return call()
+        except Exception as error:
+            left = give_up-time.monotonic()
+            if not transient(error) or left <= 0 or not keep_going():
+                if transient(error):
+                    logging.warning('%s failed, not retrying: %s: %s', what, type(error).__name__, error)
+                raise
+            logging.warning('%s: authority unreachable (%s: %s); retrying in %.1fs (%.0fs of budget left)',
+                            what, type(error).__name__, error, min(delay, left), left)
+            time.sleep(min(delay, left))
+            delay = min(delay*2, max_delay)
+
+
 class LeaseKeeper:
-    def __init__(self, client, assignment, path, *, interval=10, progress_path=None):
+    def __init__(self, client, assignment, path, *, interval=10, progress_path=None, start_retry_seconds=15):
         self.client, self.assignment = client, assignment
         self.path = Path(path)
         self.interval = interval
+        self.start_retry_seconds = start_retry_seconds
+        self._noted = None
         self.progress_path = Path(progress_path) if progress_path is not None else None
         self.progress_seen = None
         self.stopped = Event()
@@ -74,7 +113,9 @@ class LeaseKeeper:
 
     def start(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.renew()  # No process can start without a fresh grant.
+        # No process can start without a fresh grant. The authority may be
+        # mid-restart at the moment of the claim: retry briefly, never forever.
+        retry_transient(self.renew, 'initial lease grant', budget=self.start_retry_seconds)
         self.thread = Thread(target=self._loop, daemon=True, name='harmony-lease')
         self.thread.start()
         return self
@@ -84,7 +125,17 @@ class LeaseKeeper:
             raise WorkloadError('lease liveness predicate must be callable')
         self.liveness = predicate
 
+    def _unreachable(self, error):
+        """Name the outage without flooding: first failure, then every 10 s."""
+        self.error = type(error).__name__
+        now = time.monotonic()
+        if self._noted is None or now-self._noted >= 10:
+            logging.warning('authority unreachable, retrying (lease has %.0fs left): %s: %s',
+                            max(0, self.deadline-now), type(error).__name__, error)
+            self._noted = now
+
     def _lose(self, error):
+        logging.warning('lease lost, stopping the attempt: %s', error)
         self.error = error
         try:
             self._write(0)
@@ -98,7 +149,8 @@ class LeaseKeeper:
         while True:
             remaining = self.deadline-time.monotonic()
             if remaining <= 0:
-                self._lose(self.error or 'LeaseExpired')
+                self._lose('LeaseExpired: no successful renewal before the granted deadline (last error: %s)'
+                           % (self.error or 'none'))
                 return
             delay = min(1 if retrying else self.interval, remaining/3)
             if self.stopped.wait(delay):
@@ -115,18 +167,21 @@ class LeaseKeeper:
                     return
             try:
                 self.renew()
+                if retrying:
+                    logging.info('authority reachable again, lease renewed (%.0fs left)', self.remaining)
                 retrying = False
+                self._noted = None
             except WorkloadError as error:
                 # An explicit authority refusal revokes the lease immediately.
                 # Transport/server failures cannot extend it, but may retry
                 # within the deadline already granted by the authority.
                 if 400 <= error.status < 500:
-                    self._lose(type(error).__name__)
+                    self._lose('%s: authority refused renewal (HTTP %s): %s' % (type(error).__name__, error.status, error))
                     return
-                self.error = type(error).__name__
+                self._unreachable(error)
                 retrying = True
             except Exception as error:
-                self.error = type(error).__name__
+                self._unreachable(error)
                 retrying = True
 
     def close(self):
