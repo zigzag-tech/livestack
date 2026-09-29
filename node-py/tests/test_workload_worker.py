@@ -1,6 +1,8 @@
 """Actual HTTP authority, private input transfer and systemd worker execution."""
 import json
+import logging
 from pathlib import Path
+import socket
 import subprocess
 import sys
 from threading import Thread
@@ -704,3 +706,160 @@ def test_another_principal_cannot_cancel_a_job(fleet):
     with pytest.raises(WorkloadError):
         stranger.cancel(job['id'])
     assert caller.get(job['id'])['state'] == 'queued'
+
+
+class Outage:
+    """A real TCP hop between worker and authority that can refuse connections
+    (down/up on the SAME port) or reset the first N result uploads."""
+
+    def __init__(self, upstream_port):
+        self.upstream, self.reset_puts, self.listener = upstream_port, 0, None
+        probe = socket.socket()
+        probe.bind(('127.0.0.1', 0))
+        self.port = probe.getsockname()[1]
+        probe.close()
+        self.up()
+
+    def up(self):
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(('127.0.0.1', self.port))
+        listener.listen(32)
+        self.listener = listener
+        Thread(target=self._accept, args=(listener,), daemon=True).start()
+
+    def down(self):
+        self.listener.close()
+
+    def _accept(self, listener):
+        while True:
+            try:
+                client, _ = listener.accept()
+            except OSError:
+                return
+            Thread(target=self._serve, args=(client,), daemon=True).start()
+
+    def _serve(self, client):
+        try:
+            first = client.recv(65536)
+            if first.startswith(b'PUT ') and self.reset_puts > 0:
+                self.reset_puts -= 1
+                client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b'\x01\x00\x00\x00\x00\x00\x00\x00')
+                client.close()
+                return
+            upstream = socket.create_connection(('127.0.0.1', self.upstream), timeout=30)
+            upstream.sendall(first)
+            def pump(a, b):
+                try:
+                    while (chunk := a.recv(65536)):
+                        b.sendall(chunk)
+                    b.shutdown(socket.SHUT_WR)
+                except OSError:
+                    pass
+            Thread(target=pump, args=(client, upstream), daemon=True).start()
+            pump(upstream, client)
+            client.close()
+            upstream.close()
+        except OSError:
+            pass
+
+
+@pytest.fixture
+def outage(fleet):
+    store, config, caller, digest = fleet
+    store.limits = Limits(lease_seconds=4)
+    hop = Outage(int(config['authority'].rsplit(':', 1)[1]))
+    config.update(authority=f'http://127.0.0.1:{hop.port}', status_report_seconds=.3,
+                  handoff_retry_seconds=20)
+    yield hop, store, config, caller, digest
+    hop.down()
+
+
+def run_step(worker):
+    errors = []
+    def go():
+        try:
+            worker.step()
+        except Exception as error:
+            errors.append(error)
+    thread = Thread(target=go)
+    thread.start()
+    return thread, errors
+
+
+def wait_running(worker):
+    deadline = time.monotonic()+10
+    while not ((journal := worker.journal.read()) and journal['phase'] == 'running'):
+        assert time.monotonic() < deadline
+        time.sleep(.05)
+    time.sleep(.5)
+    return journal['assignment']
+
+
+def test_short_authority_outage_does_not_stop_a_healthy_attempt(outage, caplog):
+    hop, store, config, caller, digest = outage
+    caplog.set_level(logging.INFO)
+    job = submit(caller, digest, sleep=6)
+    worker = WorkloadWorker(config)
+    thread, errors = run_step(worker)
+    try:
+        assignment = wait_running(worker)
+        hop.down()
+        time.sleep(1.5)  # shorter than the lease; long enough to hit several heartbeats/reports
+        hop.up()
+        thread.join(timeout=30)
+        assert not thread.is_alive() and errors == []
+        assert 'stopped:' not in caplog.text and 'lease lost' not in caplog.text
+        assert 'authority unreachable, retrying (lease has' in caplog.text
+        result = caller.get(job['id'])
+        assert result['state'] == 'succeeded'
+        assert [a['fence'] for a in result['attempts']] == [assignment['fence']]
+    finally:
+        thread.join(timeout=30)
+        worker.close()
+
+
+def test_authority_outage_longer_than_the_lease_stops_and_fences_the_attempt(outage, caplog):
+    hop, store, config, caller, digest = outage
+    caplog.set_level(logging.INFO)
+    job = submit(caller, digest, sleep=60)
+    worker = WorkloadWorker(config)
+    thread, errors = run_step(worker)
+    started = time.monotonic()
+    try:
+        wait_running(worker)
+        hop.down()
+        deadline = time.monotonic()+15
+        while 'lease lost' not in caplog.text:
+            assert time.monotonic() < deadline, caplog.text
+            time.sleep(.1)
+        assert 'LeaseExpired' in caplog.text
+        hop.up()
+        thread.join(timeout=30)
+        assert not thread.is_alive() and time.monotonic()-started < 40
+        worker.reconcile()
+        result = caller.get(job['id'])
+        assert result['state'] == 'queued'  # fenced, not running on
+        assert all(a['state'] != 'running' for a in result['attempts'])
+        assert worker.journal.read() is None
+    finally:
+        thread.join(timeout=30)
+        caller.request('jobs/'+job['id']+'/cancel', {})
+        worker.close()
+
+
+def test_transient_failure_during_result_upload_is_retried(outage, caplog):
+    hop, store, config, caller, digest = outage
+    caplog.set_level(logging.INFO)
+    job = submit(caller, digest)
+    hop.reset_puts = 2
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        assert hop.reset_puts == 0
+        result = caller.get(job['id'])
+        assert result['state'] == 'succeeded'
+        assert 'result upload: authority unreachable' in caplog.text
+        assert worker.journal.read() is None
+    finally:
+        worker.close()
