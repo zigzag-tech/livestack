@@ -576,3 +576,55 @@ def test_infrastructure_failure_retains_log_artifact(fleet, tmp_path):
         assert worker.journal.read() is None
     finally:
         worker.close()
+
+
+def host_reading(path, **fields):
+    path.write_text(json.dumps(fields))
+    return dict(path=str(path), max_age_seconds=30)
+
+
+@pytest.mark.parametrize('reading, expected', [
+    (dict(ts=0, available_memory_bytes=32*1024**2), 32*1024**2),      # host is tighter than guest
+    (dict(ts=0, available_memory_bytes=1024**4), 128*1024**2),        # guest stays the ceiling
+    (dict(ts=0, available_memory_bytes=0), 0),                        # host thrashing
+    (dict(ts=-3600, available_memory_bytes=1024**4), 0),             # stale is NOT "no pressure"
+    (dict(ts=0, available_memory_bytes='lots'), 0),
+    (dict(ts=0, available_memory_bytes=True), 0),
+    (dict(available_memory_bytes=1024**4), 0),
+])
+def test_host_pressure_caps_reported_memory_and_fails_closed(fleet, tmp_path, reading, expected):
+    _, config, _, _ = fleet
+    # ts is an offset from now: parametrize values are built at collection time,
+    # long before a slow suite reaches this test.
+    reading = {k: (time.time()+v if k == 'ts' else v) for k, v in reading.items()}
+    config['host_pressure'] = host_reading(tmp_path/'host-pressure.json', **reading)
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.report()['available']['memory_bytes'] == expected
+    finally:
+        worker.close()
+
+
+def test_missing_or_unparseable_host_pressure_file_reports_zero_and_recovers(fleet, tmp_path):
+    _, config, _, _ = fleet
+    path = tmp_path/'host-pressure.json'
+    config['host_pressure'] = dict(path=str(path))
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.report()['available']['memory_bytes'] == 0        # no file
+        path.write_text('{not json')
+        assert worker.report()['available']['memory_bytes'] == 0        # torn write
+        path.write_text(json.dumps(dict(ts=time.time(), available_memory_bytes=64*1024**2)))
+        assert worker.report()['available']['memory_bytes'] == 64*1024**2
+    finally:
+        worker.close()
+
+
+def test_without_host_pressure_config_memory_is_unchanged(fleet):
+    _, config, _, _ = fleet
+    worker = WorkloadWorker(config)
+    try:
+        assert 'host_pressure' not in config
+        assert worker.report()['available']['memory_bytes'] > 0
+    finally:
+        worker.close()
