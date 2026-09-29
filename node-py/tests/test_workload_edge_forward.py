@@ -197,3 +197,19 @@ def test_budget_counter_resets_by_month_and_is_bounded(tmp_path):
         budget.settle(0, 1)
     rows = budget._db.execute('SELECT count(*) FROM budget').fetchone()[0]
     assert rows <= 3
+
+
+def test_the_input_cache_fetches_through_the_relay(fleet):
+    """The worker's real fetch path is InputCache, which used to rebuild its transfer from the
+    client alone and so never used the relay: a green InputTransfer test proved nothing."""
+    from livestack_node.workloads.input_cache import InputCache
+    server, _t, url = fleet.make()
+    source, digest = blob(fleet.root, 3_000_000)
+    caller = WorkloadClient(fleet.upstream, 'a'*32)
+    uploaded = InputTransfer(caller).put(source)
+    worker, assignment = claim(fleet.upstream, caller, uploaded)
+    cache = InputCache(fleet.root/'cache', InputTransfer(worker, relay=WorkloadClient(url, 'w'*32), relay_key=KEY),
+                       max_bytes=50_000_000)
+    path = cache.get(assignment)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
+    assert server.budget.used() >= 3_000_000  # the bytes crossed the relay

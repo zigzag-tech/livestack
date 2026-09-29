@@ -33,7 +33,10 @@ class InputCache:
             raise WorkloadError('cache must be a private directory')
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.max_bytes, self.max_entries, self.retention = max_bytes, max_entries, retention_seconds
-        self.transfer = InputTransfer(transfer.client, max_bytes=min(max_bytes, transfer.max_bytes))
+        # The relay travels with the client: rebuilding from the client alone silently sent every
+        # cached fetch straight to the authority, over the path the relay exists to avoid.
+        self.transfer = InputTransfer(transfer.client, max_bytes=min(max_bytes, transfer.max_bytes),
+                                      **({} if transfer.relay is None else dict(relay=transfer.relay, relay_key=transfer.relay_key)))
         self.mirror = mirror
         self.index = self.root/'index.json'
 
