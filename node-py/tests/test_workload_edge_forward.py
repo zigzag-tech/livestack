@@ -213,3 +213,68 @@ def test_the_input_cache_fetches_through_the_relay(fleet):
     path = cache.get(assignment)
     assert hashlib.sha256(path.read_bytes()).hexdigest() == digest
     assert server.budget.used() >= 3_000_000  # the bytes crossed the relay
+
+
+def _download(fleet, url, digest, parallel, out_name='out.bin'):
+    from livestack_node.workloads.download import download_into
+    path = fleet.root/out_name
+    with path.open('wb') as out:
+        download_into(WorkloadClient(url, 'a'*32), digest, {'Authorization': 'Bearer '+'a'*32, 'X-Edge-Key': KEY},
+                      out, 200*1024*1024, parallel=parallel)
+    return path
+
+
+def _counting(monkeypatch, fail_range_once=None):
+    """Wrap the REAL transport call: observe concurrency, optionally drop one block once."""
+    import threading
+    from livestack_node import transport
+    real, state = transport.dial_stream, dict(now=0, peak=0, failed=False, lock=threading.Lock())
+    # dial_stream is a context manager: wrap it as one.
+    import contextlib
+
+    @contextlib.contextmanager
+    def cm(target, method, path, headers=None, **kw):
+        if fail_range_once and headers and headers.get('Range', '').startswith(fail_range_once) and not state['failed']:
+            state['failed'] = True
+            raise ConnectionError('injected: connection reset mid-block')
+        with state['lock']:
+            state['now'] += 1
+            state['peak'] = max(state['peak'], state['now'])
+        try:
+            with real(target, method, path, headers=headers, **kw) as response:
+                yield response
+        finally:
+            with state['lock']:
+                state['now'] -= 1
+    monkeypatch.setattr(transport, 'dial_stream', cm)
+    return state
+
+
+def test_parallel_blocks_fan_out_and_verify(fleet, monkeypatch):
+    _s, _t, url = fleet.make()
+    source, digest = blob(fleet.root, 21*1024*1024)  # six 4 MiB blocks
+    InputTransfer(WorkloadClient(fleet.upstream, 'a'*32)).put(source)
+    state = _counting(monkeypatch)
+    got = _download(fleet, url, digest, parallel=4)
+    assert hashlib.sha256(got.read_bytes()).hexdigest() == digest
+    assert state['peak'] >= 2, 'blocks were fetched one at a time'
+
+
+def test_a_failed_block_hands_back_to_the_sequential_loop(fleet, monkeypatch):
+    _s, _t, url = fleet.make()
+    source, digest = blob(fleet.root, 21*1024*1024)
+    InputTransfer(WorkloadClient(fleet.upstream, 'a'*32)).put(source)
+    state = _counting(monkeypatch, fail_range_once=f'bytes={2*4*1024*1024}-')  # the third block
+    got = _download(fleet, url, digest, parallel=4)
+    assert state['failed'], 'the fault was never injected'
+    assert hashlib.sha256(got.read_bytes()).hexdigest() == digest
+
+
+def test_more_workers_than_the_relay_admits_still_completes(fleet):
+    # The relay admits 4 concurrent connections; asking for 8 gets some dropped. The download must
+    # still finish with the right bytes, not fail and not corrupt.
+    _s, _t, url = fleet.make()
+    source, digest = blob(fleet.root, 33*1024*1024)
+    InputTransfer(WorkloadClient(fleet.upstream, 'a'*32)).put(source)
+    got = _download(fleet, url, digest, parallel=8)
+    assert hashlib.sha256(got.read_bytes()).hexdigest() == digest

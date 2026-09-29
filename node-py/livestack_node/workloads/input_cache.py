@@ -36,7 +36,7 @@ class InputCache:
         # The relay travels with the client: rebuilding from the client alone silently sent every
         # cached fetch straight to the authority, over the path the relay exists to avoid.
         self.transfer = InputTransfer(transfer.client, max_bytes=min(max_bytes, transfer.max_bytes),
-                                      **({} if transfer.relay is None else dict(relay=transfer.relay, relay_key=transfer.relay_key)))
+                                      **({} if transfer.relay is None else dict(relay=transfer.relay, relay_key=transfer.relay_key, relay_parallel=transfer.relay_parallel)))
         self.mirror = mirror
         self.index = self.root/'index.json'
 

@@ -26,13 +26,14 @@ class InputTransfer:
     """
     STATUS_TTL = 30
 
-    def __init__(self, client, *, max_bytes=2*1024**3, relay=None, relay_key=None):
+    def __init__(self, client, *, max_bytes=2*1024**3, relay=None, relay_key=None, relay_parallel=4):
         if (relay is None) != (relay_key is None):
             raise ValueError('relay and relay_key are configured together')
         self.client = client
         self.max_bytes = max_bytes
         self.relay = relay
         self.relay_key = relay_key
+        self.relay_parallel = relay_parallel
         self._relay_checked = (0.0, None)
 
     def _relay_usable(self):
@@ -117,7 +118,7 @@ class InputTransfer:
                     try:
                         # A relay attempt gets few retries: the authority is the fallback.
                         download_into(client, digest, self._headers(client, assignment), out, self.max_bytes,
-                                      **({} if client is self.client else {'max_failures': 2}))
+                                      **({} if client is self.client else {'max_failures': 2, 'parallel': self.relay_parallel}))
                         break
                     except (OSError, WorkloadError) as error:
                         if client is self.client:
