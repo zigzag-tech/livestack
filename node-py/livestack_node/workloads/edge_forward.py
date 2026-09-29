@@ -78,14 +78,18 @@ class Budget:
 class EdgeForwarder(BoundedRequests, ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 16
-    max_connections = 8
+    max_connections = 4
 
-    def __init__(self, address, upstream, budget, admin_token, edge_key, *, timeout=60):
+    def __init__(self, address, upstream, budget, admin_token, edge_key, *, timeout=60, max_connections=None):
         if len(admin_token) < 32 or len(edge_key) < 32 or admin_token == edge_key:
             raise ValueError('admin token and edge key must be distinct and strong')
         parsed = urlparse(upstream)
         if parsed.scheme != 'http' or not parsed.hostname or not parsed.port:
             raise ValueError('upstream must be http://host:port')
+        if max_connections is not None:
+            if isinstance(max_connections, bool) or not isinstance(max_connections, int) or not 1 <= max_connections <= 32:
+                raise ValueError('max_connections must be 1..32')
+            self.max_connections = max_connections
         self.configure_connections()
         self.upstream, self.budget, self.admin_token, self.edge_key, self.timeout = (parsed.hostname, parsed.port), budget, admin_token, edge_key, timeout
         self._reported_exhausted = False
@@ -221,7 +225,8 @@ def main():
     logging.basicConfig(level=logging.INFO)
     server = EdgeForwarder((config.get('bind', '127.0.0.1'), config.get('port', 8803)), config['upstream'],
                            Budget(root/'budget.sqlite', config.get('budget_bytes', 600*10**9)),
-                           config['admin_token'], config['edge_key'], timeout=config.get('timeout', 60))
+                           config['admin_token'], config['edge_key'], timeout=config.get('timeout', 60),
+                           max_connections=config.get('max_connections'))
     logging.info('edge relay on %s -> %s', server.server_address, config['upstream'])
     try:
         server.serve_forever(poll_interval=1)
