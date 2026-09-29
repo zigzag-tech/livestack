@@ -224,18 +224,19 @@ def _download(fleet, url, digest, parallel, out_name='out.bin'):
     return path
 
 
-def _counting(monkeypatch, fail_range_once=None):
+def _counting(monkeypatch, fail_range_once=None, fail_times=1):
     """Wrap the REAL transport call: observe concurrency, optionally drop one block once."""
     import threading
     from livestack_node import transport
-    real, state = transport.dial_stream, dict(now=0, peak=0, failed=False, lock=threading.Lock())
+    real, state = transport.dial_stream, dict(now=0, peak=0, failed=False, failures=0, lock=threading.Lock())
     # dial_stream is a context manager: wrap it as one.
     import contextlib
 
     @contextlib.contextmanager
     def cm(target, method, path, headers=None, **kw):
-        if fail_range_once and headers and headers.get('Range', '').startswith(fail_range_once) and not state['failed']:
+        if fail_range_once and headers and headers.get('Range', '').startswith(fail_range_once) and state['failures'] < fail_times:
             state['failed'] = True
+            state['failures'] += 1
             raise ConnectionError('injected: connection reset mid-block')
         with state['lock']:
             state['now'] += 1
@@ -260,14 +261,29 @@ def test_parallel_blocks_fan_out_and_verify(fleet, monkeypatch):
     assert state['peak'] >= 2, 'blocks were fetched one at a time'
 
 
-def test_a_failed_block_hands_back_to_the_sequential_loop(fleet, monkeypatch):
+def test_a_failed_block_is_retried_in_place_and_keeps_the_fan_out(fleet, monkeypatch, caplog):
     _s, _t, url = fleet.make()
     source, digest = blob(fleet.root, 21*1024*1024)
     InputTransfer(WorkloadClient(fleet.upstream, 'a'*32)).put(source)
-    state = _counting(monkeypatch, fail_range_once=f'bytes={2*4*1024*1024}-')  # the third block
-    got = _download(fleet, url, digest, parallel=4)
-    assert state['failed'], 'the fault was never injected'
+    state = _counting(monkeypatch, fail_range_once=f'bytes={2*4*1024*1024}-', fail_times=2)  # the third block, twice
+    with caplog.at_level(logging.WARNING):
+        got = _download(fleet, url, digest, parallel=4)
+    assert state['failures'] == 2, 'the faults were never injected'
     assert hashlib.sha256(got.read_bytes()).hexdigest() == digest
+    assert 'finishing sequentially' not in caplog.text, 'two drops must not end the fan-out'
+
+
+def test_a_block_that_keeps_failing_hands_back_to_the_sequential_loop(fleet, monkeypatch, caplog):
+    _s, _t, url = fleet.make()
+    source, digest = blob(fleet.root, 21*1024*1024)
+    InputTransfer(WorkloadClient(fleet.upstream, 'a'*32)).put(source)
+    # BLOCK_RETRIES + 1 failures exhaust the in-place retries; the sequential loop then finishes it.
+    state = _counting(monkeypatch, fail_range_once=f'bytes={2*4*1024*1024}-', fail_times=3)
+    with caplog.at_level(logging.WARNING):
+        got = _download(fleet, url, digest, parallel=4)
+    assert state['failures'] == 3
+    assert hashlib.sha256(got.read_bytes()).hexdigest() == digest
+    assert 'finishing sequentially' in caplog.text
 
 
 def test_more_workers_than_the_relay_admits_still_completes(fleet):
