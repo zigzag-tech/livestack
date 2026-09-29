@@ -26,6 +26,40 @@ from .supervision import SystemdExecutor, WorkerJournal
 from .transfer import InputTransfer
 
 
+def rmtree_writable(path):
+    """rmtree that also removes read-only trees.
+
+    Handlers unpack read-only source trees (files or whole directories at 0555);
+    unlinking needs write permission on the PARENT directory, so a plain rmtree
+    raises PermissionError on them. On 2026-09-29 that escaped reconcile() and
+    wedged a worker for hours. Make every real directory owner-writable, retry.
+    """
+    try:
+        shutil.rmtree(path)
+        return
+    except PermissionError:
+        pass
+    for base, dirs, _ in os.walk(path):
+        for name in [base, *(os.path.join(base, d) for d in dirs)]:
+            if not os.path.islink(name):
+                try:
+                    os.chmod(name, 0o700 | os.lstat(name).st_mode)
+                except OSError:
+                    pass
+    shutil.rmtree(path)
+
+
+def _tree_bytes(path):
+    total = 0
+    for base, _, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(base, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
 class WorkloadWorker:
     def __init__(self, config):
         self.config = config
@@ -71,6 +105,37 @@ class WorkloadWorker:
                 retention_seconds=config.get('input_cache_retention_seconds', 14*86400), mirror=mirror)
         self.reconciled = False
         self._host_pressure_state = None
+        # Workspaces that could not be removed: path -> last error text. They are
+        # retried every step; a removal failure never blocks claiming/heartbeats.
+        self.stuck_workspaces = {}
+        self._logged_cleanup_failures = set()
+
+    def _remove_workspace(self, path):
+        """Remove an attempt workspace; on failure keep it for the next turn.
+
+        Logs ONE named line per distinct (path, error), so a permanent failure
+        cannot spam the rotating log; the line carries the running count/bytes.
+        """
+        path = Path(path)
+        try:
+            if path.exists():
+                remove_data(path)
+                rmtree_writable(path)
+            self.stuck_workspaces.pop(str(path), None)
+            return True
+        except Exception as error:
+            text = '%s: %s' % (type(error).__name__, error)
+            self.stuck_workspaces[str(path)] = text
+            if (str(path), text) not in self._logged_cleanup_failures:
+                self._logged_cleanup_failures.add((str(path), text))
+                logging.warning('workspace cleanup failed: %s: %s (%d un-removable workspaces, %d bytes)',
+                    path, text, len(self.stuck_workspaces),
+                    sum(_tree_bytes(p) for p in self.stuck_workspaces))
+            return False
+
+    def _retry_stuck_workspaces(self):
+        for path in list(self.stuck_workspaces):
+            self._remove_workspace(path)
 
     def _host_memory_limit(self):
         """Memory the HOST says it can spare, or None when no host is configured.
@@ -173,9 +238,9 @@ class WorkloadWorker:
         for attempt in response['cleanup']:
             self.executor.stop(attempt)
             path = self.workspace/attempt
-            if path.exists():
-                remove_data(path)
-                shutil.rmtree(path)
+            # The attempt is stopped; a workspace that resists removal is retried
+            # each step, but must not keep the authority from readvertising us.
+            self._remove_workspace(path)
             cleaned.append(attempt)
         if cleaned:
             response = self.register(cleaned)
@@ -183,9 +248,7 @@ class WorkloadWorker:
             raise WorkloadError('worker cleanup is incomplete', 503)
         if old:
             path = self.workspace/old['assignment']['attempt_id']
-            if path.exists():
-                remove_data(path)
-                shutil.rmtree(path)
+            self._remove_workspace(path)
         self.journal.clear()
         self.reconciled = True
 
@@ -256,6 +319,7 @@ class WorkloadWorker:
             self.reconciled = False
         if not self.reconciled:
             self.reconcile()
+        self._retry_stuck_workspaces()
         if self.input_cache:
             self.input_cache.prune()
         response = self.register()
@@ -434,7 +498,9 @@ class WorkloadWorker:
                 self._close_lease(lease, attempt, sys.exc_info()[0])
         # Keep evidence until authority acknowledgement; failed network writes
         # leave the journal and root for the next reconciliation pass.
-        shutil.rmtree(root)
+        # A workspace that resists removal is retried by later steps; the finished
+        # attempt is already acknowledged and must not turn into a wedge.
+        self._remove_workspace(root)
         self.journal.clear()
 
     def close(self):
