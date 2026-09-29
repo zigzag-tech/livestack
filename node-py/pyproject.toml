@@ -7,7 +7,11 @@ name = "livestack-node"
 version = "0.0.1"
 description = "Livestack model-node kit: lease-driven GPU residence for plain web servers (the single-node + embedded-gateway case of Livestack)."
 requires-python = ">=3.9"
-dependencies = []
+# cryptography: relay_control (imported by mesh_attach on every `serve` attach)
+# signs with Ed25519 at module import. Undeclared, a venv built from these deps
+# crash-looped every perception worker on it (xc-tower-ubuntu, 2026-09-29:
+# ~9,800 restarts each of glm-ocr / hunyuan-ocr / paddleocr-vl).
+dependencies = ["cryptography>=42"]
 
 [project.optional-dependencies]
 facade = ["fastapi>=0.100"]
