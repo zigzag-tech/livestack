@@ -682,3 +682,25 @@ def test_without_host_pressure_config_memory_is_unchanged(fleet):
         assert worker.report()['available']['memory_bytes'] > 0
     finally:
         worker.close()
+
+
+def test_client_cancels_a_queued_job_and_reports_each_outcome(fleet):
+    from livestack_node.workloads.cli import cancel_jobs
+    _, _, caller, digest = fleet
+    job = submit(caller, digest)
+    assert [item['id'] for item in caller.list_jobs()] == [job['id']]
+    outcomes = cancel_jobs(caller, [job['id'], job['id'], 'j'*32, 'not a job id!'])
+    assert outcomes[0] == dict(job=job['id'], state='cancelled', reason='cancelled by owner')
+    assert outcomes[1]['state'] == 'cancelled'             # idempotent on a terminal job
+    assert outcomes[2]['error'] == 'job not found'         # a refusal is named, not swallowed
+    assert 'error' in outcomes[3]                           # malformed ids do not stop the batch
+    assert caller.get(job['id'])['state'] == 'cancelled'
+
+
+def test_another_principal_cannot_cancel_a_job(fleet):
+    store, config, caller, digest = fleet
+    job = submit(caller, digest)
+    stranger = WorkloadClient(config['authority'], 'w'*32)   # the worker principal, not the owner
+    with pytest.raises(WorkloadError):
+        stranger.cancel(job['id'])
+    assert caller.get(job['id'])['state'] == 'queued'

@@ -41,3 +41,13 @@ class WorkloadClient:
     def get(self, job_id):
         from .model import name
         return self.request('jobs/'+name(job_id, 'job_id'))
+
+    def cancel(self, job_id):
+        """Owner cancel: a queued job ends now, a running one is fenced and its
+        worker cleans up. Idempotent on a terminal job."""
+        from .model import name
+        return self.request('jobs/'+name(job_id, 'job_id')+'/cancel', {})
+
+    def list_jobs(self):
+        """This principal's most recent jobs (the authority bounds the page)."""
+        return self.request('jobs')['jobs']

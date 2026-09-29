@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .archive import capture
 from .client import WorkloadClient
+from .model import WorkloadError
 from .transfer import InputTransfer
 
 
@@ -13,6 +14,18 @@ def read_json(path, limit):
     if path.stat().st_size > limit:
         raise ValueError('CLI input exceeds byte bound')
     return json.loads(path.read_bytes())
+
+
+def cancel_jobs(client, job_ids):
+    """Cancel each job; one refusal never stops the rest, and never hides itself."""
+    outcomes = []
+    for job_id in job_ids:
+        try:
+            job = client.cancel(job_id)
+            outcomes.append({'job': job_id, 'state': job['state'], 'reason': job.get('reason')})
+        except (WorkloadError, ValueError) as error:
+            outcomes.append({'job': job_id, 'error': str(error)})
+    return outcomes
 
 
 def main():
@@ -24,6 +37,8 @@ def main():
     upload = commands.add_parser('upload'); upload.add_argument('path')
     submit = commands.add_parser('submit'); submit.add_argument('request')
     status = commands.add_parser('get'); status.add_argument('job')
+    listing = commands.add_parser('list'); listing.add_argument('--state', action='append')
+    cancel = commands.add_parser('cancel'); cancel.add_argument('jobs', nargs='+')
     download = commands.add_parser('download')
     download.add_argument('digest'); download.add_argument('destination')
     args = parser.parse_args()
@@ -44,9 +59,17 @@ def main():
             result = client.submit(read_json(args.request, 65536))
         elif args.operation == 'get':
             result = client.get(args.job)
+        elif args.operation == 'list':
+            result = [{key: job.get(key) for key in ('id', 'state', 'reason', 'created')}
+                      | {'attempts': len(job.get('attempts') or []), 'handler': (job.get('spec') or {}).get('handler'), 'key': (job.get('spec') or {}).get('key')}
+                      for job in client.list_jobs() if not args.state or job.get('state') in args.state]
+        elif args.operation == 'cancel':
+            result = cancel_jobs(client, args.jobs)
         else:
             result = {'path': str(transfer.get(args.digest, args.destination))}
     print(json.dumps(result, separators=(',', ':')))
+    if args.operation == 'cancel' and any('error' in item for item in result):
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':
