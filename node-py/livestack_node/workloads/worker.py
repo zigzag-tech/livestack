@@ -45,7 +45,13 @@ class WorkloadWorker:
         # Bulk object PUT/GET may cross regions or wait for a configured mirror.
         # Keep that budget separate so control requests still fail fast.
         transfer_client = WorkloadClient(config['authority'], config['token'], timeout=transfer_timeout)
-        self.transfer = InputTransfer(transfer_client)
+        spec = config.get('object_relay')
+        if spec is not None and (not isinstance(spec, dict) or set(spec) != {'url', 'key'}):
+            raise WorkloadError('object_relay requires exactly url and key')
+        self.transfer = InputTransfer(
+            transfer_client, **({} if spec is None else dict(
+                relay=WorkloadClient(spec['url'], config['token'], timeout=transfer_timeout),
+                relay_key=spec['key'])))
         self.output_mirror = None
         if config.get('output_mirror') is not None:
             from .artifact_mirror import InstalledArtifactMirror
