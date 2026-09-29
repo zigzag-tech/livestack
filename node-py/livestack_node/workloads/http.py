@@ -10,6 +10,7 @@ import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
+import threading
 from urllib.parse import urlparse
 
 from .model import WorkloadError, encode, name
@@ -54,23 +55,60 @@ class Principal:
             raise ValueError('on_cap must be "queue" or "refuse"')
 
 
+def check_principals(principals):
+    """The rules for a principal set, shared by startup and reload."""
+    if not principals or len(principals) > 128:
+        raise ValueError('configure 1..128 workload principals')
+    if len({p.token for p in principals}) != len(principals):
+        raise ValueError('principal tokens must be unique')
+
+
+def binding_changes(old, new):
+    """Ids present in both sets whose identity differs (role, worker, host).
+
+    Those are refused on reload: a worker's id/host key its registered state
+    and host budgets, and a caller cannot become a worker under the same id
+    without orphaning what it owns. Remove the id and add a new one instead."""
+    before = {p.id: (p.role, p.worker, p.host) for p in old}
+    return sorted(p.id for p in new
+                  if p.id in before and before[p.id] != (p.role, p.worker, p.host))
+
+
 class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 32
 
     def __init__(self, address, store, principals, *, blobs=None, artifact_mirror=None):
-        if not principals or len(principals) > 128:
-            raise ValueError('configure 1..128 workload principals')
-        if len({p.token for p in principals}) != len(principals):
-            raise ValueError('principal tokens must be unique')
+        check_principals(principals)
         self.configure_connections()
         self.store = store
         self.blobs = blobs or BlobStore(store, __import__("pathlib").Path(store.path).parent/"objects")
         self.artifact_mirror = artifact_mirror
+        self._principals_lock = threading.Lock()
         self.principals = tuple(principals)
         # The store enforces per-principal caps in placement and submission.
         store.bind_principals(self.principals)
         super().__init__(address, Handler)
+
+    def replace_principals(self, principals):
+        """Swap the whole principal set atomically, without a restart.
+
+        Requests read `self.principals` once (one reference), so a request
+        already authenticated keeps the set it started with and none can see a
+        mix of old and new. Raises ValueError, applying nothing, when the new
+        set breaks the startup rules or changes an existing id's binding.
+        Counters and job state live in the store's database, not in the
+        principal, so unchanged principals lose nothing. In-flight attempts of
+        a removed principal are not touched: they end through the lease."""
+        principals = tuple(principals)
+        check_principals(principals)
+        with self._principals_lock:
+            changed = binding_changes(self.principals, principals)
+            if changed:
+                raise ValueError('principal_binding_changed: role/worker/host of '
+                                 + ', '.join(changed) + ' cannot change; remove and add a new id')
+            self.store.bind_principals(principals)  # caps first: new ids are never uncapped
+            self.principals = principals
 
     def service_actions(self):
         # Called periodically even with no traffic: dead clients never leave
