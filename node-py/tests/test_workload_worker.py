@@ -3,6 +3,7 @@ import json
 import logging
 from pathlib import Path
 import socket
+import shutil
 import subprocess
 import sys
 from threading import Thread
@@ -863,3 +864,75 @@ def test_transient_failure_during_result_upload_is_retried(outage, caplog):
         assert worker.journal.read() is None
     finally:
         worker.close()
+
+
+def _stale_attempt(worker, name='5'*32, read_only=True):
+    """A leftover workspace as an e2e handler leaves it: read-only file inside a
+    0555 directory, referenced by an abandoned journal entry."""
+    root = Path(worker.workspace)/name
+    (root/'source'/'sub').mkdir(parents=True)
+    (root/'source'/'sub'/'query.test.mjs').write_text('x')
+    if read_only:
+        (root/'source'/'sub'/'query.test.mjs').chmod(0o444)
+        (root/'source'/'sub').chmod(0o555)
+        (root/'source').chmod(0o555)
+    worker.journal.write(dict(assignment=dict(attempt_id=name), phase='abandoned'))
+    return root
+
+
+def test_reconcile_removes_read_only_stale_workspace(fleet):
+    store, config, caller, digest = fleet
+    worker = WorkloadWorker(config)
+    try:
+        root = _stale_attempt(worker)
+        worker.reconcile()
+        assert not root.exists() and worker.stuck_workspaces == {}
+    finally:
+        worker.close()
+
+
+def test_unremovable_workspace_never_blocks_claiming_and_logs_once(fleet, monkeypatch, caplog):
+    store, config, caller, digest = fleet
+    worker = WorkloadWorker(config)
+    try:
+        root = _stale_attempt(worker)
+        real = shutil.rmtree
+        def refuse(path, *args, **kwargs):
+            if '5'*32 in str(path):
+                raise PermissionError(13, 'Permission denied', str(path))
+            return real(path, *args, **kwargs)
+        monkeypatch.setattr('livestack_node.workloads.worker.shutil.rmtree', refuse)
+        job = submit(caller, digest)
+        with caplog.at_level(logging.WARNING):
+            assert worker.step()
+            assert not worker.step()
+        assert caller.get(job['id'])['state'] == 'succeeded'
+        assert root.exists() and list(worker.stuck_workspaces) == [str(root)]
+        lines = [r.getMessage() for r in caplog.records if 'workspace cleanup failed' in r.getMessage()]
+        assert len(lines) == 1 and str(root) in lines[0] and 'PermissionError' in lines[0]
+        monkeypatch.undo()
+        assert not worker.step()
+        assert not root.exists() and worker.stuck_workspaces == {}
+    finally:
+        worker.close()
+
+
+def test_service_loop_logs_a_traceback_once_for_a_repeating_exception(caplog):
+    from livestack_node.workloads.worker_service import serve
+
+    class Broken:
+        turns = 0
+        def step(self):
+            self.turns += 1
+            raise PermissionError(13, 'Permission denied', 'query.test.mjs')
+
+    worker = Broken()
+    def sleep(seconds):
+        if worker.turns >= 4:
+            raise KeyboardInterrupt
+    with caplog.at_level(logging.WARNING), pytest.raises(KeyboardInterrupt):
+        serve(worker, sleep)
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum('worker waiting after PermissionError' in m for m in messages) == 4
+    traces = [m for m in messages if 'Traceback' in m]
+    assert len(traces) == 1 and 'in step' in traces[0] and 'query.test.mjs' in traces[0]
