@@ -127,5 +127,5 @@
   composition proposal, and applying one by hand against the gates in spec
   `unit-composition`. Mark `_plans/resource-planner.md` §2's stale sentence.
   Tests: none. Ledger: none. Verify: doc review.
-- [ ] 7.2 `openspec validate harmony-placement-foundation --strict`, then archive.
+- [x] 7.2 `openspec validate harmony-placement-foundation --strict`, then archive (2026-09-30).
   Tests: all of the above green. Ledger: none. Verify: the command exits 0.
