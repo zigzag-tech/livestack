@@ -169,6 +169,7 @@ def test_every_forwarded_request_leaves_one_record(srv, upstream):
     assert adapter_row["adapter"] == "jemm" and adapter_row["unit"] == "llm_general"
     assert adapter_row["prompt_tokens"] == 1423 and adapter_row["completion_tokens"] == 1
     assert adapter_row["owner_ns"] == "benchday:" and adapter_row["outcome"] == "ok"
+    assert adapter_row["n"] == 1                    # absent in the body: the default, known
     assert "acct_123" not in json.dumps(rows)
     # A stream that carried no usage records null, never 0.
     assert stream_row["adapter"] is None
@@ -197,3 +198,13 @@ def test_composition_facts_are_what_the_composer_reads(srv, upstream):
     assert f["kv_dtypes"] == ["auto", "fp8"]
     assert any(r.get("adapter") == "jemm" for r in f["trace"])
     assert f["demand_log"]["enabled"] is True
+
+
+def test_a_multi_sample_request_records_its_n(srv, upstream):
+    """The hub's chip call sends n=12; vLLM counts twelve requests for it."""
+    from fastapi.testclient import TestClient
+    client = TestClient(srv.app)
+    before = len(_demand_rows(srv))
+    client.post("/v1/chat/completions", json={"model": "chips", "n": 12, "messages": []})
+    rows = _demand_rows(srv)[before:]
+    assert [r["n"] for r in rows] == [12]

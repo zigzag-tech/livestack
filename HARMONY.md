@@ -699,7 +699,7 @@ report that does not parse is `measured: unknown`. Measurements persist per comp
 
 **Demand log.** One JSONL record per request the node itself serves or refuses:
 `ts, unit, composition_hash, adapter, route (classifier|chat/completions|…),
-owner_ns, principal, requirement_hash, prompt_tokens, completion_tokens,
+owner_ns, principal, requirement_hash, prompt_tokens, completion_tokens, n,
 elapsed_ms, queue_ms (null: not measurable yet), outcome, http_status`.
 - **No token count is ever a 0 placeholder.** Tokens are read from the tail of the
   response. A stream without `usage` records `null`.
