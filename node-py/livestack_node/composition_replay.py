@@ -74,6 +74,11 @@ class Job:
     adapter: Optional[str] = None
     counted: bool = True
     imputed: bool = False
+    # Sequences the request runs as: its `n`. vLLM runs `n` parallel samples
+    # as `n` sequences against `max_num_seqs` (and counts each in its request
+    # metrics); the hub's chip generation sends n=12. `tokens` already holds
+    # every sample's completion, because `usage` sums them.
+    seqs: int = 1
 
 
 @dataclass(frozen=True)
@@ -117,7 +122,8 @@ def jobs_from_records(records: Sequence[Mapping], rate_s_per_token: float, *,
                 continue
             t = median
         out.append(Job(ts=float(r["ts"]), tokens=int(t), service_s=t * rate_s_per_token,
-                       adapter=r.get("adapter"), counted=counted(r), imputed=imputed))
+                       adapter=r.get("adapter"), counted=counted(r), imputed=imputed,
+                       seqs=int(r.get("n") or 1)))
     return out
 
 
@@ -132,6 +138,7 @@ def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
     running: list = []                 # heap of (end_ts, seq, job_index)
     waiting: list = []                 # FIFO of job indices
     used = 0
+    running_seqs = 0                   # Σ seqs of running jobs (vLLM's "Running: N reqs")
     slots: dict = {}                   # adapter -> last-use ts (resident adapters)
     in_use: dict = {}                  # adapter -> running count
     delays = [0.0] * len(jobs)
@@ -144,10 +151,10 @@ def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
     seq = 0
 
     def try_admit(now: float) -> None:
-        nonlocal used, swaps, seq, max_running
+        nonlocal used, swaps, seq, max_running, running_seqs
         while waiting:
             j = jobs[waiting[0]]
-            if len(running) >= max_num_seqs or used + j.tokens > kv_tokens:
+            if running_seqs + j.seqs > max_num_seqs or used + j.tokens > kv_tokens:
                 return
             a = j.adapter
             if a is not None and a not in slots:
@@ -166,10 +173,11 @@ def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
                 slots[a] = now
                 in_use[a] = in_use.get(a, 0) + 1
             used += j.tokens
+            running_seqs += j.seqs
             delays[i] = now - j.ts
             heapq.heappush(running, (now + j.service_s, seq, i))
             seq += 1
-            max_running = max(max_running, len(running))
+            max_running = max(max_running, running_seqs)
 
     def advance(now: float) -> None:
         nonlocal wait_time, t_prev
@@ -187,6 +195,7 @@ def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
             while running and running[0][0] <= now:
                 _, _, i = heapq.heappop(running)
                 used -= jobs[i].tokens
+                running_seqs -= jobs[i].seqs
                 a = jobs[i].adapter
                 if a is not None:
                     in_use[a] -= 1
@@ -197,7 +206,7 @@ def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
             advance(now)
             i = order[k]
             k += 1
-            if jobs[i].tokens > kv_tokens:
+            if jobs[i].tokens > kv_tokens or jobs[i].seqs > max_num_seqs:
                 rejected += 1
                 continue
             waiting.append(i)

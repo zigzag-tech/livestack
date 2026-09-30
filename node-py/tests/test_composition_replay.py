@@ -143,3 +143,22 @@ def test_model_reproduces_waiting_below_90pct_kv_seen_in_journal():
     "journal fixture alone has only the aggregate shape."))
 def test_replay_matches_journal_end_to_end():
     raise AssertionError("unreachable until the demand log exists")
+
+
+def test_an_n_sample_request_takes_n_batch_slots():
+    """vLLM runs n samples as n sequences against max_num_seqs. Two n=12 jobs
+    cannot run together under a cap of 16; two single jobs can."""
+    wide = [rp.Job(ts=0.0, tokens=100, service_s=10.0, seqs=12),
+            rp.Job(ts=0.0, tokens=100, service_s=10.0, seqs=12)]
+    r = rp.replay(wide, kv_tokens=10_000, max_num_seqs=16, max_loras=0)
+    assert r.max_running == 12 and r.total_queue_s == 10.0
+    narrow = [rp.Job(ts=0.0, tokens=100, service_s=10.0) for _ in range(2)]
+    r = rp.replay(narrow, kv_tokens=10_000, max_num_seqs=16, max_loras=0)
+    assert r.max_running == 2 and r.total_queue_s == 0.0
+
+
+def test_jobs_from_records_carry_n():
+    recs = [{"ts": 0.0, "prompt_tokens": 90, "completion_tokens": 10, "elapsed_ms": 100.0, "n": 12},
+            {"ts": 1.0, "prompt_tokens": 90, "completion_tokens": 10, "elapsed_ms": 100.0}]
+    jobs = rp.jobs_from_records(recs, rate_s_per_token=0.001)
+    assert [j.seqs for j in jobs] == [12, 1]
