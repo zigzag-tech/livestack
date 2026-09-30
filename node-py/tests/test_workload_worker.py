@@ -936,3 +936,29 @@ def test_service_loop_logs_a_traceback_once_for_a_repeating_exception(caplog):
     assert sum('worker waiting after PermissionError' in m for m in messages) == 4
     traces = [m for m in messages if 'Traceback' in m]
     assert len(traces) == 1 and 'in step' in traces[0] and 'query.test.mjs' in traces[0]
+
+
+def test_refused_runtime_cleanup_never_blocks_claiming_and_logs_once(fleet, tmp_path, monkeypatch, caplog):
+    store, config, caller, digest = fleet
+    monkeypatch.setenv('LIVESTACK_WORKLOAD_RUNTIME_BASE', str(tmp_path))
+    from livestack_node.workloads.docker_runtime import runtime_path
+    worker = WorkloadWorker(config)
+    try:
+        attempt = '6'*32
+        stuck = runtime_path(worker.executor.unit(attempt))
+        stuck.mkdir(mode=0o700)
+        (stuck/'owner.json').write_text(json.dumps({'unit': 'someone-else'}))
+        worker._stop(attempt)
+        job = submit(caller, digest)
+        with caplog.at_level(logging.WARNING):
+            assert worker.step()
+            assert not worker.step()
+        assert caller.get(job['id'])['state'] == 'succeeded'
+        assert stuck.exists() and worker.stuck_runtimes == {attempt}
+        lines = [r.getMessage() for r in caplog.records if 'docker runtime cleanup failed' in r.getMessage()]
+        assert len(lines) <= 1
+        (stuck/'owner.json').unlink()
+        assert not worker.step()
+        assert not stuck.exists() and worker.stuck_runtimes == set()
+    finally:
+        worker.close()

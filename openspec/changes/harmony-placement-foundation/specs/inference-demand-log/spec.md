@@ -4,8 +4,13 @@
 
 The node SHALL write one demand record for every request it forwards to a unit. The
 record SHALL carry the time, unit, `composition_hash`, adapter (or null for the base),
-principal namespace, requirement hash, prompt and completion tokens, elapsed time, queue
-time, and outcome class.
+principal namespace, requirement hash, prompt and completion tokens, the number of
+samples requested (`n`), elapsed time, queue time, and outcome class.
+
+#### Scenario: Multi-sample request
+- **WHEN** the hub's chip call asks for `n: 12`
+- **THEN** its one demand record carries `n: 12`, matching the twelve requests vLLM
+  counts for it
 
 #### Scenario: Adapter request
 - **WHEN** a classifier call is served by `llm_general` through adapter `jemm`

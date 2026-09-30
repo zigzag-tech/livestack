@@ -46,7 +46,9 @@
   Tests: records for base, adapter and classifier requests; a streamed request without
   usage gets `null`; no owner id appears anywhere in the file.
   Ledger: none. Verify: replay the fixture requests, then check with `jq`.
-- [ ] 3.3 **[ASK]** Deploy with logging on (DEPLOYED 2026-09-28 04:58 UTC; the 24 h count check is still open, see receipts/first-run.md). After 24 h, check the record count against
+- [x] 3.3 **[ASK]** Deploy with logging on (DEPLOYED 2026-09-28 04:58 UTC; count check
+  2026-09-30, see receipts/demand-log-count-check.md: every proxied request recorded,
+  0 dropped; the counter gap is `n`, now recorded). After 24 h, check the record count against
   vLLM's `vllm:request_success_total` delta for the same window.
   Tests: 3.1–3.2. Ledger: none. Verify: counts agree within the dropped counter.
 - [x] 3.4 Add both logs to the storage inventory in `HARMONY.md` (bound and enforcer).

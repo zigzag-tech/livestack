@@ -1,24 +1,51 @@
 """Bounded, deterministic RootlessKit control state outside long source paths."""
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
+import stat
 import sys
 
 from .model import WorkloadError
+
+
+class RuntimeCleanupRefused(WorkloadError):
+    """The runtime directory of an already-stopped unit cannot be removed now.
+
+    Distinct type so the worker can keep claiming: the unit is gone (cleanup only
+    runs after the cgroup is verified stopped) and attempt units are unique, so a
+    leftover directory leaks a few socket files but endangers nothing.
+    """
+
+
+def runtime_base():
+    # LIVESTACK_WORKLOAD_RUNTIME_BASE exists ONLY so tests can use a temp dir in
+    # place of /run/user/<uid>; production never sets it.
+    return Path(os.environ.get('LIVESTACK_WORKLOAD_RUNTIME_BASE') or Path('/run/user')/str(os.getuid()))
 
 
 def runtime_path(unit):
     # Unit identity was validated by SystemdExecutor.unit. Keep Unix sockets
     # below Linux's 104-byte path limit regardless of the workspace prefix.
     import hashlib
-    return Path('/run/user')/str(os.getuid())/('hw-'+hashlib.sha256(unit.encode()).hexdigest()[:24])
+    return runtime_base()/('hw-'+hashlib.sha256(unit.encode()).hexdigest()[:24])
 
 
 def prepare(unit, argv, cwd, output):
     path = runtime_path(unit)
+    # exist_ok=False: a leftover of the same unit is never silently reused. Unit
+    # names are per attempt, and stop() removes any leftover before a retry.
     path.mkdir(mode=0o700, exist_ok=False)
-    (path/'owner.json').write_text(json.dumps({'unit': unit}))
+    try:
+        # Marker first, atomically, before rootlesskit or anything else exists
+        # in the directory.
+        tmp = path/'.owner.json.tmp'
+        tmp.write_text(json.dumps({'unit': unit}))
+        os.replace(tmp, path/'owner.json')
+    except BaseException:
+        shutil.rmtree(path, ignore_errors=True)
+        raise
     inner = Path(output)/'docker-execution.json'
     inner.write_text(json.dumps(dict(unit=unit, argv=argv, cwd=str(cwd), output=str(output))))
     inner.chmod(0o600)
@@ -27,16 +54,71 @@ def prepare(unit, argv, cwd, output):
         sys.executable, str(Path(__file__).with_name('docker_command.py').resolve()), str(inner)]
 
 
+def _users_of(path):
+    """PIDs whose cwd/root/exe/open fds lie in `path`, or {0} if a socket is bound there.
+
+    Bounded by the process table. Processes of other uids are unreadable and
+    skipped: everything the worker's rootless Docker runs is the worker's uid.
+    """
+    prefix = str(path)
+    def inside(target):
+        return target == prefix or target.startswith(prefix+'/')
+    found = set()
+    for proc in Path('/proc').iterdir():
+        if not proc.name.isdigit():
+            continue
+        links = [proc/'cwd', proc/'root', proc/'exe']
+        try:
+            links += list((proc/'fd').iterdir())
+        except OSError:
+            pass
+        for link in links:
+            try:
+                if inside(os.readlink(link)):
+                    found.add(int(proc.name))
+                    break
+            except OSError:
+                continue
+    try:
+        # A listener's fd reads "socket:[inode]", so also look at bound paths.
+        if any(prefix+'/' in line for line in Path('/proc/net/unix').read_text().splitlines()):
+            found.add(0)
+    except OSError:
+        pass
+    return found
+
+
 def cleanup(unit):
     path = runtime_path(unit)
-    if not path.exists():
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
         return
-    marker = path/'owner.json'
-    if path.is_symlink() or path.stat().st_uid != os.getuid() or not marker.is_file() or marker.stat().st_size > 1024:
-        raise WorkloadError('unrecognized Docker runtime; cleanup refused', 503)
-    if json.loads(marker.read_text()) != {'unit': unit}:
-        raise WorkloadError('Docker runtime owner mismatch', 503)
-    shutil.rmtree(path)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+        raise RuntimeCleanupRefused('unrecognized Docker runtime; cleanup refused', 503)
+    # The directory name is hw-sha256(unit) and lives directly under the worker's
+    # own runtime dir, so a readable marker naming ANOTHER unit is the only thing
+    # that disproves ownership; a missing/unreadable marker means the attempt
+    # died before (or while) writing it.
+    owner = None
+    try:
+        marker = path/'owner.json'
+        if marker.is_file() and not marker.is_symlink() and marker.stat().st_size <= 1024:
+            owner = json.loads(marker.read_text())
+    except (OSError, ValueError):
+        owner = None
+    if owner is not None and owner != {'unit': unit}:
+        raise RuntimeCleanupRefused('Docker runtime owner mismatch', 503)
+    users = _users_of(path)
+    if users:
+        raise RuntimeCleanupRefused('Docker runtime in use by %s; cleanup refused' %
+            ('a bound socket' if users == {0} else 'pid '+','.join(str(p) for p in sorted(users - {0}))), 503)
+    try:
+        shutil.rmtree(path)
+    except OSError as error:
+        raise RuntimeCleanupRefused('Docker runtime removal failed: %s: %s' % (type(error).__name__, error), 503)
+    if owner is None:
+        logging.warning('docker runtime cleanup: removed %s (no owner.json: attempt died before writing it)', path)
 
 
 def remove_data(root):
