@@ -18,7 +18,7 @@ import uuid
 from urllib.error import HTTPError
 
 from .archive import relative_path, unpack
-from .docker_runtime import remove_data
+from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
 from .lease import LeaseKeeper, retry_transient, transient
 from .model import WorkloadError, encode
@@ -109,6 +109,27 @@ class WorkloadWorker:
         # retried every step; a removal failure never blocks claiming/heartbeats.
         self.stuck_workspaces = {}
         self._logged_cleanup_failures = set()
+        # Attempts whose unit is gone but whose Docker runtime dir could not be
+        # removed: retried each step, never blocking claiming.
+        self.stuck_runtimes = set()
+
+    def _stop(self, attempt):
+        """executor.stop, except that a refused runtime-dir removal is not fatal.
+
+        stop() raises RuntimeCleanupRefused only AFTER the unit and cgroup are
+        verified gone (capacity is safe to release). One named log line per
+        distinct (attempt, cause); retried by _retry_stuck_workspaces.
+        """
+        try:
+            self.executor.stop(attempt)
+            self.stuck_runtimes.discard(attempt)
+        except RuntimeCleanupRefused as error:
+            self.stuck_runtimes.add(attempt)
+            key = ('runtime', attempt, str(error))
+            if key not in self._logged_cleanup_failures:
+                self._logged_cleanup_failures.add(key)
+                logging.warning('docker runtime cleanup failed for attempt %s: %s (%d stuck runtimes)',
+                                attempt, error, len(self.stuck_runtimes))
 
     def _remove_workspace(self, path):
         """Remove an attempt workspace; on failure keep it for the next turn.
@@ -134,6 +155,8 @@ class WorkloadWorker:
             return False
 
     def _retry_stuck_workspaces(self):
+        for attempt in list(self.stuck_runtimes):
+            self._stop(attempt)
         for path in list(self.stuck_workspaces):
             self._remove_workspace(path)
 
@@ -203,7 +226,7 @@ class WorkloadWorker:
     def reconcile(self):
         old = self.journal.read()
         if old:
-            self.executor.stop(old['assignment']['attempt_id'])
+            self._stop(old['assignment']['attempt_id'])
             completion = old.get('completion')
             if completion is None and old.get('phase') == 'running':
                 output = self.workspace/old['assignment']['attempt_id']/'output'
@@ -236,7 +259,7 @@ class WorkloadWorker:
         # The authority may have committed an assignment whose poll response
         # never reached us. Deterministic unit identity makes that recoverable.
         for attempt in response['cleanup']:
-            self.executor.stop(attempt)
+            self._stop(attempt)
             path = self.workspace/attempt
             # The attempt is stopped; a workspace that resists removal is retried
             # each step, but must not keep the authority from readvertising us.
@@ -465,7 +488,7 @@ class WorkloadWorker:
         finally:
             # Never acknowledge completion or cleanup while owned work survives.
             try:
-                self.executor.stop(attempt)
+                self._stop(attempt)
                 remove_data(root)
             except Exception:
                 if lease:
