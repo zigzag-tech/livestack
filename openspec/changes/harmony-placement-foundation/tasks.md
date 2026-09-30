@@ -113,6 +113,12 @@
   including whether it would have kept today's chips + jemm/fp8 composition.
   Tests: 6.1–6.2. Ledger: one `compose` decision. Verify: the receipt in `receipts/first-run.md`.
 
+- [x] 6.4 Hourly `compose --outcomes` via `livestack-compose-outcomes.timer`
+  (systemd oneshot + timer, `Persistent=true`), installed on xc-tower-ubuntu.
+  Tests: a manual run in a clean env writes `{"outcome_rows_written": 0}` (no
+  proposal has chosen a change yet). Ledger: outcome rows under
+  `parent_decision_id`. Verify: `systemctl list-timers livestack-compose-outcomes.timer`.
+
 ## 7. Docs and archive
 
 - [x] 7.1 `HARMONY.md`: measured cost and its sources, the demand log, reading a
