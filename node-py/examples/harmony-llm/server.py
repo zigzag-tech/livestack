@@ -1530,7 +1530,7 @@ def _note_demand(ctx: dict, outcome: str, status: int, tail: "UsageTail | None" 
         adapter=ctx.get("adapter"), route=ctx.get("route") or ctx.get("path"),
         owner_ns=ctx.get("owner_ns"), principal=ctx.get("principal"),
         requirement_hash=ctx.get("requirement_hash"),
-        prompt_tokens=prompt, completion_tokens=completion,
+        prompt_tokens=prompt, completion_tokens=completion, n=ctx.get("n"),
         elapsed_ms=round((time.time() - ctx["t0"]) * 1000, 1), queue_ms=None,
         outcome=outcome, http_status=status)
 
@@ -1579,6 +1579,14 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         except Exception:
             parsed_body = None            # not JSON: forward untouched, as before
         if isinstance(parsed_body, dict):
+            # Samples requested: absent means 1 (the OpenAI default), which is
+            # known, not unknown. vLLM runs and counts each sample as its own
+            # request, so without this a demand record for the hub's n=12 chip
+            # call reads as one request where the engine did twelve.
+            try:
+                ctx["n"] = int(parsed_body.get("n") or 1)
+            except (TypeError, ValueError):
+                ctx["n"] = None
             # A malformed requirement is a 400 and must NOT be swallowed here.
             # `except Exception: pass` used to catch it and fall through to "the
             # first declared unit", so a caller that asked for 27B and typoed the
