@@ -7,7 +7,28 @@ import json
 import uuid
 
 from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedule
-from .model import encode
+from .model import AVOID_LABEL_SIGNATURE, AVOID_LABEL_WORKER, encode, failure_signature
+
+# How long after an infrastructure failure a job refuses the worker that
+# produced it, while some other worker could ever run it. Fixed and short
+# relative to a recovery: a lone worker that heals is used again after this.
+AVOID_SECONDS = 1800
+
+
+def _avoided(db, row, now):
+    """{worker: (signature, where)} this queued job must not return to yet."""
+    out = {}
+    if now - row["updated"] < AVOID_SECONDS:
+        for a in db.execute("SELECT worker,fence,result FROM attempts WHERE job=? "
+                            "AND result IS NOT NULL ORDER BY fence", (row["id"],)):
+            sig = failure_signature(json.loads(a["result"]))
+            if sig:
+                out[a["worker"]] = (sig, f"attempt {a['fence']}")
+    labels = json.loads(row["labels"] or "{}")
+    worker, sig = labels.get(AVOID_LABEL_WORKER), labels.get(AVOID_LABEL_SIGNATURE)
+    if worker and sig and now - row["created"] < AVOID_SECONDS:
+        out.setdefault(worker, (sig, "the previous job's last attempt"))
+    return out
 
 
 def place(db, now, limits, principals=None):
@@ -102,6 +123,7 @@ def place(db, now, limits, principals=None):
     # Priority is caller intent, while Harmony still owns capability/resource
     # admission and the final worker choice. Legacy persisted specs omit the
     # field and retain their original priority-zero FIFO behavior.
+    fresh = None  # every fresh worker regardless of readiness, loaded on first need
     for row in db.execute("SELECT * FROM jobs WHERE state='queued' "
                           "ORDER BY COALESCE(json_extract(spec,'$.priority'),0) DESC, created, id").fetchall():
         spec = json.loads(row["spec"])
@@ -119,10 +141,26 @@ def place(db, now, limits, principals=None):
         targets = []
         rejected = []
         compatible = [w for w in workers if spec["handler"] in reports[w["id"]]["handlers"]]
+        avoided = _avoided(db, row, now)
+        if avoided:
+            if fresh is None:
+                fresh = [(w, json.loads(w["report"])) for w in db.execute(
+                    "SELECT * FROM workers WHERE seen>?", (now-limits.fresh_seconds,))]
+            # Momentary load is ignored: another worker that merely is busy
+            # still counts, so the job waits for it. Only a roster with no
+            # other worker able to run the job at all lets it go back.
+            alternative = any(
+                w["id"] not in avoided and spec["handler"] in r["handlers"]
+                and all(r["labels"].get(k) == v for k, v in spec["selector"].items())
+                and all(r["capacity"].get(k, 0) >= n for k, n in admit.items())
+                for w, r in fresh)
         for w in compatible:
             report = reports[w["id"]]
             reason = None
-            if w["id"] in busy:
+            if avoided.get(w["id"]) and alternative:
+                sig, where = avoided[w["id"]]
+                reason = f"avoiding {w['id']}: same failure signature {sig} on {where}"
+            elif w["id"] in busy:
                 reason = "worker holds an active attempt or cleanup"
             elif any(report["labels"].get(k) != v for k, v in spec["selector"].items()):
                 reason = "required capability absent"

@@ -204,18 +204,18 @@ def test_worker_boot_change_does_not_free_owned_processes(harness):
     assert b['fence'] == 2
 
 
-def test_only_infrastructure_retries_and_three_attempt_limit(harness):
+def test_only_infrastructure_retries_and_two_attempt_limit(harness):
     store, _, _ = harness
     register(store)
     job = store.submit('owner', request())
-    for fence in range(1, 4):
+    for fence in range(1, 3):
         a = store.claim('w1', 'boot1')
         assert a['fence'] == fence
         done = complete(store, a, 'infrastructure')
-        assert done['state'] == ('queued' if fence < 3 else 'failed')
+        assert done['state'] == ('queued' if fence < 2 else 'failed')
         assert complete(store, a, 'infrastructure')['state'] == done['state']
     assert store.claim('w1', 'boot1') is None
-    assert len(store.get('owner', job['id'])['attempts']) == 3
+    assert len(store.get('owner', job['id'])['attempts']) == 2
     j = store.submit('owner', request('product-failure'))
     a = store.claim('w1', 'boot1')
     assert complete(store, a, 'product_failure')['state'] == 'failed'
@@ -525,3 +525,65 @@ def test_a_cancelled_attempt_and_job_carry_the_terminal_reason(harness):
     register(store, cleaned=[attempt['attempt_id']])
     state, raw = attempt_row(path, attempt['attempt_id'])
     assert state == 'ended' and json.loads(raw)['result']['detail'] == 'cancelled by owner'
+
+
+def infra(store, a, error='URLError'):
+    return store.complete(a['worker'], a['boot'], a['attempt_id'], a['fence'], input_digest='a'*64,
+                          outcome='infrastructure', result={'error': error, 'exit_code': 75})
+
+
+def test_infrastructure_retry_avoids_the_failed_worker_while_another_can_run_it(harness):
+    store, now, _ = harness
+    register(store, 'w1', 'host1')
+    register(store, 'w2', 'host2')
+    job = store.submit('owner', request())
+    a = store.claim('w1', 'boot1')
+    blocker = store.submit('owner', request('blocker'))
+    held = store.claim('w2', 'boot1')  # w2 is momentarily busy, not ineligible
+    assert held['job_id'] == blocker['id']
+    done = infra(store, a)
+    sig = done['failure_signature']
+    assert sig and sig.startswith('URLError-')
+    assert store.claim('w1', 'boot1') is None, 'the failed worker must not get the retry back'
+    reason = store.get('owner', job['id'])['reason']
+    assert f'avoiding w1: same failure signature {sig} on attempt 1' in reason
+    complete(store, held)
+    b = store.claim('w2', 'boot1')
+    assert b and b['job_id'] == job['id'] and b['fence'] == 2
+
+
+def test_avoidance_expires_so_a_recovered_worker_is_used_again(harness):
+    store, now, _ = harness
+    register(store, 'w1', 'host1', handlers=['test.v1'])
+    register(store, 'w2', 'host2')
+    job = store.submit('owner', request())
+    a = store.claim('w1', 'boot1')
+    blocker = store.submit('owner', request('blocker', handler='build.v1'))
+    assert store.claim('w2', 'boot1')['job_id'] == blocker['id']
+    infra(store, a)
+    assert store.claim('w1', 'boot1') is None
+    now[0] += 1801  # past the cooldown; w2 still holds its unfinished attempt
+    register(store, 'w1', 'host1', handlers=['test.v1'])
+    register(store, 'w2', 'host2')
+    assert store.claim('w1', 'boot1')['job_id'] == job['id']
+
+
+def test_infrastructure_retry_returns_to_the_same_worker_when_no_other_can_run_it(harness):
+    store, _, _ = harness
+    register(store, 'w1', 'host1', handlers=['test.v1'])
+    register(store, 'w2', 'host2', handlers=['build.v1'])  # cannot run test.v1
+    register(store, 'w3', 'host3', cpu=1, ram=1)  # too small for the job, ever
+    store.submit('owner', request())
+    infra(store, store.claim('w1', 'boot1'))
+    again = store.claim('w1', 'boot1')
+    assert again and again['fence'] == 2
+
+
+def test_avoid_labels_carry_the_rule_across_a_new_job(harness):
+    store, _, _ = harness
+    register(store, 'w1', 'host1', handlers=['test.v1'])
+    register(store, 'w2', 'host2')
+    store.submit('owner', request(labels={'harmony.avoid.worker': 'w1',
+                                          'harmony.avoid.signature': 'URLError-deadbeef'}))
+    assert store.claim('w1', 'boot1') is None
+    assert store.claim('w2', 'boot1')['fence'] == 1
