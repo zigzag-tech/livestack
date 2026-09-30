@@ -1,0 +1,13 @@
+# /etc/systemd/system/livestack-compose-outcomes.timer
+# Hourly, because `served` outcomes are hourly buckets. Persistent=true runs a
+# missed slot after downtime; the join is idempotent, so catching up is safe.
+[Unit]
+Description=Hourly outcome join for composition proposals
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target

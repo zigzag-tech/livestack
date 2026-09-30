@@ -745,6 +745,11 @@ the units file. Other modes:
 - `--outcomes` joins what happened to past proposals, each exactly once: the first
   measurement of the chosen composition (predicted vs measured per term), hourly
   served counts for 24 h, and `not_applied` after 7 days.
+  On xc-tower-ubuntu, `livestack-compose-outcomes.timer` runs this hourly (unit
+  files in `node-py/examples/harmony-llm/systemd/`). Check it with
+  `systemctl list-timers livestack-compose-outcomes.timer` and
+  `journalctl -u livestack-compose-outcomes`. A failed run leaves the service
+  `failed`.
 
 **Applying a proposal is a person's action**, gated in this order:
 1. Back up the units file.

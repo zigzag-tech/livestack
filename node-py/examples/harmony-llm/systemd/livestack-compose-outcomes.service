@@ -1,0 +1,23 @@
+# /etc/systemd/system/livestack-compose-outcomes.service
+# Joins what happened to past composition proposals (openspec
+# harmony-placement-foundation, design §8): the first measurement of a chosen
+# composition, hourly served counts for 24 h after it, and `not_applied` after
+# 7 days. Idempotent: each outcome row is written once, so a missed or repeated
+# run loses nothing. Proposes nothing and applies nothing.
+#
+# Runs from the ~/livestack checkout, like harmony-llm, in harmony-llm's venv.
+# A failed run leaves this unit `failed` (systemctl --failed); it never
+# degrades to silence.
+[Unit]
+Description=Livestack composition: join outcomes to past proposals
+After=harmony-llm.service
+Wants=harmony-llm.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/livestack/node-py
+Environment=LIVESTACK_HOST_ID=xc-tower-ubuntu
+ExecStart=/home/ubuntu/harmony-llm/venv/bin/python -m livestack_node.compose --outcomes
+TimeoutStartSec=300
+Nice=10
