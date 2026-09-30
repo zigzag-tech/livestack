@@ -12,7 +12,7 @@ import sqlite3
 import time
 import uuid
 
-from .model import (Limits, WorkloadError, encode, identity, labels, name, resources,
+from .model import (Limits, failure_signature, WorkloadError, encode, identity, labels, name, resources,
                     submission)
 from .model import progress as validate_progress
 
@@ -82,6 +82,10 @@ class WorkloadStore:
             result["progress"] = json.loads(latest["progress"])
         result["spec"] = json.loads(result["spec"])
         result["result"] = json.loads(result["result"]) if result["result"] else None
+        # What placement avoids on a retry, and what a caller creating the
+        # NEXT job after this one failed carries forward. None unless the last
+        # verdict was an infrastructure outcome.
+        result["failure_signature"] = failure_signature(result["result"])
         result["attempts"] = [dict(a) for a in db.execute(
             "SELECT id,worker,boot,host,fence,state,expires FROM attempts WHERE job=? ORDER BY fence",
             (job_id,))]

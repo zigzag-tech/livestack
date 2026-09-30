@@ -22,7 +22,10 @@ class Limits:
     terminal_jobs: int = 10000
     workers: int = 128
     claims_per_worker: int = 32
-    attempts: int = 3
+    # Infrastructure outcomes retry once (two attempts in all). Measured
+    # 2026-09-30: three attempts on a starved worker cost 41-99 minutes of wall
+    # for nothing; a second look is worth it, a third rarely is.
+    attempts: int = 2
     record_bytes: int = 65536
     fresh_seconds: float = 60
     lease_seconds: float = 120
@@ -44,6 +47,30 @@ class Limits:
         if self.terminal_seconds is not None and (
                 not math.isfinite(self.terminal_seconds) or self.terminal_seconds <= 0):
             raise ValueError("terminal_seconds must be positive or None (deletion disabled)")
+
+
+AVOID_LABEL_WORKER = "harmony.avoid.worker"
+AVOID_LABEL_SIGNATURE = "harmony.avoid.signature"
+
+
+def failure_signature(record) -> str | None:
+    """A stable, short name for WHY an infrastructure attempt ended, or None.
+
+    `<tag>-<hash8>`: the tag is the worker's own error name (or `exit<code>`),
+    the hash covers the error, detail and exit code with digits collapsed and
+    only the first line kept, so a timestamp or pid in a message does not make
+    two identical failures look different. Bounded: at most 41 characters.
+    """
+    if not isinstance(record, dict) or record.get("outcome") != "infrastructure":
+        return None
+    result = record.get("result")
+    result = result if isinstance(result, dict) else {}
+    error, detail, code = result.get("error"), result.get("detail"), result.get("exit_code")
+    tag = str(error) if error else (f"exit{code}" if code is not None else "unknown")
+    tag = re.sub(r"[^A-Za-z0-9_.]", "_", tag)[:32]
+    first_line = (str(detail or "").strip().splitlines() or [""])[0]
+    normal = re.sub(r"\d+", "#", f"{error}|{first_line}|{code}".lower())[:200]
+    return f"{tag}-{hashlib.sha256(normal.encode()).hexdigest()[:8]}"
 
 
 def encode(value, limit: int = 65536) -> str:
