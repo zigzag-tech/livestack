@@ -6,3 +6,16 @@
 - [x] Verify compiler/rootless builder descendants stop on cancellation/expiry before capacity release; record real supervision controls. Real Rust grandchild controls prove cancellation and expiry; native-frontend private image-build descendant controls prove expiry and cleanup acknowledgment; existing worker cancellation/rootless Docker regressions remain green. Broader store/HTTP/service/principal/supervision/worker/Docker selection: 160 passed on zz-joe (2026-10-01), followed by 34 final launch/policy controls after machine binding and bounded logging/receipt cleanup changes.
 - [ ] Select and deploy the tested contract through normal consumer dependency workflow, preserve regression checks, and archive after companion operational evidence proves rollout.
 - [x] Implement operator-reloaded claim draining without fencing live attempts; verify real HTTP heartbeats/completion, queued work and resume before using it for consumer rollout. zz-joe: 23 principal-reload, 5 HTTP/service and 11 compilation-policy controls passed (2026-10-01). Deployment remains the preceding open task.
+
+## Multi-class launch boundary qualification (2026-10-01)
+
+`require_compilations` verifies up to five distinct fixed classes from one
+current authenticated receipt. Missing any required class refuses the whole
+spawn and replaces all requested current receipts with bounded refusals.
+The single-class API delegates to the same implementation; wire version stays 1.
+Real disposable authority/root-peer/systemd controls on zz-joe counted exactly
+one authority verification for a two-class launch, compiled and ran Rust for
+the permitted control, and refused an unreserved native class before compiler
+spawn. Full verifier suite: 26 passed in 48.56 seconds. Consumer archive
+selection and guarded preparation integration remain pending; this does not
+complete deployment or archive tasks.
