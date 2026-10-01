@@ -89,3 +89,18 @@ def test_shipped_calibration_is_complete():
     cal = jemm.calibration()
     assert {"id", "temperature", "threshold", "source"} <= set(cal)
     assert cal["temperature"] > 0 and 0 < cal["threshold"] < 1
+
+
+def test_a_shadow_caller_can_ask_to_yield():
+    calls = []
+
+    async def invoke(body):
+        calls.append(body)
+        return _reply({"A": -0.05, "B": -3.0, "C": -4.0})
+    req = _req()
+    req["options"]["priority"] = 100
+    asyncio.run(classify(req, invoke))
+    assert calls[0]["priority"] == 100
+    calls.clear()
+    asyncio.run(classify(_req(), invoke))
+    assert "priority" not in calls[0]
