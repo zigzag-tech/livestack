@@ -181,3 +181,39 @@ def test_policy_changes_refuse_launch_and_renewal(authority, mutation, reason):
         clients['builder'].request('worker/heartbeat', dict(boot='boot',
             attempt_id=assignment['attempt_id'], fence=assignment['fence']))
     assert reason in str(error.value).encode()
+
+
+def test_authenticated_completed_job_retains_original_compilation_producer(authority):
+    clients, submit, register, value, write, _ = authority
+    register('builder')
+    job = submit('artifact-producer')
+    assignment = claim(clients, 'builder')
+    current = clients['caller'].get(job['id'])
+    attempt = current['attempts'][0]
+    assert attempt['id'] == assignment['attempt_id']
+    assert attempt['worker'] == assignment['worker']
+    assert attempt['boot'] == assignment['boot']
+    assert attempt['fence'] == assignment['fence']
+    assert attempt['compilation'] == assignment['compilation']
+    clients['builder'].request('worker/complete', dict(boot='boot',
+        attempt_id=assignment['attempt_id'], fence=assignment['fence'],
+        input_digest=assignment['spec']['input_digest'], outcome='succeeded',
+        result={'exit_code': 0, 'artifacts': []}))
+    value['revision'] = 'revision-2'
+    value['hosts']['physical-builder'] = []
+    write()
+    completed = clients['caller'].get(job['id'])
+    assert completed['state'] == 'succeeded'
+    assert completed['attempts'][0]['state'] == 'ended'
+    assert completed['attempts'][0]['compilation'] == assignment['compilation']
+    assert completed['attempts'][0]['compilation']['policy_revision'] == 'revision-1'
+    with pytest.raises(WorkloadError):
+        verify(clients, 'builder', assignment)
+    server = clients['caller'].fixture_server
+    server.replace_principals([replace(p, claim_enabled=False) if p.id == 'builder' else p
+                               for p in server.principals])
+    runtime = submit('artifact-runtime', 'ui.v1')
+    register('ui')
+    runtime_assignment = claim(clients, 'ui')
+    assert runtime_assignment['job_id'] == runtime['id']
+    assert clients['caller'].get(runtime['id'])['attempts'][0]['compilation'] is None

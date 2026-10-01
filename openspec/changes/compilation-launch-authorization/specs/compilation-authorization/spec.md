@@ -63,3 +63,10 @@ only as the current receipt for an attempt phase under existing artifact bounds.
 #### Scenario: Verifier cannot be reached
 - **WHEN** verification fails or exceeds its deadline
 - **THEN** the caller reports verification unavailability and starts no compilation
+
+#### Scenario: A caller verifies a completed artifact's producing admission
+- **WHEN** an authenticated owner reads a completed compilation job
+- **THEN** each bounded attempt entry carries its original recorded compilation grant alongside worker, physical host, boot and fence
+- **AND** later policy changes do not rewrite historical producing identity
+- **AND** the historical grant cannot authorize a new launch or renewal
+- **AND** runtime-only attempts explicitly carry no compilation grant

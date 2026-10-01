@@ -90,8 +90,10 @@ class WorkloadStore:
         # verdict was an infrastructure outcome.
         result["failure_signature"] = failure_signature(result["result"])
         result["attempts"] = [dict(a) for a in db.execute(
-            "SELECT id,worker,boot,host,fence,state,expires FROM attempts WHERE job=? ORDER BY fence",
+            "SELECT id,worker,boot,host,fence,state,expires,compilation FROM attempts WHERE job=? ORDER BY fence",
             (job_id,))]
+        for attempt in result['attempts']:
+            attempt['compilation'] = json.loads(attempt['compilation']) if attempt['compilation'] else None
         return result
 
     def _running(self, db, owner):
