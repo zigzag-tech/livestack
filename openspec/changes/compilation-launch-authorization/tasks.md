@@ -19,3 +19,15 @@ the permitted control, and refused an unreserved native class before compiler
 spawn. Full verifier suite: 26 passed in 48.56 seconds. Consumer archive
 selection and guarded preparation integration remain pending; this does not
 complete deployment or archive tasks.
+
+## Authenticated artifact producer qualification (2026-10-01)
+
+The existing bounded job attempt query now returns each saved compilation
+grant without additional database round trips or retained history. A real
+HTTP/SQLite control verifies worker/boot/fence and saved grant equality before
+and after completion, preserves the original policy revision after revocation,
+refuses reuse for launch, and distinguishes runtime-only null grants.
+Compilation policy plus store regressions: 60 passed on zz-joe in 20.21 seconds.
+The first runtime control hit legitimate fleet placement on the still-eligible
+builder; the corrected fixture drains its future claims before UI placement.
+Captured consumer selection and real artifact/UI integration remain pending.
