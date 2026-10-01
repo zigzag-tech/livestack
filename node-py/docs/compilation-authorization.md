@@ -140,6 +140,13 @@ Docker context overrides. This avoids weakening root authentication inside a
 user namespace. Legacy `rootless-docker` remains a runtime backend; its user
 namespace cannot run this host-namespace guard.
 
+Both Docker backends classify exit 75 as infrastructure, preserving bounded
+retry and diagnostic handoff instead of reporting a product assertion failure.
+The real worker artifact-delivery control covers both backends with success,
+product failure and exit 75, using private authorities, canonical captured inputs,
+actual systemd ownership and private Docker daemons. All six cases passed on
+zz-joe on 2026-10-01; no production job was submitted for these controls.
+
 Bounds and enforcers:
 
 - `launch_contract.receive` and root service SIGALRM: absolute 5-second
