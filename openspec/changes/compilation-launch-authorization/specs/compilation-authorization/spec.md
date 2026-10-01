@@ -13,6 +13,11 @@ replacing a worker. Re-enabling claims SHALL preserve enrollment and boot.
 - **AND** the current attempt can renew and complete without being fenced
 - **AND** queued work remains available when claims are re-enabled
 
+#### Scenario: Another worker polls during drain
+- **WHEN** another worker triggers fleet-wide placement while a worker is drained
+- **THEN** placement excludes the drained worker and records `worker_draining`
+- **AND** the drained worker does not count as an eligible retry alternative
+
 #### Scenario: Drain configuration is malformed
 - **WHEN** a claim-enabled setting is not boolean or disables a non-worker principal
 - **THEN** reload refuses the configuration and retains the previous principal set
