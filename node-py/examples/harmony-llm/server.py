@@ -357,6 +357,12 @@ _COSTS = UnitCostStore(os.environ.get("HARMONY_UNIT_COSTS_FILE") or os.path.join
 DEMAND = demand_log_from_env(HOST_ID, log=lambda m: print(m, flush=True))
 
 
+# Fields a measured-cost row gets from fitting, not from the engine's startup
+# log; a re-measurement carries them forward (see `_record_measurement`).
+_FITTED_KEYS = ("state_pages_per_seq", "prefill_tok_s", "decode_tok_s", "state_fit",
+                "state_burst", "block_size_source")
+
+
 def _tee_engine_output(proc: subprocess.Popen, capture: StartupCapture) -> None:
     """Pass the engine's output through to our own stdout (the journal still
     gets every line) while the capture keeps the few it needs. Runs until the
@@ -408,7 +414,15 @@ def _record_measurement(name: str, spec: dict, cmd: list, capture: StartupCaptur
           f"{row['kv_tokens']} tokens, graphs {row['cuda_graphs']/(1<<30):.2f}) "
           f"for {chash[:19]}", flush=True)
     try:
-        _COSTS.put({**row, "unit": name, "host_id": HOST_ID,
+        # KEEP WHAT WAS FITTED. A restart re-measures the startup numbers, but
+        # state pages and service rates come from traffic and bursts
+        # (`replay_validate --fit-state`, scripts/measure_kv_pages.py) and are
+        # not in the startup log. Replacing the row wiped them on every
+        # restart (found 2026-10-01: the composer silently fell back to the
+        # blended rate).
+        prior = _COSTS.load().get(chash) or {}
+        kept = {k: prior[k] for k in _FITTED_KEYS if k in prior}
+        _COSTS.put({**row, **kept, "unit": name, "host_id": HOST_ID,
                     "composition": json.loads(key.canonical())})
     except Exception as exc:              # persistence is for proposals, never for serving
         print(f"[harmony-llm] {name}: could not persist measured cost: {exc}", flush=True)

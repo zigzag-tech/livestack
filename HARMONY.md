@@ -769,6 +769,10 @@ shared prefill server. On 2026-09-30 it matched the engine's mean running (2.04 
 2.13) and KV usage (0.263 vs 0.265). Each cost says which accounting priced it
 (`kv_accounting`), and a paged base with an unmeasured block size is unknown. See
 `_plans/composition-replay-validation.md`.
+To measure a composition's pages per sequence directly, at a quiet moment:
+`python scripts/measure_kv_pages.py <kv_tokens> <block_size>` (from `node-py/`).
+State pages differ by KV dtype (2026-10-01: fp8 1.94, bf16 2.22 on the 27B), and
+fitted values on a measured row survive harmony-llm restarts.
 
 Known limits of v1 (design §8a, §6):
 - Only two measured rows exist today, so per-adapter deltas assume KV dtype does not
