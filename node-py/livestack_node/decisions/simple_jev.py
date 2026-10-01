@@ -208,7 +208,8 @@ async def _classify_jemm(request: Mapping[str, Any], options: Mapping[str, Any],
     for qid, question in request["questions"].items():
         messages, plan = jemm.compile_question(request["state"], question, max_options=MAX_OPTIONS)
         response = await invoke_chat(jemm.request_body(request.get("model", "local"), messages,
-                                                       plan["labels"], adapter, MAX_OPTIONS))
+                                                       plan["labels"], adapter, MAX_OPTIONS,
+                                                       priority=options.get("priority")))
         try:
             alternatives = response["choices"][0]["logprobs"]["content"][0]["top_logprobs"]
         except (KeyError, IndexError, TypeError) as exc:

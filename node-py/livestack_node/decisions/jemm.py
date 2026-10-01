@@ -76,11 +76,19 @@ def compile_question(state: Any, question: Mapping[str, Any], *, max_options: in
     return messages, {"labels": labels, "answers": answers}
 
 
-def request_body(model: str, messages: list, labels: list, adapter: str, top_logprobs: int) -> dict:
-    return {"model": adapter_model(model, adapter), "messages": messages,
+def request_body(model: str, messages: list, labels: list, adapter: str, top_logprobs: int,
+                 priority: "int | None" = None) -> dict:
+    body = {"model": adapter_model(model, adapter), "messages": messages,
             "chat_template_kwargs": {"enable_thinking": False},
             "temperature": 0, "max_tokens": 1, "logprobs": True, "top_logprobs": top_logprobs,
             "structured_outputs": {"choice": labels}}
+    # vLLM's request priority (harmony starts engines with --scheduling-policy
+    # priority; lower runs sooner, default 0). A caller that does not need the
+    # answer now (a shadow comparison) passes a high number so served traffic
+    # on the shared card goes first.
+    if priority is not None:
+        body["priority"] = int(priority)
+    return body
 
 
 def score(plan: Mapping[str, Any], alternatives: list, cal: Mapping[str, Any]) -> dict:
