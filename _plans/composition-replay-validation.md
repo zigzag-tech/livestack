@@ -69,3 +69,15 @@ evicted it each time (05:30–05:57). The unit stayed down until 15:42. Not caus
 by the measured-admission change (the preemption arithmetic is identical under
 declared and measured footprints). The fallback that fights the broker is a defect
 of its own.
+
+**Fixed 2026-09-30:**
+- The fallback now loads locally only when the broker's own defer reason is
+  "no unit satisfies" (it did not know the unit). A refusal of a known unit
+  ("no device can fit…", "residency floor…") returns 503 naming the reason, and
+  a reply with no readable reason counts as a refusal.
+- A failed vLLM start is not respawned for 30 s, doubling to 10 min; a load the
+  broker explicitly grants skips that wait.
+- `/admit` replies now carry `defer_reason` (host broker, `main`); harmony-llm
+  also reads it from the plan summary that the deployed broker release already
+  sends.
+- Tests: `tests/test_harmony_llm_fallback.py`.
