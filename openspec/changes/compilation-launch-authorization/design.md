@@ -22,6 +22,24 @@ apply. The worker checks current authenticated authority state for each launch.
 The caller has no authority credential and receives a receipt, never a bearer
 credential reusable outside its attempt. A copied environment is insufficient.
 
+The local verifier is a root-owned framework sidecar for one worker slot. Its
+root-owned configuration binds the slot, compiler UID, enrolled physical host,
+local machine-id and protected authority credential. A root-owned registry
+selects its Unix socket; the client authenticates the connected root peer using
+SO_PEERCRED. Caller environment cannot select a fake verifier or registry.
+The sidecar compares the live journal and authority receipt, checks the actual
+systemd attempt cgroup and its memory/CPU caps, and rechecks peer process start
+identity and containment after the bounded authority request. A copied sidecar
+configuration cannot start on a different enrolled OS machine identity.
+
+Rootless user namespaces change the apparent UID of the root verifier. Rather
+than accepting an ambiguous namespace UID, `rootless-docker-native` keeps the
+installed compilation frontend in the host user namespace and runs only its
+private Docker daemon and build containers under RootlessKit. The native
+frontend authenticates the private daemon's PID/cgroup and endpoint before use;
+all components remain beneath the same delegated attempt cgroup. It never
+selects the host Docker daemon or trusts inherited Docker contexts.
+
 The worker retains existing cgroup and rootless Docker descendant supervision.
 No host Docker daemon is authorized by this contract. The existing journal and
 attempt outputs own bounded evidence: one current receipt per launch phase,

@@ -12,10 +12,11 @@ from livestack_node.workloads.compilation_policy import CompilationPolicy
 from livestack_node.workloads.http import Principal, WorkloadServer
 from livestack_node.workloads.store import WorkloadStore
 from livestack_node.workloads.model import WorkloadError
+from livestack_node.workloads.model import Limits
 
 
 @pytest.fixture
-def authority(tmp_path):
+def authority(tmp_path, request):
     policy_path = tmp_path/'policy.json'
     value = dict(version=1, revision='revision-1', expires=time.time()+3600,
                  hosts={'physical-ui': [], 'physical-builder': ['rust', 'image']},
@@ -26,6 +27,7 @@ def authority(tmp_path):
         policy_path.chmod(0o600)
     write()
     store = WorkloadStore(tmp_path/'jobs.db', handlers={'build.v1', 'ui.v1'},
+        limits=Limits(**getattr(request, 'param', {})),
         compilation_policy=CompilationPolicy(policy_path, {'build.v1': ['rust', 'image']}))
     principals = [Principal('caller', 'c'*32, 'caller', ('build.v1', 'ui.v1'))]
     principals += [Principal(host, str(index)*32, 'worker', worker=host, host=host)
@@ -35,16 +37,19 @@ def authority(tmp_path):
     thread.start()
     url = f'http://127.0.0.1:{server.server_port}'
     clients = {p.id: WorkloadClient(url, p.token) for p in principals}
+    # Fault injection changes the real authority's reply after authenticating
+    # and validating its real SQLite attempt; no emulated grant store is used.
+    clients['caller'].fixture_store = store
     data = b'compilation source fixture'
     digest = hashlib.sha256(data).hexdigest()
     server.blobs.put('caller', digest, len(data), BytesIO(data))
     def submit(key, handler='build.v1'):
         return clients['caller'].request('jobs', dict(version=1, key=key, handler=handler,
-            input_digest=digest, need={'cpu': 1, 'memory_bytes': 67108864}))
+            input_digest=digest, need={'cpu': 1, 'memory_bytes': 768*1024**2}))
     def register(host):
         return clients[host].request('worker/report', dict(boot='boot', report=dict(
-            capacity={'cpu': 1, 'memory_bytes': 67108864},
-            available={'cpu': 1, 'memory_bytes': 67108864},
+            capacity={'cpu': 1, 'memory_bytes': 1024**3},
+            available={'cpu': 1, 'memory_bytes': 1024**3},
             labels={'installed-rust': 'yes', 'installed-docker': 'yes'},
             handlers=['build.v1', 'ui.v1'], ready=True)))
     yield clients, submit, register, value, write, policy_path

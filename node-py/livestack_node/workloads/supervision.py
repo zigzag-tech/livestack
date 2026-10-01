@@ -88,7 +88,8 @@ class SystemdExecutor:
                 state.get('ActiveState') in ('active', 'activating', 'reloading'))
 
     def start(self, attempt_id, argv, cwd, output, *, env, cpu, memory_bytes,
-              max_seconds=3600, tasks=512, log_bytes=8*1024**2, lease_file=None, rootless_docker=False):
+              max_seconds=3600, tasks=512, log_bytes=8*1024**2, lease_file=None, rootless_docker=False,
+              rootless_native=False):
         # Limits are operator/handler configuration, never unconstrained argv
         # supplied by a remote caller. Fail closed when cgroups cannot apply.
         for value in (cpu, memory_bytes, max_seconds, tasks, log_bytes):
@@ -98,12 +99,15 @@ class SystemdExecutor:
             raise WorkloadError('task limit must be an integer from 1 to 8192')
         if not argv or not Path(argv[0]).is_absolute():
             raise WorkloadError('installed handler must name an absolute executable')
+        if rootless_native and not rootless_docker:
+            raise WorkloadError('native Docker frontend requires owned rootless Docker')
         if self.inspect(attempt_id).get('LoadState') != 'not-found':
             raise WorkloadError('attempt already has a unit; reconcile before launch', 409)
         output = Path(output).resolve()
         output.mkdir(parents=True, exist_ok=True)
         if rootless_docker:
-            argv = docker_runtime.prepare(self.unit(attempt_id), argv, Path(cwd).resolve(), output)
+            argv = docker_runtime.prepare(self.unit(attempt_id), argv, Path(cwd).resolve(), output,
+                                          native_client=rootless_native)
         config = output/'execution.json'
         config.write_text(encode(dict(argv=argv, cwd=str(Path(cwd).resolve()), output=str(output),
                                       env=env, log_bytes=int(log_bytes),

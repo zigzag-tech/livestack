@@ -32,7 +32,7 @@ def runtime_path(unit):
     return runtime_base()/('hw-'+hashlib.sha256(unit.encode()).hexdigest()[:24])
 
 
-def prepare(unit, argv, cwd, output):
+def prepare(unit, argv, cwd, output, *, native_client=False):
     path = runtime_path(unit)
     # exist_ok=False: a leftover of the same unit is never silently reused. Unit
     # names are per attempt, and stop() removes any leftover before a retry.
@@ -47,11 +47,18 @@ def prepare(unit, argv, cwd, output):
         shutil.rmtree(path, ignore_errors=True)
         raise
     inner = Path(output)/'docker-execution.json'
-    inner.write_text(json.dumps(dict(unit=unit, argv=argv, cwd=str(cwd), output=str(output))))
+    inner.write_text(json.dumps(dict(unit=unit, argv=argv, cwd=str(cwd), output=str(output),
+                                    native_client=native_client)))
     inner.chmod(0o600)
-    return ['/usr/bin/rootlesskit', '--state-dir='+str(path), '--net=slirp4netns',
+    namespace = ['/usr/bin/rootlesskit', '--state-dir='+str(path), '--net=slirp4netns',
         '--disable-host-loopback', '--port-driver=builtin', '--copy-up=/etc', '--copy-up=/run',
         sys.executable, str(Path(__file__).with_name('docker_command.py').resolve()), str(inner)]
+    if not native_client:
+        return namespace
+    frontend = Path(output)/'docker-native-execution.json'
+    frontend.write_text(json.dumps(dict(unit=unit, namespace=namespace, argv=argv, cwd=str(cwd), output=str(output))))
+    frontend.chmod(0o600)
+    return [sys.executable, str(Path(__file__).with_name('docker_native.py').resolve()), str(frontend)]
 
 
 def _users_of(path):
