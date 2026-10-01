@@ -267,7 +267,8 @@ class WorkloadStore:
                 raise WorkloadError('compilation_input_mismatch', 409)
             return dict(**receipt, job_id=attempt['job'], attempt_id=attempt_id, fence=fence,
                         worker=worker, boot=boot, input_digest=input_digest,
-                        resources=json.loads(attempt['need']), expires=attempt['expires'])
+                        resources=json.loads(attempt['need']), execution_resources=spec['need'],
+                        expires=attempt['expires'])
 
     def heartbeat(self, worker, boot, attempt_id, fence, *, progress=None):
         now = self.clock()
