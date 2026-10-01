@@ -64,6 +64,33 @@ missing/oversized/unsupported policy, and retry eligibility. They accompany the
 existing store/HTTP/service/principal reload regressions. They do not prove
 OS confinement or end-to-end consumer rollout.
 
+## Drain before switching workers
+
+Set `claim_enabled: false` on the selected **worker principal** in the operator
+authority configuration and reload principals through the existing SIGHUP path.
+New `worker/claim` requests return `{"assignment":null,"reason":"worker_draining"}`.
+Registration, lease renewal, compilation verification, artifact upload and
+completion retain their normal fenced checks. Draining does not change a
+compilation policy revision or revoke an admitted attempt. The default is true;
+only boolean values are accepted, and callers/admins cannot disable claims.
+Malformed reload retains the previous complete principal set.
+
+An already authenticated request can finish using the old principal snapshot.
+After reload, verify that the authority has no running/cleanup/result-handoff
+attempt for the slot and the host has no owned harness process before replacing
+its worker service. A completed journal alone is insufficient. Re-enable the
+same principal after the compatible worker/verifier is installed; enrollment
+and boot need not change to resume claims. Never remove a busy worker credential
+as a substitute for drain: that also refuses renewal and completion.
+
+The drain control stores one boolean per already bounded principal (maximum
+128), with no history or new polling loop. Disposable authenticated HTTP/SQLite
+controls cover renewal, canonical artifact handoff, completion, queued work,
+same-boot resume, preserved live compilation verification and malformed reload.
+On zz-joe, 2026-10-01: principal reload selection 23 passed; HTTP/service
+regressions 5 passed; compilation-policy selection 11 passed. These tests do
+not certify operational deployment.
+
 ## Worker-local verifier
 
 Install `livestack_node.workloads.launch_verifier` as a root-owned service from
