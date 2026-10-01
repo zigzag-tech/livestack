@@ -552,3 +552,27 @@ def test_a_quota_refusal_never_reaches_the_choice():
               policy=SchedulerPolicy(max_concurrent_per_account=1),
               usage={"acct": 1}, now=1000.0, decision_id="01JDECISIONIDAAAAAAAAAAAAB")
     assert r["refused"] == "account_quota" and r["policy_decision"] is None
+
+
+def test_requires_filters_nodes_that_do_not_hold_it():
+    # A TTS that lacks the job's voice is filtered with the voice named; one
+    # that holds it wins. /fleet/admit ignored `requires` until a second NA TTS
+    # without the English voice joined (attune, 2026-10-02).
+    with_voice = _node("http://has/livestack", "h", kinds=("polytts",), probe_ms=2.0)
+    with_voice["inventory"] = {"voice": ["v-en", "v-zh"]}
+    without = _node("http://lacks/livestack", "h2", kinds=("polytts",), probe_ms=1.0)
+    without["inventory"] = {"voice": ["v-zh"]}
+    silent = _node("http://silent/livestack", "h3", kinds=("polytts",), probe_ms=1.0)
+    view = _view({"h": [with_voice], "h2": [without], "h3": [silent]})
+    r = admit(view, kind="polytts", requires={"voice": "v-en"}, now=1000.0)
+    assert r["target"]["target_id"] == "http://has"
+    filtered = {c.id: c.reason for c in r["candidates"] if c.outcome == "filtered"}
+    assert "lacks voice=v-en" in filtered["http://lacks"]
+    assert "lacks voice=v-en" in filtered["http://silent"]
+
+
+def test_no_requires_leaves_every_node_a_candidate():
+    a = _node("http://a/livestack", "h", kinds=("polytts",), probe_ms=2.0)
+    a["inventory"] = {"voice": ["v-zh"]}
+    r = admit(_view({"h": [a]}), kind="polytts", now=1000.0)
+    assert r["target"]["target_id"] == "http://a"
