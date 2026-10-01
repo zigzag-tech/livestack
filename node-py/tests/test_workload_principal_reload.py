@@ -162,6 +162,41 @@ def test_operator_drain_preserves_live_handoff_and_resumes_same_boot(authority):
     assert resumed['job_id'] == second['id'] and resumed['boot'] == 'b1'
 
 
+def test_other_worker_claim_cannot_place_work_on_a_drained_worker(authority):
+    one, two = authority.client(W), authority.client(W2)
+    authority.write([caller('alice', A), worker('w1', W), worker('w2', W2, 'h2')])
+    assert authority.reload()
+    one.request('worker/report', REPORT)
+    two.request('worker/report', REPORT)
+    authority.write([caller('alice', A), dict(worker('w1', W), claim_enabled=False),
+                     worker('w2', W2, 'h2')])
+    assert authority.reload()
+    job = authority.client(A).submit(dict(version=1, key='cross-worker', handler='test.v1',
+        input_digest=authority.digest, need={'cpu': 1}))
+    assignment = two.request('worker/claim', {'boot': 'b1'})['assignment']
+    assert assignment is not None and assignment['worker'] == 'w2'
+    assert assignment['job_id'] == job['id']
+    with authority.store.transaction() as db:
+        assert db.execute("SELECT count(*) FROM attempts WHERE worker='w1'").fetchone()[0] == 0
+
+
+def test_drained_worker_does_not_hold_an_infrastructure_retry(authority):
+    one, two = authority.client(W), authority.client(W2)
+    one.request('worker/report', REPORT)
+    job = authority.client(A).submit(dict(version=1, key='retry-drain', handler='test.v1',
+        input_digest=authority.digest, need={'cpu': 1}))
+    first = one.request('worker/claim', {'boot': 'b1'})['assignment']
+    authority.write([caller('alice', A), worker('w1', W),
+                     dict(worker('w2', W2, 'h2'), claim_enabled=False)])
+    assert authority.reload()
+    two.request('worker/report', REPORT)
+    one.request('worker/complete', dict(boot='b1', attempt_id=first['attempt_id'],
+        fence=first['fence'], input_digest=authority.digest, outcome='infrastructure',
+        result={'error': 'disposable infrastructure failure'}))
+    retry = one.request('worker/claim', {'boot': 'b1'})['assignment']
+    assert retry is not None and retry['job_id'] == job['id'] and retry['worker'] == 'w1'
+
+
 @pytest.mark.parametrize('label, content', [
     ('zero principals', json.dumps(dict(principals=[]))),
     ('duplicate tokens', json.dumps(dict(principals=[caller('alice', A), caller('bob', A)]))),
