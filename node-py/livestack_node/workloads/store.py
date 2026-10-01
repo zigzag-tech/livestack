@@ -20,11 +20,12 @@ TERMINAL = ("succeeded", "failed", "cancelled", "expired")
 
 
 class WorkloadStore:
-    def __init__(self, path, *, handlers, limits=None, clock=time.time):
+    def __init__(self, path, *, handlers, limits=None, clock=time.time, compilation_policy=None):
         self.path = str(path)
         self.handlers = set(handlers)
         self.limits = limits or Limits()
         self.clock = clock
+        self.compilation_policy = compilation_policy
         # Principals are bound by the HTTP server (service.py / WorkloadServer).
         # A standalone store has no caps and behaves exactly as before binding.
         self.principals = {}
@@ -38,6 +39,8 @@ class WorkloadStore:
                 db.execute("ALTER TABLE jobs ADD COLUMN labels TEXT NOT NULL DEFAULT '{}'")
             if "progress" not in {row[1] for row in db.execute("PRAGMA table_info(attempts)")}:
                 db.execute("ALTER TABLE attempts ADD COLUMN progress TEXT")
+            if "compilation" not in {row[1] for row in db.execute("PRAGMA table_info(attempts)")}:
+                db.execute("ALTER TABLE attempts ADD COLUMN compilation TEXT")
 
     def bind_principals(self, principals):
         """The caller-principal table, for per-principal caps and the job list."""
@@ -156,6 +159,8 @@ class WorkloadStore:
         """
         for value, field in ((worker_id, "worker"), (host_id, "host"), (boot, "boot")):
             name(value, field)
+        if self.compilation_policy is not None:
+            host_id = self.compilation_policy.physical_host(host_id, self.clock())
         if not isinstance(report, dict) or set(report) - {"capacity", "available", "labels", "handlers", "ready"}:
             raise WorkloadError("invalid worker report")
         capacity, available = resources(report.get("capacity")), resources(report.get("available"))
@@ -220,7 +225,7 @@ class WorkloadStore:
                                   (worker, boot)).fetchone()
             if existing:
                 return self._assignment(db, existing)
-            place(db, now, self.limits, self.principals)
+            place(db, now, self.limits, self.principals, self.compilation_policy)
             assigned = db.execute("SELECT * FROM attempts WHERE worker=? AND boot=? AND state='running' ORDER BY created LIMIT 1",
                                   (worker, boot)).fetchone()
             return self._assignment(db, assigned) if assigned else None
@@ -230,7 +235,39 @@ class WorkloadStore:
         return {"job_id": job["id"], "attempt_id": attempt["id"], "fence": attempt["fence"],
                 "lease_remaining": max(0, attempt["expires"] - self.clock()),
                 "expires": attempt["expires"], "worker": attempt["worker"], "boot": attempt["boot"],
-                "owner": job["owner"], "spec": job["spec"]}
+                "owner": job["owner"], "spec": job["spec"],
+                "compilation": json.loads(attempt['compilation']) if attempt['compilation'] else None}
+
+    def _compilation_live(self, db, attempt, now):
+        receipt = json.loads(attempt['compilation']) if attempt['compilation'] else None
+        job = db.execute('SELECT spec FROM jobs WHERE id=?', (attempt['job'],)).fetchone()
+        spec = json.loads(job['spec'])
+        required = self.compilation_policy and self.compilation_policy.required(spec['handler'])
+        if required or receipt:
+            if self.compilation_policy is None or receipt is None:
+                raise WorkloadError('compilation_policy_grant_missing', 409)
+            current = self.compilation_policy.authorize(attempt['host'], spec['handler'], now).receipt()
+            if current != receipt:
+                raise WorkloadError('compilation_policy_revision_changed', 409)
+        return spec, receipt
+
+    def verify_compilation(self, worker, boot, attempt_id, fence, *, input_digest, compilation_class):
+        now = self.clock()
+        with self.transaction() as db:
+            self._expire(db, now)
+            self._worker(db, worker, boot)
+            attempt = db.execute("SELECT * FROM attempts WHERE id=? AND worker=? AND boot=? "
+                                 "AND fence=? AND state='running'", (attempt_id, worker, boot, fence)).fetchone()
+            if attempt is None:
+                raise WorkloadError('compilation_attempt_not_live', 409)
+            spec, receipt = self._compilation_live(db, attempt, now)
+            if receipt is None or compilation_class not in receipt['classes']:
+                raise WorkloadError('compilation_class_not_reserved', 403)
+            if spec['input_digest'] != input_digest:
+                raise WorkloadError('compilation_input_mismatch', 409)
+            return dict(**receipt, job_id=attempt['job'], attempt_id=attempt_id, fence=fence,
+                        worker=worker, boot=boot, input_digest=input_digest,
+                        resources=json.loads(attempt['need']), expires=attempt['expires'])
 
     def heartbeat(self, worker, boot, attempt_id, fence, *, progress=None):
         now = self.clock()
@@ -242,6 +279,7 @@ class WorkloadStore:
                                  (attempt_id, worker, boot, fence)).fetchone()
             if not attempt:
                 raise WorkloadError("execution lease is no longer valid", 409)
+            self._compilation_live(db, attempt, now)
             expires = now + self.limits.lease_seconds
             # A heartbeat without progress leaves the last reported value in
             # place; progress is an overwrite, never an append.
