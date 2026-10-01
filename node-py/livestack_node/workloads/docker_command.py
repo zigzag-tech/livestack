@@ -66,6 +66,15 @@ def run(config_path):
             time.sleep(.2)
         else:
             raise RuntimeError('private Docker readiness deadline expired')
+        if config.get('native_client'):
+            # No PID namespace was requested by the installed RootlessKit argv;
+            # this PID is the host PID the native frontend authenticates.
+            ready = Path(config['output'])/'docker-native-ready.json'
+            temporary = ready.with_suffix('.tmp')
+            temporary.write_text(json.dumps({'pid': daemon.pid, 'socket': '/run/harmony/docker.sock'}))
+            temporary.chmod(0o600)
+            os.replace(temporary, ready)
+            return daemon.wait()
         return subprocess.call(config['argv'], cwd=config['cwd'], env=env)
     finally:
         daemon.terminate()

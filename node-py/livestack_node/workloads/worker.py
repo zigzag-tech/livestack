@@ -70,7 +70,8 @@ class WorkloadWorker:
         self.workspace = Path(config['workspace']).resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.handlers = config['handlers']
-        if not self.handlers or any(h.get('backend', 'native') not in ('native', 'rootless-docker') for h in self.handlers.values()):
+        if not self.handlers or any(h.get('backend', 'native') not in (
+                'native', 'rootless-docker', 'rootless-docker-native') for h in self.handlers.values()):
             raise WorkloadError('worker requires installed native or rootless-docker handlers')
         transfer_timeout = config.get('transfer_timeout', self.client.timeout)
         if (isinstance(transfer_timeout, bool) or not isinstance(transfer_timeout, (int, float)) or
@@ -378,6 +379,17 @@ class WorkloadWorker:
                    HARMONY_INPUT_OBJECTS=str(objects),
                    HARMONY_REQUEST=str(root/'request.json'), HARMONY_ATTEMPT=attempt,
                    HARMONY_OWNER=owner)
+        compilation = assignment.get('compilation')
+        if compilation is not None:
+            if (type(self.config.get('compilation_launch_contract')) is not int or
+                    self.config['compilation_launch_contract'] != 1 or
+                    type(compilation.get('version')) is not int or compilation['version'] != 1):
+                raise WorkloadError('compilation_launch_contract_unsupported', 403)
+            env.update(HARMONY_WORKER=assignment['worker'], HARMONY_BOOT=assignment['boot'],
+                       HARMONY_JOB=assignment['job_id'], HARMONY_FENCE=str(assignment['fence']),
+                       HARMONY_INPUT_DIGEST=spec['input_digest'],
+                       HARMONY_PHYSICAL_HOST=compilation['host'],
+                       HARMONY_POLICY_REVISION=compilation['policy_revision'])
         if self.config.get('fleet_url'):
             env['HARMONY_FLEET_URL'] = self.config['fleet_url']
         if self.config.get('fleet_token'):
@@ -446,7 +458,8 @@ class WorkloadWorker:
             self.executor.start(attempt, handler['argv'], root/'source', output, env=env,
                 cpu=need['cpu'], memory_bytes=need['memory_bytes'],
                 max_seconds=handler.get('max_seconds', 3600), tasks=handler.get('max_tasks', 512), lease_file=root/'lease',
-                rootless_docker=handler.get('backend') == 'rootless-docker')
+                rootless_docker=handler.get('backend') in ('rootless-docker', 'rootless-docker-native'),
+                rootless_native=handler.get('backend') == 'rootless-docker-native')
             # Once execution starts, worker-process health alone cannot retain
             # the slot. A live supervised unit or its durable exit receipt must
             # prove that execution still exists or has reached result handoff.
