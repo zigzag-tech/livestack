@@ -36,6 +36,7 @@ class Principal:
     # Per-principal cap on concurrently running attempts (J.3).
     max_running: int | None = None
     on_cap: str = "queue"  # "queue" (default) | "refuse"
+    claim_enabled: bool = True  # operator drain; existing attempts retain access
 
     def __post_init__(self):
         name(self.id, "principal")
@@ -53,6 +54,8 @@ class Principal:
             raise ValueError('max_running must be a positive integer or None')
         if self.on_cap not in ('queue', 'refuse'):
             raise ValueError('on_cap must be "queue" or "refuse"')
+        if type(self.claim_enabled) is not bool or self.role != 'worker' and not self.claim_enabled:
+            raise ValueError('claim_enabled must be boolean and only workers may disable claims')
 
 
 def check_principals(principals):
@@ -249,6 +252,8 @@ class Handler(BaseHTTPRequestHandler):
                 return store.register(principal.worker, principal.host, body['boot'], body['report'],
                                       cleaned=body.get('cleaned', ()))
             if parts == ['worker', 'claim']:
+                if not principal.claim_enabled:
+                    return {'assignment': None, 'reason': 'worker_draining'}
                 return {'assignment': store.claim(principal.worker, body['boot'])}
             if parts == ['worker', 'heartbeat']:
                 return store.heartbeat(principal.worker, body['boot'], body['attempt_id'], body['fence'],
