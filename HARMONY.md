@@ -761,6 +761,11 @@ the units file. Other modes:
 7. Check that the first demand records are `ok`.
 8. If any check fails, restore the backup.
 
+**Validating the queueing model:** `python -m livestack_node.replay_validate --hours 24`
+compares the replay with vLLM's own stats lines per engine lifetime. As of
+2026-09-30 the model misses all queueing: it does not charge vLLM's fixed
+~4,500-token per-sequence KV cost. See `_plans/composition-replay-validation.md`.
+
 Known limits of v1 (design §8a, §6):
 - Only two measured rows exist today, so per-adapter deltas assume KV dtype does not
   move weights or activation.
