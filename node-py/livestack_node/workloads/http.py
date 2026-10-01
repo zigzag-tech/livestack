@@ -253,6 +253,9 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ['worker', 'heartbeat']:
                 return store.heartbeat(principal.worker, body['boot'], body['attempt_id'], body['fence'],
                                        progress=body.get('progress'))
+            if parts == ['worker', 'verify-compilation']:
+                return store.verify_compilation(principal.worker, body['boot'], body['attempt_id'],
+                    body['fence'], input_digest=body['input_digest'], compilation_class=body['class'])
             if parts == ['worker', 'complete']:
                 return store.complete(principal.worker, body['boot'], body['attempt_id'], body['fence'],
                                       input_digest=body['input_digest'], outcome=body['outcome'], result=body['result'])
