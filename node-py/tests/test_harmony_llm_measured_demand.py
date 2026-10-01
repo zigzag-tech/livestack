@@ -208,3 +208,17 @@ def test_a_multi_sample_request_records_its_n(srv, upstream):
     client.post("/v1/chat/completions", json={"model": "chips", "n": 12, "messages": []})
     rows = _demand_rows(srv)[before:]
     assert [r["n"] for r in rows] == [12]
+
+
+def test_a_restart_keeps_what_was_fitted(srv):
+    """Re-measurement replaces the startup numbers, never the fitted ones."""
+    cap = _engine(srv, (FIX / "v0.28.0-llm_general-fp8.log").read_text().splitlines())
+    srv._record_measurement("llm_general", srv.SPECS["llm_general"], _cmd(srv), cap)
+    chash = srv._COMPOSITION["llm_general"]
+    row = srv._COSTS.load()[chash]
+    srv._COSTS.put({**row, "state_pages_per_seq": 1.936, "prefill_tok_s": 711.3, "decode_tok_s": 23.93})
+    cap = _engine(srv, (FIX / "v0.28.0-llm_general-fp8.log").read_text().splitlines())
+    srv._record_measurement("llm_general", srv.SPECS["llm_general"], _cmd(srv), cap)
+    row = srv._COSTS.load()[chash]
+    assert row["state_pages_per_seq"] == 1.936 and row["prefill_tok_s"] == 711.3
+    assert row["kv_tokens"] == 37981                     # startup numbers refreshed
