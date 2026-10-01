@@ -96,6 +96,10 @@ class ReplayResult:
     # request was left waiting. 1.0 when nothing ever waited.
     min_kv_usage_when_waiting: float = 1.0
     delays: Tuple[float, ...] = field(default=(), repr=False)
+    # (t, running sequences, waiting requests, KV tokens in use) at each of the
+    # `sample_at` times: the state after every event BEFORE t, which is what an
+    # engine's periodic stats line reports. Empty unless asked for.
+    timeline: Tuple[Tuple[float, int, int, int], ...] = field(default=(), repr=False)
 
     def to_json(self) -> dict:
         return {"n": self.n, "total_queue_s": round(self.total_queue_s, 6),
@@ -128,7 +132,7 @@ def jobs_from_records(records: Sequence[Mapping], rate_s_per_token: float, *,
 
 
 def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
-           max_loras: int) -> ReplayResult:
+           max_loras: int, sample_at: Sequence[float] = ()) -> ReplayResult:
     """FCFS event simulation over the KV pool, batch cap and adapter slots.
 
     Adapter slots are LRU among adapters not in use by a running request; a
@@ -185,10 +189,21 @@ def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
             wait_time += now - t_prev
         t_prev = now
 
+    samples = sorted(sample_at)
+    timeline: list = []
+    si = 0
+
+    def sample_until(t: float) -> None:
+        nonlocal si
+        while si < len(samples) and samples[si] < t:
+            timeline.append((samples[si], running_seqs, len(waiting), used))
+            si += 1
+
     k = 0
     while k < len(order) or running:
         next_arr = jobs[order[k]].ts if k < len(order) else math.inf
         next_dep = running[0][0] if running else math.inf
+        sample_until(min(next_arr, next_dep))
         if next_dep <= next_arr:
             now = next_dep
             advance(now)
@@ -216,6 +231,7 @@ def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
             min_usage_waiting = min(min_usage_waiting, used / kv_tokens if kv_tokens else 1.0)
         t_last = max(t_last, now)
 
+    sample_until(math.inf)
     counted = sorted(delays[i] for i in range(len(jobs))
                      if jobs[i].counted and jobs[i].tokens <= kv_tokens)
     p95 = counted[min(len(counted) - 1, int(math.ceil(0.95 * len(counted))) - 1)] if counted else 0.0
@@ -225,7 +241,8 @@ def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
         max_running=max_running, max_waiting=max_waiting,
         frac_time_waiting=(wait_time / span) if span > 0 else 0.0,
         swaps=swaps, rejected=rejected, imputed=sum(1 for j in jobs if j.imputed),
-        min_kv_usage_when_waiting=min_usage_waiting, delays=tuple(delays))
+        min_kv_usage_when_waiting=min_usage_waiting, delays=tuple(delays),
+        timeline=tuple(timeline))
 
 
 # --- windows and demand estimates -------------------------------------------
