@@ -69,6 +69,9 @@ OS confinement or end-to-end consumer rollout.
 Set `claim_enabled: false` on the selected **worker principal** in the operator
 authority configuration and reload principals through the existing SIGHUP path.
 New `worker/claim` requests return `{"assignment":null,"reason":"worker_draining"}`.
+Fleet-wide placement also excludes the drained worker when another slot polls,
+and does not count it as a retry alternative. Checking only its own HTTP claim
+is insufficient because every claim invokes placement across the whole fleet.
 Registration, lease renewal, compilation verification, artifact upload and
 completion retain their normal fenced checks. Draining does not change a
 compilation policy revision or revoke an admitted attempt. The default is true;
@@ -90,6 +93,13 @@ same-boot resume, preserved live compilation verification and malformed reload.
 On zz-joe, 2026-10-01: principal reload selection 23 passed; HTTP/service
 regressions 5 passed; compilation-policy selection 11 passed. These tests do
 not certify operational deployment.
+
+The multi-worker placement control exposed that gap in the initial drain
+implementation: it failed against captured SDK `fa886b7` and passes after the
+placement intersection. The companion infrastructure-retry control also passes.
+Principal/policy selection: 35 passed before adding the retry case; both final
+focused cases passed (2026-10-01, zz-joe). Operational rollout must select this
+placement correction before certifying a worker as drained.
 
 ## Worker-local verifier
 
