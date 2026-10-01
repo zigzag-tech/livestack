@@ -205,3 +205,17 @@ def test_a_paged_base_with_an_unmeasured_dtype_block_is_unknown_not_cheap():
     bf16 = replace(bf16, kv_dtype="auto")
     with pytest.raises(cm.CostUnknown, match="kv_block:auto"):
         cm.cost(st2, {bf16.device: bf16}, w)
+
+
+def test_state_pages_come_from_the_same_kv_dtype():
+    st = calibration_state(trace=trace(n=5))
+    rows = {}
+    for h, m in st.measured.items():
+        k = st.measured_keys[h]
+        rows[h] = MeasuredCost(**{**m.__dict__,
+                                  "block_size": 1568 if k.kv_dtype == "fp8" else 784,
+                                  "state_pages_per_seq": 1.94 if k.kv_dtype == "fp8" else 2.22})
+    st2 = replace(st, measured=rows)
+    live = next(iter(st2.live.values()))
+    assert cm.kv_paging(st2, replace(live, kv_dtype="fp8")) == (1568, 1.94)
+    assert cm.kv_paging(st2, replace(live, kv_dtype="auto")) == (784, 2.22)
