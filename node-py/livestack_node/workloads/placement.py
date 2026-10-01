@@ -7,12 +7,22 @@ import json
 import uuid
 
 from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedule
-from .model import AVOID_LABEL_SIGNATURE, AVOID_LABEL_WORKER, encode, failure_signature
+from .model import AVOID_LABEL_SIGNATURE, AVOID_LABEL_WORKER, WorkloadError, encode, failure_signature
 
 # How long after an infrastructure failure a job refuses the worker that
 # produced it, while some other worker could ever run it. Fixed and short
 # relative to a recovery: a lone worker that heals is used again after this.
 AVOID_SECONDS = 1800
+
+
+def _compilation_refusal(policy, worker, spec, now):
+    if policy is None or not policy.required(spec['handler']):
+        return None
+    try:
+        policy.authorize(worker['host'], spec['handler'], now)
+    except WorkloadError as error:
+        return str(error)
+    return None
 
 
 def _avoided(db, row, now):
@@ -31,7 +41,7 @@ def _avoided(db, row, now):
     return out
 
 
-def place(db, now, limits, principals=None):
+def place(db, now, limits, principals=None, compilation_policy=None):
     workers = db.execute("SELECT * FROM workers WHERE ready=1 AND seen>? ORDER BY id",
                          (now-limits.fresh_seconds,)).fetchall()
     reports = {w["id"]: json.loads(w["report"]) for w in workers}
@@ -153,10 +163,14 @@ def place(db, now, limits, principals=None):
                 w["id"] not in avoided and spec["handler"] in r["handlers"]
                 and all(r["labels"].get(k) == v for k, v in spec["selector"].items())
                 and all(r["capacity"].get(k, 0) >= n for k, n in admit.items())
+                and _compilation_refusal(compilation_policy, w, spec, now) is None
                 for w, r in fresh)
         for w in compatible:
             report = reports[w["id"]]
-            reason = None
+            reason = _compilation_refusal(compilation_policy, w, spec, now)
+            if reason:
+                rejected.append({"worker": w['id'], "reason": reason})
+                continue
             if avoided.get(w["id"]) and alternative:
                 sig, where = avoided[w["id"]]
                 reason = f"avoiding {w['id']}: same failure signature {sig} on {where}"
@@ -192,10 +206,13 @@ def place(db, now, limits, principals=None):
         chosen = next(w for w in workers if w["id"] == grants[0].target_id)
         fence = row["fence"] + 1
         aid = uuid.uuid4().hex
-        db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created) "
-                   "VALUES(?,?,?,?,?,?,'running',?,?,?)",
+        compilation = None
+        if compilation_policy is not None and compilation_policy.required(spec['handler']):
+            compilation = encode(compilation_policy.authorize(chosen['host'], spec['handler'], now).receipt())
+        db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created,compilation) "
+                   "VALUES(?,?,?,?,?,?,'running',?,?,?,?)",
                    (aid, row["id"], chosen["id"], chosen["boot"], chosen["host"], fence,
-                    encode(admit), now+limits.lease_seconds, now))
+                    encode(admit), now+limits.lease_seconds, now, compilation))
         db.execute("UPDATE jobs SET state='running',fence=?,updated=?,reason=? WHERE id=?",
                    (fence, now, grants[0].reason, row["id"]))
         busy.add(chosen["id"])

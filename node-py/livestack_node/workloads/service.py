@@ -13,6 +13,7 @@ from .model import Limits
 from .store import WorkloadStore
 from .blobs import BlobStore
 from .artifact_mirror import InstalledArtifactMirror
+from .compilation_policy import CompilationPolicy
 
 
 def load_principals(path):
@@ -69,7 +70,10 @@ def main():
             RotatingFileHandler(root/'authority.log', maxBytes=16*1024*1024, backupCount=3)])
         principals = load_principals(args.config)
         store = WorkloadStore(root/'workloads.sqlite', handlers=config['handlers'],
-                              limits=Limits(**config.get('limits', {})))
+                              limits=Limits(**config.get('limits', {})),
+                              compilation_policy=(CompilationPolicy(
+                                  config.get('compilation_policy'), config['compilation_handlers'])
+                                  if 'compilation_handlers' in config else None))
         store.recover()
         blobs = BlobStore(store, root/'objects', **config.get('blob_limits', {}))
         artifact_mirror = (InstalledArtifactMirror(config['artifact_mirror'])
