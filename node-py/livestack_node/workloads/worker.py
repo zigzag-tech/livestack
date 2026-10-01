@@ -283,7 +283,7 @@ class WorkloadWorker:
         resource_failure = resources.get('oom_kill', 0) > 0 or resources.get('pids_max_events', 0) > 0
         outcome = ('succeeded' if code == 0 else
             'infrastructure' if resource_failure or code in handler.get('infrastructure_exit_codes', []) or
-            (handler.get('backend') == 'rootless-docker' and code == 75) else 'product_failure')
+            (handler.get('backend') in ('rootless-docker', 'rootless-docker-native') and code == 75) else 'product_failure')
         return dict(outcome=outcome, result=result)
 
     def _close_lease(self, lease, attempt, in_flight):
