@@ -533,13 +533,14 @@ def test_killed_worker_expires_then_new_process_reconciles_journal(fleet, tmp_pa
             worker.close()
 
 
-@pytest.mark.parametrize('exit_code, expected', [(0, 'succeeded'), (7, 'failed')])
-def test_rootless_worker_delivers_pinned_artifact(fleet, tmp_path, exit_code, expected):
+@pytest.mark.parametrize('backend', ['rootless-docker', 'rootless-docker-native'])
+@pytest.mark.parametrize('exit_code, expected', [(0, 'succeeded'), (7, 'failed'), (75, 'queued')])
+def test_rootless_worker_delivers_pinned_artifact(fleet, tmp_path, backend, exit_code, expected):
     import shutil
     if not all(shutil.which(tool) for tool in ('rootlesskit', 'slirp4netns', 'newuidmap', 'dockerd')):
         pytest.skip('requires installed rootless Docker prerequisites')
     store, config, caller, digest = fleet
-    config['handlers']['native.v1']['backend'] = 'rootless-docker'
+    config['handlers']['native.v1'].update(backend=backend, infrastructure_outputs=['artifact'])
     config['capacity']['memory_bytes'] = 512*1024**2
     job = caller.submit(dict(version=1, key='docker', handler='native.v1', input_digest=digest,
         need={'cpu': .5, 'memory_bytes': 512*1024**2, 'disk_bytes': 64*1024**2}, payload={'exit': exit_code}))
@@ -556,6 +557,9 @@ def test_rootless_worker_delivers_pinned_artifact(fleet, tmp_path, exit_code, ex
         artifact = next(r for r in result['result']['result']['artifacts'] if r['name'] == 'artifact')
         received = InputTransfer(caller).get(artifact['digest'], tmp_path/'docker-returned')
         assert received.read_text() == 'captured bytes'
+        if exit_code == 75:
+            assert result['result']['outcome'] == 'infrastructure'
+            caller.request('jobs/'+job['id']+'/cancel', {})
         assert worker.journal.read() is None
         assert list(Path(config['workspace']).iterdir()) == []
         assert not worker.step()
