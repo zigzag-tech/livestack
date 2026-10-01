@@ -33,20 +33,33 @@ def write_current_receipt(output, compilation_class, value):
 
 
 def require_compilation(compilation_class, *, registry_path=REGISTRY):
-    if compilation_class not in CLASSES:
+    return require_compilations([compilation_class], registry_path=registry_path)
+
+
+def require_compilations(compilation_classes, *, registry_path=REGISTRY):
+    """Authorize a finite class set from one authenticated live receipt."""
+    if (not isinstance(compilation_classes, (list, tuple)) or
+            not 1 <= len(compilation_classes) <= len(CLASSES) or
+            any(not isinstance(item, str) or item not in CLASSES for item in compilation_classes) or
+            len(set(compilation_classes)) != len(compilation_classes)):
         raise WorkloadError('compilation_launch_class_invalid', 403)
+    compilation_class = compilation_classes[0]
     request = None
     output = os.environ.get('HARMONY_OUTPUT')
     try:
         request = environment_request(compilation_class)
         receipt = verify_launch(request, registry_path=registry_path)
-        value = dict(receipt, admitted=True, **{'class': compilation_class})
-        write_current_receipt(output, compilation_class, value)
-        logging.info('compilation_launch_verified: worker=%s attempt=%s class=%s',
-                     receipt['worker'], receipt['attempt_id'], compilation_class)
+        if any(item not in receipt.get('classes', []) for item in compilation_classes):
+            raise WorkloadError('compilation_class_not_reserved', 403)
+        for item in compilation_classes:
+            value = dict(receipt, admitted=True, **{'class': item})
+            write_current_receipt(output, item, value)
+        logging.info('compilation_launch_verified: worker=%s attempt=%s classes=%s',
+                     receipt['worker'], receipt['attempt_id'], ','.join(compilation_classes))
         return receipt
     except WorkloadError as error:
-        logging.error('compilation_launch_refused: class=%s reason=%s', compilation_class, str(error)[:1024])
+        logging.error('compilation_launch_refused: classes=%s reason=%s',
+                      ','.join(compilation_classes), str(error)[:1024])
         if output and Path(output).is_dir():
             refusal = dict(version=1, admitted=False, error=str(error)[:1024], **{'class': compilation_class})
             if request is not None:
@@ -54,7 +67,8 @@ def require_compilation(compilation_class, *, registry_path=REGISTRY):
                     'job_id', 'attempt_id', 'input_digest')})
             # A stale success cannot look like the latest launch. A receipt-write
             # failure itself remains a refusal; no caller gets permission.
-            write_current_receipt(output, compilation_class, refusal)
+            for item in compilation_classes:
+                write_current_receipt(output, item, dict(refusal, **{'class': item}))
         raise
 
 
