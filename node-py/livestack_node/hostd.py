@@ -112,7 +112,7 @@ from .mesh_peer import MeshPeer, RelayRoute, facade_id
 from . import relay_control
 from .membership import MembershipPolicy, RosterFull
 from .fleet_scheduler import SchedulerPolicy
-from .planner import Device, Request, Residency, Unit, Evict, Grant, Load, plan as _plan
+from .planner import Defer, Device, Request, Residency, Unit, Evict, Grant, Load, plan as _plan
 
 GB = 1_000_000_000
 
@@ -336,7 +336,12 @@ def build_app(broker: HostBroker):
                 "budget": dict(grant.budget) if grant is not None else {},
                 "lease_id": lease_id,
                 **({} if dev is not None else
-                   {"reason": "the planner could not place it on any device"})}
+                   {"reason": "the planner could not place it on any device",
+                    # The planner's own words, so a node can tell "no unit
+                    # like that is known" (a transient registration gap) from
+                    # "known, and not placed" (a refusal to respect).
+                    "defer_reason": next((d.reason for d in p.of(Defer)
+                                          if d.request_id == req.id), None)})}
 
     # `:path`, because a fleet lease id names its device and a hosted device
     # id is a URL (`http://100.64.0.18:8190-<ms>-<seq>`). A bare `{lease_id}`

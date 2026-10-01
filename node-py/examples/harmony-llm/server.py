@@ -316,6 +316,35 @@ VLLM_BASE = f"http://127.0.0.1:{VLLM_PORT}"   # single-unit compatibility alias
 _procs: "dict[str, subprocess.Popen]" = {}
 _lock = threading.RLock()
 
+# Failed starts per unit: (consecutive failures, retry-not-before, last reason).
+# A start that fails is retried on a doubling cooldown (30 s .. 10 min) instead
+# of on every request; see `_load`.
+_START_FAILURES: "dict[str, tuple]" = {}
+_START_BACKOFF_S, _START_BACKOFF_MAX_S = 30.0, 600.0
+
+
+def _note_start_failure(name: str, why: str) -> None:
+    fails = _START_FAILURES.get(name, (0, 0.0, ""))[0] + 1
+    wait = min(_START_BACKOFF_MAX_S, _START_BACKOFF_S * 2 ** (fails - 1))
+    _START_FAILURES[name] = (fails, time.time() + wait, why)
+    print(f"[harmony-llm] {name}: start failed ({why}), {fails} in a row; "
+          f"next start not before {wait:.0f}s unless the broker grants one", flush=True)
+
+
+def _broker_did_not_know(res: dict) -> bool:
+    """Did a non-granting admit mean "I know no unit like that" (a transient
+    gap: this node withholds its registration while a load is in flight), as
+    opposed to "I know it and will not place it"? Read from the planner's own
+    defer reason, carried in `defer_reason` or the plan summary. No reason at
+    all reads as a refusal: when the two cannot be told apart, the broker's
+    answer stands."""
+    reason = res.get("defer_reason")
+    if reason is None:
+        m = re.search(r"defer \S+ \((.*)\)", str(res.get("plan") or ""))
+        reason = m.group(1) if m else ""
+    return reason.startswith("no unit satisfies")
+
+
 # WHAT EACH ENGINE SAID IT COSTS, and which composition it said it for. Set
 # after every successful start from the engine's own startup lines
 # (livestack_node/vllm_startup.py); the declared `footprint_gb` is only a
@@ -455,6 +484,15 @@ def _load(name: str = "", device: "str | None" = None,
             return p
         # Starting here would bind-fail, yet the readiness poll below would see
         # the other engine answer and report OUR load a success.
+        # DO NOT RESPAWN A START THAT JUST FAILED. Each attempt costs ~40 s of a
+        # vLLM claiming the card and failing; on 2026-09-30 every request paid
+        # it, 346 times. A load the broker explicitly granted (it names a
+        # device) has had room made for it, so it skips the cooldown.
+        fails, not_before, why = _START_FAILURES.get(name, (0, 0.0, ""))
+        if device is None and time.time() < not_before:
+            raise RuntimeError(
+                f"{name}: start failed {fails}x (last: {why}); not retrying for "
+                f"{not_before - time.time():.0f}s")
         if _foreign_listener(name):
             raise RuntimeError(
                 f"{name}: port {spec['port']} is already served by a vLLM this node did not "
@@ -526,15 +564,18 @@ def _load(name: str = "", device: "str | None" = None,
                 # 0.28 — invisible until the journal was read by hand. Point at
                 # the log that has the answer.
                 _procs.pop(name, None)
+                _note_start_failure(name, f"vLLM exited during startup (rc={proc.returncode})")
                 raise RuntimeError(
                     f"vLLM exited during startup of {name} (rc={proc.returncode}); "
                     f"see `journalctl -u harmony-llm` for its stderr")
             if _vllm_up(name=name):
                 print(f"[harmony-llm] vLLM ready: {name}", flush=True)
+                _START_FAILURES.pop(name, None)
                 _record_measurement(name, spec, cmd, capture)
                 return proc
             time.sleep(2)
         _free(name)
+        _note_start_failure(name, "not ready before the deadline")
         raise RuntimeError(f"vLLM for {name} did not become ready before the deadline")
 
 
@@ -1733,7 +1774,15 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             # safe: the manager still enforces coload policy before loading, so
             # an exclusive single-GPU deployment evicts its other local unit.
             # This is not a placement guess for an arbitrary peer.
-            if requirement is not None and not served:
+            # ONLY WHEN THE BROKER DID NOT KNOW THE UNIT. On 2026-09-30 the
+            # broker answered "no device can fit even with preemption" (an
+            # image model held the card), this fallback loaded the 27B anyway,
+            # the start failed, the in-flight load withheld this node's
+            # registration, the broker then answered "no unit satisfies", and
+            # the fallback fired again: 346 doomed starts, llm_general down
+            # 05:29-15:42. A refusal of a unit the broker KNOWS is final here.
+            if (requirement is not None and not served
+                    and _broker_did_not_know(res)):
                 local_declared = next((n for n in sorted(SPECS, key=_selection_rank)
                                        if _local_satisfies(n, requirement)), None)
                 if local_declared:
