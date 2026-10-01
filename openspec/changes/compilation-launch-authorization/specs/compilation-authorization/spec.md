@@ -1,5 +1,22 @@
 ## ADDED Requirements
 
+### Requirement: Compilation rollout preserves admitted work
+Operators SHALL be able to pause new worker claims without revoking current
+attempt renewal, launch verification, artifact handoff or completion. A paused
+claim SHALL return a named draining reason. Existing authenticated requests may
+finish, and deployment SHALL verify actual worker and authority idleness before
+replacing a worker. Re-enabling claims SHALL preserve enrollment and boot.
+
+#### Scenario: An operator drains a busy builder
+- **WHEN** the operator reloads a worker principal with claims disabled
+- **THEN** new claims return no assignment and the reason `worker_draining`
+- **AND** the current attempt can renew and complete without being fenced
+- **AND** queued work remains available when claims are re-enabled
+
+#### Scenario: Drain configuration is malformed
+- **WHEN** a claim-enabled setting is not boolean or disables a non-worker principal
+- **THEN** reload refuses the configuration and retains the previous principal set
+
 ### Requirement: Operator physical-host policy constrains compilation
 
 The authority SHALL intersect installed handlers, hard capabilities and resource
