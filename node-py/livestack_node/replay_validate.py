@@ -290,10 +290,17 @@ def main(argv=None) -> int:
                 from .demand_log import UnitCostStore
                 fit.update(fitted_at=now, lifetime_from=best["from"], block_size=block,
                            prefill_tok_s=round(rates[0], 1), decode_tok_s=round(rates[1], 2))
+                # A direct burst measurement (scripts/measure_kv_pages.py)
+                # beats a traffic fit for state pages: keep it, and record the
+                # fit beside it. Service rates come only from traffic.
+                state = (row["state_pages_per_seq"] if row.get("state_burst")
+                         else fit["state_pages_per_seq"])
+                fit["state_pages_used"] = "state_burst" if row.get("state_burst") else "this fit"
                 UnitCostStore(a.costs).put({**row, "block_size": block,
-                                            "state_pages_per_seq": fit["state_pages_per_seq"],
+                                            "state_pages_per_seq": state,
                                             "prefill_tok_s": fit["prefill_tok_s"],
                                             "decode_tok_s": fit["decode_tok_s"],
+                                            "service_source": "replay_validate --fit-state",
                                             "state_fit": fit})
                 report["fit"] = fit
     for e in report["lifetimes"]:
