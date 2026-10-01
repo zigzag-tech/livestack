@@ -50,6 +50,18 @@ handlers cannot obtain compilation launch permission. A separate remote-agent
 OS boundary is required on UI-only hosts; this verifier does not claim to
 constrain arbitrary root or arbitrary unguarded tools.
 
+For a safe worker transition, an operator can reload a worker principal with
+`claim_enabled: false`. This pauses new claims with the explicit response reason
+`worker_draining`; it preserves its authenticated registration, heartbeat,
+compilation verification, completion and artifact transfer. It does not revoke
+already admitted work or change policy revisions. Requests already authenticated
+before reload may finish under the old principal snapshot, so deployment still
+requires the two-layer idle check after draining. Re-enabling the same principal
+resumes claims without changing its boot or enrollment. Only worker principals
+can disable claims; malformed/non-boolean settings refuse configuration reload.
+The control adds one boolean per existing bounded principal, no retained history
+or polling service. Real HTTP/SQLite controls must prove handoff and resume.
+
 ## Verification
 
 Use disposable real SQLite/HTTP authority and worker/cgroup controls. Prove

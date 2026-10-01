@@ -129,6 +129,39 @@ def test_token_rotation_swaps_credentials(authority):
     assert authority.status(B) == 200
 
 
+def test_operator_drain_preserves_live_handoff_and_resumes_same_boot(authority):
+    client = authority.client(W)
+    client.request('worker/report', REPORT)
+    spec = dict(version=1, key='first', handler='test.v1',
+                input_digest=authority.digest, need={'cpu': 1})
+    first = authority.client(A).submit(spec)
+    attempt = client.request('worker/claim', {'boot': 'b1'})['assignment']
+    assert attempt['job_id'] == first['id']
+    second = authority.client(A).submit(dict(spec, key='second'))
+    paused = dict(worker('w1', W), claim_enabled=False)
+    authority.write([caller('alice', A), paused])
+    assert authority.reload()
+    assert client.request('worker/claim', {'boot': 'b1'}) == {
+        'assignment': None, 'reason': 'worker_draining'}
+    identity = dict(boot='b1', attempt_id=attempt['attempt_id'], fence=attempt['fence'])
+    assert client.request('worker/heartbeat', identity)['lease_remaining'] > 0
+    source = authority.config.parent/'handoff'
+    source.write_bytes(b'completed during drain')
+    from livestack_node.workloads.transfer import InputTransfer
+    artifact = InputTransfer(client).put(source, assignment=attempt)
+    complete = client.request('worker/complete', dict(identity,
+        input_digest=authority.digest, outcome='succeeded',
+        result={'artifacts': [dict(name='handoff', **artifact)]}))
+    assert complete['state'] == 'succeeded'
+    assert authority.client(A).get(second['id'])['state'] == 'queued'
+    client.request('worker/report', REPORT)
+    assert client.request('worker/claim', {'boot': 'b1'})['reason'] == 'worker_draining'
+    authority.write([caller('alice', A), worker('w1', W)])
+    assert authority.reload()
+    resumed = client.request('worker/claim', {'boot': 'b1'})['assignment']
+    assert resumed['job_id'] == second['id'] and resumed['boot'] == 'b1'
+
+
 @pytest.mark.parametrize('label, content', [
     ('zero principals', json.dumps(dict(principals=[]))),
     ('duplicate tokens', json.dumps(dict(principals=[caller('alice', A), caller('bob', A)]))),
@@ -138,6 +171,8 @@ def test_token_rotation_swaps_credentials(authority):
     ('worker without host', json.dumps(dict(principals=[dict(id='w', token=W, role='worker', worker='w')]))),
     ('caller without handlers', json.dumps(dict(principals=[dict(id='x', token=B, role='caller')]))),
     ('unknown field', json.dumps(dict(principals=[caller('alice', A, bogus=1)]))),
+    ('nonboolean drain', json.dumps(dict(principals=[caller('alice', A), dict(worker('w1', W), claim_enabled=0)]))),
+    ('caller drain', json.dumps(dict(principals=[caller('alice', A, claim_enabled=False), worker('w1', W)]))),
     ('no principals key', json.dumps({})),
     ('role changed', json.dumps(dict(principals=[worker('alice', A)]))),
     ('worker rehosted', json.dumps(dict(principals=[caller('alice', A), worker('w1', W, 'other')]))),

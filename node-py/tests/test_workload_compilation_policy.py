@@ -1,5 +1,6 @@
 """Disposable authenticated authority with real SQLite and policy files."""
 import hashlib
+from dataclasses import replace
 from io import BytesIO
 import json
 from threading import Thread
@@ -40,6 +41,7 @@ def authority(tmp_path, request):
     # Fault injection changes the real authority's reply after authenticating
     # and validating its real SQLite attempt; no emulated grant store is used.
     clients['caller'].fixture_store = store
+    clients['caller'].fixture_server = server
     data = b'compilation source fixture'
     digest = hashlib.sha256(data).hexdigest()
     server.blobs.put('caller', digest, len(data), BytesIO(data))
@@ -115,6 +117,21 @@ def test_aliases_charge_one_physical_budget(authority):
     submit('second')
     assert claim(clients, 'builder') is not None
     assert claim(clients, 'builder-alias') is None
+
+
+def test_draining_builder_keeps_live_compilation_verification(authority):
+    clients, submit, register, *_ = authority
+    register('builder')
+    submit('build')
+    assignment = claim(clients, 'builder')
+    server = clients['caller'].fixture_server
+    server.replace_principals([replace(p, claim_enabled=False) if p.id == 'builder' else p
+                               for p in server.principals])
+    assert clients['builder'].request('worker/claim', {'boot': 'boot'}) == {
+        'assignment': None, 'reason': 'worker_draining'}
+    assert verify(clients, 'builder', assignment)['policy_revision'] == 'revision-1'
+    assert clients['builder'].request('worker/heartbeat', dict(boot='boot',
+        attempt_id=assignment['attempt_id'], fence=assignment['fence']))['lease_remaining'] > 0
 
 
 def test_forbidden_ui_worker_is_not_a_retry_alternative(authority):
