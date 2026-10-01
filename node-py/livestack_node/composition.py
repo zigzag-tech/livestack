@@ -395,6 +395,51 @@ def predict_memory(state: CompositionState, c: Composition, *,
         assumptions=tuple(sorted(assumptions)), graphs_delta=int(gr - gr0))
 
 
+def service_rates(state: CompositionState, c: Composition) -> Tuple[float, float]:
+    """(prefill tok/s, decode tok/s per sequence) fitted for this base from the
+    engine's own records (`replay_validate --fit-state`), or (0, 0): the
+    replay then uses one blended rate, which ignores that prompt throughput is
+    shared and over- or under-states load (see
+    `_plans/composition-replay-validation.md`)."""
+    best, at = (0.0, 0.0), -1.0
+    for hh, m in state.measured.items():
+        k = state.measured_keys.get(hh)
+        if (isinstance(m, MeasuredCost) and k is not None and k.base == c.base
+                and m.prefill_tok_s > 0 and m.decode_tok_s > 0 and m.measured_at > at):
+            best, at = (m.prefill_tok_s, m.decode_tok_s), m.measured_at
+    return best
+
+
+def kv_paging(state: CompositionState, c: Composition) -> Tuple[int, float]:
+    """(tokens per KV page, state pages per sequence) for this base and KV dtype,
+    from measurements: the block size the engine printed for that dtype, and
+    the per-sequence state the engine's own stats lines were fitted to. Either
+    missing means (0, 0.0): the replay falls back to token accounting, which
+    on a hybrid model undercounts the pool ~5x (see
+    `_plans/composition-replay-validation.md`). The caller labels that."""
+    block = state_pages = 0
+    best_at = -1.0
+    for hh, m in state.measured.items():
+        k = state.measured_keys.get(hh)
+        if not isinstance(m, MeasuredCost) or k is None or k.base != c.base:
+            continue
+        if m.state_pages_per_seq > 0:
+            state_pages = max(state_pages, m.state_pages_per_seq)
+        if (k.kv_dtype or "auto") == (c.kv_dtype or "auto") and m.block_size > 0 \
+                and m.measured_at > best_at:
+            block, best_at = m.block_size, m.measured_at
+    if block <= 0 or state_pages <= 0:
+        if state_pages > 0:
+            # The base IS paged (its state was fitted) but this KV dtype's
+            # block size was never measured. Token accounting here would price
+            # this candidate ~5x too cheap against a paged live composition:
+            # on 2026-09-30 that made a bf16 candidate look queue-free and the
+            # composer recommend it. An unmeasured term is unknown, never 0.
+            raise CostUnknown(f"no_measured_basis:kv_block:{c.kv_dtype or 'auto'}")
+        return 0, 0.0
+    return block, float(state_pages)
+
+
 # --- feasibility -------------------------------------------------------------------
 
 def feasible(state: CompositionState, c: Composition, *,
@@ -494,6 +539,10 @@ class CostBreakdown:
     operating_worst: float
     total: float                    # operating + change_cost
     total_worst: float
+    # Per device: "pages:<block>x<state>" or "tokens" (no measured paging facts:
+    # queueing on a hybrid engine is then undercounted). Named so a reader of
+    # the record knows which model priced it.
+    kv_accounting: Tuple[str, ...] = ()
 
     def to_json(self) -> dict:
         r = lambda x: round(x, 6)
@@ -504,7 +553,7 @@ class CostBreakdown:
                 "rate_basis": self.rate_basis, "self_traffic": self.self_traffic,
                 "windows": self.windows, "operating": r(self.operating),
                 "operating_worst": r(self.operating_worst), "total": r(self.total),
-                "total_worst": r(self.total_worst)}
+                "total_worst": r(self.total_worst), "kv_accounting": list(self.kv_accounting)}
 
 
 def _route(state: CompositionState, assignment: Mapping[str, Composition],
@@ -559,10 +608,14 @@ def cost(state: CompositionState, assignment: Mapping[str, Composition], weights
                 if rate is None:
                     raise CostUnknown(f"no_service_rate:{c.base}")
                 rates[c.base] = rate
+            pre, dec = service_rates(state, c)
             jobs = rp.jobs_from_records(routed[dev], rates[c.base],
-                                        counted=lambda r: not is_self_traffic(r))
+                                        counted=lambda r: not is_self_traffic(r),
+                                        prefill_tok_s=pre, decode_tok_s=dec)
+            block, spages = kv_paging(state, c)
             res = rp.replay(jobs, kv_tokens=preds[dev].kv_tokens, max_num_seqs=c.max_num_seqs,
-                            max_loras=c.max_loras)
+                            max_loras=c.max_loras, block_size=block, state_pages=spages,
+                            prefill_tok_s=pre)
             q += res.total_queue_s
             swaps += res.swaps
         return q, swaps, float(unserved)
@@ -602,7 +655,12 @@ def cost(state: CompositionState, assignment: Mapping[str, Composition], weights
         unserved=mean(2), change_cost=change, restart_requests=restart_reqs,
         new_flags=tuple(new_flags), rate=rate_total, rate_basis=basis, self_traffic=self_n,
         windows=len(per), operating=sum(op) / len(op), operating_worst=max(op),
-        total=sum(op) / len(op) + change, total_worst=max(op) + change)
+        total=sum(op) / len(op) + change, total_worst=max(op) + change,
+        kv_accounting=tuple(f"{dev}:" + (f"pages:{b}x{sp:g}" if b else "tokens")
+                            + (f",service:{pr:.0f}/{de:.1f}" if pr else ",service:blended")
+                            for dev in sorted(assignment)
+                            for b, sp in [kv_paging(state, assignment[dev])]
+                            for pr, de in [service_rates(state, assignment[dev])]))
 
 
 # --- deciders -----------------------------------------------------------------------

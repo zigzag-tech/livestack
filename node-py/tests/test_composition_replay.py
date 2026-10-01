@@ -136,16 +136,44 @@ def test_model_reproduces_waiting_below_90pct_kv_seen_in_journal():
     assert r.min_kv_usage_when_waiting < 0.90
 
 
-@pytest.mark.skip(reason=(
-    "KNOWN MODEL GAP, measured: `python -m livestack_node.replay_validate` on the "
-    "2026-09-30 15:51-20:26 engine lifetime (1,455 samples, 6,254 records) gives "
-    "waiting recall 0/391 and KV usage 0.05 modelled vs 0.26 actual. vLLM charges "
-    "~4,500 KV tokens per running SEQUENCE (784-token blocks plus fixed linear-"
-    "attention state) against a 650-token median request. See "
-    "_plans/composition-replay-validation.md. Un-skip with a recorded tolerance once "
-    "the per-sequence cost is modelled."))
-def test_replay_matches_journal_end_to_end():
-    raise AssertionError("unreachable until the per-sequence KV cost is modelled")
+def _validation_window():
+    import gzip
+    p = Path(__file__).parent / "fixtures" / "composition" / "replay-llm_general-2026-09-30.json.gz"
+    with gzip.open(p, "rt") as fh:
+        fx = json.load(fh)
+    t0 = fx["t0"]
+    samples = [{"t": t0 + t, "running": r, "waiting": w, "kv": kv} for t, r, w, kv in fx["samples"]]
+    names = {0: None, 1: "chips-settinghead-v1", 2: "jemm"}
+    records = [{"ts": t0 + t, "prompt_tokens": p, "completion_tokens": c, "elapsed_ms": e,
+                "adapter": names[a], "n": n, "outcome": "ok"} for t, p, c, e, a, n in fx["records"]]
+    return samples, records
+
+
+def test_replay_matches_the_engine_on_a_real_lifetime():
+    """The model against 4.6 h of vLLM's own stats lines (1,455 samples, 6,254
+    requests; see _plans/composition-replay-validation.md). Tolerances are the
+    measured agreement of the paged, two-rate model, rounded down: a change
+    that makes the model worse fails here."""
+    from livestack_node.replay_validate import compare
+    samples, records = _validation_window()
+    new = compare(samples, records, kv_tokens=37981, max_num_seqs=32, max_loras=2,
+                  block_size=1568, state_pages=1.791, prefill_tok_s=711.3, decode_tok_s=23.93)
+    run, kv, w = new["running"], new["kv_usage"], new["waiting_any"]
+    assert abs(run["mean_model"] - run["mean_actual"]) <= 0.15 * run["mean_actual"]
+    assert abs(kv["mean_model"] - kv["mean_actual"]) <= 0.10 * kv["mean_actual"]
+    assert run["max_model"] <= 8                    # the pool holds ~8 short sequences
+    assert w["recall"] >= 0.30 and w["precision"] >= 0.45
+
+
+def test_negative_control_the_token_model_misses_all_queueing():
+    """The pre-2026-09-30 model on the same window: it charges ~750 tokens a
+    request where the engine holds ~3 pages of 1,568, so its pool never fills
+    and it never predicts a single waiting sample."""
+    from livestack_node.replay_validate import compare
+    samples, records = _validation_window()
+    old = compare(samples, records, kv_tokens=37981, max_num_seqs=32, max_loras=2)
+    assert old["waiting_any"]["tp"] == 0
+    assert old["kv_usage"]["mean_model"] < 0.25 * old["kv_usage"]["mean_actual"]
 
 
 def test_an_n_sample_request_takes_n_batch_slots():
@@ -172,3 +200,39 @@ def test_timeline_samples_the_state_before_each_sample_time():
             rp.Job(ts=1.0, tokens=600, service_s=10.0)]          # waits: pool is 1000
     r = rp.replay(jobs, kv_tokens=1000, max_num_seqs=8, max_loras=0, sample_at=[0.5, 5.0, 10.5, 25.0])
     assert r.timeline == ((0.5, 1, 0, 600), (5.0, 1, 1, 600), (10.5, 1, 0, 600), (25.0, 0, 0, 0))
+
+
+def test_paged_need_is_whole_pages_plus_per_sequence_state():
+    j = rp.Job(ts=0.0, tokens=750, service_s=1.0, prompt=700, completion=50)
+    assert rp.kv_need(j, 0, 0.0) == 750                         # token accounting
+    assert rp.kv_need(j, 1568, 1.8) == 3 * 1568                 # ceil(1 + 1.8) pages
+    big = rp.Job(ts=0.0, tokens=2000, service_s=1.0, prompt=1900, completion=100)
+    assert rp.kv_need(big, 1568, 1.8) == 4 * 1568               # ceil(2 + 1.8)
+
+
+def test_n_samples_become_n_jobs_and_only_the_first_pays_the_prompt():
+    recs = [{"ts": 5.0, "prompt_tokens": 711, "completion_tokens": 240, "elapsed_ms": 1.0, "n": 12}]
+    jobs = rp.jobs_from_records(recs, 1.0, prefill_tok_s=711.0, decode_tok_s=20.0)
+    assert len(jobs) == 12 and all(j.seqs == 1 and j.ts == 5.0 for j in jobs)
+    assert [j.prefill_tokens for j in jobs] == [711] + [0] * 11
+    assert jobs[0].decode_s == 1.0                              # 20 tokens / 20 tok/s
+
+
+def test_siblings_wait_for_the_shared_prompt_and_prefill_is_one_server():
+    a = rp.Job(ts=0.0, tokens=100, service_s=0.0, prefill_tokens=1000, decode_s=1.0)
+    sib = rp.Job(ts=0.0, tokens=100, service_s=0.0, prefill_tokens=0, decode_s=1.0)
+    other = rp.Job(ts=0.0, tokens=100, service_s=0.0, prefill_tokens=1000, decode_s=1.0)
+    r = rp.replay([a, sib, other], kv_tokens=10_000, max_num_seqs=8, max_loras=0,
+                  prefill_tok_s=1000.0, sample_at=[1.5, 2.5, 3.5])
+    # a: prefill 0-1, decode 1-2. sib: waits for a's prompt, decodes 1-2.
+    # other: prefill queued behind a, 1-2, decodes 2-3.
+    assert [run for _, run, _, _ in r.timeline] == [3, 1, 0]
+
+
+def test_two_rate_fit_recovers_known_rates():
+    recs = [{"prompt_tokens": p, "completion_tokens": c, "n": 1,
+             "elapsed_ms": 1000.0 * (p / 700.0 + c / 25.0)}
+            for p in range(100, 3000, 97) for c in (5, 20, 60)]
+    pre, dec = rp.fit_two_rate(recs)
+    assert abs(pre - 700.0) < 1.0 and abs(dec - 25.0) < 0.1
+    assert rp.fit_two_rate(recs[:10]) is None                   # too few to fit

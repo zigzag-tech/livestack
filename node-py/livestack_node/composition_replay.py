@@ -79,6 +79,88 @@ class Job:
     # metrics); the hub's chip generation sends n=12. `tokens` already holds
     # every sample's completion, because `usage` sums them.
     seqs: int = 1
+    # The split of `tokens`, when the record had it; paged accounting needs it
+    # (the prompt is held once, each sample's completion per sequence).
+    prompt: Optional[int] = None
+    completion: Optional[int] = None
+    # Two-rate service (when the engine's rates are measured): prompt tokens go
+    # through ONE shared prefill server, then the sequence decodes on its own.
+    # `service_s` is then unused. None = single-rate `service_s`.
+    prefill_tokens: Optional[int] = None
+    decode_s: Optional[float] = None
+
+
+def _jobs_two_rate(records: Sequence[Mapping], counted: Callable[[Mapping], bool],
+                   prefill_tok_s: float, decode_tok_s: float) -> List["Job"]:
+    known_p = sorted(int(r["prompt_tokens"]) for r in records if r.get("prompt_tokens") is not None)
+    known_c = sorted(int(r["completion_tokens"]) for r in records
+                     if r.get("completion_tokens") is not None)
+    mp = known_p[len(known_p) // 2] if known_p else None
+    mc = known_c[len(known_c) // 2] if known_c else None
+    out = []
+    for r in records:
+        p, c = r.get("prompt_tokens"), r.get("completion_tokens")
+        imputed = p is None or c is None
+        if imputed:
+            if mp is None or mc is None:
+                continue
+            p, c = mp, mc
+        n = max(1, int(r.get("n") or 1))
+        per = int(math.ceil(int(c) / n))
+        for k in range(n):
+            out.append(Job(ts=float(r["ts"]), tokens=int(p) + per, service_s=0.0,
+                           adapter=r.get("adapter"), counted=counted(r), imputed=imputed,
+                           seqs=1, prompt=int(p), completion=per,
+                           prefill_tokens=int(p) if k == 0 else 0,
+                           decode_s=per / decode_tok_s))
+    return out
+
+
+def fit_two_rate(records: Sequence[Mapping]) -> Optional[Tuple[float, float]]:
+    """(prefill tok/s, decode tok/s per sequence) by least squares on
+    elapsed = prompt/P + (completion/n)/D. Pass only records from moments the
+    engine had nothing waiting, or queueing is fitted as work. None when the
+    records cannot support a fit (too few, or a non-positive rate)."""
+    rows = [(float(r["prompt_tokens"]), float(r["completion_tokens"]) / max(1, int(r.get("n") or 1)),
+             float(r["elapsed_ms"]) / 1000.0) for r in records
+            if r.get("prompt_tokens") is not None and r.get("completion_tokens") is not None
+            and r.get("elapsed_ms") is not None]
+    if len(rows) < 50:
+        return None
+    s11 = sum(a * a for a, _, _ in rows)
+    s22 = sum(b * b for _, b, _ in rows)
+    s12 = sum(a * b for a, b, _ in rows)
+    s1y = sum(a * y for a, _, y in rows)
+    s2y = sum(b * y for _, b, y in rows)
+    det = s11 * s22 - s12 * s12
+    if det <= 0:
+        return None
+    a1 = (s1y * s22 - s2y * s12) / det
+    a2 = (s2y * s11 - s1y * s12) / det
+    if a1 <= 0 or a2 <= 0:
+        return None
+    return 1.0 / a1, 1.0 / a2
+
+
+def kv_need(j: "Job", block_size: int, state_pages: float) -> int:
+    """KV tokens a job holds while it runs.
+
+    Token accounting (block_size 0) charges `tokens`. Paged accounting charges
+    whole pages: a hybrid engine gives every SEQUENCE its own linear-attention
+    state pages on top of its attention pages, and rounds attention up to the
+    page. On the 27B with fp8 KV a page is 1,568 tokens and a short request
+    holds about three of them, against ~750 tokens of actual text; that per-
+    sequence floor is what caps the card at ~8 concurrent sequences."""
+    if block_size <= 0:
+        return j.tokens
+    if j.prompt is None or j.completion is None:
+        attn = math.ceil(j.tokens / block_size)
+    elif j.seqs <= 1:
+        attn = math.ceil((j.prompt + j.completion) / block_size)
+    else:
+        per = j.completion / j.seqs
+        attn = math.ceil(j.prompt / block_size) + j.seqs * math.ceil(per / block_size)
+    return int(math.ceil(attn + j.seqs * state_pages)) * block_size
 
 
 @dataclass(frozen=True)
@@ -111,10 +193,19 @@ class ReplayResult:
 
 
 def jobs_from_records(records: Sequence[Mapping], rate_s_per_token: float, *,
-                      counted: Callable[[Mapping], bool] = lambda r: True) -> List[Job]:
+                      counted: Callable[[Mapping], bool] = lambda r: True,
+                      prefill_tok_s: float = 0.0, decode_tok_s: float = 0.0) -> List[Job]:
     """Records -> jobs. Unknown token counts take the median of the known ones;
     if none are known the record cannot be modelled and is dropped (the
-    caller sees it in `n`)."""
+    caller sees it in `n`).
+
+    With measured engine rates (`prefill_tok_s`, `decode_tok_s`), a record of
+    `n` samples becomes `n` single-sequence jobs arriving together, as vLLM
+    schedules them: the first carries the prompt through the shared prefill
+    server, the others reuse it (prefix cache) and only decode. Without them,
+    one job per record at the single blended rate, as before."""
+    if prefill_tok_s > 0 and decode_tok_s > 0:
+        return _jobs_two_rate(records, counted, prefill_tok_s, decode_tok_s)
     known = sorted(t for t in (record_tokens(r) for r in records) if t is not None)
     median = known[len(known) // 2] if known else None
     out = []
@@ -127,22 +218,31 @@ def jobs_from_records(records: Sequence[Mapping], rate_s_per_token: float, *,
             t = median
         out.append(Job(ts=float(r["ts"]), tokens=int(t), service_s=t * rate_s_per_token,
                        adapter=r.get("adapter"), counted=counted(r), imputed=imputed,
-                       seqs=int(r.get("n") or 1)))
+                       seqs=int(r.get("n") or 1),
+                       prompt=None if imputed else int(r["prompt_tokens"]),
+                       completion=None if imputed else int(r["completion_tokens"])))
     return out
 
 
 def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
-           max_loras: int, sample_at: Sequence[float] = ()) -> ReplayResult:
+           max_loras: int, sample_at: Sequence[float] = (), block_size: int = 0,
+           state_pages: float = 0.0, prefill_tok_s: float = 0.0) -> ReplayResult:
     """FCFS event simulation over the KV pool, batch cap and adapter slots.
 
     Adapter slots are LRU among adapters not in use by a running request; a
     base-model request (`adapter=None`) needs no slot. Loading into a free slot
     is not a swap; evicting a resident adapter to load another is."""
+    # Paged: the pool is whole pages, and each job holds `kv_need` tokens.
+    if block_size > 0:
+        kv_tokens = (kv_tokens // block_size) * block_size
+    jobs = [j if (j.tokens == kv_need(j, block_size, state_pages)) else
+            Job(**{**j.__dict__, "tokens": kv_need(j, block_size, state_pages)}) for j in jobs]
     order = sorted(range(len(jobs)), key=lambda i: (jobs[i].ts, i))
     running: list = []                 # heap of (end_ts, seq, job_index)
     waiting: list = []                 # FIFO of job indices
     used = 0
     running_seqs = 0                   # Σ seqs of running jobs (vLLM's "Running: N reqs")
+    prefill_free = -math.inf           # when the shared prefill server is next idle
     slots: dict = {}                   # adapter -> last-use ts (resident adapters)
     in_use: dict = {}                  # adapter -> running count
     delays = [0.0] * len(jobs)
@@ -155,7 +255,7 @@ def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
     seq = 0
 
     def try_admit(now: float) -> None:
-        nonlocal used, swaps, seq, max_running, running_seqs
+        nonlocal used, swaps, seq, max_running, running_seqs, prefill_free
         while waiting:
             j = jobs[waiting[0]]
             if running_seqs + j.seqs > max_num_seqs or used + j.tokens > kv_tokens:
@@ -179,7 +279,20 @@ def replay(jobs: Sequence[Job], *, kv_tokens: int, max_num_seqs: int,
             used += j.tokens
             running_seqs += j.seqs
             delays[i] = now - j.ts
-            heapq.heappush(running, (now + j.service_s, seq, i))
+            if prefill_tok_s > 0 and j.decode_s is not None:
+                # One shared prefill server, FIFO in admission order: the
+                # engine's prompt throughput is a total, not per request.
+                # A sample that reuses a sibling's prompt (prefill_tokens 0)
+                # still cannot decode before that prompt is processed; the
+                # sibling was admitted just ahead of it, so that is when the
+                # prefill server next frees.
+                end = max(now, prefill_free)
+                if j.prefill_tokens:
+                    end += j.prefill_tokens / prefill_tok_s
+                    prefill_free = end
+                heapq.heappush(running, (end + j.decode_s, seq, i))
+            else:
+                heapq.heappush(running, (now + j.service_s, seq, i))
             seq += 1
             max_running = max(max_running, running_seqs)
 
