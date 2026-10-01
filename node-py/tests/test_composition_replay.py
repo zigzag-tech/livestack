@@ -137,12 +137,15 @@ def test_model_reproduces_waiting_below_90pct_kv_seen_in_journal():
 
 
 @pytest.mark.skip(reason=(
-    "MISSING INPUT: per-request demand log (openspec harmony-placement-foundation "
-    "task 3.x). Replaying 7 days of the live composition and matching the journal's "
-    "10-second Running/Waiting samples needs per-request ts/tokens/elapsed; the "
-    "journal fixture alone has only the aggregate shape."))
+    "KNOWN MODEL GAP, measured: `python -m livestack_node.replay_validate` on the "
+    "2026-09-30 15:51-20:26 engine lifetime (1,455 samples, 6,254 records) gives "
+    "waiting recall 0/391 and KV usage 0.05 modelled vs 0.26 actual. vLLM charges "
+    "~4,500 KV tokens per running SEQUENCE (784-token blocks plus fixed linear-"
+    "attention state) against a 650-token median request. See "
+    "_plans/composition-replay-validation.md. Un-skip with a recorded tolerance once "
+    "the per-sequence cost is modelled."))
 def test_replay_matches_journal_end_to_end():
-    raise AssertionError("unreachable until the demand log exists")
+    raise AssertionError("unreachable until the per-sequence KV cost is modelled")
 
 
 def test_an_n_sample_request_takes_n_batch_slots():
@@ -162,3 +165,10 @@ def test_jobs_from_records_carry_n():
             {"ts": 1.0, "prompt_tokens": 90, "completion_tokens": 10, "elapsed_ms": 100.0}]
     jobs = rp.jobs_from_records(recs, rate_s_per_token=0.001)
     assert [j.seqs for j in jobs] == [12, 1]
+
+
+def test_timeline_samples_the_state_before_each_sample_time():
+    jobs = [rp.Job(ts=0.0, tokens=600, service_s=10.0),
+            rp.Job(ts=1.0, tokens=600, service_s=10.0)]          # waits: pool is 1000
+    r = rp.replay(jobs, kv_tokens=1000, max_num_seqs=8, max_loras=0, sample_at=[0.5, 5.0, 10.5, 25.0])
+    assert r.timeline == ((0.5, 1, 0, 600), (5.0, 1, 1, 600), (10.5, 1, 0, 600), (25.0, 0, 0, 0))
