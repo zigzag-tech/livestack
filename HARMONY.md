@@ -762,9 +762,13 @@ the units file. Other modes:
 8. If any check fails, restore the backup.
 
 **Validating the queueing model:** `python -m livestack_node.replay_validate --hours 24`
-compares the replay with vLLM's own stats lines per engine lifetime. As of
-2026-09-30 the model misses all queueing: it does not charge vLLM's fixed
-~4,500-token per-sequence KV cost. See `_plans/composition-replay-validation.md`.
+compares the replay with vLLM's own stats lines per engine lifetime. The model counts
+KV in pages (block from vLLM's startup line, per-sequence state fitted with
+`--fit-state`), runs `n` samples as `n` sequences, and serves prompts through one
+shared prefill server. On 2026-09-30 it matched the engine's mean running (2.04 vs
+2.13) and KV usage (0.263 vs 0.265). Each cost says which accounting priced it
+(`kv_accounting`), and a paged base with an unmeasured block size is unknown. See
+`_plans/composition-replay-validation.md`.
 
 Known limits of v1 (design §8a, §6):
 - Only two measured rows exist today, so per-adapter deltas assume KV dtype does not

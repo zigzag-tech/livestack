@@ -31,6 +31,11 @@ _PATTERNS: Mapping[str, re.Pattern] = {
     "kv_cache_size": re.compile(
         r"GPU KV cache size: (?P<tokens>[\d,]+) tokens, Maximum concurrency for "
         r"(?P<ctx>[\d,]+) tokens per request: (?P<conc>[\d.]+)x"),
+    # Hybrid (attention + linear-attention) models: vLLM sizes the attention
+    # block so one attention page equals one state page, and every page in the
+    # pool is that many tokens. 784 with bf16 KV and 1568 with fp8 KV on the
+    # Qwen3.8 27B. Absent on plain-attention models (block stays small).
+    "block_size": re.compile(r"Setting attention block size to (?P<tokens>\d+) tokens"),
     "cuda_graphs": re.compile(r"Graph capturing finished in [\d.]+ secs?, took (?P<gib>[\d.]+) GiB"),
     "actual_usage": re.compile(
         r"Desired GPU memory utilization is \((?P<frac>[\d.]+), (?P<budget>[\d.]+) GiB\)\. "
@@ -60,6 +65,16 @@ class MeasuredCost:
     composition_hash: str = ""
     measured_at: float = 0.0
     source: str = "vllm-startup"
+    # Tokens per KV page (0 = the engine did not say: not a hybrid model).
+    block_size: int = 0
+    # State pages each running SEQUENCE holds beyond its attention pages,
+    # FITTED from the engine's own stats lines (`replay_validate --fit-state`),
+    # not from the startup log. 0 = not fitted yet.
+    state_pages_per_seq: float = 0.0
+    # Engine service rates, FITTED the same way: total prompt (prefill)
+    # throughput, and decode tokens/s per sequence. 0 = not fitted.
+    prefill_tok_s: float = 0.0
+    decode_tok_s: float = 0.0
 
     @property
     def footprint(self) -> int:
@@ -150,6 +165,7 @@ def _build(h: Mapping[str, Mapping[str, str]], *, composition_hash: str, now: fl
         engine_version=version,
         composition_hash=composition_hash,
         measured_at=now,
+        block_size=int((h.get("block_size") or {}).get("tokens") or 0),
     )
 
 
