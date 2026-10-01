@@ -61,6 +61,8 @@ resumes claims without changing its boot or enrollment. Only worker principals
 can disable claims; malformed/non-boolean settings refuse configuration reload.
 The control adds one boolean per existing bounded principal, no retained history
 or polling service. Real HTTP/SQLite controls must prove handoff and resume.
+Placement also intersects this control: a different worker's claim runs fleet-wide
+placement and must not assign a drained worker or count it as a retry alternative.
 
 ## Verification
 

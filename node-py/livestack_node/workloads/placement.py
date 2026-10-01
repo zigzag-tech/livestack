@@ -42,6 +42,8 @@ def _avoided(db, row, now):
 
 
 def place(db, now, limits, principals=None, compilation_policy=None):
+    draining = {p.worker for p in (principals or {}).values()
+                if getattr(p, 'role', None) == 'worker' and not p.claim_enabled}
     workers = db.execute("SELECT * FROM workers WHERE ready=1 AND seen>? ORDER BY id",
                          (now-limits.fresh_seconds,)).fetchall()
     reports = {w["id"]: json.loads(w["report"]) for w in workers}
@@ -160,13 +162,16 @@ def place(db, now, limits, principals=None, compilation_policy=None):
             # still counts, so the job waits for it. Only a roster with no
             # other worker able to run the job at all lets it go back.
             alternative = any(
-                w["id"] not in avoided and spec["handler"] in r["handlers"]
+                w["id"] not in avoided and w["id"] not in draining and spec["handler"] in r["handlers"]
                 and all(r["labels"].get(k) == v for k, v in spec["selector"].items())
                 and all(r["capacity"].get(k, 0) >= n for k, n in admit.items())
                 and _compilation_refusal(compilation_policy, w, spec, now) is None
                 for w, r in fresh)
         for w in compatible:
             report = reports[w["id"]]
+            if w['id'] in draining:
+                rejected.append({'worker': w['id'], 'reason': 'worker_draining'})
+                continue
             reason = _compilation_refusal(compilation_policy, w, spec, now)
             if reason:
                 rejected.append({"worker": w['id'], "reason": reason})
