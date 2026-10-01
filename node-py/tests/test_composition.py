@@ -3,6 +3,7 @@
 The measured rows are the verbatim vLLM 0.28.0 startup logs in
 `fixtures/vllm_startup/`, parsed by the production parser — the calibration
 is against what the engine said, not against numbers retyped here."""
+import pytest
 from dataclasses import replace
 from pathlib import Path
 
@@ -169,3 +170,38 @@ def test_weights_artifact_loads_with_a_content_hash():
     w = cm.load_weights(WEIGHTS)
     assert w.version == 1 and w.memory_margin == 0.10 and w.restart_downtime_s == 145
     assert w.hash.startswith("sha256:") and len(w.hash) == 71
+
+
+
+def test_queueing_without_paging_facts_is_labelled_tokens():
+    w = cm.load_weights(WEIGHTS)
+    st = calibration_state(trace=trace(n=20))
+    c = cm.cost(st, dict(st.live), w)
+    assert c.kv_accounting and all(x.endswith(":tokens,service:blended") for x in c.kv_accounting)
+    # Give every measured row paging facts and fitted rates: the label says so.
+    paged = {h: MeasuredCost(**{**m.__dict__, "block_size": 1568, "state_pages_per_seq": 1.8,
+                                "prefill_tok_s": 711.0, "decode_tok_s": 24.0})
+             for h, m in st.measured.items()}
+    st2 = replace(st, measured=paged)
+    c2 = cm.cost(st2, dict(st2.live), w)
+    assert all("pages:1568x1.8" in x and "service:711/24.0" in x for x in c2.kv_accounting)
+
+
+def test_a_paged_base_with_an_unmeasured_dtype_block_is_unknown_not_cheap():
+    """2026-09-30 dry run: fp8 rows carried block 1568, the bf16 row carried no
+    block, and the bf16 candidate was priced with token accounting, queue-free,
+    against a paged live composition. It must be unknown instead."""
+    w = cm.load_weights(WEIGHTS)
+    st = calibration_state(trace=trace(n=20))
+    paged = {}
+    for h, m in st.measured.items():
+        k = st.measured_keys[h]
+        extra = {"state_pages_per_seq": 1.8, "prefill_tok_s": 711.0, "decode_tok_s": 24.0}
+        if k.kv_dtype == "fp8":
+            extra["block_size"] = 1568                  # only fp8 measured its block
+        paged[h] = MeasuredCost(**{**m.__dict__, **extra})
+    st2 = replace(st, measured=paged)
+    bf16 = next(c for c in st2.live.values())
+    bf16 = replace(bf16, kv_dtype="auto")
+    with pytest.raises(cm.CostUnknown, match="kv_block:auto"):
+        cm.cost(st2, {bf16.device: bf16}, w)

@@ -74,3 +74,11 @@ def test_key_from_launch_reads_the_flags_harmony_passes():
     assert k.kv_dtype == "fp8" and k.max_model_len == 24576 and k.max_num_seqs == 32
     assert k.adapters == (("chips", 16), ("jemm", 16))
     assert key_from_launch("q27", [], {}).kv_dtype == "auto"
+
+
+def test_block_size_is_read_when_the_engine_prints_it():
+    lines = _lines("v0.28.0-llm_general-fp8.log") + [
+        "(EngineCore pid=4098141) INFO 09-30 23:01:04 [interface.py:911] Setting attention block "
+        "size to 1568 tokens to ensure that attention page size is >= mamba page size."]
+    assert parse(lines).block_size == 1568
+    assert parse(_lines("v0.28.0-llm_general-fp8.log")).block_size == 0   # not printed: unknown

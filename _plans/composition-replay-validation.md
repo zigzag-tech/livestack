@@ -1,6 +1,6 @@
 # Composition replay vs the engine — validation (2026-09-30)
 
-**Status:** tool built, model gap measured, model fix not yet done.
+**Status:** model fixed and validated on one engine lifetime (2026-09-30); provisional fit, refit on records with `n` scheduled.
 
 `python -m livestack_node.replay_validate [--hours N]` replays the demand log of
 each engine lifetime through `composition_replay` for the live composition. It
@@ -46,18 +46,65 @@ holds whole 784-token blocks plus its linear-attention (GDN) state pages, about
 5–6 blocks in all for a short request. It also sets the ceiling:
 37,981 / ~4,600 ≈ 8 concurrent sequences, which is the observed maximum.
 
-## Fix (next)
+## Fix (done 2026-09-30) and its validation
 
-- **Charge each job** `ceil(prompt/block)·block + seqs · (ceil(completion_per_seq/block)·block + state)`,
-  with `block` parsed from the startup line.
-- **Fit `state`** per (base, KV dtype) from the engine's own samples, as above, and
-  store it with the measured cost.
-- **Then re-run this validation** with records that carry `n` (since 2026-09-30
-  20:26 EDT) and un-skip `test_replay_matches_journal_end_to_end` with the measured
-  tolerance.
-- **Prefill-bound queueing:** the 66 samples below 70% KV may be prefill
-  throughput (about 690 prompt tokens/s observed) or batch slots taken by `n=12`.
-  Re-check after the fix.
+The model, `composition_replay`, now has four parts:
+
+1. **Paged KV.** Every sequence holds `ceil(tokens/block) + state` pages. `block` is
+   read from vLLM's startup line: 784 with bf16 KV and 1,568 with fp8 on this base.
+   `state` is fitted from the engine's own stats lines (`replay_validate
+   --fit-state`); here it is 1.79 pages.
+2. **Samples are sequences.** A request with `n` samples is `n` single-sequence
+   jobs (vLLM schedules them separately). The first sample carries the prompt; the
+   others reuse it.
+3. **Two-rate service.** Prompt tokens go through **one shared prefill server**
+   (the engine's prompt throughput is a total), and then each sequence decodes on
+   its own. The rates are fitted by least squares on records from moments when
+   nothing was waiting: 711 prefill tok/s and 23.9 decode tok/s per sequence, which
+   match vLLM's own throughput lines.
+4. **Siblings wait for their shared prompt.** A sample that reuses a sibling's
+   prompt cannot decode before that prompt has been processed.
+
+Same lifetime as the baseline, with chip `n=12` inferred from
+`completion_tokens > 64` (those records predate the `n` field):
+
+| | engine | old model | new model |
+|---|---|---|---|
+| mean running sequences | 2.13 | 2.95 | 2.04 |
+| mean KV usage | 0.265 | 0.049 | 0.263 |
+| waiting recall / precision | — | 0 / — | 0.34 / 0.54 |
+
+The averages match. Second-by-second waiting agreement is moderate, as expected
+from a deterministic replay of jittery arrivals. Pinned by
+`test_replay_matches_the_engine_on_a_real_lifetime` (fixture
+`tests/fixtures/composition/replay-llm_general-2026-09-30.json.gz`); the old model
+is the negative control.
+
+**Provisional fit.** The values stored on the fp8 measured row
+(`state_pages_per_seq` 1.791, `prefill_tok_s` 711.3, `decode_tok_s` 23.93) came
+from the inferred-`n` window and say so in `state_fit.provisional`. Fitting the
+same window without inferring `n` gives a biased 37.8 decode tok/s, because a
+12-sample call reads as one sequence with 12x the output. A one-off refit on a day
+of records that carry `n` is scheduled for 2026-10-01 23:30 EDT:
+`livestack-replay-refit.timer`, report at
+`~/.cache/livestack/replay-refit-2026-10-01.json`.
+
+**The composer must not mix accounting models.** In the first dry run, the bf16
+candidate had no measured block size, so it was priced with token accounting
+(queue-free) against the paged fp8 live composition, and the composer recommended
+it. Now a paged base with an unmeasured block size for a KV dtype is
+`unknown:...:kv_block:<dtype>`. The bf16 row's block (784) was backfilled from
+that start's own journal line. Every cost now records `kv_accounting`
+(`pages:<block>x<state>,service:<P>/<D>`, or `tokens,service:blended`).
+
+**fp8 KV costs concurrency on this hybrid model.** Pages are sized to the fixed
+linear-attention state, so fp8 doubles the block (784 → 1,568 tokens) rather than
+doubling capacity. The pool is ~24 pages with fp8 against ~38 with bf16, at about
+3 pages per short sequence. Replayed on the same traffic, bf16 chips-only queues
+677 request-seconds per 6 h window against 1,486 for the live fp8 chips+jemm. The
+composer still keeps live (gain 809 < change cost 991). This assumes bf16 holds
+the same ~1.8 state pages per sequence, which follows from page bytes being equal
+across dtypes but has not been measured on bf16.
 
 ## Also found: llm_general was down 2026-09-30 05:29–15:42 EDT
 
