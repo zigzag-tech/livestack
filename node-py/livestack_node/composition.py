@@ -417,17 +417,26 @@ def kv_paging(state: CompositionState, c: Composition) -> Tuple[int, float]:
     missing means (0, 0.0): the replay falls back to token accounting, which
     on a hybrid model undercounts the pool ~5x (see
     `_plans/composition-replay-validation.md`). The caller labels that."""
+    # State pages are PER KV DTYPE: measured 2026-10-01 with identical bursts,
+    # 1.94 pages/sequence with fp8 and 2.22 with bf16 on the same base. A
+    # dtype without its own measurement borrows the base's largest (the
+    # conservative direction: more state, less concurrency).
     block = state_pages = 0
+    same_dtype_state = 0.0
     best_at = -1.0
     for hh, m in state.measured.items():
         k = state.measured_keys.get(hh)
         if not isinstance(m, MeasuredCost) or k is None or k.base != c.base:
             continue
+        same = (k.kv_dtype or "auto") == (c.kv_dtype or "auto")
         if m.state_pages_per_seq > 0:
             state_pages = max(state_pages, m.state_pages_per_seq)
-        if (k.kv_dtype or "auto") == (c.kv_dtype or "auto") and m.block_size > 0 \
-                and m.measured_at > best_at:
+            if same:
+                same_dtype_state = m.state_pages_per_seq
+        if same and m.block_size > 0 and m.measured_at > best_at:
             block, best_at = m.block_size, m.measured_at
+    if same_dtype_state > 0:
+        state_pages = same_dtype_state
     if block <= 0 or state_pages <= 0:
         if state_pages > 0:
             # The base IS paged (its state was fitted) but this KV dtype's

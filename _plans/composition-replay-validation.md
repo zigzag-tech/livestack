@@ -97,14 +97,34 @@ it. Now a paged base with an unmeasured block size for a KV dtype is
 that start's own journal line. Every cost now records `kv_accounting`
 (`pages:<block>x<state>,service:<P>/<D>`, or `tokens,service:blended`).
 
-**fp8 KV costs concurrency on this hybrid model.** Pages are sized to the fixed
-linear-attention state, so fp8 doubles the block (784 → 1,568 tokens) rather than
-doubling capacity. The pool is ~24 pages with fp8 against ~38 with bf16, at about
-3 pages per short sequence. Replayed on the same traffic, bf16 chips-only queues
-677 request-seconds per 6 h window against 1,486 for the live fp8 chips+jemm. The
-composer still keeps live (gain 809 < change cost 991). This assumes bf16 holds
-the same ~1.8 state pages per sequence, which follows from page bytes being equal
-across dtypes but has not been measured on bf16.
+**fp8 vs bf16, measured (2026-10-01).** The paragraph that stood here assumed bf16
+holds the same ~1.8 state pages per sequence as fp8, and concluded bf16 would queue
+much less. That was wrong. Identical controlled bursts (`scripts/measure_kv_pages.py`:
+K = 1..8 requests, 662-token prompt + 300 forced tokens, exact-K readings of
+`vllm:kv_cache_usage_perc` only), first on a temporary bf16 chips-only engine
+(00:22–01:07 EDT, two ~3-minute outages) and then on fp8:
+
+| KV dtype | block | pages per sequence | attention pages | state pages | sequences that fit |
+|---|---|---|---|---|---|
+| fp8 | 1,568 | 2.94 (linear in K, intercept 0) | 1 | **1.94** | ~8.2 |
+| bf16 | 784 | 4.22 (linear in K) | 2 | **2.22** | ~9.0 |
+
+The fp8 burst agrees with the traffic fit (1.79) within 8%. bf16 holds about 15% more
+state pages, so it fits only ~10% more short sequences, not the 38-vs-24 pages the
+raw page counts suggest. State pages are now stored and used **per KV dtype**
+(`kv_paging` prefers the candidate's own dtype). Both rows carry the burst values
+(`state_burst`) so the dtypes are compared by the same method. Replayed on the same
+traffic with these values, bf16 chips-only queues *more* than fp8 chips-only (2,690 vs
+2,171 request-seconds per 6 h window).
+
+**What the composer says now:** drop `jemm` (fp8, chips only), gain 999 vs change cost
+971: a thin margin. `jemm` is unused by production traffic, and its adapter slot takes
+~1 GiB of KV pool. Proposal only; applying it is the owner's call.
+
+**Fitted values survive restarts.** A harmony-llm restart re-measured the engine and
+replaced the whole measured row, wiping the fitted state pages and service rates (the
+composer silently fell back to `service:blended`). `_record_measurement` now carries
+the fitted fields (`_FITTED_KEYS`) forward.
 
 ## Also found: llm_general was down 2026-09-30 05:29–15:42 EDT
 
