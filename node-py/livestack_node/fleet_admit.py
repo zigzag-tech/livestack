@@ -42,9 +42,20 @@ SLA_BY_NAME = {"interactive": Sla.INTERACTIVE, "normal": Sla.NORMAL, "batch": Sl
 DEFAULT_CONCURRENCY = 4.0
 
 
+def _holds(inventory, key: str, wanted) -> bool:
+    """Whether a node's announced inventory holds what a job requires."""
+    have = (inventory or {}).get(key)
+    if have is None:
+        return False
+    if isinstance(have, (list, tuple, set, dict)):
+        return wanted in have
+    return have == wanted
+
+
 def targets_from_view(view: dict, kind: str, vantage: str = "direct",
                       concurrency: float = DEFAULT_CONCURRENCY,
-                      owner: str = "") -> tuple:
+                      owner: str = "",
+                      requires: Optional[Mapping[str, Any]] = None) -> tuple:
     """Every fleet node that could serve `kind`, as scheduler `Target`s, plus the
     rows for the ones that could not and why.
 
@@ -83,6 +94,21 @@ def targets_from_view(view: dict, kind: str, vantage: str = "direct",
                 rejected.append(Candidate(outcome="filtered",
                                           reason=f"filtered: does not host {kind}",
                                           **common))
+                continue
+            # What the job needs the node to HAVE, checked against what the
+            # node says it has (`inventory`, e.g. the voice ids a TTS holds).
+            # /fleet/admit used to ignore `requires`, which only the host-level
+            # /admit read: while one NA TTS held every voice it did not matter;
+            # when a second joined without the English voice, attune's TTS was
+            # placed there and 404'd (2026-10-02). A node that does not list
+            # the key cannot show it holds it, so it is filtered too.
+            missing = [f"{k}={v}" for k, v in (requires or {}).items()
+                       if not _holds(node.get("inventory"), k, v)]
+            if missing:
+                rejected.append(Candidate(
+                    outcome="filtered",
+                    reason=f"filtered: lacks {', '.join(missing)}",
+                    **common))
                 continue
             scope = node.get("scope")
             if not _scope_admits(scope, owner):
@@ -166,6 +192,7 @@ def _considered_reason(common: dict, free: float, concurrency: float,
 
 def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer",
           selector: Optional[Mapping[str, str]] = None,
+          requires: Optional[Mapping[str, Any]] = None,
           locality_host: Optional[str] = None,
           vantage: str = "direct",
           estimate_s: float = 60.0,
@@ -184,7 +211,8 @@ def admit(view: dict, *, kind: str, sla: str = "normal", owner: str = "consumer"
     choice) for the caller to record; it is not part of any response."""
     now = time.time() if now is None else now
     targets, rows = targets_from_view(view, kind, vantage=vantage,
-                                      concurrency=concurrency, owner=owner)
+                                      concurrency=concurrency, owner=owner,
+                                      requires=requires)
     job = Job(
         id=f"{kind}-{int(now * 1000)}", kind=kind, owner=owner,
         need={"concurrency": 1.0},

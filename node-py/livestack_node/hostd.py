@@ -707,6 +707,7 @@ def build_app(broker: HostBroker):
             sla=payload.get("sla", "normal"),
             owner=owner,
             selector=payload.get("selector") or {},
+            requires=payload.get("requires") or {},
             locality_host=payload.get("locality_host"),
             vantage=payload.get("via") or payload.get("vantage") or "direct",
             estimate_s=float(est),
