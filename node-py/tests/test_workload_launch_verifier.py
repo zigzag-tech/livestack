@@ -414,3 +414,40 @@ subprocess.run(['docker','build','--no-cache','--progress=plain',str(root/'build
         assert claim(clients, 'builder-alias') is not None
     finally:
         keeper.close()
+
+
+@pytest.mark.parametrize('classes,admitted', [(['rust', 'image'], True), (['rust', 'native'], False)])
+def test_multi_class_launch_uses_one_live_check_and_refuses_missing_class(verifier, authority, monkeypatch, classes, admitted):
+    _, executor, _, _, _, root, _ = verifier
+    store = authority[0]['caller'].fixture_store
+    original = store.verify_compilation
+    calls = []
+    def observe(*args, **kwargs):
+        calls.append(kwargs)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(store, 'verify_compilation', observe)
+    program = """import json,os,subprocess
+from pathlib import Path
+from livestack_node.workloads.launch_guard import require_compilations
+request=json.loads(Path(os.environ['TEST_REQUEST']).read_text())
+names={'worker':'HARMONY_WORKER','host':'HARMONY_PHYSICAL_HOST','policy_revision':'HARMONY_POLICY_REVISION',
+       'boot':'HARMONY_BOOT','job_id':'HARMONY_JOB','attempt_id':'HARMONY_ATTEMPT','fence':'HARMONY_FENCE','input_digest':'HARMONY_INPUT_DIGEST'}
+os.environ.update({variable:str(request[key]) for key,variable in names.items()})
+root=Path(os.environ['TEST_ROOT'])
+os.environ['HARMONY_OUTPUT']=str(root/'out')
+"""
+    program += 'require_compilations('+repr(classes)+",registry_path=os.environ['TEST_REGISTRY'])\n"
+    program += "(root/'tiny.rs').write_text('fn main() {}')\n"
+    program += "subprocess.run([str(Path.home()/'.cargo/bin/rustc'),str(root/'tiny.rs'),'-o',str(root/'tiny')],check=True)\n"
+    program += "subprocess.run([str(root/'tiny')],check=True)\n(root/'compiler-started').write_text('authorized')\n"
+    output = launch(verifier, program)
+    result = until(lambda: executor.exit_result(output))
+    assert (result['exit_code'] == 0) is admitted, (output/'command.log').read_text()
+    assert len(calls) == 1, 'one spawn must issue exactly one live authority check'
+    assert (root/'compiler-started').exists() is admitted
+    for item in classes:
+        receipt = output/('compilation-'+item+'.json')
+        assert receipt.stat().st_size <= 16384
+        assert json.loads(receipt.read_text())['admitted'] is admitted
+    if not admitted:
+        assert 'compilation_class_not_reserved' in (output/'command.log').read_text()
