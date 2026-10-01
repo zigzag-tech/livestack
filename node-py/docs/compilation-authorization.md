@@ -1,8 +1,8 @@
 # Compilation authorization contract v1
 
-Status: authority policy implemented; worker-local process verification and
+Status: authority policy and Linux worker-local process verification implemented;
 consumer/deployment integration remain in the active change. Do not certify
-script callers or excluded hosts from the authority policy alone.
+remote-principal confinement or rollout from these contracts alone.
 
 Authority configuration selects `compilation_handlers`, a mapping from installed
 handler id to a nonempty list of classes (`rust`, `flutter`, `image`, `node`,
@@ -62,4 +62,76 @@ prebuilt runtime eligibility, admitted builder grants, shared alias budgets,
 input/worker/boot/fence/class mismatch, revision change, expiry, revocation,
 missing/oversized/unsupported policy, and retry eligibility. They accompany the
 existing store/HTTP/service/principal reload regressions. They do not prove
-OS confinement, compiler cleanup or end-to-end consumer rollout.
+OS confinement or end-to-end consumer rollout.
+
+## Worker-local verifier
+
+Install `livestack_node.workloads.launch_verifier` as a root-owned service from
+the selected immutable SDK. Its root-owned configuration (mode 0600) carries:
+
+```json
+{
+  "version": 1,
+  "worker": "enrolled-worker-slot",
+  "worker_uid": 1001,
+  "host": "physical-builder",
+  "machine_id": "replace-with-local-32-character-machine-id",
+  "authority": "http://127.0.0.1:8802",
+  "token": "protected-worker-credential",
+  "journal": "/var/lib/harmony/slot/active.json",
+  "socket": "/run/harmony-launch-slot/verify.sock"
+}
+```
+
+The numerical authority address, configured machine-id and enrolled canonical
+host bind the service to this worker execution environment. For a VM, the
+operator maps the guest's enrolled identity to its physical host policy/budget;
+the local machine-id pins the execution guest as well. Socket directories must
+be root-owned and unwritable by callers. A service restart must occur after the
+previous listener stops; a leftover socket refuses a second listener.
+
+`/etc/livestack/compilation-launch.json` is a root-owned registry (at most 16 KiB,
+128 slots) with `{"version":1,"slots":{"enrolled-worker-slot":"/run/harmony-launch-slot/verify.sock"}}`.
+It cannot be replaced through a writable parent directory. The consumer
+authenticates the connected server's kernel root identity, rather than trusting
+an environment-selected endpoint. The root verifier uses kernel peer PID/UID,
+actual systemd cgroup containment, process start identity, actual CPU/memory
+caps and a fresh authority check. The credential stays in the root service.
+
+Worker configuration selects `compilation_launch_contract: 1`; admitted build
+handlers receive authoritative job/attempt/boot/fence/input/host/policy metadata
+in their environment. `python -m livestack_node.workloads.launch_guard --class
+rust` verifies the invoking process and refuses unmanaged callers. Unknown or
+unsupported contracts do not receive permission. Metadata and receipts are not
+reusable credentials.
+
+Use handler backend `rootless-docker-native` for guarded image builders. Its
+native frontend can authenticate the host root verifier while Docker's daemon
+and build containers stay inside the owned RootlessKit subtree. The frontend
+proves its private daemon's PID/cgroup and data-root endpoint and clears inherited
+Docker context overrides. This avoids weakening root authentication inside a
+user namespace. Legacy `rootless-docker` remains a runtime backend; its user
+namespace cannot run this host-namespace guard.
+
+Bounds and enforcers:
+
+- `launch_contract.receive` and root service SIGALRM: absolute 5-second
+  verification deadline, 16 KiB messages; `authority_receipt` bounds read bytes.
+- `launch_guard.write_current_receipt`: five finite class names, one current
+  16 KiB JSON receipt per class, at most five fixed temp names and five empty
+  lock files; atomic replacement and nonblocking locks. A failed verification
+  replaces stale success evidence with a named refusal. Existing attempt
+  workspace/artifact retention owns deletion.
+- Root verifier `RotatingFileHandler`: one 2 MiB log and two backups per slot.
+- Native Docker readiness: one current <=1 KiB record per attempt; native
+  frontend bounds reads and authenticates PID/cgroup. Existing verified cgroup
+  stop plus `docker_runtime.remove_data` owns private-layer cleanup.
+
+`tests/test_workload_launch_verifier.py` uses a disposable root service and real
+authority/systemd/cgroups. Its positive controls actually compile/run Rust and
+build a private scratch image. Negative controls cover forged/copy metadata,
+wrong worker/host/input/fence/cgroup/resource caps, a copied configuration on
+the wrong machine identity, unavailable/forged socket, unsupported contract,
+revoked/cancelled/expired admission, oversized replies and deadlines. Live
+Rust compiler grandchildren and image-builder descendants stop on actual
+lease expiry; capacity cannot be reused until verified cleanup is acknowledged.
