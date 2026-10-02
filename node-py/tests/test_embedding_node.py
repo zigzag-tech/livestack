@@ -194,3 +194,121 @@ def test_an_unloaded_model_comes_back_with_the_same_vectors(monkeypatch):
     manager.unload_now()
     assert not any(u.loaded for u in manager.units.values())
     assert run(post()) == before
+
+
+def test_real_onnx_slices_stop_on_cancellation_and_recover(monkeypatch):
+    import threading
+    from types import SimpleNamespace
+    from livestack_node.embedding.runtime import EmbeddingCancelled
+    from livestack_node.embedding.serve import unit_name
+    app = _node(monkeypatch)
+    model = app.state.embed_manager.ensure(unit_name("Xenova/all-MiniLM-L6-v2"))
+    original = model._session
+    stopped = threading.Event()
+    calls = []
+
+    def observed_run(*args, **kwargs):
+        # Execute the actual ONNX session, then request cancellation between
+        # slices. The wrapper observes work; it substitutes no inference output.
+        result = original.run(*args, **kwargs)
+        calls.append(1)
+        if len(calls) == 1:
+            stopped.set()
+        return result
+
+    model._session = SimpleNamespace(run=observed_run)
+    try:
+        stopped.set()
+        with pytest.raises(EmbeddingCancelled):
+            model.embed(["never"], cancelled=stopped.is_set)
+        assert calls == []
+        stopped.clear()
+        with pytest.raises(EmbeddingCancelled):
+            model.embed(["first", "later", "last"], cancelled=stopped.is_set)
+        assert len(calls) == 1
+        model._session = original
+        positive = model.embed(["recovered"])
+        assert positive.shape == (1, 384)
+    finally:
+        model._session = original
+
+
+def test_live_http_disconnect_stops_real_onnx_batch(monkeypatch):
+    import socket
+    import threading
+    import time
+    from types import SimpleNamespace
+    uvicorn = pytest.importorskip("uvicorn")
+    from livestack_node.embedding.serve import unit_name
+    app = _node(monkeypatch)
+    model = app.state.embed_manager.ensure(unit_name("Xenova/all-MiniLM-L6-v2"))
+    original = model._session
+    original_embed = model.embed
+    first = threading.Event()
+    release = threading.Event()
+    observed_stop = threading.Event()
+    completed = threading.Event()
+    calls = []
+
+    def observed_run(*args, **kwargs):
+        result = original.run(*args, **kwargs)
+        calls.append(1)
+        if len(calls) == 1:
+            first.set()
+            assert release.wait(5), "owned real inference barrier timed out"
+        return result
+
+    def observed_embed(texts, *, cancelled=lambda: False):
+        def observe():
+            value = cancelled()
+            if value:
+                observed_stop.set()
+            return value
+        try:
+            return original_embed(texts, cancelled=observe)
+        finally:
+            completed.set()
+
+    model._session = SimpleNamespace(run=observed_run)
+    model.embed = observed_embed
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    base = f"http://127.0.0.1:{sock.getsockname()[1]}"
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
+    thread = threading.Thread(target=lambda: server.run(sockets=[sock]), daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    async def go():
+        async with httpx.AsyncClient(base_url=base, timeout=10) as client:
+            request = asyncio.create_task(client.post("/v1/embeddings", json={
+                "model": "Xenova/all-MiniLM-L6-v2", "input": ["first", "later", "last"]}))
+            assert await asyncio.to_thread(first.wait, 5)
+            request.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await request
+            # Leave the real slice held while the production disconnect poll
+            # observes the socket closure; then let that slice settle.
+            await asyncio.sleep(0.1)
+            release.set()
+            assert await asyncio.to_thread(completed.wait, 5)
+            assert observed_stop.is_set()
+            assert len(calls) == 1, "no later ONNX slice after disconnect"
+            response = await client.post("/v1/embeddings", json={
+                "model": "Xenova/all-MiniLM-L6-v2", "input": "replacement"})
+            assert response.status_code == 200
+            assert len(response.json()["data"][0]["embedding"]) == 384
+
+    try:
+        assert server.started
+        run(go())
+    finally:
+        release.set()
+        server.should_exit = True
+        thread.join(5)
+        sock.close()
+        model._session = original
+        model.embed = original_embed
+    assert not thread.is_alive()
