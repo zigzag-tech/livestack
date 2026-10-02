@@ -291,6 +291,66 @@ No new grammar is needed for 1–2 (intervals already exist). 3 extends
 `preferences.py`'s vocabulary (`ATTRIBUTES`/`METRICS`) and wires `prefer` into
 harmony-llm's selection (`_selection_rank`), which today ignores it.
 
+## 4c. Context length as the deciding characteristic (user, 2026-10-02)
+
+The user expects the most common reason a request should reach Flash-Next to be
+**a longer context window**: our 27B runs at 24,576 tokens (KV-cache bound on a
+24 GB card) while Strata serves Flash-Next at up to 262,144 on the same card.
+
+### What the language already expresses (verified live on xc-tower-ubuntu, 2026-10-02)
+
+- `require:class=llm,context_len=[16384,]` → answered by `llm_general`.
+- `require:class=llm,context_len=[131072,]` → `{"detail":"nothing satisfies
+  {'class': 'llm', 'context_len>=': 131072}"}` (correct today: no such unit yet).
+- `context_len` is derived from the launch line (`_attributes_for`, ~line 205:
+  the served `max_model_len`), not hand-typed, so it cannot overstate the window.
+- An over-long prompt sent without a requirement: vLLM refuses with a 400 naming
+  the measured token count; harmony-llm (`_proxy_impl`, the "A CONTEXT REFUSAL IS A
+  ROUTING FACT" block, ~line 1947) turns it into a **413** that names the need
+  (`input + max_tokens`), the widest unit on the node, and tells the caller to
+  resubmit with `require:class=llm,context_len>=<total>`.
+
+So the explicit form works once `flash_next` exists. Two gaps remain.
+
+### Gap 1 — the caller should not have to restate a need Harmony has measured
+
+Today a long prompt costs the caller a 413 and a resubmission. Harmony refuses to
+derive context needs BEFORE routing because token counts depend on the candidate's
+tokenizer and template (benchday `docs/livestack-harmony.md`); that reason stands.
+But after the refusal the need is **measured by an engine**, not estimated. Change:
+
+- On a context refusal, if the request did **not** name a unit (named is named:
+  `local`, `llm_general` keep today's 413) and some unit on the node declares
+  `context_len >= input + max_tokens`, harmony-llm SHALL add
+  `context_len>=<total>` to the request's derived requirements and route it again
+  through the normal path (planner, eviction, load), **once**. The second attempt's
+  own refusal, if any, is final and returned as today's 413.
+- The derived clause is ANDed like the other derived requirements, so it can only
+  make the query stricter (benchday doc, "Derived, not declared").
+- The re-route is recorded in the ledger/demand log: original unit, measured need,
+  chosen unit, and whether a load/eviction followed.
+- Engines report refusals differently. `Engine` gains
+  `context_refusal(status, body) -> int | None` (measured input tokens, or None):
+  vLLM parses `at least (\d+) input tokens` as today; Strata's adapter parses its
+  own over-length refusal (`serve/server.py` refuses a prompt plus `max_tokens`
+  past the context with a 400 — confirm the text on the pinned rev, task 5.2).
+- Cost: one wasted round trip to the short unit (a fast 400 from the tokenizer,
+  measured at ~0.2 s TTFT scale on this node) plus, on a cold Strata, its load.
+  Fan-out stays bounded: at most one re-route per request.
+
+### Gap 2 — "as long as you have", without a number
+
+`prefer` `llm.context_len: max` (§4b.3) covers a caller that wants the widest window
+available without knowing a threshold. Like every preference it never causes a swap
+on its own (Q4 decides whether a time budget may).
+
+### Interaction with the rest of this change
+
+- Strata's `context_len` attribute is the context it was STARTED with
+  (`--context` in its run config), not the model's 262K maximum; Q3 picks the value.
+- Context is the most likely trigger for a 27B ⇄ Flash-Next swap, so Q2 (hub titles
+  failing during a swap) applies to every long-context request.
+
 ## 5. Placement decision: card 1, not card 0
 
 - **Card 1 (chosen).** Only tenant is `llm_general`, UNPINNED. The planner can

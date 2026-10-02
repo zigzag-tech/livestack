@@ -83,6 +83,15 @@ requests are **broad**: characteristics, not unit names (design §4b).
   Tests: `test_llm_preferences.py`. Ledger: selection records the preference
   receipt (`preference_key` already returns one).
 
+- [ ] 3.5 Context re-route (design §4c gap 1): `Engine.context_refusal`; on a
+  context refusal of an un-named request, derive `context_len>=input+max_tokens`
+  and route once more through the normal path; named requests keep the 413.
+  Tests: `test_context_reroute.py` with two stub engines (24K and 128K windows): an
+  over-long broad request is answered by the 128K unit with no caller resubmission;
+  a named one gets 413; a request too long for every unit gets the existing 413
+  text; at most one re-route. Positive control: the broad case returns 413 on the
+  old code. Ledger: the re-route record (original unit, need, chosen unit, load).
+
 ## 4. Verify-first items (design §9)
 
 - [ ] 4.1 Reproduce the reported `fleet_rank` defect (`GET /fleet/rank?kind=llm`
@@ -126,6 +135,8 @@ requests are **broad**: characteristics, not unit names (design §4b).
   (b) a broad request the 27B also satisfies, sent while the 27B is resident,
   does NOT swap; (c) a `max_concurrent=[8,]` request restores the 27B after
   Flash-Next idles; (d) `model: "local"` always reaches `llm_general`;
+  (d2) a broad request whose prompt exceeds 24,576 tokens, sent with no
+  `context_len` clause, is answered by Flash-Next after one internal re-route;
   (e) a request for something nothing satisfies is a 503 naming the rule;
   (f) host RAM stays inside the pool (no OOM; record swap before/after);
   (g) ASR on card 0 stays resident and serving throughout.
