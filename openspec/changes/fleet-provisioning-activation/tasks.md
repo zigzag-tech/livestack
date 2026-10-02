@@ -98,7 +98,7 @@
       disagreement over distinct orderings, and full-cascade cost and p95 including
       the fallback.
 - [ ] 3.4 Publish the receipt under `fleetd/receipts/`, and update
-      `_plans/fleetd-weave-jev.md` to SHIPPED (shadow) with the numbers.
+      `_plans/fleetd-wovine-jev.md` to SHIPPED (shadow) with the numbers.
 
 ## 4. Verification before archive
 

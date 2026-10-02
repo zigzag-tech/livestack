@@ -9,7 +9,7 @@
  *
  * ## Shape, and one departure from the design sketch
  *
- * `_plans/fleetd-weave-jev.md` §3 draws one weave per tick with the operation
+ * `_plans/fleetd-wovine-jev.md` §3 draws one wovine per tick with the operation
  * steps inside it. That is one conversation, and
  * `openspec/.../fleet-supervision-loop/spec.md` requires escalations to open in
  * a conversation bound **per job** — a blocked operation must not stop an
@@ -30,10 +30,10 @@
  * consults the registered workflow table BEFORE any model sees it, and only an
  * incident nobody registered gets to be interesting.
  */
-import { weave } from 'jingway-framework/server/weave/weave.js';
-import { noRepairHost } from 'jingway-framework/server/weave/noRepairHost.js';
+import { weave } from 'jingway-framework/server/wovine/wovine.js';
+import { noRepairHost } from 'jingway-framework/server/wovine/noRepairHost.js';
 import { READ_EFFECT } from 'jingway-framework/common/routines/effects.js';
-import type { WeaveHost, WeaveOutcome } from 'jingway-framework/common/routines/weave.js';
+import type { WovineHost, WovineOutcome } from 'jingway-framework/common/routines/wovine.js';
 import type { RepairRecord } from 'jingway-framework/common/routines/contract.js';
 
 import {
@@ -66,9 +66,9 @@ export interface TickDeps {
   /** The queue this tick is about. The loop does not own it; a caller does. */
   jobs: JobRequest[];
   /** A conversation per job. Default: no repair at all, stated as such. */
-  hostFor?: (jobId: string) => WeaveHost;
+  hostFor?: (jobId: string) => WovineHost;
   /** Where the read-only half runs. It has no effects, so it never escalates. */
-  observeHost?: WeaveHost;
+  observeHost?: WovineHost;
   state?: LoopState;
   now?: () => number;
   regions?: string;
@@ -210,7 +210,7 @@ async function runAction(
   action: ActingAction,
   plan: FleetPlan,
   deps: RunDeps,
-): Promise<{ result: ActionOutcome; outcome: WeaveOutcome<ActionOutcome> }> {
+): Promise<{ result: ActionOutcome; outcome: WovineOutcome<ActionOutcome> }> {
   const jobId = 'job_id' in action && action.job_id ? action.job_id : action.target_id;
   const host =
     deps.hostFor?.(jobId) ??
@@ -374,7 +374,7 @@ function applyWorkflow(decision: WorkflowDecision | { workflow: 'wait'; reason: 
   }
 }
 
-function collect(result: TickResult, outcome: WeaveOutcome<unknown>) {
+function collect(result: TickResult, outcome: WovineOutcome<unknown>) {
   result.repairs.push(...outcome.repairs);
   result.escalations += outcome.repairs.length;
 }

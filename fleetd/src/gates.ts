@@ -11,7 +11,7 @@
  * operation's id reported ready.
  */
 import type { Violation } from 'jingway-framework/common/routines/contract.js';
-import type { GateResult } from 'jingway-framework/common/routines/weave.js';
+import type { GateResult } from 'jingway-framework/common/routines/wovine.js';
 import type { FleetPlan, FleetView, Operation } from './client.js';
 
 /** How stale the view a plan was computed from may be. */

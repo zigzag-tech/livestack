@@ -1,5 +1,5 @@
 /**
- * Joining a weave's paper trail to the operation that paid for it.
+ * Joining a wovine's paper trail to the operation that paid for it.
  *
  * jingway records repairs and step summaries against a conversation; the broker
  * records claims and transitions against an `operation_id`. Neither knows the
@@ -15,7 +15,7 @@
  * that goes quiet and a system that had nothing to say look identical from here.
  */
 import type { RepairRecord } from 'jingway-framework/common/routines/contract.js';
-import type { WeaveBlockSummary, WeaveEvent, WeaveHost } from 'jingway-framework/common/routines/weave.js';
+import type { WovineBlockSummary, WovineEvent, WovineHost } from 'jingway-framework/common/routines/wovine.js';
 
 export interface FleetTrace {
   job_id: string;
@@ -26,7 +26,7 @@ export interface FleetTrace {
 export type TraceSink = (entry: FleetTrace & { type: 'repair' | 'summary' | 'event'; payload: unknown }) => void;
 
 export interface TracedHostOptions {
-  base: WeaveHost;
+  base: WovineHost;
   jobId: string;
   runId: string;
   /** Read at emit time, because the operation id does not exist until the claim. */
@@ -35,7 +35,7 @@ export interface TracedHostOptions {
   onSinkError?: (error: unknown) => void;
 }
 
-export function tracedHost(options: TracedHostOptions): WeaveHost {
+export function tracedHost(options: TracedHostOptions): WovineHost {
   const { base, jobId, runId, operationId, sink } = options;
   const report = options.onSinkError ?? ((e: unknown) => console.error('[fleetd] trace sink failed:', e));
   const trace = (): FleetTrace => ({
@@ -56,13 +56,13 @@ export function tracedHost(options: TracedHostOptions): WeaveHost {
       send('repair', { ...record, ...trace() });
       await base.record(record);
     },
-    emit(event: WeaveEvent) {
+    emit(event: WovineEvent) {
       send('event', event);
       base.emit(event);
     },
     ...(base.summarize || true
       ? {
-          async summarize(summary: WeaveBlockSummary) {
+          async summarize(summary: WovineBlockSummary) {
             send('summary', summary);
             await base.summarize?.(summary);
           },

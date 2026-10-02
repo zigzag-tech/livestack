@@ -23,7 +23,7 @@
  * its own classifier is a spending loop with an outage for a trigger.
  */
 import type { RepairOutcome } from 'jingway-framework/common/routines/contract.js';
-import type { EscalationPacket, WeaveHost } from 'jingway-framework/common/routines/weave.js';
+import type { EscalationPacket, WovineHost } from 'jingway-framework/common/routines/wovine.js';
 import type { ToolCallingTool } from 'jingway-framework/server/subagent/runToolCallingSubAgent.js';
 
 import type { Operation } from './client.js';
@@ -31,7 +31,7 @@ import type { ClassifyResult, IncidentDecisionRecord } from './classify.js';
 
 export interface ClassifyingHostOptions {
   /** The host that runs the full repair turn. */
-  base: WeaveHost;
+  base: WovineHost;
   /** The operation this step is about, read at escalation time. */
   operationFor: (packet: EscalationPacket) => Operation | undefined;
   /** Rung 2. Returns undefined when there is nothing to classify. */
@@ -41,7 +41,7 @@ export interface ClassifyingHostOptions {
   onError?: (error: unknown) => void;
 }
 
-export function classifyingHost(options: ClassifyingHostOptions): WeaveHost {
+export function classifyingHost(options: ClassifyingHostOptions): WovineHost {
   const report = options.onError ?? ((e: unknown) => console.error('[fleetd] classification failed:', e));
   return {
     ...options.base,

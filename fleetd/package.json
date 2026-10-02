@@ -1,7 +1,7 @@
 {
   "name": "@livestack/fleetd",
   "version": "0.0.1",
-  "description": "The fleet supervision loop: a jingway weave over Harmony's provisioning control plane.",
+  "description": "The fleet supervision loop: a jingway wovine over Harmony's provisioning control plane.",
   "type": "module",
   "scripts": {
     "link-jingway": "node scripts/link-jingway.mjs",
