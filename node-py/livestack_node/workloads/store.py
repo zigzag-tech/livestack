@@ -335,6 +335,25 @@ class WorkloadStore:
                            (raw, self.clock(), job_id))
             return self._job(db, job_id)
 
+    def withdraw(self, owner, job_id):
+        """Owner cancel that only ever ends a job NO worker has attempted.
+
+        `cancel` fences a running attempt and holds its worker in cleanup, so a
+        caller that merely changed its mind about WHICH input to run (a newer
+        snapshot superseded a queued job) must not race a claim with it. This
+        decides inside the same IMMEDIATE transaction that `claim` takes: a
+        job that is queued with zero attempts ends `cancelled`; any other job is
+        returned unchanged, and the caller reads `state` to learn which.
+        """
+        with self.transaction() as db:
+            job = self._job(db, job_id, owner)
+            attempted = db.execute("SELECT count(*) FROM attempts WHERE job=?", (job_id,)).fetchone()[0]
+            if job["state"] == "queued" and attempted == 0:
+                raw = self._terminal_result(db, job_id, "withdrawn by owner before any attempt")
+                db.execute("UPDATE jobs SET state='cancelled',reason='withdrawn by owner before any attempt',result=?,updated=? WHERE id=?",
+                           (raw, self.clock(), job_id))
+            return self._job(db, job_id)
+
     def _terminal_result(self, db, job_id, reason):
         """The verdict every terminal row must carry. Absence and failure must
         never look alike: an abandoned attempt names what ended it."""

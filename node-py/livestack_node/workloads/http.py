@@ -247,6 +247,8 @@ class Handler(BaseHTTPRequestHandler):
                 return store.get(principal.id, parts[1])
             if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'cancel' and method == 'POST':
                 return store.cancel(principal.id, parts[1])
+            if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'withdraw' and method == 'POST':
+                return store.withdraw(principal.id, parts[1])
         if principal.role == 'worker' and method == 'POST':
             if parts == ['worker', 'report']:
                 return store.register(principal.worker, principal.host, body['boot'], body['report'],
