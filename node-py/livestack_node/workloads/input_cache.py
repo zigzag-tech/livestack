@@ -69,6 +69,8 @@ class InputCache:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, self.index)
+        if os.name == 'nt':
+            return  # no directory handles through os.open; NTFS journals the rename
         descriptor = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(descriptor)

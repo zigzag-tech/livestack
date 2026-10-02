@@ -1,4 +1,4 @@
-"""Persistent one-slot Linux/WSL or macOS worker, independent of submitting clients.
+"""Persistent one-slot Linux/WSL, macOS or Windows worker, independent of submitting clients.
 
 Handlers are installed argv vectors. Production workspaces must be a dedicated
 bounded filesystem. Rootless Docker handlers use a private daemon with containers
@@ -27,6 +27,9 @@ from .supervision import SystemdExecutor, WorkerJournal
 if sys.platform == 'darwin':
     from . import darwin_proc
     from .darwin_supervision import LaunchdExecutor
+if sys.platform == 'win32':
+    from . import windows_proc
+    from .windows_supervision import JobObjectExecutor
 from .transfer import InputTransfer
 
 
@@ -43,8 +46,11 @@ def rmtree_writable(path):
         return
     except PermissionError:
         pass
-    for base, dirs, _ in os.walk(path):
-        for name in [base, *(os.path.join(base, d) for d in dirs)]:
+    for base, dirs, files in os.walk(path):
+        # Windows refuses to unlink a FILE with the read-only attribute
+        # (mode 0444 there), whatever its directory allows.
+        names = [*dirs, *files] if os.name == 'nt' else dirs
+        for name in [base, *(os.path.join(base, d) for d in names)]:
             if not os.path.islink(name):
                 try:
                     os.chmod(name, 0o700 | os.lstat(name).st_mode)
@@ -72,7 +78,11 @@ class WorkloadWorker:
         # macOS has no cgroups: launchd jobs plus wrapper-enforced limits
         # (openspec/changes/apple-host-compilation).
         self.darwin = sys.platform == 'darwin'
-        self.executor = (LaunchdExecutor if self.darwin else SystemdExecutor)(config['worker'])
+        # Windows: one Job Object per attempt (openspec/changes/windows-host-worker).
+        self.windows = sys.platform == 'win32'
+        self.executor = (LaunchdExecutor if self.darwin else JobObjectExecutor if self.windows
+                         else SystemdExecutor)(config['worker'])
+        self._cpu_load = windows_proc.CpuLoad() if self.windows else None
         if self.darwin and config.get('host_pressure') is None:
             # The only memory reading a macOS worker has; without it absence of
             # a reading would look like absence of pressure.
@@ -211,10 +221,33 @@ class WorkloadWorker:
             self._host_pressure_state = state
         return limit
 
+    def _disk(self, path):
+        """(filesystem bytes, bytes free to this user)."""
+        if self.windows:
+            usage = shutil.disk_usage(path)
+            return usage.total, usage.free
+        stats = os.statvfs(path)
+        return stats.f_blocks*stats.f_frsize, stats.f_bavail*stats.f_frsize
+
+    def _busy_cpus(self):
+        if not self.windows:
+            return os.getloadavg()[0]
+        busy = self._cpu_load.sample(os.cpu_count() or 1)
+        # Unknown (first sample) is charged as a fully busy host, never as idle.
+        return (os.cpu_count() or 1) if busy is None else busy
+
     def report(self):
-        stats = os.statvfs(self.workspace)
-        filesystem_bytes = stats.f_blocks*stats.f_frsize
-        if self.darwin:
+        filesystem_bytes, filesystem_free = self._disk(self.workspace)
+        if self.windows:
+            # Not the Linux `host` block either: a WSL VM worker on the same
+            # physical host reports its own guest view under the same `host`
+            # principal, and placement subtracts every attempt's admission on
+            # that host from both. Windows' available memory already counts the
+            # VM (vmmem) as a consumer.
+            memory = windows_proc.memory_status()
+            host = dict(memory_total_bytes=memory['total'], memory_available_bytes=memory['available'],
+                        memory_reserve_bytes=self.host_view.reserve_bytes)
+        elif self.darwin:
             # Not the Linux `host` block: placement's measured-host path keys by
             # physical host, and a Lima VM worker on this Mac must not have its
             # claims charged against macOS memory. Available memory comes from
@@ -243,15 +276,14 @@ class WorkloadWorker:
             # Inside a VM the guest's MemAvailable is not the machine's.
             host['memory_available_bytes'] = min(host['memory_available_bytes'], host_limit)
         available['disk_bytes'] = max(0, min(capacity['disk_bytes'],
-            stats.f_bavail*stats.f_frsize-self.config.get('disk_reserve_bytes', 1024**3)))
+            filesystem_free-self.config.get('disk_reserve_bytes', 1024**3)))
         for path in self.config.get('backing_filesystems', []):
-            backing = os.statvfs(path)
-            headroom = backing.f_bavail*backing.f_frsize-self.config.get('backing_reserve_bytes', 20*1024**3)
+            headroom = self._disk(path)[1]-self.config.get('backing_reserve_bytes', 20*1024**3)
             available['disk_bytes'] = max(0, min(available['disk_bytes'], headroom))
-        available['cpu'] = max(0, min(capacity['cpu'], (os.cpu_count() or 1)-os.getloadavg()[0]))
+        available['cpu'] = max(0, min(capacity['cpu'], (os.cpu_count() or 1)-self._busy_cpus()))
         report = dict(capacity=capacity, available=available, labels=self.config.get('labels', {}),
                       handlers=list(self.handlers), ready=not self.config.get('observe_only', False))
-        if not self.darwin:
+        if not self.darwin and not self.windows:
             report['host'] = host
         return report
 
@@ -413,6 +445,10 @@ class WorkloadWorker:
                    HARMONY_INPUT_OBJECTS=str(objects),
                    HARMONY_REQUEST=str(root/'request.json'), HARMONY_ATTEMPT=attempt,
                    HARMONY_OWNER=owner)
+        if self.windows:
+            # Windows tools read TEMP/TMP, not TMPDIR. The job's name lets a
+            # handler find its attempt job (IsProcessInJob proves membership).
+            env.update(TEMP=str(root/'tmp'), TMP=str(root/'tmp'), HARMONY_JOB_OBJECT=self.executor.unit(attempt))
         compilation = assignment.get('compilation')
         if compilation is not None:
             if (type(self.config.get('compilation_launch_contract')) is not int or
@@ -505,14 +541,15 @@ class WorkloadWorker:
             # freely, so placement learns claims from this figure instead
             # (openspec/changes/host-memory-ledger). A spike shorter than one
             # turn (~0.2 s) can be missed.
-            attempt_cgroup = None if self.darwin else user_app_slice()/self.executor.unit(attempt)
+            attempt_cgroup = None if self.darwin or self.windows else user_app_slice()/self.executor.unit(attempt)
             nonreclaimable_peak = None
             while True:
                 if lease.lost.is_set():
                     raise WorkloadError('execution lease lost', 409)
                 # On macOS the wrapper samples the tree's physical footprint
                 # (already non-reclaimable) and reports its peak in the receipt.
-                sample = None if self.darwin else cgroup_nonreclaimable(attempt_cgroup)
+                sample = (None if self.darwin else self.executor.memory_peak(attempt) if self.windows
+                          else cgroup_nonreclaimable(attempt_cgroup))
                 if sample is not None:
                     nonreclaimable_peak = max(nonreclaimable_peak or 0, sample)
                 result = self.executor.exit_result(output)

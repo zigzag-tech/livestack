@@ -6,7 +6,6 @@ parent every container beneath it; host Docker daemon work is never selected.
 """
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import math
@@ -19,6 +18,10 @@ import time
 
 from .model import WorkloadError, encode
 from . import docker_runtime
+if sys.platform == 'win32':
+    import msvcrt
+else:
+    import fcntl
 
 
 class WorkerJournal:
@@ -28,7 +31,16 @@ class WorkerJournal:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.lock = (self.root/'worker.lock').open('a')
         try:
-            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if sys.platform == 'win32':
+                # A byte-range lock held for the process lifetime; Windows
+                # releases it when the process dies, as flock does.
+                self.lock.seek(0)
+                try:
+                    msvcrt.locking(self.lock.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError as error:  # EDEADLOCK/EACCES: held by another process
+                    raise BlockingIOError(str(error)) from error
+            else:
+                fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             self.lock.close()
             raise WorkloadError('worker slot already supervised', 409)
@@ -55,6 +67,9 @@ class WorkerJournal:
         self._sync()
 
     def _sync(self):
+        if sys.platform == 'win32':
+            # No directory handles through os.open; NTFS journals the rename.
+            return
         fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(fd)
