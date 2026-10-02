@@ -41,7 +41,7 @@ def serve(worker, sleep=time.sleep):
             if signature not in seen:
                 seen.add(signature)
                 logging.warning('worker wait cause (first occurrence):\n%s',
-                                ''.join(traceback.format_exception(error))[-4000:])
+                                ''.join(traceback.format_exception(type(error), error, error.__traceback__))[-4000:])
             sleep(5)
 
 
