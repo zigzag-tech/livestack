@@ -583,3 +583,29 @@ Remedies are outside the ledger: put build trees on disk (or `/tmp` on disk on a
 host), make klein's load stream to the GPU instead of materialising ~16 GB in host RAM,
 or move klein. Not done here: the GPU planner does not yet consult the host view before
 a model load (design §6), and no worker other than zz-joe's sends `host`.
+
+### Corrections deployed 2026-10-02 ~02:58–03:00 UTC (livestack 224dce34)
+
+- Authority: `…+placement5dd5992+hostledger224dce34` (overlay of `hostview.py`,
+  `workloads/{placement,model}.py` on the 49882a86 release; same 3 pre-existing store
+  test failures as before).
+- zz-joe workers: `native-route-bbf4d538+hostledger224dce34`; restarted idle by a
+  transient `hostledger-roll-<worker>` unit that waited for `active.json` to vanish.
+  `host_services` restored as `{path, residence}` for klein-0/1 (8213/8214),
+  harmony-image (8210), polyasr (8766), polytts (8100), embed-cpu (8220), replacing the
+  coordinator's `[]` stopgap (`*.bak-stopgap-*`; this deploy's backups
+  `*.bak-hostledger2-*`). The cache-inflated `host-peaks.json` (klein-0 17.8 GB,
+  polytts 12.6, polyasr 6.3) was renamed `*.cache-inflated-<ts>`; the new code learns
+  into `host-peaks-nonreclaimable.json`.
+- klein-0/1: `/etc/systemd/system/harmony-klein-{0,1}.service.d/50-idle-sweep.conf`
+  points at `~/.local/share/livestack-releases/imagegen-20260930+idlesweep224dce34`
+  (the imagegen release plus ONLY the serve.py idle-sweep hunk; restarted while
+  `/livestack/residence` showed `busy: false`). harmony-image (same release) and the
+  embed node (`embed-9a1b65eb`, which has its own working loop) were not changed.
+
+First readings after the roll (03:00 UTC): services' non-reclaimable figures 0.06–0.64
+GiB with no unit resident, so the model-server term is ~0 (it was 14.0 GiB from
+klein's page cache). One e2e attempt ran on zz-joe-e2e-1; a second would see
+`free = 18.8 - 1 - (10 - 0.7) - 0 ≈ 8.5 GiB < claim 10 GiB` (the claim is still the
+cache-inclusive `memory_peak_bytes` until succeeded attempts carry
+`memory_nonreclaimable_peak_bytes`).
