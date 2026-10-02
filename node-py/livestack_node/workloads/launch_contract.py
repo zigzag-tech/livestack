@@ -16,7 +16,9 @@ from .model import WorkloadError, encode, name
 
 MAX_BYTES = 16384
 DEADLINE_SECONDS = 5
-REGISTRY = '/etc/livestack/compilation-launch.json'
+# /etc is a symlink on macOS and the trust walk below refuses symlinks.
+REGISTRY = ('/private/etc/livestack/compilation-launch.json' if sys.platform == 'darwin'
+            else '/etc/livestack/compilation-launch.json')
 REQUEST_FIELDS = frozenset({'version', 'worker', 'host', 'policy_revision', 'boot',
                            'job_id', 'attempt_id', 'fence', 'input_digest', 'class'})
 
@@ -88,7 +90,7 @@ def verify_launch(request, *, registry_path=REGISTRY):
     integration fixtures; it receives exactly the same root ownership checks.
     """
     validate_request(request)
-    if sys.platform != 'linux':
+    if sys.platform not in ('linux', 'darwin'):
         raise WorkloadError('compilation_launch_platform_unsupported', 403)
     deadline = time.monotonic()+DEADLINE_SECONDS
     try:
@@ -106,7 +108,7 @@ def verify_launch(request, *, registry_path=REGISTRY):
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
             connection.settimeout(remaining(deadline))
             connection.connect(endpoint)
-            _, uid, _ = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+            uid = server_uid(connection)
             if uid != 0:
                 raise WorkloadError('compilation_verifier_peer_untrusted', 403)
             connection.sendall(encode(request, MAX_BYTES-1).encode()+b'\n')
@@ -133,6 +135,14 @@ def verify_launch(request, *, registry_path=REGISTRY):
         raise
     except (OSError, ValueError, TypeError) as error:
         raise WorkloadError('compilation_verification_unavailable', 503) from error
+
+
+def server_uid(connection):
+    """The connected peer's uid, from the kernel (SO_PEERCRED / LOCAL_PEERCRED)."""
+    if sys.platform == 'darwin':
+        from . import darwin_proc
+        return darwin_proc.peer_credentials(connection)[1]
+    return struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))[1]
 
 
 def environment_request(compilation_class, env=None):
