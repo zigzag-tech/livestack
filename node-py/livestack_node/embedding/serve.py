@@ -26,19 +26,22 @@ Announcing to brokers uses the usual LIVESTACK_* variables (see serve.attach).
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import logging
 import os
 import re
 import socket
 import threading
 import time
 from typing import Dict, List, Optional
+from starlette.requests import Request
 
 from livestack_node import attach, counting
 from livestack_node.manager import ManagedUnit, ResidencyPolicy
 
-from .runtime import ONNX_FILES, OnnxSentenceEmbedder, model_files
+from .runtime import EmbeddingCancelled, ONNX_FILES, OnnxSentenceEmbedder, model_files
 
 # Request bounds. A caller's backlog must arrive as several requests, not one
 # that holds the node: the hub sends at most 64 texts of at most 2,000 chars.
@@ -154,8 +157,11 @@ def create_app(models: Optional[List[str]] = None, *, model_dirs: Optional[Dict[
         failures.pop(name, None)
         return model
 
+    active_requests = 0
+
     @app.post("/v1/embeddings")
-    def embeddings(body: dict):
+    async def embeddings(request: Request, body: dict):
+        nonlocal active_requests
         requested = body.get("model")
         name = by_model.get(requested) or (requested if requested in units else None)
         if name is None:
@@ -175,15 +181,65 @@ def create_app(models: Optional[List[str]] = None, *, model_dirs: Optional[Dict[
         if encoding not in ("float", "base64"):
             return JSONResponse({"error": {"message": "encoding_format must be float or base64",
                                            "type": "invalid_request_error"}}, status_code=400)
-        with busy:
+        if active_requests >= 4:
+            return JSONResponse({"error": {"message": "embedding admission full (4 requests)",
+                                           "type": "busy"}}, status_code=503)
+        stopped = threading.Event()
+
+        def compute():
+            with busy:
+                if stopped.is_set():
+                    raise EmbeddingCancelled("embedding request cancelled before model load")
+                try:
+                    model = model_for(name)
+                except Exception as exc:  # noqa: BLE001 - explicit load degradation
+                    return JSONResponse({"error": {"message": f"{name} could not load: {exc}",
+                                                   "type": "unavailable"}}, status_code=503)
+                started = time.monotonic()
+                matrix = model.embed(texts, cancelled=stopped.is_set)
+                return matrix, (time.monotonic() - started) * 1000
+
+        active_requests += 1
+        work = asyncio.create_task(asyncio.to_thread(compute))
+
+        def settled(_):
+            nonlocal active_requests
+            active_requests -= 1
+            # Retrieve an abandoned worker's outcome too (e.g. a handler
+            # cancelled twice); genuine inference failures remain observable.
+            if not work.cancelled():
+                error = work.exception()
+                if isinstance(error, EmbeddingCancelled):
+                    logging.getLogger(__name__).info("embedding request stopped after worker settlement")
+                elif error is not None:
+                    logging.getLogger(__name__).error("embedding worker failed", exc_info=error)
+
+        # A second cancellation of the handler must not release a worker's slot.
+        work.add_done_callback(settled)
+        try:
+            while not work.done():
+                if await request.is_disconnected():
+                    stopped.set()
+                await asyncio.wait({work}, timeout=0.02)
             try:
-                model = model_for(name)
-            except Exception as exc:  # noqa: BLE001
-                return JSONResponse({"error": {"message": f"{name} could not load: {exc}",
-                                               "type": "unavailable"}}, status_code=503)
-            started = time.monotonic()
-            matrix = model.embed(texts)
-            compute_ms = (time.monotonic() - started) * 1000
+                result = await work
+            except EmbeddingCancelled:
+                return JSONResponse({"error": {"message": "embedding request cancelled",
+                                               "type": "cancelled"}}, status_code=499)
+            if isinstance(result, JSONResponse):
+                return result
+            matrix, compute_ms = result
+        except asyncio.CancelledError:
+            stopped.set()
+            # Python cannot kill a running executor thread. Keep admission until
+            # its actual inference slice settles and observes the stop event.
+            try:
+                await asyncio.shield(work)
+            except EmbeddingCancelled:
+                pass  # the requested stopped outcome, never an empty success
+            raise
+        finally:
+            stopped.set()
         model_id = next(m for m, n in by_model.items() if n == name)
         data = [{"object": "embedding", "index": i, "embedding": v}
                 for i, v in enumerate(encode_vectors(matrix, encoding))]
