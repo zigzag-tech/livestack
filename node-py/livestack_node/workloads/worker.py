@@ -1,4 +1,4 @@
-"""Persistent one-slot Linux/WSL worker, independent of submitting clients.
+"""Persistent one-slot Linux/WSL or macOS worker, independent of submitting clients.
 
 Handlers are installed argv vectors. Production workspaces must be a dedicated
 bounded filesystem. Rootless Docker handlers use a private daemon with containers
@@ -24,6 +24,9 @@ from .client import WorkloadClient
 from .lease import LeaseKeeper, retry_transient, transient
 from .model import WorkloadError, encode
 from .supervision import SystemdExecutor, WorkerJournal
+if sys.platform == 'darwin':
+    from . import darwin_proc
+    from .darwin_supervision import LaunchdExecutor
 from .transfer import InputTransfer
 
 
@@ -66,7 +69,14 @@ class WorkloadWorker:
         self.config = config
         self.client = WorkloadClient(config['authority'], config['token'])
         self.journal = WorkerJournal(config['state_dir'])
-        self.executor = SystemdExecutor(config['worker'])
+        # macOS has no cgroups: launchd jobs plus wrapper-enforced limits
+        # (openspec/changes/apple-host-compilation).
+        self.darwin = sys.platform == 'darwin'
+        self.executor = (LaunchdExecutor if self.darwin else SystemdExecutor)(config['worker'])
+        if self.darwin and config.get('host_pressure') is None:
+            # The only memory reading a macOS worker has; without it absence of
+            # a reading would look like absence of pressure.
+            raise WorkloadError('a macOS worker requires a host_pressure reading')
         self.boot = uuid.uuid4().hex
         self.workspace = Path(config['workspace']).resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
@@ -204,7 +214,16 @@ class WorkloadWorker:
     def report(self):
         stats = os.statvfs(self.workspace)
         filesystem_bytes = stats.f_blocks*stats.f_frsize
-        host = self.host_view.sample()
+        if self.darwin:
+            # Not the Linux `host` block: placement's measured-host path keys by
+            # physical host, and a Lima VM worker on this Mac must not have its
+            # claims charged against macOS memory. Available memory comes from
+            # the host_pressure clamp below.
+            total = darwin_proc.memory_total()
+            host = dict(memory_total_bytes=total, memory_available_bytes=total,
+                        memory_reserve_bytes=self.host_view.reserve_bytes)
+        else:
+            host = self.host_view.sample()
         # `capacity` is an operator ceiling, not the description of the host.
         # Absent, the worker offers the measured machine and placement decides
         # fit from measurement and claims.
@@ -230,8 +249,11 @@ class WorkloadWorker:
             headroom = backing.f_bavail*backing.f_frsize-self.config.get('backing_reserve_bytes', 20*1024**3)
             available['disk_bytes'] = max(0, min(available['disk_bytes'], headroom))
         available['cpu'] = max(0, min(capacity['cpu'], (os.cpu_count() or 1)-os.getloadavg()[0]))
-        return dict(capacity=capacity, available=available, labels=self.config.get('labels', {}),
-                    handlers=list(self.handlers), ready=not self.config.get('observe_only', False), host=host)
+        report = dict(capacity=capacity, available=available, labels=self.config.get('labels', {}),
+                      handlers=list(self.handlers), ready=not self.config.get('observe_only', False))
+        if not self.darwin:
+            report['host'] = host
+        return report
 
     def register(self, cleaned=()):
         return self.client.request('worker/report', dict(boot=self.boot, report=self.report(), cleaned=list(cleaned)))
@@ -483,16 +505,20 @@ class WorkloadWorker:
             # freely, so placement learns claims from this figure instead
             # (openspec/changes/host-memory-ledger). A spike shorter than one
             # turn (~0.2 s) can be missed.
-            attempt_cgroup = user_app_slice()/self.executor.unit(attempt)
+            attempt_cgroup = None if self.darwin else user_app_slice()/self.executor.unit(attempt)
             nonreclaimable_peak = None
             while True:
                 if lease.lost.is_set():
                     raise WorkloadError('execution lease lost', 409)
-                sample = cgroup_nonreclaimable(attempt_cgroup)
+                # On macOS the wrapper samples the tree's physical footprint
+                # (already non-reclaimable) and reports its peak in the receipt.
+                sample = None if self.darwin else cgroup_nonreclaimable(attempt_cgroup)
                 if sample is not None:
                     nonreclaimable_peak = max(nonreclaimable_peak or 0, sample)
                 result = self.executor.exit_result(output)
                 if result is not None:
+                    if self.darwin:
+                        nonreclaimable_peak = (result.get('resources') or {}).get('memory_peak_bytes')
                     if nonreclaimable_peak is not None:
                         result = dict(result, resources=dict(result.get('resources') or {},
                                       memory_nonreclaimable_peak_bytes=nonreclaimable_peak))

@@ -1,4 +1,8 @@
-"""Root-owned worker-local verifier; Unix peers must inhabit the live cgroup.
+"""Root-owned worker-local verifier; Unix peers must inhabit the live attempt.
+
+Linux: the attempt is the systemd unit's cgroup. macOS: the attempt is the
+launchd job's process tree; the root PID and the enforced limits come from
+launchd itself (openspec/changes/apple-host-compilation).
 
 Run as an installed service with a root-owned config. Worker credentials never
 enter the handler environment. The worker still owns supervision/cleanup; this
@@ -22,12 +26,18 @@ import socketserver
 import stat
 import struct
 import subprocess
+import sys
 import time
 from urllib.parse import urlsplit
 
 from livestack_node import transport
 from .launch_contract import MAX_BYTES, DEADLINE_SECONDS, receive, remaining, trusted_json, validate_request
 from .model import WorkloadError, encode, name
+
+DARWIN = sys.platform == 'darwin'
+if DARWIN:
+    from . import darwin_proc
+    from .darwin_supervision import job_label, launchd_job
 
 
 @contextmanager
@@ -53,6 +63,29 @@ def bounded_json(path):
     if len(raw) > 65536:
         raise WorkloadError('compilation_worker_journal_oversized', 403)
     return json.loads(raw)
+
+
+def machine_identity():
+    """32 lowercase hex: /etc/machine-id, or IOPlatformUUID without dashes."""
+    if DARWIN:
+        return darwin_proc.platform_uuid()
+    return Path('/etc/machine-id').read_text().strip()
+
+
+def darwin_attempt(config, attempt):
+    """(pid, start, limits) of the attempt's launchd job, from launchd."""
+    job = launchd_job('gui/'+str(config['worker_uid']), job_label(config['worker'], attempt), timeout=1)
+    if job is None or job['state'] != 'running' or job['pid'] is None:
+        raise WorkloadError('compilation_attempt_containment_unavailable', 403)
+    record = darwin_proc.info(job['pid'])
+    if record is None or record['uid'] != config['worker_uid']:
+        raise WorkloadError('compilation_attempt_containment_unavailable', 403)
+    arguments, limits = job['arguments'], {}
+    for flag in ('--memory-bytes', '--cpu', '--tasks', '--max-seconds'):
+        if arguments.count(flag) != 1 or arguments.index(flag)+1 >= len(arguments):
+            raise WorkloadError('compilation_attempt_resource_limit_missing', 403)
+        limits[flag] = float(arguments[arguments.index(flag)+1])
+    return record['pid'], record['start'], limits
 
 
 def process_identity(pid):
@@ -115,15 +148,21 @@ def verify_resource_caps(group, receipt):
     resources = receipt.get('execution_resources')
     if not isinstance(resources, dict):
         raise WorkloadError('compilation_launch_contract_unsupported', 403)
-    root = Path('/sys/fs/cgroup')/group.lstrip('/')
-    memory = (root/'memory.max').read_text().strip()
-    quota, period = (root/'cpu.max').read_text().split()
-    if memory == 'max' or quota == 'max':
-        raise WorkloadError('compilation_attempt_resource_limit_missing', 403)
+    if DARWIN:
+        # The wrapper enforces what launchd started it with (no cgroup exists).
+        limits = group[2]
+        memory, cpu = limits['--memory-bytes'], limits['--cpu']
+    else:
+        root = Path('/sys/fs/cgroup')/group.lstrip('/')
+        memory = (root/'memory.max').read_text().strip()
+        quota, period = (root/'cpu.max').read_text().split()
+        if memory == 'max' or quota == 'max':
+            raise WorkloadError('compilation_attempt_resource_limit_missing', 403)
+        memory, cpu = int(memory), int(quota)/int(period)
     memory_cap, cpu_cap = resources.get('memory_bytes'), resources.get('cpu')
     if (type(memory_cap) not in (int, float) or type(cpu_cap) not in (int, float) or
             not memory_cap > 0 or not cpu_cap > 0 or
-            int(memory) > memory_cap or int(quota)/int(period) > cpu_cap):
+            memory > memory_cap or cpu > cpu_cap):
         raise WorkloadError('compilation_attempt_resource_limit_mismatch', 403)
 
 
@@ -152,17 +191,28 @@ def verify_peer(config, request, pid, uid, deadline):
                     host=compilation['host'], policy_revision=compilation['policy_revision'])
     if any(request[key] != value for key, value in expected.items()):
         raise WorkloadError('compilation_worker_assignment_mismatch', 403)
-    group = owned_group(config, attempt, deadline)
-    identity = process_identity(pid)
-    if identity[1] != group and not identity[1].startswith(group+'/'):
-        raise WorkloadError('compilation_peer_outside_attempt', 403)
+    if DARWIN:
+        group = darwin_attempt(config, attempt)
+        identity = darwin_proc.info(pid)
+        if identity is None or not darwin_proc.descends_from(pid, group[0], group[1]):
+            raise WorkloadError('compilation_peer_outside_attempt', 403)
+    else:
+        group = owned_group(config, attempt, deadline)
+        identity = process_identity(pid)
+        if identity[1] != group and not identity[1].startswith(group+'/'):
+            raise WorkloadError('compilation_peer_outside_attempt', 403)
     receipt = authority_receipt(config, request, deadline)
     if (not isinstance(receipt, dict) or type(receipt.get('version')) is not int or receipt['version'] != 1 or
             any(receipt.get(key) != value for key, value in expected.items()) or
             request['class'] not in receipt.get('classes', [])):
         raise WorkloadError('compilation_authority_receipt_mismatch', 403)
     verify_resource_caps(group, receipt)
-    if process_identity(pid) != identity or owned_group(config, attempt, deadline) != group:
+    if DARWIN:
+        changed = (darwin_proc.info(pid) != identity or darwin_attempt(config, attempt) != group or
+                   not darwin_proc.descends_from(pid, group[0], group[1]))
+    else:
+        changed = process_identity(pid) != identity or owned_group(config, attempt, deadline) != group
+    if changed:
         raise WorkloadError('compilation_peer_containment_changed', 403)
     remaining(deadline)
     return receipt
@@ -171,7 +221,10 @@ def verify_peer(config, request, pid, uid, deadline):
 class LaunchHandler(socketserver.BaseRequestHandler):
     def handle(self):
         request = None
-        pid, uid, _ = struct.unpack('3i', self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        if DARWIN:
+            pid, uid = darwin_proc.peer_credentials(self.request)
+        else:
+            pid, uid, _ = struct.unpack('3i', self.request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
         try:
             with launch_deadline() as deadline:
                 request = receive(self.request, deadline)
@@ -207,7 +260,7 @@ class LaunchServer(socketserver.UnixStreamServer):
         name(config['host'], 'physical host')
         if (not isinstance(config['machine_id'], str) or len(config['machine_id']) != 32 or
                 any(c not in '0123456789abcdef' for c in config['machine_id']) or
-                Path('/etc/machine-id').read_text().strip() != config['machine_id']):
+                machine_identity() != config['machine_id']):
             raise WorkloadError('compilation_verifier_physical_machine_mismatch', 403)
         if not isinstance(config['token'], str) or len(config['token']) < 32:
             raise WorkloadError('compilation_verifier_credential_invalid', 403)
