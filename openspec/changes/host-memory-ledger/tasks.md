@@ -28,8 +28,9 @@ names its tests and its ledger obligation.
 
 ## 4. Deploy (design §7)
 
-- [ ] 4.1 Authority release staged + repointed; verified.
-- [ ] 4.2 zz-joe workers: release + config (`host_services`, no `capacity`, default
+- [x] 4.1 Authority release staged + repointed; verified.
+- [x] 4.2 zz-joe workers: release + config (`host_services`, no `capacity`, default
   reserve); restarted idle; verified (design §8).
-- [ ] 4.3 Remaining Linux workers.
-- [ ] 4.4 Record the deploy and measurements in `_plans/durable-workloads.md`.
+- [ ] 4.3 Remaining Linux workers. NOT DONE (2026-10-02): every other worker still runs
+  its old release and is placed as before; see `_plans/durable-workloads.md`.
+- [x] 4.4 Record the deploy and measurements in `_plans/durable-workloads.md`.
