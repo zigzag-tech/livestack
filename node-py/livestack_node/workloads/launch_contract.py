@@ -17,14 +17,48 @@ from .model import WorkloadError, encode, name
 MAX_BYTES = 16384
 DEADLINE_SECONDS = 5
 # /etc is a symlink on macOS and the trust walk below refuses symlinks.
+# Windows: a directory only SYSTEM/Administrators/TrustedInstaller can alter.
 REGISTRY = ('/private/etc/livestack/compilation-launch.json' if sys.platform == 'darwin'
+            else 'C:\\ProgramData\\livestack\\compilation-launch.json' if sys.platform == 'win32'
             else '/etc/livestack/compilation-launch.json')
 REQUEST_FIELDS = frozenset({'version', 'worker', 'host', 'policy_revision', 'boot',
                            'job_id', 'attempt_id', 'fence', 'input_digest', 'class'})
 
 
+def trusted_json_windows(path, *, secret=False):
+    """The Windows equivalent of root ownership: the file and every directory
+    above it are owned by SYSTEM, Administrators or TrustedInstaller, no other
+    SID may write the file (or, for a secret, read it) or replace any entry on
+    the path, and no component is a reparse point (symlink/junction)."""
+    from . import windows_proc
+    path = Path(path)
+    if not path.is_absolute():
+        raise WorkloadError('compilation_registry_untrusted', 403)
+    try:
+        for component in [path, *path.parents]:
+            info = os.lstat(component)
+            if info.st_file_attributes & windows_proc.FILE_ATTRIBUTE_REPARSE_POINT:
+                raise WorkloadError('compilation_registry_untrusted', 403)
+        rights = windows_proc.FILE_WRITE_RIGHTS | (windows_proc.FILE_READ_RIGHTS if secret else 0)
+        reasons = [windows_proc.untrusted_rights(path, rights)]
+        reasons += [windows_proc.untrusted_rights(d, windows_proc.DIRECTORY_REPLACE_RIGHTS) for d in path.parents]
+    except OSError as error:
+        raise WorkloadError('compilation_registry_untrusted', 403) from error
+    if any(reasons):
+        raise WorkloadError('compilation_registry_untrusted', 403)
+    with open(path, 'rb') as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise WorkloadError('compilation_registry_untrusted', 403)
+        raw = source.read(MAX_BYTES+1)
+    if len(raw) > MAX_BYTES:
+        raise WorkloadError('compilation_registry_oversized', 403)
+    return json.loads(raw)
+
+
 def trusted_json(path, *, secret=False):
     """Root-owned metadata under directories a caller cannot replace."""
+    if sys.platform == 'win32':
+        return trusted_json_windows(path, secret=secret)
     path = Path(path)
     if not path.is_absolute():
         raise WorkloadError('compilation_registry_untrusted', 403)
@@ -90,7 +124,7 @@ def verify_launch(request, *, registry_path=REGISTRY):
     integration fixtures; it receives exactly the same root ownership checks.
     """
     validate_request(request)
-    if sys.platform not in ('linux', 'darwin'):
+    if sys.platform not in ('linux', 'darwin', 'win32'):
         raise WorkloadError('compilation_launch_platform_unsupported', 403)
     deadline = time.monotonic()+DEADLINE_SECONDS
     try:
@@ -100,19 +134,7 @@ def verify_launch(request, *, registry_path=REGISTRY):
                 not isinstance(registry['slots'], dict) or not 1 <= len(registry['slots']) <= 128):
             raise WorkloadError('compilation_launch_contract_unsupported', 403)
         endpoint = registry['slots'].get(request['worker'])
-        if (not isinstance(endpoint, str) or not endpoint.startswith('/') or
-                len(endpoint.encode()) > 103):
-            raise WorkloadError('compilation_verifier_slot_unavailable', 503)
-        # Socket ownership alone is not proof: SO_PEERCRED authenticates the
-        # connected server, including a raced replacement/forged socket path.
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-            connection.settimeout(remaining(deadline))
-            connection.connect(endpoint)
-            uid = server_uid(connection)
-            if uid != 0:
-                raise WorkloadError('compilation_verifier_peer_untrusted', 403)
-            connection.sendall(encode(request, MAX_BYTES-1).encode()+b'\n')
-            response = receive(connection, deadline)
+        response = (_pipe_exchange if sys.platform == 'win32' else _socket_exchange)(endpoint, request, deadline)
         remaining(deadline)
         if (not isinstance(response, dict) or response.get('version') != VERSION or
                 type(response.get('version')) is not int or type(response.get('ok')) is not bool):
@@ -135,6 +157,33 @@ def verify_launch(request, *, registry_path=REGISTRY):
         raise
     except (OSError, ValueError, TypeError) as error:
         raise WorkloadError('compilation_verification_unavailable', 503) from error
+
+
+def _socket_exchange(endpoint, request, deadline):
+    if (not isinstance(endpoint, str) or not endpoint.startswith('/') or
+            len(endpoint.encode()) > 103):
+        raise WorkloadError('compilation_verifier_slot_unavailable', 503)
+    # Socket ownership alone is not proof: SO_PEERCRED authenticates the
+    # connected server, including a raced replacement/forged socket path.
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+        connection.settimeout(remaining(deadline))
+        connection.connect(endpoint)
+        uid = server_uid(connection)
+        if uid != 0:
+            raise WorkloadError('compilation_verifier_peer_untrusted', 403)
+        connection.sendall(encode(request, MAX_BYTES-1).encode()+b'\n')
+        return receive(connection, deadline)
+
+
+def _pipe_exchange(endpoint, request, deadline):
+    # A named pipe; connect() refuses a server that is not LocalSystem.
+    from .windows_pipe import connect
+    if not isinstance(endpoint, str):
+        raise WorkloadError('compilation_verifier_slot_unavailable', 503)
+    with connect(endpoint, deadline) as connection:
+        connection.settimeout(remaining(deadline))
+        connection.sendall(encode(request, MAX_BYTES-1).encode()+b'\n')
+        return receive(connection, deadline)
 
 
 def server_uid(connection):
