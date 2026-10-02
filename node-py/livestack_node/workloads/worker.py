@@ -17,7 +17,7 @@ import time
 import uuid
 from urllib.error import HTTPError
 
-from ..hostview import HostView
+from ..hostview import HostView, cgroup_nonreclaimable, user_app_slice
 from .archive import relative_path, unpack
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
@@ -111,7 +111,7 @@ class WorkloadWorker:
         # (openspec/changes/host-memory-ledger). Model servers listed in
         # `host_services` are charged their learned host-RAM peak.
         self.host_view = HostView(services=config.get('host_services', []),
-                                  peaks_path=Path(config['state_dir'])/'host-peaks.json',
+                                  peaks_path=Path(config['state_dir'])/'host-peaks-nonreclaimable.json',
                                   reserve_bytes=config.get('memory_reserve_bytes', 1024**3))
         # Workspaces that could not be removed: path -> last error text. They are
         # retried every step; a removal failure never blocks claiming/heartbeats.
@@ -478,11 +478,24 @@ class WorkloadWorker:
             # prove that execution still exists or has reached result handoff.
             lease.require_liveness(lambda: self._execution_live_or_complete(attempt, output))
             last_report = time.monotonic()
+            # The attempt's non-reclaimable high-water (anon+shmem+kernel), sampled
+            # each turn. memory_peak_bytes counts page cache the kernel reclaims
+            # freely, so placement learns claims from this figure instead
+            # (openspec/changes/host-memory-ledger). A spike shorter than one
+            # turn (~0.2 s) can be missed.
+            attempt_cgroup = user_app_slice()/self.executor.unit(attempt)
+            nonreclaimable_peak = None
             while True:
                 if lease.lost.is_set():
                     raise WorkloadError('execution lease lost', 409)
+                sample = cgroup_nonreclaimable(attempt_cgroup)
+                if sample is not None:
+                    nonreclaimable_peak = max(nonreclaimable_peak or 0, sample)
                 result = self.executor.exit_result(output)
                 if result is not None:
+                    if nonreclaimable_peak is not None:
+                        result = dict(result, resources=dict(result.get('resources') or {},
+                                      memory_nonreclaimable_peak_bytes=nonreclaimable_peak))
                     completion = self._completion_from_exit(assignment, result)
                     break
                 if time.monotonic()-last_report >= self.config.get('status_report_seconds', 10):

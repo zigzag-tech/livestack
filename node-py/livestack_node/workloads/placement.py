@@ -18,7 +18,7 @@ AVOID_SECONDS = 1800
 # workers report a `host` block is charged learned claims, not admit vectors,
 # for memory; hosts without one are placed exactly as before.
 MEMORY = "memory_bytes"
-# A handler's claim is the max memory_peak_bytes over its last N SUCCEEDED
+# A handler's claim is the max recorded peak over its last N SUCCEEDED
 # attempts: it follows a handler that grew or shrank within a day of traffic.
 # Only successes teach: an attempt that died in preparation peaks low, and on
 # 2026-10-02 twenty of them in a row would have taught the e2e handler 3.8 GiB
@@ -37,15 +37,23 @@ def _gib(n):
 
 
 def _learned_peak(db, handler, cache):
+    """Prefer the non-reclaimable peak the worker samples; fall back to the
+    cgroup memory.peak (page cache included, so conservative) only while no
+    succeeded attempt of the handler carries the newer figure."""
     if handler not in cache:
-        peaks = [r[0] for r in db.execute(
-            "SELECT json_extract(a.result,'$.result.resources.memory_peak_bytes') FROM attempts a "
-            "JOIN jobs j ON j.id=a.job WHERE json_extract(j.spec,'$.handler')=? "
-            "AND json_extract(a.result,'$.outcome')='succeeded' "
-            "AND json_extract(a.result,'$.result.resources.memory_peak_bytes') IS NOT NULL "
-            "ORDER BY a.created DESC LIMIT ?", (handler, LEARNED_WINDOW))
-            if isinstance(r[0], (int, float)) and not isinstance(r[0], bool)]
-        cache[handler] = max(peaks) if peaks else None
+        cache[handler] = None
+        for field in ("memory_nonreclaimable_peak_bytes", "memory_peak_bytes"):
+            path = f"$.result.resources.{field}"
+            peaks = [r[0] for r in db.execute(
+                "SELECT json_extract(a.result,?) FROM attempts a "
+                "JOIN jobs j ON j.id=a.job WHERE json_extract(j.spec,'$.handler')=? "
+                "AND json_extract(a.result,'$.outcome')='succeeded' "
+                "AND json_extract(a.result,?) IS NOT NULL "
+                "ORDER BY a.created DESC LIMIT ?", (path, handler, path, LEARNED_WINDOW))
+                if isinstance(r[0], (int, float)) and not isinstance(r[0], bool)]
+            if peaks:
+                cache[handler] = max(peaks)
+                break
     return cache[handler]
 
 
@@ -215,8 +223,11 @@ def place(db, now, limits, principals=None, compilation_policy=None):
             claim = _memory_claim(db, json.loads(a["job_spec"]), learned)
             if claim is not None:
                 pending += max(0, claim - view["attempts"].get(a["id"], 0))
-        services = max((max(0, s["peak_bytes"] - s["current_bytes"]) for s in view["services"].values()),
-                       default=0)
+        # A service whose units are all resident cannot load again, so its
+        # spike is not outstanding. Only an explicit True clears it: a failed
+        # residence read (null) is charged, never read as "no spike".
+        services = max((max(0, s["peak_bytes"] - s["current_bytes"]) for s in view["services"].values()
+                        if s.get("resident") is not True), default=0)
         memory_terms[h] = dict(available=view["memory_available_bytes"], reserve=view["memory_reserve_bytes"],
                                attempts=pending, services=services, admitted=0)
         host_free.setdefault(h, {})[MEMORY] = max(0, view["memory_available_bytes"]

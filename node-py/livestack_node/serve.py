@@ -378,7 +378,49 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
                        facade_url=(f"http://127.0.0.1:{int(resolved_port)}{prefix}"
                                    if resolved_port else None))
 
+    _start_idle_sweep(manager, gpu_call=gpu_call, idle_seconds=idle_seconds,
+                      in_flight=in_flight)
     return manager, coordinator
+
+
+def _start_idle_sweep(manager, *, gpu_call, idle_seconds, in_flight=None,
+                      log: Callable[[str], None] = print,
+                      sleep: Callable[[float], None] = time.sleep):
+    """Drive ``manager.maybe_evict()`` on a daemon thread. attach() owns this.
+
+    ``ModelManager`` documents eviction as "driven by the server's idle loop",
+    and attach() builds the manager with ``idle_seconds`` — but nothing called
+    it unless the server wrote its own loop. The image worker did not: on
+    2026-10-01 klein-0 stayed resident 48+ min after its last job at 21:57 EDT
+    with ``idle_seconds=900``, and a resident unit that never leaves is a unit
+    that reloads (a 16 GB host-RAM spike) on no schedule anyone chose.
+
+    Through ``gpu_call`` because eviction is GPU-thread only: it must never race
+    an in-flight GPU op. Skipped while the server counts work in flight. A
+    failure is logged once per distinct message and never stops the loop or
+    the node. ``idle_seconds <= 0`` means units never idle-evict: no thread.
+    """
+    if not idle_seconds or idle_seconds <= 0:
+        return None
+    interval = max(0.25, min(idle_seconds / 4.0, 30.0))
+    seen = set()
+
+    def _run() -> None:
+        while True:
+            sleep(interval)
+            try:
+                if in_flight is not None and int(in_flight()) > 0:
+                    continue
+                gpu_call(manager.maybe_evict)
+            except Exception as e:  # noqa: BLE001 - a sweep failure must not kill the node
+                text = f"{type(e).__name__}: {e}"
+                if text not in seen and len(seen) < 64:
+                    seen.add(text)
+                    log(f"[livestack] idle sweep failed (node keeps serving): {text}")
+
+    thread = threading.Thread(target=_run, name="livestack-idle-sweep", daemon=True)
+    thread.start()
+    return thread
 
 
 def _start_preload(preload, *, manager, gpu_call, facade_url: Optional[str],
