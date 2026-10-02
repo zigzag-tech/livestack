@@ -226,7 +226,8 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
                 except Exception:
                     store = None
             tracker = ActivationTracker(store_path=store or None,
-                                        signature=_footprint_signature(units))
+                                        signature=_footprint_signature(units),
+                                        known_units=units.keys())
             observer = ActivationObserver(tracker, meter=meter)
 
     coordinator = LivestackCoordinator(host_id, coload=coload, usage_ttl_seconds=idle_seconds)
@@ -290,6 +291,7 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     app.include_router(
         build_router(manager, coordinator, Capability(kind=kind, host_id=host_id),
                      gpu_call, device_meter=device_meter, activation_tracker=tracker,
+                     activation_observer=observer,
                      readiness=readiness, device_id=device_id,
                      in_flight=in_flight, node_id=node_id, inventory=inventory,
                      node_principals=node_principals,
