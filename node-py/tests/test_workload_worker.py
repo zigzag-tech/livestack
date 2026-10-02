@@ -1,5 +1,6 @@
 """Actual HTTP authority, private input transfer and systemd worker execution."""
 import json
+import os
 import logging
 from pathlib import Path
 import socket
@@ -541,6 +542,14 @@ def test_rootless_worker_delivers_pinned_artifact(fleet, tmp_path, backend, exit
         pytest.skip('requires installed rootless Docker prerequisites')
     store, config, caller, digest = fleet
     config['handlers']['native.v1'].update(backend=backend, infrastructure_outputs=['artifact'])
+    # The private disposable worker uses this exact SDK, including its module
+    # entry points; the fixture's minimal environment otherwise hides it.
+    config['environment']['PYTHONPATH'] = str(Path(__file__).resolve().parents[1])
+    if backend == 'rootless-docker-native':
+        address = os.environ.get('HARMONY_TEST_NATIVE_HOST_ADDRESS')
+        if address is None:
+            pytest.skip('requires an explicit operator-declared native test host address')
+        config['docker_native_host_address'] = address
     config['capacity']['memory_bytes'] = 512*1024**2
     job = caller.submit(dict(version=1, key='docker', handler='native.v1', input_digest=digest,
         need={'cpu': .5, 'memory_bytes': 512*1024**2, 'disk_bytes': 64*1024**2}, payload={'exit': exit_code}))

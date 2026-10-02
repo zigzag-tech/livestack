@@ -89,7 +89,7 @@ class SystemdExecutor:
 
     def start(self, attempt_id, argv, cwd, output, *, env, cpu, memory_bytes,
               max_seconds=3600, tasks=512, log_bytes=8*1024**2, lease_file=None, rootless_docker=False,
-              rootless_native=False):
+              rootless_native=False, native_host_address=None):
         # Limits are operator/handler configuration, never unconstrained argv
         # supplied by a remote caller. Fail closed when cgroups cannot apply.
         for value in (cpu, memory_bytes, max_seconds, tasks, log_bytes):
@@ -107,7 +107,7 @@ class SystemdExecutor:
         output.mkdir(parents=True, exist_ok=True)
         if rootless_docker:
             argv = docker_runtime.prepare(self.unit(attempt_id), argv, Path(cwd).resolve(), output,
-                                          native_client=rootless_native)
+                                          native_client=rootless_native, native_host_address=native_host_address)
         config = output/'execution.json'
         config.write_text(encode(dict(argv=argv, cwd=str(Path(cwd).resolve()), output=str(output),
                                       env=env, log_bytes=int(log_bytes),

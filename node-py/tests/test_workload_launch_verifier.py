@@ -97,7 +97,8 @@ def launch(verifier, script, *, memory=512*1024**2, cpu=1, lease_file=None, root
     executor.start(assignment['attempt_id'], [sys.executable, str(program)], root, output,
                    env=env, cpu=cpu, memory_bytes=memory, max_seconds=60,
                    tasks=512 if rootless_native else 64, lease_file=lease_file,
-                   rootless_docker=rootless_native, rootless_native=rootless_native)
+                   rootless_docker=rootless_native, rootless_native=rootless_native,
+                   native_host_address=os.environ.get('HARMONY_TEST_NATIVE_HOST_ADDRESS'))
     return output
 
 

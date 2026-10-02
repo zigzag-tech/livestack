@@ -150,6 +150,22 @@ Docker context overrides. This avoids weakening root authentication inside a
 user namespace. Legacy `rootless-docker` remains a runtime backend; its user
 namespace cannot run this host-namespace guard.
 
+Native Docker workers must declare `docker_native_host_address` in their
+operator-owned worker configuration: a canonical local nonloopback IPv4 address
+reachable from their private containers. The worker verifies local ownership
+with a kernel bind before creating the runtime, requires nonlocal binding to be
+disabled, and installs that address as the private daemon's host-gateway IP.
+Missing, invalid or nonlocal declarations refuse launch; source environment
+variables cannot supply a fallback. The handler retains its host user and
+network namespaces and the authenticated compilation launch contract.
+
+Provision the declaration with the matching SDK only after draining the slot
+and verifying completion and cleanup of its accepted work. The real private
+Docker control in `test_native_docker_host_route.py` verifies container-to-native
+HTTP and kernel peer identity; its explicit fixture declaration is
+`HARMONY_TEST_NATIVE_HOST_ADDRESS`. The route is one fixed configuration value,
+with constant work for validation and no discovery scan or stored history.
+
 Both Docker backends classify exit 75 as infrastructure, preserving bounded
 retry and diagnostic handoff instead of reporting a product assertion failure.
 The real worker artifact-delivery control covers both backends with success,

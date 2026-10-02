@@ -459,7 +459,8 @@ class WorkloadWorker:
                 cpu=need['cpu'], memory_bytes=need['memory_bytes'],
                 max_seconds=handler.get('max_seconds', 3600), tasks=handler.get('max_tasks', 512), lease_file=root/'lease',
                 rootless_docker=handler.get('backend') in ('rootless-docker', 'rootless-docker-native'),
-                rootless_native=handler.get('backend') == 'rootless-docker-native')
+                rootless_native=handler.get('backend') == 'rootless-docker-native',
+                native_host_address=self.config.get('docker_native_host_address'))
             # Once execution starts, worker-process health alone cannot retain
             # the slot. A live supervised unit or its durable exit receipt must
             # prove that execution still exists or has reached result handoff.
