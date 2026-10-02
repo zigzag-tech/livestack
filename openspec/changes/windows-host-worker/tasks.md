@@ -22,7 +22,7 @@ on the job (`jobs.reason`), which these tasks keep.
 
 ## 4. Windows launch verification
 
-- [ ] 4.1 Verifier service (LocalSystem, named pipe, `GetNamedPipeClientProcessId` + `IsProcessInJob`, kernel-held limits, `MachineGuid`) and `verify_launch` client on Windows; tests: real verifier on Windows — admitted MSVC launch, peer outside the job refused, limit mismatch refused.
+- [x] 4.1 Verifier service (LocalSystem, named pipe, `GetNamedPipeClientProcessId` + `IsProcessInJob`, kernel-held limits, `MachineGuid`) and `verify_launch` client on Windows; tests: `test_workload_windows_verifier.py`, real LocalSystem verifier service on Windows — admitted MSVC (rustc x86_64-pc-windows-msvc) launch, peer outside the job refused, memory/CPU limit mismatch refused, unreserved class refused, registry in a user-writable directory refused, a non-SYSTEM pipe server refused, wrong-machine config cannot start.
 - [ ] 4.2 Authority runs the `windows` class before policy names it; policy grants `windows` to xc-win-1 in a window agreed with the policy owner.
 
 ## Deployment record (2026-10-02)
@@ -44,3 +44,10 @@ on the job (`jobs.reason`), which these tasks keep.
   WSL generates no `.swap` units from fstab: the guest's swap files did not return after
   `wsl --shutdown` until a oneshot `wsl-fstab-swap.service` (`swapon -a`) was added; verified
   over a second restart.
+
+## Evidence (verifier, 2026-10-02)
+
+- xc-win-1: `tests/test_workload_windows.py tests/test_workload_windows_verifier.py` 21 passed.
+- zz-joe (Linux): launch verifier, receipt files, policy, worker, supervision suites 105 passed,
+  34 skipped; the 2 failing docker verifier tests fail identically on origin/main
+  (`native_docker_host_address_missing`, environment).

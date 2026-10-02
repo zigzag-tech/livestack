@@ -1,6 +1,5 @@
 """Consumer guard: authenticate a local launch, write one current class receipt."""
 import argparse
-import fcntl
 import json
 import logging
 import os
@@ -11,6 +10,26 @@ import sys
 from .launch_contract import MAX_BYTES, REGISTRY, environment_request, verify_launch
 from .compilation_policy import CLASSES
 from .model import WorkloadError, encode
+if sys.platform == 'win32':
+    import msvcrt
+else:
+    import fcntl
+
+# Absent on Windows, where symlinks need a privilege the worker account lacks
+# and handles are not inherited by default.
+_NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)
+_NONBLOCK = getattr(os, 'O_NONBLOCK', 0)
+_CLOEXEC = getattr(os, 'O_CLOEXEC', 0)
+
+
+def _lock(stream):
+    if sys.platform == 'win32':
+        try:
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as error:
+            raise BlockingIOError(str(error)) from error
+    else:
+        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 def write_current_receipt(output, compilation_class, value):
@@ -25,7 +44,7 @@ def write_current_receipt(output, compilation_class, value):
     raw = encode(value, MAX_BYTES)
     lock_path=path.with_suffix('.lock')
     try:
-        descriptor=os.open(lock_path,os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,0o600)
+        descriptor=os.open(lock_path,os.O_WRONLY|os.O_CREAT|_NOFOLLOW|_NONBLOCK|_CLOEXEC,0o600)
     except OSError as error:
         raise WorkloadError('compilation_launch_receipt_lock_invalid',503) from error
     with os.fdopen(descriptor,'w') as lock:
@@ -33,11 +52,11 @@ def write_current_receipt(output, compilation_class, value):
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_size!=0 or metadata.st_nlink!=1:
             raise WorkloadError('compilation_launch_receipt_lock_invalid',503)
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock(lock)
         except BlockingIOError as error:
             raise WorkloadError('compilation_launch_receipt_busy', 503) from error
         try:
-            descriptor=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
+            descriptor=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|_NOFOLLOW|_CLOEXEC,0o600)
         except OSError as error:
             raise WorkloadError('compilation_launch_receipt_staging_invalid',503) from error
         try:

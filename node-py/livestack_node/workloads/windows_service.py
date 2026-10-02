@@ -67,8 +67,10 @@ def run_worker(config_path, stopping=None):
 
 
 class Service:
-    def __init__(self, name, config_path):
+    def __init__(self, name, config_path, *, target=None):
+        """target: what the service runs (default: the worker for config_path)."""
         self.name, self.config_path = name, config_path
+        self.target = target or (lambda: run_worker(config_path))
         self.stop = threading.Event()
         self.failed = None
         self.status_handle = None
@@ -101,10 +103,10 @@ class Service:
 
     def _worker(self):
         try:
-            run_worker(self.config_path)
+            self.target()
         except BaseException as error:  # noqa: BLE001 - recorded, then the process fails
             self.failed = error
-            logging.error('windows worker thread ended: %s', ''.join(traceback.format_exception(error))[-4000:])
+            logging.error('windows service thread ended: %s', ''.join(traceback.format_exception(error))[-4000:])
         self.stop.set()
 
     def _service_main(self, argc, argv):
