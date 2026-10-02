@@ -18,8 +18,11 @@ AVOID_SECONDS = 1800
 # workers report a `host` block is charged learned claims, not admit vectors,
 # for memory; hosts without one are placed exactly as before.
 MEMORY = "memory_bytes"
-# A handler's claim is the max memory_peak_bytes over its last N recorded
+# A handler's claim is the max memory_peak_bytes over its last N SUCCEEDED
 # attempts: it follows a handler that grew or shrank within a day of traffic.
+# Only successes teach: an attempt that died in preparation peaks low, and on
+# 2026-10-02 twenty of them in a row would have taught the e2e handler 3.8 GiB
+# while its completed runs reach 10 GiB.
 LEARNED_WINDOW = 20
 # Admission stops on a host that is already stalling on memory. avg60, not
 # avg10, so one burst does not flap admission. 16 MiB/s of swap-in is ~4k
@@ -38,6 +41,7 @@ def _learned_peak(db, handler, cache):
         peaks = [r[0] for r in db.execute(
             "SELECT json_extract(a.result,'$.result.resources.memory_peak_bytes') FROM attempts a "
             "JOIN jobs j ON j.id=a.job WHERE json_extract(j.spec,'$.handler')=? "
+            "AND json_extract(a.result,'$.outcome')='succeeded' "
             "AND json_extract(a.result,'$.result.resources.memory_peak_bytes') IS NOT NULL "
             "ORDER BY a.created DESC LIMIT ?", (handler, LEARNED_WINDOW))
             if isinstance(r[0], (int, float)) and not isinstance(r[0], bool)]
