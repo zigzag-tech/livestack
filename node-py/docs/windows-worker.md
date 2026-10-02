@@ -43,7 +43,8 @@ As Administrator on the host:
 5. `node-py\deploy\windows\install-worker.ps1 -WorkerId <id> -Release <...\node-py>
    -Config <config.json> -WorkspaceGB 100`. It creates the account (random
    password, rotated on every run, known only to the SCM), grants it "Log on as
-   a service", creates and mounts the bounded workspace VHDX, a SYSTEM boot task
+   a service" and "Create symbolic links" (handlers restore a captured tree's
+   links), creates and mounts the bounded workspace VHDX, a SYSTEM boot task
    that re-attaches it, the locked-down state/config directories, and the
    service with restart-on-failure actions. It does not start the service.
 6. `sc.exe start LivestackWorkloadWorker`; read
