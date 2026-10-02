@@ -250,9 +250,15 @@ class WorkloadStore:
         if required or receipt:
             if self.compilation_policy is None or receipt is None:
                 raise WorkloadError('compilation_policy_grant_missing', 409)
+            # authorize() raises when the host lost any class this handler
+            # needs (narrowing, host removal, expiry). A new revision that still
+            # grants every admitted class is a widening or a no-op for this
+            # attempt: it keeps running, and its receipt keeps the ADMITTING
+            # revision as evidence. Bumping the revision used to kill every
+            # running compile attempt fleet-wide (2026-10-02, four e2e attempts).
             current = self.compilation_policy.authorize(attempt['host'], spec['handler'], now).receipt()
-            if current != receipt:
-                raise WorkloadError('compilation_policy_revision_changed', 409)
+            if any(current[key] != receipt.get(key) for key in ('version', 'host', 'classes')):
+                raise WorkloadError('compilation_policy_grant_changed', 409)
         return spec, receipt
 
     def verify_compilation(self, worker, boot, attempt_id, fence, *, input_digest, compilation_class):
