@@ -102,6 +102,54 @@ def resources(value) -> dict:
     return result
 
 
+def _number(value, field, *, nullable=False):
+    if value is None and nullable:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) \
+            or value < 0 or value > 1e18:
+        raise WorkloadError(f"invalid host report field: {field}")
+    return value
+
+
+def host_view(value) -> dict:
+    """A worker's measured host block (livestack_node.hostview). Closed and bounded.
+
+    Readings the worker could not take are null and stay null: unknown is never zero.
+    """
+    keys = {"memory_total_bytes", "memory_available_bytes", "memory_reserve_bytes",
+            "swap_in_bytes_per_second", "psi", "attempts", "services"}
+    if not isinstance(value, dict) or set(value) != keys:
+        raise WorkloadError("invalid host report")
+    out = {k: _number(value[k], k) for k in ("memory_total_bytes", "memory_available_bytes",
+                                              "memory_reserve_bytes")}
+    out["swap_in_bytes_per_second"] = _number(value["swap_in_bytes_per_second"], "swap_in", nullable=True)
+    psi = value["psi"]
+    windows = {"some_avg10", "some_avg60", "full_avg10", "full_avg60"}
+    if not isinstance(psi, dict) or set(psi) != {"memory", "io", "cpu"}:
+        raise WorkloadError("invalid host report psi")
+    out["psi"] = {}
+    for resource, reading in psi.items():
+        if reading is not None and (not isinstance(reading, dict) or set(reading) != windows):
+            raise WorkloadError("invalid host report psi")
+        out["psi"][resource] = None if reading is None else {
+            w: _number(reading[w], "psi", nullable=True) for w in sorted(windows)}
+    attempts, services = value["attempts"], value["services"]
+    if not isinstance(attempts, dict) or len(attempts) > 64 or not isinstance(services, dict) or len(services) > 32:
+        raise WorkloadError("invalid host report tenants")
+    out["attempts"] = {}
+    for attempt, current in attempts.items():
+        if not isinstance(attempt, str) or not re.fullmatch(r"[0-9a-f]{32}", attempt):
+            raise WorkloadError("invalid host report attempt id")
+        out["attempts"][attempt] = _number(current, "attempt memory")
+    out["services"] = {}
+    for service, reading in services.items():
+        if (not isinstance(service, str) or not 0 < len(service) <= 256 or not isinstance(reading, dict)
+                or set(reading) != {"current_bytes", "peak_bytes"}):
+            raise WorkloadError("invalid host report service")
+        out["services"][service] = {k: _number(reading[k], "service memory") for k in sorted(reading)}
+    return out
+
+
 def labels(value) -> dict:
     if not isinstance(value, dict) or len(value) > 64:
         raise WorkloadError("invalid labels")

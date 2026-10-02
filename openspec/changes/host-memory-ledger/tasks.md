@@ -6,21 +6,21 @@ names its tests and its ledger obligation.
 
 ## 1. Measurement
 
-- [ ] 1.1 `livestack_node/hostview.py`: meminfo, PSI, swap-in rate, cgroup memory,
+- [x] 1.1 `livestack_node/hostview.py`: meminfo, PSI, swap-in rate, cgroup memory,
   attempt cgroup scan, learned service peaks persisted in the state dir.
   Tests: `tests/test_hostview.py`. Ledger: none.
 
 ## 2. Worker
 
-- [ ] 2.1 `worker.py` `report()`: optional `capacity` (measured host when absent), `host`
+- [x] 2.1 `worker.py` `report()`: optional `capacity` (measured host when absent), `host`
   block from `HostView`. Tests: `tests/test_hostview.py` (worker report against a temp
   tree), existing `tests/test_workload_worker.py`. Ledger: none.
 
 ## 3. Authority
 
-- [ ] 3.1 `store.py` `register`: accept and bound `host`. Tests:
+- [x] 3.1 `store.py` `register`: accept and bound `host`. Tests:
   `tests/test_workload_host_memory.py` (malformed blocks refused). Ledger: none.
-- [ ] 3.2 `placement.py`: learned handler peak, claim-based memory on measured hosts,
+- [x] 3.2 `placement.py`: learned handler peak, claim-based memory on measured hosts,
   pressure gate. Tests: `tests/test_workload_host_memory.py`, existing
   `tests/test_workload_store.py`, `tests/test_placement_principal_cap.py`.
   Positive control: overcommit test fails on the old `placement.py`.
