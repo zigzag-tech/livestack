@@ -18,6 +18,10 @@ on the job (`jobs.reason`), which these tasks keep.
 
 - [x] 3.1 Verifier and client accept macOS peers (LOCAL_PEERCRED/PEERPID, ancestry containment, launchd-held limits, IOPlatformUUID); tests: real root verifier on macOS — positive Apple-toolchain launch, copied metadata outside the job refused, wrong limits refused.
 
+## 3b. Policy changes
+
+- [x] 3.2 Widening-tolerant renewal (store `_compilation_live`): revision-only, class widening and other-host widening keep the attempt (3 controls, each failing on the old exact-receipt comparison with `compilation_policy_revision_changed`); class narrowing and host removal revoke renewal and verification (2 controls; the old code also revoked these, they guard the narrowing half). Policy suite 17 passed; lease/principal/http suites 58 passed.
+
 ## 4. Deployment (operational evidence in `_plans/durable-workloads.md`)
 
 - [ ] 4.1 Authority runs the new class before policy names it; policy grants `apple` to xc-mac-studio only, in a window agreed with the policy owner.
