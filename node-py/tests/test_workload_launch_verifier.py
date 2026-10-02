@@ -295,6 +295,8 @@ def test_dropped_authority_connection_is_retried_within_the_deadline(verifier, a
     assert dropped
     assert result['exit_code'] == 0, (output/'command.log').read_text()
     assert (root/'compiler-started').exists()
+    # stderr (the journal under systemd) names the failure, not just the file.
+    assert 'compilation_authority_transport_retry: failure=' in (root/'verifier.log').read_text()
 
 
 def test_current_receipt_is_bounded_and_refusal_replaces_success(verifier):
