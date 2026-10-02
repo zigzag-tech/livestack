@@ -17,6 +17,7 @@ import time
 import uuid
 from urllib.error import HTTPError
 
+from ..hostview import HostView
 from .archive import relative_path, unpack
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
@@ -106,6 +107,12 @@ class WorkloadWorker:
                 retention_seconds=config.get('input_cache_retention_seconds', 14*86400), mirror=mirror)
         self.reconciled = False
         self._host_pressure_state = None
+        # The measured host every placement on it consults
+        # (openspec/changes/host-memory-ledger). Model servers listed in
+        # `host_services` are charged their learned host-RAM peak.
+        self.host_view = HostView(services=config.get('host_services', []),
+                                  peaks_path=Path(config['state_dir'])/'host-peaks.json',
+                                  reserve_bytes=config.get('memory_reserve_bytes', 1024**3))
         # Workspaces that could not be removed: path -> last error text. They are
         # retried every step; a removal failure never blocks claiming/heartbeats.
         self.stuck_workspaces = {}
@@ -195,22 +202,27 @@ class WorkloadWorker:
         return limit
 
     def report(self):
-        capacity = dict(self.config['capacity'])
         stats = os.statvfs(self.workspace)
         filesystem_bytes = stats.f_blocks*stats.f_frsize
+        host = self.host_view.sample()
+        # `capacity` is an operator ceiling, not the description of the host.
+        # Absent, the worker offers the measured machine and placement decides
+        # fit from measurement and claims.
+        capacity = dict(self.config.get('capacity') or dict(
+            cpu=os.cpu_count() or 1, memory_bytes=host['memory_total_bytes'], disk_bytes=filesystem_bytes))
         if self.config.get('require_dedicated_filesystem', True):
             if self.workspace.stat().st_dev == self.workspace.parent.stat().st_dev:
                 raise WorkloadError('workspace is not a dedicated bounded filesystem', 503)
             if filesystem_bytes > self.config['workspace_bytes']:
                 raise WorkloadError('workspace filesystem exceeds configured byte bound', 503)
-        memory = dict(line.split(':', 1) for line in Path('/proc/meminfo').read_text().splitlines())
-        free_memory = int(memory['MemAvailable'].strip().split()[0])*1024
         available = dict(capacity)
         available['memory_bytes'] = max(0, min(capacity['memory_bytes'],
-            free_memory-self.config.get('memory_reserve_bytes', 1024**3)))
+            host['memory_available_bytes']-host['memory_reserve_bytes']))
         host_limit = self._host_memory_limit()
         if host_limit is not None:
             available['memory_bytes'] = min(available['memory_bytes'], host_limit)
+            # Inside a VM the guest's MemAvailable is not the machine's.
+            host['memory_available_bytes'] = min(host['memory_available_bytes'], host_limit)
         available['disk_bytes'] = max(0, min(capacity['disk_bytes'],
             stats.f_bavail*stats.f_frsize-self.config.get('disk_reserve_bytes', 1024**3)))
         for path in self.config.get('backing_filesystems', []):
@@ -219,7 +231,7 @@ class WorkloadWorker:
             available['disk_bytes'] = max(0, min(available['disk_bytes'], headroom))
         available['cpu'] = max(0, min(capacity['cpu'], (os.cpu_count() or 1)-os.getloadavg()[0]))
         return dict(capacity=capacity, available=available, labels=self.config.get('labels', {}),
-                    handlers=list(self.handlers), ready=not self.config.get('observe_only', False))
+                    handlers=list(self.handlers), ready=not self.config.get('observe_only', False), host=host)
 
     def register(self, cleaned=()):
         return self.client.request('worker/report', dict(boot=self.boot, report=self.report(), cleaned=list(cleaned)))
