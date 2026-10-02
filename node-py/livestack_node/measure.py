@@ -11,7 +11,16 @@ without a GPU.
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, Optional, Tuple
+import math
+from typing import Callable, Dict, Iterable, Optional, Tuple
+
+# A load that moved this process's allocator by less than this left its weights
+# somewhere the meter cannot see (an engine in another process, the CPU). It is
+# not evidence of a footprint, and recording it would plan a model at ~0 bytes.
+MIN_RESIDENT_EVIDENCE = 64 * 1024 * 1024
+# Upper bound on any learned value. Larger than any device; a store holding more
+# was not written by this code and is treated as corrupt.
+MAX_LEARNED_BYTES = float(1 << 40)
 
 
 class MemoryMeter:
@@ -64,28 +73,72 @@ class ActivationTracker:
     by construction: the high-water only ever grows and over-reservation cannot OOM —
     a model that later shrinks merely over-reserves until the process is restarted with
     the store cleared.
+
+    It also learns each unit's RESIDENT bytes (:meth:`record_resident`, measured by
+    :meth:`ActivationObserver.measure_load`), so a unit's planner footprint is what
+    loading it took, not an operator's number. Resident + activation are the unit's
+    whole measured cost; /residence reports them with ``footprint_source``
+    ``"allocator"`` once both are known (facade.py). Same rules as the high-water:
+    the declared footprint is the prior until the first measurement, a learned value
+    is only raised by evidence, at most one entry per known unit, and a store that
+    cannot be read is reported (``store_error``), never mistaken for an empty one.
     """
 
     def __init__(self, store_path: "Optional[str]" = None,
-                 signature: "Optional[str]" = None) -> None:
+                 signature: "Optional[str]" = None,
+                 known_units: "Optional[Iterable[str]]" = None) -> None:
         self._hw: Dict[str, float] = {}
+        # Learned RESIDENT bytes per unit: what loading it took from this process's
+        # allocator (see ActivationObserver.measure_load). Absent = never measured,
+        # and the declared footprint stands as the prior.
+        self._resident: Dict[str, float] = {}
         self._store_path = store_path
         # A store written under a different ``signature`` (e.g. a model/dtype/footprint
         # change) is DISCARDED on load rather than trusted: a stale value from a
         # different model could be too low, and under-reservation is the one dangerous
         # direction (OOM). ``None`` matches only ``None``.
         self._signature = signature
+        # Bound: the store holds at most one entry per unit this process serves.
+        # Entries for any other name are dropped on load and refused on record.
+        self._known = frozenset(known_units) if known_units is not None else None
+        # Why the durable store could not be used, or None. A store that exists but
+        # cannot be read is a FAILURE, distinct from a store that does not exist yet:
+        # the learned values it held are lost, and /residence says so.
+        self.store_error: Optional[str] = None
         if store_path:
             self._load()
+
+    def _accepts(self, unit: str) -> bool:
+        return self._known is None or unit in self._known
 
     def record(self, unit: str, activation_bytes: float) -> None:
         """Directly raise ``unit``'s activation high-water (used by the scoped
         :class:`ActivationObserver`, which measures one op exactly). Monotonic —
         a smaller later measurement never lowers the reserve."""
+        if not self._accepts(unit):
+            return
         v = max(0.0, float(activation_bytes))
-        if v > self._hw.get(unit, 0.0):
+        if unit not in self._hw or v > self._hw[unit]:
             self._hw[unit] = v
             self._save()
+
+    def record_resident(self, unit: str, resident_bytes: float) -> bool:
+        """Learn what ``unit`` holds on the device once loaded.
+
+        The first measurement REPLACES the declared prior (it is evidence; the prior
+        was not). After that the value only rises: a smaller later load is the
+        allocator reusing cached blocks, not the model shrinking. A load that moved
+        this process's allocator by less than ``MIN_RESIDENT_EVIDENCE`` is no
+        evidence at all — the weights live somewhere this meter cannot see (a
+        separate engine process, the CPU) — and is ignored rather than recorded
+        as a zero footprint. Returns whether the value was taken."""
+        v = float(resident_bytes)
+        if not self._accepts(unit) or not math.isfinite(v) or v < MIN_RESIDENT_EVIDENCE:
+            return False
+        if v > self._resident.get(unit, 0.0):
+            self._resident[unit] = v
+            self._save()
+        return True
 
     def observe(self, peak_bytes: Optional[int], resident_weights_bytes: float,
                 busy_units) -> None:
@@ -99,23 +152,53 @@ class ActivationTracker:
     def headroom_bytes(self, unit: str) -> float:
         return self._hw.get(unit, 0.0)
 
-    # --- durable store (best-effort; never raises out) ----------------------
+    def has_activation(self, unit: str) -> bool:
+        """Has an op of ``unit`` been measured (even one that added nothing)?"""
+        return unit in self._hw
+
+    def resident_bytes(self, unit: str) -> Optional[float]:
+        """Learned resident bytes, or None when never measured (declared prior stands)."""
+        return self._resident.get(unit)
+
+    # --- durable store (never raises out; failures are recorded in store_error) --
     def _load(self) -> None:
+        import json
         try:
-            import json
             with open(self._store_path) as f:
                 data = json.load(f)
-            # New format: {"signature": <sig>, "units": {name: bytes}}. Discard on
-            # signature mismatch (and ignore the legacy flat format, which had none).
-            if not isinstance(data, dict) or data.get("signature") != self._signature:
-                return
-            units = data.get("units") or {}
-            self._hw = {str(k): float(v) for k, v in units.items()
-                        if isinstance(v, (int, float)) and v >= 0}
         except FileNotFoundError:
-            pass
+            return                                   # absence: nothing learned yet
+        except Exception as e:                       # failure: unreadable / not JSON
+            self._quarantine(f"unreadable: {type(e).__name__}: {e}")
+            return
+        # Discard on signature mismatch (and the legacy flat format, which had none):
+        # a deliberate reset, not a failure.
+        if not isinstance(data, dict) or data.get("signature") != self._signature:
+            return
+        hw, res = {}, {}
+        for key, out in (("units", hw), ("resident", res)):
+            block = data.get(key) or {}
+            if not isinstance(block, dict):
+                self._quarantine(f"invalid: {key!r} is not an object")
+                return
+            for k, v in block.items():
+                if (isinstance(v, bool) or not isinstance(v, (int, float))
+                        or not math.isfinite(v) or v < 0 or v > MAX_LEARNED_BYTES):
+                    self._quarantine(f"invalid: {key}[{k!r}] = {v!r}")
+                    return
+                if self._accepts(str(k)):
+                    out[str(k)] = float(v)
+        self._hw, self._resident = hw, res
+
+    def _quarantine(self, why: str) -> None:
+        """Keep the bad file for inspection (one slot, overwritten: bounded) and
+        start from the declared priors, saying so."""
+        self.store_error = f"{self._store_path}: {why}"
+        try:
+            import os
+            os.replace(self._store_path, f"{self._store_path}.corrupt")
         except Exception:
-            pass  # corrupt/unreadable store — start fresh, don't crash the node
+            pass
 
     def _save(self) -> None:
         if not self._store_path:
@@ -125,10 +208,13 @@ class ActivationTracker:
             import os
             tmp = f"{self._store_path}.tmp.{os.getpid()}"
             with open(tmp, "w") as f:
-                json.dump({"signature": self._signature, "units": self._hw}, f)
+                json.dump({"signature": self._signature, "units": self._hw,
+                           "resident": self._resident}, f)
             os.replace(tmp, self._store_path)  # atomic
-        except Exception:
-            pass
+        except Exception as e:
+            # Learned values still apply in this process; they will not survive a
+            # restart, and the report says so instead of pretending they will.
+            self.store_error = f"{self._store_path}: save failed: {type(e).__name__}: {e}"
 
 
 class ActivationObserver:
@@ -150,14 +236,53 @@ class ActivationObserver:
         self._tracker = tracker
         self._meter = meter or _cuda_meter()
         self._base = 0.0
+        self._base_reserved: "Optional[float]" = None
+        # Why the last load could not be measured, or None.
+        self.load_error: "Optional[str]" = None
 
     def begin(self, unit: str) -> None:
         self._meter.reset_peak()
         self._base = float(self._meter.allocated())
+        self._base_reserved = _reserved(self._meter)
 
     def end(self, unit: str) -> None:
-        peak = float(self._meter.max_allocated())
-        self._tracker.record(unit, peak - self._base)
+        peak = float(self._meter.max_allocated()) - self._base
+        # What the op took from the CARD is the allocator's reserved growth, which
+        # fragmentation makes larger than the allocated growth (klein, 2026-10-02:
+        # 2.8 GiB allocated, 4.2 GiB more reserved-but-unallocated at its OOM). Take
+        # the larger of the two: either is a floor on what the op needed.
+        if self._base_reserved is not None:
+            peak = max(peak, float(self._meter.max_reserved()) - self._base_reserved)
+        self._tracker.record(unit, peak)
+
+    def measure_load(self, unit: str, load: "Callable[[], object]") -> object:
+        """Run ``load`` and learn what it left resident in this process's allocator.
+
+        Measured as the growth in reserved (else allocated) bytes across the load,
+        so co-resident units' weights and the CUDA context sit in the baseline and
+        are not attributed to ``unit``. A meter that fails is recorded in the
+        observer's ``load_error`` and never fails the load itself."""
+        try:
+            before = _reserved(self._meter)
+            before_alloc = float(self._meter.allocated())
+        except Exception as e:
+            self.load_error = f"{unit}: meter failed before load: {type(e).__name__}: {e}"
+            return load()
+        model = load()
+        try:
+            grew = float(self._meter.allocated()) - before_alloc
+            if before is not None:
+                grew = max(grew, _reserved(self._meter) - before)
+            self._tracker.record_resident(unit, grew)
+        except Exception as e:
+            self.load_error = f"{unit}: meter failed after load: {type(e).__name__}: {e}"
+        return model
+
+
+def _reserved(meter) -> "Optional[float]":
+    """The meter's reserved bytes, or None for a meter that only counts allocations."""
+    fn = getattr(meter, "reserved", None)
+    return float(fn()) if fn is not None else None
 
 
 def _cuda_meter() -> MemoryMeter:  # pragma: no cover - requires torch+CUDA
@@ -172,6 +297,12 @@ def _cuda_meter() -> MemoryMeter:  # pragma: no cover - requires torch+CUDA
 
         def max_allocated(self) -> int:
             return torch.cuda.max_memory_allocated()
+
+        def reserved(self) -> int:
+            return torch.cuda.memory_reserved()
+
+        def max_reserved(self) -> int:
+            return torch.cuda.max_memory_reserved()
 
     return _CudaMeter()
 
