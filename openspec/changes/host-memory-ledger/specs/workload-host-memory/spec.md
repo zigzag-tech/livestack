@@ -26,7 +26,7 @@ On a host whose freshest report carries `host`, placement SHALL compute free mem
 measured available memory, minus the reserve, minus every active attempt's unrealised
 claim (claim minus its measured current use), minus the largest unrealised model-server
 peak. An attempt's claim SHALL be the maximum recorded `memory_peak_bytes` over its
-handler's last 20 completed attempts, bounded by the job's `admit` and `need` memory,
+handler's last 20 succeeded attempts, bounded by the job's `admit` and `need` memory,
 and SHALL be the job's `need` memory while no peak is recorded. A queued job SHALL fit
 its own claim. Hosts without a `host` block SHALL be placed as before.
 

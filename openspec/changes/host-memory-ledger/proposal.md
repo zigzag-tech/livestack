@@ -57,7 +57,7 @@ workload planner honours.
    `free memory = MemAvailable − reserve − Σ attempts max(0, claim − current)
    − max over model servers of max(0, learned peak − current)`. An attempt's claim is
    the **learned peak of its handler** (max `memory_peak_bytes` over that handler's last
-   20 completed attempts, within `[admit, need]`), falling back to `need` until learned.
+   20 succeeded attempts, within `[admit, need]`), falling back to `need` until learned.
    A new job must fit its own claim, not its `admit`.
 4. **Pressure defers admission.** A host whose freshest report shows memory PSI
    `full avg60 ≥ 5 %` or swap-in ≥ 16 MiB/s admits nothing; each refused job names it

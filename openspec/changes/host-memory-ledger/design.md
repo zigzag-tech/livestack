@@ -62,8 +62,11 @@ Why each term:
   use, which over-charges early and under-charges late.
 - **Learned handler peak, within `[admit, need]`.** `need` is the cgroup `MemoryMax`, so
   no attempt can exceed it; `admit` is the caller's stated floor. The statistic is the
-  max of the last 20 recorded peaks: it tracks a handler that grew or shrank within a
-  day of traffic and needs no decay knob. For e2e that night it is 10 GiB
+  max of the last 20 recorded peaks of SUCCEEDED attempts: it tracks a handler that grew
+  or shrank within a day of traffic and needs no decay knob. Only successes teach, because
+  an attempt that died in preparation peaks low: at deploy time (2026-10-02 02:40 UTC)
+  the last 20 e2e attempts with a peak were mostly infrastructure failures at 2.5-4 GiB,
+  which would have taught 7.8 GiB, while the last 20 successes reach 10 GiB. For e2e that night it is 10 GiB
   (attempts hit their cap), so two attempts cannot both fit beside klein's transient.
 - **Model servers: the largest outstanding transient, not the sum.** zz-joe's servers'
   learned peaks sum to ~36 GB on a 31 GB host; they are load/serve transients of
