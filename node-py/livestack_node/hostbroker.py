@@ -57,6 +57,14 @@ def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit],
     * priority takes the MIN (lower = more important) and residency the most
       pinned tier, for the same reason: the stronger claim wins.
     * `min_resident` takes the MAX — a fleet-wide warm floor is a floor.
+    * `footprint_source` is kept when every peer agrees, else it names the mix
+      ("allocator+declared"). It used to be dropped, so a MEASURED footprint was
+      planned and ledgered as "declared" (zz-joe 2026-10-02, two klein nodes, one
+      measured) and a "vllm-startup" pair lost its reserve waiver. A mix is in no
+      `MEASURED_SOURCES`, so the device reserve still covers the unmeasured peer.
+    * `admission_footprint` takes the MAX of each peer's admission need (its
+      own, else its footprint); it used to be dropped, i.e. reset to "same as
+      footprint".
     """
     # Which devices actually have a node serving each kind. A device is not a
     # server: several nodes share one card and serve different things, so
@@ -90,6 +98,12 @@ def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit],
             spread_group=prev.spread_group or unit.spread_group,
             attributes=dict(prev.attributes or unit.attributes),
             servable_on=frozenset(serves.get(kind, ())),
+            footprint_source="+".join(sorted(
+                set(prev.footprint_source.split("+")) | {unit.footprint_source})),
+            admission_footprint=(
+                _res_max(prev.admission_footprint or prev.footprint,
+                         unit.admission_footprint or unit.footprint)
+                if prev.admission_footprint or unit.admission_footprint else {}),
         )
     return out
 
