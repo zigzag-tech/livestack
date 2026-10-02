@@ -1001,7 +1001,10 @@ def test_report_carries_the_measured_host_and_every_running_attempt(fleet):
         assert report['host']['memory_total_bytes'] == meminfo()['total']
         assert set(report['host']['psi']) == {'memory', 'io', 'cpu'}
         stepped.join(timeout=30)
-        assert caller.get(job['id'])['result']['result']['resources']['memory_peak_bytes'] > 0
+        resources = caller.get(job['id'])['result']['result']['resources']
+        assert resources['memory_peak_bytes'] > 0
+        # The worker's own sample of what the kernel cannot drop as cache.
+        assert 0 < resources['memory_nonreclaimable_peak_bytes'] <= resources['memory_peak_bytes']
     finally:
         stepped.join(timeout=30)
         worker.close()

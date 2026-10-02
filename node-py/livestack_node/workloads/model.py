@@ -143,10 +143,15 @@ def host_view(value) -> dict:
         out["attempts"][attempt] = _number(current, "attempt memory")
     out["services"] = {}
     for service, reading in services.items():
+        # `resident` (optional): True = every unit loaded, so no load spike can
+        # recur; False or null (unreadable) = a spike may come and is charged.
         if (not isinstance(service, str) or not 0 < len(service) <= 256 or not isinstance(reading, dict)
-                or set(reading) != {"current_bytes", "peak_bytes"}):
+                or not {"current_bytes", "peak_bytes"} <= set(reading) <= {"current_bytes", "peak_bytes", "resident"}
+                or reading.get("resident") not in (True, False, None)):
             raise WorkloadError("invalid host report service")
-        out["services"][service] = {k: _number(reading[k], "service memory") for k in sorted(reading)}
+        out["services"][service] = {k: _number(reading[k], "service memory") for k in ("current_bytes", "peak_bytes")}
+        if "resident" in reading:
+            out["services"][service]["resident"] = reading["resident"]
     return out
 
 

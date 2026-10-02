@@ -157,3 +157,26 @@ authority is upgraded.
   and the second job's reason names the memory arithmetic; attempts that run there
   start the hub well under the 60 s budget; job outcomes before/after from the
   authority.
+
+## 9. Corrections after the first deploy (2026-10-02 ~03:00 UTC)
+
+- **Measure non-reclaimable memory, not memory.current/memory.peak.** After a load,
+  klein-0 read memory.current 17.8 GB with anon 1.36 GB and no swap: the "16 GB peak"
+  was the 14.8 GB of safetensors in page cache, which MemAvailable already counts as
+  available. Charging it again double-counted it. Services' and attempts' figures are now
+  `anon + shmem + (kernel - slab_reclaimable)` from memory.stat; a service's learned peak
+  is the max of those samples (one per report), persisted under a new file name
+  (`host-peaks-nonreclaimable.json`) so cache-inflated values are not inherited. The
+  worker samples each attempt's figure every ~0.2 s and records
+  `memory_nonreclaimable_peak_bytes`; placement learns from it, falling back to
+  `memory_peak_bytes` only while no succeeded attempt carries it.
+- **A spike is outstanding only while a unit is not resident.** A `host_services` entry
+  may be `{path, residence}`; the worker reads `/livestack/residence` (1 s timeout,
+  256 KiB cap) and reports `resident`. Placement skips a service's spike only on an
+  explicit `true`; `false` or an unreadable server (`null`) is charged.
+- **`serve.attach()` drives idle eviction.** Nothing called `manager.maybe_evict()` for
+  servers that did not write their own loop (klein stayed resident 48+ min past
+  `idle_seconds=900`). attach() now starts the sweep (through `gpu_call`, skipped while
+  `in_flight` > 0, every min(idle/4, 30) s, failures logged and never fatal); the embed
+  node's own loop is removed. Servers that still call `maybe_evict()` themselves
+  (polyasr) sweep twice; that is idempotent under the manager's guard.

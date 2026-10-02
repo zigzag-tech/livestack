@@ -19,11 +19,36 @@ import os
 from pathlib import Path
 import re
 import time
+from urllib.request import urlopen
 
 # harmony-work-<sha256(worker)[:16]>-<attempt id>.service (supervision.py).
 ATTEMPT_UNIT = re.compile(r'harmony-work-[0-9a-f]{16}-([0-9a-f]{32})\.service')
 MAX_SERVICES = 32
 MAX_ATTEMPTS = 64
+RESIDENCE_TIMEOUT_S = 1.0
+RESIDENCE_MAX_BYTES = 256 * 1024
+
+
+def residence(url, timeout=RESIDENCE_TIMEOUT_S):
+    """True when every unit a model server reports on /livestack/residence is
+    resident, False when one is not, None when the read fails or names no unit.
+
+    A spike (a load through host RAM) can only recur while a unit is NOT
+    resident. None must be charged like False: a server we cannot read is not
+    a server that cannot spike.
+    """
+    try:
+        with urlopen(url, timeout=timeout) as reply:
+            body = reply.read(RESIDENCE_MAX_BYTES + 1)
+        if len(body) > RESIDENCE_MAX_BYTES:
+            return None
+        units = json.loads(body)['units']
+        flags = [u['resident'] for u in units]
+        if not flags or any(not isinstance(f, bool) for f in flags):
+            return None
+        return all(flags)
+    except Exception:  # noqa: BLE001 - every failure is "unknown", reported as None
+        return None
 
 
 def meminfo(proc='/proc'):
@@ -65,21 +90,36 @@ def swap_in_pages(proc='/proc'):
     return None
 
 
-def cgroup_memory(path):
-    """(memory.current, memory.peak) of one cgroup v2 dir; None when it is absent.
+def cgroup_nonreclaimable(path):
+    """Memory a cgroup holds that the kernel cannot reclaim by dropping cache:
+    anon + shmem + kernel memory other than reclaimable slab, from memory.stat.
+    None when the cgroup is absent or unreadable.
 
-    memory.peak exists from kernel 5.19; without it the peak is None.
+    Not memory.current/memory.peak: those count page cache, which MemAvailable
+    already treats as available. Measured on zz-joe 2026-10-02 02:52 UTC:
+    harmony-klein-0 after a load read memory.current 17.8 GB with anon 1.36 GB
+    and no swap; the "16 GB peak" was the 14.8 GB of safetensors in page cache.
+    Charging it on top of MemAvailable counted the same reclaimable pages twice.
     """
-    path = Path(path)
     try:
-        current = int((path/'memory.current').read_text())
+        with (Path(path)/'memory.stat').open() as stream:
+            text = stream.read(16385)
+        if len(text) > 16384:
+            return None
+        stat = {}
+        for line in text.splitlines():
+            key, _, value = line.partition(' ')
+            stat[key] = int(value)
     except (OSError, ValueError):
         return None
-    try:
-        peak = int((path/'memory.peak').read_text())
-    except (OSError, ValueError):
-        peak = None
-    return current, peak
+    if 'anon' not in stat:
+        return None
+    kernel = stat.get('kernel')
+    if kernel is None:  # kernels before 5.18 do not total it
+        kernel = sum(stat.get(k, 0) for k in ('kernel_stack', 'pagetables', 'percpu', 'sock', 'slab_unreclaimable'))
+    else:
+        kernel = max(0, kernel-stat.get('slab_reclaimable', 0))
+    return stat['anon'] + stat.get('shmem', 0) + kernel
 
 
 def user_app_slice(cgroup_root='/sys/fs/cgroup', uid=None):
@@ -94,17 +134,24 @@ class HostView:
 
     services: cgroup paths relative to cgroup_root of model servers Harmony runs on
     this host (e.g. "system.slice/harmony-klein-0.service"). Their learned peak is
-    the max memory.peak ever seen, persisted in peaks_path so a restart, which
-    resets memory.peak, does not forget a transient.
+    the max non-reclaimable memory ever sampled, persisted in peaks_path so a
+    restart does not forget a transient.
     """
 
     def __init__(self, *, services=(), peaks_path=None, attempts_dir=None,
                  reserve_bytes=1024**3, proc='/proc', cgroup_root='/sys/fs/cgroup', clock=time.monotonic):
-        services = list(services)
-        if len(services) > MAX_SERVICES or any(
-                not isinstance(s, str) or not s or s.startswith('/') or '..' in s.split('/') for s in services):
-            raise ValueError(f'host_services must be at most {MAX_SERVICES} relative cgroup paths')
-        self.services = services
+        # An entry is a relative cgroup path, or {"path": ..., "residence": url}
+        # for a model server whose /livestack/residence says whether its units
+        # are loaded (and so whether its load spike can still happen).
+        entries = [s if isinstance(s, dict) else {'path': s} for s in services]
+        if len(entries) > MAX_SERVICES or any(
+                set(e) - {'path', 'residence'} or not isinstance(e.get('path'), str) or not e['path']
+                or e['path'].startswith('/') or '..' in e['path'].split('/')
+                or not isinstance(e.get('residence', ''), str) for e in entries):
+            raise ValueError(f'host_services must be at most {MAX_SERVICES} relative cgroup paths '
+                             'or {path, residence} objects')
+        self.services = [e['path'] for e in entries]
+        self.residence_urls = {e['path']: e['residence'] for e in entries if e.get('residence')}
         self.peaks_path = Path(peaks_path) if peaks_path else None
         self.attempts_dir = attempts_dir
         self.reserve_bytes = int(reserve_bytes)
@@ -114,7 +161,7 @@ class HostView:
         if self.peaks_path and self.peaks_path.exists():
             try:
                 stored = json.loads(self.peaks_path.read_text())
-                self.peaks = {k: int(v) for k, v in stored.items() if k in services}
+                self.peaks = {k: int(v) for k, v in stored.items() if k in self.services}
             except (OSError, ValueError, TypeError, AttributeError):
                 self.peaks = {}
 
@@ -135,20 +182,27 @@ class HostView:
         for entry in entries:
             match = ATTEMPT_UNIT.fullmatch(entry.name)
             if match and len(out) < MAX_ATTEMPTS:
-                reading = cgroup_memory(entry.path)
+                reading = cgroup_nonreclaimable(entry.path)
                 if reading is not None:
-                    out[match.group(1)] = reading[0]
+                    out[match.group(1)] = reading
         return out
 
     def _services(self):
         out, changed = {}, False
         for service in self.services:
-            reading = cgroup_memory(self.cgroup_root/service)
-            current, peak = (0, None) if reading is None else reading
-            learned = max(self.peaks.get(service, 0), peak or 0, current)
+            reading = cgroup_nonreclaimable(self.cgroup_root/service)
+            current = 0 if reading is None else reading
+            # The learned peak is the max of these samples (one per report),
+            # persisted: a restart must not forget a load's anon high-water.
+            # A spike shorter than the report interval can be missed.
+            learned = max(self.peaks.get(service, 0), current)
             if learned != self.peaks.get(service):
                 self.peaks[service], changed = learned, True
             out[service] = {'current_bytes': current, 'peak_bytes': learned}
+            if service in self.residence_urls:
+                # A stopped unit (no cgroup) has nothing resident, whatever answers.
+                out[service]['resident'] = (False if reading is None
+                                            else residence(self.residence_urls[service]))
         if changed and self.peaks_path:
             tmp = self.peaks_path.with_suffix('.tmp')
             tmp.write_text(json.dumps(self.peaks, sort_keys=True))
