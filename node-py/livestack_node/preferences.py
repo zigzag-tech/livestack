@@ -21,12 +21,22 @@ METRICS = {
     "asr.first_partial_ms": "min",
     "asr.finalization_ms": "min",
     "asr.failure_rate": "min",
+    # LLM units (harmony-engine-units). Params and served context are what the
+    # launch line says; decode speed and first token are MEASURED and published
+    # from harmony-llm's fitted cost rows with their sample counts. A metric
+    # nobody measured is "no observation" and orders nothing — silence is not a
+    # zero and not an opinion.
+    "llm.params_b": "max",
+    "llm.context_len": "max",
+    "llm.decode_tok_s": "max",
+    "llm.first_token_ms": "min",
 }
 MAX_PREFERENCES = 8
 MAX_WIRE_BYTES = 4096
 
 
 def parse_preferences(raw: str | None) -> list[dict]:
+    """The query-parameter spelling: a JSON array in a string."""
     if raw in (None, ""):
         return []
     if not isinstance(raw, str) or len(raw.encode()) > MAX_WIRE_BYTES:
@@ -35,6 +45,14 @@ def parse_preferences(raw: str | None) -> list[dict]:
         value = json.loads(raw)
     except (TypeError, json.JSONDecodeError) as exc:
         raise PreferenceError("prefer must be a JSON array") from exc
+    return parse_preference_list(value)
+
+
+def parse_preference_list(value: Any) -> list[dict]:
+    """The body spelling: the same clauses, already decoded (a request's
+    `harmony_prefer` carries them as an array). Same bounds, same rules."""
+    if value is None:
+        return []
     if not isinstance(value, list) or len(value) > MAX_PREFERENCES:
         raise PreferenceError("prefer must contain at most 8 clauses")
     out = []
