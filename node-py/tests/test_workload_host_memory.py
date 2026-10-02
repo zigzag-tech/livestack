@@ -43,15 +43,15 @@ def e2e(store, key):
         admit=dict(cpu=2, memory_bytes=4*GIB, disk_bytes=16*GIB)))
 
 
-def learn(store, handler, peak, key='learn', need=10*GIB):
+def learn(store, handler, peak, key='learn', need=10*GIB, outcome='succeeded'):
     """Record one completed attempt of `handler` with its cgroup memory peak, the
     way the worker's completion receipt (resource_usage.py) carries it."""
     register(store, 'teacher', None, hostname='elsewhere')
     store.submit('owner', dict(version=1, key=key, handler=handler, input_digest='a'*64,
                                need=dict(cpu=1, memory_bytes=need, disk_bytes=GIB)))
     a = store.claim('teacher', 'boot1')
-    store.complete('teacher', 'boot1', a['attempt_id'], a['fence'], input_digest='a'*64, outcome='succeeded',
-                   result=dict(exit_code=0, artifacts=[], resources=dict(memory_peak_bytes=peak)))
+    store.complete('teacher', 'boot1', a['attempt_id'], a['fence'], input_digest='a'*64, outcome=outcome,
+                   result=dict(exit_code=0 if outcome == 'succeeded' else 75, artifacts=[], resources=dict(memory_peak_bytes=peak)))
     # The teacher leaves the roster so it cannot take the jobs under test.
     store.register('teacher', 'elsewhere', 'boot1', dict(
         capacity=dict(cpu=1), available=dict(cpu=1), labels={}, handlers=[handler], ready=False))
@@ -171,3 +171,13 @@ def test_a_malformed_host_block_is_refused(store, mutate):
     mutate(view)
     with pytest.raises(WorkloadError, match='host report'):
         register(store, 'w', view)
+
+
+def test_only_succeeded_attempts_teach_a_peak(store):
+    """An attempt that died in preparation peaks low; on 2026-10-02 twenty such
+    infrastructure failures in a row would have taught e2e 3.8 GiB."""
+    learn(store, E2E, 3*GIB, key='died-early', outcome='infrastructure')
+    register(store, 'w', host(8*GIB))
+    job = e2e(store, 'one')
+    assert store.claim('w', 'boot1') is None
+    assert 'claim 10.0 GiB' in store.get('owner', job['id'])['reason'], 'unlearned: need'
