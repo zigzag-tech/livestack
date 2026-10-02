@@ -542,9 +542,6 @@ def test_rootless_worker_delivers_pinned_artifact(fleet, tmp_path, backend, exit
         pytest.skip('requires installed rootless Docker prerequisites')
     store, config, caller, digest = fleet
     config['handlers']['native.v1'].update(backend=backend, infrastructure_outputs=['artifact'])
-    # The private disposable worker uses this exact SDK, including its module
-    # entry points; the fixture's minimal environment otherwise hides it.
-    config['environment']['PYTHONPATH'] = str(Path(__file__).resolve().parents[1])
     if backend == 'rootless-docker-native':
         address = os.environ.get('HARMONY_TEST_NATIVE_HOST_ADDRESS')
         if address is None:
