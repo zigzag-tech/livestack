@@ -137,12 +137,28 @@ def remove_data(root):
     Production controllers themselves run in a bounded systemd service.
     """
     import subprocess
+    import resource
+    import tempfile
     data = Path(root)/'docker-data'
     if not data.exists():
         return
     if data.is_symlink() or data.resolve() != data:
         raise WorkloadError('Docker data is not in the private attempt tree', 503)
-    reply = subprocess.run(['/usr/bin/rootlesskit', '/usr/bin/rm', '-rf', '--', str(data)],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+    # Diagnostics have an active kernel byte bound, no named file/history, and
+    # the same finite command deadline as cleanup. Never hide the real refusal.
+    with tempfile.TemporaryFile() as diagnostic:
+        try:
+            reply = subprocess.run(['/usr/bin/rootlesskit', '/usr/bin/rm', '-rf', '--', str(data)],
+                stdout=subprocess.DEVNULL, stderr=diagnostic, timeout=60,
+                preexec_fn=lambda:resource.setrlimit(resource.RLIMIT_FSIZE,(16384,16384)))
+        except subprocess.TimeoutExpired as error:
+            diagnostic.seek(max(0,diagnostic.tell()-1024))
+            detail=diagnostic.read(1024).decode(errors='replace')
+            raise WorkloadError('Docker layer cleanup timed out; capacity remains reserved: '+detail,503) from error
+        diagnostic.seek(0,os.SEEK_END)
+        diagnostic.seek(max(0,diagnostic.tell()-1024))
+        detail=diagnostic.read(1024).decode(errors='replace')
     if reply.returncode or data.exists():
-        raise WorkloadError('Docker layer cleanup failed; capacity remains reserved', 503)
+        raise WorkloadError('Docker layer cleanup failed; capacity remains reserved; exit='+
+                           str(reply.returncode)+': '+detail,503)
+    logging.info('Docker layer cleanup completed: %s',data)
