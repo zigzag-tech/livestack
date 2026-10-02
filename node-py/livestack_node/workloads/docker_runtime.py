@@ -8,6 +8,7 @@ import stat
 import sys
 
 from .model import WorkloadError
+from .docker_host_route import local_address
 
 
 class RuntimeCleanupRefused(WorkloadError):
@@ -32,7 +33,8 @@ def runtime_path(unit):
     return runtime_base()/('hw-'+hashlib.sha256(unit.encode()).hexdigest()[:24])
 
 
-def prepare(unit, argv, cwd, output, *, native_client=False):
+def prepare(unit, argv, cwd, output, *, native_client=False, native_host_address=None):
+    route = local_address(native_host_address) if native_client else None
     path = runtime_path(unit)
     # exist_ok=False: a leftover of the same unit is never silently reused. Unit
     # names are per attempt, and stop() removes any leftover before a retry.
@@ -48,7 +50,7 @@ def prepare(unit, argv, cwd, output, *, native_client=False):
         raise
     inner = Path(output)/'docker-execution.json'
     inner.write_text(json.dumps(dict(unit=unit, argv=argv, cwd=str(cwd), output=str(output),
-                                    native_client=native_client)))
+                                    native_client=native_client, native_host_address=route)))
     inner.chmod(0o600)
     namespace = ['/usr/bin/rootlesskit', '--state-dir='+str(path), '--net=slirp4netns',
         '--disable-host-loopback', '--port-driver=builtin', '--copy-up=/etc', '--copy-up=/run',

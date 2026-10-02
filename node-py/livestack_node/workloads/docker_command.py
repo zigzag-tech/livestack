@@ -11,6 +11,8 @@ import subprocess
 import sys
 import time
 
+from livestack_node.workloads.docker_host_route import canonical_address
+
 
 def run(config_path):
     config = json.loads(Path(config_path).read_text())
@@ -50,6 +52,8 @@ def run(config_path):
         '--pidfile=/run/harmony/docker.pid', '--host='+env['DOCKER_HOST'],
         '--exec-opt=native.cgroupdriver=cgroupfs', '--cgroup-parent='+parent,
         '--storage-driver=overlay2', '--shutdown-timeout=3']
+    if config.get('native_client'):
+        command.append('--host-gateway-ip='+canonical_address(config.get('native_host_address')))
     daemon = subprocess.Popen(command, env=env)
     try:
         deadline = time.monotonic()+60
