@@ -1,0 +1,92 @@
+[
+  {
+    "id": 1,
+    "slug": "portrait",
+    "title": "Natural portrait",
+    "prompt": "A candid documentary photograph of an elderly Japanese ceramic artist in her sunlit workshop, expressive wrinkles, hands holding a handmade blue bowl, shelves of pottery behind her, natural skin texture, 50mm lens, warm morning light.",
+    "seed": 1000,
+    "width": 768,
+    "height": 768
+  },
+  {
+    "id": 2,
+    "slug": "product",
+    "title": "Product photography",
+    "prompt": "Luxury product photograph of a transparent amber perfume bottle on a dark green marble pedestal, beside a sliced orange and white jasmine flowers, dramatic studio lighting, sharp glass reflections, minimalist composition, no lettering.",
+    "seed": 1001,
+    "width": 768,
+    "height": 768
+  },
+  {
+    "id": 3,
+    "slug": "typography",
+    "title": "English typography",
+    "prompt": "An elegant travel poster with the exact large headline \"EXPLORE TORONTO\" and the exact smaller subtitle \"A CITY OF STORIES\", the CN Tower and streetcars illustrated in a clean mid-century graphic style, cream paper, navy blue and orange ink, readable typography.",
+    "seed": 1002,
+    "width": 768,
+    "height": 768
+  },
+  {
+    "id": 4,
+    "slug": "chinese",
+    "title": "Chinese typography",
+    "prompt": "A refined Chinese tea shop poster with the exact large Chinese title \"春日茶馆\" and the exact subtitle \"一杯清茶，一段时光\", a porcelain teapot, fresh green tea leaves, soft watercolor landscape, ivory background, elegant legible Chinese lettering.",
+    "seed": 1003,
+    "width": 768,
+    "height": 768
+  },
+  {
+    "id": 5,
+    "slug": "counting",
+    "title": "Counting and positions",
+    "prompt": "A clean studio photograph of exactly three objects on a plain white table: a red apple on the left, a blue ceramic mug in the middle, and a yellow toy duck on the right. All three objects fully visible, evenly spaced, no extra objects, soft shadows.",
+    "seed": 1004,
+    "width": 768,
+    "height": 768
+  },
+  {
+    "id": 6,
+    "slug": "hands",
+    "title": "Hands and interaction",
+    "prompt": "Close-up editorial photograph of two human hands carefully tying the laces of a worn brown leather hiking boot, anatomically natural fingers, realistic leather and fabric textures, a forest trail softly blurred in the background, overcast daylight.",
+    "seed": 1005,
+    "width": 768,
+    "height": 768
+  },
+  {
+    "id": 7,
+    "slug": "landscape",
+    "title": "Landscape detail",
+    "prompt": "A photorealistic panoramic view of a turquoise alpine lake in the Canadian Rockies at sunrise, snow-dusted jagged mountains reflected in still water, a tiny red canoe near shore, mist drifting among pine trees, detailed rocks and wildflowers in the foreground.",
+    "seed": 1006,
+    "width": 768,
+    "height": 768
+  },
+  {
+    "id": 8,
+    "slug": "architecture",
+    "title": "Architecture",
+    "prompt": "Architectural photograph of a small modern library built from warm timber and exposed concrete beside a Japanese garden, floor-to-ceiling windows reveal bookshelves and reading chairs, rainy evening, glowing interior lights, realistic reflections on wet paving.",
+    "seed": 1007,
+    "width": 768,
+    "height": 768
+  },
+  {
+    "id": 9,
+    "slug": "illustration",
+    "title": "Storybook illustration",
+    "prompt": "A whimsical watercolor storybook illustration of a small fox wearing a yellow raincoat, carrying a red umbrella across a wooden bridge in an autumn forest, a friendly frog waving from below, soft paper texture, gentle expressive characters, beautifully composed.",
+    "seed": 1008,
+    "width": 768,
+    "height": 768
+  },
+  {
+    "id": 10,
+    "slug": "fantasy",
+    "title": "Complex imaginative scene",
+    "prompt": "A cinematic wide shot of a bustling floating market on an alien ocean at dusk, wooden boats selling luminous fruit, travelers of different species, two immense moons above the horizon, intricate practical details, rich teal and amber colors, imaginative but believable lighting.",
+    "seed": 1009,
+    "width": 768,
+    "height": 768
+  }
+]

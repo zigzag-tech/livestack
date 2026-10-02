@@ -897,7 +897,9 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
                                        req.kind, unit=unit)
             if victims is None:
                 continue
-            preempt_cost = sum(world.w.units[v.kind].reload_cost for v in victims)
+            preempt_cost = sum(world.w.units[v.kind].reload_cost *
+                               (1.0 + max(0.0, float(world.w.demand.get(v.kind, 0.0))))
+                               for v in victims)
             busy_pen = sum(50.0 for v in victims if v.busy)   # discourage interrupting work
             freed = world.free(d.id, unit)
             for v in victims:
@@ -990,9 +992,14 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
             # the `wanted_kinds` guard was already deployed: loaded 22:43:00,
             # evicted 22:43:05, for the fourth time that hour.
             #
-            # With demand present this does not apply, and rule 1 still evicts
-            # whatever a request needs it to.
-            if not world.requests and len(W.resident[d.id]) <= 1:
+            # A request on another device is not a reason to empty this one.
+            # A request eligible here may still reclaim space, and rule 1
+            # retains normal priority and minimum-residency admission.
+            if len(W.resident[d.id]) <= 1 and not any(
+                    _can_serve(world.units[k], d)
+                    and _device_matches(d, {**world.units[k].selector, **r.selector})
+                    for r in world.requests for k in candidate_kinds(world, r)
+                ):
                 break
             W.evict(victim.kind, d.id, "relieve measured over-budget pressure",
                     caused_by="pressure")

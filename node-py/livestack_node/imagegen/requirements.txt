@@ -1,0 +1,12 @@
+# Torch is installed separately from the cu124 index for RTX 2070 compatibility.
+diffusers==0.40.0
+transformers==5.17.0
+accelerate==1.15.0
+bitsandbytes==0.50.2
+fastapi==0.142.1
+uvicorn==0.54.0
+Pillow==12.3.0
+cryptography==50.0.1
+websockets==17.1
+sentencepiece
+protobuf

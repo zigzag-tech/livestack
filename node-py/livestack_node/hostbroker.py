@@ -884,6 +884,8 @@ class HostBroker:
                     del self._demand[k]
         self._demand_at = now
         for r in requests:
+            if not r.kind:
+                continue
             self._demand[r.kind] = self._demand.get(r.kind, 0.0) + 1.0
 
     def demand(self, now: Optional[float] = None) -> Dict[str, float]:
@@ -1019,6 +1021,9 @@ class HostBroker:
         Evicts are applied before loads so VRAM is freed first. Returns the Plan."""
         world = self.snapshot(requests, last_evicted_at)
         p = plan(world, self.policy)
+        semantic = {r.id: r for r in world.requests if not r.kind}
+        self._note_demand([replace(semantic[g.request_id], kind=g.kind)
+                           for g in p.of(Grant) if g.request_id in semantic], world.now)
         self._emit_plan(world, p)
         if not self.dispatch:
             # Observe-only. The plan is still computed, recorded and returned —
