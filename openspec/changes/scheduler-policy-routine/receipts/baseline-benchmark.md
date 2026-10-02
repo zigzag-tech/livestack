@@ -149,7 +149,7 @@ Uses the `test_preferences.py` `_node()`/`_metric()` shapes. 1 in 4 nodes is sus
 
 So about **3 × ~5.4 ms ≈ 16–19 ms of the 31–43 ms overhead is building SSL contexts for plaintext loopback hops**. The policy logic is about 0.05 ms.
 
-## 2. Section B — Jingway weave hot path (Node, mac)
+## 2. Section B — Jingway wovine hot path (Node, mac)
 
 Measured with the repo's own vitest 4 runner, using a config outside the repo (`ts/vitest.bench.config.mjs`) and absolute imports of `~/jingway/src`. There is no `tsx` in the repo. Two runs: mac load 19.6 in run 1 and 3.6 in run 2; the numbers agree within ~5 %. Run 2 is shown.
 
@@ -165,8 +165,8 @@ Measured with the repo's own vitest 4 runner, using a config outside the repo (`
 | B3 `routine({repair:'off'})` 1 step, no-op recording sink | **8.88** / 11.04 / 16.83 |
 | B3 isolated `routineVersionOf(body)`: tiny / 7 KB body | 0.38 / 4.75 |
 | B3 isolated `scope.child()` + `dispose()` | 0.71 |
-| B4 isolated `ConversationWeaveHost.summarize()` → `conversation_messages` insert (PGLite) | **883** / 980 / 1,283 |
-| B4 `weave()` via `ConversationWeaveHost`, serial | **984** / 1,061 / 1,461 → **1,016 blocks/s** |
+| B4 isolated `ConversationWovineHost.summarize()` → `conversation_messages` insert (PGLite) | **883** / 980 / 1,283 |
+| B4 `weave()` via `ConversationWovineHost`, serial | **984** / 1,061 / 1,461 → **1,016 blocks/s** |
 | B4 50 concurrent blocks on **one shared host**, per-block | 23,512 / 41,729 / 48,963 (FIFO spread); batch wall 45.2 ms → **1,106 blocks/s** |
 | B4 50 concurrent blocks on **50 separate hosts**, per-block | 41,273 / 42,794 / 43,577; batch wall 43.0 ms → **1,163 blocks/s** |
 
@@ -209,7 +209,7 @@ A side observation, not acted on: `core/crates/core/tests/fixtures/request_hash_
 
 - **`bench_proxy_parts.py` on the mac:** `livestack_node.manager` hard-requires the compiled `shared_py`, which is not built on the mac. It ran on the tower only.
 - **Harmony admission latency end to end** (the non-resident path, then `admit()`, then host broker HTTP, then `plan()`, then the ledger, then the grant): not measured live. Doing so would change residency or state on a production host. Only its pure CPU parts were measured (A2, A5).
-- **Head-of-line blocking on real Postgres** for `ConversationWeaveHost`: PGLite serialises everything (see §2).
+- **Head-of-line blocking on real Postgres** for `ConversationWovineHost`: PGLite serialises everything (see §2).
 - **Node/TS on the tower:** deliberately not run (project rule). §2 and the WASM part of §3 are mac-only.
 - **A faithful offline replay:** real ledger records carry candidate ids, priorities, tiers and a residency flag, plus measured-free inside a reason string. They do not carry unit footprints or device capacities. `plan()` cannot be re-run from the ledger alone, so replay throughput below is computed from its parts (record parse plus `plan()` at prod shape), not measured on real replays.
 - **A Rust `plan()`:** none exists, so there is no candidateResult. The 10–12× figure is extrapolated from the jingway `compute_hashes` pair and is not a measurement of `plan()`.
@@ -224,12 +224,12 @@ A side observation, not acted on: `core/crates/core/tests/fixtures/request_hash_
 | **(ii) warm admission** (host broker grant, no load) | ≥ HTTP round trip + broker CPU | `plan()` **65 µs** at prod shape | **ledger append 305 µs (host grant) + 440 µs (fleet admit)** = 5–7× the planner. `rank()` over 10 candidates adds 96–131 µs. A cold admission adds a **50–135 s** model load |
 | **(iii) offline replay** (per decision) | ≈ **100–125 µs** → **~8–10 k decisions/s per tower core** (~3× on the M4) | `plan()` 65 µs ≈ **55–65 %** | `json.loads` of the 5–8 KB record, 35–58 µs |
 
-| per weave block (mac) | cost |
+| per wovine block (mac) | cost |
 |---|---|
 | bare `weave()` | **5.7 µs** + 1.8 µs per extra step |
 | `routine({repair:'off'})` | **8.9 µs** |
 | sha256 gate fingerprint | 0.75 µs at 100 B · 19 µs at 10 KB · 2 ms at 1 MB |
-| `ConversationWeaveHost` persistence | **~0.9–1 ms** per block |
+| `ConversationWovineHost` persistence | **~0.9–1 ms** per block |
 | the policy decision itself in JS (10 candidates) | **0.03 µs** |
 
 ### Would a Rust/PyO3 policy evaluator be MATERIAL (>10 % of end-to-end decision latency)?
@@ -244,7 +244,7 @@ A side observation, not acted on: `core/crates/core/tests/fixtures/request_hash_
 
 ### For the Jingway hot-policy-tier design
 
-**Keep weave out of the per-request loop.** Wrapping each routing decision in a `weave()`/`routine()` block adds 6–9 µs per decision. That is 200–300× a JS policy evaluation, but still under Python's 50–70 µs. Adding `ConversationWeaveHost` persistence adds **~1 ms per decision**, which is **15–20× the entire current Python policy cost** and caps at ~1.1 k blocks/s on one PGLite. A hot tier should evaluate policy on the bare path and persist summaries asynchronously or in batches.
+**Keep wovines out of the per-request loop.** Wrapping each routing decision in a `weave()`/`routine()` block adds 6–9 µs per decision. That is 200–300× a JS policy evaluation, but still under Python's 50–70 µs. Adding `ConversationWovineHost` persistence adds **~1 ms per decision**, which is **15–20× the entire current Python policy cost** and caps at ~1.1 k blocks/s on one PGLite. A hot tier should evaluate policy on the bare path and persist summaries asynchronously or in batches.
 
 **Pick the native boundary by shape:**
 - PyO3 or napi with **string/JSON or scalar arguments** is cheap (tens of ns).
@@ -275,7 +275,7 @@ ssh 100.64.0.2 bash /tmp/jingway-hot-bench/run_mac.sh   # mac: A1-A5 comparison,
 | `py/bench_proxy_parts.py`, `py/bench_ssl_ctx.py` | A6 attribution |
 | `py/bench_shared_py.py` | C, livestack PyO3 |
 | `py/bench_jingway_py.py` | C, jingway PyO3 |
-| `ts/weave.bench.test.ts` + `ts/vitest.bench.config.mjs` | B |
+| `ts/wovine.bench.test.ts` + `ts/vitest.bench.config.mjs` | B |
 | `ts/bench_wasm.mjs` | C, WASM |
 
 Outputs are in `out/` (tower) and `out/mac/` (mac, copied back): `*.log` plus per-row `*.json`.

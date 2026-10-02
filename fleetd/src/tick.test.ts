@@ -9,8 +9,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { noRepairHost } from 'jingway-framework/server/weave/noRepairHost.js';
-import type { WeaveHost } from 'jingway-framework/common/routines/weave.js';
+import { noRepairHost } from 'jingway-framework/server/wovine/noRepairHost.js';
+import type { WovineHost } from 'jingway-framework/common/routines/wovine.js';
 
 import { FakeBroker, NOW, err, operation, plan, refused, unreachable, view } from './fakeBroker.js';
 import { HANDBACK_NAMES, fleetHandbacks, newLoopState } from './handbacks.js';
@@ -18,9 +18,9 @@ import { tracedHost } from './observability.js';
 import { fleetTick } from './tick.js';
 import { registeredKeys, registeredWorkflow } from './workflows.js';
 
-function countingHost(): { host: WeaveHost; escalations: number[] } {
+function countingHost(): { host: WovineHost; escalations: number[] } {
   const escalations: number[] = [];
-  const host: WeaveHost = {
+  const host: WovineHost = {
     ...noRepairHost('test host: repair is off so an escalation is visible as a count, not as a model call'),
     escalate: async () => {
       escalations.push(1);

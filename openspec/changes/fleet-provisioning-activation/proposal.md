@@ -14,7 +14,7 @@ does not yet have** — and neither is an engineering decision:
   receipt is a *measurement*, and it needs a corpus that only a deployed
   lifecycle produces, plus labels somebody other than the incumbent confirmed.
 
-The design record is `_plans/fleetd-weave-jev.md`; what is stale in it is its
+The design record is `_plans/fleetd-wovine-jev.md`; what is stale in it is its
 status line, which will say IMPLEMENTED, NOT YET DEPLOYED until this change
 lands. The prerequisites and exact commands are in `fleetd/receipts/README.md`.
 

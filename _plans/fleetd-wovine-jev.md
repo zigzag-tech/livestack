@@ -1,4 +1,4 @@
-# fleetd — the dispatch loop as a weave, with Simple Jev as the first escalation rung
+# fleetd — the dispatch loop as a wovine, with Simple Jev as the first escalation rung
 
 **Status:** DEPLOYED IN OBSERVE MODE, CANNOT YET SPEND — 2026-09-22. v1 was written by a Claude
 session and critiqued by a Codex (gpt-6-astra) session (§7, kept verbatim); §§2–5 were
@@ -32,7 +32,7 @@ OpenSpec: requirements are current truth in `openspec/specs/`
 
 **Companions:** `fleet-broker.md` (phases 0–4 shipped), `fleet-scheduler.md` (§8 is
 STALE: `schedule()` IS wired via `fleet_admit.py`), `decision-ledger.md` (SHIPPED as `ledger.py` +
-`emit_*` in `hostbroker.py`; its own status line is stale), `~/jingway/docs/weaving.md`, `~/jingway/docs/decision-models.md`.
+`emit_*` in `hostbroker.py`; its own status line is stale), `~/jingway/docs/wovines.md`, `~/jingway/docs/decision-models.md`.
 
 ## 0. Ground truth, corrected
 
@@ -44,7 +44,7 @@ STALE: `schedule()` IS wired via `fleet_admit.py`), `decision-ledger.md` (SHIPPE
 | Throughput model | missing — `_eta` = `est_duration_s`; why media-corpus 3b is left OFF (`fleet-broker.md` §5.4) |
 | Decision ledger | SHIPPED — `ledger.py` (bounded JSONL), `emit_rank/admit/placement` in `hostbroker.py`; `emit_admit` does not yet record `lease_id`; no operation records |
 | Phase 5 cross-host warm | gated on owner decision |
-| Weaves (`routine()`/`weave()`, repair turns, handbacks, `RepairRecord`) | SHIPPED in jingway 2026-09-07 |
+| Wovines (`routine()`/`weave()`, repair turns, handbacks, `RepairRecord`) | SHIPPED in jingway 2026-09-07 |
 | Typed decisions (`server/decisions`, `HarmonyClassifierAdapter`, `defineDecisionRoutine`) | SHIPPED in jingway 2026-09-20; transport is Harmony `POST /v1/classifier` (Simple Jev v1, `livestack_node/decisions/simple_jev.py`) |
 
 ## 1. The one idea
@@ -52,7 +52,7 @@ STALE: `schedule()` IS wired via `fleet_admit.py`), `decision-ledger.md` (SHIPPE
 Keep both brains pure and inference-free. Put the inference in the **loop around**
 them — the thing that assembles state, dispatches actions, and notices when the world
 did not do what the plan said. That loop is today an unstructured tick; it becomes a
-weave. Green gate = zero tokens. A red gate climbs a ladder:
+wovine. Green gate = zero tokens. A red gate climbs a ladder:
 
 1. canned attempts / tier-1 (code)
 2. **Simple Jev leaf** (Harmony resident 27B, `/v1/classifier`) — classifies the failure; code maps the class to a registered recovery workflow
@@ -88,7 +88,7 @@ creates billable resources, which is why the operation store is durable and
 reconciled on restart (owned provider instances + unfinished operations before any
 new create).
 
-Why TS for the loop: the weave, the decision leaf and the repair conversation are
+Why TS for the loop: the wovine, the decision leaf and the repair conversation are
 useful there. Not because it avoids distributed-state work — explicit ids cross the
 process boundary either way.
 
@@ -98,7 +98,7 @@ a `Provision` creates an instance that announces itself (`announce.py`) and serv
 jobs until deprovisioned. Ephemeral single-workload dispatch stays as it is and is
 out of scope.
 
-## 3. The weave
+## 3. The wovine
 
 ```
 routine({
@@ -180,7 +180,7 @@ is normalised over the offered labels — a versioned, calibrated acceptance pol
 decides, not an intuitive floor.
 
 **Code has the last word:** acceptance policy → abstain; invariants → `violations`,
-no selection, no runner-up; accepted → the mapped workflow runs; the outer weave
+no selection, no runner-up; accepted → the mapped workflow runs; the outer wovine
 re-observes and verifies its own gate. Persisted together: evidence (or durable
 reference) + digest, question/options/order, label mapping, task/profile/model/
 template/order/acceptance versions, raw result, invariant feedback, executed
@@ -207,7 +207,7 @@ stability is necessary, not sufficient. No result flips itself to `serve`.
    restart mid-create, concurrent ticks, workload-success/cleanup-failure, late
    completion after cancel, stale membership, busy-worker drain. One billed create
    per logical operation. Fix `fleet-scheduler.md` §8.
-2. **`livestack/fleetd/` — bounded TS supervision.** The weave in §3 over the API in
+2. **`livestack/fleetd/` — bounded TS supervision.** The wovine in §3 over the API in
    step 1; registered recovery workflows; no model in the loop yet.
 3. **Simple Jev shadow.** `failure_class` profile in `shadow` on captured incidents;
    frozen case corpus; evaluation CLI; qualification receipt. `serve` is a separate,
@@ -237,7 +237,7 @@ _(Codex gpt-6-astra to append here.)_
 ### Review — 2026-09-22
 
 **Verdict: keep the pure schedulers and bounded repair idea; revise the execution
-contract before implementing this plan.** A weave can supervise provisioning, but
+contract before implementing this plan.** A wovine can supervise provisioning, but
 the draft understates the missing control plane and overstates what the existing
 dispatcher, ledger, and decision leaf guarantee. Jev is a plausible experiment
 for unfamiliar failure triage, not yet a qualified first rung for spending money.
@@ -285,9 +285,9 @@ writer/claim per operation, including across concurrent ticks or service replica
 I disagree with rejecting the Python-loop/TS-facade alternative solely on trace
 identity. A TS controller calling Python already crosses that process boundary;
 explicit run/job/operation IDs must cross it either way. Choose TS because the
-weave, decision leaf and repair conversation are useful there, not because it
+wovine, decision leaf and repair conversation are useful there, not because it
 removes distributed-state work. Bind project, user and conversation deliberately
-(`docs/weaving.md` §0b), and avoid one fleet-wide repair conversation serializing
+(`docs/wovines.md` §0b), and avoid one fleet-wide repair conversation serializing
 unrelated jobs (§3.2.5). A blocked provisioning operation must not stop admission
 to healthy existing workers.
 
@@ -437,7 +437,7 @@ observations as committed ownership.** These are prerequisites for paid dispatch
 8. **Missing evidence read as success.** Decision outcomes distinguish
    `unavailable`, `invalid_output`, `abstained`, `cancelled` and
    `deadline_exceeded`; keep their distinct reasons and fallback outcomes.
-   Ledger writes and weave record writes can fail without failing the action.
+   Ledger writes and wovine record writes can fail without failing the action.
    Surface that observability loss; an audit JSONL is not the transactional
    operation store. The classifier also shares the fleet's LLM capacity: an
    outage or saturation can disable both Jev and local full repair. Bound that
@@ -448,11 +448,11 @@ observations as committed ownership.** These are prerequisites for paid dispatch
 **Not necessarily. Start with application composition, but the sketch does not
 plug into the current contracts as written.**
 
-The current `src/common/routines/weave.ts:54` requires step goals and effects,
+The current `src/common/routines/wovine.ts:54` requires step goals and effects,
 derives resume behavior from the effect class, and declares `onResume?: never`.
-`src/server/weave/weave.ts:282` rejects an explicit `onResume` at runtime.
+`src/server/wovine/wovine.ts:282` rejects an explicit `onResume` at runtime.
 `src/common/routines/effects.ts:172` excludes `resume` for irreversible effects.
-Parts of `docs/weaving.md` still describe the earlier explicit-resume API; follow
+Parts of `docs/wovines.md` still describe the earlier explicit-resume API; follow
 the types/implementation here. Keep `reobserve` for irreversible steps, supply
 typed input/output schemas and effect declarations on every handback, and use
 `carry_through` only when fresh evidence satisfies the gate. Do not label a paid
@@ -460,13 +460,13 @@ create compensatable merely because deleting the instance stops future charges.
 
 There is no built-in Jev rung between `tier1` and full repair. `tier1` is documented
 as mechanical and zero-token. One application-level implementation is a composed
-`WeaveHost.escalate`: invoke a declared decision child once for eligible incidents,
+`WovineHost.escalate`: invoke a declared decision child once for eligible incidents,
 route an accepted choice through the bounded effect surface, and return a valid
 outcome or delegate to the conversation repair host. Keep shared deadlines,
 abort signals, inference accounting, handback traces and recording intact. Specify
 whether Jev and full repair consume one composed escalation or separate rungs;
 the default step budget is one escalation, even when the block budget is two.
-The outer weave still re-observes and verifies the gate.
+The outer wovine still re-observes and verifies the gate.
 
 Alternatively, use explicit child routines and effect steps in the application.
 Either approach needs wiring and tests; `defineDecisionRoutine()` merely returns
@@ -489,7 +489,7 @@ spending, and treat order stability as necessary but insufficient.**
    late completion after cancellation, stale membership and busy-worker drain.
    Check one billed create per logical operation and no duplicate workload effects.
    This review itself makes no code changes or runtime-test claims.
-3. Add bounded TS weave supervision, then a side-effect-free Jev shadow child on
+3. Add bounded TS wovine supervision, then a side-effect-free Jev shadow child on
    captured incidents. Shadow failure must not delay the incumbent recovery path.
    Compare Jev against deterministic handling plus ordinary repair/chat, not an
    assumption that one output token is cheaper.

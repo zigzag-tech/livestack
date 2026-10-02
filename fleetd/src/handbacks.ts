@@ -15,7 +15,7 @@
  * or a tired operator drives it.
  */
 import { z } from 'zod';
-import type { Handback } from 'jingway-framework/common/routines/weave.js';
+import type { Handback } from 'jingway-framework/common/routines/wovine.js';
 import { READ_EFFECT } from 'jingway-framework/common/routines/effects.js';
 import type { FleetClient, Operation } from './client.js';
 import { COOLDOWN_S, MAX_COOLDOWN_S } from './workflows.js';

@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import type { EscalationPacket, WeaveHost } from 'jingway-framework/common/routines/weave.js';
+import type { EscalationPacket, WovineHost } from 'jingway-framework/common/routines/wovine.js';
 
 import type { ClassifyResult, IncidentDecisionRecord } from './classify.js';
 import { classifyingHost } from './escalation.js';
@@ -33,7 +33,7 @@ const LIMITS = { wallMs: 1000, maxSteps: 2, signal: new AbortController().signal
 
 function baseHost(verdict: 'resume' | 'carry_through' | 'human_gate' = 'human_gate') {
   const calls: number[] = [];
-  const host: WeaveHost = {
+  const host: WovineHost = {
     conversationId: 'c1',
     escalate: async () => {
       calls.push(1);

@@ -1,7 +1,7 @@
 # `@livestack/fleetd` — the fleet supervision loop
 
 One tick: read the fleet, ask the broker for a plan, and carry each action that
-costs money through a jingway weave whose gates read **correlated facts**.
+costs money through a jingway wovine whose gates read **correlated facts**.
 
 The loop supervises; it does not decide. Every placement comes from
 `POST /fleet/plan`; every effect goes through `POST /fleet/operations`. It holds
@@ -57,7 +57,7 @@ in one process produce schemas that are structurally identical and fail
 | `gates.ts` | The deterministic floor. Correlated facts only. |
 | `workflows.ts` | What code does about a failure it already understands. Nothing here spends. |
 | `handbacks.ts` | The closed effect surface a repair turn may drive. |
-| `tick.ts` | `fleetTick()` — the weave. |
+| `tick.ts` | `fleetTick()` — the wovine. |
 | `observability.ts` | Joins jingway's repair records and step summaries to `operation_id`. |
 | `incident.ts` | The versioned incident packet. Required evidence refuses rather than trims. |
 | `classify.ts` | The Simple Jev rung: one `failure_class` question, code-owned invariants, the persisted record. |
@@ -67,7 +67,7 @@ in one process produce schemas that are structurally identical and fail
 
 ## One departure from the design sketch
 
-`_plans/fleetd-weave-jev.md` §3 draws one weave per tick with the operation steps
+`_plans/fleetd-wovine-jev.md` §3 draws one wovine per tick with the operation steps
 inside it. `openspec/specs/fleet-supervision-loop/`
 requires escalations to open in a conversation **per job**, so that a blocked
 operation does not stop an unrelated job from being admitted. Both hold if the
