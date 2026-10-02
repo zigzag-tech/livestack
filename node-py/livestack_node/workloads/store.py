@@ -12,7 +12,7 @@ import sqlite3
 import time
 import uuid
 
-from .model import (Limits, failure_signature, WorkloadError, encode, identity, labels, name, resources,
+from .model import (Limits, failure_signature, WorkloadError, encode, host_view, identity, labels, name, resources,
                     submission)
 from .model import progress as validate_progress
 
@@ -163,7 +163,7 @@ class WorkloadStore:
             name(value, field)
         if self.compilation_policy is not None:
             host_id = self.compilation_policy.physical_host(host_id, self.clock())
-        if not isinstance(report, dict) or set(report) - {"capacity", "available", "labels", "handlers", "ready"}:
+        if not isinstance(report, dict) or set(report) - {"capacity", "available", "labels", "handlers", "ready", "host"}:
             raise WorkloadError("invalid worker report")
         capacity, available = resources(report.get("capacity")), resources(report.get("available"))
         tags = labels(report.get("labels", {}))
@@ -177,6 +177,8 @@ class WorkloadStore:
             raise WorkloadError("invalid readiness or cleanup report")
         body = dict(capacity=capacity, available=available, labels=tags, handlers=sorted(set(handlers)),
                     ready=report["ready"])
+        if report.get("host") is not None:
+            body["host"] = host_view(report["host"])
         raw = encode(body, self.limits.record_bytes)
         now = self.clock()
         with self.transaction() as db:
