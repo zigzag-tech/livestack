@@ -50,7 +50,6 @@ MAX_INPUT_CHARS = 8192
 # A failed load is retried, but the node says it is not ready meanwhile, so the
 # fleet view routes around it instead of handing out an endpoint that errors.
 LOAD_FAILURE_HOLD_S = 60.0
-SWEEP_INTERVAL_S = 30.0
 
 
 def unit_name(model_id: str) -> str:
@@ -258,16 +257,7 @@ def create_app(models: Optional[List[str]] = None, *, model_dirs: Optional[Dict[
     holder["manager"] = manager
     app.state.embed_manager = manager
     app.state.embed_coordinator = coordinator
-
-    def sweep() -> None:
-        while True:
-            time.sleep(SWEEP_INTERVAL_S)
-            try:
-                manager.maybe_evict()
-            except Exception as exc:  # noqa: BLE001 - a sweep failure must not kill the node
-                print(f"[embed] idle sweep failed: {exc}", flush=True)
-
-    threading.Thread(target=sweep, name="embed-idle-sweep", daemon=True).start()
+    # Idle eviction is driven by attach() itself (serve._start_idle_sweep).
     return app
 
 

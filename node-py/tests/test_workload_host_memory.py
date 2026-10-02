@@ -43,7 +43,7 @@ def e2e(store, key):
         admit=dict(cpu=2, memory_bytes=4*GIB, disk_bytes=16*GIB)))
 
 
-def learn(store, handler, peak, key='learn', need=10*GIB, outcome='succeeded'):
+def learn(store, handler, peak, key='learn', need=10*GIB, outcome='succeeded', field='memory_peak_bytes'):
     """Record one completed attempt of `handler` with its cgroup memory peak, the
     way the worker's completion receipt (resource_usage.py) carries it."""
     register(store, 'teacher', None, hostname='elsewhere')
@@ -51,7 +51,7 @@ def learn(store, handler, peak, key='learn', need=10*GIB, outcome='succeeded'):
                                need=dict(cpu=1, memory_bytes=need, disk_bytes=GIB)))
     a = store.claim('teacher', 'boot1')
     store.complete('teacher', 'boot1', a['attempt_id'], a['fence'], input_digest='a'*64, outcome=outcome,
-                   result=dict(exit_code=0 if outcome == 'succeeded' else 75, artifacts=[], resources=dict(memory_peak_bytes=peak)))
+                   result=dict(exit_code=0 if outcome == 'succeeded' else 75, artifacts=[], resources={field: peak}))
     # The teacher leaves the roster so it cannot take the jobs under test.
     store.register('teacher', 'elsewhere', 'boot1', dict(
         capacity=dict(cpu=1), available=dict(cpu=1), labels={}, handlers=[handler], ready=False))
@@ -181,3 +181,29 @@ def test_only_succeeded_attempts_teach_a_peak(store):
     job = e2e(store, 'one')
     assert store.claim('w', 'boot1') is None
     assert 'claim 10.0 GiB' in store.get('owner', job['id'])['reason'], 'unlearned: need'
+
+
+@pytest.mark.parametrize('resident, charged', [(True, 0.0), (False, 13.0), (None, 13.0)])
+def test_a_model_server_spike_is_charged_unless_all_its_units_are_resident(store, resident, charged):
+    """klein-0 resident cannot reload, so its 13 GiB transient is not
+    outstanding; non-resident, or unreadable (null), it is charged."""
+    klein = {KLEIN: dict(current_bytes=3*GIB, peak_bytes=16*GIB, resident=resident)}
+    register(store, 'w', host(20*GIB, services=klein))
+    job = e2e(store, 'one')
+    claim = store.claim('w', 'boot1')
+    if charged:
+        assert claim is None
+        assert f'model servers {charged:.1f}' in store.get('owner', job['id'])['reason']
+    else:
+        assert claim['job_id'] == job['id'], store.get('owner', job['id'])['reason']
+
+
+def test_the_non_reclaimable_peak_is_preferred_over_the_cache_inclusive_one(store):
+    """memory_peak_bytes counts page cache (e2e runs hit their 10 GiB cap that
+    way). Once a succeeded attempt carries the worker's non-reclaimable peak,
+    that figure is the claim; the old one is only the fallback."""
+    learn(store, E2E, 10*GIB, key='old')
+    learn(store, E2E, 6*GIB, key='new', field='memory_nonreclaimable_peak_bytes')
+    register(store, 'w', host(8*GIB))
+    job = e2e(store, 'one')
+    assert store.claim('w', 'boot1')['job_id'] == job['id'], store.get('owner', job['id'])['reason']
