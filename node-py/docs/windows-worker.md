@@ -72,6 +72,28 @@ The handler environment is exactly `environment` plus the Harmony variables:
 Windows programs need `SystemRoot` (sockets and crypto fail without it) and
 `PATHEXT`. The worker sets `TEMP`/`TMP` to the attempt's tmp directory.
 
+## Compilation launch verifier
+
+Handlers classified for compilation (`compilation_handlers` at the authority)
+must be admitted per launch by the slot's verifier: on Windows a LocalSystem
+service (`LivestackCompilationVerifier`) on `\\.\pipe\livestack-compilation-<worker>`.
+
+1. Stage the verifier input (version, worker, host = the PHYSICAL host, authority
+   as a numeric URL, the worker's token, journal =
+   `C:\harmony\state\<worker>\active.json`) somewhere only Administrators read.
+2. `node-py\deploy\windows\install-verifier.ps1 -Release <...\node-py> -Config <staged.json>`.
+   It writes `C:\ProgramData\livestack\<worker>-verifier.json` (SYSTEM and
+   Administrators only), merges the slot into `compilation-launch.json`, and
+   starts the service. Log: `C:\ProgramData\livestack\verifier.log`.
+3. The worker config needs `"compilation_launch_contract": 1`, and the handler
+   environment `ProgramFiles`, `ProgramFiles(x86)`, `ProgramData`,
+   `SystemDrive`: MSVC discovery fails without them (`link.exe not found`).
+4. The authority must run code that knows the `windows` class BEFORE the policy
+   names it, and the policy grants it per physical host.
+
+The client refuses a pipe served by anything but LocalSystem, and a registry
+any non-administrator could replace (`compilation_registry_untrusted`).
+
 ## Roll a release
 
 Stage the new release dir (additive), wait until `<state_dir>\active.json` is

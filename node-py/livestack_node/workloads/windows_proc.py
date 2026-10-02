@@ -18,6 +18,7 @@ import time
 
 # winnt.h
 JOB_OBJECT_ALL_ACCESS = 0x1F001F
+JOB_OBJECT_QUERY = 0x0004
 JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
 JOB_OBJECT_LIMIT_PRIORITY_CLASS = 0x00000020
 JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
@@ -181,9 +182,9 @@ class Job:
         return cls(None, None)
 
     @classmethod
-    def open(cls, name):
+    def open(cls, name, access=JOB_OBJECT_ALL_ACCESS):
         """The existing job, or None when no such job exists."""
-        handle = _k32().OpenJobObjectW(JOB_OBJECT_ALL_ACCESS, False, name)
+        handle = _k32().OpenJobObjectW(access, False, name)
         if not handle:
             if ctypes.get_last_error() in (ERROR_FILE_NOT_FOUND, ERROR_INVALID_PARAMETER):
                 return None
@@ -206,8 +207,10 @@ class Job:
                                               ctypes.byref(info), ctypes.sizeof(info)):
             _fail('SetInformationJobObject(limits)')
         # CpuRate is in 1/100 % of the WHOLE machine: N cores of C = N/C*10000.
+        # Rounded DOWN: the kernel cap never exceeds the CPU the attempt was
+        # authorized for (the launch verifier compares the two).
         rate = _CpuRate(JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
-                        max(1, min(10000, int(round(float(cpu)/(os.cpu_count() or 1)*10000)))))
+                        max(1, min(10000, int(float(cpu)/(os.cpu_count() or 1)*10000))))
         if not _k32().SetInformationJobObject(self.handle, JobObjectCpuRateControlInformation,
                                               ctypes.byref(rate), ctypes.sizeof(rate)):
             _fail('SetInformationJobObject(cpu rate)')
@@ -398,3 +401,175 @@ class CpuLoad:
         if idle+busy <= 0:
             return None
         return cpus*busy/(idle+busy)
+
+
+# --- identity and trust (launch verification) --------------------------------
+# openspec/changes/windows-host-worker, design "Verifier".
+
+SYSTEM_SID = 'S-1-5-18'
+ADMINISTRATORS_SID = 'S-1-5-32-544'
+TRUSTED_INSTALLER_SID = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+TRUSTED_SIDS = frozenset({SYSTEM_SID, ADMINISTRATORS_SID, TRUSTED_INSTALLER_SID})
+TOKEN_QUERY = 0x0008
+TokenUser = 1
+SE_FILE_OBJECT = 1
+OWNER_SECURITY_INFORMATION, DACL_SECURITY_INFORMATION = 0x1, 0x4
+ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE = 0, 1
+INHERIT_ONLY_ACE = 0x08
+FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+# Rights that let a holder change what a trusted FILE says, or replace it.
+FILE_WRITE_RIGHTS = 0x2 | 0x4 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000 | 0x02000000
+# Rights on a DIRECTORY that let a holder remove/rename an entry or the
+# directory itself, or rewrite its ACL. Adding a new entry (0x2/0x4) cannot
+# displace an existing trusted one.
+DIRECTORY_REPLACE_RIGHTS = 0x40 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x02000000
+FILE_READ_RIGHTS = 0x1 | 0x80000000 | 0x10000000 | 0x02000000
+
+
+class _AclHeader(ctypes.Structure):
+    _fields_ = [('AclRevision', ctypes.c_ubyte), ('Sbz1', ctypes.c_ubyte), ('AclSize', wintypes.WORD),
+                ('AceCount', wintypes.WORD), ('Sbz2', wintypes.WORD)]
+
+
+class _AceHeader(ctypes.Structure):
+    _fields_ = [('AceType', ctypes.c_ubyte), ('AceFlags', ctypes.c_ubyte), ('AceSize', wintypes.WORD),
+                ('Mask', wintypes.DWORD)]
+
+
+_A = None
+
+
+def _adv():
+    global _A
+    if _A is None:
+        a = ctypes.WinDLL('advapi32', use_last_error=True)
+        H, B, D, P = wintypes.HANDLE, wintypes.BOOL, wintypes.DWORD, ctypes.c_void_p
+        for name, res, args in [
+                ('OpenProcessToken', B, [H, D, ctypes.POINTER(H)]),
+                ('GetTokenInformation', B, [H, ctypes.c_int, P, D, ctypes.POINTER(D)]),
+                ('ConvertSidToStringSidW', B, [P, ctypes.POINTER(wintypes.LPWSTR)]),
+                ('GetNamedSecurityInfoW', D, [wintypes.LPCWSTR, ctypes.c_int, D, ctypes.POINTER(P),
+                                              ctypes.POINTER(P), ctypes.POINTER(P), ctypes.POINTER(P),
+                                              ctypes.POINTER(P)]),
+                ('GetAce', B, [P, D, ctypes.POINTER(P)]),
+                ('ConvertStringSecurityDescriptorToSecurityDescriptorW', B,
+                 [wintypes.LPCWSTR, D, ctypes.POINTER(P), ctypes.POINTER(D)])]:
+            fn = getattr(a, name)
+            fn.restype, fn.argtypes = res, args
+        k = _k32()
+        k.LocalFree.restype, k.LocalFree.argtypes = P, [P]
+        k.GetNamedPipeClientProcessId.restype = B
+        k.GetNamedPipeClientProcessId.argtypes = [H, ctypes.POINTER(wintypes.ULONG)]
+        k.GetNamedPipeServerProcessId.restype = B
+        k.GetNamedPipeServerProcessId.argtypes = [H, ctypes.POINTER(wintypes.ULONG)]
+        _A = a
+    return _A
+
+
+def _sid_string(sid):
+    text = wintypes.LPWSTR()
+    if not _adv().ConvertSidToStringSidW(sid, ctypes.byref(text)):
+        _fail('ConvertSidToStringSid')
+    try:
+        return text.value
+    finally:
+        _k32().LocalFree(text)
+
+
+def process_user_sid(process_handle):
+    """The string SID of the user a process runs as, from its token."""
+    a, k = _adv(), _k32()
+    token = wintypes.HANDLE()
+    if not a.OpenProcessToken(process_handle, TOKEN_QUERY, ctypes.byref(token)):
+        _fail('OpenProcessToken')
+    try:
+        size = wintypes.DWORD()
+        a.GetTokenInformation(token, TokenUser, None, 0, ctypes.byref(size))
+        buffer = ctypes.create_string_buffer(size.value)
+        if not a.GetTokenInformation(token, TokenUser, buffer, size, ctypes.byref(size)):
+            _fail('GetTokenInformation')
+        return _sid_string(ctypes.c_void_p.from_buffer(buffer).value)
+    finally:
+        k.CloseHandle(token)
+
+
+def current_user_sid():
+    return process_user_sid(_k32().GetCurrentProcess())
+
+
+def pipe_client_pid(handle):
+    pid = wintypes.ULONG()
+    _adv()
+    if not _k32().GetNamedPipeClientProcessId(handle, ctypes.byref(pid)):
+        _fail('GetNamedPipeClientProcessId')
+    return pid.value
+
+
+def pipe_server_pid(handle):
+    pid = wintypes.ULONG()
+    _adv()
+    if not _k32().GetNamedPipeServerProcessId(handle, ctypes.byref(pid)):
+        _fail('GetNamedPipeServerProcessId')
+    return pid.value
+
+
+def security_descriptor(sddl):
+    """(SECURITY_ATTRIBUTES, descriptor) from SDDL; free with LocalFree."""
+    descriptor = ctypes.c_void_p()
+    if not _adv().ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(descriptor), None):
+        _fail('ConvertStringSecurityDescriptorToSecurityDescriptor')
+    return descriptor
+
+
+def path_security(path):
+    """(owner SID, [(ace type, flags, mask, SID)]) of a file or directory.
+    A NULL DACL (everyone, everything) is returned as None."""
+    owner, dacl, descriptor = ctypes.c_void_p(), ctypes.c_void_p(), ctypes.c_void_p()
+    status = _adv().GetNamedSecurityInfoW(str(path), SE_FILE_OBJECT,
+                                          OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                                          ctypes.byref(owner), None, ctypes.byref(dacl), None,
+                                          ctypes.byref(descriptor))
+    if status:
+        raise OSError(status, 'GetNamedSecurityInfo failed: '+ctypes.FormatError(status).strip())
+    try:
+        if not dacl.value:
+            return _sid_string(owner), None
+        header = _AclHeader.from_address(dacl.value)
+        aces = []
+        for index in range(header.AceCount):
+            ace = ctypes.c_void_p()
+            if not _adv().GetAce(dacl, index, ctypes.byref(ace)):
+                _fail('GetAce')
+            entry = _AceHeader.from_address(ace.value)
+            sid = _sid_string(ace.value+8) if entry.AceType in (ACCESS_ALLOWED_ACE_TYPE, ACCESS_DENIED_ACE_TYPE) else None
+            aces.append((entry.AceType, entry.AceFlags, entry.Mask, sid))
+        return _sid_string(owner), aces
+    finally:
+        _k32().LocalFree(descriptor)
+
+
+def untrusted_rights(path, rights, *, trusted=TRUSTED_SIDS):
+    """None when only `trusted` SIDs own `path` and hold any of `rights`,
+    else a reason. Unknown ACE types fail closed; deny ACEs only narrow."""
+    owner, aces = path_security(path)
+    if owner not in trusted:
+        return f'owner {owner}'
+    if aces is None:
+        return 'NULL DACL'
+    for kind, flags, mask, sid in aces:
+        if kind == ACCESS_DENIED_ACE_TYPE or flags & INHERIT_ONLY_ACE:
+            continue
+        if kind != ACCESS_ALLOWED_ACE_TYPE:
+            return f'ACE type {kind}'
+        if mask & rights and sid not in trusted:
+            return f'{sid} holds {mask:#x}'
+    return None
+
+
+def machine_guid():
+    """32 lowercase hex: HKLM\\SOFTWARE\\Microsoft\\Cryptography MachineGuid."""
+    import winreg
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Cryptography', 0,
+                        winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+        value, _ = winreg.QueryValueEx(key, 'MachineGuid')
+    return value.replace('-', '').lower()

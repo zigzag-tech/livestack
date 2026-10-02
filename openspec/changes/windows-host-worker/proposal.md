@@ -41,11 +41,10 @@ a Windows host; that record still describes only the "Linux/WSL executor".
   no POSIX mode comparison in source unpacking, `TEMP`/`TMP` in the handler
   environment, `HARMONY_JOB_OBJECT` naming the attempt's job, and the enrollment
   probe reporting the job's kernel limits.
-- Specified, not yet implemented: launch verification on Windows (design
-  "Verifier"). Until it ships, a handler classified for compilation cannot
-  launch on a Windows worker (`verify_launch` refuses the platform), so the
-  first Windows handlers run unclassified, as `benchday.release.daemon.linux.v1`
-  does today.
+- Launch verification on Windows: a LocalSystem verifier service on a named
+  pipe; containment is Job Object membership from the kernel, limits are the
+  job's kernel limits, the machine is bound by `MachineGuid` (design
+  "Verifier").
 
 ## Capabilities
 

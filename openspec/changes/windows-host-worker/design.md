@@ -39,7 +39,8 @@ the active-process limit; a refused spawn posts
 `JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT` and the receipt records
 `pids_max_events: 1` (as Linux records a refused fork; nothing is killed).
 `need.cpu` is a hard CPU rate cap in the job's unit (1/100 % of the whole
-machine, so `cpu / cpu_count * 10000`, rounded: the quota is the nearest step).
+machine, so `cpu / cpu_count * 10000`, rounded DOWN so the kernel cap never
+exceeds what the verifier will compare it with).
 Wall time is enforced by the wrapper. Members run at below-normal priority and
 `DIE_ON_UNHANDLED_EXCEPTION` keeps an error dialog from parking a dead process.
 The kernel charges commit in its own granules: a peak may pass the limit by
@@ -89,7 +90,7 @@ admission. Without WSL memory reclaim the guest's page cache stays in `vmmem`
 indefinitely and starves the Windows worker; hosts should set
 `[experimental] autoMemoryReclaim` (operational, not code).
 
-**Verifier (specified; implementation is task 4).** The root verifier's Windows
+**Verifier (task 4.1).** The root verifier's Windows
 equivalent is a LocalSystem service listening on a named pipe whose DACL admits
 the worker account. It identifies the peer with `GetNamedPipeClientProcessId`
 and opens it with `PROCESS_QUERY_LIMITED_INFORMATION`; containment is
@@ -100,7 +101,17 @@ the limits it checks against the authority receipt are the kernel's
 `MachineGuid` registry value. Config and registry live under a directory only
 SYSTEM and Administrators can write (`%ProgramData%\livestack`, ACL-checked the
 way `trusted_json` checks root ownership). Same wire contract (version 1, 5 s,
-16 KiB). Limitation, stated as on Linux: the worker account owns the job object,
+16 KiB). The client refuses a pipe whose SERVER process is not LocalSystem
+(`GetNamedPipeServerProcessId`), so a same-account squatter cannot answer; the
+first pipe instance is created with `FILE_FLAG_FIRST_PIPE_INSTANCE` and remote
+clients are rejected. No SIGALRM exists: every overlapped pipe read/write and
+the authority request waits at most the remaining deadline. The registry's
+trust walk is ACL-based: the file and every directory above it are owned by
+SYSTEM, Administrators or TrustedInstaller; no other SID may write the file
+(read it, for the secret config) or delete/rename/re-ACL any directory on the
+path; no component is a reparse point. Handlers need `ProgramFiles`,
+`ProgramFiles(x86)` and `ProgramData` in their environment: MSVC discovery
+(vswhere, the VS setup API) fails without them (`link.exe not found`). Limitation, stated as on Linux: the worker account owns the job object,
 so a hostile handler of that account could open it and widen its limits; the
 design constrains supervised build tools, not hostile code.
 

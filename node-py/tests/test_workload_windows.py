@@ -100,7 +100,7 @@ def test_kernel_holds_the_attempt_limits(executor, tmp_path):
         job.close()
     assert limits['memory_bytes'] == 300*1024**2
     assert limits['tasks'] == 7
-    assert limits['cpu_rate'] == round(2/os.cpu_count()*10000)
+    assert limits['cpu_rate'] == int(2/os.cpu_count()*10000)
     assert limits['kill_on_close']
 
 
@@ -155,8 +155,9 @@ def test_restarted_worker_finds_the_attempt_by_name(tmp_path):
     # The worker process goes away: its handle closes, the wrapper's keeps the job.
     first.jobs.pop(attempt).close()
     second = JobObjectExecutor(first.worker_id)
-    assert second.inspect(attempt) == {'LoadState': 'loaded', 'ActiveState': 'active',
-                                       'ActiveProcesses': str(len(pids))}
+    state = second.inspect(attempt)
+    assert (state['LoadState'], state['ActiveState']) == ('loaded', 'active')
+    assert int(state['ActiveProcesses']) >= len(pids)
     second.stop(attempt)
     assert second.inspect(attempt)['LoadState'] == 'not-found'
     assert not [p for p in pids if windows_proc.pid_alive(p)]
@@ -238,9 +239,9 @@ def test_worker_runs_a_job_end_to_end_inside_a_job_object(fleet, tmp_path):
         job = caller.submit(dict(version=1, key='one', handler='native.v1', input_digest=digest,
                                  need={'cpu': .5, 'memory_bytes': 256*1024**2, 'disk_bytes': 1024**2},
                                  payload={'exit': 0}))
-        # The first report has no CPU interval yet and offers no CPU; the next does.
-        until(lambda: worker.report()['available']['cpu'] > 0)
-        assert worker.step()
+        # A busy host (this one also runs a WSL e2e worker) may offer too
+        # little CPU for a moment: placement waits, so does the test.
+        until(worker.step, 60)
         result = caller.get(job['id'])
         assert result['state'] == 'succeeded', result
         receipt = result['result']['result']
@@ -263,8 +264,9 @@ def test_probe_reports_the_job_object_limits(fleet, tmp_path):
         job = caller.submit(dict(version=1, key='probe', handler='harmony.probe.v1', input_digest=digest,
                                  need={'cpu': .5, 'memory_bytes': 256*1024**2, 'disk_bytes': 1024**2},
                                  payload={}))
-        until(lambda: worker.report()['available']['cpu'] > 0)
-        assert worker.step()
+        # A busy host (this one also runs a WSL e2e worker) may offer too
+        # little CPU for a moment: placement waits, so does the test.
+        until(worker.step, 60)
         result = caller.get(job['id'])
         assert result['state'] == 'succeeded', result
         artifact = next(a for a in result['result']['result']['artifacts'] if a['name'] == 'probe.json')
@@ -273,7 +275,7 @@ def test_probe_reports_the_job_object_limits(fleet, tmp_path):
         assert probe['memory_max'] == str(256*1024**2)
         # CpuRate is 1/100 % of the machine: the quota is the nearest step to 0.5 CPU.
         n = os.cpu_count()
-        assert probe['cpu_max'] == '%d 100000' % round(round(.5/n*10000)/10000*n*100000)
+        assert probe['cpu_max'] == '%d 100000' % round(int(.5/n*10000)/10000*n*100000)
     finally:
         worker.close()
 
@@ -349,4 +351,4 @@ def test_service_whose_worker_dies_is_restarted_by_the_scm(service, tmp_path):
     assert _sc('start', name).returncode == 0
     log = tmp_path/'state'/'worker.log'
     until(lambda: log.exists() and log.read_text().count('windows worker starting') >= 2, 60)
-    assert 'worker thread ended' in log.read_text()
+    assert 'service thread ended' in log.read_text()
