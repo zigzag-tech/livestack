@@ -372,7 +372,8 @@ class LaunchHandler(socketserver.BaseRequestHandler):
             logging.warning('compilation_launch_refused: peer_uid=%s reason=%s', uid, str(error)[:1024])
         except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as error:
             reply = dict(version=1, ok=False, error='compilation_verification_unavailable')
-            logging.warning('compilation_launch_refused: peer_uid=%s failure=%s', uid, type(error).__name__)
+            logging.warning('compilation_launch_refused: peer_uid=%s failure=%s: %s', uid, type(error).__name__,
+                            str(error)[:256])
         self.request.settimeout(.1)
         try:
             self.request.sendall(encode(reply, MAX_BYTES-1).encode()+b'\n')
@@ -429,8 +430,8 @@ def main_windows(args):
 
     def run():
         # The log first: a refusal to start must name its reason somewhere.
-        logging.basicConfig(level=logging.INFO, handlers=[RotatingFileHandler(
-            Path(args.config).parent/'verifier.log', maxBytes=2*1024**2, backupCount=2)])
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', handlers=[
+            RotatingFileHandler(Path(args.config).parent/'verifier.log', maxBytes=2*1024**2, backupCount=2)])
         config = trusted_json(args.config, secret=True)
         server = WindowsLaunchServer(config)
         logging.info('compilation verifier listening on %s for %s', config['pipe'], config['worker'])
@@ -452,8 +453,12 @@ def main():
         return
     config = trusted_json(args.config, secret=True)
     with LaunchServer(config) as server:
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', handlers=[RotatingFileHandler(
-            Path(config['socket']).parent/'verifier.log', maxBytes=2*1024**2, backupCount=2)])
+        # The file lives in the RuntimeDirectory, which a reboot (or `wsl
+        # --shutdown`) erases; stderr reaches the journal, which keeps the
+        # refusals of earlier boots (2026-10-02 WSL triage found none).
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', handlers=[
+            RotatingFileHandler(Path(config['socket']).parent/'verifier.log', maxBytes=2*1024**2, backupCount=2),
+            logging.StreamHandler()])
         try:
             server.serve_forever(poll_interval=.2)
         finally:
