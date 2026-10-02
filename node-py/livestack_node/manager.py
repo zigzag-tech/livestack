@@ -228,7 +228,14 @@ class ModelManager:
     # --- primitives the coordinator drives (caller holds _guard, GPU thread) ------
     def _load(self, name: str, device: "Optional[str]" = None,
               budget: "Optional[dict]" = None) -> object:
-        model = self.units[name].load(device, budget)
+        unit = self.units[name]
+        obs = self._act_observer
+        if obs is not None and not unit.loaded and hasattr(obs, "measure_load"):
+            # Learn what this load leaves resident (ActivationObserver.measure_load):
+            # the planner's footprint becomes a measurement, not the declared prior.
+            model = obs.measure_load(name, lambda: unit.load(device, budget))
+        else:
+            model = unit.load(device, budget)
         self._planner.commit_loaded(name)
         self._log(f"[harmony] loaded {name} (resident={self._planner.resident()})")
         return model
