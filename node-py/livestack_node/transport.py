@@ -2,6 +2,10 @@
 processes (node -> broker, broker -> node facade, worker -> authority,
 perception forwarding, policy-lab profiling) goes through this module.
 
+`KeptConnection` is the persistent form: one HTTP/1.1 connection reused
+across requests, for control traffic that must not need a fresh TCP handshake
+per request (lease renewal; openspec/changes/worker-control-keepalive).
+
 `dial` is the buffered form: one call, one (status, headers, body) tuple.
 `dial_stream` is the incremental form, for the two callers whose semantics
 require reading the response as it arrives — the resumable download loop
@@ -24,6 +28,9 @@ stays urllib-shaped HTTP only.
 """
 from __future__ import annotations
 
+import http.client
+import io
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -98,3 +105,82 @@ def dial(target: str, method: str, path: str,
     with dial_stream(target, method, path, headers=headers, body=body,
                      timeout=timeout) as resp:
         return resp.status, resp.headers, resp.read()
+
+
+# Failures that mean "the server closed a kept connection before answering":
+# raised by the request write or the status-line read of a REUSED connection.
+_STALE = (http.client.RemoteDisconnected, BrokenPipeError, ConnectionResetError,
+          ConnectionAbortedError)
+
+
+class KeptConnection:
+    """One persistent HTTP/1.1 connection to `target`, response buffered.
+
+    `request()` has `dial`'s contract: `(status, headers, body)` on success,
+    `HTTPError` on HTTP >= 400 (body readable), `URLError` on connection
+    failure. Requests are serialised by a lock. A request that fails on a
+    REUSED connection before any response byte arrives (the server closed it
+    while idle) is retried once on a fresh connection; every other failure
+    closes the connection and is raised for the caller's own retry policy.
+    A response with `Connection: close` is honoured: the next request
+    reconnects."""
+
+    def __init__(self, target: str, timeout: float = 30.0):
+        _refuse_mesh_scheme(target)
+        parts = urllib.parse.urlsplit(target)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
+            raise ValueError(f"kept connection needs an http(s) target: {target!r}")
+        self.target = target.rstrip("/")
+        self._cls = (http.client.HTTPSConnection if parts.scheme == "https"
+                     else http.client.HTTPConnection)
+        self._netloc = parts.netloc
+        self.timeout = timeout
+        self._conn = None
+        self._served = 0  # responses read on the current connection
+        self._lock = threading.Lock()
+        self.connects = 0  # TCP connections opened, for observability/tests
+
+    def close(self) -> None:
+        with self._lock:
+            self._drop()
+
+    def _drop(self) -> None:
+        if self._conn is not None:
+            self._conn.close()
+        self._conn, self._served = None, 0
+
+    def _once(self, method, path, headers, body):
+        if self._conn is None:
+            self._conn = self._cls(self._netloc, timeout=self.timeout)
+            self._conn.connect()
+            self.connects += 1
+        self._conn.request(method, path, body=body, headers=headers)
+        response = self._conn.getresponse()
+        data = response.read()
+        self._served += 1
+        if response.will_close:
+            self._drop()
+        return response, data
+
+    def request(self, method: str, path: str,
+                headers: Optional[Mapping[str, str]] = None,
+                body: Optional[bytes] = None) -> Tuple[int, Headers, bytes]:
+        if not path.startswith("/"):
+            path = "/" + path
+        headers = dict(headers or {})
+        with self._lock:
+            try:
+                try:
+                    response, data = self._once(method, path, headers, body)
+                except _STALE:
+                    if not self._served:
+                        raise
+                    self._drop()
+                    response, data = self._once(method, path, headers, body)
+            except (OSError, http.client.HTTPException) as error:
+                self._drop()
+                raise URLError(error) from error
+        if response.status >= 400:
+            raise HTTPError(self.target + path, response.status, response.reason,
+                            response.headers, io.BytesIO(data))
+        return response.status, response.headers, data

@@ -113,6 +113,15 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
             self.store.bind_principals(principals)  # caps first: new ids are never uncapped
             self.principals = principals
 
+    def connection_bound(self):
+        """Each worker holds up to two kept-alive control connections (main and
+        lease); the base share stays free for object/CAS transfers, verifier
+        and caller requests. Idle kept connections are evicted at the bound
+        (network.BoundedRequests), so they cannot starve those requests.
+        Ceiling: 32 + 2*128 principals = 288."""
+        workers = sum(p.role == 'worker' for p in self.principals)
+        return self.max_connections + 2*workers
+
     def service_actions(self):
         # Called periodically even with no traffic: dead clients never leave
         # expiry/retention dependent on the next user making a request.
@@ -129,7 +138,28 @@ class Handler(BaseHTTPRequestHandler):
 
     def setup(self):
         super().setup()
+        # Also the idle bound of a kept-alive connection: no next request
+        # within 15 s and handle_one_request's timeout path closes it.
         self.connection.settimeout(15)
+
+    def handle_one_request(self):
+        # Between requests a kept-alive connection is idle and may be evicted
+        # at the connection bound; parse_request marks it busy again.
+        if getattr(self, '_served', False):
+            self.server.mark_idle(self.request)
+        self._served = True
+        super().handle_one_request()
+
+    def parse_request(self):
+        self.server.mark_busy(self.request)
+        # A request may leave its connection open only once its body has been
+        # read in full (body()); until then unread bytes could be taken for the
+        # next request line.
+        self._body_consumed = False
+        ok = super().parse_request()
+        if ok and self.headers.get('Content-Length', '0') == '0' and not self.headers.get('Transfer-Encoding'):
+            self._body_consumed = True
+        return ok
 
     def log_message(self, fmt, *args):
         # Do not log authorization headers, body content or query parameters.
@@ -156,6 +186,7 @@ class Handler(BaseHTTPRequestHandler):
             raw = self.rfile.read(length)
             if len(raw) != length:
                 raise WorkloadError('incomplete request')
+            self._body_consumed = True
             result = json.loads(raw)
         except (ValueError, UnicodeError) as exc:
             raise WorkloadError('invalid JSON') from exc
@@ -169,9 +200,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', str(len(raw)))
         self.send_header('Cache-Control', 'no-store')
-        self.send_header('Connection', 'close')
+        # Control requests keep the connection (openspec/changes/
+        # worker-control-keepalive); a partly read request never does.
+        # close_connection is already True when the client asked to close.
+        if self.close_connection or not self._body_consumed:
+            self.send_header('Connection', 'close')
+            self.close_connection = True
         self.end_headers()
-        self.close_connection = True
         self.wfile.write(raw)
 
     def do_GET(self):

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.parse
+import urllib.request
 
 from livestack_node import transport
 
@@ -16,11 +18,32 @@ class WorkloadClient:
         self.url = url.rstrip('/') + '/v1/workloads/'
         self.token = token
         self.timeout = timeout
+        # Control requests ride one kept-alive connection, so an established
+        # worker needs no new TCP handshake per request
+        # (openspec/changes/worker-control-keepalive). urllib would have sent
+        # the request through an environment proxy; keep that path unchanged.
+        target = transport.split_target(self.url)[0]
+        parts = urllib.parse.urlsplit(target)
+        proxied = (parts.scheme in urllib.request.getproxies()
+                   and not urllib.request.proxy_bypass(parts.hostname or ''))
+        self._kept = None if proxied else transport.KeptConnection(target, timeout)
+
+    def channel(self):
+        """A client with its own kept connection to the same authority: the
+        lease keeper renews on it, never queued behind this client's requests."""
+        return WorkloadClient(self.url[:-len('/v1/workloads/')], self.token, timeout=self.timeout)
+
+    def close(self):
+        if self._kept is not None:
+            self._kept.close()
 
     def request(self, route, body=None):
         target, path = transport.split_target(self.url + route)
+        dial = (transport.dial if self._kept is None else
+                lambda _target, method, path, **kw: self._kept.request(
+                    method, path, headers=kw['headers'], body=kw['body']))
         try:
-            _status, _headers, data = transport.dial(
+            _status, _headers, data = dial(
                 target, 'POST' if body is not None else 'GET', path,
                 headers={'Authorization': 'Bearer '+self.token, 'Content-Type': 'application/json'},
                 body=encode(body).encode() if body is not None else None,
