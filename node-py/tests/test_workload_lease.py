@@ -26,6 +26,12 @@ class LeaseClient:
         self.replies = iter(replies)
         self.calls = 0
 
+    def channel(self):
+        return self
+
+    def close(self):
+        pass
+
     def request(self, route, body):
         self.calls += 1
         reply = next(self.replies)

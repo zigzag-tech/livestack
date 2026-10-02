@@ -721,10 +721,13 @@ def test_another_principal_cannot_cancel_a_job(fleet):
 
 class Outage:
     """A real TCP hop between worker and authority that can refuse connections
-    (down/up on the SAME port) or reset the first N result uploads."""
+    (down/up on the SAME port) or reset the first N result uploads. Going down
+    also cuts the flows already open: the worker keeps its control connections
+    alive, and an outage that spared them would not be one."""
 
     def __init__(self, upstream_port):
         self.upstream, self.reset_puts, self.listener = upstream_port, 0, None
+        self.flows = set()
         probe = socket.socket()
         probe.bind(('127.0.0.1', 0))
         self.port = probe.getsockname()[1]
@@ -740,7 +743,20 @@ class Outage:
         Thread(target=self._accept, args=(listener,), daemon=True).start()
 
     def down(self):
+        # close() alone does not wake a thread blocked in accept(), which
+        # would admit one more connection; a kept-alive one then outlives
+        # the outage.
+        try:
+            self.listener.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         self.listener.close()
+        for sock in list(self.flows):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            sock.close()
 
     def _accept(self, listener):
         while True:
@@ -751,6 +767,8 @@ class Outage:
             Thread(target=self._serve, args=(client,), daemon=True).start()
 
     def _serve(self, client):
+        self.flows.add(client)
+        upstream = None
         try:
             first = client.recv(65536)
             if first.startswith(b'PUT ') and self.reset_puts > 0:
@@ -759,6 +777,7 @@ class Outage:
                 client.close()
                 return
             upstream = socket.create_connection(('127.0.0.1', self.upstream), timeout=30)
+            self.flows.add(upstream)
             upstream.sendall(first)
             def pump(a, b):
                 try:
@@ -773,6 +792,9 @@ class Outage:
             upstream.close()
         except OSError:
             pass
+        finally:
+            self.flows.discard(client)
+            self.flows.discard(upstream)
 
 
 @pytest.fixture

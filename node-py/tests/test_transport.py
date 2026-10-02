@@ -185,6 +185,11 @@ def recorder(monkeypatch):
     rec = Recorder()
     monkeypatch.setattr(transport, "dial", rec.dial)
     monkeypatch.setattr(transport, "dial_stream", rec.dial_stream)
+    # The persistent form of the seam records into the same log.
+    monkeypatch.setattr(
+        transport.KeptConnection, "request",
+        lambda self, method, path, headers=None, body=None: rec.dial(
+            self.target, method, path, headers=headers, body=body, timeout=self.timeout))
     return rec
 
 

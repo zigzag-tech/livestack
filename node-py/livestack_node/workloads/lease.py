@@ -50,7 +50,10 @@ def retry_transient(call, what, *, budget, keep_going=lambda: True, first_delay=
 
 class LeaseKeeper:
     def __init__(self, client, assignment, path, *, interval=10, progress_path=None, start_retry_seconds=15):
-        self.client, self.assignment = client, assignment
+        # Renewals ride a connection of their own, opened by the initial grant
+        # in start(): never queued behind the worker's claim/report/complete,
+        # and no new handshake per renewal (openspec/changes/worker-control-keepalive).
+        self.client, self.assignment = client.channel(), assignment
         self.path = Path(path)
         self.interval = interval
         self.start_retry_seconds = start_retry_seconds
@@ -190,4 +193,5 @@ class LeaseKeeper:
             self.thread.join(timeout=self.client.timeout+1)
             if self.thread.is_alive():
                 raise WorkloadError('renewal thread did not stop', 503)
+        self.client.close()
         self._write(0)
