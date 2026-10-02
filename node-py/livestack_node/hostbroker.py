@@ -104,6 +104,14 @@ def aggregate_units(per_peer: Mapping[Tuple[str, str], Unit],
                 _res_max(prev.admission_footprint or prev.footprint,
                          unit.admission_footprint or unit.footprint)
                 if prev.admission_footprint or unit.admission_footprint else {}),
+            # A whole-device claim is contagious across peers of one kind (the
+            # stronger claim wins, like every other conservative fold here).
+            # The engine identity is carried for the LEDGER record only — the
+            # planner never interprets it; first non-empty wins, and a peer
+            # that says nothing does not erase what another peer said.
+            exclusive_device=prev.exclusive_device or unit.exclusive_device,
+            engine=prev.engine or unit.engine,
+            engine_rev=prev.engine_rev or unit.engine_rev,
         )
     return out
 
@@ -355,6 +363,59 @@ class HostBroker:
                 available=self.hosted_available.get(did, True),
             ))
         return out
+
+    # -- host pool -----------------------------------------------------------
+    #
+    # Host RAM is shared by every device on the machine and is planned the same
+    # way VRAM is (harmony-engine-units design §3): measured free, one reserve
+    # off the top, claims subtracted until the measurement reflects them.
+    HOST_RAM_RESERVE_BYTES = 1 << 30
+
+    def _host_pools(self, units: Mapping[str, Unit], placements: List[Placement],
+                    device_hosts: Mapping[str, str]):
+        """(hosts, host_reserve): host_id -> free RAM (and the reserve already
+        subtracted from it), from the freshest peer `host_mem` reading.
+
+        Every peer on a host measures the SAME machine (`meters.host_mem`, i.e.
+        MemAvailable), so the freshest reading wins. The reserve is taken off
+        the top (default 1 GiB, the hostview/host-memory-ledger default — below
+        it is "none free", not "1 GiB to spend"), and the claims of LOADING
+        units are subtracted: a load still arriving is not yet visible in
+        MemAvailable (the `host-memory-ledger` §3 term, applied once).
+
+        A host nobody measures is simply ABSENT — unmeasured is not empty, and
+        the planner refuses a `ram_bytes` unit there by name rather than
+        placing it into whatever RAM happens to exist.
+        """
+        reserve = float(self.default_capacity.get(
+            "host_ram_reserve_bytes", self.HOST_RAM_RESERVE_BYTES))
+        freshest: Dict[str, Tuple[float, float]] = {}
+        for key, rep in self.peer_report.items():
+            avail = (rep.get("host_mem") or {}).get("available_bytes")
+            if not isinstance(avail, (int, float)):
+                continue
+            hid = self._remembered_host(key)
+            if not hid:
+                continue
+            at = float(rep.get("at") or 0.0)
+            if hid not in freshest or at > freshest[hid][0]:
+                freshest[hid] = (at, float(avail))
+        loading: Dict[str, float] = {}
+        for pl in placements:
+            if not pl.loading:
+                continue
+            hid = device_hosts.get(pl.device_id)
+            if hid is None:
+                continue
+            claim = max(0.0, float((units.get(pl.kind).footprint
+                                    if units.get(pl.kind) else {}).get("ram_bytes", 0.0)))
+            loading[hid] = loading.get(hid, 0.0) + claim
+        hosts: Dict[str, Dict[str, float]] = {}
+        host_reserve: Dict[str, Dict[str, float]] = {}
+        for hid, (_at, avail) in freshest.items():
+            hosts[hid] = {"ram_bytes": max(0.0, avail - reserve - loading.get(hid, 0.0))}
+            host_reserve[hid] = {"ram_bytes": reserve}
+        return hosts, host_reserve
 
     # -- hosted lease ledger (the broker IS the source of truth here) ---------
     def _now(self, now: Optional[float] = None) -> float:
@@ -864,11 +925,15 @@ class HostBroker:
         for _did, _host in self._in_flight_devices().items():
             discovered.setdefault(_did, _host)
         self._note_demand(requests or (), now)
-        return WorldState(devices=tuple(self._resolve_devices(discovered, measured_caps)),
+        resolved = self._resolve_devices(discovered, measured_caps)
+        hosts, host_reserve = self._host_pools(
+            units, placements, {d.id: d.host_id for d in resolved})
+        return WorldState(devices=tuple(resolved),
                           units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
                           now=now, last_evicted_at=dict(last_evicted_at or {}),
                           measured_free=measured,
+                          hosts=hosts, host_reserve=host_reserve,
                           demand=self.demand(now))
 
     # -- demand ----------------------------------------------------------------
@@ -1512,6 +1577,40 @@ class HostBroker:
             kind = getattr(a, "kind", None)
             decision = {"Evict": "evict", "Load": "load",
                         "Grant": "grant", "Defer": "defer"}[type(a).__name__]
+            # What the reader needs beside the reason to audit a PLACEMENT
+            # (harmony-engine-units design §6): the host-pool arithmetic behind
+            # a `ram_bytes` unit, the whole-device claim and the tenants evicted
+            # to satisfy it, and which engine (and pinned rev) was loaded. Only
+            # what applies is emitted, so a record for anything else is
+            # byte-for-byte what it was. NOT named `outcome` — the candidate
+            # loop below reuses that name for its `chosen`/`ranked` verdict.
+            unit = world.units.get(kind) if kind else None
+            placement: dict = {}
+            if unit is not None and decision in ("load", "grant", "evict"):
+                if getattr(unit, "engine", ""):
+                    placement["engine"] = unit.engine
+                if getattr(unit, "engine_rev", ""):
+                    placement["engine_rev"] = unit.engine_rev
+                if getattr(unit, "exclusive_device", False):
+                    placement["exclusive_device"] = True
+                    evicted_here = sorted({e.kind for e in actions
+                                           if isinstance(e, Evict)
+                                           and e.device_id == device_id})
+                    if evicted_here and decision in ("load", "grant"):
+                        placement["evicted"] = evicted_here
+            if unit is not None and decision in ("load", "grant"):
+                hp = (a.host_pool if isinstance(a, Grant) else None) or None
+                if not hp:
+                    need = {k: v for k, v in (unit.footprint or {}).items()
+                            if k == "ram_bytes"}
+                    host_id = next((d.host_id for d in world.devices
+                                    if d.id == device_id), "")
+                    if need and host_id:
+                        hp = {"need": dict(need),
+                              "free": dict(world.hosts.get(host_id, {})),
+                              "reserve": dict(world.host_reserve.get(host_id, {}))}
+                if hp:
+                    placement["host_pool"] = dict(hp)
             # Task 8.1's ledger obligation: an eviction that lands on a peer
             # whose current failure is a NAMED transport degradation must say
             # so beside the planner's own (non-transport) cause, so a
@@ -1560,6 +1659,7 @@ class HostBroker:
                 reason=("" if self.dispatch else "ADVISORY (observe-only, not dispatched): ")
                        + (getattr(a, "reason", "") or decision)
                        + (f"; measured free {free}" if free else ""),
+                outcome=placement or None,
                 # Each action kind names what it knows under its OWN name.
                 # Grant/Defer are answerable to a request: `request_id`.
                 # Load/Evict are consequences of one: `caused_by`, the owner
@@ -1746,12 +1846,13 @@ class RestPeer:
             else:
                 prio = self._prio(r)
             reported = u.get("footprint") or {}
+            host_dims = {k: v for k, v in reported.items() if k != "vram_bytes"}
             if u["kind"] in self._footprints:
-                fp = {"vram_bytes": self._footprints[u["kind"]]}
+                fp = {"vram_bytes": self._footprints[u["kind"]], **host_dims}
             elif any(float(value) > 0 for value in reported.values()):
                 fp = reported
             elif u["kind"] in self._fallback_footprints:
-                fp = {"vram_bytes": self._fallback_footprints[u["kind"]]}
+                fp = {"vram_bytes": self._fallback_footprints[u["kind"]], **host_dims}
             else:
                 fp = reported
             # Measured peak-activation reserve (absent on nodes that don't report it).
@@ -1771,7 +1872,13 @@ class RestPeer:
                 source = ("declared" if u["kind"] in self._footprints
                           else u.get("footprint_source") or "declared")
             else:
-                fp = {"vram_bytes": float(measured["footprint"])}
+                # The engine's report replaces the DEVICE-dimension number only.
+                # Host-scoped dimensions (`ram_bytes`) are carried through from
+                # the node's report whatever the device figure says — they are
+                # charged to the host pool, not to the card, and dropping them
+                # here would place a host-RAM-pinning unit as if it were free.
+                fp = {"vram_bytes": float(measured["footprint"]),
+                      **{k: v for k, v in reported.items() if k != "vram_bytes"}}
                 adm = {"vram_bytes": float(measured["min_footprint"])}
                 hdrm = {}
                 source = measured.get("source") or "vllm-startup"
@@ -1792,7 +1899,15 @@ class RestPeer:
                 # What the unit IS, so a requirement can match it.
                 attributes=u.get("attributes") or {},
                 footprint_source=source,
-                admission_footprint=adm)
+                admission_footprint=adm,
+                # A whole-device claim (an engine that sizes its cache to
+                # whatever VRAM is free), and WHICH ENGINE serves the unit —
+                # the latter carried for the ledger record only. Absent on
+                # nodes that predate the fields: parsed as False/"" and the
+                # unit plans exactly as it did.
+                exclusive_device=bool(u.get("exclusive_device")),
+                engine=str(u.get("engine") or ""),
+                engine_rev=str(u.get("engine_rev") or ""))
         return out
 
     def placements(self):

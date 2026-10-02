@@ -26,7 +26,7 @@ import inspect
 import time
 import threading
 from contextlib import contextmanager
-from typing import Callable, Optional
+from typing import Callable, Mapping, Optional
 
 from .freeing import trim_ram
 
@@ -78,7 +78,7 @@ class ManagedUnit:
 
     def __init__(self, name: str, loader: Callable[[], object],
                  freer: Callable[[], None],
-                 footprint: int = 0,
+                 footprint: "int | Mapping[str, float]" = 0,
                  residency_policy: ResidencyPolicy = ResidencyPolicy.UNPINNED,
                  min_resident: int = 0,
                  health_check: "Optional[Callable[[object], bool]]" = None,
@@ -93,11 +93,25 @@ class ManagedUnit:
                  # 0.6 B embedder that happens to ask during the load.
                  min_residency_s: "Optional[float]" = None,
                  reload_cost: "Optional[float]" = None,
-                 priority: "Optional[int]" = None):
+                 priority: "Optional[int]" = None,
+                 # WHOLE-DEVICE claim: the unit is charged the device's entire
+                 # capacity and is admitted only when every other tenant can
+                 # leave (an engine that sizes its cache to whatever VRAM is
+                 # free). Reported to the broker; the planner enforces it.
+                 exclusive_device: bool = False,
+                 # WHICH ENGINE serves this unit ("vllm", "strata", ...) and the
+                 # revision it is pinned to. Reported for the broker's ledger
+                 # record only — never a requestable attribute.
+                 engine: str = "",
+                 engine_rev: str = ""):
         self.name = name
         self._loader = loader
         self._freer = freer
-        self.footprint = footprint              # measured-and-cached bytes (0 = unknown)
+        # Measured-and-cached bytes (0 = unknown). An int is VRAM, as it always
+        # was; a dict is a resource VECTOR ({"vram_bytes": N, "ram_bytes": M})
+        # for units that also pin host RAM — a Strata server's weights live in
+        # host memory, and planning only their VRAM is how a host swaps.
+        self.footprint = footprint
         # The engine's own startup report (`vllm_startup.MeasuredCost.to_json()`
         # or `Unknown.to_json()`), set by the node after a load. None = never
         # measured: the footprint above is then a declared prior.
@@ -112,6 +126,9 @@ class ManagedUnit:
         self.min_residency_s = min_residency_s
         self.reload_cost = reload_cost
         self.priority = priority
+        self.exclusive_device = exclusive_device
+        self.engine = engine
+        self.engine_rev = engine_rev
         # Contention class reported to the broker. Units in one group are
         # alternatives for the same work; the planner charges for co-residence
         # in proportion to the demand waiting for each, so alternating traffic
@@ -138,6 +155,18 @@ class ManagedUnit:
     @property
     def loaded(self) -> bool:
         return self.model is not None
+
+    @property
+    def vram_bytes(self) -> int:
+        """The DEVICE-scoped part of ``footprint``, as the number it used to be.
+
+        The Rust residency planner's budget is VRAM alone; host-scoped
+        dimensions (`ram_bytes`) live in the vector and are planned by the
+        broker's host pool, not by this process."""
+        fp = self.footprint
+        if isinstance(fp, Mapping):
+            return int(fp.get("vram_bytes", 0) or 0)
+        return int(fp or 0)
 
     def check_health(self) -> "Optional[bool]":
         """Run the functional liveness probe. Returns None when the unit is not
@@ -216,7 +245,7 @@ class ModelManager:
         # The Rust decision core. State (resident set, recover rate-limit) lives in
         # the planner; the host only executes the side-effects it returns.
         self._planner = _Planner([
-            (name, int(u.footprint), int(u.residency_policy), int(u.min_resident),
+            (name, u.vram_bytes, int(u.residency_policy), int(u.min_resident),
              u.health_check is not None)
             for name, u in units.items()
         ])
