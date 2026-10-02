@@ -15,7 +15,7 @@ from .model import WorkloadError, encode
 def write_current_receipt(output, compilation_class, value):
     if not output or not Path(output).is_dir():
         raise WorkloadError('compilation_launch_receipt_directory_unavailable', 503)
-    # Five finite class names, one atomically replaced current receipt each.
+    # Six finite class names (CLASSES), one atomically replaced current receipt each.
     # Existing attempt workspace/artifact retention owns these files' lifetime.
     path = Path(output)/('compilation-'+compilation_class+'.json')
     temporary = path.with_suffix('.tmp')

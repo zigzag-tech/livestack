@@ -217,3 +217,45 @@ def test_authenticated_completed_job_retains_original_compilation_producer(autho
     runtime_assignment = claim(clients, 'ui')
     assert runtime_assignment['job_id'] == runtime['id']
     assert clients['caller'].get(runtime['id'])['attempts'][0]['compilation'] is None
+
+
+def test_apple_class_granted_only_by_policy(tmp_path):
+    """openspec/changes/apple-host-compilation: an Apple handler advertised by a
+    host whose policy lacks `apple` is refused by name; the Mac is admitted."""
+    policy_path = tmp_path/'policy.json'
+    policy_path.write_text(json.dumps(dict(version=1, revision='apple-1', expires=time.time()+3600,
+        hosts={'linux-builder': ['rust', 'native'], 'mac': ['apple', 'rust', 'native']},
+        enrollments={'linux-builder': 'linux-builder', 'mac': 'mac'})))
+    policy_path.chmod(0o600)
+    store = WorkloadStore(tmp_path/'jobs.db', handlers={'apple.v1'}, limits=Limits(),
+        compilation_policy=CompilationPolicy(policy_path, {'apple.v1': ['apple', 'rust', 'native']}))
+    principals = [Principal('caller', 'c'*32, 'caller', ('apple.v1',)),
+                  Principal('linux-builder', '1'*32, 'worker', worker='linux-builder', host='linux-builder'),
+                  Principal('mac', '2'*32, 'worker', worker='mac', host='mac')]
+    server = WorkloadServer(('127.0.0.1', 0), store, principals)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f'http://127.0.0.1:{server.server_port}'
+        clients = {p.id: WorkloadClient(url, p.token) for p in principals}
+        data = b'apple source fixture'
+        digest = hashlib.sha256(data).hexdigest()
+        server.blobs.put('caller', digest, len(data), BytesIO(data))
+        job = clients['caller'].request('jobs', dict(version=1, key='apple', handler='apple.v1',
+            input_digest=digest, need={'cpu': 1, 'memory_bytes': 768*1024**2}))
+        resources = {'cpu': 1, 'memory_bytes': 1024**3}
+        clients['linux-builder'].request('worker/report', dict(boot='boot', report=dict(
+            capacity=resources, available=resources, labels={}, handlers=['apple.v1'], ready=True)))
+        assert claim(clients, 'linux-builder') is None
+        assert 'compilation_not_admitted: operator host policy' in clients['caller'].request('jobs/'+job['id'])['reason']
+        clients['mac'].request('worker/report', dict(boot='boot', report=dict(
+            capacity=resources, available=resources, labels={}, handlers=['apple.v1'], ready=True)))
+        assignment = claim(clients, 'mac')
+        assert assignment['job_id'] == job['id']
+        assert assignment['compilation']['classes'] == ['apple', 'native', 'rust']
+        receipt = verify(clients, 'mac', assignment, **{'class': 'apple'})
+        assert receipt['host'] == 'mac' and 'apple' in receipt['classes']
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
