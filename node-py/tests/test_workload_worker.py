@@ -261,8 +261,10 @@ raise SystemExit(code)
     try:
         assert worker.step()
         result = caller.get(job['id'])
-        assert result['state'] == 'queued' and result['reason'] == 'infrastructure retry'
-        assert result['result']['outcome'] == 'infrastructure'
+        # Breaching the handler's own task limit ends the job (no retry into
+        # the same cap) and names the fix; it is still not a product failure.
+        assert result['state'] == 'failed' and result['reason'].startswith('resource limit: the attempt reached its task limit')
+        assert result['result']['outcome'] == 'infrastructure' and len(result['attempts']) == 1
         detail = result['result']['result']
         assert detail['exit_code'] == 7 and detail['resources']['pids_max_events'] > 0
         artifact = next(a for a in detail['artifacts'] if a['name'] == 'artifact')

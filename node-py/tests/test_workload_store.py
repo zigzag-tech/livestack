@@ -222,6 +222,22 @@ def test_only_infrastructure_retries_and_two_attempt_limit(harness):
     assert len(store.get('owner', j['id'])['attempts']) == 1
 
 
+def test_a_breach_of_the_jobs_own_memory_need_fails_without_retry(harness):
+    store, _, _ = harness
+    register(store)
+    job = store.submit('owner', request('oom'))
+    a = store.claim('w1', 'boot1')
+    done = complete(store, a, 'infrastructure', result={'exit_code': -9, 'resources': {
+        'oom_kill': 1, 'memory_peak_bytes': 6472464832}})
+    assert done['state'] == 'failed'
+    assert done['reason'].startswith('resource limit: memory peak 6472464832 bytes reached the job')
+    assert store.claim('w1', 'boot1') is None and len(store.get('owner', job['id'])['attempts']) == 1
+    # Control: an infrastructure end WITHOUT a limit breach still retries.
+    store.submit('owner', request('lost'))
+    b = store.claim('w1', 'boot1')
+    assert complete(store, b, 'infrastructure', result={'exit_code': -9, 'resources': {'oom_kill': 0}})['state'] == 'queued'
+
+
 def test_wrong_digest_or_modified_completion_is_rejected(harness):
     store, _, _ = harness
     register(store)

@@ -19,6 +19,23 @@ from .model import progress as validate_progress
 TERMINAL = ("succeeded", "failed", "cancelled", "expired")
 
 
+def _limit_breach(result, need):
+    """The job's own resource limit, when the run ended by breaching it."""
+    resources = (result or {}).get("resources") or {}
+    try:
+        need = json.loads(need) if isinstance(need, str) else (need or {})
+    except ValueError:
+        need = {}
+    if resources.get("oom_kill", 0) > 0:
+        return ("resource limit: memory peak %s bytes reached the job's declared need.memory_bytes %s; "
+                "raise the job's need, a retry would hit the same cap"
+                % (resources.get("memory_peak_bytes", "unknown"), need.get("memory_bytes", need.get("ram", "unknown"))))
+    if resources.get("pids_max_events", 0) > 0:
+        return ("resource limit: the attempt reached its task limit (peak %s); raise the handler's max_tasks, "
+                "a retry would hit the same cap" % resources.get("tasks_peak", "unknown"))
+    return None
+
+
 class WorkloadStore:
     def __init__(self, path, *, handlers, limits=None, clock=time.time, compilation_policy=None):
         self.path = str(path)
@@ -323,7 +340,14 @@ class WorkloadStore:
             db.execute("UPDATE attempts SET state='ended',result=? WHERE id=?", (raw, attempt_id))
             state = "succeeded" if outcome == "succeeded" else "failed"
             reason = None
-            if outcome == "infrastructure" and fence < self.limits.attempts:
+            breach = _limit_breach(result, a["need"])
+            if outcome == "infrastructure" and breach:
+                # The attempt hit a limit the JOB declared (its own need is the
+                # execution cap). A retry runs the same spec into the same cap,
+                # and near the line only by luck gets through: end the job and
+                # name the fix. Not a product failure; still no retry.
+                reason = breach
+            elif outcome == "infrastructure" and fence < self.limits.attempts:
                 state, reason = "queued", "infrastructure retry"
             db.execute("UPDATE jobs SET state=?,result=?,reason=?,updated=? WHERE id=?",
                        (state, raw, reason, now, job["id"]))
