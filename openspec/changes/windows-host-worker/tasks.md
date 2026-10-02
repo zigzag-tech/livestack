@@ -17,10 +17,30 @@ on the job (`jobs.reason`), which these tasks keep.
 
 ## 3. Deployment (operational evidence below)
 
-- [ ] 3.1 xc-win-1: dedicated worker account, bounded VHDX workspace, service, release; principal `xc-win-1-native` on host `xc-win-1`; a real `harmony.probe.v1` placed there.
-- [ ] 3.2 WSL memory reclaim on xc-win-1 (`autoMemoryReclaim`), done only with `xc-win-1-wsl` drained.
+- [x] 3.1 xc-win-1: dedicated worker account, bounded VHDX workspace, service, release; principal `xc-win-1-native` on host `xc-win-1`; a real `harmony.probe.v1` placed there.
+- [x] 3.2 WSL memory reclaim on xc-win-1 (`autoMemoryReclaim`), done only with `xc-win-1-wsl` drained.
 
 ## 4. Windows launch verification
 
 - [ ] 4.1 Verifier service (LocalSystem, named pipe, `GetNamedPipeClientProcessId` + `IsProcessInJob`, kernel-held limits, `MachineGuid`) and `verify_launch` client on Windows; tests: real verifier on Windows — admitted MSVC launch, peer outside the job refused, limit mismatch refused.
 - [ ] 4.2 Authority runs the `windows` class before policy names it; policy grants `windows` to xc-win-1 in a window agreed with the policy owner.
+
+## Deployment record (2026-10-02)
+
+- xc-win-1 (Windows 11 Pro 26200): CPython 3.12.10 machine-wide (winget); release
+  `C:\harmony\releases\livestack-dba3fc37` (merge `dba3fc37`); service
+  `LivestackWorkloadWorker` as `.\harmony-worker` via `node-py/deploy/windows/install-worker.ps1`;
+  workspace VHDX 100 GB at `C:\harmony\work\xc-win-1-native`.
+- Principal `xc-win-1-native` (host `xc-win-1`, claim_enabled) added by SIGHUP reload 08:0x UTC;
+  worker registered `ready=1`, handlers `harmony.probe.v1`, no `host` block.
+- Proof: job `99f17d4b72bf43eca26f9bc3fd924b6f` (`harmony.probe.v1`, selector `os=windows`)
+  succeeded on attempt `05c0900f303d4bfc80933bf7ef9fdf36`: `isolation windows-job-object`,
+  `memory_max 268435456`, `cpu_max 100000 100000`, `tasks_max 512`, peak commit 21 MiB. While a
+  WSL e2e attempt held its 4 GiB admission and vmmem held its guest cache, the job waited as
+  `insufficient shared host resources` on the native worker: the shared-host arithmetic.
+- WSL reclaim: `xc-win-1-wsl` drained 08:10:20-08:21:47 UTC; `.wslconfig` gained
+  `[experimental] autoMemoryReclaim=gradual`. Windows available memory 3995 MB (vmmem 15287 MB,
+  e2e running) / 6574 MB (vmmem 12181 MB, idle) before; 14811 MB (vmmem 4828 MB) after restart.
+  WSL generates no `.swap` units from fstab: the guest's swap files did not return after
+  `wsl --shutdown` until a oneshot `wsl-fstab-swap.service` (`swapon -a`) was added; verified
+  over a second restart.
