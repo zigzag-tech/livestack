@@ -26,6 +26,16 @@ decision-cuda = [
     "numpy>=1.26",
     "accelerate>=0.33",
 ]
+# The CPU embedding node (livestack_node.embedding). No torch: a CPU node must
+# not drag a CUDA runtime onto the host it runs on.
+embed-cpu = [
+    "fastapi>=0.100",
+    "uvicorn>=0.30",
+    "onnxruntime>=1.20",
+    "tokenizers>=0.20",
+    "numpy>=1.26",
+    "huggingface-hub>=0.24",
+]
 decision-mlx = [
     "mlx>=0.21,<0.30",
     "huggingface-hub>=0.24",

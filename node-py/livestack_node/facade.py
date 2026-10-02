@@ -35,7 +35,8 @@ def _machine_name(fallback: str) -> str:
     return fallback
 
 
-def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
+def resolve_device_id(host_id: str, explicit: Optional[str] = None,
+                      backend: Optional[str] = None) -> str:
     """The id of the device this node actually occupies.
 
     It used to be `f"{host_id}/gpu0"` — a string template, correct only on a
@@ -53,6 +54,13 @@ def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
       card agree and two on different cards differ, with no configuration.
     * MLX — `{machine}/mlx0`. Apple unified memory is one device.
     * neither — `{machine}/gpu0`.
+
+    ``backend="cpu"`` names a node that runs on the host's CPU by DESIGN — it
+    then occupies `{machine}/cpu`, never a card. Without it a CPU process on a
+    GPU host (a build host with a card, say) would derive that card's UUID from
+    an importable torch, and the planner would charge its model to VRAM it
+    never touches; on a host with no torch it would be `gpu0`, a card that does
+    not exist. Explicit and `LIVESTACK_DEVICE_ID` still win.
 
     `machine` is the HOSTNAME, not the caller's `host_id`. That distinction is
     the whole correctness of this function and it was wrong: `host_id` is a name
@@ -78,6 +86,8 @@ def resolve_device_id(host_id: str, explicit: Optional[str] = None) -> str:
     if env:
         return env
     machine = _machine_name(host_id)
+    if backend == "cpu":
+        return f"{machine}/cpu"
     try:
         import torch
         if torch.cuda.is_available():

@@ -135,7 +135,8 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
            device_id: Optional[str] = None,
            in_flight: Optional[Callable[[], int]] = None,
            inventory=None,
-           preload=None):
+           preload=None,
+           backend: Optional[str] = None):
     """``device_meter``: a zero-arg callable -> measured {capacity,free} (see
     meters.py), ``"auto"`` to pick one by backend (CUDA/MLX), or ``None`` to report
     no live memory. Defaulting to "auto" means a node becomes memory-aware on
@@ -167,6 +168,16 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     model in a startup hook — see :func:`_start_preload` for the deadlock that
     costs.
 
+    ``backend`` is WHERE this node computes — ``"cpu"``, ``"cuda"``, ``"mlx"``
+    — stated once, by the code that knows it. It is stamped onto every unit's
+    ``attributes`` as ``backend``, OVERWRITING any declared value: it is a fact
+    about this process, and a unit file claiming otherwise is the lying
+    attribute (a request for ``backend=cpu`` routed to a card). ``"cpu"`` also
+    moves the node off every card — device ``{machine}/cpu``, a host-RAM meter,
+    no CUDA activation sampling — so loading its units takes no GPU room and
+    the planner never evicts a GPU unit to make space for one. ``None`` keeps
+    today's behaviour exactly.
+
     Each ``manager.run()`` GPU op is bracketed by an :class:`ActivationObserver` that
     measures that unit's exact peak activation and reports it as headroom for the planner
     to reserve. Learned high-waters persist across restarts (keyed by a footprint
@@ -179,8 +190,19 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     # Resolve identity BEFORE the meter, because the meter is checked against it:
     # a meter reading a card this process is not on reports a confident wrong
     # number, which is worse than reporting none (see meters.auto_meter).
-    device_id = resolve_device_id(host_id, device_id)
+    if backend is not None:
+        backend = str(backend).strip().lower()
+        if not backend:
+            raise ValueError("attach(backend=) must name a backend, e.g. 'cpu'")
+        for unit in units.values():
+            attrs = getattr(unit, "attributes", None)
+            if isinstance(attrs, dict):
+                attrs["backend"] = backend
+    device_id = resolve_device_id(host_id, device_id, backend=backend)
 
+    if device_meter == "auto" and backend == "cpu":
+        from .meters import host_ram_meter
+        device_meter = host_ram_meter()
     if device_meter == "auto":
         from .meters import auto_meter
         # The meter is checked AGAINST the resolved identity: a meter reading a
@@ -190,7 +212,9 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
 
     tracker = None
     observer = None
-    if os.environ.get("LIVESTACK_ACT_SAMPLE_S", "1") != "0":
+    # A CPU node has no device allocator to sample; an importable torch would
+    # otherwise measure a CARD this node never uses.
+    if backend != "cpu" and os.environ.get("LIVESTACK_ACT_SAMPLE_S", "1") != "0":
         meter = alloc_meter()
         if meter is not None:
             store = os.environ.get("LIVESTACK_ACT_STORE")
