@@ -150,7 +150,6 @@ def test_forbidden_ui_worker_is_not_a_retry_alternative(authority):
 @pytest.mark.parametrize('mutation,reason', [
     ('expire', b'compilation_policy_expired'),
     ('revoke', b'compilation_not_admitted'),
-    ('revision', b'compilation_policy_revision_changed'),
     ('missing', b'compilation_policy_unavailable'),
     ('oversized', b'compilation_policy_untrusted'),
     ('unsupported', b'compilation_policy_unsupported'),
@@ -165,8 +164,6 @@ def test_policy_changes_refuse_launch_and_renewal(authority, mutation, reason):
         value['expires'] = time.time()-1
     elif mutation == 'revoke':
         value['hosts']['physical-builder'] = []
-    elif mutation == 'revision':
-        value['revision'] = 'revision-2'
     elif mutation == 'unsupported':
         value['version'] = 2
     write()
@@ -259,3 +256,48 @@ def test_apple_class_granted_only_by_policy(tmp_path):
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+def renew(clients, assignment):
+    return clients['builder'].request('worker/heartbeat', dict(boot='boot',
+        attempt_id=assignment['attempt_id'], fence=assignment['fence']))
+
+
+@pytest.mark.parametrize('change', ['revision-only', 'widen-class', 'widen-host'])
+def test_widening_policy_revision_preserves_admitted_attempt(authority, change):
+    """A new revision that still grants every admitted class keeps the attempt;
+    its receipt keeps the admitting revision. Fails on the old exact-receipt
+    comparison (compilation_policy_revision_changed)."""
+    clients, submit, register, value, write, _ = authority
+    register('builder')
+    submit('build')
+    assignment = claim(clients, 'builder')
+    value['revision'] = 'revision-2'
+    if change == 'widen-class':
+        value['hosts']['physical-builder'] = ['rust', 'image', 'native']
+    elif change == 'widen-host':
+        value['hosts']['physical-ui'] = ['rust']
+    write()
+    assert renew(clients, assignment)['lease_remaining'] > 0
+    receipt = verify(clients, 'builder', assignment)
+    assert receipt['policy_revision'] == 'revision-1'
+    assert receipt['classes'] == ['image', 'rust']
+
+
+@pytest.mark.parametrize('change', ['narrow-class', 'remove-host'])
+def test_narrowing_policy_revision_revokes_admitted_attempt(authority, change):
+    clients, submit, register, value, write, _ = authority
+    register('builder')
+    submit('build')
+    assignment = claim(clients, 'builder')
+    value['revision'] = 'revision-2'
+    if change == 'narrow-class':
+        value['hosts']['physical-builder'] = ['rust']
+    else:
+        del value['hosts']['physical-builder']
+        value['enrollments'] = {k: v for k, v in value['enrollments'].items() if v != 'physical-builder'}
+    write()
+    for call in (lambda: renew(clients, assignment), lambda: verify(clients, 'builder', assignment)):
+        with pytest.raises(WorkloadError) as error:
+            call()
+        assert b'compilation_not_admitted' in str(error.value).encode()

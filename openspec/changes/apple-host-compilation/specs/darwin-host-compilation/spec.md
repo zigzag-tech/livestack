@@ -49,3 +49,18 @@ lacks it, whatever tools that host reports.
 #### Scenario: A Linux host advertises an Apple handler
 - **WHEN** a worker on a host without `apple` advertises an `apple` handler
 - **THEN** placement refuses it with `compilation_not_admitted: operator host policy`
+
+### Requirement: Widening the policy does not revoke admitted attempts
+Lease renewal and launch verification SHALL keep an admitted compilation
+attempt valid across a policy revision that still grants its host every class
+it was admitted with, SHALL keep the admitting revision in its receipt, and
+SHALL revoke it when its host is removed, a required class is no longer
+granted, or the handler's classification changed.
+
+#### Scenario: A class is granted to another host
+- **WHEN** the operator publishes a new revision that only adds grants
+- **THEN** running attempts renew and verify with their admitting revision
+
+#### Scenario: A required class is withdrawn
+- **WHEN** a new revision no longer grants one of an attempt's classes on its host
+- **THEN** renewal and verification refuse with `compilation_not_admitted`
