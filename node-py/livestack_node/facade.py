@@ -222,10 +222,49 @@ def _load_report(coordinator, status, device_meter, in_flight_fn=None):
     return report
 
 
+def _learned_footprint(kind, unit, tracker, observer):
+    """(footprint bytes, footprint_source, learned report or None) for one unit.
+
+    The declared footprint is the prior. Once the node has measured what loading
+    the unit took from its allocator (measure.ActivationTracker.record_resident),
+    that measurement IS the footprint, labelled ``"allocator-resident"``; once an
+    op's activation has been measured too, the unit's whole cost is measured and
+    the label is ``"allocator"`` (planner.MEASURED_SOURCES: the device reserve
+    then stops double-covering activation the headroom already reserves).
+
+    A unit whose engine reports its own cost (``measured_cost``, vLLM) keeps that
+    path: its weights live in another process, which this meter cannot see.
+
+    ``learned`` says which case applies, including the failure case: a store that
+    could not be read leaves the declared prior in force AND says why, so a
+    reader can tell "not measured yet" from "measurements lost"."""
+    declared = getattr(unit, "footprint", 0) or 0
+    source = getattr(unit, "footprint_source", "declared")
+    if tracker is None or getattr(unit, "measured_cost", None):
+        return declared, source, None
+    learned = {"declared_bytes": int(declared)}
+    errors = [e for e in (getattr(tracker, "store_error", None),
+                          getattr(observer, "load_error", None)) if e]
+    if errors:
+        learned["error"] = "; ".join(errors)
+    resident = tracker.resident_bytes(kind)
+    if resident is None:
+        learned["state"] = "failed" if errors else "unmeasured"
+        return declared, source, learned
+    learned["resident_bytes"] = int(resident)
+    if tracker.has_activation(kind):
+        learned["activation_bytes"] = int(tracker.headroom_bytes(kind))
+        learned["state"] = "measured"
+        return resident, "allocator", learned
+    learned["state"] = "resident-only"
+    return resident, "allocator-resident", learned
+
+
 def build_router(manager, coordinator, capability: Capability,
                  gpu_call: Callable[[Callable], object],
                  device_meter: Optional[Callable[[], Optional[dict]]] = None,
                  activation_tracker=None,
+                 activation_observer=None,
                  readiness: Optional[Callable[[], Optional[dict]]] = None,
                  device_id: Optional[str] = None,
                  in_flight: Optional[Callable[[], int]] = None,
@@ -501,7 +540,8 @@ def build_router(manager, coordinator, capability: Capability,
         resident = set(st.get("resident", []))
         units = []
         for kind, unit in manager.units.items():
-            fp = getattr(unit, "footprint", 0) or 0
+            fp, source, learned = _learned_footprint(kind, unit, activation_tracker,
+                                                     activation_observer)
             entry = {
                 "kind": kind,
                 "footprint": {"vram_bytes": int(fp)},
@@ -509,8 +549,8 @@ def build_router(manager, coordinator, capability: Capability,
                 "resident": kind in resident,
                 "busy": kind in busy,
             }
-            # Measured peak-activation headroom (allocator high-water minus declared
-            # weights), when a tracker is wired. The planner reserves it on-device
+            # Measured peak-activation headroom (allocator high-water over the op's
+            # baseline), when a tracker is wired. The planner reserves it on-device
             # while the unit is resident so runtime activation can't OOM.
             if activation_tracker is not None:
                 hb = activation_tracker.headroom_bytes(kind)
@@ -521,9 +561,11 @@ def build_router(manager, coordinator, capability: Capability,
             # composition and for inspection, until admission can use it (see
             # harmony-llm `_record_measurement`).
             measured = getattr(unit, "measured_cost", None)
-            entry["footprint_source"] = getattr(unit, "footprint_source", "declared")
+            entry["footprint_source"] = source
             if measured:
                 entry["measured"] = dict(measured)
+            if learned is not None:
+                entry["learned"] = learned
             extra = getattr(unit, "extra_report", None)
             if extra is not None:
                 try:
@@ -584,7 +626,9 @@ def build_router(manager, coordinator, capability: Capability,
             self_usage = cuda_self_meter()()
             if self_usage:
                 out["process_mem"] = self_usage
-                resident_fp = sum(int(getattr(manager.units[k], "footprint", 0) or 0)
+                resident_fp = sum(int(_learned_footprint(k, manager.units[k],
+                                                         activation_tracker,
+                                                         activation_observer)[0])
                                   for k in resident if k in manager.units)
                 leak = leak_signal(self_usage, resident_fp)
                 if leak:

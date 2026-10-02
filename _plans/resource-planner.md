@@ -6,6 +6,11 @@
 dispatches actions via each peer's `/livestack` facade, and discovers peer
 devices when no fixed device list is given; `measure.py` implements real
 footprint measurement (weights + peak activation).
+**Stale until 2026-10-02:** `measure.py` learned peak activation only, measured
+against DECLARED weights; an `attach()` node's footprint was always the operator's
+number. Since openspec `learned-gpu-footprint` the node also learns what each load
+leaves resident (allocator reserved growth) and reports it as the footprint
+(`footprint_source: "allocator"`).
 **Motivation:** three model servers (polyasr 10 GB, polytts 8.75 GB, chipgen 5 GB)
 oversubscribed one 24 GB GPU; a long align OOM'd with 233 MB free. Stopping a
 service by hand fixed it. That manual `腾挪` (make-room) + `defer` (时间换空间) is

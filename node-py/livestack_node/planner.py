@@ -129,7 +129,9 @@ class Unit:
     # compares (see `_unit_satisfies`), so a new axis costs no planner change.
     attributes: Mapping[str, object] = field(default_factory=dict)
     # Where `footprint` came from: "vllm-startup" (the engine's own report),
-    # "declared" (an operator's number, a prior), or "unknown" (the engine
+    # "allocator" / "allocator-resident" (the node's allocator measured the load;
+    # see facade._learned_footprint), "declared" (an operator's number, a
+    # prior), or "unknown" (the engine
     # became ready but its report did not parse; the footprint is then the
     # device's whole capacity, never 0). Carried so a ledger row and a replay
     # snapshot say how much to trust the number.
@@ -614,9 +616,14 @@ def _can_serve(unit: Unit, d: Device) -> bool:
     return not unit.servable_on or d.id in unit.servable_on
 
 
-# Footprint sources that already CONTAIN the unit's activation memory: the
-# engine measured everything it holds. See `_World.reserve`.
-MEASURED_SOURCES = frozenset({"vllm-startup"})
+# Footprint sources whose activation memory is MEASURED, so the device reserve
+# would cover it twice. See `_World.reserve`. "vllm-startup": the engine's own
+# report, activation inside `footprint`. "allocator": the node measured both
+# what the load left resident (`footprint`) and the op's peak over that
+# (`activation_headroom`, reserved separately while resident and at admission).
+# "allocator-resident" — resident measured, no op yet — is NOT here: its
+# activation is still unmodelled, so the reserve still covers it.
+MEASURED_SOURCES = frozenset({"vllm-startup", "allocator"})
 
 
 def _admission_need(unit: Unit) -> Res:
