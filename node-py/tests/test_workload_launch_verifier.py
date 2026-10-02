@@ -5,6 +5,7 @@ never starts a service against production authority or production worker state.
 """
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import shutil
@@ -361,13 +362,26 @@ def test_private_image_builder_descendant_stops_on_lease_expiry(verifier, author
     # network pull and does not compile a helper before admission.
     context = root/'build-context'
     context.mkdir()
-    for source, target in [('/bin/sleep', 'sleep'),
-                           ('/lib/x86_64-linux-gnu/libc.so.6', 'libc.so.6'),
-                           ('/lib64/ld-linux-x86-64.so.2', 'ld-linux')]:
-        shutil.copy2(source, context/target)
-    (context/'Dockerfile').write_text('FROM scratch\nCOPY sleep /sleep\n'
-        'COPY libc.so.6 /lib/x86_64-linux-gnu/libc.so.6\n'
-        'COPY ld-linux /lib64/ld-linux-x86-64.so.2\nRUN ["/sleep", "120"]\n')
+    shutil.copy2('/bin/sleep', context/'sleep')
+    # Resolve this host's installed runtime instead of guessing its libc,
+    # architecture or optional sleep dependencies (Ubuntu uses libselinux).
+    env={key:value for key,value in os.environ.items() if not key.startswith('LD_')}
+    dependencies=subprocess.check_output(['ldd','/bin/sleep'],env=env,timeout=5)
+    assert len(dependencies)<=16384, 'sleep dependency report exceeds bound'
+    text=dependencies.decode()
+    assert 'not found' not in text, text
+    libraries=set(re.findall(r'(?:=>\s+|^\s*)(/[^\s]+)\s+\(',text,re.MULTILINE))
+    assert 1<=len(libraries)<=32, 'sleep runtime dependency count outside bound'
+    total=0
+    for library in sorted(libraries):
+        source=Path(library)
+        assert len(library)<=4096 and source.is_file()
+        total+=source.stat().st_size
+        assert total<=64*1024**2, 'sleep runtime dependency bytes exceed bound'
+        target=context/library.lstrip('/')
+        target.parent.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(source,target)
+    (context/'Dockerfile').write_text('FROM scratch\nCOPY . /\nRUN ["/sleep", "120"]\n')
     clients = authority[0]
     keeper = LeaseKeeper(clients['builder'], assignment, root/'lease', interval=1).start()
     keeper.stopped.set()
