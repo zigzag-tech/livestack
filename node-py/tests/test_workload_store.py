@@ -587,3 +587,52 @@ def test_avoid_labels_carry_the_rule_across_a_new_job(harness):
                                           'harmony.avoid.signature': 'URLError-deadbeef'}))
     assert store.claim('w1', 'boot1') is None
     assert store.claim('w2', 'boot1')['fence'] == 1
+
+
+def test_withdraw_ends_only_a_job_no_worker_attempted(harness):
+    store, _, _ = harness
+    register(store)
+    queued = store.submit('owner', request('never-claimed'))
+    withdrawn = store.withdraw('owner', queued['id'])
+    assert withdrawn['state'] == 'cancelled'
+    assert withdrawn['result']['result']['detail'] == 'withdrawn by owner before any attempt'
+    assert store.claim('w1', 'boot1') is None, 'a withdrawn job is never placed'
+
+    running = store.submit('owner', request('claimed'))
+    a = store.claim('w1', 'boot1')
+    assert store.withdraw('owner', running['id'])['state'] == 'running', 'an attempted job is left alone'
+    store.heartbeat('w1', 'boot1', a['attempt_id'], a['fence'])
+    assert register(store)['ready'], 'withdraw never puts the worker in cleanup'
+
+    complete(store, a, outcome='infrastructure')
+    retried = store.get('owner', running['id'])
+    assert retried['state'] == 'queued' and retried['attempts'], 'premise: an infrastructure retry is queued again'
+    assert store.withdraw('owner', running['id'])['state'] == 'queued', 'a job with a prior attempt is not withdrawn'
+    with pytest.raises(WorkloadError, match='not found'):
+        store.withdraw('someone-else', running['id'])
+
+
+def test_withdraw_and_claim_race_has_exactly_one_winner(tmp_path):
+    import threading
+    for round_ in range(20):
+        store = WorkloadStore(tmp_path / f'race-{round_}.db', handlers={'test.v1', 'build.v1'})
+        register(store)
+        job = store.submit('owner', request(f'race-{round_}'))
+        barrier = threading.Barrier(2)
+        out = {}
+
+        def claim():
+            barrier.wait(); out['claim'] = store.claim('w1', 'boot1')
+
+        def withdraw():
+            barrier.wait(); out['withdraw'] = store.withdraw('owner', job['id'])
+
+        threads = [threading.Thread(target=claim), threading.Thread(target=withdraw)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+        final = store.get('owner', job['id'])
+        if final['state'] == 'cancelled':
+            assert out['claim'] is None and not final['attempts'], 'a withdrawn job was also handed to a worker'
+        else:
+            assert final['state'] == 'running' and out['claim'] is not None
+            assert out['withdraw']['state'] == 'running'
