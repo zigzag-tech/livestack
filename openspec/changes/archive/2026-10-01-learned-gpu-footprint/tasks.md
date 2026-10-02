@@ -26,5 +26,12 @@ with `~/harmony-embed/venv/bin/python -m pytest` under `nice`.
 
 ## 4. Deploy (design §7)
 
-- [ ] 4.1 zz-joe release + drop-ins, idle restart, prior back to 3e9, one generation,
-  verify node and broker report `allocator`. Record in `examples/harmony-image/README.md`.
+- [x] 4.1 zz-joe release + drop-ins, idle restart, prior back to 3e9, one generation,
+  verify node and broker report `allocator`. Recorded in
+  `examples/harmony-image/README.md` ("FLUX.2-klein on zz-joe").
+- [ ] 4.2 zz-joe host broker (`livestack-hostd`) still runs release
+  `klein-host-scheduling-20261001`, which predates `"allocator"` in
+  `MEASURED_SOURCES` and the `aggregate_units` source fix (37182d6b). It already plans
+  klein on the measured bytes (it takes the node's `footprint`); until upgraded it keeps
+  the 0.25 GB reserve on top and its ledger labels the merged klein unit "declared".
+  NOT DONE: that release is far behind main; upgrading it is its own rollout.

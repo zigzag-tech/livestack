@@ -31,3 +31,34 @@ python examples/harmony-image/compare.py --prompts examples/harmony-image/prompt
 ```
 
 The gallery is served on the mesh at `http://100.64.0.18:8212/`. Each result has a PNG and evidence JSON with a SHA256 hash. Equal seeds are recorded for reproducibility but do not give identical noise across model architectures. Generation settings and different GPUs are part of this comparison.
+
+## FLUX.2-klein on zz-joe (2026-10-02)
+
+`harmony-klein-0` / `-1` (GPU 0 / 1, RTX 2070 8 GB, ports 8213 / 8214) run
+`python -m livestack_node.imagegen.klein` from release
+`~/.local/share/livestack-releases/learned-footprint-f15cda20` (drop-in
+`60-learned-footprint.conf`, which also gives each process its own learned-footprint
+store, `~/.cache/livestack/activation-zz-joe-klein-N.json`). The NF4 text encoder
+stays on the GPU for the whole residency; host RAM holds no weights (cgroup anon
+1.36 GB after a generation). The old `~/harmony-image/klein/klein_worker.py` is no
+longer run.
+
+`resident_bytes` in `~/harmony-image/klein/worker-N.json` is the declared prior
+(3e9); the node replaces it with what it measures (openspec `learned-gpu-footprint`).
+The 5e9 hand-set on 2026-10-02 02:52 UTC was removed. Measured on klein-0, first load
+and one 768 px generation after the deploy (seed 7):
+
+| | before (hand-set) | after (learned) |
+|---|---|---|
+| `footprint` | 5.00e9, `declared` | 4.876e9 (allocator reserved growth across the load), `allocator` |
+| `activation_headroom` | none (store discarded by the 5e9 edit) | 2.338e9 (peak reserved over the op baseline) |
+| planned peak | — | 7.214e9 = the generation's `peak_reserved_bytes` |
+
+nvidia-smi showed 4974 MiB on GPU 0 while resident (the unit plus the process's CUDA
+context, which stays when the unit is evicted and is therefore not charged to it).
+Timing: load 16.9 s, prompt encoding 1.6 s, generation 19.7 s.
+
+klein-1 reports the declared prior with `learned.state: "unmeasured"` until Harmony
+first places the unit on GPU 1: while klein-0 holds it resident, admission grants that
+copy, and a request sent straight to 8214 is refused ("no concrete local Harmony
+grant"), as designed.
