@@ -15,7 +15,11 @@ from __future__ import annotations
 
 import json
 import os
-from typing import List, Sequence
+from typing import Callable, List, Sequence
+
+
+class EmbeddingCancelled(Exception):
+    """The caller stopped this batch; no subsequent inference slice may run."""
 
 # Files a model directory must hold. The ONNX file is the q8 export
 # (`onnx/model_quantized.onnx`) by default — the fp32 file is 4x the bytes and
@@ -95,10 +99,12 @@ class OnnxSentenceEmbedder:
         self.max_len = max_len
         self.dim = int(self._session.get_outputs()[0].shape[-1])
 
-    def embed(self, texts: Sequence[str]) -> "object":
+    def embed(self, texts: Sequence[str], *, cancelled: Callable[[], bool] = lambda: False) -> "object":
         np = self._np
         out: List[object] = []
         for start in range(0, len(texts), INFERENCE_SLICE):
+            if cancelled():
+                raise EmbeddingCancelled("embedding request cancelled")
             # An empty string tokenizes to nothing but specials on some
             # tokenizers and to an error on some endpoints; a space is what the
             # hub has always sent in its place.
@@ -109,11 +115,17 @@ class OnnxSentenceEmbedder:
             feed = {"input_ids": ids, "attention_mask": mask}
             if "token_type_ids" in self._inputs:
                 feed["token_type_ids"] = np.zeros_like(ids)
+            if cancelled():
+                raise EmbeddingCancelled("embedding request cancelled")
             hidden = self._session.run(None, feed)[0]            # [b, seq, dim]
+            if cancelled():
+                raise EmbeddingCancelled("embedding request cancelled")
             m = mask[:, :, None].astype(np.float32)
             pooled = (hidden * m).sum(axis=1) / np.clip(m.sum(axis=1), 1e-9, None)
             norms = np.linalg.norm(pooled, axis=1, keepdims=True)
             out.append((pooled / np.clip(norms, 1e-12, None)).astype(np.float32))
+        if cancelled():
+            raise EmbeddingCancelled("embedding request cancelled")
         if not out:
             return np.zeros((0, self.dim), dtype=np.float32)
         return np.concatenate(out, axis=0)
