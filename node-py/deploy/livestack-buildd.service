@@ -1,0 +1,31 @@
+# The build broker (HARMONY.md, "Build hosts"). Installed on zz-tower2 as
+# /etc/systemd/system/livestack-buildd.service; this file is its source.
+#   sudo cp node-py/deploy/livestack-buildd.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl restart livestack-buildd
+#
+# A missing or gutted venv must STOP the unit, not loop it: before this file
+# existed the unit restarted every 3 s for days on 203/EXEC (2026-09-29..10-02,
+# ~85k restarts) and lodestar silently fell back to its static build host.
+# ExecStartPre names the fix; the start limit (5 failures in 5 min, longer than
+# 5 x RestartSec) lands the unit in `failed`, visible in `systemctl --failed`.
+[Unit]
+Description=Livestack build-broker (Harmony build-host arbitration)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/livestack/node-py
+EnvironmentFile=/home/ubuntu/livestack/node-py/buildd.env
+ExecStartPre=/bin/sh -c '/home/ubuntu/livestack/node-py/.venv/bin/python -c "import livestack_node.hostd, fastapi, uvicorn" || { echo "livestack-buildd: node-py/.venv is missing or incomplete; run ~/livestack/node-py/scripts/setup-venv.sh" >&2; exit 1; }'
+ExecStart=/home/ubuntu/livestack/node-py/.venv/bin/python -m livestack_node.hostd
+Restart=always
+RestartSec=3
+StandardOutput=append:/home/ubuntu/livestack/node-py/buildd.log
+StandardError=append:/home/ubuntu/livestack/node-py/buildd.log
+
+[Install]
+WantedBy=multi-user.target

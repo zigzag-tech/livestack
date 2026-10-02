@@ -240,6 +240,13 @@ LIVESTACK_DEVICES={"zz-tower2": {"hosted": true, "concurrency": 1, "cost_bias": 
                                   "labels": {"arch": "linux/amd64"}}}
 ```
 
+The unit's source is `node-py/deploy/livestack-buildd.service`; it runs `node-py/.venv`,
+which `node-py/scripts/setup-venv.sh` creates or repairs. The unit refuses to start on a
+missing or incomplete venv and lands in `failed` after five tries instead of restarting
+forever: lodestar's `remote-build.mjs` falls back to the static default host whenever the
+broker does not answer, so a looping broker is otherwise invisible (it looped ~85k times,
+2026-09-29..10-02, after an untracking commit deleted the venv's `bin/`).
+
 `cost_bias` encodes *preference*, same knob as the vendor endpoints: zz-tower2 (native
 amd64, datacenter ship path) is the default; xc-win-1 is next; a slow cross-arch host would
 carry a bigger bias as overflow-only. `selector={"arch": "linux/amd64"}` on the request is
