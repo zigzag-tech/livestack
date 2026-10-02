@@ -108,3 +108,21 @@ unit satisfies it. A preference alone SHALL NOT cause a swap.
 #### Scenario: Named local still reaches the 27B
 - **WHEN** `flash_next` is resident and a request says `model: "local"`
 - **THEN** it is served by `llm_general` (after the planner evicts the idle `flash_next`), never by `flash_next`
+
+### Requirement: A measured context refusal re-routes an un-named request once
+
+When an engine refuses a request because prompt plus reserved output exceed the unit's
+context, and the request did not name a unit, the node SHALL derive the requirement
+`context_len >= input + max_tokens` from the engine's measured count and route the
+request once more through the normal selection and placement path. A request that
+named a unit, or that no unit can hold, SHALL receive the existing 413 naming the need
+and the widest unit. The node SHALL re-route at most once per request and SHALL record
+the original unit, the measured need and the chosen unit.
+
+#### Scenario: Long prompt reaches the long-context unit without resubmission
+- **WHEN** `llm_general` (24,576) is resident, `flash_next` declares a context of 131,072, and a request with no requirement carries a 40,000-token prompt
+- **THEN** `llm_general` refuses it, harmony-llm derives `context_len>=40000+max_tokens`, the planner loads `flash_next`, and the caller receives the answer from it with no 413
+
+#### Scenario: A named unit keeps the refusal
+- **WHEN** the same prompt is sent with `model: "local"`
+- **THEN** the caller receives the 413 naming the need and the wider unit, and nothing is loaded

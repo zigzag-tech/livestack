@@ -98,7 +98,14 @@ to change for the acceptance test (design §5 records why card 0 was rejected).
    Flash-Next cannot be written in the request language, that is a defect in the
    language to fix in this change, not something to route around. The full scenario
    list is in the delta spec.
-7. **Two adjacent defects fixed on the way** (they would make the acceptance test lie):
+7. **Context length decides, without the caller restating it.** Explicit
+   `require:class=llm,context_len=[N,]` already works (verified live; today it
+   correctly answers "nothing satisfies" above 24,576). New: when an engine refuses
+   an un-named request as too long, harmony-llm derives `context_len>=<measured
+   need>` and routes it once more (design §4c), so a long prompt reaches Flash-Next
+   without a 413-and-resubmit; `prefer llm.context_len: max` covers "the widest you
+   have".
+8. **Two adjacent defects fixed on the way** (they would make the acceptance test lie):
    - `GET /fleet/rank?kind=llm` reportedly ignores `require=` for LLM nodes (reported
      2026-10-02 by a survey agent; verify first, design §9). A Strata node that is
      warm must never become the hub's fallback for plain `llm` traffic.
