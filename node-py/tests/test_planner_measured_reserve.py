@@ -53,11 +53,11 @@ def test_a_resident_measured_unit_is_not_shed():
 
 
 def test_negative_control_the_double_count_sheds_it():
-    # The same number, labelled declared: the reserve is charged, free < 0,
-    # and step 0 evicts the 27B. This is the failure the waiver prevents; if
-    # it stops shedding, the test above no longer proves anything.
+    # The same number, labelled declared, still charges the reserve. A request
+    # on another device must not empty this device merely because the static
+    # accounting is over budget. Admission on the requested device still works.
     p = plan(busy_world(llm(source="declared", admission=False)))
-    assert [e.kind for e in p.of(Evict)] == ["llm_general"], p.summary()
+    assert not p.of(Evict), p.summary()
 
 
 def test_a_measured_unit_is_admitted_onto_its_empty_card():
