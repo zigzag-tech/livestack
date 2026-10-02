@@ -32,8 +32,25 @@ from livestack_node import request_log as _request_log
 from livestack_node.decisions.simple_jev import SimpleJevError, classify as simple_jev_classify
 from livestack_node.demand_log import (UnitCostStore, UsageTail, demand_log_from_env,
                                        owner_namespace, requirement_hash)
+from livestack_node.preferences import (PreferenceError as _PreferenceError,
+                                        parse_preference_list as _parse_prefer,
+                                        preference_key as _preference_key)
 from livestack_node.vllm_startup import (REQUIRED as _STARTUP_REQUIRED, StartupCapture,
                                          composition_hash, key_from_launch)
+
+# THE ENGINE SEAM (examples/harmony-llm/engines/): what it takes to drive one
+# unit's engine — argv/env/ready/measure/stop and the launch-line attributes —
+# lives behind `engine_for(spec)`. This module keeps routing, admission, the
+# queue and forwarding, engine-blind. The package sits beside this file, so a
+# script-style load (tests exec this module by path) must find it on the path.
+import sys as _sys
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in _sys.path:
+    _sys.path.insert(0, _HERE)
+from engines import engine_for as _engine_for          # noqa: E402
+from engines import vllm as _vllm_engine               # noqa: E402
+from selection import unit_inventory as _unit_inventory  # noqa: E402
+from unit_queue import Queues as _Queues, QueueFull as _QueueFull   # noqa: E402
 
 HOST_ID = os.environ.get("HARMONY_LLM_HOST_ID", "xc-tower-ubuntu")
 MODEL = os.environ.get("HARMONY_LLM_MODEL", "Qwen/Qwen3-8B")
@@ -106,121 +123,27 @@ PORT_OFFSET = int(os.environ.get("HARMONY_LLM_PORT_OFFSET", "0"))
 
 
 def _is_pooling(joined: str) -> bool:
-    """Was this unit started to POOL (embed) rather than GENERATE?
-
-    Two spellings because vLLM renamed the flag: `--task embed` through v0.9,
-    `--runner pooling` from v0.10. Both are matched so a node is not silently
-    misrouted by a vLLM upgrade.
-    """
-    return "--task embed" in joined or "--runner pooling" in joined
+    """Was this unit started to POOL (embed) rather than GENERATE? (engine fact;
+    see engines/vllm.py — kept as the module-level entry tests pin)"""
+    return _vllm_engine.is_pooling(joined)
 
 
 def _adapters_for(spec: dict) -> "dict[str, tuple[str, int]]":
     """The LoRA adapters a unit is started with: name -> (path, rank).
-
-    Declared in the units file as ``"adapters": {"chips-v1": "/path/to/adapter"}``.
-    The rank is READ from the adapter's own ``adapter_config.json`` rather than
-    declared, for the same reason the other launch-line facts are derived: a
-    hand-typed ``--max-lora-rank`` below an adapter's real rank makes vLLM refuse
-    it at load, and one above it wastes the card's memory on every batch.
-
-    An adapter whose config cannot be read is DROPPED, loudly, and therefore has
-    no attribute: a request that names it gets 503 "nothing satisfies", never a
-    silent answer from the base model it was trying not to be.
-    """
-    out: "dict[str, tuple[str, int]]" = {}
-    for name, path in sorted((spec.get("adapters") or {}).items()):
-        try:
-            with open(os.path.join(str(path), "adapter_config.json"), "r", encoding="utf-8") as fh:
-                rank = int(json.load(fh)["r"])
-        except Exception as e:  # noqa: BLE001 -- any unreadable adapter is excluded
-            print(f"[harmony-llm] unit {spec.get('name')}: adapter {name!r} at {path} "
-                  f"is NOT served ({type(e).__name__}: {e})", flush=True)
-            continue
-        out[str(name)] = (str(path), rank)
-    return out
+    Engine-owned (a Strata serves adapters differently, or not at all)."""
+    return _engine_for(spec).adapters(spec)
 
 
 def _lora_launch_args(spec: dict) -> "list[str]":
-    """The vLLM flags that serve a unit's adapters beside its base model.
-
-    One engine answers both: a request naming the base model gets the base
-    weights and one naming an adapter gets base + adapter, in the SAME batch.
-    That is the whole point on a single card -- the typed-decision classifier
-    and a chip adapter share one resident 27B instead of needing two.
-    """
-    adapters = _adapters_for(spec)
-    if not adapters:
-        return []
-    return (["--enable-lora", "--max-loras", str(len(adapters)),
-             "--max-lora-rank", str(max(r for _, r in adapters.values())),
-             "--lora-modules"] + [f"{n}={p}" for n, (p, _) in adapters.items()])
+    """The engine's adapter launch flags, or [] for an engine without any."""
+    return _engine_for(spec).adapter_launch_args(spec)
 
 
 def _attributes_for(spec: dict) -> dict:
-    """A unit's attributes, with the launch-line facts DERIVED rather than
-    trusted from the config file.
-
-    `thinking` and `vision` are properties of how vLLM was started, and a
-    hand-declared value that disagrees is the same silent failure in a new
-    place: `"thinking": true` beside a unit with no reasoning parser routes a
-    thinking request to a unit that will leak its narration into `content`.
-    So the launch line wins, always.
-    """
-    attrs = dict(spec.get("attributes") or {})
-    args = spec.get("extra_args")
-    argv = args if isinstance(args, list) else shlex.split(str(args or ""))
-    joined = " ".join(argv)
-    # WHAT KIND OF WORK this unit serves is a launch-line fact, like every other
-    # attribute here. vLLM started for pooling (`--task embed`, or `--runner
-    # pooling` since v0.10) serves /v1/embeddings and answers /v1/chat/completions
-    # with a 400; started for generation it does the exact opposite. So a
-    # hand-declared `"class": "llm"` beside `--task embed` is the lying attribute
-    # this docstring warns about — it would match a chat request's derived
-    # `class=llm` and the unit would then refuse the very request it claimed.
-    attrs["class"] = "embed" if _is_pooling(joined) else "llm"
-    # Separable reasoning requires a parser. Without one the model still
-    # "thinks"; the narration just arrives inline in content.
-    attrs["thinking"] = "--reasoning-parser" in joined
-    # Tool calling is a launch-line fact too, and a harsher one: vLLM answers
-    # `tool_choice: "auto"` with a 400 unless BOTH --enable-auto-tool-choice and
-    # --tool-call-parser are set, so a unit lacking them cannot serve a
-    # tool-calling request AT ALL, whatever its weights can do. Declaring
-    # `"tools": true` beside such a unit is the lying attribute this docstring
-    # warns about: the clause would match and the unit would then 400 the very
-    # request it claimed to satisfy. Found 2026-09-07 by sending the Overlord's
-    # own 46 tool schemas at the 27B and getting that 400 back.
-    attrs["tools"] = ("--enable-auto-tool-choice" in joined
-                      and "--tool-call-parser" in joined)
-    # A vision-capable model started with --language-model-only is not a vision
-    # unit for the purposes of routing, whatever its weights can do.
-    if "--language-model-only" not in joined:
-        attrs.setdefault("vision", spec.get("vision"))
-    else:
-        attrs["vision"] = False
-    if attrs.get("vision") is None:
-        attrs.pop("vision", None)
-    # What this unit SERVES, not what the weights support. Declaring the
-    # weights' 262144 next to a unit serving 16384 is an attribute that LIES:
-    # a `context_len>=32768` requirement would match it and the request would
-    # then be rejected by the very unit that satisfied the clause. An attribute
-    # that lies is worse than one that is missing, because the missing one
-    # fails the clause (silence is not a yes) and the lying one passes it.
-    served = spec.get("max_model_len")
-    if served:
-        try:
-            attrs["context_len"] = int(served)
-        except (TypeError, ValueError):
-            attrs.pop("context_len", None)
-    # One attribute per adapter the launch line will actually load, so the
-    # clause `adapter=<name>` selects a unit that serves it and nothing else.
-    # Derived from the same resolution as the flags: it cannot claim an adapter
-    # the engine was not started with.
-    for key in [k for k in attrs if k.startswith("adapter.")]:
-        attrs.pop(key)
-    for name in _adapters_for(spec):
-        attrs[f"adapter.{name}"] = True
-    return attrs
+    """A unit's attributes: declared, with the launch-line facts the ENGINE
+    derives always winning (an attribute that lies is worse than one that is
+    missing — see engines/*.py)."""
+    return _engine_for(spec).launch_attributes(spec)
 
 
 def _unit_specs() -> "list[dict]":
@@ -228,7 +151,9 @@ def _unit_specs() -> "list[dict]":
         return [{"name": "llm", "model": MODEL, "port": VLLM_PORT,
                  "footprint_gb": FOOTPRINT / (1 << 30), "gpu_fraction": GPU_FRACTION,
                  "max_model_len": MAX_MODEL_LEN, "extra_args": EXTRA_ARGS,
-                 "residency": None, "attributes": {}}]
+                 "residency": None, "attributes": {},
+                 "engine": "vllm", "engine_rev": "", "ram_gb": 0.0,
+                 "exclusive_device": False}]
     out = []
     for spec in json.loads(_UNITS_ENV):
         out.append({
@@ -236,6 +161,29 @@ def _unit_specs() -> "list[dict]":
             "model": spec["model"],
             "port": int(spec.get("port", VLLM_PORT)) + PORT_OFFSET,
             "footprint_gb": float(spec.get("footprint_gb", FOOTPRINT / (1 << 30))),
+            # HOST RAM this unit pins — the weight a Strata maps stays in host
+            # memory no matter what the card holds, and planning only its VRAM
+            # is how a host swaps. Charged to the HOST pool, one pool behind
+            # every card on the machine (planner `HOST_DIMS`).
+            "ram_gb": float(spec.get("ram_gb", 0) or 0),
+            # WHOLE-DEVICE claim: the engine sizes its cache to whatever VRAM
+            # is free and refuses to start into a busy card. The planner charges
+            # the device's entire capacity and admits it only when every other
+            # tenant can leave. NOT requestable — how a unit runs is not what it
+            # is.
+            "exclusive_device": bool(spec.get("exclusive_device", False)),
+            # WHICH ENGINE runs this unit ("vllm", "strata") and the rev it is
+            # pinned to. The engine name is never an attribute a request can
+            # require; both ride into the ledger record of what was loaded.
+            # `engine_source` is the units file's PIN ({rev, sha256}): the
+            # engine's `rev()` checks it against what is installed at startup.
+            "engine": str(spec.get("engine") or "vllm"),
+            "engine_rev": str(spec.get("engine_rev") or ""),
+            "engine_source": dict(spec.get("engine_source") or {}),
+            # Strata placement knobs (root checkout, `family/size` or a direct
+            # .gguf path), read by engines/strata.py and ignored elsewhere.
+            "strata_root": str(spec.get("strata_root") or ""),
+            "strata_model": str(spec.get("strata_model") or ""),
             "gpu_fraction": str(spec.get("gpu_fraction", GPU_FRACTION)),
             "max_model_len": str(spec.get("max_model_len", MAX_MODEL_LEN) or ""),
             "extra_args": shlex.split(spec.get("extra_args", "")) or EXTRA_ARGS,
@@ -286,6 +234,51 @@ def _selection_rank(name: str) -> "tuple[int, str]":
     so ranking can never hand back a unit that does not satisfy the request.
     """
     return (0 if SPECS[name].get("default") else 1, name)
+
+
+# -- unit selection under `prefer` (design §4b.3) ----------------------------
+#
+# `prefer` ORDERS units that already satisfied the hard requirement; it never
+# swaps anything on its own (a resident unit keeps answering — scenario "a
+# request both satisfy does not swap") and it never invents a value. The
+# receipt says what matched, so a selection record can show WHY a unit won.
+
+def _max_concurrent(name: str) -> int:
+    """What this unit's ENGINE admits at once (launch-line fact, design §4a).
+    The queue below a saturated engine is bounded by this and nothing else."""
+    try:
+        return max(1, int(_attributes_for(SPECS[name]).get("max_concurrent") or 1))
+    except Exception:
+        return 1
+
+
+def _prefer_key(name: str, prefer):
+    """(sort key, receipt) for one unit under `prefer`.
+
+    `preference_key` already returns the receipt (a clause-by-clause account of
+    what matched, what was comparable, what was silent) — the ordering key is
+    just it, with the stable default/name order as the tiebreak."""
+    if not prefer:
+        return (_selection_rank(name), None)
+    spec = SPECS[name]
+    fitted = _COSTS.load().get(_COMPOSITION.get(name, "")) or {}
+    revision = (f"measured:{_COMPOSITION[name][:19]}" if _COMPOSITION.get(name)
+                else f"declared:{spec['model']}")
+    inv = _unit_inventory(_attributes_for(spec), fitted, revision=revision)
+    key, receipt = _preference_key(inv, prefer)
+    return ((key, _selection_rank(name)), receipt)
+
+
+def _ordered(prefer) -> "list[str]":
+    return sorted(SPECS, key=lambda n: _prefer_key(n, prefer)[0])
+
+
+def _prefer_from(parsed_body: "dict | None") -> "list[dict]":
+    """The request's `harmony_prefer` clauses (design §4b: same vocabulary as
+    fleet_rank's `prefer`, in the body beside `harmony_requires`)."""
+    if not isinstance(parsed_body, dict):
+        return []
+    return _parse_prefer(parsed_body.get("harmony_prefer"))
 
 # coload=False means acquiring ONE unit evicts the others IN THIS PROCESS. That
 # is right for a node with a single model, and wrong the moment a node declares
@@ -375,23 +368,19 @@ def _tee_engine_output(proc: subprocess.Popen, capture: StartupCapture) -> None:
 def _record_measurement(name: str, spec: dict, cmd: list, capture: StartupCapture) -> None:
     """Turn the captured startup lines into the unit's measured cost.
 
-    The lines print before the server answers, but the tee thread may still be
-    a moment behind the readiness poll, so wait briefly for them. Whatever
-    arrives, the unit gets an answer: a MeasuredCost, or `unknown` naming the
-    lines that never came. Never 0, and never the declared prior silently."""
-    deadline = time.time() + 10
-    probe = capture.result()
-    while getattr(probe, "unmatched", None) and time.time() < deadline:
-        time.sleep(0.2)
-        probe = capture.result()
-    adapters = {n: r for n, (_, r) in _adapters_for(spec).items()}
-    serve_args = cmd[3:]                      # after `vllm serve <model>`
-    key = key_from_launch(spec["model"], serve_args, adapters,
-                          engine_version=getattr(probe, "engine_version", ""))
-    chash = composition_hash(key)
-    result = capture.result(composition_hash=chash, now=time.time())
-    row = result.to_json()
-    _COMPOSITION[name] = chash
+    The ENGINE digs its own report (`engines/*.py`, unit-measured-cost shape) —
+    vLLM prints one, Strata does not and says `unknown` — and this side only
+    keeps what it means for the unit: the reported cost, the composition it was
+    measured for, and the persistence. Whatever arrives, the unit gets an
+    answer: a MeasuredCost, or `unknown` naming what never came. Never 0, and
+    never the declared prior silently."""
+    row = dict(_engine_for(spec).measure(spec, capture, None, cmd) or {})
+    if not row:
+        return                          # this engine reports nothing at all
+    composition = row.pop("composition", None)
+    chash = row.get("composition_hash") or ""
+    if chash:
+        _COMPOSITION[name] = chash
     unit = _UNITS.get(name)
     if unit is not None:
         # REPORTED, NOT YET THE ADMISSION NUMBER. `unit.footprint` stays the
@@ -405,14 +394,16 @@ def _record_measurement(name: str, spec: dict, cmd: list, capture: StartupCaptur
         unit.measured_cost = row
     if row.get("measured") == "unknown":
         print(f"[harmony-llm] {name}: engine memory report did NOT parse "
-              f"(missing {row['unmatched']}); footprint is UNKNOWN, not "
+              f"(missing {row.get('unmatched')}); footprint is UNKNOWN, not "
               f"{spec.get('footprint_gb')} GB", flush=True)
         return
-    print(f"[harmony-llm] {name}: measured {row['footprint']/(1<<30):.2f} GiB "
-          f"(weights {row['weights_nontorch']/(1<<30):.2f}, activation "
-          f"{row['peak_activation']/(1<<30):.2f}, KV {row['kv_bytes']/(1<<30):.2f} = "
-          f"{row['kv_tokens']} tokens, graphs {row['cuda_graphs']/(1<<30):.2f}) "
-          f"for {chash[:19]}", flush=True)
+    parts = ", ".join(
+        f"{k} {row[k] / (1 << 30):.2f}" for k in
+        ("weights_nontorch", "peak_activation", "kv_bytes", "cuda_graphs") if k in row)
+    if "kv_tokens" in row:
+        parts += f" = {row['kv_tokens']} tokens"
+    print(f"[harmony-llm] {name}: measured {row['footprint'] / (1 << 30):.2f} GiB "
+          f"({parts}) for {chash[:19] or 'an unhashed composition'}", flush=True)
     try:
         # KEEP WHAT WAS FITTED. A restart re-measures the startup numbers, but
         # state pages and service rates come from traffic and bursts
@@ -423,20 +414,15 @@ def _record_measurement(name: str, spec: dict, cmd: list, capture: StartupCaptur
         prior = _COSTS.load().get(chash) or {}
         kept = {k: prior[k] for k in _FITTED_KEYS if k in prior}
         _COSTS.put({**row, **kept, "unit": name, "host_id": HOST_ID,
-                    "composition": json.loads(key.canonical())})
+                    **({"composition": composition} if composition else {})})
     except Exception as exc:              # persistence is for proposals, never for serving
         print(f"[harmony-llm] {name}: could not persist measured cost: {exc}", flush=True)
 
 
 def _device_total_bytes() -> float:
-    """Total VRAM of the card this node speaks for, or 0 when unknowable."""
-    try:
-        import torch
-        if torch.cuda.is_available():
-            return float(torch.cuda.get_device_properties(0).total_memory)
-    except Exception:
-        pass
-    return 0.0
+    """Total VRAM of the card this node speaks for, or 0 when unknowable.
+    (Engine-side fact; see engines/vllm.py.)"""
+    return _vllm_engine.device_total_bytes()
 
 
 def _base_of(name: str) -> str:
@@ -444,12 +430,10 @@ def _base_of(name: str) -> str:
 
 
 def _vllm_up(timeout: float = 2.0, name: str = "") -> bool:
+    """Is this unit's engine actually answering on its port? Engine-owned
+    (`ready`); the name stays because a dozen call sites and their tests say so."""
     name = name or next(iter(SPECS))
-    try:
-        r = httpx.get(f"{_base_of(name)}/health", timeout=timeout)
-        return r.status_code == 200
-    except Exception:
-        return False
+    return _engine_for(SPECS[name]).ready(SPECS[name], timeout=timeout)
 
 
 def _foreign_listener(name: str) -> bool:
@@ -476,22 +460,23 @@ def _foreign_listener(name: str) -> bool:
 
 def _load(name: str = "", device: "str | None" = None,
           budget: "dict | None" = None):
-    """Start this unit's vLLM and block until it actually serves.
+    """Start this unit's ENGINE and block until it actually serves.
 
     `device` is the placement the PLANNER chose, arriving through
     livestack's warm path. This node is pinned to one card for metering (a
     wrapper that saw every card would report card 0's pressure for a model on
-    card 1 — the trap the comment below records), so the assignment is checked
-    against the card this node speaks for rather than used to move the process.
-    A node that is told to load somewhere it does not serve says so, instead of
-    quietly loading in the wrong place and letting the planner believe its own
-    plan.
+    card 1 — the trap engines/vllm.py's env note records), so the assignment is
+    checked against the card this node speaks for rather than used to move the
+    process. A node that is told to load somewhere it does not serve says so,
+    instead of quietly loading in the wrong place and letting the planner
+    believe its own plan.
 
     Returning before the server is up would let Harmony mark the unit resident
     and let a request through to a port that is not listening yet.
     """
     name = name or next(iter(SPECS))
     spec = SPECS[name]
+    engine = _engine_for(spec)
     with _lock:
         p = _procs.get(name)
         if p is not None and p.poll() is None and _vllm_up(name=name):
@@ -509,67 +494,20 @@ def _load(name: str = "", device: "str | None" = None,
                 f"{not_before - time.time():.0f}s")
         if _foreign_listener(name):
             raise RuntimeError(
-                f"{name}: port {spec['port']} is already served by a vLLM this node did not "
-                f"start; refusing to load a second copy. Give each node on this host its own "
-                f"HARMONY_LLM_PORT_OFFSET.")
-        env = dict(os.environ)
-        # Only set this if the unit did not already. Setting it ONLY here is a
-        # trap: the child then runs on the right card while THIS process — which
-        # is where livestack's CUDA meter runs, and therefore where the device
-        # pressure the planner reads comes from — still sees every card and
-        # meters device 0. Observed: the LLM on card 1 reporting card 0's
-        # pressure, identical to the three ASR/TTS nodes actually on card 0.
-        # The unit sets CUDA_VISIBLE_DEVICES process-wide so the wrapper, its
-        # meter and the child all agree.
-        if "CUDA_VISIBLE_DEVICES" not in env and CUDA_DEVICE:
-            env["CUDA_VISIBLE_DEVICES"] = CUDA_DEVICE
-        # SIZE TO THE BUDGET THE PLANNER GRANTED, when it gave one.
-        #
-        # `gpu_fraction` is a fraction of the WHOLE card, fixed in config, and it
-        # cannot know what else is on that card or what the planner just evicted.
-        # Tuning it by hand to squeeze a model into one card's leftovers is
-        # placement decided by an operator again, and it is wrong the moment the
-        # card's other tenants change. The planner knows the free bytes; use them.
-        fraction = spec["gpu_fraction"]
-        want = float((budget or {}).get("vram_bytes") or 0)
-        if want > 0:
-            total = _device_total_bytes()
-            if total > 0:
-                # Leave the tail of the grant unclaimed: the budget is what is
-                # free, and an engine that takes every last byte leaves nothing
-                # for the allocator's own overhead.
-                fraction = f"{max(0.10, min(0.97, (want * 0.94) / total)):.3f}"
-                print(f"[harmony-llm] {name}: planner granted "
-                      f"{want/(1<<30):.1f} GiB -> --gpu-memory-utilization {fraction}",
-                      flush=True)
-        cmd = [
-            os.path.join(os.path.dirname(__file__), "venv", "bin", "vllm"),
-            "serve", spec["model"],
-            "--port", str(spec["port"]),
-            "--host", "127.0.0.1",
-            "--gpu-memory-utilization", fraction,
-            "--served-model-name", spec["model"], name, "local",
-        ]
-        # Unit priority decides which model may occupy a device. Once callers
-        # share a resident vLLM, request priority is a separate queueing concern.
-        # Enable vLLM's native scheduler so OpenAI requests carrying `priority`
-        # (lower = sooner) are honoured. A unit can explicitly opt back into FCFS.
-        if "--scheduling-policy" not in spec["extra_args"]:
-            cmd += ["--scheduling-policy", "priority"]
-        if spec["max_model_len"]:
-            cmd += ["--max-model-len", spec["max_model_len"]]
-        cmd += spec["extra_args"]
-        if "--enable-lora" not in spec["extra_args"]:
-            cmd += _lora_launch_args(spec)
-        print(f"[harmony-llm] starting vLLM for {name}"
+                f"{name}: port {spec['port']} is already served by a "
+                f"{engine.name} this node did not start; refusing to load a second "
+                f"copy. Give each node on this host its own HARMONY_LLM_PORT_OFFSET.")
+        env = engine.env(spec, dict(os.environ))
+        cmd = engine.argv(spec, budget)
+        print(f"[harmony-llm] starting {engine.name} for {name}"
               f"{f' (planner chose {device})' if device else ''}: {' '.join(cmd)}", flush=True)
         proc = subprocess.Popen(cmd, env=env, start_new_session=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, bufsize=1)
         _procs[name] = proc
-        capture = StartupCapture()
+        capture = engine.capture()
         threading.Thread(target=_tee_engine_output, args=(proc, capture),
-                         name=f"vllm-out-{name}", daemon=True).start()
+                         name=f"{engine.name}-out-{name}", daemon=True).start()
         deadline = time.time() + float(os.environ.get("HARMONY_LLM_START_TIMEOUT", "900"))
         while time.time() < deadline:
             if proc.poll() is not None:
@@ -578,46 +516,35 @@ def _load(name: str = "", device: "str | None" = None,
                 # 0.28 — invisible until the journal was read by hand. Point at
                 # the log that has the answer.
                 _procs.pop(name, None)
-                _note_start_failure(name, f"vLLM exited during startup (rc={proc.returncode})")
+                _note_start_failure(name, f"{engine.name} exited during startup "
+                                          f"(rc={proc.returncode})")
                 raise RuntimeError(
-                    f"vLLM exited during startup of {name} (rc={proc.returncode}); "
-                    f"see `journalctl -u harmony-llm` for its stderr")
+                    f"{engine.name} exited during startup of {name} "
+                    f"(rc={proc.returncode}); see `journalctl -u harmony-llm` "
+                    f"for its stderr")
             if _vllm_up(name=name):
-                print(f"[harmony-llm] vLLM ready: {name}", flush=True)
+                print(f"[harmony-llm] {engine.name} ready: {name}", flush=True)
                 _START_FAILURES.pop(name, None)
                 _record_measurement(name, spec, cmd, capture)
                 return proc
             time.sleep(2)
         _free(name)
         _note_start_failure(name, "not ready before the deadline")
-        raise RuntimeError(f"vLLM for {name} did not become ready before the deadline")
+        raise RuntimeError(f"{engine.name} for {name} did not become ready "
+                           f"before the deadline")
 
 
 def _free(name: str = ""):
-    """Stop this unit's vLLM and WAIT for it to die. Returning while the process
-    is still exiting would report VRAM freed that the driver has not reclaimed
-    yet, and the planner would then grant against memory that is still held."""
+    """Stop this unit's engine and WAIT for it to die (engine `stop`). Returning
+    while the process is still exiting would report VRAM freed that the driver
+    has not reclaimed yet, and the planner would then grant against memory that
+    is still held."""
     name = name or next(iter(SPECS))
     with _lock:
         p = _procs.pop(name, None)
-        if p is None or p.poll() is not None:
+        if p is None:
             return
-        print(f"[harmony-llm] stopping vLLM: {name}", flush=True)
-        try:
-            os.killpg(os.getpgid(p.pid), signal.SIGTERM)
-        except Exception:
-            p.terminate()
-        try:
-            p.wait(timeout=60)
-        except subprocess.TimeoutExpired:
-            print(f"[harmony-llm] vLLM ({name}) ignored SIGTERM; killing", flush=True)
-            try:
-                os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-            except Exception:
-                p.kill()
-            p.wait(timeout=30)
-
-
+        _engine_for(SPECS[name]).stop(p)
 def _health_probe_for(name: str):
     """A per-unit functional probe bound to that unit's port.
 
@@ -769,7 +696,19 @@ _UNITS = {
         # as before, which is why every other node in the fleet is unaffected.
         loader=(lambda n=name: (lambda device=None, budget=None: _load(n, device, budget)))(),
         freer=(lambda n=name: (lambda: _free(n)))(),
-        footprint=int(spec["footprint_gb"] * (1 << 30)),
+        # A unit that pins host RAM declares `ram_gb` and gets a VECTOR
+        # footprint: the card number and the host-RAM claim, planned by two
+        # pools (planner HOST_DIMS). A unit without one stays the int it was.
+        footprint=({**({"ram_bytes": spec["ram_gb"] * (1 << 30)}
+                       if spec.get("ram_gb") else {}),
+                    "vram_bytes": int(spec["footprint_gb"] * (1 << 30))}
+                   if spec.get("ram_gb") else int(spec["footprint_gb"] * (1 << 30))),
+        # WHOLE-DEVICE claim, and WHICH ENGINE runs it (rev pinned, for the
+        # ledger record). Neither is requestable: how a unit runs is not what
+        # it is (harmony-engine-units design §4, §6).
+        exclusive_device=bool(spec.get("exclusive_device", False)),
+        engine=str(spec.get("engine") or "vllm"),
+        engine_rev=_engine_for(spec).rev(spec),
         # SOFT_PIN. Measured 2026-09-05: an evicted unit takes ~50.7 s to answer
         # its first request, against the hub's 35 s title timeout and 15 s
         # attention timeout — a cold start is a missed title every time. Not
@@ -799,8 +738,13 @@ _UNITS = {
     )
     for name, spec in SPECS.items()
 }
-for _u in _UNITS.values():
-    _u.extra_report = lambda: {"demand_log": DEMAND.status()}
+for _name, _u in _UNITS.items():
+    _u.extra_report = (lambda n=_name: {"demand_log": DEMAND.status(),
+                                        # Per-unit queue depth (design §4a):
+                                        # what is in flight and what is waiting,
+                                        # so a saturated unit is visible before
+                                        # it is a pile-up.
+                                        "queue": _QUEUES.status(n, _max_concurrent(n))})
 
 
 def _readiness() -> dict:
@@ -847,6 +791,9 @@ def _readiness() -> dict:
 # many generations are in flight. Count our own, and let the facade label it
 # `in_flight_source: "server"` so a consumer can tell that 0 means idle.
 _busy = counting()
+# Per-unit admission queues (design §4a): at most `max_concurrent` in flight,
+# bounded FIFO of 64 waiting, 429 with the queue state beyond that.
+_QUEUES = _Queues()
 
 
 def _ensure_while_counted(ensure):
@@ -864,6 +811,17 @@ def _ensure_while_counted(ensure):
     except BaseException:
         _busy.release()
         raise
+
+
+def _release_slot(ctx: dict) -> None:
+    """Give this request's queue place back (design §4a).
+
+    Idempotent on purpose: the response paths release at three different points
+    (stream end, upstream error, refusal replay) and an exception may beat any
+    of them to it. A request that dies must not hold a queue place forever."""
+    slot = ctx.pop("queue_slot", None)
+    if slot is not None:
+        slot.release()
 
 manager, residence = attach(
     app, host_id=HOST_ID, kind=NODE_KIND, units=_UNITS,
@@ -1586,7 +1544,14 @@ def _note_demand(ctx: dict, outcome: str, status: int, tail: "UsageTail | None" 
         owner_ns=ctx.get("owner_ns"), principal=ctx.get("principal"),
         requirement_hash=ctx.get("requirement_hash"),
         prompt_tokens=prompt, completion_tokens=completion, n=ctx.get("n"),
-        elapsed_ms=round((time.time() - ctx["t0"]) * 1000, 1), queue_ms=None,
+        elapsed_ms=round((time.time() - ctx["t0"]) * 1000, 1),
+        # How long this request waited in the unit's queue (design §4a): a
+        # demand record that cannot say that cannot show a saturated unit.
+        queue_ms=(round(ctx["queue_ms"], 1) if ctx.get("queue_ms") is not None else None),
+        # WHY this unit won, when the caller stated a preference (§4b.3): the
+        # preference_key receipt, clause by clause.
+        preference_receipt=ctx.get("preference_receipt"),
+        shortcut=ctx.get("shortcut"),
         outcome=outcome, http_status=status)
 
 
@@ -1612,8 +1577,29 @@ async def proxy(path: str, request: Request):
     try:
         return await _proxy_impl(path, request, ctx)
     except HTTPException as e:
+        _release_slot(ctx)      # idempotent; the stream paths release too
         _note_demand(ctx, _outcome_for(e.status_code, str(e.detail)), e.status_code)
         raise
+    except BaseException:
+        _release_slot(ctx)      # a request that dies must not hold a queue place
+        raise
+
+
+class _Retargeted:
+    """A request re-shaped for its ONE context re-route: same verb, headers and
+    query, a body with the need stated as a requirement. Only the body differs;
+    everything the caller sent rides along unchanged — and so does the response
+    it gets back (bytes, stream or not)."""
+
+    def __init__(self, request: Request, body: bytes):
+        self._request = request
+        self._body = body
+        self.method = request.method
+        self.headers = request.headers
+        self.query_params = request.query_params
+
+    async def body(self) -> bytes:
+        return self._body
 
 
 async def _proxy_impl(path: str, request: Request, ctx: dict):
@@ -1627,6 +1613,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # than racing the planner.
     unit = next(iter(SPECS))
     requirement = None
+    prefer: "list[dict]" = []
     parsed_body = None
     if body:
         try:
@@ -1647,6 +1634,14 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             # first declared unit", so a caller that asked for 27B and typoed the
             # clause got a 4B model and a 200.
             requirement = _requirement_from(parsed_body)
+            # `prefer` beside `harmony_requires`: an ORDERING over whatever
+            # satisfies the requirement (design §4b.3), same vocabulary as
+            # fleet_rank's `prefer`. Malformed is a 400 the caller can fix —
+            # swallowing it would answer a request they did not ask.
+            try:
+                prefer = _prefer_from(parsed_body)
+            except _PreferenceError as e:
+                raise HTTPException(status_code=400, detail=f"harmony: {e}")
             derived = _derived_requirements(path, parsed_body)
             named = _named_unit(parsed_body.get("model", ""))
             if requirement is not None and derived:
@@ -1737,10 +1732,21 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         # Consequence worth stating: once an alternative is warm, indifferent
         # traffic follows it and does not swap back. Only a HARD requirement
         # that the resident unit fails will pay for a swap.
-        local = next((n for n in sorted(SPECS, key=_selection_rank)
+        local = next((n for n in _ordered(prefer)
                       if _local_satisfies(n, requirement)
                       and n in getattr(manager, "resident", ())
                       and _vllm_up(name=n)), None)
+        # A SATURATED UNIT IS NOT A SHORTCUT (design §4a.3). The shortcut is a
+        # latency optimisation for a unit with ROOM; at the engine's admission
+        # limit with a queue of its own, the ROUTER decides instead — which can
+        # place a sibling or move the model. The routing decision records why
+        # the shortcut was skipped, so the choice is auditable either way.
+        if local is not None and not _QUEUES.has_capacity(local, _max_concurrent(local)):
+            ctx["shortcut"] = f"resident {local} is saturated"
+            print(f"[harmony-llm] resident {local} is saturated "
+                  f"({_QUEUES.status(local, _max_concurrent(local))}) — routing "
+                  f"instead of reusing", flush=True)
+            local = None
         if local:
             unit, already_here = local, True
         else:
@@ -1756,7 +1762,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # actually has to load.
     held_peer = None
     if not already_here:
-        cands = ([n for n in sorted(SPECS, key=_selection_rank) if _local_satisfies(n, requirement)]
+        cands = ([n for n in _ordered(prefer) if _local_satisfies(n, requirement)]
                  if requirement is not None else [unit])
         for n in cands:
             h = _held_elsewhere(n)
@@ -1797,7 +1803,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             # 05:29-15:42. A refusal of a unit the broker KNOWS is final here.
             if (requirement is not None and not served
                     and _broker_did_not_know(res)):
-                local_declared = next((n for n in sorted(SPECS, key=_selection_rank)
+                local_declared = next((n for n in _ordered(prefer)
                                        if _local_satisfies(n, requirement)), None)
                 if local_declared:
                     print(f"[harmony-llm] broker temporarily forgot {requirement}; "
@@ -1888,6 +1894,18 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     ctx["unit"] = unit
     ctx["requirement_hash"] = requirement_hash(requirement)
     ctx["forwarded"] = bool(elsewhere or foreign)
+    if prefer:
+        _k, ctx["preference_receipt"] = _prefer_key(unit, prefer)
+    # PER-UNIT ADMISSION QUEUE (design §4a): the engine admits `max_concurrent`
+    # requests; the rest wait FIFO (bound 64), and the overflow is a 429 naming
+    # the queue state — never an unbounded pile-up inside a saturated engine.
+    # `queue_ms` (how long this one waited) goes on the demand record.
+    try:
+        _slot = _QUEUES.acquire(unit, _max_concurrent(unit))
+    except _QueueFull as e:
+        raise HTTPException(status_code=429, detail=str(e))
+    ctx["queue_ms"] = _slot.queue_ms
+    ctx["queue_slot"] = _slot
     if elsewhere:
         _busy.acquire()
         url = f"{elsewhere}/v1/{path}"
@@ -1898,6 +1916,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         try:
             _ensure_while_counted(lambda: manager.ensure(unit))
         except Exception as e:
+            _release_slot(ctx)
             raise HTTPException(status_code=503, detail=f"{unit} unavailable: {e}")
         url = f"{_base_of(unit)}/v1/{path}"
 
@@ -1918,6 +1937,11 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         # substitution this normalisation exists to prevent.
         wanted = [k[len("adapter."):] for k in (requirement or {}) if k.startswith("adapter.")]
         if len(wanted) > 1:
+            # This runs AFTER the in-flight places were taken; a refusal that
+            # holds them would make the node look busy (and its queue one slot
+            # tighter) for a request that has already ended.
+            _busy.release()
+            _release_slot(ctx)
             raise HTTPException(status_code=400,
                                 detail=f"harmony: one request can use one adapter, asked for {wanted}")
         if wanted:
@@ -1942,6 +1966,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     except Exception as e:
         await client.aclose()
         _busy.release()
+        _release_slot(ctx)
         raise HTTPException(status_code=502, detail=f"vllm proxy failed: {e}")
 
     # A CONTEXT REFUSAL IS A ROUTING FACT, NOT A VENDOR STRING.
@@ -1968,6 +1993,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             await resp.aclose()
             await client.aclose()
             _busy.release()
+            _release_slot(ctx)
         text = raw.decode("utf-8", "replace")
         if "context length" not in text.lower():
             _t = UsageTail()
@@ -1997,6 +2023,28 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
                 except (TypeError, ValueError):
                     reserve = 0
             total = None if needed is None else needed + reserve
+            # A RE-ROUTE, ONCE (design §4c): when ANOTHER unit can hold the
+            # need, state the need as a REQUIREMENT and re-run admission — the
+            # only loop-safe way to re-route. Never pick a unit by name (the
+            # planner chooses, and may move the model), and never loop: one
+            # re-route per request, and the next context refusal is answered as
+            # it comes. When nothing else can hold it, the 413 below stands.
+            if isinstance(parsed_body, dict) and total is not None \
+                    and not ctx.get("context_rerouted"):
+                # The need ANDed into the caller's OWN clauses (a unit that can
+                # hold the prompt but not the adapter is no answer), and only
+                # making the query STRICTER.
+                want = {**(requirement or {}), "context_len>=": total}
+                if any(n != unit and _local_satisfies(n, want) for n in SPECS):
+                    ctx["context_rerouted"] = True
+                    print(f"[harmony-llm] context refusal on {unit} ({total} tokens) "
+                          f"— re-routing once to require:class=llm,context_len>={total}",
+                          flush=True)
+                    rerouted = dict(parsed_body)
+                    rerouted.pop("harmony_requires", None)
+                    rerouted["harmony_requires"] = want
+                    return await _proxy_impl(
+                        path, _Retargeted(request, json.dumps(rerouted).encode()), ctx)
             served_here = int(_attributes_for(SPECS[unit]).get("context_len") or 0) if unit in SPECS else 0
             wider = widest > served_here
             if total is None:
@@ -2036,6 +2084,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             await resp.aclose()
             await client.aclose()
             _busy.release()
+            _release_slot(ctx)
             _note_demand(ctx, "ok" if resp.status_code < 400 else "refused",
                          resp.status_code, tail)
 

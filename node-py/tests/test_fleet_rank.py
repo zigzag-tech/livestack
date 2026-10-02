@@ -346,6 +346,81 @@ def test_ranking_never_applies_a_capability_requirement():
     assert len(rank(view, "asr")["targets"]) == 2
 
 
+# --- require: the request's hard NEEDS, matched against unit attributes -----
+#
+# A `require` clause map ({"class": "llm", "context_len>=": 131072}) is the
+# request language's statement of what the work NEEDS — the same clauses the
+# planner's `Request.requires` carries. Not policy about where work may run
+# (region) and not a preference (prefer): a warm node whose declared units
+# cannot meet the clause must never become the fallback for traffic it cannot
+# serve. Without the filter, the nearer short-context node wins every
+# long-context lookup on proximity alone and the engine refuses each request.
+
+def _llm_node(peer, attributes, probe_ms=2.0, extra_units=()):
+    return dict(_node(peer, kinds=("llm",), probe_ms=probe_ms,
+                      load={"in_flight": 0, "pressure": 0.1}),
+                units=[{"kind": "llm", "resident": True, "busy": False,
+                        "attributes": dict(attributes)}] + list(extra_units))
+
+
+def test_a_require_clause_keeps_out_the_units_that_cannot_meet_it():
+    """`GET /fleet/rank?kind=llm&require=class:llm,context_len>=:131072` must
+    not rank a warm 27B (context_len 24576) as the fallback for long-context
+    traffic it cannot serve. Reported: `require=` was ignored for LLM nodes
+    and the nearer short-context node won every lookup."""
+    short = _llm_node("http://short", {"class": "llm", "params_b": 27,
+                                       "context_len": 24576}, probe_ms=1.0)
+    wide = _llm_node("http://wide", {"class": "llm", "params_b": 120,
+                                     "context_len": 131072}, probe_ms=900.0)
+    view = _view({"h": {"nodes": [short, wide]}})
+    # Positive control: with no clause stated, distance decides and the
+    # short-context node wins — so what removes it below is the requirement,
+    # not the ordering.
+    assert rank(view, "llm")["chosen"] == "http://short"
+    r = rank(view, "llm", require={"class": "llm", "context_len>=": 131072})
+    assert _order(r) == ["http://wide"]
+    assert r["chosen"] == "http://wide"
+    rows = {c.target_id: c for c in r["candidates"]}
+    loser = rows["http://short"]
+    assert loser.outcome == "filtered"
+    assert "context_len>=131072" in loser.reason, loser.reason
+
+
+def test_a_require_clause_an_undeclared_attribute_cannot_meet_is_a_refusal():
+    # Silence is not a yes: a unit that never declared `context_len` must not
+    # pass a `context_len>=` clause, or every unlabelled node satisfies
+    # everything. Only the unit that SAYS it has the window is ranked.
+    bare = _llm_node("http://bare", {"class": "llm", "params_b": 27},
+                     probe_ms=1.0)
+    wide = _llm_node("http://wide", {"class": "llm", "context_len": 131072},
+                     probe_ms=900.0)
+    view = _view({"h": {"nodes": [bare, wide]}})
+    r = rank(view, "llm", require={"class": "llm", "context_len>=": 131072})
+    assert _order(r) == ["http://wide"]
+    rows = {c.target_id: c for c in r["candidates"]}
+    assert rows["http://bare"].outcome == "filtered"
+    assert "context_len>=131072" in rows["http://bare"].reason
+
+
+def test_one_unit_must_meet_every_clause_not_the_node_s_units_pooled():
+    # A small llm unit beside an embedder that happens to declare a long
+    # context is not a long-context LLM. Clauses spread across units is
+    # exactly the accident the per-unit conjunction refuses.
+    mixed = _llm_node(
+        "http://mixed",
+        {"class": "llm", "params_b": 27, "context_len": 24576}, probe_ms=1.0,
+        extra_units=[{"kind": "embed", "resident": False, "busy": False,
+                      "attributes": {"class": "embed", "context_len": 262144}}])
+    wide = _llm_node("http://wide", {"class": "llm", "context_len": 131072},
+                     probe_ms=900.0)
+    view = _view({"h": {"nodes": [mixed, wide]}})
+    r = rank(view, "llm", require={"class": "llm", "context_len>=": 131072})
+    assert _order(r) == ["http://wide"]
+    rows = {c.target_id: c for c in r["candidates"]}
+    assert rows["http://mixed"].outcome == "filtered"
+    assert "context_len>=131072" in rows["http://mixed"].reason
+
+
 # --- cold nodes: a load beats "no target" ----------------------------------
 
 def test_a_cold_node_is_held_back_while_a_warm_one_exists():

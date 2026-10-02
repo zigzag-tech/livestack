@@ -263,3 +263,23 @@ def test_run_scope_brackets_observer_around_op():
     except ValueError:
         pass
     assert calls == [("begin", "a"), ("end", "a")]
+
+
+def test_footprint_accepts_a_resource_vector():
+    """A Strata-style unit pins host RAM as well as VRAM: `footprint` is a
+    VECTOR ({"vram_bytes": N, "ram_bytes": M}). The Rust residency core, whose
+    budget is VRAM alone, is fed `vram_bytes` exactly as before — so a unit
+    declaring a vector plans like the int unit it replaced."""
+    import livestack_node as ln
+    be = Backend()
+    unit = ln.ManagedUnit("flash_next", be.loader("flash_next"), be.freer,
+                          footprint={"vram_bytes": 20, "ram_bytes": 45},
+                          exclusive_device=True,
+                          engine="strata", engine_rev="36fa455")
+    assert unit.vram_bytes == 20
+    m = ln.ModelManager({"flash_next": unit}, idle_seconds=0, coload=True,
+                        log=lambda *_: None)
+    assert m.ensure("flash_next") == "model::flash_next"
+    assert m.resident == {"flash_next"}
+    assert unit.exclusive_device is True
+    assert (unit.engine, unit.engine_rev) == ("strata", "36fa455")

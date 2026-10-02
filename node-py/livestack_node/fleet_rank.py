@@ -232,10 +232,86 @@ def warm_for(node: dict, kind: str) -> Optional[bool]:
                for u in classed)
 
 
+_CMPS = (">=", "<=", "!=", ">", "<")
+
+
+def _clause_meets(attributes: Dict[str, Any], key: str, want: Any) -> bool:
+    """Does one unit attribute satisfy one `require` clause?
+
+    The clause language is the planner's `requires` (planner._unit_satisfies),
+    for the same reason the load rule mirrors the client picker: two places
+    answering "does this unit fit this ask" must not disagree. A key may carry
+    a comparison suffix (`context_len>=`); a bare key is equality. A clause
+    naming an attribute the unit does not declare is NOT met — silence is not
+    a yes, or an unlabelled unit would satisfy everything.
+    """
+    op, name = "", key
+    for c in _CMPS:
+        if key.endswith(c):
+            op, name = c, key[: -len(c)]
+            break
+    name = name.strip()
+    if name not in attributes:
+        return False
+    have = attributes[name]
+    try:
+        if op == "":
+            return bool(have == want)
+        if op == "!=":
+            return bool(have != want)
+        if op == ">=":
+            return float(have) >= float(want)
+        if op == ">":
+            return float(have) > float(want)
+        if op == "<=":
+            return float(have) <= float(want)
+        return float(have) < float(want)      # "<"
+    except (TypeError, ValueError):
+        return False                    # non-numeric where a number was needed
+
+
+def _render_clause(key: str, want: Any) -> str:
+    """One clause as a reader writes it: `context_len>=131072`, `class=llm`."""
+    op = next((c for c in _CMPS if key.endswith(c)), "")
+    name = (key[: -len(op)] if op else key).strip()
+    return f"{name}{op or '='}{want}"
+
+
+def _requirement_gap(node: dict, require: Dict[str, Any]) -> Optional[str]:
+    """The clauses that kept this node out, rendered for a reason line — or
+    None when some ONE unit meets every clause.
+
+    One unit must meet them all: a node whose small `llm` unit sits beside an
+    embedder that happens to declare a long context is not a long-context LLM,
+    and clauses spread across units is exactly the accident the per-unit
+    conjunction refuses. The reason names the clause no unit could meet (the
+    first, in stated order) and falls back to naming the whole ask when the
+    failure only shows across units.
+    """
+    units = [u for u in (node.get("units") or []) if isinstance(u, dict)]
+    misses = [{key for key, want in require.items()
+               if not _clause_meets(u.get("attributes") or {}, key, want)}
+              for u in units] or [set(require)]
+    if not all(misses):                      # some unit met every clause
+        return None
+    no_unit_met = set.intersection(*misses)
+    named = [key for key in require if key in no_unit_met] or list(require)
+    return ", ".join(_render_clause(key, require[key]) for key in named)
+
+
 def rank(view: dict, kind: str, vantage: str = "direct",
          now: Optional[float] = None, ttl_s: float = DEFAULT_TTL_S,
-         prefer: Optional[List[Dict[str, Any]]] = None) -> dict:
+         prefer: Optional[List[Dict[str, Any]]] = None,
+         require: Optional[Dict[str, Any]] = None) -> dict:
     """Order the fleet's nodes for one `(kind, vantage)`.
+
+    `require` is the request's hard clause map (`{"class": "llm",
+    "context_len>=": 131072}` — the planner's `Request.requires` language),
+    matched against each node's declared unit attributes. A target some unit
+    cannot satisfy is eliminated with a `filtered` row naming the clause:
+    capability is not policy (that is `regions`) and not a preference (that is
+    `prefer`) — it is what the work NEEDS, and a warm node that cannot serve it
+    must never be the fallback it becomes on distance alone.
 
     Returns every candidate, winner and losers alike, each with the reason it
     landed where it did — the response takes the `ranked`/`chosen` rows and the
@@ -272,6 +348,18 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                                          reason=f"filtered: does not host {kind}",
                                          **common))
                 continue
+            # What the request NEEDS. Applied before the health rules because
+            # "can it serve this at all" is the question a reader asks first —
+            # and it gates the cold path too: a node whose declared units fail
+            # the clause can never serve it, however willing a load would be.
+            if require:
+                gap = _requirement_gap(node, require)
+                if gap:
+                    rows.append(RankedTarget(
+                        outcome="filtered",
+                        reason=f"filtered: no unit satisfies {gap}",
+                        **common))
+                    continue
             if node.get("state") != "fresh":
                 rows.append(RankedTarget(
                     outcome="filtered",
@@ -375,15 +463,23 @@ def rank(view: dict, kind: str, vantage: str = "direct",
         "ttl_s": ttl_s,
         "prefer": prefer or [],
         "chosen": chosen,
-        "reason": _summary(out, rows, kind, vantage),
+        "reason": _summary(out, rows, kind, vantage, require),
         "targets": [t.to_wire() for t in out],
         "candidates": all_rows,
     }
 
 
 def _summary(out: List[RankedTarget], filtered: List[RankedTarget],
-             kind: str, vantage: str) -> str:
+             kind: str, vantage: str,
+             require: Optional[Dict[str, Any]] = None) -> str:
     if not out:
+        if require:
+            # "hosts {kind}" would be false here: the nodes host it, they
+            # cannot serve the ask. Absence and a requirement must not look
+            # alike.
+            need = ", ".join(_render_clause(k, v) for k, v in require.items())
+            return (f"no fresh, ready {kind} node satisfies {need} "
+                    f"from {vantage}; {len(filtered)} candidate(s) filtered")
         return (f"no fresh, ready node hosts {kind} from {vantage}; "
                 f"{len(filtered)} candidate(s) filtered")
     first = out[0]

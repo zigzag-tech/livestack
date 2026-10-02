@@ -222,6 +222,17 @@ def _load_report(coordinator, status, device_meter, in_flight_fn=None):
     return report
 
 
+def _footprint_vec(unit) -> dict:
+    """The unit's declared footprint as a resource VECTOR.
+
+    An int has always meant VRAM bytes; a dict is the vector a unit that also
+    pins host RAM declares ({"vram_bytes": N, "ram_bytes": M} — a Strata server
+    keeps its weights in host memory). Normalized here so every reader below
+    speaks one shape."""
+    fp = getattr(unit, "footprint", 0) or 0
+    return dict(fp) if isinstance(fp, Mapping) else {"vram_bytes": int(fp)}
+
+
 def _learned_footprint(kind, unit, tracker, observer):
     """(footprint bytes, footprint_source, learned report or None) for one unit.
 
@@ -238,7 +249,7 @@ def _learned_footprint(kind, unit, tracker, observer):
     ``learned`` says which case applies, including the failure case: a store that
     could not be read leaves the declared prior in force AND says why, so a
     reader can tell "not measured yet" from "measurements lost"."""
-    declared = getattr(unit, "footprint", 0) or 0
+    declared = _footprint_vec(unit).get("vram_bytes", 0)
     source = getattr(unit, "footprint_source", "declared")
     if tracker is None or getattr(unit, "measured_cost", None):
         return declared, source, None
@@ -542,13 +553,29 @@ def build_router(manager, coordinator, capability: Capability,
         for kind, unit in manager.units.items():
             fp, source, learned = _learned_footprint(kind, unit, activation_tracker,
                                                      activation_observer)
+            # The VECTOR, not just the card: `fp` above is the device-scoped
+            # number (declared or learned); host-scoped dimensions ride through
+            # from what the unit declared, because the broker charges them to
+            # the host pool whatever the card looks like.
+            vec = {k: v for k, v in _footprint_vec(unit).items() if k != "vram_bytes"}
             entry = {
                 "kind": kind,
-                "footprint": {"vram_bytes": int(fp)},
+                "footprint": {**vec, "vram_bytes": int(fp)},
                 "residency": int(getattr(unit, "residency_policy", 2)),
                 "resident": kind in resident,
                 "busy": kind in busy,
             }
+            # A whole-device claim, and WHICH ENGINE serves the unit (plus the
+            # revision it is pinned to). Emitted only when set, so a node that
+            # predates the fields produces a byte-identical row — and the
+            # engine name is for the broker's ledger record only; it is never
+            # an attribute a request can require.
+            if getattr(unit, "exclusive_device", False):
+                entry["exclusive_device"] = True
+            for field in ("engine", "engine_rev"):
+                val = getattr(unit, field, "") or ""
+                if val:
+                    entry[field] = val
             # Measured peak-activation headroom (allocator high-water over the op's
             # baseline), when a tracker is wired. The planner reserves it on-device
             # while the unit is resident so runtime activation can't OOM.

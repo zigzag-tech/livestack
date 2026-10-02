@@ -17,98 +17,109 @@ requests are **broad**: characteristics, not unit names (design §4b).
 
 ## 1. Engine adapters (no behaviour change)
 
-- [ ] 1.1 Create `node-py/examples/harmony-llm/engines/` with the `Engine` protocol
+- [x] 1.1 Create `node-py/examples/harmony-llm/engines/` with the `Engine` protocol
   (design §2) and `vllm.py` holding the moved argv/ready/measure/stop code.
   `server.py` `_load`/`_free`/`_vllm_up`/`_attributes_for` delegate by
-  `spec.get("engine", "vllm")`. `server.py` must shrink, not grow.
-  Tests: all existing harmony-llm tests unchanged and green; new
-  `test_engines_vllm.py` asserting the argv for `llm_general`'s real spec
-  (copy it from xc-tower-ubuntu's `/etc/harmony/llm-units.json`) is identical to
-  the pre-refactor argv (capture it from the old code in the test as a fixture).
+  `spec.get("engine", "vllm")`. `server.py` must shrink, not grow (2052 → 1990
+  lines net; the moved code lives in `engines/`).
+  Tests: all existing harmony-llm tests unchanged and green;
+  `test_engines_vllm.py` pins `llm_general`'s real spec (from
+  `/etc/harmony/llm-units.json`) against the pre-refactor argv as a fixture.
   Ledger: none.
-- [ ] 1.2 Unknown `engine` value → the unit is declared unavailable with reason
-  `unknown engine <x>`, reported on `/residence`; a request for it gets 503 naming
-  that. Tests: `test_engines_unknown.py`. Ledger: none.
+- [x] 1.2 Unknown `engine` value → refused at STARTUP, naming the engine (the
+  delta spec's "Unknown engine at startup" scenario — the softer "declared
+  unavailable / 503" wording below it is superseded by the spec). Tests:
+  `test_engines_unknown.py`. Ledger: none.
 
 ## 2. Planner: host pool, exclusive devices
 
-- [ ] 2.1 `planner.py`: `WorldState.hosts`, `HOST_DIMS = {"ram_bytes"}`, fit on
+- [x] 2.1 `planner.py`: `WorldState.hosts`, `HOST_DIMS = {"ram_bytes"}`, fit on
   device AND host pool; eviction returns `ram_bytes`. A unit with `ram_bytes` on a
   host with no measurement is refused `host memory unmeasured`.
-  Tests: `tests/test_planner_host_pool.py`: two RAM-heavy units on two cards of one
-  host cannot both be placed; evicting one admits the other; units without
-  `ram_bytes` place exactly as before (run the existing planner tests unchanged).
-  Positive control: the two-units test FAILS on the old planner.
+  Tests: `tests/test_planner_host_pool.py` (11 cases: two RAM-heavy units on two
+  cards of one host cannot both be placed; evicting one admits the other; units
+  without `ram_bytes` place exactly as before — the existing planner tests
+  unchanged and green).
   Ledger: placement record carries `host_pool: {need, free, reserve}` (design §6).
-- [ ] 2.2 `planner.py`: `Unit.exclusive_device`; charged the device's whole
+- [x] 2.2 `planner.py`: `Unit.exclusive_device`; charged the device's whole
   capacity; refusal names the blocking tenant and its residency.
-  Tests: `tests/test_planner_exclusive.py` — exclusive unit evicts an idle UNPINNED
-  tenant; is refused (with the tenant named) when a HARD_PIN is there; waits (Defer)
-  while the tenant is busy (idle-only preemption).
+  Tests: `tests/test_planner_exclusive.py` (evicts an idle UNPINNED tenant even
+  though it is MORE important — the claim is on the space; refused with the
+  tenant named when a HARD_PIN is there; Defer while the tenant is busy; nothing
+  co-places; the resident exclusive never reads as over-budget pressure).
   Ledger: record lists evicted tenants and the exclusive flag.
-- [ ] 2.3 `hostbroker.py` / `hostd.py`: assemble `hosts` from the `hostview.py`
-  measurement the broker already reads (`host_mem`); carry `ram_bytes`,
-  `exclusive_device`, `engine`, `engine_rev` from node reports. All new fields are
-  optional; an old node's report parses unchanged (old brokers elsewhere in the
-  fleet will ignore the fields — design §8).
-  Tests: extend the hostbroker report-parsing tests with old- and new-shape reports.
-  Ledger: engine + rev on load records.
-- [ ] 2.4 `manager.py`: `ManagedUnit.footprint` accepts an `int` (VRAM bytes, as
-  today) or a `Res` dict; the `/residence` report sends a vector. Tests: existing
-  manager tests + one dict-footprint case. Ledger: none.
+- [x] 2.3 `hostbroker.py` / `hostd.py`: `hosts` assembled from the peers'
+  `host_mem` (`_host_pools`: freshest per host, reserve off the top, loading
+  claims subtracted — host-memory-ledger §3's arithmetic); `ram_bytes`,
+  `exclusive_device`, `engine`, `engine_rev` carried from node reports; all new
+  fields optional, an old node's report parses unchanged.
+  Tests: `tests/test_host_pool_report.py`. Ledger: engine + rev on load records.
+- [x] 2.4 `manager.py`: `ManagedUnit.footprint` accepts an `int` (VRAM bytes, as
+  today) or a `Res` dict; the `/residence` report sends a vector.
+  Tests: `tests/test_manager.py` + one dict-footprint case. Ledger: none.
 
 ## 3. Concurrency and LLM characteristics
 
-- [ ] 3.1 `Engine.launch_attributes` derives `max_concurrent` (vLLM: `--max-num-seqs`
-  or the installed vLLM's default, read from the engine not hard-coded; Strata: 1)
-  and `context_len`. Published in unit attributes.
+- [x] 3.1 `Engine.launch_attributes` derives `max_concurrent` (vLLM:
+  `--max-num-seqs` or vLLM's own default, named in `engines/vllm.py`; Strata: the
+  serve server's one-sequence FIFO = 1 unless declared) and `context_len`
+  (vLLM: `max_model_len`; Strata: declared — context is baked into its engine
+  config). Published in unit attributes.
   Tests: `test_engines_attributes.py`. Ledger: none.
-- [ ] 3.2 harmony-llm per-unit admission queue: at most `max_concurrent` in flight,
-  bounded FIFO of 64 waiting, 429 with a reason beyond that; depth on `/residence`.
+- [x] 3.2 harmony-llm per-unit admission queue (`unit_queue.py`): at most
+  `max_concurrent` in flight, bounded FIFO of 64 waiting, 429 with the queue
+  state beyond that; depth on `/residence`, `queue_ms` on the demand record.
   Tests: `test_unit_queue.py` with a stub engine that sleeps. Ledger: none
   (request-level, not placement).
-- [ ] 3.3 Resident-reuse shortcut (`server.py` ~line 1727) applies only while the
-  resident unit is below `max_concurrent` with an empty queue (design §4b.4).
-  Named units (`local`, `llm_general`) are unaffected.
-  Tests: a warm single-stream unit does not absorb a second broad `class=llm`
-  request; a named request still goes to its named unit. Ledger: the routing
-  decision records why the shortcut was skipped.
-- [ ] 3.4 `preferences.py`: add `llm.params_b` (max), `llm.context_len` (max),
-  `llm.decode_tok_s` (max, measured), `llm.first_token_ms` (min, measured); publish
-  the measured ones from harmony-llm's fitted keys with sample counts. Wire
-  `prefer` into harmony-llm's unit selection as ordering among survivors.
-  A preference alone never causes a swap; with a time budget, only when the
-  measured reload + speed fits it (design §4b.3, **blocked on Q4** — implement the
-  ordering-only part first).
-  Tests: `test_llm_preferences.py`. Ledger: selection records the preference
-  receipt (`preference_key` already returns one).
-
-- [ ] 3.5 Context re-route (design §4c gap 1): `Engine.context_refusal`; on a
-  context refusal of an un-named request, derive `context_len>=input+max_tokens`
-  and route once more through the normal path; named requests keep the 413.
-  Tests: `test_context_reroute.py` with two stub engines (24K and 128K windows): an
-  over-long broad request is answered by the 128K unit with no caller resubmission;
-  a named one gets 413; a request too long for every unit gets the existing 413
-  text; at most one re-route. Positive control: the broad case returns 413 on the
-  old code. Ledger: the re-route record (original unit, need, chosen unit, load).
+- [x] 3.3 Resident-reuse shortcut applies only while the resident unit is below
+  `max_concurrent` with an empty queue (design §4b.4). Named units unaffected.
+  Tests: `test_unit_queue.py` (saturated unit routes instead of absorbing) +
+  `test_llm_preferences.py` (the warm unit still answers). Ledger: the routing
+  decision records why the shortcut was skipped (`shortcut` on the demand row).
+- [x] 3.4 `preferences.py`: `llm.params_b` (max), `llm.context_len` (max),
+  `llm.decode_tok_s` (max, measured), `llm.first_token_ms` (min, measured);
+  `selection.py` publishes the measured ones from harmony-llm's fitted keys with
+  sample counts. `prefer` wired into unit selection as ordering among survivors
+  (`harmony_prefer` beside `harmony_requires`; ordering-only — the time-budget
+  swap is Q4, not implemented).
+  Tests: `test_llm_preferences.py`. Ledger: the selection record carries the
+  `preference_key` receipt on the demand row.
+- [x] 3.5 Context re-route (design §4c gap 1): `Engine.context_refusal`; on a
+  context refusal the need (`context_len>=input+max_tokens`, the caller's own
+  clauses ANDed in) re-routes ONCE through the normal admission path; a named
+  request keeps its unit and the 413; nothing loops.
+  Tests: `test_context_reroute.py` (two stub units, 24K/128K windows): the broad
+  over-long request is answered by the 128K unit with no caller resubmission and
+  exactly two upstream calls; a request too long for every unit gets the existing
+  413 text with the need named; one re-route at most; streamed and non-streamed
+  bytes pass through untouched; an unrelated 4xx keeps its model.
+  Ledger: the re-route is recorded (one demand row for the request that was
+  served).
 
 ## 4. Verify-first items (design §9)
 
-- [ ] 4.1 Reproduce the reported `fleet_rank` defect (`GET /fleet/rank?kind=llm`
-  ignoring `require=`) in a test against `fleet_rank.rank()`. If it reproduces, fix
-  it; if not, record "not reproduced" with the test in design §9 and close.
+- [x] 4.1 REPRODUCED: `fleet_rank.rank()` ignored `require=` for LLM nodes — a
+  target whose units fail the clauses was still ranked. Fixed: candidates are
+  filtered with a named `filtered` outcome + reason (and the unfiltered path is
+  pinned by a positive control). Tests: `tests/test_fleet_rank.py` (+27),
+  `tests/test_hostbroker.py` green. Ledger: none.
+
+## 5. Strata engine (Q1 resolved: architectds/Strata tag v0.1.24-linux-cuda12.8, Q2_0)
+
+- [x] 5.1 `engines/strata.py`: argv drives the rev's REAL entry point
+  (`.venv/bin/python serve/server.py --engine strata --config strata-*.json
+  --port N --host 127.0.0.1` — the `run-<model>.sh` line, since the pinned rev
+  has no `llama-server` binary; design §1: "whatever the repo's actual script
+  name, the adapter owns the exact argv"); `--idle-unload`, `--lazy`,
+  `--before-load` are REFUSED (lifecycle is Harmony's). ready = `/health` AND
+  `/status` state. measure = the engine's slot/GiB lines + NVML VRAM + the
+  `/proc/<pid>/status` pin field (`VmLck`, chosen by a positive control),
+  `source: "strata-startup"`, `unknown` with what never came named when nothing
+  answers. `engine_source.rev`/`sha256` checked at node start against
+  `STRATA_VERSION`/`MODEL_SHA256` (mismatch = startup error naming both).
+  Tests: `test_engines_strata.py` against a fake Strata server (the serve
+  server's API surface, incl. `/health`, `/status`, `/v1/chat/completions`).
   Ledger: none.
-
-## 5. Strata engine (BLOCKED on Q1: fork + rev + model size)
-
-- [ ] 5.1 `engines/strata.py`: argv (no `--idle-unload`, `--lazy`, `--before-load`),
-  ready (`/health` + `/status` loaded), measure (NVML VRAM, `/proc/<pid>/status`
-  pinned field chosen by a positive control, Strata's slot/GiB log line,
-  `source: "strata-startup"`), `engine_source` rev/model-hash check at node start.
-  Tests: `test_engines_strata.py` against a fake Strata server process (a tiny
-  HTTP stub implementing `/health`, `/status`, `/v1/chat/completions` with a
-  one-request lock) — this is a unit test of the adapter; the real engine is
-  covered by 6.x. Ledger: none.
 - [ ] 5.2 On the pinned rev, verify and record in design §1: reasoning returned
   separately or inline (decides `thinking`), OpenAI `tool_calls` (decides `tools`),
   the `/status` READY field, which `/proc` field shows pinned memory.

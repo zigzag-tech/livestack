@@ -846,6 +846,58 @@ Limits and status:
 - **Nothing in production sends `template: jemm` yet.** The benchday hub still uses
   Simple Jev v1.
 
+## Engine units — a non-vLLM engine on a card (Strata / flash_next)
+
+An **engine unit** runs a model through an engine that is not `vllm serve`:
+one that sizes its own cache to whatever VRAM is free, keeps its weights in
+host RAM, and refuses to start into a busy card. The first one is
+**Strata** (`architectds/Strata`, llama.cpp lineage) serving
+**Qwen3.8-Flash-Next** on xc-tower-ubuntu card 1. What makes it safe to share a
+host is three declarations and one seam:
+
+| Declaration | Where | What it buys |
+|---|---|---|
+| `"engine": "strata"` | units file | the adapter that drives it (`examples/harmony-llm/engines/strata.py`); never a requestable attribute |
+| `"exclusive_device": true` | units file | charged the WHOLE card; admitted only when every other tenant can leave; its grant is "all of it" |
+| `"ram_gb": 45` | units file | the host-RAM pin, planned against the HOST pool (one pool behind every card) — planning only its VRAM is how a host swaps |
+
+**Launch.** The adapter runs the repo's own server, byte-for-byte what
+`run-<model>.sh` runs: `<root>/.venv/bin/python <root>/serve/server.py --engine
+strata --config strata-*.json --port N --host 127.0.0.1` + `extra_args`. The
+engine command line lives INSIDE the config (setup writes it). Strata sizes its
+cache to the free VRAM itself — no budget translation, no `--gpu-memory-utilization`.
+Pin the engine to ONE card with `--gpu <nvidia-smi index>` in `extra_args`
+(the setup's default is BOTH cards split), or the planner's one-card claim is a
+lie.
+
+**The rev is pinned**, in `<root>/STRATA_VERSION` (what `engine_rev` reports to
+the ledger record of every load). The runbook:
+
+```sh
+diskreap auto --force          # the install wants ~70 GB of disk; stop below 100 GB free
+cd ~/strata/strata && git checkout <rev> && echo <rev> > STRATA_VERSION
+NVCC_PREPEND_FLAGS="-ccbin /usr/bin/g++-14" CUDAHOSTCXX=/usr/bin/g++-14 \
+  ./setup.sh --yes --family qwen --model Q2_0 --context 131072 --vision none \
+             --no-start --port 8191
+./strata.sh verify             # the API shape: tool_calls, usage, stream usage
+```
+
+The gcc-14 drop-in is this host's (`HARMONY.md` fp8 note above): CUDA 12.9's
+nvcc cannot identify itself under gcc 15. `--no-start` because Harmony owns the
+lifecycle — the unit starts the engine through its adapter and kills it on
+eviction (process death is the only thing that returns the memory).
+
+**Floors** (the honest cost, stated once): while Flash-Next is resident, any
+request for `llm_general` waits for Flash-Next's `min_residency_s` to lapse, its
+idle eviction, and the 27B's ~50 s reload. Declare `min_residency_s` on the
+unit (measured reload + margin), keep `llm_general` the `default: true` unit
+(so `model: "local"` keeps reaching the 27B), and let the queue make the wait
+visible (`queue_ms` on every demand record). A broad long-context request
+(`require:class=llm,context_len>=N`) is what loads Flash-Next — requests are
+the only lever, and `POST /model/warm` never bypasses admission.
+
+Design record + what this does NOT fix: `_plans/harmony-engine-units.md`.
+
 ## Scheduler policy — the target choice is a tunable, recorded policy
 
 The fleet broker's per-job target choice (`fleet_scheduler.schedule()`) runs as the

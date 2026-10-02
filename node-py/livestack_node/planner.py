@@ -64,6 +64,22 @@ def _magnitude(r: Res) -> float:
     return sum(max(0.0, v) for v in r.values())
 
 
+# HOST-SCOPED dimensions. A card's capacity is its own; host RAM is shared by
+# every device on the machine, so a unit's `ram_bytes` must fit the HOST pool
+# and not one card's budget — two 45 GB units fit two 24 GB cards separately
+# and together swap the host. Routing is a fixed set: every dimension not named
+# here is device-scoped (harmony-engine-units design §3).
+HOST_DIMS = frozenset({"ram_bytes"})
+
+
+def _device_dims(r: Res) -> Dict[str, float]:
+    return {k: v for k, v in r.items() if k not in HOST_DIMS}
+
+
+def _host_dims(r: Res) -> Dict[str, float]:
+    return {k: v for k, v in r.items() if k in HOST_DIMS}
+
+
 # --- model ------------------------------------------------------------------
 class Residency(enum.IntEnum):
     HARD_PIN = 0
@@ -142,6 +158,18 @@ class Unit:
     # cannot start without is its measured MINIMUM (weights + activation +
     # CUDA graphs + KV for one max-length request). Empty = `footprint`.
     admission_footprint: Res = field(default_factory=dict)
+    # WHOLE-DEVICE claim. A unit that takes the card for itself (an engine that
+    # sizes its cache to whatever VRAM is free and refuses to start into a busy
+    # card) is charged the device's entire capacity, so it is admitted only when
+    # every other tenant of that device can leave — and nothing co-places with
+    # it afterwards. Evictability, not size, is then the admission question
+    # (harmony-engine-units spec, "A unit may claim a whole device").
+    exclusive_device: bool = False
+    # WHICH ENGINE serves this unit ("vllm", "strata", ...) and the revision it
+    # was pinned to. Opaque to the planner — never an attribute a request can
+    # require — carried so a ledger record can name what was loaded.
+    engine: str = ""
+    engine_rev: str = ""
 
 
 @dataclass(frozen=True)
@@ -245,6 +273,17 @@ class WorldState:
     # memory (external processes, footprint drift, activation spikes the static
     # footprints miss) instead of pure footprint bookkeeping.
     measured_free: Mapping[str, Res] = field(default_factory=dict)
+    # host_id -> FREE host-scoped capacity (e.g. {"ram_bytes": ...}), measured
+    # on that host and shared by every device on it. A host absent from this
+    # map is UNMEASURED, which is not "empty": a unit carrying a host-scoped
+    # dimension is refused there (`host memory unmeasured`) and units without
+    # one place exactly as before. The figure already has the reserve
+    # subtracted (see `host_reserve`) and already reflects what resident units
+    # currently hold; the planner adjusts it by what THIS cycle loads/evicts.
+    hosts: Mapping[str, Res] = field(default_factory=dict)
+    # host_id -> the reserve subtracted from `hosts`, kept for the placement
+    # record only (the planner never spends it twice). Absent = unmeasured.
+    host_reserve: Mapping[str, Res] = field(default_factory=dict)
 
 
 # --- actions ----------------------------------------------------------------
@@ -302,6 +341,11 @@ class Grant:
     # `_plans/decision-ledger.md` §4.1). Defaulted, so no existing constructor
     # breaks.
     reason: str = ""
+    # The host-pool arithmetic behind a placement that carries host-scoped
+    # resources (`ram_bytes`): what it needs, what the host had free, and the
+    # reserve already subtracted from that figure. Empty for units with no
+    # host-scoped footprint, whose records are byte-for-byte what they were.
+    host_pool: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -370,13 +414,74 @@ class _World:
         for p in w.placements:
             if p.device_id in self._used_at_snapshot:
                 self._used_at_snapshot[p.device_id] = _add(
-                    self._used_at_snapshot[p.device_id], w.units[p.kind].footprint)
+                    self._used_at_snapshot[p.device_id],
+                    _device_dims(self._charged(w.units[p.kind], p.device_id)))
+        # Host-scoped claims at snapshot time, for the same delta arithmetic one
+        # level up (a host's free RAM is one pool behind several cards).
+        self._host_used_at_snapshot: Dict[str, Dict[str, float]] = {}
+        for p in w.placements:
+            hid = self.devices[p.device_id].host_id if p.device_id in self.devices else None
+            if hid is not None:
+                self._host_used_at_snapshot[hid] = _add(
+                    self._host_used_at_snapshot.get(hid, {}),
+                    {k: v for k, v in w.units[p.kind].footprint.items() if k in HOST_DIMS})
+
+    def _charged(self, unit: Unit, device_id: str) -> Res:
+        """What ``unit`` occupies on ``device_id``.
+
+        Its footprint — except an exclusive unit, which is charged the device's
+        ENTIRE capacity on every device dimension (its host-scoped needs stay
+        its own: host RAM is not multiplied by taking a card). Charging the
+        whole card is what keeps anything else from fitting beside it after it
+        is admitted, and what an eviction of it gives back.
+        """
+        fp = dict(unit.footprint)
+        if not unit.exclusive_device:
+            return fp
+        out = dict(fp)
+        for k, v in self.devices[device_id].capacity.items():
+            out[k] = max(out.get(k, 0.0), float(v))
+        return out
+
+    def _host_of(self, device_id: str) -> "str | None":
+        d = self.devices.get(device_id)
+        return d.host_id if d is not None else None
 
     def used(self, device_id: str) -> Dict[str, float]:
+        """Device-scoped occupancy of ``device_id`` (host dims stay in `host_used`,
+        one pool per host rather than one per card)."""
         u: Dict[str, float] = {}
         for p in self.resident[device_id].values():
-            u = _add(u, self.w.units[p.kind].footprint)
+            u = _add(u, _device_dims(self._charged(self.w.units[p.kind], device_id)))
         return u
+
+    def host_used(self, host_id: str) -> Dict[str, float]:
+        """Host-scoped claims of every present unit on this host, summed."""
+        u: Dict[str, float] = {}
+        for did, per_kind in self.resident.items():
+            if self._host_of(did) != host_id:
+                continue
+            for p in per_kind.values():
+                u = _add(u, {k: v for k, v in self.w.units[p.kind].footprint.items()
+                             if k in HOST_DIMS})
+        return u
+
+    def host_free(self, host_id: str) -> Dict[str, float]:
+        """Free host-scoped capacity, or {} when this host is UNMEASURED.
+
+        The measurement already reflects what resident units hold and already
+        has the reserve subtracted; it is adjusted by what this cycle has
+        loaded or evicted since the snapshot (same delta arithmetic as
+        `measured_free`), so an eviction here frees RAM and a load spends it.
+        Absence is not infinity: a unit with `ram_bytes` simply does not fit
+        against {} and is refused `host memory unmeasured`.
+        """
+        meas = self.w.hosts.get(host_id)
+        if meas is None:
+            return {}
+        delta = _sub(self.host_used(host_id),
+                     self._host_used_at_snapshot.get(host_id, {}))
+        return {k: v for k, v in _sub(meas, delta).items() if k in HOST_DIMS}
 
     def _resident_headroom(self, device_id: str) -> Dict[str, float]:
         """Peak-activation VRAM kept FREE on the device for as long as each unit is
@@ -416,33 +521,48 @@ class _World:
         return dict(d.reserved)
 
     def free(self, device_id: str, for_unit: Optional[Unit] = None) -> Dict[str, float]:
-        """Free capacity on the device. Pass `for_unit` when asking whether THAT
-        unit fits: the reserve depends on who would be resident (see `reserve`)."""
+        """Free capacity on the device AND on its host pool. Pass `for_unit` when
+        asking whether THAT unit fits: the reserve depends on who would be
+        resident (see `reserve`). Host-scoped dimensions ride along from
+        `host_free`, so one `_fits` call answers both questions and an eviction
+        gives its `ram_bytes` back to the pool it came from."""
         d = self.devices[device_id]
-        reserved = self.reserve(device_id, for_unit)
-        # Reserve resident units' measured peak-activation on top of the static
-        # `reserved` slack, so admitting/backfilling another unit can't consume the
-        # space a resident unit needs when it next runs (prevents runtime OOM, not
-        # just load-time). Zero when no unit declares headroom => unchanged.
-        hdrm = self._resident_headroom(device_id)
-        budget = _sub(_sub(_sub(d.capacity, reserved), self.used(device_id)), hdrm)
-        meas = self.w.measured_free.get(device_id) if self.w.measured_free else None
-        if not meas:
-            return budget
-        # Reconcile model vs reality: keep the configured `reserved` headroom on top
-        # of the *measured* free bytes, then take the tighter of (policy budget,
-        # measured reality) per dimension. So neither a too-optimistic static model
-        # (external process / drift) nor exceeding our self-imposed budget can grant
-        # an allocation that would OOM. NOTE: this can go NEGATIVE when reality is
-        # worse than the model assumed — step 0 of plan() sheds to relieve that.
-        # Adjust the snapshot reading by what we've loaded/evicted so far this cycle:
-        # delta = used_now - used_at_snapshot (positive => we loaded => less real free).
-        delta = _sub(self.used(device_id), self._used_at_snapshot.get(device_id, {}))
-        adjusted = _sub(meas, delta)
-        avail = _sub(_sub(adjusted, reserved), hdrm)
+        if any(self.w.units[k].exclusive_device for k in self.resident[device_id]):
+            # An exclusive tenant OWNS the device: nothing on it is free, and the
+            # reserve/headroom that protects co-tenants has nobody left to
+            # protect. Zero, never negative — a resident must not read as
+            # over-budget pressure and shed itself.
+            budget = {k: 0.0 for k in d.capacity}
+        else:
+            reserved = self.reserve(device_id, for_unit)
+            # Reserve resident units' measured peak-activation on top of the static
+            # `reserved` slack, so admitting/backfilling another unit can't consume the
+            # space a resident unit needs when it next runs (prevents runtime OOM, not
+            # just load-time). Zero when no unit declares headroom => unchanged.
+            hdrm = self._resident_headroom(device_id)
+            budget = _sub(_sub(_sub(d.capacity, reserved), self.used(device_id)), hdrm)
+            meas = self.w.measured_free.get(device_id) if self.w.measured_free else None
+            if meas:
+                # Reconcile model vs reality: keep the configured `reserved` headroom on top
+                # of the *measured* free bytes, then take the tighter of (policy budget,
+                # measured reality) per dimension. So neither a too-optimistic static model
+                # (external process / drift) nor exceeding our self-imposed budget can grant
+                # an allocation that would OOM. NOTE: this can go NEGATIVE when reality is
+                # worse than the model assumed — step 0 of plan() sheds to relieve that.
+                # Adjust the snapshot reading by what we've loaded/evicted so far this cycle:
+                # delta = used_now - used_at_snapshot (positive => we loaded => less real free).
+                delta = _sub(self.used(device_id), self._used_at_snapshot.get(device_id, {}))
+                adjusted = _sub(meas, delta)
+                avail = _sub(_sub(adjusted, reserved), hdrm)
+                out = dict(budget)
+                for k, v in avail.items():
+                    out[k] = min(budget.get(k, v), v)
+                budget = out
+        # Host-scoped dimensions are shared by every device on the host, so they
+        # are fitted against the host pool here and evictions return them there
+        # (the victim's footprint is added back in `_victims_to_free`).
         out = dict(budget)
-        for k, v in avail.items():
-            out[k] = min(budget.get(k, v), v)
+        out.update(self.host_free(d.host_id))
         return out
 
     def is_resident(self, kind: str, device_id: Optional[str] = None) -> bool:
@@ -490,11 +610,35 @@ class _World:
 
     def grant(self, req: Request, device_id: str, reason: str = "",
               budget: Optional[Res] = None) -> None:
+        unit = self.w.units.get(req.kind)
+        if budget is None:
+            budget = self.free(device_id)
+        if unit is not None and unit.exclusive_device:
+            # The grant is the WHOLE DEVICE: an engine that sizes itself to what
+            # is free must be told "all of it", not the zeros a charged
+            # exclusive tenant leaves behind it.
+            budget = dict(self.devices[device_id].capacity)
+            budget.update(self.host_free(self._host_of(device_id) or ""))
         self.actions.append(Grant(request_id=req.id, kind=req.kind,
                                   device_id=device_id, reason=reason,
                                   budget=dict(budget or {}),
+                                  host_pool=self._host_pool_record(device_id, unit),
                                   owner=req.owner,
                                   owner_asserted=req.owner_asserted))
+
+    def _host_pool_record(self, device_id: str, unit: "Optional[Unit]") -> Dict[str, object]:
+        """`{need, free, reserve}` of the host pool behind a placement, for the
+        ledger. Empty for a unit with no host-scoped footprint — its record is
+        byte-for-byte what it was."""
+        if unit is None:
+            return {}
+        need = _host_dims(self._charged(unit, device_id))
+        if not need:
+            return {}
+        host_id = self._host_of(device_id) or ""
+        return {"need": dict(need),
+                "free": dict(self.host_free(host_id)),
+                "reserve": dict(self.w.host_reserve.get(host_id, {}))}
 
     def defer(self, req: Request, reason: str) -> None:
         self.actions.append(Defer(request_id=req.id, reason=reason))
@@ -617,13 +761,14 @@ def _can_serve(unit: Unit, d: Device) -> bool:
 
 
 # Footprint sources whose activation memory is MEASURED, so the device reserve
-# would cover it twice. See `_World.reserve`. "vllm-startup": the engine's own
-# report, activation inside `footprint`. "allocator": the node measured both
+# would cover it twice. See `_World.reserve`. "vllm-startup" / "strata-startup":
+# the ENGINE's own report (whatever the engine is called), activation inside
+# `footprint`. "allocator": the node measured both
 # what the load left resident (`footprint`) and the op's peak over that
 # (`activation_headroom`, reserved separately while resident and at admission).
 # "allocator-resident" — resident measured, no op yet — is NOT here: its
 # activation is still unmodelled, so the reserve still covers it.
-MEASURED_SOURCES = frozenset({"vllm-startup", "allocator"})
+MEASURED_SOURCES = frozenset({"vllm-startup", "strata-startup", "allocator"})
 
 
 def _admission_need(unit: Unit) -> Res:
@@ -709,7 +854,7 @@ def _victims_to_free(world: _World, device_id: str, need: Res, requester_prio: i
         return []
     for p in cands:
         chosen.append(p)
-        freed = _add(freed, units[p.kind].footprint)
+        freed = _add(freed, world._charged(units[p.kind], device_id))
         if _fits(need, freed):
             return chosen
     return None
@@ -752,11 +897,11 @@ def _residency_floor_blocker(world: _World, device_id: str, need: Res,
     if _fits(need, freed):
         return None                             # it fits as-is; no blocker
     for p in evictable:
-        freed = _add(freed, units[p.kind].footprint)
+        freed = _add(freed, world._charged(units[p.kind], device_id))
     if _fits(need, freed):
         return None                             # the room exists without the young
     for p in young:
-        freed = _add(freed, units[p.kind].footprint)
+        freed = _add(freed, world._charged(units[p.kind], device_id))
     if not _fits(need, freed):
         return None                             # even everything would not fit
     # Only the floor stands between: name the largest protected load.
@@ -798,6 +943,92 @@ def _shed_victim(world: _World, device_id: str, pol: PlannerPolicy,
                               -_magnitude(units[p.kind].footprint),
                               units[p.kind].reload_cost))
     return cands[0]
+
+
+def _exclusive_victims(world: _World, device_id: str, unit: Unit,
+                       pol: PlannerPolicy) -> "tuple[Optional[List[Placement]], str]":
+    """(victims, blocker) for admitting an EXCLUSIVE unit to ``device_id``.
+
+    A whole-device claim makes evictability — not size — the admission
+    question: every other tenant of the device must be able to leave. An idle
+    evictable tenant is evicted; a busy one defers the admission (idle-only
+    preemption still applies); a HARD_PIN refuses it, named. Priority does NOT
+    shield a tenant here — the claim is on the space, not on the work — but
+    anti-thrash (`min_residency_s`) still protects a load that just arrived.
+    """
+    units = world.w.units
+    victims: List[Placement] = []
+    busy: List[Placement] = []
+    pinned: List[Placement] = []
+    young: List[Placement] = []
+    for p in world.resident[device_id].values():
+        if p.kind == unit.kind:
+            continue                      # our own copy is reuse, not a tenant
+        u = units[p.kind]
+        if u.residency == Residency.HARD_PIN:
+            pinned.append(p)
+        elif p.busy and not pol.allow_busy_preemption:
+            busy.append(p)
+        elif (world.w.now - p.loaded_at) < u.min_residency_s:
+            young.append(p)
+        else:
+            victims.append(p)
+    if pinned:
+        p = pinned[0]
+        return None, (f"exclusive unit {unit.kind} needs device {device_id} empty; "
+                      f"{p.kind} is HARD_PIN there")
+    if busy:
+        p = busy[0]
+        return None, (f"exclusive unit {unit.kind} needs device {device_id} empty; "
+                      f"{p.kind} is busy there (idle-only preemption); the admission waits")
+    if young:
+        p = max(young, key=lambda p: _magnitude(units[p.kind].footprint))
+        return None, (f"residency floor: {p.kind} loaded {world.w.now - p.loaded_at:.0f}s ago "
+                      f"is protected for {units[p.kind].min_residency_s:.0f}s "
+                      f"(min_residency_s); the room exists behind the floor")
+    return victims, ""
+
+
+def _exclusive_blocker(world: WorldState, unit: Unit,
+                       pol: PlannerPolicy) -> "Optional[tuple[str, str]]":
+    """(device_id, reason) of the first device a whole-device claim cannot take,
+    for a refusal that names WHY — or None when nothing blocks it."""
+    w = _World(world)
+    for d in world.devices:
+        if d.hosted or not _device_matches(d, unit.selector) or not _can_serve(unit, d):
+            continue
+        _victims, blocker = _exclusive_victims(w, d.id, unit, pol)
+        if blocker:
+            return d.id, blocker
+    return None
+
+
+def _host_pool_reason(world: "_World", unit: Unit) -> "Optional[str]":
+    """Why the HOST pool refused this unit, or None when host RAM was not the
+    binding dimension. Names the arithmetic — need, free, reserve — so an
+    operator can check the figures against `free` without reading code (the
+    host-memory-ledger §5 reason style). `host memory unmeasured` when no
+    candidate host has a measurement at all: absence, not an empty pool.
+    """
+    need = _host_dims(_admission_need(unit))
+    if not need:
+        return None
+    hosts = {world._host_of(d.id) for d in world.w.devices
+             if _device_matches(d, unit.selector) and _can_serve(unit, d)}
+    hosts.discard(None)
+    if not any(h in world.w.hosts for h in hosts):
+        return "host memory unmeasured"
+    best = None
+    for h in hosts:
+        free = world.host_free(h or "")
+        if not free or _fits(need, free):
+            continue            # this host could hold the RAM; a card could not
+        if best is None or _magnitude(free) > best[0]:
+            reserve = world.w.host_reserve.get(h or "", {})
+            best = (_magnitude(free),
+                    f"insufficient host memory: need {dict(need)} > free "
+                    f"{dict(free)} (host {h}, reserve {dict(reserve)})")
+    return best[1] if best else None
 
 
 @dataclass
@@ -895,6 +1126,26 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
             # uniformly random point during it.
             opt = _Option(d.id, unit.reload_cost / 2.0 + loc_pen, [], needs_load=False,
                           slack=_magnitude(_sub(world.free(d.id, unit), _admission_need(unit))))
+        elif unit.exclusive_device:
+            # WHOLE-DEVICE CLAIM: every other tenant must be able to leave
+            # (evictability is the admission question, not size), and the unit
+            # is charged the device's entire capacity from here on.
+            victims, blocker = _exclusive_victims(world, d.id, unit, pol)
+            if blocker:
+                continue
+            freed = world.free(d.id, unit)
+            for v in victims:
+                freed = _add(freed, world._charged(world.w.units[v.kind], d.id))
+            if not _fits(_admission_need(unit), freed):
+                continue
+            preempt_cost = sum(world.w.units[v.kind].reload_cost *
+                               (1.0 + max(0.0, float(world.w.demand.get(v.kind, 0.0))))
+                               for v in victims)
+            busy_pen = sum(50.0 for v in victims if v.busy)   # discourage interrupting work
+            opt = _Option(d.id, unit.reload_cost + loc_pen + preempt_cost + busy_pen
+                          + _contention_cost(world, d.id, unit, pol),
+                          victims, needs_load=True,
+                          slack=_magnitude(_sub(freed, _admission_need(unit))))
         elif _fits(_admission_need(unit), world.free(d.id, unit)):
             opt = _Option(d.id, unit.reload_cost + loc_pen
                           + _contention_cost(world, d.id, unit, pol), [], needs_load=True,
@@ -910,7 +1161,7 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
             busy_pen = sum(50.0 for v in victims if v.busy)   # discourage interrupting work
             freed = world.free(d.id, unit)
             for v in victims:
-                freed = _add(freed, world.w.units[v.kind].footprint)
+                freed = _add(freed, world._charged(world.w.units[v.kind], d.id))
             opt = _Option(d.id, unit.reload_cost + loc_pen + preempt_cost + busy_pen
                           + _contention_cost(world, d.id, unit, pol),
                           victims, needs_load=True,
@@ -1059,14 +1310,24 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
                 break
         if opt is None or unit is None:
             reason = "no device can fit even with preemption"
+            if u is not None and u.exclusive_device:
+                # A whole-device claim fails on EVICTABILITY, and the refusal
+                # names the tenant that will not leave (spec: "A unit may claim
+                # a whole device").
+                blk = _exclusive_blocker(world, u, pol)
+                if blk is not None:
+                    reason = blk[1]
+            elif u is not None and _host_dims(_admission_need(u)):
+                reason = _host_pool_reason(W, u) or reason
             # Say WHY when the why is a residency floor: a young load that
             # would otherwise be the victim is protected, and the caller
             # should wait for the floor, not give up on the request.
-            blocker = next(
-                (b for d in world.devices if not d.hosted
-                 for b in [_residency_floor_blocker(
-                     W, d.id, _admission_need(u), e, pol, kind, unit=u)] if b),
-                None)
+            blocker = (None if (u is not None and u.exclusive_device) else
+                       next(
+                           (b for d in world.devices if not d.hosted
+                            for b in [_residency_floor_blocker(
+                                W, d.id, _admission_need(u), e, pol, kind, unit=u)] if b),
+                           None))
             if blocker is not None:
                 b_kind, b_floor, b_age = blocker
                 reason = (f"residency floor: {b_kind} loaded {b_age:.0f}s ago "
