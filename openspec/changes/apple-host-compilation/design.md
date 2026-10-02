@@ -62,9 +62,12 @@ len(CLASSES)" grows by one; receipts stay per-class files.
 
 ## Risks
 
-- Policy reload kills running compile attempts when the revision changes
-  (`compilation_policy_revision_changed` on renewal). The grant of `apple` to
-  xc-mac-studio is a policy edit and is done only in a window agreed with the
-  policy owner with no compile attempt running.
+- Policy reload used to kill running compile attempts on ANY revision change
+  (`compilation_policy_revision_changed` on renewal; four e2e attempts died to a
+  pure widening on 2026-10-02). Renewal now revokes only when the host no longer
+  grants every admitted class (narrowing, host removal, expiry) or the
+  handler's classification changed; a widening or revision-only change keeps
+  the attempt, and its receipt keeps the admitting revision as evidence. The
+  `apple` grant is made only after this is live on the authority.
 - An old authority reading a policy that names `apple` refuses all compilation;
   the authority must run this code before the policy names the class.
