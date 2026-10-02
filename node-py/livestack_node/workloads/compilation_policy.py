@@ -16,7 +16,9 @@ from .model import WorkloadError, name
 
 VERSION = 1
 MAX_BYTES = 16384
-CLASSES = frozenset({'rust', 'flutter', 'image', 'node', 'native'})
+# `apple`: the Xcode SDK, Apple linkers/signing tools and CocoaPods, which only
+# a macOS host has (openspec/changes/apple-host-compilation).
+CLASSES = frozenset({'rust', 'flutter', 'image', 'node', 'native', 'apple'})
 
 
 @dataclass(frozen=True)
