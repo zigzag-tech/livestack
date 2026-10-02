@@ -146,9 +146,16 @@ def remove_data(root):
         raise WorkloadError('Docker data is not in the private attempt tree', 503)
     # Diagnostics have an active kernel byte bound, no named file/history, and
     # the same finite command deadline as cleanup. Never hide the real refusal.
-    with tempfile.TemporaryFile() as diagnostic:
+    # Nested attempt TMPDIR paths exceed AF_UNIX's pathname limit. Keep the
+    # rootless helper's finite state in the user-owned, kernel-bounded runtime
+    # filesystem instead; never shorten or relocate the actual layer tree.
+    runtime = Path('/run/user')/str(os.getuid())
+    metadata = runtime.lstat()
+    if not runtime.is_dir() or runtime.is_symlink() or metadata.st_uid != os.getuid() or metadata.st_mode & 0o077:
+        raise WorkloadError('Docker cleanup user runtime directory is unsafe; capacity remains reserved',503)
+    with tempfile.TemporaryDirectory(prefix='hcleanup-',dir=runtime) as state, tempfile.TemporaryFile() as diagnostic:
         try:
-            reply = subprocess.run(['/usr/bin/rootlesskit', '/usr/bin/rm', '-rf', '--', str(data)],
+            reply = subprocess.run(['/usr/bin/rootlesskit', '--state-dir='+state, '/usr/bin/rm', '-rf', '--', str(data)],
                 stdout=subprocess.DEVNULL, stderr=diagnostic, timeout=60,
                 preexec_fn=lambda:resource.setrlimit(resource.RLIMIT_FSIZE,(16384,16384)))
         except subprocess.TimeoutExpired as error:
