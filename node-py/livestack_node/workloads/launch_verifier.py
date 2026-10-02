@@ -125,20 +125,30 @@ def authority_receipt(config, request, deadline):
     target, path = transport.split_target(config['authority'].rstrip('/')+'/v1/workloads/worker/verify-compilation')
     body = dict(boot=request['boot'], attempt_id=request['attempt_id'], fence=request['fence'],
                 input_digest=request['input_digest'], **{'class': request['class']})
-    try:
-        with transport.dial_stream(target, 'POST', path,
-                headers={'Authorization': 'Bearer '+config['token'], 'Content-Type': 'application/json'},
-                body=encode(body).encode(), timeout=min(2, remaining(deadline))) as response:
-            raw = response.read(MAX_BYTES+1)
-    except transport.HTTPError as error:
-        raw = error.read(MAX_BYTES+1)
-        if len(raw) > MAX_BYTES:
-            raise WorkloadError('compilation_authority_response_oversized', 503)
-        value = json.loads(raw)
-        reason = value.get('error') if isinstance(value, dict) else None
-        if not isinstance(reason, str) or not reason:
-            raise WorkloadError('compilation_authority_refusal_missing_reason', 503)
-        raise WorkloadError(reason[:1024], error.code) from error
+    while True:
+        try:
+            with transport.dial_stream(target, 'POST', path,
+                    headers={'Authorization': 'Bearer '+config['token'], 'Content-Type': 'application/json'},
+                    body=encode(body).encode(), timeout=min(2, remaining(deadline))) as response:
+                raw = response.read(MAX_BYTES+1)
+            break
+        except transport.HTTPError as error:
+            raw = error.read(MAX_BYTES+1)
+            if len(raw) > MAX_BYTES:
+                raise WorkloadError('compilation_authority_response_oversized', 503)
+            value = json.loads(raw)
+            reason = value.get('error') if isinstance(value, dict) else None
+            if not isinstance(reason, str) or not reason:
+                raise WorkloadError('compilation_authority_refusal_missing_reason', 503)
+            raise WorkloadError(reason[:1024], error.code) from error
+        except OSError as error:
+            # verify-compilation is a read, so a lost connection is retried
+            # inside this launch's wall deadline; an authority answer never is.
+            # One try over xc-win-1-wsl's 230 ms / ~10%-loss path refused
+            # launches mid-attempt (2026-10-02, docs/harmony-worker-enrolment.md).
+            logging.warning('compilation_authority_transport_retry: failure=%s %s',
+                            type(error).__name__, str(error)[:200])
+            time.sleep(min(.2, remaining(deadline)))
     if len(raw) > MAX_BYTES:
         raise WorkloadError('compilation_authority_response_oversized', 503)
     return json.loads(raw)
@@ -289,7 +299,7 @@ def main():
     args = parser.parse_args()
     config = trusted_json(args.config, secret=True)
     with LaunchServer(config) as server:
-        logging.basicConfig(level=logging.INFO, handlers=[RotatingFileHandler(
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', handlers=[RotatingFileHandler(
             Path(config['socket']).parent/'verifier.log', maxBytes=2*1024**2, backupCount=2)])
         try:
             server.serve_forever(poll_interval=.2)

@@ -275,6 +275,28 @@ def test_verification_wall_deadline_refuses_slow_authority(verifier, authority, 
     assert not (root/'compiler-started').exists()
 
 
+def test_dropped_authority_connection_is_retried_within_the_deadline(verifier, authority):
+    # xc-win-1-wsl, 2026-10-02: the verifier's one authority request crossed a
+    # 230 ms / ~10%-loss path; one lost connection refused the launch
+    # (compilation_verification_unavailable) and threw away a multi-minute e2e
+    # attempt after ten good launches. The authority drops a connection here the
+    # way its own BoundedRequests does at its connection bound.
+    _, executor, _, _, _, root, _ = verifier
+    server = authority[0]['caller'].fixture_server
+    original, dropped = server.process_request, []
+    def drop_first(request, client_address):
+        if not dropped:
+            dropped.append(client_address)
+            return server.shutdown_request(request)
+        return original(request, client_address)
+    server.process_request = drop_first
+    output = launch(verifier, IMPORTS+"Path(os.environ['TEST_ROOT'],'compiler-started').write_text('ok')\n")
+    result = until(lambda: executor.exit_result(output), 10)
+    assert dropped
+    assert result['exit_code'] == 0, (output/'command.log').read_text()
+    assert (root/'compiler-started').exists()
+
+
 def test_current_receipt_is_bounded_and_refusal_replaces_success(verifier):
     _, executor, _, _, _, root, _ = verifier
     output = launch(verifier, '''import json,os
