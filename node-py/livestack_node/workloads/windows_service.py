@@ -106,7 +106,7 @@ class Service:
             self.target()
         except BaseException as error:  # noqa: BLE001 - recorded, then the process fails
             self.failed = error
-            logging.error('windows service thread ended: %s', ''.join(traceback.format_exception(error))[-4000:])
+            logging.error('windows service thread ended: %s', ''.join(traceback.format_exception(type(error), error, error.__traceback__))[-4000:])
         self.stop.set()
 
     def _service_main(self, argc, argv):
