@@ -59,20 +59,25 @@ if (Get-LocalUser -Name $Account -ErrorAction SilentlyContinue) {
 }
 $sid = (Get-LocalUser -Name $Account).SID.Value
 
-# --- Log on as a service ----------------------------------------------------
+# --- user rights: Log on as a service; create symbolic links ----------------
+# Symlinks: handlers restore the links a captured source tree carries
+# (Benchday's restoreSourceLinks); without the right they fail EPERM.
 $work = Join-Path $env:TEMP ('secpol-' + [guid]::NewGuid())
 New-Item -ItemType Directory $work | Out-Null
 try {
-  secedit /export /cfg "$work\cur.inf" /areas USER_RIGHTS | Out-Null
-  $line = (Get-Content "$work\cur.inf" | Where-Object { $_ -like 'SeServiceLogonRight*' })
-  # secedit names a resolvable account by NAME, otherwise by *SID.
-  $held = ($line -split '=', 2)[-1].Split(',') | ForEach-Object { $_.Trim() }
-  if (-not ($held -contains "*$sid" -or $held -contains $Account)) {
-    $value = if ($line) { ($line -split '=', 2)[1].Trim() + ",*$sid" } else { "*$sid" }
-    @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1',
-      '[Privilege Rights]', "SeServiceLogonRight = $value") | Set-Content "$work\new.inf" -Encoding Unicode
-    secedit /configure /db "$work\new.sdb" /cfg "$work\new.inf" /areas USER_RIGHTS | Out-Null
-    Step 'granted SeServiceLogonRight'
+  foreach ($right in @('SeServiceLogonRight', 'SeCreateSymbolicLinkPrivilege')) {
+    secedit /export /cfg "$work\cur.inf" /areas USER_RIGHTS | Out-Null
+    $line = (Get-Content "$work\cur.inf" | Where-Object { $_ -like "$right*" })
+    # secedit names a resolvable account by NAME, otherwise by *SID.
+    $held = ($line -split '=', 2)[-1].Split(',') | ForEach-Object { $_.Trim() }
+    if (-not ($held -contains "*$sid" -or $held -contains $Account)) {
+      $value = if ($line) { ($line -split '=', 2)[1].Trim() + ",*$sid" } else { "*$sid" }
+      @('[Unicode]', 'Unicode=yes', '[Version]', 'signature="$CHICAGO$"', 'Revision=1',
+        '[Privilege Rights]', "$right = $value") | Set-Content "$work\new.inf" -Encoding Unicode
+      secedit /configure /db "$work\new.sdb" /cfg "$work\new.inf" /areas USER_RIGHTS | Out-Null
+      Remove-Item "$work\new.sdb" -ErrorAction SilentlyContinue
+      Step "granted $right"
+    }
   }
 } finally { Remove-Item -Recurse -Force $work }
 
