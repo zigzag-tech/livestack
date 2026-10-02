@@ -60,7 +60,7 @@ data=json.load(sys.stdin);root=Path(data['root']);root.mkdir(mode=0o755)
                        registry={'version': 1, 'slots': {'builder': endpoint}})), text=True)
     log = (tmp_path/'verifier.log').open('w')
     process = subprocess.Popen(['sudo', '-n', '/usr/bin/env',
-        'PYTHONPATH='+str(Path(__file__).resolve().parents[1]), sys.executable,
+        'PYTHONPATH='+str(Path(__file__).resolve().parents[1]), sys.executable, '-B',
         '-m', 'livestack_node.workloads.launch_verifier', '--config', runtime+'/config.json'],
         stdout=log, stderr=log)
     executor = SystemdExecutor('builder')
