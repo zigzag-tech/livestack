@@ -609,3 +609,15 @@ klein's page cache). One e2e attempt ran on zz-joe-e2e-1; a second would see
 `free = 18.8 - 1 - (10 - 0.7) - 0 ≈ 8.5 GiB < claim 10 GiB` (the claim is still the
 cache-inclusive `memory_peak_bytes` until succeeded attempts carry
 `memory_nonreclaimable_peak_bytes`).
+
+### 2026-10-02: a breach of the job's OWN limit ends the job, it does not retry
+
+A resource-limit event stays an infrastructure outcome (the product code is not
+wrong), but the authority no longer re-queues it: the limit that killed it is the
+job's own `need` (or the handler's `max_tasks`), so a retry runs the same spec
+into the same cap and near the line passes only by luck. Seen with Benchday's
+first admitted macOS release build (job `cb5fc699`, attempt `9b6c583a`): footprint
+peak 6,472,464,832 B against a 6 GiB need, killed, re-queued, and heading for the
+same kill. The job now fails with `reason` = `resource limit: …` naming the peak
+and the declared need; the caller raises its need. An infrastructure end without
+a limit breach still retries.
