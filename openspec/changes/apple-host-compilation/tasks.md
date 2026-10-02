@@ -24,8 +24,8 @@ on the job (`jobs.reason`), which these tasks keep.
 
 ## 4. Deployment (operational evidence in `_plans/durable-workloads.md`)
 
-- [ ] 4.1 Authority runs the new class before policy names it; policy grants `apple` to xc-mac-studio only, in a window agreed with the policy owner.
-- [ ] 4.2 xc-mac-studio host worker (LaunchAgent, bounded APFS workspace volume) and root verifier (LaunchDaemon) installed; a real Apple build admitted there and the same handler refused on another host.
+- [x] 4.1 Authority runs the new class before policy names it; policy grants `apple` to xc-mac-studio only, in a window agreed with the policy owner.
+- [x] 4.2 xc-mac-studio host worker (LaunchAgent, bounded APFS workspace volume) and root verifier (LaunchDaemon) installed; a real Apple build admitted there and the same handler refused on another host.
 
 ## Evidence (2026-10-02)
 
@@ -38,3 +38,16 @@ on the job (`jobs.reason`), which these tasks keep.
 - zz-joe (Linux): policy, full launch verifier, worker, supervision, host memory, service suites:
   116 passed, 10 skipped (the macOS suite), 164 s. Includes the new
   `test_apple_class_granted_only_by_policy`.
+
+## Deployment record (2026-10-02)
+
+- Authority (xc-tower-ubuntu) restarted 05:34 UTC on the running release plus exactly the `CLASSES`
+  line and the `74745b1f` renewal comparison; parsed policy v2 first; all four running e2e attempts renewed.
+- Policy `benchday-compilation-20261002-v3` (05:35 UTC): v2 plus `apple` on xc-mac-studio only; running
+  attempts kept their v2 receipts (widening-tolerant renewal live).
+- xc-mac-studio host worker `xc-mac-studio-apple` (LaunchAgent, `/usr/bin/python3`, release
+  `apple-8ba23c46`, APFS quota volume `HarmonyAppleWork` 40 GB) and root verifier LaunchDaemon
+  `io.livestack.harmony-compilation-ee8f14cf8c6c5b50`; enabled 05:36 UTC.
+- Real Apple build admitted there (attempt `75d1d038`, classes apple/native/rust, v3): Mach-O arm64
+  Benchday CLI, build 9001. Same handler refused by policy on zz-joe, xc-win-1, the tower and the
+  laptop. Benchday evidence: `openspec/changes/apple-builds-run-on-an-admitted-mac/evidence/`.
