@@ -73,8 +73,10 @@ try:
 finally:server.shutdown()
 ''')
     try:
+        environment = dict(os.environ)
+        environment.pop('PYTHONPATH', None)
         executor.start(attempt, [sys.executable, str(script), IMAGE, str(output), str(endpoint), address],
-                       tmp_path, output, env=dict(os.environ), cpu=1, memory_bytes=768*1024**2,
+                       tmp_path, output, env=environment, cpu=1, memory_bytes=768*1024**2,
                        rootless_docker=True, rootless_native=True, native_host_address=address,
                        max_seconds=120, tasks=512)
         connection, _ = peer.accept()

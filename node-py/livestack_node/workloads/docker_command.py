@@ -11,6 +11,9 @@ import subprocess
 import sys
 import time
 
+# This installed entry point is invoked by filename with the handler's minimal
+# environment. Resolve its own selected SDK rather than inherited PYTHONPATH.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from livestack_node.workloads.docker_host_route import canonical_address
 
 
