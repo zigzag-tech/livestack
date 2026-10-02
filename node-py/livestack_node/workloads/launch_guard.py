@@ -4,6 +4,7 @@ import fcntl
 import json
 import logging
 import os
+import stat
 from pathlib import Path
 import sys
 
@@ -13,6 +14,8 @@ from .model import WorkloadError, encode
 
 
 def write_current_receipt(output, compilation_class, value):
+    if not isinstance(compilation_class,str) or compilation_class not in CLASSES:
+        raise WorkloadError('compilation_launch_class_invalid',403)
     if not output or not Path(output).is_dir():
         raise WorkloadError('compilation_launch_receipt_directory_unavailable', 503)
     # Six finite class names (CLASSES), one atomically replaced current receipt each.
@@ -20,16 +23,32 @@ def write_current_receipt(output, compilation_class, value):
     path = Path(output)/('compilation-'+compilation_class+'.json')
     temporary = path.with_suffix('.tmp')
     raw = encode(value, MAX_BYTES)
-    with path.with_suffix('.lock').open('a') as lock:
+    lock_path=path.with_suffix('.lock')
+    try:
+        descriptor=os.open(lock_path,os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC,0o600)
+    except OSError as error:
+        raise WorkloadError('compilation_launch_receipt_lock_invalid',503) from error
+    with os.fdopen(descriptor,'w') as lock:
+        metadata=os.fstat(lock.fileno())
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size!=0 or metadata.st_nlink!=1:
+            raise WorkloadError('compilation_launch_receipt_lock_invalid',503)
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise WorkloadError('compilation_launch_receipt_busy', 503) from error
-        with temporary.open('w') as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        try:
+            descriptor=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
+        except OSError as error:
+            raise WorkloadError('compilation_launch_receipt_staging_invalid',503) from error
+        try:
+            with os.fdopen(descriptor,'w') as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary,path)
+        finally:
+            # Remove only this invocation's exclusively created staging file.
+            if temporary.exists():temporary.unlink()
 
 
 def require_compilation(compilation_class, *, registry_path=REGISTRY):

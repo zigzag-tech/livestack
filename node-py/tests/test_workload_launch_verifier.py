@@ -55,7 +55,7 @@ data=json.load(sys.stdin);root=Path(data['root']);root.mkdir(mode=0o755)
 (root/'config.json').write_text(json.dumps(data['config']));(root/'config.json').chmod(0o600)
 (root/'registry.json').write_text(json.dumps(data['registry']));(root/'registry.json').chmod(0o644)
 '''
-    subprocess.run(['sudo', '-n', sys.executable, '-c', setup], check=True,
+    subprocess.run(['sudo', '-n', sys.executable, '-B', '-c', setup], check=True,
                    input=json.dumps(dict(root=runtime, config=config,
                        registry={'version': 1, 'slots': {'builder': endpoint}})), text=True)
     log = (tmp_path/'verifier.log').open('w')
@@ -201,7 +201,7 @@ def test_root_registry_cannot_bless_fake_nonroot_socket(verifier):
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as fake:
         fake.bind(endpoint)
         fake.listen(1)
-        subprocess.run(['sudo', '-n', sys.executable, '-c',
+        subprocess.run(['sudo', '-n', sys.executable, '-B', '-c',
             'import json,sys;open(sys.argv[1],"w").write(json.dumps({"version":1,"slots":{"builder":sys.argv[2]}}))',
             registry, endpoint], check=True)
         with pytest.raises(WorkloadError, match='compilation_verifier_peer_untrusted'):
@@ -216,7 +216,7 @@ root=Path(sys.argv[1]);config=json.loads((root/'config.json').read_text())
 config['machine_id']='0'*32;config['socket']=str(root/'wrong.sock')
 path=root/'wrong-config.json';path.write_text(json.dumps(config));path.chmod(0o600)
 '''
-    subprocess.run(['sudo', '-n', sys.executable, '-c', change, runtime], check=True)
+    subprocess.run(['sudo', '-n', sys.executable, '-B', '-c', change, runtime], check=True)
     result = subprocess.run(['sudo', '-n', '/usr/bin/env',
         'PYTHONPATH='+str(Path(__file__).resolve().parents[1]), sys.executable,
         '-m', 'livestack_node.workloads.launch_verifier', '--config', runtime+'/wrong-config.json'],
