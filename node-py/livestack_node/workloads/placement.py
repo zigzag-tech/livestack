@@ -14,6 +14,60 @@ from .model import AVOID_LABEL_SIGNATURE, AVOID_LABEL_WORKER, WorkloadError, enc
 # relative to a recovery: a lone worker that heals is used again after this.
 AVOID_SECONDS = 1800
 
+# Measured-host memory (openspec/changes/host-memory-ledger). A host whose
+# workers report a `host` block is charged learned claims, not admit vectors,
+# for memory; hosts without one are placed exactly as before.
+MEMORY = "memory_bytes"
+# A handler's claim is the max memory_peak_bytes over its last N recorded
+# attempts: it follows a handler that grew or shrank within a day of traffic.
+LEARNED_WINDOW = 20
+# Admission stops on a host that is already stalling on memory. avg60, not
+# avg10, so one burst does not flap admission. 16 MiB/s of swap-in is ~4k
+# pages/s: far above an idle server faulting back in (zz-joe at rest: <10/s).
+# IO pressure is not gated: an attempt's own image build saturates IO legitimately.
+PRESSURE_MEMORY_FULL_AVG60 = 5.0
+PRESSURE_SWAP_IN_BYTES_PER_SECOND = 16 * 1024**2
+
+
+def _gib(n):
+    return f"{n / 1024**3:.1f}"
+
+
+def _learned_peak(db, handler, cache):
+    if handler not in cache:
+        peaks = [r[0] for r in db.execute(
+            "SELECT json_extract(a.result,'$.result.resources.memory_peak_bytes') FROM attempts a "
+            "JOIN jobs j ON j.id=a.job WHERE json_extract(j.spec,'$.handler')=? "
+            "AND json_extract(a.result,'$.result.resources.memory_peak_bytes') IS NOT NULL "
+            "ORDER BY a.created DESC LIMIT ?", (handler, LEARNED_WINDOW))
+            if isinstance(r[0], (int, float)) and not isinstance(r[0], bool)]
+        cache[handler] = max(peaks) if peaks else None
+    return cache[handler]
+
+
+def _memory_claim(db, spec, cache):
+    """What an attempt of this job will hold: its handler's learned peak within
+    [admit, need], or `need` (its cgroup MemoryMax) until a peak is recorded.
+    None when the job declares no memory."""
+    need = spec["need"].get(MEMORY)
+    if need is None:
+        return None
+    admit = (spec.get("admit") or spec["need"]).get(MEMORY, need)
+    learned = _learned_peak(db, spec["handler"], cache)
+    return need if learned is None else min(need, max(admit, learned))
+
+
+def _pressure(view):
+    memory = (view.get("psi") or {}).get("memory") or {}
+    full = memory.get("full_avg60")
+    if full is not None and full >= PRESSURE_MEMORY_FULL_AVG60:
+        return f"host memory pressure: memory full avg60 {full:.1f}% (limit {PRESSURE_MEMORY_FULL_AVG60:g}%)"
+    swap = view.get("swap_in_bytes_per_second")
+    if swap is not None and swap >= PRESSURE_SWAP_IN_BYTES_PER_SECOND:
+        return (f"host memory pressure: swap-in {swap / 1024**2:.1f} MiB/s "
+                f"(limit {PRESSURE_SWAP_IN_BYTES_PER_SECOND / 1024**2:g} MiB/s)")
+    return None
+
 
 def _compilation_refusal(policy, worker, spec, now):
     if policy is None or not policy.required(spec['handler']):
@@ -68,7 +122,8 @@ def place(db, now, limits, principals=None, compilation_policy=None):
     # to clean up (`register` reports it), which is what actually stops its
     # containers.
     active = db.execute(
-        "SELECT a.* FROM attempts a JOIN workers w ON w.id=a.worker "
+        "SELECT a.*, j.spec AS job_spec FROM attempts a JOIN workers w ON w.id=a.worker "
+        "JOIN jobs j ON j.id=a.job "
         "WHERE a.state IN ('running','cleanup') "
         "AND NOT (a.state='cleanup' AND w.seen<?)",
         (now-limits.cleanup_seconds,)).fetchall()
@@ -132,6 +187,41 @@ def place(db, now, limits, principals=None, compilation_policy=None):
             k: max(previous.get(k, 0), observed.get(k, 0)) for k in previous.keys() | observed.keys()}
     host_free = {h: {k: max(0, v - used.get(h, {}).get(k, 0)) for k, v in obs.items()}
                  for h, obs in host_observed.items()}
+    # Memory on a measured host: the freshest `host` block is the machine's view.
+    # Its MemAvailable already contains every tenant's current use, so only the
+    # unrealised part of each claim is still to come. Model servers are charged
+    # their largest outstanding transient (not the sum: independent servers'
+    # load spikes summed exceed zz-joe's RAM, and coincident spikes are what the
+    # pressure gate catches).
+    views, seen = {}, {}
+    for w in workers:
+        view = reports[w["id"]].get("host")
+        if view is not None and w["seen"] >= seen.get(w["host"], float("-inf")):
+            views[w["host"]], seen[w["host"]] = view, w["seen"]
+    learned = {}
+    pressure, memory_terms = {}, {}
+    for h, view in views.items():
+        reason = _pressure(view)
+        if reason:
+            pressure[h] = reason
+        pending = 0
+        for a in active:
+            if a["host"] != h:
+                continue
+            claim = _memory_claim(db, json.loads(a["job_spec"]), learned)
+            if claim is not None:
+                pending += max(0, claim - view["attempts"].get(a["id"], 0))
+        services = max((max(0, s["peak_bytes"] - s["current_bytes"]) for s in view["services"].values()),
+                       default=0)
+        memory_terms[h] = dict(available=view["memory_available_bytes"], reserve=view["memory_reserve_bytes"],
+                               attempts=pending, services=services, admitted=0)
+        host_free.setdefault(h, {})[MEMORY] = max(0, view["memory_available_bytes"]
+                                                  - view["memory_reserve_bytes"] - pending - services)
+        for w in workers:
+            if w["host"] == h:
+                # The configured capacity (or the measured MemTotal) stays a
+                # per-identity ceiling; the measured host decides the rest.
+                worker_free[w["id"]][MEMORY] = reports[w["id"]]["capacity"].get(MEMORY, 0)
     # Priority is caller intent, while Harmony still owns capability/resource
     # admission and the final worker choice. Legacy persisted specs omit the
     # field and retain their original priority-zero FIFO behavior.
@@ -150,6 +240,7 @@ def place(db, now, limits, principals=None, compilation_policy=None):
         # attempt's cgroup. Omitting `admit` submits need as both, which is
         # exactly the behavior every existing caller already has.
         admit = spec.get("admit") or spec["need"]
+        claim = _memory_claim(db, spec, learned) if views else None
         targets = []
         rejected = []
         compatible = [w for w in workers if spec["handler"] in reports[w["id"]]["handlers"]]
@@ -183,8 +274,18 @@ def place(db, now, limits, principals=None, compilation_policy=None):
                 reason = "worker holds an active attempt or cleanup"
             elif any(report["labels"].get(k) != v for k, v in spec["selector"].items()):
                 reason = "required capability absent"
+            elif w["host"] in pressure:
+                reason = pressure[w["host"]]
+            elif (w["host"] in views and claim is not None and
+                  min(host_free[w["host"]][MEMORY], worker_free[w["id"]].get(MEMORY, 0)) < claim):
+                t = memory_terms[w["host"]]
+                reason = (f"insufficient host memory: claim {_gib(claim)} GiB > free "
+                          f"{_gib(min(host_free[w['host']][MEMORY], worker_free[w['id']].get(MEMORY, 0)))} GiB "
+                          f"(available {_gib(t['available'])}, reserve {_gib(t['reserve'])}, "
+                          f"running attempts {_gib(t['attempts'])}, model servers {_gib(t['services'])}, "
+                          f"admitted now {_gib(t['admitted'])})")
             elif any(min(host_free[w["host"]].get(k, 0), worker_free[w["id"]].get(k, 0)) < n
-                     for k, n in admit.items()):
+                     for k, n in admit.items() if not (k == MEMORY and w["host"] in views and claim is not None)):
                 # One reason for both bounds: a caller can act on neither
                 # differently, and the distinct figures are already in the
                 # worker report the refusal is recorded against.
@@ -222,5 +323,10 @@ def place(db, now, limits, principals=None, compilation_policy=None):
                    (fence, now, grants[0].reason, row["id"]))
         busy.add(chosen["id"])
         running[row["owner"]] = running.get(row["owner"], 0) + 1
+        measured = chosen["host"] in views and claim is not None
         for k, n in admit.items():
-            host_free[chosen["host"]][k] -= n
+            if not (k == MEMORY and measured):
+                host_free[chosen["host"]][k] -= n
+        if measured:
+            host_free[chosen["host"]][MEMORY] -= claim
+            memory_terms[chosen["host"]]["admitted"] += claim

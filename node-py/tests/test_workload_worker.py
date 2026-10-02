@@ -972,3 +972,36 @@ def test_refused_runtime_cleanup_never_blocks_claiming_and_logs_once(fleet, tmp_
         assert not stuck.exists() and worker.stuck_runtimes == set()
     finally:
         worker.close()
+
+
+def test_report_carries_the_measured_host_and_every_running_attempt(fleet):
+    """openspec/changes/host-memory-ledger: no `capacity` means the measured
+    machine, and the report names each running attempt's real cgroup memory so a
+    SIBLING identity's report (here a second HostView) charges it too."""
+    from livestack_node.hostview import HostView, meminfo
+    store, config, caller, digest = fleet
+    del config['capacity']
+    config['status_report_seconds'] = .2
+    job = submit(caller, digest, sleep=3)
+    worker = WorkloadWorker(config)
+    stepped = Thread(target=worker.step)
+    try:
+        stepped.start()
+        sibling, seen = HostView(), None
+        deadline = time.monotonic()+20
+        while time.monotonic() < deadline and not seen:
+            attempts = caller.get(job['id'])['attempts']
+            if attempts:
+                seen = sibling.sample()['attempts'].get(attempts[0]['id'])
+            time.sleep(.05)
+        assert seen and seen > 0, 'the running attempt cgroup must be visible host-wide'
+        with store.transaction() as db:
+            report = json.loads(db.execute('SELECT report FROM workers').fetchone()['report'])
+        assert report['capacity']['memory_bytes'] == meminfo()['total']
+        assert report['host']['memory_total_bytes'] == meminfo()['total']
+        assert set(report['host']['psi']) == {'memory', 'io', 'cpu'}
+        stepped.join(timeout=30)
+        assert caller.get(job['id'])['result']['result']['resources']['memory_peak_bytes'] > 0
+    finally:
+        stepped.join(timeout=30)
+        worker.close()
