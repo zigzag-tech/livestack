@@ -6,6 +6,10 @@ supervisor must stop that cgroup even when the immediate command has exited.
 macOS: runs as the attempt's launchd job, which has no cgroup, so this wrapper
 also enforces the limits launchd holds in its argv (`--memory-bytes`, `--tasks`,
 `--max-seconds`): see DarwinLimits.
+
+Windows: runs inside the attempt's Job Object, which the kernel bounds (commit,
+process count, CPU rate); this wrapper turns the job's limit notifications into
+the Linux receipt fields and enforces wall time: see WindowsLimits.
 """
 from __future__ import annotations
 
@@ -17,10 +21,14 @@ import signal
 import subprocess
 import sys
 import selectors
+import threading
+import queue
 import time
 
 if sys.platform == 'darwin':
     import darwin_proc
+elif sys.platform == 'win32':
+    import windows_proc
 else:
     from resource_usage import resource_usage
 
@@ -84,6 +92,75 @@ class DarwinLimits:
                     cpu_usage_usec=int((usage.ru_utime+usage.ru_stime)*1e6))
 
 
+class WindowsLimits:
+    """The job's kernel limits, observed: a memory-limit notification kills the
+    rest of the job (as cgroup OOMPolicy=kill does) and records oom_kill; a
+    process-limit notification records pids_max_events (a refused spawn, as on
+    Linux); wall time is enforced here."""
+
+    def __init__(self, job_name, max_seconds):
+        self.max_seconds = max_seconds
+        self.started = time.monotonic()
+        self.job = windows_proc.Job.open(job_name)
+        # Holding this handle keeps the job, and so its name, alive across a
+        # worker restart; the worker created it with kill-on-close.
+        if self.job is None or not self.job.contains(windows_proc._k32().GetCurrentProcess()):
+            raise SystemExit(75)
+        self.port = self.job.watch()
+        self.oom_kill = 0
+        self.pids_max_events = 0
+
+    def check(self):
+        messages = windows_proc.limit_messages(self.port)
+        breach = None
+        if windows_proc.JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT in messages:
+            self.pids_max_events = 1
+        if windows_proc.JOB_OBJECT_MSG_JOB_MEMORY_LIMIT in messages:
+            self.oom_kill, breach = 1, 'memory'
+        elif time.monotonic()-self.started > self.max_seconds:
+            breach = 'wall time'
+        if breach:
+            self.kill()
+        return breach
+
+    def kill(self):
+        # The parent too: a venv's python.exe is a launcher that runs the real
+        # interpreter as its child and dies with it (kill-on-close job).
+        if not self.job.kill_others({os.getpid(), os.getppid()}):
+            # Something keeps respawning: end the whole job, this wrapper too.
+            # No receipt means the worker reports an infrastructure stop.
+            self.job.terminate()
+
+    def resources(self):
+        limits, accounting = self.job.limits(), self.job.accounting()
+        return dict(memory_peak_bytes=limits['peak_memory_bytes'], tasks_peak=accounting['total'],
+                    oom_kill=self.oom_kill, pids_max_events=self.pids_max_events,
+                    cpu_usage_usec=accounting['cpu_usage_usec'])
+
+
+class _PipeReader:
+    """Windows select() takes sockets only: read the pipe on a thread."""
+
+    def __init__(self, pipe, chunk):
+        self.chunks = queue.Queue(maxsize=64)
+        self.thread = threading.Thread(target=self._read, args=(pipe, chunk), daemon=True)
+        self.thread.start()
+
+    def _read(self, pipe, chunk):
+        while True:
+            data = os.read(pipe.fileno(), chunk)
+            self.chunks.put(data)
+            if not data:
+                return
+
+    def read(self, timeout):
+        """bytes, b'' at end of stream, or None when nothing arrived."""
+        try:
+            return self.chunks.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+
 def run(config_path, limits=None):
     config = json.loads(Path(config_path).read_text())
     output = Path(config['output'])
@@ -93,8 +170,11 @@ def run(config_path, limits=None):
     log = output/'command.log'
     stream = log.open('wb')
     size = 0
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ)
+    if sys.platform == 'win32':
+        selector, reader = None, _PipeReader(process.stdout, min(65536, limit))
+    else:
+        reader, selector = None, selectors.DefaultSelector()
+        selector.register(process.stdout, selectors.EVENT_READ)
     pipe_open = True
     try:
         while True:
@@ -113,11 +193,20 @@ def run(config_path, limits=None):
                 limits.check()
             if not pipe_open and process.poll() is not None:
                 break
-            if not selector.select(timeout=.1):
+            if not pipe_open:
+                time.sleep(.1)
                 continue
-            chunk = os.read(process.stdout.fileno(), min(65536, limit))
+            if reader is not None:
+                chunk = reader.read(.1)
+                if chunk is None:
+                    continue
+            else:
+                if not selector.select(timeout=.1):
+                    continue
+                chunk = os.read(process.stdout.fileno(), min(65536, limit))
             if not chunk:
-                selector.unregister(process.stdout)
+                if selector is not None:
+                    selector.unregister(process.stdout)
                 pipe_open = False
                 continue
             if size + len(chunk) > limit:
@@ -144,12 +233,21 @@ def run(config_path, limits=None):
             # dies with the attempt, as a cgroup's would; so does everything
             # when the lease lapses (SystemExit 75 above).
             limits.kill()
-        selector.close()
+        if selector is not None:
+            selector.close()
         stream.close()
         process.stdout.close()
 
 
 def main(argv):
+    if sys.platform == 'win32':
+        parser = argparse.ArgumentParser()
+        parser.add_argument('config')
+        parser.add_argument('--job', required=True)
+        parser.add_argument('--max-seconds', type=int, required=True)
+        args = parser.parse_args(argv)
+        run(args.config, WindowsLimits(args.job, args.max_seconds))
+        return
     if sys.platform != 'darwin':
         run(argv[0])
         return

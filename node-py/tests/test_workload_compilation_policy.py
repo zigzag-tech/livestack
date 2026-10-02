@@ -258,6 +258,48 @@ def test_apple_class_granted_only_by_policy(tmp_path):
         server.server_close()
 
 
+def test_windows_class_granted_only_by_policy(tmp_path):
+    """openspec/changes/windows-host-worker: a Windows handler advertised by a
+    host whose policy lacks `windows` is refused by name; the Windows host is
+    placed. A WSL guest worker shares its physical host's grant."""
+    policy_path = tmp_path/'policy.json'
+    policy_path.write_text(json.dumps(dict(version=1, revision='windows-1', expires=time.time()+3600,
+        hosts={'linux-builder': ['rust', 'native'], 'win': ['windows', 'rust', 'native']},
+        enrollments={'linux-builder': 'linux-builder', 'win': 'win'})))
+    policy_path.chmod(0o600)
+    store = WorkloadStore(tmp_path/'jobs.db', handlers={'windows.v1'}, limits=Limits(),
+        compilation_policy=CompilationPolicy(policy_path, {'windows.v1': ['windows', 'rust']}))
+    principals = [Principal('caller', 'c'*32, 'caller', ('windows.v1',)),
+                  Principal('linux-builder', '1'*32, 'worker', worker='linux-builder', host='linux-builder'),
+                  Principal('win', '2'*32, 'worker', worker='win-native', host='win')]
+    server = WorkloadServer(('127.0.0.1', 0), store, principals)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f'http://127.0.0.1:{server.server_port}'
+        clients = {p.id: WorkloadClient(url, p.token) for p in principals}
+        data = b'windows source fixture'
+        digest = hashlib.sha256(data).hexdigest()
+        server.blobs.put('caller', digest, len(data), BytesIO(data))
+        job = clients['caller'].request('jobs', dict(version=1, key='windows', handler='windows.v1',
+            input_digest=digest, need={'cpu': 1, 'memory_bytes': 768*1024**2}))
+        resources = {'cpu': 1, 'memory_bytes': 1024**3}
+        clients['linux-builder'].request('worker/report', dict(boot='boot', report=dict(
+            capacity=resources, available=resources, labels={}, handlers=['windows.v1'], ready=True)))
+        assert claim(clients, 'linux-builder') is None
+        assert 'compilation_not_admitted: operator host policy' in clients['caller'].request('jobs/'+job['id'])['reason']
+        clients['win'].request('worker/report', dict(boot='boot', report=dict(
+            capacity=resources, available=resources, labels={}, handlers=['windows.v1'], ready=True)))
+        assignment = claim(clients, 'win')
+        assert assignment['job_id'] == job['id']
+        assert assignment['compilation']['classes'] == ['rust', 'windows']
+        assert assignment['compilation']['host'] == 'win'
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+        server.server_close()
+
+
 def renew(clients, assignment):
     return clients['builder'].request('worker/heartbeat', dict(boot='boot',
         attempt_id=assignment['attempt_id'], fence=assignment['fence']))

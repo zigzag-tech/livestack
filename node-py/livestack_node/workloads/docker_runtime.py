@@ -136,12 +136,14 @@ def remove_data(root):
     The controller retains the cleanup claim until this finite operation ends.
     Production controllers themselves run in a bounded systemd service.
     """
-    import subprocess
-    import resource
-    import tempfile
     data = Path(root)/'docker-data'
     if not data.exists():
         return
+    # After the check: `resource` does not exist on Windows workers, which
+    # never have Docker data.
+    import subprocess
+    import resource
+    import tempfile
     if data.is_symlink() or data.resolve() != data:
         raise WorkloadError('Docker data is not in the private attempt tree', 503)
     # Diagnostics have an active kernel byte bound, no named file/history, and
