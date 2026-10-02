@@ -398,6 +398,34 @@ manager, coordinator = attach(
 `coload=True` (ASR's co-resident units) vs `False` (one-model-in-VRAM TTS engines) and
 which unit is HARD_PIN are the only things that differ between servers.
 
+### A node on the CPU: `backend="cpu"`
+
+GPU is the scarce resource here, and some models do not need one: a 384-dim
+MiniLM embeds a sentence in ~3 ms on a desktop CPU. `attach(..., backend="cpu")`
+says so ONCE, in the code that knows it, and three things follow:
+
+- every unit's `attributes.backend` is set to `"cpu"`, **overwriting** any
+  declared value — a unit file claiming `cuda` beside a CPU process is the
+  lying attribute, and would route a `backend=cuda` request to a CPU;
+- the node's device is `{machine}/cpu`, never a card's UUID (which an
+  importable torch on a GPU host would otherwise derive), so the planner models
+  its units on a device of their own and **never evicts a GPU unit to make room
+  for one**;
+- the device meter is host RAM (`capacity`/`free` = total/available), and CUDA
+  activation sampling is off.
+
+A consumer then states the need in the ordinary grammar —
+`require:class=embed,backend=cpu,model=<id>,quant=q8` — and a GPU embedder (the
+vLLM `class=embed` units, which declare no `backend`) can never satisfy it,
+because an undeclared attribute is not satisfied. Passing any other backend
+only stamps the attribute; device identity is unchanged.
+
+The first such node is `livestack_node.embedding.serve` — `POST /v1/embeddings`
+(OpenAI-shaped, `encoding_format: "base64"` for compact float32), ONNX Runtime
+on the CPU, one text per inference (q8 quantizes activations per tensor, so a
+batched text's vector would depend on its neighbours). Deployment and how to
+add a host: benchday `docs/cpu-embedder.md`.
+
 ## The fleet broker — one Harmony that can see every host
 
 Everything above is per-HOST: a broker arbitrating the model-server processes
@@ -1098,6 +1126,9 @@ up on stays filtered, however empty its card.
 - **xc-tower-ubuntu** (2x RTX 3090): `livestack-hostd.service` (:8799) brokers
   `polyasr` x2 + `polytts` + `harmony-llm`; **`livestack-fleetd.service` (:8801)**
   is the fleet broker — observe-only, peers on all three GPU hosts.
+- **zz-joe** (build/test host): `harmony-embed-cpu.service` (:8220) — the CPU
+  embedding node (`kind=embed`, device `zz-joe/cpu`), announced to its own
+  hostd and the fleet broker.
 
 ## Tests
 

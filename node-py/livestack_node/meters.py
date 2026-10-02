@@ -314,6 +314,24 @@ def auto_peak_meter() -> Optional[PeakMeter]:
     return None
 
 
+def host_ram_meter() -> Callable[[], Optional[dict]]:
+    """The meter for a node whose device IS the host CPU (``attach(backend="cpu")``).
+
+    Same shape as the card meters, so the planner and the fleet view need no
+    special case: capacity is system RAM, free is what the kernel says is
+    available. The key stays ``vram_bytes`` because that is the planner's one
+    memory dimension, and a ``{machine}/cpu`` device id is what says the bytes
+    are host RAM. ``None`` when RAM cannot be read, like every other meter.
+    """
+    def meter() -> Optional[dict]:
+        mem = host_mem()
+        if not mem or not mem.get("total_bytes") or mem.get("available_bytes") is None:
+            return None
+        return {"capacity": {"vram_bytes": int(mem["total_bytes"])},
+                "free": {"vram_bytes": int(mem["available_bytes"])}}
+    return meter
+
+
 # -- host RAM ---------------------------------------------------------------
 #
 # VRAM is what Harmony arbitrates; it is not all a node OCCUPIES. An ASR server
