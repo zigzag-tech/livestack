@@ -155,7 +155,9 @@ def unpack(bundle, destination, expected_digest, *, max_bytes=20*1024**3, max_fi
                 if path.stat().st_size != record['size'] or file_digest(path) != record['sha256']:
                     raise ValueError('manifest content mismatch')
                 mode = stat.S_IMODE(path.stat().st_mode)
-                if mode != record['mode']:
+                # Windows has no mode bits to compare (st_mode is 0o666 or the
+                # read-only 0o444); the manifest still carries them for handlers.
+                if os.name != 'nt' and mode != record['mode']:
                     raise ValueError('manifest mode mismatch')
         except (ValueError, KeyError, TypeError) as exc:
             raise WorkloadError('invalid source manifest') from exc

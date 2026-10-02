@@ -18,7 +18,9 @@ VERSION = 1
 MAX_BYTES = 16384
 # `apple`: the Xcode SDK, Apple linkers/signing tools and CocoaPods, which only
 # a macOS host has (openspec/changes/apple-host-compilation).
-CLASSES = frozenset({'rust', 'flutter', 'image', 'node', 'native', 'apple'})
+# `windows`: the MSVC toolchain, Windows SDK and signing tools, which only a
+# Windows host has (openspec/changes/windows-host-worker).
+CLASSES = frozenset({'rust', 'flutter', 'image', 'node', 'native', 'apple', 'windows'})
 
 
 @dataclass(frozen=True)
