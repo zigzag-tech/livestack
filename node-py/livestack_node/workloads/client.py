@@ -48,6 +48,12 @@ class WorkloadClient:
         from .model import name
         return self.request('jobs/'+name(job_id, 'job_id')+'/cancel', {})
 
+    def withdraw(self, job_id):
+        """Cancel only if no worker ever attempted the job; otherwise the job
+        is returned unchanged. Read `state` for the outcome."""
+        from .model import name
+        return self.request('jobs/'+name(job_id, 'job_id')+'/withdraw', {})
+
     def list_jobs(self):
         """This principal's most recent jobs (the authority bounds the page)."""
         return self.request('jobs')['jobs']
