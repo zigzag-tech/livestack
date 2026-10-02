@@ -530,3 +530,56 @@ attune jobs at cap 2 never block a benchday thumbnail; 429 on refuse;
 job-list `principal` block) and `tests/test_workload_progress.py` (a handler
 reporting `tts` then `stills` is read back in order; missing-heartbeat and
 absent cases).
+
+## Measured host memory and learned claims (2026-10-02)
+
+Change: `openspec/changes/host-memory-ledger/` (design, rollout, verification). This
+section supersedes two statements above: a worker's `capacity` is no longer the
+description of a host (it is an optional operator ceiling; absent, the worker offers
+the measured machine), and on a host whose workers report `host` the memory charge is
+a learned claim, not the `admit` vector. CPU and disk are unchanged.
+
+Deployed 2026-10-02 ~02:35–02:50 UTC:
+
+- Authority (xc-tower-ubuntu): release
+  `a8710d11…+placement5dd5992+hostledger49882a86`, drop-in
+  `livestack-workload-authority.service.d/40-host-ledger.conf`. Overlay of
+  `hostview.py`, `workloads/{placement,model}.py` and the `register` hunk of
+  `workloads/store.py` (the running release's `store.py` predates main's
+  terminal-result changes, so main's file was not copied). The 3 store tests that fail
+  on it (`*_terminal_reason`, `cleanup_flip_*`) fail identically on the previous release.
+- zz-joe workers `zz-joe-e2e-1`/`-2`: release `native-route-bbf4d538+hostledger59d121d3`
+  (workers do not run placement, so 49882a86's change does not apply to them),
+  drop-ins `40-host-ledger.conf`; configs (backups `*.bak-hostledger-20261002T*`) lost
+  `capacity` and the 4 GiB `memory_reserve_bytes` and gained `host_services` (klein-0/1,
+  harmony-image, polyasr, polytts, harmony-embed-cpu). Rolled through the authority's
+  drain (`claim_enabled: false`, restored afterwards), each worker restarted idle.
+- Every other worker is still on its old release and is placed exactly as before.
+
+What the first live decisions said (02:45 UTC, no e2e attempt running on zz-joe):
+
+    insufficient host memory: claim 10.0 GiB > free 3.7 GiB (available 18.8,
+    reserve 1.0, running attempts 0.0, model servers 14.0, admitted now 0.0)
+
+- The e2e claim is 10 GiB: the last 20 succeeded `benchday.e2e.full.v1` attempts peak
+  at 5.6–10.0 GiB (the 10.0s are the cgroup cap). The last 20 attempts of ANY outcome
+  peaked at 2.5–7.8 GiB because most died in preparation, which is why only successes
+  teach (49882a86).
+- The 14 GiB is `harmony-klein-0`'s load transient (`memory.peak` 16.0 GB, current
+  0.9 GB). klein is `ResidencyPolicy.UNPINNED` with `idle_seconds` 900, so it is evicted
+  between bursts and every burst after an idle period reloads it through host RAM
+  (FLUX.2-klein transformer + text encoder before NF4 quantisation). The transient
+  recurs; charging it is correct.
+- Only 18.8 of 31 GiB was available with nothing of ours running. `/proc/meminfo` showed
+  Zswap 6.3 GB holding 14.7 GB of compressed swap, and `/tmp` on zz-joe is a 16 GB
+  **tmpfs** holding 13 GB of agents' build/test trees (`/tmp/benchday-val` 4.4 G,
+  `benchday-stream-daemon` 3.7 G, `benchday-streams-core` 2.3 G, `benchday-e2e-tsx-hub`
+  1.5 G). tmpfs is RAM or swap; it belongs to no service, so no ledger can charge it,
+  and it is most of the 13 GiB of swap charged to `user-1000.slice` with no live child.
+
+So zz-joe cannot hold one e2e attempt (10 GiB) beside klein's reload (14 GiB) on what
+is left after `/tmp`; the authority now says so instead of admitting two and swapping.
+Remedies are outside the ledger: put build trees on disk (or `/tmp` on disk on a build
+host), make klein's load stream to the GPU instead of materialising ~16 GB in host RAM,
+or move klein. Not done here: the GPU planner does not yet consult the host view before
+a model load (design §6), and no worker other than zz-joe's sends `host`.
