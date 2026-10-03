@@ -1230,6 +1230,9 @@ def wait_running(worker):
 
 def test_short_authority_outage_does_not_stop_a_healthy_attempt(outage, caplog):
     hop, store, config, caller, digest = outage
+    # Keep enough lease headroom for scheduler pauses during the whole worker
+    # module; the simulated authority outage remains much shorter than this.
+    store.limits = Limits(lease_seconds=15)
     caplog.set_level(logging.INFO)
     job = submit(caller, digest, sleep=6)
     worker = WorkloadWorker(config)
