@@ -41,6 +41,12 @@ Control bodies are limited to 64 KiB. Other routes are refused at the relay,
 and object traffic remains subject to its monthly byte budget. The workload
 authority stays bound to `100.64.0.18:8810` on Headscale.
 
+The GitHub worker's source and artifact transfers use `object_relay` pointed at
+the same public relay URL and authenticated with the existing
+`HARMONY_EDGE_KEY`. The attempt-scoped worker token still authenticates the
+transfer to Harmony; the edge key only admits the relay hop. Keep both headers
+on relay object requests so the relay can strip its key before forwarding.
+
 The six existing Apple signing values remain repository-level GitHub secrets;
 their encrypted values cannot be moved into an environment without their
 original plaintext source. The fixed workflow references them only from the
@@ -52,11 +58,11 @@ scope changes the storage scope of the existing Apple secrets.
 
 Use a new lightweight release-workflow tag for every security-sensitive change;
 never move an existing tag. The current target is
-`benchday-ios-remote-v5`. The authority verifies that its commit SHA is on the
+`benchday-ios-remote-v7`. The authority verifies that its commit SHA is on the
 allowlist before dispatch. Set both `workflow_ref` values to:
 
 ```
-settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v5
+settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v7
 ```
 
 The provider's `workflow_path` is
@@ -97,14 +103,14 @@ the existing GitHub repository and the landed tag; do not print credentials.
         "labels": {"os": "macos", "signing": "apple"},
         "slots": 1,
         "workflow_path": ".github/workflows/release-ios-harmony.yml",
-        "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v5",
+        "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v7",
         "workflow_id": 12345678,
         "identity": {
           "repository": "settinghead/benchday",
           "repository_id": "REPOSITORY_ID",
-          "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v5",
+          "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v7",
           "workflow_id": 12345678,
-          "workflow_sha": ["2f78388446de1c4b001e916c4c387542db642083"],
+          "workflow_sha": ["ff7f825d2cd3a71e42bff49adf9c64dddc2ae9a9"],
           "event_name": "workflow_dispatch",
           "job_name": "Build and upload iOS",
           "audience": "harmony",
@@ -125,6 +131,19 @@ Mac pool: one slot, 3 CPU, 9 GiB memory, and 12 GiB disk. The configured
 compilation classes must exactly match the handler's `compilation_policy`.
 Keep the workflow's APFS workspace quota and reserves within the hosted runner
 profile.
+
+Keep launchd's per-attempt plist and execution config in
+`$RUNNER_TEMP/worker-state/launchd`, on the runner's system-backed temporary
+filesystem. The bounded source and build output remain on the mounted APFS
+workspace; the wrapper reads its working directory from the private execution
+config. Do not point launchd's `WorkingDirectory` or plist path into the mounted
+image.
+
+The authority's global CAS bounds apply to release source archives and returned
+artifacts as well as E2E objects. Current limits are 140 GiB total, 8 GiB per
+object, 8,192 objects and 24-hour retention for unreferenced objects. Check CAS
+usage and free host disk before increasing a bound; preserve references and the
+retention window when a release source is refused for capacity.
 
 The authority's external `/etc/livestack/compilation-policy.json` must also
 contain a `github-actions-ios` host entry granting exactly

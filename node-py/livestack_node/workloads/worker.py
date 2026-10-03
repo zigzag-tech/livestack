@@ -80,8 +80,10 @@ class WorkloadWorker:
         self.darwin = sys.platform == 'darwin'
         # Windows: one Job Object per attempt (openspec/changes/windows-host-worker).
         self.windows = sys.platform == 'win32'
-        self.executor = (LaunchdExecutor if self.darwin else JobObjectExecutor if self.windows
-                         else SystemdExecutor)(config['worker'])
+        if self.darwin:
+            self.executor = LaunchdExecutor(config['worker'], state_dir=config.get('launchd_state_dir'))
+        else:
+            self.executor = (JobObjectExecutor if self.windows else SystemdExecutor)(config['worker'])
         self._cpu_load = windows_proc.CpuLoad() if self.windows else None
         if self.darwin and config.get('host_pressure') is None and not config.get('remote_capacity_authoritative'):
             # The only memory reading a macOS worker has; without it absence of

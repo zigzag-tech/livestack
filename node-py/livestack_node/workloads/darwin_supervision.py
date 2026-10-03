@@ -57,9 +57,10 @@ def launchd_job(domain, label, timeout=10):
 
 
 class LaunchdExecutor:
-    def __init__(self, worker_id, *, uid=None):
+    def __init__(self, worker_id, *, uid=None, state_dir=None):
         self.worker_id = worker_id
         self.domain = f'gui/{os.getuid() if uid is None else uid}'
+        self.state_dir = Path(state_dir).resolve() if state_dir is not None else None
 
     def unit(self, attempt_id):
         return job_label(self.worker_id, attempt_id)
@@ -96,7 +97,11 @@ class LaunchdExecutor:
             raise WorkloadError('attempt already has a launchd job; reconcile before launch', 409)
         output = Path(output).resolve()
         output.mkdir(parents=True, exist_ok=True)
-        config = output/'execution.json'
+        control_dir = self.state_dir or output.parent
+        control_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        config = control_dir/(label+'.json')
+        if config.exists() or (control_dir/(label+'.plist')).exists():
+            raise WorkloadError('launchd attempt control files already exist', 409)
         config.write_text(encode(dict(argv=argv, cwd=str(Path(cwd).resolve()), output=str(output),
                                       env=env, log_bytes=int(log_bytes),
                                       lease_file=str(lease_file) if lease_file else None)))
@@ -105,7 +110,7 @@ class LaunchdExecutor:
         # The limits travel as arguments so launchd itself holds them: the root
         # verifier reads them from `launchctl print`, not from a file the
         # handler (same uid) could rewrite.
-        plist = output.parent/(label+'.plist')
+        plist = control_dir/(label+'.plist')
         plist.write_bytes(plistlib.dumps(dict(
             Label=label,
             ProgramArguments=[sys.executable, str(wrapper), str(config),
@@ -114,10 +119,13 @@ class LaunchdExecutor:
             RunAtLoad=True, KeepAlive=False, AbandonProcessGroup=False,
             # No CPU quota exists on macOS; niced so interactive tenants keep priority.
             Nice=10, ProcessType='Standard',
-            StandardOutPath='/dev/null', StandardErrorPath='/dev/null',
-            WorkingDirectory=str(Path(cwd).resolve()))))
+            StandardOutPath='/dev/null', StandardErrorPath='/dev/null')))
         plist.chmod(0o600)
-        self.command('/bin/launchctl', 'bootstrap', self.domain, str(plist))
+        try:
+            self.command('/bin/launchctl', 'bootstrap', self.domain, str(plist))
+        except subprocess.CalledProcessError as error:
+            detail = (error.stderr or error.stdout or '').strip()[-512:]
+            raise WorkloadError('launchd bootstrap failed (%d): %s' % (error.returncode, detail), 503) from error
         # systemd-run Type=exec returns once the wrapper runs; bootstrap may
         # return while launchd still has the spawn scheduled, which the
         # worker's loop would read as "stopped without a result".
@@ -134,6 +142,7 @@ class LaunchdExecutor:
         label = self.unit(attempt_id)
         job = launchd_job(self.domain, label)
         if job is None:
+            self._remove_control_files(label)
             return
         found = {}
         if job['pid'] is not None:
@@ -149,12 +158,18 @@ class LaunchdExecutor:
         deadline = time.monotonic()+STOP_GRACE_SECONDS
         while time.monotonic() < deadline:
             if launchd_job(self.domain, label) is None and not darwin_proc.survivors(found):
+                self._remove_control_files(label)
                 return
             time.sleep(.1)
         if launchd_job(self.domain, label) is not None:
             raise WorkloadError('owned launchd job has not stopped (bootout %d); capacity remains reserved'
                                 % removed.returncode, 503)
         raise WorkloadError('owned process tree still populated; capacity remains reserved', 503)
+
+    def _remove_control_files(self, label):
+        if self.state_dir is not None:
+            (self.state_dir/(label+'.json')).unlink(missing_ok=True)
+            (self.state_dir/(label+'.plist')).unlink(missing_ok=True)
 
     def exit_result(self, output):
         path = Path(output)/'exit.json'
