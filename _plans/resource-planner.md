@@ -56,6 +56,17 @@ footprint = {"vram_bytes": 10e9}                     # today
 `_fits(need, free)` holds iff it fits on **every** dimension, so the binding
 constraint is whichever runs out first. GPU residence is just the first tenant.
 
+**Shipped 2026-10-02 (harmony-engine-units): the dimension ROUTING.** A card's
+capacity is its own; host RAM is shared by every device on the machine.
+`HOST_DIMS = {"ram_bytes"}` routes those dimensions to the HOST pool
+(`WorldState.hosts` — measured free, reserve off the top, loading claims
+subtracted), so two 45 GB units fit two 24 GB cards separately and together do
+not swap the host. Eviction returns `ram_bytes` to the pool; a host nobody
+measures is UNMEASURED (a `ram_bytes` unit is refused `host memory unmeasured`,
+units without one place as before). And a unit may claim a whole DEVICE
+(`Unit.exclusive_device`): charged the device's entire capacity, admitted only
+when every other tenant can leave. See `_plans/harmony-engine-units.md`.
+
 ### Critical correctness note (the actual OOM cause)
 The OOM was **activation** memory (a 270 s align chunk needed 522 MB *transient*),
 not weights. So:
