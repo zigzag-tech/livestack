@@ -294,3 +294,40 @@ def test_footprint_accepts_a_resource_vector():
         _footprint_signature({"flash_next": vec2})
     plain = ln.ManagedUnit("a", be.loader("a"), be.freer, footprint=20)
     assert _footprint_signature({"a": plain})   # the int form still works
+
+
+def test_exclusive_overrides_coload_acquiring_one_evicts_its_siblings():
+    """A unit declaring `exclusive_device` claims the DEVICE, not a slot beside
+    its siblings: acquiring it evicts the process's other units even under
+    coload=True. coload says "siblings may stay"; it cannot make room the unit's
+    own declaration says must be empty — an engine that sizes its cache to the
+    free VRAM will not start into a busy card at all (measured 2026-10-02:
+    Strata saw 399 MiB free and its cudaMalloc failed). It is also what keeps
+    the "broker temporarily forgot" local fallback safe: that path loads without
+    the planner, and this is the only room-making left."""
+    import livestack_node as ln
+    from livestack_node.coordinator import LivestackCoordinator
+    be = Backend()
+    units = {
+        "llm_general": ln.ManagedUnit("llm_general", be.loader("llm_general"), be.freer,
+                                      footprint=21),
+        "flash_next": ln.ManagedUnit("flash_next", be.loader("flash_next"), be.freer,
+                                     footprint={"vram_bytes": 20, "ram_bytes": 45},
+                                     exclusive_device=True),
+    }
+    m = ln.ModelManager(units, idle_seconds=0, coload=True, log=lambda *_: None)
+    coord = LivestackCoordinator("h", coload=True)
+    coord.bind(m)
+    m.ensure("llm_general")
+    assert m.resident == {"llm_general"}
+    coord.acquire("flash_next")          # coload=True — and it still evicts
+    assert m.resident == {"flash_next"}
+    # A NON-exclusive unit under coload=True keeps its siblings (unchanged).
+    units["embed"] = ln.ManagedUnit("embed", be.loader("embed"), be.freer, footprint=2)
+    m2 = ln.ModelManager({"llm_general": units["llm_general"], "embed": units["embed"]},
+                         idle_seconds=0, coload=True, log=lambda *_: None)
+    coord2 = LivestackCoordinator("h", coload=True)
+    coord2.bind(m2)
+    m2.ensure("llm_general")
+    coord2.acquire("embed")
+    assert m2.resident == {"llm_general", "embed"}

@@ -896,6 +896,15 @@ visible (`queue_ms` on every demand record). A broad long-context request
 (`require:class=llm,context_len>=N`) is what loads Flash-Next — requests are
 the only lever, and `POST /model/warm` never bypasses admission.
 
+**Never set `HARMONY_LLM_COLOAD=0` on a multi-unit node.** `coload=0` means
+acquiring ONE unit evicts the others in the process — right while a node served
+one model, and a trap the moment a node declares several for one card. It was
+set here from the single-model era and, during the acceptance, every concurrent
+named request `ensure()`d its unit and stopped the just-loaded Flash-Next
+mid-request. A multi-unit node coloads by default and the PLANNER decides what
+goes; the override lives disabled as
+`/etc/systemd/system/harmony-llm.service.d/80-coload.conf.disabled-20261002`.
+
 Design record + what this does NOT fix: `_plans/harmony-engine-units.md`.
 
 ## Scheduler policy — the target choice is a tunable, recorded policy
