@@ -306,8 +306,15 @@ class GitHubActionsProvider:
             raise WorkloadError('invalid remote worker report')
         observed = resources(report.get('available'))
         capacity = self.config['resources']
+        available = {key:min(value, observed.get(key, 0)) for key,value in capacity.items()}
+        # The provider is a fixed, single-slot hosted runner pool. macOS load
+        # average includes runner and guest background work and may exceed the
+        # VM's assigned vCPU count, reporting zero even when no Harmony job is
+        # running. Its configured runner envelope is authoritative for CPU;
+        # memory and disk remain clamped to measured availability.
+        available['cpu'] = capacity['cpu']
         return dict(capacity=capacity,
-                    available={key:min(value, observed.get(key, 0)) for key,value in capacity.items()},
+                    available=available,
                     labels={**self.config['labels'], 'harmony.execution.provider':self.id},
                     handlers=list(self.handlers),
                     ready=bool(report.get('ready')))

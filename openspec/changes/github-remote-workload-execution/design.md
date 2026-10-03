@@ -42,6 +42,8 @@ GitHub-hosted runners cannot reach the authority's Headscale-only address direct
 
 GitHub-hosted capacity is represented as a virtual provider pool with operator-declared runner resources and a hard concurrency slot bound. Harmony reserves both the workload resource vector and a provider slot before dispatch. It does not pretend the runner is a registered physical worker with local cgroup evidence. GitHub-hosted runner limits and job timeout provide the remote VM boundary; the attempt deadline is no longer than the configured GitHub job timeout.
 
+The provider's CPU envelope is authoritative for scheduling. macOS load average includes guest and runner background work and may exceed a hosted VM's assigned vCPU count even when no Harmony attempt is running. A single provider slot bounds simultaneous use of that CPU envelope; memory and disk availability remain clamped to the remote worker's measured values.
+
 An unavailable provider, unknown dispatch, exhausted slot count, missing credential, or failed identity check produces a visible queued or terminal reason. There is no local or SSH fallback. Existing local handlers continue through their present scheduler and worker supervision unchanged.
 
 ### Product signing material stays in GitHub Actions
