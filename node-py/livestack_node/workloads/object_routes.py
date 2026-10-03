@@ -5,6 +5,8 @@ from .object_download import send_object
 from .model import WorkloadError
 from .blob_references import route_reference
 
+OBJECT_UPLOAD_IDLE_TIMEOUT_SECONDS = 20 * 60
+
 
 def attempt_owner(store, principal, headers, digest=None):
     """Workers can access only content of their CURRENT execution attempt."""
@@ -46,7 +48,17 @@ def route_object(handler, principal, method, parts):
             size = int(handler.headers.get('Content-Length', '-1'))
         except ValueError:
             raise WorkloadError('invalid content length')
-        result = blobs.put(owner, digest, size, handler.rfile)
+        # Handler.setup() uses a short timeout to evict idle keep-alive
+        # connections. That timeout also applies while this request body is
+        # being streamed; large, valid source archives can take longer than 15
+        # seconds between reads on a loaded host. Match the bounded publisher
+        # transfer window for the body only, then restore the keep-alive bound.
+        previous_timeout = handler.connection.gettimeout()
+        handler.connection.settimeout(OBJECT_UPLOAD_IDLE_TIMEOUT_SECONDS)
+        try:
+            result = blobs.put(owner, digest, size, handler.rfile)
+        finally:
+            handler.connection.settimeout(previous_timeout)
         # The verified authority CAS is canonical. A regional mirror is only a
         # best-effort cache, so it must not extend the caller's upload or keep a
         # worker attempt alive after the canonical bytes are durable.

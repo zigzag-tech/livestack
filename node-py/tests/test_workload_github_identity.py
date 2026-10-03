@@ -49,8 +49,10 @@ def verifier():
     return verifier, private, claims
 
 
-def test_valid_oidc_is_cross_checked_against_live_run_and_job(verifier):
+@pytest.mark.parametrize('attempt_claim',[1, '1'])
+def test_valid_oidc_is_cross_checked_against_live_run_and_job(verifier, attempt_claim):
     service, private, claims = verifier
+    claims['run_attempt'] = attempt_claim
     identity = service.verify(token(private, claims), 'g'*32, correlation='c'*32)
     assert identity == dict(repository='settinghead/benchday', repository_id='12345',
                             workflow_ref=service.config['workflow_ref'], workflow_sha='a'*40,
@@ -64,6 +66,8 @@ def test_valid_oidc_is_cross_checked_against_live_run_and_job(verifier):
     ('workflow_sha', 'b'*40, 'github_oidc_identity_mismatch'),
     ('actor_id', 43, 'github_oidc_identity_mismatch'),
     ('run_attempt', 2, 'github_actions_run_mismatch'),
+    ('run_attempt', '01', 'github_oidc_identity_mismatch'),
+    ('run_attempt', '1.0', 'github_oidc_identity_mismatch'),
 ])
 def test_oidc_identity_mismatch_is_refused(verifier, field, value, reason):
     service, private, claims = verifier
