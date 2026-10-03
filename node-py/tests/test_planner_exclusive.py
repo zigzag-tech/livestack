@@ -115,3 +115,31 @@ def test_an_exclusive_resident_is_never_read_as_over_budget_pressure():
     p = plan(w)
     assert p.of(Evict) == []
     assert p.actions == ()
+
+
+def test_the_whole_device_claim_fits_the_whole_device_not_capacity_minus_slack():
+    """The reserve and the activation headroom exist to protect CO-TENANTS;
+    an exclusive claim has none left. Fitting against
+    capacity - reserve - headroom could never admit a 22 GiB claim on a 24 GB
+    card — measured 2026-10-02 as a flat "the planner could not place it on
+    any device" against a card whose only tenant was idle and evictable."""
+    from livestack_node.planner import Device, Placement, Request, Unit, WorldState, plan
+    card = Device(id="gpu0", host_id="h1",
+                  capacity={"vram_bytes": 25.3e9},
+                  reserved={"vram_bytes": 2.0e9})
+    llm = Unit("llm_general", {"vram_bytes": 22.5e9}, priority=100,
+               residency=Residency.UNPINNED, reload_cost=50.0,
+               min_residency_s=15.0,
+               activation_headroom={"vram_bytes": 2.56e9})
+    flash = Unit("flash_next", {"vram_bytes": 23.6e9, "ram_bytes": 45.0e9},
+                 priority=150, residency=Residency.UNPINNED,
+                 exclusive_device=True, reload_cost=120.0, min_residency_s=120.0)
+    w = WorldState(devices=(card,),
+                   units={"llm_general": llm, "flash_next": flash},
+                   placements=(Placement("llm_general", "gpu0", loaded_at=0.0),),
+                   now=100.0,
+                   hosts={"h1": {"ram_bytes": 64.0e9}},
+                   requests=(Request("r1", "flash_next", created_at=100.0),))
+    p = plan(w)
+    assert [a.kind for a in p.of(Evict)] == ["llm_general"]
+    assert [a.kind for a in p.of(Load)] == ["flash_next"]
