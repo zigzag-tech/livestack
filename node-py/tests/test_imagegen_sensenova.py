@@ -50,3 +50,25 @@ def test_official_bf16_override_restores_quantized_timestep(tmp_path):
     for name, weight in expected.items():
         torch.testing.assert_close(model.state_dict()[name], weight, rtol=0, atol=0)
     assert torch.isfinite(embedder(torch.tensor([0.5]))).all()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='requires CUDA pinned host allocator')
+def test_close_releases_pinned_host_allocator_cache():
+    from pathlib import Path
+    from livestack_node.imagegen.sensenova import SenseNovaRuntime
+    torch.cuda.init()
+    torch.cuda.synchronize()  # Include the driver's context in the RSS baseline.
+    torch._C._host_emptyCache()
+    def rss():
+        for line in Path('/proc/self/status').read_text().splitlines():
+            if line.startswith('VmRSS:'):
+                return int(line.split()[1]) * 1024
+    before = rss()
+    runtime = SenseNovaRuntime.__new__(SenseNovaRuntime)
+    runtime.torch = torch
+    runtime.model = torch.ones(256 * 1024 * 1024, dtype=torch.uint8, pin_memory=True)
+    runtime.tokenizer = None
+    assert rss() - before > 128 * 1024 * 1024
+    runtime.close()
+    # GPU empty_cache/malloc_trim cannot release CUDA's cached pinned CPU blocks.
+    assert rss() - before < 64 * 1024 * 1024

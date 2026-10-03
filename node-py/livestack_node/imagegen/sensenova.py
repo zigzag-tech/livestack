@@ -117,6 +117,10 @@ class SenseNovaRuntime:
         self.model = self.tokenizer = None
         gc.collect()
         free_cuda()
+        # Pinned layer buffers use a separate CPU allocator, not CUDA's
+        # device cache or libc's heap. Release only after copies finish and
+        # the model's last tensor references have been dropped.
+        self.torch._C._host_emptyCache()
         trim_ram()
 
 
