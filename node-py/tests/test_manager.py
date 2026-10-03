@@ -358,3 +358,35 @@ def test_the_exclusive_claim_is_symmetric_nothing_co_places_with_it():
     assert m.resident == {"flash_next"}
     coord.acquire("llm_general")     # plain unit, coload=True — and the
     assert m.resident == {"llm_general"}   # exclusive tenant still leaves
+
+
+def test_a_busy_tenant_is_never_evicted_out_from_under_its_work():
+    """Idle-only preemption applies to the manager's local acquire exactly as
+    it does to the planner's ("a busy one defers the admission"): an exclusive
+    acquire that would evict a BUSY co-tenant REFUSES instead of cutting a
+    live stream (measured 2026-10-02: title traffic bouncing the models cut a
+    26k-token generation with ReadError)."""
+    import livestack_node as ln
+    from livestack_node.coordinator import LivestackCoordinator
+    be = Backend()
+    units = {
+        "llm_general": ln.ManagedUnit("llm_general", be.loader("llm_general"), be.freer,
+                                      footprint=21),
+        "flash_next": ln.ManagedUnit("flash_next", be.loader("flash_next"), be.freer,
+                                     footprint={"vram_bytes": 20, "ram_bytes": 45},
+                                     exclusive_device=True),
+    }
+    m = ln.ModelManager(units, idle_seconds=0, coload=True, log=lambda *_: None)
+    coord = LivestackCoordinator("h", coload=True)
+    coord.bind(m)
+    m.ensure("llm_general")
+    m.units["llm_general"].busy = True   # a request is in flight on the 27B
+    try:
+        import pytest
+        with pytest.raises(RuntimeError, match="busy"):
+            coord.acquire("flash_next")
+    finally:
+        m.units["llm_general"].busy = False
+    assert m.resident == {"llm_general"}      # the stream survived
+    coord.acquire("flash_next")               # idle now: the claim applies
+    assert m.resident == {"flash_next"}
