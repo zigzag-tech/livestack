@@ -52,11 +52,11 @@ scope changes the storage scope of the existing Apple secrets.
 
 Use a new lightweight release-workflow tag for every security-sensitive change;
 never move an existing tag. The current target is
-`benchday-ios-remote-v2`. The authority verifies that its commit SHA is on the
+`benchday-ios-remote-v5`. The authority verifies that its commit SHA is on the
 allowlist before dispatch. Set both `workflow_ref` values to:
 
 ```
-settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v2
+settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v5
 ```
 
 The provider's `workflow_path` is
@@ -65,7 +65,9 @@ numeric ID returned by GitHub. Identity configuration also pins the repository
 id, workflow id, exact tag commit SHA, `workflow_dispatch`, job name,
 correlation prefix, audience `harmony`, and the approved actor id (the existing
 `settinghead` account). Before dispatch, the authority confirms the tag is a
-lightweight tag pointing directly to an allowlisted commit.
+lightweight tag pointing directly to an allowlisted commit. GitHub OIDC
+encodes `run_attempt` as a canonical decimal string; the verifier normalizes
+it before comparing against the API run record, which uses an integer.
 
 The GitHub `ios-release` environment must permit only the current tag and have
 administrator bypass disabled. Its `BENCHDAY_GITHUB_ACTOR_ID` variable matches
@@ -95,14 +97,14 @@ the existing GitHub repository and the landed tag; do not print credentials.
         "labels": {"os": "macos", "signing": "apple"},
         "slots": 1,
         "workflow_path": ".github/workflows/release-ios-harmony.yml",
-        "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v2",
+        "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v5",
         "workflow_id": 12345678,
         "identity": {
           "repository": "settinghead/benchday",
           "repository_id": "REPOSITORY_ID",
-          "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v2",
+          "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v5",
           "workflow_id": 12345678,
-          "workflow_sha": ["40_HEX_TAG_COMMIT_SHA"],
+          "workflow_sha": ["2f78388446de1c4b001e916c4c387542db642083"],
           "event_name": "workflow_dispatch",
           "job_name": "Build and upload iOS",
           "audience": "harmony",

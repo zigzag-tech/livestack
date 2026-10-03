@@ -634,11 +634,14 @@ a limit breach still retries.
 
 Harmony may place explicitly configured handlers on a single-assignment,
 GitHub-hosted runner. The authority owns the durable job, dispatch outbox,
-correlation id, capacity slot, cancellation and run reconciliation. A GitHub App
-dispatches the configured workflow; the runner exchanges its GitHub Actions OIDC
-token for a short-lived, fenced Harmony worker credential only after the
+correlation id, capacity slot, cancellation and run reconciliation. The
+authority dispatches and inspects the configured workflow with this host's
+existing private GitHub CLI credential. The runner exchanges its GitHub Actions
+OIDC token for a short-lived, fenced Harmony worker credential only after the
 authority validates the signing key, repository id, immutable workflow ref and
 SHA, event, actor, live run, attempt, job and correlation through GitHub's API.
+GitHub emits the OIDC `run_attempt` as a canonical decimal string; the verifier
+normalizes that field before comparing it with GitHub's integer API value.
 The runner receives one job and exits. It cannot register as a general worker
 or claim another handler.
 
@@ -650,9 +653,8 @@ the Harmony job and its GitHub run reach terminal cleanup. A lost dispatch
 response is reconciled by correlation instead of being blindly dispatched a
 second time.
 
-Provider setup, GitHub App permissions, OIDC claims, Tailscale workload identity
-federation, API-only ACL, workflow pinning, resource bounds and rollout steps
-are in [`_plans/github-remote-workloads.md`](_plans/github-remote-workloads.md).
-The implementation and local tests are complete; live provider configuration
-and an end-to-end hosted workflow remain rollout gates. Do not route a handler
-to GitHub until those gates pass.
+Provider setup with the existing `gh` credential, the HTTPS edge relay, OIDC
+claims, the private Headscale boundary, workflow pinning, resource bounds and
+rollout steps are in [`_plans/github-remote-workloads.md`](_plans/github-remote-workloads.md).
+The handler is enabled only when those controls and the tagged hosted `--no-upload`
+proof are in place.

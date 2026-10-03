@@ -130,6 +130,11 @@ class GitHubIdentityVerifier:
         claims = self.decode(oidc_token)
         required = {'repository', 'repository_id', 'workflow_ref', 'workflow_sha', 'event_name',
                     'run_id', 'run_attempt', 'actor_id', 'sha'}
+        run_attempt = claims.get('run_attempt')
+        if (isinstance(run_attempt, str) and 1 <= len(run_attempt) <= 10 and
+                run_attempt.isascii() and run_attempt.isdigit() and
+                (run_attempt == '0' or not run_attempt.startswith('0'))):
+            run_attempt = int(run_attempt)
         if (not required <= set(claims) or claims['repository'] != self.config['repository'] or
                 str(claims['repository_id']) != str(self.config['repository_id']) or
                 claims['workflow_ref'] != self.config['workflow_ref'] or
@@ -137,15 +142,15 @@ class GitHubIdentityVerifier:
                 claims['workflow_sha'] not in self.config['workflow_sha'] or
                 claims['event_name'] != self.config['event_name'] or
                 str(claims['actor_id']) not in self.config['actor_ids'] or
-                not str(claims['run_id']).isdigit() or type(claims['run_attempt']) is not int or
-                claims['run_attempt'] < 1 or not isinstance(correlation, str) or len(correlation) != 32):
+                not str(claims['run_id']).isdigit() or type(run_attempt) is not int or
+                run_attempt < 1 or not isinstance(correlation, str) or len(correlation) != 32):
             raise WorkloadError('github_oidc_identity_mismatch', 403)
 
         run_id = str(claims['run_id'])
         repo = quote(self.config['repository'], safe='/')
         run = self._json_request(f'{API_ROOT}/repos/{repo}/actions/runs/{run_id}', token=github_token)
         if (str(run.get('id')) != run_id or run.get('workflow_id') != self.config['workflow_id'] or
-                run.get('run_attempt') != claims['run_attempt'] or run.get('event') != self.config['event_name'] or
+                run.get('run_attempt') != run_attempt or run.get('event') != self.config['event_name'] or
                 run.get('status') != 'in_progress' or run.get('head_sha') != claims['workflow_sha'] or
                 run.get('head_sha') != claims['sha'] or
                 run.get('display_title') != self.config['correlation_prefix'] + correlation or
@@ -162,5 +167,5 @@ class GitHubIdentityVerifier:
             raise WorkloadError('github_actions_job_not_live', 403)
         return dict(repository=self.config['repository'], repository_id=str(self.config['repository_id']),
                     workflow_ref=self.config['workflow_ref'], workflow_sha=claims['workflow_sha'],
-                    run_id=run_id, run_attempt=claims['run_attempt'], actor_id=str(claims['actor_id']),
+                    run_id=run_id, run_attempt=run_attempt, actor_id=str(claims['actor_id']),
                     workflow_job_id=str(live[0].get('id')))
