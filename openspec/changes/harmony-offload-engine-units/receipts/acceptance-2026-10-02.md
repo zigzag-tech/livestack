@@ -180,3 +180,30 @@ What remains TRUE and unfixed is in `_plans/harmony-engine-units.md`
 itself: with card 1 serving both a 27B for titles and Flash-Next for long
 context, the floors and the honest costs mean the two swap on the traffic
 pattern, and each swap is 40 s (Strata) or 50 s (vLLM). Q2, stated once.
+
+## The goal's explicit criteria — run some cat, run some LLM calls (Qwen Flash-Next)
+
+```
+$ POST /v1/chat/completions {"model": "require:class=llm",
+    "harmony_requires": {"class": "llm", "tools": true},
+    "tools": [<cat tool schema>], "tool_choice": "auto", ...}
+model: dbirks/Qwen3.8-27B-W4A16-AutoRound
+tool_call: cat {"path": "/etc/hostname"}
+RAN: cat /etc/hostname -> 'xc-tower-ubuntu'
+```
+An LLM call whose `cat` tool call RAN — through Harmony, request language
+only. And the Flash-Next calls (scenario (a), run 1):
+`model: qwen3.8-flash-next-q2_0`, `usage: {prompt 62, completion 24, total 86}`,
+`timings: {prompt_per_second: 38.8, predicted: 24 in 938.8 ms}`, reasoning in
+`reasoning_content` — Qwen3.8-Flash-Next BEING the model that answers, loaded
+by the request that needed it.
+
+## One finding left open (recorded, not fixed)
+
+A Flash-Next admission is refused `no device can fit even with preemption` in
+hostd's FULL world while the same world snapshot planned locally grants
+(`Evict llm_general -> Load flash_next -> Grant` — reproduced side by side
+against the live reports). The partial-world repro (the tower-llm peer alone)
+always grants; the difference is the linked/federated peer set. The refusal is
+at least honest now (the 503 carries it), and scenario (a) proves the
+placement path works — but WHY the full world refuses is unexplained and open.
