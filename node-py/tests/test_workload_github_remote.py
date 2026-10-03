@@ -192,9 +192,12 @@ def test_remote_report_is_clamped_to_operator_capacity(tmp_path):
     provider = GitHubActionsProvider('github-actions',provider_config(tmp_path),b'k'*32)
     principal = type('Principal',(),{'remote_job':'a'*32})()
     constrained = provider.constrain_report(principal,dict(ready=True,
-        available={'cpu':16,'memory_bytes':64*1024**3,'disk_bytes':1024**4}))
+        available={'cpu':0,'memory_bytes':4*1024**3,'disk_bytes':6*1024**3}))
     assert constrained['capacity'] == provider.config['resources']
-    assert constrained['available'] == provider.config['resources']
+    assert constrained['available'] == {'cpu':4,'memory_bytes':4*1024**3,'disk_bytes':6*1024**3}
+    overreported = provider.constrain_report(principal,dict(ready=True,
+        available={'cpu':16,'memory_bytes':64*1024**3,'disk_bytes':1024**4}))
+    assert overreported['available'] == provider.config['resources']
     assert constrained['labels'] == {'os':'macos','signing':'apple',
                                      'harmony.execution.provider':'github-actions'}
     assert constrained['handlers'] == ['release.v1']
@@ -214,6 +217,44 @@ def test_installation_token_requests_only_actions_and_contents_permissions(tmp_p
                       'signed-app-jwt',
                       {'permissions':{'actions':'write','contents':'read','metadata':'read'}},
                       (201,))]
+
+
+def test_provider_uses_an_existing_private_cli_token_file_without_logging_it(tmp_path, caplog):
+    token = 'gho_'+'x'*40
+    token_file = tmp_path/'github-token'
+    token_file.write_text(token+'\n')
+    token_file.chmod(0o600)
+    config = provider_config(tmp_path)
+    del config['app']
+    config['token_file'] = str(token_file)
+    calls = []
+
+    class Response:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+        def read(self, _maximum): return b'{"ok":true}'
+
+    def opener(request, *, timeout):
+        calls.append((request.get_header('Authorization'), timeout))
+        return Response()
+
+    provider = GitHubActionsProvider('github-actions', config, b'k'*32, opener=opener)
+    assert provider._api('GET', '/user') == (200, {'ok':True})
+    assert calls == [('Bearer '+token, 10)]
+    assert token not in caplog.text
+
+
+def test_provider_rejects_a_group_or_world_readable_cli_token(tmp_path):
+    token_file = tmp_path/'github-token'
+    token_file.write_text('gho_'+'x'*40)
+    token_file.chmod(0o644)
+    config = provider_config(tmp_path)
+    del config['app']
+    config['token_file'] = str(token_file)
+    provider = GitHubActionsProvider('github-actions', config, b'k'*32)
+    with pytest.raises(WorkloadError, match='github_provider_credential_untrusted'):
+        provider._api('GET', '/user')
 
 
 def test_terminal_job_cannot_release_provider_slot_before_github_run_cleanup(tmp_path):

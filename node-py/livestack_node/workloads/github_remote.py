@@ -123,11 +123,38 @@ class GitHubApp:
         return token
 
 
+class GitHubTokenFile:
+    """Read an existing GitHub CLI credential without logging or caching it."""
+
+    def __init__(self, path, *, opener=urlopen):
+        if not isinstance(path, str) or not path:
+            raise ValueError('invalid GitHub token-file configuration')
+        self.path, self.opener = path, opener
+
+    def token(self):
+        try:
+            raw = _read_private(self.path, maximum=4096)
+            value = raw.decode('ascii').removesuffix('\n')
+            if (not 20 <= len(value) <= 4096 or any(char.isspace() for char in value) or
+                    not value.isprintable()):
+                raise ValueError('invalid token')
+            return value
+        except WorkloadError:
+            raise
+        except Exception as error:
+            raise WorkloadError('github_provider_credential_invalid', 403) from error
+
+    def _request(self, method, url, *, body=None, accepted=(200,)):
+        return GitHubApp._request(self, method, url, token=self.token(), body=body, accepted=accepted)
+
+
 class GitHubActionsProvider:
     def __init__(self, provider_id, config, token_key, *, opener=urlopen, clock=time.time):
         required = {'handlers','host','resources','labels','slots','workflow_path','workflow_ref','workflow_id',
-                    'identity','app','max_seconds','compilation_classes'}
-        if (not isinstance(config, dict) or set(config) != required or not isinstance(config['handlers'], list) or
+                    'identity','max_seconds','compilation_classes'}
+        credential_fields = {'app','token_file'}
+        if (not isinstance(config, dict) or set(config)-credential_fields != required or
+                len(set(config) & credential_fields) != 1 or not isinstance(config['handlers'], list) or
                 not config['handlers'] or len(set(config['handlers'])) != len(config['handlers']) or
                 not isinstance(config['host'], str) or type(config['slots']) is not int or config['slots'] != 1 or
                 not isinstance(config['workflow_path'], str) or not config['workflow_path'].startswith('.github/workflows/') or
@@ -158,7 +185,8 @@ class GitHubActionsProvider:
                 not workflow_ref.split('/',2)[2] or len(workflow_ref) > 200):
             raise ValueError('GitHub OIDC workflow must use an immutable tag ref and match the provider workflow path')
         self.dispatch_ref = workflow_ref.split('/',2)[2]
-        self.app = GitHubApp(config['app'], opener=opener, clock=clock)
+        self.api_credential = (GitHubApp(config['app'], opener=opener, clock=clock)
+                               if 'app' in config else GitHubTokenFile(config['token_file'], opener=opener))
         self.opener, self.clock = opener, clock
 
     @property
@@ -166,7 +194,7 @@ class GitHubActionsProvider:
         return tuple(self.config['handlers'])
 
     def _api(self, method, path, *, body=None, accepted=(200,)):
-        return self.app._request(method, API_ROOT+path, token=self.app.token(), body=body, accepted=accepted)
+        return self.api_credential._request(method, API_ROOT+path, body=body, accepted=accepted)
 
     def dispatch(self, item):
         spec = item['spec']
@@ -278,8 +306,15 @@ class GitHubActionsProvider:
             raise WorkloadError('invalid remote worker report')
         observed = resources(report.get('available'))
         capacity = self.config['resources']
+        available = {key:min(value, observed.get(key, 0)) for key,value in capacity.items()}
+        # The provider is a fixed, single-slot hosted runner pool. macOS load
+        # average includes runner and guest background work and may exceed the
+        # VM's assigned vCPU count, reporting zero even when no Harmony job is
+        # running. Its configured runner envelope is authoritative for CPU;
+        # memory and disk remain clamped to measured availability.
+        available['cpu'] = capacity['cpu']
         return dict(capacity=capacity,
-                    available={key:min(value, observed.get(key, 0)) for key,value in capacity.items()},
+                    available=available,
                     labels={**self.config['labels'], 'harmony.execution.provider':self.id},
                     handlers=list(self.handlers),
                     ready=bool(report.get('ready')))
@@ -291,9 +326,13 @@ class GitHubRemote:
     def __init__(self, config, *, opener=urlopen, clock=time.time, interval=5):
         if not isinstance(config, dict) or set(config) != {'token_key_file','providers','interval'}:
             raise ValueError('invalid github_remote configuration')
-        key = _read_private(config['token_key_file'], maximum=4096)
-        if len(key) < 32:
+        provider_key = _read_private(config['token_key_file'], maximum=4096)
+        if len(provider_key) < 32:
             raise ValueError('remote worker token key must contain at least 32 bytes')
+        # Domain-separate the locally held provider credential from the HMAC
+        # key used to mint attempt-scoped worker tokens. The GitHub API token
+        # itself never leaves this process or appears as the worker MAC key.
+        key = hashlib.sha256(b'livestack.github-remote.worker-token.v1\0'+provider_key).digest()
         providers = config['providers']
         if not isinstance(providers, dict) or not 1 <= len(providers) <= 16:
             raise ValueError('configure 1..16 GitHub Actions providers')

@@ -1,8 +1,10 @@
 """Real authenticated HTTP over a real durable authority, not a mocked server."""
 import json
 import hashlib
+import http.client
 from io import BytesIO
 from threading import Event, Thread
+import time
 import urllib.error
 import urllib.request
 
@@ -85,6 +87,36 @@ def test_object_put_acknowledges_canonical_cas_before_optional_mirror(tmp_path):
         mirror.release.set()
         uploading.join(timeout=5)
         assert mirror.finished.wait(5)
+        server.shutdown()
+        serving.join(timeout=5)
+        server.server_close()
+
+
+def test_object_upload_body_can_pause_longer_than_keepalive_timeout(tmp_path):
+    store = WorkloadStore(tmp_path/'jobs.db', handlers={'test.v1'})
+    server = WorkloadServer(('127.0.0.1', 0), store, [
+        Principal('alice', 'a'*32, 'caller', ('test.v1',)),
+    ])
+    serving = Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    body = b'xy'
+    digest = hashlib.sha256(body).hexdigest()
+    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=30)
+    try:
+        connection.putrequest('PUT', f'/v1/workloads/objects/{digest}')
+        connection.putheader('Authorization', 'Bearer ' + 'a'*32)
+        connection.putheader('Content-Length', str(len(body)))
+        connection.endheaders()
+        connection.send(body[:1])
+        # The server's normal keep-alive timeout is 15 seconds. The object
+        # route must extend it while waiting for the rest of this body.
+        time.sleep(16)
+        connection.send(body[1:])
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {'digest': digest, 'size': len(body)}
+    finally:
+        connection.close()
         server.shutdown()
         serving.join(timeout=5)
         server.server_close()
