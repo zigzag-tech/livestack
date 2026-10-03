@@ -801,7 +801,8 @@ class TaskEnvironmentStore:
                     idle_expires=now+self.idle_seconds, generation_expires=now+self.generation_seconds)
                 remote_replica = any(isinstance(value, dict) and value.get('host') != self.host_id and
                                      value.get('state') == 'parked' for value in authority_replicas)
-                reuse_outcome = 'relocated' if remote_replica else 'rebuilt' if had_local else 'created'
+                reuse_outcome = ('relocated' if remote_replica else
+                                 'rebuilt' if had_local or generation > 1 else 'created')
                 if remote_replica and not had_local:
                     reason_code = 'relocated_reconstructed'
                 elif had_local and marker['compatibility'] != compatibility:
@@ -809,6 +810,8 @@ class TaskEnvironmentStore:
                 elif had_local and marker['state'] == 'rebuild_required':
                     reason_code = 'local_state_untrusted'
                 elif had_local:
+                    reason_code = 'authority_replica_unconfirmed'
+                elif generation > 1:
                     reason_code = 'authority_replica_unconfirmed'
                 else:
                     reason_code = 'created'

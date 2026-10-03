@@ -41,6 +41,10 @@ def fleet(tmp_path, monkeypatch):
     script.write_text('''import json,os,time
 from pathlib import Path
 request=json.loads(Path(os.environ['HARMONY_REQUEST']).read_text())
+if request.get('cache_before_sleep'):
+    cache=Path('build','cache.txt')
+    cache.parent.mkdir(parents=True,exist_ok=True)
+    cache.write_text('partial-cache')
 time.sleep(request.get('sleep',0))
 value=Path('input').read_text()
 if request.get('object'):
@@ -748,7 +752,7 @@ def test_worker_restart_rebuilds_unconfirmed_task_environment(fleet, tmp_path, m
     first = caller.submit(dict(version=3, key='crash-recovery-first', handler='native.v1',
         input_digest=digest, need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
         environment={'key':'crash-recovery-task','reuse':'prefer'},
-        payload={'sleep':120,'cache':True,'inspect_cache':True}))
+        payload={'sleep':120,'cache_before_sleep':True,'cache':True,'inspect_cache':True}))
     config_path = tmp_path/'task-environment-worker.json'
     config_path.write_text(json.dumps(config))
     runner = tmp_path/'run-task-environment-worker.py'
@@ -825,8 +829,27 @@ worker.step()
         assert result['state'] == 'succeeded'
         receipt = result['result']['environment_receipt']
         assert receipt['reuse_outcome'] == 'rebuilt'
-        assert receipt['reason_code'] == 'local_state_untrusted'
+        assert receipt['reason_code'] == 'authority_replica_unconfirmed'
+        artifact = next(item for item in result['result']['result']['artifacts'] if item['name'] == 'artifact')
+        returned = InputTransfer(caller).get(artifact['digest'], tmp_path/'recovered-artifact')
+        assert 'cache=fresh' in returned.read_text()
+        assert 'partial-cache' not in returned.read_text()
         assert caller.get_environment(handle)['state'] == 'parked'
+        stale_worker = WorkloadClient(config['authority'], config['token'])
+        timings = {phase: {'seconds': None, 'reason': 'measurement_unavailable'} for phase in
+                   ('queue', 'transfer', 'source_materialization', 'dependencies', 'compile', 'test',
+                    'execution', 'cleanup')}
+        stale_receipt = dict(version=1, handle=handle, generation=assignment['environment']['generation'],
+            profile=assignment['environment']['profile'],
+            compatibility=assignment['environment']['compatibility'], source_digest=digest,
+            reuse_outcome='rebuilt', reason_code='authority_replica_unconfirmed', state='parked',
+            bytes_used=0, phase_timings=timings, cache_components=[])
+        with pytest.raises(WorkloadError) as refused:
+            stale_worker.request('worker/complete', dict(boot=assignment['boot'],
+                attempt_id=assignment['attempt_id'], fence=assignment['fence'], input_digest=digest,
+                outcome='succeeded', result={'exit_code': 0, 'artifacts': []},
+                environment_receipt=stale_receipt))
+        assert refused.value.status == 409
         assert worker.journal.read() is None
         with store.transaction() as db:
             assert db.execute("SELECT count(*) FROM attempts WHERE state!='ended'").fetchone()[0] == 0
