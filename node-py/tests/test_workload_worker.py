@@ -59,13 +59,17 @@ def fleet(tmp_path, monkeypatch):
 
     store._test_restart_authority = restart_authority
     script = tmp_path/'installed-handler.py'
-    script.write_text('''import json,os,time
+    script.write_text('''import json,os,subprocess,sys,time
 from pathlib import Path
 request=json.loads(Path(os.environ['HARMONY_REQUEST']).read_text())
 if request.get('cache_before_sleep'):
     cache=Path('build','cache.txt')
     cache.parent.mkdir(parents=True,exist_ok=True)
     cache.write_text('partial-cache')
+if request.get('spawn_child'):
+    child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'],
+        stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    Path('build','child.pid').write_text(str(child.pid))
 time.sleep(request.get('sleep',0))
 value=Path('input').read_text()
 if request.get('object'):
@@ -607,9 +611,37 @@ def test_corrupted_cached_bytes_cannot_execute(fleet):
         worker.close()
 
 
-def test_cancel_running_job_reconciles_before_readvertising_capacity(fleet):
+def test_cancel_running_job_reconciles_before_readvertising_capacity(fleet, tmp_path, monkeypatch):
     store, config, caller, digest = fleet
-    job = submit(caller, digest, sleep=120)
+    environment_root = tmp_path/'cancelled-task-environments'
+    environment_root.mkdir()
+    config['task_environments'] = dict(root=str(environment_root), host_id='test-host',
+        quota_helper='/unused/in-tests', project_id_min=100000, project_id_max=100063,
+        max_bytes_per_replica=32*1024**3, max_bytes_per_owner=128*1024**3,
+        max_total_bytes=256*1024**3, reserve_bytes=0, profiles={'native-test-v1': {
+            'handlers': ['native.v1'], 'purpose': 'development', 'cache_contract': 'native-test-v1',
+            'probe_argv': [sys.executable, '-c', 'print("native-test-toolchain-v1")'],
+            'cache_components': [{'name': 'incremental-build', 'path': 'source/build',
+                'inputs': [], 'contract': 'incremental-build-v1'}]}})
+
+    def quota_usage(project_ids):
+        return [{'project_id': project_id, 'used_bytes': 0, 'hard_bytes': 32*1024**3}
+                for project_id in project_ids]
+
+    original_init = TaskEnvironmentStore.__init__
+    def test_store_init(self, environment_config, **kwargs):
+        return original_init(self, environment_config, **kwargs,
+            quota_ensure=lambda _handle, _project, quota: {'quota_bytes': quota},
+            quota_probe=lambda _root: True, quota_usage=quota_usage,
+            require_separate_filesystem=False, filesystem_bytes=8*1024**3)
+    monkeypatch.setattr(TaskEnvironmentStore, '__init__', test_store_init)
+
+    job = caller.submit(dict(version=3, key='cancelled-task-environment', handler='native.v1',
+        input_digest=digest, need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
+        environment={'key':'cancelled-task','reuse':'prefer'},
+        payload={'sleep':120,'cache_before_sleep':True,'spawn_child':True}))
+    handle = job['environment_handle']
+    child_pid_file = environment_root/handle/'source'/'build'/'child.pid'
     worker = WorkloadWorker(config)
     errors = []
     def execute():
@@ -623,15 +655,25 @@ def test_cancel_running_job_reconciles_before_readvertising_capacity(fleet):
         deadline = time.monotonic()+10
         while True:
             journal = worker.journal.read()
-            if journal and journal['phase'] == 'running':
+            if journal and journal['phase'] == 'running' and child_pid_file.exists():
                 break
             assert time.monotonic() < deadline
             time.sleep(.05)
+        attempt = journal['assignment']['attempt_id']
+        group = worker.executor.inspect(attempt).get('ControlGroup')
+        assert group
         caller.request('jobs/'+job['id']+'/cancel', {})
         thread.join(timeout=15)
         assert not thread.is_alive() and errors == []
         assert caller.get(job['id'])['state'] == 'cancelled'
         assert not worker.step()
+        cgroup = Path('/sys/fs/cgroup')/group.lstrip('/')
+        assert not cgroup.exists() or 'populated 0' in (cgroup/'cgroup.events').read_text()
+        marker = json.loads((environment_root/handle/'environment.json').read_text())
+        assert marker['state'] == 'rebuild_required'
+        assert marker['compatibility'] == '0'*64
+        assert not any(replica['handle'] == handle for replica in worker.task_environments.report()[1])
+        assert caller.get_environment(handle)['state'] == 'rebuild_required'
         with store.transaction() as db:
             assert db.execute("SELECT count(*) FROM attempts WHERE state='cleanup'").fetchone()[0] == 0
     finally:
