@@ -667,10 +667,20 @@ def _unit_satisfies(u: Unit, requires: Mapping[str, object]) -> bool:
         have = u.attributes[name]
         try:
             if op == "":
-                if have != want:
+                # A LIST want is "a value in this list" — the request language's
+                # `context_len=[131072,]` spelling (harmony-engine-units
+                # scenario: "a request says require:class=llm,context_len=[131072,]").
+                # Matching it as equality silently satisfied nothing.
+                if isinstance(want, (list, tuple, set)):
+                    if have not in want:
+                        return False
+                elif have != want:
                     return False
             elif op == "!=":
-                if have == want:
+                if isinstance(want, (list, tuple, set)):
+                    if have in want:
+                        return False
+                elif have == want:
                     return False
             elif op == ">=":
                 if not float(have) >= float(want):
