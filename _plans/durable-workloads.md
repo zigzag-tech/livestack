@@ -621,3 +621,30 @@ peak 6,472,464,832 B against a 6 GiB need, killed, re-queued, and heading for th
 same kill. The job now fails with `reason` = `resource limit: …` naming the peak
 and the declared need; the caller raises its need. An infrastructure end without
 a limit breach still retries.
+
+## GitHub Actions as a Harmony workload provider (2026-10-03)
+
+Harmony may place explicitly configured handlers on a single-assignment,
+GitHub-hosted runner. The authority owns the durable job, dispatch outbox,
+correlation id, capacity slot, cancellation and run reconciliation. A GitHub App
+dispatches the configured workflow; the runner exchanges its GitHub Actions OIDC
+token for a short-lived, fenced Harmony worker credential only after the
+authority validates the signing key, repository id, immutable workflow ref and
+SHA, event, actor, live run, attempt, job and correlation through GitHub's API.
+The runner receives one job and exits. It cannot register as a general worker
+or claim another handler.
+
+The normal Harmony transfer protocol remains the only path for source and
+attempt-scoped artifacts, with its existing size, digest and fence checks.
+Compilation authorization is revalidated against the same live grant before
+each admitted compiler launch. Provider capacity remains occupied until both
+the Harmony job and its GitHub run reach terminal cleanup. A lost dispatch
+response is reconciled by correlation instead of being blindly dispatched a
+second time.
+
+Provider setup, GitHub App permissions, OIDC claims, Tailscale workload identity
+federation, API-only ACL, workflow pinning, resource bounds and rollout steps
+are in [`_plans/github-remote-workloads.md`](_plans/github-remote-workloads.md).
+The implementation and local tests are complete; live provider configuration
+and an end-to-end hosted workflow remain rollout gates. Do not route a handler
+to GitHub until those gates pass.
