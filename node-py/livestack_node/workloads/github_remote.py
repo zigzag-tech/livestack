@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from cryptography.hazmat.primitives import hashes, serialization
@@ -105,7 +106,8 @@ class GitHubApp:
         if self._installation_token and self.clock() < self._token_expiry-120:
             return self._installation_token
         _, value = self._request('POST', f"{API_ROOT}/app/installations/{self.config['installation_id']}/access_tokens",
-                                 token=self._jwt(), body={'permissions': {'actions':'write','metadata':'read'}},
+                                 token=self._jwt(), body={'permissions': {
+                                     'actions':'write','contents':'read','metadata':'read'}},
                                  accepted=(201,))
         token = value.get('token')
         if not isinstance(token, str) or not token or not isinstance(value.get('expires_at'), str):
@@ -152,9 +154,9 @@ class GitHubActionsProvider:
         workflow_ref = workflow_parts[1] if len(workflow_parts) == 2 else ''
         if (len(workflow_parts) != 2 or workflow_parts[0] !=
                 self.identity.config['repository']+'/'+config['workflow_path'] or
-                not workflow_ref.startswith(('refs/heads/','refs/tags/')) or
+                not workflow_ref.startswith('refs/tags/') or
                 not workflow_ref.split('/',2)[2] or len(workflow_ref) > 200):
-            raise ValueError('GitHub OIDC workflow ref and provider workflow path differ')
+            raise ValueError('GitHub OIDC workflow must use an immutable tag ref and match the provider workflow path')
         self.dispatch_ref = workflow_ref.split('/',2)[2]
         self.app = GitHubApp(config['app'], opener=opener, clock=clock)
         self.opener, self.clock = opener, clock
@@ -168,9 +170,19 @@ class GitHubActionsProvider:
 
     def dispatch(self, item):
         spec = item['spec']
+        # GitHub's dispatch API accepts a tag name, not a commit SHA. Refuse to
+        # dispatch if the configured immutable tag has moved since operator
+        # review, even when OIDC would reject the resulting run later.
+        repo = self.identity.config['repository']
+        _, ref = self._api('GET', f"/repos/{repo}/git/ref/tags/{quote(self.dispatch_ref, safe='/')}")
+        target = ref.get('object') if isinstance(ref, dict) else None
+        allowed_shas = self.identity.config['workflow_sha']
+        if (not isinstance(target, dict) or target.get('type') != 'commit' or
+                target.get('sha') not in allowed_shas):
+            raise WorkloadError('github_workflow_revision_drift', 409)
         inputs = {'harmony_job_id':item['job_id'], 'harmony_correlation':item['correlation'],
                   'harmony_input_digest':spec['input_digest'], 'harmony_release_key':spec['key']}
-        path = f"/repos/{self.identity.config['repository']}/actions/workflows/{self.config['workflow_id']}/dispatches"
+        path = f"/repos/{repo}/actions/workflows/{self.config['workflow_id']}/dispatches"
         self._api('POST', path, body={'ref':self.dispatch_ref, 'inputs':inputs}, accepted=(204,))
 
     def find_run(self, correlation):

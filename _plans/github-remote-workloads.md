@@ -7,9 +7,9 @@ until the identity, network, resource and sandbox checks below pass.
 
 ## Required identities and permissions
 
-Create a GitHub App installed only on `settinghead/benchday` with Actions read
-and write permission and repository metadata read permission. Generate one App
-private key and place it on the authority host in a root/authority-owned file
+Create a GitHub App installed only on `settinghead/benchday` with Actions write
+and Contents read permissions (repository metadata read is implicit). Generate
+one App private key and place it on the authority host in a root/authority-owned file
 with mode `0600`; keep only its path in configuration. The App installation
 token is minted by the authority for dispatch and run reconciliation. It is
 never passed to a runner.
@@ -28,8 +28,9 @@ values or copy them into the authority, workload database, artifacts or logs.
 
 ## Pin the workflow
 
-Create the immutable tag `benchday-ios-remote-v1` only after the workflow and
-runner scripts have landed on `main`. Record the tag's commit SHA in the
+Create a lightweight tag `benchday-ios-remote-v1` only after the workflow and
+runner scripts have landed on `main`. The authority verifies the tag points
+directly to an allowlisted commit before it dispatches. Record the tag's commit SHA in the
 authority's `identity.workflow_sha` allowlist and set `identity.workflow_ref`
 to:
 
