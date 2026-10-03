@@ -1868,9 +1868,15 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
                       f"kind={res.get('kind')!r} reason={res.get('reason')!r}", flush=True)
             if requirement is not None:
                 if not served:
+                    # ...so the planner's OWN words ride the refusal: "no unit
+                    # satisfies {...}" and "residency floor: llm_general loaded
+                    # 37s ago is protected for 60s" are different answers and
+                    # cost different actions (change the request vs wait).
+                    why = str(res.get("defer_reason") or res.get("reason") or "")
                     raise HTTPException(
                         status_code=503,
-                        detail=f"nothing satisfies {requirement}")
+                        detail=(f"nothing satisfies {requirement}"
+                                + (f" — {why}" if why else "")))
                 # WHICH unit a requirement resolved to, every time it changes
                 # the answer. Only refusals were logged, so a grant that chose
                 # a different model than the caller had in mind left no trace
