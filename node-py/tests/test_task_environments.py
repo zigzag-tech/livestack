@@ -10,6 +10,7 @@ import pytest
 
 from livestack_node.workloads.archive import capture, unpack
 from livestack_node.workloads.model import WorkloadError
+from livestack_node.workloads import task_environments as task_environments_module
 from livestack_node.workloads.task_environments import TaskEnvironmentStore
 
 
@@ -28,7 +29,8 @@ def profile(*, probe='print("flutter 3.24.0")', contract='cache-v1'):
                  contract='flutter-debug-v1')])}
 
 
-def make_store(tmp_path, *, now=None, max_per_owner=128*GIB, max_total=256*GIB, profile_spec=None):
+def make_store(tmp_path, *, now=None, max_per_owner=128*GIB, max_total=256*GIB, profile_spec=None,
+               idle_seconds=10, generation_seconds=100):
     root = tmp_path/'environments'
     workspace = tmp_path/'attempt-workspace'
     root.mkdir()
@@ -53,7 +55,8 @@ def make_store(tmp_path, *, now=None, max_per_owner=128*GIB, max_total=256*GIB, 
     config = dict(root=str(root), host_id='host-a', quota_helper='/usr/local/libexec/quota',
         project_id_min=100000, project_id_max=1000000, max_bytes_per_replica=32*GIB,
         max_bytes_per_owner=max_per_owner, max_total_bytes=max_total, reserve_bytes=0,
-        idle_seconds=10, generation_seconds=100, profiles=profile_spec or profile())
+        idle_seconds=idle_seconds, generation_seconds=generation_seconds,
+        profiles=profile_spec or profile())
     store = TaskEnvironmentStore(config, workspace=workspace, handlers=[HANDLER],
         quota_ensure=ensure, quota_probe=lambda _: True, quota_usage=usage,
         require_separate_filesystem=False,
@@ -274,6 +277,77 @@ def test_prune_expires_parked_disk_only_and_reports_deletion(tmp_path):
     result = store.prune()
     assert result['removed'] == ['2'*32]
     assert not (root/('2'*32)).exists()
+    recreated = store.prepare(assignment('2'*32, 2, digest), incoming, handler=HANDLER)
+    assert recreated['reuse_outcome'] == 'created'
+    assert (recreated['source']/'lib'/'main.dart').read_bytes() == b'code'
+    store.release(recreated)
+
+
+def test_prune_protects_expired_writer_until_supervised_cleanup(tmp_path):
+    now = [1000.0]
+    store, root, _ = make_store(tmp_path, now=now)
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    handle = 'a'*32
+    prepared = store.prepare(assignment(handle, 1, digest), incoming, handler=HANDLER)
+    now[0] += 101
+
+    assert store.prune()['removed'] == []
+    assert (root/handle).exists(), 'the active writer still owns its lock and quota'
+
+    finish(store, prepared, generation=1)
+    assert store.prune()['removed'] == [handle]
+    assert not (root/handle).exists()
+
+
+def test_absolute_generation_expiry_survives_recent_idle_refresh(tmp_path):
+    now = [1000.0]
+    store, root, _ = make_store(tmp_path, now=now, idle_seconds=200, generation_seconds=100)
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    handle = 'b'*32
+    first = store.prepare(assignment(handle, 1, digest), incoming, handler=HANDLER)
+    finish(store, first, generation=1)
+
+    now[0] += 95
+    replica = local_replica(store, handle, 1)
+    second = store.prepare(assignment(handle, 2, digest, replicas=[replica]), incoming, handler=HANDLER)
+    finish(store, second, generation=2)
+    marker = json.loads((root/handle/'environment.json').read_text())
+    assert marker['generation_expires'] == 1100
+    assert marker['idle_expires'] > marker['generation_expires']
+
+    now[0] = 1099
+    assert store.prune()['removed'] == []
+    now[0] = 1100
+    assert store.prune()['removed'] == [handle]
+
+
+def test_deletion_failure_keeps_host_quota_reserved_until_retry(tmp_path, monkeypatch):
+    now = [1000.0]
+    store, root, quota_calls = make_store(tmp_path, now=now, max_total=32*GIB)
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    expired_handle = 'c'*32
+    prepared = store.prepare(assignment(expired_handle, 1, digest), incoming, handler=HANDLER)
+    finish(store, prepared, generation=1)
+    now[0] += 11
+
+    # No integration test can safely inject a transient deletion failure into
+    # the kernel-quota mount; this control verifies the host ledger fails closed.
+    def refuse_delete(_path):
+        raise PermissionError('injected deletion failure')
+
+    monkeypatch.setattr(task_environments_module, '_remove_tree', refuse_delete)
+    assert store.prune()['removed'] == []
+    assert (root/expired_handle/'environment.json').is_file()
+    with pytest.raises(WorkloadError, match='budget is exhausted'):
+        store.prepare(assignment('d'*32, 1, digest), incoming, handler=HANDLER)
+    assert len(quota_calls) == 1
+
+    monkeypatch.undo()
+    assert store.prune()['removed'] == [expired_handle]
+    assert not (root/expired_handle).exists()
+    recreated = store.prepare(assignment('d'*32, 1, digest), incoming, handler=HANDLER)
+    assert recreated['reuse_outcome'] == 'created'
+    store.release(recreated)
 
 
 def test_prune_reclaims_untrusted_environment_after_its_writer_releases(tmp_path):
