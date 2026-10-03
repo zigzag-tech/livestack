@@ -12,12 +12,15 @@ from .model import WorkloadError, encode
 
 
 class WorkloadClient:
-    def __init__(self, url, token, *, timeout=15):
+    def __init__(self, url, token, *, timeout=15, edge_key=None):
         if not url.startswith(('http://', 'https://')) or len(token) < 32:
             raise ValueError('a workload URL and strong credential are required')
+        if edge_key is not None and (not isinstance(edge_key, str) or len(edge_key) < 32):
+            raise ValueError('an edge key must contain at least 32 characters')
         self.url = url.rstrip('/') + '/v1/workloads/'
         self.token = token
         self.timeout = timeout
+        self.edge_key = edge_key
         # Control requests ride one kept-alive connection, so an established
         # worker needs no new TCP handshake per request
         # (openspec/changes/worker-control-keepalive). urllib would have sent
@@ -31,7 +34,8 @@ class WorkloadClient:
     def channel(self):
         """A client with its own kept connection to the same authority: the
         lease keeper renews on it, never queued behind this client's requests."""
-        return WorkloadClient(self.url[:-len('/v1/workloads/')], self.token, timeout=self.timeout)
+        return WorkloadClient(self.url[:-len('/v1/workloads/')], self.token, timeout=self.timeout,
+                              edge_key=self.edge_key)
 
     def close(self):
         if self._kept is not None:
@@ -43,9 +47,12 @@ class WorkloadClient:
                 lambda _target, method, path, **kw: self._kept.request(
                     method, path, headers=kw['headers'], body=kw['body']))
         try:
+            headers = {'Authorization': 'Bearer '+self.token, 'Content-Type': 'application/json'}
+            if self.edge_key is not None:
+                headers['X-Edge-Key'] = self.edge_key
             _status, _headers, data = dial(
                 target, 'POST' if body is not None else 'GET', path,
-                headers={'Authorization': 'Bearer '+self.token, 'Content-Type': 'application/json'},
+                headers=headers,
                 body=encode(body).encode() if body is not None else None,
                 timeout=self.timeout)
             if len(data) > 8*1024*1024:
