@@ -820,8 +820,14 @@ def _release_slot(ctx: dict) -> None:
     (stream end, upstream error, refusal replay) and an exception may beat any
     of them to it. A request that dies must not hold a queue place forever."""
     slot = ctx.pop("queue_slot", None)
+    name = ctx.get("unit")
     if slot is not None:
         slot.release()
+        try:
+            if slot._queue.status()["in_flight"] == 0 and name:
+                manager.units[name].busy = False
+        except Exception:
+            pass
 
 manager, residence = attach(
     app, host_id=HOST_ID, kind=NODE_KIND, units=_UNITS,
@@ -1967,6 +1973,13 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         raise HTTPException(status_code=429, detail=str(e))
     ctx["queue_ms"] = _slot.queue_ms
     ctx["queue_slot"] = _slot
+    # The queue brackets the in-flight window, so it is the unit's busy truth:
+    # a co-tenant acquire refuses to evict a unit that is serving (idle-only
+    # preemption, as the planner has it).
+    try:
+        manager.units[unit].busy = True
+    except Exception:
+        pass
     if elsewhere:
         _busy.acquire()
         url = f"{elsewhere}/v1/{path}"

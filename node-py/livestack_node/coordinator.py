@@ -172,6 +172,18 @@ class LivestackCoordinator:
             other_unit = m.units.get(other)
             if (not self.coload or exclusive
                     or getattr(other_unit, "exclusive_device", False)):
+                # ...but NEVER out from under in-flight work. The planner's
+                # rule is "a busy one defers the admission" (idle-only
+                # preemption); a local acquire that kills a busy engine
+                # mid-generation turns a live stream into a broken one
+                # (measured 2026-10-02: title traffic bouncing the models cut
+                # a 26k-token generation with ReadError). Refuse instead — the
+                # caller retries, the stream survives. Exclusive or not, the
+                # busy tenant is the one thing this cannot take.
+                if getattr(other_unit, "busy", False):
+                    raise RuntimeError(
+                        f"{other} is busy with in-flight work; refusing to "
+                        f"interrupt it to load {name} (retry once it is idle)")
                 m._evict(other)
         if name not in m._resident:
             m._load(name, device, budget)
