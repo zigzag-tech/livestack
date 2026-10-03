@@ -28,16 +28,21 @@ def test_the_planner_treats_a_list_as_membership():
     assert not _unit_satisfies(u, {"nope": [1]})
 
 
-def test_the_node_matcher_agrees_with_the_planner():
+def test_the_node_matcher_agrees_with_the_planner(tmp_path):
     import importlib.util
+    import json
+    import os
     import sys
     from pathlib import Path
     here = Path(__file__).resolve().parents[1] / "examples" / "harmony-llm" / "server.py"
+    units = tmp_path / "units.json"
+    units.write_text(json.dumps([{"name": "u", "model": "m/u", "port": 8189,
+                                  "footprint_gb": 1, "attributes": {}}]))
+    os.environ["HARMONY_LLM_UNITS_FILE"] = str(units)
+    os.environ.pop("HARMONY_LLM_UNITS", None)
     spec = importlib.util.spec_from_file_location("harmony_llm_server_lists", here)
     module = importlib.util.module_from_spec(spec)
     sys.modules["harmony_llm_server_lists"] = module
-    import os
-    os.environ.setdefault("HARMONY_LLM_UNITS_FILE", "/nonexistent-for-this-test")
     try:
         spec.loader.exec_module(module)
     except Exception as e:                      # shared_py absent in some venvs
