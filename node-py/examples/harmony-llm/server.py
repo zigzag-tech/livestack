@@ -2047,13 +2047,25 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             _busy.release()
             _release_slot(ctx)
         text = raw.decode("utf-8", "replace")
-        if "context length" not in text.lower():
+        # WHETHER this refusal means "the prompt is too long" is the ENGINE's
+        # dialect, not a string this server knows: vLLM says "maximum context
+        # length is 16384 tokens ... at least 16385 input tokens", llama.cpp
+        # says "prompt (144950 tokens) + max tokens (16) exceeds the context
+        # (131072)". The adapter answers `context_refusal` — the seam that
+        # exists for exactly this (measured 2026-10-02: the block matched only
+        # vLLM's words and a llama.cpp refusal fell through to a raw passthrough,
+        # never the 413 with the need named).
+        _ctx_refusal = (_engine_for(SPECS.get(unit) or {})
+                        .context_refusal(400, raw)) if unit in SPECS else None
+        if not _ctx_refusal:
             _t = UsageTail()
             _t.feed(raw)
             _note_demand(ctx, "refused", 400, _t)
-        if "context length" in text.lower():
+        if _ctx_refusal:
             needed = None
             m = re.search(r"at least (\d+) input tokens", text)
+            if not m:
+                m = re.search(r"prompt \((\d+) tokens\)", text)
             if m:
                 # +1: a prompt of exactly N tokens needs room for N, and the
                 # message reports a floor ("at least"), never a ceiling.

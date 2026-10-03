@@ -31,7 +31,7 @@ def srv(tmp_path_factory):
          "footprint_gb": 12, "max_model_len": "16384",
          "attributes": {"class": "llm", "params_b": 9, "context_len": 16384}},
         {"name": "llm_wide", "model": "m/wide", "port": 8191,
-         "footprint_gb": 22, "max_model_len": "131072",
+         "footprint_gb": 22, "max_model_len": "131072", "engine": "strata",
          "attributes": {"class": "llm", "params_b": 125, "context_len": 131072}},
     ]))
     os.environ.update({
@@ -68,7 +68,14 @@ class _Upstream(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(n) or b"{}")
         _Upstream.seen.append(body)
         if _Upstream.refuse_all or body.get("model") in _Upstream.refuse_models:
-            out = json.dumps({"error": {"message": CONTEXT_ERROR}}).encode()
+            # Each engine refuses in its OWN dialect: the wide unit is the
+            # strata one (llama.cpp words), everyone else speaks vLLM's.
+            if "wide" in str(body.get("model")):
+                msg = ("prompt (40000 tokens) + max tokens (8) exceeds the "
+                       "context (16384); requests are never truncated")
+            else:
+                msg = CONTEXT_ERROR
+            out = json.dumps({"error": {"message": msg}}).encode()
             self.send_response(400)
             self.send_header("content-type", "application/json")
             self.send_header("content-length", str(len(out)))
@@ -241,3 +248,57 @@ def test_a_named_request_keeps_the_413(srv, upstream):
     assert r.status_code == 413
     assert "40000" in r.text
     assert [b["model"] for b in _Upstream.seen] == ["local"]   # no re-route
+
+
+def test_the_llama_cpp_dialect_is_recognised_too(srv, upstream):
+    """The refusal dialect is the ENGINE's (design §4c): llama.cpp's
+    "prompt (N tokens) + max tokens (M) exceeds the context (K)" names the
+    need differently from vLLM's "at least N input tokens", and the block
+    matched only vLLM's words (found 2026-10-02: a llama.cpp refusal fell
+    through as a raw passthrough instead of the 413 with the need named)."""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import threading
+    from fastapi.testclient import TestClient
+
+    class _LlamaCpp(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+
+        def do_POST(self):
+            out = json.dumps({"error": {"type": "invalid_request_error",
+                                        "message": "prompt (26000 tokens) + max tokens (16) "
+                                                   "exceeds the context (16384); "
+                                                   "requests are never truncated"}}).encode()
+            self.send_response(400)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+    httpd = HTTPServer(("127.0.0.1", 0), _LlamaCpp)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    monkey_base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    import unittest.mock as mock
+    with mock.patch.object(srv, "_base_of", lambda name: monkey_base), \
+         mock.patch.object(srv, "_held_elsewhere", lambda name: None), \
+         mock.patch.object(srv, "_foreign_listener", lambda name: False), \
+         mock.patch.object(srv.manager, "ensure", lambda *a, **k: None), \
+         mock.patch.object(srv, "_vllm_up", lambda **k: True), \
+         mock.patch.object(srv, "admit", lambda *a, **k: {"kind": "llm_wide",
+                                                           "granted": True,
+                                                           "device_id": srv.DEVICE_ID_SELF}):
+        # llm_wide is the STRATA unit — the refusal comes from an engine whose
+        # dialect is llama.cpp's, which is the point: each unit knows its own
+        # engine's words (a vLLM unit would not recognise them, rightly).
+        client = TestClient(srv.app)
+        r = client.post("/v1/chat/completions",
+                        json={"model": "require:class=llm", "max_tokens": 8,
+                              "messages": [{"role": "user", "content": "x"}]})
+    httpd.shutdown()
+    # The 413 with the need named (26000 input + 8 reserved), not a raw 400.
+    assert r.status_code == 413
+    assert "26008" in r.text or "26000" in r.text

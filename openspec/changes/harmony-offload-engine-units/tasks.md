@@ -120,9 +120,14 @@ requests are **broad**: characteristics, not unit names (design §4b).
   Tests: `test_engines_strata.py` against a fake Strata server (the serve
   server's API surface, incl. `/health`, `/status`, `/v1/chat/completions`).
   Ledger: none.
-- [ ] 5.2 On the pinned rev, verify and record in design §1: reasoning returned
-  separately or inline (decides `thinking`), OpenAI `tool_calls` (decides `tools`),
-  the `/status` READY field, which `/proc` field shows pinned memory.
+- [x] 5.2 VERIFIED on the pinned rev (`strata.sh verify`, exit 0 — receipts/):
+  reasoning returned SEPARATELY (`reasoning_content`) -> `thinking: true`
+  declared; OpenAI `tool_calls` work -> `tools: true` declared; `GET /status`
+  reports `{busy, queued}` (the ready gate is `/health` AND `/status` state);
+  pinned memory is `/proc/<pid>/status` `VmLck` (positive control:
+  `tests/test_engines_strata.py`). Process name is `serve/server.py --engine
+  strata` — the pinned rev has no `llama-server` binary; the adapter drives the
+  real entry point (design §1: "whatever the repo's actual script name").
 
 ## 6. Deploy on xc-tower-ubuntu and acceptance (BLOCKED on Q1; Q2 informs it)
 
