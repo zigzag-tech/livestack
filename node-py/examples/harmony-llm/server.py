@@ -1840,8 +1840,17 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             # registration, the broker then answered "no unit satisfies", and
             # the fallback fired again: 346 doomed starts, llm_general down
             # 05:29-15:42. A refusal of a unit the broker KNOWS is final here.
+            # ...and "no unit satisfies" for a requirement one of OUR units
+            # meets is ALSO "did not know": the facade blocks while it serves,
+            # so a load drops the registration and the broker's snapshot loses
+            # this node entirely (measured 2026-10-02: a re-route to a
+            # locally-known flash_next died as a 503 while the broker's world
+            # held no tower-llm units at all). The local check below stays the
+            # discriminator: when no local unit satisfies either, the refusal
+            # is real and final.
+            _stale = "no unit satisfies" in str(res.get("defer_reason") or "")
             if (requirement is not None and not served
-                    and _broker_did_not_know(res)):
+                    and (_broker_did_not_know(res) or _stale)):
                 local_declared = next((n for n in _ordered(prefer)
                                        if _local_satisfies(n, requirement)), None)
                 if local_declared:
