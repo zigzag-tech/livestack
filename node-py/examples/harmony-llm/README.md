@@ -346,3 +346,28 @@ workers.
 
 **This is a copy of a deployed file, not the deployment.** Changing it here does
 not change the running service; sync deliberately.
+
+## Engine units (2026-10-02): a non-vLLM engine on a card
+
+`/etc/harmony/llm-units.json` on xc-tower-ubuntu now declares TWO units for
+card 1: `llm_general` (vLLM, `default: true`) and `flash_next`
+(Qwen3.8-Flash-Next through Strata, `exclusive_device: true`,
+`engine: "strata"`, `ram_gb: 45`, `min_residency_s: 180`, `priority: 110`).
+Deploy paths:
+
+| What | Where |
+|---|---|
+| Strata checkout (rev pinned) | `~/strata/strata` (`STRATA_VERSION` = `e416ba57…`) |
+| run config + engine log | `~/strata/strata/strata-q2_0.json`, `strata-q2_0.log` |
+| model + pack + MTP | `~/strata/Strata-data/{models/Q2_0,packs/q2_0,mtp/rt}` |
+| engine (prebuilt) | `~/strata/strata/engine/strata` |
+| verification | `~/strata/strata/strata.sh verify` (`PORT=8191`) |
+| units file | `/etc/harmony/llm-units.json` (backup `.bak-20261002`) |
+
+The engine runs card 1 only (`--gpu 1` in the unit's `extra_args` — the setup's
+default was a two-card layer split). **`HARMONY_LLM_COLOAD=0` must stay off**
+on a multi-unit node (its drop-in is disabled as
+`80-coload.conf.disabled-20261002`): acquiring one unit used to evict the
+others in this process, stopping a just-loaded Flash-Next mid-request.
+Full runbook: `HARMONY.md` "Engine units"; design record:
+`_plans/harmony-engine-units.md`.
