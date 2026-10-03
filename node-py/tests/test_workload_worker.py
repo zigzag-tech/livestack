@@ -55,14 +55,18 @@ if request.get('inspect_cache'):
     value+='|env-cache='+os.environ.get('HARMONY_ENV_CACHE_COMPONENTS','missing')
 timing_path=os.environ.get('HARMONY_PHASE_TIMINGS')
 if timing_path:
-    if request.get('timing_version',2)==1:
+    timing_version=request.get('timing_version',2)
+    if timing_version==0:
+        Path(timing_path).write_text('{invalid timing json')
+    elif timing_version==1:
         timing={'version':1,'dependencies_seconds':0.125,'compile_seconds':0.5,'test_seconds':0.25}
     else:
         timing={'version':2,'phases':{
             'dependencies':{'seconds':0.125},
             'compile':{'seconds':None,'reason':'not_applicable'},
             'test':{'seconds':0.25}}}
-    Path(timing_path).write_text(json.dumps(timing))
+    if timing_version!=0:
+        Path(timing_path).write_text(json.dumps(timing))
 Path(os.environ['HARMONY_OUTPUT'],'artifact').write_text(value)
 print('finished')
 raise SystemExit(request.get('exit',0))
@@ -277,6 +281,15 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
         assert cache_components == [{
             'name': 'incremental-build', 'path': 'build', 'identity': receipt['cache_components'][0]['identity'],
             'outcome': 'reused'}]
+
+        malformed = submit_environment('environment-malformed-timing', second_digest, timing_version=0)
+        assert worker.step()
+        malformed_result = caller.get(malformed['id'])
+        malformed_receipt = malformed_result['result']['environment_receipt']
+        assert malformed_result['state'] == 'succeeded'
+        assert all(malformed_receipt['phase_timings'][phase] == {
+            'seconds': None, 'reason': 'handler_uninstrumented'}
+            for phase in ('dependencies', 'compile', 'test'))
     finally:
         worker.close()
 
