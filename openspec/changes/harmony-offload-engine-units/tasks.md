@@ -131,21 +131,21 @@ requests are **broad**: characteristics, not unit names (design §4b).
 
 ## 6. Deploy on xc-tower-ubuntu and acceptance (BLOCKED on Q1; Q2 informs it)
 
-- [ ] 6.1 Disk: `diskreap scan`, then `diskreap clean --apply` (SAFE only) until
+- [x] 6.1 Disk: `diskreap scan`, then `diskreap clean --apply` (SAFE only) until
   ≥100 GB free. REPORT-ONLY items go to the user.
-- [ ] 6.2 Install Strata at the pinned rev with
+- [x] 6.2 Install Strata at the pinned rev with
   `./setup.sh --yes --family qwen --model <size> --no-start` (model choice from Q1).
   Never let setup start the server. Record paths in harmony-llm `README.md`.
-- [ ] 6.3 Deploy tasks 1–3 code to xc-tower-ubuntu's harmony-llm and hostd; verify
+- [x] 6.3 Deploy tasks 1–3 code to xc-tower-ubuntu's harmony-llm and hostd; verify
   `llm_general` unchanged (same argv in the start log, titles served, same measured
   cost). Add harmony-llm's systemd unit to the workload worker's `host_services`
   (host-memory-ledger) so batch placement sees Strata's RAM.
-- [ ] 6.4 Add `flash_next` to `/etc/harmony/llm-units.json` on the card-1 node:
+- [x] 6.4 Add `flash_next` to `/etc/harmony/llm-units.json` on the card-1 node:
   `engine: "strata"`, `engine_source`, `exclusive_device: true`, `ram_bytes` prior,
   `residency: "UNPINNED"`, priority below `llm_general`, `min_residency_s` ≥ measured
   load time, honest attributes (design §4). Restart harmony-llm once. Confirm
   `/status` on :8799 lists it, **not resident**.
-- [ ] 6.5 Acceptance — each scenario in the delta spec, driven only by requests,
+- [x] 6.5 Acceptance — each scenario in the delta spec, driven only by requests,
   evidence = request, response, hostd `/status` before/after, ledger record:
   (a) a broad long-context request loads Flash-Next by evicting the idle 27B;
   (b) a broad request the 27B also satisfies, sent while the 27B is resident,
@@ -157,7 +157,7 @@ requests are **broad**: characteristics, not unit names (design §4b).
   (f) host RAM stays inside the pool (no OOM; record swap before/after);
   (g) ASR on card 0 stays resident and serving throughout.
   Measure and record decode/prefill tok/s and load time on this host.
-- [ ] 6.6 Docs: `HARMONY.md` "Engines other than vLLM" + host pool in
+- [x] 6.6 Docs: `HARMONY.md` "Engines other than vLLM" + host pool in
   "Context-awareness"; `_plans/resource-planner.md` §2 stale line;
   harmony-llm `README.md`; benchday `docs/livestack-harmony.md` (request examples
   for broad LLM requests and `prefer`); `~/.claude/docs/mesh.md` xc-tower-ubuntu

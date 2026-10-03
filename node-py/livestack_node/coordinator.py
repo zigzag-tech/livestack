@@ -158,10 +158,21 @@ class LivestackCoordinator:
         # also what keeps the "broker temporarily forgot" fallback safe: that
         # path loads WITHOUT the planner, and the only room-making left is here.
         unit = m.units.get(name)
-        if not self.coload or getattr(unit, "exclusive_device", False):
-            for other in list(m._resident):
-                if other != name:
-                    m._evict(other)
+        exclusive = getattr(unit, "exclusive_device", False)
+        for other in list(m._resident):
+            if other == name:
+                continue
+            # ...and the claim is symmetric: nothing co-places WITH an
+            # exclusive resident either. Acquiring a plain unit beside one
+            # produced two tenants the planner models as impossible — the world
+            # then read the card massively over-budget and step 0 shed in a
+            # loop (ledger: "relieve measured over-budget pressure" every ~10 s,
+            # 2026-10-02). The exclusive tenant leaves first, whatever coload
+            # says.
+            other_unit = m.units.get(other)
+            if (not self.coload or exclusive
+                    or getattr(other_unit, "exclusive_device", False)):
+                m._evict(other)
         if name not in m._resident:
             m._load(name, device, budget)
         self._note_usage(name)

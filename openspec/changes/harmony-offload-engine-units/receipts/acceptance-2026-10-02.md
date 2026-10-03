@@ -103,3 +103,37 @@ point. Reasoning is returned SEPARATELY (`reasoning_content`) and tools work
 5. `model: "local"` was "no opinion" and lost to the reuse shortcut (`e4a94948`
    lineage; see (d)).
 6. The 502 carried an empty message; it now names the exception type.
+
+## Scenario run 2 (the state dance, request-driven) — 2026-10-02
+
+`/tmp/accept-all.log` + `/tmp/accept-rest.log` hold the raw logs. Summary:
+
+- **(b) no swap** — broad `require:class=llm` while the 27B resident →
+  `model: dbirks/Qwen3.8-27B-W4A16-AutoRound`, state unchanged
+  (`llm_general resident, flash_next not`). PASS.
+- **(a) long-context** — `require:class=llm,context_len=[131072,]` →
+  `model: qwen3.8-flash-next-q2_0`; state after:
+  `llm_general evicted, flash_next resident`. PASS (also in run 1).
+- **(f) host RAM inside the pool** — before: used 17 G / available 76 G;
+  after Flash-Next resident: used 48 G / available 46 G (the ~31.6 GiB expert
+  pin + MTP), swap 74→76 G flat, no OOM. PASS.
+- **(g) ASR on card 0** — `tower-asr-1 [('asr', True)]` in EVERY snapshot
+  across the whole run. PASS.
+- **(c)** — the first attempt sent the body-JSON list form (`max_concurrent:
+  [8]`, membership) instead of the spec's interval spelling
+  (`max_concurrent=[8,]` = `>=8` per `_expand_clause`): nothing satisfied it.
+  Re-shot with the model-string spelling in run 2.
+- **(d)** — the first attempt ran INSIDE flash_next's anti-thrash floor and was
+  correctly deferred ("was not admitted: the planner could not place it on any
+  device"); the scenario's "idle past its minimum residency" applies here too.
+  Re-shot after the floor in run 2.
+- **(d2)** — the first prompt was 144,950 tokens (past even Flash-Next's
+  131,072): the engine refused and — the acceptance's second dialect finding —
+  the refusal fell through as a raw 400 because the block matched only vLLM's
+  "context length" words. Fixed (Engine.context_refusal + both number
+  spellings, landed `2d1f3380`); re-shot with a ~26k-token prompt in run 2.
+- **(e)** — the first attempt sent `vision=[true,]` and the parser refused it
+  ("bad requirement 'vision': not a number: 'true'") — a 400, correctly, and
+  naming the rule; re-shot as a 503 case in run 2.
+
+Run 2 results are appended below by the follow-up capture.
