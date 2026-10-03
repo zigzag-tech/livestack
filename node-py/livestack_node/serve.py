@@ -26,8 +26,18 @@ from .lease import Capability
 def _footprint_signature(units: Dict[str, object]) -> str:
     """A short fingerprint of the unit set + declared footprints. The persisted
     activation store is keyed by this, so a model/footprint change invalidates stale
-    values instead of trusting a possibly-too-low reserve (the OOM direction)."""
-    items = sorted((str(n), int(getattr(u, "footprint", 0) or 0)) for n, u in units.items())
+    values instead of trusting a possibly-too-low reserve (the OOM direction).
+
+    A footprint is an int (VRAM bytes, as it always was) or a resource VECTOR
+    ({vram_bytes, ram_bytes, ...} — a unit that also pins host RAM). The whole
+    vector is fingerprinted: a change in EITHER dimension is a different model
+    and must discard the learned values."""
+    items = []
+    for n, u in units.items():
+        fp = getattr(u, "footprint", 0) or 0
+        vec = tuple(sorted(fp.items())) if isinstance(fp, dict) else int(fp)
+        items.append((str(n), vec))
+    items.sort()
     return hashlib.sha256(repr(items).encode()).hexdigest()[:16]
 
 

@@ -283,3 +283,14 @@ def test_footprint_accepts_a_resource_vector():
     assert m.resident == {"flash_next"}
     assert unit.exclusive_device is True
     assert (unit.engine, unit.engine_rev) == ("strata", "36fa455")
+    # Every consumer of `footprint` speaks the vector (2026-10-02: serve.py's
+    # activation-store signature int()-crashed on the dict and the node would
+    # not boot). The signature changes when EITHER dimension changes.
+    from livestack_node.serve import _footprint_signature
+    assert _footprint_signature({"flash_next": unit})
+    vec2 = ln.ManagedUnit("flash_next", be.loader("flash_next"), be.freer,
+                          footprint={"vram_bytes": 20, "ram_bytes": 46})
+    assert _footprint_signature({"flash_next": unit}) != \
+        _footprint_signature({"flash_next": vec2})
+    plain = ln.ManagedUnit("a", be.loader("a"), be.freer, footprint=20)
+    assert _footprint_signature({"a": plain})   # the int form still works
