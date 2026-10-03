@@ -3,7 +3,7 @@ import pytest
 from livestack_node.workloads.model import WorkloadError
 from livestack_node.workloads.model import Limits
 from livestack_node.workloads.store import WorkloadStore
-from livestack_node.workloads.github_remote import GitHubActionsProvider
+from livestack_node.workloads.github_remote import GitHubActionsProvider, GitHubApp
 
 
 def spec(key, *, handler='release.v1'):
@@ -158,18 +158,34 @@ def test_bootstrap_binds_the_dispatch_inputs_and_issues_only_a_job_scoped_grant(
     assert provider.principal(grant['token']+'x') is None
 
 
-def test_dispatch_uses_the_oidc_pinned_branch_and_passes_authority_identity(tmp_path):
+def test_dispatch_checks_the_pinned_tag_sha_before_passing_authority_identity(tmp_path):
     provider = GitHubActionsProvider('github-actions',provider_config(tmp_path),b'k'*32)
     calls = []
-    provider._api = lambda method, path, *, body=None, accepted=(200,): calls.append((method,path,body,accepted))
+    def api(method, path, *, body=None, accepted=(200,)):
+        calls.append((method,path,body,accepted))
+        return (200, {'object': {'type':'commit','sha':'a'*40}}) if method == 'GET' else (204, {})
+    provider._api = api
     item = {'job_id':'1'*32,'correlation':'2'*32,
             'spec':{'input_digest':'a'*64,'key':'ios-42'}}
     provider.dispatch(item)
     method,path,body,accepted = calls[0]
+    assert method == 'GET' and path.endswith('/git/ref/tags/benchday-ios-remote-v1')
+    method,path,body,accepted = calls[1]
     assert method == 'POST' and accepted == (204,)
     assert path.endswith('/actions/workflows/77/dispatches')
     assert body == {'ref':'benchday-ios-remote-v1','inputs':{'harmony_job_id':'1'*32,'harmony_correlation':'2'*32,
         'harmony_input_digest':'a'*64,'harmony_release_key':'ios-42'}}
+
+
+def test_dispatch_refuses_a_moved_or_annotated_workflow_tag(tmp_path):
+    provider = GitHubActionsProvider('github-actions',provider_config(tmp_path),b'k'*32)
+    calls = []
+    provider._api = lambda method, path, *, body=None, accepted=(200,): (
+        calls.append((method,path)) or (200, {'object': {'type':'commit','sha':'b'*40}}))
+    with pytest.raises(WorkloadError, match='github_workflow_revision_drift'):
+        provider.dispatch({'job_id':'1'*32,'correlation':'2'*32,
+                           'spec':{'input_digest':'a'*64,'key':'ios-42'}})
+    assert len(calls) == 1 and calls[0][0] == 'GET'
 
 
 def test_remote_report_is_clamped_to_operator_capacity(tmp_path):
@@ -182,6 +198,22 @@ def test_remote_report_is_clamped_to_operator_capacity(tmp_path):
     assert constrained['labels'] == {'os':'macos','signing':'apple',
                                      'harmony.execution.provider':'github-actions'}
     assert constrained['handlers'] == ['release.v1']
+
+
+def test_installation_token_requests_only_actions_and_contents_permissions(tmp_path):
+    app = GitHubApp(dict(app_id=12,installation_id=34,private_key_file=str(tmp_path/'unused.pem')),
+                    clock=lambda:1000)
+    app._jwt = lambda:'signed-app-jwt'
+    calls = []
+    def request(method,url,*,token,body=None,accepted=(200,)):
+        calls.append((method,url,token,body,accepted))
+        return 201, {'token':'installation-token','expires_at':'2030-01-01T00:00:00Z'}
+    app._request = request
+    assert app.token() == 'installation-token'
+    assert calls == [('POST','https://api.github.com/app/installations/34/access_tokens',
+                      'signed-app-jwt',
+                      {'permissions':{'actions':'write','contents':'read','metadata':'read'}},
+                      (201,))]
 
 
 def test_terminal_job_cannot_release_provider_slot_before_github_run_cleanup(tmp_path):
