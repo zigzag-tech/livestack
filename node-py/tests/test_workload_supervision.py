@@ -103,6 +103,36 @@ def test_output_is_drained_but_storage_is_bounded(tmp_path, executor):
         executor.stop(attempt)
 
 
+def test_environment_execution_sees_only_its_bound_source_tree(tmp_path, executor):
+    attempt = uuid.uuid4().hex
+    environment_root = tmp_path/'shared-environments'
+    source = environment_root/'handle-a'/'source'
+    other = environment_root/'handle-b'/'source'
+    view = tmp_path/'attempt'/'environment-view'
+    source.mkdir(parents=True)
+    other.mkdir(parents=True)
+    view.mkdir(parents=True)
+    (source/'captured').write_text('current-task')
+    (other/'secret').write_text('different-owner')
+    program = f"""from pathlib import Path
+assert Path({str(view/'captured')!r}).read_text() == 'current-task'
+try:
+    Path({str(other/'secret')!r}).read_text()
+except PermissionError:
+    pass
+else:
+    raise AssertionError('sibling environment was readable')
+"""
+    try:
+        executor.start(attempt, [sys.executable, '-c', program], view, tmp_path/'out',
+            env=dict(os.environ), cpu=.1, memory_bytes=128*1024**2,
+            inaccessible_paths=[str(environment_root)], bind_paths=[(str(source), str(view))])
+        result = until(lambda: executor.exit_result(tmp_path/'out'))
+        assert result['exit_code'] == 0, result
+    finally:
+        executor.stop(attempt)
+
+
 @pytest.mark.parametrize('tasks', [0, .5, True, 8193])
 def test_task_budget_cannot_disable_or_escape_the_bound(tmp_path, executor, tasks):
     with pytest.raises(WorkloadError):

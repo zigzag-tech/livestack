@@ -73,6 +73,7 @@ def main():
         github_remote = GitHubRemote(config['github_remote']) if 'github_remote' in config else None
         store = WorkloadStore(root/'workloads.sqlite', handlers=config['handlers'],
                               limits=Limits(**config.get('limits', {})),
+                              environment_handlers=config.get('environment_handlers', {}),
                               compilation_policy=(CompilationPolicy(
                                   config.get('compilation_policy'), config['compilation_handlers'])
                                   if 'compilation_handlers' in config else None),

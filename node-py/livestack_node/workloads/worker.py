@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 import hashlib
 import logging
+import math
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import time
@@ -91,6 +93,17 @@ class WorkloadWorker:
         self.workspace = Path(config['workspace']).resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.handlers = config['handlers']
+        self.task_environments = None
+        self.task_environment_error = None
+        self._environment_sweep_at = 0.0
+        if config.get('task_environments') is not None:
+            try:
+                from .task_environments import TaskEnvironmentStore
+                self.task_environments = TaskEnvironmentStore(config['task_environments'],
+                    workspace=self.workspace, handlers=self.handlers)
+            except Exception as error:
+                self.task_environment_error = f'{type(error).__name__}: {str(error)[:512]}'
+                logging.error('task_environment_support_disabled: %s', self.task_environment_error)
         if not self.handlers or any(h.get('backend', 'native') not in (
                 'native', 'rootless-docker', 'rootless-docker-native') for h in self.handlers.values()):
             raise WorkloadError('worker requires installed native or rootless-docker handlers')
@@ -283,6 +296,15 @@ class WorkloadWorker:
         available['cpu'] = max(0, min(capacity['cpu'], (os.cpu_count() or 1)-self._busy_cpus()))
         report = dict(capacity=capacity, available=available, labels=self.config.get('labels', {}),
                       handlers=list(self.handlers), ready=not self.config.get('observe_only', False))
+        if self.task_environments is not None:
+            profiles, replicas = self.task_environments.report()
+            report['environment_profiles'] = profiles
+            if replicas is not None:
+                report['environment_replicas'] = replicas
+        elif self.config.get('task_environments') is not None:
+            # Explicit absence keeps ordinary handlers available while making
+            # task environments ineligible for placement on this worker.
+            report['environment_profiles'] = {}
         if not self.darwin and not self.windows:
             report['host'] = host
         return report
@@ -293,17 +315,17 @@ class WorkloadWorker:
     def reconcile(self):
         old = self.journal.read()
         if old:
-            self._stop(old['assignment']['attempt_id'])
+            assignment = old['assignment']
+            self._stop(assignment['attempt_id'])
             completion = old.get('completion')
             if completion is None and old.get('phase') == 'running':
-                output = self.workspace/old['assignment']['attempt_id']/'output'
+                output = self.workspace/assignment['attempt_id']/'output'
                 self._release_fleet_leases(output)
                 result = self.executor.exit_result(output)
                 if result is not None:
                     try:
-                        completion = self._completion_from_exit(old['assignment'], result)
-                        completion = self._attach_artifacts(old['assignment'], completion, output)
-                        self.journal.write(dict(assignment=old['assignment'], phase='completed', completion=completion))
+                        completion = self._completion_from_exit(assignment, result)
+                        completion = self._attach_artifacts(assignment, completion, output)
                     except (WorkloadError, HTTPError) as error:
                         # Cancellation or immutable-deadline expiry can fence the
                         # attempt before a restarted worker uploads its recovered
@@ -312,12 +334,30 @@ class WorkloadWorker:
                         if error.status != 409:
                             raise
                         completion = None
+            env = assignment.get('environment')
+            if env and completion is not None and 'environment_receipt' not in completion:
+                completion['environment_receipt'] = self._environment_receipt(assignment, None,
+                    self.workspace/assignment['attempt_id']/'output', source_seconds=None,
+                    cleanup_seconds=None, state='rebuild_required')
+            if completion is not None:
+                self.journal.write(dict(assignment=assignment, phase='completed', completion=completion))
             if completion:
                 try:
-                    self.client.request('worker/complete', completion)
+                    acknowledgement = self.client.request('worker/complete', completion)
                 except WorkloadError as error:
                     if error.status != 409:
                         raise
+                    completion = None
+                if completion and env and self.task_environments and \
+                        completion.get('environment_receipt', {}).get('state') == 'parked':
+                    if not self.task_environments.acknowledge_handle(env['handle'], env['generation'],
+                                                                      acknowledgement.get('environment')):
+                        logging.error('task_environment_restart_ack_missing: handle=%s generation=%s',
+                                      env['handle'], env['generation'])
+                elif completion and env and self.task_environments:
+                    self.task_environments.invalidate(env['handle'])
+            if env and completion is None and self.task_environments:
+                self.task_environments.invalidate(env['handle'])
             # A restart or interrupted execution is a new worker session. This
             # fences any old live assignment before cleanup is acknowledged.
             self.boot = uuid.uuid4().hex
@@ -351,6 +391,65 @@ class WorkloadWorker:
             'infrastructure' if resource_failure or code in handler.get('infrastructure_exit_codes', []) or
             (handler.get('backend') in ('rootless-docker', 'rootless-docker-native') and code == 75) else 'product_failure')
         return dict(outcome=outcome, result=result)
+
+    @staticmethod
+    def _measured_phase(seconds, reason='measurement_unavailable'):
+        if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds < 0 or not math.isfinite(seconds):
+            return dict(seconds=None, reason=reason)
+        return dict(seconds=float(seconds))
+
+    def _environment_timings(self, assignment, output, *, transfer_seconds, source_seconds,
+                             execution_seconds, cleanup_seconds):
+        environment = assignment['environment']
+        queue_seconds = environment.get('queue_seconds')
+        timings = {
+            'queue': self._measured_phase(queue_seconds, 'authority_queue_timing_unavailable'),
+            'transfer': self._measured_phase(transfer_seconds, 'input_transfer_not_completed'),
+            'source_materialization': self._measured_phase(source_seconds, 'source_materialization_not_started'),
+            'dependencies': dict(seconds=None, reason='handler_uninstrumented'),
+            'compile': dict(seconds=None, reason='handler_uninstrumented'),
+            'test': dict(seconds=None, reason='handler_uninstrumented'),
+            'execution': self._measured_phase(execution_seconds, 'handler_execution_not_started'),
+            'cleanup': self._measured_phase(cleanup_seconds, 'cleanup_not_observed'),
+        }
+        trace = Path(output) / 'environment-timings.json'
+        try:
+            if not trace.is_file() or trace.is_symlink() or trace.stat().st_size > 2048:
+                raise ValueError('timing trace missing or oversized')
+            value = json.loads(trace.read_bytes())
+            if not isinstance(value, dict) or set(value) != {
+                    'version', 'dependencies_seconds', 'compile_seconds', 'test_seconds'} or value['version'] != 1:
+                raise ValueError('timing trace fields are invalid')
+            for phase in ('dependencies', 'compile', 'test'):
+                seconds = value[phase + '_seconds']
+                if (isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or
+                        not 0 <= seconds <= 86400 or not math.isfinite(seconds)):
+                    raise ValueError(f'{phase} timing is invalid')
+                timings[phase] = dict(seconds=float(seconds))
+        except (OSError, ValueError, TypeError) as error:
+            logging.info('task_environment_timing_unknown: job=%s reason=%s: %s',
+                         assignment['job_id'], type(error).__name__, str(error)[:256])
+        return timings
+
+    def _environment_receipt(self, assignment, prepared, output, *, transfer_seconds=None, source_seconds,
+                             execution_seconds=None, cleanup_seconds, state):
+        if not assignment.get('environment'):
+            return None
+        timings = self._environment_timings(assignment, output,
+            transfer_seconds=transfer_seconds, source_seconds=source_seconds,
+            execution_seconds=execution_seconds, cleanup_seconds=cleanup_seconds)
+        if prepared is not None and self.task_environments is not None:
+            return self.task_environments.receipt(prepared, state=state, phase_timings=timings)
+        environment = assignment['environment']
+        compatibility = (self.task_environments.profile_digest(environment['profile'])
+                         if self.task_environments else None) or environment.get('compatibility')
+        if not isinstance(compatibility, str) or not re.fullmatch('[a-f0-9]{64}', compatibility):
+            compatibility = hashlib.sha256(('unavailable:' + environment['profile']).encode()).hexdigest()
+        return dict(version=1, handle=environment['handle'], generation=environment['generation'],
+            profile=environment['profile'], compatibility=compatibility,
+            source_digest=assignment['spec']['input_digest'], reuse_outcome='created',
+            reason_code='worker_environment_unavailable',
+            state='rebuild_required', bytes_used=0, phase_timings=timings, cache_components=[])
 
     def _close_lease(self, lease, attempt, in_flight):
         # A stuck renewal thread must never mask the error being propagated.
@@ -412,6 +511,12 @@ class WorkloadWorker:
         self._retry_stuck_workspaces()
         if self.input_cache:
             self.input_cache.prune()
+        if self.task_environments and time.monotonic() >= self._environment_sweep_at:
+            try:
+                self.task_environments.prune()
+            except Exception as error:
+                logging.error('task_environment_sweep_failed: %s: %s', type(error).__name__, str(error)[:512])
+            self._environment_sweep_at = time.monotonic() + 60
         response = self.register()
         if response['cleanup']:
             self.reconciled = False
@@ -433,7 +538,8 @@ class WorkloadWorker:
         # immediately before systemd marks the unit inactive.
         return self.executor.exit_result(output) is not None
 
-    def _attempt_env(self, assignment, root, output, objects, attempt):
+    def _attempt_env(self, assignment, root, output, objects, attempt, source_path=None,
+                     environment_prepared=None):
         """The handler's environment. Ownership metadata travels with the job:
         HARMONY_OWNER is the end user's owner string (labels.owner) when the
         submitter named one, else the submitting principal itself."""
@@ -441,10 +547,23 @@ class WorkloadWorker:
         spec = assignment['spec']
         owner = (spec.get('labels') or {}).get('owner') or assignment['owner']
         env.update(HOME=str(root/'home'), TMPDIR=str(root/'tmp'),
-                   HARMONY_INPUT=str(root/'source'), HARMONY_OUTPUT=str(output),
+                   HARMONY_INPUT=str(source_path or root/'source'), HARMONY_OUTPUT=str(output),
                    HARMONY_INPUT_OBJECTS=str(objects),
                    HARMONY_REQUEST=str(root/'request.json'), HARMONY_ATTEMPT=attempt,
                    HARMONY_OWNER=owner)
+        environment = assignment.get('environment')
+        if environment is not None:
+            env.update(HARMONY_ENV_HANDLE=environment['handle'],
+                       HARMONY_ENV_GENERATION=str(environment['generation']),
+                       HARMONY_ENV_PROFILE=environment['profile'],
+                       HARMONY_PHASE_TIMINGS=str(output/'environment-timings.json'))
+            components = [] if environment_prepared is None else [
+                {key: component[key] for key in ('name', 'path', 'identity', 'outcome')}
+                for component in environment_prepared['cache_components']]
+            encoded_components = json.dumps(components, separators=(',', ':'))
+            if len(encoded_components.encode()) > 16 * 1024:
+                raise WorkloadError('task environment cache component handoff exceeds16KiB', 413)
+            env['HARMONY_ENV_CACHE_COMPONENTS'] = encoded_components
         if self.windows:
             # Windows tools read TEMP/TMP, not TMPDIR. The job's name lets a
             # handler find its attempt job (IsProcessInJob proves membership).
@@ -502,6 +621,14 @@ class WorkloadWorker:
         lease = None
         completion = None
         started = None
+        environment_prepared = None
+        environment_view = None
+        environment_isolation = {}
+        source_materialization_started = None
+        source_materialization_seconds = None
+        transfer_seconds = 0.0
+        execution_seconds = None
+        cleanup_seconds = None
         output = root/'output'
         try:
             lease = LeaseKeeper(self.client, assignment, root/'lease',
@@ -512,33 +639,55 @@ class WorkloadWorker:
             need = spec['need']
             if need.get('cpu', 0) <= 0 or need.get('memory_bytes', 0) < 64*1024**2:
                 raise WorkloadError('native execution requires CPU and at least 64 MiB RAM')
+            transfer_started = time.monotonic()
             bundle = (self.input_cache.get(assignment) if self.input_cache else
                       self.transfer.get(spec['input_digest'], root/'input.tar', assignment=assignment))
+            transfer_seconds += time.monotonic() - transfer_started
+            source_materialization_started = time.monotonic()
             unpack(bundle, root/'source', spec['input_digest'])
             if not self.input_cache:
                 bundle.unlink()
+            execution_source = root/'source'
+            if assignment.get('environment') is not None:
+                if self.task_environments is None:
+                    raise WorkloadError('assigned task environment is unavailable on this worker', 503)
+                environment_prepared = self.task_environments.prepare(assignment, root/'source',
+                                                                       handler=spec['handler'])
+                execution_source = environment_prepared['source']
+                environment_view = root/'environment-view'
+                environment_view.mkdir(mode=0o700)
+                environment_isolation = dict(inaccessible_paths=[str(self.task_environments.root)],
+                    bind_paths=[(str(execution_source), str(environment_view))])
+                execution_cwd = environment_view
+            else:
+                execution_cwd = execution_source
+            source_materialization_seconds = time.monotonic() - source_materialization_started
             objects = root/'input-objects'
             objects.mkdir()
             for item in spec.get('input_objects', []):
                 destination = objects/item['name']
+                transfer_started = time.monotonic()
                 received = self.transfer.get(item['digest'], destination, assignment=assignment)
+                transfer_seconds += time.monotonic() - transfer_started
                 if received.stat().st_size != item['size']:
                     raise WorkloadError('input object size mismatch', 409)
             output.mkdir()
             (root/'request.json').write_text(encode(spec['payload']))
-            env = self._attempt_env(assignment, root, output, objects, attempt)
+            env = self._attempt_env(assignment, root, output, objects, attempt, source_path=execution_cwd,
+                                    environment_prepared=environment_prepared)
             for path in ('home', 'tmp'):
                 (root/path).mkdir()
             if lease.lost.is_set():
                 raise WorkloadError('execution lease lost during preparation', 409)
             self.journal.write(dict(assignment=assignment, phase='running'))
             started = time.monotonic()
-            self.executor.start(attempt, handler['argv'], root/'source', output, env=env,
+            self.executor.start(attempt, handler['argv'], execution_cwd, output, env=env,
                 cpu=need['cpu'], memory_bytes=need['memory_bytes'],
                 max_seconds=handler.get('max_seconds', 3600), tasks=handler.get('max_tasks', 512), lease_file=root/'lease',
                 rootless_docker=handler.get('backend') in ('rootless-docker', 'rootless-docker-native'),
                 rootless_native=handler.get('backend') == 'rootless-docker-native',
-                native_host_address=self.config.get('docker_native_host_address'))
+                native_host_address=self.config.get('docker_native_host_address'),
+                **environment_isolation)
             # Once execution starts, worker-process health alone cannot retain
             # the slot. A live supervised unit or its durable exit receipt must
             # prove that execution still exists or has reached result handoff.
@@ -568,6 +717,7 @@ class WorkloadWorker:
                         result = dict(result, resources=dict(result.get('resources') or {},
                                       memory_nonreclaimable_peak_bytes=nonreclaimable_peak))
                     completion = self._completion_from_exit(assignment, result)
+                    execution_seconds = time.monotonic() - started
                     break
                 if time.monotonic()-last_report >= self.config.get('status_report_seconds', 10):
                     last_report = time.monotonic()
@@ -591,19 +741,59 @@ class WorkloadWorker:
                     raise WorkloadError('execution stopped without a result', 503)
                 time.sleep(.2)
         except Exception as error:
+            if started is not None:
+                execution_seconds = time.monotonic() - started
             detail = str(error)[:512] or type(error).__name__
             logging.warning('attempt %s stopped: %s: %s', attempt, type(error).__name__, detail)
             completion = dict(outcome='infrastructure', result={'error':type(error).__name__})
             completion['result']['detail'] = detail
         finally:
             # Never acknowledge completion or cleanup while owned work survives.
+            cleanup_started = time.monotonic()
             try:
                 self._stop(attempt)
                 remove_data(root)
+                cleanup_seconds = time.monotonic() - cleanup_started
             except Exception:
                 if lease:
                     self._close_lease(lease, attempt, sys.exc_info()[0])
+                if environment_prepared and self.task_environments:
+                    self.task_environments.release(environment_prepared)
                 raise
+            if assignment.get('environment') is not None:
+                parked = completion['outcome'] in ('succeeded', 'product_failure') and attempt not in self.stuck_runtimes
+                if parked and environment_prepared is not None:
+                    try:
+                        self.task_environments.verify_source(environment_prepared)
+                    except Exception as error:
+                        parked = False
+                        completion['outcome'] = 'infrastructure'
+                        completion['result']['environment_integrity_error'] = str(error)[:512]
+                        logging.error('task_environment_source_integrity_failed: job=%s: %s: %s',
+                                      assignment['job_id'], type(error).__name__, error)
+                try:
+                    environment_receipt = self._environment_receipt(assignment, environment_prepared, output,
+                        transfer_seconds=transfer_seconds, source_seconds=source_materialization_seconds,
+                        execution_seconds=execution_seconds, cleanup_seconds=cleanup_seconds,
+                        state='parked' if parked else 'rebuild_required')
+                except Exception as error:
+                    parked = False
+                    logging.error('task_environment_receipt_failed: job=%s: %s: %s',
+                                  assignment['job_id'], type(error).__name__, str(error)[:512])
+                    environment_receipt = self._environment_receipt(assignment, None, output,
+                        transfer_seconds=transfer_seconds, source_seconds=source_materialization_seconds,
+                        execution_seconds=execution_seconds, cleanup_seconds=cleanup_seconds,
+                        state='rebuild_required')
+                completion['environment_receipt'] = environment_receipt
+                if environment_prepared is not None and self.task_environments is not None:
+                    try:
+                        self.task_environments.mark_awaiting_authority(environment_prepared,
+                            state=environment_receipt['state'], bytes_used=environment_receipt['bytes_used'])
+                    except Exception as error:
+                        logging.error('task_environment_local_handoff_failed: handle=%s: %s: %s',
+                                      environment_prepared['handle'], type(error).__name__, str(error)[:512])
+                        self.task_environments.reject(environment_prepared)
+                        environment_receipt.update(state='rebuild_required', bytes_used=0, cache_components=[])
         # The workload's wall time and verdict go back with the fleet leases it
         # held: the fleet broker joins them to the decision that placed it.
         self._release_fleet_leases(
@@ -620,15 +810,28 @@ class WorkloadWorker:
             completion = retry_transient(lambda: self._attach_artifacts(assignment, completion, output),
                                          'attempt %s result upload' % attempt, **handoff)
             self.journal.write(dict(assignment=assignment, phase='completed', completion=completion))
-            retry_transient(lambda: self.client.request('worker/complete', completion),
+            acknowledged = retry_transient(lambda: self.client.request('worker/complete', completion),
                             'attempt %s completion' % attempt, **handoff)
+            if environment_prepared is not None and self.task_environments is not None and \
+                    completion.get('environment_receipt', {}).get('state') == 'parked':
+                try:
+                    if not self.task_environments.acknowledge(environment_prepared, acknowledged.get('environment')):
+                        logging.error('task_environment_authority_ack_missing: handle=%s generation=%s',
+                                      environment_prepared['handle'], environment_prepared['generation'])
+                except Exception as error:
+                    logging.error('task_environment_local_park_failed: handle=%s: %s: %s',
+                                  environment_prepared['handle'], type(error).__name__, str(error)[:512])
         except (WorkloadError, HTTPError) as error:
             if error.status != 409:
                 raise
+            if environment_prepared is not None and self.task_environments is not None:
+                self.task_environments.reject(environment_prepared)
             self.reconciled = False
         finally:
             if lease:
                 self._close_lease(lease, attempt, sys.exc_info()[0])
+            if environment_prepared is not None and self.task_environments is not None:
+                self.task_environments.release(environment_prepared)
         # Keep evidence until authority acknowledgement; failed network writes
         # leave the journal and root for the next reconciliation pass.
         # A workspace that resists removal is retried by later steps; the finished

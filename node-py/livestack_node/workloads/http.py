@@ -292,11 +292,19 @@ class Handler(BaseHTTPRequestHandler):
     def route(self, principal, method, parts, body):
         store = self.server.store
         if principal.role in ('caller', 'admin'):
+            if parts == ['capabilities'] and method == 'GET':
+                return store.capabilities(principal.id, principal.handlers)
+            if len(parts) == 2 and parts[0] == 'environments' and method == 'GET':
+                return store.get_environment(principal.id, parts[1])
             if parts == ['jobs']:
                 if method == 'POST':
                     if body.get('handler') not in principal.handlers:
                         raise WorkloadError('handler is not authorized', 403)
                     self._authorized_labels(principal, body)
+                    # Refuse unsupported schema/purpose before checking or
+                    # touching the uploaded source objects. SDK callers also
+                    # negotiate capabilities before they start an upload.
+                    store.validate_submission(principal.id, body, allowed_handlers=principal.handlers)
                     with self.server.blobs.open(principal.id, body.get('input_digest')):
                         pass
                     inputs = body.get('input_objects', [])
@@ -341,7 +349,8 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ['worker', 'complete']:
                 self._remote_boot(principal, body)
                 return store.complete(principal.worker, body['boot'], body['attempt_id'], body['fence'],
-                                      input_digest=body['input_digest'], outcome=body['outcome'], result=body['result'])
+                                      input_digest=body['input_digest'], outcome=body['outcome'], result=body['result'],
+                                      environment_receipt=body.get('environment_receipt'))
         raise WorkloadError('route not permitted for principal', 403)
 
     @staticmethod

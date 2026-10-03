@@ -246,9 +246,37 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
     if only_job_id is not None:
         queue_sql += ' AND id=?'
         queue_params = (only_job_id,)
-    for row in db.execute(queue_sql+" ORDER BY COALESCE(json_extract(spec,'$.priority'),0) DESC, created, id",
-                          queue_params).fetchall():
+    queue_sql = queue_sql.replace('SELECT * FROM jobs',
+        'SELECT j.*,e.purpose AS environment_purpose,e.profile AS environment_profile,'
+        'e.state AS environment_state,e.generation AS environment_generation,'
+        'e.writer_job AS environment_writer_job,e.writer_attempt AS environment_writer_attempt,'
+        'e.affinity_started AS environment_affinity_started FROM jobs j '
+        'LEFT JOIN task_environments e ON e.handle=j.environment_handle')
+    queue_sql = queue_sql.replace('WHERE state=', 'WHERE j.state=').replace(' AND id=?', ' AND j.id=?')
+    queued = db.execute(queue_sql+" ORDER BY COALESCE(json_extract(j.spec,'$.priority'),0) DESC, j.created, j.id",
+                        queue_params).fetchall()
+    handles = sorted({row['environment_handle'] for row in queued if row['environment_handle']})
+    replicas_by_handle = {}
+    if handles:
+        placeholders = ','.join('?' for _ in handles)
+        replicas = db.execute(f'SELECT handle,host,profile,compatibility,generation,state,bytes_used,last_used,seen '
+                              f'FROM task_environment_replicas WHERE handle IN ({placeholders}) AND seen>? '
+                              'ORDER BY handle,last_used DESC,host LIMIT ?',
+                              (*handles, now-limits.fresh_seconds, min(2048, 2*len(handles)))).fetchall()
+        for replica in replicas:
+            replicas_by_handle.setdefault(replica['handle'], []).append(replica)
+    active_environment_writers = set()
+    for row in queued:
         spec = json.loads(row["spec"])
+        environment_handle = row['environment_handle']
+        environment_profile = row['environment_profile']
+        if environment_handle and environment_profile is None:
+            db.execute("UPDATE jobs SET reason='environment_not_found' WHERE id=?", (row['id'],))
+            continue
+        if environment_handle and (row['environment_writer_job'] is not None or
+                                   environment_handle in active_environment_writers):
+            db.execute("UPDATE jobs SET reason='environment_busy' WHERE id=?", (row['id'],))
+            continue
         cap = caps.get(row["owner"])
         if cap is not None and running.get(row["owner"], 0) >= cap:
             db.execute("UPDATE jobs SET reason=? WHERE id=?",
@@ -265,6 +293,18 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         rejected = []
         compatible = [w for w in workers if spec["handler"] in reports[w["id"]]["handlers"]]
         avoided = _avoided(db, row, now)
+        matching_hosts = set()
+        warm_wait_hosts = set()
+        if environment_handle:
+            for replica in replicas_by_handle.get(environment_handle, []):
+                if (replica['profile'] != environment_profile or replica['compatibility'] is None or
+                        replica['state'] != 'parked' or replica['generation'] != row['environment_generation']):
+                    continue
+                for worker in workers:
+                    profile_compatibility = reports[worker['id']].get('environment_profiles', {}).get(environment_profile)
+                    if worker['host'] == replica['host'] and profile_compatibility == replica['compatibility']:
+                        matching_hosts.add(worker['host'])
+                        break
         if avoided:
             if fresh is None:
                 fresh = [(w, json.loads(w["report"])) for w in db.execute(
@@ -280,8 +320,24 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 for w, r in fresh)
         for w in compatible:
             report = reports[w["id"]]
+            profile_compatibility = report.get('environment_profiles', {}).get(environment_profile) \
+                if environment_handle else None
+            replica_compatibility = next((r['compatibility'] for r in replicas_by_handle.get(environment_handle, [])
+                if r['host'] == w['host'] and r['profile'] == environment_profile and r['state'] == 'parked' and
+                   r['generation'] == row['environment_generation']), None) \
+                if environment_handle else None
+            if (environment_handle and w['host'] in matching_hosts and
+                    profile_compatibility == replica_compatibility and w['id'] not in draining and
+                    _compilation_refusal(compilation_policy, w, spec, now) is None and
+                    all(report['labels'].get(k) == v for k, v in spec['selector'].items()) and
+                    all(report['capacity'].get(k, 0) >= n for k, n in admit.items()) and
+                    not avoided.get(w['id'])):
+                warm_wait_hosts.add(w['host'])
             if w['id'] in draining:
                 rejected.append({'worker': w['id'], 'reason': 'worker_draining'})
+                continue
+            if environment_handle and profile_compatibility is None:
+                rejected.append({'worker': w['id'], 'reason': 'environment_profile_not_installed'})
                 continue
             reason = _compilation_refusal(compilation_policy, w, spec, now)
             if reason:
@@ -315,10 +371,31 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 continue
             targets.append(Target(id=w["id"], host_id=w["host"], tier=Tier.LOCAL,
                                   capacity=host_free[w["host"]], labels=report["labels"]))
+        affinity_started = row['environment_affinity_started']
+        if environment_handle:
+            warm_targets = [target for target in targets if target.host_id in matching_hosts]
+            cold_targets = [target for target in targets if target.host_id not in matching_hosts]
+            if warm_targets:
+                db.execute('UPDATE task_environments SET affinity_started=NULL WHERE handle=?', (environment_handle,))
+            elif cold_targets and warm_wait_hosts and limits.environment_affinity_seconds > 0:
+                if affinity_started is None:
+                    affinity_started = now
+                    db.execute('UPDATE task_environments SET affinity_started=? WHERE handle=?',
+                               (affinity_started, environment_handle))
+                if now-affinity_started < limits.environment_affinity_seconds:
+                    db.execute("UPDATE jobs SET reason='environment_affinity_wait' WHERE id=?", (row['id'],))
+                    continue
+            elif not warm_wait_hosts:
+                db.execute('UPDATE task_environments SET affinity_started=NULL WHERE handle=?', (environment_handle,))
+        locality = spec['locality_host']
+        if environment_handle and locality is None:
+            preferred = next((target.host_id for target in targets if target.host_id in matching_hosts), None)
+            if preferred is not None:
+                locality = preferred
         job = Job(id=row["id"], kind=spec["handler"], owner=row["owner"], need=admit,
                   created_at=row["created"], sla=Sla.BATCH, deadline=spec["deadline"],
                   est_duration_s=spec["estimate_seconds"], selector=spec["selector"],
-                  locality_host=spec["locality_host"])
+                  locality_host=locality)
         grants = schedule(FleetState(targets=tuple(targets), jobs=(job,), now=now)).of(Admit)
         if not grants:
             if not workers:
@@ -332,13 +409,22 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         chosen = next(w for w in workers if w["id"] == grants[0].target_id)
         fence = row["fence"] + 1
         aid = uuid.uuid4().hex
+        environment_generation = None
         compilation = None
         if compilation_policy is not None and compilation_policy.required(spec['handler']):
             compilation = encode(compilation_policy.authorize(chosen['host'], spec['handler'], now).receipt())
-        db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created,compilation) "
-                   "VALUES(?,?,?,?,?,?,'running',?,?,?,?)",
+        if environment_handle:
+            environment_generation = row['environment_generation'] + 1
+            db.execute('UPDATE task_environments SET state=\'preparing\',generation=?,writer_job=?,writer_attempt=?,'
+                       'affinity_started=NULL,updated=? WHERE handle=? AND writer_job IS NULL',
+                       (environment_generation, row['id'], aid, now, environment_handle))
+            if db.execute('SELECT changes()').fetchone()[0] != 1:
+                raise WorkloadError('environment_writer_race', 409)
+            active_environment_writers.add(environment_handle)
+        db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created,compilation,environment_generation) "
+                   "VALUES(?,?,?,?,?,?,'running',?,?,?,?,?)",
                    (aid, row["id"], chosen["id"], chosen["boot"], chosen["host"], fence,
-                    encode(admit), now+limits.lease_seconds, now, compilation))
+                    encode(admit), now+limits.lease_seconds, now, compilation, environment_generation))
         db.execute("UPDATE jobs SET state='running',fence=?,updated=?,reason=? WHERE id=?",
                    (fence, now, grants[0].reason, row["id"]))
         busy.add(chosen["id"])

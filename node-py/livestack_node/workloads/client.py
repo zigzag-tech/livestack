@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,6 +19,8 @@ class WorkloadClient:
         self.url = url.rstrip('/') + '/v1/workloads/'
         self.token = token
         self.timeout = timeout
+        self._capability_cache = None
+        self._capability_checked = 0.0
         # Control requests ride one kept-alive connection, so an established
         # worker needs no new TCP handshake per request
         # (openspec/changes/worker-control-keepalive). urllib would have sent
@@ -59,7 +62,50 @@ class WorkloadClient:
             raise WorkloadError(detail, error.code) from error
 
     def submit(self, request):
-        return self.request('jobs', request)
+        if isinstance(request, dict) and request.get('version') == 3 and request.get('environment') is not None:
+            capabilities = self.capabilities()
+            environment = capabilities.get('environments') or {}
+            handler = request.get('handler')
+            if 3 not in capabilities.get('versions', []):
+                raise WorkloadError('environment_unsupported: schema 3 is unavailable', 409)
+            if environment.get('version') != 1:
+                raise WorkloadError('environment_unsupported: authority environment API unavailable', 409)
+            if handler in environment.get('forbidden_handlers', []):
+                raise WorkloadError('environment_scope_forbidden', 403)
+            if handler not in environment.get('handlers', []):
+                raise WorkloadError('environment_unsupported: handler is not enrolled', 409)
+        try:
+            return self.request('jobs', request)
+        except WorkloadError as error:
+            if error.status in (400, 409) and ('unsupported workload schema' in str(error) or
+                                                'environment_unsupported' in str(error)):
+                self._capability_cache = None
+                self._capability_checked = 0.0
+            raise
+
+    def capabilities(self, *, refresh=False):
+        """Read bounded authenticated authority capabilities; cache for at most 60s."""
+        now = time.monotonic()
+        if not refresh and self._capability_cache is not None and now-self._capability_checked < 60:
+            return self._capability_cache
+        try:
+            result = self.request('capabilities')
+        except WorkloadError as error:
+            if error.status in (404, 405, 501):
+                raise WorkloadError('environment_unsupported: authority capability API unavailable', 409) from error
+            raise
+        if (not isinstance(result, dict) or not isinstance(result.get('versions'), list) or
+                not isinstance(result.get('environments'), dict) or len(encode(result).encode()) > 8192):
+            raise WorkloadError('invalid capability response', 502)
+        self._capability_cache, self._capability_checked = result, now
+        return result
+
+    def get_environment(self, handle):
+        from .model import name
+        result = self.request('environments/'+name(handle, 'environment handle'))
+        if len(encode(result).encode()) > 16*1024:
+            raise WorkloadError('environment response exceeds byte limit', 502)
+        return result
 
     def get(self, job_id):
         from .model import name
