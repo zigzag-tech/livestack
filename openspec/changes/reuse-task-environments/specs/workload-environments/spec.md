@@ -125,6 +125,8 @@ The system SHALL enforce the count/byte/age ceilings in the design: 1,024 logica
 
 Job status/receipts SHALL name the environment handle/generation, requested and actual reuse, reason, compatibility/input identities and actual producing host/attempt. Waiting and cleanup states SHALL have separate reasons. Measured phase timings SHALL distinguish queue, transfer, preparation, build, execution and cleanup; unavailable readings SHALL be unknown with a reason. Metadata/receipts and decision records SHALL be bounded as in the design, with `observability_degraded` for recording failures. Registry/placement/sweep round trips SHALL be bounded independently of environment/entity count.
 
+Handler timing traces SHALL be bounded and SHALL represent each dependency, compile and test phase as either a finite nonnegative duration or an unknown value with a bounded reason. During a rolling upgrade, the worker SHALL continue to accept the existing version-1 task-E2E trace while new handlers may emit the version-2 phase map.
+
 #### Scenario: A caller requests reuse but the caches are incompatible
 - **WHEN** the job succeeds after rebuilding
 - **THEN** its product outcome is succeeded and reuse outcome is rebuilt with the invalidation reason

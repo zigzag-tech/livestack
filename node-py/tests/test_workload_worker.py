@@ -53,6 +53,16 @@ if request.get('cache'):
     value+='|cache='+previous
 if request.get('inspect_cache'):
     value+='|env-cache='+os.environ.get('HARMONY_ENV_CACHE_COMPONENTS','missing')
+timing_path=os.environ.get('HARMONY_PHASE_TIMINGS')
+if timing_path:
+    if request.get('timing_version',2)==1:
+        timing={'version':1,'dependencies_seconds':0.125,'compile_seconds':0.5,'test_seconds':0.25}
+    else:
+        timing={'version':2,'phases':{
+            'dependencies':{'seconds':0.125},
+            'compile':{'seconds':None,'reason':'not_applicable'},
+            'test':{'seconds':0.25}}}
+    Path(timing_path).write_text(json.dumps(timing))
 Path(os.environ['HARMONY_OUTPUT'],'artifact').write_text(value)
 print('finished')
 raise SystemExit(request.get('exit',0))
@@ -218,10 +228,11 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
             require_separate_filesystem=False, filesystem_bytes=8*1024**3)
     monkeypatch.setattr(TaskEnvironmentStore, '__init__', test_store_init)
 
-    def submit_environment(job_key, digest):
+    def submit_environment(job_key, digest, timing_version=2):
         return caller.submit(dict(version=3, key=job_key, handler='native.v1', input_digest=digest,
             need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
-            environment={'key':'test-task', 'reuse':'prefer'}, payload={'cache':True, 'inspect_cache':True}))
+            environment={'key':'test-task', 'reuse':'prefer'},
+            payload={'cache':True, 'inspect_cache':True, 'timing_version':timing_version}))
 
     worker = WorkloadWorker(config)
     try:
@@ -231,6 +242,10 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
         receipt = first_result['result']['environment_receipt']
         assert first_result['state'] == 'succeeded'
         assert receipt['reuse_outcome'] == 'created' and receipt['reason_code'] == 'created'
+        assert receipt['phase_timings']['dependencies'] == {'seconds': 0.125}
+        assert receipt['phase_timings']['compile'] == {
+            'seconds': None, 'reason': 'not_applicable'}
+        assert receipt['phase_timings']['test'] == {'seconds': 0.25}
         handle = first['environment_handle']
         cache = environment_root/handle/'source'/'build'/'cache.txt'
         assert cache.read_text() == 'fresh|captured bytes'
@@ -240,7 +255,7 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
         (edited/'input').write_text('edited captured bytes')
         capture(edited, ['input'], tmp_path/'edited-source.tar')
         second_digest = InputTransfer(caller).put(tmp_path/'edited-source.tar')['digest']
-        second = submit_environment('environment-second', second_digest)
+        second = submit_environment('environment-second', second_digest, timing_version=1)
         assert second['environment_handle'] == handle
         assert worker.step()
         second_result = caller.get(second['id'])
@@ -248,6 +263,9 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
         assert second_result['state'] == 'succeeded'
         assert receipt['reuse_outcome'] == 'reused'
         assert receipt['reason_code'] == 'source_updated_incrementally'
+        assert receipt['phase_timings']['dependencies'] == {'seconds': 0.125}
+        assert receipt['phase_timings']['compile'] == {'seconds': 0.5}
+        assert receipt['phase_timings']['test'] == {'seconds': 0.25}
         assert receipt['cache_components'][0]['outcome'] == 'reused'
         assert cache.read_text() == 'fresh|captured bytes|edited captured bytes'
         artifact = next(item for item in second_result['result']['result']['artifacts']

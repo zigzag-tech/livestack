@@ -435,15 +435,34 @@ class WorkloadWorker:
             if not trace.is_file() or trace.is_symlink() or trace.stat().st_size > 2048:
                 raise ValueError('timing trace missing or oversized')
             value = json.loads(trace.read_bytes())
-            if not isinstance(value, dict) or set(value) != {
-                    'version', 'dependencies_seconds', 'compile_seconds', 'test_seconds'} or value['version'] != 1:
+            if not isinstance(value, dict):
                 raise ValueError('timing trace fields are invalid')
-            for phase in ('dependencies', 'compile', 'test'):
-                seconds = value[phase + '_seconds']
-                if (isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or
-                        not 0 <= seconds <= 86400 or not math.isfinite(seconds)):
+            if value.get('version') == 1 and set(value) == {
+                    'version', 'dependencies_seconds', 'compile_seconds', 'test_seconds'}:
+                # Keep task-E2E handlers installed before the phase-reason
+                # format upgrade readable during a rolling worker deployment.
+                phases = {phase: {'seconds': value[phase + '_seconds']}
+                          for phase in ('dependencies', 'compile', 'test')}
+            elif value.get('version') == 2 and set(value) == {'version', 'phases'}:
+                phases = value['phases']
+                if not isinstance(phases, dict) or set(phases) != {'dependencies', 'compile', 'test'}:
+                    raise ValueError('timing trace phases are invalid')
+            else:
+                raise ValueError('timing trace fields are invalid')
+            for phase, measurement in phases.items():
+                if not isinstance(measurement, dict) or set(measurement) not in ({'seconds'}, {'seconds', 'reason'}):
+                    raise ValueError(f'{phase} timing fields are invalid')
+                seconds = measurement['seconds']
+                reason = measurement.get('reason')
+                if seconds is None:
+                    if not isinstance(reason, str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,63}', reason):
+                        raise ValueError(f'{phase} unknown timing needs a reason')
+                    timings[phase] = self._measured_phase(None, reason)
+                elif (isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or
+                        not 0 <= seconds <= 86400 or not math.isfinite(seconds) or reason is not None):
                     raise ValueError(f'{phase} timing is invalid')
-                timings[phase] = dict(seconds=float(seconds))
+                else:
+                    timings[phase] = dict(seconds=float(seconds))
         except (OSError, ValueError, TypeError) as error:
             logging.info('task_environment_timing_unknown: job=%s reason=%s: %s',
                          assignment['job_id'], type(error).__name__, str(error)[:256])
