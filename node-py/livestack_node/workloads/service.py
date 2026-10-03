@@ -14,6 +14,7 @@ from .store import WorkloadStore
 from .blobs import BlobStore
 from .artifact_mirror import InstalledArtifactMirror
 from .compilation_policy import CompilationPolicy
+from .github_remote import GitHubRemote
 
 
 def load_principals(path):
@@ -69,17 +70,30 @@ def main():
         logging.basicConfig(level=logging.INFO, handlers=[
             RotatingFileHandler(root/'authority.log', maxBytes=16*1024*1024, backupCount=3)])
         principals = load_principals(args.config)
+        github_remote = GitHubRemote(config['github_remote']) if 'github_remote' in config else None
         store = WorkloadStore(root/'workloads.sqlite', handlers=config['handlers'],
                               limits=Limits(**config.get('limits', {})),
                               compilation_policy=(CompilationPolicy(
                                   config.get('compilation_policy'), config['compilation_handlers'])
-                                  if 'compilation_handlers' in config else None))
+                                  if 'compilation_handlers' in config else None),
+                              execution_providers=({} if github_remote is None else github_remote.handler_to_provider),
+                              remote_hosts=({} if github_remote is None else github_remote.hosts))
+        if github_remote is not None:
+            if store.compilation_policy is None:
+                raise ValueError('GitHub remote compilation requires the operator compilation policy')
+            for provider_id, provider in github_remote.providers.items():
+                for handler in provider.handlers:
+                    if (not store.compilation_policy.required(handler) or
+                            store.compilation_policy.handler_classes[handler] != tuple(sorted(
+                                provider.config['compilation_classes']))):
+                        raise ValueError('GitHub remote compilation classes differ from handler policy')
         store.recover()
         blobs = BlobStore(store, root/'objects', **config.get('blob_limits', {}))
         artifact_mirror = (InstalledArtifactMirror(config['artifact_mirror'])
                            if config.get('artifact_mirror') is not None else None)
         server = WorkloadServer((config.get('bind', '127.0.0.1'), config.get('port', 8802)),
-                                store, principals, blobs=blobs, artifact_mirror=artifact_mirror)
+                                store, principals, blobs=blobs, artifact_mirror=artifact_mirror,
+                                github_remote=github_remote)
         server.blobs.recover()
         # SIGHUP re-reads the principals from --config (docs/authority-principal-reload.md).
         # A thread keeps the file read and its retries out of the signal handler.

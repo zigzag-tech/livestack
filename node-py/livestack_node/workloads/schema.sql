@@ -17,5 +17,12 @@ CREATE TABLE IF NOT EXISTS attempts (
  need TEXT NOT NULL, expires REAL NOT NULL, created REAL NOT NULL,
  progress TEXT, result TEXT, UNIQUE(job, fence)
 );
+CREATE TABLE IF NOT EXISTS github_remote_jobs (
+ job TEXT PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+ provider TEXT NOT NULL, correlation TEXT NOT NULL UNIQUE,
+ state TEXT NOT NULL, dispatch_started REAL, run_id TEXT, run_attempt INTEGER,
+ run_status TEXT, reason TEXT, created REAL NOT NULL, updated REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state, created);
 CREATE INDEX IF NOT EXISTS attempts_host ON attempts(host, state);
+CREATE INDEX IF NOT EXISTS github_remote_state ON github_remote_jobs(provider, state, created);

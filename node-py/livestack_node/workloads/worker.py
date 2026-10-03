@@ -22,7 +22,7 @@ from .archive import relative_path, unpack
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
 from .lease import LeaseKeeper, retry_transient, transient
-from .model import WorkloadError, encode
+from .model import WorkloadError, encode, name
 from .supervision import SystemdExecutor, WorkerJournal
 if sys.platform == 'darwin':
     from . import darwin_proc
@@ -83,11 +83,11 @@ class WorkloadWorker:
         self.executor = (LaunchdExecutor if self.darwin else JobObjectExecutor if self.windows
                          else SystemdExecutor)(config['worker'])
         self._cpu_load = windows_proc.CpuLoad() if self.windows else None
-        if self.darwin and config.get('host_pressure') is None:
+        if self.darwin and config.get('host_pressure') is None and not config.get('remote_capacity_authoritative'):
             # The only memory reading a macOS worker has; without it absence of
             # a reading would look like absence of pressure.
             raise WorkloadError('a macOS worker requires a host_pressure reading')
-        self.boot = uuid.uuid4().hex
+        self.boot = name(config['boot'], 'worker boot') if config.get('boot') is not None else uuid.uuid4().hex
         self.workspace = Path(config['workspace']).resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.handlers = config['handlers']
@@ -460,6 +460,14 @@ class WorkloadWorker:
                        HARMONY_INPUT_DIGEST=spec['input_digest'],
                        HARMONY_PHYSICAL_HOST=compilation['host'],
                        HARMONY_POLICY_REVISION=compilation['policy_revision'])
+        if spec.get('execution_provider') is not None:
+            # The signed credential returned from the OIDC bootstrap is scoped
+            # to one remote workflow and one queued Harmony job. The compiler
+            # guard revalidates the current attempt/fence through the authority
+            # before each native compile launch.
+            env.update(HARMONY_EXECUTION_PROVIDER=spec['execution_provider'],
+                       HARMONY_AUTHORITY=self.config['authority'],
+                       HARMONY_REMOTE_TOKEN=self.config['token'])
         if self.config.get('fleet_url'):
             env['HARMONY_FLEET_URL'] = self.config['fleet_url']
         if self.config.get('fleet_token'):
