@@ -331,3 +331,30 @@ def test_exclusive_overrides_coload_acquiring_one_evicts_its_siblings():
     m2.ensure("llm_general")
     coord2.acquire("embed")
     assert m2.resident == {"llm_general", "embed"}
+
+
+def test_the_exclusive_claim_is_symmetric_nothing_co_places_with_it():
+    """Acquiring a PLAIN unit while an exclusive one is resident evicts the
+    exclusive tenant first: its claim means nobody co-places beside it. The
+    converse (exclusive acquirer evicts siblings) is the previous test.
+    Without this, a named `local` request loaded the 27B beside a resident
+    Flash-Next — two tenants the planner models as impossible — and the world
+    read the card massively over-budget until step 0 shed in a loop (ledger:
+    "relieve measured over-budget pressure" every ~10 s, 2026-10-02)."""
+    import livestack_node as ln
+    from livestack_node.coordinator import LivestackCoordinator
+    be = Backend()
+    units = {
+        "flash_next": ln.ManagedUnit("flash_next", be.loader("flash_next"), be.freer,
+                                     footprint={"vram_bytes": 20, "ram_bytes": 45},
+                                     exclusive_device=True),
+        "llm_general": ln.ManagedUnit("llm_general", be.loader("llm_general"), be.freer,
+                                      footprint=21),
+    }
+    m = ln.ModelManager(units, idle_seconds=0, coload=True, log=lambda *_: None)
+    coord = LivestackCoordinator("h", coload=True)
+    coord.bind(m)
+    m.ensure("flash_next")
+    assert m.resident == {"flash_next"}
+    coord.acquire("llm_general")     # plain unit, coload=True — and the
+    assert m.resident == {"llm_general"}   # exclusive tenant still leaves
