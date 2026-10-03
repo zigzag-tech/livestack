@@ -1143,9 +1143,17 @@ def _best_placement(world: _World, req: Request, unit: Unit, pol: PlannerPolicy,
             victims, blocker = _exclusive_victims(world, d.id, unit, pol)
             if blocker:
                 continue
-            freed = world.free(d.id, unit)
+            # After every tenant leaves the device is EMPTY, and the reserve /
+            # activation-headroom that `free()` holds back exist to protect
+            # co-tenants who are all gone. A whole-device claim therefore fits
+            # against the CAPACITY (and the host pool), not against
+            # capacity - reserve - headroom — the latter could never admit a
+            # 22 GiB claim on a 24 GB card (measured 2026-10-02: "the planner
+            # could not place it on any device", exactly this arithmetic).
+            freed = dict(d.capacity)
+            freed.update(world.host_free(d.host_id))
             for v in victims:
-                freed = _add(freed, world._charged(world.w.units[v.kind], d.id))
+                freed = _add(freed, _host_dims(world.w.units[v.kind].footprint))
             if not _fits(_admission_need(unit), freed):
                 continue
             preempt_cost = sum(world.w.units[v.kind].reload_cost *
