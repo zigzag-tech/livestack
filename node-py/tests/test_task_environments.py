@@ -30,7 +30,7 @@ def profile(*, probe='print("flutter 3.24.0")', contract='cache-v1'):
 
 
 def make_store(tmp_path, *, now=None, max_per_owner=128*GIB, max_total=256*GIB, profile_spec=None,
-               idle_seconds=10, generation_seconds=100):
+               max_per_replica=32*GIB, idle_seconds=10, generation_seconds=100):
     root = tmp_path/'environments'
     workspace = tmp_path/'attempt-workspace'
     root.mkdir()
@@ -53,7 +53,7 @@ def make_store(tmp_path, *, now=None, max_per_owner=128*GIB, max_total=256*GIB, 
                 hard_bytes=((marker['quota_bytes']+1023)//1024)*1024))
         return rows
     config = dict(root=str(root), host_id='host-a', quota_helper='/usr/local/libexec/quota',
-        project_id_min=100000, project_id_max=1000000, max_bytes_per_replica=32*GIB,
+        project_id_min=100000, project_id_max=1000000, max_bytes_per_replica=max_per_replica,
         max_bytes_per_owner=max_per_owner, max_total_bytes=max_total, reserve_bytes=0,
         idle_seconds=idle_seconds, generation_seconds=generation_seconds,
         profiles=profile_spec or profile())
@@ -281,6 +281,30 @@ def test_prune_expires_parked_disk_only_and_reports_deletion(tmp_path):
     assert recreated['reuse_outcome'] == 'created'
     assert (recreated['source']/'lib'/'main.dart').read_bytes() == b'code'
     store.release(recreated)
+
+
+def test_prune_removes_only_one_bounded_batch_then_revisits_remaining_entries(tmp_path):
+    now = [1000.0]
+    store, root, _ = make_store(tmp_path, now=now, max_per_replica=GIB, max_total=128*GIB)
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    handles = [f'{index:032x}' for index in range(64)]
+    for index, handle in enumerate(handles):
+        prepared = store.prepare(assignment(handle, 1, digest), incoming, handler=HANDLER)
+        finish(store, prepared, generation=1)
+    now[0] += 11
+
+    with pytest.raises(ValueError, match='may only be lowered'):
+        store.prune(rows=65)
+    first = store.prune(rows=32)
+    assert first['examined'] == 32
+    assert len(first['removed']) == 32
+    remaining = [handle for handle in handles if (root/handle).exists()]
+    assert len(remaining) == 32
+
+    second = store.prune(rows=32)
+    assert second['examined'] == 32
+    assert set(second['removed']) == set(remaining)
+    assert not any((root/handle).exists() for handle in handles)
 
 
 def test_prune_protects_expired_writer_until_supervised_cleanup(tmp_path):
