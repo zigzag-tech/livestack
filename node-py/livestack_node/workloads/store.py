@@ -37,12 +37,18 @@ def _limit_breach(result, need):
 
 
 class WorkloadStore:
-    def __init__(self, path, *, handlers, limits=None, clock=time.time, compilation_policy=None):
+    def __init__(self, path, *, handlers, limits=None, clock=time.time, compilation_policy=None,
+                 execution_providers=None, remote_hosts=None):
         self.path = str(path)
         self.handlers = set(handlers)
         self.limits = limits or Limits()
         self.clock = clock
         self.compilation_policy = compilation_policy
+        self.execution_providers = dict(execution_providers or {})
+        self.remote_hosts = dict(remote_hosts or {})
+        if (set(self.execution_providers) - self.handlers or
+                any(not isinstance(p, str) or not p for p in self.execution_providers.values())):
+            raise ValueError('invalid configured remote handler mapping')
         # Principals are bound by the HTTP server (service.py / WorkloadServer).
         # A standalone store has no caps and behaves exactly as before binding.
         self.principals = {}
@@ -62,6 +68,148 @@ class WorkloadStore:
     def bind_principals(self, principals):
         """The caller-principal table, for per-principal caps and the job list."""
         self.principals = {p.id: p for p in principals}
+
+    def reserve_remote_dispatch(self, provider, slots):
+        """Reserve a configured GitHub provider slot and return one outbox row.
+
+        The reservation is committed before the caller makes network I/O. A
+        process restart changes stale `dispatching` rows to `dispatch_unknown`;
+        it never blindly sends a duplicate workflow_dispatch.
+        """
+        now = self.clock()
+        with self.transaction() as db:
+            self._expire(db, now)
+            db.execute("UPDATE github_remote_jobs SET state='terminal',reason='job ended before dispatch',updated=? "
+                       "WHERE provider=? AND state='queued' AND job IN "
+                       "(SELECT id FROM jobs WHERE state IN ('succeeded','failed','cancelled','expired'))",
+                       (now, provider))
+            active = db.execute("SELECT count(*) FROM github_remote_jobs WHERE provider=? "
+                                "AND state IN ('dispatching','dispatch_unknown','running','cancel_requested')",
+                                (provider,)).fetchone()[0]
+            if active >= slots:
+                return None
+            row = db.execute("SELECT r.job,r.correlation,j.spec FROM github_remote_jobs r "
+                             "JOIN jobs j ON j.id=r.job WHERE r.provider=? AND r.state='queued' "
+                             "AND j.state='queued' ORDER BY j.created,j.id LIMIT 1", (provider,)).fetchone()
+            if row is None:
+                return None
+            db.execute("UPDATE github_remote_jobs SET state='dispatching',dispatch_started=?,updated=? "
+                       "WHERE job=? AND state='queued'", (now, now, row['job']))
+            return dict(job_id=row['job'], correlation=row['correlation'], spec=json.loads(row['spec']))
+
+    def remote_dispatch_unknown(self, job_id, *, reason=None):
+        with self.transaction() as db:
+            row = db.execute("SELECT state FROM github_remote_jobs WHERE job=?", (job_id,)).fetchone()
+            if row is None:
+                raise WorkloadError('unknown remote dispatch', 404)
+            if row['state'] == 'dispatching':
+                db.execute("UPDATE github_remote_jobs SET state='dispatch_unknown',reason=?,updated=? WHERE job=?",
+                           (reason, self.clock(), job_id))
+
+    def remote_dispatch_reconcile(self, provider, *, stale_after=30):
+        """Return bounded dispatch rows awaiting run lookup and age abandoned sends."""
+        now = self.clock()
+        with self.transaction() as db:
+            db.execute("UPDATE github_remote_jobs SET state='dispatch_unknown',reason='dispatch acknowledgement lost',updated=? "
+                       "WHERE provider=? AND state='dispatching' AND dispatch_started<=?",
+                       (now, provider, now-stale_after))
+            rows = db.execute("SELECT r.job,r.correlation,r.state,r.run_id,r.run_attempt,r.run_status,r.reason,"
+                              "j.state AS job_state,j.spec,j.fence FROM github_remote_jobs r "
+                              "JOIN jobs j ON j.id=r.job WHERE r.provider=? AND r.state!='terminal' "
+                              "AND r.state!='refused' ORDER BY r.created,r.job LIMIT 64", (provider,)).fetchall()
+            return [dict(row, spec=json.loads(row['spec'])) for row in rows]
+
+    def remote_bind_run(self, provider, job_id, correlation, run_id, run_attempt, *, input_digest=None, release_key=None):
+        if (not isinstance(run_id, str) or not run_id.isdigit() or type(run_attempt) is not int or
+                run_attempt != 1):
+            raise WorkloadError('github_run_identity_invalid', 403)
+        if (input_digest is None) != (release_key is None):
+            raise WorkloadError('github_remote_release_identity_invalid', 400)
+        now = self.clock()
+        with self.transaction() as db:
+            row = db.execute("SELECT r.*,j.spec AS job_spec FROM github_remote_jobs r "
+                             "JOIN jobs j ON j.id=r.job WHERE r.job=?", (job_id,)).fetchone()
+            if row is None or row['provider'] != provider or row['correlation'] != correlation:
+                raise WorkloadError('github_remote_correlation_mismatch', 403)
+            if row['state'] in ('terminal','refused'):
+                raise WorkloadError('github_remote_attempt_not_live', 409)
+            if input_digest is not None:
+                spec = json.loads(row['job_spec'])
+                if spec.get('input_digest') != input_digest or spec.get('key') != release_key:
+                    raise WorkloadError('github_remote_release_identity_mismatch', 403)
+            other = db.execute("SELECT job FROM github_remote_jobs WHERE provider=? AND run_id=? AND job!=?",
+                               (provider, run_id, job_id)).fetchone()
+            if other:
+                raise WorkloadError('github_run_already_bound', 409)
+            if row['run_id'] is not None and (row['run_id'] != run_id or row['run_attempt'] != run_attempt):
+                raise WorkloadError('github_run_replay_refused', 409)
+            state = 'cancel_requested' if row['state'] == 'cancel_requested' else 'running'
+            db.execute("UPDATE github_remote_jobs SET state=?,run_id=?,run_attempt=?,run_status='in_progress',"
+                       "reason=NULL,updated=? WHERE job=?", (state, run_id, run_attempt, now, job_id))
+            return self._job(db, job_id)
+
+    def remote_job_context(self, provider, job_id, correlation):
+        with self.transaction() as db:
+            self._expire(db, self.clock())
+            row = db.execute("SELECT r.*,j.state AS job_state,j.spec,j.owner,j.fence FROM github_remote_jobs r "
+                             "JOIN jobs j ON j.id=r.job WHERE r.job=?", (job_id,)).fetchone()
+            if row is None or row['provider'] != provider or row['correlation'] != correlation:
+                raise WorkloadError('github_remote_correlation_mismatch', 403)
+            if row['state'] not in ('running',) or row['job_state'] != 'queued':
+                raise WorkloadError('github_remote_job_not_claimable', 409)
+            return dict(job_id=job_id, owner=row['owner'], fence=row['fence'], spec=json.loads(row['spec']),
+                        correlation=row['correlation'], provider=row['provider'], run_id=row['run_id'],
+                        run_attempt=row['run_attempt'])
+
+    def remote_job_status(self, provider, job_id):
+        with self.transaction() as db:
+            self._expire(db, self.clock())
+            row = db.execute("SELECT provider FROM github_remote_jobs WHERE job=?", (job_id,)).fetchone()
+            if row is None or row['provider'] != provider:
+                raise WorkloadError('github_remote_job_not_found', 404)
+            return self._job(db, job_id)
+
+    def remote_cancel_requests(self, provider):
+        with closing(self.connect()) as db:
+            return [dict(row) for row in db.execute(
+                "SELECT job,correlation,run_id,run_attempt,run_status FROM github_remote_jobs "
+                "WHERE provider=? AND state='cancel_requested' ORDER BY created LIMIT 64", (provider,))]
+
+    def remote_run_status(self, provider, job_id, run_id, status, conclusion=None):
+        if status not in ('queued','in_progress','completed'):
+            raise WorkloadError('github_run_status_invalid', 400)
+        now = self.clock()
+        with self.transaction() as db:
+            row = db.execute("SELECT r.*,j.state AS job_state FROM github_remote_jobs r "
+                             "JOIN jobs j ON j.id=r.job WHERE r.job=?", (job_id,)).fetchone()
+            if row is None or row['provider'] != provider or row['run_id'] != run_id:
+                raise WorkloadError('github_run_status_mismatch', 409)
+            db.execute("UPDATE github_remote_jobs SET run_status=?,updated=? WHERE job=?", (status, now, job_id))
+            if status == 'completed' and row['job_state'] not in TERMINAL:
+                reason = 'GitHub Actions run ended without a Harmony completion'
+                if conclusion:
+                    reason += ' ('+str(conclusion)[:64]+')'
+                raw = self._terminal_result(db, job_id, reason)
+                db.execute("UPDATE attempts SET state='cleanup',result=COALESCE(result,?) WHERE job=? AND state='running'",
+                           (raw, job_id))
+                db.execute("UPDATE workers SET ready=0 WHERE id IN "
+                           "(SELECT worker FROM attempts WHERE job=? AND state='cleanup')", (job_id,))
+                db.execute("UPDATE jobs SET state='failed',reason=?,result=?,updated=? WHERE id=? "
+                           "AND state IN ('queued','running')", (reason, raw, now, job_id))
+            cleanup = db.execute("SELECT count(*) FROM attempts WHERE job=? AND state IN ('running','cleanup')",
+                                 (job_id,)).fetchone()[0]
+            if status == 'completed' and cleanup == 0:
+                db.execute("UPDATE github_remote_jobs SET state='terminal',reason=?,updated=? WHERE job=?",
+                           (conclusion or 'completed', now, job_id))
+            return self._job(db, job_id)
+
+    def remote_finalize_cleanup(self):
+        now = self.clock()
+        with self.transaction() as db:
+            db.execute("UPDATE github_remote_jobs SET state='terminal',updated=? WHERE state IN ('running','cancel_requested') "
+                       "AND run_status='completed' AND NOT EXISTS "
+                       "(SELECT 1 FROM attempts a WHERE a.job=github_remote_jobs.job AND a.state IN ('running','cleanup'))",
+                       (now,))
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
@@ -111,6 +259,10 @@ class WorkloadStore:
             (job_id,))]
         for attempt in result['attempts']:
             attempt['compilation'] = json.loads(attempt['compilation']) if attempt['compilation'] else None
+        remote = db.execute("SELECT provider,correlation,state,run_id,run_attempt,run_status,reason "
+                            "FROM github_remote_jobs WHERE job=?", (job_id,)).fetchone()
+        if remote:
+            result['remote_execution'] = dict(remote)
         return result
 
     def _running(self, db, owner):
@@ -129,6 +281,15 @@ class WorkloadStore:
         name(owner, "owner")
         spec = submission(request, self.handlers if allowed_handlers is None else
                           self.handlers.intersection(allowed_handlers), self.limits)
+        provider = self.execution_providers.get(spec['handler'])
+        if provider is not None:
+            selector = dict(spec['selector'])
+            reserved = 'harmony.execution.provider'
+            if reserved in selector and selector[reserved] != provider:
+                raise WorkloadError('execution provider is operator configured', 403)
+            selector[reserved] = provider
+            spec['selector'] = selector
+            spec['execution_provider'] = provider
         digest = identity(spec)
         now = self.clock()
         with self.transaction() as db:
@@ -155,6 +316,10 @@ class WorkloadStore:
                        "VALUES(?,?,?,?,?,'queued',?,?,?,?)",
                        (jid, owner, spec["key"], digest, encode(spec), now, now,
                         encode(spec.get("labels", {})), spec["retain"]))
+            if provider is not None:
+                db.execute("INSERT INTO github_remote_jobs(job,provider,correlation,state,created,updated) "
+                           "VALUES(?,?,?,'queued',?,?)",
+                           (jid, provider, uuid.uuid4().hex, now, now))
             return self._job(db, jid)
 
     def get(self, owner, job_id):
@@ -178,7 +343,7 @@ class WorkloadStore:
         """
         for value, field in ((worker_id, "worker"), (host_id, "host"), (boot, "boot")):
             name(value, field)
-        if self.compilation_policy is not None:
+        if self.compilation_policy is not None and host_id not in self.remote_hosts.values():
             host_id = self.compilation_policy.physical_host(host_id, self.clock())
         if not isinstance(report, dict) or set(report) - {"capacity", "available", "labels", "handlers", "ready", "host"}:
             raise WorkloadError("invalid worker report")
@@ -233,7 +398,7 @@ class WorkloadStore:
             raise WorkloadError("worker session is not current", 409)
         return row
 
-    def claim(self, worker, boot):
+    def claim(self, worker, boot, *, job_id=None):
         from .placement import place
         now = self.clock()
         with self.transaction() as db:
@@ -242,13 +407,21 @@ class WorkloadStore:
             if not current["ready"] or now - current["seen"] > self.limits.fresh_seconds:
                 return None
             # A lost poll reply must return the SAME assignment until completion.
-            existing = db.execute("SELECT * FROM attempts WHERE worker=? AND boot=? AND state='running' ORDER BY created LIMIT 1",
-                                  (worker, boot)).fetchone()
+            query = "SELECT * FROM attempts WHERE worker=? AND boot=? AND state='running'"
+            params = [worker, boot]
+            if job_id is not None:
+                query += ' AND job=?'
+                params.append(job_id)
+            existing = db.execute(query+' ORDER BY created LIMIT 1', params).fetchone()
             if existing:
                 return self._assignment(db, existing)
-            place(db, now, self.limits, self.principals, self.compilation_policy)
-            assigned = db.execute("SELECT * FROM attempts WHERE worker=? AND boot=? AND state='running' ORDER BY created LIMIT 1",
-                                  (worker, boot)).fetchone()
+            place(db, now, self.limits, self.principals, self.compilation_policy, only_job_id=job_id)
+            query = "SELECT * FROM attempts WHERE worker=? AND boot=? AND state='running'"
+            params = [worker, boot]
+            if job_id is not None:
+                query += ' AND job=?'
+                params.append(job_id)
+            assigned = db.execute(query+' ORDER BY created LIMIT 1', params).fetchone()
             return self._assignment(db, assigned) if assigned else None
 
     def _assignment(self, db, attempt):
@@ -363,6 +536,11 @@ class WorkloadStore:
                 db.execute("UPDATE workers SET ready=0 WHERE id IN (SELECT worker FROM attempts WHERE job=? AND state='cleanup')", (job_id,))
                 db.execute("UPDATE jobs SET state='cancelled',reason='cancelled by owner',result=?,updated=? WHERE id=?",
                            (raw, self.clock(), job_id))
+                remote = db.execute("SELECT state FROM github_remote_jobs WHERE job=?", (job_id,)).fetchone()
+                if remote:
+                    state = 'terminal' if remote['state'] == 'queued' else 'cancel_requested'
+                    db.execute("UPDATE github_remote_jobs SET state=?,reason='job cancelled',updated=? WHERE job=? "
+                               "AND state!='terminal'", (state, self.clock(), job_id))
             return self._job(db, job_id)
 
     def withdraw(self, owner, job_id):
@@ -382,6 +560,8 @@ class WorkloadStore:
                 raw = self._terminal_result(db, job_id, "withdrawn by owner before any attempt")
                 db.execute("UPDATE jobs SET state='cancelled',reason='withdrawn by owner before any attempt',result=?,updated=? WHERE id=?",
                            (raw, self.clock(), job_id))
+                db.execute("UPDATE github_remote_jobs SET state='terminal',reason='job withdrawn before dispatch',updated=? "
+                           "WHERE job=? AND state='queued'", (self.clock(), job_id))
             return self._job(db, job_id)
 
     def _terminal_result(self, db, job_id, reason):
@@ -420,6 +600,9 @@ class WorkloadStore:
                            (raw, job["id"]))
                 db.execute("UPDATE workers SET ready=0 WHERE id IN "
                            "(SELECT worker FROM attempts WHERE job=? AND state='cleanup')", (job["id"],))
+            db.execute("UPDATE github_remote_jobs SET state=CASE WHEN state='queued' THEN 'terminal' "
+                       "ELSE 'cancel_requested' END,reason=?,updated=? WHERE job=? AND state!='terminal'",
+                       (reason, now, job['id']))
             db.execute("UPDATE jobs SET state='expired',reason=?,result=?,updated=? "
                        "WHERE id=? AND state IN ('queued','running')", (reason, raw, now, job["id"]))
         for a in list(db.execute("SELECT * FROM attempts WHERE state='running' AND expires<=?", (now,))):
@@ -430,6 +613,8 @@ class WorkloadStore:
             return  # Missing destructive window fails closed; submission still enforces a hard cap.
         rows = db.execute("SELECT id,updated,retain FROM jobs WHERE state IN ('succeeded','failed','cancelled','expired') "
                           "AND NOT EXISTS (SELECT 1 FROM attempts WHERE job=jobs.id AND state IN ('running','cleanup')) "
+                          "AND NOT EXISTS (SELECT 1 FROM github_remote_jobs WHERE job=jobs.id "
+                          "AND state NOT IN ('terminal','refused')) "
                           "ORDER BY updated DESC").fetchall()
         for index, row in enumerate(rows):
             if not row["retain"] and (index >= self.limits.terminal_jobs or now-row["updated"] > self.limits.terminal_seconds):
@@ -439,5 +624,9 @@ class WorkloadStore:
         with self.transaction() as db:
             self._expire(db, self.clock())
             self._prune(db, self.clock())
+            db.execute("UPDATE github_remote_jobs SET state='terminal',updated=? WHERE state IN ('running','cancel_requested') "
+                       "AND run_status='completed' AND NOT EXISTS "
+                       "(SELECT 1 FROM attempts a WHERE a.job=github_remote_jobs.job AND a.state IN ('running','cleanup'))",
+                       (self.clock(),))
         with closing(self.connect()) as db:
             db.execute("PRAGMA wal_checkpoint(PASSIVE)")

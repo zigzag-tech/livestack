@@ -37,6 +37,10 @@ class Principal:
     max_running: int | None = None
     on_cap: str = "queue"  # "queue" (default) | "refuse"
     claim_enabled: bool = True  # operator drain; existing attempts retain access
+    remote_job: str | None = None
+    remote_provider: str | None = None
+    remote_run_id: str | None = None
+    remote_boot: str | None = None
 
     def __post_init__(self):
         name(self.id, "principal")
@@ -45,6 +49,16 @@ class Principal:
         if self.role == 'worker':
             name(self.worker, 'worker')
             name(self.host, 'host')
+            if self.remote_job is not None:
+                if (self.remote_provider is None or self.remote_run_id is None or self.remote_boot is None or
+                        not isinstance(self.remote_job, str) or len(self.remote_job) != 32 or
+                        any(c not in '0123456789abcdef' for c in self.remote_job) or
+                        not isinstance(self.remote_run_id, str) or not self.remote_run_id.isdigit()):
+                    raise ValueError('remote worker principal must be bound to one job and run')
+                name(self.remote_provider, 'remote provider')
+                name(self.remote_boot, 'remote worker boot')
+        elif any(value is not None for value in (self.remote_job,self.remote_provider,self.remote_run_id,self.remote_boot)):
+            raise ValueError('only a remote worker may carry a remote binding')
         elif not self.handlers:
             raise ValueError('caller/admin must declare allowed handlers')
         if self.delegate_prefix is not None and self.delegate_prefix:
@@ -81,17 +95,25 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 32
 
-    def __init__(self, address, store, principals, *, blobs=None, artifact_mirror=None):
+    def __init__(self, address, store, principals, *, blobs=None, artifact_mirror=None, github_remote=None):
         check_principals(principals)
         self.configure_connections()
         self.store = store
         self.blobs = blobs or BlobStore(store, __import__("pathlib").Path(store.path).parent/"objects")
         self.artifact_mirror = artifact_mirror
+        self.github_remote = github_remote
         self._principals_lock = threading.Lock()
         self.principals = tuple(principals)
         # The store enforces per-principal caps in placement and submission.
         store.bind_principals(self.principals)
         super().__init__(address, Handler)
+        if self.github_remote is not None:
+            self.github_remote.start(store)
+
+    def server_close(self):
+        if self.github_remote is not None:
+            self.github_remote.close()
+        super().server_close()
 
     def replace_principals(self, principals):
         """Swap the whole principal set atomically, without a restart.
@@ -171,6 +193,10 @@ class Handler(BaseHTTPRequestHandler):
         for principal in self.server.principals:
             if hmac.compare_digest(token.encode(), principal.token.encode()):
                 return principal
+        if self.server.github_remote is not None:
+            principal = self.server.github_remote.principal_for_token(token)
+            if principal is not None:
+                return principal
         raise WorkloadError('authentication required', 401)
 
     def body(self):
@@ -220,10 +246,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def dispatch(self, method):
         try:
-            principal = self.principal()
             parts = urlparse(self.path).path.strip('/').split('/')
             if parts[:2] != ['v1', 'workloads']:
                 raise WorkloadError('route not found', 404)
+            if parts[2:] == ['github', 'bootstrap'] and method == 'POST':
+                if self.server.github_remote is None:
+                    raise WorkloadError('GitHub remote execution is not configured', 404)
+                self.respond(200, self.server.github_remote.bootstrap(self.body()))
+                return
+            principal = self.principal()
             if route_object(self, principal, method, parts[2:]):
                 return
             body = self.body() if method == 'POST' else {}
@@ -285,20 +316,35 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'withdraw' and method == 'POST':
                 return store.withdraw(principal.id, parts[1])
         if principal.role == 'worker' and method == 'POST':
+            if parts == ['worker', 'status'] and principal.remote_job is not None:
+                return store.remote_job_status(principal.remote_provider, principal.remote_job)
             if parts == ['worker', 'report']:
-                return store.register(principal.worker, principal.host, body['boot'], body['report'],
+                self._remote_boot(principal, body)
+                report = body['report']
+                if principal.remote_provider:
+                    report = self.server.github_remote.constrain_report(principal, report)
+                return store.register(principal.worker, principal.host, body['boot'], report,
                                       cleaned=body.get('cleaned', ()))
             if parts == ['worker', 'claim']:
+                self._remote_boot(principal, body)
                 if not principal.claim_enabled:
                     return {'assignment': None, 'reason': 'worker_draining'}
-                return {'assignment': store.claim(principal.worker, body['boot'])}
+                return {'assignment': store.claim(principal.worker, body['boot'], job_id=principal.remote_job)}
             if parts == ['worker', 'heartbeat']:
+                self._remote_boot(principal, body)
                 return store.heartbeat(principal.worker, body['boot'], body['attempt_id'], body['fence'],
                                        progress=body.get('progress'))
             if parts == ['worker', 'verify-compilation']:
+                self._remote_boot(principal, body)
                 return store.verify_compilation(principal.worker, body['boot'], body['attempt_id'],
                     body['fence'], input_digest=body['input_digest'], compilation_class=body['class'])
             if parts == ['worker', 'complete']:
+                self._remote_boot(principal, body)
                 return store.complete(principal.worker, body['boot'], body['attempt_id'], body['fence'],
                                       input_digest=body['input_digest'], outcome=body['outcome'], result=body['result'])
         raise WorkloadError('route not permitted for principal', 403)
+
+    @staticmethod
+    def _remote_boot(principal, body):
+        if principal.remote_boot is not None and body.get('boot') != principal.remote_boot:
+            raise WorkloadError('github_worker_boot_mismatch', 403)
