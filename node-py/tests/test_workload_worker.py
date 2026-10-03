@@ -713,6 +713,133 @@ def test_killed_worker_expires_then_new_process_reconciles_journal(fleet, tmp_pa
             worker.close()
 
 
+def test_worker_restart_rebuilds_unconfirmed_task_environment(fleet, tmp_path, monkeypatch):
+    """A killed attempt cannot leave its environment advertised as warm."""
+    store, config, caller, digest = fleet
+    store.limits = Limits(lease_seconds=2)
+    environment_root = tmp_path/'retained-environments'
+    environment_root.mkdir()
+    config['task_environments'] = dict(root=str(environment_root), host_id='test-host',
+        quota_helper='/unused/in-tests', project_id_min=100000, project_id_max=100063,
+        max_bytes_per_replica=32*1024**3, max_bytes_per_owner=128*1024**3,
+        max_total_bytes=256*1024**3, reserve_bytes=0, profiles={'native-test-v1': {
+            'handlers': ['native.v1'], 'purpose': 'development', 'cache_contract': 'native-test-v1',
+            'probe_argv': [sys.executable, '-c', 'print("native-test-toolchain-v1")'],
+            'cache_components': [{'name': 'incremental-build', 'path': 'source/build',
+                'inputs': [], 'contract': 'incremental-build-v1'}]}})
+
+    def quota_usage(project_ids):
+        rows = []
+        for marker_path in environment_root.glob('*/environment.json'):
+            marker = json.loads(marker_path.read_text())
+            if marker['project_id'] in project_ids:
+                rows.append({'project_id': marker['project_id'], 'used_bytes': 0,
+                    'hard_bytes': ((marker['quota_bytes']+1023)//1024)*1024})
+        return rows
+
+    original_init = TaskEnvironmentStore.__init__
+    def test_store_init(self, environment_config, **kwargs):
+        return original_init(self, environment_config, **kwargs,
+            quota_ensure=lambda handle, project, quota: {'quota_bytes': quota},
+            quota_probe=lambda _: True, quota_usage=quota_usage,
+            require_separate_filesystem=False, filesystem_bytes=8*1024**3)
+    monkeypatch.setattr(TaskEnvironmentStore, '__init__', test_store_init)
+
+    first = caller.submit(dict(version=3, key='crash-recovery-first', handler='native.v1',
+        input_digest=digest, need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
+        environment={'key':'crash-recovery-task','reuse':'prefer'},
+        payload={'sleep':120,'cache':True,'inspect_cache':True}))
+    config_path = tmp_path/'task-environment-worker.json'
+    config_path.write_text(json.dumps(config))
+    runner = tmp_path/'run-task-environment-worker.py'
+    runner.write_text('''import json,sys
+from pathlib import Path
+from livestack_node.workloads.task_environments import TaskEnvironmentStore
+import livestack_node.workloads.worker as worker_module
+root = Path(sys.argv[2])
+original = TaskEnvironmentStore.__init__
+def usage(project_ids):
+    rows = []
+    for path in root.glob('*/environment.json'):
+        marker = json.loads(path.read_text())
+        if marker['project_id'] in project_ids:
+            rows.append({'project_id': marker['project_id'], 'used_bytes': 0,
+                'hard_bytes': ((marker['quota_bytes']+1023)//1024)*1024})
+    return rows
+def test_init(self, config, **kwargs):
+    return original(self, config, **kwargs,
+        quota_ensure=lambda handle, project, quota: {'quota_bytes': quota},
+        quota_probe=lambda _: True, quota_usage=usage,
+        require_separate_filesystem=False, filesystem_bytes=8*1024**3)
+TaskEnvironmentStore.__init__ = test_init
+worker_module.os.getloadavg = lambda: (0,0,0)
+worker = worker_module.WorkloadWorker(json.loads(Path(sys.argv[1]).read_text()))
+worker.step()
+''')
+    process = subprocess.Popen([sys.executable, str(runner), str(config_path), str(environment_root)])
+    executor = SystemdExecutor(config['worker'])
+    attempt, worker = None, None
+    try:
+        deadline = time.monotonic()+20
+        journal_path = Path(config['state_dir'])/'active.json'
+        while True:
+            if journal_path.exists():
+                journal = json.loads(journal_path.read_text())
+                if journal['phase'] == 'running':
+                    attempt = journal['assignment']['attempt_id']
+                    group = executor.inspect(attempt).get('ControlGroup')
+                    if group:
+                        break
+            assert process.poll() is None and time.monotonic() < deadline
+            time.sleep(.05)
+        assignment = journal['assignment']
+        handle = assignment['environment']['handle']
+        assert handle == first['environment_handle']
+        process.kill()
+        process.wait(timeout=5)
+        cgroup = Path('/sys/fs/cgroup')/group.lstrip('/')
+        deadline = time.monotonic()+10
+        while cgroup.exists() and 'populated 1' in (cgroup/'cgroup.events').read_text():
+            assert time.monotonic() < deadline
+            time.sleep(.1)
+
+        worker = WorkloadWorker(config)
+        worker.reconcile()
+        assert caller.get(first['id'])['state'] == 'queued'
+        marker_path = environment_root/handle/'environment.json'
+        marker = json.loads(marker_path.read_text())
+        assert marker['state'] == 'rebuild_required'
+        assert marker['compatibility'] == '0'*64
+        assert not any(replica['handle'] == handle for replica in worker.task_environments.report()[1])
+        with store.transaction() as db:
+            assert db.execute("SELECT count(*) FROM attempts WHERE state!='ended'").fetchone()[0] == 0
+        caller.request('jobs/'+first['id']+'/cancel', {})
+
+        second = caller.submit(dict(version=3, key='crash-recovery-second', handler='native.v1',
+            input_digest=digest, need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
+            environment={'key':'crash-recovery-task','reuse':'prefer'},
+            payload={'cache':True,'inspect_cache':True}))
+        assert second['environment_handle'] == handle
+        assert worker.step()
+        result = caller.get(second['id'])
+        assert result['state'] == 'succeeded'
+        receipt = result['result']['environment_receipt']
+        assert receipt['reuse_outcome'] == 'rebuilt'
+        assert receipt['reason_code'] == 'local_state_untrusted'
+        assert caller.get_environment(handle)['state'] == 'parked'
+        assert worker.journal.read() is None
+        with store.transaction() as db:
+            assert db.execute("SELECT count(*) FROM attempts WHERE state!='ended'").fetchone()[0] == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+        if attempt:
+            executor.stop(attempt)
+        if worker:
+            worker.close()
+
+
 @pytest.mark.parametrize('backend', ['rootless-docker', 'rootless-docker-native'])
 @pytest.mark.parametrize('exit_code, expected', [(0, 'succeeded'), (7, 'failed'), (75, 'queued')])
 def test_rootless_worker_delivers_pinned_artifact(fleet, tmp_path, backend, exit_code, expected):
