@@ -12,7 +12,7 @@
 - [ ] 2.1 Add bounded replica reports and batched registry lookup to the scheduler snapshot; verify increasing environment counts do not increase database round trips and unknown compatibility never becomes a hit. Ledger: bounded candidate values and exclusions.
 - [ ] 2.2 Atomically combine environment writer generation and ordinary host resource admission; verify concurrent same-handle requests, independent environments and same-host multi-worker reuse with a real authority. Ledger: environment-busy vs resource wait vs admitted.
 - [ ] 2.3 Add compatible-host preference and durable capped affinity; verify busy preferred host, available alternative, unknown ETA, restarted authority and policy-excluded old host cases. Ledger: measured/unknown estimate components, affinity start/expiry and actual choice.
-- [ ] 2.4 Enforce installed development/task-E2E purpose and bounded proper-subset selection; verify full/coalesced E2E, publishing/release, absent scope and caller-spoofed purpose all refuse, while legacy no-environment orchestration still works. Ledger: environment_scope_forbidden and exact task selection identity.
+- [ ] 2.4 Enforce installed development/task-E2E purpose and bounded exact-ID request shape; verify the installed task handler rejects empty, unknown and full-suite selection against captured source before preparation, while full/coalesced E2E, publishing/release and caller-spoofed purpose refuse and legacy no-environment orchestration still works. Ledger: environment_scope_forbidden and exact task selection identity.
 
 ## 3. Bounded worker environments
 

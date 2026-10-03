@@ -21,8 +21,7 @@ from livestack_node.workloads.store import WorkloadStore
 HANDLERS = {'dev.v1', 'task.v1', 'full.v1', 'publish.v1'}
 POLICIES = {
     'dev.v1': {'purpose': 'development', 'profile': 'linux-rust'},
-    'task.v1': {'purpose': 'task_e2e', 'profile': 'benchday-task-e2e',
-                'check_ids': ['hub.one', 'hub.two']},
+    'task.v1': {'purpose': 'task_e2e', 'profile': 'benchday-task-e2e'},
     'full.v1': {'purpose': 'full_e2e', 'profile': 'full-suite'},
     'publish.v1': {'purpose': 'publishing', 'profile': 'release'},
 }
@@ -231,7 +230,7 @@ def test_affinity_wait_is_durable_bounded_and_holds_no_compute_claim(tmp_path):
     assert attempt['environment']['generation'] == 2
 
 
-def test_environment_scope_is_installed_policy_and_requires_task_subset(tmp_path):
+def test_environment_scope_is_installed_policy_and_requires_bounded_exact_task_ids(tmp_path):
     store, api, thread = server(tmp_path)
     try:
         capabilities = store.capabilities('alice', HANDLERS)['environments']
@@ -240,17 +239,28 @@ def test_environment_scope_is_installed_policy_and_requires_task_subset(tmp_path
         for handler in ('full.v1', 'publish.v1'):
             with pytest.raises(WorkloadError, match='environment_scope_forbidden'):
                 store.submit('alice', env_request('blocked', handler=handler))
-        with pytest.raises(WorkloadError, match='proper subset'):
-            store.submit('alice', env_request('task', handler='task.v1',
-                payload={'check_ids': ['hub.one', 'hub.two']}))
-        with pytest.raises(WorkloadError, match='proper subset'):
-            store.submit('alice', env_request('task', handler='task.v1', payload={}))
+        for selection in (None, [], ['hub.one', 'hub.one'], ['hub.*'], ['hub.check'] * 65):
+            payload = {} if selection is None else {'check_ids': selection}
+            with pytest.raises(WorkloadError, match='bounded exact check IDs'):
+                store.submit('alice', env_request('task', handler='task.v1', payload=payload))
         scoped = store.submit('alice', env_request('task', handler='task.v1',
             payload={'check_ids': ['hub.one']}))
         assert scoped['environment']['purpose'] == 'task_e2e'
         assert request(api, 'environments/'+scoped['environment_handle'])[0] == 200
     finally:
         close(api, thread)
+
+
+def test_task_e2e_optional_allowlist_is_enforced_when_installed(tmp_path):
+    policies = dict(POLICIES)
+    policies['task.v1'] = {**POLICIES['task.v1'], 'check_ids': ['hub.one', 'hub.two']}
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, environment_handlers=policies)
+    with pytest.raises(WorkloadError, match='outside its installed allowlist'):
+        store.validate_submission('alice', env_request('task', handler='task.v1',
+            payload={'check_ids': ['hub.other']}))
+    with pytest.raises(WorkloadError, match='outside its installed allowlist'):
+        store.validate_submission('alice', env_request('task', handler='task.v1',
+            payload={'check_ids': ['hub.one', 'hub.two']}))
 
 
 def test_development_environment_policy_cannot_be_used_for_release_payload_modes(tmp_path):

@@ -693,12 +693,14 @@ python -m livestack_node.workloads.cli --config <private-config> get <job-id>
 
 Authority enrollment is explicit and handler-owned. Development handlers may
 be listed with purpose `development`; task-specific E2E handlers use purpose
-`task_e2e` plus an installed finite `check_ids` allowlist. Their payload must
-name a nonempty proper subset. Full/coalesced E2E and publishing/release
-handlers are enrolled only as forbidden purposes and reject environment
-references. They keep their existing unified coordinators. The caller cannot
-declare or widen purpose, convert a full run into a task run, or attach an
-environment to publishing.
+`task_e2e` and carry at most 64 unique exact check IDs. An optional finite
+authority allowlist can further restrict those IDs. The installed handler
+validates the IDs against each immutable captured source and refuses a
+selection that expands to the full suite before preparation or execution.
+Full/coalesced E2E and publishing/release handlers are enrolled only as
+forbidden purposes and reject environment references. They keep their existing
+unified coordinators. The caller cannot declare or widen purpose, convert a
+full run into a task run, or attach an environment to publishing.
 
 Linux workers need two separate storage areas: the existing per-worker attempt
 filesystem and one project-quota environment filesystem shared by all worker
