@@ -73,7 +73,7 @@ def _tree_bytes(path):
 class WorkloadWorker:
     def __init__(self, config):
         self.config = config
-        self.client = WorkloadClient(config['authority'], config['token'])
+        self.client = WorkloadClient(config['authority'], config['token'], edge_key=config.get('edge_key'))
         self.journal = WorkerJournal(config['state_dir'])
         # macOS has no cgroups: launchd jobs plus wrapper-enforced limits
         # (openspec/changes/apple-host-compilation).
@@ -100,7 +100,8 @@ class WorkloadWorker:
             raise WorkloadError('transfer timeout must be between control timeout and one hour')
         # Bulk object PUT/GET may cross regions or wait for a configured mirror.
         # Keep that budget separate so control requests still fail fast.
-        transfer_client = WorkloadClient(config['authority'], config['token'], timeout=transfer_timeout)
+        transfer_client = WorkloadClient(config['authority'], config['token'], timeout=transfer_timeout,
+                                         edge_key=config.get('edge_key'))
         spec = config.get('object_relay')
         if spec is not None and (not isinstance(spec, dict) or not {'url', 'key'} <= set(spec) <= {'url', 'key', 'parallel'}
                                  or not isinstance(spec.get('parallel', 4), int) or isinstance(spec.get('parallel', 4), bool)
@@ -108,7 +109,8 @@ class WorkloadWorker:
             raise WorkloadError('object_relay requires url and key, and optionally parallel 1..8')
         self.transfer = InputTransfer(
             transfer_client, **({} if spec is None else dict(
-                relay=WorkloadClient(spec['url'], config['token'], timeout=transfer_timeout),
+                relay=WorkloadClient(spec['url'], config['token'], timeout=transfer_timeout,
+                                     edge_key=config.get('edge_key')),
                 relay_key=spec['key'], relay_parallel=spec.get('parallel', 4))))
         self.output_mirror = None
         if config.get('output_mirror') is not None:

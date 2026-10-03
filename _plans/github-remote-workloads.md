@@ -1,88 +1,115 @@
 # GitHub Actions workload provider operations
 
 This runbook applies to the `github-actions` provider in LiveStack's durable
-workload authority. The authority remains the scheduler and source of truth.
-GitHub only supplies a one-job runner. Do not route a release handler here
-until the identity, network, resource and sandbox checks below pass.
+workload authority. Harmony remains the scheduler and source of truth; GitHub
+supplies one macOS runner for a fixed admitted attempt. The hosted runner does
+not join Headscale and does not receive the authority's GitHub API credential.
 
-## Required identities and permissions
+## Existing identities and credentials
 
-Create a GitHub App installed only on `settinghead/benchday` with Actions write
-and Contents read permissions (repository metadata read is implicit). Generate
-one App private key and place it on the authority host in a root/authority-owned file
-with mode `0600`; keep only its path in configuration. The App installation
-token is minted by the authority for dispatch and run reconciliation. It is
-never passed to a runner.
+The authority uses the current `gh` login on xc-tower-ubuntu. Refresh the
+authority-local token file without printing its value:
 
-Record these immutable repository values with the GitHub API: repository id,
-workflow id, and the App bot's numeric actor id. The repository id prevents a
-renamed or recreated repository from inheriting the route. The workflow id
-must identify `.github/workflows/release-ios-harmony.yml`.
+```bash
+umask 077
+tmp="$HOME/.config/livestack-workloads/github-token.next"
+gh auth token > "$tmp"
+chmod 600 "$tmp"
+mv "$tmp" "$HOME/.config/livestack-workloads/github-token"
+```
 
-Protect the `ios-release` GitHub environment and keep the existing Apple
-distribution certificate, profile and App Store Connect API key secrets there
-when they are available as environment secrets. The workflow's job-level gate
-also requires the configured App actor, the one approved tag ref and run
-attempt 1. Review that gate whenever the workflow changes. Never print secret
-values or copy them into the authority, workload database, artifacts or logs.
+The service checks that the file is regular, private, and owned by the service
+user or root. The provider reads it for GitHub API calls. The attempt-worker MAC
+key is domain-separated from the same file, so no separate key or GitHub App is
+needed. A replacement token changes that derived key on the next service start;
+rotate it only while the provider has no active remote attempt.
+
+The runner reaches the authority through
+`https://hs.zztech.io/harmony-relay`, which is the existing HTTPS edge relay
+backed by `harmony-edge-tunnel.service` and its outbound SSH reverse tunnel.
+Copy the existing `key` from
+`~/.config/livestack-workloads/edge-relay.json` into the GitHub
+`ios-release` environment secret `HARMONY_EDGE_KEY`. Do not copy its admin
+token. The edge key gates relay transport only: Harmony still validates the
+GitHub OIDC bootstrap and the attempt-scoped worker token.
+
+The relay forwards only `POST /v1/workloads/github/bootstrap`, the fixed
+`/v1/workloads/worker/{status,report,claim,heartbeat,verify-compilation,complete}`
+routes, and the existing content-addressed object routes. Every forwarded
+request requires `X-Edge-Key`; the relay strips that header before forwarding.
+Control bodies are limited to 64 KiB. Other routes are refused at the relay,
+and object traffic remains subject to its monthly byte budget. The workload
+authority stays bound to `100.64.0.18:8810` on Headscale.
+
+The six existing Apple signing values remain repository-level GitHub secrets;
+their encrypted values cannot be moved into an environment without their
+original plaintext source. The fixed workflow references them only from the
+tag-restricted `ios-release` environment and imports them into per-run signing
+state. The relay key is an environment secret. Do not claim that the environment
+scope changes the storage scope of the existing Apple secrets.
 
 ## Pin the workflow
 
-Create a lightweight tag `benchday-ios-remote-v1` only after the workflow and
-runner scripts have landed on `main`. The authority verifies the tag points
-directly to an allowlisted commit before it dispatches. Record the tag's commit SHA in the
-authority's `identity.workflow_sha` allowlist and set `identity.workflow_ref`
-to:
+Use a new lightweight release-workflow tag for every security-sensitive change;
+never move an existing tag. The current target is
+`benchday-ios-remote-v2`. The authority verifies that its commit SHA is on the
+allowlist before dispatch. Set both `workflow_ref` values to:
 
 ```
-settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v1
+settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v2
 ```
 
-The provider's `workflow_ref` must name the same repository, file and tag. Its
-`workflow_path` is `.github/workflows/release-ios-harmony.yml`, and its
-`workflow_id` is the numeric id returned by GitHub. If the workflow needs a
-security-sensitive change, publish a new tag, then update the allowed SHA and
-ref together. Do not move an existing tag or permit arbitrary branch refs.
+The provider's `workflow_path` is
+`.github/workflows/release-ios-harmony.yml`; its `workflow_id` is the fixed
+numeric ID returned by GitHub. Identity configuration also pins the repository
+id, workflow id, exact tag commit SHA, `workflow_dispatch`, job name,
+correlation prefix, audience `harmony`, and the approved actor id (the existing
+`settinghead` account). Before dispatch, the authority confirms the tag is a
+lightweight tag pointing directly to an allowlisted commit.
+
+The GitHub `ios-release` environment must permit only the current tag and have
+administrator bypass disabled. Its `BENCHDAY_GITHUB_ACTOR_ID` variable matches
+the existing GitHub CLI user's numeric actor id. The job-level actor, tag, and
+first-attempt gate runs before the workflow reads signing values or the relay
+key. Keep `id-token: write`, `actions: read`, and `contents: read` as the only
+workflow token permissions.
 
 ## Authority configuration
 
-Add a `github_remote` object to the authority config without replacing the
-existing handlers, principals, compilation policy or local workers. Keep the
-token key and App private key outside the checkout, readable only by the
-authority process. The required shape is:
+Add the provider mapping without replacing existing handlers, principals,
+compilation policy, or local workers. Both provider token paths point to the
+existing private CLI credential file; LiveStack derives a separate MAC key
+with domain separation. Replace the example identity values with values from
+the existing GitHub repository and the landed tag; do not print credentials.
 
 ```json
 {
   "github_remote": {
-    "token_key_file": "/etc/livestack/github-worker-token.key",
+    "token_key_file": "/home/ubuntu/.config/livestack-workloads/github-token",
     "interval": 5,
     "providers": {
       "github-actions": {
         "handlers": ["benchday.release.ios.v1"],
         "host": "github-actions-ios",
-        "resources": {"cpu": 3, "memory": 9663676416, "disk": 12884901888},
+        "resources": {"cpu": 3, "memory_bytes": 9663676416, "disk_bytes": 12884901888},
         "labels": {"os": "macos", "signing": "apple"},
         "slots": 1,
         "workflow_path": ".github/workflows/release-ios-harmony.yml",
-        "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v1",
+        "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v2",
         "workflow_id": 12345678,
         "identity": {
           "repository": "settinghead/benchday",
           "repository_id": "REPOSITORY_ID",
-          "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v1",
+          "workflow_ref": "settinghead/benchday/.github/workflows/release-ios-harmony.yml@refs/tags/benchday-ios-remote-v2",
           "workflow_id": 12345678,
           "workflow_sha": ["40_HEX_TAG_COMMIT_SHA"],
           "event_name": "workflow_dispatch",
           "job_name": "Build and upload iOS",
-          "audience": "harmony-workload-bootstrap",
+          "audience": "harmony",
           "correlation_prefix": "Harmony iOS release ",
-          "actor_ids": ["GITHUB_APP_BOT_ACTOR_ID"]
+          "actor_ids": ["794516"]
         },
-        "app": {
-          "app_id": 123456,
-          "installation_id": 987654,
-          "private_key_file": "/etc/livestack/benchday-github-app.pem"
-        },
+        "token_file": "/home/ubuntu/.config/livestack-workloads/github-token",
         "max_seconds": 21600,
         "compilation_classes": ["apple", "flutter", "native", "rust"]
       }
@@ -91,52 +118,46 @@ authority process. The required shape is:
 }
 ```
 
-The numbers above describe the `macos-26-intel` runner envelope used by the
-workflow, not a general Mac worker pool: one slot, 3 CPU, 9 GiB memory, and
-12 GiB disk. The authority clamps its worker report to those configured
-resources. The configured compilation classes must exactly match
-`compilation_policy` for this handler. Review the workflow's APFS workspace
-quota and reserve against the current hosted runner profile before raising any
-limit.
+The numbers describe the fixed `macos-26-intel` runner envelope, not a general
+Mac pool: one slot, 3 CPU, 9 GiB memory, and 12 GiB disk. The configured
+compilation classes must exactly match the handler's `compilation_policy`.
+Keep the workflow's APFS workspace quota and reserves within the hosted runner
+profile.
 
-Set the workflow bootstrap audience to the exact configured audience. Configure
-Tailscale Workload Identity Federation to accept only this repository, the
-`ios-release` environment, and the approved workflow identity. The resulting
-short-lived runner identity may reach only the workload authority bootstrap
-and worker API on the `github-actions-ios` tag. Its ACL must not grant SSH,
-database, hub administration, or access to other tailnet services. The
-authority API must not expose the bootstrap route outside the tailnet.
+The authority's external `/etc/livestack/compilation-policy.json` must also
+contain a `github-actions-ios` host entry granting exactly
+`apple`, `flutter`, `native`, and `rust`. The provider maps this virtual
+host directly, so it does not need a mesh-worker enrollment. Do not add it to
+the physical-worker enrollment map or widen any existing host; preserve the
+current expiry and advance the policy revision when adding this entry.
 
 ## Rollout and checks
 
 1. Run the LiveStack workload tests and `openspec validate --specs` before
-   deployment. Install the immutable release on the authority host using its
-   normal release mechanism; preserve the current state directory and database.
-2. Back up and inspect the authority config. Add the provider mapping, secret
-   file paths, exact compilation classes and repository/workflow allowlists.
-   Do not remove or change the current local worker entries.
-3. Restart the authority using its service manager. Confirm it loads the
-   provider and retains its existing workers, principals and job rows. Verify
-   the GitHub App can mint an installation token and list the pinned workflow,
-   without logging the token.
-4. Dispatch a sandbox workflow that uses the same OIDC, GitHub API and
-   Tailscale path but does not receive Apple secrets or run a release handler.
-   Confirm the authority binds the live run and job id, issues a single-use
-   fenced credential, accepts a small digest-verified artifact, and reconciles
-   cancellation and completion. Repeat with a manual ref, fork, wrong actor,
-   wrong workflow SHA, rerun and expired grant; each must be rejected before
-   worker claim or secret use.
-5. Inspect the workload ledger for provider, correlation, run/attempt,
-   identity decision, artifact digest and terminal result. Confirm the
-   one-runner slot remains occupied until GitHub terminal cleanup, and that
-   the local Mac workers continue to receive their existing jobs.
-6. Only then route `benchday.release.ios.v1` to GitHub and use the publisher's
-   `--no-upload` path as the non-publishing release proof. Verify signing
-   cleanup, source/build provenance, IPA receipt and TestFlight upload before
-   recording the cadence ledger.
+   deployment. Stage an immutable authority release with the provider and
+   relay code. Preserve the current workload state directory and database.
+2. Verify `gh auth status` and the non-secret GitHub identity, then write the
+   existing CLI token to its private local file. Copy the existing edge key to
+   `HARMONY_EDGE_KEY` in the tag-restricted environment. Do not create an App,
+   Headscale node, pre-auth key, or Tailscale federation secret.
+3. Back up the authority config and compilation policy. Add the exact provider
+   mapping and the matching virtual-host compilation grant. Keep all current
+   local worker entries and physical-host enrollments. Repoint the staged
+   service to the new immutable release only at an idle, result-safe point,
+   then restart and verify workers, principals, and stored jobs are intact.
+4. Verify the edge relay returns its public liveness status. From the relay
+   tests, confirm unlisted routes, missing keys, and control bodies over 64 KiB
+   stop before forwarding, and that the edge key is stripped. The authority
+   remains inaccessible outside its private Headscale address.
+5. Use `publish-ios.sh --no-upload` as the hosted macOS proof. Confirm Harmony
+   binds the live run and job, issues one fenced token, returns a digest-verified
+   IPA, cleans signing material, and reconciles the terminal state. Confirm no
+   local or Mac worker compiled the iOS handler.
+6. Only after that proof, enable the normal iOS upload path. Verify App Store
+   Connect acceptance and the source/build/run provenance before the publisher
+   updates the cadence ledger.
 
-If any GitHub API or identity check is unavailable, the provider fails closed:
-the job remains durable and capacity is not silently represented as a local
-worker. Diagnose the provider's own reason and reconcile before retrying. Do
-not bypass OIDC, turn on a local runner, or place Apple credentials on the Mac
-as a recovery path.
+If GitHub or the relay is unavailable, the provider fails closed and the
+attempt remains visible in Harmony. Diagnose its workload reason before
+retrying. Do not bypass OIDC, use an unrestricted mesh route, or fall back to a
+local or Mac build.

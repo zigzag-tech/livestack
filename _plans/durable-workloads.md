@@ -42,6 +42,14 @@ but retain capacity until the worker confirms owned-process cleanup. A disconnec
 host cannot receive another attempt; another host can retry infrastructure work.
 Product failure is terminal. Worker-owned heartbeats outlive caller sessions.
 
+A configured GitHub Actions provider runs selected handlers as the same durable,
+fenced workload attempt; GitHub does not own admission or completion. The iOS
+release runner reaches the private authority through the fixed HTTPS edge relay
+and outbound SSH tunnel. It does not join Headscale. The authority uses its
+existing local GitHub CLI credential for dispatch, while OIDC and a single-use
+worker token authorize the runner. Provider configuration and rollout checks
+are in `_plans/github-remote-workloads.md`.
+
 Source objects are SHA-256 addressed. A worker verifies them before extraction
 into a private source root and writes only to separate output state. Dependencies,
 submodules, modes and dirty source provenance belong in the manifest; development

@@ -2,13 +2,12 @@
 
 Run `python -m livestack_node.workloads.edge_forward --config /path/config.json`.
 
-It forwards `GET|PUT|HEAD /v1/workloads/objects/<digest>` to ONE configured
-upstream (the workload authority) and nothing else, so worker-to-worker traffic
-cannot cross it. It stores no object bytes; memory is connection count times
-BUFFER. The authority still authenticates every request: this hop holds no
-credentials, and workers still verify SHA-256, so it can delay or drop bytes but
-not forge them. Traffic is bounded by a monthly byte budget; exhaustion answers
-`budget_exhausted` and is logged, never a 404 or an empty body.
+It forwards `GET|PUT|HEAD /v1/workloads/objects/<digest>` and the fixed GitHub
+bootstrap/worker-control routes to ONE configured upstream (the workload
+authority). Control calls are edge-key gated and capped at 64 KiB; the key is
+never forwarded. The relay stores no object bytes, and the authority still
+authenticates each request. Traffic is bounded by a monthly byte budget;
+exhaustion answers `budget_exhausted` and is logged, never a 404 or empty body.
 """
 import argparse
 import hmac
@@ -27,8 +26,11 @@ from .block_codec import HEADER
 from .network import BoundedRequests
 
 OBJECT = re.compile(r'/v1/workloads/objects/[0-9a-f]{64}')
+REMOTE_CONTROL = re.compile(
+    r'/v1/workloads/(?:github/bootstrap|worker/(?:status|report|claim|heartbeat|verify-compilation|complete))')
 STATUS = '/v1/edge/status'
 BUFFER = 256*1024
+CONTROL_MAX_BYTES = 64*1024
 REQUEST_HEADERS = ('authorization', 'range', 'content-type', 'content-length', HEADER.lower())
 RESPONSE_HEADERS = ('content-type', 'content-length', 'content-range', 'accept-ranges', HEADER.lower())
 KEEP_MONTHS = 3
@@ -134,6 +136,10 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == STATUS and self.command == 'GET':
             return self.status()
+        if REMOTE_CONTROL.fullmatch(path):
+            if self.command != 'POST':
+                return self.reply(405, {'error': 'unsupported control operation'})
+            return self.forward(path, control=True)
         if not OBJECT.fullmatch(path):
             return self.reply(404, {'error': 'route not found'})
         if self.command not in ('GET', 'PUT', 'HEAD'):
@@ -149,7 +155,7 @@ class Handler(BaseHTTPRequestHandler):
             body.update(month=budget.month(), used_bytes=budget.used(), cap_bytes=budget.cap)
         self.reply(200, body)
 
-    def forward(self, path):
+    def forward(self, path, *, control=False):
         server, declared = self.server, 0
         # Before anything is read or forwarded: the endpoint is public, and an
         # unauthenticated PUT body would otherwise be streamed to the authority
@@ -158,13 +164,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(401, {'error': 'edge key required'})
         if self.headers.get('Transfer-Encoding'):
             return self.reply(400, {'error': 'transfer encoding is not supported'})
-        if self.command == 'PUT':
+        if self.command == 'PUT' or control:
             try:
                 declared = int(self.headers.get('Content-Length', '-1'))
             except ValueError:
                 declared = -1
             if declared < 0:
                 return self.reply(400, {'error': 'invalid content length'})
+            if control and declared > CONTROL_MAX_BYTES:
+                return self.reply(413, {'error': 'control request byte limit exceeded'})
         if not server.budget.admit(declared):
             server.report_budget(True)
             return self.reply(503, {'error': 'budget_exhausted'}, [('X-Edge-Reason', 'budget_exhausted')])

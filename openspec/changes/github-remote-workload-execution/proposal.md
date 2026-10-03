@@ -8,9 +8,9 @@ This realizes `_plans/durable-workloads.md`. That record assumes a claimed attem
 
 - Add a GitHub Actions execution provider for configured workload handlers, with bounded provider capacity and durable dispatch, run identity, status, cancellation, and completion under the existing workload authority.
 - Bind each remote run to one admitted job attempt, fence, immutable input digest, fixed repository and workflow identity, and absolute deadline. Authenticate the runner with GitHub OIDC and issue only a short-lived attempt grant that the remote compilation guard can verify.
-- Let only the approved GitHub workflow join the tailnet through Tailscale workload identity federation, using an ephemeral tagged runner with ACL access only to the workload authority API. This gives the runner a private route without a long-lived tailnet key or a public authority endpoint.
+- Route the approved GitHub workflow through the existing HTTPS Harmony edge relay and its outbound SSH tunnel. The relay SHALL require the existing edge key and forward only bounded release bootstrap, worker-control, and object-transfer routes; the workload authority remains bound to Headscale and continues to authorize OIDC bootstrap and attempt-scoped worker tokens.
 - Verify remote logs and output objects through the authority's existing size, ownership, digest, and source-provenance rules. Stale, duplicate, manually dispatched, or mismatched runs cannot complete an attempt or return accepted artifacts.
-- Keep provider credentials and workload state outside job payloads. The authority's narrowly scoped GitHub App credential stays in operator configuration; product signing secrets remain in the configured GitHub Actions secret store and never enter Harmony payloads or CAS.
+- Keep provider credentials and workload state outside job payloads. The authority reads the already authenticated GitHub CLI credential from a private operator-owned file and derives its attempt-token MAC key with domain separation; the workflow uses the existing relay key in the tag-restricted `ios-release` environment. Product signing secrets remain in their existing GitHub secret store and never enter Harmony payloads or CAS.
 - Do not silently run a provider-selected job on another backend when GitHub is unavailable, over capacity, or cannot prove run identity.
 
 ## Capabilities

@@ -1,12 +1,14 @@
-"""The edge relay in front of a REAL authority: no fakes on either side.
+"""The edge relay in front of a REAL authority.
 
-It must forward object routes and nothing else, hold no bytes, keep the
-authority's authorization, refuse over budget by name, and never leave a worker
-without a path (fall back to the authority)."""
+It forwards bounded release-control and object routes, keeps the authority's
+authorization, strips its transport key, refuses over budget by name, and
+stores no object bytes. A small fake upstream is used only to inspect headers
+that the real authority intentionally ignores."""
 import hashlib
 import json
 import logging
 import os
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 import urllib.error
 import urllib.request
@@ -95,11 +97,12 @@ def test_fetch_and_upload_flow_through_the_relay_and_leave_nothing_behind(fleet)
     assert sorted(p.name for p in (fleet.root/'relay').iterdir()) == ['budget.sqlite']
 
 
-def test_only_object_routes_are_forwarded(fleet):
+def test_only_fixed_remote_and_object_routes_are_forwarded(fleet):
     _s, _t, url = fleet.make()
-    for path, method in (('/v1/workloads/jobs', 'GET'), ('/v1/workloads/worker/claim', 'POST'), ('/v1/fleet/admit', 'GET')):
+    for path, method in (('/v1/workloads/jobs', 'GET'), ('/v1/workloads/worker/retry', 'POST'),
+                         ('/v1/fleet/admit', 'GET')):
         request = urllib.request.Request(url+path, method=method, data=b'{}' if method == 'POST' else None,
-                                         headers={'Authorization': 'Bearer '+'a'*32})
+                                         headers={'Authorization': 'Bearer '+'a'*32, 'X-Edge-Key': KEY})
         with pytest.raises(urllib.error.HTTPError) as error:
             urllib.request.urlopen(request)
         assert error.value.code == 404
@@ -108,6 +111,28 @@ def test_only_object_routes_are_forwarded(fleet):
     with pytest.raises(urllib.error.HTTPError) as error:
         urllib.request.urlopen(request)
     assert error.value.code == 405
+
+
+def test_remote_worker_control_reaches_the_real_authority_with_both_auth_layers(fleet):
+    _s, _t, url = fleet.make()
+    client = WorkloadClient(url, 'w'*32, edge_key=KEY)
+    capacity = {'cpu': 2}
+    report = client.request('worker/report', dict(boot='relay-boot', report=dict(
+        capacity=capacity, available=capacity, labels={}, handlers=['test.v1'], ready=True)))
+    assert report['worker'] == 'cn-1'
+    assert client.request('worker/claim', {'boot':'relay-boot'})['assignment'] is None
+    client.close()
+
+
+def test_github_bootstrap_path_is_forwarded_but_authority_still_refuses_without_provider(fleet):
+    server, _t, url = fleet.make()
+    request = urllib.request.Request(url+'/v1/workloads/github/bootstrap', method='POST', data=b'{}',
+        headers={'X-Edge-Key':KEY,'Content-Type':'application/json'})
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request)
+    assert error.value.code == 404
+    assert json.loads(error.value.read()) == {'error':'GitHub remote execution is not configured'}
+    assert server.budget.used() > 0
 
 
 def test_the_authority_still_authorizes(fleet):
@@ -133,10 +158,61 @@ def test_a_request_without_the_edge_key_is_refused_before_any_bytes_move(fleet):
             urllib.request.urlopen(request)
         assert error.value.code == 401
         assert json.loads(error.value.read()) == {'error': 'edge key required'}
+    control = urllib.request.Request(url+'/v1/workloads/worker/claim', method='POST', data=b'{}',
+        headers={'Authorization':'Bearer '+'w'*32,'Content-Type':'application/json'})
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(control)
+    assert error.value.code == 401
+    assert json.loads(error.value.read()) == {'error':'edge key required'}
     assert server.budget.used() == 0  # nothing reached the authority, nothing was spent
     # the key is a relay credential only: it must never reach the authority
     with pytest.raises(ValueError):
         EdgeForwarder(('127.0.0.1', 0), 'http://127.0.0.1:9', server.budget, ADMIN, ADMIN)
+
+
+def test_remote_control_body_limit_refuses_before_forwarding(fleet):
+    server, _t, url = fleet.make()
+    request = urllib.request.Request(url+'/v1/workloads/worker/report', method='POST',
+        data=b'x'*(64*1024+1), headers={'X-Edge-Key':KEY,'Content-Type':'application/json'})
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request)
+    assert error.value.code == 413
+    assert json.loads(error.value.read()) == {'error':'control request byte limit exceeded'}
+    assert server.budget.used() == 0
+
+
+def test_edge_key_is_stripped_before_control_request_reaches_upstream(tmp_path):
+    observed = {}
+
+    class Capture(BaseHTTPRequestHandler):
+        def do_POST(self):
+            observed['path'] = self.path
+            observed['edge_key'] = self.headers.get('X-Edge-Key')
+            observed['authorization'] = self.headers.get('Authorization')
+            self.rfile.read(int(self.headers.get('Content-Length','0')))
+            self.send_response(200)
+            self.send_header('Content-Length','2')
+            self.send_header('Connection','close')
+            self.end_headers()
+            self.wfile.write(b'{}')
+        def log_message(self, *_args): pass
+
+    upstream = ThreadingHTTPServer(('127.0.0.1',0),Capture)
+    upstream_thread = serve(upstream)
+    budget = Budget(tmp_path/'budget.sqlite', 100_000)
+    relay = EdgeForwarder(('127.0.0.1',0),f'http://127.0.0.1:{upstream.server_port}',
+                          budget,ADMIN,KEY)
+    relay_thread = serve(relay)
+    try:
+        request = urllib.request.Request(f'http://127.0.0.1:{relay.server_port}/v1/workloads/worker/status',
+            method='POST',data=b'{}',headers={'X-Edge-Key':KEY,'Authorization':'Bearer '+'w'*32,
+                                              'Content-Type':'application/json'})
+        assert urllib.request.urlopen(request).read() == b'{}'
+        assert observed == {'path':'/v1/workloads/worker/status','edge_key':None,
+                            'authorization':'Bearer '+'w'*32}
+    finally:
+        stop(relay,relay_thread)
+        stop(upstream,upstream_thread)
 
 
 def test_budget_exhaustion_is_named_logged_and_falls_back(fleet, caplog):
