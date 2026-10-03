@@ -30,13 +30,34 @@ def fleet(tmp_path, monkeypatch):
     monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (0, 0, 0))
     if subprocess.run(['systemctl', '--user', 'show'], capture_output=True).returncode:
         pytest.skip('requires Linux systemd user manager and cgroup v2')
-    store = WorkloadStore(tmp_path/'authority/jobs.db', handlers={'native.v1'}, environment_handlers={
+    authority_path = tmp_path/'authority/jobs.db'
+    store = WorkloadStore(authority_path, handlers={'native.v1'}, environment_handlers={
         'native.v1': {'purpose': 'development', 'profile': 'native-test-v1'}})
-    server = WorkloadServer(('127.0.0.1', 0), store, [
+    principals = [
         Principal('owner', 'a'*32, 'caller', ('native.v1',)),
-        Principal('worker', 'w'*32, 'worker', worker='integration', host='test-host')])
+        Principal('worker', 'w'*32, 'worker', worker='integration', host='test-host')]
+    server = WorkloadServer(('127.0.0.1', 0), store, principals)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    authority_state = {'server': server, 'thread': thread}
+
+    def restart_authority():
+        previous = authority_state['server']
+        previous_thread = authority_state['thread']
+        previous.shutdown()
+        previous_thread.join(timeout=5)
+        previous.server_close()
+        reopened = WorkloadStore(authority_path, handlers={'native.v1'}, environment_handlers={
+            'native.v1': {'purpose': 'development', 'profile': 'native-test-v1'}})
+        reopened.recover()
+        replacement = WorkloadServer(('127.0.0.1', 0), reopened, principals)
+        replacement_thread = Thread(target=replacement.serve_forever, daemon=True)
+        replacement_thread.start()
+        authority_state.update(server=replacement, thread=replacement_thread)
+        reopened._test_restart_authority = restart_authority
+        return reopened, f'http://127.0.0.1:{replacement.server_port}'
+
+    store._test_restart_authority = restart_authority
     script = tmp_path/'installed-handler.py'
     script.write_text('''import json,os,time
 from pathlib import Path
@@ -91,9 +112,9 @@ raise SystemExit(request.get('exit',0))
     try:
         yield store, config, caller, digest
     finally:
-        server.shutdown()
-        thread.join(timeout=5)
-        server.server_close()
+        authority_state['server'].shutdown()
+        authority_state['thread'].join(timeout=5)
+        authority_state['server'].server_close()
 
 
 def submit(caller, digest, **payload):
@@ -717,8 +738,8 @@ def test_killed_worker_expires_then_new_process_reconciles_journal(fleet, tmp_pa
             worker.close()
 
 
-def test_worker_restart_rebuilds_unconfirmed_task_environment(fleet, tmp_path, monkeypatch):
-    """A killed attempt cannot leave its environment advertised as warm."""
+def test_worker_and_authority_restart_rebuild_unconfirmed_task_environment(fleet, tmp_path, monkeypatch):
+    """A killed attempt cannot leave its environment advertised as warm across either restart."""
     store, config, caller, digest = fleet
     store.limits = Limits(lease_seconds=2)
     environment_root = tmp_path/'retained-environments'
@@ -782,7 +803,7 @@ worker.step()
 ''')
     process = subprocess.Popen([sys.executable, str(runner), str(config_path), str(environment_root)])
     executor = SystemdExecutor(config['worker'])
-    attempt, worker = None, None
+    attempt, worker, replacement_caller = None, None, None
     try:
         deadline = time.monotonic()+20
         journal_path = Path(config['state_dir'])/'active.json'
@@ -807,6 +828,11 @@ worker.step()
             assert time.monotonic() < deadline
             time.sleep(.1)
 
+        store, authority = store._test_restart_authority()
+        config['authority'] = authority
+        caller.close()
+        replacement_caller = WorkloadClient(authority, 'a'*32)
+        caller = replacement_caller
         worker = WorkloadWorker(config)
         worker.reconcile()
         assert caller.get(first['id'])['state'] == 'queued'
@@ -861,6 +887,8 @@ worker.step()
             executor.stop(attempt)
         if worker:
             worker.close()
+        if replacement_caller:
+            replacement_caller.close()
 
 
 @pytest.mark.parametrize('backend', ['rootless-docker', 'rootless-docker-native'])
