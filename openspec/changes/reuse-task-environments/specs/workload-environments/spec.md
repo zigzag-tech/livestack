@@ -49,7 +49,7 @@ Every execution SHALL enter the existing workload queue, satisfy the current phy
 
 ### Requirement: Environment execution stops at task-specific E2E
 
-Environment-enabled execution SHALL be limited by installed policy to development compilation/checks/tests and nonempty explicitly scoped task E2E. Full/coalesced E2E and publishing/release handlers SHALL reject environment references with `environment_scope_forbidden`. Task E2E selection SHALL NOT expand or coalesce into full-suite execution. Existing full-test and publish orchestration SHALL continue without task environment bindings; caller metadata SHALL NOT grant a different purpose.
+Environment-enabled execution SHALL be limited by installed policy to development compilation/checks/tests and nonempty explicitly scoped task E2E. The authority SHALL accept at most 64 unique exact task-E2E check IDs, optionally restricted by an installed finite allowlist. The installed handler SHALL resolve them against immutable captured source and refuse an empty selection, unknown IDs, or a selection that expands to the full suite before preparation or execution. Full/coalesced E2E and publishing/release handlers SHALL reject environment references with `environment_scope_forbidden`. Task E2E selection SHALL NOT expand or coalesce into full-suite execution. Existing full-test and publish orchestration SHALL continue without task environment bindings; caller metadata SHALL NOT grant a different purpose.
 
 #### Scenario: A caller requests a full E2E run with its task handle
 - **WHEN** the handler purpose is full E2E or the selection resolves to the entire suite

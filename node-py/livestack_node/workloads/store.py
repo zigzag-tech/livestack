@@ -62,17 +62,17 @@ class WorkloadStore:
                 name(profile, 'environment profile')
             except WorkloadError as error:
                 raise ValueError(f'invalid environment profile for {handler}') from error
-            checks = policy.get('check_ids', [])
+            checks = policy.get('check_ids')
             modes = policy.get('payload_modes', [])
-            if (not isinstance(checks, list) or len(checks) > 256 or
+            if ((checks is not None and (not isinstance(checks, list) or not checks or len(checks) > 256 or
                     any(not isinstance(item, str) or not item or len(item) > 160 for item in checks) or
-                    len(set(checks)) != len(checks) or (purpose == 'task_e2e' and not checks) or
+                    len(set(checks)) != len(checks))) or
                     not isinstance(modes, list) or len(modes) > 32 or
                     any(not isinstance(item, str) or not item or len(item) > 64 for item in modes) or
                     len(set(modes)) != len(modes) or (modes and purpose != 'development')):
                 raise ValueError(f'invalid task check policy for {handler}')
             self.environment_handlers[handler] = dict(purpose=purpose, profile=profile,
-                check_ids=tuple(checks), payload_modes=tuple(modes))
+                check_ids=tuple(checks) if checks is not None else None, payload_modes=tuple(modes))
         if (set(self.execution_providers) - self.handlers or
                 any(not isinstance(p, str) or not p for p in self.execution_providers.values())):
             raise ValueError('invalid configured remote handler mapping')
@@ -354,11 +354,14 @@ class WorkloadStore:
             raise WorkloadError('environment_retention_disabled', 503)
         if policy['purpose'] == 'task_e2e':
             selected = spec['payload'].get('check_ids')
-            known = set(policy['check_ids'])
             if (not isinstance(selected, list) or not selected or len(selected) > 64 or
-                    any(not isinstance(item, str) or item not in known for item in selected) or
-                    len(set(selected)) != len(selected) or set(selected) == known):
-                raise WorkloadError('environment_scope_forbidden: task E2E requires a nonempty proper subset', 403)
+                    any(not isinstance(item, str) or not re.fullmatch(
+                        r'[a-z0-9][a-z0-9_-]*\.[a-z0-9][a-z0-9_-]*', item) for item in selected) or
+                    len(set(selected)) != len(selected)):
+                raise WorkloadError('environment_scope_forbidden: task E2E requires bounded exact check IDs', 403)
+            known = policy.get('check_ids')
+            if known is not None and (not set(selected).issubset(known) or set(selected) == set(known)):
+                raise WorkloadError('environment_scope_forbidden: task E2E selection is outside its installed allowlist', 403)
         allowed_modes = policy.get('payload_modes', ())
         if allowed_modes and spec['payload'].get('mode') not in allowed_modes:
             raise WorkloadError('environment_scope_forbidden: payload mode is not enrolled for reuse', 403)

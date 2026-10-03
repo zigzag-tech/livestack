@@ -724,8 +724,9 @@ before source upload when the authority or installed handler does not support
 it. Authority policy enrolls development and explicitly scoped task-E2E
 handlers. Full/coalesced E2E and publishing/release handlers remain on their
 existing unified orchestration and refuse environment references. Task-E2E
-requires a nonempty proper subset of its installed check IDs; its runtime
-fixtures are recreated for every job.
+requires bounded unique exact check IDs; its installed runtime validates them
+against captured source and refuses a full-suite selection before preparation.
+Its runtime fixtures are recreated for every job.
 
 Workers retain only declared, compatible build and dependency state on a
 separate ext4 project-quota filesystem. Each job reconciles the complete
