@@ -192,9 +192,12 @@ def test_remote_report_is_clamped_to_operator_capacity(tmp_path):
     provider = GitHubActionsProvider('github-actions',provider_config(tmp_path),b'k'*32)
     principal = type('Principal',(),{'remote_job':'a'*32})()
     constrained = provider.constrain_report(principal,dict(ready=True,
-        available={'cpu':16,'memory_bytes':64*1024**3,'disk_bytes':1024**4}))
+        available={'cpu':0,'memory_bytes':4*1024**3,'disk_bytes':6*1024**3}))
     assert constrained['capacity'] == provider.config['resources']
-    assert constrained['available'] == provider.config['resources']
+    assert constrained['available'] == {'cpu':4,'memory_bytes':4*1024**3,'disk_bytes':6*1024**3}
+    overreported = provider.constrain_report(principal,dict(ready=True,
+        available={'cpu':16,'memory_bytes':64*1024**3,'disk_bytes':1024**4}))
+    assert overreported['available'] == provider.config['resources']
     assert constrained['labels'] == {'os':'macos','signing':'apple',
                                      'harmony.execution.provider':'github-actions'}
     assert constrained['handlers'] == ['release.v1']

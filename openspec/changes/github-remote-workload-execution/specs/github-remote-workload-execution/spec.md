@@ -22,6 +22,11 @@ Harmony SHALL route a workload to GitHub Actions only when operator configuratio
 - **THEN** the job remains queued or is refused according to its admission policy with a provider-capacity reason
 - **AND** no local worker starts it as a fallback
 
+#### Scenario: A hosted runner reports zero CPU availability from guest load
+- **WHEN** a fixed single-slot GitHub runner reports lower available CPU because its macOS load average includes background work
+- **THEN** Harmony reserves the operator-declared CPU envelope for that remote attempt
+- **AND** it still clamps memory and disk availability to the runner's measured values
+
 ### Requirement: A remote runner proves its GitHub and Harmony attempt identity
 
 Before a remote runner receives compilation authorization, Harmony SHALL verify a GitHub-issued OIDC identity against the configured repository identity, workflow path and revision policy, source commit, dispatch actor, run id, and run attempt. Harmony SHALL cross-check the reported job id and status against GitHub's API, then issue only a short-lived grant scoped to the current Harmony job, attempt, fence, and configured compilation classes. The authority's operator compilation policy SHALL admit those classes on the provider's virtual host. A missing, invalid, replayed, stale, or policy-refused proof SHALL be refused.
