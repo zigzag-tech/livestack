@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from threading import Thread
 import urllib.error
@@ -68,6 +69,13 @@ def test_schema_three_environment_capabilities_and_preupload_refusal(tmp_path):
         caps = client.capabilities()
         assert caps == {'versions': [1, 2, 3],
                         'environments': {'version': 1, 'handlers': [], 'forbidden_handlers': []}}
+        api.blobs.put('alice', SOURCE, len(b'captured'), BytesIO(b'captured'))
+        legacy = dict(version=1, key='legacy-http', handler='dev.v1', input_digest=SOURCE,
+                      need={'cpu': 1, 'memory_bytes': 1024})
+        legacy_first = client.submit(legacy)
+        legacy_retry = client.submit(dict(legacy))
+        assert legacy_first['id'] == legacy_retry['id']
+        assert 'environment_handle' not in legacy_first
         missing_source = 'f'*64
         # The object is deliberately absent. Purpose support must be checked
         # before the HTTP route attempts to open/upload the referenced input.
@@ -75,7 +83,7 @@ def test_schema_three_environment_capabilities_and_preupload_refusal(tmp_path):
         assert status == 409 and refusal['error'] == 'environment_unsupported: handler is not enrolled'
         with pytest.raises(WorkloadError, match='environment_unsupported'):
             client.submit(env_request('task', digest=missing_source))
-        assert store.list_jobs('alice') == []
+        assert [job['id'] for job in store.list_jobs('alice')] == [legacy_first['id']]
     finally:
         close(api, thread)
 
@@ -114,9 +122,26 @@ def test_environment_key_resolution_is_atomic_durable_and_owner_scoped(tmp_path)
             store.submit('alice', env_request('repo/task/linux-rust', digest='e'*64))
 
         reopened = WorkloadStore(store.path, handlers=HANDLERS, environment_handlers=POLICIES)
-        assert reopened.submit('alice', env_request('repo/task/linux-rust'))['id'] == first['id']
+        close(api, thread)
+        reopened.recover()
+        api = WorkloadServer(('127.0.0.1', 0), reopened, [
+            Principal('alice', 'a'*32, 'caller', tuple(sorted(HANDLERS))),
+            Principal('bob', 'b'*32, 'caller', tuple(sorted(HANDLERS))),
+        ])
+        thread = Thread(target=api.serve_forever, daemon=True)
+        thread.start()
+        api.blobs.put('alice', SOURCE, len(b'captured'), BytesIO(b'captured'))
+        retry_client = WorkloadClient(f'http://127.0.0.1:{api.server_port}', 'a'*32)
+        try:
+            assert retry_client.submit(env_request('repo/task/linux-rust'))['id'] == first['id']
+        finally:
+            retry_client.close()
+        with reopened.connect() as db:
+            jobs_before_inspection = db.execute('SELECT count(*) FROM jobs').fetchone()[0]
         status, view = request(api, 'environments/'+handle)
         assert status == 200 and view['handle'] == handle and view['profile'] == 'linux-rust'
+        with reopened.connect() as db:
+            assert db.execute('SELECT count(*) FROM jobs').fetchone()[0] == jobs_before_inspection
         assert request(api, 'environments/'+handle, token='b'*32)[0] == 404
         foreign = env_request('repo/task/linux-rust', job='foreign', **{})
         foreign['environment'] = {'handle': handle, 'reuse': 'prefer'}
@@ -170,24 +195,33 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
     now[0] += 0.1
     second = store.submit('alice', env_request('same-writer', job='second',
         digest=hashlib.sha256(b'next source').hexdigest()))
-    attempt = store.claim('worker-a', 'boot')
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending = [(worker, pool.submit(store.claim, worker, 'boot'))
+                   for worker in ('worker-a', 'worker-b')]
+        claims = [(worker, future.result()) for worker, future in pending]
+    admitted = [(worker, attempt) for worker, attempt in claims if attempt is not None]
+    assert len(admitted) == 1
+    attempt_worker, attempt = admitted[0]
     assert attempt['job_id'] == first['id']
     assert attempt['environment']['handle'] == first['environment_handle']
     assert attempt['environment']['generation'] == 1
-    assert store.claim('worker-b', 'boot') is None
+    assert next(value for worker, value in claims if worker != attempt_worker) is None
     waiting = store.get('alice', second['id'])
     assert waiting['state'] == 'queued' and waiting['reason'] == 'environment_busy'
     assert waiting['attempts'] == []
 
     receipt = environment_receipt(first['environment_handle'], 1)
-    completed = store.complete('worker-a', 'boot', attempt['attempt_id'], attempt['fence'],
+    receipt['phase_timings']['compile'] = {'seconds': None, 'reason': 'timer_unavailable'}
+    completed = store.complete(attempt_worker, 'boot', attempt['attempt_id'], attempt['fence'],
         input_digest=SOURCE, outcome='succeeded', result={'artifacts': []}, environment_receipt=receipt)
     assert completed['state'] == 'succeeded'
     assert completed['result']['environment_receipt']['reuse_outcome'] == 'created'
+    assert completed['result']['environment_receipt']['phase_timings']['compile'] == {
+        'seconds': None, 'reason': 'timer_unavailable'}
     view = store.get_environment('alice', first['environment_handle'])
     assert view['state'] == 'parked' and view['generation'] == 1
     assert view['replicas'][0]['host'] == 'host-a'
-    assert store.complete('worker-a', 'boot', attempt['attempt_id'], attempt['fence'],
+    assert store.complete(attempt_worker, 'boot', attempt['attempt_id'], attempt['fence'],
         input_digest=SOURCE, outcome='succeeded', result={'artifacts': []},
         environment_receipt=receipt)['id'] == first['id'], 'completion replay returns same receipt'
 
@@ -198,6 +232,21 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
     assert next_attempt['job_id'] == second['id']
     assert next_attempt['environment']['generation'] == 2
     assert next_attempt['environment']['replicas'][0]['compatibility'] == 'b'*64
+
+
+def test_independent_environments_can_be_admitted_concurrently(tmp_path):
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, environment_handlers=POLICIES)
+    register_environment_worker(store, 'worker-a', 'host-a')
+    register_environment_worker(store, 'worker-b', 'host-b')
+    first = store.submit('alice', env_request('parallel-a', job='parallel-a'))
+    second = store.submit('alice', env_request('parallel-b', job='parallel-b'))
+
+    first_attempt = store.claim('worker-a', 'boot')
+    second_attempt = store.claim('worker-b', 'boot')
+    assert first_attempt is not None and second_attempt is not None
+    assert {first_attempt['job_id'], second_attempt['job_id']} == {first['id'], second['id']}
+    assert first_attempt['environment']['handle'] != second_attempt['environment']['handle']
+    assert first_attempt['environment']['generation'] == second_attempt['environment']['generation'] == 1
 
 
 def test_affinity_wait_is_durable_bounded_and_holds_no_compute_claim(tmp_path):
@@ -221,13 +270,122 @@ def test_affinity_wait_is_durable_bounded_and_holds_no_compute_claim(tmp_path):
     waiting = store.get('alice', job['id'])
     assert waiting['state'] == 'queued' and waiting['reason'] == 'environment_affinity_wait'
     assert waiting['attempts'] == []
+    assert 'eta_seconds' not in waiting and 'estimated_wait_seconds' not in waiting
     with store.connect() as db:
         assert db.execute("SELECT writer_job FROM task_environments WHERE handle=?", (handle,)).fetchone()[0] is None
 
-    now[0] += 16
-    attempt = store.claim('cold', 'boot')
+    # A process restart retains the original affinity deadline; it cannot
+    # restart the wait clock or admit a writer while the old preference holds.
+    restarted = WorkloadStore(store.path, handlers=HANDLERS,
+        limits=Limits(environment_affinity_seconds=15), clock=lambda: now[0],
+        environment_handlers=POLICIES)
+    restarted.recover()
+    register_environment_worker(restarted, 'warm', 'host-a', available_cpu=0)
+    register_environment_worker(restarted, 'cold', 'host-b')
+    now[0] += 14
+    assert restarted.claim('warm', 'boot') is None
+    assert restarted.get('alice', job['id'])['reason'] == 'environment_affinity_wait'
+    now[0] += 2
+    attempt = restarted.claim('cold', 'boot')
     assert attempt['job_id'] == job['id']
     assert attempt['environment']['generation'] == 2
+
+
+def test_scheduler_batches_replica_registry_lookup_as_environment_count_grows(tmp_path):
+    """The affinity snapshot resolves all queued handles with one registry read."""
+    counts = []
+    for environment_count in (1, 24):
+        case = tmp_path/str(environment_count)
+        case.mkdir()
+        store = WorkloadStore(case/'jobs.sqlite', handlers=HANDLERS,
+            clock=lambda: 1000.0, environment_handlers=POLICIES)
+        handles = []
+        for index in range(environment_count):
+            job = store.submit('alice', env_request(f'batch-{index}', job=f'job-{index}'))
+            handles.append(job['environment_handle'])
+        with store.transaction() as db:
+            for handle in handles:
+                db.execute("UPDATE task_environments SET state='parked',generation=1,compatibility=? WHERE handle=?",
+                           ('b'*64, handle))
+                db.execute("INSERT INTO task_environment_replicas(handle,host,profile,compatibility,generation,state,"
+                           "bytes_used,last_used,seen) VALUES(?,?,?, ?,1,'parked',100,1000,1000)",
+                           (handle, 'host-a', 'linux-rust', 'b'*64))
+        register_environment_worker(store, 'worker-a', 'host-a')
+
+        statements = []
+        connect = store.connect
+        def traced_connect():
+            db = connect()
+            db.set_trace_callback(statements.append)
+            return db
+        store.connect = traced_connect
+        assert store.claim('worker-a', 'boot') is not None
+        replica_reads = [sql for sql in statements if 'FROM task_environment_replicas WHERE handle IN (' in sql]
+        counts.append(len(replica_reads))
+
+    assert counts == [1, 1]
+
+
+def test_worker_replica_reports_enforce_the_sixty_four_entry_bound(tmp_path):
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, environment_handlers=POLICIES)
+
+    def report(count):
+        return dict(capacity={'cpu': 4, 'memory_bytes': 2*1024**3},
+            available={'cpu': 4, 'memory_bytes': 2*1024**3}, labels={'os': 'linux'},
+            handlers=['dev.v1'], ready=True, environment_profiles={'linux-rust': 'b'*64},
+            environment_replicas=[dict(handle=f'{index:032x}', profile='linux-rust',
+                compatibility='b'*64, generation=1, state='parked', bytes_used=100, last_used=1000.0)
+                for index in range(count)])
+
+    with pytest.raises(WorkloadError, match='invalid environment replica report'):
+        store.register('worker', 'host-a', 'boot', report(65))
+    assert store.register('worker', 'host-a', 'boot', report(64))['ready'] is True
+
+
+def test_unknown_replica_compatibility_is_not_a_warm_hit(tmp_path):
+    now = [1000.0]
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS,
+        clock=lambda: now[0], environment_handlers=POLICIES)
+    job = store.submit('alice', env_request('unknown-compatibility'))
+    handle = job['environment_handle']
+    with store.transaction() as db:
+        db.execute("UPDATE task_environments SET state='parked',generation=1,compatibility=? WHERE handle=?",
+                   ('b'*64, handle))
+        db.execute("INSERT INTO task_environment_replicas(handle,host,profile,compatibility,generation,state,"
+                   "bytes_used,last_used,seen) VALUES(?,?,?,NULL,1,'parked',100,?,?)",
+                   (handle, 'host-a', 'linux-rust', now[0], now[0]))
+    register_environment_worker(store, 'warm-but-full', 'host-a', available_cpu=0)
+    register_environment_worker(store, 'cold', 'host-b')
+
+    attempt = store.claim('cold', 'boot')
+    assert attempt is not None and attempt['job_id'] == job['id']
+    with store.connect() as db:
+        assert db.execute("SELECT affinity_started FROM task_environments WHERE handle=?",
+                          (handle,)).fetchone()[0] is None
+
+
+def test_policy_excluded_preferred_host_does_not_delay_cold_placement(tmp_path):
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS,
+        environment_handlers=POLICIES)
+    job = store.submit('alice', env_request('excluded-preferred-host'))
+    handle = job['environment_handle']
+    with store.transaction() as db:
+        db.execute("UPDATE task_environments SET state='parked',generation=1,compatibility=? WHERE handle=?",
+                   ('b'*64, handle))
+        db.execute("INSERT INTO task_environment_replicas(handle,host,profile,compatibility,generation,state,"
+                   "bytes_used,last_used,seen) VALUES(?,?,?, ?,1,'parked',100,1000,1000)",
+                   (handle, 'host-a', 'linux-rust', 'b'*64))
+    register_environment_worker(store, 'warm', 'host-a')
+    register_environment_worker(store, 'cold', 'host-b')
+    store.bind_principals([
+        Principal('warm-worker', 'w'*32, 'worker', worker='warm', host='host-a', claim_enabled=False),
+    ])
+
+    attempt = store.claim('cold', 'boot')
+    assert attempt is not None and attempt['job_id'] == job['id']
+    with store.connect() as db:
+        assert db.execute("SELECT affinity_started FROM task_environments WHERE handle=?",
+                          (handle,)).fetchone()[0] is None
 
 
 def test_environment_scope_is_installed_policy_and_requires_bounded_exact_task_ids(tmp_path):
@@ -293,6 +451,31 @@ def test_environment_expiry_recreates_key_and_disabled_retention_fails_closed(tm
         disabled.submit('alice', env_request('never-retained'))
 
 
+def test_environment_client_bounds_view_bytes_and_obeys_request_deadline(tmp_path):
+    oversized = WorkloadClient('http://127.0.0.1:1', 'a'*32)
+    oversized.request = lambda *_args, **_kwargs: {'large': 'x'*(16*1024)}
+    with pytest.raises(WorkloadError, match='environment response exceeds byte limit'):
+        oversized.get_environment('a'*32)
+    oversized.close()
+
+    store, api, thread = server(tmp_path)
+    job = store.submit('alice', env_request('deadline'))
+    get_environment = store.get_environment
+    def delayed_view(*args, **kwargs):
+        time.sleep(0.2)
+        return get_environment(*args, **kwargs)
+    store.get_environment = delayed_view
+    client = WorkloadClient(f'http://127.0.0.1:{api.server_port}', 'a'*32, timeout=0.05)
+    started = time.monotonic()
+    try:
+        with pytest.raises(urllib.error.URLError):
+            client.get_environment(job['environment_handle'])
+        assert time.monotonic()-started < 0.5
+    finally:
+        client.close()
+        close(api, thread)
+
+
 def test_legacy_schema_identity_and_environment_reference_are_separate():
     legacy = dict(version=1, key='legacy', handler='dev.v1', input_digest=SOURCE,
                   need={'cpu': 1})
@@ -328,6 +511,14 @@ def test_cli_environment_selector_observation_and_opt_out(tmp_path):
         assert submitted.returncode == 0, submitted.stderr
         job = json.loads(submitted.stdout)
         assert job['environment_handle'] and job['spec']['version'] == 3
+        request_path.write_text(json.dumps(dict(version=1, key='cli-handle', handler='dev.v1',
+            input_digest=SOURCE, need={'cpu': 1}, payload={})))
+        by_handle = cli('submit', request_path, '--environment-handle', job['environment_handle'])
+        assert by_handle.returncode == 0, by_handle.stderr
+        assert json.loads(by_handle.stdout)['environment_handle'] == job['environment_handle']
+        observed_job = cli('get', job['id'])
+        assert observed_job.returncode == 0, observed_job.stderr
+        assert json.loads(observed_job.stdout)['id'] == job['id']
         inspected = cli('environment', 'get', job['environment_handle'])
         assert inspected.returncode == 0, inspected.stderr
         assert json.loads(inspected.stdout)['handle'] == job['environment_handle']
