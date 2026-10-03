@@ -107,7 +107,7 @@ def _avoided(db, row, now):
     return out
 
 
-def place(db, now, limits, principals=None, compilation_policy=None):
+def place(db, now, limits, principals=None, compilation_policy=None, *, only_job_id=None):
     draining = {p.worker for p in (principals or {}).values()
                 if getattr(p, 'role', None) == 'worker' and not p.claim_enabled}
     workers = db.execute("SELECT * FROM workers WHERE ready=1 AND seen>? ORDER BY id",
@@ -241,8 +241,13 @@ def place(db, now, limits, principals=None, compilation_policy=None):
     # admission and the final worker choice. Legacy persisted specs omit the
     # field and retain their original priority-zero FIFO behavior.
     fresh = None  # every fresh worker regardless of readiness, loaded on first need
-    for row in db.execute("SELECT * FROM jobs WHERE state='queued' "
-                          "ORDER BY COALESCE(json_extract(spec,'$.priority'),0) DESC, created, id").fetchall():
+    queue_sql = "SELECT * FROM jobs WHERE state='queued'"
+    queue_params = ()
+    if only_job_id is not None:
+        queue_sql += ' AND id=?'
+        queue_params = (only_job_id,)
+    for row in db.execute(queue_sql+" ORDER BY COALESCE(json_extract(spec,'$.priority'),0) DESC, created, id",
+                          queue_params).fetchall():
         spec = json.loads(row["spec"])
         cap = caps.get(row["owner"])
         if cap is not None and running.get(row["owner"], 0) >= cap:
