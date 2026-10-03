@@ -1331,10 +1331,13 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
             if u is not None and u.exclusive_device:
                 # A whole-device claim fails on EVICTABILITY, and the refusal
                 # names the tenant that will not leave (spec: "A unit may claim
-                # a whole device").
+                # a whole device") — or on the HOST pool, which the claim does
+                # not buy (its `ram_bytes` still fit one machine's RAM).
                 blk = _exclusive_blocker(world, u, pol)
                 if blk is not None:
                     reason = blk[1]
+                elif _host_dims(_admission_need(u)):
+                    reason = _host_pool_reason(W, u) or reason
             elif u is not None and _host_dims(_admission_need(u)):
                 reason = _host_pool_reason(W, u) or reason
             # Say WHY when the why is a residency floor: a young load that
