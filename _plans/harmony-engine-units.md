@@ -75,6 +75,23 @@ queue as more than it is:
 * **The re-route does not re-measure.** The need comes from the refusal text
   (`at least N input tokens`) plus `max_tokens`; an engine whose refusal names
   no number gets the 413, not a guess.
+* **The anti-thrash floor cannot see a peer-reported load.** `min_residency_s`
+  compares against `Placement.loaded_at`, and a placement learned from a
+  `/residence` report carries `loaded_at: 0` (`hostbroker.RestPeer.placements`)
+  — so a freshly-loaded unit is protected only inside the plan that loaded it,
+  and the next cycle's plan reads it as old. Found during the acceptance: a
+  concurrent request path stopped a just-loaded Flash-Next the second it
+  became ready (the same-second eviction also needed the `coload=0` trap below;
+  both had to be true). The fix is for the broker to remember when a placement
+  first appeared per (peer, kind, device) — it already does exactly this shape
+  of bookkeeping in its sticky-residency state — and that is NOT in this
+  change.
+* **A loading node looks dead to its broker.** The facade blocks while it
+  serves, so a 40 s engine load makes the broker's snapshot time out (`fresh
+  -> suspect ... timed out`), its units vanish from the world, and concurrent
+  requests fall back to the local catalogue (`broker temporarily forgot ...
+  using locally declared`). The fallback is deliberate and named; the
+  fleet-visible gap during a load is not fixed here.
 
 ## Open questions the change carried (Q1-Q4)
 

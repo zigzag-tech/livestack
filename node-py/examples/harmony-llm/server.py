@@ -1976,7 +1976,13 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         await client.aclose()
         _busy.release()
         _release_slot(ctx)
-        raise HTTPException(status_code=502, detail=f"vllm proxy failed: {e}")
+        # The TYPE is part of the answer: `Server disconnected without sending
+        # a response` and `All connection attempts failed` are different
+        # failures, and an empty message carried neither (this is how the
+        # acceptance's first 502 said nothing at all).
+        raise HTTPException(status_code=502,
+                            detail=f"proxy to {unit} failed: "
+                                   f"{type(e).__name__}: {e or '(no message)'}")
 
     # A CONTEXT REFUSAL IS A ROUTING FACT, NOT A VENDOR STRING.
     #

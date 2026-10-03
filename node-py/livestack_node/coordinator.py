@@ -149,7 +149,16 @@ class LivestackCoordinator:
     def acquire(self, name: str, device: "Optional[str]" = None,
                 budget: "Optional[dict]" = None):
         m = self.mgr
-        if not self.coload:
+        # EXCLUSIVE OVERRIDES COLOAD (harmony-engine-units). A unit declaring
+        # `exclusive_device` claims the DEVICE, not a slot beside its siblings —
+        # an engine that sizes its cache to the free VRAM will not start into a
+        # busy card at all (measured: Strata saw 399 MiB free and its
+        # cudaMalloc failed). coload says "siblings may stay"; it cannot make
+        # room the exclusive unit's own declaration says must be empty. This is
+        # also what keeps the "broker temporarily forgot" fallback safe: that
+        # path loads WITHOUT the planner, and the only room-making left is here.
+        unit = m.units.get(name)
+        if not self.coload or getattr(unit, "exclusive_device", False):
             for other in list(m._resident):
                 if other != name:
                     m._evict(other)
