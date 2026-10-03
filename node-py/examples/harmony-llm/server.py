@@ -1384,14 +1384,44 @@ def _named_unit(requested: str) -> "str | None":
     return None
 
 
+def _model_choice(body) -> "str | None":
+    """The unit the `model` field CHOOSES, or None when the caller has no
+    opinion.
+
+    A unit name, a model id — and the legacy alias `local`, which every
+    existing caller sends meaning this node's DEFAULT model. The alias is a
+    CHOICE, not "no opinion": a resident flash_next would otherwise answer for
+    the 27B through the reuse shortcut with nothing in the exchange saying so
+    (harmony-engine-units scenario: "Named local still reaches the 27B ...
+    never by flash_next"). `_named_unit` stays strict — "does this name a
+    UNIT?" — because that answer is needed too ("no opinion must be TELLABLE
+    from asked for something"); the alias resolves through `_unit_for_model`,
+    which is where its old meaning has always lived."""
+    r = str((body or {}).get("model") or "").strip()
+    named = _named_unit(r)
+    if named is not None:
+        return named
+    return _unit_for_model(r) if r == "local" else None
+
+
+def _default_unit() -> "str | None":
+    """The unit `default: true` names, else the first declared — what an
+    indifferent caller gets, deterministically (never "whichever unit happens
+    to be first in the dict this boot")."""
+    named = next((n for n in sorted(SPECS, key=_selection_rank)
+                  if SPECS[n].get("default")), None)
+    return named or next(iter(SPECS), None)
+
+
 def _unit_for_model(requested: str) -> str:
     """Which declared unit serves this `model` field.
 
     Accepts the unit name, the model id, or the legacy alias `local`. An
-    unknown model resolves to the first declared unit rather than erroring,
-    which keeps every existing caller — all of which send `local` — working.
+    unknown model resolves to the DEFAULT unit (the `default: true` one, else
+    the first declared) rather than erroring, which keeps every existing
+    caller — all of which send `local` — working.
     """
-    return _named_unit(requested) or next(iter(SPECS))
+    return _named_unit(requested) or _default_unit()
 
 
 @app.get("/health")
@@ -1652,7 +1682,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             except _PreferenceError as e:
                 raise HTTPException(status_code=400, detail=f"harmony: {e}")
             derived = _derived_requirements(path, parsed_body)
-            named = _named_unit(parsed_body.get("model", ""))
+            named = _model_choice(parsed_body)
             if requirement is not None and derived:
                 # Derived clauses are ANDed in and may only make the query
                 # STRICTER. A caller cannot declare `vision: false` to escape
@@ -1909,8 +1939,15 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # requests; the rest wait FIFO (bound 64), and the overflow is a 429 naming
     # the queue state — never an unbounded pile-up inside a saturated engine.
     # `queue_ms` (how long this one waited) goes on the demand record.
+    # OFF THE EVENT LOOP: `acquire` BLOCKS while the engine is at its limit
+    # (that is the queue), and a blocking wait inside an async handler wedges
+    # the whole node — every other request, including /livestack/residence,
+    # stops answering (measured 2026-10-02: residence:000 with the engine
+    # idle). The wait is real; it just must not hold the loop.
+    import asyncio as _asyncio
     try:
-        _slot = _QUEUES.acquire(unit, _max_concurrent(unit))
+        _slot = await _asyncio.get_running_loop().run_in_executor(
+            None, _QUEUES.acquire, unit, _max_concurrent(unit))
     except _QueueFull as e:
         raise HTTPException(status_code=429, detail=str(e))
     ctx["queue_ms"] = _slot.queue_ms
@@ -2044,8 +2081,13 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             # planner chooses, and may move the model), and never loop: one
             # re-route per request, and the next context refusal is answered as
             # it comes. When nothing else can hold it, the 413 below stands.
-            if isinstance(parsed_body, dict) and total is not None \
-                    and not ctx.get("context_rerouted"):
+            # ONLY FOR AN UN-NAMED REQUEST (task 3.5): a caller that NAMED a
+            # unit chose it and gets the 413 — a silent re-route to some other
+            # model they did not ask for is exactly what "named is named"
+            # forbids. `requirement` is set exactly when the caller stated a
+            # NEED (or named nothing, where the path implies the class).
+            if requirement is not None and isinstance(parsed_body, dict) \
+                    and total is not None and not ctx.get("context_rerouted"):
                 # The need ANDed into the caller's OWN clauses (a unit that can
                 # hold the prompt but not the adapter is no answer), and only
                 # making the query STRICTER.
