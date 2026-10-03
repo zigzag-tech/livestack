@@ -18,6 +18,7 @@ from livestack_node.workloads.http import Principal, WorkloadServer
 from livestack_node.workloads.model import Limits, WorkloadError
 from livestack_node.workloads.store import WorkloadStore
 from livestack_node.workloads.supervision import SystemdExecutor
+from livestack_node.workloads.task_environments import TaskEnvironmentStore
 from livestack_node.workloads.transfer import InputTransfer
 from livestack_node.workloads.worker import WorkloadWorker
 
@@ -29,7 +30,8 @@ def fleet(tmp_path, monkeypatch):
     monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (0, 0, 0))
     if subprocess.run(['systemctl', '--user', 'show'], capture_output=True).returncode:
         pytest.skip('requires Linux systemd user manager and cgroup v2')
-    store = WorkloadStore(tmp_path/'authority/jobs.db', handlers={'native.v1'})
+    store = WorkloadStore(tmp_path/'authority/jobs.db', handlers={'native.v1'}, environment_handlers={
+        'native.v1': {'purpose': 'development', 'profile': 'native-test-v1'}})
     server = WorkloadServer(('127.0.0.1', 0), store, [
         Principal('owner', 'a'*32, 'caller', ('native.v1',)),
         Principal('worker', 'w'*32, 'worker', worker='integration', host='test-host')])
@@ -43,6 +45,14 @@ time.sleep(request.get('sleep',0))
 value=Path('input').read_text()
 if request.get('object'):
     value+='|'+Path(os.environ['HARMONY_INPUT_OBJECTS'],request['object']).read_text()
+if request.get('cache'):
+    cache=Path('build','cache.txt')
+    previous=cache.read_text() if cache.exists() else 'fresh'
+    cache.parent.mkdir(parents=True,exist_ok=True)
+    cache.write_text(previous+'|'+value)
+    value+='|cache='+previous
+if request.get('inspect_cache'):
+    value+='|env-cache='+os.environ.get('HARMONY_ENV_CACHE_COMPONENTS','missing')
 Path(os.environ['HARMONY_OUTPUT'],'artifact').write_text(value)
 print('finished')
 raise SystemExit(request.get('exit',0))
@@ -113,6 +123,87 @@ def test_worker_fetches_only_declared_supplemental_inputs(fleet, tmp_path, monke
         returned = InputTransfer(caller).get(artifact['digest'], tmp_path/'multi-result')
         assert returned.read_text() == 'captured bytes|accepted component bytes'
         assert list(Path(config['workspace']).iterdir()) == []
+    finally:
+        worker.close()
+
+
+def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_path, monkeypatch):
+    store, config, caller, first_digest = fleet
+    environment_root = tmp_path/'task-environments'
+    environment_root.mkdir()
+    config['task_environments'] = dict(root=str(environment_root), host_id='test-host',
+        quota_helper='/unused/in-tests', project_id_min=100000, project_id_max=100063,
+        max_bytes_per_replica=32*1024**3, max_bytes_per_owner=128*1024**3,
+        max_total_bytes=256*1024**3, reserve_bytes=0, profiles={'native-test-v1': {
+            'handlers': ['native.v1'], 'purpose': 'development', 'cache_contract': 'native-test-v1',
+            'probe_argv': [sys.executable, '-c', 'print("native-test-toolchain-v1")'],
+            'cache_components': [{'name': 'incremental-build', 'path': 'source/build',
+                'inputs': [], 'contract': 'incremental-build-v1'}]}})
+
+    def quota_usage(project_ids):
+        result = []
+        for directory in environment_root.iterdir():
+            marker_path = directory/'environment.json'
+            if not marker_path.is_file():
+                continue
+            marker = json.loads(marker_path.read_text())
+            project_id = marker['project_id']
+            if project_id not in project_ids:
+                continue
+            used = sum(path.lstat().st_blocks*512 for path in directory.rglob('*') if not path.is_dir())
+            result.append({'project_id': project_id, 'used_bytes': used,
+                'hard_bytes': ((marker['quota_bytes']+1023)//1024)*1024})
+        return result
+
+    original_init = TaskEnvironmentStore.__init__
+    def test_store_init(self, environment_config, **kwargs):
+        return original_init(self, environment_config, **kwargs,
+            quota_ensure=lambda handle, project, quota: {'quota_bytes': quota},
+            quota_probe=lambda _: True, quota_usage=quota_usage,
+            require_separate_filesystem=False, filesystem_bytes=8*1024**3)
+    monkeypatch.setattr(TaskEnvironmentStore, '__init__', test_store_init)
+
+    def submit_environment(job_key, digest):
+        return caller.submit(dict(version=3, key=job_key, handler='native.v1', input_digest=digest,
+            need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
+            environment={'key':'test-task', 'reuse':'prefer'}, payload={'cache':True, 'inspect_cache':True}))
+
+    worker = WorkloadWorker(config)
+    try:
+        first = submit_environment('environment-first', first_digest)
+        assert worker.step()
+        first_result = caller.get(first['id'])
+        receipt = first_result['result']['environment_receipt']
+        assert first_result['state'] == 'succeeded'
+        assert receipt['reuse_outcome'] == 'created' and receipt['reason_code'] == 'created'
+        handle = first['environment_handle']
+        cache = environment_root/handle/'source'/'build'/'cache.txt'
+        assert cache.read_text() == 'fresh|captured bytes'
+
+        edited = tmp_path/'edited-source'
+        edited.mkdir()
+        (edited/'input').write_text('edited captured bytes')
+        capture(edited, ['input'], tmp_path/'edited-source.tar')
+        second_digest = InputTransfer(caller).put(tmp_path/'edited-source.tar')['digest']
+        second = submit_environment('environment-second', second_digest)
+        assert second['environment_handle'] == handle
+        assert worker.step()
+        second_result = caller.get(second['id'])
+        receipt = second_result['result']['environment_receipt']
+        assert second_result['state'] == 'succeeded'
+        assert receipt['reuse_outcome'] == 'reused'
+        assert receipt['reason_code'] == 'source_updated_incrementally'
+        assert receipt['cache_components'][0]['outcome'] == 'reused'
+        assert cache.read_text() == 'fresh|captured bytes|edited captured bytes'
+        artifact = next(item for item in second_result['result']['result']['artifacts']
+                        if item['name'] == 'artifact')
+        returned = InputTransfer(caller).get(artifact['digest'], tmp_path/'environment-artifact')
+        text = returned.read_text()
+        assert text.startswith('edited captured bytes|cache=fresh|captured bytes|env-cache=')
+        cache_components = json.loads(text.split('|env-cache=', 1)[1])
+        assert cache_components == [{
+            'name': 'incremental-build', 'path': 'build', 'identity': receipt['cache_components'][0]['identity'],
+            'outcome': 'reused'}]
     finally:
         worker.close()
 

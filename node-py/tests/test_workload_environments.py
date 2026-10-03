@@ -1,0 +1,345 @@
+"""Environment request identity and ownership on the real durable authority."""
+import hashlib
+from io import BytesIO
+import json
+import os
+import subprocess
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from threading import Thread
+import urllib.error
+import urllib.request
+
+import pytest
+
+from livestack_node.workloads.client import WorkloadClient
+from livestack_node.workloads.http import Principal, WorkloadServer
+from livestack_node.workloads.model import Limits, WorkloadError, identity, submission
+from livestack_node.workloads.store import WorkloadStore
+
+
+HANDLERS = {'dev.v1', 'task.v1', 'full.v1', 'publish.v1'}
+POLICIES = {
+    'dev.v1': {'purpose': 'development', 'profile': 'linux-rust'},
+    'task.v1': {'purpose': 'task_e2e', 'profile': 'benchday-task-e2e',
+                'check_ids': ['hub.one', 'hub.two']},
+    'full.v1': {'purpose': 'full_e2e', 'profile': 'full-suite'},
+    'publish.v1': {'purpose': 'publishing', 'profile': 'release'},
+}
+SOURCE = hashlib.sha256(b'captured').hexdigest()
+
+
+def env_request(key, *, handler='dev.v1', job='job-one', digest=SOURCE, **extra):
+    return dict(version=3, key=job, handler=handler, input_digest=digest,
+                need={'cpu': 1, 'memory_bytes': 1024},
+                environment={'key': key, 'reuse': 'prefer'}, **extra)
+
+
+def server(tmp_path, *, policies=POLICIES, limits=None):
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, limits=limits,
+                          environment_handlers=policies)
+    api = WorkloadServer(('127.0.0.1', 0), store, [
+        Principal('alice', 'a'*32, 'caller', tuple(sorted(HANDLERS))),
+        Principal('bob', 'b'*32, 'caller', tuple(sorted(HANDLERS))),
+    ])
+    thread = Thread(target=api.serve_forever, daemon=True)
+    thread.start()
+    return store, api, thread
+
+
+def request(api, path, *, method='GET', data=None, token='a'*32):
+    req = urllib.request.Request(f'http://127.0.0.1:{api.server_port}/v1/workloads/{path}',
+        data=json.dumps(data).encode() if data is not None else None, method=method,
+        headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        return error.code, json.load(error)
+
+
+def close(api, thread):
+    api.shutdown(); thread.join(timeout=5); api.server_close()
+
+
+def test_schema_three_environment_capabilities_and_preupload_refusal(tmp_path):
+    store, api, thread = server(tmp_path, policies={})
+    try:
+        client = WorkloadClient(f'http://127.0.0.1:{api.server_port}', 'a'*32)
+        caps = client.capabilities()
+        assert caps == {'versions': [1, 2, 3],
+                        'environments': {'version': 1, 'handlers': [], 'forbidden_handlers': []}}
+        missing_source = 'f'*64
+        # The object is deliberately absent. Purpose support must be checked
+        # before the HTTP route attempts to open/upload the referenced input.
+        status, refusal = request(api, 'jobs', method='POST', data=env_request('task', digest=missing_source))
+        assert status == 409 and refusal['error'] == 'environment_unsupported: handler is not enrolled'
+        with pytest.raises(WorkloadError, match='environment_unsupported'):
+            client.submit(env_request('task', digest=missing_source))
+        assert store.list_jobs('alice') == []
+    finally:
+        close(api, thread)
+
+
+def test_old_authority_capability_route_is_a_named_environment_refusal():
+    client = WorkloadClient('http://127.0.0.1:1', 'a'*32)
+    def missing_capability(_route, _body=None):
+        raise WorkloadError('workload request refused', 404)
+    client.request = missing_capability
+    with pytest.raises(WorkloadError, match='environment_unsupported: authority capability API unavailable'):
+        client.capabilities()
+
+
+def test_schema_three_requires_schema_capability_before_submit():
+    client = WorkloadClient('http://127.0.0.1:1', 'a'*32)
+    client.capabilities = lambda: {'versions': [1, 2], 'environments': {
+        'version': 1, 'handlers': ['dev.v1'], 'forbidden_handlers': []}}
+    with pytest.raises(WorkloadError, match='environment_unsupported: schema 3 is unavailable'):
+        client.submit(env_request('task'))
+
+
+def test_environment_key_resolution_is_atomic_durable_and_owner_scoped(tmp_path):
+    store, api, thread = server(tmp_path)
+    try:
+        first = store.submit('alice', env_request('repo/task/linux-rust'))
+        handle = first['environment_handle']
+        assert len(handle) == 32 and first['spec']['environment'] == {
+            'key': 'repo/task/linux-rust', 'reuse': 'prefer'}
+        assert first['environment']['state'] == 'empty'
+        retry = store.submit('alice', env_request('repo/task/linux-rust'))
+        assert retry['id'] == first['id'] and retry['environment_handle'] == handle
+        changed = store.submit('alice', env_request('repo/task/linux-rust', job='job-two',
+            digest=hashlib.sha256(b'edited source').hexdigest()))
+        assert changed['id'] != first['id'] and changed['environment_handle'] == handle
+        with pytest.raises(WorkloadError, match='different inputs'):
+            store.submit('alice', env_request('repo/task/linux-rust', digest='e'*64))
+
+        reopened = WorkloadStore(store.path, handlers=HANDLERS, environment_handlers=POLICIES)
+        assert reopened.submit('alice', env_request('repo/task/linux-rust'))['id'] == first['id']
+        status, view = request(api, 'environments/'+handle)
+        assert status == 200 and view['handle'] == handle and view['profile'] == 'linux-rust'
+        assert request(api, 'environments/'+handle, token='b'*32)[0] == 404
+        foreign = env_request('repo/task/linux-rust', job='foreign', **{})
+        foreign['environment'] = {'handle': handle, 'reuse': 'prefer'}
+        with pytest.raises(WorkloadError, match='not found'):
+            reopened.submit('bob', foreign)
+        other_owner = reopened.submit('bob', env_request('repo/task/linux-rust'))
+        assert other_owner['environment_handle'] != handle
+    finally:
+        close(api, thread)
+
+
+def test_concurrent_environment_submissions_resolve_one_logical_handle(tmp_path):
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, environment_handlers=POLICIES)
+    def submit(index):
+        return store.submit('alice', env_request('same-task', job=f'job-{index}',
+            digest=hashlib.sha256(f'source-{index}'.encode()).hexdigest()))['environment_handle']
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        handles = list(pool.map(submit, range(16)))
+    assert len(set(handles)) == 1
+    with store.connect() as db:
+        assert db.execute('SELECT count(*) FROM task_environments').fetchone()[0] == 1
+
+
+def register_environment_worker(store, worker, host, *, boot='boot', cpu=4, available_cpu=None,
+                                compatibility='b'*64, replicas=None):
+    store.register(worker, host, boot, dict(
+        capacity={'cpu': cpu, 'memory_bytes': 2*1024**3},
+        available={'cpu': cpu if available_cpu is None else available_cpu,
+                   'memory_bytes': 2*1024**3}, labels={'os': 'linux'}, handlers=['dev.v1'], ready=True,
+        environment_profiles={'linux-rust': compatibility},
+        **({'environment_replicas': replicas} if replicas is not None else {})))
+
+
+def environment_receipt(handle, generation, digest=SOURCE, *, compatibility='b'*64, outcome='created'):
+    return dict(version=1, handle=handle, generation=generation, profile='linux-rust',
+        compatibility=compatibility, source_digest=digest, reuse_outcome=outcome,
+        reason_code='created', state='parked',
+        bytes_used=1024, phase_timings={phase: {'seconds': 0.1} for phase in
+            ('queue', 'transfer', 'source_materialization', 'dependencies', 'compile', 'test',
+             'execution', 'cleanup')},
+        cache_components=[])
+
+
+def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_path):
+    now = [1000.0]
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, clock=lambda: now[0],
+                          environment_handlers=POLICIES)
+    register_environment_worker(store, 'worker-a', 'host-a')
+    register_environment_worker(store, 'worker-b', 'host-a')
+    first = store.submit('alice', env_request('same-writer', job='first'))
+    now[0] += 0.1
+    second = store.submit('alice', env_request('same-writer', job='second',
+        digest=hashlib.sha256(b'next source').hexdigest()))
+    attempt = store.claim('worker-a', 'boot')
+    assert attempt['job_id'] == first['id']
+    assert attempt['environment']['handle'] == first['environment_handle']
+    assert attempt['environment']['generation'] == 1
+    assert store.claim('worker-b', 'boot') is None
+    waiting = store.get('alice', second['id'])
+    assert waiting['state'] == 'queued' and waiting['reason'] == 'environment_busy'
+    assert waiting['attempts'] == []
+
+    receipt = environment_receipt(first['environment_handle'], 1)
+    completed = store.complete('worker-a', 'boot', attempt['attempt_id'], attempt['fence'],
+        input_digest=SOURCE, outcome='succeeded', result={'artifacts': []}, environment_receipt=receipt)
+    assert completed['state'] == 'succeeded'
+    assert completed['result']['environment_receipt']['reuse_outcome'] == 'created'
+    view = store.get_environment('alice', first['environment_handle'])
+    assert view['state'] == 'parked' and view['generation'] == 1
+    assert view['replicas'][0]['host'] == 'host-a'
+    assert store.complete('worker-a', 'boot', attempt['attempt_id'], attempt['fence'],
+        input_digest=SOURCE, outcome='succeeded', result={'artifacts': []},
+        environment_receipt=receipt)['id'] == first['id'], 'completion replay returns same receipt'
+
+    # Placement is host-affine and may choose either worker identity on the
+    # same physical host; poll both identities to collect the shared-host job.
+    next_attempt = store.claim('worker-a', 'boot') or store.claim('worker-b', 'boot')
+    assert next_attempt is not None, f"reason={store.get('alice', second['id'])['reason']!r}"
+    assert next_attempt['job_id'] == second['id']
+    assert next_attempt['environment']['generation'] == 2
+    assert next_attempt['environment']['replicas'][0]['compatibility'] == 'b'*64
+
+
+def test_affinity_wait_is_durable_bounded_and_holds_no_compute_claim(tmp_path):
+    now = [1000.0]
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS,
+        limits=Limits(environment_affinity_seconds=15), clock=lambda: now[0],
+        environment_handlers=POLICIES)
+    # A compatible parked replica is on host-a. It is currently full, while
+    # host-b is a cold but immediately available compatible destination.
+    job = store.submit('alice', env_request('affinity'))
+    handle = job['environment_handle']
+    with store.transaction() as db:
+        db.execute("UPDATE task_environments SET state='parked',generation=1,compatibility=? WHERE handle=?",
+                   ('b'*64, handle))
+        db.execute("INSERT INTO task_environment_replicas(handle,host,profile,compatibility,generation,state,"
+                   "bytes_used,last_used,seen) VALUES(?,?,?, ?,1,'parked',100,?,?)",
+                   (handle, 'host-a', 'linux-rust', 'b'*64, now[0], now[0]))
+    register_environment_worker(store, 'warm', 'host-a', available_cpu=0)
+    register_environment_worker(store, 'cold', 'host-b')
+    assert store.claim('warm', 'boot') is None
+    waiting = store.get('alice', job['id'])
+    assert waiting['state'] == 'queued' and waiting['reason'] == 'environment_affinity_wait'
+    assert waiting['attempts'] == []
+    with store.connect() as db:
+        assert db.execute("SELECT writer_job FROM task_environments WHERE handle=?", (handle,)).fetchone()[0] is None
+
+    now[0] += 16
+    attempt = store.claim('cold', 'boot')
+    assert attempt['job_id'] == job['id']
+    assert attempt['environment']['generation'] == 2
+
+
+def test_environment_scope_is_installed_policy_and_requires_task_subset(tmp_path):
+    store, api, thread = server(tmp_path)
+    try:
+        capabilities = store.capabilities('alice', HANDLERS)['environments']
+        assert capabilities['handlers'] == ['dev.v1', 'task.v1']
+        assert capabilities['forbidden_handlers'] == ['full.v1', 'publish.v1']
+        for handler in ('full.v1', 'publish.v1'):
+            with pytest.raises(WorkloadError, match='environment_scope_forbidden'):
+                store.submit('alice', env_request('blocked', handler=handler))
+        with pytest.raises(WorkloadError, match='proper subset'):
+            store.submit('alice', env_request('task', handler='task.v1',
+                payload={'check_ids': ['hub.one', 'hub.two']}))
+        with pytest.raises(WorkloadError, match='proper subset'):
+            store.submit('alice', env_request('task', handler='task.v1', payload={}))
+        scoped = store.submit('alice', env_request('task', handler='task.v1',
+            payload={'check_ids': ['hub.one']}))
+        assert scoped['environment']['purpose'] == 'task_e2e'
+        assert request(api, 'environments/'+scoped['environment_handle'])[0] == 200
+    finally:
+        close(api, thread)
+
+
+def test_development_environment_policy_cannot_be_used_for_release_payload_modes(tmp_path):
+    policies = dict(POLICIES)
+    policies['dev.v1'] = {**POLICIES['dev.v1'], 'payload_modes': ['test', 'analyze']}
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, environment_handlers=policies)
+    with pytest.raises(WorkloadError, match='environment_scope_forbidden'):
+        store.validate_submission('alice', env_request('dev', payload={'mode': 'build-linux-release'}))
+    accepted = store.validate_submission('alice', env_request('dev', payload={'mode': 'test'}))
+    assert accepted['environment'] == {'key': 'dev', 'reuse': 'prefer'}
+
+
+def test_environment_expiry_recreates_key_and_disabled_retention_fails_closed(tmp_path):
+    now = [1000.0]
+    limits = Limits(environment_idle_seconds=30, environment_generation_seconds=90)
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, limits=limits,
+        clock=lambda: now[0], environment_handlers=POLICIES)
+    first = store.submit('alice', env_request('expiring'))
+    store.withdraw('alice', first['id'])
+    now[0] += 31
+    with pytest.raises(WorkloadError, match='not found'):
+        store.get_environment('alice', first['environment_handle'])
+    replacement = store.submit('alice', env_request('expiring', job='job-two'))
+    assert replacement['environment_handle'] != first['environment_handle']
+
+    disabled = WorkloadStore(tmp_path/'disabled.sqlite', handlers=HANDLERS,
+        limits=Limits(environment_idle_seconds=None), environment_handlers=POLICIES)
+    assert disabled.capabilities('alice', HANDLERS)['environments']['handlers'] == []
+    with pytest.raises(WorkloadError, match='environment_retention_disabled'):
+        disabled.submit('alice', env_request('never-retained'))
+
+
+def test_legacy_schema_identity_and_environment_reference_are_separate():
+    legacy = dict(version=1, key='legacy', handler='dev.v1', input_digest=SOURCE,
+                  need={'cpu': 1})
+    normalized = submission(legacy, HANDLERS, Limits())
+    assert 'environment' not in normalized
+    assert identity(normalized) == identity(submission(dict(legacy), HANDLERS, Limits()))
+    with pytest.raises(WorkloadError, match='unsupported workload schema'):
+        submission(dict(legacy, environment={'key': 'task', 'reuse': 'prefer'}), HANDLERS, Limits())
+    with pytest.raises(WorkloadError, match='exactly one key or handle'):
+        submission(dict(version=3, key='bad', handler='dev.v1', input_digest=SOURCE,
+            need={'cpu': 1}, environment={'key': 'task', 'handle': 'a'*32, 'reuse': 'prefer'}),
+            HANDLERS, Limits())
+
+
+def test_cli_environment_selector_observation_and_opt_out(tmp_path):
+    store, api, thread = server(tmp_path)
+    data = b'captured'
+    store_blob = api.blobs.put('alice', SOURCE, len(data), BytesIO(data))
+    assert store_blob['digest'] == SOURCE
+    config = tmp_path/'client.json'
+    config.write_text(json.dumps({'authority': f'http://127.0.0.1:{api.server_port}', 'token': 'a'*32}))
+    request_path = tmp_path/'job.json'
+    request_path.write_text(json.dumps(dict(version=1, key='cli-task', handler='dev.v1',
+        input_digest=SOURCE, need={'cpu': 1}, payload={})))
+
+    def cli(*args):
+        return subprocess.run([sys.executable, '-m', 'livestack_node.workloads.cli',
+            '--config', str(config), *map(str, args)], env=dict(os.environ),
+            capture_output=True, text=True, timeout=10)
+
+    try:
+        submitted = cli('submit', request_path, '--environment-key', 'repo/cli/linux-rust', '--json')
+        assert submitted.returncode == 0, submitted.stderr
+        job = json.loads(submitted.stdout)
+        assert job['environment_handle'] and job['spec']['version'] == 3
+        inspected = cli('environment', 'get', job['environment_handle'])
+        assert inspected.returncode == 0, inspected.stderr
+        assert json.loads(inspected.stdout)['handle'] == job['environment_handle']
+
+        request_path.write_text(json.dumps(dict(version=1, key='cli-disposable', handler='dev.v1',
+            input_digest=SOURCE, need={'cpu': 1}, payload={})))
+        disposable = cli('submit', request_path, '--no-environment')
+        assert disposable.returncode == 0, disposable.stderr
+        assert 'environment_handle' not in json.loads(disposable.stdout)
+
+        request_path.write_text(json.dumps(dict(version=3, key='conflict', handler='dev.v1',
+            input_digest=SOURCE, need={'cpu': 1}, environment={'key': 'body', 'reuse': 'prefer'})))
+        conflict = cli('submit', request_path, '--environment-key', 'other')
+        assert conflict.returncode == 2 and 'conflicts' in conflict.stderr
+
+        request_path.write_text(json.dumps(dict(version=3, key='same-reference', handler='dev.v1',
+            input_digest=SOURCE, need={'cpu': 1},
+            environment={'key': 'repo/cli/linux-rust', 'reuse': 'prefer'})))
+        same = cli('submit', request_path, '--environment-key', 'repo/cli/linux-rust')
+        assert same.returncode == 0, same.stderr
+        assert json.loads(same.stdout)['environment_handle'] == job['environment_handle']
+        opt_out_conflict = cli('submit', request_path, '--no-environment')
+        assert opt_out_conflict.returncode == 2 and 'conflicts' in opt_out_conflict.stderr
+    finally:
+        close(api, thread)

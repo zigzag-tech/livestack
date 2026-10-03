@@ -34,11 +34,22 @@ class Limits:
     # against a worker that never returns -- see `WorkloadStore._expire`.
     cleanup_seconds: float = 3600
     terminal_seconds: float | None = 14 * 86400
+    # Persistent task environments are disk-only acceleration state. These
+    # bounds are independent of the job/attempt limits above: a parked
+    # environment never consumes a running-job slot.
+    environment_registry: int = 1024
+    environments_per_owner: int = 64
+    environment_idle_seconds: float | None = 7 * 86400
+    environment_generation_seconds: float | None = 30 * 86400
+    environment_affinity_seconds: float = 15
+    environment_sweep_rows: int = 64
+    environment_sweep_seconds: float = 5
 
     def __post_init__(self):
         for name in ("active_jobs", "terminal_jobs", "workers", "claims_per_worker",
                      "attempts", "record_bytes", "fresh_seconds", "lease_seconds",
-                     "cleanup_seconds"):
+                     "cleanup_seconds", "environment_registry", "environments_per_owner",
+                     "environment_affinity_seconds", "environment_sweep_rows", "environment_sweep_seconds"):
             value = getattr(self, name)
             if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be positive and finite")
@@ -47,6 +58,16 @@ class Limits:
         if self.terminal_seconds is not None and (
                 not math.isfinite(self.terminal_seconds) or self.terminal_seconds <= 0):
             raise ValueError("terminal_seconds must be positive or None (deletion disabled)")
+        for field in ("environment_idle_seconds", "environment_generation_seconds"):
+            value = getattr(self, field)
+            # An unset or zero environment retention window disables destructive
+            # expiry. New environment admission then fails closed in the store.
+            if value is not None and (not math.isfinite(value) or value < 0):
+                raise ValueError(f"{field} must be positive, zero, or None")
+        if self.environment_registry > 1024 or self.environments_per_owner > 64 or self.environment_sweep_rows > 64:
+            raise ValueError("environment limits may only be lowered from their hard ceilings")
+        if self.environment_affinity_seconds > 15:
+            raise ValueError("environment affinity may not exceed its 15 second hard ceiling")
 
 
 AVOID_LABEL_WORKER = "harmony.avoid.worker"
@@ -220,9 +241,10 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
         raise WorkloadError("submission must be an object")
     allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
                "admit", "selector", "labels", "estimate_seconds", "deadline", "priority",
-               "locality_host", "retain"}
+               "locality_host", "retain", "environment"}
     version = value.get("version")
-    if set(value) - allowed or version not in (1, 2) or (version == 1 and "input_objects" in value):
+    if set(value) - allowed or version not in (1, 2, 3) or (version == 1 and "input_objects" in value) \
+            or (version != 3 and "environment" in value):
         raise WorkloadError("unsupported workload schema or fields")
     handler = name(value.get("handler"), "handler")
     if handler not in handlers:
@@ -279,8 +301,20 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     # already has; keeping the key out preserves their idempotency bytes.
     if admit is not None:
         result["admit"] = admit
-    if version == 2:
+    if version == 2 or (version == 3 and "input_objects" in value):
         result["input_objects"] = input_objects(value.get("input_objects", []))
+    if version == 3 and "environment" in value:
+        reference = value["environment"]
+        if (not isinstance(reference, dict) or set(reference) != {"reuse", "key"} and
+                set(reference) != {"reuse", "handle"} or reference.get("reuse") != "prefer"):
+            raise WorkloadError("environment must name exactly one key or handle with reuse=prefer")
+        if "key" in reference:
+            result["environment"] = {"key": name(reference["key"], "environment key"), "reuse": "prefer"}
+        else:
+            handle = reference.get("handle")
+            if not isinstance(handle, str) or not re.fullmatch(r"[a-f0-9]{32}", handle):
+                raise WorkloadError("invalid environment handle")
+            result["environment"] = {"handle": handle, "reuse": "prefer"}
     if result["locality_host"] is not None:
         name(result["locality_host"], "locality_host")
     encode(result, limits.record_bytes)

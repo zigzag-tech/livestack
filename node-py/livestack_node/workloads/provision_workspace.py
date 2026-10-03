@@ -18,7 +18,59 @@ def run(*argv):
     return subprocess.run(argv, check=True, capture_output=True, text=True, timeout=180).stdout.strip()
 
 
-def provision(worker, owner, size_gib):
+def _allocate_image(root, image, mount, marker, expected, size, account,
+                    *, features='', mount_options='loop,nodev,nosuid', description='Harmony bounded workload workspace'):
+    if image.exists():
+        if image.is_symlink() or not marker.exists() or json.loads(marker.read_text()) != expected:
+            raise ValueError('existing workspace does not match owned provisioning metadata')
+        if image.stat().st_size != size or run('blkid', '-o', 'value', '-s', 'TYPE', str(image)) != 'ext4':
+            raise ValueError('existing workspace image is incomplete or has changed')
+    else:
+        if mount.is_mount() or marker.exists():
+            raise ValueError('unexpected existing workspace state; refusing to format')
+        stats = os.statvfs(root)
+        if stats.f_bavail*stats.f_frsize < size + 20*1024**3:
+            raise ValueError('insufficient host disk headroom for workspace and reserve')
+        print(f'Allocating {size//1024**3} GiB owned workspace at {mount}', flush=True)
+        with image.open('xb') as stream:
+            stream.truncate(size)
+        image.chmod(0o600)
+        run('fallocate', '-l', str(size), str(image))
+        command = ['mkfs.ext4', '-q', '-m', '0', '-E',
+                   'nodiscard,lazy_itable_init=1,lazy_journal_init=1']
+        if features:
+            command += ['-O', features]
+        command.append(str(image))
+        run(*command)
+        marker.write_text(json.dumps(expected, sort_keys=True)+'\n')
+        marker.chmod(0o600)
+    mount.mkdir(exist_ok=True, mode=0o755)
+    unit = run('systemd-escape', '--path', '--suffix=mount', str(mount))
+    text = ('[Unit]\nDescription='+description+'\n\n[Mount]\n'
+            f'What={image}\nWhere={mount}\nType=ext4\nOptions={mount_options}\n\n'
+            '[Install]\nWantedBy=multi-user.target\n')
+    unit_path = Path('/etc/systemd/system')/unit
+    if unit_path.exists() and unit_path.read_text() != text:
+        raise ValueError('existing mount unit differs; refusing to replace it')
+    unit_path.write_text(text)
+    run('systemctl', 'daemon-reload')
+    run('systemctl', 'enable', '--now', unit)
+    if not mount.is_mount() or mount.stat().st_dev == root.stat().st_dev:
+        raise ValueError('mounted filesystem is not independent')
+    source = run('findmnt', '-n', '-o', 'SOURCE', '--mountpoint', str(mount))
+    backing = run('losetup', '-n', '-O', 'BACK-FILE', source)
+    if Path(backing).resolve() != image:
+        raise ValueError('mounted filesystem is not the owned workspace image')
+    if features and not set(features.split(',')) <= set(run('tune2fs', '-l', str(image)).split('Filesystem features:')[-1].splitlines()[0].strip().split()):
+        raise ValueError('filesystem lacks requested project quota features')
+    os.chown(mount, account.pw_uid, account.pw_gid)
+    mount.chmod(0o700)
+    stats = os.statvfs(mount)
+    return dict(path=str(mount), bytes=size, mount_unit=unit,
+                filesystem_bytes=stats.f_blocks*stats.f_frsize)
+
+
+def provision(worker, owner, size_gib, environment_size_gib=None, environment_host_id=None):
     if os.geteuid() != 0:
         raise ValueError('workspace provisioning requires root')
     if not re.fullmatch('[a-z0-9][a-z0-9-]{0,39}', worker):
@@ -33,49 +85,31 @@ def provision(worker, owner, size_gib):
     image, mount, marker = root/'workspace.ext4', root/'workspace', root/'workspace.json'
     size = size_gib*1024**3
     expected = dict(version=1, worker=worker, owner=owner, uid=account.pw_uid, bytes=size)
-    if image.exists():
-        if image.is_symlink() or not marker.exists() or json.loads(marker.read_text()) != expected:
-            raise ValueError('existing workspace does not match owned provisioning metadata')
-        if image.stat().st_size != size or run('blkid', '-o', 'value', '-s', 'TYPE', str(image)) != 'ext4':
-            raise ValueError('existing workspace image is incomplete or has changed')
-    else:
-        if mount.is_mount() or marker.exists():
-            raise ValueError('unexpected existing workspace state; refusing to format')
-        stats = os.statvfs(root)
-        if stats.f_bavail*stats.f_frsize < size + 20*1024**3:
-            raise ValueError('insufficient host disk headroom for workspace and reserve')
-        print(f'Allocating {size_gib} GiB owned workspace for {worker}', flush=True)
-        # Exclusive creation prevents replacing an existing image. Allocation
-        # reserves Linux filesystem space; Windows backing-disk headroom must
-        # also be monitored by the WSL worker configuration.
-        with image.open('xb') as stream:
-            stream.truncate(size)
-        image.chmod(0o600)
-        run('fallocate', '-l', str(size), str(image))
-        run('mkfs.ext4', '-q', '-m', '0', '-E', 'nodiscard,lazy_itable_init=1,lazy_journal_init=1', str(image))
-        marker.write_text(json.dumps(expected, sort_keys=True)+'\n')
-        marker.chmod(0o600)
-    mount.mkdir(exist_ok=True, mode=0o755)
-    unit = run('systemd-escape', '--path', '--suffix=mount', str(mount))
-    text = ('[Unit]\nDescription=Harmony bounded workload workspace\n\n[Mount]\n'
-            f'What={image}\nWhere={mount}\nType=ext4\nOptions=loop,nodev,nosuid\n\n'
-            '[Install]\nWantedBy=multi-user.target\n')
-    path = Path('/etc/systemd/system')/unit
-    if path.exists() and path.read_text() != text:
-        raise ValueError('existing mount unit differs; refusing to replace it')
-    path.write_text(text)
-    run('systemctl', 'daemon-reload')
-    run('systemctl', 'enable', '--now', unit)
-    if not mount.is_mount() or mount.stat().st_dev == root.stat().st_dev:
-        raise ValueError('workspace mount did not become independent')
-    source = run('findmnt', '-n', '-o', 'SOURCE', '--mountpoint', str(mount))
-    backing = run('losetup', '-n', '-O', 'BACK-FILE', source)
-    if Path(backing).resolve() != image:
-        raise ValueError('mounted filesystem is not the owned workspace image')
-    os.chown(mount, account.pw_uid, account.pw_gid)
-    mount.chmod(0o700)
-    result = dict(workspace=str(mount), workspace_bytes=size, mount_unit=unit,
-                  filesystem_bytes=os.statvfs(mount).f_blocks*os.statvfs(mount).f_frsize)
+    result = _allocate_image(root, image, mount, marker, expected=expected,
+                             size=size, account=account)
+    result = dict(workspace=result['path'], workspace_bytes=result['bytes'], mount_unit=result['mount_unit'],
+                  filesystem_bytes=result['filesystem_bytes'])
+    if environment_size_gib is not None:
+        if not isinstance(environment_size_gib, int) or not 1 <= environment_size_gib <= 256:
+            raise ValueError('environment workspace size must be 1..256 GiB')
+        if not isinstance(environment_host_id, str) or not re.fullmatch('[A-Za-z0-9][A-Za-z0-9_.-]{0,63}',
+                                                                        environment_host_id):
+            raise ValueError('--environment-host-id is required and must identify the shared physical host')
+        env_root = Path('/var/lib/livestack-workloads')/'environment-hosts'/environment_host_id
+        env_root.mkdir(parents=True, exist_ok=True, mode=0o755)
+        if env_root.resolve() != env_root or env_root.stat().st_uid != 0:
+            raise ValueError('environment provisioning root must be real and root-owned')
+        env_image, env_mount, env_marker = (env_root/'task-environments.ext4', env_root/'task-environments',
+                                            env_root/'task-environments.json')
+        env_size = environment_size_gib*1024**3
+        env_expected = dict(version=1, host_id=environment_host_id, owner=owner, uid=account.pw_uid,
+                            bytes=env_size, features=['project', 'quota'])
+        env_result = _allocate_image(env_root, env_image, env_mount, env_marker,
+            expected=env_expected, size=env_size, account=account, features='project,quota',
+            mount_options='loop,nodev,nosuid,prjquota', description='Harmony retained task environments')
+        result.update(environment_root=env_result['path'], environment_bytes=env_result['bytes'],
+                      environment_mount_unit=env_result['mount_unit'],
+                      environment_filesystem_bytes=env_result['filesystem_bytes'])
     print(json.dumps(result), flush=True)
     return result
 
@@ -85,8 +119,14 @@ def main():
     parser.add_argument('--worker', required=True)
     parser.add_argument('--owner', default='ubuntu')
     parser.add_argument('--size-gib', type=int, default=128)
+    parser.add_argument('--environment-size-gib', type=int,
+                        help='also provision a host-shared ext4 project-quota filesystem (1..256 GiB)')
+    parser.add_argument('--environment-host-id',
+                        help='physical host identity shared by every worker identity on that host')
     args = parser.parse_args()
-    provision(args.worker, args.owner, args.size_gib)
+    if args.environment_host_id is not None and args.environment_size_gib is None:
+        parser.error('--environment-host-id requires --environment-size-gib')
+    provision(args.worker, args.owner, args.size_gib, args.environment_size_gib, args.environment_host_id)
 
 
 if __name__ == '__main__':

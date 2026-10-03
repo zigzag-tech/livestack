@@ -709,6 +709,36 @@ livestack_node.replay_plan --since 3600` re-runs every recorded plan from its
 snapshot and exits non-zero on any mismatch. Candidate rows name each unit's
 footprint and its source (`vllm-startup`, `declared`, `unknown`).
 
+## Proposed: durable workload environments
+
+Harmony workloads can retain bounded disk state across admitted jobs while
+releasing each job's CPU, RAM and execution lease at completion. The caller
+uses the existing `POST /v1/workloads/jobs` request with schema 3 and an
+`environment` reference (`key` or authority-issued `handle`, with
+`reuse: "prefer"`). The authority creates or resolves the logical environment
+atomically with job admission; it never grants a worker reservation while the
+agent is editing.
+
+Environment support is capability-negotiated. An explicit request must fail
+before source upload when the authority or installed handler does not support
+it. Authority policy enrolls development and explicitly scoped task-E2E
+handlers. Full/coalesced E2E and publishing/release handlers remain on their
+existing unified orchestration and refuse environment references. Task-E2E
+requires a nonempty proper subset of its installed check IDs; its runtime
+fixtures are recreated for every job.
+
+Workers retain only declared, compatible build and dependency state on a
+separate ext4 project-quota filesystem. Each job reconciles the complete
+captured source before running in a supervised attempt; the receipt records
+whether the environment was created, reused, rebuilt or relocated. A parked
+environment owns disk only. Cleanup must be acknowledged before another job
+can write the same handle.
+
+This proposal remains opt-in until authority policy, the Linux quota positive
+control, worker profiles, consumer SDK and handler-scope refusals have been
+verified together. Operator configuration and commands are in
+[`_plans/durable-workloads.md`](_plans/durable-workloads.md).
+
 ## Unit composition — what a card SHOULD run, proposed, never applied
 
 The planner loads and evicts the units it is given. **Composition** decides what a

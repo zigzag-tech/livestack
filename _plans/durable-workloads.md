@@ -648,3 +648,115 @@ are in [`_plans/github-remote-workloads.md`](_plans/github-remote-workloads.md).
 The implementation and local tests are complete; live provider configuration
 and an end-to-end hosted workflow remain rollout gates. Do not route a handler
 to GitHub until those gates pass.
+
+## Retained task environments (implementation in progress)
+
+This adds disk-only continuity to the existing workload API. Every edit, build,
+development check and explicitly scoped task-E2E execution is still a new
+queued workload with ordinary CPU/RAM admission, a supervised attempt and
+cleanup. When cleanup is acknowledged, the compute claim ends while the
+authority may keep a bounded logical environment and compatible compiler or
+dependency state. Editing between jobs holds no worker slot.
+
+The request contract is schema 3 on the existing `POST /v1/workloads/jobs`
+route. It adds `environment: {key, reuse: "prefer"}` or
+`environment: {handle, reuse: "prefer"}`. A stable key is principal and
+delegated-owner scoped; the authority returns an opaque handle during job
+admission. It is not a path, worker name or credential. The job's idempotency
+key remains the identity of one source/options/reference request; changed
+source gets a new job in the same environment. `GET /v1/workloads/capabilities`
+is the authenticated preflight, and `GET /v1/workloads/environments/<handle>`
+inspects retained state without creating a job.
+
+Capability response example:
+
+```json
+{"versions":[1,2,3],"environments":{"version":1,
+ "handlers":["benchday.compilation.flutter-check.v1"],
+ "forbidden_handlers":["benchday.full-test-train.v1","benchday.publish.v1"]}}
+```
+
+The caller checks capabilities before source upload. An explicit environment
+request fails with a named unsupported/scope refusal if the installed authority
+or handler cannot honor it; the SDK never strips the field. Legacy schema 1/2
+requests keep their old request identity. CLI examples:
+
+```sh
+python -m livestack_node.workloads.cli --config <private-config> submit request.json \
+  --environment-key <stable-task-key>
+python -m livestack_node.workloads.cli --config <private-config> submit request.json \
+  --environment-handle <opaque-handle>
+python -m livestack_node.workloads.cli --config <private-config> submit request.json --no-environment
+python -m livestack_node.workloads.cli --config <private-config> environment get <opaque-handle>
+python -m livestack_node.workloads.cli --config <private-config> get <job-id>
+```
+
+Authority enrollment is explicit and handler-owned. Development handlers may
+be listed with purpose `development`; task-specific E2E handlers use purpose
+`task_e2e` plus an installed finite `check_ids` allowlist. Their payload must
+name a nonempty proper subset. Full/coalesced E2E and publishing/release
+handlers are enrolled only as forbidden purposes and reject environment
+references. They keep their existing unified coordinators. The caller cannot
+declare or widen purpose, convert a full run into a task run, or attach an
+environment to publishing.
+
+Linux workers need two separate storage areas: the existing per-worker attempt
+filesystem and one project-quota environment filesystem shared by all worker
+identities on the same physical host. Provision the shared volume once for that
+host; do not give each worker a private environment volume, or a returning job
+could not find the replica:
+
+```sh
+sudo python3 -m livestack_node.workloads.provision_workspace \
+  --worker <worker-unit> --size-gib 128 --environment-size-gib 128 \
+  --environment-host-id <physical-host-id>
+```
+
+The worker config's `task_environments` object points to that mount and names
+`host_id`, the fixed installed quota helper, its private project-ID range, and
+at most 32 installed profiles. Each profile fixes allowed handlers, purpose,
+toolchain-probe argv, cache contract and at most 16 declared cache components.
+Install the helper as a root-owned executable at
+`/usr/local/libexec/livestack-task-environment-quota`; its root-owned config is
+`/etc/livestack/workload-environment-quota.json`. The only delegated operations
+are `probe`, bounded `usage` reads and per-handle `ensure`; the worker cannot
+select a mount or raise its hard ceiling. Run the root positive-control script
+`node-py/scripts/task-environment-quota-control.py` on every candidate host
+before advertising an environment profile. The control must observe a child
+write fail with `EDQUOT` while another project's quota remains intact.
+
+The enforced default ceilings are 32 GiB per replica, 128 GiB per owner per
+host, 256 GiB total per host (also capped by the provisioned volume minus its
+reserve), 64 environments per worker host, seven idle days and 30 absolute
+days. Authority metadata is capped at 1,024 global and 64 per owner; replicas
+are capped at two per environment and 64 per host. Missing/zero destructive
+retention disables admission and does not delete. A missing quota backend
+disables that worker's environment capability. Cleanup, source reconciliation,
+profile mismatch and eviction are explicit receipts/reasons; deletion failures
+remain charged until a later successful sweep.
+
+The environment filesystem retains source mirror, declared dependency/build
+caches and bounded metadata only. Credentials, sockets, databases, test
+fixtures, process state and output artifacts remain attempt-owned. Before a
+handler starts, the worker reconciles the full immutable capture (including
+removed files) and exposes only that handle's source tree through the supervised
+attempt view. It verifies source integrity again before parking state. The
+authority fences each writer generation; the local host lock serializes
+different worker identities that share the filesystem. An uncertain cleanup or
+stale generation invalidates local reuse and causes reconstruction.
+
+Placement first applies normal handler, host, resource and compilation policy.
+It may prefer a compatible same-host replica and wait for affinity for at most
+15 seconds; that wait owns no compute claim. If needed, it can relocate and
+rebuild on another eligible host. The receipt separates product outcome from
+`created`, `reused`, `rebuilt` or `relocated`, with named reason and measured
+queue, transfer, source, dependency, compile, test, execution and cleanup
+phases. Unknown timing remains unknown.
+
+This proposal is opt-in and not a live-host enrollment. Rollout order is
+authority policy, provisioned and positively verified worker storage, worker
+profiles, consumer SDK/runtime pin, then wrapper defaults and agent
+instructions. Full/coalesced E2E and publishing requests remain outside the
+environment lifecycle at every stage. Rollback disables environment
+capabilities and drains current writers; it leaves ordinary job submission and
+the existing full-test and publication coordinators intact.

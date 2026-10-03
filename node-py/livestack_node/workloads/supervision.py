@@ -104,7 +104,7 @@ class SystemdExecutor:
 
     def start(self, attempt_id, argv, cwd, output, *, env, cpu, memory_bytes,
               max_seconds=3600, tasks=512, log_bytes=8*1024**2, lease_file=None, rootless_docker=False,
-              rootless_native=False, native_host_address=None):
+              rootless_native=False, native_host_address=None, inaccessible_paths=(), bind_paths=()):
         # Limits are operator/handler configuration, never unconstrained argv
         # supplied by a remote caller. Fail closed when cgroups cannot apply.
         for value in (cpu, memory_bytes, max_seconds, tasks, log_bytes):
@@ -116,6 +116,31 @@ class SystemdExecutor:
             raise WorkloadError('installed handler must name an absolute executable')
         if rootless_native and not rootless_docker:
             raise WorkloadError('native Docker frontend requires owned rootless Docker')
+        if not isinstance(inaccessible_paths, (list, tuple)) or len(inaccessible_paths) > 8:
+            raise WorkloadError('invalid execution inaccessible-path policy')
+        clean_inaccessible = []
+        for value in inaccessible_paths:
+            path = Path(value)
+            if (not path.is_absolute() or ':' in str(path) or '\n' in str(path) or
+                    not path.exists() or path.is_symlink()):
+                raise WorkloadError('execution inaccessible paths must be existing absolute paths')
+            clean_inaccessible.append(path.resolve())
+        if not isinstance(bind_paths, (list, tuple)) or len(bind_paths) > 8:
+            raise WorkloadError('invalid execution bind-path policy')
+        clean_binds = []
+        for pair in bind_paths:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise WorkloadError('execution bind path must name source and destination')
+            source, destination = (Path(value) for value in pair)
+            if (not source.is_absolute() or not destination.is_absolute() or
+                    any(':' in str(path) or '\n' in str(path) for path in (source, destination)) or
+                    not source.is_dir() or source.is_symlink() or
+                    not destination.is_dir() or destination.is_symlink()):
+                raise WorkloadError('execution bind paths must be existing absolute directories')
+            clean_source, clean_destination = source.resolve(), destination.resolve()
+            if any(clean_destination == path or path in clean_destination.parents for path in clean_inaccessible):
+                raise WorkloadError('execution bind destination is hidden by its path policy')
+            clean_binds.append((clean_source, clean_destination))
         if self.inspect(attempt_id).get('LoadState') != 'not-found':
             raise WorkloadError('attempt already has a unit; reconcile before launch', 409)
         output = Path(output).resolve()
@@ -138,6 +163,9 @@ class SystemdExecutor:
             '--property=RuntimeMaxSec='+str(max_seconds),
             '--property=StandardOutput=null', '--property=StandardError=null',
             '--property=NoNewPrivileges='+('no' if rootless_docker else 'yes'),
+            *['--property=InaccessiblePaths='+str(path) for path in clean_inaccessible],
+            *['--property=BindPaths='+str(source)+':'+str(destination)
+              for source, destination in clean_binds],
             *(['--property=Delegate=yes', '--property=DelegateSubgroup=supervisor'] if rootless_docker else []),
             sys.executable, str(wrapper), str(config))
 
