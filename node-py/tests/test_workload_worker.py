@@ -95,6 +95,61 @@ def test_worker_executes_pinned_input_and_returns_owned_artifact(fleet, tmp_path
         worker.close()
 
 
+def test_handler_output_bound_allows_eight_gib_without_raising_input_bound(
+        fleet, tmp_path, monkeypatch):
+    _, config, _caller, digest = fleet
+    config['handlers']['native.v1']['output_max_bytes'] = 8 * 1024**3
+    worker = WorkloadWorker(config)
+    output = tmp_path/'output'
+    output.mkdir()
+    artifact_path = output/'artifact'
+    with artifact_path.open('wb') as artifact_file:
+        artifact_file.truncate(2 * 1024**3 + 1)
+
+    try:
+        assert worker.transfer.max_bytes == 2 * 1024**3
+        assert worker.output_transfers['native.v1'].max_bytes == 8 * 1024**3
+        with pytest.raises(WorkloadError, match='upload byte limit exceeded'):
+            worker.transfer.put(artifact_path)
+
+        artifact_digest = 'b' * 64
+        monkeypatch.setattr('livestack_node.workloads.transfer.file_digest',
+                            lambda _path: artifact_digest)
+
+        def acknowledge_upload(_target, method, _path, *, headers, body, timeout):
+            assert method == 'PUT'
+            assert body.seek(0, 2) == int(headers['Content-Length'])
+            return 200, {}, json.dumps({
+                'digest': artifact_digest,
+                'size': int(headers['Content-Length']),
+            }).encode()
+
+        monkeypatch.setattr('livestack_node.workloads.transfer.transport.dial',
+                            acknowledge_upload)
+        assignment = {
+            'spec': {'handler': 'native.v1', 'input_digest': digest},
+            'boot': worker.boot,
+            'attempt_id': 'a' * 32,
+            'fence': 1,
+        }
+        completion = {'outcome': 'succeeded', 'result': {}}
+        worker._attach_artifacts(assignment, completion, output)
+        assert completion['result']['artifacts'] == [{
+            'name': 'artifact', 'digest': artifact_digest,
+            'size': 2 * 1024**3 + 1,
+        }]
+    finally:
+        worker.close()
+
+
+@pytest.mark.parametrize('invalid_limit', [True, 8 * 1024**3 + 1])
+def test_worker_rejects_invalid_handler_output_bound(fleet, invalid_limit):
+    _, config, _caller, _digest = fleet
+    config['handlers']['native.v1']['output_max_bytes'] = invalid_limit
+    with pytest.raises(WorkloadError, match='handler output_max_bytes'):
+        WorkloadWorker(config)
+
+
 def test_worker_fetches_only_declared_supplemental_inputs(fleet, tmp_path, monkeypatch):
     monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (0, 0, 0))
     _, config, caller, digest = fleet

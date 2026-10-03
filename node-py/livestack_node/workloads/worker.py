@@ -71,6 +71,9 @@ def _tree_bytes(path):
 
 
 class WorkloadWorker:
+    # Match the authority's object bound without widening input/downloads.
+    MAX_HANDLER_OUTPUT_BYTES = 8 * 1024**3
+
     def __init__(self, config):
         self.config = config
         self.client = WorkloadClient(config['authority'], config['token'], edge_key=config.get('edge_key'))
@@ -109,11 +112,22 @@ class WorkloadWorker:
                                  or not isinstance(spec.get('parallel', 4), int) or isinstance(spec.get('parallel', 4), bool)
                                  or not 1 <= spec.get('parallel', 4) <= 8):
             raise WorkloadError('object_relay requires url and key, and optionally parallel 1..8')
-        self.transfer = InputTransfer(
-            transfer_client, **({} if spec is None else dict(
-                relay=WorkloadClient(spec['url'], config['token'], timeout=transfer_timeout,
-                                     edge_key=config.get('edge_key')),
-                relay_key=spec['key'], relay_parallel=spec.get('parallel', 4))))
+        transfer_options = {} if spec is None else dict(
+            relay=WorkloadClient(spec['url'], config['token'], timeout=transfer_timeout,
+                                 edge_key=config.get('edge_key')),
+            relay_key=spec['key'], relay_parallel=spec.get('parallel', 4))
+        self.transfer = InputTransfer(transfer_client, **transfer_options)
+        # Large compiler artifacts use their handler's output bound; input
+        # downloads and framework logs keep the original transfer limit.
+        self.output_transfers = {}
+        for handler_name, handler in self.handlers.items():
+            output_max_bytes = handler.get('output_max_bytes', self.transfer.max_bytes)
+            if (isinstance(output_max_bytes, bool) or not isinstance(output_max_bytes, int) or
+                    not 1 <= output_max_bytes <= self.MAX_HANDLER_OUTPUT_BYTES):
+                raise WorkloadError('handler output_max_bytes must be an integer from 1 byte to 8 GiB')
+            self.output_transfers[handler_name] = (
+                self.transfer if output_max_bytes == self.transfer.max_bytes else
+                InputTransfer(transfer_client, max_bytes=output_max_bytes, **transfer_options))
         self.output_mirror = None
         if config.get('output_mirror') is not None:
             from .artifact_mirror import InstalledArtifactMirror
@@ -376,10 +390,12 @@ class WorkloadWorker:
                 continue
             if path.resolve() != path or not path.is_file():
                 raise WorkloadError('artifact must be a private regular file')
-            artifact = self.transfer.put(path, assignment=assignment)
+            output_transfer = (self.output_transfers[assignment['spec']['handler']]
+                              if item in declared else self.transfer)
+            artifact = output_transfer.put(path, assignment=assignment)
             if self.output_mirror:
                 try:
-                    self.output_mirror.put(artifact['digest'], path, self.transfer.max_bytes)
+                    self.output_mirror.put(artifact['digest'], path, output_transfer.max_bytes)
                 except WorkloadError as error:
                     # The authority CAS remains canonical and downstream
                     # workers retain their authenticated fallback path.
