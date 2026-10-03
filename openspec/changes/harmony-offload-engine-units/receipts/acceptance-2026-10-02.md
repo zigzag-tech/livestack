@@ -137,3 +137,46 @@ point. Reasoning is returned SEPARATELY (`reasoning_content`) and tools work
   naming the rule; re-shot as a 503 case in run 2.
 
 Run 2 results are appended below by the follow-up capture.
+
+## Scenario run 3 — 2026-10-02 (all fixes deployed)
+
+- **(d) PASS** — `model: "local"` with the models having bounced →
+  `model: dbirks/Qwen3.8-27B-W4A16-AutoRound`: the legacy alias reaches the
+  27B, never Flash-Next (`/tmp/g-d.json`). The `_model_choice` fix is what
+  makes this true.
+- **(d2) re-route PROVEN in the journal** — `context refusal on llm_general
+  (24577 tokens) — re-routing once to require:class=llm,context_len>=24577`
+  (21:51:07), and the stale-world fallback answering a later one with
+  `using locally declared flash_next` (22:03:51). The END-TO-END answer kept
+  meeting the honest-cost wall underneath it: the 26k-token prompt's first
+  leg holds the 27B busy for its prefill, and every window in which
+  Flash-Next could be admitted was either inside a floor or taken by live
+  title traffic — and a busy tenant is now correctly NEVER evicted out from
+  under its work (that fix is what stopped the ReadError stream cuts).
+- **(e) PASS** — `{"detail":"nothing satisfies {'class': 'llm',
+  'no_such_attribute>=': 7}"}` — a 503 naming the rule (run 2); run 3's
+  refusals additionally carry the planner's own words after the fix
+  (`— the planner could not place it on any device`).
+- **(b), (c), (f), (g)** — see run 2 (all PASS).
+
+## The fix ledger (every one landed and pushed)
+
+| # | Found by | Fix | landed |
+|---|---|---|---|
+| 1 | node would not boot | `serve._footprint_signature` speaks the vector | `c4a120c1` |
+| 2 | scenario (a) 503 | list clause = "a value in this list" (both matchers) | `1e076011` |
+| 3 | flash_next stopped mid-request | `HARMONY_LLM_COLOAD=0` disabled (multi-unit coload) | service drop-in |
+| 4 | cudaMalloc failed (399 MiB free) | exclusive claim overrides coload | `36a4d929` |
+| 5 | `local` answered by flash_next | the alias is a CHOICE (`_model_choice`) | `e4a94948`+ |
+| 6 | node wedged (`residence:000`) | the queue waits OFF the event loop | `80e257cb` |
+| 7 | raw 400 instead of the 413 | context dialect via `Engine.context_refusal` | `2d1f3380` |
+| 8 | 503 said "nothing satisfies" for a floor | the 503 carries `defer_reason` | `2dc6fb33` |
+| 9 | shed loop (`relieve measured over-budget pressure`) | the exclusive claim is symmetric | `07f04731` |
+| 10 | stale world 503 on a locally-known unit | "no unit satisfies" from a stale world = did-not-know | `7692d966` |
+| 11 | ReadError stream cut | busy tenants are never evicted mid-work | `c9d3bed6` |
+
+What remains TRUE and unfixed is in `_plans/harmony-engine-units.md`
+"What the queue and the re-route do NOT fix" — including the model bounce
+itself: with card 1 serving both a 27B for titles and Flash-Next for long
+context, the floors and the honest costs mean the two swap on the traffic
+pattern, and each swap is 40 s (Strata) or 50 s (vLLM). Q2, stated once.
