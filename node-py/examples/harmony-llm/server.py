@@ -1202,9 +1202,18 @@ def _local_satisfies(name: str, requires: dict) -> bool:
             return False
         have = attrs[attr]
         try:
-            if op == "" and have != want:
+            # A LIST want is "a value in this list" (the `context_len=[131072,]`
+            # spelling) — the same semantics as the planner's `_unit_satisfies`;
+            # the two matchers must never disagree about what a clause means.
+            if op == "" and isinstance(want, (list, tuple, set)):
+                if have not in want:
+                    return False
+            elif op == "" and have != want:
                 return False
-            if op == "!=" and have == want:
+            if op == "!=" and isinstance(want, (list, tuple, set)):
+                if have in want:
+                    return False
+            if op == "!=" and not isinstance(want, (list, tuple, set)) and have == want:
                 return False
             if op == ">=" and not float(have) >= float(want):
                 return False
