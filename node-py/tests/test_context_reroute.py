@@ -127,7 +127,7 @@ def test_a_context_refusal_reroutes_once_by_requirement(srv, upstream):
     _Upstream.refuse_models = {"m/small"}
     client = TestClient(srv.app)
     r = client.post("/v1/chat/completions",
-                    json={"model": "local", "max_tokens": 8,
+                    json={"model": "require:class=llm", "max_tokens": 8,
                           "messages": [{"role": "user", "content": "x"}]})
     assert r.status_code == 200
     # Exactly TWO upstream calls: the refusal, then the ONE re-route. No loop.
@@ -143,7 +143,7 @@ def test_streaming_bytes_survive_the_re_route(srv, upstream):
     _Upstream.refuse_models = {"m/small"}
     client = TestClient(srv.app)
     r = client.post("/v1/chat/completions",
-                    json={"model": "local", "stream": True, "max_tokens": 8,
+                    json={"model": "require:class=llm", "stream": True, "max_tokens": 8,
                           "messages": [{"role": "user", "content": "x"}]})
     assert r.status_code == 200
     assert [b["model"] for b in _Upstream.seen] == ["m/small", "m/wide"]
@@ -156,7 +156,7 @@ def test_the_re_route_does_not_loop(srv, upstream):
     _Upstream.refuse_all = True               # the wide unit refuses too
     client = TestClient(srv.app)
     r = client.post("/v1/chat/completions",
-                    json={"model": "local", "max_tokens": 8,
+                    json={"model": "require:class=llm", "max_tokens": 8,
                           "messages": [{"role": "user", "content": "x"}]})
     assert r.status_code == 413
     # ONE re-route per request: the second refusal is answered as it comes.
@@ -171,7 +171,7 @@ def test_nothing_that_can_hold_it_is_the_413_with_the_need_named(srv, upstream, 
     monkeypatch.delitem(srv.SPECS, "llm_wide")   # nothing wider exists
     client = TestClient(srv.app)
     r = client.post("/v1/chat/completions",
-                    json={"model": "local", "max_tokens": 8,
+                    json={"model": "require:class=llm", "max_tokens": 8,
                           "messages": [{"role": "user", "content": "x"}]})
     assert r.status_code == 413
     assert len(_Upstream.seen) == 1              # no re-route was possible
@@ -184,7 +184,7 @@ def test_a_callers_other_clauses_ride_the_re_route(srv, upstream):
     _Upstream.refuse_models = {"m/small"}
     client = TestClient(srv.app)
     r = client.post("/v1/chat/completions",
-                    json={"model": "local", "max_tokens": 8,
+                    json={"model": "require:class=llm", "max_tokens": 8,
                           "harmony_requires": {"class": "llm", "params_b>=": 9},
                           "messages": [{"role": "user", "content": "x"}]})
     assert r.status_code == 200
@@ -217,9 +217,27 @@ def test_an_unrelated_4xx_passes_through_with_its_model(srv, upstream, monkeypat
                         lambda name: f"http://127.0.0.1:{httpd.server_address[1]}")
     client = TestClient(srv.app)
     r = client.post("/v1/chat/completions",
-                    json={"model": "local", "messages": [{"role": "user", "content": "x"}]})
+                    json={"model": "require:class=llm", "messages": [{"role": "user", "content": "x"}]})
     assert r.status_code == 400
     # Byte-for-byte: the model field of a 4xx is the engine's own answer.
     assert json.loads(r.content) == {"error": {"message": "bad request"},
                                      "model": "m/small"}
     httpd.shutdown()
+
+
+def test_a_named_request_keeps_the_413(srv, upstream):
+    """Named is named (task 3.5): a request that NAMES a unit — including the
+    legacy alias `local`, which is this node's default model (scenario
+    "Named local still reaches the 27B") — gets the 413 with the need named,
+    never a silent re-route to some other model the caller did not ask for."""
+    from fastapi.testclient import TestClient
+    # The SMALL unit's engine refuses under whatever name it is asked ("local"
+    # passes through for a named request — named is named).
+    _Upstream.refuse_models = {"m/small", "local"}
+    client = TestClient(srv.app)
+    r = client.post("/v1/chat/completions",
+                    json={"model": "local", "max_tokens": 8,
+                          "messages": [{"role": "user", "content": "x"}]})
+    assert r.status_code == 413
+    assert "40000" in r.text
+    assert [b["model"] for b in _Upstream.seen] == ["local"]   # no re-route
