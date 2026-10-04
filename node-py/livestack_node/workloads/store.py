@@ -95,6 +95,8 @@ class WorkloadStore:
                 db.execute("ALTER TABLE jobs ADD COLUMN environment_handle TEXT")
             if "environment_generation" not in {row[1] for row in db.execute("PRAGMA table_info(attempts)")}:
                 db.execute("ALTER TABLE attempts ADD COLUMN environment_generation INTEGER")
+            if "handler_release" not in {row[1] for row in db.execute("PRAGMA table_info(attempts)")}:
+                db.execute("ALTER TABLE attempts ADD COLUMN handler_release TEXT")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_environment ON jobs(environment_handle,state)")
             environment_columns = {row[1] for row in db.execute("PRAGMA table_info(task_environments)")}
             for column, declaration in (('writer_job', 'TEXT'), ('writer_attempt', 'TEXT'),
@@ -516,6 +518,28 @@ class WorkloadStore:
                 if old["request_hash"] != digest:
                     raise WorkloadError("idempotency key already names different inputs", 409)
                 return self._job(db, old["id"])
+            intent = spec.get('handler_release_intent')
+            if intent is not None:
+                registry = getattr(self, 'handler_registry', None)
+                if registry is None:
+                    raise WorkloadError('handler_release_registry_unavailable', 503)
+                if intent['selection'] == 'default':
+                    digest_map = registry._defaults(db)
+                    release_digest = digest_map.get(spec['handler'])
+                    reason = 'registry_default'
+                else:
+                    release_digest = intent['release_digest']
+                    reason = 'explicit_digest'
+                release = db.execute('SELECT handler_id,release_digest,manifest FROM handler_releases '
+                                     'WHERE handler_id=? AND release_digest=?',
+                                     (spec['handler'], release_digest)).fetchone()
+                if release is None:
+                    raise WorkloadError('handler_release_unavailable', 409)
+                manifest = json.loads(release['manifest'])
+                spec['handler_release'] = dict(handler_id=release['handler_id'],
+                    release_digest=release['release_digest'], execution_contract=manifest['execution_contract'],
+                    payload_schema=manifest['payload_schema'], result_schema=manifest['result_schema'],
+                    selection_reason=reason)
             self._expire(db, now)
             self._expire_environments(db, now)
             self._prune(db, now)
@@ -567,7 +591,8 @@ class WorkloadStore:
         if self.compilation_policy is not None and host_id not in self.remote_hosts.values():
             host_id = self.compilation_policy.physical_host(host_id, self.clock())
         if not isinstance(report, dict) or set(report) - {"capacity", "available", "labels", "handlers", "ready", "host",
-                                                          "environment_profiles", "environment_replicas"}:
+                                                          "environment_profiles", "environment_replicas", "handler_inventory",
+                                                          "handler_activation_failures", "handler_gc_receipts"}:
             raise WorkloadError("invalid worker report")
         capacity, available = resources(report.get("capacity")), resources(report.get("available"))
         tags = labels(report.get("labels", {}))
@@ -581,6 +606,38 @@ class WorkloadStore:
             raise WorkloadError("invalid readiness or cleanup report")
         body = dict(capacity=capacity, available=available, labels=tags, handlers=sorted(set(handlers)),
                     ready=report["ready"])
+        if 'handler_inventory' in report:
+            from .handler_release import validate_worker_inventory
+            inventory = validate_worker_inventory(report['handler_inventory'])
+            if any(item['handler_id'] not in body['handlers'] for item in inventory['releases']):
+                raise WorkloadError('handler_worker_inventory_roster_mismatch')
+            failures = report.get('handler_activation_failures', [])
+            if (not isinstance(failures, list) or len(failures) > 16 or
+                    any(not isinstance(item, dict) or set(item) != {'generation', 'release_digest', 'reason'} or
+                        type(item['generation']) is not int or item['generation'] < 0 or
+                        not re.fullmatch(r'[a-f0-9]{64}', item['release_digest']) or
+                        not isinstance(item['reason'], str) or not item['reason'] or len(item['reason']) > 160
+                        for item in failures)):
+                raise WorkloadError('handler_activation_failures_invalid')
+            body['handler_inventory'] = inventory
+            body['handler_activation_failures'] = failures
+            receipts = report.get('handler_gc_receipts', [])
+            if not isinstance(receipts, list) or len(receipts) > 16:
+                raise WorkloadError('handler_gc_receipts_invalid')
+            for item in receipts:
+                if (not isinstance(item, dict) or set(item) != {
+                        'outcome', 'reason', 'generation', 'examined', 'deleted', 'bytes_reclaimed',
+                        'deleted_digests', 'reference_evidence'} or
+                        item['outcome'] not in ('complete', 'refused') or
+                        item['reason'] is not None and (not isinstance(item['reason'], str) or len(item['reason']) > 160) or
+                        type(item['generation']) is not int or item['generation'] < 0 or
+                        any(type(item[key]) is not int or item[key] < 0 for key in ('examined', 'deleted', 'bytes_reclaimed')) or
+                        not isinstance(item['deleted_digests'], list) or len(item['deleted_digests']) > 256 or
+                        any(not isinstance(digest, str) or not re.fullmatch(r'[a-f0-9]{64}', digest)
+                            for digest in item['deleted_digests']) or
+                        item['reference_evidence'] not in ('complete', 'unavailable')):
+                    raise WorkloadError('handler_gc_receipts_invalid')
+            body['handler_gc_receipts'] = receipts
         profiles = report.get('environment_profiles', {})
         if not isinstance(profiles, dict) or len(profiles) > 32:
             raise WorkloadError('invalid environment profile report')
@@ -631,6 +688,22 @@ class WorkloadStore:
             if old and old["boot"] != boot:
                 for a in db.execute("SELECT * FROM attempts WHERE worker=? AND state='running'", (worker_id,)):
                     self._abandon(db, a, now, "worker session changed")
+            inventory = body.get('handler_inventory')
+            if inventory is not None and inventory['releases']:
+                digests = [item['release_digest'] for item in inventory['releases']]
+                placeholders = ','.join('?' for _ in digests)
+                known = db.execute(f'SELECT handler_id,release_digest,manifest FROM handler_releases '
+                                   f'WHERE release_digest IN ({placeholders})', digests).fetchall()
+                installed = {(row['handler_id'], row['release_digest']): json.loads(row['manifest']) for row in known}
+                for item in inventory['releases']:
+                    manifest = installed.get((item['handler_id'], item['release_digest']))
+                    # A digest can outlive its authority catalog row on a worker's
+                    # bounded local cache. It remains observable but cannot match
+                    # a new assignment unless a live job or default still owns it.
+                    if (manifest is not None and (item['execution_contract'] != manifest['execution_contract'] or
+                            item['payload_schema'] != manifest['payload_schema'] or
+                            item['result_schema'] != manifest['result_schema'])):
+                        raise WorkloadError('handler_worker_inventory_unknown_release', 409)
             db.execute("INSERT INTO workers(id,host,boot,report,seen,ready) VALUES(?,?,?,?,?,0) "
                        "ON CONFLICT(id) DO UPDATE SET boot=excluded.boot,report=excluded.report,seen=excluded.seen",
                        (worker_id, host_id, boot, raw, now))
@@ -751,6 +824,10 @@ class WorkloadStore:
                  "expires": attempt["expires"], "worker": attempt["worker"], "boot": attempt["boot"],
                  "owner": job["owner"], "spec": job["spec"],
                  "compilation": json.loads(attempt['compilation']) if attempt['compilation'] else None}
+        if attempt['handler_release']:
+            result['handler_release'] = json.loads(attempt['handler_release'])
+        elif job['spec'].get('handler_release'):
+            result['handler_release'] = job['spec']['handler_release']
         if job.get('environment_handle'):
             env = db.execute('SELECT * FROM task_environments WHERE handle=?',
                              (job['environment_handle'],)).fetchone()
@@ -821,7 +898,7 @@ class WorkloadStore:
             return {"expires": expires, "lease_remaining": self.limits.lease_seconds}
 
     def complete(self, worker, boot, attempt_id, fence, *, input_digest, outcome, result,
-                  environment_receipt=None):
+                  environment_receipt=None, handler_result_identity=None):
         if outcome not in ("succeeded", "product_failure", "infrastructure"):
             raise WorkloadError("invalid outcome")
         now = self.clock()
@@ -835,7 +912,23 @@ class WorkloadStore:
             job = self._job(db, a["job"])
             if job["spec"]["input_digest"] != input_digest:
                 raise WorkloadError("result input digest differs from assignment", 409)
+            expected_release = job['spec'].get('handler_release')
+            if expected_release is not None:
+                from .handler_release import validate_result_identity
+                identity = validate_result_identity(handler_result_identity)
+                expected_identity = {key: expected_release[key] for key in (
+                    'handler_id', 'release_digest', 'execution_contract', 'payload_schema', 'result_schema')}
+                if identity['handler_release'] != expected_identity:
+                    raise WorkloadError('handler_result_release_identity_mismatch', 409)
+                if any(identity[key] != expected for key, expected in dict(job_id=job['id'],
+                    attempt_id=attempt_id, fence=fence, worker=worker, boot=boot,
+                    input_digest=input_digest).items()):
+                    raise WorkloadError('handler_result_identity_mismatch', 409)
+            elif handler_result_identity is not None:
+                raise WorkloadError('unexpected_handler_release_identity', 400)
             completion = {"outcome": outcome, "input_digest": input_digest, "result": result}
+            if expected_release is not None:
+                completion['handler_result_identity'] = identity
             env_handle = job.get('environment_handle')
             env = None
             if env_handle:

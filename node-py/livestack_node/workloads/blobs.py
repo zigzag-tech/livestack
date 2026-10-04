@@ -119,6 +119,21 @@ class BlobStore:
         finally:
             stream.close()
 
+    @contextmanager
+    def open_authority(self, digest):
+        """Read a verified object for an authority-owned protocol purpose."""
+        digest = self.digest(digest)
+        with self.store.transaction() as db:
+            row = db.execute("SELECT size FROM blobs WHERE digest=? AND state='ready'", (digest,)).fetchone()
+            if not row:
+                raise WorkloadError('content not found', 404)
+            stream = (self.root/digest).open('rb')
+            db.execute('UPDATE blobs SET used=? WHERE digest=?', (self.store.clock(), digest))
+        try:
+            yield stream, row['size']
+        finally:
+            stream.close()
+
     def recover(self):
         """Startup only, under the authority's singleton lock."""
         with self.store.transaction() as db:
@@ -147,7 +162,8 @@ class BlobStore:
                 "SELECT json_extract(input.value,'$.digest') FROM jobs, "
                 "json_each(jobs.spec,'$.input_objects') input UNION "
                 "SELECT json_extract(artifact.value,'$.digest') FROM attempts, "
-                "json_each(attempts.result,'$.result.artifacts') artifact) "
+                "json_each(attempts.result,'$.result.artifacts') artifact UNION "
+                "SELECT archive_digest FROM handler_releases) "
                 "SELECT digest FROM blobs WHERE state='ready' AND used<? "
                 "AND digest NOT IN (SELECT digest FROM referenced)",
                 (now-self.retention_seconds,)).fetchall()

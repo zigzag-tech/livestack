@@ -125,6 +125,69 @@ after cgroup cleanup. Its durable journal replays an ambiguous completion or
 reconciles an interrupted attempt after restart. Observe-only reports capacity
 without claiming jobs. Native execution does not yet advertise Docker handlers.
 
+## Proposed: independently released workload handlers (2026-10-04)
+
+The paired `harmony-handler-release-registry` and
+`harmony-handler-hot-activation` changes add immutable command-handler packages
+to the existing workload boundary. They keep scheduling, leases, process
+supervision, artifact transfer, and cleanup in the authority and worker. They do
+not hot-import Python into either long-lived process. A compatible release for
+an already authorized logical handler can become the default without restarting
+the authority or worker; a new handler ID, installed runtime, execution backend,
+or contract major remains a guarded core/configuration rollout.
+
+An operator configures `handler_release_policy` on the authority with a policy
+revision and, per existing handler ID, allowlisted `runtime_ids` and `backends`.
+The worker separately maps runtime IDs to installed executable paths and keeps
+its existing per-handler resource/backend policy. A release manifest can select
+only one of those installed runtimes and backends. It cannot grant signing,
+compilation, host, network, credential, or resource privileges.
+
+Build a bundle with `scripts/build-handler-bundle.mjs`. Use the private operator
+config with the release CLI:
+
+```sh
+python -m livestack_node.workloads.handler_release_cli --config <operator.json> status
+python -m livestack_node.workloads.handler_release_cli --config <operator.json> \
+  stage --bundle <bundle-dir> --handler <existing-handler-id>
+python -m livestack_node.workloads.handler_release_cli --config <operator.json> \
+  activate --handler <existing-handler-id> --digest <release-digest> \
+  --expected-generation <observed-generation>
+python -m livestack_node.workloads.handler_release_cli --config <operator.json> \
+  rollback --handler <existing-handler-id> --digest <retained-release-digest> \
+  --expected-generation <observed-generation>
+```
+
+Staging verifies the complete archive and is idempotent by release digest.
+Activation uses compare-and-swap against the authority generation. Workers fetch
+the bounded desired snapshot over their existing control exchange, install
+missing immutable packages, and atomically advance the local pointer. A failure
+keeps the previous pointer and is reported by digest and reason. The authority
+resolves a default once when accepting a job; retries and completion continue to
+use that exact release even after another version activates.
+
+Initial hard bounds are 64 handler IDs, four catalogued releases per handler,
+2 GiB per archive, 16 GiB total authority archives, 4 MiB catalog metadata, 16
+unreferenced staging candidates, 16 activation receipts, 1,024 bounded ledger
+events, 256 installed packages per worker, and 16 GiB installed bytes per
+worker. Garbage collection needs a configured retention window of at least 24
+hours and one complete, set-based reference snapshot; unset retention or missing
+evidence deletes nothing. The authority keeps two registry generations and the
+current plus one rollback release per handler. Workers retain packages referenced
+by their effective defaults, active journals, and the authority snapshot.
+The private worker package root also caps installed packages at 256 and total
+entries at 260, including at most three transient download/extraction/pointer
+files. Startup removes incomplete transient entries from a prior crash; excess
+entries refuse activation with a named capacity error.
+
+Rollout is: ship the paired core/schema support, configure the operator policy
+and worker runtime mapping, build and stage a package, activate it with the
+observed generation, then verify worker status and a real A/B attempt before
+migrating a consumer. Rollback activates a retained digest as a new generation;
+it never rewrites accepted jobs. Existing name-only jobs and workers remain on
+the legacy path until migrated. These controls are proposed and do not enroll a
+production worker by themselves.
+
 Production workers require a separate bounded filesystem. The root-only
 `workloads.provision_workspace` command exclusively creates an owned ext4 image
 under `/var/lib/livestack-workloads`, installs an enabled systemd mount unit and

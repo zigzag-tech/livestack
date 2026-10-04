@@ -37,8 +37,13 @@ def route_object(handler, principal, method, parts):
     blobs, store = handler.server.blobs, handler.server.store
     digest = blobs.digest(parts[1])
     if method == 'GET':
-        owner = attempt_owner(store, principal, handler.headers, digest) if principal.role == 'worker' else principal.id
-        with blobs.open(owner, digest) as (stream, size):
+        registry_archive = principal.role == 'worker' and handler.server.handler_registry.is_required_archive(digest)
+        if registry_archive:
+            opened = blobs.open_authority(digest)
+        else:
+            owner = attempt_owner(store, principal, handler.headers, digest) if principal.role == 'worker' else principal.id
+            opened = blobs.open(owner, digest)
+        with opened as (stream, size):
             send_object(handler, stream, size, digest)
     elif method == 'PUT':
         owner = attempt_owner(store, principal, handler.headers) if principal.role == 'worker' else principal.id

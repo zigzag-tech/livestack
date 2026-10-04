@@ -97,7 +97,20 @@ class WorkloadWorker:
         self.boot = name(config['boot'], 'worker boot') if config.get('boot') is not None else uuid.uuid4().hex
         self.workspace = Path(config['workspace']).resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
-        self.handlers = config['handlers']
+        self.base_handlers = config['handlers']
+        self.handlers = dict(self.base_handlers)
+        from .handler_installer import HandlerPackageStore
+        self.handler_packages = HandlerPackageStore(config.get('handler_release_store',
+            str(Path(config['state_dir'])/'handler-releases')), config.get('handler_runtimes', {}),
+            self.base_handlers, platform_name=config.get('handler_platform'),
+            architecture=config.get('handler_architecture'))
+        self.handler_registry_failures = []
+        self.handler_gc_receipts = []
+        self.handler_registry_state = self.handler_packages.read_pointer()
+        for handler_id, release_digest in self.handler_registry_state['defaults'].items():
+            self.handlers[handler_id] = self.handler_packages.handler_config(release_digest, verify=False)
+        self.handler_inventory = self.handler_packages.inventory(self.handler_registry_state['generation'],
+            self.handler_registry_state['defaults'])
         self.task_environments = None
         self.task_environment_error = None
         self._environment_sweep_at = 0.0
@@ -314,6 +327,9 @@ class WorkloadWorker:
         available['cpu'] = max(0, min(capacity['cpu'], (os.cpu_count() or 1)-self._busy_cpus()))
         report = dict(capacity=capacity, available=available, labels=self.config.get('labels', {}),
                       handlers=list(self.handlers), ready=not self.config.get('observe_only', False))
+        report['handler_inventory'] = self.handler_inventory
+        report['handler_activation_failures'] = list(self.handler_registry_failures[-16:])
+        report['handler_gc_receipts'] = list(self.handler_gc_receipts[-16:])
         if self.task_environments is not None:
             profiles, replicas = self.task_environments.report()
             report['environment_profiles'] = profiles
@@ -328,7 +344,16 @@ class WorkloadWorker:
         return report
 
     def register(self, cleaned=()):
-        response = self.client.request('worker/report', dict(boot=self.boot, report=self.report(), cleaned=list(cleaned)))
+        pending_cleaned = list(cleaned)
+        response = None
+        for _ in range(3):
+            response = self.client.request('worker/report',
+                dict(boot=self.boot, report=self.report(), cleaned=pending_cleaned))
+            pending_cleaned = []
+            if not self._sync_handler_registry(response.get('handler_sync')):
+                break
+        else:
+            raise WorkloadError('handler_registry_changed_during_worker_sync', 503)
         instructions = response.get('environment_cleanup', [])
         if not isinstance(instructions, list) or len(instructions) > 64:
             raise WorkloadError('authority returned invalid environment cleanup instructions', 502)
@@ -350,6 +375,113 @@ class WorkloadWorker:
             logging.info('task_environment_stale_cleanup: handle=%s generation=%s outcome=%s',
                          item['handle'], item['generation'], outcome)
         return response
+
+    def _sync_handler_registry(self, sync):
+        if sync is None:
+            return False
+        if (not isinstance(sync, dict) or set(sync) != {
+                'generation', 'defaults', 'releases', 'retention_seconds', 'references_complete'} or
+                type(sync['generation']) is not int or sync['generation'] < 0 or
+                not isinstance(sync['defaults'], dict) or len(sync['defaults']) > 64 or
+                not isinstance(sync['releases'], list) or len(sync['releases']) > 256 or
+                type(sync['references_complete']) is not bool or
+                sync['retention_seconds'] is not None and type(sync['retention_seconds']) is not int):
+            raise WorkloadError('authority returned invalid handler registry generation', 502)
+        current = self.handler_packages.read_pointer(verify=False)
+        defaults = dict(sync['defaults'])
+        changed = False
+        for descriptor in sync['releases']:
+            if (not isinstance(descriptor, dict) or set(descriptor) != {
+                    'handler_id', 'release_digest', 'archive_digest', 'archive_bytes', 'manifest'}):
+                raise WorkloadError('authority returned invalid handler release descriptor', 502)
+            handler, digest = descriptor['handler_id'], descriptor['release_digest']
+            if handler not in self.base_handlers:
+                raise WorkloadError('authority selected a handler outside worker core policy', 403)
+            if digest not in {item['release_digest'] for item in self.handler_inventory['releases']}:
+                temporary = self.handler_packages.root/('.handler-download-'+digest+'.tar')
+                try:
+                    self.transfer.get(descriptor['archive_digest'], temporary)
+                    self.handler_packages.install(temporary, descriptor)
+                except Exception as error:
+                    reason = f'{type(error).__name__}: {str(error)[:120]}'
+                    self._record_handler_registry_failure(sync['generation'], digest, reason)
+                    logging.error('handler_release_activation_failed: generation=%s digest=%s reason=%s',
+                                  sync['generation'], digest, reason)
+                    return False
+                finally:
+                    temporary.unlink(missing_ok=True)
+                changed = True
+            try:
+                self.handler_packages.handler_config(digest, verify=False)
+            except Exception as error:
+                reason = f'{type(error).__name__}: {str(error)[:120]}'
+                self._record_handler_registry_failure(sync['generation'], digest, reason)
+                logging.error('handler_release_activation_failed: generation=%s digest=%s reason=%s',
+                              sync['generation'], digest, reason)
+                return False
+        if current['generation'] != sync['generation']:
+            changed = True
+        if not changed:
+            self.handler_registry_state = current
+            pruned = self._prune_handler_packages(sync)
+            if pruned:
+                self.handler_inventory = self.handler_packages.inventory(sync['generation'], current['defaults'])
+            return pruned
+        # Validate every selected package before replacing the durable pointer.
+        installed_handlers = dict(self.handlers)
+        for handler, digest in defaults.items():
+            installed_handlers[handler] = self.handler_packages.handler_config(digest, verify=False)
+        self.handler_packages.commit_pointer(sync['generation'], defaults)
+        self.handler_registry_state = {'generation': sync['generation'], 'defaults': defaults}
+        self.handlers = installed_handlers
+        self.handler_inventory = self.handler_packages.inventory(sync['generation'], defaults)
+        self.handler_registry_failures = [failure for failure in self.handler_registry_failures
+            if failure['generation'] != sync['generation']]
+        logging.info('handler_registry_activated: generation=%s releases=%d',
+                     sync['generation'], len(sync['releases']))
+        self._prune_handler_packages(sync)
+        self.handler_inventory = self.handler_packages.inventory(sync['generation'])
+        return True
+
+    def _prune_handler_packages(self, sync):
+        journal = self.journal.read()
+        protected = set(sync['defaults'].values())
+        if journal:
+            identity = journal.get('assignment', {}).get('handler_release')
+            if isinstance(identity, dict) and isinstance(identity.get('release_digest'), str):
+                protected.add(identity['release_digest'])
+        receipt = self.handler_packages.prune(
+            {item['release_digest'] for item in sync['releases']}, protected,
+            sync['retention_seconds'], generation=sync['generation'],
+            references_complete=sync['references_complete'])
+        previous = self.handler_gc_receipts[-1] if self.handler_gc_receipts else None
+        if receipt != previous:
+            self.handler_gc_receipts.append(receipt)
+            self.handler_gc_receipts = self.handler_gc_receipts[-16:]
+            if receipt['outcome'] == 'refused' or receipt.get('deleted'):
+                logging.info('handler_release_gc: %s', json.dumps(receipt, sort_keys=True))
+        if receipt.get('deleted'):
+            return True
+        return False
+
+    def _record_handler_registry_failure(self, generation, digest, reason):
+        failure = {'generation': generation, 'release_digest': digest, 'reason': reason[:160]}
+        self.handler_registry_failures = [item for item in self.handler_registry_failures
+            if not (item['generation'] == generation and item['release_digest'] == digest)]
+        self.handler_registry_failures.append(failure)
+        self.handler_registry_failures = self.handler_registry_failures[-16:]
+
+    def _handler_for_assignment(self, assignment, *, verify=True):
+        release = assignment.get('handler_release')
+        if release is None:
+            return self.base_handlers[assignment['spec']['handler']]
+        if release.get('handler_id') != assignment['spec']['handler']:
+            raise WorkloadError('handler_assignment_identity_mismatch', 409)
+        manifest = self.handler_packages.manifest(release['release_digest'], verify=verify)
+        if any(release.get(field) != manifest[field] for field in (
+                'handler_id', 'execution_contract', 'payload_schema', 'result_schema')):
+            raise WorkloadError('handler_assignment_contract_mismatch', 409)
+        return self.handler_packages.handler_config(release['release_digest'], verify=False)
 
     def reconcile(self):
         old = self.journal.read()
@@ -422,7 +554,7 @@ class WorkloadWorker:
         self.reconciled = True
 
     def _completion_from_exit(self, assignment, result):
-        handler = self.handlers[assignment['spec']['handler']]
+        handler = self._handler_for_assignment(assignment, verify=False)
         code = result['exit_code']
         resources = result.get('resources', {})
         resource_failure = resources.get('oom_kill', 0) > 0 or resources.get('pids_max_events', 0) > 0
@@ -519,7 +651,7 @@ class WorkloadWorker:
                 raise
 
     def _attach_artifacts(self, assignment, completion, output):
-        handler = self.handlers[assignment['spec']['handler']]
+        handler = self._handler_for_assignment(assignment, verify=False)
         artifacts = []
         declared = handler.get('outputs', []) if completion['outcome'] != 'infrastructure' else handler.get('infrastructure_outputs', [])
         for item in ['command.log', 'command.previous.log'] + declared:
@@ -561,6 +693,14 @@ class WorkloadWorker:
         completion['result']['artifacts'] = artifacts
         completion.update(boot=assignment['boot'], attempt_id=assignment['attempt_id'], fence=assignment['fence'],
                           input_digest=assignment['spec']['input_digest'])
+        if assignment.get('handler_release') is not None:
+            release = assignment['handler_release']
+            completion['handler_result_identity'] = dict(job_id=assignment['job_id'],
+                attempt_id=assignment['attempt_id'], fence=assignment['fence'],
+                worker=assignment['worker'], boot=assignment['boot'],
+                input_digest=assignment['spec']['input_digest'],
+                handler_release={key: release[key] for key in (
+                    'handler_id', 'release_digest', 'execution_contract', 'payload_schema', 'result_schema')})
         return completion
 
     def step(self):
@@ -695,7 +835,7 @@ class WorkloadWorker:
                                 interval=self.config.get('lease_interval', 10),
                                 progress_path=output/'progress.json').start()
             spec = assignment['spec']
-            handler = self.handlers[spec['handler']]
+            handler = self._handler_for_assignment(assignment)
             need = spec['need']
             if need.get('cpu', 0) <= 0 or need.get('memory_bytes', 0) < 64*1024**2:
                 raise WorkloadError('native execution requires CPU and at least 64 MiB RAM')

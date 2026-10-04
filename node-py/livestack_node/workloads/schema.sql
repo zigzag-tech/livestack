@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS attempts (
  worker TEXT NOT NULL REFERENCES workers(id), boot TEXT NOT NULL,
  host TEXT NOT NULL, fence INTEGER NOT NULL, state TEXT NOT NULL,
  need TEXT NOT NULL, expires REAL NOT NULL, created REAL NOT NULL,
- progress TEXT, result TEXT, environment_generation INTEGER,
+ progress TEXT, result TEXT, environment_generation INTEGER, handler_release TEXT,
  UNIQUE(job, fence)
 );
 CREATE TABLE IF NOT EXISTS task_environments (
@@ -66,6 +66,24 @@ CREATE TABLE IF NOT EXISTS github_remote_jobs (
  state TEXT NOT NULL, dispatch_started REAL, run_id TEXT, run_attempt INTEGER,
  run_status TEXT, reason TEXT, created REAL NOT NULL, updated REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS handler_releases(
+ handler_id TEXT NOT NULL, release_digest TEXT NOT NULL, archive_digest TEXT NOT NULL,
+ archive_bytes INTEGER NOT NULL, manifest TEXT NOT NULL, actor TEXT NOT NULL,
+ created REAL NOT NULL, PRIMARY KEY(handler_id,release_digest), UNIQUE(release_digest));
+CREATE TABLE IF NOT EXISTS handler_registry_generations(
+ generation INTEGER PRIMARY KEY, defaults TEXT NOT NULL, actor TEXT NOT NULL,
+ request_id TEXT NOT NULL UNIQUE, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS handler_registry_state(
+ singleton INTEGER PRIMARY KEY CHECK(singleton=1), generation INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS handler_activation_receipts(
+ request_id TEXT PRIMARY KEY, actor TEXT NOT NULL, expected_generation INTEGER NOT NULL,
+ generation INTEGER NOT NULL, handler_id TEXT NOT NULL, previous_digest TEXT,
+ release_digest TEXT NOT NULL, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS handler_release_events(
+ id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL NOT NULL, actor TEXT NOT NULL,
+ handler_id TEXT NOT NULL, release_digest TEXT, archive_digest TEXT,
+ bytes INTEGER NOT NULL, outcome TEXT NOT NULL, policy_revision TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS handler_release_events_age ON handler_release_events(id);
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state, created);
 CREATE INDEX IF NOT EXISTS attempts_host ON attempts(host, state);
 CREATE INDEX IF NOT EXISTS github_remote_state ON github_remote_jobs(provider, state, created);
