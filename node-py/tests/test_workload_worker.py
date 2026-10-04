@@ -72,6 +72,11 @@ if request.get('spawn_child'):
     Path('build','child.pid').write_text(str(child.pid))
 time.sleep(request.get('sleep',0))
 value=Path('input').read_text()
+if request.get('assert_absent') and Path(request['assert_absent']).exists():
+    raise SystemExit(71)
+if request.get('assert_mode') is not None:
+    if Path(request.get('mode_file','input')).stat().st_mode & 0o777 != request['assert_mode']:
+        raise SystemExit(72)
 if request.get('object'):
     value+='|'+Path(os.environ['HARMONY_INPUT_OBJECTS'],request['object']).read_text()
 if request.get('cache'):
@@ -226,7 +231,7 @@ def test_worker_fetches_only_declared_supplemental_inputs(fleet, tmp_path, monke
 
 
 def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_path, monkeypatch):
-    store, config, caller, first_digest = fleet
+    store, config, caller, _first_digest = fleet
     environment_root = tmp_path/'task-environments'
     environment_root.mkdir()
     config['task_environments'] = dict(root=str(environment_root), host_id='test-host',
@@ -261,14 +266,29 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
             require_separate_filesystem=False, filesystem_bytes=8*1024**3)
     monkeypatch.setattr(TaskEnvironmentStore, '__init__', test_store_init)
 
-    def submit_environment(job_key, digest, timing_version=2):
+    def submit_environment(job_key, digest, timing_version=2, **extra_payload):
         return caller.submit(dict(version=3, key=job_key, handler='native.v1', input_digest=digest,
             need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
             environment={'key':'test-task', 'reuse':'prefer'},
-            payload={'cache':True, 'inspect_cache':True, 'timing_version':timing_version}))
+            payload={'cache':True, 'inspect_cache':True, 'timing_version':timing_version,
+                **extra_payload}))
+
+    def capture_revision(name, files, modes=None):
+        source = tmp_path/name
+        source.mkdir()
+        for relative, contents in files.items():
+            path = source/relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(contents)
+            path.chmod((modes or {}).get(relative, 0o644))
+        archive = tmp_path/f'{name}.tar'
+        capture(source, sorted(files), archive)
+        return InputTransfer(caller).put(archive)['digest']
 
     worker = WorkloadWorker(config)
     try:
+        first_digest = capture_revision('environment-revision-one', {
+            'input': b'captured bytes', 'obsolete.txt': b'old captured file'})
         first = submit_environment('environment-first', first_digest)
         assert worker.step()
         first_result = caller.get(first['id'])
@@ -282,13 +302,12 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
         handle = first['environment_handle']
         cache = environment_root/handle/'source'/'build'/'cache.txt'
         assert cache.read_text() == 'fresh|captured bytes'
+        assert (environment_root/handle/'source'/'obsolete.txt').read_bytes() == b'old captured file'
 
-        edited = tmp_path/'edited-source'
-        edited.mkdir()
-        (edited/'input').write_text('edited captured bytes')
-        capture(edited, ['input'], tmp_path/'edited-source.tar')
-        second_digest = InputTransfer(caller).put(tmp_path/'edited-source.tar')['digest']
-        second = submit_environment('environment-second', second_digest, timing_version=1)
+        second_digest = capture_revision('environment-revision-two',
+            {'input': b'edited captured bytes'}, {'input': 0o755})
+        second = submit_environment('environment-second', second_digest, timing_version=1,
+            assert_absent='obsolete.txt', mode_file='input', assert_mode=0o755)
         assert second['environment_handle'] == handle
         assert worker.step()
         second_result = caller.get(second['id'])
