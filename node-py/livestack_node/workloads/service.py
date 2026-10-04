@@ -14,7 +14,6 @@ from .store import WorkloadStore
 from .blobs import BlobStore
 from .artifact_mirror import InstalledArtifactMirror
 from .compilation_policy import CompilationPolicy
-from .github_remote import GitHubRemote
 
 
 def load_principals(path):
@@ -70,7 +69,14 @@ def main():
         logging.basicConfig(level=logging.INFO, handlers=[
             RotatingFileHandler(root/'authority.log', maxBytes=16*1024*1024, backupCount=3)])
         principals = load_principals(args.config)
-        github_remote = GitHubRemote(config['github_remote']) if 'github_remote' in config else None
+        if 'github_remote' in config:
+            # GitHub dispatch is optional. Keep its third-party crypto
+            # dependency out of authorities that do not configure that
+            # provider (including the source-only Harmony test runtime).
+            from .github_remote import GitHubRemote
+            github_remote = GitHubRemote(config['github_remote'])
+        else:
+            github_remote = None
         store = WorkloadStore(root/'workloads.sqlite', handlers=config['handlers'],
                               limits=Limits(**config.get('limits', {})),
                               environment_handlers=config.get('environment_handlers', {}),
