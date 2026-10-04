@@ -278,7 +278,7 @@ def test_prune_expires_parked_disk_only_and_reports_deletion(tmp_path):
     assert result['removed'] == ['2'*32]
     assert not (root/('2'*32)).exists()
     recreated = store.prepare(assignment('2'*32, 2, digest), incoming, handler=HANDLER)
-    assert recreated['reuse_outcome'] == 'created'
+    assert recreated['reuse_outcome'] == 'rebuilt'
     assert (recreated['source']/'lib'/'main.dart').read_bytes() == b'code'
     store.release(recreated)
 
