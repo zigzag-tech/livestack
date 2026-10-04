@@ -125,7 +125,7 @@ after cgroup cleanup. Its durable journal replays an ambiguous completion or
 reconciles an interrupted attempt after restart. Observe-only reports capacity
 without claiming jobs. Native execution does not yet advertise Docker handlers.
 
-## Proposed: independently released workload handlers (2026-10-04)
+## Current: independently released workload handlers (initial E2E rollout, 2026-10-04)
 
 The paired `harmony-handler-release-registry` and
 `harmony-handler-hot-activation` changes add immutable command-handler packages
@@ -185,8 +185,33 @@ and worker runtime mapping, build and stage a package, activate it with the
 observed generation, then verify worker status and a real A/B attempt before
 migrating a consumer. Rollback activates a retained digest as a new generation;
 it never rewrites accepted jobs. Existing name-only jobs and workers remain on
-the legacy path until migrated. These controls are proposed and do not enroll a
-production worker by themselves.
+the legacy path until migrated.
+
+### Initial production rollout
+
+The paired implementation is live in the authority and three compatible
+Linux/x86_64 E2E workers. The authority was upgraded once to the release-aware
+core. Its policy revision `benchday-e2e-handler-release-20261004` authorizes
+only `benchday.e2e.dependencies.v1` and `benchday.e2e.full.v1`, each with
+runtime `node22` and backend `rootless-docker-native`.
+
+At generation 4 the defaults are dependency A
+`8ccb0512a7dc2485762dfc7604ccb2bbba3d28eb3f124ade95d015051d3fe874` and full A
+`e9bc7bdcdf07a2d68250ded54ac16cc63f322b817ff6c613e10c587d58539544`. Workers
+`zz-joe-e2e-1`, `zz-joe-e2e-2`, and `xc-win-1-wsl` report both releases, are
+ready, and have no activation failures. E2E2 additionally retains full B
+`09a3c85b2b0800398a8ab17664a53944ef014fc0136891e0cd8923755d980639`; activating
+B and rolling back to A advanced the registry through generations 3 and 4
+without an authority or worker restart. The busy-attempt integration control
+also verifies that A remains pinned and the worker PID/boot remain stable while
+B activates.
+
+The aarch64 Mac Lima worker remains on legacy execution, and the retired tower
+E2E workers remain offline. Build/release handlers stay explicit on the legacy
+path until a separate target/runtime/caller migration. The separately staged
+Hub/Web policy and admin principal are not part of this rollout. See
+Benchday's `docs/harmony-worker-enrolment.md` for the worker runbook and
+drop-in precedence trap.
 
 Production workers require a separate bounded filesystem. The root-only
 `workloads.provision_workspace` command exclusively creates an owned ext4 image

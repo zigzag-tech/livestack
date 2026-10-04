@@ -82,7 +82,7 @@ The authority reference query returns a set covering retained registry defaults,
 1. Ship the paired Benchday and Livestack contract fixtures and schemas. Add the authority package catalog and release-aware protocol while keeping legacy configuration and callers explicit.
 2. Upgrade the authority and eligible workers once using the existing guarded rollout. Install the registry state directory and configured runtimes; do not claim a worker has a release until its verified report names it.
 3. Register and install Benchday E2E packages, then exercise A/B activation under a live attempt, queue pinning, retry, rollback, recovery and result identity in isolated real authority/worker tests.
-4. Migrate compatible build/release producers and consumers to exact identity, enumerate worker compatibility from authority reports, and preserve name-only workers as legacy.
+4. For the initial E2E-scoped rollout, migrate only the full and dependency producers/consumers to exact identity. Keep build/release handlers on the explicit legacy path; their target-specific runtimes, hosts, producer contracts, and policies require a separate migration. Use authority reports to enumerate compatibility rather than assuming a uniform fleet.
 5. Rollback changes defaults to retained releases. Disable release-aware placement only after no accepted release-aware job remains; refuse a core downgrade while such jobs or journals are pinned.
 
 ## Verification
