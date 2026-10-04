@@ -35,7 +35,8 @@ def fleet(tmp_path, monkeypatch):
         'native.v1': {'purpose': 'development', 'profile': 'native-test-v1'}})
     principals = [
         Principal('owner', 'a'*32, 'caller', ('native.v1',)),
-        Principal('worker', 'w'*32, 'worker', worker='integration', host='test-host')]
+        Principal('worker', 'w'*32, 'worker', worker='integration', host='test-host'),
+        Principal('worker-b', 'z'*32, 'worker', worker='integration-b', host='replacement-host')]
     server = WorkloadServer(('127.0.0.1', 0), store, principals)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -234,6 +235,8 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
     store, config, caller, _first_digest = fleet
     environment_root = tmp_path/'task-environments'
     environment_root.mkdir()
+    replacement_environment_root = tmp_path/'replacement-task-environments'
+    replacement_environment_root.mkdir()
     config['task_environments'] = dict(root=str(environment_root), host_id='test-host',
         quota_helper='/unused/in-tests', project_id_min=100000, project_id_max=100063,
         max_bytes_per_replica=32*1024**3, max_bytes_per_owner=128*1024**3,
@@ -243,26 +246,28 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
             'cache_components': [{'name': 'incremental-build', 'path': 'source/build',
                 'inputs': [], 'contract': 'incremental-build-v1'}]}})
 
-    def quota_usage(project_ids):
-        result = []
-        for directory in environment_root.iterdir():
-            marker_path = directory/'environment.json'
-            if not marker_path.is_file():
-                continue
-            marker = json.loads(marker_path.read_text())
-            project_id = marker['project_id']
-            if project_id not in project_ids:
-                continue
-            used = sum(path.lstat().st_blocks*512 for path in directory.rglob('*') if not path.is_dir())
-            result.append({'project_id': project_id, 'used_bytes': used,
-                'hard_bytes': ((marker['quota_bytes']+1023)//1024)*1024})
-        return result
+    def quota_usage_for(root):
+        def quota_usage(project_ids):
+            result = []
+            for directory in root.iterdir():
+                marker_path = directory/'environment.json'
+                if not marker_path.is_file():
+                    continue
+                marker = json.loads(marker_path.read_text())
+                project_id = marker['project_id']
+                if project_id not in project_ids:
+                    continue
+                used = sum(path.lstat().st_blocks*512 for path in directory.rglob('*') if not path.is_dir())
+                result.append({'project_id': project_id, 'used_bytes': used,
+                    'hard_bytes': ((marker['quota_bytes']+1023)//1024)*1024})
+            return result
+        return quota_usage
 
     original_init = TaskEnvironmentStore.__init__
     def test_store_init(self, environment_config, **kwargs):
         return original_init(self, environment_config, **kwargs,
             quota_ensure=lambda handle, project, quota: {'quota_bytes': quota},
-            quota_probe=lambda _: True, quota_usage=quota_usage,
+            quota_probe=lambda _: True, quota_usage=quota_usage_for(Path(environment_config['root'])),
             require_separate_filesystem=False, filesystem_bytes=8*1024**3)
     monkeypatch.setattr(TaskEnvironmentStore, '__init__', test_store_init)
 
@@ -330,8 +335,42 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
             'name': 'incremental-build', 'path': 'build', 'identity': receipt['cache_components'][0]['identity'],
             'outcome': 'reused'}]
 
+        # Let a real worker on a second authority host reconstruct generation 3.
+        # When the first worker reports again, it must reclaim only generation 2.
+        replacement_config = dict(config, token='z'*32, worker='integration-b',
+            state_dir=str(tmp_path/'replacement-state'), workspace=str(tmp_path/'replacement-workspace'),
+            task_environments=dict(config['task_environments'], root=str(replacement_environment_root),
+                                   host_id='replacement-host'))
+        third_digest = capture_revision('environment-revision-three', {'input': b'relocated source'})
+        third = submit_environment('environment-relocated', third_digest)
+        assert third['environment_handle'] == handle
+        with store.connect() as db:
+            parked = db.execute('SELECT generation,state FROM task_environments WHERE handle=?',
+                                 (handle,)).fetchone()
+            prior = db.execute('SELECT host,generation,state FROM task_environment_replicas WHERE handle=?',
+                               (handle,)).fetchall()
+        assert tuple(parked) == (2, 'parked')
+        assert [(row['host'], row['generation'], row['state']) for row in prior] == [
+            ('test-host', 2, 'parked')]
+        with store.transaction() as db:
+            db.execute("UPDATE workers SET seen=0 WHERE id='integration'")
+        worker_b = WorkloadWorker(replacement_config)
+        assert worker_b.step()
+        relocated = caller.get(third['id'])
+        assert relocated['state'] == 'succeeded'
+        assert relocated['result']['environment_receipt']['reuse_outcome'] == 'relocated'
+        assert json.loads((replacement_environment_root/handle/'environment.json').read_text())['generation'] == 3
+
+        cleanup = worker.register()
+        assert cleanup['environment_cleanup'] == [{'handle': handle, 'generation': 2}]
+        assert not (environment_root/handle).exists()
+        with store.connect() as db:
+            replicas = db.execute('SELECT host,generation FROM task_environment_replicas WHERE handle=?',
+                                  (handle,)).fetchall()
+        assert [(row['host'], row['generation']) for row in replicas] == [('replacement-host', 3)]
+
         malformed = submit_environment('environment-malformed-timing', second_digest, timing_version=0)
-        assert worker.step()
+        assert worker_b.step()
         malformed_result = caller.get(malformed['id'])
         malformed_receipt = malformed_result['result']['environment_receipt']
         assert malformed_result['state'] == 'succeeded'
@@ -340,6 +379,8 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
             for phase in ('dependencies', 'compile', 'test'))
     finally:
         worker.close()
+        if 'worker_b' in locals():
+            worker_b.close()
 
 
 

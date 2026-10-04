@@ -634,6 +634,7 @@ class WorkloadStore:
             db.execute("INSERT INTO workers(id,host,boot,report,seen,ready) VALUES(?,?,?,?,?,0) "
                        "ON CONFLICT(id) DO UPDATE SET boot=excluded.boot,report=excluded.report,seen=excluded.seen",
                        (worker_id, host_id, boot, raw, now))
+            environment_cleanup = []
             if 'environment_replicas' in report:
                 reported = body['environment_replicas']
                 reported_handles = {item['handle'] for item in reported}
@@ -663,9 +664,12 @@ class WorkloadStore:
                     handle = replica['handle']
                     environment = environments.get(handle)
                     if environment is None:
+                        environment_cleanup.append(dict(handle=handle, generation=replica['generation']))
                         continue  # stale disk state is never a scheduler cache hit
-                    if (replica['state'] != 'parked' or replica['generation'] != environment['generation'] or
-                            environment['writer_attempt'] is not None):
+                    if replica['generation'] != environment['generation']:
+                        environment_cleanup.append(dict(handle=handle, generation=replica['generation']))
+                        continue  # returning hosts must reclaim superseded local bytes
+                    if (replica['state'] != 'parked' or environment['writer_attempt'] is not None):
                         continue  # uncommitted and fenced generations are not cache hits
                     if environment['other_hosts'] >= 2:
                         raise WorkloadError('environment replica registry capacity exhausted', 429)
@@ -704,7 +708,8 @@ class WorkloadStore:
             ready = bool(body["ready"] and not dirty)
             db.execute("UPDATE workers SET ready=? WHERE id=?", (ready, worker_id))
             return {"worker": worker_id, "boot": boot, "ready": ready,
-                    "cleanup": [r[0] for r in db.execute("SELECT id FROM attempts WHERE worker=? AND state='cleanup'", (worker_id,))]}
+                    "cleanup": [r[0] for r in db.execute("SELECT id FROM attempts WHERE worker=? AND state='cleanup'", (worker_id,))],
+                    "environment_cleanup": environment_cleanup}
 
     def _worker(self, db, worker, boot):
         row = db.execute("SELECT * FROM workers WHERE id=? AND boot=?", (worker, boot)).fetchone()

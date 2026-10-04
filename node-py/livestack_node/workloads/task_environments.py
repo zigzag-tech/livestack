@@ -980,6 +980,50 @@ class TaskEnvironmentStore:
                 _atomic_json(directory / 'environment.json',
                              dict(marker, state='rebuild_required', compatibility='0' * 64))
 
+    def remove_stale_replica(self, handle, generation):
+        """Remove only the exact local generation rejected by authority.
+
+        A nonblocking per-handle lock keeps a returning worker from deleting a
+        replica another worker on this physical host has already started using.
+        The marker check is repeated under both storage locks, so an obsolete
+        report cannot remove a newer local generation.
+        """
+        if not HANDLE.fullmatch(handle) or type(generation) is not int or generation < 0:
+            raise WorkloadError('invalid stale environment cleanup identity', 409)
+        global_path = self.root / '.storage.lock'
+        lock_path = self.root / '.locks' / (handle + '.lock')
+        global_fd = os.open(global_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(global_fd, fcntl.LOCK_EX)
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            try:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return 'busy'
+                directory = self.root / handle
+                try:
+                    directory_info = directory.lstat()
+                except FileNotFoundError:
+                    lock_path.unlink(missing_ok=True)
+                    return 'already_absent'
+                if not stat.S_ISDIR(directory_info.st_mode):
+                    raise WorkloadError('stale task environment path is not a real directory', 503)
+                marker = _read_marker(directory)
+                if marker is None or marker['handle'] != handle or marker['generation'] != generation:
+                    return 'changed'
+                _remove_tree(directory)
+                lock_path.unlink(missing_ok=True)
+                return 'removed'
+            finally:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(lock_fd)
+        finally:
+            fcntl.flock(global_fd, fcntl.LOCK_UN)
+            os.close(global_fd)
+
     def release(self, prepared):
         # The caller invokes this only after the supervisor has proved the
         # attempt's entire cgroup/container tree is stopped.

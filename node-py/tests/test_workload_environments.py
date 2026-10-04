@@ -167,7 +167,7 @@ def test_concurrent_environment_submissions_resolve_one_logical_handle(tmp_path)
 
 def register_environment_worker(store, worker, host, *, boot='boot', cpu=4, available_cpu=None,
                                 compatibility='b'*64, replicas=None):
-    store.register(worker, host, boot, dict(
+    return store.register(worker, host, boot, dict(
         capacity={'cpu': cpu, 'memory_bytes': 2*1024**3},
         available={'cpu': cpu if available_cpu is None else available_cpu,
                    'memory_bytes': 2*1024**3}, labels={'os': 'linux'}, handlers=['dev.v1'], ready=True,
@@ -340,6 +340,38 @@ def test_worker_replica_reports_enforce_the_sixty_four_entry_bound(tmp_path):
     with pytest.raises(WorkloadError, match='invalid environment replica report'):
         store.register('worker', 'host-a', 'boot', report(65))
     assert store.register('worker', 'host-a', 'boot', report(64))['ready'] is True
+
+
+def test_returning_worker_gets_generation_scoped_cleanup_for_stale_replicas(tmp_path):
+    # Unit-only: force both a superseded generation and a replica whose logical
+    # row vanished into one bounded authority report; worker HTTP coverage uses
+    # the normal replacement-generation lifecycle.
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS,
+                          environment_handlers=POLICIES)
+    job = store.submit('alice', env_request('returning-worker-cleanup'))
+    handle = job['environment_handle']
+    with store.transaction() as db:
+        db.execute("UPDATE task_environments SET state='parked',generation=2,compatibility=? WHERE handle=?",
+                   ('b'*64, handle))
+
+    def replica(replica_handle, generation):
+        return dict(handle=replica_handle, profile='linux-rust', compatibility='b'*64,
+            generation=generation, state='parked', bytes_used=1024, last_used=1000.0)
+
+    report = register_environment_worker(store, 'returning', 'host-a',
+        replicas=[replica(handle, 1), replica('f'*32, 7)])
+    assert report['environment_cleanup'] == [
+        {'handle': handle, 'generation': 1}, {'handle': 'f'*32, 'generation': 7}]
+    with store.connect() as db:
+        assert db.execute("SELECT count(*) FROM task_environment_replicas WHERE host='host-a'").fetchone()[0] == 0
+
+    current = register_environment_worker(store, 'returning', 'host-a',
+        replicas=[replica(handle, 2)])
+    assert current['environment_cleanup'] == []
+    with store.connect() as db:
+        row = db.execute("SELECT generation,state FROM task_environment_replicas WHERE host='host-a' AND handle=?",
+                         (handle,)).fetchone()
+    assert tuple(row) == (2, 'parked')
 
 
 def test_unknown_replica_compatibility_is_not_a_warm_hit(tmp_path):
