@@ -76,6 +76,12 @@ At most one current authorized writer SHALL update a logical environment. Same-h
 - **WHEN** a replacement generation has been authorized on another host
 - **THEN** the old attempt cannot publish source/build state or results for that generation
 
+#### Scenario: A worker returns with a superseded local replica
+- **WHEN** its bounded report identifies a parked replica whose logical environment is missing or has advanced to another generation
+- **THEN** the authority returns cleanup instructions bound to the exact reported handle and generation
+- **AND** the worker removes that directory only while holding its per-handle lock and after confirming the marker still has that generation
+- **AND** a busy lock is retried on a later report, while a changed marker or failed removal never deletes a newer or active generation and remains visible under the bounded worker-storage policy
+
 ### Requirement: Retained state cannot change executed source or artifact freshness
 
 Workers SHALL execute the complete verified captured input of each job, including deletions, modes, symlinks and external dependencies. They SHALL preserve only declared compatible cache/output state and SHALL reset runtime/test state. Compatibility SHALL cover actual platform/toolchain/ABI, dependency and build-recipe identities. Unknown, corrupt or interrupted retained state SHALL cause a named rebuild/refusal. Important source/output data SHALL remain recoverable independently of environment caches.

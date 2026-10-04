@@ -385,6 +385,30 @@ def test_prune_reclaims_untrusted_environment_after_its_writer_releases(tmp_path
     assert not (root/('7'*32)).exists()
 
 
+def test_stale_replica_cleanup_yields_to_writer_and_preserves_a_newer_marker(tmp_path):
+    # Unit-only: hold the actual flock while an obsolete report races a writer,
+    # then change the marker before retry; the worker/HTTP integration covers
+    # successful cleanup but cannot deterministically pause at these race points.
+    store, root, _ = make_store(tmp_path)
+    handle = '9'*32
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    first = store.prepare(assignment(handle, 1, digest), incoming, handler=HANDLER)
+    finish(store, first, generation=1)
+
+    current_replica = local_replica(store, handle, 1)
+    second = store.prepare(assignment(handle, 2, digest, replicas=[current_replica]), incoming,
+                           handler=HANDLER)
+    assert store.remove_stale_replica(handle, 1) == 'busy'
+    assert json.loads((root/handle/'environment.json').read_text())['generation'] == 2
+
+    finish(store, second, generation=2)
+    assert store.remove_stale_replica(handle, 1) == 'changed'
+    marker = json.loads((root/handle/'environment.json').read_text())
+    assert marker['generation'] == 2 and marker['state'] == 'parked'
+    assert store.remove_stale_replica(handle, 2) == 'removed'
+    assert not (root/handle).exists()
+
+
 def test_source_integrity_failure_and_symlinked_cache_force_reconstruction(tmp_path):
     store, _, _ = make_store(tmp_path)
     incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})

@@ -328,7 +328,28 @@ class WorkloadWorker:
         return report
 
     def register(self, cleaned=()):
-        return self.client.request('worker/report', dict(boot=self.boot, report=self.report(), cleaned=list(cleaned)))
+        response = self.client.request('worker/report', dict(boot=self.boot, report=self.report(), cleaned=list(cleaned)))
+        instructions = response.get('environment_cleanup', [])
+        if not isinstance(instructions, list) or len(instructions) > 64:
+            raise WorkloadError('authority returned invalid environment cleanup instructions', 502)
+        if instructions and self.task_environments is None:
+            raise WorkloadError('authority requested cleanup on a worker without task environment storage', 503)
+        seen = set()
+        for item in instructions:
+            if (not isinstance(item, dict) or set(item) != {'handle', 'generation'} or
+                    not isinstance(item['handle'], str) or not re.fullmatch(r'[a-f0-9]{32}', item['handle']) or
+                    type(item['generation']) is not int or item['generation'] < 0 or item['handle'] in seen):
+                raise WorkloadError('authority returned invalid environment cleanup identity', 502)
+            seen.add(item['handle'])
+            try:
+                outcome = self.task_environments.remove_stale_replica(item['handle'], item['generation'])
+            except Exception as error:
+                logging.error('task_environment_stale_cleanup_failed: handle=%s generation=%s error=%s: %s',
+                              item['handle'], item['generation'], type(error).__name__, str(error)[:512])
+                continue
+            logging.info('task_environment_stale_cleanup: handle=%s generation=%s outcome=%s',
+                         item['handle'], item['generation'], outcome)
+        return response
 
     def reconcile(self):
         old = self.journal.read()
