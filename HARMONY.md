@@ -740,7 +740,7 @@ control, worker profiles, consumer SDK and handler-scope refusals have been
 verified together. Operator configuration and commands are in
 [`_plans/durable-workloads.md`](_plans/durable-workloads.md).
 
-## Proposed: live workload handler releases
+## Live workload handler releases (initial E2E rollout shipped 2026-10-04)
 
 The durable workload authority and worker remain responsible for admission,
 placement, leases, fencing, supervision, and cleanup. Product handler code moves
@@ -774,9 +774,12 @@ staged candidates, 16 activation receipts, 256 installed worker packages, 260
 worker package-root entries (at most three transient entries), and 16 GiB of
 worker package bytes. Collection requires complete reference evidence
 and at least 24 hours of unreferenced age; an unset window preserves files and
-reports the refusal. This proposal is in paired implementation changes and is
-not yet an enrollment or shipment claim. The authority contract and rollout
-procedure are tracked in [`_plans/durable-workloads.md`](_plans/durable-workloads.md).
+reports the refusal. The paired Livestack and Benchday implementation is
+landed. The initial live policy covers only the full and dependency E2E
+handlers on three Linux/x86_64 workers; build/release handlers remain explicitly
+on their legacy path until their target-specific migration. Current defaults,
+worker inventories, paired revisions, and rollback evidence are recorded in
+[`_plans/durable-workloads.md`](_plans/durable-workloads.md).
 
 ## Unit composition — what a card SHOULD run, proposed, never applied
 
