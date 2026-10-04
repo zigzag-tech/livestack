@@ -740,6 +740,44 @@ control, worker profiles, consumer SDK and handler-scope refusals have been
 verified together. Operator configuration and commands are in
 [`_plans/durable-workloads.md`](_plans/durable-workloads.md).
 
+## Proposed: live workload handler releases
+
+The durable workload authority and worker remain responsible for admission,
+placement, leases, fencing, supervision, and cleanup. Product handler code moves
+as an immutable package with a canonical release digest. An operator stages and
+activates a compatible package through the running authority; workers receive
+the desired generation on their existing registration and report loop, verify
+the package, then atomically switch their local registry pointer. This does not
+restart the authority or worker, and an active attempt keeps the exact handler
+descriptor it started with.
+
+Job acceptance resolves a default to one release digest and stores that choice
+with the job. Queued jobs, retries, results, and artifact handling keep that
+digest when a newer release becomes the default. A compatible code update for
+an already authorized handler is therefore plug-and-play. Adding a logical
+handler ID, runtime, backend, or new execution contract still requires an
+operator-controlled core/configuration rollout; package metadata cannot grant
+signing, compilation, host, or network privileges.
+
+The operator entry point is `python -m
+livestack_node.workloads.handler_release_cli --config <private-config>`. Its
+commands are `status`, `stage --bundle <bundle-dir> --handler <id>`,
+`activate --handler <id> --digest <release-digest> --expected-generation <n>`,
+and `rollback` with the same compare-and-swap arguments. Activation receipts
+show the committed generation; status reports defaults, worker-effective
+generations, installed digests, and recent refusals. Rollback selects a retained
+digest in a new generation and affects future acceptance only.
+
+The initial bounds are 64 handler IDs, four releases per handler, 2 GiB per
+package, 16 GiB of authority package bytes, 4 MiB of manifest metadata, 16
+staged candidates, 16 activation receipts, 256 installed worker packages, 260
+worker package-root entries (at most three transient entries), and 16 GiB of
+worker package bytes. Collection requires complete reference evidence
+and at least 24 hours of unreferenced age; an unset window preserves files and
+reports the refusal. This proposal is in paired implementation changes and is
+not yet an enrollment or shipment claim. The authority contract and rollout
+procedure are tracked in [`_plans/durable-workloads.md`](_plans/durable-workloads.md).
+
 ## Unit composition — what a card SHOULD run, proposed, never applied
 
 The planner loads and evicts the units it is given. **Composition** decides what a

@@ -94,7 +94,8 @@ def main():
                            if config.get('artifact_mirror') is not None else None)
         server = WorkloadServer((config.get('bind', '127.0.0.1'), config.get('port', 8802)),
                                 store, principals, blobs=blobs, artifact_mirror=artifact_mirror,
-                                github_remote=github_remote)
+                                github_remote=github_remote,
+                                handler_release_policy=config.get('handler_release_policy'))
         server.blobs.recover()
         # SIGHUP re-reads the principals from --config (docs/authority-principal-reload.md).
         # A thread keeps the file read and its retries out of the signal handler.

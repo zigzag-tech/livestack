@@ -15,10 +15,14 @@ from urllib.parse import urlparse
 
 from .model import WorkloadError, encode, name
 from .blobs import BlobStore
+from .handler_registry import HandlerReleaseRegistry
+from .handler_release import MAX_MANIFEST_BYTES
 from .object_routes import route_object
 from .network import BoundedRequests
 
 from ..fleet_auth import AuthError, Principal as FleetPrincipal, resolve_owner
+
+MAX_HANDLER_STAGE_REQUEST_BYTES = MAX_MANIFEST_BYTES + 64 * 1024
 
 
 @dataclass(frozen=True)
@@ -95,11 +99,14 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 32
 
-    def __init__(self, address, store, principals, *, blobs=None, artifact_mirror=None, github_remote=None):
+    def __init__(self, address, store, principals, *, blobs=None, artifact_mirror=None, github_remote=None,
+                 handler_release_policy=None):
         check_principals(principals)
         self.configure_connections()
         self.store = store
         self.blobs = blobs or BlobStore(store, __import__("pathlib").Path(store.path).parent/"objects")
+        self.handler_registry = HandlerReleaseRegistry(store, self.blobs, handler_release_policy)
+        store.handler_registry = self.handler_registry
         self.artifact_mirror = artifact_mirror
         self.github_remote = github_remote
         self._principals_lock = threading.Lock()
@@ -152,6 +159,8 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
         if now - getattr(self, '_last_sweep', 0) >= 30:
             self.store.sweep()
             self.blobs.prune()
+            handler_gc = self.handler_registry.collect()
+            logging.info('handler_release_gc: %s', encode(handler_gc, 4096))
             self._last_sweep = now
 
 
@@ -206,7 +215,9 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get('Content-Length', '-1'))
         except ValueError:
             raise WorkloadError('invalid content length')
-        if length < 0 or length > self.server.store.limits.record_bytes:
+        stage_manifest_limit = MAX_HANDLER_STAGE_REQUEST_BYTES if \
+            urlparse(self.path).path.endswith('/handler-releases/stage') else 0
+        if length < 0 or length > max(self.server.store.limits.record_bytes, stage_manifest_limit):
             raise WorkloadError('request byte limit exceeded', 413)
         try:
             raw = self.rfile.read(length)
@@ -291,6 +302,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def route(self, principal, method, parts, body):
         store = self.server.store
+        if parts == ['handler-releases', 'status'] and method == 'GET':
+            if principal.role != 'admin':
+                raise WorkloadError('handler release administration requires an admin principal', 403)
+            return self.server.handler_registry.status()
+        if parts == ['handler-releases', 'stage'] and method == 'POST':
+            if principal.role != 'admin':
+                self.server.handler_registry.record_refusal(principal.id, body, 'authorization')
+                raise WorkloadError('handler release staging requires an admin principal', 403)
+            return self.server.handler_registry.stage(principal.id, body)
+        if parts in (['handler-releases', 'activate'], ['handler-releases', 'rollback']) and method == 'POST':
+            if principal.role != 'admin':
+                self.server.handler_registry.record_refusal(principal.id, body, 'authorization')
+                raise WorkloadError('handler release activation requires an admin principal', 403)
+            return self.server.handler_registry.activate(principal.id, body,
+                rollback=parts[-1] == 'rollback')
         if principal.role in ('caller', 'admin'):
             if parts == ['capabilities'] and method == 'GET':
                 return store.capabilities(principal.id, principal.handlers)
@@ -331,8 +357,10 @@ class Handler(BaseHTTPRequestHandler):
                 report = body['report']
                 if principal.remote_provider:
                     report = self.server.github_remote.constrain_report(principal, report)
-                return store.register(principal.worker, principal.host, body['boot'], report,
-                                      cleaned=body.get('cleaned', ()))
+                response = store.register(principal.worker, principal.host, body['boot'], report,
+                                          cleaned=body.get('cleaned', ()))
+                response['handler_sync'] = self.server.handler_registry.desired(report['handlers'])
+                return response
             if parts == ['worker', 'claim']:
                 self._remote_boot(principal, body)
                 if not principal.claim_enabled:
@@ -350,7 +378,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._remote_boot(principal, body)
                 return store.complete(principal.worker, body['boot'], body['attempt_id'], body['fence'],
                                       input_digest=body['input_digest'], outcome=body['outcome'], result=body['result'],
-                                      environment_receipt=body.get('environment_receipt'))
+                                      environment_receipt=body.get('environment_receipt'),
+                                      handler_result_identity=body.get('handler_result_identity'))
         raise WorkloadError('route not permitted for principal', 403)
 
     @staticmethod

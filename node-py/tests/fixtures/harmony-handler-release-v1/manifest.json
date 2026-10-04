@@ -1,0 +1,25 @@
+{
+  "format": "harmony-handler-package.v1",
+  "handler_id": "benchday.fixture.e2e",
+  "release_version": "1.0.0",
+  "execution_contract": 1,
+  "payload_schema": "benchday.test-train.request.v1",
+  "result_schema": "benchday.test-train.result.v1",
+  "platform": "linux",
+  "architecture": "x86_64",
+  "backend": "native",
+  "runtime_id": "node22",
+  "entrypoint": "handler.mjs",
+  "arguments": [],
+  "outputs": ["e2e-result.json"],
+  "infrastructure_outputs": [],
+  "infrastructure_exit_codes": [10, 12],
+  "files": [
+    {
+      "path": "handler.mjs",
+      "mode": 292,
+      "size": 37,
+      "sha256": "60593e38ac37d557308f7fb85af9ef69f420237e1dfc8edf4c9f5840a913b17d"
+    }
+  ]
+}

@@ -91,6 +91,19 @@ def _compilation_refusal(policy, worker, spec, now):
     return None
 
 
+def _release_compatible(report, spec):
+    required = spec.get('handler_release')
+    if required is None:
+        return True
+    inventory = report.get('handler_inventory')
+    if not isinstance(inventory, dict):
+        return False
+    return any(item.get('handler_id') == required['handler_id'] and
+               item.get('release_digest') == required['release_digest'] and
+               item.get('execution_contract') == required['execution_contract']
+               for item in inventory.get('releases', []))
+
+
 def _avoided(db, row, now):
     """{worker: (signature, where)} this queued job must not return to yet."""
     out = {}
@@ -291,7 +304,8 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         claim = _memory_claim(db, spec, learned) if views else None
         targets = []
         rejected = []
-        compatible = [w for w in workers if spec["handler"] in reports[w["id"]]["handlers"]]
+        handler_workers = [w for w in workers if spec["handler"] in reports[w["id"]]["handlers"]]
+        compatible = [w for w in handler_workers if _release_compatible(reports[w['id']], spec)]
         avoided = _avoided(db, row, now)
         matching_hosts = set()
         warm_wait_hosts = set()
@@ -314,6 +328,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
             # other worker able to run the job at all lets it go back.
             alternative = any(
                 w["id"] not in avoided and w["id"] not in draining and spec["handler"] in r["handlers"]
+                and _release_compatible(r, spec)
                 and all(r["labels"].get(k) == v for k, v in spec["selector"].items())
                 and all(r["capacity"].get(k, 0) >= n for k, n in admit.items())
                 and _compilation_refusal(compilation_policy, w, spec, now) is None
@@ -400,7 +415,12 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         if not grants:
             if not workers:
                 reason = "no fresh, reconciled worker"
+            elif not compatible and spec.get('handler_release'):
+                reason = (f"no fresh worker advertises release {spec['handler_release']['release_digest']} "
+                          f"for handler {spec['handler']}")
             elif not compatible:
+                reason = f"no fresh worker advertises handler {spec['handler']}"
+            elif handler_workers and not compatible:
                 reason = f"no fresh worker advertises handler {spec['handler']}"
             else:
                 reason = encode(rejected or {"reason": "no target can meet deadline"})
@@ -421,10 +441,12 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
             if db.execute('SELECT changes()').fetchone()[0] != 1:
                 raise WorkloadError('environment_writer_race', 409)
             active_environment_writers.add(environment_handle)
-        db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created,compilation,environment_generation) "
-                   "VALUES(?,?,?,?,?,?,'running',?,?,?,?,?)",
+        pinned_release = spec.get('handler_release')
+        db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created,compilation,environment_generation,handler_release) "
+                   "VALUES(?,?,?,?,?,?,'running',?,?,?,?,?,?)",
                    (aid, row["id"], chosen["id"], chosen["boot"], chosen["host"], fence,
-                    encode(admit), now+limits.lease_seconds, now, compilation, environment_generation))
+                    encode(admit), now+limits.lease_seconds, now, compilation, environment_generation,
+                    encode(pinned_release) if pinned_release is not None else None))
         db.execute("UPDATE jobs SET state='running',fence=?,updated=?,reason=? WHERE id=?",
                    (fence, now, grants[0].reason, row["id"]))
         busy.add(chosen["id"])

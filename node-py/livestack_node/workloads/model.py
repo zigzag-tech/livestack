@@ -241,7 +241,7 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
         raise WorkloadError("submission must be an object")
     allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
                "admit", "selector", "labels", "estimate_seconds", "deadline", "priority",
-               "locality_host", "retain", "environment"}
+               "locality_host", "retain", "environment", "handler_release"}
     version = value.get("version")
     if set(value) - allowed or version not in (1, 2, 3) or (version == 1 and "input_objects" in value) \
             or (version != 3 and "environment" in value):
@@ -287,6 +287,18 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
                   selector=labels(value.get("selector", {})), estimate_seconds=estimate,
                   deadline=deadline, locality_host=value.get("locality_host"),
                   retain=value.get("retain", False))
+    if "handler_release" in value:
+        release = value['handler_release']
+        if not isinstance(release, dict) or release.get('selection') not in ('default', 'exact'):
+            raise WorkloadError('handler_release_intent_invalid')
+        if release['selection'] == 'default' and set(release) != {'selection'}:
+            raise WorkloadError('handler_release_intent_invalid')
+        if release['selection'] == 'exact':
+            digest_value = release.get('release_digest')
+            if (set(release) != {'selection', 'release_digest'} or not isinstance(digest_value, str) or
+                    not re.fullmatch(r'[0-9a-f]{64}', digest_value)):
+                raise WorkloadError('handler_release_intent_invalid')
+        result['handler_release_intent'] = dict(release)
     # `labels.owner` is reserved for the end user's owner string and is
     # authorized at the HTTP boundary against the caller's delegate_prefix,
     # exactly as /fleet/admit refuses an owner outside a delegating principal.

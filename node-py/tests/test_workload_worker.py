@@ -1,12 +1,16 @@
 """Actual HTTP authority, private input transfer and systemd worker execution."""
 import json
+import hashlib
+import io
 import os
 import logging
+import platform
 from pathlib import Path
 import socket
 import shutil
 import subprocess
 import sys
+import tarfile
 from threading import Thread
 import time
 
@@ -15,6 +19,7 @@ import pytest
 from livestack_node.workloads.archive import capture
 from livestack_node.workloads.client import WorkloadClient
 from livestack_node.workloads.http import Principal, WorkloadServer
+from livestack_node.workloads.handler_release import validate_manifest
 from livestack_node.workloads.model import Limits, WorkloadError
 from livestack_node.workloads.store import WorkloadStore
 from livestack_node.workloads.supervision import SystemdExecutor
@@ -35,9 +40,12 @@ def fleet(tmp_path, monkeypatch):
         'native.v1': {'purpose': 'development', 'profile': 'native-test-v1'}})
     principals = [
         Principal('owner', 'a'*32, 'caller', ('native.v1',)),
+        Principal('operator', 'o'*32, 'admin', ('native.v1',)),
         Principal('worker', 'w'*32, 'worker', worker='integration', host='test-host'),
         Principal('worker-b', 'z'*32, 'worker', worker='integration-b', host='replacement-host')]
-    server = WorkloadServer(('127.0.0.1', 0), store, principals)
+    release_policy = {'revision': 'worker-test-v1', 'retention_seconds': 24*60*60,
+        'handlers': {'native.v1': {'runtime_ids': ['python3'], 'backends': ['native']}}}
+    server = WorkloadServer(('127.0.0.1', 0), store, principals, handler_release_policy=release_policy)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     authority_state = {'server': server, 'thread': thread}
@@ -51,7 +59,8 @@ def fleet(tmp_path, monkeypatch):
         reopened = WorkloadStore(authority_path, handlers={'native.v1'}, environment_handlers={
             'native.v1': {'purpose': 'development', 'profile': 'native-test-v1'}})
         reopened.recover()
-        replacement = WorkloadServer(('127.0.0.1', 0), reopened, principals)
+        replacement = WorkloadServer(('127.0.0.1', 0), reopened, principals,
+                                     handler_release_policy=release_policy)
         replacement_thread = Thread(target=replacement.serve_forever, daemon=True)
         replacement_thread.start()
         authority_state.update(server=replacement, thread=replacement_thread)
@@ -109,6 +118,7 @@ raise SystemExit(request.get('exit',0))
     url = f'http://127.0.0.1:{server.server_port}'
     config = dict(authority=url, token='w'*32, worker='integration', state_dir=str(tmp_path/'state'),
         workspace=str(tmp_path/'workspace'), require_dedicated_filesystem=False, lease_interval=.2,
+        handler_runtimes={'python3': sys.executable},
         capacity={'cpu':1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
         memory_reserve_bytes=0,disk_reserve_bytes=0,environment={'PATH':'/usr/bin:/bin'},
         handlers={'native.v1':dict(argv=[sys.executable,str(script)],outputs=['artifact'])})
@@ -150,6 +160,195 @@ def test_worker_executes_pinned_input_and_returns_owned_artifact(fleet, tmp_path
         assert worker.journal.read() is None
         assert list(Path(config['workspace']).iterdir()) == []
         assert not worker.step()  # Product failure was not retried.
+    finally:
+        worker.close()
+
+
+def _handler_package(tmp_path, version, output, delay=0, exit_code=0, infrastructure_exit_codes=(),
+                     infrastructure_outputs=()):
+    source = ("import os, time\nfrom pathlib import Path\n"
+              "out=Path(os.environ['HARMONY_OUTPUT'])\n"
+              "(out/'worker.pid').write_text(str(os.getpid()))\n"
+              f"time.sleep({delay!r})\n"
+              f"(out/{output!r}).write_text({version!r})\n"
+              f"raise SystemExit({exit_code})\n").encode()
+    manifest = dict(format='harmony-handler-package.v1', handler_id='native.v1', release_version=version,
+        execution_contract=1, payload_schema='benchday.handler.request.v1',
+        result_schema='benchday.handler.result.v1', platform='linux',
+        architecture={'x86_64':'x86_64','amd64':'x86_64','aarch64':'aarch64','arm64':'arm64'}[platform.machine().lower()],
+        backend='native', runtime_id='python3', entrypoint='handler.py', arguments=[], outputs=[output],
+        infrastructure_outputs=sorted(infrastructure_outputs),
+        infrastructure_exit_codes=sorted(infrastructure_exit_codes),
+        files=[dict(path='handler.py', mode=0o444, size=len(source), sha256=hashlib.sha256(source).hexdigest())])
+    release = validate_manifest(manifest)
+    archive_path = tmp_path/f'{version}.tar'
+    with tarfile.open(archive_path, 'w', format=tarfile.USTAR_FORMAT) as archive:
+        info = tarfile.TarInfo('handler.py')
+        info.mode, info.size, info.mtime, info.uid, info.gid = 0o444, len(source), 0, 0, 0
+        info.uname = info.gname = ''
+        archive.addfile(info, io.BytesIO(source))
+    return dict(manifest=manifest, release_digest=release['release_digest'], archive_path=archive_path,
+        archive_digest=hashlib.sha256(archive_path.read_bytes()).hexdigest(), archive_bytes=archive_path.stat().st_size)
+
+
+def _stage_handler(client, package):
+    uploaded = InputTransfer(client).put(package['archive_path'])
+    assert uploaded['digest'] == package['archive_digest']
+    client.request('handler-releases/stage', dict(manifest=package['manifest'],
+        release_digest=package['release_digest'], archive_digest=uploaded['digest'], archive_bytes=uploaded['size']))
+
+
+def _activate_handler(client, package, generation):
+    import uuid
+    return client.request('handler-releases/activate', dict(request_id=uuid.uuid4().hex,
+        expected_generation=generation, handler_id='native.v1', release_digest=package['release_digest']))
+
+
+def test_live_release_activation_keeps_running_attempt_pinned_and_worker_alive(fleet, tmp_path):
+    store, config, caller, digest = fleet
+    operator = WorkloadClient(config['authority'], 'o'*32)
+    first = _handler_package(tmp_path, 'release-a', 'a.out', delay=12)
+    second = _handler_package(tmp_path, 'release-b', 'b.out')
+    worker = WorkloadWorker(config)
+    thread = None
+    try:
+        _stage_handler(operator, first)
+        _activate_handler(operator, first, 0)
+        first_job = caller.submit(dict(version=1, key='live-a', handler='native.v1', input_digest=digest,
+            need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2}, payload={},
+            handler_release={'selection':'default'}))
+        worker.config['status_report_seconds'] = .2
+        outcome = {}
+        thread = Thread(target=lambda: outcome.update(worked=worker.step()), daemon=True)
+        boot = worker.boot
+        thread.start()
+        deadline = time.monotonic()+10
+        pid_path = None
+        while time.monotonic() < deadline:
+            journal = worker.journal.read()
+            if journal:
+                pid_path = Path(config['workspace'])/journal['assignment']['attempt_id']/'output'/'worker.pid'
+                if pid_path.exists():
+                    break
+            time.sleep(.05)
+        assert pid_path and pid_path.exists(), 'release A started under the real supervisor'
+        pid = int(pid_path.read_text())
+        before_start = Path(f'/proc/{pid}/stat').read_text().split()[21]
+
+        _stage_handler(operator, second)
+        _activate_handler(operator, second, 1)
+        deadline = time.monotonic()+6
+        while time.monotonic() < deadline and worker.handler_registry_state['generation'] < 2:
+            time.sleep(.05)
+        assert worker.handler_registry_state['generation'] == 2, 'the live worker installed B without a restart'
+        assert worker.boot == boot
+        assert Path(f'/proc/{pid}/stat').read_text().split()[21] == before_start
+        os.kill(pid, 0)
+
+        thread.join(timeout=15)
+        assert not thread.is_alive()
+        assert outcome.get('worked') is True
+        result_a = caller.get(first_job['id'])
+        assert result_a['state'] == 'succeeded'
+        assert result_a['result']['handler_result_identity']['handler_release']['release_digest'] == first['release_digest']
+        artifact_a = next(item for item in result_a['result']['result']['artifacts'] if item['name'] == 'a.out')
+        assert InputTransfer(caller).get(artifact_a['digest'], tmp_path/'a.out').read_text() == 'release-a'
+
+        second_job = caller.submit(dict(version=1, key='live-b', handler='native.v1', input_digest=digest,
+            need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2}, payload={},
+            handler_release={'selection':'default'}))
+        assert worker.step() is True
+        result_b = caller.get(second_job['id'])
+        assert result_b['state'] == 'succeeded'
+        assert result_b['result']['handler_result_identity']['handler_release']['release_digest'] == second['release_digest']
+        artifact_b = next(item for item in result_b['result']['result']['artifacts'] if item['name'] == 'b.out')
+        assert InputTransfer(caller).get(artifact_b['digest'], tmp_path/'b.out').read_text() == 'release-b'
+    finally:
+        if thread and thread.is_alive():
+            thread.join(timeout=10)
+        worker.close()
+        operator.close()
+
+
+def test_restart_recovery_uses_pinned_release_policy_and_outputs(fleet, tmp_path):
+    _store, config, caller, digest = fleet
+    operator = WorkloadClient(config['authority'], 'o'*32)
+    first = _handler_package(tmp_path, 'recovery-a', 'a.out', exit_code=75,
+        infrastructure_exit_codes=(75,), infrastructure_outputs=('a.out',))
+    second = _handler_package(tmp_path, 'recovery-b', 'b.out', exit_code=75)
+    worker = recovered = None
+    try:
+        _stage_handler(operator, first)
+        _activate_handler(operator, first, 0)
+        job = caller.submit(dict(version=1, key='recovery-a', handler='native.v1', input_digest=digest,
+            need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2}, payload={},
+            handler_release={'selection':'default'}))
+
+        worker = WorkloadWorker(config)
+        def interrupt_after_exit_receipt(*_args):
+            raise RuntimeError('simulated worker restart before result upload')
+
+        worker._attach_artifacts = interrupt_after_exit_receipt
+        with pytest.raises(RuntimeError, match='simulated worker restart'):
+            worker.step()
+        journal = worker.journal.read()
+        assert journal['phase'] == 'running'
+        assert journal['assignment']['handler_release']['release_digest'] == first['release_digest']
+        attempt = journal['assignment']['attempt_id']
+        output = Path(config['workspace'])/attempt/'output'
+        assert worker.executor.exit_result(output)['exit_code'] == 75
+        assert (output/'a.out').read_text() == 'recovery-a'
+        worker.close()
+        worker = None
+
+        _stage_handler(operator, second)
+        _activate_handler(operator, second, 1)
+        recovered = WorkloadWorker(config)
+        recovered.reconcile()
+
+        result = caller.get(job['id'])
+        assert result['state'] == 'queued'
+        assert result['result']['outcome'] == 'infrastructure'
+        identity = result['result']['handler_result_identity']
+        assert identity['handler_release']['release_digest'] == first['release_digest']
+        artifacts = result['result']['result']['artifacts']
+        assert [artifact['name'] for artifact in artifacts if artifact['name'].endswith('.out')] == ['a.out']
+        artifact = next(item for item in artifacts if item['name'] == 'a.out')
+        assert InputTransfer(caller).get(artifact['digest'], tmp_path/'recovered-a.out').read_text() == 'recovery-a'
+        assert len(result['attempts']) == 1
+        assert recovered.journal.read() is None
+    finally:
+        if worker is not None:
+            worker.close()
+        if recovered is not None:
+            recovered.close()
+        operator.close()
+
+
+def test_release_specific_exit_policy_uses_the_pinned_descriptor(fleet, tmp_path):
+    _store, config, _caller, _digest = fleet
+    first = _handler_package(tmp_path, 'exit-a', 'a.out', exit_code=75,
+                             infrastructure_exit_codes=(75,))
+    second = _handler_package(tmp_path, 'exit-b', 'b.out', exit_code=75)
+    worker = WorkloadWorker(config)
+    try:
+        for package in (first, second):
+            descriptor = dict(manifest=package['manifest'], release_digest=package['release_digest'],
+                archive_digest=package['archive_digest'], archive_bytes=package['archive_bytes'])
+            worker.handler_packages.install(package['archive_path'], descriptor)
+
+        def classify(package):
+            manifest = package['manifest']
+            identity = dict(handler_id=manifest['handler_id'], release_digest=package['release_digest'],
+                execution_contract=manifest['execution_contract'], payload_schema=manifest['payload_schema'],
+                result_schema=manifest['result_schema'])
+            assignment = dict(spec={'handler': manifest['handler_id']}, handler_release=identity)
+            return worker._completion_from_exit(assignment, {'exit_code': 75, 'resources': {}})['outcome']
+
+        # The supervised live A/B integration covers process, lease and artifact
+        # pinning. This isolates the scalar exit-policy difference itself.
+        assert classify(first) == 'infrastructure'
+        assert classify(second) == 'product_failure'
     finally:
         worker.close()
 
