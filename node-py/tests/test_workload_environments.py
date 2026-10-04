@@ -88,6 +88,27 @@ def test_schema_three_environment_capabilities_and_preupload_refusal(tmp_path):
         close(api, thread)
 
 
+def test_disposable_full_request_survives_environment_rollback(tmp_path):
+    store, api, thread = server(tmp_path, policies={})
+    client = WorkloadClient(f'http://127.0.0.1:{api.server_port}', 'a'*32)
+    try:
+        api.blobs.put('alice', SOURCE, len(b'captured'), BytesIO(b'captured'))
+        full_request = dict(version=1, key='full-after-environment-rollback',
+            handler='full.v1', input_digest=SOURCE,
+            need={'cpu': 1, 'memory_bytes': 1024})
+        accepted = client.submit(full_request)
+        assert accepted['id']
+        assert 'environment_handle' not in accepted
+        assert store.get('alice', accepted['id'])['spec']['handler'] == 'full.v1'
+
+        with pytest.raises(WorkloadError, match='environment_unsupported'):
+            client.submit(env_request('task-after-rollback', handler='full.v1'))
+        assert [job['id'] for job in store.list_jobs('alice')] == [accepted['id']]
+    finally:
+        client.close()
+        close(api, thread)
+
+
 def test_old_authority_capability_route_is_a_named_environment_refusal():
     client = WorkloadClient('http://127.0.0.1:1', 'a'*32)
     def missing_capability(_route, _body=None):
