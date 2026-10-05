@@ -97,17 +97,8 @@ def test_admin_stages_activates_idempotently_and_refuses_stale_generation(author
     assert status['recent_receipts'][0]['generation'] == 1
 
 
-def test_catalog_capacity_refuses_staging_without_evicting_existing_releases(authority, tmp_path):
-    _server, clients = authority
-    releases = [package(tmp_path, f'capacity-{index}') for index in range(5)]
-    for release in releases[:4]:
-        stage(clients['operator'], release)
-    with pytest.raises(WorkloadError, match='handler_release_count_capacity'):
-        stage(clients['operator'], releases[4])
-    status = clients['operator'].request('handler-releases/status')
-    assert {row['release_digest'] for row in status['releases']} == {
-        release[1] for release in releases[:4]
-    }
+# The per-handler release-count refusal was removed (storage is the bound, with burst headroom):
+# see test_workload_handler_registry_burst.py.
 
 
 def test_caller_cannot_register_and_archive_must_match_manifest(authority, tmp_path):

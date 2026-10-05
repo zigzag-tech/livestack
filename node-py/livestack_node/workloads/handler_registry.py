@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import PurePosixPath
 import re
+import sqlite3
 import tarfile
 import time
 
@@ -13,7 +14,10 @@ from .handler_release import (MAX_MANIFEST_BYTES, MAX_PACKAGE_BYTES, validate_ma
 from .model import WorkloadError, encode
 
 MAX_HANDLER_IDS = 64
-MAX_RELEASES_PER_HANDLER = 4
+# Total catalogued releases across every handler. There is deliberately NO per-handler
+# count: storage is the bound (bytes, metadata, unreferenced candidates, and this
+# total, which matches a worker's 256 installed-package cap and the status listing).
+MAX_TOTAL_RELEASES = 256
 MAX_REGISTRY_BYTES = 16 * 1024**3
 MAX_METADATA_BYTES = 4 * 1024**2
 MAX_STAGED_CANDIDATES = 16
@@ -21,6 +25,13 @@ MAX_RECEIPTS = 16
 MAX_GENERATIONS = 2
 MAX_EVENTS = 1024
 MINIMUM_RETENTION_SECONDS = 24 * 60 * 60
+# Capacity-driven eviction may reclaim an unreferenced release only after this
+# explicit minimum age, which a policy may set no lower than one hour. The age
+# protects the window between staging a release and the first reference to it
+# being recorded (a job submitted by digest, a worker inventory report); the
+# complete-reference-evidence check below remains the safety net.
+MINIMUM_BURST_AGE_SECONDS = 60 * 60
+MAX_EVICTIONS_PER_STAGE = 32
 _DIGEST = re.compile(r'^[0-9a-f]{64}$')
 
 
@@ -30,7 +41,7 @@ class HandlerReleaseRegistry:
     def __init__(self, store, blobs, policy=None):
         self.store, self.blobs = store, blobs
         config = policy or {}
-        if (not isinstance(config, dict) or set(config) - {'revision', 'handlers', 'retention_seconds'} or
+        if (not isinstance(config, dict) or set(config) - {'revision', 'handlers', 'retention_seconds', 'burst_min_age_seconds'} or
                 not isinstance(config.get('handlers', {}), dict) or
                 len(config.get('handlers', {})) > MAX_HANDLER_IDS):
             raise ValueError('invalid handler release policy')
@@ -40,6 +51,13 @@ class HandlerReleaseRegistry:
                 not MINIMUM_RETENTION_SECONDS <= retention <= 10*365*24*60*60):
             raise ValueError('handler release retention must be unset or at least 24 hours')
         self.retention_seconds = retention
+        burst = config.get('burst_min_age_seconds')
+        if burst is not None and (type(burst) is not int or burst < MINIMUM_BURST_AGE_SECONDS or
+                burst > 10*365*24*60*60 or (retention is not None and burst > retention)):
+            raise ValueError('handler release burst eviction age must be unset or at least one hour '
+                             'and no longer than the retention window')
+        # Unset means capacity-driven eviction is OFF (fail closed): a full registry then refuses by name.
+        self.burst_min_age_seconds = burst
         self.policy = config.get('handlers', {})
         for handler, value in self.policy.items():
             if (handler not in store.handlers or not isinstance(value, dict) or
@@ -157,6 +175,65 @@ class HandlerReleaseRegistry:
         if seen != set(expected) or expanded > MAX_PACKAGE_BYTES:
             raise WorkloadError('handler_archive_inventory_mismatch', 409)
 
+    # One reference-evidence query serves both the ordinary retention sweep and the
+    # capacity-driven eviction, so the two can never disagree about what is referenced.
+    _UNREFERENCED_SQL = ("WITH referenced(digest) AS MATERIALIZED ("
+        "SELECT value FROM handler_registry_generations g,json_each(g.defaults) "
+        "UNION SELECT r.previous_digest FROM handler_activation_receipts r WHERE r.previous_digest IS NOT NULL "
+        "AND r.request_id=(SELECT newest.request_id FROM handler_activation_receipts newest "
+        "WHERE newest.handler_id=r.handler_id ORDER BY newest.created DESC LIMIT 1) "
+        "UNION SELECT effective.value FROM workers w,json_each(w.report,'$.handler_inventory.defaults') effective "
+        "WHERE w.seen>? "
+        "UNION SELECT json_extract(spec,'$.handler_release.release_digest') FROM jobs "
+        "WHERE state IN ('queued','running') "
+        "UNION SELECT json_extract(handler_release,'$.release_digest') FROM attempts "
+        "WHERE state IN ('running','cleanup')) "
+        "SELECT r.handler_id,r.release_digest,r.archive_digest,r.archive_bytes,"
+        "length(CAST(r.manifest AS BLOB)) AS manifest_bytes "
+        "FROM handler_releases r WHERE r.created<=? AND r.release_digest NOT IN "
+        "(SELECT digest FROM referenced WHERE digest IS NOT NULL) "
+        "ORDER BY r.created,r.release_digest LIMIT ?")
+
+    def _unreferenced(self, db, now, cutoff, limit):
+        """Oldest-first releases created at or before `cutoff` that nothing references."""
+        return db.execute(self._UNREFERENCED_SQL, (now-self.store.limits.fresh_seconds, cutoff, limit)).fetchall()
+
+    def _make_room(self, db, actor, now, reason, deficits):
+        """Evict just enough aged, unreferenced releases to cover `deficits`.
+
+        deficits = (bytes, manifest_bytes, releases, candidates) still to free. All-or-nothing:
+        nothing is deleted unless the whole deficit can be covered, so a refusal never costs a
+        release. Never evicts a default, rollback target, queued/running job or attempt, fresh
+        worker inventory, or anything younger than the policy's burst age. Unknown reference
+        evidence evicts nothing. Bounded: one evidence query and at most MAX_EVICTIONS_PER_STAGE
+        deletes, independent of how many releases exist. Returns the evicted rows ([] if none).
+        """
+        if self.burst_min_age_seconds is None:
+            return []
+        try:
+            rows = self._unreferenced(db, now, now-self.burst_min_age_seconds, MAX_EVICTIONS_PER_STAGE)
+        except sqlite3.Error:
+            self._event(db, actor, '*', None, None, 0, 'handler_release_eviction_evidence_unavailable')
+            return []
+        need = list(deficits)
+        chosen = []
+        for row in rows:
+            if all(value <= 0 for value in need):
+                break
+            chosen.append(row)
+            need[0] -= row['archive_bytes']
+            need[1] -= row['manifest_bytes']
+            need[2] -= 1
+            need[3] -= 1
+        if any(value > 0 for value in need):
+            return []
+        for row in chosen:
+            db.execute('DELETE FROM handler_releases WHERE handler_id=? AND release_digest=? AND created<=?',
+                       (row['handler_id'], row['release_digest'], now-self.burst_min_age_seconds))
+            self._event(db, actor, row['handler_id'], row['release_digest'], row['archive_digest'],
+                        row['archive_bytes'], 'evicted_for_'+reason)
+        return chosen
+
     def stage(self, actor, request):
         required = {'manifest', 'release_digest', 'archive_digest', 'archive_bytes'}
         if not isinstance(request, dict) or set(request) != required:
@@ -187,6 +264,7 @@ class HandlerReleaseRegistry:
         self.collect(actor=actor)
         now = self.store.clock()
         refusal = None
+        evicted = []
         with self.store.transaction() as db:
             existing = db.execute('SELECT * FROM handler_releases WHERE handler_id=? AND release_digest=?',
                                   (handler, digest)).fetchone()
@@ -196,25 +274,36 @@ class HandlerReleaseRegistry:
                 self._event(db, actor, handler, digest, request['archive_digest'], actual_size, 'stage_idempotent')
                 return {'handler_id': handler, 'release_digest': digest, 'state': 'staged', 'idempotent': True}
             count, used = db.execute('SELECT count(*),coalesce(sum(archive_bytes),0) FROM handler_releases').fetchone()
-            per_handler = db.execute('SELECT count(*) FROM handler_releases WHERE handler_id=?', (handler,)).fetchone()[0]
             candidates = db.execute('SELECT count(*) FROM handler_releases r WHERE NOT EXISTS '
                 '(SELECT 1 FROM handler_registry_generations g, json_each(g.defaults) d '
                 'WHERE d.value=r.release_digest)', ()).fetchone()[0]
             metadata = db.execute('SELECT coalesce(sum(length(CAST(manifest AS BLOB))),0) '
                                   'FROM handler_releases').fetchone()[0]
-            if len({r[0] for r in db.execute('SELECT DISTINCT handler_id FROM handler_releases')}) >= MAX_HANDLER_IDS and \
-                    handler not in {r[0] for r in db.execute('SELECT DISTINCT handler_id FROM handler_releases')}:
+            new_meta = len(checked['canonical_bytes'])
+            known = {r[0] for r in db.execute('SELECT DISTINCT handler_id FROM handler_releases')}
+            # Storage bounds only: no per-handler release count. A bound that is exceeded is first
+            # relieved by evicting aged unreferenced releases; it refuses by name only when it cannot.
+            deficits = {'byte_capacity': used + actual_size - MAX_REGISTRY_BYTES,
+                        'metadata_capacity': metadata + new_meta - MAX_METADATA_BYTES,
+                        'release_capacity': count + 1 - MAX_TOTAL_RELEASES,
+                        'staging_capacity': candidates + 1 - MAX_STAGED_CANDIDATES}
+            names = {'byte_capacity': 'handler_registry_byte_capacity',
+                     'metadata_capacity': 'handler_registry_metadata_capacity',
+                     'release_capacity': 'handler_registry_release_capacity',
+                     'staging_capacity': 'handler_registry_staging_capacity'}
+            if len(known) >= MAX_HANDLER_IDS and handler not in known:
                 refusal = 'handler_registry_id_capacity'
-            elif per_handler >= MAX_RELEASES_PER_HANDLER:
-                refusal = 'handler_release_count_capacity'
-            elif used + actual_size > MAX_REGISTRY_BYTES:
-                refusal = 'handler_registry_byte_capacity'
-            elif metadata + len(checked['canonical_bytes']) > MAX_METADATA_BYTES:
-                refusal = 'handler_registry_metadata_capacity'
-            elif candidates >= MAX_STAGED_CANDIDATES:
-                refusal = 'handler_registry_staging_capacity'
+            elif (actual_size > MAX_REGISTRY_BYTES or new_meta > MAX_METADATA_BYTES):
+                refusal = names['byte_capacity' if actual_size > MAX_REGISTRY_BYTES else 'metadata_capacity']
             else:
+                over = [key for key in names if deficits[key] > 0]
                 refusal = None
+                if over:
+                    evicted = self._make_room(db, actor, now, over[0],
+                        (deficits['byte_capacity'], deficits['metadata_capacity'],
+                         deficits['release_capacity'], deficits['staging_capacity']))
+                    if not evicted:
+                        refusal = names[over[0]]
             if refusal:
                 self._event(db, actor, handler, digest, request['archive_digest'], actual_size, refusal)
             else:
@@ -224,7 +313,10 @@ class HandlerReleaseRegistry:
                 self._event(db, actor, handler, digest, request['archive_digest'], actual_size, 'staged')
         if refusal:
             raise WorkloadError(refusal, 429)
-        return {'handler_id': handler, 'release_digest': digest, 'state': 'staged', 'idempotent': False}
+        result = {'handler_id': handler, 'release_digest': digest, 'state': 'staged', 'idempotent': False}
+        if evicted:
+            result['evicted'] = len(evicted)
+        return result
 
     def _current(self, db):
         row = db.execute('SELECT generation FROM handler_registry_state WHERE singleton=1').fetchone()
@@ -363,22 +455,7 @@ class HandlerReleaseRegistry:
         now = self.store.clock()
         try:
             with self.store.transaction() as db:
-                rows = db.execute("WITH referenced(digest) AS MATERIALIZED ("
-                    "SELECT value FROM handler_registry_generations g,json_each(g.defaults) "
-                    "UNION SELECT r.previous_digest FROM handler_activation_receipts r WHERE r.previous_digest IS NOT NULL "
-                    "AND r.request_id=(SELECT newest.request_id FROM handler_activation_receipts newest "
-                    "WHERE newest.handler_id=r.handler_id ORDER BY newest.created DESC LIMIT 1) "
-                    "UNION SELECT effective.value FROM workers w,json_each(w.report,'$.handler_inventory.defaults') effective "
-                    "WHERE w.seen>? "
-                    "UNION SELECT json_extract(spec,'$.handler_release.release_digest') FROM jobs "
-                    "WHERE state IN ('queued','running') "
-                    "UNION SELECT json_extract(handler_release,'$.release_digest') FROM attempts "
-                    "WHERE state IN ('running','cleanup')) "
-                    "SELECT r.handler_id,r.release_digest,r.archive_digest,r.archive_bytes "
-                    "FROM handler_releases r WHERE r.created<=? AND r.release_digest NOT IN "
-                    "(SELECT digest FROM referenced WHERE digest IS NOT NULL) "
-                    "ORDER BY r.created,r.release_digest LIMIT 32",
-                    (now-self.store.limits.fresh_seconds, now-self.retention_seconds)).fetchall()
+                rows = self._unreferenced(db, now, now-self.retention_seconds, 32)
                 deleted, reclaimed = 0, 0
                 for row in rows:
                     cursor = db.execute('DELETE FROM handler_releases WHERE handler_id=? AND release_digest=? '
@@ -409,6 +486,12 @@ class HandlerReleaseRegistry:
                     activation_failures=report.get('handler_activation_failures', []),
                     gc_receipts=report.get('handler_gc_receipts', [])))
             result = {'generation': generation, 'defaults': defaults, 'workers': workers,
+                'policy': {'revision': self.policy_revision, 'retention_seconds': self.retention_seconds,
+                    'burst_min_age_seconds': self.burst_min_age_seconds,
+                    'limits': {'handler_ids': MAX_HANDLER_IDS, 'releases_total': MAX_TOTAL_RELEASES,
+                               'archive_bytes': MAX_REGISTRY_BYTES, 'manifest_bytes': MAX_METADATA_BYTES,
+                               'unreferenced_candidates': MAX_STAGED_CANDIDATES,
+                               'releases_per_handler': None}},
                 'releases': [dict(handler_id=r['handler_id'], release_digest=r['release_digest'],
                     archive_bytes=r['archive_bytes'], is_default=defaults.get(r['handler_id']) == r['release_digest'],
                     created=r['created']) for r in db.execute('SELECT * FROM handler_releases ORDER BY handler_id,created DESC LIMIT 256')],

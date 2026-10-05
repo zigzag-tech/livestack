@@ -2,7 +2,7 @@
 
 Unknown or invalid keys fail closed at startup and on SIGHUP reload. Sections
 validated elsewhere at construction (principals -> http.Principal, limits ->
-model.Limits, github_remote, compilation_*, handler_release_policy) are only
+model.Limits, github_remote, compilation_*) are only
 type-checked here so there is one owner for each rule.
 """
 from pathlib import Path
@@ -18,6 +18,20 @@ class PrincipalsOnly(BaseModel):
     the rest of the file is the startup gate's business, so it is not re-judged."""
     model_config = ConfigDict(extra='ignore', strict=True)
     principals: list[dict[str, Any]]
+
+
+class HandlerReleasePolicy(BaseModel):
+    """The handler release registry's policy section. Unknown keys fail closed. Per-handler
+    entries (runtimes/backends) are judged by HandlerReleaseRegistry at construction, which
+    stays the one owner of those rules; the burst age floor is judged here too so a bad
+    value never reaches the registry."""
+    model_config = ConfigDict(extra='forbid', strict=True)
+    revision: Optional[StrictStr] = None
+    retention_seconds: Optional[StrictInt] = Field(default=None, ge=86400)
+    # Minimum age before capacity-driven eviction may reclaim an UNREFERENCED release.
+    # Unset disables eviction (a full registry refuses by name). Floor: one hour.
+    burst_min_age_seconds: Optional[StrictInt] = Field(default=None, ge=3600)
+    handlers: Optional[dict[str, dict[str, Any]]] = None
 
 
 class AuthorityConfig(BaseModel):
@@ -37,7 +51,7 @@ class AuthorityConfig(BaseModel):
     compilation_policy: Optional[StrictStr] = None  # path to the policy file
     github_remote: Optional[dict[str, Any]] = None
     artifact_mirror: Optional[dict[str, Any]] = None
-    handler_release_policy: Optional[dict[str, Any]] = None
+    handler_release_policy: Optional[HandlerReleasePolicy] = None
 
     @field_validator('public_base_url')
     @classmethod
