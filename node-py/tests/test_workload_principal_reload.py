@@ -50,8 +50,12 @@ class Authority:
         self.digest = hashlib.sha256(data).hexdigest()
         self.server.blobs.put('alice', self.digest, len(data), BytesIO(data))
 
-    def write(self, principals):
-        self.config.write_text(json.dumps(dict(principals=principals)))
+    def write(self, principals, handlers=('test.v1',), policy=None):
+        # A real authority file always carries `handlers`; policy only when set.
+        body = dict(principals=principals, handlers=list(handlers))
+        if policy is not None:
+            body['handler_release_policy'] = policy
+        self.config.write_text(json.dumps(body))
 
     def reload(self):
         return reload_principals(self.server, self.config, attempts=1, pause=0)
@@ -198,19 +202,19 @@ def test_drained_worker_does_not_hold_an_infrastructure_retry(authority):
 
 
 @pytest.mark.parametrize('label, content', [
-    ('zero principals', json.dumps(dict(principals=[]))),
-    ('duplicate tokens', json.dumps(dict(principals=[caller('alice', A), caller('bob', A)]))),
+    ('zero principals', json.dumps(dict(handlers=["test.v1"], principals=[]))),
+    ('duplicate tokens', json.dumps(dict(handlers=["test.v1"], principals=[caller('alice', A), caller('bob', A)]))),
     ('malformed json', '{"principals": ['),
     ('torn write', ''),
-    ('unknown role', json.dumps(dict(principals=[dict(id='x', token=A, role='root')]))),
-    ('worker without host', json.dumps(dict(principals=[dict(id='w', token=W, role='worker', worker='w')]))),
-    ('caller without handlers', json.dumps(dict(principals=[dict(id='x', token=B, role='caller')]))),
-    ('unknown field', json.dumps(dict(principals=[caller('alice', A, bogus=1)]))),
-    ('nonboolean drain', json.dumps(dict(principals=[caller('alice', A), dict(worker('w1', W), claim_enabled=0)]))),
-    ('caller drain', json.dumps(dict(principals=[caller('alice', A, claim_enabled=False), worker('w1', W)]))),
+    ('unknown role', json.dumps(dict(handlers=["test.v1"], principals=[dict(id='x', token=A, role='root')]))),
+    ('worker without host', json.dumps(dict(handlers=["test.v1"], principals=[dict(id='w', token=W, role='worker', worker='w')]))),
+    ('caller without handlers', json.dumps(dict(handlers=["test.v1"], principals=[dict(id='x', token=B, role='caller')]))),
+    ('unknown field', json.dumps(dict(handlers=["test.v1"], principals=[caller('alice', A, bogus=1)]))),
+    ('nonboolean drain', json.dumps(dict(handlers=["test.v1"], principals=[caller('alice', A), dict(worker('w1', W), claim_enabled=0)]))),
+    ('caller drain', json.dumps(dict(handlers=["test.v1"], principals=[caller('alice', A, claim_enabled=False), worker('w1', W)]))),
     ('no principals key', json.dumps({})),
-    ('role changed', json.dumps(dict(principals=[worker('alice', A)]))),
-    ('worker rehosted', json.dumps(dict(principals=[caller('alice', A), worker('w1', W, 'other')]))),
+    ('role changed', json.dumps(dict(handlers=["test.v1"], principals=[worker('alice', A)]))),
+    ('worker rehosted', json.dumps(dict(handlers=["test.v1"], principals=[caller('alice', A), worker('w1', W, 'other')]))),
 ])
 def test_invalid_config_keeps_previous_set(authority, caplog, label, content):
     authority.config.write_text(content)
@@ -233,7 +237,7 @@ def test_missing_file_keeps_previous_set(authority, caplog):
 
 def test_torn_read_is_retried_until_the_write_completes(authority):
     authority.config.write_text('{"princ')
-    good = json.dumps(dict(principals=[caller('alice', A), caller('bob', B), worker('w1', W)]))
+    good = json.dumps(dict(handlers=["test.v1"], principals=[caller('alice', A), caller('bob', B), worker('w1', W)]))
     Thread(target=lambda: (time.sleep(.15), authority.config.write_text(good))).start()
     assert reload_principals(authority.server, authority.config, attempts=10, pause=.1)
     assert authority.status(B) == 200
@@ -340,3 +344,44 @@ def test_sighup_reloads_the_real_service_process(tmp_path):
     finally:
         process.terminate()
         process.wait(timeout=10)
+
+
+def test_added_handler_is_submittable_without_restart(authority, caplog):
+    spec = dict(version=1, key='k', handler='askafox.deploy.v1', input_digest=authority.digest, need={'cpu': 1})
+    authority.write([dict(caller('alice', A), handlers=['test.v1', 'askafox.deploy.v1']), worker('w1', W)])
+    with pytest.raises(WorkloadError):  # not yet reloaded: the handler is unknown
+        authority.client(A).submit(spec)
+    authority.write([dict(caller('alice', A), handlers=['test.v1', 'askafox.deploy.v1']), worker('w1', W)],
+                    handlers=['test.v1', 'askafox.deploy.v1'])
+    assert authority.reload()
+    assert authority.client(A).submit(spec)['state'] == 'queued'
+
+
+def test_handler_removal_is_refused_and_keeps_everything(authority, caplog):
+    authority.write([caller('alice', A), worker('w1', W), worker('w2', NEW, 'h2')], handlers=['other.v1'])
+    with caplog.at_level(logging.ERROR):
+        assert not authority.reload()
+    assert 'handler_removal_refused: test.v1' in caplog.text
+    assert authority.status(NEW) == 401  # the principal edit in the same file was not applied either
+    assert authority.store.handlers == {'test.v1'}
+
+
+def test_release_policy_reloads_and_a_bad_policy_keeps_the_old_one(authority, caplog):
+    good = dict(revision='r2', handlers={'test.v1': dict(runtime_ids=['host-python3'], backends=['native'])})
+    authority.write([caller('alice', A), worker('w1', W)], policy=good)
+    assert authority.reload()
+    registry = authority.server.handler_registry
+    assert registry.policy_revision == 'r2' and registry.policy['test.v1']['backends'] == ['native']
+    bad = dict(revision='r3', handlers={'not.installed': dict(backends=['native'])})
+    authority.write([caller('alice', A), worker('w1', W)], policy=bad)
+    with caplog.at_level(logging.ERROR):
+        assert not authority.reload()
+    assert 'principal_reload_refused' in caplog.text and 'narrow installed handlers' in caplog.text
+    assert registry.policy_revision == 'r2'
+
+
+def test_policy_may_name_a_handler_added_in_the_same_reload(authority):
+    policy = dict(handlers={'askafox.deploy.v1': dict(runtime_ids=['host-python3'], backends=['native'])})
+    authority.write([caller('alice', A), worker('w1', W)], handlers=['test.v1', 'askafox.deploy.v1'], policy=policy)
+    assert authority.reload()
+    assert 'askafox.deploy.v1' in authority.server.handler_registry.policy

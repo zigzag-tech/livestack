@@ -270,6 +270,12 @@ class WorkloadStore:
         finally:
             db.close()
 
+    def add_handlers(self, names):
+        """Install more handler ids without a restart. Add-only: removing one could strand
+        queued jobs, so a smaller set is the caller's refusal. One reference swap, so a
+        request reads either the old set or the new one."""
+        self.handlers = self.handlers | set(names)
+
     def recover(self):
         """Call once at service startup, not whenever a client opens the store."""
         with self.transaction() as db:

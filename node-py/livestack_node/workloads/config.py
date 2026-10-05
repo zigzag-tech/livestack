@@ -13,13 +13,6 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
 
 
-class PrincipalsOnly(BaseModel):
-    """Reload applies only the principal set (docs/authority-principal-reload.md);
-    the rest of the file is the startup gate's business, so it is not re-judged."""
-    model_config = ConfigDict(extra='ignore', strict=True)
-    principals: list[dict[str, Any]]
-
-
 class HandlerReleasePolicy(BaseModel):
     """The handler release registry's policy section. Unknown keys fail closed. Per-handler
     entries (runtimes/backends) are judged by HandlerReleaseRegistry at construction, which
@@ -32,6 +25,16 @@ class HandlerReleasePolicy(BaseModel):
     # Unset disables eviction (a full registry refuses by name). Floor: one hour.
     burst_min_age_seconds: Optional[StrictInt] = Field(default=None, ge=3600)
     handlers: Optional[dict[str, dict[str, Any]]] = None
+
+
+class ReloadableConfig(BaseModel):
+    """What SIGHUP re-reads (docs/authority-principal-reload.md): principals, the installed
+    handler ids (add-only) and the handler release policy. The rest of the file is the
+    startup gate's business, so it is not re-judged."""
+    model_config = ConfigDict(extra='ignore', strict=True)
+    principals: list[dict[str, Any]]
+    handlers: list[StrictStr]
+    handler_release_policy: Optional[HandlerReleasePolicy] = None
 
 
 class AuthorityConfig(BaseModel):
