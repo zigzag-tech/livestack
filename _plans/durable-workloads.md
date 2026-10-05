@@ -166,11 +166,15 @@ keeps the previous pointer and is reported by digest and reason. The authority
 resolves a default once when accepting a job; retries and completion continue to
 use that exact release even after another version activates.
 
-Initial hard bounds are 64 handler IDs, four catalogued releases per handler,
-2 GiB per archive, 16 GiB total authority archives, 4 MiB catalog metadata, 16
-unreferenced staging candidates, 16 activation receipts, 1,024 bounded ledger
-events, 256 installed packages per worker, and 16 GiB installed bytes per
-worker. Garbage collection needs a configured retention window of at least 24
+Hard bounds are 64 handler IDs, 256 catalogued releases in total (no count per
+handler: storage is the bound), 2 GiB per archive, 16 GiB total authority
+archives, 4 MiB catalog metadata, 16 unreferenced staging candidates, 16
+activation receipts, 1,024 bounded ledger events, 256 installed packages per
+worker, and 16 GiB installed bytes per worker. A stage that would exceed a byte,
+metadata, total-release or candidate bound first evicts the oldest unreferenced
+releases at least `burst_min_age_seconds` old (policy value, floor one hour; unset
+disables eviction), all-or-nothing and with the same complete reference evidence
+as garbage collection (openspec `handler-registry-burst-headroom`). Garbage collection needs a configured retention window of at least 24
 hours and one complete, set-based reference snapshot; unset retention or missing
 evidence deletes nothing. The authority keeps two registry generations and the
 current plus one rollback release per handler. Workers retain packages referenced
