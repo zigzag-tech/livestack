@@ -13,4 +13,4 @@
 ## 3. Documentation and rollout
 
 - [x] 3.1 Update `_plans/durable-workloads.md` hard bounds and the delta spec.
-- [ ] 3.2 Deploy to the live authority with a backed-up state and config; verify health, worker reconnection, the new policy revision in registry events, and a scratch-handler burst with eviction; then archive this change.
+- [x] 3.2 Deployed 2026-10-05 13:43 UTC (livestack 4932b47e): state+config backed up and verified, release dir `…+burstheadroom4932b47e`, drop-in `99-zz-burst-headroom.conf`, restart 1.3 s, status shows policy revision `benchday-e2e-handler-release-burst-20261005` with burst_min_age_seconds=3600 and no per-handler limit; burst of 8 + eviction proved with the deployed code on a scratch handler in a throwaway authority; zzops/hub healthy afterwards. Open: first production eviction event and archive.
