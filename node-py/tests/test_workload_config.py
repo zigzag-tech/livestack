@@ -18,7 +18,8 @@ def write(tmp_path, **override):
 
 
 def test_valid_config_round_trips_and_keeps_upload_grants_flag(tmp_path):
-    config = load_config(write(tmp_path, public_base_url='https://hub.example:8810/', port=8810))
+    config = load_config(write(tmp_path, public_base_url='https://hub.example:8810/', port=8810,
+                               compilation_policy='/etc/policy.json', compilation_handlers={'h': ['linux']}))
     assert config['public_base_url'] == 'https://hub.example:8810' and 'bind' not in config
     assert load_principals(write(tmp_path))[0].upload_grants is True
     full = write(tmp_path)  # reload judges only principals; startup judges the whole file
@@ -37,6 +38,7 @@ def test_valid_config_round_trips_and_keeps_upload_grants_flag(tmp_path):
     dict(blob_limits={'max_byte': 1}),                   # misspelt bound
     dict(blob_limits={'max_bytes': 0}),
     dict(handlers='test.v1'),
+    dict(compilation_policy={'not': 'a path'}),
 ])
 def test_invalid_config_is_refused_without_echoing_secrets(tmp_path, override):
     with pytest.raises(ValueError) as error:
