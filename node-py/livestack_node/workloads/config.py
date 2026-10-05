@@ -34,7 +34,7 @@ class AuthorityConfig(BaseModel):
     blob_limits: Optional[dict[str, Any]] = None
     environment_handlers: Optional[dict[str, Any]] = None
     compilation_handlers: Optional[dict[str, Any]] = None
-    compilation_policy: Optional[dict[str, Any]] = None
+    compilation_policy: Optional[StrictStr] = None  # path to the policy file
     github_remote: Optional[dict[str, Any]] = None
     artifact_mirror: Optional[dict[str, Any]] = None
     handler_release_policy: Optional[dict[str, Any]] = None
