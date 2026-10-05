@@ -14,3 +14,8 @@
 
 - [x] 3.1 Update `_plans/durable-workloads.md` hard bounds and the delta spec.
 - [x] 3.2 Deployed 2026-10-05 13:43 UTC (livestack 4932b47e): state+config backed up and verified, release dir `…+burstheadroom4932b47e`, drop-in `99-zz-burst-headroom.conf`, restart 1.3 s, status shows policy revision `benchday-e2e-handler-release-burst-20261005` with burst_min_age_seconds=3600 and no per-handler limit; burst of 8 + eviction proved with the deployed code on a scratch handler in a throwaway authority; zzops/hub healthy afterwards. Open: first production eviction event and archive.
+
+## 4. Post-deploy finding (2026-10-05)
+
+- [x] 4.1 The overlay release the authority runs (an older patch stack) had `node-py/livestack_node/workloads/store.py` using `re.fullmatch` in worker registration with no `import re` (origin/main has it). Registrations carrying a handler inventory failed with HTTP 503 (`NameError`, about 3,000 log lines, workers `zz-joe-e2e-1/2` and `xc-win-1-wsl` not ready). The bug predates this change (the previous release had the same file) but the deploy carried it forward and its checks did not exercise registration. Fixed in the deployed release (`…+burstheadroom4932b47e`, one-line `import re`, backup `store.py.before-import-re`), restart 13:50 UTC: zero new errors, 15 of 15 fresh workers ready, e2e workers at registry generation 7.
+- [ ] 4.2 Overlay releases are hand-patched copies; add a deploy check that runs pyflakes (undefined names) over the deployed `workloads/` directory and verifies a real worker registration (a worker reports ready with a handler inventory) before declaring a deploy healthy.
