@@ -191,6 +191,29 @@ migrating a consumer. Rollback activates a retained digest as a new generation;
 it never rewrites accepted jobs. Existing name-only jobs and workers remain on
 the legacy path until migrated.
 
+### Authority release deployment
+
+The live authority runs a hand-assembled overlay release directory (an older patch stack plus
+the files a change touches), selected by a systemd drop-in. A change that works from `main` can
+still fail in that overlay, so a release is deployed only by this procedure:
+
+1. `tools/check-authority-release.py <release-dir>` must print `RESULT: PASS`. It runs an
+   undefined-name check over `livestack_node/workloads`, proves the release's own
+   `livestack_node` is the code imported, boots a THROWAWAY authority from the release on a
+   scratch state dir and port, registers a real scratch worker over HTTP with a report that
+   reaches every validation branch (handler inventory, activation failures, GC receipts,
+   environment profiles when the release knows them), and completes one job round trip. It
+   prints one PASS/FAIL line per stage with a named cause and never prints a token. Status
+   answering is not enough: on 2026-10-05 an overlay whose `store.py` lacked `import re`
+   booted and answered status while every worker registration returned HTTP 503.
+2. `tools/deploy-authority-release.sh <release-dir> [candidate-config.json]` runs that check,
+   backs up the database and config (integrity-checked), switches the drop-in, restarts, and
+   verifies the LIVE authority: status answers and at least as many workers are ready as
+   before. Any failure after the backup rolls back (drop-in removed or restored, config
+   restored, restart). Downtime is seconds.
+3. Roll back by hand with the same steps: restore the config from the printed backup directory,
+   remove or restore the drop-in, `systemctl --user daemon-reload`, restart.
+
 ### Initial production rollout
 
 The paired implementation is live in the authority and three compatible
