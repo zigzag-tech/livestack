@@ -11,7 +11,7 @@ requires-python = ">=3.9"
 # signs with Ed25519 at module import. Undeclared, a venv built from these deps
 # crash-looped every perception worker on it (xc-tower-ubuntu, 2026-09-29:
 # ~9,800 restarts each of glm-ocr / hunyuan-ocr / paddleocr-vl).
-dependencies = ["cryptography>=42"]
+dependencies = ["cryptography>=42", "pydantic>=2.12,<3"]
 
 [project.optional-dependencies]
 facade = ["fastapi>=0.100"]
