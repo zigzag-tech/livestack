@@ -18,6 +18,7 @@ from .blobs import BlobStore
 from .handler_registry import HandlerReleaseRegistry
 from .handler_release import MAX_MANIFEST_BYTES
 from .object_routes import route_object
+from .upload_grants import UploadGrants, route_upload_grant, route_upload_grant_owner
 from .network import BoundedRequests
 
 from ..fleet_auth import AuthError, Principal as FleetPrincipal, resolve_owner
@@ -45,6 +46,9 @@ class Principal:
     remote_provider: str | None = None
     remote_run_id: str | None = None
     remote_boot: str | None = None
+    # May mint one-object upload grants into its OWN object namespace
+    # (workloads/upload_grants.py). Default off; callers/admins only.
+    upload_grants: bool = False
 
     def __post_init__(self):
         name(self.id, "principal")
@@ -65,6 +69,8 @@ class Principal:
             raise ValueError('only a remote worker may carry a remote binding')
         elif not self.handlers:
             raise ValueError('caller/admin must declare allowed handlers')
+        if type(self.upload_grants) is not bool or self.upload_grants and self.role == 'worker':
+            raise ValueError('upload_grants must be boolean and is for caller/admin principals only')
         if self.delegate_prefix is not None and self.delegate_prefix:
             name(self.delegate_prefix, "delegate_prefix")
         if (isinstance(self.max_running, bool) or self.max_running is not None
@@ -100,13 +106,15 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
     request_queue_size = 32
 
     def __init__(self, address, store, principals, *, blobs=None, artifact_mirror=None, github_remote=None,
-                 handler_release_policy=None):
+                 handler_release_policy=None, public_base_url=None):
         check_principals(principals)
         self.configure_connections()
         self.store = store
         self.blobs = blobs or BlobStore(store, __import__("pathlib").Path(store.path).parent/"objects")
         self.handler_registry = HandlerReleaseRegistry(store, self.blobs, handler_release_policy)
         store.handler_registry = self.handler_registry
+        self.upload_grants = UploadGrants(self.blobs)
+        self.public_base_url = public_base_url
         self.artifact_mirror = artifact_mirror
         self.github_remote = github_remote
         self._principals_lock = threading.Lock()
@@ -159,6 +167,7 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
         if now - getattr(self, '_last_sweep', 0) >= 30:
             self.store.sweep()
             self.blobs.prune()
+            self.upload_grants.sweep()
             handler_gc = self.handler_registry.collect()
             logging.info('handler_release_gc: %s', encode(handler_gc, 4096))
             self._last_sweep = now
@@ -265,7 +274,15 @@ class Handler(BaseHTTPRequestHandler):
                     raise WorkloadError('GitHub remote execution is not configured', 404)
                 self.respond(200, self.server.github_remote.bootstrap(self.body()))
                 return
+            receipt = route_upload_grant(self, method, parts[2:])
+            if receipt is not None:
+                self.respond(200, receipt)
+                return
             principal = self.principal()
+            handled, grant_result = route_upload_grant_owner(self, principal, method, parts[2:])
+            if handled:
+                self.respond(200, grant_result)
+                return
             if route_object(self, principal, method, parts[2:]):
                 return
             body = self.body() if method == 'POST' else {}

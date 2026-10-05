@@ -860,3 +860,21 @@ instructions. Full/coalesced E2E and publishing requests remain outside the
 environment lifecycle at every stage. Rollback disables environment
 capabilities and drains current writers; it leaves ordinary job submission and
 the existing full-test and publication coordinators intact.
+
+### Delegated one-object upload grants (shipped)
+
+The caller-token transfer protocol above stays authoritative for callers and
+fenced workers, but a source publisher must not need a caller token (that token
+can also submit jobs and read the owner's objects). A principal configured with
+`"upload_grants": true` (callers/admins only, default false) mints a grant with
+`POST /v1/workloads/upload-grants` `{request_id, digest, size, expires_in_seconds?}`
+bound to its own object namespace; the holder streams exactly those bytes with
+`PUT /v1/workloads/upload-grants/<grant_id>/objects/<digest>` using the opaque
+capability as the bearer. The capability authorizes nothing else. The owner
+reads `GET /v1/workloads/upload-grants/<request_id>` (reconciled from the
+durable CAS owner/digest/size binding after a lost reply, never from the bytes).
+State is capped (4096 grants, 512 unexpired per owner, 8192 audit events; terminal
+rows collected after 24 h); only the capability's SHA-256 verifier is stored.
+Optional `public_base_url` in the service config sets the host in `upload_url`.
+Code: `node-py/livestack_node/workloads/upload_grants.py`; tests:
+`test_workload_upload_grants.py`.
