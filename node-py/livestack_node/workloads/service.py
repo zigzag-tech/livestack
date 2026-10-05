@@ -8,6 +8,7 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from .config import PrincipalsOnly, load_config
 from .http import Principal, WorkloadServer, check_principals
 from .model import Limits
 from .store import WorkloadStore
@@ -19,9 +20,9 @@ from .compilation_policy import CompilationPolicy
 def load_principals(path):
     """Parse the config's principals with the startup rules. Raises ValueError."""
     try:
-        config = json.loads(Path(path).read_text())
+        config = load_config(path, PrincipalsOnly)
         principals = [Principal(**p) for p in config['principals']]
-    except (OSError, KeyError, TypeError, AttributeError) as exc:
+    except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError(f'principals unreadable: {type(exc).__name__}: {exc}') from exc
     check_principals(principals)
     return principals
@@ -58,7 +59,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
     args = parser.parse_args()
-    config = json.loads(Path(args.config).read_text())
+    config = load_config(args.config)
     root = Path(config['state_dir']).expanduser()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     # One authority per database. A second instance must not clear readiness
