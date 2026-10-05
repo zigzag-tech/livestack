@@ -8,4 +8,4 @@
 ## 2. Rollout
 
 - [x] 2.1 Update `_plans/durable-workloads.md`; land on origin/main.
-- [ ] 2.2 Deploy to the Harmony authority and enable `upload_grants` only for the ZZOPS dispatcher principal; verify a real grant, PUT and status round trip.
+- [x] 2.2 Deployed to the Harmony authority (user unit drop-in `99-upload-grants.conf`, release `...+uploadgrants839d6831`); `upload_grants: true` set only on principal `zzops-benchday-test-train`; live grant, PUT and status round trip verified 2026-10-04.
