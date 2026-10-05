@@ -35,43 +35,50 @@ MAX_EVICTIONS_PER_STAGE = 32
 _DIGEST = re.compile(r'^[0-9a-f]{64}$')
 
 
+def parse_policy(policy, handlers):
+    """Validate a handler release policy against the installed handler ids and return
+    (revision, retention_seconds, burst_min_age_seconds, per-handler policy). Raises ValueError.
+    Pure: startup and SIGHUP reload share it, so there is one owner of these rules."""
+    config = policy or {}
+    if (not isinstance(config, dict) or set(config) - {'revision', 'handlers', 'retention_seconds', 'burst_min_age_seconds'} or
+            not isinstance(config.get('handlers', {}), dict) or
+            len(config.get('handlers', {})) > MAX_HANDLER_IDS):
+        raise ValueError('invalid handler release policy')
+    policy_revision = str(config.get('revision', '1'))[:64]
+    retention = config.get('retention_seconds')
+    if retention is not None and (type(retention) is not int or
+            not MINIMUM_RETENTION_SECONDS <= retention <= 10*365*24*60*60):
+        raise ValueError('handler release retention must be unset or at least 24 hours')
+    burst = config.get('burst_min_age_seconds')
+    if burst is not None and (type(burst) is not int or burst < MINIMUM_BURST_AGE_SECONDS or
+            burst > 10*365*24*60*60 or (retention is not None and burst > retention)):
+        raise ValueError('handler release burst eviction age must be unset or at least one hour '
+                         'and no longer than the retention window')
+    # Unset means capacity-driven eviction is OFF (fail closed): a full registry then refuses by name.
+    policy = config.get('handlers', {})
+    for handler, value in policy.items():
+        if (handler not in handlers or not isinstance(value, dict) or
+                set(value) - {'runtime_ids', 'backends', 'enabled'} or
+                not isinstance(value.get('runtime_ids', []), list) or
+                len(value.get('runtime_ids', [])) > 16 or
+                any(not isinstance(runtime, str) or not runtime or len(runtime) > 64
+                    for runtime in value.get('runtime_ids', [])) or
+                not isinstance(value.get('backends', []), list) or not value.get('backends') or
+                len(value.get('backends', [])) > 3 or
+                any(backend not in ('native', 'rootless-docker', 'rootless-docker-native')
+                    for backend in value.get('backends', [])) or
+                type(value.get('enabled', True)) is not bool):
+            raise ValueError('handler release policy may only narrow installed handlers and runtimes')
+    return policy_revision, retention, burst, policy
+
+
 class HandlerReleaseRegistry:
     """Registry transitions share the authority's SQLite transaction boundary."""
 
     def __init__(self, store, blobs, policy=None):
         self.store, self.blobs = store, blobs
-        config = policy or {}
-        if (not isinstance(config, dict) or set(config) - {'revision', 'handlers', 'retention_seconds', 'burst_min_age_seconds'} or
-                not isinstance(config.get('handlers', {}), dict) or
-                len(config.get('handlers', {})) > MAX_HANDLER_IDS):
-            raise ValueError('invalid handler release policy')
-        self.policy_revision = str(config.get('revision', '1'))[:64]
-        retention = config.get('retention_seconds')
-        if retention is not None and (type(retention) is not int or
-                not MINIMUM_RETENTION_SECONDS <= retention <= 10*365*24*60*60):
-            raise ValueError('handler release retention must be unset or at least 24 hours')
-        self.retention_seconds = retention
-        burst = config.get('burst_min_age_seconds')
-        if burst is not None and (type(burst) is not int or burst < MINIMUM_BURST_AGE_SECONDS or
-                burst > 10*365*24*60*60 or (retention is not None and burst > retention)):
-            raise ValueError('handler release burst eviction age must be unset or at least one hour '
-                             'and no longer than the retention window')
-        # Unset means capacity-driven eviction is OFF (fail closed): a full registry then refuses by name.
-        self.burst_min_age_seconds = burst
-        self.policy = config.get('handlers', {})
-        for handler, value in self.policy.items():
-            if (handler not in store.handlers or not isinstance(value, dict) or
-                    set(value) - {'runtime_ids', 'backends', 'enabled'} or
-                    not isinstance(value.get('runtime_ids', []), list) or
-                    len(value.get('runtime_ids', [])) > 16 or
-                    any(not isinstance(runtime, str) or not runtime or len(runtime) > 64
-                        for runtime in value.get('runtime_ids', [])) or
-                    not isinstance(value.get('backends', []), list) or not value.get('backends') or
-                    len(value.get('backends', [])) > 3 or
-                    any(backend not in ('native', 'rootless-docker', 'rootless-docker-native')
-                        for backend in value.get('backends', [])) or
-                    type(value.get('enabled', True)) is not bool):
-                raise ValueError('handler release policy may only narrow installed handlers and runtimes')
+        (self.policy_revision, self.retention_seconds, self.burst_min_age_seconds,
+         self.policy) = parse_policy(policy, store.handlers)
         with store.transaction() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS handler_releases(
@@ -97,6 +104,12 @@ class HandlerReleaseRegistry:
                 db.execute('INSERT INTO handler_registry_generations VALUES(0,?,?,?,?)',
                            ('{}', 'system', 'initial', store.clock()))
                 db.execute('INSERT INTO handler_registry_state VALUES(1,0)')
+
+    def replace_policy(self, policy, handlers):
+        """Swap the policy atomically (SIGHUP reload). Raises ValueError, applying nothing."""
+        revision, retention, burst, narrowed = parse_policy(policy, handlers)
+        self.policy_revision, self.retention_seconds = revision, retention
+        self.burst_min_age_seconds, self.policy = burst, narrowed
 
     def _event(self, db, actor, handler, release, archive, size, outcome):
         db.execute('INSERT INTO handler_release_events(at,actor,handler_id,release_digest,archive_digest,bytes,'

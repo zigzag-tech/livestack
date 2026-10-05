@@ -8,7 +8,8 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from .config import PrincipalsOnly, load_config
+from .config import ReloadableConfig, load_config
+from .handler_registry import parse_policy
 from .http import Principal, WorkloadServer, check_principals
 from .model import Limits
 from .store import WorkloadStore
@@ -17,25 +18,31 @@ from .artifact_mirror import InstalledArtifactMirror
 from .compilation_policy import CompilationPolicy
 
 
-def load_principals(path):
-    """Parse the config's principals with the startup rules. Raises ValueError."""
+def load_reloadable(path):
+    """Parse the reloadable sections with the startup rules. Raises ValueError.
+    Pure: nothing is applied until every section has passed."""
     try:
-        config = load_config(path, PrincipalsOnly)
+        config = load_config(path, ReloadableConfig)
         principals = [Principal(**p) for p in config['principals']]
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError(f'principals unreadable: {type(exc).__name__}: {exc}') from exc
     check_principals(principals)
-    return principals
+    return principals, config['handlers'], config.get('handler_release_policy')
+
+
+def load_principals(path):
+    return load_reloadable(path)[0]
 
 
 def reload_principals(server, path, attempts=3, pause=.2):
-    """Re-read `path` and swap the principal set; fail closed, keep the old one.
+    """Re-read `path` and swap principals, installed handler ids (add-only) and the
+    handler release policy; fail closed, keep every old value on any refusal.
 
     A torn read (editor mid-write) is retried briefly before it counts. Returns
     True when a new set was applied. Never raises, never logs a token."""
     for attempt in range(attempts):
         try:
-            new = load_principals(path)
+            new, handlers, policy = load_reloadable(path)
             break
         except ValueError as exc:
             # JSONDecodeError is a ValueError: a torn write lands here.
@@ -43,15 +50,25 @@ def reload_principals(server, path, attempts=3, pause=.2):
                 logging.error('principal_reload_refused: %s; keeping the previous set', exc)
                 return False
             time.sleep(pause)
+    store, registry = server.store, server.handler_registry
     try:
+        removed = store.handlers - set(handlers)
+        if removed:
+            raise ValueError('handler_removal_refused: ' + ', '.join(sorted(removed))
+                             + ' cannot be removed without a restart')
+        all_handlers = store.handlers | set(handlers)
+        parse_policy(policy, all_handlers)
         old = {p.id for p in server.principals}
         server.replace_principals(new)
     except ValueError as exc:
         logging.error('principal_reload_refused: %s; keeping the previous set', exc)
         return False
+    added = sorted(all_handlers - store.handlers)
+    store.add_handlers(handlers)
+    registry.replace_policy(policy, store.handlers)
     ids = {p.id for p in new}
-    logging.info('principal_reload_applied: %d principals, added=%s removed=%s',
-                 len(new), sorted(ids-old), sorted(old-ids))
+    logging.info('principal_reload_applied: %d principals, added=%s removed=%s; handlers added=%s',
+                 len(new), sorted(ids-old), sorted(old-ids), added)
     return True
 
 

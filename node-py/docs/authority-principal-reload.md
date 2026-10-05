@@ -48,6 +48,20 @@ never logged.
 - Duplicate *ids* with distinct tokens are not rejected (neither at startup);
   the later entry wins the store's cap table. Do not do that.
 
+## Handlers and the handler release policy
+
+The same SIGHUP also re-reads `handlers` and `handler_release_policy` (the sections
+`ReloadableConfig` names). A new handler id can therefore be installed, and given a
+release policy, without a restart.
+
+- `handlers` is **add-only**. A file that drops an installed id is refused whole
+  (`principal_reload_refused: handler_removal_refused: <id> ...`): removing one could
+  strand queued jobs, so that stays a restart.
+- The policy is judged by the startup rules (`handler_registry.parse_policy`, one owner),
+  against the handler set *after* the add, so one edit can add a handler and its policy.
+- All sections are validated before any is applied. A refusal in any of them keeps the
+  previous principals, handlers and policy, and logs the named reason (never a token).
+
 ## systemd
 
 Add one line to the `[Service]` section of the unit
