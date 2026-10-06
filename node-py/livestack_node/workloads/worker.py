@@ -72,6 +72,24 @@ def _tree_bytes(path):
     return total
 
 
+MAX_TRANSFER_BYTES = 8 * 1024**3   # the authority's per-object bound
+DEFAULT_TRANSFER_BYTES = 2 * 1024**3
+
+
+def transfer_byte_limit(config):
+    """Per-object upload and download ceiling (worker.json `transfer_max_bytes`).
+
+    Defaults to 2 GiB. A worker that must move larger objects (an admitted
+    docker-save image archive is ~3.6 GiB; benchday caps them at 8 GiB) sets it,
+    up to the authority's 8 GiB object bound. Handler `output_max_bytes` still
+    overrides the ceiling for that handler's result artifacts.
+    """
+    value = config.get('transfer_max_bytes', DEFAULT_TRANSFER_BYTES)
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_TRANSFER_BYTES:
+        raise WorkloadError('transfer_max_bytes must be an integer from 1 byte to 8 GiB')
+    return value
+
+
 class WorkloadWorker:
     # Match the authority's object bound without widening input/downloads.
     MAX_HANDLER_OUTPUT_BYTES = 8 * 1024**3
@@ -142,7 +160,9 @@ class WorkloadWorker:
             relay=WorkloadClient(spec['url'], config['token'], timeout=transfer_timeout,
                                  edge_key=config.get('edge_key')),
             relay_key=spec['key'], relay_parallel=spec.get('parallel', 4))
-        self.transfer = InputTransfer(transfer_client, **transfer_options)
+        limit = transfer_byte_limit(config)
+        logging.info('object transfer ceiling is %d bytes', limit)
+        self.transfer = InputTransfer(transfer_client, max_bytes=limit, **transfer_options)
         # Large compiler artifacts use their handler's output bound; input
         # downloads and framework logs keep the original transfer limit.
         self.output_transfers = {}
