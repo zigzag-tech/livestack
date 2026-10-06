@@ -385,3 +385,30 @@ def test_policy_may_name_a_handler_added_in_the_same_reload(authority):
     authority.write([caller('alice', A), worker('w1', W)], handlers=['test.v1', 'askafox.deploy.v1'], policy=policy)
     assert authority.reload()
     assert 'askafox.deploy.v1' in authority.server.handler_registry.policy
+
+
+def test_one_worker_serves_jobs_of_two_owners_without_leaking_either(authority):
+    authority.write([caller('alice', A), caller('bob', B), worker('w1', W)])
+    assert authority.reload()
+    w = authority.client(W)
+    w.request('worker/report', REPORT)
+    # Objects are owned: bob cannot reference alice's bytes, so he uploads his own.
+    authority.server.blobs.put('bob', authority.digest, 5, BytesIO(b'input'))
+    spec = dict(version=1, key='k', handler='test.v1', input_digest=authority.digest, need={'cpu': 1})
+    first = authority.client(A).submit(dict(spec, labels={'requested_by': 'human-a'}))
+    second = authority.client(B).submit(dict(spec, labels={'requested_by': 'human-b'}))
+    requester = {first['id']: 'human-a', second['id']: 'human-b'}
+    claimed = []
+    for _ in range(2):  # placement decides the order; each owner's audit label must travel with its own job
+        assignment = w.request('worker/claim', {'boot': 'b1'})['assignment']
+        assert assignment['spec']['labels']['requested_by'] == requester[assignment['job_id']]
+        claimed.append(assignment['job_id'])
+        w.request('worker/complete', dict(boot='b1', attempt_id=assignment['attempt_id'], fence=assignment['fence'],
+            input_digest=authority.digest, outcome='succeeded', result={}))
+    assert sorted(claimed) == sorted(requester)
+    assert authority.client(A).get(first['id'])['state'] == 'succeeded'
+    assert authority.client(B).get(second['id'])['state'] == 'succeeded'
+    for owner, foreign in ((A, second), (B, first)):  # neither can read or cancel the other's job
+        with pytest.raises(WorkloadError) as error:
+            authority.client(owner).get(foreign['id'])
+        assert error.value.status == 404
