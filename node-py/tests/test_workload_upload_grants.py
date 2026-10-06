@@ -174,3 +174,37 @@ def test_principal_flag_validation():
         Principal('w', 'w'*32, 'worker', worker='w', host='h', upload_grants=True)
     with pytest.raises(ValueError):
         Principal('c', 'c'*32, 'caller', ('h',), upload_grants='yes')
+
+
+def test_a_principal_upload_base_url_is_used_only_for_its_own_grants(tmp_path):
+    store = WorkloadStore(tmp_path/'jobs.db', handlers={'test.v1'})
+    server = WorkloadServer(('127.0.0.1', 0), store, [
+        Principal('benchday', OTHER, 'caller', ('test.v1',), upload_grants=True),
+        Principal('collab', OWNER, 'caller', ('test.v1',), upload_grants=True, upload_base_url='https://relay.example/')])
+    Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        _, mine = call(server, 'POST', 'upload-grants', OWNER, dict(request_id='r1', digest=DIGEST, size=len(DATA)))
+        _, other = call(server, 'POST', 'upload-grants', OTHER, dict(request_id='r1', digest=DIGEST, size=len(DATA)))
+        assert mine['upload_url'].startswith('https://relay.example/v1/workloads/upload-grants/')
+        assert other['upload_url'].startswith('http://127.0.0.1:'), 'another principal keeps the authority\'s own address'
+        assert call(server, 'PUT', f"upload-grants/{mine['grant_id']}/objects/{DIGEST}", mine['capability'], data=DATA)[0] == 200
+    finally:
+        server.shutdown(); server.server_close()
+
+
+@pytest.mark.parametrize('bad', ['relay.example', 'https://relay.example/path', 'https://u:p@relay.example', 'ftp://relay.example'])
+def test_upload_base_url_must_be_an_origin_and_needs_upload_grants(bad):
+    with pytest.raises(ValueError):
+        Principal('x', OWNER, 'caller', ('test.v1',), upload_grants=True, upload_base_url=bad)
+    with pytest.raises(ValueError):
+        Principal('x', OWNER, 'caller', ('test.v1',), upload_base_url='https://relay.example')
+
+
+def test_a_global_public_base_url_with_several_grant_principals_is_refused_by_name():
+    from livestack_node.workloads.http import check_grant_origins
+    one = [Principal('a', OWNER, 'caller', ('test.v1',), upload_grants=True)]
+    two = one + [Principal('b', OTHER, 'caller', ('test.v1',), upload_grants=True)]
+    check_grant_origins(one, 'https://relay.example')   # a single minting principal: unambiguous
+    check_grant_origins(two, None)
+    with pytest.raises(ValueError, match='applies to every grant-minting principal \\(a, b\\)'):
+        check_grant_origins(two, 'https://relay.example')

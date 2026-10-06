@@ -2,7 +2,7 @@
 
 Off-mesh collaborators upload a one-use grant's bytes straight to the authority through the Osaka relay
 (`harmony-edge.service`, port 8803 on the gateway VPS, `edge_forward.py`). The authority's
-`public_base_url` is the origin only (`https://hs.zztech.io`; the schema refuses a path), so the gateway's
+The principal that mints public grants carries `upload_base_url` (an origin, e.g. `https://hs.zztech.io`; a path is refused), so the gateway's
 Caddy sends exactly one URL shape to the relay:
 
     @grantput path_regexp ^/v1/workloads/upload-grants/[0-9a-f]{32}/objects/[0-9a-f]{64}$
@@ -27,3 +27,10 @@ worker call with `compilation_policy_unknown_enrollment` (the worker then loops 
 2026-10-06: added `histo-one` (hosts: `[]`, enrollments: `histo-one -> histo-one`) for the askafox deploy worker.
 Backup: `/etc/livestack/compilation-policy.json.bak-pre-histo-one-20261006`. Revert: copy it back (the authority re-reads
 the file; no restart).
+
+## Never set the global `public_base_url` when several principals mint grants
+
+2026-10-06 incident: a server-wide `public_base_url` rewrote the upload URL of EVERY grant-minting principal. The benchday
+source publisher validates the URL against the authority's own address and refused every grant for ~30 minutes. The authority
+now refuses to start with a global `public_base_url` and more than one `upload_grants` principal
+(`check_grant_origins`); put `upload_base_url` on the one principal that needs a public address instead.

@@ -1,0 +1,4 @@
+- [x] Principal field + validation; use in upload grant minting
+- [x] Startup guard `check_grant_origins`
+- [x] Real HTTP/SQLite tests (own-grants-only, origin validation, guard)
+- [ ] Apply on the live authority (one restart, no train/publish in flight)
