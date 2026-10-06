@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import re
 import sqlite3
+import select
 import threading
 import time
 from urllib.parse import urlparse
@@ -28,7 +29,8 @@ from .network import BoundedRequests
 OBJECT = re.compile(r'/v1/workloads/objects/[0-9a-f]{64}')
 # One-use upload grant (upload_grants.py): the holder PUTs the exact object with the opaque capability
 # as bearer. Only PUT is forwarded; the authority validates the capability, so the relay stays stateless.
-GRANT_OBJECT = re.compile(r'/v1/workloads/upload-grants/[A-Za-z0-9_-]{1,128}/objects/[0-9a-f]{64}')
+GRANT_OBJECT = re.compile(r'/v1/workloads/upload-grants/[0-9a-f]{32}/objects/[0-9a-f]{64}')
+CAPABILITY = re.compile(r'Bearer [A-Za-z0-9._~+/=-]{20,512}')
 REMOTE_CONTROL = re.compile(
     r'/v1/workloads/(?:github/bootstrap|worker/(?:status|report|claim|heartbeat|verify-compilation|complete))')
 STATUS = '/v1/edge/status'
@@ -81,12 +83,50 @@ class Budget:
         return not self.admit(0)
 
 
+class GrantLimits:
+    """Admission for the unauthenticated grant route: per-IP and global sliding windows plus a
+    concurrent-upload cap. Every request counts, accepted or not, so junk is rate-limited too.
+    Returns None to admit or the NAMED refusal."""
+
+    def __init__(self, per_ip=6, global_=30, window=60, concurrent=3, clock=time.monotonic):
+        self.per_ip, self.global_, self.window, self.concurrent, self.clock = per_ip, global_, window, concurrent, clock
+        self._ip, self._all, self._active, self._lock = {}, [], 0, threading.Lock()
+
+    def _trim(self, hits, now):
+        while hits and hits[0] <= now-self.window:
+            hits.pop(0)
+
+    def admit(self, ip):
+        with self._lock:
+            now = self.clock()
+            self._trim(self._all, now)
+            hits = self._ip.setdefault(ip, [])
+            self._trim(hits, now)
+            for key in [k for k, v in self._ip.items() if not v and k != ip][:64]:
+                del self._ip[key]
+            if len(hits) >= self.per_ip:
+                return 'rate_limited_ip'
+            if len(self._all) >= self.global_:
+                return 'rate_limited_global'
+            if self._active >= self.concurrent:
+                return 'too_many_uploads'
+            hits.append(now)
+            self._all.append(now)
+            self._active += 1
+            return None
+
+    def done(self):
+        with self._lock:
+            self._active -= 1
+
+
 class EdgeForwarder(BoundedRequests, ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 16
     max_connections = 4
 
-    def __init__(self, address, upstream, budget, admin_token, edge_key, *, timeout=60, max_connections=None):
+    def __init__(self, address, upstream, budget, admin_token, edge_key, *, timeout=60, max_connections=None,
+                 grant_limits=None, early_reject_seconds=1.5):
         if len(admin_token) < 32 or len(edge_key) < 32 or admin_token == edge_key:
             raise ValueError('admin token and edge key must be distinct and strong')
         parsed = urlparse(upstream)
@@ -99,7 +139,18 @@ class EdgeForwarder(BoundedRequests, ThreadingHTTPServer):
         self.configure_connections()
         self.upstream, self.budget, self.admin_token, self.edge_key, self.timeout = (parsed.hostname, parsed.port), budget, admin_token, edge_key, timeout
         self._reported_exhausted = False
+        self.grant_limits, self.early_reject_seconds = grant_limits or GrantLimits(), early_reject_seconds
+        self._crossed = set()
         super().__init__(address, Handler)
+
+    def report_thresholds(self):
+        """One log line (and one alert signal) per month when usage first crosses 50/80/100%."""
+        used, month = self.budget.used(), self.budget.month()
+        for percent in (50, 80, 100):
+            if used*100 >= self.budget.cap*percent and (month, percent) not in self._crossed:
+                self._crossed.add((month, percent))
+                logging.error('edge relay budget ALERT: %d%% of the monthly cap crossed (used %d of %d bytes)',
+                              percent, used, self.budget.cap)
 
     def report_budget(self, exhausted):
         """Log each transition once: a steady refusal must not flood the log."""
@@ -147,7 +198,7 @@ class Handler(BaseHTTPRequestHandler):
         if GRANT_OBJECT.fullmatch(path):
             if self.command != 'PUT':
                 return self.reply(405, {'error': 'unsupported upload operation'})
-            return self.forward(path, grant=True)
+            return self.forward_grant(path)
         if not OBJECT.fullmatch(path):
             return self.reply(404, {'error': 'route not found'})
         if self.command not in ('GET', 'PUT', 'HEAD'):
@@ -163,17 +214,105 @@ class Handler(BaseHTTPRequestHandler):
             body.update(month=budget.month(), used_bytes=budget.used(), cap_bytes=budget.cap)
         self.reply(200, body)
 
-    def forward(self, path, *, control=False, grant=False):
+    def client_ip(self):
+        """Behind Caddy the peer is loopback and Caddy appends the real address to X-Forwarded-For: the
+        LAST entry is the one our own proxy observed (earlier ones are client-supplied)."""
+        peer = self.client_address[0]
+        if peer in ('127.0.0.1', '::1'):
+            forwarded = self.headers.get('X-Forwarded-For', '').split(',')[-1].strip()
+            if re.fullmatch(r'[0-9a-fA-F:.]{3,45}', forwarded):
+                return forwarded
+        return peer
+
+    def grant_log(self, grant_id, outcome, size, ip):
+        # Never the Authorization header or the capability: grant id, outcome, size, caller address only.
+        logging.info('edge grant-upload grant=%s outcome=%s bytes=%d ip=%s', grant_id, outcome, size, ip)
+
+    def forward_grant(self, path):
+        """PUT of a one-use upload grant by a collaborator who holds no edge key. Everything cheap is
+        refused BEFORE a body byte is read; the authority's own header-time capability check is then
+        awaited (early_reject_seconds) before the body is streamed, so a wrong capability costs the
+        relay no upload bytes."""
+        server, ip = self.server, self.client_ip()
+        grant_id = path.split('/')[4]
+
+        def refuse(status, name, headers=()):
+            self.grant_log(grant_id, name, 0, ip)
+            return self.reply(status, {'error': name}, headers)
+        if not CAPABILITY.fullmatch(self.headers.get('Authorization', '')):
+            return refuse(401, 'upload_capability_required')
+        if self.headers.get('Transfer-Encoding'):
+            return refuse(400, 'transfer_encoding_unsupported')
+        try:
+            declared = int(self.headers.get('Content-Length', ''))
+        except ValueError:
+            return refuse(411, 'content_length_required')
+        if declared <= 0:
+            return refuse(400, 'content_length_invalid')
+        if declared > GRANT_MAX_BYTES:
+            return refuse(413, 'upload_grant_byte_limit_exceeded')
+        limited = server.grant_limits.admit(ip)
+        if limited:
+            return refuse(429, limited, [('Retry-After', '60')])
+        try:
+            if not server.budget.admit(declared):
+                server.report_budget(True)
+                return refuse(503, 'budget_exhausted', [('X-Edge-Reason', 'budget_exhausted')])
+            server.report_budget(False)
+            moved, connection, early = 0, None, False
+            try:
+                connection = http.client.HTTPConnection(*server.upstream, timeout=server.timeout)
+                connection.putrequest('PUT', path, skip_host=True, skip_accept_encoding=True)
+                connection.putheader('Host', '%s:%d' % server.upstream)
+                for key, value in self.headers.items():
+                    if key.lower() in REQUEST_HEADERS:
+                        connection.putheader(key, value)
+                connection.endheaders()
+                # The authority decides from headers alone (capability, object, size, expiry). A refusal
+                # arrives at once; acceptance is silent until the body is read. Wait briefly for a refusal.
+                early = bool(select.select([connection.sock], [], [], server.early_reject_seconds)[0])
+                if not early:
+                    left = declared
+                    while left:
+                        part = self.rfile.read(min(BUFFER, left))
+                        if not part:
+                            raise OSError('client ended upload early')
+                        connection.send(part)
+                        left -= len(part)
+                        moved += len(part)
+                response = connection.getresponse()
+            except OSError as error:
+                logging.warning('edge grant upstream/client failure grant=%s: %s', grant_id, error)
+                server.budget.settle(declared, moved)
+                if connection:
+                    connection.close()
+                self.grant_log(grant_id, 'upstream_unavailable_or_client_gone', moved, ip)
+                return self.reply(502, {'error': 'upstream unavailable'})
+            try:
+                data = response.read(65536)
+                self.send_response(response.status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(data)))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.close_connection = True
+                self.wfile.write(data)
+            except OSError as error:
+                logging.warning('edge grant reply interrupted grant=%s: %s', grant_id, error)
+            finally:
+                connection.close()
+                server.budget.settle(declared, moved)
+                server.report_thresholds()
+                self.grant_log(grant_id, 'upstream_%d%s' % (response.status, '_early' if early else ''), moved, ip)
+        finally:
+            server.grant_limits.done()
+
+    def forward(self, path, *, control=False):
         server, declared = self.server, 0
         # Before anything is read or forwarded: the endpoint is public, and an
         # unauthenticated PUT body would otherwise be streamed to the authority
         # (spending the byte budget) before the authority could refuse it.
-        # A grant PUT carries its own one-use capability and comes from a collaborator who holds no
-        # edge key; it is instead bounded per request (GRANT_MAX_BYTES) and by the monthly budget.
-        bearer = self.headers.get('Authorization', '').startswith('Bearer ')
-        if grant and not bearer:
-            return self.reply(401, {'error': 'upload capability required'})
-        if not grant and not hmac.compare_digest(self.headers.get('X-Edge-Key', '').encode(), server.edge_key.encode()):
+        if not hmac.compare_digest(self.headers.get('X-Edge-Key', '').encode(), server.edge_key.encode()):
             return self.reply(401, {'error': 'edge key required'})
         if self.headers.get('Transfer-Encoding'):
             return self.reply(400, {'error': 'transfer encoding is not supported'})
@@ -184,8 +323,6 @@ class Handler(BaseHTTPRequestHandler):
                 declared = -1
             if declared < 0:
                 return self.reply(400, {'error': 'invalid content length'})
-            if grant and declared > GRANT_MAX_BYTES:
-                return self.reply(413, {'error': 'upload grant byte limit exceeded'})
             if control and declared > CONTROL_MAX_BYTES:
                 return self.reply(413, {'error': 'control request byte limit exceeded'})
         if not server.budget.admit(declared):
@@ -237,6 +374,7 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             connection.close()
             server.budget.settle(declared, moved)
+            server.report_thresholds()
 
 
 def main():
