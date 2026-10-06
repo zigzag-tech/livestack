@@ -9,6 +9,11 @@ The directory a worker unit puts on `PYTHONPATH`: `<release>/node-py/{LICENSE,li
 hash). It is built from one git commit, never edited in place, and named for it:
 `livestack-<sha8>` (the legacy `native-route-...+transfer8g+...` names are retired).
 
+The worker needs only a stock `python3` on `PYTHONPATH=<release>/node-py`: no third-party
+package is imported on its startup path (enforced by a test). Release `livestack-70a11344`
+alone required pydantic (hosts there carry a `deps-pydantic-*` directory on `PYTHONPATH`);
+releases from a later commit do not, and the extra path entry is then harmless.
+
 ## Build and verify (any machine with the repo; this does not touch a worker)
 
     node-py/scripts/build-worker-release.py build <commit> --out /tmp/rel/livestack-<sha8>

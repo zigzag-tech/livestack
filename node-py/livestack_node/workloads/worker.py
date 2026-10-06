@@ -23,7 +23,7 @@ from ..hostview import HostView, cgroup_nonreclaimable, user_app_slice
 from .archive import relative_path, unpack
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
-from .config import CpuAdmission
+from .cpu_admission import CpuAdmission
 from .lease import LeaseKeeper, retry_transient, transient
 from .model import ArtifactTooLarge, WorkloadError, encode, name
 from .supervision import SystemdExecutor, WorkerJournal
@@ -193,11 +193,9 @@ class WorkloadWorker:
         self.reconciled = False
         self._host_pressure_state = None
         try:
-            self.cpu_admission = CpuAdmission.model_validate(config.get('cpu_admission') or {})
+            self.cpu_admission = CpuAdmission.validate(config.get('cpu_admission') or {})
         except ValueError as exc:
-            raise WorkloadError('invalid cpu_admission: ' + '; '.join(
-                f"{'.'.join(map(str, p['loc']))}: {p['msg']}"
-                for p in exc.errors(include_input=False, include_url=False)), 500) from None
+            raise WorkloadError(f'invalid cpu_admission: {exc}', 500) from None
         self._cpu_psi_state = None
         # The measured host every placement on it consults
         # (openspec/changes/host-memory-ledger). Model servers listed in
