@@ -103,6 +103,8 @@ Initial operator defaults/ceilings (operators may lower them):
 
 Kernel bounds must apply to child writes, including native Docker/host backends. A periodic `du` alone is insufficient. Active generations are never evicted. Queued jobs do not pin cache bytes: they can recreate their environment from retained job inputs. Retention exemptions apply to source/artifact CAS under existing policy; an exempt payload is never stored solely in disposable environment state. An inability to enforce quota disables environment support on that worker. Deletion failures remain counted and observable, never block unrelated healthy workers. Disk pressure can evict eligible inactive caches or give a named storage refusal.
 
+The ext4 mount root is owned by root and the worker's primary group with mode `01770`. The sticky bit lets the worker create and remove its own environment entries while preventing it from replacing ext4's root-owned `lost+found`. Inventory accepts only a root-owned, mode-`0700`, same-filesystem `lost+found` entry; other unrecognized root entries still refuse placement.
+
 ### 7. Agent SDK, CLI and receipts
 
 Extend `WorkloadClient.submit` and its typed request/response contract; add `capabilities()` and `get_environment(handle)`. Validate environment options before upload. Existing workload CLI remains the interface:

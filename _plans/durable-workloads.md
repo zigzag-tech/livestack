@@ -852,6 +852,11 @@ select a mount or raise its hard ceiling. Run the root positive-control script
 before advertising an environment profile. The control must observe a child
 write fail with `EDQUOT` while another project's quota remains intact.
 
+For ext4, set the mount root to `root:<worker-primary-group>` with mode `01770`.
+The sticky bit protects ext4's root-owned `lost+found` from worker jobs while
+letting the worker manage its own environment directories. The worker accepts
+only that exact root-owned, mode-`0700`, same-filesystem recovery directory.
+
 The enforced default ceilings are 32 GiB per replica, 128 GiB per owner per
 host, 256 GiB total per host (also capped by the provisioned volume minus its
 reserve), 64 environments per worker host, seven idle days and 30 absolute

@@ -367,8 +367,10 @@ class TaskEnvironmentStore:
             raise WorkloadError('task environment storage must be a separate bounded filesystem', 503)
         if not self.root.is_dir():
             raise WorkloadError('task environment storage root is unavailable', 503)
-        if require_separate_filesystem and (root_info.st_uid != os.geteuid() or root_info.st_mode & 0o077):
-            raise WorkloadError('task environment storage root must be private to the worker account', 503)
+        if require_separate_filesystem and (
+                root_info.st_uid != 0 or root_info.st_gid != os.getegid() or
+                stat.S_IMODE(root_info.st_mode) != 0o1770):
+            raise WorkloadError('task environment storage root must be root-owned, sticky, and private to the worker group', 503)
         self.helper = config['quota_helper']
         if not isinstance(self.helper, str) or not self.helper.startswith('/'):
             raise WorkloadError('task environment quota helper must be an absolute installed path')
@@ -661,6 +663,12 @@ class TaskEnvironmentStore:
         owner_usage = {}
         for path in sorted(self.root.iterdir()):
             if not HANDLE.fullmatch(path.name):
+                if path.name == 'lost+found':
+                    info = path.lstat()
+                    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or
+                            stat.S_IMODE(info.st_mode) != 0o700 or info.st_dev != self.root.stat().st_dev):
+                        raise WorkloadError('invalid filesystem recovery directory in task environment storage root', 503)
+                    continue
                 if path.name not in ('.locks', '.storage.lock'):
                     raise WorkloadError('unexpected entry in task environment storage root', 503)
                 continue
