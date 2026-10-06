@@ -9,3 +9,7 @@ A principal MAY carry `upload_base_url`; grants it mints SHALL use that origin, 
 
 ### Requirement: A global public address cannot silently change several principals' grants
 The authority SHALL refuse to start when `public_base_url` is set and more than one principal may mint grants, naming the principals.
+
+#### Scenario: A global value with two grant principals
+- **WHEN** the config sets `public_base_url` and two principals have `upload_grants`
+- **THEN** startup fails with a message naming both principals and pointing to `upload_base_url`
