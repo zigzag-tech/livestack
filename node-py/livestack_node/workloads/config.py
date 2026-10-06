@@ -6,7 +6,7 @@ model.Limits, github_remote, compilation_*) are only
 type-checked here so there is one owner for each rule.
 """
 from pathlib import Path
-from typing import Any, Literal, Optional, Union
+from typing import Any, Optional, Union
 
 from urllib.parse import urlparse
 
@@ -25,22 +25,6 @@ class HandlerReleasePolicy(BaseModel):
     # Unset disables eviction (a full registry refuses by name). Floor: one hour.
     burst_min_age_seconds: Optional[StrictInt] = Field(default=None, ge=3600)
     handlers: Optional[dict[str, dict[str, Any]]] = None
-
-
-class CpuAdmission(BaseModel):
-    """worker.json `cpu_admission`: how the worker derives `available.cpu`
-    (docs/worker-cpu-admission.md). Absent means `loadavg`, today's behaviour. Unknown keys
-    fail closed."""
-    model_config = ConfigDict(extra='forbid', strict=True)
-    policy: Literal['loadavg', 'psi'] = 'loadavg'
-    # psi: the host counts as stalled (report 0) when /proc/pressure/cpu `full avg60`
-    # exceeds this percentage; otherwise the whole capacity less reserve_cpu is offered
-    # and placement's reservations decide fit.
-    stall_full_avg60_percent: Union[StrictInt, StrictFloat] = Field(default=5, ge=0, le=100)
-    # CPUs held back for work Harmony does not place (agents' own runs).
-    reserve_cpu: Union[StrictInt, StrictFloat] = Field(default=0, ge=0)
-    # Test seam and non-standard mounts; the kernel's file by default.
-    psi_path: StrictStr = '/proc/pressure/cpu'
 
 
 class ReloadableConfig(BaseModel):

@@ -1825,3 +1825,41 @@ def test_invalid_cpu_admission_is_refused_at_construction(fleet, bad):
     config['cpu_admission'] = bad
     with pytest.raises(WorkloadError, match='invalid cpu_admission'):
         WorkloadWorker(config)
+
+
+def test_worker_startup_path_needs_no_pydantic():
+    """A stock interpreter without pydantic must still import the worker and judge
+    cpu_admission (hand-managed hosts; a missing pydantic crash-looped zz-joe's first roll).
+    Real subprocess with a meta-path finder that makes `import pydantic` fail."""
+    script = '''
+import importlib.abc, sys
+class Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path, target=None):
+        if name == 'pydantic' or name.startswith('pydantic.') or name == 'pydantic_core':
+            raise ModuleNotFoundError("No module named 'pydantic'")
+sys.meta_path.insert(0, Block())
+from livestack_node.workloads import worker
+from livestack_node.workloads.cpu_admission import CpuAdmission
+assert 'pydantic' not in sys.modules
+assert CpuAdmission.validate({}).policy == 'loadavg'
+ok = CpuAdmission.validate(dict(policy='psi', stall_full_avg60_percent=2.5, reserve_cpu=1, psi_path='/x'))
+assert (ok.policy, ok.stall_full_avg60_percent, ok.reserve_cpu, ok.psi_path) == ('psi', 2.5, 1, '/x')
+bad = {
+  "policy: Input should be 'loadavg' or 'psi'": dict(policy='bogus'),
+  'polcy: Extra inputs are not permitted': dict(polcy='psi'),
+  'stall_full_avg60_percent: Input should be less than or equal to 100': dict(stall_full_avg60_percent=101),
+  'reserve_cpu: Input should be greater than or equal to 0': dict(reserve_cpu=-1),
+  'reserve_cpu: Input should be a valid number': dict(reserve_cpu='2'),
+  'psi_path: Input should be a valid string': dict(psi_path=3),
+}
+for message, block in bad.items():
+    try:
+        CpuAdmission.validate(block)
+    except ValueError as exc:
+        assert str(exc) == message, (str(exc), message)
+    else:
+        raise AssertionError(block)
+'''
+    root = Path(__file__).resolve().parent.parent
+    result = subprocess.run([sys.executable, '-c', script], cwd=root, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
