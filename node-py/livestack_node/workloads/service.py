@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .config import ReloadableConfig, load_config
 from .handler_registry import parse_policy
-from .http import Principal, WorkloadServer, check_principals
+from .http import Principal, WorkloadServer, check_grant_origins, check_principals
 from .model import Limits
 from .store import WorkloadStore
 from .blobs import BlobStore
@@ -87,6 +87,7 @@ def main():
         logging.basicConfig(level=logging.INFO, handlers=[
             RotatingFileHandler(root/'authority.log', maxBytes=16*1024*1024, backupCount=3)])
         principals = load_principals(args.config)
+        check_grant_origins(principals, config.get('public_base_url'))
         if 'github_remote' in config:
             # GitHub dispatch is optional. Keep its third-party crypto
             # dependency out of authorities that do not configure that

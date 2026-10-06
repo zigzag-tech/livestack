@@ -49,6 +49,9 @@ class Principal:
     # May mint one-object upload grants into its OWN object namespace
     # (workloads/upload_grants.py). Default off; callers/admins only.
     upload_grants: bool = False
+    # Origin placed in the upload_url of grants THIS principal mints, for a holder that reaches the authority
+    # by another address (e.g. a public relay). Unset: the server's public_base_url, else the request Host.
+    upload_base_url: str | None = None
 
     def __post_init__(self):
         name(self.id, "principal")
@@ -71,6 +74,13 @@ class Principal:
             raise ValueError('caller/admin must declare allowed handlers')
         if type(self.upload_grants) is not bool or self.upload_grants and self.role == 'worker':
             raise ValueError('upload_grants must be boolean and is for caller/admin principals only')
+        if self.upload_base_url is not None:
+            from urllib.parse import urlparse
+            parsed = urlparse(self.upload_base_url) if isinstance(self.upload_base_url, str) else None
+            if (not self.upload_grants or parsed is None or parsed.scheme not in ('http', 'https') or not parsed.hostname or
+                    parsed.path not in ('', '/') or parsed.params or parsed.query or parsed.fragment or parsed.username or parsed.password):
+                raise ValueError('upload_base_url must be an http(s) origin and requires upload_grants')
+            object.__setattr__(self, 'upload_base_url', self.upload_base_url.rstrip('/'))
         if self.delegate_prefix is not None and self.delegate_prefix:
             name(self.delegate_prefix, "delegate_prefix")
         if (isinstance(self.max_running, bool) or self.max_running is not None
@@ -80,6 +90,18 @@ class Principal:
             raise ValueError('on_cap must be "queue" or "refuse"')
         if type(self.claim_enabled) is not bool or self.role != 'worker' and not self.claim_enabled:
             raise ValueError('claim_enabled must be boolean and only workers may disable claims')
+
+
+def check_grant_origins(principals, public_base_url):
+    """A server-wide `public_base_url` rewrites EVERY grant-minting principal's upload_url. With more than one such
+    principal that silently breaks any consumer that validates the URL against the authority's own address (benchday's
+    source publisher did, 2026-10-06), so it is refused by name: give each principal that needs a public address its own
+    `upload_base_url` and leave the global unset."""
+    minting = [p for p in principals if getattr(p, 'upload_grants', False)]
+    if public_base_url and len(minting) > 1:
+        raise ValueError('public_base_url applies to every grant-minting principal ('
+                         + ', '.join(sorted(p.id for p in minting))
+                         + '); remove it and set upload_base_url on the principal that needs a public address')
 
 
 def check_principals(principals):

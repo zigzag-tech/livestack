@@ -232,7 +232,8 @@ def route_upload_grant_owner(handler, principal, method, parts):
     grants = handler.server.upload_grants
     if parts == ['upload-grants'] and method == 'POST':
         host = handler.headers.get('Host') or '%s:%s' % handler.server.server_address[:2]
-        base = getattr(handler.server, 'public_base_url', None) or f'http://{host}'
+        base = (getattr(principal, 'upload_base_url', None) or getattr(handler.server, 'public_base_url', None)
+                or f'http://{host}')
         return True, grants.issue(principal, handler.body(), base)
     if len(parts) == 2 and method == 'GET':
         return True, grants.status(principal, parts[1])
