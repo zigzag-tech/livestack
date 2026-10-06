@@ -16,7 +16,7 @@ import urllib.request
 import pytest
 
 from livestack_node.workloads.client import WorkloadClient
-from livestack_node.workloads.edge_forward import Budget, EdgeForwarder
+from livestack_node.workloads.edge_forward import Budget, EdgeForwarder, GrantLimits
 from livestack_node.workloads.http import Principal, WorkloadServer
 from livestack_node.workloads.store import WorkloadStore
 from livestack_node.workloads.transfer import InputTransfer
@@ -47,10 +47,10 @@ def fleet(tmp_path):
     a_thread = serve(authority)
     upstream = f'http://127.0.0.1:{authority.server_port}'
 
-    def relay(cap=10**9, upstream_url=upstream):
+    def relay(cap=10**9, upstream_url=upstream, **kw):
         state = tmp_path/'relay'
         state.mkdir(exist_ok=True)
-        server = EdgeForwarder(('127.0.0.1', 0), upstream_url, Budget(state/'budget.sqlite', cap), ADMIN, KEY)
+        server = EdgeForwarder(('127.0.0.1', 0), upstream_url, Budget(state/'budget.sqlite', cap), ADMIN, KEY, **kw)
         return server, serve(server), f'http://127.0.0.1:{server.server_port}'
 
     started = []
@@ -393,3 +393,123 @@ def test_a_one_use_upload_grant_put_reaches_the_authority_through_the_relay(flee
     with pytest.raises(urllib.error.HTTPError) as error:
         urllib.request.urlopen(bad)
     assert error.value.code in (401, 403)
+
+
+def raw(url, request):
+    """Send raw bytes and return (status, seconds-to-answer, bytes the client managed to send)."""
+    import socket, time
+    host, port = url[len('http://'):].split(':')
+    start = time.monotonic()
+    with socket.create_connection((host, int(port)), timeout=10) as conn:
+        conn.sendall(request)
+        reply = conn.recv(65536)
+    return int(reply.split(b' ', 2)[1]), time.monotonic()-start
+
+
+def mint(fleet, size, request_id='g1'):
+    digest = 'a'*64
+    grant = WorkloadClient(fleet.upstream, 'a'*32).request('upload-grants', dict(
+        request_id=request_id, digest=digest, size=size, expires_in_seconds=600))
+    return grant, grant['upload_url'].split('/v1/workloads')[1]
+
+
+def put_headers(path, bearer, length):
+    return (f'PUT /v1/workloads{path} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {bearer}\r\n'
+            f'Content-Length: {length}\r\n\r\n').encode()
+
+
+def test_cheap_refusals_happen_before_any_body_is_read(fleet):
+    server, _t, url = fleet.make()
+    grant, path = mint(fleet, 1000)
+    ok = 'c'*40
+    cases = [
+        (put_headers(path, 'short', 1000), 401),                                    # ill-formed bearer
+        (put_headers(path, ok, 0), 400),                                            # zero length
+        (put_headers(path, ok, 600*1024*1024), 413),                                # over the cap
+        (f'PUT /v1/workloads{path} HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {ok}\r\n\r\n'.encode(), 411),  # no length
+        (put_headers(path.replace(grant['grant_id'], 'ZZ'), ok, 10), 404),          # malformed grant id: not a route
+        (put_headers(path[:-64]+'nothex'*10+'abcd', ok, 10), 404),                  # malformed digest
+    ]
+    for request, status in cases:
+        got, seconds = raw(url, request)  # no body is ever sent
+        assert got == status and seconds < 1.0, (request[:60], got)
+    assert server.budget.used() == 0
+
+
+def test_a_wrong_capability_is_refused_by_the_authority_before_the_relay_streams_any_body(fleet):
+    server, _t, url = fleet.make(early_reject_seconds=3)
+    grant, path = mint(fleet, 300*1024*1024)
+    # Declares 300 MiB with a WRONG capability, sends none of it: the answer must come from the authority
+    # at header time, not after a body is streamed.
+    status, seconds = raw(url, put_headers(path, 'w'*40, 300*1024*1024))
+    assert status == 401 and seconds < 2.5
+    assert server.budget.used() == 0, 'a wrong capability must cost the relay no upload bytes'
+    # A right capability with a wrong declared size is also refused at headers time.
+    status, _ = raw(url, put_headers(path, grant['capability'], 5))
+    assert status == 403 and server.budget.used() == 0
+
+
+def test_grant_route_rate_limits_are_named_and_the_authority_is_untouched(fleet):
+    server, _t, url = fleet.make(grant_limits=GrantLimits(per_ip=2, global_=100, concurrent=3))
+    grant, path = mint(fleet, 1000)
+    answers = [raw(url, put_headers(path, 'w'*40, 1000))[0] for _ in range(3)]
+    assert answers == [401, 401, 429]
+    request = urllib.request.Request(url+'/v1/workloads'+path, method='PUT', data=b'x'*10, headers={'Authorization': 'Bearer '+'w'*40})
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request)
+    assert error.value.code == 429 and json.loads(error.value.read())['error'] == 'rate_limited_ip'
+    assert error.value.headers['Retry-After'] == '60'
+    limits = GrantLimits(per_ip=9, global_=2, concurrent=9)
+    assert [limits.admit('1.1.1.1'), limits.admit('2.2.2.2'), limits.admit('3.3.3.3')] == [None, None, 'rate_limited_global']
+    busy = GrantLimits(per_ip=9, global_=99, concurrent=1)
+    assert [busy.admit('a'), busy.admit('b')] == [None, 'too_many_uploads']
+    busy.done()
+    assert busy.admit('b') is None
+
+
+def test_grant_budget_hard_stop_alert_thresholds_and_no_secret_in_logs(fleet, caplog):
+    size = 200*1024
+    server, _t, url = fleet.make(cap=size*10)
+    grant, path = mint(fleet, size)
+    capability = grant['capability']
+    with caplog.at_level(logging.INFO):
+        request = urllib.request.Request(url+'/v1/workloads'+path, method='PUT', data=b'z'*size, headers={'Authorization': 'Bearer '+capability})
+        try:
+            urllib.request.urlopen(request).read()
+        except urllib.error.HTTPError:
+            pass  # content is irrelevant to the budget: size is what counts
+        server.budget.settle(0, size*5)  # push usage past 50%
+        server.report_thresholds()
+        server.budget.settle(0, size*5)
+        server.report_thresholds()
+    assert 'budget ALERT: 50%' in caplog.text and 'budget ALERT: 100%' in caplog.text
+    assert caplog.text.count('ALERT: 50%') == 1
+    assert capability not in caplog.text and 'Bearer' not in caplog.text
+    assert f'grant={grant["grant_id"]}' in caplog.text
+    # Hard stop: over budget, the grant route answers by name and the caller can fall back to the authority.
+    status, _ = raw(url, put_headers(path, capability, size))
+    assert status == 503
+
+
+def test_client_disconnect_mid_upload_aborts_upstream_and_the_grant_stays_usable(fleet):
+    import socket, time
+    server, _t, url = fleet.make(early_reject_seconds=.3)
+    source, digest = blob(fleet.root, 2*1024*1024)
+    grant = WorkloadClient(fleet.upstream, 'a'*32).request('upload-grants', dict(
+        request_id='drop', digest=digest, size=source.stat().st_size, expires_in_seconds=600))
+    path = grant['upload_url'].split('/v1/workloads')[1]
+    host, port = url[len('http://'):].split(':')
+    conn = socket.create_connection((host, int(port)))
+    conn.sendall(put_headers(path, grant['capability'], source.stat().st_size) + source.read_bytes()[:500*1024])
+    time.sleep(.6)
+    conn.close()
+    for _ in range(50):  # the relay notices, settles only what moved, and frees its slot
+        if server.grant_limits._active == 0:
+            break
+        time.sleep(.1)
+    assert server.grant_limits._active == 0
+    assert 0 < server.budget.used() < source.stat().st_size
+    assert WorkloadClient(fleet.upstream, 'a'*32).request('upload-grants/drop')['state'] == 'issued'
+    relayed = urllib.request.Request(url+'/v1/workloads'+path, method='PUT', data=source.read_bytes(),
+                                     headers={'Authorization': 'Bearer '+grant['capability']})
+    assert json.loads(urllib.request.urlopen(relayed).read())['digest'] == digest
