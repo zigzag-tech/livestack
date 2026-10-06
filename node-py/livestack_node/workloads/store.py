@@ -586,6 +586,21 @@ class WorkloadStore:
                                             (owner, limit))]
             return [self._job(db, jid, owner) for jid in ids]
 
+    def handler_capacity(self, handler, draining=()):
+        """How many workers could take a new `handler` job now: ready, fresh (the
+        placement freshness window), serving the handler, and not draining.
+
+        A caller sizing its own outstanding work reads this instead of keeping a
+        number in its config that goes stale whenever a worker is added or retired.
+        """
+        name(handler, 'handler')
+        with self.transaction() as db:
+            rows = db.execute("SELECT id, report FROM workers WHERE ready=1 AND seen>? ORDER BY id",
+                              (self.clock()-self.limits.fresh_seconds,)).fetchall()
+        workers = sum(1 for row in rows if row['id'] not in draining
+                      and handler in json.loads(row['report']).get('handlers', ()))
+        return dict(handler=handler, ready_workers=workers, fresh_seconds=self.limits.fresh_seconds)
+
     def register(self, worker_id, host_id, boot, report, *, cleaned=()):
         """Worker credential binds worker+host at the HTTP boundary.
 

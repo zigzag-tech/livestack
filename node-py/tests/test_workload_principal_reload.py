@@ -166,6 +166,33 @@ def test_operator_drain_preserves_live_handoff_and_resumes_same_boot(authority):
     assert resumed['job_id'] == second['id'] and resumed['boot'] == 'b1'
 
 
+def test_handler_capacity_follows_ready_fresh_undrained_workers(authority):
+    """A caller can size its outstanding work from the authority instead of a config number."""
+    cap = lambda: authority.client(A).request('handlers/test.v1/capacity')['ready_workers']
+    assert cap() == 0  # registered principal, no report yet
+    authority.client(W).request('worker/report', REPORT)
+    assert cap() == 1
+    authority.write([caller('alice', A), worker('w1', W), worker('w2', W2, 'h2')])
+    assert authority.reload()
+    authority.client(W2).request('worker/report', REPORT)
+    assert cap() == 2  # worker added: capacity rises
+    authority.write([caller('alice', A), worker('w1', W), dict(worker('w2', W2, 'h2'), claim_enabled=False)])
+    assert authority.reload()
+    assert cap() == 1  # claim disabled: falls
+    unready = dict(REPORT, report=dict(REPORT['report'], ready=False))
+    authority.client(W).request('worker/report', unready)
+    assert cap() == 0  # not ready
+    authority.client(W).request('worker/report', REPORT)
+    authority.now[0] += 10_000  # report gone stale
+    assert cap() == 0
+    with pytest.raises(WorkloadError) as refused:
+        authority.client(A).request('handlers/other.v1/capacity')
+    assert refused.value.status == 403  # only the caller's own handlers
+    with pytest.raises(WorkloadError) as refused:
+        authority.client(W).request('handlers/test.v1/capacity')
+    assert refused.value.status == 403  # workers do not read it
+
+
 def test_other_worker_claim_cannot_place_work_on_a_drained_worker(authority):
     one, two = authority.client(W), authority.client(W2)
     authority.write([caller('alice', A), worker('w1', W), worker('w2', W2, 'h2')])
