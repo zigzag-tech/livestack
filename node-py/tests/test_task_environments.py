@@ -2,9 +2,11 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -225,6 +227,32 @@ def test_incomplete_writer_is_never_reported_as_parked_and_generation_fences(tmp
     store.release(prepared)
     with pytest.raises(WorkloadError, match='not newer'):
         store.prepare(assignment(handle, 2, digest), incoming, handler=HANDLER)
+
+
+def test_inventory_accepts_only_private_ext4_lost_found(tmp_path, monkeypatch):
+    store, root, _ = make_store(tmp_path)
+    lost_found = root/'lost+found'
+    lost_found.mkdir(mode=0o700)
+    real_lstat = Path.lstat
+    reported = {'uid': 0, 'mode': 0o700}
+
+    def lstat(path):
+        info = real_lstat(path)
+        if path == lost_found:
+            return SimpleNamespace(st_mode=stat.S_IFDIR | reported['mode'],
+                st_uid=reported['uid'], st_gid=0, st_dev=info.st_dev)
+        return info
+
+    monkeypatch.setattr(Path, 'lstat', lstat)
+    assert store._inventory() == []
+
+    reported['uid'] = os.geteuid() + 1
+    with pytest.raises(WorkloadError, match='invalid filesystem recovery directory'):
+        store._inventory()
+
+    reported.update(uid=0, mode=0o755)
+    with pytest.raises(WorkloadError, match='invalid filesystem recovery directory'):
+        store._inventory()
 
 
 def test_owner_and_host_hard_quota_reservations_are_bounded(tmp_path):
