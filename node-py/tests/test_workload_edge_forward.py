@@ -41,7 +41,7 @@ def stop(server, thread):
 def fleet(tmp_path):
     store = WorkloadStore(tmp_path/'authority/jobs.db', handlers={'test.v1'})
     authority = WorkloadServer(('127.0.0.1', 0), store, [
-        Principal('owner', 'a'*32, 'caller', ('test.v1',)),
+        Principal('owner', 'a'*32, 'caller', ('test.v1',), upload_grants=True),
         Principal('worker', 'w'*32, 'worker', worker='cn-1', host='cn'),
     ])
     a_thread = serve(authority)
@@ -370,3 +370,26 @@ def test_more_workers_than_the_relay_admits_still_completes(fleet):
     InputTransfer(WorkloadClient(fleet.upstream, 'a'*32)).put(source)
     got = _download(fleet, url, digest, parallel=8)
     assert hashlib.sha256(got.read_bytes()).hexdigest() == digest
+
+
+def test_a_one_use_upload_grant_put_reaches_the_authority_through_the_relay(fleet):
+    _server, _t, url = fleet.make()
+    source, digest = blob(fleet.root, 300*1024)
+    size = source.stat().st_size
+    grant = WorkloadClient(fleet.upstream, 'a'*32).request('upload-grants', dict(
+        request_id='deploy-1', digest=digest, size=size, expires_in_seconds=600))
+    relayed = grant['upload_url'].replace(fleet.upstream, url)
+    request = urllib.request.Request(relayed, method='PUT', data=source.read_bytes(), headers={
+        'Authorization': 'Bearer '+grant['capability'], 'Content-Type': 'application/octet-stream'})
+    assert json.loads(urllib.request.urlopen(request).read())['digest'] == digest
+    status = WorkloadClient(fleet.upstream, 'a'*32).request('upload-grants/deploy-1')
+    assert status['state'] == 'uploaded'
+    # Only PUT, and a wrong capability is still refused by the authority, not by the relay.
+    for method in ('GET', 'POST'):
+        with pytest.raises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(urllib.request.Request(relayed, method=method, data=b'' if method == 'POST' else None))
+        assert error.value.code == 405
+    bad = urllib.request.Request(relayed, method='PUT', data=b'x', headers={'Authorization': 'Bearer '+'z'*40})
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(bad)
+    assert error.value.code in (401, 403)
