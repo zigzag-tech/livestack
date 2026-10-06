@@ -17,3 +17,13 @@ tests/test_workload_edge_forward.py).
 Reproduce/rollback (2026-10-06): backup `/etc/caddy/Caddyfile.bak-pre-grants-route`; revert = copy it back,
 `caddy validate`, `systemctl reload caddy`. Relay revert: `/usr/local/sbin/revert-harmony-edge-relay`.
 Budget alerts (50/80/100% of `budget_bytes`) are `ERROR` log lines `edge relay budget ALERT`.
+
+## Worker hosts need a compilation-policy enrollment
+
+A worker host is admitted only if `/etc/livestack/compilation-policy.json` (the authority's operator host
+policy) names it. A new host with no compilation classes still needs an entry in BOTH `hosts` (empty class list)
+and `enrollments` (its worker `host` string maps to the physical host), or the authority refuses every
+worker call with `compilation_policy_unknown_enrollment` (the worker then loops "waiting").
+2026-10-06: added `histo-one` (hosts: `[]`, enrollments: `histo-one -> histo-one`) for the askafox deploy worker.
+Backup: `/etc/livestack/compilation-policy.json.bak-pre-histo-one-20261006`. Revert: copy it back (the authority re-reads
+the file; no restart).
