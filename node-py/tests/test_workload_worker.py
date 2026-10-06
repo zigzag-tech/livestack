@@ -1717,3 +1717,50 @@ def test_report_carries_the_measured_host_and_every_running_attempt(fleet):
     finally:
         stepped.join(timeout=30)
         worker.close()
+
+
+def test_transfer_max_bytes_sets_the_worker_wide_object_ceiling(fleet, tmp_path, caplog):
+    # Real worker + authority: the setting reaches InputTransfer, which refuses
+    # an upload over it before any byte is sent (the success path is the 8 GiB test above).
+    _, config, _caller, _digest = fleet
+    config['transfer_max_bytes'] = 64
+    with caplog.at_level(logging.INFO):
+        worker = WorkloadWorker(config)
+    try:
+        assert 'object transfer ceiling is 64 bytes' in caplog.text
+        assert worker.transfer.max_bytes == 64
+        large = tmp_path/'large'
+        large.write_bytes(b'l'*65)
+        with pytest.raises(WorkloadError, match='upload byte limit exceeded'):
+            worker.transfer.put(large)
+        # A handler without output_max_bytes follows the worker-wide ceiling.
+        assert worker.output_transfers['native.v1'] is worker.transfer
+    finally:
+        worker.close()
+
+
+def test_transfer_max_bytes_defaults_to_two_gib(fleet):
+    _, config, _caller, _digest = fleet
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.transfer.max_bytes == 2 * 1024**3
+    finally:
+        worker.close()
+
+
+@pytest.mark.parametrize('invalid_limit', [True, 0, -1, 8 * 1024**3 + 1, 1.5, '8589934592'])
+def test_worker_rejects_invalid_transfer_max_bytes(fleet, invalid_limit):
+    _, config, _caller, _digest = fleet
+    config['transfer_max_bytes'] = invalid_limit
+    with pytest.raises(WorkloadError, match='transfer_max_bytes'):
+        WorkloadWorker(config)
+
+
+def test_transfer_max_bytes_accepts_eight_gib_without_touching_files(fleet):
+    _, config, _caller, _digest = fleet
+    config['transfer_max_bytes'] = 8 * 1024**3
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.transfer.max_bytes == 8 * 1024**3
+    finally:
+        worker.close()
