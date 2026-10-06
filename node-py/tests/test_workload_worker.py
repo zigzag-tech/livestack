@@ -1764,3 +1764,64 @@ def test_transfer_max_bytes_accepts_eight_gib_without_touching_files(fleet):
         assert worker.transfer.max_bytes == 8 * 1024**3
     finally:
         worker.close()
+
+
+def psi_file(path, full_avg60):
+    path.write_text('some avg10=40.00 avg60=%.2f avg300=30.00 total=1\nfull avg10=0.00 avg60=%.2f avg300=0.00 total=1\n'
+                    % (full_avg60+30, full_avg60))
+    return str(path)
+
+
+def test_default_cpu_admission_still_collapses_on_a_busy_host(fleet, monkeypatch):
+    _, config, _, _ = fleet
+    monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (99, 99, 99))
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.report()['available']['cpu'] == 0
+    finally:
+        worker.close()
+
+
+@pytest.mark.parametrize('full, spec, expected', [
+    (0.0, {}, 'capacity'),                                    # busy but not stalled: admissible
+    (0.0, dict(reserve_cpu=0.25), 'capacity-0.25'),
+    (4.9, {}, 'capacity'),
+    (5.1, {}, 0),                                             # genuinely stalled
+    (3.0, dict(stall_full_avg60_percent=2), 0),
+])
+def test_psi_cpu_admission_offers_capacity_unless_stalled(fleet, monkeypatch, tmp_path, full, spec, expected):
+    _, config, _, _ = fleet
+    monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (99, 99, 99))
+    config['cpu_admission'] = dict(policy='psi', psi_path=psi_file(tmp_path/'cpu', full), **spec)
+    worker = WorkloadWorker(config)
+    try:
+        report = worker.report()
+        cpu = report['capacity']['cpu']
+        want = {'capacity': cpu, 'capacity-0.25': cpu-0.25}.get(expected, expected)
+        assert report['available']['cpu'] == want
+    finally:
+        worker.close()
+
+
+def test_psi_cpu_admission_fails_closed_and_recovers(fleet, tmp_path):
+    _, config, _, _ = fleet
+    path = tmp_path/'cpu'
+    config['cpu_admission'] = dict(policy='psi', psi_path=str(path))
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.report()['available']['cpu'] == 0           # missing file
+        path.write_text('some avg60=1.00\n')                       # no `full` line
+        assert worker.report()['available']['cpu'] == 0
+        psi_file(path, 0.0)
+        assert worker.report()['available']['cpu'] == worker.report()['capacity']['cpu'] > 0
+    finally:
+        worker.close()
+
+
+@pytest.mark.parametrize('bad', [dict(policy='psi', stall_full_avg60_percent=101), dict(policy='bogus'),
+                                 dict(polcy='psi'), dict(reserve_cpu=-1), dict(reserve_cpu='2')])
+def test_invalid_cpu_admission_is_refused_at_construction(fleet, bad):
+    _, config, _, _ = fleet
+    config['cpu_admission'] = bad
+    with pytest.raises(WorkloadError, match='invalid cpu_admission'):
+        WorkloadWorker(config)

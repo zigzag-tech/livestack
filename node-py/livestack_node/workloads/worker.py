@@ -23,6 +23,7 @@ from ..hostview import HostView, cgroup_nonreclaimable, user_app_slice
 from .archive import relative_path, unpack
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
+from .config import CpuAdmission
 from .lease import LeaseKeeper, retry_transient, transient
 from .model import ArtifactTooLarge, WorkloadError, encode, name
 from .supervision import SystemdExecutor, WorkerJournal
@@ -191,6 +192,13 @@ class WorkloadWorker:
                 retention_seconds=config.get('input_cache_retention_seconds', 14*86400), mirror=mirror)
         self.reconciled = False
         self._host_pressure_state = None
+        try:
+            self.cpu_admission = CpuAdmission.model_validate(config.get('cpu_admission') or {})
+        except ValueError as exc:
+            raise WorkloadError('invalid cpu_admission: ' + '; '.join(
+                f"{'.'.join(map(str, p['loc']))}: {p['msg']}"
+                for p in exc.errors(include_input=False, include_url=False)), 500) from None
+        self._cpu_psi_state = None
         # The measured host every placement on it consults
         # (openspec/changes/host-memory-ledger). Model servers listed in
         # `host_services` are charged their learned host-RAM peak.
@@ -293,6 +301,36 @@ class WorkloadWorker:
         stats = os.statvfs(path)
         return stats.f_blocks*stats.f_frsize, stats.f_bavail*stats.f_frsize
 
+    def _cpu_stalled(self):
+        """True when the host is genuinely stalled, or when it cannot be measured.
+
+        PSI `full` is the share of time EVERY runnable task was waiting on a core
+        (kernel >= 5.13), so it stays near zero on a merely busy host, unlike
+        cpu_count - loadavg1, which is zero on any host with more runnable tasks than
+        cores. An unreadable file reports stalled, never "no pressure".
+        """
+        stalled, state = True, 'unreadable'
+        try:
+            for line in Path(self.cpu_admission.psi_path).read_text().splitlines():
+                fields = line.split()
+                if fields and fields[0] == 'full':
+                    avg60 = float(dict(f.split('=') for f in fields[1:])['avg60'])
+                    stalled = avg60 > self.cpu_admission.stall_full_avg60_percent
+                    state = 'stalled' if stalled else 'ok'
+        except (OSError, ValueError, KeyError):
+            pass
+        if state != self._cpu_psi_state:
+            (logging.info if state == 'ok' else logging.warning)('cpu pressure %s (psi)', state)
+            self._cpu_psi_state = state
+        return stalled
+
+    def _available_cpu(self, capacity):
+        if self.cpu_admission.policy == 'psi' and not self.windows and not self.darwin:
+            if self._cpu_stalled():
+                return 0
+            return max(0, capacity['cpu']-self.cpu_admission.reserve_cpu)
+        return max(0, min(capacity['cpu'], (os.cpu_count() or 1)-self._busy_cpus()))
+
     def _busy_cpus(self):
         if not self.windows:
             return os.getloadavg()[0]
@@ -344,7 +382,7 @@ class WorkloadWorker:
         for path in self.config.get('backing_filesystems', []):
             headroom = self._disk(path)[1]-self.config.get('backing_reserve_bytes', 20*1024**3)
             available['disk_bytes'] = max(0, min(available['disk_bytes'], headroom))
-        available['cpu'] = max(0, min(capacity['cpu'], (os.cpu_count() or 1)-self._busy_cpus()))
+        available['cpu'] = self._available_cpu(capacity)
         report = dict(capacity=capacity, available=available, labels=self.config.get('labels', {}),
                       handlers=list(self.handlers), ready=not self.config.get('observe_only', False))
         report['handler_inventory'] = self.handler_inventory
