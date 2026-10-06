@@ -12,7 +12,7 @@ from livestack_node import transport
 
 from .archive import file_digest
 from .blobs import BlobStore
-from .model import WorkloadError
+from .model import ArtifactTooLarge, WorkloadError
 from .download import download_into
 
 
@@ -76,7 +76,7 @@ class InputTransfer:
         source = Path(source)
         size = source.stat().st_size
         if size > self.max_bytes:
-            raise WorkloadError('upload byte limit exceeded', 413)
+            raise ArtifactTooLarge(size, self.max_bytes)
         digest = file_digest(source)
         clients, last = self._clients(), None
         for client in clients:

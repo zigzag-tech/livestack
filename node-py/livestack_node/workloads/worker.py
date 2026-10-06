@@ -24,7 +24,7 @@ from .archive import relative_path, unpack
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
 from .lease import LeaseKeeper, retry_transient, transient
-from .model import WorkloadError, encode, name
+from .model import ArtifactTooLarge, WorkloadError, encode, name
 from .supervision import SystemdExecutor, WorkerJournal
 if sys.platform == 'darwin':
     from . import darwin_proc
@@ -496,7 +496,8 @@ class WorkloadWorker:
                 if result is not None:
                     try:
                         completion = self._completion_from_exit(assignment, result)
-                        completion = self._attach_artifacts(assignment, completion, output)
+                        completion = self._attach_or_end_oversized(assignment, completion, output,
+                                                                   assignment['attempt_id'], budget=0)
                     except (WorkloadError, HTTPError) as error:
                         # Cancellation or immutable-deadline expiry can fence the
                         # attempt before a restarted worker uploads its recovered
@@ -650,6 +651,23 @@ class WorkloadWorker:
             if in_flight is None:
                 raise
 
+    def _attach_or_end_oversized(self, assignment, completion, output, attempt, **retry):
+        """Upload the result artifacts; an artifact over this worker's bound
+        ends the attempt now as infrastructure, naming size and limit. No retry
+        can shrink it, and failing here again on every step until the lease
+        expires would abandon the attempt with no cause."""
+        try:
+            return retry_transient(lambda: self._attach_artifacts(assignment, completion, output),
+                                   'attempt %s result upload' % attempt, **retry)
+        except ArtifactTooLarge as error:
+            logging.error('attempt %s ends: %s', attempt, error)
+            ended = dict(completion, outcome='infrastructure',
+                         result=dict(completion.get('result', {}), error='ArtifactTooLarge',
+                                     detail=str(error)[:512], artifact_bytes=error.size,
+                                     limit_bytes=error.limit))
+            return retry_transient(lambda: self._attach_artifacts(assignment, ended, output),
+                                   'attempt %s result upload' % attempt, **retry)
+
     def _attach_artifacts(self, assignment, completion, output):
         handler = self._handler_for_assignment(assignment, verify=False)
         artifacts = []
@@ -663,7 +681,15 @@ class WorkloadWorker:
                 raise WorkloadError('artifact must be a private regular file')
             output_transfer = (self.output_transfers[assignment['spec']['handler']]
                               if item in declared else self.transfer)
-            artifact = output_transfer.put(path, assignment=assignment)
+            try:
+                artifact = output_transfer.put(path, assignment=assignment)
+            except ArtifactTooLarge as error:
+                if completion['outcome'] != 'infrastructure':
+                    raise
+                # Evidence of a failure that is already being reported: do not
+                # let its size turn the report itself into a failure.
+                logging.warning('infrastructure output %s not shipped: %s', item, error)
+                continue
             if self.output_mirror:
                 try:
                     self.output_mirror.put(artifact['digest'], path, output_transfer.max_bytes)
@@ -1007,8 +1033,7 @@ class WorkloadWorker:
             # the finished result. Exhaustion raises with the cause named.
             handoff = dict(budget=self.config.get('handoff_retry_seconds', 60),
                            keep_going=lambda: lease is None or not lease.lost.is_set())
-            completion = retry_transient(lambda: self._attach_artifacts(assignment, completion, output),
-                                         'attempt %s result upload' % attempt, **handoff)
+            completion = self._attach_or_end_oversized(assignment, completion, output, attempt, **handoff)
             self.journal.write(dict(assignment=assignment, phase='completed', completion=completion))
             acknowledged = retry_transient(lambda: self.client.request('worker/complete', completion),
                             'attempt %s completion' % attempt, **handoff)

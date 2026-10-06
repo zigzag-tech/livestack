@@ -16,6 +16,15 @@ class WorkloadError(ValueError):
         self.status = status
 
 
+class ArtifactTooLarge(WorkloadError):
+    """A result artifact is over this worker's upload bound. Retrying cannot
+    shrink it, so it is terminal for the attempt (never a transient fault)."""
+
+    def __init__(self, size: int, limit: int):
+        super().__init__('upload byte limit exceeded: artifact is %d bytes, limit is %d bytes' % (size, limit), 413)
+        self.size, self.limit = size, limit
+
+
 @dataclass(frozen=True)
 class Limits:
     active_jobs: int = 1000
