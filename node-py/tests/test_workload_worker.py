@@ -408,6 +408,32 @@ def test_worker_rejects_invalid_handler_output_bound(fleet, invalid_limit):
         WorkloadWorker(config)
 
 
+def test_oversized_result_artifact_ends_the_attempt_naming_size_and_limit(fleet, tmp_path):
+    # Real worker, systemd executor, authority and transfer: only the bound is
+    # lowered. Before the fix the upload raised on every step (and again on every
+    # reconcile) until the lease expired and the attempt was abandoned unexplained.
+    store, config, caller, digest = fleet
+    job = submit(caller, digest)
+    worker = WorkloadWorker(config)
+    worker.output_transfers['native.v1'] = InputTransfer(worker.transfer.client, max_bytes=4)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        assert result['state'] != 'running'
+        assert worker.journal.read() is None
+        assert list(Path(config['workspace']).iterdir()) == []
+        detail = result['result']
+        assert detail['outcome'] == 'infrastructure'
+        body = detail['result']
+        assert body['error'] == 'ArtifactTooLarge'
+        assert body['artifact_bytes'] == len('captured bytes')
+        assert body['limit_bytes'] == 4
+        assert 'upload byte limit exceeded' in body['detail'] and '14 bytes' in body['detail']
+        assert all(a['name'] != 'artifact' for a in body.get('artifacts', []))
+    finally:
+        worker.close()
+
+
 def test_worker_fetches_only_declared_supplemental_inputs(fleet, tmp_path, monkeypatch):
     monkeypatch.setattr('livestack_node.workloads.worker.os.getloadavg', lambda: (0, 0, 0))
     _, config, caller, digest = fleet
