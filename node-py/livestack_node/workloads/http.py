@@ -359,6 +359,11 @@ class Handler(BaseHTTPRequestHandler):
         if principal.role in ('caller', 'admin'):
             if parts == ['capabilities'] and method == 'GET':
                 return store.capabilities(principal.id, principal.handlers)
+            if len(parts) == 3 and parts[0] == 'handlers' and parts[2] == 'capacity' and method == 'GET':
+                if parts[1] not in principal.handlers:
+                    raise WorkloadError('handler is not authorized', 403)
+                return store.handler_capacity(parts[1], draining={
+                    p.worker for p in self.server.principals if p.role == 'worker' and not p.claim_enabled})
             if len(parts) == 2 and parts[0] == 'environments' and method == 'GET':
                 return store.get_environment(principal.id, parts[1])
             if parts == ['jobs']:
