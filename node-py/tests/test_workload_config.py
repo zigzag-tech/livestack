@@ -23,7 +23,7 @@ def test_valid_config_round_trips_and_keeps_upload_grants_flag(tmp_path):
     assert config['public_base_url'] == 'https://hub.example:8810' and 'bind' not in config
     assert load_principals(write(tmp_path))[0].upload_grants is True
     full = write(tmp_path)  # reload judges only principals; startup judges the whole file
-    full.write_text(json.dumps(dict(principals=BASE['principals'], surprise=1)))
+    full.write_text(json.dumps(dict(principals=BASE['principals'], handlers=BASE['handlers'], surprise=1)))
     assert load_principals(full)[0].id == 'zzops'
     with pytest.raises(ValueError):
         load_config(full)
