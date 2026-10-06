@@ -2,7 +2,7 @@
 
 Run `python -m livestack_node.workloads.edge_forward --config /path/config.json`.
 
-It forwards `GET|PUT|HEAD /v1/workloads/objects/<digest>` and the fixed GitHub
+It forwards `GET|PUT|HEAD /v1/workloads/objects/<digest>`, `PUT /v1/workloads/upload-grants/<id>/objects/<digest>` and the fixed GitHub
 bootstrap/worker-control routes to ONE configured upstream (the workload
 authority). Control calls are edge-key gated and capped at 64 KiB; the key is
 never forwarded. The relay stores no object bytes, and the authority still
@@ -26,11 +26,15 @@ from .block_codec import HEADER
 from .network import BoundedRequests
 
 OBJECT = re.compile(r'/v1/workloads/objects/[0-9a-f]{64}')
+# One-use upload grant (upload_grants.py): the holder PUTs the exact object with the opaque capability
+# as bearer. Only PUT is forwarded; the authority validates the capability, so the relay stays stateless.
+GRANT_OBJECT = re.compile(r'/v1/workloads/upload-grants/[A-Za-z0-9_-]{1,128}/objects/[0-9a-f]{64}')
 REMOTE_CONTROL = re.compile(
     r'/v1/workloads/(?:github/bootstrap|worker/(?:status|report|claim|heartbeat|verify-compilation|complete))')
 STATUS = '/v1/edge/status'
 BUFFER = 256*1024
 CONTROL_MAX_BYTES = 64*1024
+GRANT_MAX_BYTES = 512*1024*1024
 REQUEST_HEADERS = ('authorization', 'range', 'content-type', 'content-length', HEADER.lower())
 RESPONSE_HEADERS = ('content-type', 'content-length', 'content-range', 'accept-ranges', HEADER.lower())
 KEEP_MONTHS = 3
@@ -140,6 +144,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.command != 'POST':
                 return self.reply(405, {'error': 'unsupported control operation'})
             return self.forward(path, control=True)
+        if GRANT_OBJECT.fullmatch(path):
+            if self.command != 'PUT':
+                return self.reply(405, {'error': 'unsupported upload operation'})
+            return self.forward(path, grant=True)
         if not OBJECT.fullmatch(path):
             return self.reply(404, {'error': 'route not found'})
         if self.command not in ('GET', 'PUT', 'HEAD'):
@@ -155,12 +163,17 @@ class Handler(BaseHTTPRequestHandler):
             body.update(month=budget.month(), used_bytes=budget.used(), cap_bytes=budget.cap)
         self.reply(200, body)
 
-    def forward(self, path, *, control=False):
+    def forward(self, path, *, control=False, grant=False):
         server, declared = self.server, 0
         # Before anything is read or forwarded: the endpoint is public, and an
         # unauthenticated PUT body would otherwise be streamed to the authority
         # (spending the byte budget) before the authority could refuse it.
-        if not hmac.compare_digest(self.headers.get('X-Edge-Key', '').encode(), server.edge_key.encode()):
+        # A grant PUT carries its own one-use capability and comes from a collaborator who holds no
+        # edge key; it is instead bounded per request (GRANT_MAX_BYTES) and by the monthly budget.
+        bearer = self.headers.get('Authorization', '').startswith('Bearer ')
+        if grant and not bearer:
+            return self.reply(401, {'error': 'upload capability required'})
+        if not grant and not hmac.compare_digest(self.headers.get('X-Edge-Key', '').encode(), server.edge_key.encode()):
             return self.reply(401, {'error': 'edge key required'})
         if self.headers.get('Transfer-Encoding'):
             return self.reply(400, {'error': 'transfer encoding is not supported'})
@@ -171,6 +184,8 @@ class Handler(BaseHTTPRequestHandler):
                 declared = -1
             if declared < 0:
                 return self.reply(400, {'error': 'invalid content length'})
+            if grant and declared > GRANT_MAX_BYTES:
+                return self.reply(413, {'error': 'upload grant byte limit exceeded'})
             if control and declared > CONTROL_MAX_BYTES:
                 return self.reply(413, {'error': 'control request byte limit exceeded'})
         if not server.budget.admit(declared):
