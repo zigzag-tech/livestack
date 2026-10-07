@@ -309,6 +309,13 @@ VLLM_BASE = f"http://127.0.0.1:{VLLM_PORT}"   # single-unit compatibility alias
 _procs: "dict[str, subprocess.Popen]" = {}
 _lock = threading.RLock()
 
+# Set the moment this node is told to stop (SIGTERM/SIGINT, see `__main__`).
+# `_load` blocks a request thread for up to HARMONY_LLM_START_TIMEOUT waiting on
+# the engine, and uvicorn's graceful shutdown waits for that thread -- so a stop
+# that arrives mid-load (a reboot a minute after boot) ran out systemd's whole
+# stop timeout, because the engine ignores SIGTERM while it initialises.
+_SHUTDOWN = threading.Event()
+
 # Failed starts per unit: (consecutive failures, retry-not-before, last reason).
 # A start that fails is retried on a doubling cooldown (30 s .. 10 min) instead
 # of on every request; see `_load`.
@@ -510,6 +517,17 @@ def _load(name: str = "", device: "str | None" = None,
                          name=f"{engine.name}-out-{name}", daemon=True).start()
         deadline = time.time() + float(os.environ.get("HARMONY_LLM_START_TIMEOUT", "900"))
         while time.time() < deadline:
+            if _SHUTDOWN.is_set():
+                # Not a failed start: no cooldown, and SIGKILL the engine now
+                # (the unit is going away; a graceful stop of a half-loaded
+                # engine only repeats the wait that SIGTERM already lost).
+                _procs.pop(name, None)
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except Exception:
+                    proc.kill()
+                proc.wait(timeout=10)
+                raise RuntimeError(f"{name}: node is shutting down; load abandoned")
             if proc.poll() is not None:
                 # The return code alone is not a diagnosis. rc=2 here was
                 # argparse rejecting `--disable-log-requests`, removed in vLLM
@@ -2194,4 +2212,10 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=NODE_PORT)
+
+    class _Server(uvicorn.Server):
+        def handle_exit(self, sig, frame):
+            _SHUTDOWN.set()
+            super().handle_exit(sig, frame)
+
+    _Server(uvicorn.Config(app, host="0.0.0.0", port=NODE_PORT)).run()
