@@ -25,7 +25,7 @@ def test_required_handler_without_a_description_is_refused_by_name():
 
 def test_required_handler_with_a_description_and_other_handlers_pass():
     limits = Limits(describe_required_handlers=['b.e2e.v1'])
-    spec = submission(_job(labels={'describe': 'admission 846f4ddaf: herdr-backend.x (+1)'}), {'b.e2e.v1'}, limits)
+    spec = submission(_job(labels={'describe': 'admission 846f4ddaf: herdr-backend.x (+1)', 'origin': 'agent:claude@xc-tower-ubuntu:p3Q'}), {'b.e2e.v1'}, limits)
     assert spec['labels']['describe'].startswith('admission')
     assert submission(dict(_job(), handler='other.v1'), {'other.v1'}, limits)['handler'] == 'other.v1'
 
@@ -34,3 +34,13 @@ def test_required_handler_with_a_description_and_other_handlers_pass():
 def test_the_setting_must_be_a_list_of_handler_ids(bad):
     with pytest.raises(ValueError, match='describe_required_handlers'):
         Limits(describe_required_handlers=bad)
+
+
+def test_origin_is_required_with_the_same_switch_and_shape_checked():
+    limits = Limits(describe_required_handlers=['b.e2e.v1'])
+    for origin in (None, '', 'someone', 'robot:x', 'agent:', 'agent:' + 'x' * 101):
+        labels = {'describe': 'd'} if origin is None else {'describe': 'd', 'origin': origin}
+        with pytest.raises(WorkloadError, match='job_origin_required'):
+            submission(_job(labels=labels), {'b.e2e.v1'}, limits)
+    for origin in ('human:acct_c082baa1', 'system:test-train-scheduler', 'agent:codex@h:w28:p3Q'):
+        assert submission(_job(labels={'describe': 'd', 'origin': origin}), {'b.e2e.v1'}, limits)
