@@ -63,6 +63,8 @@ class AuthorityConfig(BaseModel):
     # Origin used in upload_url returned by POST /upload-grants, for holders that
     # reach the authority by a different address than the Host they were given.
     public_base_url: Optional[StrictStr] = None
+    # Stable Livestack source id for the workload identity snapshot endpoint.
+    identity_authority_id: Optional[StrictStr] = None
     limits: Optional[dict[str, Any]] = None
     blob_limits: Optional[dict[str, Any]] = None
     environment_handlers: Optional[dict[str, Any]] = None

@@ -280,6 +280,8 @@ def build_router(manager, coordinator, capability: Capability,
                  device_id: Optional[str] = None,
                  in_flight: Optional[Callable[[], int]] = None,
                  node_id: Optional[str] = None, inventory=None,
+                 identity_node_id: Optional[str] = None,
+                 benchday_host_id: Optional[str] = None,
                  node_principals=None,
                  subsystems: Optional[Mapping[str, Callable[[], Mapping]]] = None):
     # Resolved ONCE, here, so /capability and /residence can never disagree
@@ -296,6 +298,24 @@ def build_router(manager, coordinator, capability: Capability,
     device_candidates = resolve_device_candidates(capability.host_id, device_id
                                                   if device_id != resolve_device_id(capability.host_id)
                                                   else None)
+    from .identity_facts import valid_identity
+    identity_node_id = identity_node_id or None
+    benchday_host_id = benchday_host_id or None
+    identity_error = None
+    if identity_node_id is not None and not valid_identity(identity_node_id, max_bytes=220):
+        identity_node_id = None
+        identity_error = "invalid_stable_node_id"
+    if benchday_host_id is not None and not valid_identity(benchday_host_id, max_bytes=220):
+        benchday_host_id = None
+        identity_error = "invalid_benchday_host_id"
+    identity_status = (
+        {"state": "present"} if identity_node_id and benchday_host_id else
+        {"state": "absent", "reason": identity_error or
+         ("missing_stable_node_id" if not identity_node_id else "missing_benchday_host_id")})
+    if identity_status["state"] == "present":
+        print(f"[livestack] hosted_on identity configured: {identity_node_id}", flush=True)
+    else:
+        print(f"[livestack] hosted_on identity omitted: {identity_status['reason']}", flush=True)
     try:
         from fastapi import APIRouter, Body, Depends, Header, HTTPException
     except ImportError as exc:  # pragma: no cover
@@ -362,6 +382,7 @@ def build_router(manager, coordinator, capability: Capability,
             "kind": capability.kind,
             "host_id": capability.host_id,
             "node_id": node_id,
+            "identity": dict(identity_status),
             # Where this node is, from its own environment.
             #
             # Reported HERE as well as in the announce because the announce
@@ -380,6 +401,10 @@ def build_router(manager, coordinator, capability: Capability,
             "ready": bool(resident),
             "detail": "resident" if resident else "no unit resident",
         }
+        if identity_node_id:
+            out["identity_id"] = identity_node_id
+        if identity_node_id and benchday_host_id:
+            out["benchday_host_id"] = benchday_host_id
         # What this node HAS, as opposed to what it IS: the voice ids a TTS
         # server holds, the models an ASR has on disk. Evaluated per request
         # rather than snapshotted at attach, because the answer changes while
