@@ -586,6 +586,15 @@ class WorkloadStore:
                                             (owner, limit))]
             return [self._job(db, jid, owner) for jid in ids]
 
+    def identity_workers(self):
+        """One bounded read of current worker registrations for identity export."""
+        with self.transaction() as db:
+            rows = db.execute(
+                "SELECT id, host, seen FROM workers ORDER BY id LIMIT ?",
+                (self.limits.workers,),
+            ).fetchall()
+        return [dict(id=row["id"], host=row["host"], seen=row["seen"]) for row in rows]
+
     def handler_capacity(self, handler, draining=()):
         """How many workers could take a new `handler` job now: ready, fresh (the
         placement freshness window), serving the handler, and not draining.
