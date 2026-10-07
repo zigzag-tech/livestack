@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager, nullcontext
 import hashlib
 import os
+import threading
 from pathlib import Path
 import re
 import time
@@ -30,6 +31,7 @@ class BlobStore:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.max_bytes, self.max_object_bytes = max_bytes, max_object_bytes
         self.max_objects, self.retention_seconds = max_objects, retention_seconds
+        self._partial_lock = threading.Lock()
         with store.transaction() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS blobs (
@@ -101,6 +103,113 @@ class BlobStore:
             raise
         finally:
             (self.root/staging).unlink(missing_ok=True)
+
+    # ---- resumable upload -------------------------------------------------
+    # A partial upload is one private staging file per (owner, digest), grown only at
+    # its current end, so a retry on ANY route resumes at the offset the authority
+    # holds and no byte is ever stored twice. Bounded by count and idle age; a
+    # restart discards partials (recover()) and the client simply resumes at 0.
+    MAX_PARTIALS = 16
+    PARTIAL_IDLE_SECONDS = 3600
+    MAX_CHUNK_BYTES = 64*1024*1024
+
+    def _partial_path(self, owner, digest):
+        return self.root/('.partial-'+hashlib.sha256((owner+'\0'+digest).encode()).hexdigest()[:40])
+
+    def _sweep_partials(self):
+        cutoff = time.time()-self.PARTIAL_IDLE_SECONDS
+        for path in self.root.glob('.partial-*'):
+            if path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+
+    def upload_offset(self, owner, digest):
+        """Bytes already staged for this owner's upload of `digest` (0 when none)."""
+        name(owner, 'owner')
+        path = self._partial_path(owner, self.digest(digest))
+        with self._partial_lock:
+            return path.stat().st_size if path.is_file() else 0
+
+    def completed_size(self, owner, digest):
+        """Size of a verified object this owner already holds, else None."""
+        with self.store.transaction() as db:
+            row = db.execute("SELECT b.size FROM blobs b JOIN blob_owners o USING(digest) "
+                             "WHERE b.digest=? AND o.owner=? AND b.state='ready'", (self.digest(digest), owner)).fetchone()
+        return row['size'] if row else None
+
+    def put_range(self, owner, digest, total, offset, length, source, chunk_digest=None):
+        """Append bytes [offset, offset+length) of a `total`-byte object.
+
+        The offset must equal what is staged; otherwise WorkloadError(409) carries
+        `offset` so the caller resynchronises (a chunk whose acknowledgement was lost
+        is the normal case). The final chunk verifies the digest and commits exactly
+        as put() does. Returns {digest,size,offset,complete}."""
+        name(owner, 'owner')
+        digest = self.digest(digest)
+        if (any(isinstance(v, bool) or not isinstance(v, int) for v in (total, offset, length)) or
+                not 0 <= total <= self.max_object_bytes or length <= 0 or offset < 0 or offset+length > total):
+            raise WorkloadError('invalid upload range', 400)
+        if length > self.MAX_CHUNK_BYTES:
+            raise WorkloadError('upload chunk exceeds bound', 413)
+        path = self._partial_path(owner, digest)
+        with self._partial_lock:
+            have = path.stat().st_size if path.is_file() else 0
+            if offset != have:
+                error = WorkloadError('upload offset mismatch', 409)
+                error.offset = have
+                raise error
+            if offset == 0:
+                self._sweep_partials()
+                with self.store.transaction() as db:
+                    count, used = db.execute('SELECT count(*),coalesce(sum(size),0) FROM blobs').fetchone()
+                partials = list(self.root.glob('.partial-*'))
+                if (len(partials) >= self.MAX_PARTIALS or count >= self.max_objects or
+                        used+total+sum(p.stat().st_size for p in partials) > self.max_bytes):
+                    raise WorkloadError('content store capacity exhausted', 429)
+            hasher_needed = offset+length == total
+            try:
+                chunk_hasher = hashlib.sha256()
+                with path.open('ab') as out:
+                    left = length
+                    while left:
+                        part = source.read(min(1024*1024, left))
+                        if not part:
+                            raise WorkloadError('incomplete content upload')
+                        out.write(part)
+                        chunk_hasher.update(part)
+                        left -= len(part)
+                    out.flush()
+                    os.fsync(out.fileno())
+                if chunk_digest is not None and chunk_hasher.hexdigest() != chunk_digest:
+                    raise WorkloadError('chunk digest mismatch', 400)
+            except BaseException:
+                # A torn chunk must not leave a misaligned tail: truncate back.
+                if path.exists():
+                    with path.open('r+b') as out:
+                        out.truncate(have)
+                raise
+            if not hasher_needed:
+                return {'digest': digest, 'size': total, 'offset': offset+length, 'complete': False}
+            hasher = hashlib.sha256()
+            with path.open('rb') as stream:
+                for block in iter(lambda: stream.read(1024*1024), b''):
+                    hasher.update(block)
+            if hasher.hexdigest() != digest:
+                path.unlink(missing_ok=True)
+                raise WorkloadError('content digest mismatch', 409)
+            now = self.store.clock()
+            with self.store.transaction() as db:
+                row = db.execute('SELECT * FROM blobs WHERE digest=?', (digest,)).fetchone()
+                if row and (row['state'] != 'ready' or row['size'] != total):
+                    path.unlink(missing_ok=True)
+                    raise WorkloadError('object upload already in progress' if row['state'] != 'ready'
+                                        else 'digest size conflict', 409)
+                if row:
+                    path.unlink(missing_ok=True)
+                else:
+                    os.replace(path, self.root/digest)
+                    db.execute("INSERT INTO blobs VALUES(?,?,'ready',NULL,?,?)", (digest, total, now, now))
+                db.execute('INSERT OR IGNORE INTO blob_owners VALUES(?,?)', (digest, owner))
+            return {'digest': digest, 'size': total, 'offset': total, 'complete': True}
 
     @contextmanager
     def open(self, owner, digest):
