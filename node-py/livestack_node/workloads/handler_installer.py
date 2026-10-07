@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path, PurePosixPath
 import platform
@@ -62,6 +63,12 @@ class HandlerPackageStore:
             if not path.is_file() or not os.access(path, os.X_OK):
                 raise WorkloadError('handler_runtime_not_installed: '+str(runtime_id))
             self.runtimes[runtime_id] = str(path)
+        # Interpreters present on PATH but not listed in config are advertised too; config wins.
+        from .runtime_discovery import discover
+        found, self.runtime_discovery = discover(self.runtimes)
+        self.runtimes = {key: str(Path(value).resolve()) for key, value in found.items()}
+        for runtime_id, outcome in self.runtime_discovery.items():
+            logging.info('handler_runtime %s: %s', runtime_id, outcome)
         self.base_handlers = base_handlers
         self._verified_manifests = {}
         self.platform = platform_name or ({'Linux': 'linux', 'Darwin': 'darwin', 'Windows': 'windows'}
