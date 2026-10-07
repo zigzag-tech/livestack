@@ -53,8 +53,17 @@ class Limits:
     environment_affinity_seconds: float = 15
     environment_sweep_rows: int = 64
     environment_sweep_seconds: float = 5
+    # Handlers whose submissions MUST carry a non-empty `labels.describe` (a short human
+    # statement of what the job is for). Empty = nothing required. Set from authority.json
+    # `limits.describe_required_handlers`; switch on only after every submitter sends it.
+    describe_required_handlers: tuple = ()
 
     def __post_init__(self):
+        required = self.describe_required_handlers
+        if (isinstance(required, (str, bytes)) or not isinstance(required, (list, tuple))
+                or any(not isinstance(item, str) or not item for item in required)):
+            raise ValueError("describe_required_handlers must be a list of handler ids")
+        object.__setattr__(self, "describe_required_handlers", tuple(required))
         for name in ("active_jobs", "terminal_jobs", "workers", "claims_per_worker",
                      "attempts", "record_bytes", "fresh_seconds", "lease_seconds",
                      "cleanup_seconds", "environment_registry", "environments_per_owner",
@@ -291,6 +300,9 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     job_labels = labels(value.get("labels", {}))
     if len(job_labels) > 16:
         raise WorkloadError("a submission carries at most 16 labels")
+    if handler in limits.describe_required_handlers and not job_labels.get("describe", "").strip():
+        raise WorkloadError("job_description_required: this handler's submissions must carry a non-empty "
+                            "labels.describe saying what the job is for")
     result = dict(version=version, key=name(value.get("key"), "key"), handler=handler,
                   input_digest=digest, payload=value.get("payload", {}), need=need,
                   selector=labels(value.get("selector", {})), estimate_seconds=estimate,
