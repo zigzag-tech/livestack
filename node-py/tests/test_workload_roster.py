@@ -94,3 +94,38 @@ def test_roster_marks_a_silent_worker_offline_and_is_not_readable_by_a_worker(ap
     assert ('w-full', 'configured_silent') in {(d['worker'], d['kind']) for d in roster['disagreements']}
     assert call('workers', token='f'*32)[0] == 403
     assert call('workers', token='bad')[0] == 401
+
+
+def test_roster_queue_names_who_holds_the_capacity_a_queued_job_needs(api):
+    call, store, server = api
+    for token in ('f', 'p'):
+        call('worker/report', dict(boot='b', report=dict(capacity={'cpu': 4, 'memory_bytes': 8, 'disk_bytes': 100},
+             available={'cpu': 4, 'memory_bytes': 8, 'disk_bytes': 100}, labels={}, handlers=['a.v1'], ready=True,
+             host=_host())), token=token*32)
+    for name, size in (('one', b'one'), ('two', b'two')):
+        server.blobs.put('caller', hashlib.sha256(size).hexdigest(), len(size), BytesIO(size))
+    first = call('jobs', dict(version=1, key='k1', handler='a.v1', input_digest=hashlib.sha256(b'one').hexdigest(),
+                              need={'cpu': 3, 'disk_bytes': 60}))[1]
+    assert call('worker/claim', {'boot': 'b'}, token='f'*32)[1]['assignment']['job_id'] == first['id']
+    second = call('jobs', dict(version=1, key='k2', handler='a.v1', input_digest=hashlib.sha256(b'two').hexdigest(),
+                               need={'cpu': 3, 'disk_bytes': 60}))[1]
+    # w-part is idle on the SAME host: placement refuses it for what w-full already reserved.
+    assert call('worker/claim', {'boot': 'b'}, token='p'*32)[1]['assignment'] is None
+    status, roster = call('workers')
+    assert status == 200 and [q['job_id'] for q in roster['queue']] == [second['id']]
+    queued = roster['queue'][0]
+    assert queued['handler'] == 'a.v1' and queued['age_s'] >= 0 and queued['admit']['cpu'] == 3
+    assert queued['reason'], 'the authority own placement verdict is carried verbatim'
+    by_worker = {w['worker']: w for w in queued['workers']}
+    part = by_worker['w-part']
+    assert any(r.startswith('cpu: needs 3, 1 free') and 'reserved by running attempts on host h1' in r
+               for r in part['blocked_by'])
+    assert any(r.startswith('disk: needs') for r in part['blocked_by'])
+    assert part['host_holders'][0]['job_id'] == first['id'] and part['host_holders'][0]['worker'] == 'w-full'
+    assert any(r.startswith('busy: holds attempt for job') for r in by_worker['w-full']['blocked_by'])
+    assert queued['started_since'] == 0
+
+
+def test_roster_queue_is_empty_when_nothing_waits(api):
+    call, _, _ = api
+    assert call('workers')[1]['queue'] == []
