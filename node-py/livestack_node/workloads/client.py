@@ -9,6 +9,7 @@ import urllib.request
 
 from livestack_node import transport
 
+from .origin import stamp
 from .model import WorkloadError, encode
 
 
@@ -69,6 +70,7 @@ class WorkloadClient:
             raise WorkloadError(detail, error.code) from error
 
     def submit(self, request):
+        request = stamp(request)
         if isinstance(request, dict) and request.get('version') == 3 and request.get('environment') is not None:
             capabilities = self.capabilities()
             environment = capabilities.get('environments') or {}
