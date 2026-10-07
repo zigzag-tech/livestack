@@ -44,6 +44,7 @@ def main():
     submit.add_argument('--json', action='store_true', help='emit one JSON result (the default)')
     status = commands.add_parser('get'); status.add_argument('job')
     listing = commands.add_parser('list'); listing.add_argument('--state', action='append')
+    commands.add_parser('workers', help='read-only fleet roster as the authority sees it')
     cancel = commands.add_parser('cancel'); cancel.add_argument('jobs', nargs='+')
     download = commands.add_parser('download')
     download.add_argument('digest'); download.add_argument('destination')
@@ -89,6 +90,8 @@ def main():
             result = [{key: job.get(key) for key in ('id', 'state', 'reason', 'created')}
                       | {'attempts': len(job.get('attempts') or []), 'handler': (job.get('spec') or {}).get('handler'), 'key': (job.get('spec') or {}).get('key')}
                       for job in client.list_jobs() if not args.state or job.get('state') in args.state]
+        elif args.operation == 'workers':
+            result = client.roster()
         elif args.operation == 'cancel':
             result = cancel_jobs(client, args.jobs)
         elif args.operation == 'environment':

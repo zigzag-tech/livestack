@@ -740,6 +740,19 @@ control, worker profiles, consumer SDK and handler-scope refusals have been
 verified together. Operator configuration and commands are in
 [`_plans/durable-workloads.md`](_plans/durable-workloads.md).
 
+## Fleet roster: `GET /v1/workloads/workers` (read-only)
+
+Any `caller` or `admin` principal can ask the authority for the worker fleet as the
+authority itself holds it: `python3 -m livestack_node.workloads.cli --config <caller.json> workers`
+(or `WorkloadClient.roster()`). It merges the principals the RUNNING authority has
+(`claim_enabled`, host), the `workers` registrations (age, handlers, labels,
+capacity/available, host pressure, handler inventory and activation failures) and
+running attempts (job id, handler), and gives each worker an `eligible` flag with
+`ineligible_reasons`. `disagreements` names: configured but never registered or
+silent, registered but not configured, a strict-subset handler list versus a same-host
+peer, `*handler_release` label skew between same-host peers, and failed handler
+activation. No token or secret leaves the authority. Code: `workloads/roster.py`.
+
 ## Live workload handler releases (initial E2E rollout shipped 2026-10-04)
 
 The durable workload authority and worker remain responsible for admission,

@@ -130,6 +130,10 @@ class WorkloadClient:
         from .model import name
         return self.request('jobs/'+name(job_id, 'job_id')+'/withdraw', {})
 
+    def roster(self):
+        """Read-only fleet roster as the authority sees it (workloads/roster.py)."""
+        return self.request('workers')
+
     def list_jobs(self):
         """This principal's most recent jobs (the authority bounds the page)."""
         return self.request('jobs')['jobs']

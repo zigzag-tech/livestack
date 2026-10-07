@@ -14,6 +14,7 @@ import threading
 from urllib.parse import urlparse
 
 from .model import WorkloadError, encode, name
+from . import roster
 from .blobs import BlobStore
 from .handler_registry import HandlerReleaseRegistry
 from .handler_release import MAX_MANIFEST_BYTES
@@ -428,6 +429,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.server.handler_registry.activate(principal.id, body,
                 rollback=parts[-1] == 'rollback')
         if principal.role in ('caller', 'admin'):
+            if parts == ['workers'] and method == 'GET':
+                # Read-only roster: the fleet as this authority sees it (roster.py).
+                return roster.build(store, self.server.principals)
             if parts == ['capabilities'] and method == 'GET':
                 return store.capabilities(principal.id, principal.handlers)
             if len(parts) == 3 and parts[0] == 'handlers' and parts[2] == 'capacity' and method == 'GET':
