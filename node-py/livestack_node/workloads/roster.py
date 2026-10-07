@@ -136,7 +136,7 @@ def _verdict(entry, spec, admit, host_held):
     return reasons
 
 
-def _queue(db, now, entries, limit=QUEUE_LIMIT):
+def _queue(db, now, entries, cleanup_seconds, limit=QUEUE_LIMIT):
     """Queued jobs and, per worker serving the handler, the concrete reason it has not claimed.
 
     Placement already records its own last verdict on the job (`reason`); that is carried
@@ -148,8 +148,12 @@ def _queue(db, now, entries, limit=QUEUE_LIMIT):
                       (limit,)).fetchall()
     if not jobs:
         return []
+    # Same rule as placement: a `cleanup` attempt whose worker has been silent for cleanup_seconds
+    # no longer holds capacity (the obligation stays, the reservation does not). Counting it here
+    # reported a 15-day-dead worker's attempt as the blocker for jobs placement was free to place.
     active = db.execute("SELECT a.worker, a.host, a.job, a.need, j.spec FROM attempts a JOIN jobs j ON j.id=a.job "
-                        "WHERE a.state IN ('running','cleanup')").fetchall()
+                        "JOIN workers w ON w.id=a.worker WHERE a.state IN ('running','cleanup') "
+                        "AND NOT (a.state='cleanup' AND w.seen<?)", (now - cleanup_seconds,)).fetchall()
     held = {}
     for row in active:
         host = held.setdefault(row['host'], dict(total={}, holders=[]))
@@ -237,6 +241,6 @@ def build(store, principals):
         entry['ineligible_reasons'] = reasons
         entries.append(entry)
     with store.transaction() as db:
-        queue = _queue(db, now, entries)
+        queue = _queue(db, now, entries, store.limits.cleanup_seconds)
     return dict(now=round(now, 3), fresh_seconds=fresh, workers=entries, disagreements=_disagreements(entries),
                 queue=queue)
