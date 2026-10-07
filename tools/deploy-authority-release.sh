@@ -45,8 +45,28 @@ PY
 
 echo "== 2. back up"
 mkdir -p "$BACKUP" && chmod 700 "$BACKUP"
-sqlite3 "$STATE/workloads.sqlite" ".backup $BACKUP/workloads.sqlite" && \
-  [ "$(sqlite3 -readonly "$BACKUP/workloads.sqlite" 'pragma integrity_check')" = ok ] || { echo "ABORT: backup failed"; exit 2; }
+if ! /usr/bin/python3 - "$STATE/workloads.sqlite" "$BACKUP/workloads.sqlite" <<'PY'
+import os, sqlite3, sys
+from pathlib import Path
+
+source_path = Path(sys.argv[1]).resolve(strict=True)
+backup_path = Path(sys.argv[2])
+source = sqlite3.connect(source_path.as_uri() + '?mode=ro', uri=True)
+backup = sqlite3.connect(backup_path)
+try:
+  source.backup(backup)
+  if backup.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
+    raise RuntimeError('backup integrity_check failed')
+finally:
+  backup.close()
+  source.close()
+os.chmod(backup_path, 0o600)
+print('backup integrity_check: ok')
+PY
+then
+  rm -f "$BACKUP/workloads.sqlite"
+  echo "ABORT: backup failed"; exit 2
+fi
 install -m 600 "$CFG" "$BACKUP/authority.json"
 [ -f "$DROPIN" ] && cp -p "$DROPIN" "$BACKUP/99-zz-release.conf.previous"
 read -r BEFORE_READY BEFORE_FRESH < <(ready_workers 2>/dev/null || echo "0 0")
