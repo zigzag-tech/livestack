@@ -29,12 +29,13 @@ class HandlerReleasePolicy(BaseModel):
 
 class ReloadableConfig(BaseModel):
     """What SIGHUP re-reads (docs/authority-principal-reload.md): principals, the installed
-    handler ids (add-only) and the handler release policy. The rest of the file is the
-    startup gate's business, so it is not re-judged."""
+    handler ids (add-only), handler release policy and environment-handler policy. The rest
+    of the file is the startup gate's business, so it is not re-judged."""
     model_config = ConfigDict(extra='ignore', strict=True)
     principals: list[dict[str, Any]]
     handlers: list[StrictStr]
     handler_release_policy: Optional[HandlerReleasePolicy] = None
+    environment_handlers: Optional[dict[str, Any]] = None
 
 
 class AuthorityConfig(BaseModel):

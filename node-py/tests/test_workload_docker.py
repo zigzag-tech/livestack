@@ -30,16 +30,31 @@ def until(predicate, seconds=90):
 def test_private_docker_inherits_job_caps_and_stops_with_lease(tmp_path, outcome):
     if not all(shutil.which(tool) for tool in ('rootlesskit', 'slirp4netns', 'newuidmap', 'dockerd')):
         pytest.skip('requires installed rootless Docker prerequisites')
+    if not shutil.which('sudo') or subprocess.run(['sudo', '-n', 'true'], capture_output=True).returncode:
+        pytest.skip('requires passwordless systemd service-manager access for isolated rootless Docker')
     executor = SystemdExecutor('docker-integration-'+uuid.uuid4().hex)
     attempt = uuid.uuid4().hex
     output = tmp_path/'output'
     output.mkdir()
+    environment_root = tmp_path/'environments'
+    source = environment_root/'handle-a'/'source'
+    other = environment_root/'handle-b'/'source'
+    view = tmp_path/'environment-view'
+    source.mkdir(parents=True)
+    other.mkdir(parents=True)
+    view.mkdir()
+    (source/'captured').write_text('current-task')
+    (other/'secret').write_text('different-owner')
     lease = tmp_path/'lease'
     lease.write_text(str(time.monotonic()+150))
     script = tmp_path/'handler.py'
     script.write_text('''import json,os,subprocess,time
 from pathlib import Path
-image,output,outcome = __import__('sys').argv[1:]
+image,output,outcome,view,hidden = __import__('sys').argv[1:]
+assert Path(view,'captured').read_text() == 'current-task'
+try: Path(hidden).read_text()
+except (PermissionError,FileNotFoundError): pass
+else: raise AssertionError('sibling task environment was readable')
 assert not Path('/var/run/docker.sock').exists(), 'host Docker socket leaked into namespace'
 subprocess.run(['docker','run','-d','--name=proof',image,'sleep','120'],check=True)
 pid=int(subprocess.check_output(['docker','inspect','--format','{{.State.Pid}}','proof'],text=True))
@@ -69,11 +84,15 @@ if outcome=='lease-expired': time.sleep(120)
 raise SystemExit(7 if outcome=='failure' else 0)
 ''')
     try:
-        executor.start(attempt, [sys.executable, str(script), IMAGE, str(output), outcome],
+        executor.start(attempt, [sys.executable, str(script), IMAGE, str(output), outcome,
+                                 str(view), str(other/'secret')],
             tmp_path, output, env=dict(os.environ), cpu=1, memory_bytes=512*1024**2,
-            rootless_docker=True, lease_file=lease, max_seconds=180)
+            rootless_docker=True, lease_file=lease, max_seconds=180,
+            inaccessible_paths=[str(environment_root)], bind_paths=[(str(source), str(view))])
         proof = until(lambda: json.loads((output/'proof.json').read_text()) if (output/'proof.json').exists() else None)
-        group = executor.inspect(attempt)['ControlGroup']
+        state = executor.inspect(attempt)
+        assert state['UnitManager'] == '--system', state
+        group = state['ControlGroup']
         assert proof['group'].startswith(group+'/'), proof
         cgroup = Path('/sys/fs/cgroup')/group.lstrip('/')
         assert (cgroup/'memory.max').read_text().strip() == str(512*1024**2)

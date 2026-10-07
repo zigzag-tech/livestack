@@ -45,7 +45,10 @@ journal shows `object transfer ceiling is 8589934592 bytes` after.
 
 ## Drain and idle rule
 
-Never restart the authority. To stop a worker taking new work: set `"claim_enabled": false` on its
+Do not restart the authority as part of a worker release. A separate authority
+code upgrade is a one-time operation and requires a fully idle window with no
+running or cleanup attempts; see `authority-principal-reload.md`. To stop a
+worker taking new work: set `"claim_enabled": false` on its
 principal in the authority config and reload it (`systemctl --user reload livestack-workload-authority` = SIGHUP; principals reload live, see
 `authority-principal-reload.md`). Roll when the worker has NO running attempt (`workload ls`/authority
 view; an idle worker needs no drain), restart only that worker's unit, then set `claim_enabled` back

@@ -147,8 +147,22 @@ native frontend can authenticate the host root verifier while Docker's daemon
 and build containers stay inside the owned RootlessKit subtree. The frontend
 proves its private daemon's PID/cgroup and data-root endpoint and clears inherited
 Docker context overrides. This avoids weakening root authentication inside a
-user namespace. Legacy `rootless-docker` remains a runtime backend; its user
-namespace cannot run this host-namespace guard.
+user namespace. The frontend sets `no_new_privs` before execing the handler, so
+the native build keeps host-UID socket credentials without gaining host privilege
+through setuid programs. Legacy `rootless-docker` remains a runtime backend; its
+user namespace cannot run this host-namespace guard.
+
+Task-environment execution adds systemd `InaccessiblePaths` and `BindPaths` to
+hide sibling environments and expose only the assigned source tree. In a user
+manager, those mount restrictions place the unit in a single-UID user namespace;
+nested RootlessKit then cannot map the worker's subordinate UID/GID range. When a
+rootless Docker attempt needs those paths, `SystemdExecutor` starts the transient
+unit through `sudo -n systemd-run --system`, with the worker's UID/GID and the
+same delegated cgroup and resource limits. The system manager applies the path
+restrictions before RootlessKit starts, so the daemon and handler inherit the
+same restricted mount tree. The worker fails closed if that system-manager
+launch is unavailable. Host pressure accounting reads these attempts from both
+the user's `app.slice` and `system.slice`.
 
 Native Docker workers must declare `docker_native_host_address` in their
 operator-owned worker configuration: a canonical local nonloopback IPv4 address

@@ -70,6 +70,18 @@ def test_sample_reports_every_harmony_tenant_on_the_host(tmp_path):
     assert sample['swap_in_bytes_per_second'] is None, 'one sample has no rate: unknown, not zero'
 
 
+def test_attempt_accounting_includes_rootless_path_isolation_units(tmp_path):
+    proc = proc_tree(tmp_path/'proc')
+    root = tmp_path/'cgroup'
+    uid = os.getuid()
+    user_slice = root/f'user.slice/user-{uid}.slice/user@{uid}.service/app.slice'
+    user_attempt, isolated_attempt = 'c'*32, 'd'*32
+    cgroup(user_slice/f'harmony-work-{"3"*16}-{user_attempt}.service', 2*GIB)
+    cgroup(root/'system.slice'/f'harmony-work-{"4"*16}-{isolated_attempt}.service', 3*GIB)
+    sample = HostView(proc=proc, cgroup_root=root).sample()
+    assert sample['attempts'] == {user_attempt: 2*GIB, isolated_attempt: 3*GIB}
+
+
 def test_learned_service_peak_is_the_max_sample_and_survives_a_restart(tmp_path):
     proc = proc_tree(tmp_path/'proc')
     root = tmp_path/'cgroup'

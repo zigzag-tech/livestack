@@ -83,6 +83,8 @@ class WorkerJournal:
 class SystemdExecutor:
     def __init__(self, worker_id):
         self.prefix = 'harmony-work-' + hashlib.sha256(worker_id.encode()).hexdigest()[:16] + '-'
+        self.manager_attempt = None
+        self.manager = None
 
     def unit(self, attempt_id):
         if not re.fullmatch('[a-f0-9]{32}', attempt_id):
@@ -92,10 +94,32 @@ class SystemdExecutor:
     def command(self, *args, check=True):
         return subprocess.run(args, check=check, capture_output=True, text=True, timeout=30)
 
-    def inspect(self, attempt_id):
-        reply = self.command('systemctl', '--user', 'show', self.unit(attempt_id),
+    def _inspect_manager(self, manager, unit):
+        reply = self.command('systemctl', manager, 'show', unit,
                              '--property=LoadState,ActiveState,SubState,Result,ControlGroup')
-        return dict(line.split('=', 1) for line in reply.stdout.splitlines() if '=' in line)
+        state = dict(line.split('=', 1) for line in reply.stdout.splitlines() if '=' in line)
+        state['UnitManager'] = manager
+        return state
+
+    def inspect(self, attempt_id):
+        manager = self.manager if self.manager_attempt == attempt_id else None
+        if manager is not None:
+            return self._inspect_manager(manager, self.unit(attempt_id))
+        user = self._inspect_manager('--user', self.unit(attempt_id))
+        system = self._inspect_manager('--system', self.unit(attempt_id))
+        user_loaded = user.get('LoadState') != 'not-found'
+        system_loaded = system.get('LoadState') != 'not-found'
+        if user_loaded and system_loaded:
+            raise WorkloadError('attempt unit exists in both systemd managers', 409)
+        if system_loaded:
+            if self.manager_attempt in (None, attempt_id):
+                self.manager_attempt, self.manager = attempt_id, '--system'
+            return system
+        if user_loaded:
+            if self.manager_attempt in (None, attempt_id):
+                self.manager_attempt, self.manager = attempt_id, '--user'
+            return user
+        return user
 
     def alive(self, attempt_id):
         state = self.inspect(attempt_id)
@@ -143,6 +167,9 @@ class SystemdExecutor:
             clean_binds.append((clean_source, clean_destination))
         if self.inspect(attempt_id).get('LoadState') != 'not-found':
             raise WorkloadError('attempt already has a unit; reconcile before launch', 409)
+        system_manager = bool(rootless_docker and (clean_inaccessible or clean_binds))
+        manager = '--system' if system_manager else '--user'
+        self.manager_attempt, self.manager = attempt_id, manager
         output = Path(output).resolve()
         output.mkdir(parents=True, exist_ok=True)
         if rootless_docker:
@@ -154,7 +181,12 @@ class SystemdExecutor:
                                       lease_file=str(lease_file) if lease_file else None)))
         config.chmod(0o600)
         wrapper = Path(__file__).with_name('bounded_exec.py').resolve()
-        self.command('systemd-run', '--user', '--quiet', '--unit='+self.unit(attempt_id),
+        run = (['/usr/bin/sudo', '-n', '/usr/bin/systemd-run', '--system'] if system_manager else
+               ['systemd-run', '--user'])
+        user_properties = (['--property=User='+str(os.getuid()), '--property=Group='+str(os.getgid())]
+                           if system_manager else [])
+        self.command(*run, '--quiet', '--unit='+self.unit(attempt_id),
+            *user_properties,
             '--property=Type=exec',
             '--property=KillMode=control-group', '--property=TimeoutStopSec=5s',
             '--property=SendSIGKILL=yes', '--property=OOMPolicy=kill',
@@ -172,11 +204,16 @@ class SystemdExecutor:
     def stop(self, attempt_id):
         """Return only after the owned unit and all its descendants are gone."""
         state = self.inspect(attempt_id)
+        manager = state.get('UnitManager', '--user')
+        system_command = ['/usr/bin/sudo', '-n', '/usr/bin/systemctl', '--system'] if manager == '--system' else [
+            'systemctl', '--user']
         if state.get('LoadState') == 'not-found':
             docker_runtime.cleanup(self.unit(attempt_id))
+            if self.manager_attempt == attempt_id:
+                self.manager_attempt, self.manager = None, None
             return
         group = state.get('ControlGroup')
-        stopped = self.command('systemctl', '--user', 'stop', self.unit(attempt_id), check=False)
+        stopped = self.command(*system_command, 'stop', self.unit(attempt_id), check=False)
         # A transient unit can be collected after inspect and before stop.
         # Exit 5 alone proves nothing: still verify unit state and the captured
         # cgroup below before acknowledging cleanup or releasing capacity.
@@ -189,8 +226,10 @@ class SystemdExecutor:
             events = Path('/sys/fs/cgroup')/group.lstrip('/')/'cgroup.events'
             if events.exists() and 'populated 1' in events.read_text():
                 raise WorkloadError('owned cgroup still populated; capacity remains reserved', 503)
-        self.command('systemctl', '--user', 'reset-failed', self.unit(attempt_id), check=False)
+        self.command(*system_command, 'reset-failed', self.unit(attempt_id), check=False)
         docker_runtime.cleanup(self.unit(attempt_id))
+        if self.manager_attempt == attempt_id:
+            self.manager_attempt, self.manager = None, None
 
     def exit_result(self, output):
         path = Path(output)/'exit.json'
