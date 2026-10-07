@@ -31,6 +31,7 @@ def api(tmp_path):
         Principal('caller', 'c'*32, 'caller', ('a.v1',)),
         Principal('w-full', 'f'*32, 'worker', worker='w-full', host='h1'),
         Principal('w-part', 'p'*32, 'worker', worker='w-part', host='h1'),
+        Principal('w-twin', 't'*32, 'worker', worker='w-twin', host='h1'),
         Principal('w-drain', 'd'*32, 'worker', worker='w-drain', host='h2', claim_enabled=False),
         Principal('w-new', 'n'*32, 'worker', worker='w-new', host='h3'),
     ])
@@ -56,6 +57,7 @@ def test_roster_merges_config_registration_and_running_and_names_disagreements(a
     call, store, server = api
     call('worker/report', _report(['a.v1', 'b.v1'], labels={'x_handler_release': 'aaaa'}), token='f'*32)
     call('worker/report', _report(['a.v1'], labels={'x_handler_release': 'bbbb'}), token='p'*32)
+    call('worker/report', _report(['a.v1'], labels={'x_handler_release': 'cccc'}), token='t'*32)
     call('worker/report', _report(['a.v1'], host=_host(0, 5)), token='d'*32)
     data = b'input'
     digest = hashlib.sha256(data).hexdigest()
@@ -66,7 +68,7 @@ def test_roster_merges_config_registration_and_running_and_names_disagreements(a
     status, roster = call('workers')
     assert status == 200
     workers = {w['id']: w for w in roster['workers']}
-    assert set(workers) == {'w-full', 'w-part', 'w-drain', 'w-new'}
+    assert set(workers) == {'w-full', 'w-part', 'w-twin', 'w-drain', 'w-new'}
     assert workers['w-full']['connected'] and workers['w-full']['state'] == 'running'
     assert workers['w-full']['running'][0]['job_id'] == job['id'] and workers['w-full']['running'][0]['handler'] == 'a.v1'
     assert workers['w-part']['eligible'] and workers['w-part']['state'] == 'idle'

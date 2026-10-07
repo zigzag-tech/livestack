@@ -80,13 +80,19 @@ def _disagreements(entries):
                     found.append(dict(worker=entry['id'], kind='fewer_handlers_than_peer',
                                       detail=f"host {host}: lacks {sorted(theirs - mine)} that {peer['id']} serves"))
                     break
-        keys = sorted({k for e in peers for k in e['labels'] if k.endswith('handler_release')})
-        for key in keys:
-            values = {e['id']: e['labels'][key] for e in peers if key in e['labels']}
-            if len(values) > 1 and len(set(values.values())) > 1:
-                found.append(dict(worker=sorted(values)[0], kind='handler_release_skew',
-                                  detail=f'host {host}: {key} differs across peers: '
-                                         + ', '.join(f'{w}={v[:12]}' for w, v in sorted(values.items()))))
+        # Release skew is only a disagreement between workers serving the SAME handler set
+        # (same role); a compilation worker and a stager legitimately differ.
+        roles = {}
+        for entry in peers:
+            roles.setdefault(tuple(sorted(entry['handlers'])), []).append(entry)
+        for group in roles.values():
+            keys = sorted({k for e in group for k in e['labels'] if k.endswith('handler_release')})
+            for key in keys:
+                values = {e['id']: e['labels'][key] for e in group if key in e['labels']}
+                if len(values) > 1 and len(set(values.values())) > 1:
+                    found.append(dict(worker=sorted(values)[0], kind='handler_release_skew',
+                                      detail=f'host {host}: {key} differs across same-role peers: '
+                                             + ', '.join(f'{w}={v[:12]}' for w, v in sorted(values.items()))))
     return found
 
 
