@@ -24,6 +24,39 @@ def _age(now, seen):
     return max(0.0, round(now - seen, 1))
 
 
+DESCRIBE_CHARS = 120
+IDLE_WAIT_SECONDS = 60
+
+
+def _about(spec):
+    """What a job is about, from spec fields only (never tokens): `describe` and `origin`.
+
+    `labels.describe` / `labels.origin` come first when a submitter set them (advisory text,
+    not identity). Otherwise `describe` is synthesized from the payload: an e2e job reads
+    "<purpose> <commit[:9]>: <first 2 selection ids> (+N)", a release job "release <component>
+    build <n> plan <id[:8]>"."""
+    labels = spec.get('labels') or {}
+    payload = spec.get('payload') or {}
+    describe = labels.get('describe') if isinstance(labels.get('describe'), str) else None
+    if not describe:
+        if payload.get('purpose') or payload.get('source_commit'):
+            selection = payload.get('selection')
+            if isinstance(selection, list) and selection:
+                shown = ', '.join(str(item) for item in selection[:2])
+                shown += f' (+{len(selection) - 2})' if len(selection) > 2 else ''
+            else:
+                shown = str(selection) if selection else ''
+            describe = f"{payload.get('purpose') or payload.get('phase') or 'job'} " \
+                       f"{str(payload.get('source_commit') or '')[:9]}: {shown}".strip(' :')
+        elif payload.get('component'):
+            describe = (f"release {payload['component']} build {payload.get('build_number')} "
+                        f"plan {str(payload.get('plan_id') or '')[:8]}")
+        else:
+            describe = str(spec.get('handler') or '')
+    origin = labels.get('origin') if isinstance(labels.get('origin'), str) else None
+    return dict(describe=describe[:DESCRIBE_CHARS], origin=origin[:DESCRIBE_CHARS] if origin else None)
+
+
 def _reasons(entry, fresh_seconds):
     """Why a worker would not take a new job now; empty means it would."""
     if not entry['registered']:
@@ -183,12 +216,37 @@ def _queue(db, now, entries, cleanup_seconds, limit=QUEUE_LIMIT):
                 blocked_by=_verdict(entry, spec, admit, host_held),
                 host_holders=sorted(host_held['holders'], key=lambda h: -sum(h['admit'].values()))[:HOLDERS_SHOWN]))
         queue.append(dict(
-            job_id=job['id'], handler=spec.get('handler'), owner=job['owner'],
+            job_id=job['id'], handler=spec.get('handler'), owner=job['owner'], **_about(spec),
             age_s=_age(now, job['created']), priority=spec.get('priority', 0), admit=admit,
             reason=reason, serving_workers=len(serving),
             started_since=sum(1 for row in started if row['host'] in hosts and row['created'] > job['created']),
             workers=workers))
     return queue
+
+
+def _warnings(entries, queue):
+    """Workers that look available but are not doing what they could.
+
+    `activation_failed_idle`: connected, idle, and its handler registry failed to activate — it can
+    claim nothing and nothing else says so. `idle_while_claimable_work_waits`: idle and eligible,
+    serves the handler of a job that has waited past IDLE_WAIT_SECONDS, and the roster can name no
+    reason it has not claimed it."""
+    found = []
+    by_id = {e['id']: e for e in entries}
+    for entry in entries:
+        if entry['connected'] and entry['state'] == 'idle' and entry['activation_failures']:
+            found.append(dict(kind='activation_failed_idle', worker=entry['id'], host=entry['host'],
+                              detail='; '.join(str(f)[:160] for f in entry['activation_failures'][:2])))
+    for job in queue:
+        if job['age_s'] <= IDLE_WAIT_SECONDS:
+            continue
+        for part in job['workers']:
+            entry = by_id.get(part['worker'])
+            if entry and entry['eligible'] and entry['state'] == 'idle' and not part['blocked_by']:
+                found.append(dict(kind='idle_while_claimable_work_waits', worker=part['worker'], host=part['host'],
+                                  job_id=job['job_id'], handler=job['handler'], waited_s=job['age_s'],
+                                  detail=job['describe']))
+    return found
 
 
 def build(store, principals):
@@ -208,7 +266,7 @@ def build(store, principals):
     runs = {}
     for row in running:
         runs.setdefault(row['worker'], []).append(dict(
-            job_id=row['job'], handler=json.loads(row['spec']).get('handler'),
+            job_id=row['job'], handler=json.loads(row['spec']).get('handler'), **_about(json.loads(row['spec'])),
             running_for_s=_age(now, row['created']), lease_remaining_s=max(0.0, round(row['expires'] - now, 1))))
     registered = {row['id']: row for row in rows}
     entries = []
@@ -243,4 +301,4 @@ def build(store, principals):
     with store.transaction() as db:
         queue = _queue(db, now, entries, store.limits.cleanup_seconds)
     return dict(now=round(now, 3), fresh_seconds=fresh, workers=entries, disagreements=_disagreements(entries),
-                queue=queue)
+                queue=queue, warnings=_warnings(entries, queue))
