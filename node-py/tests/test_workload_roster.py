@@ -153,3 +153,46 @@ def test_roster_queue_does_not_name_a_dead_workers_cleanup_attempt_as_a_holder(a
 def test_roster_queue_is_empty_when_nothing_waits(api):
     call, _, _ = api
     assert call('workers')[1]['queue'] == []
+
+
+def test_roster_says_what_each_running_and_queued_job_is_about(api):
+    call, store, server = api
+    call('worker/report', _report(['a.v1']), token='f'*32)
+    for size in (b'one', b'two'):
+        server.blobs.put('caller', hashlib.sha256(size).hexdigest(), len(size), BytesIO(size))
+    first = call('jobs', dict(version=1, key='k1', handler='a.v1', input_digest=hashlib.sha256(b'one').hexdigest(),
+                              need={'cpu': 4}, payload=dict(purpose='admission', phase='e2e', source_commit='0123456789abcdef',
+                              selection=['x.one', 'x.two', 'x.three', 'x.four'])))[1]
+    assert call('worker/claim', {'boot': 'b'}, token='f'*32)[1]['assignment']['job_id'] == first['id']
+    second = call('jobs', dict(version=1, key='k2', handler='a.v1', input_digest=hashlib.sha256(b'two').hexdigest(),
+                               need={'cpu': 4}, labels={'describe': 'Hand-written description', 'origin': 'agent:claude@h1'}))[1]
+    _, roster = call('workers')
+    running = next(w for w in roster['workers'] if w['id'] == 'w-full')['running'][0]
+    assert running['describe'] == 'admission 012345678: x.one, x.two (+2)' and running['origin'] is None
+    queued = next(q for q in roster['queue'] if q['job_id'] == second['id'])
+    assert queued['describe'] == 'Hand-written description' and queued['origin'] == 'agent:claude@h1'
+
+
+def test_about_synthesizes_release_jobs_truncates_and_never_reads_secrets():
+    from livestack_node.workloads.roster import _about
+    about = _about(dict(handler='r.v1', payload=dict(component='hub', build_number=3377, plan_id='69c88856-e13b',
+                        signer_sha256='SECRET'), labels={'describe': 'x'*500}))
+    assert len(about['describe']) == 120
+    release = _about(dict(handler='r.v1', payload=dict(component='hub', build_number=3377, plan_id='69c88856-e13b')))
+    assert release['describe'] == 'release hub build 3377 plan 69c88856'
+    assert 'SECRET' not in json.dumps(_about(dict(handler='r.v1', payload=dict(component='app', signer_sha256='SECRET'))))
+
+
+def test_warnings_flag_an_idle_worker_that_could_take_waiting_work_but_names_no_reason():
+    # Direct on the pure function: a real authority would claim this job, so no live state can show it.
+    from livestack_node.workloads.roster import _warnings
+    idle = dict(id='w1', host='h', connected=True, state='idle', eligible=True, activation_failures=[])
+    broken = dict(id='w2', host='h', connected=True, state='idle', eligible=False,
+                  activation_failures=['generation 16: handler_runtime_not_installed: python3'])
+    queue = [dict(job_id='j1', handler='a.v1', describe='d', age_s=600.0,
+                  workers=[dict(worker='w1', host='h', blocked_by=[]), dict(worker='w3', host='h', blocked_by=['busy'])]),
+             dict(job_id='j2', handler='a.v1', describe='young', age_s=5.0, workers=[dict(worker='w1', host='h', blocked_by=[])])]
+    found = _warnings([idle, broken], queue)
+    assert [(w['kind'], w['worker']) for w in found] == [('activation_failed_idle', 'w2'),
+                                                         ('idle_while_claimable_work_waits', 'w1')]
+    assert found[1]['job_id'] == 'j1' and 'handler_runtime_not_installed' in found[0]['detail']
