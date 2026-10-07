@@ -14,6 +14,11 @@ named, not inferred from a missing row.
 """
 import json
 
+QUEUE_LIMIT = 50
+HOLDERS_SHOWN = 6
+BYPASS_ROWS = 5000
+RESOURCES = (('cpu', 'cpu'), ('memory_bytes', 'memory'), ('disk_bytes', 'disk'))
+
 
 def _age(now, seen):
     return max(0.0, round(now - seen, 1))
@@ -96,6 +101,92 @@ def _disagreements(entries):
     return found
 
 
+def _gib(value):
+    return f'{value / 2**30:.1f}GiB' if value >= 2**20 else f'{value:g}'
+
+
+def _amount(key, value):
+    return _gib(value) if key.endswith('_bytes') else f'{value:g}'
+
+
+def _verdict(entry, spec, admit, host_held):
+    """Why this worker has not taken the job: [] means nothing the roster can see blocks it.
+
+    The resource arithmetic mirrors placement (a worker's observed free, less what every
+    ACTIVE attempt on the same host has reserved) closely enough to NAME the holders; the
+    authority's own last verdict stays alongside it as `reason`."""
+    reasons = list(entry['ineligible_reasons'])
+    if entry['running'] and not any(r.startswith('draining') for r in reasons):
+        held = entry['running'][0]
+        reasons.append(f"busy: holds attempt for job {held['job_id'][:8]} ({held['handler']})")
+    for key, want in sorted((spec.get('selector') or {}).items()):
+        if entry['labels'].get(key) != want:
+            reasons.append(f"selector: label {key} is {entry['labels'].get(key)!r}, job requires {want!r}")
+    capacity, available = entry['capacity'] or {}, entry['available'] or {}
+    for key, label in RESOURCES:
+        need = admit.get(key)
+        if not need or key not in capacity:
+            continue
+        observed = min(capacity[key], available.get(key, capacity[key]))
+        free = max(0, observed - host_held.get('total', {}).get(key, 0))
+        if free < need:
+            reasons.append(f"{label}: needs {_amount(key, need)}, {_amount(key, free)} free "
+                           f"({_amount(key, observed)} observed less {_amount(key, host_held.get('total', {}).get(key, 0))} "
+                           f"reserved by running attempts on host {entry['host']})")
+    return reasons
+
+
+def _queue(db, now, entries, limit=QUEUE_LIMIT):
+    """Queued jobs and, per worker serving the handler, the concrete reason it has not claimed.
+
+    Placement already records its own last verdict on the job (`reason`); that is carried
+    verbatim. Beside it: how long the job has waited, what the same hosts have started
+    since it was submitted (a large job starved by smaller ones shows as `started_since`
+    climbing while its reason stays a resource refusal), and who holds the capacity."""
+    jobs = db.execute("SELECT id, owner, created, reason, spec FROM jobs WHERE state='queued' "
+                      "ORDER BY COALESCE(json_extract(spec,'$.priority'),0) DESC, created, id LIMIT ?",
+                      (limit,)).fetchall()
+    if not jobs:
+        return []
+    active = db.execute("SELECT a.worker, a.host, a.job, a.need, j.spec FROM attempts a JOIN jobs j ON j.id=a.job "
+                        "WHERE a.state IN ('running','cleanup')").fetchall()
+    held = {}
+    for row in active:
+        host = held.setdefault(row['host'], dict(total={}, holders=[]))
+        need = json.loads(row['need'])
+        for key, value in need.items():
+            host['total'][key] = host['total'].get(key, 0) + value
+        host['holders'].append(dict(job_id=row['job'], worker=row['worker'],
+                                    handler=json.loads(row['spec']).get('handler'), admit=need))
+    started = db.execute("SELECT host, created FROM attempts WHERE created>=? ORDER BY created DESC LIMIT ?",
+                         (min(job['created'] for job in jobs), BYPASS_ROWS)).fetchall()
+    queue = []
+    for job in jobs:
+        spec = json.loads(job['spec'])
+        admit = spec.get('admit') or spec.get('need') or {}
+        serving = [e for e in entries if spec.get('handler') in e['handlers'] and e['registered']]
+        hosts = {e['host'] for e in serving}
+        reason = job['reason']
+        try:
+            reason = json.loads(reason) if reason else None
+        except ValueError:
+            pass
+        workers = []
+        for entry in serving:
+            host_held = held.get(entry['host'], dict(total={}, holders=[]))
+            workers.append(dict(
+                worker=entry['id'], host=entry['host'], state=entry['state'],
+                blocked_by=_verdict(entry, spec, admit, host_held),
+                host_holders=sorted(host_held['holders'], key=lambda h: -sum(h['admit'].values()))[:HOLDERS_SHOWN]))
+        queue.append(dict(
+            job_id=job['id'], handler=spec.get('handler'), owner=job['owner'],
+            age_s=_age(now, job['created']), priority=spec.get('priority', 0), admit=admit,
+            reason=reason, serving_workers=len(serving),
+            started_since=sum(1 for row in started if row['host'] in hosts and row['created'] > job['created']),
+            workers=workers))
+    return queue
+
+
 def build(store, principals):
     """The roster. `principals` is the authority's live set (server.principals)."""
     now = store.clock()
@@ -145,4 +236,7 @@ def build(store, principals):
         entry['eligible'] = not reasons and connected
         entry['ineligible_reasons'] = reasons
         entries.append(entry)
-    return dict(now=round(now, 3), fresh_seconds=fresh, workers=entries, disagreements=_disagreements(entries))
+    with store.transaction() as db:
+        queue = _queue(db, now, entries)
+    return dict(now=round(now, 3), fresh_seconds=fresh, workers=entries, disagreements=_disagreements(entries),
+                queue=queue)
