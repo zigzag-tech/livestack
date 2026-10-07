@@ -102,3 +102,15 @@ def test_submission_without_labels_keeps_legacy_shape(api):
     _, job = call('jobs', submission('legacy', digest))
     assert job['labels'] == {}
     assert 'labels' not in job['spec'], 'legacy idempotency bytes stay unchanged'
+
+
+def test_describe_and_origin_do_not_change_request_identity(api):
+    # Advisory display labels: the same key resubmitted from another pane, or by a submitter that
+    # predates them, is the same request. Any OTHER label still conflicts.
+    call, digest, _, _ = api
+    first = call('jobs', submission('same', digest))[1]
+    again = call('jobs', submission('same', digest, labels={'describe': 'a', 'origin': 'agent:x@h:p1'}))
+    assert again[0] == 200 and again[1]['id'] == first['id']
+    other = call('jobs', submission('same', digest, labels={'describe': 'b', 'origin': 'human:y'}))
+    assert other[0] == 200 and other[1]['id'] == first['id']
+    assert call('jobs', submission('same', digest, labels={'owner': 'attune:acct_a'}))[0] == 409

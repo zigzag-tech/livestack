@@ -515,7 +515,12 @@ class WorkloadStore:
             selector[reserved] = provider
             spec['selector'] = selector
             spec['execution_provider'] = provider
-        digest = identity(spec)
+        # `describe` and `origin` are advisory display text: a resubmission of the same key from another
+        # pane (or by a submitter that predates them) is the same request, not a conflicting one.
+        hashed = dict(spec, labels={k: v for k, v in spec.get('labels', {}).items() if k not in ('describe', 'origin')})
+        if not hashed['labels']:
+            hashed.pop('labels')
+        digest = identity(hashed)
         now = self.clock()
         with self.transaction() as db:
             old = db.execute("SELECT id,request_hash FROM jobs WHERE owner=? AND request_key=?",

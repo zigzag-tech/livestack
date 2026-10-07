@@ -44,3 +44,15 @@ def test_origin_is_required_with_the_same_switch_and_shape_checked():
             submission(_job(labels=labels), {'b.e2e.v1'}, limits)
     for origin in ('human:acct_c082baa1', 'system:test-train-scheduler', 'agent:codex@h:w28:p3Q'):
         assert submission(_job(labels={'describe': 'd', 'origin': origin}), {'b.e2e.v1'}, limits)
+
+
+def test_sdk_stamps_origin_from_the_pane_environment_and_never_overwrites():
+    from livestack_node.workloads.origin import job_origin, stamp
+    env = {'HERDR_PANE_ID': 'w28:p3Q', 'HERDR_WORKSPACE_ID': 'w28', 'CLAUDECODE': '1', 'TOKEN': 'secret'}
+    origin = job_origin(env)
+    assert origin.startswith('agent:claude@') and origin.endswith('w28:p3Q') and 'secret' not in origin
+    assert job_origin({}, isatty=True).startswith('human:') and job_origin({}, isatty=False).startswith('system:')
+    stamped = stamp({'handler': 'h.v1', 'key': 'k'}, env)
+    assert stamped['labels']['origin'] == origin and stamped['labels']['describe'] == 'h.v1: k'
+    kept = stamp({'handler': 'h.v1', 'key': 'k', 'labels': {'origin': 'human:me', 'describe': 'mine'}}, env)
+    assert kept['labels'] == {'origin': 'human:me', 'describe': 'mine'}
