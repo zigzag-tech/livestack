@@ -126,6 +126,30 @@ def test_roster_queue_names_who_holds_the_capacity_a_queued_job_needs(api):
     assert queued['started_since'] == 0
 
 
+def test_roster_queue_does_not_name_a_dead_workers_cleanup_attempt_as_a_holder(api):
+    # Placement drops a `cleanup` hold once its worker has been silent for cleanup_seconds; the roster
+    # must agree, or it names a blocker placement is not honouring.
+    call, store, server = api
+    for token in ('f', 'p'):
+        call('worker/report', dict(boot='b', report=dict(capacity={'cpu': 4, 'memory_bytes': 8, 'disk_bytes': 100},
+             available={'cpu': 4, 'memory_bytes': 8, 'disk_bytes': 100}, labels={}, handlers=['a.v1'], ready=True,
+             host=_host())), token=token*32)
+    for size in (b'one', b'two'):
+        server.blobs.put('caller', hashlib.sha256(size).hexdigest(), len(size), BytesIO(size))
+    first = call('jobs', dict(version=1, key='k1', handler='a.v1', input_digest=hashlib.sha256(b'one').hexdigest(),
+                              need={'cpu': 3, 'disk_bytes': 60}))[1]
+    assert call('worker/claim', {'boot': 'b'}, token='f'*32)[1]['assignment']['job_id'] == first['id']
+    call('jobs', dict(version=1, key='k2', handler='a.v1', input_digest=hashlib.sha256(b'two').hexdigest(),
+                      need={'cpu': 3, 'disk_bytes': 60}))
+    with store.transaction() as db:
+        db.execute("UPDATE attempts SET state='cleanup' WHERE job=?", (first['id'],))
+        db.execute("UPDATE workers SET seen=seen-?", (store.limits.cleanup_seconds + 10,))
+        db.execute("UPDATE workers SET seen=seen+? WHERE id='w-part'", (store.limits.cleanup_seconds + 10,))
+    _, roster = call('workers')
+    part = {w['worker']: w for w in roster['queue'][0]['workers']}['w-part']
+    assert part['host_holders'] == [], 'a stale cleanup attempt is not a capacity holder'
+
+
 def test_roster_queue_is_empty_when_nothing_waits(api):
     call, _, _ = api
     assert call('workers')[1]['queue'] == []
