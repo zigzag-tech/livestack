@@ -120,12 +120,28 @@ def _parallel_tail(client, digest, headers, out, hasher, count, total, deadline,
     return count
 
 
-def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, max_seconds=3600, parallel=1):
+def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, max_seconds=3600, parallel=1, start=0):
     """`parallel` > 1 fans the blocks after the first out over that many connections. Worth it
     where each request pays a long round trip (the relay measured 0.9-1.9 MB/s sequential against
-    ~10 MB/s with four in flight); it never changes what is accepted or how it is verified."""
-    count, total, failures, requests = 0, None, 0, 0
+    ~10 MB/s with four in flight); it never changes what is accepted or how it is verified.
+
+    `start` > 0 resumes an object whose first `start` bytes are already in `out` (opened
+    for read+write), typically written through ANOTHER route: the prefix is re-hashed from
+    disk so the final digest check still covers every byte, and the first request is a
+    range at `start`, never a restart."""
+    count, total, failures, requests = start, None, 0, 0
     hasher = hashlib.sha256()
+    if start:
+        out.seek(0)
+        remaining = start
+        while remaining:
+            block = out.read(min(1024*1024, remaining))
+            if not block:
+                raise WorkloadError('resume prefix is shorter than its recorded length', 409)
+            hasher.update(block)
+            remaining -= len(block)
+        out.seek(start)
+        out.truncate()
     deadline = time.monotonic()+max_seconds
     last_error = None
     fanned_out = parallel <= 1
@@ -144,7 +160,7 @@ def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, ma
         try:
             with transport.dial_stream(
                     target, 'GET', path,
-                    headers={**headers, HEADER: 'gzip', **({'Range': f'bytes={count}-{max(count, requested_end)}'} if total is not None else {})},
+                    headers={**headers, HEADER: 'gzip', **({'Range': f'bytes={count}-{max(count, requested_end)}'} if total is not None or count else {})},
                     timeout=min(client.timeout, max(0.1, deadline-time.monotonic()))) as response:
                 length = response.headers.get('Content-Length', '')
                 if not re.fullmatch(r'[0-9]{1,20}', length):

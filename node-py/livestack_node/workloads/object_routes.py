@@ -1,5 +1,6 @@
 """Stream immutable inputs over the authenticated workload connection."""
 import logging
+import re
 from .object_download import send_object
 
 from .model import WorkloadError
@@ -32,6 +33,8 @@ def attempt_owner(store, principal, headers, digest=None):
 def route_object(handler, principal, method, parts):
     if route_reference(handler, principal, method, parts):
         return True
+    if len(parts) == 3 and parts[0] == 'objects' and parts[2] == 'upload':
+        return route_resumable_upload(handler, principal, method, parts[1])
     if len(parts) != 2 or parts[0] != 'objects':
         return False
     blobs, store = handler.server.blobs, handler.server.store
@@ -77,4 +80,53 @@ def route_object(handler, principal, method, parts):
                 logging.warning('artifact mirror unavailable for %s: %s', digest, error)
     else:
         raise WorkloadError('unsupported object operation', 405)
+    return True
+
+
+CONTENT_RANGE = re.compile(r'bytes ([0-9]{1,15})-([0-9]{1,15})/([0-9]{1,15})')
+
+
+def route_resumable_upload(handler, principal, method, digest):
+    """GET objects/<digest>/upload -> {offset}; PUT with Content-Range appends one chunk.
+
+    Additive: an authority without these routes answers 404 and the client falls back
+    to the single-request PUT. Ownership and fencing are exactly those of PUT."""
+    blobs, store = handler.server.blobs, handler.server.store
+    digest = blobs.digest(digest)
+    owner = attempt_owner(store, principal, handler.headers) if principal.role == 'worker' else principal.id
+    if method == 'GET':
+        done = blobs.completed_size(owner, digest)
+        handler.respond(200, {'digest': digest, 'offset': blobs.upload_offset(owner, digest) if done is None else done,
+                              'size': done, 'complete': done is not None})
+        return True
+    if method != 'PUT':
+        raise WorkloadError('unsupported object operation', 405)
+    if handler.headers.get('Transfer-Encoding'):
+        raise WorkloadError('transfer encoding is not supported')
+    match = CONTENT_RANGE.fullmatch(handler.headers.get('Content-Range', ''))
+    try:
+        length = int(handler.headers.get('Content-Length', '-1'))
+    except ValueError:
+        length = -1
+    if not match:
+        raise WorkloadError('Content-Range required', 400)
+    first, last, total = map(int, match.groups())
+    if length != last-first+1:
+        raise WorkloadError('content length must equal the range', 400)
+    previous = handler.connection.gettimeout()
+    handler.connection.settimeout(OBJECT_UPLOAD_IDLE_TIMEOUT_SECONDS)
+    try:
+        chunk_digest = handler.headers.get('X-Chunk-Digest')
+        if chunk_digest is not None and not re.fullmatch('[0-9a-f]{64}', chunk_digest):
+            raise WorkloadError('invalid chunk digest', 400)
+        result = blobs.put_range(owner, digest, total, first, length, handler.rfile, chunk_digest)
+    except WorkloadError as error:
+        if hasattr(error, 'offset'):
+            handler.respond(409, {'error': str(error), 'offset': error.offset})
+            return True
+        raise
+    finally:
+        handler.connection.settimeout(previous)
+    handler._body_consumed = True
+    handler.respond(200, result)
     return True

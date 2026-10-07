@@ -26,7 +26,7 @@ from urllib.parse import urlparse
 from .block_codec import HEADER
 from .network import BoundedRequests
 
-OBJECT = re.compile(r'/v1/workloads/objects/[0-9a-f]{64}')
+OBJECT = re.compile(r'/v1/workloads/objects/[0-9a-f]{64}(?:/upload)?')
 # One-use upload grant (upload_grants.py): the holder PUTs the exact object with the opaque capability
 # as bearer. Only PUT is forwarded; the authority validates the capability, so the relay stays stateless.
 GRANT_OBJECT = re.compile(r'/v1/workloads/upload-grants/[0-9a-f]{32}/objects/[0-9a-f]{64}')
@@ -37,7 +37,7 @@ STATUS = '/v1/edge/status'
 BUFFER = 256*1024
 CONTROL_MAX_BYTES = 64*1024
 GRANT_MAX_BYTES = 512*1024*1024
-REQUEST_HEADERS = ('authorization', 'range', 'content-type', 'content-length', HEADER.lower())
+REQUEST_HEADERS = ('authorization', 'range', 'content-range', 'x-chunk-digest', 'content-type', 'content-length', HEADER.lower())
 RESPONSE_HEADERS = ('content-type', 'content-length', 'content-range', 'accept-ranges', HEADER.lower())
 KEEP_MONTHS = 3
 
