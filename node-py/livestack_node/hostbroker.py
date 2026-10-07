@@ -279,6 +279,7 @@ class HostBroker:
         self.host_id: Optional[str] = None
         self._capabilities: Dict[str, dict] = {}
         self._capability_at: Dict[str, float] = {}
+        self._capability_observed_at_ms: Dict[str, int] = {}
         self.capability_ttl_s = float(os.environ.get("LIVESTACK_CAPABILITY_TTL", "15"))
         self.roster = PeerRoster(membership, clock=clock or time.monotonic, log=log,
                                  on_transition=self._emit_transition)
@@ -1211,7 +1212,61 @@ class HostBroker:
             return self._capabilities.get(key)
         self._capabilities[key] = got
         self._capability_at[key] = now
+        self._capability_observed_at_ms[key] = int(time.time() * 1000)
         return got
+
+    def identity_relations(self, *, max_age_ms: int = 60_000):
+        """Current explicit node-to-host assertions and named omission counts."""
+        from .identity_facts import valid_identity
+
+        now_ms = int(time.time() * 1000)
+        candidates = {}
+        counts = {
+            "status": "ok",
+            "known_peers": len(self.peers),
+            "observed": 0,
+            "published": 0,
+            "missing_stable_identity": 0,
+            "missing_benchday_host": 0,
+            "stale_observation": 0,
+            "conflicting_observation": 0,
+        }
+        conflicted = set()
+        for key, cap in self._capabilities.items():
+            if not isinstance(cap, dict):
+                continue
+            identity_id = cap.get("identity_id")
+            host_id = cap.get("benchday_host_id")
+            if not valid_identity(identity_id, max_bytes=220):
+                counts["missing_stable_identity"] += 1
+                continue
+            counts["observed"] += 1
+            if not valid_identity(host_id, max_bytes=220):
+                counts["missing_benchday_host"] += 1
+                continue
+            observed_at_ms = self._capability_observed_at_ms.get(key)
+            if observed_at_ms is None or now_ms - observed_at_ms > max_age_ms:
+                counts["stale_observation"] += 1
+                continue
+            relation = {
+                "resource_namespace": "harmony:node",
+                "resource_id": identity_id,
+                "host_id": host_id,
+                "observed_at_ms": observed_at_ms,
+                "ttl_ms": max_age_ms,
+            }
+            if identity_id in conflicted:
+                continue
+            previous = candidates.get(identity_id)
+            if previous is not None and previous["host_id"] != host_id:
+                candidates.pop(identity_id, None)
+                conflicted.add(identity_id)
+                counts["conflicting_observation"] += 1
+                continue
+            if previous is None or observed_at_ms > previous["observed_at_ms"]:
+                candidates[identity_id] = relation
+        counts["published"] = len(candidates)
+        return list(candidates.values()), counts
 
     def fleet_view(self) -> dict:
         """Every node the broker knows, grouped by host — the whole-fleet view.
@@ -1263,6 +1318,10 @@ class HostBroker:
             if cap:
                 node["ready"] = cap.get("ready")
                 node["detail"] = cap.get("detail")
+                if isinstance(cap.get("identity_id"), str):
+                    node["identity_id"] = cap["identity_id"]
+                if isinstance(cap.get("identity"), dict):
+                    node["identity"] = cap["identity"]
                 # The node's own statement wins over the announce: a seeded
                 # peer never announced at all, and this is the only path that
                 # reaches a node on another host.

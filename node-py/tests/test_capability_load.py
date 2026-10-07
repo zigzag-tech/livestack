@@ -289,3 +289,29 @@ def test_an_unverifiable_id_meters_rather_than_refusing():
     # And no device_id at all is the pre-existing call: meter normally.
     meter = _with_torch(_fake_torch(0), lambda: meters.auto_meter())
     assert _with_torch(_fake_torch(0), meter) is not None
+
+
+# -- explicit host identity -----------------------------------------------------
+
+def test_capability_reports_only_explicit_identity_ids(monkeypatch):
+    monkeypatch.setenv("LIVESTACK_IDENTITY_NODE_ID", "node-stable-a")
+    monkeypatch.setenv("BENCHDAY_HOST_ID", "host-a")
+    body = cap(make_app()[0])
+
+    assert body["identity"] == {"state": "present"}
+    assert body["identity_id"] == "node-stable-a"
+    assert body["benchday_host_id"] == "host-a"
+
+
+def test_capability_does_not_infer_host_identity_from_logical_host_or_device(monkeypatch):
+    monkeypatch.delenv("LIVESTACK_IDENTITY_NODE_ID", raising=False)
+    monkeypatch.delenv("BENCHDAY_HOST_ID", raising=False)
+    body = cap(make_app()[0])
+
+    assert body["identity"] == {
+        "state": "absent",
+        "reason": "missing_stable_node_id",
+    }
+    assert "identity_id" not in body
+    assert "benchday_host_id" not in body
+

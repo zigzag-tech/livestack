@@ -203,7 +203,13 @@ def build_app(broker: HostBroker):
     from fastapi.responses import HTMLResponse
 
     from .ui import page as ui_page
+    from .identity_facts import IdentitySnapshotPublisher, valid_identity
     app = FastAPI(title="Livestack Harmony broker")
+    authority_id = os.environ.get("LIVESTACK_IDENTITY_AUTHORITY_ID", "").strip()
+    identity_publisher = (
+        IdentitySnapshotPublisher("livestack", authority_id)
+        if valid_identity(authority_id, max_bytes=220) else None
+    )
     # One journal line per mutating request and per auth refusal, with source
     # address and principal name — the evidence the R.3 inventory gate reads
     # ("zero 401s from an address not in the inventory"). Reads stay silent;
@@ -462,6 +468,29 @@ def build_app(broker: HostBroker):
         and a page that could preempt from a phone is a second one.
         """
         return HTMLResponse(ui_page())
+
+    @app.get("/fleet/identity-facts")
+    def fleet_identity_facts(authorization: str = Header(None)):
+        """Authenticated complete cut of explicitly configured node identities."""
+        if identity_publisher is None:
+            raise HTTPException(503, "identity_authority_not_configured")
+        principals = getattr(broker, "fleet_principals", None)
+        if principals is None:
+            raise HTTPException(503, "identity_fact_auth_not_configured")
+        if not authorization:
+            raise HTTPException(401, "authorization_required")
+        from .fleet_auth import AuthError, bearer_token, principal_for
+        try:
+            principal_for(principals, bearer_token(authorization))
+        except AuthError as error:
+            raise HTTPException(error.status, error.detail) from error
+        # Refresh the same soft-state view consumed by /fleet. identity_relations
+        # only includes capability observations younger than the Fact TTL.
+        broker.fleet_view()
+        relations, source_state = broker.identity_relations()
+        cut = identity_publisher.snapshot(relations)
+        cut["source_state"] = source_state
+        return cut
 
     @app.get("/fleet")
     def fleet():

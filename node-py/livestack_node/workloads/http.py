@@ -20,6 +20,7 @@ from .handler_release import MAX_MANIFEST_BYTES
 from .object_routes import route_object
 from .upload_grants import UploadGrants, route_upload_grant, route_upload_grant_owner
 from .network import BoundedRequests
+from ..identity_facts import IdentitySnapshotPublisher, valid_identity
 
 from ..fleet_auth import AuthError, Principal as FleetPrincipal, resolve_owner
 
@@ -52,6 +53,8 @@ class Principal:
     # Origin placed in the upload_url of grants THIS principal mints, for a holder that reaches the authority
     # by another address (e.g. a public relay). Unset: the server's public_base_url, else the request Host.
     upload_base_url: str | None = None
+    # Explicit operator-owned join to the Benchday host identity graph.
+    benchday_host_id: str | None = None
 
     def __post_init__(self):
         name(self.id, "principal")
@@ -60,6 +63,8 @@ class Principal:
         if self.role == 'worker':
             name(self.worker, 'worker')
             name(self.host, 'host')
+            if self.benchday_host_id is not None:
+                name(self.benchday_host_id, 'benchday host')
             if self.remote_job is not None:
                 if (self.remote_provider is None or self.remote_run_id is None or self.remote_boot is None or
                         not isinstance(self.remote_job, str) or len(self.remote_job) != 32 or
@@ -68,6 +73,8 @@ class Principal:
                     raise ValueError('remote worker principal must be bound to one job and run')
                 name(self.remote_provider, 'remote provider')
                 name(self.remote_boot, 'remote worker boot')
+        elif self.benchday_host_id is not None:
+            raise ValueError('only a worker principal may carry a Benchday host mapping')
         elif any(value is not None for value in (self.remote_job,self.remote_provider,self.remote_run_id,self.remote_boot)):
             raise ValueError('only a remote worker may carry a remote binding')
         elif not self.handlers:
@@ -118,9 +125,10 @@ def binding_changes(old, new):
     Those are refused on reload: a worker's id/host key its registered state
     and host budgets, and a caller cannot become a worker under the same id
     without orphaning what it owns. Remove the id and add a new one instead."""
-    before = {p.id: (p.role, p.worker, p.host) for p in old}
+    before = {p.id: (p.role, p.worker, p.host, p.benchday_host_id) for p in old}
     return sorted(p.id for p in new
-                  if p.id in before and before[p.id] != (p.role, p.worker, p.host))
+                  if p.id in before and before[p.id] !=
+                  (p.role, p.worker, p.host, p.benchday_host_id))
 
 
 class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
@@ -128,7 +136,8 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
     request_queue_size = 32
 
     def __init__(self, address, store, principals, *, blobs=None, artifact_mirror=None, github_remote=None,
-                 handler_release_policy=None, public_base_url=None):
+                 handler_release_policy=None, public_base_url=None,
+                 identity_authority_id=None):
         check_principals(principals)
         self.configure_connections()
         self.store = store
@@ -138,6 +147,10 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
         self.upload_grants = UploadGrants(self.blobs)
         self.public_base_url = public_base_url
         self.artifact_mirror = artifact_mirror
+        self.identity_publisher = (
+            IdentitySnapshotPublisher("livestack", identity_authority_id)
+            if valid_identity(identity_authority_id, max_bytes=220) else None
+        )
         self.github_remote = github_remote
         self._principals_lock = threading.Lock()
         self.principals = tuple(principals)
@@ -167,10 +180,66 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
         with self._principals_lock:
             changed = binding_changes(self.principals, principals)
             if changed:
-                raise ValueError('principal_binding_changed: role/worker/host of '
+                raise ValueError('principal_binding_changed: role/worker/host/benchday_host_id of '
                                  + ', '.join(changed) + ' cannot change; remove and add a new id')
             self.store.bind_principals(principals)  # caps first: new ids are never uncapped
             self.principals = principals
+
+    def identity_facts(self):
+        """Authenticated, read-only full cut for current mapped workers."""
+        if self.identity_publisher is None:
+            raise WorkloadError("identity_authority_not_configured", 503)
+        now_s = self.store.clock()
+        now_ms = int(now_s * 1000)
+        ttl_ms = min(
+            int(self.store.limits.fresh_seconds * 1000),
+            self.identity_publisher.ttl_ms,
+        )
+        rows = self.store.identity_workers()
+        with self._principals_lock:
+            principals = self.principals
+        by_worker = {}
+        ambiguous = set()
+        for principal in principals:
+            if principal.role != "worker":
+                continue
+            worker_id = principal.worker
+            if worker_id in by_worker:
+                if by_worker[worker_id].benchday_host_id != principal.benchday_host_id:
+                    ambiguous.add(worker_id)
+            else:
+                by_worker[worker_id] = principal
+        relations = []
+        fresh_count = 0
+        unmapped_count = 0
+        stale_count = 0
+        for row in rows:
+            age_ms = max(0, now_ms - int(row["seen"] * 1000))
+            if age_ms > ttl_ms:
+                stale_count += 1
+                continue
+            fresh_count += 1
+            principal = by_worker.get(row["id"])
+            if principal is None or row["id"] in ambiguous or not principal.benchday_host_id:
+                unmapped_count += 1
+                continue
+            relations.append({
+                "resource_namespace": "livestack:worker",
+                "resource_id": row["id"],
+                "host_id": principal.benchday_host_id,
+                "observed_at_ms": int(row["seen"] * 1000),
+                "ttl_ms": ttl_ms,
+            })
+        cut = self.identity_publisher.snapshot(relations, now_ms=now_ms)
+        cut["source_state"] = {
+            "status": "ok",
+            "registered_workers": len(rows),
+            "fresh_workers": fresh_count,
+            "published": len(relations),
+            "unmapped": unmapped_count,
+            "stale": stale_count,
+        }
+        return cut
 
     def connection_bound(self):
         """Each worker holds up to two kept-alive control connections (main and
@@ -341,6 +410,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def route(self, principal, method, parts, body):
         store = self.server.store
+        if principal.role == 'admin' and method == 'GET' and parts == ['identity-facts']:
+            return self.server.identity_facts()
         if parts == ['handler-releases', 'status'] and method == 'GET':
             if principal.role != 'admin':
                 raise WorkloadError('handler release administration requires an admin principal', 403)
