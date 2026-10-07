@@ -50,11 +50,13 @@ class Authority:
         self.digest = hashlib.sha256(data).hexdigest()
         self.server.blobs.put('alice', self.digest, len(data), BytesIO(data))
 
-    def write(self, principals, handlers=('test.v1',), policy=None):
+    def write(self, principals, handlers=('test.v1',), policy=None, environment_handlers=None):
         # A real authority file always carries `handlers`; policy only when set.
         body = dict(principals=principals, handlers=list(handlers))
         if policy is not None:
             body['handler_release_policy'] = policy
+        if environment_handlers is not None:
+            body['environment_handlers'] = environment_handlers
         self.config.write_text(json.dumps(body))
 
     def reload(self):
@@ -331,14 +333,17 @@ def test_concurrent_requests_never_see_a_half_applied_set(authority):
 
 def test_sighup_reloads_the_real_service_process(tmp_path):
     config, state = tmp_path/'authority.json', tmp_path/'state'
-    def write(principals):
+    def write(principals, environment_handlers=None):
         tmp = tmp_path/'authority.json.tmp'
-        tmp.write_text(json.dumps(dict(state_dir=str(state), port=0, handlers=['test.v1'],
-                                       principals=principals)))
+        body = dict(state_dir=str(state), port=0, handlers=['test.v1'], principals=principals)
+        if environment_handlers is not None:
+            body['environment_handlers'] = environment_handlers
+        tmp.write_text(json.dumps(body))
         os.replace(tmp, config)  # the editor pattern: write temp, rename
     write([caller('alice', A)])
     process = subprocess.Popen([sys.executable, '-m', 'livestack_node.workloads.service',
                                 '--config', str(config)])
+    client = None
     try:
         log, deadline, match = state/'authority.log', time.monotonic()+15, None
         while not match:
@@ -347,6 +352,7 @@ def test_sighup_reloads_the_real_service_process(tmp_path):
             assert process.poll() is None and time.monotonic() < deadline
             time.sleep(.05)
         url = f'http://127.0.0.1:{match[1]}'
+        client = WorkloadClient(url, A)
         def status(token):
             try:
                 WorkloadClient(url, token).request('jobs')
@@ -368,7 +374,23 @@ def test_sighup_reloads_the_real_service_process(tmp_path):
             time.sleep(.05)
         assert (status(A), status(B)) == (200, 200)  # the bad file changed nothing
         assert process.poll() is None
+        enabled = {'test.v1': {'purpose': 'development', 'profile': 'flutter-v1'}}
+        write([caller('alice', A), caller('bob', B)], environment_handlers=enabled)
+        process.send_signal(signal.SIGHUP)
+        deadline = time.monotonic()+10
+        while client.capabilities(refresh=True)['environments']['handlers'] != ['test.v1']:
+            assert process.poll() is None and time.monotonic() < deadline
+            time.sleep(.05)
+        write([caller('alice', A), caller('bob', B)], environment_handlers={})
+        process.send_signal(signal.SIGHUP)
+        deadline = time.monotonic()+10
+        while client.capabilities(refresh=True)['environments']['handlers'] != []:
+            assert process.poll() is None and time.monotonic() < deadline
+            time.sleep(.05)
+        assert process.poll() is None
     finally:
+        if client is not None:
+            client.close()
         process.terminate()
         process.wait(timeout=10)
 
@@ -405,6 +427,34 @@ def test_release_policy_reloads_and_a_bad_policy_keeps_the_old_one(authority, ca
         assert not authority.reload()
     assert 'principal_reload_refused' in caplog.text and 'narrow installed handlers' in caplog.text
     assert registry.policy_revision == 'r2'
+
+
+def test_environment_handler_policy_reloads_and_omission_preserves_it(authority, caplog):
+    enabled = {'test.v1': {'purpose': 'development', 'profile': 'flutter-v1'}}
+    authority.write([caller('alice', A), worker('w1', W)], environment_handlers=enabled)
+    assert authority.reload()
+    assert authority.client(A).capabilities()['environments']['handlers'] == ['test.v1']
+
+    authority.write([caller('alice', A), caller('bob', B), worker('w1', W)])
+    assert authority.reload()
+    assert authority.client(A).capabilities()['environments']['handlers'] == ['test.v1']
+    assert authority.status(B) == 200
+
+    invalid = {'missing.v1': {'purpose': 'development', 'profile': 'flutter-v1'}}
+    authority.write([caller('alice', A), worker('w1', W)], environment_handlers=invalid)
+    with caplog.at_level(logging.ERROR):
+        assert not authority.reload()
+    assert 'principal_reload_refused' in caplog.text
+    assert authority.client(A).capabilities()['environments']['handlers'] == ['test.v1']
+    assert authority.status(B) == 200  # invalid policy kept the other sections unchanged too
+
+    authority.write([caller('alice', A), worker('w1', W)], environment_handlers={})
+    assert authority.reload()
+    assert authority.client(A).capabilities()['environments']['handlers'] == []
+    with pytest.raises(WorkloadError, match='environment_unsupported: handler is not enrolled'):
+        authority.client(A).submit(dict(version=3, key='disabled', handler='test.v1',
+            input_digest=authority.digest, need={'cpu': 1, 'memory_bytes': 64*1024**2, 'disk_bytes': 1},
+            environment={'key': 'task', 'reuse': 'prefer'}))
 
 
 def test_policy_may_name_a_handler_added_in_the_same_reload(authority):

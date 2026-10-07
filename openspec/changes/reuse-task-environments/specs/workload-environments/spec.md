@@ -26,6 +26,8 @@ Schema-3 submissions SHALL accept an optional environment reference containing e
 
 Authenticated capability discovery SHALL report supported schema versions and environment-enabled handlers. The workload SDK and existing submit/get CLI SHALL support environment key/handle selection, environment inspection and structured job observation. Unsupported explicit reuse SHALL produce `environment_unsupported` before source upload, without silent downgrade or unmanaged execution. CLI/help/runbooks SHALL explain the separation of task environment identity and job idempotency identity.
 
+The authority SHALL reload an explicitly supplied `environment_handlers` policy map on SIGHUP without restarting or interrupting active attempts. A config that omits this section SHALL preserve the current map; an explicit empty map SHALL disable environment enrollment. Invalid replacement policy SHALL leave the prior map and other reloadable sections unchanged.
+
 #### Scenario: An updated agent reaches an older authority
 - **WHEN** explicit environment selection is unsupported or capability discovery fails
 - **THEN** the caller reports the unsupported/unavailable state and starts no compiler
@@ -34,6 +36,11 @@ Authenticated capability discovery SHALL report supported schema versions and en
 #### Scenario: A replacement agent observes accepted work
 - **WHEN** it uses the handoff's accepted job ID and environment reference
 - **THEN** it observes the same job through get and can inspect the environment without creating another job
+
+#### Scenario: An operator changes environment enrollment during service
+- **WHEN** the operator reloads valid environment handler policies while jobs are active
+- **THEN** fresh capability reads reflect the new eligible and forbidden handlers without interrupting those jobs
+- **AND** an invalid reload leaves the old capability and admission policy in place
 
 ### Requirement: Every environment execution acquires and releases ordinary resources
 

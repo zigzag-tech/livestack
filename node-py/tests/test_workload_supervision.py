@@ -30,6 +30,49 @@ def until(predicate, seconds=10):
     raise AssertionError('condition did not become true')
 
 
+def test_inspect_discovers_and_caches_system_manager_unit(monkeypatch):
+    executor = SystemdExecutor('manager-selection')
+    attempt = uuid.uuid4().hex
+    calls = []
+
+    def inspect_manager(manager, unit):
+        calls.append(manager)
+        if manager == '--user':
+            return {'LoadState': 'not-found'}
+        return {'LoadState': 'loaded', 'ActiveState': 'active', 'ControlGroup': '/system.slice/job',
+                'UnitManager': manager}
+
+    monkeypatch.setattr(executor, '_inspect_manager', inspect_manager)
+    state = executor.inspect(attempt)
+    assert state['UnitManager'] == '--system'
+    assert calls == ['--user', '--system']
+    assert executor.inspect(attempt)['UnitManager'] == '--system'
+    assert calls == ['--user', '--system', '--system']
+
+
+def test_stop_routes_system_manager_unit_through_sudo(monkeypatch):
+    executor = SystemdExecutor('manager-stop')
+    attempt = uuid.uuid4().hex
+    states = iter([
+        {'LoadState': 'loaded', 'ActiveState': 'active', 'UnitManager': '--system'},
+        {'LoadState': 'loaded', 'ActiveState': 'inactive', 'UnitManager': '--system'},
+    ])
+    monkeypatch.setattr(executor, 'inspect', lambda _attempt: next(states))
+    commands = []
+
+    def command(*args, check=True):
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(executor, 'command', command)
+    monkeypatch.setattr('livestack_node.workloads.supervision.docker_runtime.cleanup', lambda _unit: None)
+    executor.stop(attempt)
+    assert commands == [
+        ('/usr/bin/sudo', '-n', '/usr/bin/systemctl', '--system', 'stop', executor.unit(attempt)),
+        ('/usr/bin/sudo', '-n', '/usr/bin/systemctl', '--system', 'reset-failed', executor.unit(attempt)),
+    ]
+
+
 def test_restart_journal_stops_grandchildren_and_limits_resources(tmp_path, executor):
     attempt = uuid.uuid4().hex
     root = tmp_path/'journal'

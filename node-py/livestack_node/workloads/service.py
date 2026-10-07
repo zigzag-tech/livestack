@@ -18,6 +18,9 @@ from .artifact_mirror import InstalledArtifactMirror
 from .compilation_policy import CompilationPolicy
 
 
+_UNCHANGED = object()
+
+
 def load_reloadable(path):
     """Parse the reloadable sections with the startup rules. Raises ValueError.
     Pure: nothing is applied until every section has passed."""
@@ -27,7 +30,8 @@ def load_reloadable(path):
     except (KeyError, TypeError, AttributeError) as exc:
         raise ValueError(f'principals unreadable: {type(exc).__name__}: {exc}') from exc
     check_principals(principals)
-    return principals, config['handlers'], config.get('handler_release_policy')
+    environment_handlers = config.get('environment_handlers', _UNCHANGED)
+    return principals, config['handlers'], config.get('handler_release_policy'), environment_handlers
 
 
 def load_principals(path):
@@ -35,14 +39,15 @@ def load_principals(path):
 
 
 def reload_principals(server, path, attempts=3, pause=.2):
-    """Re-read `path` and swap principals, installed handler ids (add-only) and the
-    handler release policy; fail closed, keep every old value on any refusal.
+    """Re-read `path` and swap reloadable authority policy without a restart.
 
     A torn read (editor mid-write) is retried briefly before it counts. Returns
-    True when a new set was applied. Never raises, never logs a token."""
+    True when the config was applied. An omitted environment_handlers section
+    preserves the installed environment policy; an explicit empty mapping
+    disables environment enrollment. Never raises, never logs a token."""
     for attempt in range(attempts):
         try:
-            new, handlers, policy = load_reloadable(path)
+            new, handlers, policy, environment_handlers = load_reloadable(path)
             break
         except ValueError as exc:
             # JSONDecodeError is a ValueError: a torn write lands here.
@@ -58,6 +63,9 @@ def reload_principals(server, path, attempts=3, pause=.2):
                              + ' cannot be removed without a restart')
         all_handlers = store.handlers | set(handlers)
         parse_policy(policy, all_handlers)
+        parsed_environment_handlers = (
+            store.parse_environment_handlers(environment_handlers, all_handlers)
+            if environment_handlers is not _UNCHANGED else None)
         old = {p.id for p in server.principals}
         server.replace_principals(new)
     except ValueError as exc:
@@ -66,9 +74,14 @@ def reload_principals(server, path, attempts=3, pause=.2):
     added = sorted(all_handlers - store.handlers)
     store.add_handlers(handlers)
     registry.replace_policy(policy, store.handlers)
+    if environment_handlers is not _UNCHANGED:
+        store.environment_handlers = parsed_environment_handlers
     ids = {p.id for p in new}
-    logging.info('principal_reload_applied: %d principals, added=%s removed=%s; handlers added=%s',
-                 len(new), sorted(ids-old), sorted(old-ids), added)
+    environment_count = ('unchanged' if environment_handlers is _UNCHANGED
+                         else len(parsed_environment_handlers))
+    logging.info('principal_reload_applied: %d principals, added=%s removed=%s; handlers added=%s; '
+                 'environment_handlers=%s',
+                 len(new), sorted(ids-old), sorted(old-ids), added, environment_count)
     return True
 
 

@@ -173,18 +173,20 @@ class HostView:
         return max(0, pages-previous[1])*os.sysconf('SC_PAGE_SIZE')/(now-previous[0])
 
     def _attempts(self):
-        directory = self.attempts_dir if self.attempts_dir is not None else user_app_slice(self.cgroup_root)
+        directories = ([self.attempts_dir] if self.attempts_dir is not None else
+                       [user_app_slice(self.cgroup_root), self.cgroup_root/'system.slice'])
         out = {}
-        try:
-            entries = sorted(os.scandir(directory), key=lambda e: e.name)
-        except OSError:
-            return out
-        for entry in entries:
-            match = ATTEMPT_UNIT.fullmatch(entry.name)
-            if match and len(out) < MAX_ATTEMPTS:
-                reading = cgroup_nonreclaimable(entry.path)
-                if reading is not None:
-                    out[match.group(1)] = reading
+        for directory in directories:
+            try:
+                entries = sorted(os.scandir(directory), key=lambda e: e.name)
+            except OSError:
+                continue
+            for entry in entries:
+                match = ATTEMPT_UNIT.fullmatch(entry.name)
+                if match and len(out) < MAX_ATTEMPTS:
+                    reading = cgroup_nonreclaimable(entry.path)
+                    if reading is not None:
+                        out[match.group(1)] = reading
         return out
 
     def _services(self):

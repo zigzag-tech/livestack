@@ -41,18 +41,12 @@ def _limit_breach(result, need):
 
 
 class WorkloadStore:
-    def __init__(self, path, *, handlers, limits=None, clock=time.time, compilation_policy=None,
-                 execution_providers=None, remote_hosts=None, environment_handlers=None):
-        self.path = str(path)
-        self.handlers = set(handlers)
-        self.limits = limits or Limits()
-        self.clock = clock
-        self.compilation_policy = compilation_policy
-        self.execution_providers = dict(execution_providers or {})
-        self.remote_hosts = dict(remote_hosts or {})
-        self.environment_handlers = {}
+    @staticmethod
+    def parse_environment_handlers(environment_handlers, handlers):
+        installed = set(handlers)
+        parsed = {}
         for handler, policy in dict(environment_handlers or {}).items():
-            if handler not in self.handlers or not isinstance(policy, dict) or \
+            if handler not in installed or not isinstance(policy, dict) or \
                     set(policy) - {'purpose', 'profile', 'check_ids', 'payload_modes'}:
                 raise ValueError('invalid environment handler policy')
             purpose, profile = policy.get('purpose'), policy.get('profile')
@@ -71,8 +65,20 @@ class WorkloadStore:
                     any(not isinstance(item, str) or not item or len(item) > 64 for item in modes) or
                     len(set(modes)) != len(modes) or (modes and purpose != 'development')):
                 raise ValueError(f'invalid task check policy for {handler}')
-            self.environment_handlers[handler] = dict(purpose=purpose, profile=profile,
+            parsed[handler] = dict(purpose=purpose, profile=profile,
                 check_ids=tuple(checks) if checks is not None else None, payload_modes=tuple(modes))
+        return parsed
+
+    def __init__(self, path, *, handlers, limits=None, clock=time.time, compilation_policy=None,
+                 execution_providers=None, remote_hosts=None, environment_handlers=None):
+        self.path = str(path)
+        self.handlers = set(handlers)
+        self.limits = limits or Limits()
+        self.clock = clock
+        self.compilation_policy = compilation_policy
+        self.execution_providers = dict(execution_providers or {})
+        self.remote_hosts = dict(remote_hosts or {})
+        self.environment_handlers = self.parse_environment_handlers(environment_handlers, self.handlers)
         if (set(self.execution_providers) - self.handlers or
                 any(not isinstance(p, str) or not p for p in self.execution_providers.values())):
             raise ValueError('invalid configured remote handler mapping')
@@ -337,10 +343,11 @@ class WorkloadStore:
     def capabilities(self, owner, allowed_handlers):
         """Small authenticated capability response; unsupported is never inferred."""
         allowed = set(allowed_handlers)
-        enrolled = sorted(handler for handler, policy in self.environment_handlers.items()
+        environment_handlers = self.environment_handlers
+        enrolled = sorted(handler for handler, policy in environment_handlers.items()
                           if handler in allowed and policy['purpose'] in ('development', 'task_e2e')
                           and self.environment_retention_enabled)
-        forbidden = sorted(handler for handler, policy in self.environment_handlers.items()
+        forbidden = sorted(handler for handler, policy in environment_handlers.items()
                            if handler in allowed and policy['purpose'] in ('full_e2e', 'publishing', 'release'))
         result = dict(versions=[1, 2, 3], environments=dict(version=1, handlers=enrolled,
                                                              forbidden_handlers=forbidden))

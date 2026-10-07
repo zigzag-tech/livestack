@@ -19,7 +19,7 @@ import time
 import uuid
 from urllib.error import HTTPError
 
-from ..hostview import HostView, cgroup_nonreclaimable, user_app_slice
+from ..hostview import HostView, cgroup_nonreclaimable
 from .archive import relative_path, unpack
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
@@ -980,7 +980,12 @@ class WorkloadWorker:
             # freely, so placement learns claims from this figure instead
             # (openspec/changes/host-memory-ledger). A spike shorter than one
             # turn (~0.2 s) can be missed.
-            attempt_cgroup = None if self.darwin or self.windows else user_app_slice()/self.executor.unit(attempt)
+            if self.darwin or self.windows:
+                attempt_cgroup = None
+            else:
+                control_group = self.executor.inspect(attempt).get('ControlGroup')
+                attempt_cgroup = (Path('/sys/fs/cgroup')/control_group.lstrip('/')
+                                  if control_group else None)
             nonreclaimable_peak = None
             while True:
                 if lease.lost.is_set():

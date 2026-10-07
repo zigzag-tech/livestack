@@ -138,20 +138,30 @@ def owned_group(config, attempt, deadline):
     unit = 'harmony-work-'+hashlib.sha256(config['worker'].encode()).hexdigest()[:16]+'-'+attempt+'.service'
     uid = config['worker_uid']
     account = pwd.getpwuid(uid).pw_name
-    command = ['/usr/sbin/runuser', '-u', account, '--', '/usr/bin/env',
-               'XDG_RUNTIME_DIR=/run/user/'+str(uid),
-               'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/'+str(uid)+'/bus',
-               '/usr/bin/systemctl', '--user', 'show', unit,
-               '--property=ActiveState,ControlGroup']
-    result = subprocess.run(command, check=True, capture_output=True, text=True,
-                            timeout=min(1, remaining(deadline)))
-    if len(result.stdout.encode()) > MAX_BYTES:
-        raise WorkloadError('compilation_unit_report_oversized', 503)
-    state = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
-    group = state.get('ControlGroup', '')
-    if state.get('ActiveState') != 'active' or not group.startswith('/') or group == '/':
+    commands = [
+        ['/usr/sbin/runuser', '-u', account, '--', '/usr/bin/env',
+         'XDG_RUNTIME_DIR=/run/user/'+str(uid),
+         'DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/'+str(uid)+'/bus',
+         '/usr/bin/systemctl', '--user', 'show', unit, '--property=ActiveState,ControlGroup'],
+        ['/usr/bin/systemctl', '--system', 'show', unit, '--property=ActiveState,ControlGroup'],
+    ]
+    active_groups = []
+    for command in commands:
+        result = subprocess.run(command, check=False, capture_output=True, text=True,
+                                timeout=min(1, remaining(deadline)))
+        if result.returncode:
+            continue
+        if len(result.stdout.encode()) > MAX_BYTES:
+            raise WorkloadError('compilation_unit_report_oversized', 503)
+        state = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
+        group = state.get('ControlGroup', '')
+        if state.get('ActiveState') == 'active':
+            if not group.startswith('/') or group == '/':
+                raise WorkloadError('compilation_attempt_containment_unavailable', 403)
+            active_groups.append(group)
+    if len(active_groups) != 1:
         raise WorkloadError('compilation_attempt_containment_unavailable', 403)
-    return group
+    return active_groups[0]
 
 
 def authority_receipt(config, request, deadline):

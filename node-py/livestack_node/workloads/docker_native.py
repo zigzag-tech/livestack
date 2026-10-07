@@ -4,6 +4,7 @@ The frontend stays in the host user namespace so it can authenticate the root
 launch verifier. Only the Docker daemon/container descendants enter RootlessKit.
 Both remain beneath the same attempt cgroup and reservation.
 """
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,14 @@ import signal
 import subprocess
 import sys
 import time
+
+
+def _no_new_privileges():
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(38, ctypes.c_ulong(1), ctypes.c_ulong(0),
+                  ctypes.c_ulong(0), ctypes.c_ulong(0)) != 0:  # PR_SET_NO_NEW_PRIVS
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
 
 
 def identity(pid):
@@ -64,6 +73,7 @@ def run(config_path):
             env=env, capture_output=True, text=True, timeout=5, check=True)
         if probe.stdout.strip() != '/run/harmony/data':
             raise RuntimeError('private Docker native endpoint identity mismatch')
+        _no_new_privileges()
         return subprocess.call(config['argv'], cwd=config['cwd'], env=env)
     finally:
         if owned is not None:

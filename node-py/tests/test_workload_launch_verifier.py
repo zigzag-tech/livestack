@@ -86,7 +86,8 @@ data=json.load(sys.stdin);root=Path(data['root']);root.mkdir(mode=0o755)
         journal.close()
 
 
-def launch(verifier, script, *, memory=512*1024**2, cpu=1, lease_file=None, rootless_native=False):
+def launch(verifier, script, *, memory=512*1024**2, cpu=1, lease_file=None,
+           rootless_native=False, isolation=None):
     assignment, executor, request, registry, _, root, _ = verifier
     path = root/'request.json'
     path.write_text(json.dumps(request))
@@ -95,11 +96,17 @@ def launch(verifier, script, *, memory=512*1024**2, cpu=1, lease_file=None, root
     output = root/'out'
     env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[1]),
                TEST_REQUEST=str(path), TEST_REGISTRY=registry, TEST_ROOT=str(root))
-    executor.start(assignment['attempt_id'], [sys.executable, str(program)], root, output,
+    cwd, options = root, {}
+    if isolation is not None:
+        environment_root, source, other, view = isolation
+        env.update(TEST_ENV_VIEW=str(view), TEST_ENV_HIDDEN=str(other/'secret'))
+        cwd = view
+        options = dict(inaccessible_paths=[str(environment_root)], bind_paths=[(str(source), str(view))])
+    executor.start(assignment['attempt_id'], [sys.executable, str(program)], cwd, output,
                    env=env, cpu=cpu, memory_bytes=memory, max_seconds=60,
                    tasks=512 if rootless_native else 64, lease_file=lease_file,
                    rootless_docker=rootless_native, rootless_native=rootless_native,
-                   native_host_address=os.environ.get('HARMONY_TEST_NATIVE_HOST_ADDRESS'))
+                   native_host_address=os.environ.get('HARMONY_TEST_NATIVE_HOST_ADDRESS'), **options)
     return output
 
 
@@ -129,6 +136,15 @@ assert subprocess.run([str(root/'tiny')]).returncode==17
 def test_real_admitted_private_docker_build_keeps_verification_native(verifier):
     _, executor, request, _, _, root, _ = verifier
     request['class'] = 'image'
+    environment_root = root/'environments'
+    source = environment_root/'handle-a'/'source'
+    other = environment_root/'handle-b'/'source'
+    view = root/'environment-view'
+    source.mkdir(parents=True)
+    other.mkdir(parents=True)
+    view.mkdir()
+    (source/'captured').write_text('current-task')
+    (other/'secret').write_text('different-owner')
     context = root/'build-context'
     context.mkdir()
     (context/'marker').write_text('verified private builder')
@@ -136,13 +152,21 @@ def test_real_admitted_private_docker_build_keeps_verification_native(verifier):
     output = launch(verifier, IMPORTS+'''
 assert os.getuid()!=0, 'compiler frontend entered rootless user namespace'
 root=Path(os.environ['TEST_ROOT'])
+assert next(line for line in Path('/proc/self/status').read_text().splitlines()
+            if line.startswith('NoNewPrivs:')).split()[1] == '1'
+view=Path(os.environ['TEST_ENV_VIEW'])
+assert (view/'captured').read_text() == 'current-task'
+try: Path(os.environ['TEST_ENV_HIDDEN']).read_text()
+except (PermissionError,FileNotFoundError): pass
+else: raise AssertionError('sibling task environment was readable')
 assert os.environ['DOCKER_HOST'].startswith('unix:///proc/')
 assert subprocess.check_output(['docker','info','--format','{{.DockerRootDir}}'],text=True).strip()=='/run/harmony/data'
 subprocess.run(['docker','build','--progress=plain','-t','tiny-proof',str(root/'build-context')],check=True)
 digest=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}','tiny-proof'],text=True).strip()
 assert digest.startswith('sha256:')
 (root/'compiled.json').write_text(json.dumps(receipt))
-''', rootless_native=True, memory=768*1024**2)
+''', rootless_native=True, memory=768*1024**2,
+         isolation=(environment_root, source, other, view))
     result = until(lambda: executor.exit_result(output), 55)
     assert result['exit_code'] == 0, (output/'command.log').read_text()[-8000:]
     assert json.loads((root/'compiled.json').read_text())['host'] == 'physical-builder'
