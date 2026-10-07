@@ -54,8 +54,11 @@ class Limits:
     environment_sweep_rows: int = 64
     environment_sweep_seconds: float = 5
     # Handlers whose submissions MUST carry a non-empty `labels.describe` (a short human
-    # statement of what the job is for). Empty = nothing required. Set from authority.json
-    # `limits.describe_required_handlers`; switch on only after every submitter sends it.
+    # statement of what the job is for) and a `labels.origin` of the form kind:name with kind in
+    # agent|human|system (who submitted it). BOTH are advisory text for people reading the queue:
+    # origin is NOT authentication or authorization -- the caller's principal is the only identity
+    # the authority trusts. Empty = nothing required. Set from authority.json
+    # `limits.describe_required_handlers`; switch on only after every submitter sends both.
     describe_required_handlers: tuple = ()
 
     def __post_init__(self):
@@ -88,6 +91,7 @@ class Limits:
             raise ValueError("environment affinity may not exceed its 15 second hard ceiling")
 
 
+ORIGIN_PATTERN = re.compile(r"^(agent|human|system):.{1,100}$")
 AVOID_LABEL_WORKER = "harmony.avoid.worker"
 AVOID_LABEL_SIGNATURE = "harmony.avoid.signature"
 
@@ -303,6 +307,9 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     if handler in limits.describe_required_handlers and not job_labels.get("describe", "").strip():
         raise WorkloadError("job_description_required: this handler's submissions must carry a non-empty "
                             "labels.describe saying what the job is for")
+    if handler in limits.describe_required_handlers and not ORIGIN_PATTERN.match(job_labels.get("origin", "")):
+        raise WorkloadError("job_origin_required: this handler's submissions must carry labels.origin "
+                            "as agent|human|system:<short name> (advisory, not identity proof)")
     result = dict(version=version, key=name(value.get("key"), "key"), handler=handler,
                   input_digest=digest, payload=value.get("payload", {}), need=need,
                   selector=labels(value.get("selector", {})), estimate_seconds=estimate,
