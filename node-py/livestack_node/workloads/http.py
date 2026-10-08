@@ -411,6 +411,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def route(self, principal, method, parts, body):
         store = self.server.store
+        if parts == ['status'] and method == 'GET':
+            if principal.role != 'admin':
+                raise WorkloadError('authority status requires an admin principal', 403)
+            return store.status()
         if principal.role == 'admin' and method == 'GET' and parts == ['identity-facts']:
             return self.server.identity_facts()
         if parts == ['handler-releases', 'status'] and method == 'GET':

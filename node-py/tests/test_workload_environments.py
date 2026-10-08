@@ -13,6 +13,7 @@ import urllib.request
 
 import pytest
 
+from livestack_node.ledger import Decision, JsonlLedger, validate as validate_decision_record
 from livestack_node.workloads.client import WorkloadClient
 from livestack_node.workloads.http import Principal, WorkloadServer
 from livestack_node.workloads.model import Limits, WorkloadError, identity, submission
@@ -41,6 +42,7 @@ def server(tmp_path, *, policies=POLICIES, limits=None):
     api = WorkloadServer(('127.0.0.1', 0), store, [
         Principal('alice', 'a'*32, 'caller', tuple(sorted(HANDLERS))),
         Principal('bob', 'b'*32, 'caller', tuple(sorted(HANDLERS))),
+        Principal('admin', 'c'*32, 'admin', tuple(sorted(HANDLERS))),
     ])
     thread = Thread(target=api.serve_forever, daemon=True)
     thread.start()
@@ -60,6 +62,24 @@ def request(api, path, *, method='GET', data=None, token='a'*32):
 
 def close(api, thread):
     api.shutdown(); thread.join(timeout=5); api.server_close()
+
+
+def test_authority_status_exposes_ledger_health_to_admin_only(tmp_path):
+    store, api, thread = server(tmp_path)
+    try:
+        store.decision_ledger = JsonlLedger(str(tmp_path/'missing'/'decisions.jsonl'))
+        store.decision_ledger.path = str(tmp_path/'missing-parent'/'decisions.jsonl')
+        assert store.record_decision(Decision(
+            emitter='job-caller', emitter_id='authority-test', decision='admit')) is False
+        status, body = request(api, 'status', token='c'*32)
+        assert status == 200
+        assert body == {
+            'decision_ledger': {'enabled': True, 'degraded': True, 'reason': 'write_failed'},
+            'observability_degraded': ['decision_ledger'],
+        }
+        assert request(api, 'status')[0] == 403
+    finally:
+        close(api, thread)
 
 
 def test_schema_three_environment_capabilities_and_preupload_refusal(tmp_path):
@@ -210,8 +230,10 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
     from livestack_node.workloads import placement
 
     now = [1000.0]
+    ledger = JsonlLedger(str(tmp_path/'workload-decisions.jsonl'))
     store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, clock=lambda: now[0],
-                          environment_handlers=POLICIES)
+                          environment_handlers=POLICIES, decision_ledger=ledger,
+                          decision_emitter_id='authority-test')
     decisions = {}
     original_schedule = placement.schedule
     def capture_schedule(*args, **kwargs):
@@ -260,19 +282,41 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
     assert recorded_attempt['host'] == 'host-a'
     assert completed['result']['environment_receipt']['phase_timings']['compile'] == {
         'seconds': None, 'reason': 'timer_unavailable'}
+    records = ledger.read()
+    admission = next(record for record in records if record['decision_id'] == attempt['decision_id'])
+    completion_event = next(record for record in records
+                            if record.get('parent_decision_id') == attempt['decision_id'])
+    assert validate_decision_record(admission) == []
+    assert validate_decision_record(completion_event) == []
+    assert admission['request']['job_id'] == attempt['job_id'] == first['id']
+    assert admission['request']['attempt_id'] == attempt['attempt_id']
+    assert admission['request']['environment_handle'] == first['environment_handle']
+    assert admission['request']['environment_generation'] == 1
+    assert admission['chosen'] == attempt_worker
+    assert {candidate['id'] for candidate in admission['candidates']} == {'worker-a', 'worker-b'}
+    assert completion_event['outcome']['status'] == 'ok'
+    assert completion_event['outcome']['job_id'] == attempt['job_id']
+    assert completion_event['outcome']['attempt_id'] == attempt['attempt_id']
+    assert completion_event['outcome']['environment_handle'] == first['environment_handle']
+    assert completion_event['outcome']['environment_generation'] == 1
+    assert completion_event['outcome']['environment_reuse_outcome'] == 'created'
     view = store.get_environment('alice', first['environment_handle'])
     assert view['state'] == 'parked' and view['generation'] == 1
     assert view['replicas'][0]['host'] == 'host-a'
     assert store.complete(attempt_worker, 'boot', attempt['attempt_id'], attempt['fence'],
         input_digest=SOURCE, outcome='succeeded', result={'artifacts': []},
         environment_receipt=receipt)['id'] == first['id'], 'completion replay returns same receipt'
+    assert len([record for record in ledger.read()
+                if record.get('parent_decision_id') == attempt['decision_id']]) == 1
 
     # Placement is host-affine and may choose either worker identity on the
     # same physical host; poll both identities to collect the shared-host job.
+    ledger.path = str(tmp_path/'missing'/'decisions.jsonl')
     next_attempt = store.claim('worker-a', 'boot') or store.claim('worker-b', 'boot')
     assert next_attempt is not None, f"reason={store.get('alice', second['id'])['reason']!r}"
     assert next_attempt['job_id'] == second['id']
     assert next_attempt['environment']['generation'] == 2
+    assert store.status()['observability_degraded'] == ['decision_ledger']
     assert next_attempt['environment']['replicas'][0]['compatibility'] == 'b'*64
 
 

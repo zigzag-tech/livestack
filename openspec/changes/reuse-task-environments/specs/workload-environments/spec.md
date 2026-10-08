@@ -154,6 +154,11 @@ Handler timing traces SHALL be bounded and SHALL represent each dependency, comp
 - **WHEN** the authority's compilation receipt decision ID differs from the worker's journaled assignment
 - **THEN** the worker refuses before the handler can start a compiler
 
+#### Scenario: Placement and completion share a bounded decision-ledger join
+- **WHEN** a workload attempt is admitted and later completes
+- **THEN** the bounded placement record uses the attempt's `decision_id`, and its completion event joins by `parent_decision_id`, job, attempt, environment handle and generation
+- **AND** a failed ledger write is visible through the admin authority status as `observability_degraded` without refusing the workload
+
 #### Scenario: The environment registry grows to its configured limit
 - **WHEN** placement processes the bounded candidate set
 - **THEN** lookup/claim operations use a bounded batch rather than one database round trip per environment

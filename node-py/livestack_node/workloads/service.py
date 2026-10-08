@@ -3,6 +3,7 @@ import argparse
 import json
 import logging
 import signal
+import socket
 import threading
 import time
 from logging.handlers import RotatingFileHandler
@@ -16,6 +17,7 @@ from .store import WorkloadStore
 from .blobs import BlobStore
 from .artifact_mirror import InstalledArtifactMirror
 from .compilation_policy import CompilationPolicy
+from ..ledger import JsonlLedger
 
 
 _UNCHANGED = object()
@@ -109,6 +111,9 @@ def main():
             github_remote = GitHubRemote(config['github_remote'])
         else:
             github_remote = None
+        decision_ledger = JsonlLedger(
+            str(root/'workload-decisions.jsonl'), max_bytes=64*1024*1024, max_files=4,
+            log=lambda message: logging.warning('%s', message))
         store = WorkloadStore(root/'workloads.sqlite', handlers=config['handlers'],
                               limits=Limits(**config.get('limits', {})),
                               environment_handlers=config.get('environment_handlers', {}),
@@ -116,7 +121,9 @@ def main():
                                   config.get('compilation_policy'), config['compilation_handlers'])
                                   if 'compilation_handlers' in config else None),
                               execution_providers=({} if github_remote is None else github_remote.handler_to_provider),
-                              remote_hosts=({} if github_remote is None else github_remote.hosts))
+                              remote_hosts=({} if github_remote is None else github_remote.hosts),
+                              decision_ledger=decision_ledger,
+                              decision_emitter_id=config.get('identity_authority_id') or socket.gethostname())
         if github_remote is not None:
             if store.compilation_policy is None:
                 raise ValueError('GitHub remote compilation requires the operator compilation policy')
