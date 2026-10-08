@@ -948,6 +948,13 @@ class WorkloadWorker:
             env['HARMONY_FLEET_TOKEN'] = self.config['fleet_token']
         return env
 
+    def _executor_identity_options(self, assignment):
+        # Called only after _attempt_env has validated any compilation grant.
+        # macOS launchd and Windows Job Objects keep their native verifier paths.
+        if isinstance(self.executor, SystemdExecutor):
+            return {'host_identity_required': assignment.get('compilation') is not None}
+        return {}
+
     def _release_fleet_leases(self, output, *, status=None, wall_s=None):
         """Release fleet residency leases the handler recorded in
         $HARMONY_OUTPUT/leases.json, even after a crash. A dead fleet broker
@@ -1052,8 +1059,7 @@ class WorkloadWorker:
                 native_host_address=self.config.get('docker_native_host_address'),
                 **({'docker_cache': docker_cache.plan(self.docker_cache, assignment['owner'], attempt)}
                    if self.docker_cache is not None and handler.get('backend') in ('rootless-docker', 'rootless-docker-native') else {}),
-                **({'host_identity_required': compilation is not None}
-                   if isinstance(self.executor, SystemdExecutor) else {}),
+                **self._executor_identity_options(assignment),
                 **environment_isolation)
             # Once execution starts, worker-process health alone cannot retain
             # the slot. A live supervised unit or its durable exit receipt must
