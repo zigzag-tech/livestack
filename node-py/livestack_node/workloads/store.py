@@ -253,7 +253,7 @@ class WorkloadStore:
                 'margin %s); raise the need or ask the operator to adjust resource_floor'
                 % (need, minimum, series['max'], series['p95'], series['n'], floor['margin']), 422)
 
-    def resource_audit(self, admit=None):
+    def resource_audit(self):
         """Declaration audit from the bounded history: {flags, min_samples}, or the stated
         reason it could not be read. One read transaction however many handlers exist."""
         try:
@@ -264,7 +264,7 @@ class WorkloadStore:
         return {'available': True, 'min_samples': resource_history.MIN_SAMPLES,
                 'floor': 'off' if self.resource_floor is None else (
                     'unavailable: ' + self.resource_floor_unavailable if self.resource_floor_unavailable else 'on'),
-                'flags': resource_history.audit(history, admit)}
+                'flags': resource_history.audit(history)}
 
     def status(self):
         with self._decision_ledger_lock:
@@ -1205,10 +1205,11 @@ class WorkloadStore:
                                'WHERE handle=? AND host=?', (now, env_handle, a['host']))
             state = "succeeded" if outcome == "succeeded" else "failed"
             reason, job_raw = None, raw
-            breach = _limit_breach(result, a["need"])
+            # a["need"] is the ADMIT vector (placement charge); the enforced caps are the job's own need.
+            breach = _limit_breach(result, job["spec"]["need"])
             resource_history.record(db, job["spec"]["handler"], attempt_id, result,
                                     "resource_limit" if outcome == "infrastructure" and breach else outcome,
-                                    a["need"], now, max_age=self.resource_history_max_age)
+                                    job["spec"]["need"], now, max_age=self.resource_history_max_age, admit=a["need"])
             if outcome == "infrastructure" and breach:
                 # The attempt hit a limit the JOB declared (its own need is the
                 # execution cap). A retry runs the same spec into the same cap,

@@ -22,11 +22,12 @@ def store(tmp_path):
     return s
 
 
-def run(store, handler, key, resources, outcome='succeeded', need=8*GIB):
+def run(store, handler, key, resources, outcome='succeeded', need=8*GIB, admit=None):
     store.register('w', 'host', 'boot1', dict(capacity=dict(cpu=4, memory_bytes=64*GIB, disk_bytes=GIB*100),
         available=dict(cpu=4, memory_bytes=64*GIB, disk_bytes=GIB*100), labels={}, handlers=[handler], ready=True))
     store.submit('owner', dict(version=1, key=key, handler=handler, input_digest='a'*64,
-                               need=dict(cpu=1, memory_bytes=need, disk_bytes=GIB)))
+                               need=dict(cpu=1, memory_bytes=need, disk_bytes=GIB),
+                               **({'admit': dict(cpu=1, memory_bytes=admit, disk_bytes=GIB)} if admit else {})))
     a = store.claim('w', 'boot1')
     store._now[0] += 1
     return store.complete('w', 'boot1', a['attempt_id'], a['fence'], input_digest='a'*64, outcome=outcome,
@@ -118,3 +119,13 @@ def test_backfill_rebuilds_derived_history_once_and_reports_how_many(tmp_path):
     assert rows(reopened) == [GIB, 2*GIB, 3*GIB]
     again = WorkloadStore(tmp_path/'authority.db', handlers={H}, clock=lambda: now[0])
     assert again.resource_backfilled == 0
+
+
+def test_declared_is_the_enforced_need_and_admit_is_the_separate_placement_charge(store):
+    # attempts.need holds the ADMIT vector; judging a declaration against it was wrong on live data
+    # (e2e.full admits 4 GiB but is capped at its 10 GiB need).
+    for i in range(5):
+        run(store, H, f'k{i}', {'memory_peak_bytes': 6*GIB}, need=10*GIB, admit=4*GIB)
+    flags = {f['kind']: f for f in store.status()['resource_audit']['flags']}
+    assert 'declared_below_observed' not in flags            # 10 GiB cap > 6 GiB observed
+    assert flags['admit_below_typical']['admit'] == 4*GIB and flags['admit_below_typical']['declared'] == 10*GIB

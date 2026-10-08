@@ -93,7 +93,7 @@ CREATE INDEX IF NOT EXISTS github_remote_state ON github_remote_jobs(provider, s
 -- same transaction that inserts (resource_history.py).
 CREATE TABLE IF NOT EXISTS resource_history (
  id INTEGER PRIMARY KEY AUTOINCREMENT, handler TEXT NOT NULL, dimension TEXT NOT NULL,
- attempt TEXT NOT NULL, value REAL NOT NULL, declared REAL, outcome TEXT NOT NULL, at REAL NOT NULL,
+ attempt TEXT NOT NULL, value REAL NOT NULL, declared REAL, admitted REAL, outcome TEXT NOT NULL, at REAL NOT NULL,
  UNIQUE(attempt, dimension)
 );
 CREATE INDEX IF NOT EXISTS resource_history_series ON resource_history(handler, dimension, at);
