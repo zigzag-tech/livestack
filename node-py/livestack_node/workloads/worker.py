@@ -460,6 +460,14 @@ class WorkloadWorker:
         report['handler_inventory'] = self.handler_inventory
         report['handler_activation_failures'] = list(self.handler_registry_failures[-16:])
         report['handler_gc_receipts'] = list(self.handler_gc_receipts[-16:])
+        if self.config.get('report_unit', False):
+            # Default off: an authority from before declarative-worker-rollout refuses an unknown
+            # report key, so a worker may report its deployment-unit parts only once the authority
+            # that holds it understands them.
+            from .unit import worker_unit_report
+            unit_part = worker_unit_report(self.config.get('unit_verifier_dir'), self.handler_inventory)
+            if unit_part is not None:
+                report['unit'] = unit_part
         if self.task_environments is not None:
             profiles, replicas = self.task_environments.report()
             report['environment_profiles'] = profiles
