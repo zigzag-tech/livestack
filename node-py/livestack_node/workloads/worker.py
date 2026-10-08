@@ -22,6 +22,7 @@ from urllib.error import HTTPError
 from ..hostview import HostView, cgroup_nonreclaimable
 from .archive import relative_path, unpack
 from . import docker_cache
+from . import dependency_cache
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
 from .cpu_admission import CpuAdmission
@@ -230,6 +231,24 @@ class WorkloadWorker:
                              cache_root, self.docker_cache['max_bytes'], self.docker_cache['epoch'],
                              self.docker_cache['canary_every'])
 
+        # Persistent dependency cache (openspec/changes/dependency-cache): disabled unless
+        # worker.json `dependency_cache` is valid and enabled on a Linux worker.
+        self.dependency_cache, why = dependency_cache.settings(config.get('dependency_cache'))
+        if self.dependency_cache is not None and (self.darwin or self.windows):
+            self.dependency_cache, why = None, 'unsupported-platform'
+        if why.startswith('invalid') or why == 'unsupported-platform':
+            logging.warning('dependency_cache disabled: %s', why)
+        if self.dependency_cache is not None:
+            cache_root = Path(self.dependency_cache['path'])
+            cache_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if cache_root.is_symlink() or cache_root.stat().st_uid != os.getuid() or cache_root.stat().st_mode & 0o077:
+                logging.warning('dependency_cache disabled: path is not a private directory of this user')
+                self.dependency_cache = None
+            else:
+                logging.info('dependency_cache enabled: path=%s max_bytes=%d epoch=%d refresh_every=%d',
+                             cache_root, self.dependency_cache['max_bytes'], self.dependency_cache['epoch'],
+                             self.dependency_cache['refresh_every'])
+
     def _stop(self, attempt):
         """executor.stop, except that a refused runtime-dir removal is not fatal.
 
@@ -260,6 +279,23 @@ class WorkloadWorker:
             logging.info('attempt docker_cache: %s', json.dumps(outcome))
         except Exception as error:
             logging.warning('docker_cache outcome unavailable: %s: %s', type(error).__name__, error)
+
+    def _dependency_attempt(self, assignment, attempt, handler):
+        """This attempt's dependency cache, or None (disabled, task environment, or no handler argv)."""
+        if self.dependency_cache is None or assignment.get('environment') is not None or not handler.get('argv'):
+            return None
+        return dependency_cache.Attempt(self.dependency_cache, assignment['owner'], attempt, handler['argv'][0])
+
+    def _record_dependency_cache(self, completion, cache, source, output):
+        """Store what the handler committed and report the outcome; never changes the verdict."""
+        if cache is None or not isinstance(completion, dict):
+            return
+        try:
+            outcome = cache.outcome(cache.save(source, output))
+            completion.setdefault('result', {})['dependency_cache'] = outcome
+            logging.info('attempt dependency_cache: %s', json.dumps(outcome))
+        except Exception as error:
+            logging.warning('dependency_cache outcome unavailable: %s: %s', type(error).__name__, error)
 
     def _remove_workspace(self, path):
         """Remove an attempt workspace; on failure keep it for the next turn.
@@ -944,6 +980,7 @@ class WorkloadWorker:
         cleanup_seconds = None
         output = root/'output'
         handler_backend = None
+        dependency_attempt = None
         try:
             lease = LeaseKeeper(self.client, assignment, root/'lease',
                                 interval=self.config.get('lease_interval', 10),
@@ -992,6 +1029,10 @@ class WorkloadWorker:
                                     environment_prepared=environment_prepared)
             for path in ('home', 'tmp'):
                 (root/path).mkdir()
+            dependency_attempt = self._dependency_attempt(assignment, attempt, handler)
+            if dependency_attempt is not None:
+                dependency_attempt.restore(execution_cwd)
+                env[dependency_cache.ENV_COMPONENTS] = dependency_attempt.env()
             if lease.lost.is_set():
                 raise WorkloadError('execution lease lost during preparation', 409)
             self.journal.write(dict(assignment=assignment, phase='running'))
@@ -1075,6 +1116,7 @@ class WorkloadWorker:
             try:
                 self._stop(attempt)
                 self._record_docker_cache(completion, handler_backend, output)
+                self._record_dependency_cache(completion, dependency_attempt, root/'source', output)
                 remove_data(root)
                 cleanup_seconds = time.monotonic() - cleanup_started
             except Exception:

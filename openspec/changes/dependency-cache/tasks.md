@@ -1,0 +1,6 @@
+- [x] dependency_cache.py: settings, manifest, keys, restore, save, evict
+- [x] worker.py wiring (restore before executor.start, save after stop, result field)
+- [x] tests/test_workload_dependency_cache.py (real files, cp, flock)
+- [x] node-py/docs/dependency-cache.md
+- [ ] roll out: worker.json `dependency_cache` per worker, worker release per worker-release-rollout.md
+- [ ] record measured hit/miss per worker, archive the change
