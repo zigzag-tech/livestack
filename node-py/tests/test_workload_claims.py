@@ -257,3 +257,32 @@ def test_old_database_without_claims_rows_falls_back_to_the_principal(tmp_path):
     with store.transaction() as db:
         assert claims_module.draining(db, store.clock(), {drained.id: drained}) == {'w9'}
     assert sqlite3.connect(store.path).execute('SELECT COUNT(*) FROM worker_claims').fetchone()[0] == 0
+
+
+def test_cli_drain_enable_claims_and_export_against_a_real_authority(authority, tmp_path):
+    """tasks 1.6: the operator CLI, as real processes, including the refusal of an unbounded drain."""
+    import os
+    import subprocess
+    import sys
+    config = tmp_path/'cli.json'
+    config.write_text(json.dumps({'authority': authority.url, 'token': ADMIN}))
+
+    def cli(*args, ok=True):
+        done = subprocess.run([sys.executable, '-m', 'livestack_node.workloads.cli', '--config', str(config), *args],
+                              env=dict(os.environ), capture_output=True, text=True, timeout=20)
+        assert (done.returncode == 0) == ok, done.stderr
+        return json.loads(done.stdout) if ok else done.stderr
+
+    drained = cli('drain', 'w1', '--ttl', '3600', '--owner', 'agent-cli', '--reason', 'roll')
+    assert drained['owner'] == 'agent-cli' and drained['enabled'] is False
+    claims = cli('claims')['claims']
+    assert {c['worker']: c['draining'] for c in claims} == {'w1': True, 'w2': False}
+    assert cli('claims', '--export-authority-json') == {'w1': False, 'w2': True}
+    assert 'drain_held_by:agent-cli' in cli('drain', 'w1', '--ttl', '60', '--owner', 'other', ok=False)
+    stale = cli('drain', 'w2', '--ttl', '60', '--if-generation', '99', ok=False)
+    assert 'claim_generation_conflict' in stale
+    assert cli('enable', 'w1', '--owner', 'agent-cli')['enabled'] is True
+    assert 'verdict' in cli('reload-status')
+    no_expiry = subprocess.run([sys.executable, '-m', 'livestack_node.workloads.cli', '--config', str(config),
+                                'drain', 'w1'], capture_output=True, text=True, timeout=20)
+    assert no_expiry.returncode != 0   # argparse: one of --until/--ttl is required
