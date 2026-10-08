@@ -446,6 +446,54 @@ def test_worker_replica_reports_enforce_the_sixty_four_entry_bound(tmp_path):
     assert store.register('worker', 'host-a', 'boot', report(64))['ready'] is True
 
 
+def test_worker_replica_reports_reconcile_only_declared_profiles(tmp_path):
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, environment_handlers=POLICIES)
+    compatibility = {'linux-rust': 'b'*64, 'benchday-task-e2e': 'c'*64}
+    rust = store.submit('alice', env_request('shared-rust', job='shared-rust'))['environment_handle']
+    stale_rust = store.submit('alice', env_request('stale-rust', job='stale-rust'))['environment_handle']
+    task_e2e = store.submit('alice', env_request('shared-task-e2e', handler='task.v1',
+        job='shared-task-e2e', payload={'check_ids': ['hub.one']}))['environment_handle']
+
+    def replica(handle, profile):
+        return dict(handle=handle, profile=profile, compatibility=compatibility[profile],
+            generation=1, state='parked', bytes_used=1024, last_used=1000.0)
+
+    with store.transaction() as db:
+        for handle, profile in ((rust, 'linux-rust'), (stale_rust, 'linux-rust'),
+                                (task_e2e, 'benchday-task-e2e')):
+            db.execute("UPDATE task_environments SET state='parked',generation=1,compatibility=? WHERE handle=?",
+                       (compatibility[profile], handle))
+
+    def register(worker, profiles, replicas):
+        report = dict(capacity={'cpu': 4, 'memory_bytes': 2*1024**3},
+            available={'cpu': 4, 'memory_bytes': 2*1024**3}, labels={'os': 'linux'},
+            handlers=['dev.v1'], ready=True, environment_profiles=profiles, environment_replicas=replicas)
+        return store.register(worker, 'host-a', 'boot', report)
+
+    register('worker-all-profiles', compatibility, [
+        replica(rust, 'linux-rust'), replica(stale_rust, 'linux-rust'),
+        replica(task_e2e, 'benchday-task-e2e')])
+    register('worker-partial-profiles', {'linux-rust': compatibility['linux-rust']},
+        [replica(rust, 'linux-rust')])
+
+    with store.connect() as db:
+        rows = db.execute('SELECT handle,profile FROM task_environment_replicas WHERE host=?',
+                          ('host-a',)).fetchall()
+    assert {(row['handle'], row['profile']) for row in rows} == {
+        (rust, 'linux-rust'), (task_e2e, 'benchday-task-e2e')}
+
+    register('worker-empty-profiles', {}, [])
+    with store.connect() as db:
+        rows = db.execute('SELECT handle,profile FROM task_environment_replicas WHERE host=?',
+                          ('host-a',)).fetchall()
+    assert {(row['handle'], row['profile']) for row in rows} == {
+        (rust, 'linux-rust'), (task_e2e, 'benchday-task-e2e')}
+
+    with pytest.raises(WorkloadError, match='environment replica profile is not declared'):
+        register('worker-invalid-scope', {'linux-rust': compatibility['linux-rust']},
+            [replica(task_e2e, 'benchday-task-e2e')])
+
+
 def test_returning_worker_gets_generation_scoped_cleanup_for_stale_replicas(tmp_path):
     # Unit-only: force both a superseded generation and a replica whose logical
     # row vanished into one bounded authority report; worker HTTP coverage uses

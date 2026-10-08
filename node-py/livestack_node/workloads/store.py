@@ -930,6 +930,8 @@ class WorkloadStore:
                     isinstance(last_used, bool) or not isinstance(last_used, (int, float)) or
                     not math.isfinite(last_used) or last_used < 0 or replica['state'] not in ('parked', 'rebuild_required')):
                 raise WorkloadError('invalid environment replica measurements')
+            if profile not in body['environment_profiles']:
+                raise WorkloadError('environment replica profile is not declared by worker')
             seen_handles.add(handle)
             body['environment_replicas'].append(dict(handle=handle, profile=profile,
                 compatibility=compatibility, generation=generation, state=replica['state'],
@@ -971,10 +973,21 @@ class WorkloadStore:
             if 'environment_replicas' in report:
                 reported = body['environment_replicas']
                 reported_handles = {item['handle'] for item in reported}
+                profiles = sorted(body['environment_profiles'])
+                if profiles:
+                    profile_placeholders = ','.join('?' for _ in profiles)
+                    profile_params = (host_id, *profiles)
+                    if reported_handles:
+                        handle_placeholders = ','.join('?' for _ in reported_handles)
+                        db.execute(f"DELETE FROM task_environment_replicas WHERE host=? "
+                                   f"AND profile IN ({profile_placeholders}) "
+                                   f"AND handle NOT IN ({handle_placeholders})",
+                                   (*profile_params, *sorted(reported_handles)))
+                    else:
+                        db.execute(f"DELETE FROM task_environment_replicas WHERE host=? "
+                                   f"AND profile IN ({profile_placeholders})", profile_params)
                 if reported_handles:
                     placeholders = ','.join('?' for _ in reported_handles)
-                    db.execute(f"DELETE FROM task_environment_replicas WHERE host=? AND handle NOT IN ({placeholders})",
-                               (host_id, *sorted(reported_handles)))
                     handles = sorted(reported_handles)
                     environment_rows = db.execute(
                         f"SELECT e.handle,e.generation,e.writer_attempt,count(r.host) AS other_hosts "
@@ -990,8 +1003,9 @@ class WorkloadStore:
                     host_rows = db.execute('SELECT count(*) FROM task_environment_replicas WHERE host=?',
                                             (host_id,)).fetchone()[0]
                 else:
-                    db.execute("DELETE FROM task_environment_replicas WHERE host=?", (host_id,))
-                    environments, existing_handles, host_rows = {}, set(), 0
+                    environments, existing_handles = {}, set()
+                    host_rows = db.execute('SELECT count(*) FROM task_environment_replicas WHERE host=?',
+                                            (host_id,)).fetchone()[0]
                 candidates = []
                 for replica in reported:
                     handle = replica['handle']
