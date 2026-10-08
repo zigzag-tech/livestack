@@ -191,12 +191,27 @@ class Session:
         self.unclean = False        # dockerd had to be killed: the store may be inconsistent
         self.result = dict(outcome='disabled', reason='not-configured')
         self.started = time.monotonic()
+        # Wall seconds the cache itself cost, by phase. `seconds` in the outcome is the sum of the
+        # CACHE phases only (begin, prune, finish); `session_seconds` is the whole attempt inside
+        # the launcher, which is what `seconds` wrongly reported until this was added.
+        self.phases = {}
+
+    def timed(self, name, started):
+        """Record `name` as the seconds since monotonic `started` (accumulating if repeated)."""
+        self.phases[name] = round(self.phases.get(name, 0.0) + time.monotonic() - started, 2)
 
     # -- begin ---------------------------------------------------------------
     def begin(self):
         """Return the persistent data root to use, or None for an ephemeral root."""
         if not self.plan:
             return None
+        began = time.monotonic()
+        try:
+            return self._begin()
+        finally:
+            self.timed('begin', began)
+
+    def _begin(self):
         p = self.plan
         self.result = dict(outcome='cold-new', namespace=p['namespace'], epoch=p['epoch'])
         try:
@@ -268,7 +283,11 @@ class Session:
 
     def _wipe_slot(self, reason):
         self.result.update(outcome='wiped', reason=reason)
-        _wipe(self.dir/'slot')
+        started = time.monotonic()
+        try:
+            _wipe(self.dir/'slot')
+        finally:
+            self.timed('wipe', started)
         for name in ('state.json', 'canary.json'):
             try:
                 (self.dir/name).unlink()
@@ -305,6 +324,7 @@ class Session:
         """After dockerd stopped: size guard, canary, state, outcome file. Never raises."""
         if not self.plan:
             return
+        finishing = time.monotonic()
         try:
             self._finish(code)
         except Exception as error:
@@ -312,7 +332,12 @@ class Session:
             # The root's cleanliness is unknown: leave clean:false so the next attempt wipes it.
         finally:
             self._release()
-            self.result['seconds'] = round(time.monotonic()-self.started, 1)
+            self.timed('finish', finishing)
+            self.result['session_seconds'] = round(time.monotonic()-self.started, 1)
+            self.result['phases'] = dict(self.phases)
+            # Cache cost = begin + prune + finish. `wipe` and `walk` are inside begin/finish;
+            # dockerd_start/dockerd_stop happen with or without a cache, so none are added again.
+            self.result['seconds'] = round(sum(self.phases.get(k, 0.0) for k in ('begin', 'prune', 'finish')), 1)
             try:
                 _write_json(self.output/OUTCOME_FILE, self.result)
             except Exception:
@@ -332,6 +357,8 @@ class Session:
         exit_record = _read_json(self.output/EXIT_FILE) or {}
         if 'prune' in exit_record:
             self.result['prune'] = exit_record['prune']
+        if isinstance(exit_record.get('prune_seconds'), (int, float)):
+            self.phases['prune'] = round(float(exit_record['prune_seconds']), 2)
         if self.unclean:
             self.result['dockerd_killed'] = True
         fingerprint = _read_json(self.output/FINGERPRINT_FILE) or {}
@@ -366,7 +393,9 @@ class Session:
             else:
                 _write_json(self.dir/'canary.json', dict(records=records))
             if self.root is not None:
+                walking = time.monotonic()
                 nbytes, walk_errors = tree_bytes(self.root)
+                self.timed('walk', walking)
                 self.result['bytes'] = nbytes
                 if mode == 'cold' and state.get('cold_bytes') is None:
                     state['cold_bytes'] = nbytes
@@ -398,14 +427,17 @@ KEEP_FRACTION = 0.7   # builder cache is pruned to this share of max_bytes; the 
 
 def prune(env, max_bytes):
     """End-of-attempt prune while dockerd is up. Returns a small report; never raises."""
-    report = {}
+    report, steps, began = {}, {}, time.monotonic()
     def run(name, *argv, timeout=240):
+        started = time.monotonic()
         try:
             done = subprocess.run(['/usr/bin/docker', *argv], env=env, capture_output=True, text=True, timeout=timeout)
             report[name] = done.returncode if done.returncode else 'ok'
             return done
         except Exception as error:
             report[name] = type(error).__name__
+        finally:
+            steps[name] = round(time.monotonic()-started, 2)
     try:
         listing = subprocess.run(['/usr/bin/docker', 'ps', '-aq'], env=env, capture_output=True, text=True, timeout=30)
         ids = listing.stdout.split()
@@ -421,6 +453,8 @@ def prune(env, max_bytes):
     report['docker_bytes'] = over
     if over is not None and over > max_bytes:
         run('image_all', 'image', 'prune', '-a', '-f')
+    report['steps'] = steps
+    report['seconds'] = round(time.monotonic()-began, 2)
     return report
 
 

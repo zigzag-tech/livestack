@@ -57,6 +57,16 @@ creation time and would evict old base images first.
 `docker_cache`: `outcome` is one of `hit`, `cold-new`, `cold-canary`, `cold-locked`, `cold-unsafe`, `cold-error`,
 `wiped`, `discarded`, `disabled`; plus `reason`, `bytes`, `cold_bytes`, `prune`, `canary_mismatch`.
 
+### What `seconds` measures
+
+`seconds` is the wall time the cache itself cost: `phases.begin + phases.prune + phases.finish`.
+`phases` also lists `wipe` (inside begin/finish), `walk` (size walk, inside finish), `dockerd_start` and
+`dockerd_stop` (paid with or without a cache, so not counted), and `prune.steps` has each docker prune
+command. `session_seconds` is the whole attempt inside the launcher. Before 2026-10-08 `seconds` was
+that whole-session number: it was ~95% of attempt wall time (median 277 s) and was misread as cache
+overhead. Measured overhead is seconds, not minutes: the size walk of a 34 GB root takes under 1 s and
+the whole post-job tail (handler exit to dockerd SIGTERM) is ~21 s even on a cache-less canary.
+
 ## Cold canary
 
 Every `canary_every`-th attempt (sha256 of the attempt id mod N) runs on an ephemeral root, exactly the old cold
