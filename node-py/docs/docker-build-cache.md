@@ -93,3 +93,25 @@ counted by the disk reaper like any other: do not place it under a path `diskrea
 The apt/curl/npm layers of an app are cached forever until the Dockerfile changes, the root is wiped or `epoch`
 bumps; an app that needs refresh should bump an `ARG`. A BuildKit instruction that is best-effort (a download
 that may fail) must not live in a cached layer: use `--no-cache-filter` for that stage.
+
+## Rollout record and measurements (2026-10-08)
+
+Release `livestack-925a02fa` (code of main 925a02fa), drop-in `95-docker-cache.conf` per worker (rollback: delete
+it, `daemon-reload`, restart when idle; and set `docker_cache.enabled` false or restore `worker*.json.bak-dockercache-*`).
+Cache dir `~/.cache/livestack-docker-cache/<worker>`, bound 40 GiB per namespace (WSL 30 GiB), `canary_every` 20
+(zz-joe-e2e-3: 3). Drain/enable with the atomic `claim_enabled` edit in `worker-release-rollout.md`.
+
+zz-joe, Benchday E2E attempts of 2026-10-08 (command.log `Built benchday/e2e-node:<fp> in Ns`, authority DB):
+
+| class | attempts | image build median | start -> postgresReady median |
+|---|---|---|---|
+| before (no cache) | 125 | 716 s | 1010 s |
+| cold-new (first on a root) | 3 | 695 s | 908 s |
+| hit (same image fingerprint) | 8 | 2 s | 117 s |
+
+A hit with a NEW source tree (one-crate bump) measured in isolation: 241 s vs 582 s cold. Root size 22.9 GB per
+slot after the first build.
+
+Incident during rollout (fixed in 925a02fa): the first release compared job verdicts in the canary and purged a good
+root, and the native frontend killed the attempt process 5 s after dockerd stopped, before the outcome was written.
+Both failed closed (next attempt wiped and ran cold).
