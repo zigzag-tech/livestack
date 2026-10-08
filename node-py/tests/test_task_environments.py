@@ -11,6 +11,10 @@ from types import SimpleNamespace
 import pytest
 
 from livestack_node.workloads.archive import capture, unpack
+from livestack_node.fleet_operations import CREATED, OperationStore
+from livestack_node.fleet_ops_api import deprovision
+from livestack_node.hostd import _drain_blocked
+from livestack_node.hostbroker import HostBroker
 from livestack_node.workloads.model import WorkloadError
 from livestack_node.workloads import task_environments as task_environments_module
 from livestack_node.workloads.task_environments import TaskEnvironmentStore
@@ -535,3 +539,35 @@ def test_same_handle_local_lock_serializes_distinct_worker_processes(tmp_path):
     assert finished.is_set()
     assert result['prepared']['reuse_outcome'] == 'reused'
     store.release(result['prepared'])
+
+
+def test_parked_environment_does_not_block_host_deprovision(tmp_path):
+    environment_store, _, _ = make_store(tmp_path)
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    prepared = environment_store.prepare(assignment('6'*32, 1, digest), incoming, handler=HANDLER)
+    finish(environment_store, prepared, generation=1)
+    profiles, replicas = environment_store.report()
+    assert profiles[PROFILE] and len(replicas) == 1
+    assert replicas[0]['state'] == 'parked'
+
+    node_id = 'http://worker-a'
+    broker = HostBroker(devices=[], peers=[], clock=lambda: 1_700_000_000.0)
+    broker.fleet_view = lambda: {'hosts': {'host-a': {'nodes': [
+        {'peer': node_id + '/livestack', 'load': {'in_flight': 0}}]}}}
+    assert broker.leases_on(node_id) == 0
+    operations = OperationStore(str(tmp_path/'fleet.sqlite'), clock=lambda: 1_700_000_000.0)
+    operation = operations.claim(job_id='task-environment-drain', owner='owner',
+        target_id=node_id, idempotency_key='task-environment-drain', provider='fake',
+        tier='SPOT', now=1_700_000_000.0)
+    operations.transition(operation.operation_id, CREATED, provider_instance_id='instance-1',
+                          now=1_700_000_000.0)
+    operations.announce(operation.operation_id, ready=True, node=node_id,
+                        now=1_700_000_000.0)
+    terminated = []
+    result = deprovision({'type': 'deprovision', 'target_id': node_id}, store=operations,
+        providers={'fake': SimpleNamespace(terminate=terminated.append)},
+        busy=lambda target: _drain_blocked(broker, target), now=1_700_000_000.0)
+
+    assert result['state'] == 'released' and result['teardown'] == 'ok'
+    assert terminated == ['instance-1']
+    assert environment_store.report()[1][0]['state'] == 'parked'
