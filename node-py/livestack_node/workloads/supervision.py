@@ -128,7 +128,8 @@ class SystemdExecutor:
 
     def start(self, attempt_id, argv, cwd, output, *, env, cpu, memory_bytes,
               max_seconds=3600, tasks=512, log_bytes=8*1024**2, lease_file=None, rootless_docker=False,
-              rootless_native=False, native_host_address=None, docker_cache=None, inaccessible_paths=(), bind_paths=()):
+              rootless_native=False, native_host_address=None, docker_cache=None, inaccessible_paths=(), bind_paths=(),
+              host_identity_required=False):
         # Limits are operator/handler configuration, never unconstrained argv
         # supplied by a remote caller. Fail closed when cgroups cannot apply.
         for value in (cpu, memory_bytes, max_seconds, tasks, log_bytes):
@@ -140,6 +141,8 @@ class SystemdExecutor:
             raise WorkloadError('installed handler must name an absolute executable')
         if rootless_native and not rootless_docker:
             raise WorkloadError('native Docker frontend requires owned rootless Docker')
+        if type(host_identity_required) is not bool:
+            raise WorkloadError('host identity requirement must be a boolean')
         if not isinstance(inaccessible_paths, (list, tuple)) or len(inaccessible_paths) > 8:
             raise WorkloadError('invalid execution inaccessible-path policy')
         clean_inaccessible = []
@@ -167,7 +170,8 @@ class SystemdExecutor:
             clean_binds.append((clean_source, clean_destination))
         if self.inspect(attempt_id).get('LoadState') != 'not-found':
             raise WorkloadError('attempt already has a unit; reconcile before launch', 409)
-        system_manager = bool(rootless_docker and (clean_inaccessible or clean_binds))
+        system_manager = bool(host_identity_required or
+                              (rootless_docker and (clean_inaccessible or clean_binds)))
         manager = '--system' if system_manager else '--user'
         self.manager_attempt, self.manager = attempt_id, manager
         output = Path(output).resolve()
@@ -190,22 +194,28 @@ class SystemdExecutor:
         # get a mount namespace; inside it setuid newuidmap (rootlesskit) fails with EPERM
         # because root is unmapped. So rootless Docker under --user gets no PrivateTmp.
         private_tmp = [] if rootless_docker and not system_manager else ['--property=PrivateTmp=yes']
-        self.command(*run, '--quiet', '--unit='+self.unit(attempt_id),
-            *user_properties,
-            '--property=Type=exec',
-            '--property=KillMode=control-group', '--property=TimeoutStopSec=5s',
-            '--property=SendSIGKILL=yes', '--property=OOMPolicy=kill',
-            '--property=MemoryMax='+str(int(memory_bytes)), '--property=MemorySwapMax=0',
-            '--property=CPUQuota='+str(cpu*100)+'%', '--property=TasksMax='+str(int(tasks)),
-            '--property=RuntimeMaxSec='+str(max_seconds),
-            *private_tmp,
-            '--property=StandardOutput=null', '--property=StandardError=null',
-            '--property=NoNewPrivileges='+('no' if rootless_docker else 'yes'),
-            *['--property=InaccessiblePaths='+str(path) for path in clean_inaccessible],
-            *['--property=BindPaths='+str(source)+':'+str(destination)
-              for source, destination in clean_binds],
-            *(['--property=Delegate=yes', '--property=DelegateSubgroup=supervisor'] if rootless_docker else []),
-            sys.executable, str(wrapper), str(config))
+        try:
+            self.command(*run, '--quiet', '--unit='+self.unit(attempt_id),
+                *user_properties,
+                '--property=Type=exec',
+                '--property=KillMode=control-group', '--property=TimeoutStopSec=5s',
+                '--property=SendSIGKILL=yes', '--property=OOMPolicy=kill',
+                '--property=MemoryMax='+str(int(memory_bytes)), '--property=MemorySwapMax=0',
+                '--property=CPUQuota='+str(cpu*100)+'%', '--property=TasksMax='+str(int(tasks)),
+                '--property=RuntimeMaxSec='+str(max_seconds),
+                *private_tmp,
+                '--property=StandardOutput=null', '--property=StandardError=null',
+                '--property=NoNewPrivileges='+('no' if rootless_docker else 'yes'),
+                *['--property=InaccessiblePaths='+str(path) for path in clean_inaccessible],
+                *['--property=BindPaths='+str(source)+':'+str(destination)
+                  for source, destination in clean_binds],
+                *(['--property=Delegate=yes', '--property=DelegateSubgroup=supervisor'] if rootless_docker else []),
+                sys.executable, str(wrapper), str(config))
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            if not host_identity_required:
+                raise
+            detail = (getattr(error, 'stderr', None) or getattr(error, 'stdout', None) or str(error)).strip()[-256:]
+            raise WorkloadError('compilation_host_identity_unavailable: '+(detail or type(error).__name__), 503) from error
 
     def stop(self, attempt_id):
         """Return only after the owned unit and all its descendants are gone."""

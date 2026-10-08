@@ -86,6 +86,79 @@ def test_stop_routes_system_manager_unit_through_sudo(monkeypatch):
     ]
 
 
+def test_compilation_execution_uses_system_manager_and_worker_identity(monkeypatch, workload_test_root):
+    executor = SystemdExecutor('compilation-manager-selection')
+    attempt = uuid.uuid4().hex
+    monkeypatch.setattr(executor, 'inspect', lambda _attempt: {'LoadState': 'not-found'})
+    commands = []
+
+    def command(*args, check=True):
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(executor, 'command', command)
+    executor.start(attempt, ['/usr/bin/python3', '-c', 'pass'], workload_test_root,
+        workload_test_root/'compilation-out', env={}, cpu=.5, memory_bytes=128*1024**2,
+        max_seconds=30, tasks=64, host_identity_required=True)
+    args = commands[0]
+    assert args[:4] == ('/usr/bin/sudo', '-n', '/usr/bin/systemd-run', '--system')
+    assert '--user' not in args
+    assert '--property=User='+str(os.getuid()) in args
+    assert '--property=Group='+str(os.getgid()) in args
+    assert '--property=PrivateTmp=yes' in args
+    assert '--property=NoNewPrivileges=yes' in args
+    assert '--property=MemoryMax='+str(128*1024**2) in args
+    assert '--property=TasksMax=64' in args
+    assert '--property=RuntimeMaxSec=30' in args
+    assert '--property=CPUQuota=50.0%' in args
+
+
+def test_runtime_only_execution_stays_on_user_manager(monkeypatch, workload_test_root):
+    executor = SystemdExecutor('runtime-manager-selection')
+    attempt = uuid.uuid4().hex
+    monkeypatch.setattr(executor, 'inspect', lambda _attempt: {'LoadState': 'not-found'})
+    commands = []
+
+    def command(*args, check=True):
+        commands.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout='', stderr='')
+
+    monkeypatch.setattr(executor, 'command', command)
+    executor.start(attempt, ['/usr/bin/python3', '-c', 'pass'], workload_test_root,
+        workload_test_root/'runtime-out', env={}, cpu=.5, memory_bytes=128*1024**2)
+    assert commands[0][0:2] == ('systemd-run', '--user')
+    assert '--system' not in commands[0]
+    assert not any(value.startswith('--property=User=') for value in commands[0])
+    assert not any(value.startswith('--property=Group=') for value in commands[0])
+
+
+def test_compilation_execution_fails_closed_when_system_manager_is_unavailable(monkeypatch, workload_test_root):
+    executor = SystemdExecutor('compilation-no-manager-fallback')
+    attempt = uuid.uuid4().hex
+    monkeypatch.setattr(executor, 'inspect', lambda _attempt: {'LoadState': 'not-found'})
+    commands = []
+
+    def unavailable(*args, check=True):
+        commands.append(args)
+        raise subprocess.CalledProcessError(1, args, stderr='sudo not permitted')
+
+    monkeypatch.setattr(executor, 'command', unavailable)
+    with pytest.raises(WorkloadError, match='compilation_host_identity_unavailable'):
+        executor.start(attempt, ['/usr/bin/python3', '-c', 'pass'], workload_test_root,
+            workload_test_root/'compilation-refused', env={}, cpu=.5, memory_bytes=128*1024**2,
+            host_identity_required=True)
+    assert len(commands) == 1
+    assert commands[0][:4] == ('/usr/bin/sudo', '-n', '/usr/bin/systemd-run', '--system')
+    assert '--user' not in commands[0]
+
+
+def test_compilation_host_identity_requires_a_boolean(workload_test_root, executor):
+    with pytest.raises(WorkloadError, match='host identity requirement must be a boolean'):
+        executor.start(uuid.uuid4().hex, ['/usr/bin/python3', '-c', 'pass'], workload_test_root,
+            workload_test_root/'invalid-identity-flag', env={}, cpu=.1, memory_bytes=64*1024**2,
+            host_identity_required='true')
+
+
 def test_restart_journal_stops_grandchildren_and_limits_resources(workload_test_root, executor):
     attempt = uuid.uuid4().hex
     root = workload_test_root/'journal'
@@ -184,6 +257,72 @@ time.sleep(1)
         assert all(not marker.exists() for marker in host_markers)
     finally:
         executor.stop(attempt)
+        for marker_path in host_markers:
+            marker_path.unlink(missing_ok=True)
+
+
+def test_compilation_attempt_keeps_host_verifier_identity_and_limits(workload_test_root, executor):
+    registry = Path('/etc/livestack/compilation-launch.json')
+    if not registry.is_file():
+        pytest.skip('requires the enrolled host compilation verifier registry')
+    if not Path('/usr/bin/sudo').is_file() or subprocess.run(
+            ['/usr/bin/sudo', '-n', 'true'], capture_output=True).returncode:
+        pytest.skip('requires the enrolled worker system-manager sudo rule')
+    if subprocess.run(['systemctl', '--system', 'show'], capture_output=True).returncode:
+        pytest.skip('requires a running system systemd manager')
+
+    attempt = uuid.uuid4().hex
+    out = workload_test_root/'compilation-identity'
+    out.mkdir()
+    report_path = out/'identity.json'
+    marker = 'harmony-compilation-'+uuid.uuid4().hex
+    host_markers = [Path('/tmp/.X11-unix')/marker, Path('/var/tmp')/marker]
+    program = f"""import json, os, re, time
+from pathlib import Path
+status = Path('/proc/self/status').read_text()
+cgroup = next(line[3:] for line in Path('/proc/self/cgroup').read_text().splitlines()
+              if line.startswith('0::'))
+report = dict(uid=os.getuid(), gid=os.getgid(),
+              registry_uid=Path({str(registry)!r}).stat().st_uid,
+              registry_gid=Path({str(registry)!r}).stat().st_gid,
+              no_new_privileges=bool(re.search(r'^NoNewPrivs:\\s+1$', status, re.M)),
+              cgroup=cgroup)
+Path({str(report_path)!r}).write_text(json.dumps(report))
+directory = Path('/tmp/.X11-unix')
+directory.mkdir(parents=True, exist_ok=True)
+(directory/{marker!r}).write_text('private')
+(Path('/var/tmp')/{marker!r}).write_text('private')
+time.sleep(1.5)
+"""
+    try:
+        executor.start(attempt, ['/usr/bin/python3', '-c', program], workload_test_root, out,
+            env={}, cpu=.1, memory_bytes=128*1024**2, max_seconds=30, tasks=32,
+            host_identity_required=True)
+        group = until(lambda: executor.inspect(attempt).get('ControlGroup'))
+        cgroup = Path('/sys/fs/cgroup')/group.lstrip('/')
+        assert (cgroup/'memory.max').read_text().strip() == str(128*1024**2)
+        assert (cgroup/'pids.max').read_text().strip() == '32'
+        quota, period = map(int, (cgroup/'cpu.max').read_text().split())
+        assert quota/period == pytest.approx(.1)
+        properties = subprocess.run(['/usr/bin/sudo', '-n', '/usr/bin/systemctl', '--system',
+            'show', executor.unit(attempt), '--property=PrivateTmp,NoNewPrivileges'],
+            check=True, capture_output=True, text=True).stdout.splitlines()
+        assert dict(line.split('=', 1) for line in properties) == {
+            'PrivateTmp': 'yes', 'NoNewPrivileges': 'yes'}
+        result = until(lambda: executor.exit_result(out))
+        report = json.loads(report_path.read_text())
+        assert result['exit_code'] == 0, result
+        assert report['uid'] == os.getuid()
+        assert report['gid'] == os.getgid()
+        assert report['registry_uid'] == 0
+        assert report['registry_gid'] == 0
+        assert report['no_new_privileges'] is True
+        assert group in report['cgroup']
+        assert all(not marker.exists() for marker in host_markers)
+    finally:
+        executor.stop(attempt)
+        for marker_path in host_markers:
+            marker_path.unlink(missing_ok=True)
 
 
 def test_environment_execution_sees_only_its_bound_source_tree(workload_test_root, executor):

@@ -1052,6 +1052,8 @@ class WorkloadWorker:
                 native_host_address=self.config.get('docker_native_host_address'),
                 **({'docker_cache': docker_cache.plan(self.docker_cache, assignment['owner'], attempt)}
                    if self.docker_cache is not None and handler.get('backend') in ('rootless-docker', 'rootless-docker-native') else {}),
+                **({'host_identity_required': compilation is not None}
+                   if isinstance(self.executor, SystemdExecutor) else {}),
                 **environment_isolation)
             # Once execution starts, worker-process health alone cannot retain
             # the slot. A live supervised unit or its durable exit receipt must
