@@ -67,7 +67,7 @@ def test_miss_then_save_then_hit_restores_identical_tree(tmp_path):
     first = make_source(tmp_path, 'one')
     cold = attempt(cfg, 'a1')
     assert {r['outcome'] for r in cold.restore(first)} == {'miss'}
-    assert json.loads(cold.env()) == []
+    assert cold.reused() == []
     run_handler(first, tmp_path/'out1', ROOTS)
     saved = cold.save(first, tmp_path/'out1')
     assert [r['outcome'] for r in saved] == ['saved'] * 3
@@ -76,7 +76,7 @@ def test_miss_then_save_then_hit_restores_identical_tree(tmp_path):
     warm = attempt(cfg, 'a2')
     records = warm.restore(second)
     assert [r['outcome'] for r in records] == ['reused'] * 3
-    assert sorted(item['path'] for item in json.loads(warm.env())) == sorted(r + '/node_modules' for r in ROOTS)
+    assert sorted(item['path'] for item in warm.reused()) == sorted(r + '/node_modules' for r in ROOTS)
     for root in ROOTS:
         assert (second/root/'node_modules/dep/index.js').read_text() == 'x'
         assert os.readlink(second/root/'node_modules/.bin/run') == '../dep/bin/run'
@@ -198,7 +198,7 @@ def test_scheduled_refresh_runs_cold_and_replaces_the_entry(tmp_path):
     second = make_source(tmp_path, 'two')
     two = attempt(cfg, 'a2')
     assert {r['outcome'] for r in two.restore(second)} == {'refresh'}
-    assert json.loads(two.env()) == []
+    assert two.reused() == []
     for root in ROOTS:
         install(second, root, content='fresh')
     (tmp_path/'o2').mkdir()
@@ -297,3 +297,62 @@ def test_an_opted_in_handler_gets_an_attempt_and_a_disabled_worker_gets_none(tmp
     assert attempt_for(None, dict(argv=['/bin/sh'], dependency_cache=True)) is None
     assert dc.opted_in(dict(dependency_cache=True)) == (True, None)
     assert dc.opted_in(dict(dependency_cache='yes'))[1].startswith('invalid')
+
+
+# ----------------------------------------------------------------- handshake
+
+def ask(handshake, root):
+    handshake.mkdir(exist_ok=True)
+    (handshake/dc.REQUEST_FILE).write_text(json.dumps(dict(version=1, root=str(root))))
+
+
+def test_the_handler_asks_for_the_restore_from_its_own_root_and_the_store_follows_that_root(tmp_path):
+    cfg = config(tmp_path)
+    boundary = tmp_path/'attempt-source'
+    # the layout the handler works in is an app/ directory inside the attempt's source dir
+    first = make_source(tmp_path, 'attempt-source/app')
+    cold = attempt(cfg, 'a1')
+    handshake = tmp_path/'hs1'
+    cold.serve(handshake, boundary)                       # no request yet: nothing happens
+    assert not (handshake/dc.RESPONSE_FILE).exists()
+    ask(handshake, first)
+    cold.serve(handshake, boundary)
+    answer = json.loads((handshake/dc.RESPONSE_FILE).read_text())
+    assert answer['components'] == [] and answer['outcome'] == 'restored'
+    run_handler(first, tmp_path/'o', ROOTS)
+    # the worker's own idea of the source is the attempt dir; the handler's root wins
+    assert {r['outcome'] for r in cold.save(boundary, tmp_path/'o')} == {'saved'}
+
+    second = make_source(tmp_path, 'attempt2/app')
+    warm = attempt(cfg, 'a2')
+    ask(tmp_path/'hs2', second)
+    warm.serve(tmp_path/'hs2', tmp_path/'attempt2')
+    answer = json.loads((tmp_path/'hs2'/dc.RESPONSE_FILE).read_text())
+    assert sorted(c['path'] for c in answer['components']) == sorted(r + '/node_modules' for r in ROOTS)
+    assert (second/'app/node_modules/dep/index.js').read_text() == 'x'      # restored under the handler's root
+    assert (second/'pkgs/a/node_modules/dep/bin/run').exists()
+
+
+def test_a_request_naming_a_root_outside_the_attempt_source_restores_nothing(tmp_path):
+    cfg = config(tmp_path)
+    inside = tmp_path/'attempt'
+    inside.mkdir()
+    outside = make_source(tmp_path, 'elsewhere')
+    cold = attempt(cfg, 'a1')
+    ask(tmp_path/'hs', outside)
+    cold.serve(tmp_path/'hs', inside)
+    answer = json.loads((tmp_path/'hs'/dc.RESPONSE_FILE).read_text())
+    assert answer['components'] == [] and cold.records == [dict(outcome='skipped', reason='root-outside-source')]
+    assert not list(outside.glob('*/node_modules'))
+
+
+def test_a_request_is_answered_once(tmp_path):
+    cfg = config(tmp_path)
+    source = make_source(tmp_path, 'attempt/app')
+    cold = attempt(cfg, 'a1')
+    ask(tmp_path/'hs', source)
+    cold.serve(tmp_path/'hs', tmp_path/'attempt')
+    first = (tmp_path/'hs'/dc.RESPONSE_FILE).read_text()
+    (tmp_path/'hs'/dc.REQUEST_FILE).write_text(json.dumps(dict(version=1, root=str(tmp_path))))
+    cold.serve(tmp_path/'hs', tmp_path/'attempt')
+    assert (tmp_path/'hs'/dc.RESPONSE_FILE).read_text() == first
