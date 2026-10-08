@@ -280,3 +280,11 @@ def describe(row, now):
                 reason=row['reason'], expires_in_s=(None if row['expires_at'] is None
                                                     else round(row['expires_at'] - now, 1)),
                 needs_operator=bool(row['needs_operator']), draining=_live_drain(row, now))
+
+
+def draining_now(store, principals=None):
+    """`draining` on a short read-only connection: the claim path polls constantly, and a BEGIN IMMEDIATE
+    transaction for a read would queue behind (and in front of) every writer."""
+    from contextlib import closing
+    with closing(store.connect()) as db:
+        return draining(db, store.clock(), principals)
