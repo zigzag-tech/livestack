@@ -16,10 +16,10 @@ of what to key and where to restore is the app's.
   (`{version, components:[{path, for_each?, key_paths}]}`, closed schema, `{}` expands
   over `for_each` directories so workspaces are discovered, not enumerated).
 - Handlers opt in with `"dependency_cache": true` in their worker.json entry; others never get restores or stores.
-- Before the handler starts, for each concrete tree whose key (hash of the `key_paths`
+- When the handler asks (a request file naming its tree root, which must be inside the attempt source), for each concrete tree whose key (hash of the `key_paths`
   contents, owner namespace, epoch, handler executable identity, platform/arch/libc) has
   an entry, the worker copies it into the source and names it in
-  `HARMONY_DEPENDENCY_CACHE_COMPONENTS`.
+  the handler's `response.json`.
 - The handler writes `dependency-cache-commit.json` (`{version, paths}`) into its output
   once the trees are complete; the worker stores committed trees that missed.
 - Bounded: `max_bytes` per principal namespace with LRU eviction at store time; a tree

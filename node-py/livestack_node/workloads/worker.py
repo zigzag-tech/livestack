@@ -1037,8 +1037,9 @@ class WorkloadWorker:
                 (root/path).mkdir()
             dependency_attempt = self._dependency_attempt(assignment, attempt, handler)
             if dependency_attempt is not None:
-                dependency_attempt.restore(execution_cwd)
-                env[dependency_cache.ENV_COMPONENTS] = dependency_attempt.env()
+                handshake = output/'dependency-cache'
+                handshake.mkdir()
+                env[dependency_cache.ENV_HANDSHAKE] = str(handshake)
             if lease.lost.is_set():
                 raise WorkloadError('execution lease lost during preparation', 409)
             self.journal.write(dict(assignment=assignment, phase='running'))
@@ -1072,6 +1073,8 @@ class WorkloadWorker:
             while True:
                 if lease.lost.is_set():
                     raise WorkloadError('execution lease lost', 409)
+                if dependency_attempt is not None:
+                    dependency_attempt.serve(handshake, execution_cwd)
                 # On macOS the wrapper samples the tree's physical footprint
                 # (already non-reclaimable) and reports its peak in the receipt.
                 sample = (None if self.darwin else self.executor.memory_peak(attempt) if self.windows
