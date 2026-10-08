@@ -6,6 +6,8 @@ packages (hand-managed hosts; a missing pydantic crash-looped zz-joe's first rol
 messages mirror the pydantic ones this replaced. Pydantic stays the authority's dependency
 (config.py), never the worker's.
 """
+from __future__ import annotations
+
 import logging
 import math
 import os
