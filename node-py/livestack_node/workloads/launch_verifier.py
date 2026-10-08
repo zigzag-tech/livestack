@@ -32,7 +32,7 @@ import time
 from urllib.parse import urlsplit
 
 from livestack_node import transport
-from .launch_contract import MAX_BYTES, DEADLINE_SECONDS, receive, remaining, trusted_json, validate_request
+from .launch_contract import PEER_EXITED, MAX_BYTES, DEADLINE_SECONDS, receive, remaining, trusted_json, validate_request
 from .model import WorkloadError, encode, name
 
 DARWIN = sys.platform == 'darwin'
@@ -121,11 +121,19 @@ def windows_attempt(config, attempt, peer):
     return limits
 
 
+PROC = Path('/proc')
+
+
 def process_identity(pid):
     # Field 22 starttime plus kernel peer PID closes PID-reuse races around the
     # authority request. Read /proc in the verifier's host PID/cgroup namespace.
-    fields = (Path('/proc')/str(pid)/'stat').read_text().rsplit(')', 1)[1].split()
-    groups = (Path('/proc')/str(pid)/'cgroup').read_text()
+    # A peer that exited before the read is not a verification failure of the
+    # launch contract: it is a distinct, retryable refusal (never an admission).
+    try:
+        fields = (PROC/str(pid)/'stat').read_text().rsplit(')', 1)[1].split()
+        groups = (PROC/str(pid)/'cgroup').read_text()
+    except (FileNotFoundError, ProcessLookupError, NotADirectoryError) as error:
+        raise WorkloadError(PEER_EXITED, 503) from error
     if len(groups.encode()) > MAX_BYTES:
         raise WorkloadError('compilation_peer_cgroup_oversized', 403)
     unified = [line[3:] for line in groups.splitlines() if line.startswith('0::')]
