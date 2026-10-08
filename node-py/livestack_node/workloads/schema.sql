@@ -88,3 +88,23 @@ CREATE INDEX IF NOT EXISTS handler_release_events_age ON handler_release_events(
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state, created);
 CREATE INDEX IF NOT EXISTS attempts_host ON attempts(host, state);
 CREATE INDEX IF NOT EXISTS github_remote_state ON github_remote_jobs(provider, state, created);
+-- declarative-worker-rollout: operator claims (drain/enable) with owner, expiry and
+-- compare-and-swap generation. See claims.py. file_value is the last claim_enabled seen
+-- in authority.json, so a later file edit is recognised as a change (migration path).
+CREATE TABLE IF NOT EXISTS worker_claims(
+  worker TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL,
+  generation INTEGER NOT NULL,
+  owner TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT '',
+  expires_at REAL,
+  needs_operator INTEGER NOT NULL DEFAULT 0,
+  file_value INTEGER,
+  updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS rollout_state(
+  key TEXT PRIMARY KEY,
+  generation INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  updated_at REAL NOT NULL
+);

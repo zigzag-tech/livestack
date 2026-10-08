@@ -14,7 +14,7 @@ import threading
 from urllib.parse import urlparse
 
 from .model import WorkloadError, encode, name
-from . import roster
+from . import claims, reload_status, rollout, roster, rollout_routes
 from .blobs import BlobStore
 from .handler_registry import HandlerReleaseRegistry
 from .handler_release import MAX_MANIFEST_BYTES
@@ -59,7 +59,7 @@ class Principal:
 
     def __post_init__(self):
         name(self.id, "principal")
-        if len(self.token) < 32 or self.role not in ('caller', 'worker', 'admin'):
+        if len(self.token) < 32 or self.role not in ('caller', 'worker', 'admin', 'rollout'):
             raise ValueError('principal requires a strong token and a known role')
         if self.role == 'worker':
             name(self.worker, 'worker')
@@ -78,7 +78,7 @@ class Principal:
             raise ValueError('only a worker principal may carry a Benchday host mapping')
         elif any(value is not None for value in (self.remote_job,self.remote_provider,self.remote_run_id,self.remote_boot)):
             raise ValueError('only a remote worker may carry a remote binding')
-        elif not self.handlers:
+        elif not self.handlers and self.role != 'rollout':
             raise ValueError('caller/admin must declare allowed handlers')
         if type(self.upload_grants) is not bool or self.upload_grants and self.role == 'worker':
             raise ValueError('upload_grants must be boolean and is for caller/admin principals only')
@@ -155,6 +155,10 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
         self.github_remote = github_remote
         self._principals_lock = threading.Lock()
         self.principals = tuple(principals)
+        self.claims = claims.Claims(store, claims.ActionLedger(
+            __import__('pathlib').Path(store.path).parent/'rollout-actions.jsonl', clock=store.clock))
+        self.rollout = rollout.RolloutState(store, self.claims.ledger)
+        self.reload_status = reload_status.ReloadStatus()
         # The store enforces per-principal caps in placement and submission.
         store.bind_principals(self.principals)
         super().__init__(address, Handler)
@@ -258,6 +262,10 @@ class WorkloadServer(BoundedRequests, ThreadingHTTPServer):
         now = time.monotonic()
         if now - getattr(self, '_last_sweep', 0) >= 30:
             self.store.sweep()
+            try:
+                self.claims.expire()
+            except Exception:
+                logging.exception('claim_expiry_failed')  # must never stop the sweep or the serve loop
             self.blobs.prune()
             self.upload_grants.sweep()
             handler_gc = self.handler_registry.collect()
@@ -415,6 +423,9 @@ class Handler(BaseHTTPRequestHandler):
             if principal.role != 'admin':
                 raise WorkloadError('authority status requires an admin principal', 403)
             return store.status()
+        handled, answer = rollout_routes.route(self.server, principal, method, parts, body)
+        if handled:
+            return answer
         if principal.role == 'admin' and method == 'GET' and parts == ['identity-facts']:
             return self.server.identity_facts()
         if parts == ['handler-releases', 'status'] and method == 'GET':
@@ -441,8 +452,9 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[0] == 'handlers' and parts[2] == 'capacity' and method == 'GET':
                 if parts[1] not in principal.handlers:
                     raise WorkloadError('handler is not authorized', 403)
-                return store.handler_capacity(parts[1], draining={
-                    p.worker for p in self.server.principals if p.role == 'worker' and not p.claim_enabled})
+                with store.transaction() as db:
+                    draining = claims.draining(db, store.clock(), self.server.principals)
+                return store.handler_capacity(parts[1], draining=draining)
             if len(parts) == 2 and parts[0] == 'environments' and method == 'GET':
                 return store.get_environment(principal.id, parts[1])
             if parts == ['jobs']:
@@ -486,7 +498,9 @@ class Handler(BaseHTTPRequestHandler):
                 return response
             if parts == ['worker', 'claim']:
                 self._remote_boot(principal, body)
-                if not principal.claim_enabled:
+                with store.transaction() as db:
+                    withheld = principal.worker in claims.draining(db, store.clock(), self.server.principals)
+                if withheld:
                     return {'assignment': None, 'reason': 'worker_draining'}
                 return {'assignment': store.claim(principal.worker, body['boot'], job_id=principal.remote_job)}
             if parts == ['worker', 'heartbeat']:

@@ -10,6 +10,7 @@ from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedul
 from ..ledger import new_decision_id
 from .model import AVOID_LABEL_SIGNATURE, AVOID_LABEL_WORKER, WorkloadError, encode, failure_signature
 from .decision_records import admission_record
+from . import claims
 
 # How long after an infrastructure failure a job refuses the worker that
 # produced it, while some other worker could ever run it. Fixed and short
@@ -125,8 +126,7 @@ def _avoided(db, row, now):
 def place(db, now, limits, principals=None, compilation_policy=None, *, only_job_id=None,
           emitter_id=None):
     decision_records = []
-    draining = {p.worker for p in (principals or {}).values()
-                if getattr(p, 'role', None) == 'worker' and not p.claim_enabled}
+    draining = claims.draining(db, now, principals)  # claims store, else the principal's claim_enabled
     workers = db.execute("SELECT * FROM workers WHERE ready=1 AND seen>? ORDER BY id",
                          (now-limits.fresh_seconds,)).fetchall()
     reports = {w["id"]: json.loads(w["report"]) for w in workers}
