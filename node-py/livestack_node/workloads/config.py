@@ -13,6 +13,16 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr, field_validator
 
 
+def _validated(value, section):
+    """Judge a mechanism section with its owner module; messages never echo values."""
+    if value is None:
+        return value
+    from .retention_tiers import RetentionTiers
+    from .storage_bounds import StorageBounds
+    (StorageBounds if section == 'storage_bounds' else RetentionTiers).validate(value)
+    return value
+
+
 class HandlerReleasePolicy(BaseModel):
     """The handler release registry's policy section. Unknown keys fail closed. Per-handler
     entries (runtimes/backends) are judged by HandlerReleaseRegistry at construction, which
@@ -36,6 +46,18 @@ class ReloadableConfig(BaseModel):
     handlers: list[StrictStr]
     handler_release_policy: Optional[HandlerReleasePolicy] = None
     environment_handlers: Optional[dict[str, Any]] = None
+    storage_bounds: Optional[dict[str, Any]] = None
+    retention_tiers: Optional[dict[str, Any]] = None
+
+    @field_validator('storage_bounds')
+    @classmethod
+    def _bounds(cls, value):
+        return _validated(value, 'storage_bounds')
+
+    @field_validator('retention_tiers')
+    @classmethod
+    def _tiers(cls, value):
+        return _validated(value, 'retention_tiers')
 
 
 class AuthorityConfig(BaseModel):
@@ -58,6 +80,19 @@ class AuthorityConfig(BaseModel):
     github_remote: Optional[dict[str, Any]] = None
     artifact_mirror: Optional[dict[str, Any]] = None
     handler_release_policy: Optional[HandlerReleasePolicy] = None
+    # Mechanism sections of openspec/changes/storage-headroom-admission; absent = flat behaviour.
+    storage_bounds: Optional[dict[str, Any]] = None
+    retention_tiers: Optional[dict[str, Any]] = None
+
+    @field_validator('storage_bounds')
+    @classmethod
+    def _bounds(cls, value):
+        return _validated(value, 'storage_bounds')
+
+    @field_validator('retention_tiers')
+    @classmethod
+    def _tiers(cls, value):
+        return _validated(value, 'retention_tiers')
 
     @field_validator('public_base_url')
     @classmethod

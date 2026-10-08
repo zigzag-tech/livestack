@@ -414,7 +414,11 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ['status'] and method == 'GET':
             if principal.role != 'admin':
                 raise WorkloadError('authority status requires an admin principal', 403)
-            return store.status()
+            return dict(store.status(), storage=self.server.blobs.status())
+        if parts == ['retention', 'plan'] and method == 'GET':
+            if principal.role != 'admin':
+                raise WorkloadError('retention plan requires an admin principal', 403)
+            return dict(self.server.store.retention_plan(), **self.server.blobs.retention_plan())
         if principal.role == 'admin' and method == 'GET' and parts == ['identity-facts']:
             return self.server.identity_facts()
         if parts == ['handler-releases', 'status'] and method == 'GET':
