@@ -267,6 +267,7 @@ def verify_peer(config, request, pid, uid, deadline):
     receipt = authority_receipt(config, request, deadline)
     if (not isinstance(receipt, dict) or type(receipt.get('version')) is not int or receipt['version'] != 1 or
             any(receipt.get(key) != value for key, value in expected.items()) or
+            receipt.get('decision_id') != assignment.get('decision_id') or
             request['class'] not in receipt.get('classes', [])):
         raise WorkloadError('compilation_authority_receipt_mismatch', 403)
     verify_resource_caps(group, receipt)

@@ -282,6 +282,28 @@ def test_oversized_real_authority_reply_refuses(verifier, authority, monkeypatch
     assert 'compilation_authority_response_oversized' in (output/'command.log').read_text()
 
 
+def test_verified_launch_receipt_preserves_decision_id(verifier):
+    assignment, executor, _, _, _, root, _ = verifier
+    output = launch(verifier, IMPORTS+"Path(os.environ['TEST_ROOT'],'receipt.json').write_text(json.dumps(receipt))\n")
+    result = until(lambda: executor.exit_result(output))
+    assert result['exit_code'] == 0, (output/'command.log').read_text()
+    assert json.loads((root/'receipt.json').read_text())['decision_id'] == assignment['decision_id']
+
+
+def test_mismatched_decision_id_refuses_before_compiler(verifier, authority, monkeypatch):
+    _, executor, _, _, _, root, _ = verifier
+    store = authority[0]['caller'].fixture_store
+    original = store.verify_compilation
+    def mismatched(*args, **kwargs):
+        return dict(original(*args, **kwargs), decision_id='01J00000000000000000000000')
+    monkeypatch.setattr(store, 'verify_compilation', mismatched)
+    output = launch(verifier, IMPORTS+"Path(os.environ['TEST_ROOT'],'compiler-started').write_text('bad')\n")
+    result = until(lambda: executor.exit_result(output))
+    assert result['exit_code'] != 0
+    assert not (root/'compiler-started').exists()
+    assert 'compilation_authority_receipt_mismatch' in (output/'command.log').read_text()
+
+
 def test_verification_wall_deadline_refuses_slow_authority(verifier, authority, monkeypatch):
     _, executor, _, _, _, root, _ = verifier
     store = authority[0]['caller'].fixture_store
