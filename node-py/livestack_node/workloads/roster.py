@@ -237,6 +237,17 @@ def _warnings(entries, queue):
         if entry['connected'] and entry['state'] == 'idle' and entry['activation_failures']:
             found.append(dict(kind='activation_failed_idle', worker=entry['id'], host=entry['host'],
                               detail='; '.join(str(f)[:160] for f in entry['activation_failures'][:2])))
+    for entry in entries:
+        gone = entry.get('disk_unavailable')
+        if entry['connected'] and gone:
+            found.append(dict(kind='reserve_exceeds_free', worker=entry['id'], host=entry['host'],
+                              detail=f"{gone['filesystem']}: free {_gib(gone['free_bytes'])} < reserve "
+                                     f"{_gib(gone['reserve_bytes'])} ({gone['reason']}); offers 0 of "
+                                     f"{_gib(gone['capacity_bytes'])}"))
+        signal = entry.get('cpu_signal') or {}
+        if entry['connected'] and signal.get('state') == 'inert':
+            found.append(dict(kind='cpu_signal_inert', worker=entry['id'], host=entry['host'],
+                              detail=f"{signal.get('policy')}: {signal.get('detail')}"))
     for job in queue:
         if job['age_s'] <= IDLE_WAIT_SECONDS:
             continue
@@ -293,6 +304,9 @@ def build(store, principals):
             handler_releases=[dict(handler=r['handler_id'], release=r['release_digest'][:16])
                               for r in inventory.get('releases', [])],
             activation_failures=report.get('handler_activation_failures', []),
+            disk_unavailable=report.get('disk_unavailable'),
+            reserve_exceeds_free=bool(report.get('disk_unavailable')),
+            cpu_signal=report.get('cpu_signal'),
         )
         reasons = _reasons(entry, fresh)
         entry['eligible'] = not reasons and connected

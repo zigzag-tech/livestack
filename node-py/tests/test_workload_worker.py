@@ -1845,7 +1845,7 @@ assert CpuAdmission.validate({}).policy == 'loadavg'
 ok = CpuAdmission.validate(dict(policy='psi', stall_full_avg60_percent=2.5, reserve_cpu=1, psi_path='/x'))
 assert (ok.policy, ok.stall_full_avg60_percent, ok.reserve_cpu, ok.psi_path) == ('psi', 2.5, 1, '/x')
 bad = {
-  "policy: Input should be 'loadavg' or 'psi'": dict(policy='bogus'),
+  "policy: Input should be 'loadavg', 'psi', 'psi_some' or 'runqueue'": dict(policy='bogus'),
   'polcy: Extra inputs are not permitted': dict(polcy='psi'),
   'stall_full_avg60_percent: Input should be less than or equal to 100': dict(stall_full_avg60_percent=101),
   'reserve_cpu: Input should be greater than or equal to 0': dict(reserve_cpu=-1),

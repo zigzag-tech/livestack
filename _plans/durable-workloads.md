@@ -81,6 +81,16 @@ caps reject new admission if nothing can be reclaimed. Retention exemptions are
 honored. Unconfigured destructive retention disables deletion, not admission caps.
 Service logs use rotation; SQLite WAL checkpoints constrain journal growth.
 
+Headroom and tiers (openspec `storage-headroom-admission`; `node-py/docs/storage-headroom.md`):
+the content store's absolute `blob_limits.max_bytes` is no longer the whole story. With
+`storage_bounds` configured the effective bound is `min(max_bytes, capacity_fraction x filesystem)`
+and new bytes are refused (HTTP 507 `storage_headroom`) when the filesystem would drop below a
+free-space floor, after one bounded GC pass per refresh window that deletes only unreferenced
+objects at least an hour old. `retention_tiers` sets terminal-job windows per outcome (failed
+may outlive succeeded) and a `{keep_newest, ttl_seconds}` rule per reference owner/prefix;
+references matched by no rule are reported as `unbounded_references`. Absent sections keep the
+flat behaviour above exactly.
+
 Rollout: isolated store/process failure tests, two real supervised workers, remote
 E2E, then release stages. Win One is WSL Ubuntu via SSH port 2222 for provisioning;
 normal worker traffic is outbound HTTP, with no caller-owned SSH session.

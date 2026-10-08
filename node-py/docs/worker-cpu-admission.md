@@ -47,3 +47,37 @@ package for it (pydantic is the authority's dependency, not the worker's). An ea
 revision (70a11344) imported pydantic and crash-looped hosts without it; releases built from
 a later commit do not. `tests/test_workload_worker.py::test_worker_startup_path_needs_no_pydantic`
 holds that line: do not import a third-party package on the worker startup path.
+
+
+## Verified signals: `psi_some` and `runqueue` (storage-headroom-admission)
+
+Both `loadavg` (counts uninterruptible tasks, unbounded against cores) and `psi` (`full avg60`;
+CPU `full` reads 0 on kernel 7.0 here, so the gate can never fire) are poor signals.
+
+```json
+"cpu_admission": {"policy": "psi_some", "stall_some_avg10_percent": 40, "reserve_cpu": 0,
+                  "selftest_seconds": 3, "fallback": "runqueue"}
+```
+
+- `psi_some`: stalled when `/proc/pressure/cpu` `some avg10` >= `stall_some_avg10_percent`
+  (avg10, so a finished burst releases admission in about 10 s).
+- `runqueue`: mean `procs_running` per core (minus the sampler) over `window_seconds`
+  (1 Hz thread), stalled above `stall_runnable_per_core` (default 2.0). `proc_root` is a test seam.
+- `fallback` (`runqueue` by default, `null` to forbid): used only when the pressure file is
+  **absent** (no PSI), announced in the worker log and in the report's `cpu_signal.detail`.
+  A signal that exists but does not move never falls back.
+- Not stalled: `capacity.cpu - reserve_cpu`. Stalled, inert or unreadable: `0`, with the reason.
+
+**Self-test (positive control, at worker construction):** the signal is read idle, then
+`cores + 1` busy processes run for `selftest_seconds` (1-10, killed and reaped in a `finally`), and
+the signal must rise by at least 1.0 (`psi_some`, percentage points) or 0.5 (`runqueue`, tasks per
+core). Result in the worker report as `cpu_signal = {policy, state, detail}`:
+`active`; `active_unverified` (host already above the threshold, burn skipped); `inert`
+(`psi_some`/`runqueue` then offer CPU 0, naming the policy; roster warning `cpu_signal_inert`).
+Legacy `psi` is also self-tested (on `full avg10`) but advisory: an `inert` result is reported
+(`signal_inert`) and logged while the old gate keeps its behaviour, so an upgrade cannot withdraw a
+host's CPU. Worker config is read at start; a changed `cpu_admission` takes effect on restart
+(there is no worker SIGHUP reload).
+
+Verify on a host: start the worker, read `cpu_signal` in the authority roster
+(`GET /v1/workloads/workers`, per worker) -- `state: active` and a `detail` showing the rise.

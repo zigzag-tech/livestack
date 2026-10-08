@@ -25,6 +25,7 @@ from . import docker_cache
 from . import dependency_cache
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
+from . import cpu_admission as cpu_signals
 from .cpu_admission import CpuAdmission
 from .lease import LeaseKeeper, retry_transient, transient
 from .model import ArtifactTooLarge, WorkloadError, encode, name
@@ -199,6 +200,8 @@ class WorkloadWorker:
         except ValueError as exc:
             raise WorkloadError(f'invalid cpu_admission: {exc}', 500) from None
         self._cpu_psi_state = None
+        self._disk_state = None
+        self.cpu_signal = self._verify_cpu_signal()
         # The measured host every placement on it consults
         # (openspec/changes/host-memory-ledger). Model servers listed in
         # `host_services` are charged their learned host-RAM peak.
@@ -396,12 +399,92 @@ class WorkloadWorker:
             self._cpu_psi_state = state
         return stalled
 
+    def _verify_cpu_signal(self):
+        """Startup positive control (openspec/changes/storage-headroom-admission): a bounded burn
+        of cores+1 busy processes must move the chosen signal. Sets self._cpu_read (the signal in
+        force) and returns the record the report carries. An inert psi_some/runqueue signal makes
+        CPU unavailable; it never silently becomes another policy. Legacy `psi` is tested but
+        stays advisory so an upgrade cannot withdraw a host's CPU."""
+        policy, cfg = self.cpu_admission.policy, self.cpu_admission
+        self._cpu_read, self._cpu_threshold, self._cpu_sampler = None, None, None
+        if policy == 'loadavg' or self.windows or self.darwin:
+            return dict(policy=policy, state='active', detail='no self-test for this policy')
+        used, note = policy, ''
+        if policy == 'psi_some':
+            read = cpu_signals.psi_signal(cfg.psi_path, 'some', 'avg10')
+            threshold = cfg.stall_some_avg10_percent
+            try:
+                read()
+            except OSError:
+                if cfg.fallback != 'runqueue':
+                    return self._cpu_inert(policy, f'{cfg.psi_path} unreadable and no fallback configured')
+                used, note = 'runqueue', f'psi_some unavailable ({cfg.psi_path} unreadable); using configured fallback runqueue. '
+                logging.warning('cpu admission: %s', note.strip())
+        elif policy == 'psi':
+            read, threshold = cpu_signals.psi_signal(cfg.psi_path, 'full', 'avg10'), math.inf
+        if used == 'runqueue':
+            self._cpu_sampler = cpu_signals.RunqueueSampler(cfg.proc_root, cfg.window_seconds).start()
+            read, threshold = self._cpu_sampler, cfg.stall_runnable_per_core
+        result = cpu_signals.selftest(read, policy=used, threshold=threshold, cores=os.cpu_count() or 1,
+                                      seconds=cfg.selftest_seconds)
+        result = dict(policy=policy, state=result['state'], detail=(note + result['detail'])[:200])
+        if result['state'] == 'inert':
+            logging.error('cpu admission: %s', result['detail'])
+            if policy == 'psi':
+                result['detail'] = ('signal_inert (legacy psi still gates on full avg60): ' + result['detail'])[:200]
+                return result
+            if self._cpu_sampler:
+                self._cpu_sampler.stop()
+            return result
+        if policy != 'psi':
+            self._cpu_read, self._cpu_threshold = read, threshold
+        return result
+
+    def _cpu_inert(self, policy, detail):
+        logging.error('cpu admission: %s', detail)
+        return dict(policy=policy, state='inert', detail=detail[:200])
+
     def _available_cpu(self, capacity):
+        if self.cpu_admission.policy in ('psi_some', 'runqueue') and not self.windows and not self.darwin:
+            # Verified-signal policies. Unverified inert or unreadable = no CPU, with the reason in the
+            # report's cpu_signal; stalled likewise. Never a silent switch to loadavg.
+            if self._cpu_read is None:
+                return 0
+            try:
+                stalled = self._cpu_read() >= self._cpu_threshold
+            except (OSError, ValueError, KeyError):
+                stalled = True
+            return 0 if stalled else max(0, capacity['cpu']-self.cpu_admission.reserve_cpu)
         if self.cpu_admission.policy == 'psi' and not self.windows and not self.darwin:
             if self._cpu_stalled():
                 return 0
             return max(0, capacity['cpu']-self.cpu_admission.reserve_cpu)
         return max(0, min(capacity['cpu'], (os.cpu_count() or 1)-self._busy_cpus()))
+
+    def _disk_unavailable(self, capacity, free):
+        """Why offered disk is zero because of a reserve (None when it is not). Logged once per
+        state change, not per report; announce-only: the operator owns the reserve."""
+        reserve = self.config.get('disk_reserve_bytes', 1024**3)
+        found = None
+        if free-reserve <= 0 and capacity['disk_bytes'] > 0:
+            found = dict(filesystem=str(self.workspace), free_bytes=int(free), reserve_bytes=int(reserve),
+                         offered_bytes=0, capacity_bytes=int(capacity['disk_bytes']), reason='reserve_exceeds_free')
+        else:
+            for path in self.config.get('backing_filesystems', []):
+                backing_free, backing_reserve = self._disk(path)[1], self.config.get('backing_reserve_bytes', 20*1024**3)
+                if backing_free-backing_reserve <= 0 and capacity['disk_bytes'] > 0:
+                    found = dict(filesystem=str(path), free_bytes=int(backing_free), reserve_bytes=int(backing_reserve),
+                                 offered_bytes=0, capacity_bytes=int(capacity['disk_bytes']), reason='backing_reserve')
+                    break
+        state = None if found is None else (found['filesystem'], found['reason'])
+        if state != self._disk_state:
+            self._disk_state = state
+            if found is None:
+                logging.info('disk offer restored: free space is above the reserve')
+            else:
+                logging.warning('disk offer is 0: %s free %d < reserve %d (%s)', found['filesystem'],
+                                found['free_bytes'], found['reserve_bytes'], found['reason'])
+        return found
 
     def _busy_cpus(self):
         if not self.windows:
@@ -455,9 +538,14 @@ class WorkloadWorker:
             headroom = self._disk(path)[1]-self.config.get('backing_reserve_bytes', 20*1024**3)
             available['disk_bytes'] = max(0, min(available['disk_bytes'], headroom))
         available['cpu'] = self._available_cpu(capacity)
+        unavailable = self._disk_unavailable(capacity, filesystem_free)
         report = dict(capacity=capacity, available=available, labels=self.config.get('labels', {}),
                       handlers=list(self.handlers), ready=not self.config.get('observe_only', False))
         report['handler_inventory'] = self.handler_inventory
+        if unavailable is not None:
+            report['disk_unavailable'] = unavailable
+        if self.cpu_signal['policy'] != 'loadavg':
+            report['cpu_signal'] = self.cpu_signal
         report['handler_activation_failures'] = list(self.handler_registry_failures[-16:])
         report['handler_gc_receipts'] = list(self.handler_gc_receipts[-16:])
         if self.task_environments is not None:

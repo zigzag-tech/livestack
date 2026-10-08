@@ -43,6 +43,8 @@ class Limits:
     # against a worker that never returns -- see `WorkloadStore._expire`.
     cleanup_seconds: float = 3600
     terminal_seconds: float | None = 14 * 86400
+    # A job refused for the same coded reason by every candidate worker this long raises one event.
+    stall_report_seconds: float = 300
     # Persistent task environments are disk-only acceleration state. These
     # bounds are independent of the job/attempt limits above: a parked
     # environment never consumes a running-job slot.
