@@ -109,6 +109,17 @@ was left running. This is foundation evidence, not worker enrollment: Docker
 container ownership, filesystem bounds, the persistent worker service and product
 adapters are still required before production handlers may be advertised.
 
+Every Linux systemd attempt also sets `PrivateTmp=yes`, giving its process tree
+private writable `/tmp` and `/var/tmp` mounts without changing
+`NoNewPrivileges`, cgroup limits, or explicit attempt input/output paths. This
+lets restricted handlers create temporary runtime paths such as
+`/tmp/.X11-unix` without changing host mounts. A real systemd integration test
+checks both private paths, the host-visible absence of unique marker files, and
+`NoNewPrivs: 1`; the focused supervision file passed 13 tests on
+`lappy-bellinzona` (2026-10-08, Python 3.13.15, real systemd user unit/cgroup
+v2). Rollout to the enrolled WSL worker and the dependent Benchday gate remain
+open.
+
 Completion results may name up to 128 artifacts as `{name, digest, size}`.
 The completion transaction verifies each object is ready, owned by the job's
 principal and has the declared size, and rejects duplicate names. Retention

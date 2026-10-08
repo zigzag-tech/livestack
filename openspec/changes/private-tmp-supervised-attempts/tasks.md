@@ -1,0 +1,5 @@
+# Tasks: Private temporary storage for supervised attempts
+
+- [x] 1. Add `PrivateTmp=yes` to Linux systemd attempt units. Test: `node-py/tests/test_workload_supervision.py::test_attempt_has_private_writable_tmp_with_no_new_privileges` against a real systemd user manager and cgroup v2. The complete supervision file passed 13 tests on `lappy-bellinzona` (2026-10-08, Python 3.13.15). Ledger: no new decision or durable state; existing job/attempt identities are unchanged.
+- [x] 2. Update `_plans/durable-workloads.md` with the temporary-filesystem boundary and current validation evidence. Test: `openspec validate private-tmp-supervised-attempts --type change` and `openspec validate --specs`. Ledger: record the release commit and verification evidence only; no workload decision records are added.
+- [ ] 3. Build and verify an immutable worker release, roll it to the affected worker using `node-py/docs/worker-release-rollout.md`, and verify a real admission check. Test: repeat the focused systemd control on the worker and submit the Benchday ZZOPS gate. Ledger: retain the existing attempt and gate identifiers in the rollout evidence; no new decision schema.
