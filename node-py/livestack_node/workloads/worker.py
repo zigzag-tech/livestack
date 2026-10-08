@@ -281,8 +281,14 @@ class WorkloadWorker:
             logging.warning('docker_cache outcome unavailable: %s: %s', type(error).__name__, error)
 
     def _dependency_attempt(self, assignment, attempt, handler):
-        """This attempt's dependency cache, or None (disabled, task environment, or no handler argv)."""
+        """This attempt's dependency cache, or None (disabled, task environment, no handler argv, or a handler
+        entry that has not opted in with `"dependency_cache": true`)."""
         if self.dependency_cache is None or assignment.get('environment') is not None or not handler.get('argv'):
+            return None
+        enrolled, why = dependency_cache.opted_in(handler)
+        if not enrolled:
+            if why.startswith('invalid'):
+                logging.warning('dependency_cache not used for %s: %s', assignment['spec']['handler'], why)
             return None
         return dependency_cache.Attempt(self.dependency_cache, assignment['owner'], attempt, handler['argv'][0])
 

@@ -21,6 +21,16 @@ and where to restore; the worker keeps the trees, bounded and per principal.
 exist are skipped). A component without `for_each` names one literal path and no `{}`. `key_paths` are files or
 directories (hashed recursively); all must exist or the tree is not cached (`no-key`).
 
+## Opt-in per handler (worker-owned)
+
+Only handlers whose entry in worker.json `handlers` says `"dependency_cache": true` receive restores or stores;
+every other handler (compilation, release, ...) never gets a tree copied in, even when its source carries a
+manifest. The boolean `true` is the only opt-in: absent, `false`, a string or a number is not opted in, and a
+non-boolean value is logged (`dependency_cache not used for <handler>: invalid: ...`). The flag is deliberately
+not read from the job's source or the handler package. For registry-managed handlers the entry is the worker's
+base handler (`handler_config` starts from it), so no package release is needed to change it; restart the worker
+(idle) to apply a config change.
+
 ## Handler contract
 
 1. `HARMONY_DEPENDENCY_CACHE_COMPONENTS` is a JSON list `[{"path": "hub/node_modules", "outcome": "reused"}]` of

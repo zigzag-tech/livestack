@@ -15,6 +15,7 @@ of what to key and where to restore is the app's.
 - The job's source declares components in `.livestack/dependency-cache.json`
   (`{version, components:[{path, for_each?, key_paths}]}`, closed schema, `{}` expands
   over `for_each` directories so workspaces are discovered, not enumerated).
+- Handlers opt in with `"dependency_cache": true` in their worker.json entry; others never get restores or stores.
 - Before the handler starts, for each concrete tree whose key (hash of the `key_paths`
   contents, owner namespace, epoch, handler executable identity, platform/arch/libc) has
   an entry, the worker copies it into the source and names it in
