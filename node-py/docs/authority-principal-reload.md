@@ -10,6 +10,20 @@ them at `worker/report`.
 
     edit authority.json
     systemctl --user reload livestack-workload-authority   # = kill -HUP $MAINPID
+    python -m livestack_node.workloads.cli --config C reload-status   # did it take? (GET reload/status)
+
+**SIGHUP is the only trigger.** The authority never watches the file; an edit that is not followed by
+SIGHUP is not read. `GET reload/status` (admin or rollout principal) answers "applied or silently not
+read": `applied` (last applied time and file hash), `last_attempt` (including a refusal's reason), the
+hash of the file now, and a `verdict` of `applied`, `edited_not_applied`, `refused_current_file` or
+`unknown`.
+
+**What is NOT reloaded from the file at all:** worker claims (drain/enable) and rollout state live in the
+authority database and are changed through the API (`claims/...`, `rollout/...`), see
+`worker-claims-and-rollout.md`. `claim_enabled` in the file is still honoured during the migration: it is
+imported once for a worker with no claims row, and a later *change* of that value is applied as a claim
+change by owner `file:authority.json` with no expiry (logged `claim_file_edit_applied:<worker>`); an
+unchanged file value never overrides the database (logged `claim_enabled_in_file_ignored:<worker>`).
 
 Outcome is in `authority.log`: `principal_reload_applied: N principals,
 added=[..] removed=[..]` or `principal_reload_refused: <reason>`. The applied

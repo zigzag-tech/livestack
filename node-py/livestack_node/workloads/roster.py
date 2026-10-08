@@ -14,6 +14,8 @@ named, not inferred from a missing row.
 """
 import json
 
+from . import claims, rollout
+
 QUEUE_LIMIT = 50
 HOLDERS_SHOWN = 6
 BYPASS_ROWS = 5000
@@ -267,6 +269,8 @@ def build(store, principals):
     with store.transaction() as db:
         rows = db.execute('SELECT id, host, boot, report, seen, ready FROM workers ORDER BY id LIMIT ?',
                           (store.limits.workers,)).fetchall()
+        claim_rows = {r['worker']: r for r in db.execute('SELECT * FROM worker_claims')}
+        withheld = claims.draining(db, now, {p.id: p for p in principals})
         running = db.execute(
             "SELECT a.worker, a.job, a.created, a.expires, j.spec FROM attempts a JOIN jobs j ON a.job=j.id "
             "WHERE a.state='running' ORDER BY a.created").fetchall()
@@ -292,7 +296,8 @@ def build(store, principals):
             configured=principal is not None, registered=row is not None,
             remote=bool(row) and row['host'] in store.remote_hosts.values(),
             connected=connected, last_seen_age_s=age,
-            claim_enabled=principal.claim_enabled if principal else None,
+            claim_enabled=(worker not in withheld) if (principal or worker in claim_rows) else None,
+            drain=claims.describe(claim_rows.get(worker), now),
             ready=bool(row['ready']) if row else False,
             state='offline' if not connected else ('running' if runs.get(worker) else 'idle'),
             running=runs.get(worker, []),
@@ -307,6 +312,7 @@ def build(store, principals):
             disk_unavailable=report.get('disk_unavailable'),
             reserve_exceeds_free=bool(report.get('disk_unavailable')),
             cpu_signal=report.get('cpu_signal'),
+            unit=report.get('unit'),
         )
         reasons = _reasons(entry, fresh)
         entry['eligible'] = not reasons and connected
@@ -314,5 +320,11 @@ def build(store, principals):
         entries.append(entry)
     with store.transaction() as db:
         queue = _queue(db, now, entries, store.limits.cleanup_seconds)
+        spec_row, _report, manifests = rollout.RolloutState(store).read(db)
+    planned = rollout.plan(spec_row['body'] if spec_row else None, entries, manifests)['workers']
+    for entry in entries:
+        info = planned.get(entry['id'], {})
+        entry['unit_state'] = info.get('unit_state', 'undeclared')
+        entry['unit_desired'] = info.get('desired')
     return dict(now=round(now, 3), fresh_seconds=fresh, workers=entries, disagreements=_disagreements(entries),
                 queue=queue, warnings=_warnings(entries, queue), resource_audit=store.resource_audit())
