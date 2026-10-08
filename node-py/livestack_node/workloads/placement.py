@@ -412,7 +412,10 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                   created_at=row["created"], sla=Sla.BATCH, deadline=spec["deadline"],
                   est_duration_s=spec["estimate_seconds"], selector=spec["selector"],
                   locality_host=locality)
-        grants = schedule(FleetState(targets=tuple(targets), jobs=(job,), now=now)).of(Admit)
+        decision_id = new_decision_id(now)
+        plan = schedule(FleetState(targets=tuple(targets), jobs=(job,), now=now),
+                        decision_ids={job.id: decision_id})
+        grants = plan.of(Admit)
         if not grants:
             if not workers:
                 reason = "no fresh, reconciled worker"
@@ -430,7 +433,6 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         chosen = next(w for w in workers if w["id"] == grants[0].target_id)
         fence = row["fence"] + 1
         aid = uuid.uuid4().hex
-        decision_id = new_decision_id(now)
         environment_generation = None
         compilation = None
         if compilation_policy is not None and compilation_policy.required(spec['handler']):
