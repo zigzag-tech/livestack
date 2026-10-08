@@ -186,7 +186,8 @@ def _manifest(source):
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 16 * 1024**2:
         raise WorkloadError('captured source manifest is missing or oversized', 409)
     try:
-        value = json.loads(path.read_bytes())
+        raw = path.read_bytes()
+        value = json.loads(raw)
         records = value['files']
     except (OSError, ValueError, KeyError, TypeError) as error:
         raise WorkloadError('captured source manifest is invalid', 409) from error
@@ -203,11 +204,11 @@ def _manifest(source):
                 not re.fullmatch('[a-f0-9]{64}', digest)):
             raise WorkloadError('captured source manifest record is invalid', 409)
         by_path[rel] = dict(record)
-    return value, by_path
+    return by_path, raw
 
 
 def _sync_source(incoming, destination, components):
-    manifest, records = _manifest(incoming)
+    records, raw_manifest = _manifest(incoming)
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
     cache_roots = {component['path'][len('source/'):]: component['path']
                    for component in components if component['path'].startswith('source/')}
@@ -269,14 +270,13 @@ def _sync_source(incoming, destination, components):
             shutil.copyfile(src, temporary)
             temporary.chmod(record['mode'])
             os.replace(temporary, target)
-    raw_manifest = (Path(incoming) / MANIFEST).read_bytes()
     mirror_manifest = destination / MANIFEST
     if not mirror_manifest.exists() or mirror_manifest.is_symlink() or mirror_manifest.read_bytes() != raw_manifest:
         temporary = mirror_manifest.with_name(MANIFEST + '.sync-tmp')
         temporary.write_bytes(raw_manifest)
         temporary.chmod(0o600)
         os.replace(temporary, mirror_manifest)
-    return manifest, records, hashlib.sha256(encode(manifest).encode()).hexdigest()
+    return records, hashlib.sha256(raw_manifest).hexdigest()
 
 
 def _safe_internal_link(path, root):
@@ -827,8 +827,7 @@ class TaskEnvironmentStore:
             _atomic_json(current_path / 'environment.json', meta)
         source_dir = current_path / 'source'
         source_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        manifest, records, manifest_digest = _sync_source(incoming_source, source_dir,
-                                                           spec['cache_components'])
+        records, manifest_digest = _sync_source(incoming_source, source_dir, spec['cache_components'])
         current_components = {}
         receipts = []
         for component in spec['cache_components']:
@@ -867,7 +866,7 @@ class TaskEnvironmentStore:
         return dict(handle=handle, generation=generation, profile=profile, compatibility=compatibility,
             purpose=env['purpose'], owner_scope=env['owner_scope'], source=source_dir, path=current_path,
             started=start, source_digest=assignment['spec']['input_digest'],
-            manifest_digest=hashlib.sha256(encode(manifest).encode()).hexdigest(),
+            manifest_digest=manifest_digest,
             source_integrity=source_integrity, reuse_outcome=reuse_outcome, reason_code=reason_code,
             cache_components=receipts, metadata=meta,
             cache_roots=[component['path'][len('source/'):] for component in spec['cache_components']])
@@ -879,8 +878,8 @@ class TaskEnvironmentStore:
             info = path.lstat()
             if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != mode or file_digest(path) != digest:
                 raise WorkloadError('handler modified captured source; environment cannot be parked', 409)
-        manifest, records = _manifest(root)
-        if hashlib.sha256(encode(manifest).encode()).hexdigest() != prepared['manifest_digest']:
+        _, raw_manifest = _manifest(root)
+        if hashlib.sha256(raw_manifest).hexdigest() != prepared['manifest_digest']:
             raise WorkloadError('handler removed the captured source manifest', 409)
         expected_links = _source_links(root)
         expected = set(prepared['source_integrity']) | set(expected_links) | {MANIFEST}

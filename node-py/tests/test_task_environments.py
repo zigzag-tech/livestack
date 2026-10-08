@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from livestack_node.workloads.archive import capture, unpack
+from livestack_node.workloads.archive import MANIFEST, capture, unpack
 from livestack_node.fleet_operations import CREATED, OperationStore
 from livestack_node.fleet_ops_api import deprovision
 from livestack_node.hostd import _drain_blocked
@@ -502,6 +502,20 @@ def test_captured_source_alias_is_verified_against_benchday_manifest(tmp_path):
         store.verify_source(rebuilt)
     store.reject(rebuilt)
     store.release(rebuilt)
+
+
+def test_large_captured_manifest_is_hashed_with_its_declared_bound(tmp_path):
+    store, _, _ = make_store(tmp_path)
+    files = {f'src/file-{index:04}.txt': b'x' for index in range(800)}
+    incoming, digest = bundle(tmp_path, files)
+    raw_manifest = (incoming/MANIFEST).read_bytes()
+    assert len(raw_manifest) > 64*1024
+
+    prepared = store.prepare(assignment('6'*32, 1, digest), incoming, handler=HANDLER)
+    assert prepared['manifest_digest'] == hashlib.sha256(raw_manifest).hexdigest()
+    store.verify_source(prepared)
+    store.reject(prepared)
+    store.release(prepared)
 
 
 def test_same_handle_local_lock_serializes_distinct_worker_processes(tmp_path):
