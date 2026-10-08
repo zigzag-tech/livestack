@@ -13,6 +13,7 @@ variable naming what was restored.
 Nothing here may fail an attempt: `restore` and `save` return named outcomes and
 swallow their own faults, and an unusable cache is exactly today's cold install.
 """
+from concurrent.futures import ThreadPoolExecutor
 import fcntl
 import hashlib
 import json
@@ -41,6 +42,7 @@ MAX_KEY_FILES = 20000            # files hashed for one directory key path
 MAX_TREE_FILES = 400000
 RECORDS = 32
 TEMP_AGE = 3600
+RESTORE_THREADS = 8
 
 
 # ------------------------------------------------------------------ settings
@@ -380,6 +382,7 @@ class Attempt:
             self.records = [dict(outcome='skipped', reason=reason)]
             return self.records
         refresh = self._refresh_due()
+        jobs = []
         for path, key_paths in expanded:
             started = time.monotonic()
             record = dict(path=path)
@@ -408,31 +411,41 @@ class Attempt:
                 record.update(outcome='miss', reason='no-entry')
                 self.entries[index] = (path, key_paths, key, 'miss')
                 continue
-            lock = self._lock(False)
-            if lock is None:
-                record.update(outcome='miss', reason='busy')
-                self.entries[index] = (path, key_paths, key, 'miss-busy')
-                continue
-            try:
-                _copy(entry/'data', destination)
-                files, size, apparent, error = scan(destination)
-                if error or files != meta.get('files') or apparent != meta.get('apparent'):
-                    _remove(destination)
-                    record.update(outcome='miss', reason='verify-failed: %s' % (error or 'size-mismatch'))
-                    self.entries[index] = (path, key_paths, key, 'miss')
-                    _remove(entry)    # a damaged entry is dropped, never served
-                    continue
-                os.utime(entry/'meta.json')
-            except Exception as error:
-                _remove(destination)
-                record.update(outcome='miss', reason='copy-failed: %s' % str(error)[:120])
-                self.entries[index] = (path, key_paths, key, 'miss')
-                continue
-            finally:
-                lock.close()
-            record.update(outcome='reused', bytes=meta['bytes'], seconds=round(time.monotonic() - started, 2))
-            self.entries[index] = (path, key_paths, key, 'reused')
+            jobs.append((index, record, entry, meta, destination, started))
+        # The copies are independent and I/O bound (two trees carry most of the bytes), so
+        # run them side by side; each holds its own shared lock and verifies its own copy.
+        if jobs:
+            with ThreadPoolExecutor(max_workers=min(RESTORE_THREADS, len(jobs))) as pool:
+                results = list(pool.map(self._restore_one, jobs))
+            for (index, record, *_), (updates, state) in zip(jobs, results):
+                record.update(updates)
+                path, key_paths, key, _old = self.entries[index]
+                self.entries[index] = (path, key_paths, key, state)
         return self.records
+
+    def _restore_one(self, job):
+        """Copy and verify one entry; returns (record updates, entry state). Never raises."""
+        index, record, entry, meta, destination, started = job
+        lock = self._lock(False)
+        if lock is None:
+            return dict(outcome='miss', reason='busy'), 'miss-busy'
+        try:
+            _copy(entry/'data', destination)
+            files, size, apparent, error = scan(destination)
+            if error or files != meta.get('files') or apparent != meta.get('apparent'):
+                _remove(destination)
+                _remove(entry)    # a damaged entry is dropped, never served
+                return dict(outcome='miss', reason='verify-failed: %s' % (error or 'size-mismatch')), 'miss'
+            os.utime(entry/'meta.json')
+        except Exception as error:
+            try:
+                _remove(destination)
+            except Exception:
+                pass
+            return dict(outcome='miss', reason='copy-failed: %s' % str(error)[:120]), 'miss'
+        finally:
+            lock.close()
+        return dict(outcome='reused', bytes=meta['bytes'], seconds=round(time.monotonic() - started, 2)), 'reused'
 
     def reused(self):
         """The trees the handler may skip installing."""

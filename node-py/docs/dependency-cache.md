@@ -62,6 +62,8 @@ Key = sha256 of (schema, epoch, owner namespace, handler executable realpath/siz
 key file contents). Namespace is the submitting principal (`assignment['owner']`), as in `docker_cache`.
 A tree whose parent directory is an alias symlink (Benchday's `packages/mesh_relay`) is restored and stored at the
 parent's real location, provided that stays inside the source (npm installed it there); otherwise `parent-outside-source`.
+Restores of the trees of one attempt run concurrently (8 threads): two trees (hub 640 MB, jingway-framework) carry
+most bytes and the rest are under a second, so wall time is the slowest copy, not the sum.
 Restore is a copy (`cp -a --reflink=auto`) then a re-scan compared with the entry's recorded file count and apparent (`st_size`) bytes; allocation differs between a tree and its copy and is only used for the bound;
 a mismatch drops the entry and the attempt installs cold. Store refuses absolute/escaping symlinks, special files,
 unreadable subtrees, trees over `max_component_bytes` or `max_bytes/2`, and a key that changed during the attempt.
