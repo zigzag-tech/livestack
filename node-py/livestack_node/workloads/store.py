@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 
-from . import resource_history
+from . import metrics_schema, resource_history
 from .model import (Limits, failure_signature, WorkloadError, encode, host_view, identity, labels, name, resources,
                     submission)
 from .environment_receipts import validate as validate_environment_receipt
@@ -161,7 +161,9 @@ class WorkloadStore:
                 if column not in environment_columns:
                     db.execute(f'ALTER TABLE task_environments ADD COLUMN {column} {declaration}')
         # Derived data: filled once from the last attempts when the table is empty.
+        self.metrics_stats = dict(undeclared_total=0, misscoped_total=0, recent_dropped=[])  # since process start
         self.resource_floor = None
+        self.resource_floor_unavailable = None
         self.resource_history_max_age = resource_history.MAX_AGE_SECONDS
         self.resource_backfilled = None
         try:
@@ -187,6 +189,70 @@ class WorkloadStore:
             return False
         return True
 
+    def _declared_metrics(self, result, release):
+        """Keep only metrics that have a definition (worker schema or the handler release
+        manifest). Dropped names are counted and a few shown in status, so a typo is visible."""
+        if not isinstance(result, dict) or 'metrics' not in result:
+            return result
+        declared = ()
+        registry = getattr(self, 'handler_registry', None)
+        if release is not None and registry is not None and isinstance(result['metrics'], dict):
+            try:
+                declared = registry.release_descriptor(release['release_digest'])['manifest'].get('metrics', ())
+            except WorkloadError:
+                declared = ()  # unreadable manifest: only worker-defined metrics survive
+        accepted, undeclared, misscoped = metrics_schema.filter_metrics(
+            result['metrics'] if isinstance(result['metrics'], dict) else {}, declared)
+        stats = self.metrics_stats
+        stats['undeclared_total'] += len(undeclared) + (0 if isinstance(result['metrics'], dict) else 1)
+        stats['misscoped_total'] += len(misscoped)
+        stats['recent_dropped'] = (stats['recent_dropped'] + undeclared + misscoped)[-metrics_schema.MAX_UNDECLARED_SHOWN:]
+        return dict(result, metrics=accepted)
+
+    def set_resource_floor(self, floor):
+        """Install (or, with None, remove) the validated `resource_floor` section. Called at
+        startup and on every SIGHUP; config.ResourceFloor owns the rules."""
+        if floor is None:
+            self.resource_floor, self.resource_history_max_age = None, resource_history.MAX_AGE_SECONDS
+            return
+        floor = dict(dict(margin=1.15, min_samples=5, dimensions=['memory_bytes'], strict=False,
+                          history_max_age_seconds=resource_history.MAX_AGE_SECONDS), **floor)
+        self.resource_floor = floor
+        self.resource_history_max_age = floor['history_max_age_seconds']
+
+    def _resource_floor_check(self, spec):
+        """Refuse (422) a submit whose memory need is below max(observed max, p95) x margin for a
+        covered handler. Insufficient history raises no floor; unreadable history disables the
+        floor for this request and is stated in status, unless `strict`, which refuses by name."""
+        floor, handler = self.resource_floor, spec['handler']
+        if floor is None or not any(handler == p or p.endswith('.*') and handler.startswith(p[:-1])
+                                    for p in floor['handlers']):
+            return
+        need = spec['need'].get('memory_bytes')
+        if need is None:
+            return
+        try:
+            with self.connect() as db:
+                stats = resource_history.summary(db, self.clock(), self.resource_history_max_age,
+                                                 handler=handler, same_declaration=False).get(handler, {})
+        except sqlite3.Error as error:
+            self.resource_floor_unavailable = type(error).__name__
+            if floor['strict']:
+                raise WorkloadError('resource_floor_unavailable: history unreadable (%s) and the floor is strict'
+                                    % type(error).__name__, 503) from error
+            return
+        self.resource_floor_unavailable = None
+        series = stats.get('memory_nonreclaimable_peak') or stats.get('memory_peak')
+        if not series or series['n'] < floor['min_samples']:
+            return
+        observed = max(series['max'], series['p95'])
+        minimum = math.ceil(observed*floor['margin'])
+        if need < minimum:
+            raise WorkloadError(
+                'resource_floor: need.memory_bytes %s < floor %s (observed max %s, p95 %s over %s attempts, '
+                'margin %s); raise the need or ask the operator to adjust resource_floor'
+                % (need, minimum, series['max'], series['p95'], series['n'], floor['margin']), 422)
+
     def resource_audit(self, admit=None):
         """Declaration audit from the bounded history: {flags, min_samples}, or the stated
         reason it could not be read. One read transaction however many handlers exist."""
@@ -196,6 +262,8 @@ class WorkloadStore:
         except sqlite3.Error as error:
             return {'available': False, 'reason': type(error).__name__, 'flags': []}
         return {'available': True, 'min_samples': resource_history.MIN_SAMPLES,
+                'floor': 'off' if self.resource_floor is None else (
+                    'unavailable: ' + self.resource_floor_unavailable if self.resource_floor_unavailable else 'on'),
                 'flags': resource_history.audit(history, admit)}
 
     def status(self):
@@ -204,6 +272,7 @@ class WorkloadStore:
         degraded = failure is not None
         return {
             'resource_audit': self.resource_audit(),
+            'metrics': dict(self.metrics_stats),
             'decision_ledger': {
                 'enabled': self.decision_ledger is not None,
                 'degraded': degraded,
@@ -486,6 +555,7 @@ class WorkloadStore:
         spec = submission(request, self.handlers if allowed_handlers is None else
                           self.handlers.intersection(allowed_handlers), self.limits)
         self._environment_policy(spec)
+        self._resource_floor_check(spec)
         return spec
 
     def _environment_row(self, db, handle, principal=None, *, delegated_owner=None):
@@ -1082,6 +1152,7 @@ class WorkloadStore:
                     raise WorkloadError('handler_result_identity_mismatch', 409)
             elif handler_result_identity is not None:
                 raise WorkloadError('unexpected_handler_release_identity', 400)
+            result = self._declared_metrics(result, expected_release)
             completion = {"outcome": outcome, "input_digest": input_digest, "result": result}
             if expected_release is not None:
                 completion['handler_result_identity'] = identity

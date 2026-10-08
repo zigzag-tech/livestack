@@ -73,7 +73,8 @@ def test_authority_status_exposes_ledger_health_to_admin_only(tmp_path):
             emitter='job-caller', emitter_id='authority-test', decision='admit')) is False
         status, body = request(api, 'status', token='c'*32)
         assert status == 200
-        assert body == {
+        # The ledger-health keys are exact; status also carries other sections (resource_audit, metrics, storage).
+        assert {key: body[key] for key in ('decision_ledger', 'observability_degraded')} == {
             'decision_ledger': {'enabled': True, 'degraded': True, 'reason': 'write_failed'},
             'observability_degraded': ['decision_ledger'],
         }

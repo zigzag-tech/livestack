@@ -315,4 +315,4 @@ def build(store, principals):
     with store.transaction() as db:
         queue = _queue(db, now, entries, store.limits.cleanup_seconds)
     return dict(now=round(now, 3), fresh_seconds=fresh, workers=entries, disagreements=_disagreements(entries),
-                queue=queue, warnings=_warnings(entries, queue))
+                queue=queue, warnings=_warnings(entries, queue), resource_audit=store.resource_audit())

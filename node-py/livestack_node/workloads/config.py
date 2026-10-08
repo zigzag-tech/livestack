@@ -6,7 +6,7 @@ model.Limits, github_remote, compilation_*) are only
 type-checked here so there is one owner for each rule.
 """
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from urllib.parse import urlparse
 
@@ -37,6 +37,28 @@ class HandlerReleasePolicy(BaseModel):
     handlers: Optional[dict[str, dict[str, Any]]] = None
 
 
+class ResourceFloor(BaseModel):
+    """Optional admission floor (openspec measured-resource-declarations). Absent section = no
+    floor; the declaration audit still warns. Unknown keys fail closed. `handlers` are exact
+    ids or a trailing `.*` prefix pattern."""
+    model_config = ConfigDict(extra='forbid', strict=True)
+    margin: StrictFloat = Field(default=1.15, ge=1.0)
+    min_samples: StrictInt = Field(default=5, ge=3)
+    dimensions: list[Literal['memory_bytes']] = ['memory_bytes']
+    handlers: list[StrictStr] = Field(min_length=1)
+    history_max_age_seconds: StrictInt = Field(default=2592000, ge=86400)
+    strict: bool = False
+
+    @field_validator('handlers')
+    @classmethod
+    def _patterns(cls, value):
+        for pattern in value:
+            body = pattern[:-2] if pattern.endswith('.*') else pattern
+            if not body or '*' in body or any(c.isspace() for c in body):
+                raise ValueError('handlers entries must be an exact handler id or a prefix ending in ".*"')
+        return value
+
+
 class ReloadableConfig(BaseModel):
     """What SIGHUP re-reads (docs/authority-principal-reload.md): principals, the installed
     handler ids (add-only), handler release policy and environment-handler policy. The rest
@@ -48,6 +70,7 @@ class ReloadableConfig(BaseModel):
     environment_handlers: Optional[dict[str, Any]] = None
     storage_bounds: Optional[dict[str, Any]] = None
     retention_tiers: Optional[dict[str, Any]] = None
+    resource_floor: Optional[ResourceFloor] = None
 
     @field_validator('storage_bounds')
     @classmethod
@@ -83,6 +106,7 @@ class AuthorityConfig(BaseModel):
     # Mechanism sections of openspec/changes/storage-headroom-admission; absent = flat behaviour.
     storage_bounds: Optional[dict[str, Any]] = None
     retention_tiers: Optional[dict[str, Any]] = None
+    resource_floor: Optional[ResourceFloor] = None
 
     @field_validator('storage_bounds')
     @classmethod

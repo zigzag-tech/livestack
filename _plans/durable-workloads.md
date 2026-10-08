@@ -769,6 +769,22 @@ same kill. The job now fails with `reason` = `resource limit: …` naming the pe
 and the declared need; the caller raises its need. An infrastructure end without
 a limit breach still retries.
 
+### 2026-10-08: measured usage survives a kill, and declarations are audited
+
+Replaces the statements above that a resource-limit event is read only from the exit
+receipt and is an *infrastructure* outcome. The wrapper still dies with the unit when the
+kernel OOM-kills it (`OOMPolicy=kill`), so no receipt exists; the unit cgroup is gone by
+the time `ActiveState` is `failed` (measured, `node-py/docs/measured-resources.md`), and
+the worker now classifies from the failed unit's retained `Result`/`OOMKills`/`MemoryPeak`/
+`CPUUsageNSec` plus the last loop sample. The job fails with the typed cause
+`resource_limit` (kind `memory`/`tasks`/`disk`, observed, declared, `retryable: false`) on
+the job result; the raw attempt outcome remains `infrastructure`. The authority keeps a
+bounded per-handler history (`resource_history`), flags `declared_below_observed` /
+`admit_below_typical` in `GET /status` and the roster, can optionally refuse (`resource_floor`,
+off unless configured) and validates reported metrics against definitions
+(`metrics_schema.py`). `placement._learned_peak` now reads the same history. Design:
+`openspec/changes/measured-resource-declarations`.
+
 ## GitHub Actions as a Harmony workload provider (2026-10-03)
 
 Harmony may place explicitly configured handlers on a single-assignment,
