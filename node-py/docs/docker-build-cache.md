@@ -62,8 +62,19 @@ creation time and would evict old base images first.
 Every `canary_every`-th attempt (sha256 of the attempt id mod N) runs on an ephemeral root, exactly the old cold
 path, and the first attempt on an empty root is the cold reference. A handler may write
 `docker-cache-fingerprint.json` (`{"inputs": "<digest>", "outputs": {...}}`) into its output directory. Warm and
-cold records with equal `inputs` must have equal `outputs` and equal success verdict; otherwise the root is
-purged, the outcome is `wiped(canary-mismatch)` and `docker_cache_canary_mismatch: {...}` is logged.
+cold records with equal, NAMED `inputs` must have equal `outputs`; otherwise the root is purged, the outcome is
+`wiped(canary-mismatch)` and `docker_cache_canary_mismatch: {...}` is logged. A job's own verdict is deliberately
+NOT compared (two runs of one tree legitimately differ), and attempts without a fingerprint are never compared:
+the first deployment compared exit codes of unrelated attempts and purged a good root. Benchday emits the
+fingerprint from `buildNodeImage` (see its `docs/e2e-build-cache.md`).
+
+## Native frontend and slow bookkeeping
+
+In `rootless-docker-native` the host frontend stops dockerd after the handler returns; the namespace process then
+walks the root, runs the canary and wipes. The frontend waits up to `FINISH_WAIT` (900 s, announced in
+`docker-cache-session.json`) for it instead of the old 5 s, because killing it there lost the outcome record
+(seen in the first rollout). A wipe renames the slot aside first, so a kill mid-delete leaves only a
+`slot.trash-*` sibling that the next attempt removes.
 
 ## Operations
 

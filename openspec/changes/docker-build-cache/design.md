@@ -47,9 +47,10 @@ root is empty. A canary attempt runs on an ephemeral root (exactly today's cold
 path) and afterwards compares its fingerprint with the most recent warm record
 sharing its `inputs` digest, taking the root lock briefly (skipped if busy). Warm
 attempts record theirs, and compare against recorded cold ones the same way.
-Mismatch in `outputs` or in exit-code verdict -> purge the root, write
-`canary_mismatch` into the outcome. Without a fingerprint file only the exit
-code is compared.
+Mismatch in `outputs` -> purge the root, write `canary_mismatch` into the
+outcome. Only fingerprints that name their `inputs` are comparable and the job's
+own exit verdict is never compared (two runs of one tree legitimately differ;
+the first rollout purged a good root by comparing verdicts).
 
 ## Results
 
