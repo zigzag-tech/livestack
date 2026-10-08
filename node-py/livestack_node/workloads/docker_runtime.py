@@ -33,7 +33,7 @@ def runtime_path(unit):
     return runtime_base()/('hw-'+hashlib.sha256(unit.encode()).hexdigest()[:24])
 
 
-def prepare(unit, argv, cwd, output, *, native_client=False, native_host_address=None):
+def prepare(unit, argv, cwd, output, *, native_client=False, native_host_address=None, docker_cache=None):
     route = local_address(native_host_address) if native_client else None
     path = runtime_path(unit)
     # exist_ok=False: a leftover of the same unit is never silently reused. Unit
@@ -50,7 +50,7 @@ def prepare(unit, argv, cwd, output, *, native_client=False, native_host_address
         raise
     inner = Path(output)/'docker-execution.json'
     inner.write_text(json.dumps(dict(unit=unit, argv=argv, cwd=str(cwd), output=str(output),
-                                    native_client=native_client, native_host_address=route)))
+                                    native_client=native_client, native_host_address=route, docker_cache=docker_cache)))
     inner.chmod(0o600)
     namespace = ['/usr/bin/rootlesskit', '--state-dir='+str(path), '--net=slirp4netns',
         '--disable-host-loopback', '--port-driver=builtin', '--copy-up=/etc', '--copy-up=/run',
@@ -130,22 +130,16 @@ def cleanup(unit):
         logging.warning('docker runtime cleanup: removed %s (no owner.json: attempt died before writing it)', path)
 
 
-def remove_data(root):
-    """Delete subordinate-UID layers only after the attempt cgroup is stopped.
+def run_in_userns(argv, timeout=60):
+    """Run `argv` as uid 0 of the worker's subordinate-uid user namespace (RootlessKit).
 
-    The controller retains the cleanup claim until this finite operation ends.
-    Production controllers themselves run in a bounded systemd service.
+    Needed to delete files rootless dockerd created as sub-uids. Returns
+    (returncode, last 1 KiB of stderr). Raises WorkloadError (503) on a timeout
+    or an unsafe user runtime directory.
     """
-    data = Path(root)/'docker-data'
-    if not data.exists():
-        return
-    # After the check: `resource` does not exist on Windows workers, which
-    # never have Docker data.
     import subprocess
     import resource
     import tempfile
-    if data.is_symlink() or data.resolve() != data:
-        raise WorkloadError('Docker data is not in the private attempt tree', 503)
     # Diagnostics have an active kernel byte bound, no named file/history, and
     # the same finite command deadline as cleanup. Never hide the real refusal.
     # Nested attempt TMPDIR paths exceed AF_UNIX's pathname limit. Keep the
@@ -157,8 +151,8 @@ def remove_data(root):
         raise WorkloadError('Docker cleanup user runtime directory is unsafe; capacity remains reserved',503)
     with tempfile.TemporaryDirectory(prefix='hcleanup-',dir=runtime) as state, tempfile.TemporaryFile() as diagnostic:
         try:
-            reply = subprocess.run(['/usr/bin/rootlesskit', '--state-dir='+state, '/usr/bin/rm', '-rf', '--', str(data)],
-                stdout=subprocess.DEVNULL, stderr=diagnostic, timeout=60,
+            reply = subprocess.run(['/usr/bin/rootlesskit', '--state-dir='+state, *argv],
+                stdout=subprocess.DEVNULL, stderr=diagnostic, timeout=timeout,
                 preexec_fn=lambda:resource.setrlimit(resource.RLIMIT_FSIZE,(16384,16384)))
         except subprocess.TimeoutExpired as error:
             diagnostic.seek(max(0,diagnostic.tell()-1024))
@@ -167,7 +161,24 @@ def remove_data(root):
         diagnostic.seek(0,os.SEEK_END)
         diagnostic.seek(max(0,diagnostic.tell()-1024))
         detail=diagnostic.read(1024).decode(errors='replace')
-    if reply.returncode or data.exists():
+    return reply.returncode, detail
+
+
+def remove_data(root):
+    """Delete subordinate-UID layers only after the attempt cgroup is stopped.
+
+    The controller retains the cleanup claim until this finite operation ends.
+    Production controllers themselves run in a bounded systemd service.
+    Only the attempt-private `docker-data` is removed; a persistent docker_cache
+    root lives outside the workspace and is never named here.
+    """
+    data = Path(root)/'docker-data'
+    if not data.exists():
+        return
+    if data.is_symlink() or data.resolve() != data:
+        raise WorkloadError('Docker data is not in the private attempt tree', 503)
+    returncode, detail = run_in_userns(['/usr/bin/rm', '-rf', '--', str(data)])
+    if returncode or data.exists():
         raise WorkloadError('Docker layer cleanup failed; capacity remains reserved; exit='+
-                           str(reply.returncode)+': '+detail,503)
+                           str(returncode)+': '+detail,503)
     logging.info('Docker layer cleanup completed: %s',data)

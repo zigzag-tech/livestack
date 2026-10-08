@@ -13,6 +13,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from livestack_node.workloads import docker_cache
+
 
 def _no_new_privileges():
     libc = ctypes.CDLL(None, use_errno=True)
@@ -74,7 +77,19 @@ def run(config_path):
         if probe.stdout.strip() != '/run/harmony/data':
             raise RuntimeError('private Docker native endpoint identity mismatch')
         _no_new_privileges()
-        return subprocess.call(config['argv'], cwd=config['cwd'], env=env)
+        code = subprocess.call(config['argv'], cwd=config['cwd'], env=env)
+        record = {'code': code}
+        try:
+            # While dockerd is still up: the persistent root's bound is enforced here, in the
+            # same place docker_command enforces it for the non-native path.
+            session = docker_cache._read_json(Path(config['output'])/docker_cache.SESSION_FILE) or {}
+            if session.get('persistent') is True:
+                record['prune'] = docker_cache.prune(env, int(session['max_bytes']))
+        except Exception as error:
+            record['prune_error'] = type(error).__name__
+        if session:
+            docker_cache._write_json(Path(config['output'])/docker_cache.EXIT_FILE, record)
+        return code
     finally:
         if owned is not None:
             pid, expected = owned
