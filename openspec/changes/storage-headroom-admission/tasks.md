@@ -25,24 +25,24 @@ and its ledger obligation. Do not edit `authority.json` retention values or Benc
 
 ## 3. Worker and placement
 
-- [ ] 3.1 `disk_unavailable` in the report; roster `reserve_exceeds_free`; startup warning.
+- [x] 3.1 `disk_unavailable` in the report; roster `reserve_exceeds_free`; startup warning.
   Tests: reserve 64 GiB over free 60 GiB.
-- [ ] 3.2 Placement `reason_code` + figures; stall event after `stall_report_seconds`.
+- [x] 3.2 Placement `reason_code` + figures; stall event after `stall_report_seconds`.
   Tests: existing placement tests green; stager scenario reproduced.
 
 ## 4. CPU signal
 
-- [ ] 4.1 `cpu_admission.py`: `psi_some`, `runqueue`, schema (plain Python, no pydantic in
+- [x] 4.1 `cpu_admission.py`: `psi_some`, `runqueue`, schema (plain Python, no pydantic in
   the worker). Tests: fake `/proc`.
-- [ ] 4.2 Self-test with synthetic burn; `inert` and `active_unverified` states. Tests: real
+- [x] 4.2 Self-test with synthetic burn; `inert` and `active_unverified` states. Tests: real
   burn moves signal and not `full`; frozen fake reports `inert`, no silent fallback.
-- [ ] 4.3 Update `node-py/docs/worker-cpu-admission.md`.
+- [x] 4.3 Update `node-py/docs/worker-cpu-admission.md`.
 
 ## 5. Status, docs, validation
 
-- [ ] 5.1 Status and roster surfaces (free space, state, effective bound, refusals).
-- [ ] 5.2 `_plans/durable-workloads.md` hard-bounds table updated.
-- [ ] 5.3 `openspec validate --specs` and `openspec validate storage-headroom-admission`.
+- [x] 5.1 Status and roster surfaces (free space, state, effective bound, refusals).
+- [x] 5.2 `_plans/durable-workloads.md` hard-bounds table updated.
+- [x] 5.3 `openspec validate --specs` and `openspec validate storage-headroom-admission`.
 
 ## 6. Rollout (after owner confirmation)
 

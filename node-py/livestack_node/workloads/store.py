@@ -25,6 +25,29 @@ from .model import progress as validate_progress
 TERMINAL = ("succeeded", "failed", "cancelled", "expired")
 
 
+DISK_REASONS = ("reserve_exceeds_free", "backing_reserve")
+CPU_STATES = ("active", "active_unverified", "inert")
+
+
+def validate_disk_unavailable(value):
+    """Fixed keys, non-negative integers: the worker's own account of why it offers no disk."""
+    keys = {"filesystem", "free_bytes", "reserve_bytes", "offered_bytes", "capacity_bytes", "reason"}
+    if (not isinstance(value, dict) or set(value) != keys or not isinstance(value["filesystem"], str)
+            or len(value["filesystem"]) > 256 or value["reason"] not in DISK_REASONS
+            or any(type(value[k]) is not int or value[k] < 0 for k in keys - {"filesystem", "reason"})):
+        raise WorkloadError("invalid disk_unavailable report")
+    return value
+
+
+def validate_cpu_signal(value):
+    if (not isinstance(value, dict) or set(value) - {"policy", "state", "detail", "selftest"}
+            or {"policy", "state"} - set(value) or value["state"] not in CPU_STATES
+            or not isinstance(value["policy"], str) or len(value["policy"]) > 32
+            or any(not isinstance(value.get(k, ""), str) or len(value.get(k, "")) > 200 for k in ("detail", "selftest"))):
+        raise WorkloadError("invalid cpu_signal report")
+    return value
+
+
 def _limit_breach(result, need):
     """The job's own resource limit, when the run ended by breaching it."""
     resources = (result or {}).get("resources") or {}
@@ -669,7 +692,8 @@ class WorkloadStore:
             host_id = self.compilation_policy.physical_host(host_id, self.clock())
         if not isinstance(report, dict) or set(report) - {"capacity", "available", "labels", "handlers", "ready", "host",
                                                           "environment_profiles", "environment_replicas", "handler_inventory",
-                                                          "handler_activation_failures", "handler_gc_receipts"}:
+                                                          "handler_activation_failures", "handler_gc_receipts",
+                                                          "disk_unavailable", "cpu_signal"}:
             raise WorkloadError("invalid worker report")
         capacity, available = resources(report.get("capacity")), resources(report.get("available"))
         tags = labels(report.get("labels", {}))
@@ -683,6 +707,10 @@ class WorkloadStore:
             raise WorkloadError("invalid readiness or cleanup report")
         body = dict(capacity=capacity, available=available, labels=tags, handlers=sorted(set(handlers)),
                     ready=report["ready"])
+        if 'disk_unavailable' in report:
+            body['disk_unavailable'] = validate_disk_unavailable(report['disk_unavailable'])
+        if 'cpu_signal' in report:
+            body['cpu_signal'] = validate_cpu_signal(report['cpu_signal'])
         if 'handler_inventory' in report:
             from .handler_release import validate_worker_inventory
             inventory = validate_worker_inventory(report['handler_inventory'])

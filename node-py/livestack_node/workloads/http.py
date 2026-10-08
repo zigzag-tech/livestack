@@ -439,7 +439,8 @@ class Handler(BaseHTTPRequestHandler):
         if principal.role in ('caller', 'admin'):
             if parts == ['workers'] and method == 'GET':
                 # Read-only roster: the fleet as this authority sees it (roster.py).
-                return roster.build(store, self.server.principals)
+                return dict(roster.build(store, self.server.principals),
+                            storage=(self.server.blobs.guard.snapshot(log=False) if self.server.blobs.guard else None))
             if parts == ['capabilities'] and method == 'GET':
                 return store.capabilities(principal.id, principal.handlers)
             if len(parts) == 3 and parts[0] == 'handlers' and parts[2] == 'capacity' and method == 'GET':

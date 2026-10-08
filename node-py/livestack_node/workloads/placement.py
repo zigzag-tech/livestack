@@ -4,6 +4,7 @@ Called only inside the authority's immediate transaction. Assign one attempt per
 worker initially; all environments on the same physical host share claims.
 """
 import json
+import logging
 import uuid
 
 from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedule
@@ -36,6 +37,46 @@ PRESSURE_SWAP_IN_BYTES_PER_SECOND = 16 * 1024**2
 
 def _gib(n):
     return f"{n / 1024**3:.1f}"
+
+
+# Seconds a job may wait on the SAME refusal code from every candidate worker before one
+# event announces it (limits.stall_report_seconds); remembered per (job, code), bounded.
+_STALL_REPORTED = {}
+
+
+def _disk_refusal(worker_id, report, host_free, worker_free, need):
+    """A named disk refusal (code, reason, figures) when the worker's offered disk cannot hold
+    `need`, else None. Replaces the generic "insufficient shared host resources" for disk."""
+    free = min(host_free, worker_free)
+    if need is None or free >= need:
+        return None
+    capacity = report["capacity"].get("disk_bytes", 0)
+    gone = report.get("disk_unavailable")
+    if gone:
+        reason = (f"worker {worker_id}: disk offered {_gib(gone['offered_bytes'])} of {_gib(gone['capacity_bytes'])} GiB "
+                  f"(free {_gib(gone['free_bytes'])} GiB < reserve {_gib(gone['reserve_bytes'])} GiB, "
+                  f"{gone['reason']})")
+        return "disk_reserve", reason, dict(gone, need_bytes=need)
+    figures = dict(need_bytes=need, free_bytes=free, capacity_bytes=capacity)
+    return "disk_need", (f"worker {worker_id}: disk need {_gib(need)} GiB > free {_gib(free)} GiB "
+                         f"of {_gib(capacity)} GiB offered"), figures
+
+
+def _stall_event(row, rejected, now, limits):
+    """One logged event when every candidate worker refuses a job for the same coded reason for
+    longer than limits.stall_report_seconds (the 20-minute stager stall was discovered, not announced)."""
+    codes = {item.get("reason_code") for item in rejected}
+    seconds = getattr(limits, "stall_report_seconds", None)
+    if not rejected or len(codes) != 1 or None in codes or not seconds or now-row["created"] < seconds:
+        return
+    key = (row["id"], next(iter(codes)))
+    if key in _STALL_REPORTED:
+        return
+    if len(_STALL_REPORTED) >= 1024:
+        _STALL_REPORTED.clear()
+    _STALL_REPORTED[key] = now
+    logging.warning("placement_stalled: job %s waited %.0fs; every candidate refuses with %s: %s",
+                    row["id"], now-row["created"], key[1], "; ".join(i["reason"] for i in rejected[:4])[:512])
 
 
 def _learned_peak(db, handler, cache):
@@ -379,6 +420,11 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                           f"(available {_gib(t['available'])}, reserve {_gib(t['reserve'])}, "
                           f"running attempts {_gib(t['attempts'])}, model servers {_gib(t['services'])}, "
                           f"admitted now {_gib(t['admitted'])})")
+            elif (disk := _disk_refusal(w["id"], report, host_free[w["host"]].get("disk_bytes", 0),
+                                        worker_free[w["id"]].get("disk_bytes", 0), admit.get("disk_bytes"))):
+                code, reason, figures = disk
+                rejected.append({"worker": w["id"], "reason": reason, "reason_code": code, "figures": figures})
+                continue
             elif any(min(host_free[w["host"]].get(k, 0), worker_free[w["id"]].get(k, 0)) < n
                      for k, n in admit.items() if not (k == MEMORY and w["host"] in views and claim is not None)):
                 # One reason for both bounds: a caller can act on neither
@@ -431,6 +477,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 reason = f"no fresh worker advertises handler {spec['handler']}"
             else:
                 reason = encode(rejected or {"reason": "no target can meet deadline"})
+                _stall_event(row, rejected, now, limits)
             db.execute("UPDATE jobs SET reason=? WHERE id=?", (reason[:8192], row["id"]))
             continue
         chosen = next(w for w in workers if w["id"] == grants[0].target_id)
