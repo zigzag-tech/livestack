@@ -209,9 +209,10 @@ def _manifest(source):
 
 def _sync_source(incoming, destination, components):
     records, raw_manifest = _manifest(incoming)
+    source_links = _source_links(incoming)
+    resolved_cache_paths = _resolved_cache_paths(components, source_links)
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
-    cache_roots = {component['path'][len('source/'):]: component['path']
-                   for component in components if component['path'].startswith('source/')}
+    cache_roots = set(resolved_cache_paths.values())
     for rel in records:
         if any(rel == root or rel.startswith(root + '/') for root in cache_roots):
             raise WorkloadError('captured source overlaps a retained cache component', 409)
@@ -334,7 +335,43 @@ def _source_links(root):
                 link_path.startswith('.benchday-cache/') or target == link_path):
             raise WorkloadError('captured source link is duplicated or conflicts with metadata', 409)
         result[link_path] = target
+    aliases = set(result)
+    for alias in aliases:
+        if any(str(parent) in aliases for parent in PurePosixPath(alias).parents):
+            raise WorkloadError('captured source aliases overlap', 409)
+    for target in result.values():
+        target_path = PurePosixPath(target)
+        if any(str(parent) in aliases for parent in (target_path, *target_path.parents)):
+            raise WorkloadError('captured source alias target is another alias', 409)
     return result
+
+
+def _resolve_source_alias(path, links):
+    path = _relative(path, 'captured source path')
+    parts = PurePosixPath(path).parts
+    for depth in range(1, len(parts) + 1):
+        alias = '/'.join(parts[:depth])
+        target = links.get(alias)
+        if target is not None:
+            return _relative('/'.join((*PurePosixPath(target).parts, *parts[depth:])),
+                             'resolved captured source path')
+    return path
+
+
+def _resolved_cache_paths(components, links):
+    resolved = {}
+    paths = []
+    for component in components:
+        path = component['path']
+        if not path.startswith('source/'):
+            raise WorkloadError('task environment cache path is outside source', 409)
+        path = _resolve_source_alias(path[len('source/'):], links)
+        if any(path == previous or path.startswith(previous + '/') or previous.startswith(path + '/')
+               for previous in paths):
+            raise WorkloadError('task environment cache components overlap after source alias resolution', 409)
+        paths.append(path)
+        resolved[component['name']] = path
+    return resolved
 
 
 class TaskEnvironmentStore:
@@ -841,18 +878,23 @@ class TaskEnvironmentStore:
         source_dir = current_path / 'source'
         source_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         records, manifest_digest = _sync_source(incoming_source, source_dir, spec['cache_components'])
+        source_links = _source_links(source_dir)
+        resolved_cache_paths = _resolved_cache_paths(spec['cache_components'], source_links)
         current_components = {}
         receipts = []
         for component in spec['cache_components']:
-            input_identity = hashlib.sha256(encode([
-                (item, records[item]['sha256'], records[item]['mode']) if item in records else (item, None)
-                for item in component['inputs']]).encode()).hexdigest()
+            inputs = []
+            for item in component['inputs']:
+                resolved_item = _resolve_source_alias(item, source_links)
+                record = records.get(resolved_item)
+                inputs.append((item, record['sha256'], record['mode']) if record else (item, None))
+            input_identity = hashlib.sha256(encode(inputs).encode()).hexdigest()
             identity = hashlib.sha256(encode(dict(profile_compatibility=compatibility,
                 cache_contract=spec['cache_contract'], component_contract=component['contract'],
                 input_identity=input_identity)).encode()).hexdigest()
             old = meta.get('components', {}).get(component['name']) if reusable else \
                   discarded_components.get(component['name'])
-            cache_path = _inside(current_path, component['path'])
+            cache_path = _inside(current_path, f"source/{resolved_cache_paths[component['name']]}")
             outcome = 'reused' if reusable and old == identity and cache_path.exists() and \
                       not _has_links(cache_path, source_dir) else \
                       'invalidated' if old is not None else 'created'
@@ -882,7 +924,7 @@ class TaskEnvironmentStore:
             manifest_digest=manifest_digest,
             source_integrity=source_integrity, reuse_outcome=reuse_outcome, reason_code=reason_code,
             cache_components=receipts, metadata=meta,
-            cache_roots=[component['path'][len('source/'):] for component in spec['cache_components']])
+            cache_roots=list(resolved_cache_paths.values()))
 
     def verify_source(self, prepared):
         root = Path(prepared['source'])
