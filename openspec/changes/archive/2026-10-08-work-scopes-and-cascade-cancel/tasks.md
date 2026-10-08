@@ -42,3 +42,4 @@ default, `WORK_SCOPE_SEQUENCES=2000` for the full run; mutants without cascade a
 (release `livestack-a3a6a47f`, backup `release-20261008T233219Z`), first run against a copy of the production database (migration of 588 jobs, scoped round trip),
 then `tools/deploy-authority-release.sh` (check PASS, 22 of 22 workers ready after restart). Live verification: capabilities.scopes, scoped submit, renew, close (cascade
 cancelled the job, cause `scope_closed`), replay 409. No worker release needed.
+Full model run (`WORK_SCOPE_SEQUENCES=2000`, 40 steps each): passed, 897 s. ZZOPS adopted the contract and deployed it (zzops e71b382, installed release 86282fb8, 2026-10-09 UTC): live open, renew, close, renew-after-close through ZZOPS' own client against this authority verified; a real plan/run being renewed by the coordinator tick is not yet observed (ZZOPS change run-settlement-and-ownership stays open for it).
