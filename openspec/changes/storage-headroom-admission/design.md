@@ -169,3 +169,18 @@ Tests that need a real cgroup or kernel PSI skip with an explicit reason, never 
    confirm with the retention agent so values are set once, in `authority.json`.
 5. `runqueue` vs `psi_some` as the recommended default policy (proposed `psi_some`,
    `runqueue` as the fallback where PSI is unavailable).
+
+## 10. Owner decisions (2026-10-08)
+
+- Resource floor: warning-only by default; optional schema-validated refusal for named
+  handlers exists but is off. `resource_limit` is non-retryable; no automatic raise of the
+  declared need; the warning text may name a suggested number.
+- Object store defaults as proposed: capacity fraction 0.5, floor `max(40 GiB, 10%)`,
+  applied through the schema-validated authority config without overwriting values another
+  agent has set (read `authority.json` at implementation time).
+- Worker disk reserve: announce-only (no auto-lowering).
+- Retention: failed jobs 14 d, succeeded 3 d, release references keep-newest-10 with TTL 14 d.
+- CPU policy: `psi_some` with `runqueue` fallback, each validated at startup by a synthetic
+  burn positive control.
+- Rollout approved: authority first, then workers; back up configs, drain by the existing
+  procedure, avoid an active release train, revert on failure.

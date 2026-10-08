@@ -6,7 +6,7 @@ tests and its ledger obligation (a bounded event/record naming the decision).
 
 ## 1. Measurement
 
-- [ ] 1.1 Measure on a real kernel whether the attempt cgroup stays readable after the unit
+- [x] 1.1 Measure on a real kernel whether the attempt cgroup stays readable after the unit
   enters `failed` (design R1). Record the result in `node-py/docs/measured-resources.md`.
   Tests: a script-level control. Ledger: none.
 - [ ] 1.2 `resource_usage.py`: add `source`, workspace disk delta; sample helper shared by
