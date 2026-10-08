@@ -64,7 +64,7 @@ def settings(raw):
     try:
         out = dict(path=str(Path(path)), max_bytes=int(number('max_bytes', 64*1024**2, 4*1024**4)),
                    epoch=int(number('epoch', 0, 2**31, 0)), canary_every=int(number('canary_every', 0, 1000, 20)),
-                   max_growth=float(number('max_growth', 1.0, 10.0, 1.5)))
+                   max_growth=float(number('max_growth', 1.0, 10.0, 3.0)))
     except (ValueError, KeyError, TypeError) as error:
         return None, 'invalid: %s' % error
     return out, 'enabled'
@@ -363,6 +363,9 @@ class Session:
         return True
 
 
+KEEP_FRACTION = 0.7   # builder cache is pruned to this share of max_bytes; the rest is headroom for images and one attempt's growth
+
+
 def prune(env, max_bytes):
     """End-of-attempt prune while dockerd is up. Returns a small report; never raises."""
     report = {}
@@ -383,7 +386,7 @@ def prune(env, max_bytes):
     run('volume', 'volume', 'prune', '-f')
     run('network', 'network', 'prune', '-f')
     run('image', 'image', 'prune', '-f')
-    run('builder', 'builder', 'prune', '-f', '--keep-storage', str(max_bytes))
+    run('builder', 'builder', 'prune', '-f', '--keep-storage', str(int(max_bytes * KEEP_FRACTION)))
     over = _docker_bytes(env)
     report['docker_bytes'] = over
     if over is not None and over > max_bytes:

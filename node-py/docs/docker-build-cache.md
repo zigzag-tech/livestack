@@ -13,7 +13,7 @@ work natively for any app. Nothing app-specific is declared.
 ## Config (worker.json, no environment variables)
 
     "docker_cache": {"enabled": true, "path": "/home/ubuntu/.cache/livestack-docker-cache/<worker>",
-                     "max_bytes": 42949672960, "epoch": 0, "canary_every": 20, "max_growth": 1.5}
+                     "max_bytes": 42949672960, "epoch": 0, "canary_every": 20, "max_growth": 3.0}
 
 - `path` absolute, private (0700, owned by the worker uid), on a filesystem that supports overlay2, OUTSIDE the
   workspace. Give every worker its OWN path (two workers on one path will find the lock busy and run cold).
@@ -45,9 +45,9 @@ work natively for any app. Nothing app-specific is declared.
 
 Bound: `docker_cache.max_bytes` per namespace root. Enforcer: end of every attempt, dockerd still up
 (`docker_cache.prune`): remove containers, `volume prune`, `network prune`, `image prune` (dangling),
-`builder prune -f --keep-storage max_bytes`; if `docker system df` still exceeds the bound, `image prune -a`.
+`builder prune -f --keep-storage 0.7*max_bytes` (headroom for images and one attempt's growth); if `docker system df` still exceeds the bound, `image prune -a`.
 After dockerd stops the root is measured (allocated blocks, hard links once) and DISCARDED if over `max_bytes`
-or over `max_growth` x its cold size (`discarded(size|growth)`). Worst case on disk is therefore about
+or over `max_growth` x its cold size, default 3 (`discarded(size|growth|unmeasurable)`; a walk that cannot read a subtree fails closed). Measured on Benchday's image: cold root 22 GB, +7.5 GB per attempt before LRU pruning. Worst case on disk is therefore about
 one in-flight attempt beyond `max_bytes` per worker, plus a wipe window. No `until=` filter is used: it is image
 creation time and would evict old base images first.
 
