@@ -32,10 +32,16 @@ The last successfully read sample is kept. When execution ends:
 
 - receipt present: receipt wins (`source: "receipt"`), sample fills dimensions the
   receipt lacks;
-- no receipt: the sample is the evidence (`source: "sampled"`), and
-  **`memory.events` is read once more at the moment `ActiveState` flips**, because
-  systemd keeps the cgroup readable until the unit is garbage collected (verify;
-  design risk R1).
+- no receipt: the evidence is the last loop sample **plus the failed unit's retained manager
+  properties**. Task 1.1 measured (systemd 259, kernel 7.0, cgroup2, `--user` manager,
+  `OOMPolicy=kill`, `MemoryMax=64M`) that the unit cgroup directory is already **gone** when
+  `ActiveState` first reads `failed` (about 200 ms after the kill, in both the direct and
+  the wrapper-spawns-child shapes), so a "read `memory.events` at the flip" step cannot
+  work. systemd does keep on the failed unit: `Result=oom-kill`, `OOMKills=1`,
+  `MemoryPeak`, `CPUUsageNSec`. `inspect()` already runs `systemctl show`; it additionally
+  requests `Result,OOMKills,MemoryPeak,CPUUsageNSec` (`source: "unit"`). `tasks` and `disk`
+  evidence come only from the last loop sample (`source: "sampled"`); `TasksCurrent` and
+  IO counters are `[not set]` after failure.
 
 An `oom_kill` count in either source classifies the attempt `resource_limit/memory`.
 If neither source has the file (cgroup gone, non-Linux), `resource_evidence: "none"` is
@@ -146,10 +152,10 @@ A "not measured" reading is distinguishable from zero in every control.
 
 ## 8. Risks and open points
 
-- R1: whether the cgroup remains readable after the unit enters `failed`. The unit's
-  cgroup is removed when the unit is released; if the read loses the race the last
-  loop sample is used. Task 1.1 measures this on a real kernel before anything is built
-  on it.
+- R1 (resolved by task 1.1): the cgroup is NOT readable after `failed`; the design uses retained
+  unit properties (`Result`, `OOMKills`, `MemoryPeak`, `CPUUsageNSec`) instead. Residual risk:
+  other managers (`--system`, launchd, Windows) may retain different properties; where they
+  do not, `resource_evidence: "none"` is stated.
 - R2: PSI `full` reads 0 on this kernel; none of this depends on PSI.
 - R3: history growth: bounded per (handler, dimension) and by age.
 - R4: memory.peak counts page cache; `memory_nonreclaimable_peak_bytes` is preferred
@@ -160,5 +166,20 @@ A "not measured" reading is distinguishable from zero in every control.
 1. Floor default: warning only (recommended), or refuse on submit for named handlers?
 2. Who edits the declaration when flagged: leave to humans (recommended), or let the
    authority suggest the new number in the warning text (proposed, no auto-apply)?
-3. Is `resource_limit` non-retryable acceptable, given an operator may want one
+3. (Owner decided: non-retryable, no automatic raise.) Is `resource_limit` non-retryable acceptable, given an operator may want one
    automatic retry at a higher need? (Recommended: no automatic raise; names the number.)
+
+## 10. Owner decisions (2026-10-08)
+
+- Resource floor: warning-only by default; optional schema-validated refusal for named
+  handlers exists but is off. `resource_limit` is non-retryable; no automatic raise of the
+  declared need; the warning text may name a suggested number.
+- Object store defaults as proposed: capacity fraction 0.5, floor `max(40 GiB, 10%)`,
+  applied through the schema-validated authority config without overwriting values another
+  agent has set (read `authority.json` at implementation time).
+- Worker disk reserve: announce-only (no auto-lowering).
+- Retention: failed jobs 14 d, succeeded 3 d, release references keep-newest-10 with TTL 14 d.
+- CPU policy: `psi_some` with `runqueue` fallback, each validated at startup by a synthetic
+  burn positive control.
+- Rollout approved: authority first, then workers; back up configs, drain by the existing
+  procedure, avoid an active release train, revert on failure.
