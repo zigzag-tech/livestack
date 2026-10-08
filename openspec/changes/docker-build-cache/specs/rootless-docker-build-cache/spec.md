@@ -41,7 +41,7 @@ Unclean previous exit, epoch change, identity mismatch or a daemon that cannot s
 - **THEN** the next attempt reports `wiped(epoch)`
 
 ### Requirement: Cold canary
-Every `canary_every`-th attempt, and the first on an empty root, SHALL bypass the cache, and fingerprints of equal inputs SHALL match between warm and cold runs; a mismatch SHALL purge the namespace and be named.
+Every `canary_every`-th attempt, and the first on an empty root, SHALL bypass the cache, and fingerprint outputs of equal named inputs SHALL match between warm and cold runs; a mismatch SHALL purge the namespace and be named. A job verdict SHALL NOT be compared.
 
 #### Scenario: Stale entry injected
 - **WHEN** a warm run's fingerprint differs from a cold run's for the same inputs
