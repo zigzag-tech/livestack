@@ -768,13 +768,26 @@ class TaskEnvironmentStore:
         with self._storage_locked():
             entries = self._inventory()
             marker = next((entry[1] for entry in entries if entry[0] == current_path), None)
-            hit = any(isinstance(replica, dict) and replica.get('host') == self.host_id and
-                      replica.get('profile') == profile and replica.get('compatibility') == compatibility and
-                      replica.get('generation') == (marker or {}).get('generation') and
-                      replica.get('state') == 'parked' for replica in authority_replicas)
-            reusable = bool(marker and hit and marker['state'] == 'parked' and marker['profile'] == profile and
-                            marker['purpose'] == env['purpose'] and marker['compatibility'] == compatibility and
-                            marker['owner_scope'] == env['owner_scope'] and marker['generation'] < generation)
+            replica_checks = []
+            for replica in authority_replicas:
+                if isinstance(replica, dict):
+                    replica_checks.append(dict(host=replica.get('host') == self.host_id,
+                        profile=replica.get('profile') == profile,
+                        compatibility=replica.get('compatibility') == compatibility,
+                        generation=replica.get('generation') == (marker or {}).get('generation'),
+                        parked=replica.get('state') == 'parked'))
+            hit = any(all(check.values()) for check in replica_checks)
+            reuse_checks = dict(local_marker=marker is not None, authority_replica=hit,
+                parked=bool(marker and marker['state'] == 'parked'),
+                profile=bool(marker and marker['profile'] == profile),
+                purpose=bool(marker and marker['purpose'] == env['purpose']),
+                compatibility=bool(marker and marker['compatibility'] == compatibility),
+                owner_scope=bool(marker and marker['owner_scope'] == env['owner_scope']),
+                generation_advances=bool(marker and marker['generation'] < generation))
+            reusable = all(reuse_checks.values())
+            logging.info('task_environment_reuse_decision: handle=%s generation=%s replicas=%s checks=%s reused=%s',
+                         handle, generation, len(replica_checks),
+                         ','.join(f'{key}={int(value)}' for key, value in reuse_checks.items()), int(reusable))
             had_local = marker is not None
             discarded_components = dict(marker['components']) if marker is not None else {}
             if marker is not None and marker['generation'] >= generation:
