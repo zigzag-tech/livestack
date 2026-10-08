@@ -25,3 +25,8 @@
 - **Not covered**: build outputs (keying on source changes every train), the docker
   data root (docker_cache), macOS/Windows workers, task-environment attempts (own
   mechanism).
+- **Restore on request, not at start**: the transported source is not the handler's working tree until the
+  handler materialises it (Benchday's archive layout is app/ plus sibling groups, and its normaliser refuses
+  any extra file). The handler writes a request naming its root; the worker serves it from its poll loop,
+  restricted to the attempt's source directory, and answers once. Found when every real attempt reported
+  `no-manifest`: the manifest lived at app/.livestack/, not source/.livestack/.

@@ -30,7 +30,9 @@ from .docker_cache import namespace
 SCHEMA = 1
 MANIFEST = '.livestack/dependency-cache.json'
 COMMIT_FILE = 'dependency-cache-commit.json'
-ENV_COMPONENTS = 'HARMONY_DEPENDENCY_CACHE_COMPONENTS'
+ENV_HANDSHAKE = 'HARMONY_DEPENDENCY_CACHE_HANDSHAKE'
+REQUEST_FILE = 'request.json'
+RESPONSE_FILE = 'response.json'
 KEYS = {'enabled', 'path', 'max_bytes', 'epoch', 'refresh_every', 'max_component_bytes'}
 MAX_FILE = 16384
 MAX_COMPONENTS = 16
@@ -317,6 +319,8 @@ class Attempt:
         self.root = Path(config['path'])/namespace(owner)
         self.records = []
         self.entries = []        # [(path, key_paths, key, outcome)] after restore
+        self.served = False
+        self.source = None       # the handler's root, once it has asked
 
     # -- restore
     def _refresh_due(self):
@@ -407,16 +411,53 @@ class Attempt:
             self.entries[index] = (path, key_paths, key, 'reused')
         return self.records
 
-    def env(self):
-        """Value for ENV_COMPONENTS: the trees the handler may skip installing."""
-        reused = [dict(path=record['path'], outcome='reused') for record in self.records if record.get('outcome') == 'reused']
-        return json.dumps(reused, separators=(',', ':'))
+    def reused(self):
+        """The trees the handler may skip installing."""
+        return [dict(path=record['path'], outcome='reused') for record in self.records if record.get('outcome') == 'reused']
+
+    # -- handshake: the handler asks for the restore when ITS tree is ready
+    # A job's source is often not the handler's working tree until the handler has
+    # materialised it (Benchday's ZZOPS archive is app/ plus sibling dependency
+    # groups, merged into one tree, and any extra file in the raw layout is refused).
+    # So the worker restores on request, from the root the handler names, which must
+    # lie inside the attempt's source directory. The handler only ever sees directories.
+    def serve(self, handshake, boundary):
+        """Poll for the handler's request; restore and answer it once. Never raises."""
+        try:
+            if self.served:
+                return
+            request = _read_json(Path(handshake)/REQUEST_FILE)
+            if request is None:
+                return
+            self.served = True
+            answer = dict(version=SCHEMA, components=[], outcome='skipped')
+            root = request.get('root') if request.get('version') == SCHEMA else None
+            try:
+                real = os.path.realpath(root) if isinstance(root, str) else None
+                inside = real is not None and os.path.commonpath([real, os.path.realpath(boundary)]) == os.path.realpath(boundary)
+            except ValueError:
+                inside = False
+            if not inside or not os.path.isdir(real):
+                self.records = [dict(outcome='skipped', reason='root-outside-source')]
+            else:
+                self.source = Path(real)
+                self.restore(self.source)
+                answer.update(outcome='restored', components=self.reused())
+            _write_json(Path(handshake)/RESPONSE_FILE, answer)
+        except Exception as error:
+            self.records = [dict(outcome='error', reason='%s: %s' % (type(error).__name__, str(error)[:200]))]
+            try:
+                _write_json(Path(handshake)/RESPONSE_FILE, dict(version=SCHEMA, components=[], outcome='error'))
+            except Exception:
+                pass
 
     # -- save
     def save(self, source, output):
-        """Store the trees the handler committed that were not restored; returns the records (never raises)."""
+        """Store the trees the handler committed that were not restored; returns the records (never raises).
+
+        `source` is only the fallback: when the handler asked for a restore, its root is used."""
         try:
-            return self._save(Path(source), Path(output))
+            return self._save(self.source or Path(source), Path(output))
         except Exception as error:
             return [dict(outcome='error', reason='%s: %s' % (type(error).__name__, str(error)[:200]))]
 

@@ -31,12 +31,22 @@ not read from the job's source or the handler package. For registry-managed hand
 base handler (`handler_config` starts from it), so no package release is needed to change it; restart the worker
 (idle) to apply a config change.
 
-## Handler contract
+## Handler contract (handshake)
 
-1. `HARMONY_DEPENDENCY_CACHE_COMPONENTS` is a JSON list `[{"path": "hub/node_modules", "outcome": "reused"}]` of
-   trees already restored: do not install them. Absent variable = no cache.
-2. After every install succeeded, write `$HARMONY_OUTPUT/dependency-cache-commit.json`:
-   `{"version": 1, "paths": ["hub/node_modules", ...]}`. Never write it for trees later pruned or mutated.
+The worker cannot restore before the handler starts: a job's source is often not the handler's working tree
+until the handler has materialised it (Benchday's ZZOPS archive is `app/` plus sibling dependency groups
+that the handler merges into one tree, and any extra file in the raw layout is refused). So the handler asks:
+
+1. `HARMONY_DEPENDENCY_CACHE_HANDSHAKE` names a directory. Absent = no cache; install as usual.
+2. When its tree is ready, the handler writes `<dir>/request.json` `{"version": 1, "root": "<absolute tree root>"}`
+   (atomic rename). `root` must lie inside the attempt's source directory and contain `.livestack/dependency-cache.json`.
+3. The worker (polling every 0.2 s while the attempt runs) restores what matches and writes `<dir>/response.json`
+   `{"version": 1, "outcome": "restored"|"skipped"|"error", "components": [{"path": "hub/node_modules", "outcome": "reused"}]}`
+   once. The handler waits for it (bounded) and does not install the trees named `reused`. On timeout it installs
+   everything (cold).
+4. After every install succeeded, the handler writes `$HARMONY_OUTPUT/dependency-cache-commit.json`:
+   `{"version": 1, "paths": ["hub/node_modules", ...]}`. Never for trees later pruned or mutated. The worker stores
+   the committed trees that missed, reading them from the `root` the handler gave.
 
 ## Worker config (worker.json, no environment variables)
 
