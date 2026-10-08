@@ -20,7 +20,9 @@ UNIT=livestack-workload-authority
 CFG=$HOME/.config/livestack-workloads/authority.json
 STATE=$HOME/.local/state/livestack-workloads/authority
 DROPIN_DIR=$HOME/.config/systemd/user/$UNIT.service.d
-DROPIN=$DROPIN_DIR/99-zz-release.conf
+# Release overlays use a z-prefixed filename; keep this stable override later
+# than versioned overlays so systemd cannot keep selecting an older PYTHONPATH.
+DROPIN=$DROPIN_DIR/zzzzzzzzzzzzzzzz-release-current.conf
 HERE=$(cd "$(dirname "$0")" && pwd)
 NODE_PY=$RELEASE/node-py; [ -d "$NODE_PY" ] || NODE_PY=$RELEASE
 PYPATH=$NODE_PY:$NODE_PY/_deps
@@ -68,21 +70,28 @@ then
   echo "ABORT: backup failed"; exit 2
 fi
 install -m 600 "$CFG" "$BACKUP/authority.json"
-[ -f "$DROPIN" ] && cp -p "$DROPIN" "$BACKUP/99-zz-release.conf.previous"
+[ -f "$DROPIN" ] && cp -p "$DROPIN" "$BACKUP/zz-release-current.conf.previous"
 read -r BEFORE_READY BEFORE_FRESH < <(ready_workers 2>/dev/null || echo "0 0")
 echo "   backup: $BACKUP   workers ready before: $BEFORE_READY of $BEFORE_FRESH fresh"
 
 rollback() {
   echo "ROLLBACK: $1"
-  if [ -f "$BACKUP/99-zz-release.conf.previous" ]; then cp -p "$BACKUP/99-zz-release.conf.previous" "$DROPIN"; else rm -f "$DROPIN"; fi
+  if [ -f "$BACKUP/zz-release-current.conf.previous" ]; then cp -p "$BACKUP/zz-release-current.conf.previous" "$DROPIN"; else rm -f "$DROPIN"; fi
   install -m 600 "$BACKUP/authority.json" "$CFG"
   systemctl --user daemon-reload; systemctl --user restart $UNIT; sleep 3
   echo "   unit: $(systemctl --user is-active $UNIT)"; exit 1
 }
 
+live_release_path_matches() {
+  local pid
+  pid=$(systemctl --user show --property=MainPID --value "$UNIT") || return 1
+  [ "$pid" -gt 1 ] || return 1
+  tr '\0' '\n' < "/proc/$pid/environ" | grep -Fxq "PYTHONPATH=$PYPATH"
+}
+
 echo "== 3. switch and restart"
 mkdir -p "$DROPIN_DIR"
-printf '[Service]\n# %s: release %s. Roll back: delete this file (or restore %s/99-zz-release.conf.previous), restore %s/authority.json, daemon-reload, restart.\nEnvironment=PYTHONPATH=%s\n' \
+printf '[Service]\n# %s: release %s. Roll back: delete this file (or restore %s/zz-release-current.conf.previous), restore %s/authority.json, daemon-reload, restart.\nEnvironment=PYTHONPATH=%s\nEnvironment=PYTHONDONTWRITEBYTECODE=1\n' \
   "$STAMP" "$RELEASE" "$BACKUP" "$BACKUP" "$PYPATH" > "$DROPIN"
 [ -n "$CANDIDATE_CONFIG" ] && install -m 600 "$CANDIDATE_CONFIG" "$CFG"
 systemctl --user daemon-reload
@@ -90,7 +99,7 @@ t0=$(date +%s); systemctl --user restart $UNIT || rollback "restart command fail
 
 echo "== 4. verify live"
 for i in $(seq 1 90); do
-  if read -r READY FRESH < <(ready_workers 2>/dev/null) && [ "$READY" -ge "$BEFORE_READY" ] && [ "$READY" -gt 0 ]; then
+  if live_release_path_matches && read -r READY FRESH < <(ready_workers 2>/dev/null) && [ "$READY" -ge "$BEFORE_READY" ] && [ "$READY" -gt 0 ]; then
     echo "   healthy $(( $(date +%s) - t0 ))s after restart: workers ready $READY of $FRESH (before: $BEFORE_READY)"; echo "DEPLOYED $RELEASE"; exit 0
   fi
   sleep 2
