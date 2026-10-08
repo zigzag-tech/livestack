@@ -88,3 +88,12 @@ CREATE INDEX IF NOT EXISTS handler_release_events_age ON handler_release_events(
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state, created);
 CREATE INDEX IF NOT EXISTS attempts_host ON attempts(host, state);
 CREATE INDEX IF NOT EXISTS github_remote_state ON github_remote_jobs(provider, state, created);
+-- Derived data (openspec measured-resource-declarations): rebuilt from attempt results, so
+-- losing it reads as "no history". Bounded per (handler, dimension) by count and age in the
+-- same transaction that inserts (resource_history.py).
+CREATE TABLE IF NOT EXISTS resource_history (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, handler TEXT NOT NULL, dimension TEXT NOT NULL,
+ attempt TEXT NOT NULL, value REAL NOT NULL, declared REAL, outcome TEXT NOT NULL, at REAL NOT NULL,
+ UNIQUE(attempt, dimension)
+);
+CREATE INDEX IF NOT EXISTS resource_history_series ON resource_history(handler, dimension, at);
