@@ -186,6 +186,10 @@ class SystemdExecutor:
                ['systemd-run', '--user'])
         user_properties = (['--property=User='+str(os.getuid()), '--property=Group='+str(os.getgid())]
                            if system_manager else [])
+        # In a --user manager PrivateTmp makes systemd build an implicit user namespace to
+        # get a mount namespace; inside it setuid newuidmap (rootlesskit) fails with EPERM
+        # because root is unmapped. So rootless Docker under --user gets no PrivateTmp.
+        private_tmp = [] if rootless_docker and not system_manager else ['--property=PrivateTmp=yes']
         self.command(*run, '--quiet', '--unit='+self.unit(attempt_id),
             *user_properties,
             '--property=Type=exec',
@@ -194,7 +198,7 @@ class SystemdExecutor:
             '--property=MemoryMax='+str(int(memory_bytes)), '--property=MemorySwapMax=0',
             '--property=CPUQuota='+str(cpu*100)+'%', '--property=TasksMax='+str(int(tasks)),
             '--property=RuntimeMaxSec='+str(max_seconds),
-            '--property=PrivateTmp=yes',
+            *private_tmp,
             '--property=StandardOutput=null', '--property=StandardError=null',
             '--property=NoNewPrivileges='+('no' if rootless_docker else 'yes'),
             *['--property=InaccessiblePaths='+str(path) for path in clean_inaccessible],
