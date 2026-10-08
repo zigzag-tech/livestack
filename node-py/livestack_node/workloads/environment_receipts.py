@@ -12,12 +12,8 @@ TIMING_PHASES = ('queue', 'transfer', 'source_materialization', 'dependencies', 
 REUSE_OUTCOMES = ('created', 'reused', 'rebuilt', 'relocated')
 CACHE_OUTCOMES = ('created', 'reused', 'rebuilt', 'relocated', 'invalidated')
 REUSE_REASONS = ('created', 'compatible_environment_reused', 'source_updated_incrementally',
-    'cache_inputs_changed', 'toolchain_changed', 'profile_changed', 'purpose_changed',
-    'owner_scope_changed', 'local_state_untrusted', 'authority_replica_unconfirmed',
-    'authority_replica_missing', 'authority_replica_host_mismatch',
-    'authority_replica_profile_mismatch', 'authority_replica_compatibility_mismatch',
-    'authority_replica_generation_mismatch', 'authority_replica_not_parked',
-    'relocated_reconstructed', 'worker_environment_unavailable')
+    'cache_inputs_changed', 'toolchain_changed', 'local_state_untrusted',
+    'authority_replica_unconfirmed', 'relocated_reconstructed', 'worker_environment_unavailable')
 
 
 def validate(receipt, *, handle, generation, profile, source_digest):
