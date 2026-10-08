@@ -110,10 +110,13 @@ container ownership, filesystem bounds, the persistent worker service and produc
 adapters are still required before production handlers may be advertised.
 
 Every Linux systemd attempt also sets `PrivateTmp=yes`, giving its process tree
-private writable `/tmp` and `/var/tmp` mounts without changing
-`NoNewPrivileges`, cgroup limits, or explicit attempt input/output paths. This
-lets restricted handlers create temporary runtime paths such as
-`/tmp/.X11-unix` without changing host mounts. A real systemd integration test
+private writable `/tmp` and `/var/tmp` mounts without changing the backend's
+`NoNewPrivileges` policy, cgroup limits, or explicit attempt input/output paths.
+Runtime-only attempts use the systemd user manager. An admitted compilation
+assignment uses the system manager as the worker UID/GID so the root verifier
+continues to see its root-owned host registry as UID 0; no user-manager fallback
+is allowed. This lets restricted handlers create temporary runtime paths such
+as `/tmp/.X11-unix` without changing host mounts. A real systemd integration test
 checks both private paths, the host-visible absence of unique marker files, and
 `NoNewPrivs: 1`; the focused supervision file passed 13 tests on
 `lappy-bellinzona` (2026-10-08, Python 3.13.15, real systemd user unit/cgroup
