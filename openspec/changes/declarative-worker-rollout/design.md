@@ -111,10 +111,12 @@ Rollback of the change: set mode `off`; claims remain authoritative but a docume
 - **Compatibility:** old workers without facts get no unit state and no reconciliation (`unknown`); they keep working and are rolled by hand until upgraded once.
 - Estimate: roughly 40 tasks, about 5 engineer-weeks plus observation windows (steps 1 and 3).
 
-## Open Questions
+## Owner decisions (2026-10-08, resolving the open questions)
 
-1. Where does the `rollout` actor run: inside the authority tick (proposed, one process, access to DB) or as a separate service principal calling the API (smaller authority blast radius, more moving parts)? 
-2. Soak duration and failure budget defaults (10 min / 3 failures proposed) are guesses; they should be set from the first three real rollouts.
-3. Should the capture-size cap be raised or should the capture be split? (d) shows the cap blocks releases; this change only makes it a build-time failure. A decision on the number belongs to the owner and the runtime-capture owner.
-4. Verifier helper trust: is a root-owned path-activated helper that selects among pre-staged payloads acceptable, or must verifier refresh always be a human root action? Proposed: acceptable, because root only chooses between payloads the operator staged and signed.
-5. Do Benchday `e2e` slots count as one capability set for `min_claiming`, given Harmony slots are scarce? Minimum proposed: 2 of 5.
+1. The reconciler runs as a SEPARATE service principal (`rollout`) with a smaller blast radius, calling the authority API; it does not run inside the authority tick. The authority keeps only claim expiry.
+2. Verifier refresh: a root-owned helper MAY install payloads the owner has pre-staged. It installs only content-addressed payloads whose sha256 appears in a root-owned allow file, and nothing else. This removes the third deploy path.
+3. Auto-re-enable on drain expiry is accepted. Intentional long holds use an explicit `hold: true`.
+4. `min_claiming`: 2 of 5 for the zz-joe e2e slots; at least 1 for every other capability set (release workers: 1 of 2).
+5. Soak 10 minutes and failure budget 3 are the starting defaults.
+6. Runtime capture cap: this change only makes exceeding it a build-time failure. Raising or splitting stays a separate decision.
+7. Enforce mode is operator-only. Round 1 implements phases 0-1 and reconciler OBSERVE only.
