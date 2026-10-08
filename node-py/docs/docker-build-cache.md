@@ -111,6 +111,12 @@ it, `daemon-reload`, restart when idle; and set `docker_cache.enabled` false or 
 Cache dir `~/.cache/livestack-docker-cache/<worker>`, bound 40 GiB per namespace (WSL 30 GiB), `canary_every` 20
 (zz-joe-e2e-3: 3). Drain/enable with the atomic `claim_enabled` edit in `worker-release-rollout.md`.
 
+Enabled slots (2026-10-08): zz-joe-e2e-1, -2, -3, -4 and -5 (cache dir named for the worker; e2e-5 configured by a
+separate rollout), xc-win-1-wsl and xc-win-1-wsl-2 (each its own `<worker>` dir, 30 GiB). zz-joe-e2e-2 runs the
+taskenv release (livestack-2151b9d4, same `docker_cache.py`/`docker_command.py` as 925a02fa) so it needs no
+PYTHONPATH change; xc-win-1-wsl-2 got the `zzz-docker-cache.conf` drop-in (925a02fa). Backups:
+`worker-2.json.bak-dockercache-*`.
+
 zz-joe, Benchday E2E attempts of 2026-10-08 (command.log `Built benchday/e2e-node:<fp> in Ns`, authority DB):
 
 | class | attempts | image build median | start -> postgresReady median |
