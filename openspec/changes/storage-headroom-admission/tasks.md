@@ -48,3 +48,11 @@ and its ledger obligation. Do not edit `authority.json` retention values or Benc
 
 - [ ] 6.1 Authority release first (`tools/check-authority-release.py`), config sections
   added in a separate reviewed commit with `/retention/plan` output attached; workers next.
+
+Rollout record 2026-10-08: authority release livestack-8923e025 deployed (backup release-20261008T230506Z; a first
+attempt with 80cf377b rolled back automatically because the live config already used the newer `rollout` role).
+Config added to authority.json (backup authority.json.bak-measured-storage-sections-20261008T230541Z):
+`storage_bounds` (capacity 0.5, 40 GiB floor; the 10% fraction was NOT applied: ~183 GiB floor > ~130 GiB free
+would refuse all uploads) and `retention_tiers` (succeeded 3 d, failed 14 d, release refs keep 10 / 14 d).
+Workers: only xc-tower-attune-1 rolled (canary). OPEN: roll remaining workers (they classify OOM without a
+receipt and report disk_unavailable/cpu_signal only after their release moves); then archive.
