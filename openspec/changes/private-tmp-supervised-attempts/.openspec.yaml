@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-08
+goal: Give every systemd-supervised workload a writable private /tmp and
+  /var/tmp without changing its privilege boundary.

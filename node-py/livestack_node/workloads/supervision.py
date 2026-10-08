@@ -194,6 +194,7 @@ class SystemdExecutor:
             '--property=MemoryMax='+str(int(memory_bytes)), '--property=MemorySwapMax=0',
             '--property=CPUQuota='+str(cpu*100)+'%', '--property=TasksMax='+str(int(tasks)),
             '--property=RuntimeMaxSec='+str(max_seconds),
+            '--property=PrivateTmp=yes',
             '--property=StandardOutput=null', '--property=StandardError=null',
             '--property=NoNewPrivileges='+('no' if rootless_docker else 'yes'),
             *['--property=InaccessiblePaths='+str(path) for path in clean_inaccessible],
