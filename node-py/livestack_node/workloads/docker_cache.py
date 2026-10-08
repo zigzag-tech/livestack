@@ -29,6 +29,7 @@ EXIT_FILE = 'docker-cache-exit.json'
 FINGERPRINT_FILE = 'docker-cache-fingerprint.json'
 MAX_FILE = 262144
 RECORDS = 16
+FINISH_WAIT = 900   # seconds the native frontend lets the attempt process finish cache bookkeeping
 
 
 # ---------------------------------------------------------------- worker side
@@ -144,9 +145,21 @@ def tree_bytes(root):
     return total, errors
 
 
-def _wipe(path):
+def _rm(path):
     subprocess.run(['/usr/bin/rm', '-rf', '--', str(path)], check=True, timeout=900,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _wipe(path):
+    """Make `path` disappear NOW (rename), then delete it. A kill during the slow delete
+    leaves only a `.trash-*` sibling, which the next attempt removes; the live name is
+    never half-deleted."""
+    path = Path(path)
+    if not path.exists() and not path.is_symlink():
+        return
+    trash = path.with_name(path.name + '.trash-' + os.urandom(4).hex())
+    os.rename(path, trash)
+    _rm(trash)
 
 
 def _read_json(path):
@@ -201,6 +214,11 @@ class Session:
             self.lock_fd = fd
             _write_json(self.dir/'holder.json', dict(attempt=p['attempt'], pid=os.getpid(), t=time.time()))
             self.state = _read_json(self.dir/'state.json') or {}
+            for leftover in self.dir.glob('slot.trash-*'):
+                try:
+                    _rm(leftover)
+                except Exception as error:
+                    self.result['trash_error'] = '%s: %s' % (type(error).__name__, str(error)[:120])
             slot = self.dir/'slot'
             reason = None
             if slot.is_symlink():
@@ -271,9 +289,14 @@ class Session:
 
     def announce(self):
         """Tell the native frontend (which prunes while dockerd is up) what applies."""
+        if not self.plan:
+            return
         try:
+            # finish_wait: how long the native frontend must let this process run its size walk,
+            # canary and wipe after dockerd stops (killing it there would lose the outcome).
             _write_json(self.output/SESSION_FILE, dict(persistent=self.root is not None,
-                                                       max_bytes=self.plan['max_bytes'] if self.plan else 0))
+                                                       max_bytes=self.plan['max_bytes'] if self.plan else 0,
+                                                       finish_wait=FINISH_WAIT if self.plan else 5))
         except Exception:
             pass
 
@@ -322,10 +345,17 @@ class Session:
             records = (_read_json(self.dir/'canary.json') or {}).get('records', [])
             record = dict(mode=mode, attempt=p['attempt'], ok=code == 0, inputs=fingerprint.get('inputs'),
                           outputs=fingerprint.get('outputs'), t=int(time.time()))
-            other = next((r for r in reversed(records) if r.get('mode') != mode and r.get('inputs') == record['inputs']), None)
-            if other and (other.get('ok') != record['ok'] or
-                          (other.get('outputs') is not None and record['outputs'] is not None and other['outputs'] != record['outputs'])):
-                mismatch = dict(against=other.get('attempt'), this=mode, ok=[other.get('ok'), record['ok']])
+            # Only fingerprints that name their inputs are comparable. A job's own verdict is
+            # NOT compared: two runs of one tree legitimately differ (flaky assertions), and
+            # that says nothing about the cache.
+            other = None
+            if record['inputs'] is not None and record['outputs'] is not None:
+                other = next((r for r in reversed(records) if r.get('mode') != mode and r.get('inputs') == record['inputs']
+                              and r.get('outputs') is not None), None)
+            if other and other['outputs'] != record['outputs']:
+                mismatch = dict(against=other.get('attempt'), this=mode,
+                                differing=sorted(k for k in set(other['outputs']) | set(record['outputs'])
+                                                 if other['outputs'].get(k) != record['outputs'].get(k))[:8])
             records = (records + [record])[-RECORDS:]
             if mismatch:
                 self.result['canary_mismatch'] = mismatch

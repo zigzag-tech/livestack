@@ -43,6 +43,7 @@ def run(config_path):
         raise RuntimeError('private Docker readiness record already exists')
     namespace = subprocess.Popen(config['namespace'])
     owned = None
+    finish_wait = 5
     try:
         deadline = time.monotonic()+60
         while not ready.exists():
@@ -83,6 +84,7 @@ def run(config_path):
             # While dockerd is still up: the persistent root's bound is enforced here, in the
             # same place docker_command enforces it for the non-native path.
             session = docker_cache._read_json(Path(config['output'])/docker_cache.SESSION_FILE) or {}
+            finish_wait = int(session.get('finish_wait', 5)) if isinstance(session.get('finish_wait', 5), int) else 5
             if session.get('persistent') is True:
                 record['prune'] = docker_cache.prune(env, int(session['max_bytes']))
         except Exception as error:
@@ -99,7 +101,7 @@ def run(config_path):
             except FileNotFoundError:
                 pass
         try:
-            namespace.wait(timeout=5)
+            namespace.wait(timeout=finish_wait)
         except subprocess.TimeoutExpired:
             namespace.terminate()
             try:
