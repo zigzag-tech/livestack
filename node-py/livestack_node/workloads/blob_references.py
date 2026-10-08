@@ -55,6 +55,9 @@ class BlobReferences:
             db.execute('INSERT INTO blob_references VALUES(?,?,?,?) ON CONFLICT(owner,name) '
                        'DO UPDATE SET revision=excluded.revision,digests=excluded.digests',
                        (owner,key,revision,json.dumps(digests,separators=(',',':'))))
+            db.execute('INSERT INTO blob_reference_ages(owner,name,updated) VALUES(?,?,?) '
+                       'ON CONFLICT(owner,name) DO UPDATE SET updated=excluded.updated',
+                       (owner,key,self.blobs.store.clock()))
             # Empty references retain their revision: deleting a row would let
             # stale pre-deletion writers pass after a name was recreated.
             return dict(revision=revision, digests=digests)

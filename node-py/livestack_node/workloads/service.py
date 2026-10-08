@@ -23,6 +23,22 @@ from ..ledger import JsonlLedger
 _UNCHANGED = object()
 
 
+def apply_storage_policy(server, config):
+    """(Re)build the headroom guard and retention tiers from the validated config sections
+    and install them. Absent sections install None: today's flat behaviour."""
+    from .retention_tiers import RetentionTiers
+    from .storage_bounds import HeadroomGuard, StorageBounds
+    bounds = StorageBounds.validate(config['storage_bounds']) if config.get('storage_bounds') is not None else None
+    tiers = RetentionTiers.validate(config['retention_tiers']) if config.get('retention_tiers') is not None else None
+    blobs = server.blobs
+    guard = HeadroomGuard(blobs.root, blobs.max_bytes, bounds) if bounds is not None else None
+    blobs.replace_policy(guard, tiers, bounds.gc_batch if bounds is not None else 256)
+    server.store.retention_tiers = tiers
+    if guard is not None:
+        guard.snapshot()  # logs the effective bound at startup/reload
+    return guard, tiers
+
+
 def load_reloadable(path):
     """Parse the reloadable sections with the startup rules. Raises ValueError.
     Pure: nothing is applied until every section has passed."""
@@ -84,6 +100,10 @@ def reload_principals(server, path, attempts=3, pause=.2):
     logging.info('principal_reload_applied: %d principals, added=%s removed=%s; handlers added=%s; '
                  'environment_handlers=%s',
                  len(new), sorted(ids-old), sorted(old-ids), added, environment_count)
+    try:
+        apply_storage_policy(server, load_config(path, ReloadableConfig))
+    except ValueError as exc:
+        logging.error('storage_policy_reload_refused: %s; keeping the previous policy', exc)
     return True
 
 
@@ -144,6 +164,7 @@ def main():
                                 public_base_url=config.get('public_base_url'),
                                 identity_authority_id=config.get('identity_authority_id'))
         server.blobs.recover()
+        apply_storage_policy(server, config)
         # SIGHUP re-reads the principals from --config (docs/authority-principal-reload.md).
         # A thread keeps the file read and its retries out of the signal handler.
         signal.signal(signal.SIGHUP, lambda *_: threading.Thread(

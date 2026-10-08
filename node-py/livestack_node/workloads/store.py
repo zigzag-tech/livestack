@@ -1187,17 +1187,45 @@ class WorkloadStore:
         for a in list(db.execute("SELECT * FROM attempts WHERE state='running' AND expires<=?", (now,))):
             self._abandon(db, a, now, "execution lease expired")
 
-    def _prune(self, db, now):
-        if self.limits.terminal_seconds is None:
-            return  # Missing destructive window fails closed; submission still enforces a hard cap.
-        rows = db.execute("SELECT id,updated,retain FROM jobs WHERE state IN ('succeeded','failed','cancelled','expired') "
+    retention_tiers = None  # retention_tiers.RetentionTiers, installed by the service; None = flat window
+
+    def _job_window(self, state):
+        flat = self.limits.terminal_seconds
+        return flat if self.retention_tiers is None else self.retention_tiers.job_window(state, flat)
+
+    def _prune_candidates(self, db, now):
+        """Terminal jobs a retention pass deletes: beyond the count bound, or older than the window of
+        their outcome tier. A tier with no window (flat window unset) deletes nothing by age."""
+        rows = db.execute("SELECT id,state,updated,retain FROM jobs WHERE state IN ('succeeded','failed','cancelled','expired') "
                           "AND NOT EXISTS (SELECT 1 FROM attempts WHERE job=jobs.id AND state IN ('running','cleanup')) "
                           "AND NOT EXISTS (SELECT 1 FROM github_remote_jobs WHERE job=jobs.id "
                           "AND state NOT IN ('terminal','refused')) "
                           "ORDER BY updated DESC").fetchall()
+        doomed = []
         for index, row in enumerate(rows):
-            if not row["retain"] and (index >= self.limits.terminal_jobs or now-row["updated"] > self.limits.terminal_seconds):
-                db.execute("DELETE FROM jobs WHERE id=?", (row["id"],))
+            window = self._job_window(row["state"])
+            if window is not None and not row["retain"] and (
+                    index >= self.limits.terminal_jobs or now-row["updated"] > window):
+                doomed.append(row)
+        return doomed
+
+    def _prune(self, db, now):
+        if self.limits.terminal_seconds is None and self.retention_tiers is None:
+            return  # Missing destructive window fails closed; submission still enforces a hard cap.
+        for row in self._prune_candidates(db, now):
+            db.execute("DELETE FROM jobs WHERE id=?", (row["id"],))
+
+    def retention_plan(self):
+        """Dry run of the job part of a retention pass: counts per outcome. Deletes nothing."""
+        with self.transaction() as db:
+            doomed = self._prune_candidates(db, self.clock())
+        counts = {}
+        for row in doomed:
+            counts[row["state"]] = counts.get(row["state"], 0) + 1
+        tiers = self.retention_tiers
+        return dict(jobs=dict(would_delete=len(doomed), by_state=counts,
+                              windows_seconds={s: self._job_window(s) for s in ("succeeded", "failed", "cancelled", "expired")},
+                              tiered=tiers is not None and bool(tiers.jobs)))
 
     def sweep(self):
         with self.transaction() as db:

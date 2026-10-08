@@ -7,20 +7,20 @@ and its ledger obligation. Do not edit `authority.json` retention values or Benc
 
 ## 1. Effective bounds
 
-- [ ] 1.1 `storage_bounds.py` + `config.py` section, `statvfs` seam, log/status record.
+- [x] 1.1 `storage_bounds.py` + `config.py` section, `statvfs` seam, log/status record.
   Tests: boundary +-1 byte (fails on `origin/main`), statvfs failure, bad config fails
   closed. Ledger: bound record logged at startup/reload/change.
-- [ ] 1.2 `blobs.py` put/put_range/upload-grant consult it; HTTP 507 named refusal.
+- [x] 1.2 `blobs.py` put/put_range/upload-grant consult it; HTTP 507 named refusal.
   Tests: control above. Ledger: refusal event with figures.
-- [ ] 1.3 Proactive bounded GC with once-per-window guard. Tests: GC counter, referenced-
+- [x] 1.3 Proactive bounded GC with once-per-window guard. Tests: GC counter, referenced-
   only store, deletion never touches referenced blobs.
 
 ## 2. Retention tiers
 
-- [ ] 2.1 `retention_tiers` schema; tiered job/attempt expiry; compatible reference rules
+- [x] 2.1 `retention_tiers` schema; tiered job/attempt expiry; compatible reference rules
   with `ttl_seconds` + `keep_newest`; `retain` exemption. Tests: straddling ages; release
   prefix rule; "never" requires acknowledgement.
-- [ ] 2.2 `unbounded_references` status and `GET /retention/plan` dry run. Tests: unmatched
+- [x] 2.2 `unbounded_references` status and `GET /retention/plan` dry run. Tests: unmatched
   owner shown; plan deletes nothing.
 
 ## 3. Worker and placement
