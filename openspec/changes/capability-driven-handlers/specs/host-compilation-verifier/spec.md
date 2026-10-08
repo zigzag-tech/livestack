@@ -8,6 +8,10 @@ A host MAY run one root-owned compilation launch verifier serving every worker i
 - **WHEN** a process inside worker B's attempt unit sends a request naming worker A
 - **THEN** the verifier looks up A's unit, finds the peer outside it, and refuses with `compilation_peer_outside_attempt`
 
+#### Scenario: The requesting peer exits before the verifier reads it
+- **WHEN** the peer process is gone when the verifier reads its `/proc` identity (before or after the authority exchange)
+- **THEN** the verifier refuses with the distinct `compilation_peer_exited` (503), never the generic `compilation_verification_unavailable`, and never admits; the consumer guard retries the launch exactly once on this code and treats the second answer as final, while every other refusal is never retried
+
 #### Scenario: A non-enrolled local account tries to mint a receipt
 - **WHEN** a process of an unenrolled uid names a live attempt id from its environment
 - **THEN** the verifier refuses before any authority exchange
