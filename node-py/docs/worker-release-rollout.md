@@ -45,6 +45,10 @@ journal shows `object transfer ceiling is 8589934592 bytes` after.
 
 ## Drain and idle rule
 
+Prefer the claims API (owner, mandatory expiry, compare-and-swap):
+`cli --config C drain WORKER --until 2026-10-09T06:00Z --reason "roll image handler"` and `... enable WORKER`;
+see `worker-claims-and-rollout.md`. The `claim_enabled` file edit below still works and is logged.
+
 Do not restart the authority as part of a worker release. A separate authority
 code upgrade is a one-time operation and requires a fully idle window with no
 running or cleanup attempts; see `authority-principal-reload.md`. To stop a

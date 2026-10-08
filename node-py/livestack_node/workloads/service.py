@@ -10,6 +10,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from .config import ReloadableConfig, load_config
+from .reload_status import file_hash
 from .handler_registry import parse_policy
 from .http import Principal, WorkloadServer, check_grant_origins, check_principals
 from .model import Limits
@@ -47,7 +48,9 @@ def reload_principals(server, path, attempts=3, pause=.2):
     True when the config was applied. An omitted environment_handlers section
     preserves the installed environment policy; an explicit empty mapping
     disables environment enrollment. Never raises, never logs a token."""
+    status = getattr(server, 'reload_status', None)
     for attempt in range(attempts):
+        digest = file_hash(path)  # taken before the read: a later edit shows as not in sync, never as applied
         try:
             new, handlers, policy, environment_handlers = load_reloadable(path)
             break
@@ -55,6 +58,8 @@ def reload_principals(server, path, attempts=3, pause=.2):
             # JSONDecodeError is a ValueError: a torn write lands here.
             if attempt + 1 == attempts:
                 logging.error('principal_reload_refused: %s; keeping the previous set', exc)
+                if status is not None:
+                    status.refused(path, digest, exc)
                 return False
             time.sleep(pause)
     store, registry = server.store, server.handler_registry
@@ -72,6 +77,8 @@ def reload_principals(server, path, attempts=3, pause=.2):
         server.replace_principals(new)
     except ValueError as exc:
         logging.error('principal_reload_refused: %s; keeping the previous set', exc)
+        if status is not None:
+            status.refused(path, digest, exc)
         return False
     added = sorted(all_handlers - store.handlers)
     store.add_handlers(handlers)
@@ -81,6 +88,12 @@ def reload_principals(server, path, attempts=3, pause=.2):
     ids = {p.id for p in new}
     environment_count = ('unchanged' if environment_handlers is _UNCHANGED
                          else len(parsed_environment_handlers))
+    if status is not None:
+        status.applied_now(path, digest, len(new), 'sighup')
+    claims_sync = getattr(server, 'claims', None)
+    if claims_sync is not None:
+        # authority.json claim_enabled still works during migration (claims.py sync_file); it is logged.
+        claims_sync.sync_file(new)
     logging.info('principal_reload_applied: %d principals, added=%s removed=%s; handlers added=%s; '
                  'environment_handlers=%s',
                  len(new), sorted(ids-old), sorted(old-ids), added, environment_count)
@@ -144,6 +157,8 @@ def main():
                                 public_base_url=config.get('public_base_url'),
                                 identity_authority_id=config.get('identity_authority_id'))
         server.blobs.recover()
+        server.claims.sync_file(principals)
+        server.reload_status.applied_now(args.config, file_hash(args.config), len(principals), 'startup')
         # SIGHUP re-reads the principals from --config (docs/authority-principal-reload.md).
         # A thread keeps the file read and its retries out of the signal handler.
         signal.signal(signal.SIGHUP, lambda *_: threading.Thread(

@@ -669,7 +669,7 @@ class WorkloadStore:
             host_id = self.compilation_policy.physical_host(host_id, self.clock())
         if not isinstance(report, dict) or set(report) - {"capacity", "available", "labels", "handlers", "ready", "host",
                                                           "environment_profiles", "environment_replicas", "handler_inventory",
-                                                          "handler_activation_failures", "handler_gc_receipts"}:
+                                                          "handler_activation_failures", "handler_gc_receipts", "unit"}:
             raise WorkloadError("invalid worker report")
         capacity, available = resources(report.get("capacity")), resources(report.get("available"))
         tags = labels(report.get("labels", {}))
@@ -715,6 +715,9 @@ class WorkloadStore:
                         item['reference_evidence'] not in ('complete', 'unavailable')):
                     raise WorkloadError('handler_gc_receipts_invalid')
             body['handler_gc_receipts'] = receipts
+        if 'unit' in report:  # deployment-unit parts the worker runs (unit.py); absent on legacy workers
+            from .unit import validate_report as validate_unit_report
+            body['unit'] = validate_unit_report(report['unit'])
         profiles = report.get('environment_profiles', {})
         if not isinstance(profiles, dict) or len(profiles) > 32:
             raise WorkloadError('invalid environment profile report')
