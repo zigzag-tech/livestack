@@ -200,3 +200,7 @@ Capacity recheck (2026-10-08 01:17 UTC): `zzops train status --app benchday --co
 
 
 Capacity turnover recheck (2026-10-08 01:24 UTC): a read-only Livestack SQLite snapshot now has 1,176 ended attempts (three more than the 01:17 snapshot), six running attempts, zero cleanup attempts, and zero task-environment/replica rows. No task-environment work is active; the queue is turning over but has not reached the required zero-attempt window. No new fence, task workload, full/coalesced E2E, service/worker change or publish was initiated.
+
+
+
+Active-attempt liveness readback (2026-10-08 01:33 UTC): all six authority attempts are live, not stale: worker heartbeats are 1.7–9.5 seconds old, each attempt lease has about 114 seconds remaining, and all six workers report `ready=true`. The read is based on the authority's SQLite attempts joined to worker heartbeat/readiness rows. It confirms the safe next step is to wait for completion; do not restart or drain around these active jobs. Task-environment and replica row counts remain zero.
