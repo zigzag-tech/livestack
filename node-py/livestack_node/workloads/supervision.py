@@ -96,7 +96,7 @@ class SystemdExecutor:
 
     def _inspect_manager(self, manager, unit):
         reply = self.command('systemctl', manager, 'show', unit,
-                             '--property=LoadState,ActiveState,SubState,Result,ControlGroup,OOMKills,MemoryPeak,CPUUsageNSec')
+                             '--property=LoadState,ActiveState,SubState,Result,ControlGroup,OOMKills,MemoryPeak,CPUUsageNSec,ExecMainStatus')
         state = dict(line.split('=', 1) for line in reply.stdout.splitlines() if '=' in line)
         state['UnitManager'] = manager
         return state

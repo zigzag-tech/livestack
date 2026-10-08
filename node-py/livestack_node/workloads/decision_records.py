@@ -70,7 +70,7 @@ def admission_record(decision, *, now, emitter_id, kind, owner, selector, locali
 
 def completion_record(*, now, emitter_id, decision_id, kind, owner, job_id, attempt_id,
                       worker, environment_handle, environment_generation, attempt_seconds,
-                      product_outcome, job_state, environment_receipt=None):
+                      product_outcome, job_state, environment_receipt=None, cause_kind=None):
     """Build a linked completion event; it does not change the original decision."""
     receipt = environment_receipt or {}
     return Decision(
@@ -99,6 +99,7 @@ def completion_record(*, now, emitter_id, decision_id, kind, owner, job_id, atte
             'environment_reuse_outcome': receipt.get('reuse_outcome'),
             'product_outcome': product_outcome,
             'job_state': job_state,
+            'cause_kind': cause_kind,
         },
         decision_id=new_decision_id(now), ts=now,
     )

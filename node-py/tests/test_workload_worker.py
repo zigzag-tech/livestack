@@ -1919,5 +1919,8 @@ def test_oom_kill_without_a_receipt_fails_as_a_resource_limit_and_is_not_retried
         resources = done['result']['result']['resources']
         assert resources['oom_kill'] >= 1 and resources['source'] in ('unit', 'sampled')
         assert len(done['attempts']) == 1 and not worker.step()
+        # The typed cause (openspec typed-outcome-causes-and-blockers) from the same real kernel kill.
+        assert done['cause']['kind'] == 'oom_killed' and done['cause']['retry'] == 'after_change', done['cause']
+        assert done['cause']['evidence']['source'] in ('unit', 'sampled')
     finally:
         worker.close()

@@ -71,7 +71,7 @@ class WorkloadClient:
 
     def submit(self, request):
         request = stamp(request)
-        if isinstance(request, dict) and request.get('version') == 3 and request.get('environment') is not None:
+        if isinstance(request, dict) and request.get('version') in (3, 4) and request.get('environment') is not None:
             capabilities = self.capabilities()
             environment = capabilities.get('environments') or {}
             handler = request.get('handler')
@@ -131,6 +131,21 @@ class WorkloadClient:
         is returned unchanged. Read `state` for the outcome."""
         from .model import name
         return self.request('jobs/'+name(job_id, 'job_id')+'/withdraw', {})
+
+    def get_scope(self, key):
+        """State, lease and per-state job counts of one of this principal's scopes."""
+        from .model import scope_key
+        return self.request('scopes/'+scope_key(key))
+
+    def close_scope(self, key, reason=None):
+        """Close a scope: cancel every non-terminal job in it and refuse new work. Idempotent."""
+        from .model import scope_key
+        return self.request('scopes/'+scope_key(key)+'/close', {'reason': reason} if reason else {})
+
+    def renew_scope(self, key, lease_seconds=None):
+        """Extend an open scope's lease; a closed scope answers 409 scope_closed."""
+        from .model import scope_key
+        return self.request('scopes/'+scope_key(key)+'/renew', {'lease_seconds': lease_seconds} if lease_seconds else {})
 
     def roster(self):
         """Read-only fleet roster as the authority sees it (workloads/roster.py)."""

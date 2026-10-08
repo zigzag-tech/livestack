@@ -78,6 +78,12 @@ def unit_evidence(state):
     kills = number('OOMKills')
     if state.get('Result') == 'oom-kill' or kills:
         result['oom_kill'] = max(kills or 0, 1)
+    # Why systemd ended the unit (`timeout` is RuntimeMaxSec, the handler's wall time) and its main exit
+    # status: the authority's cause classifier (causes.py) reads them when no receipt exists.
+    if state.get('Result') not in (None, '', 'success'):
+        result['unit_result'] = str(state['Result'])[:40]
+    if str(state.get('ExecMainStatus', '')).isdigit():
+        result['exec_main_status'] = int(state['ExecMainStatus'])
     peak, cpu = number('MemoryPeak'), number('CPUUsageNSec')
     if peak is not None:
         result['memory_peak_bytes'] = peak
@@ -99,7 +105,8 @@ def merge_evidence(receipt, sampled, unit):
         return merged
     merged = dict(sampled or {})
     for key, value in (unit or {}).items():
-        merged[key] = max(merged.get(key, 0), value)
+        merged[key] = (max(merged.get(key, 0), value) if isinstance(value, (int, float))
+                       else value)  # text evidence (`unit_result`) has no maximum
     if unit:
         merged['source'] = 'unit'
     elif merged:

@@ -488,6 +488,14 @@ class Handler(BaseHTTPRequestHandler):
                 return store.cancel(principal.id, parts[1])
             if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'withdraw' and method == 'POST':
                 return store.withdraw(principal.id, parts[1])
+            # Work scopes. The owner is always the authenticated principal, so another principal's scope
+            # is simply absent (404), never readable or closable.
+            if len(parts) == 2 and parts[0] == 'scopes' and method == 'GET':
+                return store.get_scope(principal.id, parts[1])
+            if len(parts) == 3 and parts[0] == 'scopes' and parts[2] == 'close' and method == 'POST':
+                return store.close_scope(principal.id, parts[1], (body or {}).get('reason'))
+            if len(parts) == 3 and parts[0] == 'scopes' and parts[2] == 'renew' and method == 'POST':
+                return store.renew_scope(principal.id, parts[1], (body or {}).get('lease_seconds'))
         if principal.role == 'worker' and method == 'POST':
             if parts == ['worker', 'status'] and principal.remote_job is not None:
                 return store.remote_job_status(principal.remote_provider, principal.remote_job)
