@@ -117,6 +117,11 @@ def validate_request(request):
         raise WorkloadError('compilation_launch_input_invalid', 403)
 
 
+# Verifier refusal text when the requesting peer exited before /proc was read.
+# Retried once by the guard; defined here so verifier and guard share it.
+PEER_EXITED = 'compilation_peer_exited'
+
+
 def verify_launch(request, *, registry_path=REGISTRY):
     """No registry/socket override from caller environment can mint a grant.
 

@@ -7,7 +7,7 @@ import stat
 from pathlib import Path
 import sys
 
-from .launch_contract import MAX_BYTES, REGISTRY, environment_request, verify_launch
+from .launch_contract import MAX_BYTES, PEER_EXITED, REGISTRY, environment_request, verify_launch
 from .compilation_policy import CLASSES
 from .model import WorkloadError, encode
 if sys.platform == 'win32':
@@ -86,7 +86,18 @@ def require_compilations(compilation_classes, *, registry_path=REGISTRY):
     output = os.environ.get('HARMONY_OUTPUT')
     try:
         request = environment_request(compilation_class)
-        receipt = verify_launch(request, registry_path=registry_path)
+        try:
+            receipt = verify_launch(request, registry_path=registry_path)
+        except WorkloadError as error:
+            # The verifier's peer vanished mid-verification (e.g. a launcher
+            # child exiting while its host shuts down). Exactly one retry; the
+            # second answer, whatever it is, is final. A real verification
+            # failure is never retried, and a gone peer is never verified.
+            if str(error) != PEER_EXITED:
+                raise
+            logging.warning('compilation_launch_retry: reason=%s classes=%s',
+                            PEER_EXITED, ','.join(compilation_classes))
+            receipt = verify_launch(request, registry_path=registry_path)
         if any(item not in receipt.get('classes', []) for item in compilation_classes):
             raise WorkloadError('compilation_class_not_reserved', 403)
         for item in compilation_classes:
