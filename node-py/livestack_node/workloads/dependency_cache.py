@@ -75,6 +75,22 @@ def settings(raw):
     return out, 'enabled'
 
 
+def opted_in(handler):
+    """(True, None) when the worker's handler entry says `"dependency_cache": true`, else (False, reason).
+
+    Opt-in lives in the worker-owned handler entry (worker.json `handlers`), never in the job's source or
+    the handler package: whoever operates the worker decides which handlers pay for restores. Anything
+    other than the boolean true (absent, false, a string, 1) is NOT opted in.
+    """
+    if 'dependency_cache' not in handler:
+        return False, 'not-opted-in'
+    if handler['dependency_cache'] is True:
+        return True, None
+    if handler['dependency_cache'] is False:
+        return False, 'not-opted-in'
+    return False, 'invalid: dependency_cache must be a boolean'
+
+
 # ------------------------------------------------------------------ manifest
 
 def _relative(value):

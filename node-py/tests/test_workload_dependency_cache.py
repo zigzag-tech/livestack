@@ -254,3 +254,46 @@ def test_no_manifest_or_unsupported_pattern_means_cold_with_a_named_reason(tmp_p
     manifest['components'][0]['for_each'] = ['*/deep']
     (source/'.livestack/dependency-cache.json').write_text(json.dumps(manifest))
     assert attempt(cfg).restore(source)[0]['reason'].startswith('unsupported-pattern')
+
+
+# ------------------------------------------------------------ per-handler opt-in
+
+def worker_stub(cfg):
+    from types import SimpleNamespace
+    return SimpleNamespace(dependency_cache=cfg)
+
+
+def attempt_for(cfg, handler):
+    from livestack_node.workloads.worker import WorkloadWorker as Worker
+    assignment = dict(owner='principal-1', spec=dict(handler='h'))
+    return Worker._dependency_attempt(worker_stub(cfg), assignment, 'a1', handler)
+
+
+@pytest.mark.parametrize('handler', [
+    dict(argv=['/bin/sh']),                                   # never opted in
+    dict(argv=['/bin/sh'], dependency_cache=False),
+    dict(argv=['/bin/sh'], dependency_cache='true'),          # not the boolean: fail closed
+    dict(argv=['/bin/sh'], dependency_cache=1),
+])
+def test_a_handler_that_has_not_opted_in_gets_no_restore_and_no_store(tmp_path, handler):
+    cfg = config(tmp_path)
+    source = make_source(tmp_path)
+    # a warm entry exists for this very source, put there by an opted-in handler
+    warm = attempt_for(cfg, dict(argv=['/bin/sh'], dependency_cache=True))
+    warm.restore(source)
+    run_handler(source, tmp_path/'o', ROOTS)
+    assert {r['outcome'] for r in warm.save(source, tmp_path/'o')} == {'saved'}
+    entries_before = sorted(p.name for p in Path(cfg['path']).glob('*/entries/*'))
+
+    other = make_source(tmp_path, 'other')
+    assert attempt_for(cfg, handler) is None                  # the worker never builds an Attempt for it
+    assert not list(other.glob('*/node_modules')) and not list(other.glob('pkgs/*/node_modules'))
+    assert sorted(p.name for p in Path(cfg['path']).glob('*/entries/*')) == entries_before
+
+
+def test_an_opted_in_handler_gets_an_attempt_and_a_disabled_worker_gets_none(tmp_path):
+    cfg = config(tmp_path)
+    assert attempt_for(cfg, dict(argv=['/bin/sh'], dependency_cache=True)) is not None
+    assert attempt_for(None, dict(argv=['/bin/sh'], dependency_cache=True)) is None
+    assert dc.opted_in(dict(dependency_cache=True)) == (True, None)
+    assert dc.opted_in(dict(dependency_cache='yes'))[1].startswith('invalid')

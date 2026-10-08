@@ -35,3 +35,11 @@ from that report.
 #### Scenario: over the bound
 - **WHEN** a store would exceed `max_bytes`
 - **THEN** the oldest other entries are removed first
+
+### Requirement: Only opted-in handlers use the cache
+The worker SHALL restore and store dependency trees only for a handler whose worker-configured
+entry has `dependency_cache` equal to the boolean true.
+
+#### Scenario: not opted in
+- **WHEN** a handler without the flag (or with any non-true value) runs a job whose source carries a manifest
+- **THEN** no tree is restored, nothing is stored and the result has no `dependency_cache` field
