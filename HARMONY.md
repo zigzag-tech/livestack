@@ -759,6 +759,19 @@ silent, registered but not configured, a strict-subset handler list versus a sam
 peer, `*handler_release` label skew between same-host peers, and failed handler
 activation. No token or secret leaves the authority. Code: `workloads/roster.py`.
 
+## Work scopes, causes and blockers (2026-10-08)
+
+A submitter that wants its jobs to die with it names a scope: schema-4 `scope: {key, lease_seconds?}` on `POST /v1/workloads/jobs`
+(`WorkloadClient.submit`, then `get_scope(key)`, `renew_scope(key)`, `close_scope(key, reason)`). Closing a scope cancels everything
+non-terminal in it and refuses later submissions (`409 scope_closed`). A scope's lease defaults to 30 minutes (5..240); stop renewing
+and the authority closes it. `GET /v1/workloads/capabilities` reports `scopes`, `causes` and `deadlines` when the authority has them;
+absent means an older authority and the submitter must fall back to per-job cancel and say so.
+
+A job read back carries `cause` once terminal (`kind` from a closed list, `retry` advice, `evidence`) and, while queued unplaced,
+`placement.blockers` (`worker`, `host`, closed `code`, `detail`). Opt-in per submission: `max_queue_seconds`, `progress_deadline_seconds`.
+Reference: `_plans/durable-workloads.md` ("work scopes, typed causes and structured blockers"); code `workloads/causes.py`,
+`workloads/store.py` (`close_scope`, `_job_verdict`), `workloads/placement.py` (`_wait`).
+
 ## Live workload handler releases (initial E2E rollout shipped 2026-10-04)
 
 The durable workload authority and worker remain responsible for admission,

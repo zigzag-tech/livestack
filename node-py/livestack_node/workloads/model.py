@@ -16,6 +16,17 @@ class WorkloadError(ValueError):
         self.status = status
 
 
+class RefusedAfterCommit(WorkloadError):
+    """A refusal raised inside a store transaction that is committed first: the transaction also
+    carried work (such as closing an expired scope) that is true whether or not this request is."""
+
+
+class ScopeClosed(RefusedAfterCommit):
+    def __init__(self, key: str):
+        super().__init__("scope_closed: scope %s is closed" % key, 409)
+        self.scope = key
+
+
 class ArtifactTooLarge(WorkloadError):
     """A result artifact is over this worker's upload bound. Retrying cannot
     shrink it, so it is terminal for the attempt (never a transient fault)."""
@@ -62,6 +73,17 @@ class Limits:
     # the authority trusts. Empty = nothing required. Set from authority.json
     # `limits.describe_required_handlers`; switch on only after every submitter sends both.
     describe_required_handlers: tuple = ()
+    # Work scopes (openspec work-scopes-and-cascade-cancel). A scope is an owner's handle on a set of
+    # jobs; closing it cancels them. Every scope carries a lease: default 30 minutes, bounded 5..240
+    # minutes (owner decision 2026-10-08), renewed by the submitter's heartbeat. Hard ceilings are
+    # enforced in __post_init__ so configuration can only lower them.
+    scope_lease_default_seconds: float = 1800
+    scope_lease_min_seconds: float = 300
+    scope_lease_max_seconds: float = 14400
+    scope_jobs: int = 256
+    scopes_per_owner: int = 256
+    # Handlers that REFUSE an unscoped submission; same shape as describe_required_handlers.
+    scope_required_handlers: tuple = ()
 
     def __post_init__(self):
         required = self.describe_required_handlers
@@ -69,6 +91,22 @@ class Limits:
                 or any(not isinstance(item, str) or not item for item in required)):
             raise ValueError("describe_required_handlers must be a list of handler ids")
         object.__setattr__(self, "describe_required_handlers", tuple(required))
+        scoped = self.scope_required_handlers
+        if (isinstance(scoped, (str, bytes)) or not isinstance(scoped, (list, tuple))
+                or any(not isinstance(item, str) or not item for item in scoped)):
+            raise ValueError("scope_required_handlers must be a list of handler ids")
+        object.__setattr__(self, "scope_required_handlers", tuple(scoped))
+        for name_ in ("scope_lease_default_seconds", "scope_lease_min_seconds", "scope_lease_max_seconds",
+                      "scope_jobs", "scopes_per_owner"):
+            value = getattr(self, name_)
+            if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name_} must be positive and finite")
+        if self.scope_jobs > 1024 or self.scopes_per_owner > 1024:
+            raise ValueError("scope limits may only be lowered from their hard ceilings of 1024")
+        if not self.scope_lease_min_seconds <= self.scope_lease_default_seconds <= self.scope_lease_max_seconds:
+            raise ValueError("scope lease default must lie between its minimum and maximum")
+        if self.scope_lease_max_seconds > 240 * 60 or self.scope_lease_min_seconds < 5 * 60:
+            raise ValueError("scope lease bounds are 5..240 minutes; configuration may only narrow them")
         for name in ("active_jobs", "terminal_jobs", "workers", "claims_per_worker",
                      "attempts", "record_bytes", "fresh_seconds", "lease_seconds",
                      "cleanup_seconds", "environment_registry", "environments_per_owner",
@@ -260,15 +298,48 @@ def input_objects(value) -> list[dict]:
     return result
 
 
+SCOPE_KEY = re.compile(r"[A-Za-z0-9_.:@-]{1,160}")
+
+
+def scope_key(value) -> str:
+    # No '/': the key travels as one URL path segment.
+    if not isinstance(value, str) or not SCOPE_KEY.fullmatch(value):
+        raise WorkloadError("invalid scope key")
+    return value
+
+
+def scope_lease(value, limits: Limits) -> float:
+    if value is None:
+        return float(limits.scope_lease_default_seconds)
+    if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+            or not limits.scope_lease_min_seconds <= value <= limits.scope_lease_max_seconds):
+        raise WorkloadError("scope lease_seconds must be in [%g, %g]" % (
+            limits.scope_lease_min_seconds, limits.scope_lease_max_seconds))
+    return float(value)
+
+
+def scope_ref(value, limits: Limits) -> dict:
+    if not isinstance(value, dict) or set(value) - {"key", "lease_seconds"} or "key" not in value:
+        raise WorkloadError("scope must be {key, lease_seconds?}")
+    result = {"key": scope_key(value["key"])}
+    if "lease_seconds" in value:
+        result["lease_seconds"] = scope_lease(value["lease_seconds"], limits)
+    return result
+
+
 def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     if not isinstance(value, dict):
         raise WorkloadError("submission must be an object")
     allowed = {"version", "key", "handler", "input_digest", "input_objects", "payload", "need",
                "admit", "selector", "labels", "estimate_seconds", "deadline", "priority",
-               "locality_host", "retain", "environment", "handler_release"}
+               "locality_host", "retain", "environment", "handler_release", "scope",
+               "max_queue_seconds", "progress_deadline_seconds"}
     version = value.get("version")
-    if set(value) - allowed or version not in (1, 2, 3) or (version == 1 and "input_objects" in value) \
-            or (version != 3 and "environment" in value):
+    # Version 4 is version 3 plus work scopes and the opt-in deadlines; an authority that predates it
+    # refuses a scoped submission loudly instead of ignoring the scope.
+    if set(value) - allowed or version not in (1, 2, 3, 4) or (version == 1 and "input_objects" in value) \
+            or (version not in (3, 4) and "environment" in value) \
+            or (version != 4 and {"scope", "max_queue_seconds", "progress_deadline_seconds"} & set(value)):
         raise WorkloadError("unsupported workload schema or fields")
     handler = name(value.get("handler"), "handler")
     if handler not in handlers:
@@ -343,9 +414,21 @@ def submission(value: dict, handlers: set[str], limits: Limits) -> dict:
     # already has; keeping the key out preserves their idempotency bytes.
     if admit is not None:
         result["admit"] = admit
-    if version == 2 or (version == 3 and "input_objects" in value):
+    if version == 4:
+        for field_, low in (("max_queue_seconds", 30), ("progress_deadline_seconds", 30)):
+            if field_ in value:
+                seconds = value[field_]
+                if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) \
+                        or not low <= seconds <= 86400:
+                    raise WorkloadError(f"{field_} must be in [{low}, 86400]")
+                result[field_] = seconds
+    if "scope" in value:
+        result["scope"] = scope_ref(value["scope"], limits)
+    elif handler in limits.scope_required_handlers:
+        raise WorkloadError("scope_required: this handler's submissions must name a scope", 400)
+    if version == 2 or (version in (3, 4) and "input_objects" in value):
         result["input_objects"] = input_objects(value.get("input_objects", []))
-    if version == 3 and "environment" in value:
+    if version in (3, 4) and "environment" in value:
         reference = value["environment"]
         if (not isinstance(reference, dict) or set(reference) != {"reuse", "key"} and
                 set(reference) != {"reuse", "handle"} or reference.get("reuse") != "prefer"):

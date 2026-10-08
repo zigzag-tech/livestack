@@ -785,6 +785,38 @@ off unless configured) and validates reported metrics against definitions
 (`metrics_schema.py`). `placement._learned_peak` now reads the same history. Design:
 `openspec/changes/measured-resource-declarations`.
 
+### 2026-10-08: work scopes, typed causes and structured blockers
+
+Supersedes the statements above that cancel is per job and an owner is only the principal, and that an
+infrastructure end is one undifferentiated value. Design and rationale: `openspec/changes/work-scopes-and-cascade-cancel`
+and `openspec/changes/typed-outcome-causes-and-blockers`.
+
+- **Scopes.** A schema-4 submission may name `scope: {key, lease_seconds?}`; the key is opaque (ZZOPS uses
+  `zzops:<app>:<kind>:<id>`). `POST /v1/workloads/scopes/<key>/close {reason}` cancels every non-terminal job in it with
+  the same code as owner cancel, refuses later work (`409 scope_closed`, including a replay of an existing key) and is
+  idempotent; `.../renew {lease_seconds?}` extends the lease (`409 scope_closed` once it is gone, `404 scope_not_found`
+  if never opened); `GET .../scopes/<key>` reports state, lease, close reason and per-state counts. Every scope has a lease:
+  default 30 minutes, bounded 5..240 minutes (owner decision 2026-10-08), and `_expire` closes a lapsed one
+  (`closed_by: authority`, reason `lease expired`, at most 16 per call). Closing an unknown scope creates it closed. A scope holds
+  at most `scope_jobs` (256) jobs and an owner at most `scopes_per_owner` (256) open scopes (`429 scope_capacity`).
+  `limits.scope_required_handlers` makes a handler refuse unscoped work. A refusal raised after an expiry cascade commits
+  the cascade first (`RefusedAfterCommit`). Failure mode to remember: an owner that cannot reach the authority for longer than its
+  lease has its jobs cancelled, healthy or not.
+- **Causes.** Every terminal job carries `cause: {kind, retry, evidence}` (closed list in `workloads/causes.py`; `retry` is advice:
+  `same | elsewhere | after_change | no`). The authority derives it from the completion, so no worker release is needed for the
+  kinds it can already see; a row that ended before this change reports `cause: null, cause_reason: "predates_causes"`.
+  `unknown` names what could not be read and is never guessed to be an OOM kill. The ledger's `resource_limit` result cause stays;
+  `cause.kind` is `oom_killed` / `pids_exhausted` / `disk_exhausted` for the same events. The worker now also reports systemd's
+  `Result` and `ExecMainStatus` (`resources.unit_result`, `exec_main_status`) so `Result=timeout` reads `wall_time_exceeded`; that
+  reaches the authority only after a worker release.
+- **Blockers.** A queued job's `placement` is `{since, evaluated, blockers[{worker, host, code, detail}], truncated}` with `code`
+  from `placement.BLOCKER_CODES`; written only when the set of (worker, host, code) changes or once a minute, so `since` is the age of
+  the current wait. `reason` keeps today's text, now written only when it changes.
+- **Opt-in deadlines** (schema 4, submitter chooses; Livestack imposes none): `max_queue_seconds` expires a never-attempted job as
+  `unplaceable` with its last blockers; `progress_deadline_seconds` fails a running attempt whose reported progress document has not
+  changed that long (`stalled_no_progress`). Deviation from the proposal: both are submission fields, not a handler declaration, because
+  the authority is the one that must know them.
+
 ## GitHub Actions as a Harmony workload provider (2026-10-03)
 
 Harmony may place explicitly configured handlers on a single-assignment,

@@ -119,3 +119,16 @@ CREATE TABLE IF NOT EXISTS rollout_state(
   body TEXT NOT NULL,
   updated_at REAL NOT NULL
 );
+
+-- work-scopes-and-cascade-cancel: an owner's handle on a set of jobs. Closing it cancels them and
+-- refuses further work; a lease closes it if the owner stops renewing. jobs.scope (added by a guarded
+-- migration in store.py) names the key. Rows are pruned by WorkloadStore._prune once closed and unreferenced.
+CREATE TABLE IF NOT EXISTS scopes(
+  owner TEXT NOT NULL, key TEXT NOT NULL,
+  state TEXT NOT NULL CHECK(state IN ('open','closed')),
+  lease_seconds REAL, lease_expires REAL,
+  close_reason TEXT, closed_by TEXT, close_result TEXT,
+  created REAL NOT NULL, updated REAL NOT NULL,
+  PRIMARY KEY(owner, key)
+);
+CREATE INDEX IF NOT EXISTS scopes_lease ON scopes(state, lease_expires);

@@ -88,8 +88,9 @@ def test_schema_three_environment_capabilities_and_preupload_refusal(tmp_path):
     try:
         client = WorkloadClient(f'http://127.0.0.1:{api.server_port}', 'a'*32)
         caps = client.capabilities()
-        assert caps == {'versions': [1, 2, 3],
-                        'environments': {'version': 1, 'handlers': [], 'forbidden_handlers': []}}
+        assert caps['versions'] == [1, 2, 3, 4]
+        assert caps['environments'] == {'version': 1, 'handlers': [], 'forbidden_handlers': []}
+        assert caps['scopes']['version'] == 1 and caps['causes']['version'] == 1
         api.blobs.put('alice', SOURCE, len(b'captured'), BytesIO(b'captured'))
         legacy = dict(version=1, key='legacy-http', handler='dev.v1', input_digest=SOURCE,
                       need={'cpu': 1, 'memory_bytes': 1024})

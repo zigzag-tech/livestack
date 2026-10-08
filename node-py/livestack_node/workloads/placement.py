@@ -3,6 +3,7 @@
 Called only inside the authority's immediate transaction. Assign one attempt per
 worker initially; all environments on the same physical host share claims.
 """
+import hashlib
 import json
 import logging
 import uuid
@@ -78,6 +79,42 @@ def _stall_event(row, rejected, now, limits):
     _STALL_REPORTED[key] = now
     logging.warning("placement_stalled: job %s waited %.0fs; every candidate refuses with %s: %s",
                     row["id"], now-row["created"], key[1], "; ".join(i["reason"] for i in rejected[:4])[:512])
+
+
+# Blocker codes (openspec typed-outcome-causes-and-blockers). A closed list: a reader tells "no worker advertises
+# the handler" from "the one worker is busy" without parsing prose.
+BLOCKER_CODES = frozenset((
+    "worker_stale", "worker_draining", "worker_not_ready", "handler_not_advertised", "release_incompatible",
+    "capability_absent", "memory_insufficient", "host_pressure", "principal_cap", "avoiding_failure_signature",
+    "worker_busy", "environment_busy", "environment_affinity_wait", "environment_not_found",
+    "environment_profile_not_installed", "compilation_refused", "disk_reserve", "disk_insufficient",
+    "resources_insufficient", "deadline_unfit", "no_workers"))
+PLACEMENT_BYTES = 4096
+PLACEMENT_REFRESH_SECONDS = 60
+
+
+def _wait(db, row, now, reason, blockers):
+    """Say why a queued job was not placed this round.
+
+    `reason` keeps today's human line, written only when its text changed (a steady wait is not an UPDATE per
+    claim poll). `jobs.placement` carries the structured blockers; `since` is when this SET of blockers first
+    appeared (worker, host, code: not the figures in `detail`, which move every round) and `evaluated` is
+    refreshed at most once a minute, so a reader can compute how long the job has waited and why."""
+    if reason is not None and row["reason"] != reason[:8192]:
+        db.execute("UPDATE jobs SET reason=? WHERE id=?", (reason[:8192], row["id"]))
+    blockers = [dict(worker=b.get("worker"), host=b.get("host"), code=b["code"], detail=str(b.get("detail", ""))[:160])
+                for b in blockers]
+    digest = hashlib.sha256(json.dumps([[b["worker"], b["host"], b["code"]] for b in blockers]).encode()).hexdigest()[:16]
+    stored = json.loads(row["placement"]) if row["placement"] else None
+    same = stored is not None and stored.get("digest") == digest
+    if same and now - stored["evaluated"] < PLACEMENT_REFRESH_SECONDS:
+        return
+    document = dict(since=stored["since"] if same else now, evaluated=now, digest=digest,
+                    blockers=blockers[:16], truncated=len(blockers) > 16)
+    while len(encode(document, 1 << 20).encode()) > PLACEMENT_BYTES and document["blockers"]:
+        document["blockers"] = document["blockers"][:-1]
+        document["truncated"] = True
+    db.execute("UPDATE jobs SET placement=? WHERE id=?", (encode(document, PLACEMENT_BYTES), row["id"]))
 
 
 def _learned_peak(db, handler, cache):
@@ -327,16 +364,16 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         environment_handle = row['environment_handle']
         environment_profile = row['environment_profile']
         if environment_handle and environment_profile is None:
-            db.execute("UPDATE jobs SET reason='environment_not_found' WHERE id=?", (row['id'],))
+            _wait(db, row, now, 'environment_not_found', [dict(code='environment_not_found')])
             continue
         if environment_handle and (row['environment_writer_job'] is not None or
                                    environment_handle in active_environment_writers):
-            db.execute("UPDATE jobs SET reason='environment_busy' WHERE id=?", (row['id'],))
+            _wait(db, row, now, 'environment_busy', [dict(code='environment_busy')])
             continue
         cap = caps.get(row["owner"])
         if cap is not None and running.get(row["owner"], 0) >= cap:
-            db.execute("UPDATE jobs SET reason=? WHERE id=?",
-                       (f"principal at max_running ({cap})", row["id"]))
+            _wait(db, row, now, f"principal at max_running ({cap})",
+                  [dict(code='principal_cap', detail=f"principal at max_running ({cap})")])
             continue
         # Admission and execution are separate quantities. `admit` is both the
         # fit test and the reservation, so admitted vectors on a host always sum
@@ -392,24 +429,26 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                     not avoided.get(w['id'])):
                 warm_wait_hosts.add(w['host'])
             if w['id'] in draining:
-                rejected.append({'worker': w['id'], 'reason': 'worker_draining'})
+                rejected.append({'worker': w['id'], 'reason': 'worker_draining', 'code': 'worker_draining'})
                 continue
             if environment_handle and profile_compatibility is None:
-                rejected.append({'worker': w['id'], 'reason': 'environment_profile_not_installed'})
+                rejected.append({'worker': w['id'], 'reason': 'environment_profile_not_installed',
+                                 'code': 'environment_profile_not_installed'})
                 continue
             reason = _compilation_refusal(compilation_policy, w, spec, now)
             if reason:
-                rejected.append({"worker": w['id'], "reason": reason})
+                rejected.append({"worker": w['id'], "reason": reason, "code": "compilation_refused"})
                 continue
+            code = None
             if avoided.get(w["id"]) and alternative:
                 sig, where = avoided[w["id"]]
-                reason = f"avoiding {w['id']}: same failure signature {sig} on {where}"
+                reason, code = f"avoiding {w['id']}: same failure signature {sig} on {where}", "avoiding_failure_signature"
             elif w["id"] in busy:
-                reason = "worker holds an active attempt or cleanup"
+                reason, code = "worker holds an active attempt or cleanup", "worker_busy"
             elif any(report["labels"].get(k) != v for k, v in spec["selector"].items()):
-                reason = "required capability absent"
+                reason, code = "required capability absent", "capability_absent"
             elif w["host"] in pressure:
-                reason = pressure[w["host"]]
+                reason, code = pressure[w["host"]], "host_pressure"
             elif (w["host"] in views and claim is not None and
                   min(host_free[w["host"]][MEMORY], worker_free[w["id"]].get(MEMORY, 0)) < claim):
                 t = memory_terms[w["host"]]
@@ -418,19 +457,21 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                           f"(available {_gib(t['available'])}, reserve {_gib(t['reserve'])}, "
                           f"running attempts {_gib(t['attempts'])}, model servers {_gib(t['services'])}, "
                           f"admitted now {_gib(t['admitted'])})")
+                code = "memory_insufficient"
             elif (disk := _disk_refusal(w["id"], report, host_free[w["host"]].get("disk_bytes", 0),
                                         worker_free[w["id"]].get("disk_bytes", 0), admit.get("disk_bytes"))):
                 code, reason, figures = disk
-                rejected.append({"worker": w["id"], "reason": reason, "reason_code": code, "figures": figures})
+                rejected.append({"worker": w["id"], "reason": reason, "reason_code": code, "figures": figures,
+                                 "code": "disk_reserve" if code == "disk_reserve" else "disk_insufficient"})
                 continue
             elif any(min(host_free[w["host"]].get(k, 0), worker_free[w["id"]].get(k, 0)) < n
                      for k, n in admit.items() if not (k == MEMORY and w["host"] in views and claim is not None)):
                 # One reason for both bounds: a caller can act on neither
                 # differently, and the distinct figures are already in the
                 # worker report the refusal is recorded against.
-                reason = "insufficient shared host resources"
+                reason, code = "insufficient shared host resources", "resources_insufficient"
             if reason:
-                rejected.append({"worker": w["id"], "reason": reason})
+                rejected.append({"worker": w["id"], "reason": reason, "code": code})
                 continue
             targets.append(Target(id=w["id"], host_id=w["host"], tier=Tier.LOCAL,
                                   capacity=host_free[w["host"]], labels=report["labels"]))
@@ -446,7 +487,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                     db.execute('UPDATE task_environments SET affinity_started=? WHERE handle=?',
                                (affinity_started, environment_handle))
                 if now-affinity_started < limits.environment_affinity_seconds:
-                    db.execute("UPDATE jobs SET reason='environment_affinity_wait' WHERE id=?", (row['id'],))
+                    _wait(db, row, now, 'environment_affinity_wait', [dict(code='environment_affinity_wait')])
                     continue
             elif not warm_wait_hosts:
                 db.execute('UPDATE task_environments SET affinity_started=NULL WHERE handle=?', (environment_handle,))
@@ -464,19 +505,27 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                         decision_ids={job.id: decision_id})
         grants = plan.of(Admit)
         if not grants:
+            hosts = {w["id"]: w["host"] for w in workers}
             if not workers:
                 reason = "no fresh, reconciled worker"
+                blockers = [dict(code="no_workers", detail=reason)]
             elif not compatible and spec.get('handler_release'):
                 reason = (f"no fresh worker advertises release {spec['handler_release']['release_digest']} "
                           f"for handler {spec['handler']}")
+                blockers = [dict(code="release_incompatible" if handler_workers else "handler_not_advertised", detail=reason)]
             elif not compatible:
                 reason = f"no fresh worker advertises handler {spec['handler']}"
+                blockers = [dict(code="handler_not_advertised", detail=reason)]
             elif handler_workers and not compatible:
                 reason = f"no fresh worker advertises handler {spec['handler']}"
+                blockers = [dict(code="handler_not_advertised", detail=reason)]
             else:
                 reason = encode(rejected or {"reason": "no target can meet deadline"})
+                blockers = ([dict(worker=item["worker"], host=hosts.get(item["worker"]), code=item["code"],
+                                  detail=item["reason"]) for item in rejected if item.get("code") in BLOCKER_CODES]
+                            or [dict(code="deadline_unfit", detail="no target can meet deadline")])
                 _stall_event(row, rejected, now, limits)
-            db.execute("UPDATE jobs SET reason=? WHERE id=?", (reason[:8192], row["id"]))
+            _wait(db, row, now, reason, blockers)
             continue
         chosen = next(w for w in workers if w["id"] == grants[0].target_id)
         fence = row["fence"] + 1
@@ -499,7 +548,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                    (aid, row["id"], chosen["id"], chosen["boot"], chosen["host"], fence,
                     encode(admit), now+limits.lease_seconds, now, compilation, environment_generation,
                     encode(pinned_release) if pinned_release is not None else None, decision_id))
-        db.execute("UPDATE jobs SET state='running',fence=?,updated=?,reason=? WHERE id=?",
+        db.execute("UPDATE jobs SET state='running',placement=NULL,fence=?,updated=?,reason=? WHERE id=?",
                    (fence, now, grants[0].reason, row["id"]))
         filtered = {item['worker']: item['reason'] for item in rejected}
         scheduler_candidates = {candidate['id'] for candidate in

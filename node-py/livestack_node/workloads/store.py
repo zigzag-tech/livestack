@@ -8,6 +8,7 @@ from __future__ import annotations
 from contextlib import closing, contextmanager
 import hashlib
 import json
+import logging
 import math
 from pathlib import Path
 import re
@@ -16,9 +17,9 @@ import threading
 import time
 import uuid
 
-from . import metrics_schema, resource_history
+from . import causes, metrics_schema, resource_history
 from .model import (Limits, failure_signature, WorkloadError, encode, host_view, identity, labels, name, resources,
-                    submission)
+                    RefusedAfterCommit, ScopeClosed, scope_key, scope_lease, submission)
 from .environment_receipts import validate as validate_environment_receipt
 from .decision_records import completion_record
 from .model import progress as validate_progress
@@ -154,6 +155,13 @@ class WorkloadStore:
                 db.execute("ALTER TABLE attempts ADD COLUMN handler_release TEXT")
             if "decision_id" not in {row[1] for row in db.execute("PRAGMA table_info(attempts)")}:
                 db.execute("ALTER TABLE attempts ADD COLUMN decision_id TEXT")
+            if "scope" not in {row[1] for row in db.execute("PRAGMA table_info(jobs)")}:
+                db.execute("ALTER TABLE jobs ADD COLUMN scope TEXT")
+            db.execute("CREATE INDEX IF NOT EXISTS jobs_scope ON jobs(owner,scope,state)")
+            for table, column, declaration in (("jobs", "cause", "TEXT"), ("jobs", "placement", "TEXT"),
+                                               ("attempts", "progress_changed", "REAL")):
+                if column not in {row[1] for row in db.execute(f"PRAGMA table_info({table})")}:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_environment ON jobs(environment_handle,state)")
             environment_columns = {row[1] for row in db.execute("PRAGMA table_info(task_environments)")}
             for column, declaration in (('writer_job', 'TEXT'), ('writer_attempt', 'TEXT'),
@@ -406,8 +414,10 @@ class WorkloadStore:
                            (raw, job_id))
                 db.execute("UPDATE workers SET ready=0 WHERE id IN "
                            "(SELECT worker FROM attempts WHERE job=? AND state='cleanup')", (job_id,))
-                db.execute("UPDATE jobs SET state='failed',reason=?,result=?,updated=? WHERE id=? "
-                           "AND state IN ('queued','running')", (reason, raw, now, job_id))
+                db.execute("UPDATE jobs SET state='failed',reason=?,result=?,cause=?,updated=? WHERE id=? "
+                           "AND state IN ('queued','running')",
+                           (reason, raw, encode(causes.make("worker_lost", {"remote_conclusion": str(conclusion)[:64]}),
+                                                causes.CAUSE_BYTES), now, job_id))
             cleanup = db.execute("SELECT count(*) FROM attempts WHERE job=? AND state IN ('running','cleanup')",
                                  (job_id,)).fetchone()[0]
             if status == 'completed' and cleanup == 0:
@@ -437,6 +447,10 @@ class WorkloadStore:
             db.execute("BEGIN IMMEDIATE")
             yield db
             db.commit()
+        except RefusedAfterCommit:
+            # A refusal that must not undo the housekeeping done on the way to it (a lease expiry cascade).
+            db.commit()
+            raise
         except BaseException:
             db.rollback()
             raise
@@ -470,6 +484,11 @@ class WorkloadStore:
             result["progress"] = json.loads(latest["progress"])
         result["spec"] = json.loads(result["spec"])
         result["result"] = json.loads(result["result"]) if result["result"] else None
+        result["cause"] = json.loads(result["cause"]) if result.get("cause") else None
+        if result["cause"] is None and result["state"] in TERMINAL:
+            # A row ended before causes existed says so; it is not `unknown`.
+            result["cause_reason"] = "predates_causes"
+        result["placement"] = json.loads(result["placement"]) if result.get("placement") else None
         # What placement avoids on a retry, and what a caller creating the
         # NEXT job after this one failed carries forward. None unless the last
         # verdict was an infrastructure outcome.
@@ -516,7 +535,13 @@ class WorkloadStore:
                           and self.environment_retention_enabled)
         forbidden = sorted(handler for handler, policy in environment_handlers.items()
                            if handler in allowed and policy['purpose'] in ('full_e2e', 'publishing', 'release'))
-        result = dict(versions=[1, 2, 3], environments=dict(version=1, handlers=enrolled,
+        result = dict(versions=[1, 2, 3, 4], causes=dict(version=1, kinds=sorted(causes.KINDS)),
+            deadlines=dict(version=1, max_queue_seconds=[30, 86400], progress_deadline_seconds=[30, 86400]),
+            scopes=dict(
+            version=1, lease_default_seconds=self.limits.scope_lease_default_seconds,
+            lease_min_seconds=self.limits.scope_lease_min_seconds,
+            lease_max_seconds=self.limits.scope_lease_max_seconds, jobs_per_scope=self.limits.scope_jobs,
+            scopes_per_owner=self.limits.scopes_per_owner), environments=dict(version=1, handlers=enrolled,
                                                              forbidden_handlers=forbidden))
         encode(result, 8192)
         return result
@@ -695,15 +720,33 @@ class WorkloadStore:
         hashed = dict(spec, labels={k: v for k, v in spec.get('labels', {}).items() if k not in ('describe', 'origin')})
         if not hashed['labels']:
             hashed.pop('labels')
+        scope = spec.get('scope')
+        scope_lease_seconds = None
+        if scope is not None:
+            # The lease is the owner's heartbeat cadence, not part of WHAT is requested: a resubmission
+            # with another lease is the same request.
+            scope = dict(scope)
+            scope_lease_seconds = scope.pop('lease_seconds', None)
+            hashed['scope'] = scope
+            spec['scope'] = scope
         digest = identity(hashed)
         now = self.clock()
         with self.transaction() as db:
-            old = db.execute("SELECT id,request_hash FROM jobs WHERE owner=? AND request_key=?",
+            # Expiry runs first so a scope whose lease has lapsed is already closed when it is consulted.
+            self._expire(db, now)
+            old = db.execute("SELECT id,request_hash,scope FROM jobs WHERE owner=? AND request_key=?",
                              (owner, spec["key"])).fetchone()
             if old:
                 if old["request_hash"] != digest:
                     raise WorkloadError("idempotency key already names different inputs", 409)
+                # A replay into a closed scope is refused, not answered with the corpse: the caller's
+                # retry loop must learn the owner it works for is gone, never read "cancelled" as an
+                # infrastructure fault to retry.
+                if old["scope"] is not None and self._scope_state(db, owner, old["scope"]) == 'closed':
+                    raise ScopeClosed(old["scope"])
                 return self._job(db, old["id"])
+            if scope is not None:
+                self._admit_to_scope(db, owner, scope['key'], scope_lease_seconds, now)
             intent = spec.get('handler_release_intent')
             if intent is not None:
                 registry = getattr(self, 'handler_registry', None)
@@ -726,7 +769,6 @@ class WorkloadStore:
                     release_digest=release['release_digest'], execution_contract=manifest['execution_contract'],
                     payload_schema=manifest['payload_schema'], result_schema=manifest['result_schema'],
                     selection_reason=reason)
-            self._expire(db, now)
             self._expire_environments(db, now)
             self._prune(db, now)
             principal = self.principals.get(owner)
@@ -740,10 +782,10 @@ class WorkloadStore:
             if active >= self.limits.active_jobs or total >= self.limits.active_jobs + self.limits.terminal_jobs:
                 raise WorkloadError("job storage capacity exhausted", 429)
             jid = uuid.uuid4().hex
-            db.execute("INSERT INTO jobs(id,owner,request_key,request_hash,spec,state,created,updated,labels,retain) "
-                       "VALUES(?,?,?,?,?,'queued',?,?,?,?)",
+            db.execute("INSERT INTO jobs(id,owner,request_key,request_hash,spec,state,created,updated,labels,retain,scope) "
+                       "VALUES(?,?,?,?,?,'queued',?,?,?,?,?)",
                        (jid, owner, spec["key"], digest, encode(spec), now, now,
-                        encode(spec.get("labels", {})), spec["retain"]))
+                        encode(spec.get("labels", {})), spec["retain"], scope['key'] if scope else None))
             env = self._resolve_environment(db, owner, spec, now, jid)
             if env is not None:
                 db.execute('UPDATE jobs SET environment_handle=? WHERE id=?', (env['handle'], jid))
@@ -1121,8 +1163,12 @@ class WorkloadStore:
             expires = now + self.limits.lease_seconds
             # A heartbeat without progress leaves the last reported value in
             # place; progress is an overwrite, never an append.
-            db.execute("UPDATE attempts SET expires=?,progress=COALESCE(?,progress) WHERE id=?",
-                       (expires, latest, attempt_id))
+            # `progress_changed` is when the reported progress last DIFFERED: the clock of the opt-in
+            # progress deadline. A heartbeat repeating the same document does not move it.
+            changed = latest is not None and latest != attempt["progress"]
+            db.execute("UPDATE attempts SET expires=?,progress=COALESCE(?,progress),"
+                       "progress_changed=CASE WHEN ? THEN ? ELSE progress_changed END WHERE id=?",
+                       (expires, latest, changed, now, attempt_id))
             return {"expires": expires, "lease_remaining": self.limits.lease_seconds}
 
     def complete(self, worker, boot, attempt_id, fence, *, input_digest, outcome, result,
@@ -1207,7 +1253,7 @@ class WorkloadStore:
                     db.execute("UPDATE task_environment_replicas SET state='rebuild_required',compatibility=NULL,seen=? "
                                'WHERE handle=? AND host=?', (now, env_handle, a['host']))
             state = "succeeded" if outcome == "succeeded" else "failed"
-            reason, job_raw = None, raw
+            reason, job_raw, cause = None, raw, None
             # a["need"] is the ADMIT vector (placement charge); the enforced caps are the job's own need.
             breach = _limit_breach(result, job["spec"]["need"])
             resource_history.record(db, job["spec"]["handler"], attempt_id, result,
@@ -1223,8 +1269,11 @@ class WorkloadStore:
                 job_raw = encode(dict(completion, cause=breach), self.limits.record_bytes)
             elif outcome == "infrastructure" and fence < self.limits.attempts:
                 state, reason = "queued", "infrastructure retry"
-            db.execute("UPDATE jobs SET state=?,result=?,reason=?,updated=? WHERE id=?",
-                       (state, job_raw, reason, now, job["id"]))
+            if state != "queued":
+                cause = encode(causes.derive(outcome, result, breach=breach, fence=fence, attempts=self.limits.attempts),
+                               causes.CAUSE_BYTES)
+            db.execute("UPDATE jobs SET state=?,result=?,reason=?,cause=?,updated=? WHERE id=?",
+                       (state, job_raw, reason, cause, now, job["id"]))
             result_job = self._job(db, job["id"])
             if self.decision_ledger is not None and a['decision_id']:
                 outcome_record = completion_record(
@@ -1234,7 +1283,8 @@ class WorkloadStore:
                     worker=worker, environment_handle=env_handle,
                     environment_generation=a['environment_generation'],
                     attempt_seconds=now-a['created'], product_outcome=outcome,
-                    job_state=state, environment_receipt=completion.get('environment_receipt'))
+                    job_state=state, environment_receipt=completion.get('environment_receipt'),
+                    cause_kind=json.loads(cause)['kind'] if cause else None)
         if outcome_record is not None:
             self.record_decision(outcome_record)
         return result_job
@@ -1243,18 +1293,128 @@ class WorkloadStore:
         with self.transaction() as db:
             job = self._job(db, job_id, owner)
             if job["state"] not in TERMINAL:
-                raw = self._terminal_result(db, job_id, "cancelled by owner")
-                db.execute("UPDATE attempts SET state='cleanup',result=COALESCE(result,?) WHERE job=? AND state='running'",
-                           (raw, job_id))
-                db.execute("UPDATE workers SET ready=0 WHERE id IN (SELECT worker FROM attempts WHERE job=? AND state='cleanup')", (job_id,))
-                db.execute("UPDATE jobs SET state='cancelled',reason='cancelled by owner',result=?,updated=? WHERE id=?",
-                           (raw, self.clock(), job_id))
-                remote = db.execute("SELECT state FROM github_remote_jobs WHERE job=?", (job_id,)).fetchone()
-                if remote:
-                    state = 'terminal' if remote['state'] == 'queued' else 'cancel_requested'
-                    db.execute("UPDATE github_remote_jobs SET state=?,reason='job cancelled',updated=? WHERE job=? "
-                               "AND state!='terminal'", (state, self.clock(), job_id))
+                self._cancel_job(db, job_id, "cancelled by owner", self.clock(), causes.make("cancelled_by_owner"))
             return self._job(db, job_id)
+
+    def _cancel_job(self, db, job_id, reason, now, cause):
+        """End one non-terminal job: the single implementation behind owner cancel and scope close.
+        A running attempt moves to `cleanup` and its worker is held until it reports clean."""
+        raw = self._terminal_result(db, job_id, reason)
+        db.execute("UPDATE attempts SET state='cleanup',result=COALESCE(result,?) WHERE job=? AND state='running'",
+                   (raw, job_id))
+        db.execute("UPDATE workers SET ready=0 WHERE id IN (SELECT worker FROM attempts WHERE job=? AND state='cleanup')", (job_id,))
+        db.execute("UPDATE jobs SET state='cancelled',reason=?,result=?,cause=?,updated=? WHERE id=?",
+                   (reason, raw, encode(cause, causes.CAUSE_BYTES), now, job_id))
+        remote = db.execute("SELECT state FROM github_remote_jobs WHERE job=?", (job_id,)).fetchone()
+        if remote:
+            state = 'terminal' if remote['state'] == 'queued' else 'cancel_requested'
+            db.execute("UPDATE github_remote_jobs SET state=?,reason='job cancelled',updated=? WHERE job=? "
+                       "AND state!='terminal'", (state, now, job_id))
+
+    # ---- work scopes (openspec work-scopes-and-cascade-cancel) ------------------------------------
+
+    def _scope_state(self, db, owner, key):
+        row = db.execute("SELECT state FROM scopes WHERE owner=? AND key=?", (owner, key)).fetchone()
+        return row["state"] if row else None
+
+    def _admit_to_scope(self, db, owner, key, lease_seconds, now):
+        """Open the scope on first use, refuse a closed one, bound its size, and renew its lease."""
+        row = db.execute("SELECT * FROM scopes WHERE owner=? AND key=?", (owner, key)).fetchone()
+        if row is not None and row["state"] == 'closed':
+            raise ScopeClosed(key)
+        limits = self.limits
+        if row is None:
+            open_scopes = db.execute("SELECT count(*) FROM scopes WHERE owner=? AND state='open'", (owner,)).fetchone()[0]
+            if open_scopes >= limits.scopes_per_owner:
+                raise WorkloadError("scope_capacity: %d open scopes" % open_scopes, 429)
+            lease = lease_seconds if lease_seconds is not None else float(limits.scope_lease_default_seconds)
+            db.execute("INSERT INTO scopes(owner,key,state,lease_seconds,lease_expires,created,updated) "
+                       "VALUES(?,?,'open',?,?,?,?)", (owner, key, lease, now + lease, now, now))
+            return
+        held = db.execute("SELECT count(*) FROM jobs WHERE owner=? AND scope=?", (owner, key)).fetchone()[0]
+        if held >= limits.scope_jobs:
+            raise WorkloadError("scope_capacity: scope holds %d jobs" % held, 429)
+        lease = lease_seconds if lease_seconds is not None else row["lease_seconds"]
+        db.execute("UPDATE scopes SET lease_seconds=?,lease_expires=?,updated=? WHERE owner=? AND key=?",
+                   (lease, now + lease, now, owner, key))
+
+    def _close_scope(self, db, owner, key, reason, by, now):
+        """The one close: explicit, by lease expiry, and by the janitor all land here.
+
+        Idempotent. Closing an unknown scope creates it closed, so a slow submitter that opens it later
+        is refused: a cancel cannot lose a race with the first submit."""
+        row = db.execute("SELECT * FROM scopes WHERE owner=? AND key=?", (owner, key)).fetchone()
+        if row is not None and row["state"] == 'closed':
+            return dict(json.loads(row["close_result"] or '{}'), state='closed', replayed=True)
+        reason = (reason or 'closed')
+        if len(reason) > 512:
+            reason = reason[:509] + '...'
+        cancelled = cleanup = 0
+        jobs = list(db.execute("SELECT id,state FROM jobs WHERE owner=? AND scope=?", (owner, key)))
+        terminal = sum(1 for j in jobs if j["state"] in TERMINAL)
+        text = "scope %s closed: %s" % (key, reason)
+        for job in jobs:
+            if job["state"] in TERMINAL:
+                continue
+            running = db.execute("SELECT 1 FROM attempts WHERE job=? AND state='running'", (job["id"],)).fetchone()
+            self._cancel_job(db, job["id"], text[:512], now,
+                             causes.make("scope_closed", {"scope": key, "closed_by": by, "reason": reason[:160]}))
+            cancelled += 1
+            cleanup += 1 if running else 0
+        result = dict(cancelled=cancelled, running_cleanup=cleanup, already_terminal=terminal)
+        if row is None:
+            db.execute("INSERT INTO scopes(owner,key,state,close_reason,closed_by,close_result,created,updated) "
+                       "VALUES(?,?,'closed',?,?,?,?,?)", (owner, key, reason, by, encode(result), now, now))
+        else:
+            db.execute("UPDATE scopes SET state='closed',close_reason=?,closed_by=?,close_result=?,lease_expires=NULL,"
+                       "updated=? WHERE owner=? AND key=?", (reason, by, encode(result), now, owner, key))
+        logging.getLogger(__name__).warning(
+            "scope_closed owner=%s key=%s by=%s reason=%s cancelled=%d cleanup=%d terminal=%d",
+            owner, key, by, reason, cancelled, cleanup, terminal)
+        return dict(result, state='closed', replayed=False)
+
+    def close_scope(self, owner, key, reason=None, by=None):
+        key = scope_key(key)
+        if reason is not None and not isinstance(reason, str):
+            raise WorkloadError("scope close reason must be text")
+        with self.transaction() as db:
+            self._expire(db, self.clock())
+            return self._close_scope(db, owner, key, reason, by or owner, self.clock())
+
+    def renew_scope(self, owner, key, lease_seconds=None):
+        key = scope_key(key)
+        lease_seconds = scope_lease(lease_seconds, self.limits) if lease_seconds is not None else None
+        now = self.clock()
+        with self.transaction() as db:
+            self._expire(db, now)
+            row = db.execute("SELECT * FROM scopes WHERE owner=? AND key=?", (owner, key)).fetchone()
+            if row is None:
+                raise WorkloadError("scope_not_found", 404)
+            if row["state"] == 'closed':
+                # The owner learns it lost the scope on its next renewal, not by silence.
+                raise ScopeClosed(key)
+            lease = lease_seconds if lease_seconds is not None else row["lease_seconds"]
+            db.execute("UPDATE scopes SET lease_seconds=?,lease_expires=?,updated=? WHERE owner=? AND key=?",
+                       (lease, now + lease, now, owner, key))
+            return self._scope_view(db, owner, key)
+
+    def get_scope(self, owner, key):
+        key = scope_key(key)
+        with self.transaction() as db:
+            self._expire(db, self.clock())
+            return self._scope_view(db, owner, key)
+
+    def _scope_view(self, db, owner, key):
+        row = db.execute("SELECT * FROM scopes WHERE owner=? AND key=?", (owner, key)).fetchone()
+        if row is None:
+            raise WorkloadError("scope_not_found", 404)
+        counts = {"queued": 0, "running": 0, "succeeded": 0, "failed": 0, "cancelled": 0, "expired": 0}
+        for state, n in db.execute("SELECT state,count(*) FROM jobs WHERE owner=? AND scope=? GROUP BY state", (owner, key)):
+            counts[state] = n
+        view = dict(row)
+        view["close_result"] = json.loads(view["close_result"]) if view["close_result"] else None
+        view["jobs"] = counts
+        return view
 
     def withdraw(self, owner, job_id):
         """Owner cancel that only ever ends a job NO worker has attempted.
@@ -1271,8 +1431,9 @@ class WorkloadStore:
             attempted = db.execute("SELECT count(*) FROM attempts WHERE job=?", (job_id,)).fetchone()[0]
             if job["state"] == "queued" and attempted == 0:
                 raw = self._terminal_result(db, job_id, "withdrawn by owner before any attempt")
-                db.execute("UPDATE jobs SET state='cancelled',reason='withdrawn by owner before any attempt',result=?,updated=? WHERE id=?",
-                           (raw, self.clock(), job_id))
+                db.execute("UPDATE jobs SET state='cancelled',reason='withdrawn by owner before any attempt',result=?,cause=?,updated=? WHERE id=?",
+                           (raw, encode(causes.make("cancelled_by_owner", {"withdrawn": True}), causes.CAUSE_BYTES),
+                            self.clock(), job_id))
                 db.execute("UPDATE github_remote_jobs SET state='terminal',reason='job withdrawn before dispatch',updated=? "
                            "WHERE job=? AND state='queued'", (self.clock(), job_id))
             return self._job(db, job_id)
@@ -1291,8 +1452,10 @@ class WorkloadStore:
         db.execute("UPDATE attempts SET state='cleanup',result=COALESCE(result,?) WHERE id=?", (raw, attempt["id"]))
         db.execute("UPDATE workers SET ready=0 WHERE id=?", (attempt["worker"],))
         state = "queued" if attempt["fence"] < self.limits.attempts else "failed"
-        db.execute("UPDATE jobs SET state=?,reason=?,result=?,updated=? WHERE id=? AND fence=? AND state='running'",
-                   (state, reason, raw, now, attempt["job"], attempt["fence"]))
+        cause = (encode(causes.make("worker_lost", {"detail": reason[:160], "worker": attempt["worker"]}),
+                        causes.CAUSE_BYTES) if state == "failed" else None)
+        db.execute("UPDATE jobs SET state=?,reason=?,result=?,cause=?,updated=? WHERE id=? AND fence=? AND state='running'",
+                   (state, reason, raw, cause, now, attempt["job"], attempt["fence"]))
 
     def _release_environment_writer(self, db, attempt, now):
         """Release a retained replica only after the worker proves cleanup."""
@@ -1309,18 +1472,16 @@ class WorkloadStore:
                        'WHERE handle=? AND host=?', (now, handle, attempt['host']))
 
     def _expire(self, db, now):
-        for job in list(db.execute("SELECT id,spec,state FROM jobs WHERE state IN ('queued','running')")):
-            spec = json.loads(job["spec"])
-            deadline = spec.get("deadline")
-            if deadline is None:
+        # A scope whose owner stopped renewing is closed by the same code as an explicit close. LIMIT bounds
+        # the work per call; the remainder is closed by the next call or by sweep().
+        for lapsed in list(db.execute("SELECT owner,key FROM scopes WHERE state='open' AND lease_expires IS NOT NULL "
+                                      "AND lease_expires<=? ORDER BY lease_expires LIMIT 16", (now,))):
+            self._close_scope(db, lapsed["owner"], lapsed["key"], "lease expired", "authority", now)
+        for job in list(db.execute("SELECT id,spec,state,created,placement FROM jobs WHERE state IN ('queued','running')")):
+            verdict = self._job_verdict(db, job, json.loads(job["spec"]), now)
+            if verdict is None:
                 continue
-            reason = "execution deadline expired"
-            if deadline > now:
-                estimate = spec["estimate_seconds"]
-                if job["state"] != "queued" or deadline - now >= estimate:
-                    continue
-                reason = ("estimated execution cannot fit remaining deadline "
-                          f"({max(0, deadline-now):.0f}s < {estimate:.0f}s)")
+            state, reason, cause = verdict
             raw = self._terminal_result(db, job["id"], reason)
             if job["state"] == "running":
                 db.execute("UPDATE attempts SET state='cleanup',result=COALESCE(result,?) WHERE job=? AND state='running'",
@@ -1330,10 +1491,46 @@ class WorkloadStore:
             db.execute("UPDATE github_remote_jobs SET state=CASE WHEN state='queued' THEN 'terminal' "
                        "ELSE 'cancel_requested' END,reason=?,updated=? WHERE job=? AND state!='terminal'",
                        (reason, now, job['id']))
-            db.execute("UPDATE jobs SET state='expired',reason=?,result=?,updated=? "
-                       "WHERE id=? AND state IN ('queued','running')", (reason, raw, now, job["id"]))
+            db.execute("UPDATE jobs SET state=?,reason=?,result=?,cause=?,updated=? "
+                       "WHERE id=? AND state IN ('queued','running')",
+                       (state, reason, raw, encode(cause, causes.CAUSE_BYTES), now, job["id"]))
         for a in list(db.execute("SELECT * FROM attempts WHERE state='running' AND expires<=?", (now,))):
             self._abandon(db, a, now, "execution lease expired")
+
+    def _job_verdict(self, db, job, spec, now):
+        """(terminal state, reason, cause) when a queued or running job's own clock has run out, else None.
+
+        Three clocks: the absolute `deadline`, and two that exist only when the submitter opts in
+        (`max_queue_seconds`, `progress_deadline_seconds`): Livestack imposes no wait or stall policy."""
+        deadline = spec.get("deadline")
+        if deadline is not None:
+            reason = "execution deadline expired"
+            if deadline <= now:
+                return "expired", reason, causes.make("deadline_expired", {"deadline": deadline})
+            estimate = spec["estimate_seconds"]
+            if job["state"] == "queued" and deadline - now < estimate:
+                return "expired", ("estimated execution cannot fit remaining deadline "
+                                   f"({max(0, deadline-now):.0f}s < {estimate:.0f}s)"), \
+                    causes.make("deadline_expired", {"deadline": deadline, "estimate_seconds": estimate})
+        queue_limit = spec.get("max_queue_seconds")
+        if (queue_limit is not None and job["state"] == "queued" and now - job["created"] > queue_limit and
+                not db.execute("SELECT 1 FROM attempts WHERE job=? LIMIT 1", (job["id"],)).fetchone()):
+            placement = json.loads(job["placement"]) if job["placement"] else None
+            return "expired", f"queue wait exceeded max_queue_seconds ({queue_limit:g}s)", causes.make(
+                "unplaceable", {"max_queue_seconds": queue_limit, "waited_seconds": round(now - job["created"]),
+                                "last_placement": placement and {"blockers": placement.get("blockers", [])[:4],
+                                                                 "since": placement.get("since")}})
+        stall_limit = spec.get("progress_deadline_seconds")
+        if stall_limit is not None and job["state"] == "running":
+            attempt = db.execute("SELECT created,progress_changed FROM attempts WHERE job=? AND state='running' "
+                                 "ORDER BY fence DESC LIMIT 1", (job["id"],)).fetchone()
+            if attempt is not None:
+                quiet = now - (attempt["progress_changed"] or attempt["created"])
+                if quiet > stall_limit:
+                    return "failed", f"no progress for {quiet:.0f}s (progress_deadline_seconds {stall_limit:g})", \
+                        causes.make("stalled_no_progress", {"progress_deadline_seconds": stall_limit,
+                                                            "quiet_seconds": round(quiet)})
+        return None
 
     retention_tiers = None  # retention_tiers.RetentionTiers, installed by the service; None = flat window
 
@@ -1362,6 +1559,10 @@ class WorkloadStore:
             return  # Missing destructive window fails closed; submission still enforces a hard cap.
         for row in self._prune_candidates(db, now):
             db.execute("DELETE FROM jobs WHERE id=?", (row["id"],))
+        if self.limits.terminal_seconds is not None:
+            db.execute("DELETE FROM scopes WHERE state='closed' AND updated<? AND NOT EXISTS "
+                       "(SELECT 1 FROM jobs WHERE jobs.owner=scopes.owner AND jobs.scope=scopes.key)",
+                       (now - self.limits.terminal_seconds,))
 
     def retention_plan(self):
         """Dry run of the job part of a retention pass: counts per outcome. Deletes nothing."""
