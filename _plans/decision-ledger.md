@@ -262,6 +262,7 @@ no inventory row — it is the shape this design must not add another of.
 |---|---|---|---|---|
 | host broker | `~/.cache/livestack/decisions-<host>.jsonl` | JSONL | **rotate at 32 MiB × 4 files** and **prune > 14 d** | the writer (size check on append, copy-truncate), same shape as benchday's `logging.rs` rotating writer |
 | fleet broker | `~/.cache/livestack/fleet-decisions.jsonl` | JSONL | **64 MiB × 4**, **30 d** | same writer |
+| workload authority | `<state_dir>/workload-decisions.jsonl` | JSONL | **64 MiB × 4**, age pruning disabled | `JsonlLedger` (size check on append; an unset age window never deletes history) |
 | hub manifest + client picker | Postgres `activity_events` (`source = "route.decision"` / `"route.outcome"`, record in `ctx` JSONB, `trace_id = decision_id`) | existing table | **30 d** | existing `pruneActivity` in `retention-sweeper.ts` — already bounded, already inventoried |
 | job caller | its own log; media-corpus writes to its run log | append | its existing bound | its existing rotation |
 
@@ -269,8 +270,10 @@ Rate bounds, because a per-tick emitter is how a 92,089-line log happened:
 the host broker emits only when a plan has actions; the fleet broker emits
 `observe` only on membership *transitions*; the client emits one `pick` per
 `pickBest` (not per `ranked`/snapshot call — `ranked()` is also called for
-diagnostics and would multiply records). A record is capped at 32 KiB; a
-candidate list over 64 entries is truncated with `"truncated": n`.
+diagnostics and would multiply records); the workload authority emits only on
+committed attempts and once when each attempt completes (completion replay
+does not emit again). A record is capped at 32 KiB; a candidate list over 64
+entries is truncated with `"truncated": n`.
 
 Unset retention must mean **disabled**, never "delete on deploy" — the rule
 the retention sweeper already follows.

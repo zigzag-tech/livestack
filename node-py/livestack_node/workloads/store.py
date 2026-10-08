@@ -12,12 +12,14 @@ import math
 from pathlib import Path
 import re
 import sqlite3
+import threading
 import time
 import uuid
 
 from .model import (Limits, failure_signature, WorkloadError, encode, host_view, identity, labels, name, resources,
                     submission)
 from .environment_receipts import validate as validate_environment_receipt
+from .decision_records import completion_record
 from .model import progress as validate_progress
 
 TERMINAL = ("succeeded", "failed", "cancelled", "expired")
@@ -70,7 +72,8 @@ class WorkloadStore:
         return parsed
 
     def __init__(self, path, *, handlers, limits=None, clock=time.time, compilation_policy=None,
-                 execution_providers=None, remote_hosts=None, environment_handlers=None):
+                 execution_providers=None, remote_hosts=None, environment_handlers=None,
+                 decision_ledger=None, decision_emitter_id='workload-authority'):
         self.path = str(path)
         self.handlers = set(handlers)
         self.limits = limits or Limits()
@@ -79,6 +82,10 @@ class WorkloadStore:
         self.execution_providers = dict(execution_providers or {})
         self.remote_hosts = dict(remote_hosts or {})
         self.environment_handlers = self.parse_environment_handlers(environment_handlers, self.handlers)
+        self.decision_ledger = decision_ledger
+        self.decision_emitter_id = decision_emitter_id
+        self._decision_ledger_lock = threading.Lock()
+        self._decision_ledger_failure = None
         if (set(self.execution_providers) - self.handlers or
                 any(not isinstance(p, str) or not p for p in self.execution_providers.values())):
             raise ValueError('invalid configured remote handler mapping')
@@ -115,6 +122,32 @@ class WorkloadStore:
     def bind_principals(self, principals):
         """The caller-principal table, for per-principal caps and the job list."""
         self.principals = {p.id: p for p in principals}
+
+    def record_decision(self, record):
+        if self.decision_ledger is None:
+            return False
+        try:
+            written = self.decision_ledger.append(record)
+        except Exception:
+            written = None
+        if written is None:
+            with self._decision_ledger_lock:
+                self._decision_ledger_failure = 'write_failed'
+            return False
+        return True
+
+    def status(self):
+        with self._decision_ledger_lock:
+            failure = self._decision_ledger_failure
+        degraded = failure is not None
+        return {
+            'decision_ledger': {
+                'enabled': self.decision_ledger is not None,
+                'degraded': degraded,
+                'reason': failure,
+            },
+            'observability_degraded': ['decision_ledger'] if degraded else [],
+        }
 
     def reserve_remote_dispatch(self, provider, slots):
         """Reserve a configured GitHub provider slot and return one outbox row.
@@ -837,6 +870,8 @@ class WorkloadStore:
     def claim(self, worker, boot, *, job_id=None):
         from .placement import place
         now = self.clock()
+        records = []
+        assignment = None
         with self.transaction() as db:
             self._expire(db, now)
             self._expire_environments(db, now)
@@ -852,14 +887,20 @@ class WorkloadStore:
             existing = db.execute(query+' ORDER BY created LIMIT 1', params).fetchone()
             if existing:
                 return self._assignment(db, existing)
-            place(db, now, self.limits, self.principals, self.compilation_policy, only_job_id=job_id)
+            records = place(db, now, self.limits, self.principals, self.compilation_policy,
+                            only_job_id=job_id,
+                            emitter_id=(self.decision_emitter_id
+                                        if self.decision_ledger is not None else None))
             query = "SELECT * FROM attempts WHERE worker=? AND boot=? AND state='running'"
             params = [worker, boot]
             if job_id is not None:
                 query += ' AND job=?'
                 params.append(job_id)
             assigned = db.execute(query+' ORDER BY created LIMIT 1', params).fetchone()
-            return self._assignment(db, assigned) if assigned else None
+            assignment = self._assignment(db, assigned) if assigned else None
+        for record in records:
+            self.record_decision(record)
+        return assignment
 
     def _assignment(self, db, attempt):
         job = self._job(db, attempt["job"])
@@ -948,6 +989,7 @@ class WorkloadStore:
         if outcome not in ("succeeded", "product_failure", "infrastructure"):
             raise WorkloadError("invalid outcome")
         now = self.clock()
+        outcome_record = None
         with self.transaction() as db:
             self._expire(db, now)
             self._worker(db, worker, boot)
@@ -1035,7 +1077,19 @@ class WorkloadStore:
                 state, reason = "queued", "infrastructure retry"
             db.execute("UPDATE jobs SET state=?,result=?,reason=?,updated=? WHERE id=?",
                        (state, raw, reason, now, job["id"]))
-            return self._job(db, job["id"])
+            result_job = self._job(db, job["id"])
+            if self.decision_ledger is not None and a['decision_id']:
+                outcome_record = completion_record(
+                    now=now, emitter_id=self.decision_emitter_id,
+                    decision_id=a['decision_id'], kind=job['spec']['handler'],
+                    owner=job['owner'], job_id=job['id'], attempt_id=attempt_id,
+                    worker=worker, environment_handle=env_handle,
+                    environment_generation=a['environment_generation'],
+                    attempt_seconds=now-a['created'], product_outcome=outcome,
+                    job_state=state, environment_receipt=completion.get('environment_receipt'))
+        if outcome_record is not None:
+            self.record_decision(outcome_record)
+        return result_job
 
     def cancel(self, owner, job_id):
         with self.transaction() as db:

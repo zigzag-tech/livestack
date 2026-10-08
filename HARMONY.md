@@ -740,6 +740,12 @@ control, worker profiles, consumer SDK and handler-scope refusals have been
 verified together. Operator configuration and commands are in
 [`_plans/durable-workloads.md`](_plans/durable-workloads.md).
 
+Committed placements and attempt completion events are written to the bounded
+`<state_dir>/workload-decisions.jsonl` ledger (64 MiB per file, four files,
+age deletion disabled), joined by decision, job, attempt and environment
+generation IDs. An admin can read `GET /v1/workloads/status`; a ledger write
+failure appears as `observability_degraded` and does not refuse the workload.
+
 ## Fleet roster: `GET /v1/workloads/workers` (read-only)
 
 Any `caller` or `admin` principal can ask the authority for the worker fleet as the

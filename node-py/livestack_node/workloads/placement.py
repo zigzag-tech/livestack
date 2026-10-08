@@ -9,6 +9,7 @@ import uuid
 from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedule
 from ..ledger import new_decision_id
 from .model import AVOID_LABEL_SIGNATURE, AVOID_LABEL_WORKER, WorkloadError, encode, failure_signature
+from .decision_records import admission_record
 
 # How long after an infrastructure failure a job refuses the worker that
 # produced it, while some other worker could ever run it. Fixed and short
@@ -121,7 +122,9 @@ def _avoided(db, row, now):
     return out
 
 
-def place(db, now, limits, principals=None, compilation_policy=None, *, only_job_id=None):
+def place(db, now, limits, principals=None, compilation_policy=None, *, only_job_id=None,
+          emitter_id=None):
+    decision_records = []
     draining = {p.worker for p in (principals or {}).values()
                 if getattr(p, 'role', None) == 'worker' and not p.claim_enabled}
     workers = db.execute("SELECT * FROM workers WHERE ready=1 AND seen>? ORDER BY id",
@@ -453,6 +456,34 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                     encode(pinned_release) if pinned_release is not None else None, decision_id))
         db.execute("UPDATE jobs SET state='running',fence=?,updated=?,reason=? WHERE id=?",
                    (fence, now, grants[0].reason, row["id"]))
+        filtered = {item['worker']: item['reason'] for item in rejected}
+        scheduler_candidates = {candidate['id'] for candidate in
+                                plan.decisions[job.id]['candidates']}
+        for worker in workers:
+            if worker['id'] in scheduler_candidates or worker['id'] in filtered:
+                continue
+            report = reports[worker['id']]
+            if worker['id'] in draining:
+                reason = 'worker draining'
+            elif spec['handler'] not in report['handlers']:
+                reason = 'handler not advertised'
+            elif worker not in compatible:
+                reason = 'handler release incompatible'
+            else:
+                reason = 'excluded by placement prerequisites'
+            filtered[worker['id']] = reason
+        if emitter_id is not None:
+            decision_records.append(admission_record(
+                plan.decisions[job.id], now=now, emitter_id=emitter_id,
+                kind=spec['handler'], owner=row['owner'], selector=spec['selector'],
+                locality_host=locality, job_id=row['id'], attempt_id=aid,
+                environment_handle=environment_handle,
+                environment_generation=environment_generation,
+                filtered_candidates=[
+                    {'worker': worker['id'], 'host': worker['host'], 'reason': reason}
+                    for worker in workers if (reason := filtered.get(worker['id']))
+                ],
+            ))
         busy.add(chosen["id"])
         running[row["owner"]] = running.get(row["owner"], 0) + 1
         measured = chosen["host"] in views and claim is not None
@@ -462,3 +493,4 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         if measured:
             host_free[chosen["host"]][MEMORY] -= claim
             memory_terms[chosen["host"]]["admitted"] += claim
+    return decision_records
