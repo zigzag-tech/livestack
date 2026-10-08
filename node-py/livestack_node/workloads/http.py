@@ -452,8 +452,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 3 and parts[0] == 'handlers' and parts[2] == 'capacity' and method == 'GET':
                 if parts[1] not in principal.handlers:
                     raise WorkloadError('handler is not authorized', 403)
-                with store.transaction() as db:
-                    draining = claims.draining(db, store.clock(), self.server.principals)
+                draining = claims.draining_now(store, self.server.principals)
                 return store.handler_capacity(parts[1], draining=draining)
             if len(parts) == 2 and parts[0] == 'environments' and method == 'GET':
                 return store.get_environment(principal.id, parts[1])
@@ -498,9 +497,7 @@ class Handler(BaseHTTPRequestHandler):
                 return response
             if parts == ['worker', 'claim']:
                 self._remote_boot(principal, body)
-                with store.transaction() as db:
-                    withheld = principal.worker in claims.draining(db, store.clock(), self.server.principals)
-                if withheld:
+                if principal.worker in claims.draining_now(store, self.server.principals):
                     return {'assignment': None, 'reason': 'worker_draining'}
                 return {'assignment': store.claim(principal.worker, body['boot'], job_id=principal.remote_job)}
             if parts == ['worker', 'heartbeat']:
