@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from livestack_node.workloads.archive import MANIFEST, capture, unpack
+from livestack_node.workloads.environment_receipts import validate as validate_environment_receipt
 from livestack_node.fleet_operations import CREATED, OperationStore
 from livestack_node.fleet_ops_api import deprovision
 from livestack_node.hostd import _drain_blocked
@@ -159,15 +160,16 @@ def test_complete_mirror_preserves_incremental_state_and_invalidates_lockfiles(t
     finish(store, third, generation=3)
 
 
-@pytest.mark.parametrize(('field', 'value', 'expected', 'outcome'), [
-    (None, None, 'authority_replica_missing', 'rebuilt'),
-    ('host', 'host-b', 'authority_replica_host_mismatch', 'relocated'),
-    ('profile', 'other-profile', 'authority_replica_profile_mismatch', 'rebuilt'),
-    ('compatibility', '0'*64, 'authority_replica_compatibility_mismatch', 'rebuilt'),
-    ('generation', 0, 'authority_replica_generation_mismatch', 'rebuilt'),
-    ('state', 'running', 'authority_replica_not_parked', 'rebuilt'),
+@pytest.mark.parametrize(('field', 'value', 'expected', 'outcome', 'receipt_reason'), [
+    (None, None, 'authority_replica_missing', 'rebuilt', 'authority_replica_unconfirmed'),
+    ('host', 'host-b', 'authority_replica_host_mismatch', 'relocated', 'authority_replica_unconfirmed'),
+    ('profile', 'other-profile', 'authority_replica_profile_mismatch', 'rebuilt', 'authority_replica_unconfirmed'),
+    ('compatibility', '0'*64, 'authority_replica_compatibility_mismatch', 'rebuilt', 'authority_replica_unconfirmed'),
+    ('generation', 0, 'authority_replica_generation_mismatch', 'rebuilt', 'authority_replica_unconfirmed'),
+    ('state', 'running', 'authority_replica_not_parked', 'rebuilt', 'authority_replica_unconfirmed'),
 ])
-def test_unconfirmed_local_replica_reports_the_failed_authority_check(tmp_path, field, value, expected, outcome):
+def test_unconfirmed_local_replica_logs_failed_authority_check(
+        tmp_path, caplog, field, value, expected, outcome, receipt_reason):
     store, _, _ = make_store(tmp_path)
     handle = 'e'*32
     incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
@@ -181,8 +183,13 @@ def test_unconfirmed_local_replica_reports_the_failed_authority_check(tmp_path, 
         replicas=[] if field is None else [replica]), incoming, handler=HANDLER)
 
     assert second['reuse_outcome'] == outcome
-    assert second['reason_code'] == expected
-    finish(store, second, generation=2)
+    assert second['reuse_diagnostic'] == expected
+    assert second['reason_code'] == receipt_reason
+    assert f'diagnostic={expected}' in caplog.text
+    receipt = finish(store, second, generation=2)
+    assert receipt['reason_code'] == receipt_reason
+    validate_environment_receipt(receipt, handle=handle, generation=2,
+        profile=PROFILE, source_digest=digest)
 
 
 def test_untrusted_local_marker_reason_precedes_synthetic_compatibility_digest(tmp_path):

@@ -24,6 +24,7 @@ import sys
 import time
 
 from .archive import MANIFEST, file_digest, relative_path
+from .environment_receipts import REUSE_REASONS
 from .model import WorkloadError, encode, name
 
 MAX_REPLICA_BYTES = 32 * 1024**3
@@ -870,6 +871,7 @@ class TaskEnvironmentStore:
                 meta = dict(marker)
                 reuse_outcome = 'reused'
                 reason_code = 'compatible_environment_reused'
+                reuse_diagnostic = reason_code
             else:
                 if current_path.exists():
                     _remove_tree(current_path)
@@ -898,20 +900,27 @@ class TaskEnvironmentStore:
                 reuse_outcome = ('relocated' if remote_replica else
                                  'rebuilt' if had_local or generation > 1 else 'created')
                 if remote_replica and not had_local:
-                    reason_code = 'relocated_reconstructed'
+                    reuse_diagnostic = 'relocated_reconstructed'
                 elif had_local:
-                    reason_code = _reuse_rejection_reason(marker, profile=profile,
+                    reuse_diagnostic = _reuse_rejection_reason(marker, profile=profile,
                         purpose=env['purpose'], compatibility=compatibility,
                         owner_scope=env['owner_scope'], replica_checks=replica_checks)
                 elif generation > 1:
-                    reason_code = _authority_replica_rejection_reason(replica_checks)
+                    reuse_diagnostic = _authority_replica_rejection_reason(replica_checks)
                 else:
-                    reason_code = 'created'
+                    reuse_diagnostic = 'created'
+                reason_code = (reuse_diagnostic if reuse_diagnostic in REUSE_REASONS else
+                               'authority_replica_unconfirmed')
             replica_summary = ';'.join(','.join(f'{key}={int(value)}' for key, value in check.items())
                                        for check in replica_checks)
+            reuse_checks_summary = ','.join(f'{key}={int(value)}' for key, value in reuse_checks.items())
+            if not reusable and (had_local or generation > 1):
+                logging.warning('task_environment_reuse_rejected: handle=%s generation=%s diagnostic=%s '
+                    'checks=%s replica_checks=%s', handle, generation, reuse_diagnostic,
+                    reuse_checks_summary[:512], replica_summary[:1024] or 'none')
             logging.info('task_environment_reuse_decision: handle=%s generation=%s checks=%s '
                          'replica_checks=%s reason=%s reused=%s', handle, generation,
-                         ','.join(f'{key}={int(value)}' for key, value in reuse_checks.items()),
+                         reuse_checks_summary,
                          replica_summary or 'none', reason_code, int(reusable))
             meta.update(state='preparing', generation=generation, compatibility=compatibility)
             _atomic_json(current_path / 'environment.json', meta)
@@ -963,6 +972,7 @@ class TaskEnvironmentStore:
             started=start, source_digest=assignment['spec']['input_digest'],
             manifest_digest=manifest_digest,
             source_integrity=source_integrity, reuse_outcome=reuse_outcome, reason_code=reason_code,
+            reuse_diagnostic=reuse_diagnostic,
             cache_components=receipts, metadata=meta,
             cache_roots=list(resolved_cache_paths.values()))
 

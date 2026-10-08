@@ -136,7 +136,7 @@ The system SHALL enforce the count/byte/age ceilings in the design: 1,024 logica
 
 ### Requirement: Reuse outcomes and timing are attributable without entity fan-out
 
-Job status/receipts SHALL name the environment handle/generation, requested and actual reuse, reason, compatibility/input identities and actual producing host/attempt. A rebuild reason SHALL identify the first failed local reuse predicate; an authority replica refusal SHALL identify the mismatched replica field when one is available. Waiting and cleanup states SHALL have separate reasons. Measured phase timings SHALL distinguish queue, transfer, preparation, build, execution and cleanup; unavailable readings SHALL be unknown with a reason. Metadata/receipts and decision records SHALL be bounded as in the design, with `observability_degraded` for recording failures. Registry/placement/sweep round trips SHALL be bounded independently of environment/entity count.
+Job status/receipts SHALL name the environment handle/generation, requested and actual reuse, reason, compatibility/input identities and actual producing host/attempt. The version-1 receipt reason SHALL remain within its established closed vocabulary for rolling compatibility. When rebuilding a previously retained environment, the worker SHALL emit one bounded warning naming the first failed local reuse predicate; an authority replica refusal SHALL name the mismatched replica field when one is available. Waiting and cleanup states SHALL have separate reasons. Measured phase timings SHALL distinguish queue, transfer, preparation, build, execution and cleanup; unavailable readings SHALL be unknown with a reason. Metadata/receipts and decision records SHALL be bounded as in the design, with `observability_degraded` for recording failures. Registry/placement/sweep round trips SHALL be bounded independently of environment/entity count.
 
 Each admitted placement SHALL have one stable `decision_id`, minted before the scheduler chooses a target. The ID SHALL be present in the worker assignment, attempt history and compilation authorization receipt, and those records SHALL agree. The terminal environment outcome SHALL remain joinable to that ID through its job/attempt/generation identity. A worker SHALL refuse a compilation authorization receipt whose `decision_id` differs from its journaled assignment; caller input SHALL NOT choose this identity. Legacy attempts without an ID may report it as unknown.
 
@@ -148,7 +148,8 @@ Handler timing traces SHALL be bounded and SHALL represent each dependency, comp
 
 #### Scenario: A retained replica is rejected for reuse
 - **WHEN** a local marker exists but an authority replica field fails the reuse check
-- **THEN** the receipt names the failed authority field when it can be isolated
+- **THEN** the compatible receipt reports a supported refusal reason
+- **AND** a bounded worker warning names the failed authority field when it can be isolated
 - **AND** the worker rebuilds instead of treating that replica as reusable
 
 #### Scenario: Timing instrumentation is unavailable
