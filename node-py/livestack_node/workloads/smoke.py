@@ -38,6 +38,8 @@ from pathlib import Path
 PASS, FAIL, NOT_APPLICABLE = 'pass', 'fail', 'not_applicable'
 MINIMUM = ('worker_restart_clean', 'handler_import', 'handler_integrity')
 MAX_SOURCE_FILES = 2000
+# Third-party trees ride inside a bundle; they are not the handler's code and dominate its file count.
+VENDORED = {'node_modules', 'site-packages', '__pycache__', '.git', '_deps'}
 MAX_SOURCE_BYTES = 8 * 1024 * 1024
 PROBE_TIMEOUT_S = 60
 
@@ -166,8 +168,7 @@ def js_problems(path, node='node'):
     declared"). It cannot see an undefined name; eslint's no-undef does, so it runs when installed."""
     if shutil.which(node) is None:
         return None
-    flag = ['--input-type=module'] if str(path).endswith('.mjs') else []
-    code, out = _run([node, *flag, '--check', str(path)], 20)
+    code, out = _run([node, '--check', str(path)], 20)   # .mjs is parsed as ESM by extension
     problems = []
     if code != 0:
         first = next((line for line in out.splitlines() if 'Error' in line), out.strip()[:200])
@@ -203,7 +204,8 @@ def handler_import(ctx):
         if not payload.is_dir():
             problems.append(f'missing_payload:{digest[:12]}')
             continue
-        files = sorted(p for p in payload.rglob('*') if p.is_file() and not p.is_symlink())[:MAX_SOURCE_FILES]
+        files = [p for p in sorted(payload.rglob('*')) if p.is_file() and not p.is_symlink()
+                 and not VENDORED.intersection(p.relative_to(payload).parts)][:MAX_SOURCE_FILES]
         for path in files:
             suffix = path.suffix
             if suffix not in ('.py', '.js', '.mjs', '.cjs') or path.stat().st_size > MAX_SOURCE_BYTES:

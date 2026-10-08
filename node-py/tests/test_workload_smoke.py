@@ -92,6 +92,15 @@ def test_js_redeclaration_is_a_syntax_error_node_check_reports(tmp_path):
     assert result['status'] == 'fail' and 'already been declared' in json.dumps(result)
 
 
+@pytest.mark.skipif(shutil.which('node') is None, reason='needs node')
+def test_valid_esm_handler_passes_and_vendored_trees_are_not_scanned(tmp_path):
+    """Found on the live canary host: .mjs handlers must pass, and node_modules must not be scanned."""
+    esm = b'import fs from "node:fs";\nexport const read = (p) => fs.readFileSync(p, "utf8");\n'
+    make_package(tmp_path, {'src/run.mjs': esm, 'node_modules/dep/index.js': b'this is not javascript ((('})
+    result = smoke.handler_import(dict(handlers_root=str(tmp_path)))
+    assert result['status'] == 'pass' and result['detail']['files_checked'] == 1
+
+
 def test_syntax_error_is_caught(tmp_path):
     make_package(tmp_path, {'run.py': b'def broken(:\n    pass\n'})
     assert smoke.handler_import(dict(handlers_root=str(tmp_path)))['reason'].find('syntax_error') >= 0
