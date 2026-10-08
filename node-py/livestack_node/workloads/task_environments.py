@@ -36,6 +36,45 @@ MAX_MANIFEST_FILES = 50000
 MAX_PROBE_BYTES = 8192
 LOCK_WAIT_SECONDS = 5
 HANDLE = re.compile(r'[a-f0-9]{32}')
+_REPLICA_REJECTION_REASONS = {
+    'host': 'authority_replica_host_mismatch',
+    'profile': 'authority_replica_profile_mismatch',
+    'compatibility': 'authority_replica_compatibility_mismatch',
+    'generation': 'authority_replica_generation_mismatch',
+    'parked': 'authority_replica_not_parked',
+}
+
+
+def _authority_replica_rejection_reason(replica_checks):
+    if not replica_checks:
+        return 'authority_replica_missing'
+    mismatch_sets = [tuple(field for field, matches in check.items() if not matches)
+                     for check in replica_checks]
+    closest_count = min(len(mismatches) for mismatches in mismatch_sets)
+    closest = {mismatches for mismatches in mismatch_sets if len(mismatches) == closest_count}
+    if len(closest) == 1:
+        failed, = closest
+        if len(failed) == 1:
+            return _REPLICA_REJECTION_REASONS[failed[0]]
+    return 'authority_replica_unconfirmed'
+
+
+def _reuse_rejection_reason(marker, *, profile, purpose, compatibility, owner_scope, replica_checks):
+    if marker is None:
+        return _authority_replica_rejection_reason(replica_checks)
+    if marker['state'] == 'rebuild_required':
+        return 'local_state_untrusted'
+    if marker['profile'] != profile:
+        return 'profile_changed'
+    if marker['purpose'] != purpose:
+        return 'purpose_changed'
+    if marker['compatibility'] != compatibility:
+        return 'toolchain_changed'
+    if marker['owner_scope'] != owner_scope:
+        return 'owner_scope_changed'
+    if marker['state'] != 'parked':
+        return 'local_state_untrusted'
+    return _authority_replica_rejection_reason(replica_checks)
 
 
 def _relative(value, field):
@@ -822,9 +861,6 @@ class TaskEnvironmentStore:
                 owner_scope=bool(marker and marker['owner_scope'] == env['owner_scope']),
                 generation_advances=bool(marker and marker['generation'] < generation))
             reusable = all(reuse_checks.values())
-            logging.info('task_environment_reuse_decision: handle=%s generation=%s replicas=%s checks=%s reused=%s',
-                         handle, generation, len(replica_checks),
-                         ','.join(f'{key}={int(value)}' for key, value in reuse_checks.items()), int(reusable))
             had_local = marker is not None
             discarded_components = dict(marker['components']) if marker is not None else {}
             if marker is not None and marker['generation'] >= generation:
@@ -863,16 +899,20 @@ class TaskEnvironmentStore:
                                  'rebuilt' if had_local or generation > 1 else 'created')
                 if remote_replica and not had_local:
                     reason_code = 'relocated_reconstructed'
-                elif had_local and marker['compatibility'] != compatibility:
-                    reason_code = 'toolchain_changed'
-                elif had_local and marker['state'] == 'rebuild_required':
-                    reason_code = 'local_state_untrusted'
                 elif had_local:
-                    reason_code = 'authority_replica_unconfirmed'
+                    reason_code = _reuse_rejection_reason(marker, profile=profile,
+                        purpose=env['purpose'], compatibility=compatibility,
+                        owner_scope=env['owner_scope'], replica_checks=replica_checks)
                 elif generation > 1:
-                    reason_code = 'authority_replica_unconfirmed'
+                    reason_code = _authority_replica_rejection_reason(replica_checks)
                 else:
                     reason_code = 'created'
+            replica_summary = ';'.join(','.join(f'{key}={int(value)}' for key, value in check.items())
+                                       for check in replica_checks)
+            logging.info('task_environment_reuse_decision: handle=%s generation=%s checks=%s '
+                         'replica_checks=%s reason=%s reused=%s', handle, generation,
+                         ','.join(f'{key}={int(value)}' for key, value in reuse_checks.items()),
+                         replica_summary or 'none', reason_code, int(reusable))
             meta.update(state='preparing', generation=generation, compatibility=compatibility)
             _atomic_json(current_path / 'environment.json', meta)
         source_dir = current_path / 'source'

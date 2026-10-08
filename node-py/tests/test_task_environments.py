@@ -159,6 +159,50 @@ def test_complete_mirror_preserves_incremental_state_and_invalidates_lockfiles(t
     finish(store, third, generation=3)
 
 
+@pytest.mark.parametrize(('field', 'value', 'expected', 'outcome'), [
+    (None, None, 'authority_replica_missing', 'rebuilt'),
+    ('host', 'host-b', 'authority_replica_host_mismatch', 'relocated'),
+    ('profile', 'other-profile', 'authority_replica_profile_mismatch', 'rebuilt'),
+    ('compatibility', '0'*64, 'authority_replica_compatibility_mismatch', 'rebuilt'),
+    ('generation', 0, 'authority_replica_generation_mismatch', 'rebuilt'),
+    ('state', 'running', 'authority_replica_not_parked', 'rebuilt'),
+])
+def test_unconfirmed_local_replica_reports_the_failed_authority_check(tmp_path, field, value, expected, outcome):
+    store, _, _ = make_store(tmp_path)
+    handle = 'e'*32
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    first = store.prepare(assignment(handle, 1, digest), incoming, handler=HANDLER)
+    finish(store, first, generation=1)
+    replica = local_replica(store, handle, 1)
+    if field is not None:
+        replica[field] = value
+
+    second = store.prepare(assignment(handle, 2, digest,
+        replicas=[] if field is None else [replica]), incoming, handler=HANDLER)
+
+    assert second['reuse_outcome'] == outcome
+    assert second['reason_code'] == expected
+    finish(store, second, generation=2)
+
+
+def test_untrusted_local_marker_reason_precedes_synthetic_compatibility_digest(tmp_path):
+    store, _, _ = make_store(tmp_path)
+    handle = 'f'*32
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    first = store.prepare(assignment(handle, 1, digest), incoming, handler=HANDLER)
+    finish(store, first, generation=1)
+    marker_path = store.root/handle/'environment.json'
+    marker = json.loads(marker_path.read_text())
+    marker.update(state='rebuild_required', compatibility='0'*64)
+    marker_path.write_text(json.dumps(marker))
+
+    second = store.prepare(assignment(handle, 2, digest), incoming, handler=HANDLER)
+
+    assert second['reuse_outcome'] == 'rebuilt'
+    assert second['reason_code'] == 'local_state_untrusted'
+    finish(store, second, generation=2)
+
+
 def test_incompatible_profile_rebuilds_and_remote_replica_relocates(tmp_path):
     store, root, _ = make_store(tmp_path)
     handle = 'b'*32
