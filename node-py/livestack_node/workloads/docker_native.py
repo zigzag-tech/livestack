@@ -87,6 +87,7 @@ def run(config_path):
             finish_wait = int(session.get('finish_wait', 5)) if isinstance(session.get('finish_wait', 5), int) else 5
             if session.get('persistent') is True:
                 record['prune'] = docker_cache.prune(env, int(session['max_bytes']))
+                record['prune_seconds'] = record['prune'].get('seconds', 0.0)
         except Exception as error:
             record['prune_error'] = type(error).__name__
         if session:

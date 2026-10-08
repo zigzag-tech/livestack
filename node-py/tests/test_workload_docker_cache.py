@@ -90,6 +90,20 @@ def test_second_attempt_hits_and_first_is_cold(tmp_path):
     assert second.result['outcome'] == 'hit' and root2 == root and (root2/'blob').exists()
 
 
+def test_seconds_is_cache_overhead_not_the_attempt(tmp_path):
+    # Positive control for the instrument: `seconds` once measured Session creation to finish,
+    # i.e. the whole job (median 277 s of mostly e2e work). A job of 1.5 s must show in
+    # session_seconds and must NOT show in seconds or in any cache phase.
+    session = Session(make_plan(tmp_path), tmp_path)
+    session.begin()
+    time.sleep(1.5)
+    session.finish(0)
+    result = session.result
+    assert result['session_seconds'] >= 1.5
+    assert result['seconds'] < 1.0 and sum(result['phases'].values()) < 1.0
+    assert {'begin', 'finish'} <= set(result['phases'])
+
+
 def test_principals_get_different_roots(tmp_path):
     _, a = run_session(tmp_path, make_plan(tmp_path, owner='a'), grow=100)
     second, b = run_session(tmp_path, make_plan(tmp_path, owner='b'))

@@ -60,6 +60,7 @@ def run(config_path):
     code = None
     try:
         persistent = cache.begin()
+        starting = time.monotonic()
         for data in ([persistent, None] if persistent is not None else [None]):
             if data is None:
                 data = Path(config['output']).parent/'docker-data'
@@ -77,6 +78,7 @@ def run(config_path):
                     raise
                 # Fail closed to cold: a root dockerd cannot start on is wiped, the attempt runs ephemeral.
                 cache.start_failed()
+        cache.timed('dockerd_start', starting)
         cache.announce()
         if config.get('native_client'):
             # No PID namespace was requested by the installed RootlessKit argv;
@@ -91,10 +93,13 @@ def run(config_path):
         code = subprocess.call(config['argv'], cwd=config['cwd'], env=env)
         if cache.root is not None:
             cache.result['prune'] = docker_cache.prune(env, cache.plan['max_bytes'])
+            cache.phases['prune'] = cache.result['prune'].get('seconds', 0.0)
         return code
     finally:
+        stopping = time.monotonic()
         if daemon is not None and not stop(daemon, 15 if cache.root is not None else 5):
             cache.unclean = True
+        cache.timed('dockerd_stop', stopping)
         # In native mode `code` is dockerd's own status; the frontend recorded the handler's.
         cache.finish(None if config.get('native_client') else code)
 
