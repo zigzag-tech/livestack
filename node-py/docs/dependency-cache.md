@@ -60,7 +60,9 @@ Missing, `enabled:false` or invalid = disabled (invalid is logged by name). Linu
 
 Key = sha256 of (schema, epoch, owner namespace, handler executable realpath/size/mtime + OS/arch/libc, tree path,
 key file contents). Namespace is the submitting principal (`assignment['owner']`), as in `docker_cache`.
-Restore is a copy (`cp -a --reflink=auto`) then a re-scan compared with the entry's recorded file count and bytes;
+A tree whose parent directory is an alias symlink (Benchday's `packages/mesh_relay`) is restored and stored at the
+parent's real location, provided that stays inside the source (npm installed it there); otherwise `parent-outside-source`.
+Restore is a copy (`cp -a --reflink=auto`) then a re-scan compared with the entry's recorded file count and apparent (`st_size`) bytes; allocation differs between a tree and its copy and is only used for the bound;
 a mismatch drops the entry and the attempt installs cold. Store refuses absolute/escaping symlinks, special files,
 unreadable subtrees, trees over `max_component_bytes` or `max_bytes/2`, and a key that changed during the attempt.
 `refresh_every` N: every Nth attempt (sha256 of attempt id mod N) skips restore, installs cold and replaces the
@@ -72,7 +74,7 @@ exclusive store; busy = named miss).
 
 Attempt result `dependency_cache`: `{outcome: enabled, restored: [{path, outcome, reason?, key, bytes, seconds}],
 saved: [...]}`. Restore outcomes: `reused`, `miss` (`no-entry`, `busy`, `verify-failed: ...`, `copy-failed`),
-`refresh`, `skipped` (`no-manifest`, `invalid-manifest: ...`, `no-key`, `destination-exists`, `symlinked-parent`,
+`refresh`, `skipped` (`no-manifest`, `invalid-manifest: ...`, `no-key`, `destination-exists`, `parent-outside-source`,
 `unsupported-pattern`). Save outcomes: `saved`, `not-saved` (reason).
 
 ## Operations / rollback

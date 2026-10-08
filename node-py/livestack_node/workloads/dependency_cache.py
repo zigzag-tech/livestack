@@ -234,43 +234,48 @@ def entry_key(config, owner, tool, path, source, key_paths):
 # --------------------------------------------------------------------- trees
 
 def scan(root, source_root=None):
-    """(files, bytes, error) of a tree; never follows links. error names the first unsafe thing.
+    """(files, allocated_bytes, apparent_bytes, error) of a tree; never follows links.
+
+    error names the first unsafe thing. Allocated bytes (st_blocks) are what the bound counts;
+    apparent bytes (st_size) are what a copy must reproduce exactly: allocation legitimately
+    differs between a tree and its copy (holes, inline data, reflinks).
 
     A symlink must be relative and, when `source_root` is given, stay inside it: an absolute
     link would point into the attempt that saved it.
     """
-    files, total, base = 0, 0, Path(root)
+    files, total, apparent, base = 0, 0, 0, Path(root)
     stack = [base]
     while stack:
         current = stack.pop()
         try:
             entries = list(os.scandir(current))
         except OSError as error:
-            return files, total, 'unreadable: %s' % (error.strerror or error)
+            return files, total, apparent, 'unreadable: %s' % (error.strerror or error)
         for entry in entries:
             try:
                 info = entry.stat(follow_symlinks=False)
             except OSError as error:
-                return files, total, 'unreadable: %s' % (error.strerror or error)
+                return files, total, apparent, 'unreadable: %s' % (error.strerror or error)
             files += 1
             if files > MAX_TREE_FILES:
-                return files, total, 'too-many-files'
+                return files, total, apparent, 'too-many-files'
             mode = info.st_mode
             if stat.S_ISDIR(mode):
                 stack.append(Path(entry.path))
             elif stat.S_ISLNK(mode):
                 target = os.readlink(entry.path)
                 if os.path.isabs(target):
-                    return files, total, 'absolute-symlink'
+                    return files, total, apparent, 'absolute-symlink'
                 if source_root is not None:
                     resolved = os.path.normpath(os.path.join(os.path.dirname(entry.path), target))
                     if os.path.commonpath([resolved, str(source_root)]) != str(source_root):
-                        return files, total, 'symlink-escapes-source'
+                        return files, total, apparent, 'symlink-escapes-source'
             elif stat.S_ISREG(mode):
                 total += info.st_blocks * 512
+                apparent += info.st_size
             else:
-                return files, total, 'special-file'
-    return files, total, None
+                return files, total, apparent, 'special-file'
+    return files, total, apparent, None
 
 
 def _copy(source, destination):
@@ -322,6 +327,25 @@ class Attempt:
         self.served = False
         self.source = None       # the handler's root, once it has asked
 
+    @staticmethod
+    def root_of(source):
+        return Path(os.path.realpath(source))
+
+    @classmethod
+    def physical(cls, source, path):
+        """Where `path` really lives: its parent may be an alias symlink (Benchday mounts
+        packages/mesh_relay as a link into another group), resolved by the same rule npm
+        used when it installed there. None when the resolved parent leaves the source."""
+        root = cls.root_of(source)
+        relative = PurePosixPath(path)
+        parent = Path(os.path.realpath(root/relative.parent))
+        try:
+            if os.path.commonpath([str(parent), str(root)]) != str(root):
+                return None
+        except ValueError:
+            return None
+        return parent/relative.name
+
     # -- restore
     def _refresh_due(self):
         every = self.config['refresh_every']
@@ -360,10 +384,9 @@ class Attempt:
             started = time.monotonic()
             record = dict(path=path)
             self.records.append(record)
-            destination = source/path
-            parent_chain = [source/PurePosixPath(path).parents[i] for i in range(len(PurePosixPath(path).parents) - 1)]
-            if any(parent.is_symlink() for parent in parent_chain):
-                record.update(outcome='skipped', reason='symlinked-parent')
+            destination = self.physical(source, path)
+            if destination is None:
+                record.update(outcome='skipped', reason='parent-outside-source')
                 continue
             if os.path.lexists(destination):
                 record.update(outcome='skipped', reason='destination-exists')
@@ -392,8 +415,8 @@ class Attempt:
                 continue
             try:
                 _copy(entry/'data', destination)
-                files, size, error = scan(destination)
-                if error or files != meta.get('files') or size != meta.get('bytes'):
+                files, size, apparent, error = scan(destination)
+                if error or files != meta.get('files') or apparent != meta.get('apparent'):
                     _remove(destination)
                     record.update(outcome='miss', reason='verify-failed: %s' % (error or 'size-mismatch'))
                     self.entries[index] = (path, key_paths, key, 'miss')
@@ -483,14 +506,14 @@ class Attempt:
             if path not in committed:
                 record.update(outcome='not-saved', reason='not-committed')
                 continue
-            tree = source/path
-            if tree.is_symlink() or not tree.is_dir():
+            tree = self.physical(source, path)
+            if tree is None or tree.is_symlink() or not tree.is_dir():
                 record.update(outcome='not-saved', reason='missing')
                 continue
             if entry_key(self.config, self.owner, self.tool, path, source, key_paths) != key:
                 record.update(outcome='not-saved', reason='key-changed')
                 continue
-            files, size, error = scan(tree, source)
+            files, size, apparent, error = scan(tree, self.root_of(source))
             if error:
                 record.update(outcome='not-saved', reason=error)
                 continue
@@ -502,7 +525,7 @@ class Attempt:
                 record.update(outcome='not-saved', reason='busy')
                 continue
             try:
-                self._store(tree, path, key, files, size)
+                self._store(tree, path, key, files, size, apparent)
                 record.update(outcome='saved', bytes=size, seconds=round(time.monotonic() - started, 2))
                 self._evict(keep=key)
             except Exception as error:
@@ -511,7 +534,7 @@ class Attempt:
                 lock.close()
         return saved
 
-    def _store(self, tree, path, key, files, size):
+    def _store(self, tree, path, key, files, size, apparent):
         entries = self.root/'entries'
         entries.mkdir(mode=0o700, parents=True, exist_ok=True)
         temporary = entries/('tmp-%s-%d' % (self.attempt[:12], os.getpid()))
@@ -520,9 +543,9 @@ class Attempt:
         try:
             _copy(tree, temporary/'data')
             copied = scan(temporary/'data')
-            if copied != (files, size, None):
+            if (copied[0], copied[2], copied[3]) != (files, apparent, None):
                 raise RuntimeError('copy differs from source')
-            _write_json(temporary/'meta.json', dict(schema=SCHEMA, path=path, files=files, bytes=size,
+            _write_json(temporary/'meta.json', dict(schema=SCHEMA, path=path, files=files, bytes=size, apparent=apparent,
                                                     created=time.time(), tool=self.tool))
             final = entries/key
             if final.exists():
