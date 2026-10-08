@@ -23,6 +23,8 @@ _MANIFEST_KEYS = {
     'runtime_id', 'entrypoint', 'arguments', 'outputs', 'infrastructure_outputs',
     'infrastructure_exit_codes', 'files',
 }
+# Optional: absent from every manifest published before metric definitions, so their digests hold.
+_OPTIONAL_KEYS = {'metrics'}
 
 
 def _fail(reason):
@@ -67,7 +69,7 @@ def validate_manifest(manifest, expected_digest=None):
         _fail('handler_manifest_invalid_object')
     if manifest.get('format') != FORMAT:
         _fail('handler_package_format_unsupported')
-    if set(manifest) != _MANIFEST_KEYS:
+    if not _MANIFEST_KEYS <= set(manifest) <= _MANIFEST_KEYS | _OPTIONAL_KEYS:
         _fail('handler_manifest_unknown_or_missing_fields')
 
     _string(manifest['format'], 'format')
@@ -109,6 +111,10 @@ def validate_manifest(manifest, expected_digest=None):
             any(type(code) is not int or not 1 <= code <= 255 for code in codes) or
             codes != sorted(set(codes))):
         _fail('handler_manifest_invalid_infrastructure_exit_codes')
+
+    if 'metrics' in manifest:
+        from .metrics_schema import validate_manifest_metrics
+        validate_manifest_metrics(manifest['metrics'])
 
     files = manifest['files']
     if not isinstance(files, list) or not 1 <= len(files) <= MAX_PACKAGE_FILES:

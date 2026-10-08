@@ -284,6 +284,23 @@ class WorkloadWorker:
         except Exception as error:
             logging.warning('docker_cache outcome unavailable: %s: %s', type(error).__name__, error)
 
+    @staticmethod
+    def _record_metrics(completion, execution_seconds):
+        """Report the worker-measured numbers under their metrics_schema names. A figure that
+        was not measured is left out, never reported as 0."""
+        if not isinstance(completion, dict) or not isinstance(completion.get('result'), dict):
+            return
+        metrics = {}
+        if isinstance(execution_seconds, (int, float)) and not isinstance(execution_seconds, bool):
+            metrics['attempt.execution_seconds'] = round(execution_seconds, 3)
+        cache = completion['result'].get('docker_cache')
+        if isinstance(cache, dict):
+            for key in ('seconds', 'session_seconds'):
+                if isinstance(cache.get(key), (int, float)) and not isinstance(cache.get(key), bool):
+                    metrics['docker_cache.' + key] = cache[key]
+        if metrics:
+            completion['result']['metrics'] = metrics
+
     def _dependency_attempt(self, assignment, attempt, handler):
         """This attempt's dependency cache, or None (disabled, task environment, no handler argv, or a handler
         entry that has not opted in with `"dependency_cache": true`)."""
@@ -1252,6 +1269,7 @@ class WorkloadWorker:
             try:
                 self._stop(attempt)
                 self._record_docker_cache(completion, handler_backend, output)
+                self._record_metrics(completion, execution_seconds)
                 self._record_dependency_cache(completion, dependency_attempt, root/'source', output)
                 remove_data(root)
                 cleanup_seconds = time.monotonic() - cleanup_started

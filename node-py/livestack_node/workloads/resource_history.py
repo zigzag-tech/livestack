@@ -12,6 +12,7 @@ import math
 WINDOW = 50
 MIN_SAMPLES = 5
 MAX_AGE_SECONDS = 30*86400
+SUGGEST_MARGIN = 1.15  # named in the warning text; never applied automatically
 # dimension -> the `need` key it is audited against (None: no declared counterpart)
 DIMENSIONS = {'memory_nonreclaimable_peak': 'memory_bytes', 'memory_peak': 'memory_bytes',
               'tasks_peak': None, 'cpu_cores': 'cpu', 'disk_delta': 'disk_bytes'}
@@ -85,19 +86,20 @@ def _percentile(sorted_values, fraction):
     return sorted_values[index]
 
 
-def summary(db, now, max_age=MAX_AGE_SECONDS):
+def summary(db, now, max_age=MAX_AGE_SECONDS, handler=None, same_declaration=True):
     """{handler: {dimension: {n, p50, p95, max, declared, outcomes}}} from ONE statement.
-    `declared` is the declaration of the newest row (an older declaration is compared
-    separately only when it differs: see `audit`)."""
+    `declared` is the declaration of the newest row; with `same_declaration` only rows
+    that ran under it are counted (a declaration changed by hand starts a fresh comparison)."""
     series = {}
     for row in db.execute('SELECT handler,dimension,value,declared,outcome FROM resource_history WHERE at>=? '
-                          'ORDER BY handler,dimension,at DESC,id DESC', (now-max_age,)):
+                          'AND (? IS NULL OR handler=?) ORDER BY handler,dimension,at DESC,id DESC',
+                          (now-max_age, handler, handler)):
         series.setdefault((row['handler'], row['dimension']), []).append(row)
     result = {}
     for (handler, dimension), rows in series.items():
         # Only the rows run under the newest declaration are comparable to it.
         declared = rows[0]['declared']
-        same = [r for r in rows if r['declared'] == declared]
+        same = [r for r in rows if r['declared'] == declared] if same_declaration else rows
         values = sorted(r['value'] for r in same)
         result.setdefault(handler, {})[dimension] = dict(
             n=len(values), p50=_percentile(values, .5), p95=_percentile(values, .95), max=values[-1],
@@ -120,7 +122,7 @@ def audit(history, admit=None, min_samples=MIN_SAMPLES):
         figures = dict(handler=handler, dimension='memory', declared=stats['declared'], n=stats['n'],
                        p50=stats['p50'], p95=stats['p95'], max=stats['max'])
         if stats['declared'] < observed:
-            flags.append(dict(figures, kind='declared_below_observed'))
+            flags.append(dict(figures, kind='declared_below_observed', suggested=math.ceil(observed*SUGGEST_MARGIN)))
         elif stats['max'] > 0 and stats['declared'] > 4*stats['max']:
             flags.append(dict(figures, kind='declared_far_above_observed', info=True))
         floor = ((admit or {}).get(handler) or {}).get('memory_bytes')

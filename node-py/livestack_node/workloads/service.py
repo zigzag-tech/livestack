@@ -49,7 +49,8 @@ def load_reloadable(path):
         raise ValueError(f'principals unreadable: {type(exc).__name__}: {exc}') from exc
     check_principals(principals)
     environment_handlers = config.get('environment_handlers', _UNCHANGED)
-    return principals, config['handlers'], config.get('handler_release_policy'), environment_handlers
+    return (principals, config['handlers'], config.get('handler_release_policy'), environment_handlers,
+            config.get('resource_floor'))
 
 
 def load_principals(path):
@@ -65,7 +66,7 @@ def reload_principals(server, path, attempts=3, pause=.2):
     disables environment enrollment. Never raises, never logs a token."""
     for attempt in range(attempts):
         try:
-            new, handlers, policy, environment_handlers = load_reloadable(path)
+            new, handlers, policy, environment_handlers, resource_floor = load_reloadable(path)
             break
         except ValueError as exc:
             # JSONDecodeError is a ValueError: a torn write lands here.
@@ -94,6 +95,7 @@ def reload_principals(server, path, attempts=3, pause=.2):
     registry.replace_policy(policy, store.handlers)
     if environment_handlers is not _UNCHANGED:
         store.environment_handlers = parsed_environment_handlers
+    store.set_resource_floor(resource_floor)  # absent section = floor off
     ids = {p.id for p in new}
     environment_count = ('unchanged' if environment_handlers is _UNCHANGED
                          else len(parsed_environment_handlers))
@@ -153,6 +155,7 @@ def main():
                             store.compilation_policy.handler_classes[handler] != tuple(sorted(
                                 provider.config['compilation_classes']))):
                         raise ValueError('GitHub remote compilation classes differ from handler policy')
+        store.set_resource_floor(config.get('resource_floor'))
         store.recover()
         blobs = BlobStore(store, root/'objects', **config.get('blob_limits', {}))
         artifact_mirror = (InstalledArtifactMirror(config['artifact_mirror'])
