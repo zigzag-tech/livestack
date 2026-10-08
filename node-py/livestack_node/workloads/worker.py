@@ -21,6 +21,7 @@ from urllib.error import HTTPError
 
 from ..hostview import HostView, cgroup_nonreclaimable
 from .archive import relative_path, unpack
+from . import docker_cache
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
 from .cpu_admission import CpuAdmission
@@ -210,6 +211,24 @@ class WorkloadWorker:
         # Attempts whose unit is gone but whose Docker runtime dir could not be
         # removed: retried each step, never blocking claiming.
         self.stuck_runtimes = set()
+        # Persistent Docker build cache (openspec/changes/docker-build-cache): disabled unless
+        # worker.json `docker_cache` is valid, enabled and this is a Linux systemd worker.
+        self.docker_cache, why = docker_cache.settings(config.get('docker_cache'))
+        if self.docker_cache is not None and (self.darwin or self.windows):
+            self.docker_cache, why = None, 'unsupported-platform'
+        self.docker_cache_why = why
+        if why.startswith('invalid') or why == 'unsupported-platform':
+            logging.warning('docker_cache disabled: %s', why)
+        if self.docker_cache is not None:
+            cache_root = Path(self.docker_cache['path'])
+            cache_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if cache_root.is_symlink() or cache_root.stat().st_uid != os.getuid() or cache_root.stat().st_mode & 0o077:
+                logging.warning('docker_cache disabled: path is not a private directory of this user')
+                self.docker_cache, self.docker_cache_why = None, 'invalid: path is not private'
+            else:
+                logging.info('docker_cache enabled: path=%s max_bytes=%d epoch=%d canary_every=%d',
+                             cache_root, self.docker_cache['max_bytes'], self.docker_cache['epoch'],
+                             self.docker_cache['canary_every'])
 
     def _stop(self, attempt):
         """executor.stop, except that a refused runtime-dir removal is not fatal.
@@ -228,6 +247,19 @@ class WorkloadWorker:
                 self._logged_cleanup_failures.add(key)
                 logging.warning('docker runtime cleanup failed for attempt %s: %s (%d stuck runtimes)',
                                 attempt, error, len(self.stuck_runtimes))
+
+    def _record_docker_cache(self, completion, backend, output):
+        """Put the attempt's cache outcome in its result; a cache fault never changes the verdict."""
+        if backend not in ('rootless-docker', 'rootless-docker-native') or not isinstance(completion, dict):
+            return
+        try:
+            outcome = docker_cache.read_outcome(output) or (
+                dict(outcome='disabled', reason=self.docker_cache_why) if self.docker_cache is None else
+                dict(outcome='unknown', reason='attempt wrote no cache record'))
+            completion.setdefault('result', {})['docker_cache'] = outcome
+            logging.info('attempt docker_cache: %s', json.dumps(outcome))
+        except Exception as error:
+            logging.warning('docker_cache outcome unavailable: %s: %s', type(error).__name__, error)
 
     def _remove_workspace(self, path):
         """Remove an attempt workspace; on failure keep it for the next turn.
@@ -912,12 +944,14 @@ class WorkloadWorker:
         execution_seconds = None
         cleanup_seconds = None
         output = root/'output'
+        handler_backend = None
         try:
             lease = LeaseKeeper(self.client, assignment, root/'lease',
                                 interval=self.config.get('lease_interval', 10),
                                 progress_path=output/'progress.json').start()
             spec = assignment['spec']
             handler = self._handler_for_assignment(assignment)
+            handler_backend = handler.get('backend')
             need = spec['need']
             if need.get('cpu', 0) <= 0 or need.get('memory_bytes', 0) < 64*1024**2:
                 raise WorkloadError('native execution requires CPU and at least 64 MiB RAM')
@@ -969,6 +1003,8 @@ class WorkloadWorker:
                 rootless_docker=handler.get('backend') in ('rootless-docker', 'rootless-docker-native'),
                 rootless_native=handler.get('backend') == 'rootless-docker-native',
                 native_host_address=self.config.get('docker_native_host_address'),
+                **({'docker_cache': docker_cache.plan(self.docker_cache, assignment['owner'], attempt)}
+                   if self.docker_cache is not None and handler.get('backend') in ('rootless-docker', 'rootless-docker-native') else {}),
                 **environment_isolation)
             # Once execution starts, worker-process health alone cannot retain
             # the slot. A live supervised unit or its durable exit receipt must
@@ -1039,6 +1075,7 @@ class WorkloadWorker:
             cleanup_started = time.monotonic()
             try:
                 self._stop(attempt)
+                self._record_docker_cache(completion, handler_backend, output)
                 remove_data(root)
                 cleanup_seconds = time.monotonic() - cleanup_started
             except Exception:
