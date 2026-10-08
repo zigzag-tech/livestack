@@ -138,6 +138,8 @@ The system SHALL enforce the count/byte/age ceilings in the design: 1,024 logica
 
 Job status/receipts SHALL name the environment handle/generation, requested and actual reuse, reason, compatibility/input identities and actual producing host/attempt. Waiting and cleanup states SHALL have separate reasons. Measured phase timings SHALL distinguish queue, transfer, preparation, build, execution and cleanup; unavailable readings SHALL be unknown with a reason. Metadata/receipts and decision records SHALL be bounded as in the design, with `observability_degraded` for recording failures. Registry/placement/sweep round trips SHALL be bounded independently of environment/entity count.
 
+Each admitted placement SHALL have one stable `decision_id`, minted before the scheduler chooses a target. The ID SHALL be present in the worker assignment, attempt history and compilation authorization receipt, and those records SHALL agree. The terminal environment outcome SHALL remain joinable to that ID through its job/attempt/generation identity. A worker SHALL refuse a compilation authorization receipt whose `decision_id` differs from its journaled assignment; caller input SHALL NOT choose this identity. Legacy attempts without an ID may report it as unknown.
+
 Handler timing traces SHALL be bounded and SHALL represent each dependency, compile and test phase as either a finite nonnegative duration or an unknown value with a bounded reason. During a rolling upgrade, the worker SHALL continue to accept the existing version-1 task-E2E trace while new handlers may emit the version-2 phase map.
 
 #### Scenario: A caller requests reuse but the caches are incompatible
@@ -147,6 +149,10 @@ Handler timing traces SHALL be bounded and SHALL represent each dependency, comp
 #### Scenario: Timing instrumentation is unavailable
 - **WHEN** a phase's duration cannot be measured
 - **THEN** the receipt reports unknown and does not count that interval as saved time
+
+#### Scenario: Compilation authorization names a different placement decision
+- **WHEN** the authority's compilation receipt decision ID differs from the worker's journaled assignment
+- **THEN** the worker refuses before the handler can start a compiler
 
 #### Scenario: The environment registry grows to its configured limit
 - **WHEN** placement processes the bounded candidate set

@@ -206,10 +206,19 @@ def environment_receipt(handle, generation, digest=SOURCE, *, compatibility='b'*
         cache_components=[])
 
 
-def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_path):
+def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_path, monkeypatch):
+    from livestack_node.workloads import placement
+
     now = [1000.0]
     store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS, clock=lambda: now[0],
                           environment_handlers=POLICIES)
+    decisions = {}
+    original_schedule = placement.schedule
+    def capture_schedule(*args, **kwargs):
+        plan = original_schedule(*args, **kwargs)
+        decisions.update(plan.decisions)
+        return plan
+    monkeypatch.setattr(placement, 'schedule', capture_schedule)
     register_environment_worker(store, 'worker-a', 'host-a')
     register_environment_worker(store, 'worker-b', 'host-a')
     first = store.submit('alice', env_request('same-writer', job='first'))
@@ -225,6 +234,7 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
     attempt_worker, attempt = admitted[0]
     assert attempt['job_id'] == first['id']
     assert isinstance(attempt['decision_id'], str) and len(attempt['decision_id']) == 26
+    assert decisions[first['id']]['decision_id'] == attempt['decision_id']
     assert attempt['environment']['handle'] == first['environment_handle']
     assert attempt['environment']['generation'] == 1
     assert store.claim(attempt_worker, 'boot')['decision_id'] == attempt['decision_id']
