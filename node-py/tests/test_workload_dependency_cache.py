@@ -356,3 +356,49 @@ def test_a_request_is_answered_once(tmp_path):
     (tmp_path/'hs'/dc.REQUEST_FILE).write_text(json.dumps(dict(version=1, root=str(tmp_path))))
     cold.serve(tmp_path/'hs', tmp_path/'attempt')
     assert (tmp_path/'hs'/dc.RESPONSE_FILE).read_text() == first
+
+
+def test_a_tree_behind_an_alias_symlink_is_restored_and_stored_at_its_real_location(tmp_path):
+    cfg = config(tmp_path)
+
+    def layout(name, lock):
+        source = make_source(tmp_path, name, lock=lock)
+        # packages/alias -> real/pkg, the shape of Benchday's packages/mesh_relay mount
+        (source/'real/pkg').mkdir(parents=True)
+        (source/'real/pkg/package.json').write_text('{}')
+        (source/'real/pkg/package-lock.json').write_text('lock')
+        (source/'packages').mkdir()
+        os.symlink('../real/pkg', source/'packages/alias')
+        manifest = json.loads((source/'.livestack/dependency-cache.json').read_text())
+        manifest['components'].append(dict(path='packages/alias/node_modules', key_paths=['packages/alias/package.json', 'packages/alias/package-lock.json']))
+        (source/'.livestack/dependency-cache.json').write_text(json.dumps(manifest))
+        return source
+    first = layout('one', 'a')
+    cold = attempt(cfg, 'a1')
+    assert any(r['path'] == 'packages/alias/node_modules' and r['outcome'] == 'miss' for r in cold.restore(first))
+    run_handler(first, tmp_path/'o', ROOTS)
+    install(first, 'real/pkg')                                  # npm installs at the real location
+    (tmp_path/'o'/dc.COMMIT_FILE).write_text(json.dumps(dict(version=1,
+        paths=[r + '/node_modules' for r in ROOTS] + ['packages/alias/node_modules'])))
+    saved = {r['path']: r['outcome'] for r in cold.save(first, tmp_path/'o')}
+    assert saved['packages/alias/node_modules'] == 'saved'
+    second = layout('two', 'a')
+    records = {r['path']: r['outcome'] for r in attempt(cfg, 'a2').restore(second)}
+    assert records['packages/alias/node_modules'] == 'reused'
+    assert (second/'real/pkg/node_modules/dep/index.js').read_text() == 'x'
+    assert not (second/'packages/alias').is_dir() or (second/'packages/alias/node_modules').is_dir()
+
+
+def test_an_alias_whose_target_leaves_the_source_is_refused(tmp_path):
+    cfg = config(tmp_path)
+    source = make_source(tmp_path)
+    outside = tmp_path/'outside'
+    outside.mkdir()
+    (source/'packages').mkdir()
+    os.symlink(str(outside), source/'packages/escape')
+    manifest = json.loads((source/'.livestack/dependency-cache.json').read_text())
+    manifest['components'].append(dict(path='packages/escape/node_modules', key_paths=['app/package.json']))
+    (source/'.livestack/dependency-cache.json').write_text(json.dumps(manifest))
+    records = {r['path']: r.get('reason') for r in attempt(cfg).restore(source)}
+    assert records['packages/escape/node_modules'] == 'parent-outside-source'
+    assert not (outside/'node_modules').exists()
