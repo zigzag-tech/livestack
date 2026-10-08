@@ -215,12 +215,29 @@ def test_canary_bypasses_cache_and_catches_stale_entry(tmp_path):
     assert nxt.result['outcome'] == 'cold-new'
 
 
-def test_canary_verdict_mismatch_without_fingerprint(tmp_path):
+def test_canary_never_compares_verdicts_or_unnamed_inputs(tmp_path):
+    """A flaky job (cold run failed, warm run passed) or a run with no fingerprint says nothing about the cache."""
     canary_id, warm_id = pick_attempts(3)
-    run_session(tmp_path, make_plan(tmp_path, canary_every=3, attempt='first'), grow=100, code=0)
+    run_session(tmp_path, make_plan(tmp_path, canary_every=3, attempt='first'), grow=100, code=1)
     run_session(tmp_path, make_plan(tmp_path, canary_every=3, attempt=warm_id), code=0)
     s, _ = run_session(tmp_path, make_plan(tmp_path, canary_every=3, attempt=canary_id), code=1)
-    assert s.result.get('canary_mismatch'), s.result
+    assert 'canary_mismatch' not in s.result, s.result
+    fp = dict(inputs='lock-1', outputs={'rlibs': 'AAA'})
+    s, _ = run_session(tmp_path, make_plan(tmp_path, canary_every=3, attempt=warm_id+'8'), code=0, fingerprint=fp)
+    canary2 = next(a for a in map(str, range(1000)) if a != canary_id and docker_cache._canary_due(dict(canary_every=3, attempt=a)))
+    s, _ = run_session(tmp_path, make_plan(tmp_path, canary_every=3, attempt=canary2), code=1, fingerprint=fp)
+    assert 'canary_mismatch' not in s.result, s.result       # same inputs, same outputs: verdict differences are ignored
+
+
+def test_wipe_survives_a_kill_during_the_slow_delete(tmp_path):
+    """The live name disappears at once; a half-deleted trash sibling is removed by the next attempt."""
+    run_session(tmp_path, make_plan(tmp_path), grow=100)
+    d = tmp_path/'cache'/namespace('principal-a')
+    trash = d/'slot.trash-deadbeef'
+    trash.mkdir()
+    (trash/'half').write_bytes(b'x')
+    s, root = run_session(tmp_path, make_plan(tmp_path, epoch=5))
+    assert not trash.exists() and s.result['reason'] == 'epoch' and root.exists() and not (root/'blob').exists()
 
 
 def test_disabled_session_is_inert(tmp_path):
@@ -389,3 +406,17 @@ def test_unreadable_subtree_is_an_error_not_zero(tmp_path):
     finally:
         for d in tmp_path.rglob('sealed'):
             d.chmod(0o700)
+
+
+def test_native_frontend_is_told_how_long_the_bookkeeping_may_take(tmp_path):
+    out = tmp_path/'o'
+    out.mkdir()
+    s = Session(make_plan(tmp_path), out)
+    s.begin()
+    s.announce()
+    assert json.loads((out/docker_cache.SESSION_FILE).read_text())['finish_wait'] == docker_cache.FINISH_WAIT > 60
+    s.finish(0)
+    off = tmp_path/'p'
+    off.mkdir()
+    Session(None, off).announce()
+    assert list(off.iterdir()) == []
