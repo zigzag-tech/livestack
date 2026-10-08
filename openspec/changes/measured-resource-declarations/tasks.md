@@ -29,22 +29,22 @@ tests and its ledger obligation (a bounded event/record naming the decision).
 
 ## 3. Policy
 
-- [ ] 3.1 `config.py` `resource_floor` schema, SIGHUP reload, 422 refusal text. Tests: bad
+- [x] 3.1 `config.py` `resource_floor` schema, SIGHUP reload, 422 refusal text. Tests: bad
   keys fail closed without echoing values; floor boundary at exactly `observed x margin`.
   Ledger: refusal event with evidence.
-- [ ] 3.2 `strict` / unreadable-history behaviour. Tests: both modes.
+- [x] 3.2 `strict` / unreadable-history behaviour. Tests: both modes.
 
 ## 4. Metrics
 
-- [ ] 4.1 `metrics_schema.py`, validation on store, `metrics_undeclared_total`, manifest
+- [x] 4.1 `metrics_schema.py`, validation on store, `metrics_undeclared_total`, manifest
   `metrics`. Tests: unknown name dropped and counted; sub-phase sum <= whole control.
-- [ ] 4.2 `node-py/docs/measured-resources.md` including the "measure the instrument"
+- [x] 4.2 `node-py/docs/measured-resources.md` including the "measure the instrument"
   checklist (see design 7).
 
 ## 5. Spec and docs
 
-- [ ] 5.1 `openspec validate --specs` and `openspec validate measured-resource-declarations`.
-- [ ] 5.2 Update `_plans/durable-workloads.md` (stale statements named in the proposal).
+- [x] 5.1 `openspec validate --specs` and `openspec validate measured-resource-declarations`.
+- [x] 5.2 Update `_plans/durable-workloads.md` (stale statements named in the proposal).
 - [ ] 5.3 Benchday follow-ups doc (separate repo task, see
   `benchday-followups.md` next to this file).
 
