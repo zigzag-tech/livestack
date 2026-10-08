@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS attempts (
  host TEXT NOT NULL, fence INTEGER NOT NULL, state TEXT NOT NULL,
  need TEXT NOT NULL, expires REAL NOT NULL, created REAL NOT NULL,
  progress TEXT, result TEXT, environment_generation INTEGER, handler_release TEXT,
+ decision_id TEXT,
  UNIQUE(job, fence)
 );
 CREATE TABLE IF NOT EXISTS task_environments (

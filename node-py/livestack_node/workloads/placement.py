@@ -7,6 +7,7 @@ import json
 import uuid
 
 from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedule
+from ..ledger import new_decision_id
 from .model import AVOID_LABEL_SIGNATURE, AVOID_LABEL_WORKER, WorkloadError, encode, failure_signature
 
 # How long after an infrastructure failure a job refuses the worker that
@@ -429,6 +430,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         chosen = next(w for w in workers if w["id"] == grants[0].target_id)
         fence = row["fence"] + 1
         aid = uuid.uuid4().hex
+        decision_id = new_decision_id(now)
         environment_generation = None
         compilation = None
         if compilation_policy is not None and compilation_policy.required(spec['handler']):
@@ -442,11 +444,11 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 raise WorkloadError('environment_writer_race', 409)
             active_environment_writers.add(environment_handle)
         pinned_release = spec.get('handler_release')
-        db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created,compilation,environment_generation,handler_release) "
-                   "VALUES(?,?,?,?,?,?,'running',?,?,?,?,?,?)",
+        db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created,compilation,environment_generation,handler_release,decision_id) "
+                   "VALUES(?,?,?,?,?,?,'running',?,?,?,?,?,?,?)",
                    (aid, row["id"], chosen["id"], chosen["boot"], chosen["host"], fence,
                     encode(admit), now+limits.lease_seconds, now, compilation, environment_generation,
-                    encode(pinned_release) if pinned_release is not None else None))
+                    encode(pinned_release) if pinned_release is not None else None, decision_id))
         db.execute("UPDATE jobs SET state='running',fence=?,updated=?,reason=? WHERE id=?",
                    (fence, now, grants[0].reason, row["id"]))
         busy.add(chosen["id"])

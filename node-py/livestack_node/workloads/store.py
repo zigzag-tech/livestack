@@ -103,6 +103,8 @@ class WorkloadStore:
                 db.execute("ALTER TABLE attempts ADD COLUMN environment_generation INTEGER")
             if "handler_release" not in {row[1] for row in db.execute("PRAGMA table_info(attempts)")}:
                 db.execute("ALTER TABLE attempts ADD COLUMN handler_release TEXT")
+            if "decision_id" not in {row[1] for row in db.execute("PRAGMA table_info(attempts)")}:
+                db.execute("ALTER TABLE attempts ADD COLUMN decision_id TEXT")
             db.execute("CREATE INDEX IF NOT EXISTS jobs_environment ON jobs(environment_handle,state)")
             environment_columns = {row[1] for row in db.execute("PRAGMA table_info(task_environments)")}
             for column, declaration in (('writer_job', 'TEXT'), ('writer_attempt', 'TEXT'),
@@ -308,7 +310,7 @@ class WorkloadStore:
         # verdict was an infrastructure outcome.
         result["failure_signature"] = failure_signature(result["result"])
         result["attempts"] = [dict(a) for a in db.execute(
-            "SELECT id,worker,boot,host,fence,state,expires,compilation,environment_generation "
+            "SELECT id,worker,boot,host,fence,state,expires,compilation,environment_generation,decision_id "
             "FROM attempts WHERE job=? ORDER BY fence",
             (job_id,))]
         for attempt in result['attempts']:
@@ -861,7 +863,8 @@ class WorkloadStore:
 
     def _assignment(self, db, attempt):
         job = self._job(db, attempt["job"])
-        result = {"job_id": job["id"], "attempt_id": attempt["id"], "fence": attempt["fence"],
+        result = {"job_id": job["id"], "attempt_id": attempt["id"],
+                 "decision_id": attempt["decision_id"], "fence": attempt["fence"],
                  "lease_remaining": max(0, attempt["expires"] - self.clock()),
                  "expires": attempt["expires"], "worker": attempt["worker"], "boot": attempt["boot"],
                  "owner": job["owner"], "spec": job["spec"],
@@ -916,7 +919,8 @@ class WorkloadStore:
                 raise WorkloadError('compilation_class_not_reserved', 403)
             if spec['input_digest'] != input_digest:
                 raise WorkloadError('compilation_input_mismatch', 409)
-            return dict(**receipt, job_id=attempt['job'], attempt_id=attempt_id, fence=fence,
+            return dict(**receipt, job_id=attempt['job'], attempt_id=attempt_id,
+                        decision_id=attempt['decision_id'], fence=fence,
                         worker=worker, boot=boot, input_digest=input_digest,
                         resources=json.loads(attempt['need']), execution_resources=spec['need'],
                         expires=attempt['expires'])

@@ -224,8 +224,10 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
     assert len(admitted) == 1
     attempt_worker, attempt = admitted[0]
     assert attempt['job_id'] == first['id']
+    assert isinstance(attempt['decision_id'], str) and len(attempt['decision_id']) == 26
     assert attempt['environment']['handle'] == first['environment_handle']
     assert attempt['environment']['generation'] == 1
+    assert store.claim(attempt_worker, 'boot')['decision_id'] == attempt['decision_id']
     assert next(value for worker, value in claims if worker != attempt_worker) is None
     waiting = store.get('alice', second['id'])
     assert waiting['state'] == 'queued' and waiting['reason'] == 'environment_busy'
@@ -237,6 +239,15 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
         input_digest=SOURCE, outcome='succeeded', result={'artifacts': []}, environment_receipt=receipt)
     assert completed['state'] == 'succeeded'
     assert completed['result']['environment_receipt']['reuse_outcome'] == 'created'
+    recorded_attempt = next(row for row in completed['attempts']
+                            if row['id'] == attempt['attempt_id'])
+    completed_receipt = completed['result']['environment_receipt']
+    assert completed['id'] == attempt['job_id'] == first['id']
+    assert completed['environment_handle'] == attempt['environment']['handle'] == completed_receipt['handle']
+    assert recorded_attempt['decision_id'] == attempt['decision_id']
+    assert recorded_attempt['environment_generation'] == attempt['environment']['generation'] == \
+        completed_receipt['generation'] == 1
+    assert recorded_attempt['host'] == 'host-a'
     assert completed['result']['environment_receipt']['phase_timings']['compile'] == {
         'seconds': None, 'reason': 'timer_unavailable'}
     view = store.get_environment('alice', first['environment_handle'])
@@ -253,6 +264,22 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
     assert next_attempt['job_id'] == second['id']
     assert next_attempt['environment']['generation'] == 2
     assert next_attempt['environment']['replicas'][0]['compatibility'] == 'b'*64
+
+
+def test_attempt_decision_id_column_migrates_additively(tmp_path):
+    path = tmp_path/'jobs.sqlite'
+    store = WorkloadStore(path, handlers=HANDLERS, environment_handlers=POLICIES)
+    register_environment_worker(store, 'worker-a', 'host-a')
+    job = store.submit('alice', env_request('legacy-attempt'))
+    old_attempt = store.claim('worker-a', 'boot')
+    assert old_attempt['job_id'] == job['id']
+
+    with store.connect() as db:
+        db.execute('ALTER TABLE attempts DROP COLUMN decision_id')
+    reopened = WorkloadStore(path, handlers=HANDLERS, environment_handlers=POLICIES)
+    status = reopened.get('alice', job['id'])
+    assert status['attempts'][0]['decision_id'] is None
+    assert reopened.claim('worker-a', 'boot')['attempt_id'] == old_attempt['attempt_id']
 
 
 def test_independent_environments_can_be_admitted_concurrently(tmp_path):
