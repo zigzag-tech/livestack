@@ -504,6 +504,54 @@ def test_captured_source_alias_is_verified_against_benchday_manifest(tmp_path):
     store.release(rebuilt)
 
 
+
+def test_cache_components_follow_captured_source_aliases_and_invalidate_inputs(tmp_path):
+    benchday_manifest = json.dumps({'version': 1, 'links': [
+        {'path': 'packages/core', 'target': 'packages/core-source'}]}).encode()
+    profile_spec = {PROFILE: dict(handlers=[HANDLER], purpose='development',
+        cache_contract='cache-v1', probe_argv=[sys.executable, '-c', 'pass'],
+        cache_components=[dict(name='npm-core', path='source/packages/core/node_modules',
+            inputs=['packages/core/package-lock.json'], contract='npm-v1')])}
+    store, _, _ = make_store(tmp_path, profile_spec=profile_spec)
+    handle = '7'*32
+
+    def capture(lock, source):
+        return bundle(tmp_path, {
+            '.benchday-source.json': benchday_manifest,
+            'packages/core-source/package-lock.json': lock,
+            'packages/core-source/lib/index.js': source,
+        })
+
+    incoming, digest = capture(b'lock-v1', b'first source')
+    first = store.prepare(assignment(handle, 1, digest), incoming, handler=HANDLER)
+    alias = first['source']/'packages/core'
+    assert not alias.exists() and not alias.is_symlink()
+    cache = first['source']/'packages/core-source/node_modules'
+    assert cache.is_dir()
+    (cache/'marker').write_text('retained')
+    (cache/'.bin').symlink_to('../lib', target_is_directory=True)
+    alias.symlink_to('core-source', target_is_directory=True)
+    finish(store, first, generation=1)
+
+    replica = local_replica(store, handle, 1)
+    incoming, digest = capture(b'lock-v1', b'edited source')
+    second = store.prepare(assignment(handle, 2, digest, replicas=[replica]), incoming,
+                           handler=HANDLER)
+    assert second['cache_components'][0]['outcome'] == 'reused'
+    assert (second['source']/'packages/core-source/lib/index.js').read_bytes() == b'edited source'
+    (second['source']/'packages/core').symlink_to('core-source', target_is_directory=True)
+    finish(store, second, generation=2)
+
+    replica = local_replica(store, handle, 2)
+    incoming, digest = capture(b'lock-v2', b'new lockfile source')
+    third = store.prepare(assignment(handle, 3, digest, replicas=[replica]), incoming,
+                          handler=HANDLER)
+    assert third['cache_components'][0]['outcome'] == 'invalidated'
+    assert not (third['source']/'packages/core-source/node_modules/marker').exists()
+    (third['source']/'packages/core').symlink_to('core-source', target_is_directory=True)
+    finish(store, third, generation=3)
+
+
 def test_large_captured_manifest_is_hashed_with_its_declared_bound(tmp_path):
     store, _, _ = make_store(tmp_path)
     files = {f'src/file-{index:04}.txt': b'x' for index in range(800)}
