@@ -66,7 +66,7 @@ def run_session(tmp_path, p, *, code=0, grow=0, fingerprint=None, kill=False):
 def test_settings_disabled_unless_valid_and_enabled(tmp_path):
     good = dict(enabled=True, path=str(tmp_path), max_bytes=10**9, epoch=3, canary_every=5)
     value, why = settings(good)
-    assert why == 'enabled' and value['epoch'] == 3 and value['max_growth'] == 1.5
+    assert why == 'enabled' and value['epoch'] == 3 and value['max_growth'] == 3.0
     assert settings(None) == (None, 'not-configured')
     assert settings(dict(good, enabled=False)) == (None, 'disabled')
     for bad in (dict(good, path='relative'), dict(good, path='/a/../b'), dict(good, max_bytes=True),
