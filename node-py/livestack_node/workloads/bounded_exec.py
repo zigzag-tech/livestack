@@ -30,7 +30,7 @@ if sys.platform == 'darwin':
 elif sys.platform == 'win32':
     import windows_proc
 else:
-    from resource_usage import resource_usage
+    from resource_usage import resource_usage, filesystem_used
 
 # One sample of the tree every half second: a spike shorter than that can
 # overshoot the memory cap (design "Limits").
@@ -165,6 +165,9 @@ def run(config_path, limits=None):
     config = json.loads(Path(config_path).read_text())
     output = Path(config['output'])
     limit = int(config['log_bytes'])
+    cwd_path = config['cwd']
+    # Workspace filesystem baseline for the receipt's disk delta (Linux wrapper only).
+    disk_baseline = filesystem_used(cwd_path) if limits is None and sys.platform not in ('darwin', 'win32') else None
     process = subprocess.Popen(config['argv'], cwd=config['cwd'], env=config['env'],
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     log = output/'command.log'
@@ -220,7 +223,7 @@ def run(config_path, limits=None):
         code = process.wait()
         if limits is not None:
             limits.kill()  # before the receipt: a finished attempt has no survivors
-        resources = limits.resources() if limits is not None else resource_usage()
+        resources = limits.resources() if limits is not None else resource_usage(cwd_path, disk_baseline)
         temporary = output/'exit.tmp'
         with temporary.open('w') as result:
             json.dump({'exit_code': code, 'resources': resources}, result)

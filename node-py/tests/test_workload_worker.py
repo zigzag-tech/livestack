@@ -80,6 +80,16 @@ if request.get('spawn_child'):
     child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'],
         stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     Path('build','child.pid').write_text(str(child.pid))
+if request.get('allocate_mb'):
+    block=bytearray(request['allocate_mb']*1024**2)
+    for offset in range(0,len(block),4096): block[offset]=1
+if request.get('write_mb'):
+    with open('written.bin','wb') as written:
+        for _ in range(request['write_mb']): written.write(os.urandom(1024**2))
+        written.flush(); os.fsync(written.fileno())
+if request.get('busy'):
+    until=time.process_time()+request['busy']
+    while time.process_time()<until: pass
 time.sleep(request.get('sleep',0))
 value=Path('input').read_text()
 if request.get('assert_absent') and Path(request['assert_absent']).exists():
@@ -137,9 +147,9 @@ raise SystemExit(request.get('exit',0))
         authority_state['server'].server_close()
 
 
-def submit(caller, digest, **payload):
-    return caller.submit(dict(version=1,key='one',handler='native.v1',input_digest=digest,
-        need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},payload=payload))
+def submit(caller, digest, _key='one', _need=None, **payload):
+    return caller.submit(dict(version=1,key=_key,handler='native.v1',input_digest=digest,
+        need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2, **(_need or {})},payload=payload))
 
 
 @pytest.mark.parametrize('exit_code, expected', [(0,'succeeded'), (7,'failed')])
@@ -1863,3 +1873,51 @@ for message, block in bad.items():
     root = Path(__file__).resolve().parent.parent
     result = subprocess.run([sys.executable, '-c', script], cwd=root, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def _resources(caller, job):
+    return caller.get(job['id'])['result']['result']['resources']
+
+
+def test_receipt_resources_move_by_the_known_amount_and_say_where_they_came_from(fleet):
+    # Positive controls (openspec measured-resource-declarations section 7): each
+    # quantity is driven by a known amount and an idle run shows the opposite.
+    _, config, caller, digest = fleet
+    worker = WorkloadWorker(config)
+    try:
+        busy = submit(caller, digest, _need={'cpu': 1}, busy=1.0, write_mb=24, allocate_mb=32)
+        assert worker.step()
+        idle = submit(caller, digest, 'two', sleep=1.0)
+        assert worker.step()
+        loaded, quiet = _resources(caller, busy), _resources(caller, idle)
+        assert loaded['source'] == quiet['source'] == 'receipt'
+        assert 0.7e6 <= loaded['cpu_usage_usec'] <= 2.5e6 and quiet['cpu_usage_usec'] < 0.6e6
+        assert 32*1024**2 <= loaded['memory_peak_bytes'] <= 32*1024**2+64*1024**2
+        assert loaded['memory_peak_bytes'] > quiet['memory_peak_bytes'] + 20*1024**2
+        # filesystem delta: an upper bound (other writers on the filesystem count too)
+        assert loaded['disk_delta_bytes'] >= 0.9*24*1024**2
+        # no idle upper bound: the delta is filesystem-wide, so concurrent writers inflate it
+        assert isinstance(quiet['disk_delta_bytes'], int)
+    finally:
+        worker.close()
+
+
+def test_oom_kill_without_a_receipt_fails_as_a_resource_limit_and_is_not_retried(fleet):
+    # The unit is killed as a whole (OOMPolicy=kill) so the wrapper never writes a
+    # receipt. On origin/main this ends as "execution stopped without a result",
+    # an infrastructure outcome that is retried.
+    _, config, caller, digest = fleet
+    job = submit(caller, digest, allocate_mb=400, sleep=5)
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        done = caller.get(job['id'])
+        assert done['state'] == 'failed', done
+        assert done['reason'].startswith('resource limit: memory'), done['reason']
+        assert done['result']['cause']['cause'] == 'resource_limit'
+        assert done['result']['cause']['kind'] == 'memory' and done['result']['cause']['retryable'] is False
+        resources = done['result']['result']['resources']
+        assert resources['oom_kill'] >= 1 and resources['source'] in ('unit', 'sampled')
+        assert len(done['attempts']) == 1 and not worker.step()
+    finally:
+        worker.close()

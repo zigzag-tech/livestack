@@ -82,18 +82,16 @@ def _stall_event(row, rejected, now, limits):
 def _learned_peak(db, handler, cache):
     """Prefer the non-reclaimable peak the worker samples; fall back to the
     cgroup memory.peak (page cache included, so conservative) only while no
-    succeeded attempt of the handler carries the newer figure."""
+    succeeded attempt of the handler carries the newer figure.
+
+    Reads the bounded resource history (resource_history.py), the one learned number
+    shared with the declaration audit."""
     if handler not in cache:
         cache[handler] = None
-        for field in ("memory_nonreclaimable_peak_bytes", "memory_peak_bytes"):
-            path = f"$.result.resources.{field}"
+        for dimension in ("memory_nonreclaimable_peak", "memory_peak"):
             peaks = [r[0] for r in db.execute(
-                "SELECT json_extract(a.result,?) FROM attempts a "
-                "JOIN jobs j ON j.id=a.job WHERE json_extract(j.spec,'$.handler')=? "
-                "AND json_extract(a.result,'$.outcome')='succeeded' "
-                "AND json_extract(a.result,?) IS NOT NULL "
-                "ORDER BY a.created DESC LIMIT ?", (path, handler, path, LEARNED_WINDOW))
-                if isinstance(r[0], (int, float)) and not isinstance(r[0], bool)]
+                "SELECT value FROM resource_history WHERE handler=? AND dimension=? AND outcome='succeeded' "
+                "ORDER BY at DESC,id DESC LIMIT ?", (handler, dimension, LEARNED_WINDOW))]
             if peaks:
                 cache[handler] = max(peaks)
                 break

@@ -16,6 +16,7 @@ import threading
 import time
 import uuid
 
+from . import resource_history
 from .model import (Limits, failure_signature, WorkloadError, encode, host_view, identity, labels, name, resources,
                     submission)
 from .environment_receipts import validate as validate_environment_receipt
@@ -49,19 +50,37 @@ def validate_cpu_signal(value):
 
 
 def _limit_breach(result, need):
-    """The job's own resource limit, when the run ended by breaching it."""
+    """The job's own resource limit, when the run ended by breaching it.
+
+    Returns None, or a typed cause (`resource_limit`, never retried) whose `detail` is
+    the operator-facing sentence. Kinds: memory (oom_kill), tasks (pids_max_events),
+    disk (the workspace filesystem grew by at least the declared need.disk_bytes).
+    """
     resources = (result or {}).get("resources") or {}
     try:
         need = json.loads(need) if isinstance(need, str) else (need or {})
     except ValueError:
         need = {}
+    def cause(kind, observed, declared, detail):
+        return {"cause": "resource_limit", "kind": kind, "observed": observed, "declared": declared,
+                "retryable": False, "source": resources.get("source"), "detail": detail}
     if resources.get("oom_kill", 0) > 0:
-        return ("resource limit: memory peak %s bytes reached the job's declared need.memory_bytes %s; "
-                "raise the job's need, a retry would hit the same cap"
-                % (resources.get("memory_peak_bytes", "unknown"), need.get("memory_bytes", need.get("ram", "unknown"))))
+        declared = need.get("memory_bytes", need.get("ram"))
+        observed = resources.get("memory_peak_bytes")
+        return cause("memory", observed, declared,
+                     "resource limit: memory peak %s bytes reached the job's declared need.memory_bytes %s; "
+                     "raise the job's need, a retry would hit the same cap"
+                     % (observed if observed is not None else "unknown", declared if declared is not None else "unknown"))
     if resources.get("pids_max_events", 0) > 0:
-        return ("resource limit: the attempt reached its task limit (peak %s); raise the handler's max_tasks, "
-                "a retry would hit the same cap" % resources.get("tasks_peak", "unknown"))
+        observed = resources.get("tasks_peak")
+        return cause("tasks", observed, None,
+                     "resource limit: the attempt reached its task limit (peak %s); raise the handler's max_tasks, "
+                     "a retry would hit the same cap" % (observed if observed is not None else "unknown"))
+    declared, grown = need.get("disk_bytes"), resources.get("disk_delta_bytes")
+    if isinstance(declared, int) and isinstance(grown, int) and not isinstance(grown, bool) and grown >= declared:
+        return cause("disk", grown, declared,
+                     "resource limit: the workspace filesystem grew by %s bytes, reaching the job's declared "
+                     "need.disk_bytes %s; raise the job's need, a retry would hit the same cap" % (grown, declared))
     return None
 
 
@@ -141,6 +160,15 @@ class WorkloadStore:
                                         ('affinity_started', 'REAL')):
                 if column not in environment_columns:
                     db.execute(f'ALTER TABLE task_environments ADD COLUMN {column} {declaration}')
+        # Derived data: filled once from the last attempts when the table is empty.
+        self.resource_floor = None
+        self.resource_history_max_age = resource_history.MAX_AGE_SECONDS
+        self.resource_backfilled = None
+        try:
+            with self.transaction() as db:
+                self.resource_backfilled = resource_history.backfill(db, self.clock())
+        except sqlite3.Error:
+            pass  # stated as `history_backfill: failed` in status; the table is derived data
 
     def bind_principals(self, principals):
         """The caller-principal table, for per-principal caps and the job list."""
@@ -159,11 +187,23 @@ class WorkloadStore:
             return False
         return True
 
+    def resource_audit(self, admit=None):
+        """Declaration audit from the bounded history: {flags, min_samples}, or the stated
+        reason it could not be read. One read transaction however many handlers exist."""
+        try:
+            with self.connect() as db:
+                history = resource_history.summary(db, self.clock(), self.resource_history_max_age)
+        except sqlite3.Error as error:
+            return {'available': False, 'reason': type(error).__name__, 'flags': []}
+        return {'available': True, 'min_samples': resource_history.MIN_SAMPLES,
+                'flags': resource_history.audit(history, admit)}
+
     def status(self):
         with self._decision_ledger_lock:
             failure = self._decision_ledger_failure
         degraded = failure is not None
         return {
+            'resource_audit': self.resource_audit(),
             'decision_ledger': {
                 'enabled': self.decision_ledger is not None,
                 'degraded': degraded,
@@ -1093,18 +1133,23 @@ class WorkloadStore:
                     db.execute("UPDATE task_environment_replicas SET state='rebuild_required',compatibility=NULL,seen=? "
                                'WHERE handle=? AND host=?', (now, env_handle, a['host']))
             state = "succeeded" if outcome == "succeeded" else "failed"
-            reason = None
+            reason, job_raw = None, raw
             breach = _limit_breach(result, a["need"])
+            resource_history.record(db, job["spec"]["handler"], attempt_id, result,
+                                    "resource_limit" if outcome == "infrastructure" and breach else outcome,
+                                    a["need"], now, max_age=self.resource_history_max_age)
             if outcome == "infrastructure" and breach:
                 # The attempt hit a limit the JOB declared (its own need is the
                 # execution cap). A retry runs the same spec into the same cap,
                 # and near the line only by luck gets through: end the job and
                 # name the fix. Not a product failure; still no retry.
-                reason = breach
+                reason = breach["detail"]
+                # The typed cause rides on the job result; the attempt keeps the raw completion.
+                job_raw = encode(dict(completion, cause=breach), self.limits.record_bytes)
             elif outcome == "infrastructure" and fence < self.limits.attempts:
                 state, reason = "queued", "infrastructure retry"
             db.execute("UPDATE jobs SET state=?,result=?,reason=?,updated=? WHERE id=?",
-                       (state, raw, reason, now, job["id"]))
+                       (state, job_raw, reason, now, job["id"]))
             result_job = self._job(db, job["id"])
             if self.decision_ledger is not None and a['decision_id']:
                 outcome_record = completion_record(

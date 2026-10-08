@@ -27,6 +27,7 @@ from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
 from . import cpu_admission as cpu_signals
 from .cpu_admission import CpuAdmission
+from .resource_usage import sample as sample_resources, filesystem_used, unit_evidence, merge_evidence
 from .lease import LeaseKeeper, retry_transient, transient
 from .model import ArtifactTooLarge, WorkloadError, encode, name
 from .supervision import SystemdExecutor, WorkerJournal
@@ -1071,6 +1072,7 @@ class WorkloadWorker:
         lease = None
         completion = None
         started = None
+        resource_sample = {}  # last good cgroup sample: the evidence if the wrapper dies before its receipt
         environment_prepared = None
         environment_view = None
         environment_isolation = {}
@@ -1166,6 +1168,7 @@ class WorkloadWorker:
                 attempt_cgroup = (Path('/sys/fs/cgroup')/control_group.lstrip('/')
                                   if control_group else None)
             nonreclaimable_peak = None
+            disk_baseline, disk_sampled = (filesystem_used(execution_cwd) if attempt_cgroup is not None else None), 0.0
             while True:
                 if lease.lost.is_set():
                     raise WorkloadError('execution lease lost', 409)
@@ -1177,15 +1180,27 @@ class WorkloadWorker:
                           else cgroup_nonreclaimable(attempt_cgroup))
                 if sample is not None:
                     nonreclaimable_peak = max(nonreclaimable_peak or 0, sample)
+                if attempt_cgroup is not None:
+                    now = time.monotonic()
+                    fresh = sample_resources(attempt_cgroup, execution_cwd if now-disk_sampled >= 5 else None,
+                                             disk_baseline)
+                    if now-disk_sampled >= 5:
+                        disk_sampled = now
+                    # Counters and high-water marks only grow; keep the largest seen.
+                    for key, value in fresh.items():
+                        resource_sample[key] = max(resource_sample.get(key, 0), value)
                 result = self.executor.exit_result(output)
                 if result is not None:
+                    result = dict(result, resources=merge_evidence(
+                        result.get('resources', {}), resource_sample, None))
                     if self.darwin:
                         nonreclaimable_peak = (result.get('resources') or {}).get('memory_peak_bytes')
                     if nonreclaimable_peak is not None:
                         result = dict(result, resources=dict(result.get('resources') or {},
                                       memory_nonreclaimable_peak_bytes=nonreclaimable_peak))
-                    completion = self._completion_from_exit(assignment, result)
                     execution_seconds = time.monotonic() - started
+                    result = dict(result, resources=dict(result['resources'], execution_seconds=round(execution_seconds, 3)))
+                    completion = self._completion_from_exit(assignment, result)
                     break
                 if time.monotonic()-last_report >= self.config.get('status_report_seconds', 10):
                     last_report = time.monotonic()
@@ -1206,6 +1221,14 @@ class WorkloadWorker:
                     # on the next iteration instead of retrying completed work.
                     if self.executor.exit_result(output) is not None:
                         continue
+                    # No receipt: the cgroup is already gone (node-py/docs/measured-resources.md),
+                    # so the unit's retained properties and the last loop sample are the evidence.
+                    resources = merge_evidence(None, resource_sample, unit_evidence(state))
+                    if resources.get('oom_kill') or resources.get('pids_max_events'):
+                        completion = dict(outcome='infrastructure', result=dict(
+                            error='WorkloadError', detail='execution stopped without a result', resources=resources))
+                        execution_seconds = time.monotonic() - started
+                        break
                     raise WorkloadError('execution stopped without a result', 503)
                 time.sleep(.2)
         except Exception as error:
@@ -1215,6 +1238,14 @@ class WorkloadWorker:
             logging.warning('attempt %s stopped: %s: %s', attempt, type(error).__name__, detail)
             completion = dict(outcome='infrastructure', result={'error':type(error).__name__})
             completion['result']['detail'] = detail
+            if started is not None:
+                # Any stop after launch (including a lost lease) states what the attempt
+                # measured; a limit kill must not be reported as only "lost".
+                try:
+                    unit = unit_evidence(self.executor.inspect(attempt))
+                except Exception:
+                    unit = {}
+                completion['result']['resources'] = merge_evidence(None, resource_sample, unit)
         finally:
             # Never acknowledge completion or cleanup while owned work survives.
             cleanup_started = time.monotonic()
