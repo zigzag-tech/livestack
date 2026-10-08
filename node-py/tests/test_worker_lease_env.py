@@ -106,13 +106,15 @@ def test_attempt_env_carries_owner_and_fleet_credentials(tmp_path, fleet_broker)
     for path in (root, output, objects):
         path.mkdir()
     assignment = {'owner': 'attune-hub', 'attempt_id': 'a'*32,
-                  'spec': {'labels': {'owner': 'attune:acct_a'}, 'payload': {}}}
+                  'spec': {'input_digest': 'd'*64,
+                           'labels': {'owner': 'attune:acct_a'}, 'payload': {}}}
     env = worker._attempt_env(assignment, root, output, objects, 'attempt1')
     assert env['HARMONY_OWNER'] == 'attune:acct_a'
+    assert env['HARMONY_INPUT_DIGEST'] == 'd'*64
     assert env['HARMONY_FLEET_URL'] == fleet_broker.url
     assert env['HARMONY_FLEET_TOKEN'] == 'f'*32
     # Without a label owner the principal itself owns the attempt.
-    unlabelled = dict(assignment, spec={'payload': {}})
+    unlabelled = dict(assignment, spec={'input_digest': 'd'*64, 'payload': {}})
     assert worker._attempt_env(unlabelled, root, output, objects, 'attempt1')['HARMONY_OWNER'] == 'attune-hub'
     # No fleet configured: no fleet env leaks into the handler.
     plain = WorkloadWorker(worker_config(tmp_path/'plain', 'http://127.0.0.1:1'))

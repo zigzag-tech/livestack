@@ -864,7 +864,7 @@ class WorkloadWorker:
                    HARMONY_INPUT=str(source_path or root/'source'), HARMONY_OUTPUT=str(output),
                    HARMONY_INPUT_OBJECTS=str(objects),
                    HARMONY_REQUEST=str(root/'request.json'), HARMONY_ATTEMPT=attempt,
-                   HARMONY_OWNER=owner)
+                   HARMONY_OWNER=owner, HARMONY_INPUT_DIGEST=spec['input_digest'])
         environment = assignment.get('environment')
         if environment is not None:
             env.update(HARMONY_ENV_HANDLE=environment['handle'],
@@ -890,7 +890,6 @@ class WorkloadWorker:
                 raise WorkloadError('compilation_launch_contract_unsupported', 403)
             env.update(HARMONY_WORKER=assignment['worker'], HARMONY_BOOT=assignment['boot'],
                        HARMONY_JOB=assignment['job_id'], HARMONY_FENCE=str(assignment['fence']),
-                       HARMONY_INPUT_DIGEST=spec['input_digest'],
                        HARMONY_PHYSICAL_HOST=compilation['host'],
                        HARMONY_POLICY_REVISION=compilation['policy_revision'])
         if spec.get('execution_provider') is not None:
