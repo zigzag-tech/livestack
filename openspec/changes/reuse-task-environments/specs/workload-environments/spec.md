@@ -74,6 +74,8 @@ Environment-enabled execution SHALL be limited by installed policy to developmen
 
 At most one current authorized writer SHALL update a logical environment. Same-host replicas SHALL be serialized across worker identities. Stale attempt/boot/generation writes SHALL NOT advance environment state or satisfy a job. Restart and cancellation SHALL reconcile unfinished generations before reuse; an unconfirmed old replica SHALL be reconstructed elsewhere or visibly refused under existing retry/cleanup policy.
 
+Worker reports SHALL reconcile physical-host replica rows only for profiles declared in that report. An empty or partial profile inventory SHALL NOT delete rows belonging to profiles the reporting worker does not declare. Every reported replica SHALL name a profile declared by that worker.
+
 #### Scenario: Two jobs request one environment concurrently
 - **WHEN** both jobs are eligible for the same environment
 - **THEN** one writer is admitted and the other remains queued without reserving CPU/RAM
@@ -88,6 +90,11 @@ At most one current authorized writer SHALL update a logical environment. Same-h
 - **THEN** the authority returns cleanup instructions bound to the exact reported handle and generation
 - **AND** the worker removes that directory only while holding its per-handle lock and after confirming the marker still has that generation
 - **AND** a busy lock is retried on a later report, while a changed marker or failed removal never deletes a newer or active generation and remains visible under the bounded worker-storage policy
+
+#### Scenario: Workers on one host report different profile sets
+- **WHEN** a worker reports only a subset of the environment profiles installed by other workers on the same physical host, or reports no profiles
+- **THEN** the authority reconciles rows for the profiles in that report and preserves rows for every omitted profile
+- **AND** it refuses a replica entry whose profile is absent from the reporting worker's profile inventory
 
 ### Requirement: Retained state cannot change executed source or artifact freshness
 
