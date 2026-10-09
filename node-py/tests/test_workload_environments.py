@@ -322,6 +322,62 @@ def test_writer_is_exclusive_and_environment_receipt_parks_after_cleanup(tmp_pat
     assert next_attempt['environment']['replicas'][0]['compatibility'] == 'b'*64
 
 
+@pytest.mark.parametrize(('writer_host', 'should_clean'), [
+    ('host-a', False),
+    ('host-b', True),
+])
+def test_registration_preserves_parked_generation_for_same_host_writer(
+        tmp_path, writer_host, should_clean):
+    now = [1000.0]
+    store = WorkloadStore(tmp_path/'jobs.sqlite', handlers=HANDLERS,
+        limits=Limits(environment_affinity_seconds=0.01), clock=lambda: now[0],
+        environment_handlers=POLICIES)
+    register_environment_worker(store, 'worker-a', 'host-a')
+    register_environment_worker(store, 'worker-b', 'host-a')
+    if writer_host == 'host-b':
+        register_environment_worker(store, 'worker-c', 'host-b')
+
+    first = store.submit('alice', env_request('handoff', job='first'))
+    first_attempt = store.claim('worker-a', 'boot')
+    assert first_attempt['environment']['generation'] == 1
+    store.complete('worker-a', 'boot', first_attempt['attempt_id'], first_attempt['fence'],
+        input_digest=SOURCE, outcome='succeeded', result={'artifacts': []},
+        environment_receipt=environment_receipt(first['environment_handle'], 1))
+
+    replica = dict(handle=first['environment_handle'], profile='linux-rust',
+        compatibility='b'*64, generation=1, state='parked', bytes_used=1024, last_used=1000.0)
+    assert register_environment_worker(store, 'worker-b', 'host-a', replicas=[replica])['ready'] is True
+
+    if writer_host == 'host-b':
+        register_environment_worker(store, 'worker-a', 'host-a', available_cpu=0, replicas=[replica])
+        register_environment_worker(store, 'worker-b', 'host-a', available_cpu=0, replicas=[replica])
+
+    second = store.submit('alice', env_request('handoff', job='second',
+        digest=hashlib.sha256(b'next source').hexdigest()))
+    if writer_host == 'host-a':
+        writer = store.claim('worker-a', 'boot')
+    else:
+        assert store.claim('worker-c', 'boot') is None
+        now[0] += 1
+        writer = store.claim('worker-c', 'boot')
+        assert writer is not None, f"reason={store.get('alice', second['id'])['reason']!r}"
+    assert writer['job_id'] == second['id']
+    assert writer['environment']['generation'] == 2
+
+    registration = register_environment_worker(store, 'worker-b', 'host-a', replicas=[replica])
+    cleanup = registration['environment_cleanup']
+    if should_clean:
+        assert cleanup == [dict(handle=first['environment_handle'], generation=1)]
+        with store.connect() as db:
+            assert db.execute('SELECT 1 FROM task_environment_replicas WHERE handle=? AND host=?',
+                (first['environment_handle'], 'host-a')).fetchone() is None
+    else:
+        assert cleanup == []
+        with store.connect() as db:
+            assert db.execute('SELECT generation FROM task_environment_replicas WHERE handle=? AND host=?',
+                (first['environment_handle'], 'host-a')).fetchone()[0] == 1
+
+
 def test_attempt_decision_id_column_migrates_additively(tmp_path):
     path = tmp_path/'jobs.sqlite'
     store = WorkloadStore(path, handlers=HANDLERS, environment_handlers=POLICIES)

@@ -990,10 +990,13 @@ class WorkloadStore:
                     placeholders = ','.join('?' for _ in reported_handles)
                     handles = sorted(reported_handles)
                     environment_rows = db.execute(
-                        f"SELECT e.handle,e.generation,e.writer_attempt,count(r.host) AS other_hosts "
+                        f"SELECT e.handle,e.generation,e.writer_attempt,a.host AS writer_host,"
+                        f"count(r.host) AS other_hosts "
                         f"FROM task_environments e LEFT JOIN task_environment_replicas r "
-                        f"ON r.handle=e.handle AND r.host!=? WHERE e.handle IN ({placeholders}) "
-                        "GROUP BY e.handle,e.generation,e.writer_attempt",
+                        f"ON r.handle=e.handle AND r.host!=? "
+                        "LEFT JOIN attempts a ON a.id=e.writer_attempt "
+                        f"WHERE e.handle IN ({placeholders}) "
+                        "GROUP BY e.handle,e.generation,e.writer_attempt,a.host",
                         (host_id, *handles)).fetchall()
                     environments = {row['handle']: row for row in environment_rows}
                     existing_rows = db.execute(
@@ -1007,6 +1010,7 @@ class WorkloadStore:
                     host_rows = db.execute('SELECT count(*) FROM task_environment_replicas WHERE host=?',
                                             (host_id,)).fetchone()[0]
                 candidates = []
+                preserved_handles = set()
                 for replica in reported:
                     handle = replica['handle']
                     environment = environments.get(handle)
@@ -1014,6 +1018,15 @@ class WorkloadStore:
                         environment_cleanup.append(dict(handle=handle, generation=replica['generation']))
                         continue  # stale disk state is never a scheduler cache hit
                     if replica['generation'] != environment['generation']:
+                        if (environment['writer_attempt'] is not None and
+                                environment['writer_host'] == host_id and
+                                replica['generation'] < environment['generation'] and
+                                replica['state'] == 'parked'):
+                            # A newer writer on this physical host may reuse
+                            # the prior generation. Do not delete its source
+                            # before the assigned worker can inspect it.
+                            preserved_handles.add(handle)
+                            continue
                         environment_cleanup.append(dict(handle=handle, generation=replica['generation']))
                         continue  # returning hosts must reclaim superseded local bytes
                     if (replica['state'] != 'parked' or environment['writer_attempt'] is not None):
@@ -1024,7 +1037,7 @@ class WorkloadStore:
                                        replica['generation'], replica['state'], replica['bytes_used'],
                                        replica['last_used'], now))
                 candidate_handles = {row[0] for row in candidates}
-                stale_handles = existing_handles - candidate_handles
+                stale_handles = existing_handles - candidate_handles - preserved_handles
                 if stale_handles:
                     stale_sql = ','.join('?' for _ in stale_handles)
                     db.execute(f'DELETE FROM task_environment_replicas WHERE host=? AND handle IN ({stale_sql})',
