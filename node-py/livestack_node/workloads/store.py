@@ -1586,6 +1586,10 @@ class WorkloadStore:
             return  # Missing destructive window fails closed; submission still enforces a hard cap.
         for row in self._prune_candidates(db, now):
             db.execute("DELETE FROM jobs WHERE id=?", (row["id"],))
+        # Rows whose parent was deleted on a connection without foreign keys (a manual SQL session) are
+        # never reached by the cascade, and their artifact digests would pin objects forever.
+        db.execute("DELETE FROM attempts WHERE state NOT IN ('running','cleanup') "
+                   "AND NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.id=attempts.job)")
         if self.limits.terminal_seconds is not None:
             db.execute("DELETE FROM scopes WHERE state='closed' AND updated<? AND NOT EXISTS "
                        "(SELECT 1 FROM jobs WHERE jobs.owner=scopes.owner AND jobs.scope=scopes.key)",

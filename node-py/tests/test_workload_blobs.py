@@ -60,3 +60,24 @@ def test_referenced_inputs_survive_retention(tmp_path):
         assert stream.read() == data
     with blobs.open('alice', component_digest) as (stream,_):
         assert stream.read() == component
+
+
+def test_sweep_drops_orphan_attempts_so_their_artifacts_are_collected(tmp_path):
+    """Attempts whose job was deleted without foreign keys (manual SQL) pinned their artifacts forever."""
+    clock = [1000.0]
+    store = WorkloadStore(tmp_path/'jobs.db', handlers={'test.v1'}, clock=lambda: clock[0])
+    blobs = BlobStore(store, tmp_path/'objects', max_bytes=64, max_object_bytes=8, retention_seconds=60)
+    data = b'12345678'
+    digest = hashlib.sha256(data).hexdigest()
+    blobs.put('alice', digest, 8, BytesIO(data))
+    with store.connect() as db:
+        db.execute('PRAGMA foreign_keys=OFF')
+        db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created,result) "
+                   "VALUES('a','gone','w','b','h',1,'ended','{}',0,0,?)",
+                   ('{"result":{"artifacts":[{"digest":"%s"}]}}' % digest,))
+    clock[0] += 120
+    blobs.prune()
+    assert blobs.status()['objects'] == 1  # pinned by the orphan
+    store.sweep()
+    blobs.prune()
+    assert blobs.status()['objects'] == 0
