@@ -34,7 +34,7 @@ COMMIT_FILE = 'dependency-cache-commit.json'
 ENV_HANDSHAKE = 'HARMONY_DEPENDENCY_CACHE_HANDSHAKE'
 REQUEST_FILE = 'request.json'
 RESPONSE_FILE = 'response.json'
-KEYS = {'enabled', 'path', 'max_bytes', 'epoch', 'refresh_every', 'max_component_bytes'}
+KEYS = {'enabled', 'path', 'max_bytes', 'epoch', 'refresh_every', 'audit_every', 'max_component_bytes'}
 MAX_FILE = 16384
 MAX_COMPONENTS = 16
 MAX_ENTRIES = 64                 # expanded (per-directory) entries per attempt
@@ -73,6 +73,7 @@ def settings(raw):
     try:
         out = dict(path=str(Path(path)), max_bytes=number('max_bytes', 64*1024**2, 4*1024**4, 8*1024**3),
                    epoch=number('epoch', 0, 2**31, 0), refresh_every=number('refresh_every', 0, 1000, 20),
+                   audit_every=number('audit_every', 0, 1000, 0),
                    max_component_bytes=number('max_component_bytes', 1024**2, 64*1024**3, 4*1024**3))
     except ValueError as error:
         return None, 'invalid: %s' % error
@@ -280,6 +281,53 @@ def scan(root, source_root=None):
     return files, total, apparent, None
 
 
+def tree_digest(root):
+    """sha256 over every entry of a tree: kind, relative path, executable bit, size and content hash
+    (link target for a symlink). Modification times are not part of it. Never follows links.
+
+    This is what makes a restored copy provably the stored one: the entry's `meta.json` records it at
+    store time and restore recomputes it on the copy it is about to hand to the handler. A same-size
+    byte flip, a swapped file or a removed file all change it (the cheaper file-count/size scan cannot
+    see them). Returns None when the tree holds anything but directories, regular files and symlinks.
+    """
+    base = Path(root)
+    rows = []
+    stack = [base]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = list(os.scandir(current))
+        except OSError:
+            return None
+        for entry in entries:
+            relative = Path(entry.path).relative_to(base).as_posix()
+            try:
+                info = entry.stat(follow_symlinks=False)
+            except OSError:
+                return None
+            mode = info.st_mode
+            if stat.S_ISDIR(mode):
+                rows.append('d\0%s\0\0\0' % relative)
+                stack.append(Path(entry.path))
+            elif stat.S_ISLNK(mode):
+                rows.append('l\0%s\0\0\0%s' % (relative, os.readlink(entry.path)))
+            elif stat.S_ISREG(mode):
+                content = hashlib.sha256()
+                try:
+                    with open(entry.path, 'rb') as handle:
+                        for block in iter(lambda: handle.read(1024 * 1024), b''):
+                            content.update(block)
+                except OSError:
+                    return None
+                rows.append('f\0%s\0%d\0%d\0%s' % (relative, 1 if mode & 0o111 else 0, info.st_size, content.hexdigest()))
+            else:
+                return None
+    digest = hashlib.sha256()
+    for row in sorted(rows):
+        digest.update(row.encode('utf-8', 'surrogateescape') + b'\n')
+    return digest.hexdigest()
+
+
 def _copy(source, destination):
     """Copy a tree (links kept as links, modes and times kept); reflink where the filesystem has it."""
     Path(destination).parent.mkdir(parents=True, exist_ok=True)
@@ -352,6 +400,10 @@ class Attempt:
     def _refresh_due(self):
         every = self.config['refresh_every']
         return bool(every) and int(hashlib.sha256(self.attempt.encode()).hexdigest(), 16) % every == 0
+
+    def _audit_due(self):
+        every = self.config['audit_every']
+        return bool(every) and int(hashlib.sha256((self.attempt + ':audit').encode()).hexdigest(), 16) % every == 0
 
     def _lock(self, exclusive):
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -432,10 +484,19 @@ class Attempt:
         try:
             _copy(entry/'data', destination)
             files, size, apparent, error = scan(destination)
-            if error or files != meta.get('files') or apparent != meta.get('apparent'):
+            if not error and (files != meta.get('files') or apparent != meta.get('apparent')):
+                error = 'size-mismatch'
+            if not error:
+                # Content, not just shape: the copy the handler will use must hash to what was stored.
+                recorded = meta.get('digest')
+                if not isinstance(recorded, str) or not re.fullmatch('[a-f0-9]{64}', recorded):
+                    error = 'no-digest'      # stored before digests existed: never trusted
+                elif tree_digest(destination) != recorded:
+                    error = 'digest-mismatch'
+            if error:
                 _remove(destination)
                 _remove(entry)    # a damaged entry is dropped, never served
-                return dict(outcome='miss', reason='verify-failed: %s' % (error or 'size-mismatch')), 'miss'
+                return dict(outcome='miss', reason='verify-failed: %s' % error), 'miss'
             os.utime(entry/'meta.json')
         except Exception as error:
             try:
@@ -445,11 +506,14 @@ class Attempt:
             return dict(outcome='miss', reason='copy-failed: %s' % str(error)[:120]), 'miss'
         finally:
             lock.close()
-        return dict(outcome='reused', bytes=meta['bytes'], seconds=round(time.monotonic() - started, 2)), 'reused'
+        return dict(outcome='reused', bytes=meta['bytes'], seconds=round(time.monotonic() - started, 2),
+                    digest=meta['digest']), 'reused'
 
     def reused(self):
-        """The trees the handler may skip installing."""
-        return [dict(path=record['path'], outcome='reused') for record in self.records if record.get('outcome') == 'reused']
+        """The trees the handler may skip installing, each with the full key and content digest it was served under."""
+        keys = {entry[0]: entry[2] for entry in self.entries}
+        return [dict(path=record['path'], outcome='reused', key=keys.get(record['path']), digest=record.get('digest'))
+                for record in self.records if record.get('outcome') == 'reused']
 
     # -- handshake: the handler asks for the restore when ITS tree is ready
     # A job's source is often not the handler's working tree until the handler has
@@ -466,7 +530,7 @@ class Attempt:
             if request is None:
                 return
             self.served = True
-            answer = dict(version=SCHEMA, components=[], outcome='skipped')
+            answer = dict(version=SCHEMA, components=[], outcome='skipped', audit=False)
             root = request.get('root') if request.get('version') == SCHEMA else None
             try:
                 real = os.path.realpath(root) if isinstance(root, str) else None
@@ -478,12 +542,12 @@ class Attempt:
             else:
                 self.source = Path(real)
                 self.restore(self.source)
-                answer.update(outcome='restored', components=self.reused())
+                answer.update(outcome='restored', components=self.reused(), audit=self._audit_due())
             _write_json(Path(handshake)/RESPONSE_FILE, answer)
         except Exception as error:
             self.records = [dict(outcome='error', reason='%s: %s' % (type(error).__name__, str(error)[:200]))]
             try:
-                _write_json(Path(handshake)/RESPONSE_FILE, dict(version=SCHEMA, components=[], outcome='error'))
+                _write_json(Path(handshake)/RESPONSE_FILE, dict(version=SCHEMA, components=[], outcome='error', audit=False))
             except Exception:
                 pass
 
@@ -499,18 +563,27 @@ class Attempt:
 
     def _committed(self, output):
         value = _read_json(Path(output)/COMMIT_FILE)
+        replace = value.get('replace', []) if value is not None else None
         if (value is None or value.get('version') != SCHEMA or not isinstance(value.get('paths'), list) or
-                len(value['paths']) > MAX_ENTRIES or not all(isinstance(item, str) for item in value['paths'])):
+                len(value['paths']) > MAX_ENTRIES or not all(isinstance(item, str) for item in value['paths']) or
+                not isinstance(replace, list) or len(replace) > MAX_ENTRIES or
+                not all(isinstance(item, str) for item in replace)):
             return None
-        return set(value['paths'])
+        return set(value['paths']), set(replace)
 
     def _save(self, source, output):
-        todo = [entry for entry in self.entries if entry[3] in ('miss', 'refresh')]
+        committed = self._committed(output)
+        # A restored tree is stored again only when the handler names it in `replace`: it found the
+        # entry wrong (an audit mismatch) and is committing the tree it rebuilt cold. Not on its say-so
+        # alone: the attempt must also have succeeded (checked by the worker before it calls save).
+        replace = committed[1] if committed is not None else set()
+        todo = [entry for entry in self.entries
+                if entry[3] in ('miss', 'refresh') or (entry[3] == 'reused' and entry[0] in replace)]
         if not todo:
             return []
-        committed = self._committed(output)
         if committed is None:
             return [dict(path=entry[0], outcome='not-saved', reason='handler-wrote-no-commit') for entry in todo]
+        committed = committed[0]
         saved = []
         for path, key_paths, key, how in todo:
             started = time.monotonic()
@@ -538,8 +611,8 @@ class Attempt:
                 record.update(outcome='not-saved', reason='busy')
                 continue
             try:
-                self._store(tree, path, key, files, size, apparent)
-                record.update(outcome='saved', bytes=size, seconds=round(time.monotonic() - started, 2))
+                digest = self._store(tree, path, key, files, size, apparent)
+                record.update(outcome='saved', bytes=size, seconds=round(time.monotonic() - started, 2), digest=digest)
                 self._evict(keep=key)
             except Exception as error:
                 record.update(outcome='not-saved', reason='store-failed: %s' % str(error)[:120])
@@ -554,18 +627,22 @@ class Attempt:
         _remove(temporary)
         temporary.mkdir(mode=0o700)
         try:
+            digest = tree_digest(tree)
+            if digest is None:
+                raise RuntimeError('tree cannot be digested')
             _copy(tree, temporary/'data')
             copied = scan(temporary/'data')
-            if (copied[0], copied[2], copied[3]) != (files, apparent, None):
+            if (copied[0], copied[2], copied[3]) != (files, apparent, None) or tree_digest(temporary/'data') != digest:
                 raise RuntimeError('copy differs from source')
             _write_json(temporary/'meta.json', dict(schema=SCHEMA, path=path, files=files, bytes=size, apparent=apparent,
-                                                    created=time.time(), tool=self.tool))
+                                                    digest=digest, created=time.time(), tool=self.tool))
             final = entries/key
             if final.exists():
                 old = entries/('tmp-old-%s-%d' % (key[:12], os.getpid()))
                 os.rename(final, old)
                 _remove(old)
             os.rename(temporary, final)
+            return digest
         except BaseException:
             _remove(temporary)
             raise
