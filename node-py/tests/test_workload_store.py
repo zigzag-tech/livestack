@@ -652,3 +652,29 @@ def test_withdraw_and_claim_race_has_exactly_one_winner(tmp_path):
         else:
             assert final['state'] == 'running' and out['claim'] is not None
             assert out['withdraw']['state'] == 'running'
+
+
+def test_starved_big_job_holds_its_host_against_later_higher_priority_small_jobs(harness):
+    """2026-10-09: 16 GiB release builds sat unclaimed for 50 minutes while idle release workers shared a host
+    with a stream of small priority-500000 e2e jobs. A job queued past starvation_seconds now outranks priority
+    and holds what it is short of, so the next job that fits does not take the room freed for it."""
+    _, now, path = harness
+    store = WorkloadStore(path, handlers={'test.v1', 'build.v1'}, clock=lambda: now[0],
+                          limits=Limits(lease_seconds=5000))
+    for name in 'abc':
+        register(store, name, 'shared', cpu=8, ram=16)
+    small = store.submit('owner', request('small', need={'cpu': 4, 'ram': 4}))
+    running = store.claim('a', 'boot1')
+    assert running['job_id'] == small['id']
+    big = store.submit('owner', request('big', need={'cpu': 8, 'ram': 8}))
+    assert store.claim('b', 'boot1') is None
+    now[0] += store.limits.starvation_seconds + 1
+    for name in 'abc':  # workers stay fresh
+        register(store, name, 'shared', cpu=8, ram=16)
+    urgent = store.submit('owner', request('urgent', need={'cpu': 4, 'ram': 4}, priority=500000))
+    assert store.claim('b', 'boot1') is None, 'room freed for the starved job must not go to a later small one'
+    assert store.get('owner', urgent['id'])['state'] == 'queued'
+    complete(store, running)
+    register(store, 'a', 'shared', cpu=8, ram=16, cleaned=[running['attempt_id']])
+    claimed = [c for c in (store.claim(n, 'boot1') for n in 'abc') if c]
+    assert [c['job_id'] for c in claimed] == [big['id']]

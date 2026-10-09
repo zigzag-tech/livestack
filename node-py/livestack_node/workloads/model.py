@@ -56,6 +56,8 @@ class Limits:
     terminal_seconds: float | None = 14 * 86400
     # A job refused for the same coded reason by every candidate worker this long raises one event.
     stall_report_seconds: float = 300
+    # A queued job older than this outranks priority and holds the resources it is short of (placement.py).
+    starvation_seconds: float = 600
     # Persistent task environments are disk-only acceleration state. These
     # bounds are independent of the job/attempt limits above: a parked
     # environment never consumes a running-job slot.
@@ -109,7 +111,7 @@ class Limits:
             raise ValueError("scope lease bounds are 5..240 minutes; configuration may only narrow them")
         for name in ("active_jobs", "terminal_jobs", "workers", "claims_per_worker",
                      "attempts", "record_bytes", "fresh_seconds", "lease_seconds",
-                     "cleanup_seconds", "environment_registry", "environments_per_owner",
+                     "cleanup_seconds", "starvation_seconds", "environment_registry", "environments_per_owner",
                      "environment_affinity_seconds", "environment_sweep_rows", "environment_sweep_seconds"):
             value = getattr(self, name)
             if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
