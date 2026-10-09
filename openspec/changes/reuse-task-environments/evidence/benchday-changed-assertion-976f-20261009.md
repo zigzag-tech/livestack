@@ -61,5 +61,12 @@ assertion verdict.
 At this read, the scheduler reported no queued cargo, while a full completion
 train and an unrelated admission were dispatched. The repeated cross-worker
 infrastructure failures provide no product assertion evidence and no actionable
-source fix. No additional submission was made; await worker/coordinator
-recovery before retrying this unchanged assertion.
+source fix.
+
+The earlier complete change-bound PASS for merge `976f...` remains the
+discharging result: under Benchday's `pass-is-final` policy, the first complete
+PASS is final and a later infrastructure outcome cannot revoke it. The fresh
+`status --change` response of `missing` is inconsistent with that retained PASS
+and is recorded as a status-projection defect, not a new assertion verdict.
+Do not submit again solely to refresh the projection. This does not complete the
+paired task's separate benchmark, rollout, or rollback requirements.
