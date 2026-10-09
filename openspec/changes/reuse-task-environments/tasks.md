@@ -346,3 +346,17 @@ activate this release until that path is provisioned under the normal
 fence/drain procedure. Keep tasks 3.2, 4.1, 4.4 and 4.5 open; make no savings
 claim. See
 `evidence/cargo-cache-path-instability-20261009.md`.
+
+## Changed-assertion policy correction — 2026-10-09
+
+The gate-projection notes above do not reopen accepted assertion work. Benchday
+`docs/e2e-gate.md` now states that the first complete PASS for a merge's changed
+assertions is final; a later infrastructure outcome cannot revoke it. Both
+merge `48c6d99f32a5ec93a87b6375953bec2fa93fed43` (four assertions, train
+`tt_8e65b4a4-a9f6-4d05-97a6-447f2fedacb1`) and merge
+`976f344600eea42213ff91d4f2fab317e9af4965` (one assertion, train
+`tt_aaff49f4-15b2-4595-98a3-5ee72977aebd`) have retained complete PASS
+evidence. Later infrastructure-only attempts and a current `status --change`
+`missing` response are a status-projection inconsistency; they do not require
+another gate submission. Task 4.5 remains open for its independent alternating
+benchmark, live rollout, rollback, and archive requirements.
