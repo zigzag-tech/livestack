@@ -29,3 +29,13 @@ unverified through this caller.
 Keep automatic environment selection disabled. Full/coalesced E2E and
 publishing remain with their existing coordinators. This evidence does not
 certify a full suite or a release.
+
+## Current profile and authority readback — 2026-10-09 18:31 UTC
+
+Read-only authority state reports worker 1 and worker 2 ready with Flutter,
+Rust, and task-E2E profiles. Worker 1 was drained at generation 5, updated on
+release 377bb4e4, and re-enabled at generation 7. The observe report remains
+at spec generation 2 with no waiting reason. Automatic selection remains
+disabled. The authority process is active on release d55c4c13; the exact
+source-bundle match and deployed dependency difference are recorded in
+rollout-recheck-20261009.md. No rollout promotion or rollback was performed.

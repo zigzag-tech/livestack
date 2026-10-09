@@ -58,3 +58,51 @@ invalidation, cross-worker reuse, or a load-controlled alternating benchmark.
 |---|---|---|
 | `478c7dd2776a422fa6ded2d375f93a20` | `709cf8a19d18cc204731e82a41d9b1298cc8e41d8e42c3ab20c152d85dba84c7` | `1f41974a45344791840f22bca9c28cd558f923b7faea12cb5234c351183b6447` |
 | `bf60dffb4ee64dd086e4bdf6b8279d47` | `229407f13c62c51fd52c59b9bc0d8d8e0674225455f94b8d2826a5c55f7d5ec7` | `efaed5ae84f8b59377d33588730c0a842b900e7ee4ee38b6adf5618c2b61162e` |
+
+## Changed-source daemon check completed — 2026-10-09 18:31 UTC
+
+This supersedes the 18:02 UTC queued observation. The durable job
+9db7f40033f74cc3a724783b2541961e completed successfully on zz-joe-e2e-2;
+it was submitted once and was not resubmitted. It ran check daemon against
+source commit 19ae42b9f5c4fdde03609e6e0b1e091a2399fbf8, source digest
+43fed7859e6eb278cdd243f50cbd8ef299235a9df490f88f4f4adf6b9b3e757c, attempt
+51f2bbed87364269852555bcba4812ee, and Rust handler release
+584701d4f3b2bdd0c14607e10826637d373aeb2602ec474a3b30263834372f61.
+
+The request reused handle 4636512da5084b70bc2f0a1b0f045020. The receipt says
+reuse_outcome=reused and reason_code=source_updated_incrementally. Both
+cargo-home and cargo-target were reused; the parked environment advanced from
+generation 10 (1,913,688,064 bytes) to generation 11 (3,749,679,104 bytes).
+
+| Phase or resource | Result |
+|---|---:|
+| Queue | 1,484.105 s (about 24.7 min) |
+| Transfer | 7.081 s |
+| Source materialization | 16.730 s |
+| Dependency preparation | 3.562 s |
+| Cargo check daemon | 98.426 s |
+| Worker execution | 110.452 s |
+| Cleanup | 0.006 s |
+| Test | not applicable |
+| CPU | 313,516,097 usec |
+| Peak memory | 5,432,221,696 bytes |
+| Peak non-reclaimable memory | 1,762,037,424 bytes |
+| Disk delta | 1,835,868,864 bytes |
+| OOM kills / pids-max events | 0 / 0 |
+
+The installed workload-decisions ledger was read directly. Admission decision
+01M4GY367JS3Y6S8QQDCSB4YME chose worker 2. Completion decision
+01M4GY7MQFBFYJDKA243T6S3Z1 links to that admission through parent_decision_id
+and records the job, attempt, worker zz-joe-e2e-2, host zz-joe, handle,
+generation 11, succeeded product outcome, and reused environment outcome.
+The command artifact hashes are 901bb34508306ff7c6ebe2f4f95140c6d267046194b1ef5d2f1a76d0a0167578
+(command.log) and 40f66843a9467031187ee2140678f585a81fe556ea0fcc98e2735115ba7451d4
+(rust-check.json).
+
+Host load sampling spans 17:51:23–18:19:00 UTC at a 5-second median interval:
+318 samples total and 27 during this attempt. Load1 min/median/max was
+12.07/14.33/18.70; CPU PSI some avg60 min/median/max was
+7.69/18.52/40.35. This sample describes host conditions, not a controlled
+before/after comparison. Queue dominated the run, and the changed-source
+daemon result cannot be compared with the unchanged-source CLI pair as a
+total wait-time saving. No full/coalesced E2E or publishing was invoked.

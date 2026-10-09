@@ -91,3 +91,35 @@ Read-only rollout status is generation 1586, spec generation 2, mode `observe`, 
 ## Post-failure generation readback — 2026-10-09 12:29 UTC
 
 ZZOPS reports the pre-existing full-product completion train `tt_bf33eee1-043c-42fa-8820-0b18ece7cdfc` terminal with an infrastructure outcome and no assertion result. A fresh rollout read after that event is generation 1610, mode `observe`, unit `unit-f38a7baa`, still waiting on `canary_not_representative:benchday.e2e.task.v1`; the reconciler reports `applied: []`. No authority change from this task occurred, so there is nothing to roll back. Worker 2 remains the only task-E2E advertiser; workers 1–4 have active test-train/compiler jobs and worker 5 is draining. No task-environment job, full/coalesced E2E, publish, cancellation, or rollout mutation was made.
+
+## Current authority and worker readback — 2026-10-09 18:31 UTC
+
+This supersedes earlier statements that the d55c4c13 authority release was
+staged but inactive. Read-only systemd status on 100.64.0.18 reports the
+livestack-workload-authority service active, NeedDaemonReload=no, with its
+process started at 2026-10-09 14:40:21 UTC and PYTHONPATH selecting
+/home/ubuntu/.local/share/livestack-workload-releases/livestack-d55c4c13.
+The remote node-py/RELEASE.json and locally built candidate both record commit
+d55c4c13fcef241231f012b2578d224e1545ac27, content hash
+87bd2b9156d2d2e06444b3119c40a8256954639a4b1fa082c8a9de0084cb79e6, and
+245 files. The verifier reports all 245 source files match, plus 151 deployed
+vendored _deps files; it reports zero changed and zero only-built files, so
+the full directory differs only because of those deployed dependencies.
+
+The previous release drop-in backup and authority configuration/database
+snapshots exist under
+/home/ubuntu/.local/state/livestack-workloads/backups/release-20261009T144019Z.
+The prior drop-in points to release livestack-starve-327ac7e7. No rollback was
+attempted. The expired ZZOPS deployment fence was not reused, and this task did
+not restart the authority.
+
+Worker 1 was drained by the documented rollout principal at claim generation
+5, then re-enabled at generation 7 after updating its profile config and
+service. It runs worker release 377bb4e4 (content hash
+7cf90d52f10d4e68e9442aa493c8f8f67d0ec2a6c66526893017f9dd0d05d2c2), with
+task-E2E handler label 909844c7b71167b5dfa7ca5193d37cf41184cd28. Read-only
+authority state reports workers 1 and 2 ready with Flutter, Rust, and
+task-E2E profiles. Worker 1's image handler was preserved. The observe report
+is still at spec generation 2, mode observe, with no waiting reason; automatic
+selection remains disabled. No promotion, task-specific E2E, full/coalesced
+E2E, or publishing was performed in this recheck.
