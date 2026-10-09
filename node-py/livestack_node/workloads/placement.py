@@ -81,6 +81,42 @@ def _stall_event(row, rejected, now, limits):
                     row["id"], now-row["created"], key[1], "; ".join(i["reason"] for i in rejected[:4])[:512])
 
 
+_HOLD_CODES = frozenset(("resources_insufficient", "memory_insufficient", "disk_insufficient"))
+_STARVED_REPORTED = {}
+
+
+def _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, memory_terms, views, now, limits):
+    """Reserve, on every host that refuses an aged job only for lack of free resources, what the job would take.
+
+    Jobs placed later in this round then see the host as already charged, exactly as if the starved job had been
+    admitted, so running attempts draining off the host make room for IT rather than for the next small job. Only
+    a job the host could ever fit (its capacity covers `admit`) holds: a job bigger than the machine must not
+    freeze it. The hold lasts one round; nothing persists."""
+    if now-row["created"] < limits.starvation_seconds:
+        return
+    by_id = {w["id"]: w for w in workers}
+    held = set()
+    for item in rejected:
+        w = by_id.get(item["worker"])
+        if (w is None or item.get("code") not in _HOLD_CODES or w["host"] in held
+                or any(reports[w["id"]]["capacity"].get(k, 0) < n for k, n in admit.items())):
+            continue
+        held.add(w["host"])
+        measured = w["host"] in views and claim is not None
+        for k, n in admit.items():
+            if not (k == MEMORY and measured):
+                host_free[w["host"]][k] -= n
+        if measured:
+            host_free[w["host"]][MEMORY] -= claim
+            memory_terms[w["host"]]["admitted"] += claim
+    if held and row["id"] not in _STARVED_REPORTED:
+        if len(_STARVED_REPORTED) >= 1024:
+            _STARVED_REPORTED.clear()
+        _STARVED_REPORTED[row["id"]] = now
+        logging.warning("placement_starved: job %s waited %.0fs for free resources on %s; holding them for it",
+                        row["id"], now-row["created"], ", ".join(sorted(held)))
+
+
 # Blocker codes (openspec typed-outcome-causes-and-blockers). A closed list: a reader tells "no worker advertises
 # the handler" from "the one worker is busy" without parsing prose.
 BLOCKER_CODES = frozenset((
@@ -346,8 +382,14 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         'e.affinity_started AS environment_affinity_started FROM jobs j '
         'LEFT JOIN task_environments e ON e.handle=j.environment_handle')
     queue_sql = queue_sql.replace('WHERE state=', 'WHERE j.state=').replace(' AND id=?', ' AND j.id=?')
-    queued = db.execute(queue_sql+" ORDER BY COALESCE(json_extract(j.spec,'$.priority'),0) DESC, j.created, j.id",
-                        queue_params).fetchall()
+    # A job queued longer than limits.starvation_seconds ranks ahead of priority: priority orders fresh work,
+    # but must not let a stream of higher-priority small jobs refill a shared host forever (2026-10-09: two
+    # release builds needing 16 GiB sat unclaimed 50 min behind priority-500000 e2e jobs while both release
+    # workers were idle). Starved jobs also HOLD their host's resources (see _hold_for_starved).
+    starved_before = now-limits.starvation_seconds
+    queued = db.execute(queue_sql+" ORDER BY (j.created <= ?) DESC, "
+                        "CASE WHEN j.created <= ? THEN 0 ELSE COALESCE(json_extract(j.spec,'$.priority'),0) END DESC, "
+                        "j.created, j.id", (*queue_params, starved_before, starved_before)).fetchall()
     handles = sorted({row['environment_handle'] for row in queued if row['environment_handle']})
     replicas_by_handle = {}
     if handles:
@@ -525,6 +567,8 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                                   detail=item["reason"]) for item in rejected if item.get("code") in BLOCKER_CODES]
                             or [dict(code="deadline_unfit", detail="no target can meet deadline")])
                 _stall_event(row, rejected, now, limits)
+                _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, memory_terms,
+                                  views, now, limits)
             _wait(db, row, now, reason, blockers)
             continue
         chosen = next(w for w in workers if w["id"] == grants[0].target_id)
