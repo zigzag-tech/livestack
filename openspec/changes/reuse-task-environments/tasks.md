@@ -360,3 +360,90 @@ evidence. Later infrastructure-only attempts and a current `status --change`
 `missing` response are a status-projection inconsistency; they do not require
 another gate submission. Task 4.5 remains open for its independent alternating
 benchmark, live rollout, rollback, and archive requirements.
+
+## Stable worker-view prerequisite rechecked — 2026-10-09 22:57 UTC
+
+The `zz-joe` sibling `task-environment-view` is now present, empty, and owned
+`ubuntu:ubuntu` mode `0700`; both worker user units are active, with no restart
+for the directory repair. On the authenticated roster read, e2e workers 1 and
+2 advertise Flutter, Rust-check, and task-E2E handlers; workers 3 and 4 do not
+advertise task-E2E, and worker 5 remains claim-disabled. Workers 1, 3, and 4
+were executing admitted assertion work while worker 2 was running a coalesced
+full-suite completion. No task-specific E2E or compiler job was submitted
+against the repaired view. This is only the stable-path host prerequisite;
+the admitted freshness/compile and rollout acceptance tasks remain open. See
+`evidence/cargo-cache-path-instability-20261009.md`.
+
+After the coordinator restarts, the owner explicitly requested reattachment by
+resubmitting the two landed assertion-changing merges. Their current admission
+cargos are `tt_142c3470-16aa-465b-b02b-cb0d74d49c98` (four assertions for
+`48c6d99f32a5ec93a87b6375953bec2fa93fed43`) and
+`tt_5d6014c2-b87f-4c40-9e41-27d85f5a1f01` (one assertion for
+`976f344600eea42213ff91d4f2fab317e9af4965`); both were queued on snapshot
+`0d62a596dbf1` at submission. Await their terminal results; this submission
+does not request or represent a full-suite run.
+
+## Gate watcher update — 2026-10-09 23:05 UTC
+
+The reattached admission train for `48c6d99f32a5ec93a87b6375953bec2fa93fed43`
+passed all four derived assertions (`tt_4ea73eed-f3f1-4cbb-80e9-b64f95978cfd`);
+the `976f344600eea42213ff91d4f2fab317e9af4965` admission passed its one
+runtime-freshness assertion (`tt_5a31a072-5d24-4aed-bb02-e5883dcf7ab6`). These
+are admission results only. The four-assertion completion cargo
+`tt_afaa9538-8a9f-4973-a109-7f878cb4fe7d` had an infrastructure-only attempt
+and is queued for retry. The runtime-freshness completion cargo
+`tt_90f681c9-38af-4e4f-91f2-6b2c9524ba69` is dispatched on `zz-joe-e2e-4`.
+Completion watchers are attached; do not count either merge as newly complete
+until its change-bound completion result is observed. The pre-existing full
+train continues separately on `zz-joe-e2e-2`.
+
+## Parked state readback — 2026-10-09 23:01 UTC
+
+The read-only authority inspection reports the existing Rust handle at
+generation 14 with 18,310,598,656 retained bytes and the task-E2E handle at
+generation 9 with 2,294,231,040 retained bytes. Both are `parked`; their latest
+job records are `succeeded` and their attempts `ended`. The Rust and task-E2E
+last-use timestamps are 20:56 and 19:45 UTC, before the 22:53 stable-view
+repair. They confirm retained state and parking, but do not close the required
+post-repair compiler/E2E, invalidation, or timing evidence. Details:
+`evidence/cargo-cache-path-instability-20261009.md`.
+
+## Scoped task-E2E request queued — 2026-10-09 23:08 UTC
+
+Benchday job `9e08c6cc02fa4c00b1dbddaffed763dc` was accepted for the exact
+`fleet-workload.task-environment-runtime-freshness` check (1 of 923 known
+checks), using existing task-E2E handle
+`06318b61f53c4b3ca5cb7dc620b5702f`. The authority reports `queued`, no
+attempts, and `worker_busy` on workers 1 and 2. The environment remains parked
+at generation 9 with 2,294,231,040 retained bytes. This is not a full-suite
+request and is not yet post-repair execution evidence; observe the same job
+after capacity clears.
+
+## Reattached gates and current rollout readback — 2026-10-09 23:21 UTC
+
+The reattached completion cargo for Benchday merge
+`48c6d99f32a5ec93a87b6375953bec2fa93fed43` (`tt_afaa9538-8a9f-4973-a109-7f878cb4fe7d`)
+is terminal PASS for all four derived assertions, with `complete=true` and
+`full=false`; producing train `tt_3dfc7a85-b40c-4b55-8ec8-52f69ba47373`
+completed at `dd8311da558602478196944b2517e2447d56e5e7`. The independent
+`976f344600eea42213ff91d4f2fab317e9af4965` merge has a current change-bound
+PASS for `fleet-workload.task-environment-runtime-freshness`
+(`tt_b2ccb762-6e29-4f15-aaf3-c98af6c64a40`), also `complete=true`, `full=false`.
+These close only the named changed-assertion gates.
+
+The authenticated rollout readback remains mode `observe` at spec generation 2
+with no applied actions. The desired `unit-f38a7baa` reports `zz-joe-e2e-1`
+behind and workers 2–5 unknown; task-E2E is advertised only by workers 1 and 2,
+with handler-release skew between them. At the 23:21 UTC roster read, workers 1
+and 2 were running full-handler attempts, worker 3 a Rust job, worker 4 another
+full-handler attempt, and worker 5 was claim-disabled. The existing exact
+task-E2E canary job `9e08c6cc02fa4c00b1dbddaffed763dc` remains queued with no
+attempt and its environment parked at generation 9. No duplicate was submitted.
+
+ZZOPS still reports the long full-suite train
+`tt_76035e95-a06d-464b-9666-a4f159b4d18d` as running on job
+`473610d2f7ce4aa0b36893be668e8d32` / attempt
+`575f73e842a74910b477a6d843dc8831` on worker 2; progress is unreported and
+there are no shared-tree riders. It has not reached terminal failure, so it
+was not cancelled. The representative canary, source/cache invalidation and
+benchmark evidence, rollout/rollback acceptance, and archive remain open.

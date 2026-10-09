@@ -72,3 +72,32 @@ that directory with the documented worker-storage procedure, then roll only
 after the normal fence/drain confirms the worker has no active attempt. Until
 then, the landed code will refuse task-environment support on that host rather
 than use an attempt-specific path.
+
+## Stable view provisioned — 2026-10-09 22:53 UTC
+
+The missing sibling view has since been provisioned on `zz-joe` at
+`/var/lib/livestack-workloads/environment-hosts/zz-joe/task-environment-view`.
+Read-only verification at 22:53 UTC reported `ubuntu:ubuntu`, mode `0700`, and
+`ls -A` returned no entries. The `livestack-workload-worker.service` and
+`livestack-workload-worker-2.service` user units were both active/running; no
+worker or authority restart was performed for this directory repair.
+
+This removes the missing-view prerequisite for a stable-path attempt. It does
+not establish Cargo fingerprint reuse, invalidation coverage, or a time saving;
+the next admitted task-environment compiler run must verify those outcomes.
+
+## Parked environment readback — 2026-10-09 23:01 UTC
+
+The read-only workload CLI reports these existing `zz-joe` environments as
+parked, with their latest successful attempts ended:
+
+| Profile | Handle | Generation | Retained bytes | Last job |
+|---|---|---:|---:|---|
+| `benchday-linux-rust-dev-v1` | `4636512da5084b70bc2f0a1b0f045020` | 14 | 18,310,598,656 | `3dc619c8736543c299f33127d8159b22` |
+| `benchday-task-e2e-v1` | `06318b61f53c4b3ca5cb7dc620b5702f` | 9 | 2,294,231,040 | `f8681675389b4d518369ee071a0e0cfc` |
+
+Both report `last_outcome=reused`, and the job records report succeeded with
+ended attempts. Their last-use timestamps (20:56 and 19:45 UTC) precede the
+22:53 stable-view repair, so this verifies retained parked state only; it is
+not a post-repair compiler or task-E2E acceptance run and does not establish
+stable-path cache savings.
