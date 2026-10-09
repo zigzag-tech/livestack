@@ -9,4 +9,4 @@ result `dependency_cache`.
 - [x] `worker.py`: save only for `succeeded`; store path inaccessible to the attempt sandbox.
   Tests: `test_only_a_succeeded_attempt_writes_the_store`; the mount policy was checked by hand with `systemd-run --user -p PrivateTmp=yes -p InaccessiblePaths=...` on zz-joe (access refused, other paths writable)
 - [x] `node-py/docs/dependency-cache.md`
-- [ ] build a worker release and roll it to zz-joe-release / zz-joe-release-2 (benchday `release-build-cache` task 6); update the compilation verifier SDK copy to the same revision
+- [x] build a worker release and roll it to zz-joe-release / zz-joe-release-2 (benchday `release-build-cache` task 6): `livestack-30a6b9af`, verifier SDK `verifier-sdk-30a6b9af` for the two release verifiers, 2026-10-09; no worker enables `dependency_cache` for a release handler yet
