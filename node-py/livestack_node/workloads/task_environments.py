@@ -455,6 +455,23 @@ class TaskEnvironmentStore:
             raise WorkloadError('task environment storage root must be a real directory', 503)
         self.root = configured_root.resolve(strict=True)
         self.workspace = Path(workspace).resolve()
+        # Every worker identity on a physical host mounts a task's current
+        # source at this same absolute path inside its attempt namespace. Cargo
+        # fingerprints include workspace/target paths, so an attempt-specific
+        # bind destination defeats retained native build state.
+        self.execution_view = self.root.parent / 'task-environment-view'
+        try:
+            view_info = self.execution_view.lstat()
+        except FileNotFoundError:
+            parent_info = self.root.parent.stat()
+            if parent_info.st_uid != os.geteuid() or not os.access(self.root.parent, os.W_OK | os.X_OK):
+                raise WorkloadError('task environment stable execution view is not provisioned', 503)
+            self.execution_view.mkdir(mode=0o700, exist_ok=True)
+            view_info = self.execution_view.lstat()
+        if (not stat.S_ISDIR(view_info.st_mode) or view_info.st_uid != os.geteuid() or
+                view_info.st_gid != os.getegid() or stat.S_IMODE(view_info.st_mode) != 0o700 or
+                next(self.execution_view.iterdir(), None) is not None):
+            raise WorkloadError('task environment stable execution view is unsafe or not empty', 503)
         self.host_id = name(config['host_id'], 'physical host')
         if require_separate_filesystem and (self.root == self.workspace or
                 not self.root.is_mount() or self.root.stat().st_dev == self.workspace.stat().st_dev):

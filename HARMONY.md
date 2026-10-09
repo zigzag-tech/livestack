@@ -730,10 +730,14 @@ Its runtime fixtures are recreated for every job.
 
 Workers retain only declared, compatible build and dependency state on a
 separate ext4 project-quota filesystem. Each job reconciles the complete
-captured source before running in a supervised attempt; the receipt records
-whether the environment was created, reused, rebuilt or relocated. A parked
-environment owns disk only. Cleanup must be acknowledged before another job
-can write the same handle.
+captured source before running in a supervised attempt. It mounts that source
+at the host's fixed `task-environment-view` path inside the attempt's isolated
+mount namespace, so compiler fingerprints remain stable across attempts and
+worker identities on that host. Provisioning owns the empty, private mount
+point; a missing or unsafe view disables environment execution. The receipt
+records whether the environment was created, reused, rebuilt or relocated. A
+parked environment owns disk only. Cleanup must be acknowledged before another
+job can write the same handle.
 
 This proposal remains opt-in until authority policy, the Linux quota positive
 control, worker profiles, consumer SDK and handler-scope refusals have been

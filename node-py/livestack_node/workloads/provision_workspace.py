@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import pwd
 import re
+import stat
 import subprocess
 
 
@@ -99,6 +100,18 @@ def provision(worker, owner, size_gib, environment_size_gib=None, environment_ho
         env_root.mkdir(parents=True, exist_ok=True, mode=0o755)
         if env_root.resolve() != env_root or env_root.stat().st_uid != 0:
             raise ValueError('environment provisioning root must be real and root-owned')
+        execution_view = env_root/'task-environment-view'
+        try:
+            view_info = execution_view.lstat()
+        except FileNotFoundError:
+            execution_view.mkdir(mode=0o700)
+            os.chown(execution_view, account.pw_uid, account.pw_gid)
+            execution_view.chmod(0o700)
+            view_info = execution_view.lstat()
+        if (not stat.S_ISDIR(view_info.st_mode) or view_info.st_uid != account.pw_uid or
+                view_info.st_gid != account.pw_gid or stat.S_IMODE(view_info.st_mode) != 0o700 or
+                next(execution_view.iterdir(), None) is not None):
+            raise ValueError('task environment execution view must be an empty private worker directory')
         env_image, env_mount, env_marker = (env_root/'task-environments.ext4', env_root/'task-environments',
                                             env_root/'task-environments.json')
         env_size = environment_size_gib*1024**3
