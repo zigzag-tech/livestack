@@ -30,10 +30,10 @@ Both terminal results are `succeeded`; each job's receipt says
 `compatible_environment_reused`, both Cargo cache components are `reused`,
 and the environment is parked after the attempt.
 
-| Job | Generation | Compile | Queue | Transfer | Source materialization | Cargo log |
-|---|---:|---:|---:|---:|---:|---|
-| `478c7dd2776a422fa6ded2d375f93a20` | 9 | 28.451 s | 0.958 s | 6.779 s | 14.627 s | 75 `Compiling`, 234 `Checking` |
-| `bf60dffb4ee64dd086e4bdf6b8279d47` | 10 | 0.173 s | 0.673 s | 0.183 s | 14.070 s | 0 `Compiling`, 0 `Checking` |
+| Job | Generation | Attempt | Decision | Compile | Queue | Transfer | Source materialization | Cargo log |
+|---|---:|---|---|---:|---:|---:|---:|---|
+| `478c7dd2776a422fa6ded2d375f93a20` | 9 | `466ffd21403a47c2a9a74f3c44e8c146` | `01M4GVAX8W9KN8YHZEYC1ZPTAF` | 28.451 s | 0.958 s | 6.779 s | 14.627 s | 75 `Compiling`, 234 `Checking` |
+| `bf60dffb4ee64dd086e4bdf6b8279d47` | 10 | `9006e46cc4194e4f844ecd015cc40e57` | `01M4GVFFMQVS487A2JH0W55X62` | 0.173 s | 0.673 s | 0.183 s | 14.070 s | 0 `Compiling`, 0 `Checking` |
 
 Dependency preparation measured 0.342 s and 0.122 s; cleanup measured 0.0056
 s for each; tests were not applicable. The Cargo phase decreased 28.278 s
@@ -43,10 +43,14 @@ microseconds and 2,505,560,064 bytes for the first attempt. Both attempts
 reported zero OOM kills and zero pids-max events. The environment remained
 parked with 1,913,688,064 bytes retained.
 
-This is a real Cargo fingerprint hit after the stable-path worker release; it
-does not remove the per-invocation queue. Host-wide load was not sampled, and
-this pair does not cover Dart/native edits, lock/toolchain invalidation,
-cross-worker reuse, or a load-controlled alternating benchmark.
+Both authority job records are joined to these attempt IDs, the same worker
+`zz-joe-e2e-2`, host `zz-joe`, and the placement decisions shown above. The
+accepted/completed identity names handler release digest
+`584701d4f3b2bdd0c14607e10826637d373aeb2602ec474a3b30263834372f61`. This is
+a real Cargo fingerprint hit after the stable-path worker release; it does
+not remove the per-invocation queue. Host-wide load was not sampled during
+these two jobs, and this pair does not cover Dart/native edits, lock/toolchain
+invalidation, cross-worker reuse, or a load-controlled alternating benchmark.
 
 ## Artifact digests
 
