@@ -73,3 +73,11 @@ The Livestack observe-mode rollout is at report generation 1533, spec generation
 The current Benchday change-bound verdict is PASS, complete=true, full=false, for all four changed task-environment assertions on merge 48c6d99f32a5ec93a87b6375953bec2fa93fed43. The historical global status.gate is not the change verdict.
 
 The separate full-product completion train tt_bf33eee1-043c-42fa-8820-0b18ece7cdfc is still dispatched on zz-joe-e2e-1 (job 9a214e6c93894a0e9b3c1b5338239a81, attempt 1af544232a19402a9fdcb58954c1ae02), with no terminal result observed. ZZOPS reports six remote trains outstanding, two shared-tree cargos waiting, and an open deploy fence. No Livestack authority or worker rollout, task-environment workload, full/coalesced E2E, or publish was started during this recheck.
+
+## Full-train retry recheck — 2026-10-09 12:10 UTC
+
+The Benchday change-bound verdict remains PASS, complete=true, full=false, for the four task-environment assertions. Its separate full-product train tt_bf33eee1-043c-42fa-8820-0b18ece7cdfc remains dispatched; current status identifies job 9a214e6c93894a0e9b3c1b5338239a81, attempt 1af544232a19402a9fdcb58954c1ae02 on zz-joe-e2e-1, elapsed about 116 minutes, with no progress sample or terminal verdict.
+
+Associated cargo tt_c9235ec4-97b7-4f12-a644-998ea29b1ab0 records an earlier infrastructure failure on xc-win-1-wsl-2 (job 75f90f33514e4d608ab62492276ab412, attempt 62bdefaa09324d11be754161d410fbff); the retry binds the newest published snapshot 83ce9b1cf3b2 containing commit be1a65d8b353. Its watcher returned 404 and cargo-specific status rejected this ID, but a fresh global status still confirms the train and its current zz-joe attempt are live. This is not a terminal gate result; no cancellation, rollback, task-environment request, authority rollout, or worker rollout was made.
+
+ZZOPS still reports six dispatched trains, two dispatch-pending trains, two shared-tree cargos waiting, and an open deploy fence. No safe authority drain window is available.
