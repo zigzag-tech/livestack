@@ -481,3 +481,24 @@ for its named assertion. The only local Livestack credential is non-admin;
 handler-release status refused it and no operator config is present. No handler
 activation or rollback occurred. Benchmark and live rollout/rollback
 acceptance remain open.
+
+## Task-E2E terminal follow-up — 2026-10-09 23:53 UTC
+
+The earlier queued/running observations for Benchday job
+`9e08c6cc02fa4c00b1dbddaffed763dc` are superseded by its terminal PASS. The
+exact runtime-freshness assertion passed on `zz-joe-e2e-1`, reused all 16 cache
+components on the same task-environment handle, and parked generation 10
+after clean teardown. Its 1,667.505-second queue is separate from compile and
+test phases, so this is environment-reuse evidence, not a queue-savings claim.
+See `evidence/task-e2e-resumed-20261009.md` for artifact digests and phase
+receipts.
+
+This closes only the post-repair task-E2E execution. The alternating compiler
+benchmark, real Dart/native and deletion/symlink/lockfile invalidation
+controls, broad worker/SDK rollout, rollback readback, and archive prerequisites
+remain open. Current rollout status is `mode=observe`, generation 2970,
+`applied=[]`; the unit report lists `zz-joe-e2e-1` behind and workers 2–5
+unknown. The authority roster lists the task-E2E handler on workers 1 and 2,
+both occupied by background image-warm jobs in the snapshot; workers 3 and 4
+were idle without that handler and worker 5 was claim-disabled. Keep
+automatic-selection defaults disabled.
