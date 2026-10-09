@@ -337,6 +337,12 @@ while each attempt remains in an isolated systemd mount namespace. Focused
 Livestack checks passed 30/30 on `lappy-bellinzona` (Python 3.13.15):
 `test_task_environments.py` and the existing two-invocation worker integration.
 This does not prove a real Cargo fingerprint hit or cross-worker compiler
-reuse. The change has not been landed, deployed or exercised by an admitted
-compiler. Keep tasks 3.2, 4.1, 4.4 and 4.5 open; make no savings claim. See
+reuse. The change landed on Livestack main as `377bb4e4`, and its 246-file
+worker candidate has content hash
+`7cf90d52f10d4e68e9442aa493c8f8f67d0ec2a6c66526893017f9dd0d05d2c2`. It has
+not been deployed or exercised by an admitted compiler. The live zz-joe mount
+exists but the required sibling `task-environment-view` is absent, so do not
+activate this release until that path is provisioned under the normal
+fence/drain procedure. Keep tasks 3.2, 4.1, 4.4 and 4.5 open; make no savings
+claim. See
 `evidence/cargo-cache-path-instability-20261009.md`.

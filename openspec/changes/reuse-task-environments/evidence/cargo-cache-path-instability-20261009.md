@@ -54,3 +54,21 @@ controlled warm-repeat or edit comparison has been measured. These two
 receipts establish retained cache bytes and actual repeated compilation, not
 time saved. Do not claim Cargo cache savings until a current-source admitted
 run demonstrates that unchanged native dependencies are not recompiled.
+
+## Landed worker candidate and host prerequisite
+
+The stable-path implementation landed on Livestack `main` as commit
+`377bb4e4a567a43b65b114078cadf643952231f8`. A worker release candidate built
+from that commit contains 246 files and has content hash
+`7cf90d52f10d4e68e9442aa493c8f8f67d0ec2a6c66526893017f9dd0d05d2c2`; the
+independent release `hash` command returned the same value. The candidate is
+at `/tmp/livestack-377bb4e4-cargo-path-20261009` and is not installed.
+
+Read-only inspection on `zz-joe` confirmed the task-environment mount exists
+at `/var/lib/livestack-workloads/environment-hosts/zz-joe/task-environments`
+(`root:ubuntu`, mode `1770`), but its sibling `task-environment-view` does not
+exist. No worker, authority, or rollout configuration was changed. Provision
+that directory with the documented worker-storage procedure, then roll only
+after the normal fence/drain confirms the worker has no active attempt. Until
+then, the landed code will refuse task-environment support on that host rather
+than use an attempt-specific path.
