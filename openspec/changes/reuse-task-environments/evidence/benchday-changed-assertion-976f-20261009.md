@@ -22,3 +22,44 @@ A separate current `status --change` read for earlier merge
 `No complete change-bound evidence`. The PASS above is for `976f...` only and
 does not resolve that earlier projection; keep the companion acceptance task
 open.
+
+## Reattachment after ZZOPS coordinator restarts — 2026-10-09
+
+After the coordinator restarts, a fresh submission for merge
+`976f344600eea42213ff91d4f2fab317e9af4965` created admission cargo
+`tt_3b2860e3-8a46-4bb6-8518-53b92cd33ec4`. Admission returned `pass` with
+`partial=true`. Its changed assertion is still
+`fleet-workload.task-environment-runtime-freshness`.
+
+The existing durable completion cargo
+`tt_8713494a-9a06-46b1-9d5d-aaf25afead67` then settled after two attempts as
+an infrastructure failure, with no retained assertion result. The last named
+execution was job `08e7e67103694877823843cac8c6f86e`, attempt
+`2929db5f88804e0fa8fd5b71fdc47360`, on `zz-joe-e2e-1`; its worker reported an
+infrastructure outcome without a reason. A fresh `status --change 976f...`
+therefore reports no complete change-bound evidence. This does not replace or
+contradict the earlier recorded PASS for this merge; it is a later attempt
+without an assertion verdict.
+
+No full/coalesced E2E or publishing action was started for this reattachment.
+The companion acceptance remains open while the infrastructure cause and
+change-bound projection are unresolved. Do not resubmit unchanged work until
+there is actionable failure evidence or the worker capacity condition changes.
+
+## Current ZZOPS status — 2026-10-09
+
+A subsequent read-only `zzops train status --change 976f...` still exits 3 with
+`No complete change-bound evidence`. The recent-failure ledger now shows four
+infrastructure outcomes for the same derived assertion across two workers:
+completion jobs `08e7e67103694877823843cac8c6f86e` on `zz-joe-e2e-1` and
+`95058affe97a459d90c15fdca29c77b7` on `xc-win-1-wsl-2`, plus admission jobs
+`5f9c9e49f3b04c27b9cd1e3db59aeb2e` and
+`15e865fc180149e0b7a137c76cb4c2d2` on `xc-win-1-wsl-2`. Each worker declared
+an infrastructure outcome without an authority reason; none retained an
+assertion verdict.
+
+At this read, the scheduler reported no queued cargo, while a full completion
+train and an unrelated admission were dispatched. The repeated cross-worker
+infrastructure failures provide no product assertion evidence and no actionable
+source fix. No additional submission was made; await worker/coordinator
+recovery before retrying this unchanged assertion.
