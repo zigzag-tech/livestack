@@ -440,6 +440,20 @@ full-handler attempt, and worker 5 was claim-disabled. The existing exact
 task-E2E canary job `9e08c6cc02fa4c00b1dbddaffed763dc` remains queued with no
 attempt and its environment parked at generation 9. No duplicate was submitted.
 
+## Rollout observation follow-up — 2026-10-09 23:24 UTC
+
+The fresh observe report (generation 2903, spec generation 2) has no set
+waiting reason: the two-worker `min_claiming` threshold is currently met, so
+the earlier `canary_not_representative` observation is superseded. The exact
+canary is still queued solely because workers 1 and 2 hold active full-handler
+attempts. The report remains `mode=observe`, `applied=[]`; worker 1 reports
+unit release hash `7cf90d52f10d4e68e9442aa493c8f8f67d0ec2a6c66526893017f9dd0d05d2c2`
+against desired unit `unit-f38a7baa`'s release hash
+`6593d104da0263001da63df76a4f7338818053f02e8026de3ccb8b744645d20b`, and
+worker 2 has no unit report. This is observed rollout drift; no worker was
+restarted or changed. Keep defaults disabled pending the canary, benchmark,
+and remaining rollout/rollback evidence.
+
 ZZOPS still reports the long full-suite train
 `tt_76035e95-a06d-464b-9666-a4f159b4d18d` as running on job
 `473610d2f7ce4aa0b36893be668e8d32` / attempt
