@@ -461,3 +461,23 @@ ZZOPS still reports the long full-suite train
 there are no shared-tree riders. It has not reached terminal failure, so it
 was not cancelled. The representative canary, source/cache invalidation and
 benchmark evidence, rollout/rollback acceptance, and archive remain open.
+
+## Task-E2E dispatched after slot cleanup — 2026-10-09 23:42 UTC
+
+The accepted Benchday request `9e08c6cc02fa4c00b1dbddaffed763dc` is now
+running on `zz-joe-e2e-1`, still bound to handle
+`06318b61f53c4b3ca5cb7dc620b5702f`, at environment generation 10. Direct
+authority reads report `result=null` and environment state `preparing`; this
+is not terminal execution evidence. The original 1800-second observer exited
+with `pending`; continue reading the accepted job ID without resubmitting it.
+See `evidence/task-e2e-resumed-20261009.md`.
+
+The scheduler-owned full completion train on worker 2 was cancelled through the
+audited ZZOPS command after 78 minutes without reported progress and with no
+shared-tree riders. Its authority job is cancelled but cleanup remains pending,
+so worker 2 is not-ready until it reports clean. The independent worker-1
+full-product train ended with a ZZOPS result-selection mismatch and no verdict
+for its named assertion. The only local Livestack credential is non-admin;
+handler-release status refused it and no operator config is present. No handler
+activation or rollback occurred. Benchmark and live rollout/rollback
+acceptance remain open.
