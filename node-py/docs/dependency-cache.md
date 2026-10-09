@@ -41,17 +41,21 @@ that the handler merges into one tree, and any extra file in the raw layout is r
 2. When its tree is ready, the handler writes `<dir>/request.json` `{"version": 1, "root": "<absolute tree root>"}`
    (atomic rename). `root` must lie inside the attempt's source directory and contain `.livestack/dependency-cache.json`.
 3. The worker (polling every 0.2 s while the attempt runs) restores what matches and writes `<dir>/response.json`
-   `{"version": 1, "outcome": "restored"|"skipped"|"error", "components": [{"path": "hub/node_modules", "outcome": "reused"}]}`
-   once. The handler waits for it (bounded) and does not install the trees named `reused`. On timeout it installs
+   `{"version": 1, "outcome": "restored"|"skipped"|"error", "audit": false, "components": [{"path": "hub/node_modules", "outcome": "reused", "key": "<64 hex>", "digest": "<64 hex>"}]}`
+   once. `key` and `digest` are what the tree was served under; a handler that ships what it builds puts them in its receipt. The handler waits for it (bounded) and does not install the trees named `reused`. On timeout it installs
    everything (cold).
 4. After every install succeeded, the handler writes `$HARMONY_OUTPUT/dependency-cache-commit.json`:
-   `{"version": 1, "paths": ["hub/node_modules", ...]}`. Never for trees later pruned or mutated. The worker stores
-   the committed trees that missed, reading them from the `root` the handler gave.
+   `{"version": 1, "paths": ["hub/node_modules", ...], "replace": [...]}`. Never for trees later pruned or mutated. The worker stores
+   the committed trees that missed, reading them from the `root` the handler gave, and only when the attempt `succeeded`.
+   `replace` (optional, a subset of `paths`) names restored trees the handler found wrong and rebuilt cold; those are stored over the entry.
+5. When `audit` is true the handler is expected to also produce its result without the restored trees, compare the two,
+   ship the cold one and report the comparison in its receipt (what "the same result" means is the handler's: for a compiler,
+   the output bytes). A mismatch SHOULD put the rebuilt tree in `replace`.
 
 ## Worker config (worker.json, no environment variables)
 
     "dependency_cache": {"enabled": true, "path": "/home/ubuntu/.cache/livestack-dependency-cache/<worker>",
-                         "max_bytes": 8589934592, "epoch": 0, "refresh_every": 20, "max_component_bytes": 4294967296}
+                         "max_bytes": 8589934592, "epoch": 0, "refresh_every": 20, "audit_every": 0, "max_component_bytes": 4294967296}
 
 `path` absolute and private (0700, worker uid), its own per worker. `epoch` bump = everything misses.
 Missing, `enabled:false` or invalid = disabled (invalid is logged by name). Linux only, not task environments.
@@ -64,11 +68,17 @@ A tree whose parent directory is an alias symlink (Benchday's `packages/mesh_rel
 parent's real location, provided that stays inside the source (npm installed it there); otherwise `parent-outside-source`.
 Restores of the trees of one attempt run concurrently (8 threads): two trees (hub 640 MB, jingway-framework) carry
 most bytes and the rest are under a second, so wall time is the slowest copy, not the sum.
-Restore is a copy (`cp -a --reflink=auto`) then a re-scan compared with the entry's recorded file count and apparent (`st_size`) bytes; allocation differs between a tree and its copy and is only used for the bound;
-a mismatch drops the entry and the attempt installs cold. Store refuses absolute/escaping symlinks, special files,
+Restore is a copy (`cp -a --reflink=auto`) then a re-scan compared with the entry's recorded file count and apparent (`st_size`) bytes (allocation differs between a tree and its copy and is only used for the bound),
+then a content digest (`tree_digest`: kind, path, executable bit, size, sha256 of every file, link targets; no mtimes) recomputed on the copy and compared with the one in `meta.json`.
+Any mismatch, or an entry with no digest (stored before digests), drops the entry and the attempt installs cold (`verify-failed: size-mismatch|digest-mismatch|no-digest`).
+Store computes the digest on the source tree and again on the stored copy and refuses a copy that differs. Store refuses absolute/escaping symlinks, special files,
 unreadable subtrees, trees over `max_component_bytes` or `max_bytes/2`, and a key that changed during the attempt.
 `refresh_every` N: every Nth attempt (sha256 of attempt id mod N) skips restore, installs cold and replaces the
-entry, bounding undetected same-size corruption. Bound: `max_bytes` per namespace, LRU by `meta.json` mtime,
+entry. `audit_every` N (default 0 = never; different hash salt): every Nth attempt restores as usual but is told `audit: true`, see the handler contract.
+Only a `succeeded` attempt stores (`not-saved: attempt-not-succeeded`), and the attempt's unit gets `InaccessiblePaths=<path>` so nothing in the
+sandbox can read or write the store; the worker is its only writer. Residual: another process of the same uid outside such a sandbox (a different
+worker's handler, a shell) can still write it; the digest makes accidental damage and partial writes impossible to serve, an audit makes a coherent forgery visible,
+neither authenticates against a same-uid adversary. Bound: `max_bytes` per namespace, LRU by `meta.json` mtime,
 enforced at every store. Layout: `<path>/<ns>/entries/<key>/{data,meta.json}`, `<ns>/.lock` (flock: shared restore,
 exclusive store; busy = named miss).
 

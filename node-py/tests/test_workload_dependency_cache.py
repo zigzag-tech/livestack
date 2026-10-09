@@ -1,6 +1,7 @@
 """Dependency cache: real directories, real cp, real flock. No dockerd is needed."""
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -402,3 +403,133 @@ def test_an_alias_whose_target_leaves_the_source_is_refused(tmp_path):
     records = {r['path']: r.get('reason') for r in attempt(cfg).restore(source)}
     assert records['packages/escape/node_modules'] == 'parent-outside-source'
     assert not (outside/'node_modules').exists()
+
+
+# ------------------------------------------------- integrity (openspec dependency-cache-integrity)
+
+def seeded(tmp_path, cfg, name='one'):
+    source = make_source(tmp_path, name)
+    cold = attempt(cfg, 'a-' + name)
+    cold.restore(source)
+    run_handler(source, tmp_path/('o-' + name), ROOTS)
+    assert {r['outcome'] for r in cold.save(source, tmp_path/('o-' + name))} == {'saved'}
+    return source
+
+
+def test_a_same_size_poisoned_entry_is_refused_and_dropped(tmp_path):
+    cfg = config(tmp_path)
+    seeded(tmp_path, cfg)
+    victim = next(Path(cfg['path']).glob('*/entries/*/data/dep/index.js'))
+    stamp = victim.stat()
+    victim.write_text('y')                      # same length, different byte
+    os.utime(victim, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    assert victim.stat().st_size == stamp.st_size
+    records = attempt(cfg, 'a2').restore(make_source(tmp_path, 'two'))
+    refused = [r for r in records if r['outcome'] == 'miss']
+    assert len(refused) == 1 and refused[0]['reason'] == 'verify-failed: digest-mismatch'
+    assert len(list(Path(cfg['path']).glob('*/entries/*'))) == 2        # the poisoned entry is gone, the others stay
+    assert sorted(r['outcome'] for r in attempt(cfg, 'a3').restore(make_source(tmp_path, 'three'))) == ['miss', 'reused', 'reused']
+
+
+def test_an_entry_without_a_digest_is_never_trusted(tmp_path):
+    cfg = config(tmp_path)
+    seeded(tmp_path, cfg)
+    for meta in Path(cfg['path']).glob('*/entries/*/meta.json'):
+        value = json.loads(meta.read_text())
+        del value['digest']
+        meta.write_text(json.dumps(value))
+    records = attempt(cfg, 'a2').restore(make_source(tmp_path, 'two'))
+    assert {r['outcome'] for r in records} == {'miss'}
+    assert {r['reason'] for r in records} == {'verify-failed: no-digest'}
+
+
+def test_a_swapped_file_and_a_changed_link_change_the_tree_digest(tmp_path):
+    tree = tmp_path/'t'
+    (tree/'d').mkdir(parents=True)
+    (tree/'d/f').write_text('a')
+    os.symlink('f', tree/'d/l')
+    base = dc.tree_digest(tree)
+    assert base == dc.tree_digest(tree)
+    (tree/'d/f').write_text('b')
+    changed = dc.tree_digest(tree)
+    assert changed != base
+    (tree/'d/f').write_text('a')
+    (tree/'d/l').unlink()
+    os.symlink('g', tree/'d/l')
+    assert dc.tree_digest(tree) not in (base, changed)
+
+
+def test_the_response_names_key_and_digest_and_audit_is_scheduled(tmp_path):
+    cfg = config(tmp_path, audit_every=1)       # every attempt is an audit attempt
+    boundary = tmp_path/'b'
+    first = make_source(tmp_path, 'b/app')
+    cold = attempt(cfg, 'a1')
+    ask(tmp_path/'hs1', first)
+    cold.serve(tmp_path/'hs1', boundary)
+    assert json.loads((tmp_path/'hs1'/dc.RESPONSE_FILE).read_text())['audit'] is True
+    run_handler(first, tmp_path/'o', ROOTS)
+    cold.save(boundary, tmp_path/'o')
+    second = make_source(tmp_path, 'c/app')
+    warm = attempt(cfg, 'a2')
+    ask(tmp_path/'hs2', second)
+    warm.serve(tmp_path/'hs2', tmp_path/'c')
+    answer = json.loads((tmp_path/'hs2'/dc.RESPONSE_FILE).read_text())
+    assert answer['audit'] is True
+    assert all(len(c['digest']) == 64 and len(c['key']) == 64 for c in answer['components']) and answer['components']
+    quiet = config(tmp_path, audit_every=0)
+    assert attempt(quiet, 'a9')._audit_due() is False
+
+
+def test_a_restored_tree_is_replaced_only_when_the_handler_names_it(tmp_path):
+    cfg = config(tmp_path)
+    seeded(tmp_path, cfg)
+    second = make_source(tmp_path, 'two')
+    warm = attempt(cfg, 'a2')
+    assert {r['outcome'] for r in warm.restore(second)} == {'reused'}
+    # the handler rebuilt app/node_modules cold and found the restored one wrong
+    shutil.rmtree(second/'app/node_modules')
+    install(second, 'app', content='z')
+    out = tmp_path/'o2'
+    out.mkdir()
+    (out/dc.COMMIT_FILE).write_text(json.dumps(dict(version=1, paths=['app/node_modules'], replace=['app/node_modules'])))
+    saved = {r['path']: r for r in warm.save(second, out)}
+    assert saved['app/node_modules']['outcome'] == 'saved' and set(saved) == {'app/node_modules'}
+    third = make_source(tmp_path, 'three')
+    assert {r['outcome'] for r in attempt(cfg, 'a3').restore(third)} == {'reused'}
+    assert (third/'app/node_modules/dep/index.js').read_text() == 'z'
+    # without `replace` a restored tree is never stored again
+    fourth = make_source(tmp_path, 'four')
+    again = attempt(cfg, 'a4')
+    again.restore(fourth)
+    out4 = tmp_path/'o4'
+    out4.mkdir()
+    (out4/dc.COMMIT_FILE).write_text(json.dumps(dict(version=1, paths=['app/node_modules'])))
+    assert again.save(fourth, out4) == []
+
+
+def test_only_a_succeeded_attempt_writes_the_store(tmp_path):
+    from livestack_node.workloads.worker import WorkloadWorker as Worker
+    cfg = config(tmp_path)
+    source = make_source(tmp_path, 'one')
+    cold = attempt(cfg, 'a1')
+    cold.restore(source)
+    run_handler(source, tmp_path/'o', ROOTS)       # the handler committed everything...
+    completion = dict(outcome='product_failure', result={})      # ...but the attempt did not succeed
+    Worker._record_dependency_cache(worker_stub(cfg), completion, cold, source, tmp_path/'o')
+    result = completion['result']['dependency_cache']
+    assert {r['reason'] for r in result['saved']} == {'attempt-not-succeeded'}
+    assert not list(Path(cfg['path']).glob('*/entries/*'))
+    completion = dict(outcome='succeeded', result={})
+    Worker._record_dependency_cache(worker_stub(cfg), completion, cold, source, tmp_path/'o')
+    assert {r['outcome'] for r in completion['result']['dependency_cache']['saved']} == {'saved'}
+
+
+def test_the_store_is_hidden_from_native_attempts_only(tmp_path):
+    from livestack_node.workloads.worker import WorkloadWorker as Worker
+    cfg = config(tmp_path)
+    stub = worker_stub(cfg)
+    stub._store_isolation = lambda *a: Worker._store_isolation(stub, *a)
+    opted_in = attempt_for(cfg, dict(argv=['/bin/sh'], dependency_cache=True))
+    assert Worker._store_isolation(stub, opted_in, None) == {'inaccessible_paths': [cfg['path']]}
+    assert Worker._store_isolation(stub, opted_in, 'rootless-docker-native') == {}      # would change its execution class
+    assert Worker._store_isolation(stub, None, None) == {}                              # not opted in: nothing to hide
