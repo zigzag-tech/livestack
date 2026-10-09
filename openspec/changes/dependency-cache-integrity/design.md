@@ -26,10 +26,10 @@ file). Keys and digests cross the boundary in `response.json` (worker to handler
 - **Success-only store.** The worker already gated the store on the handler's commit marker; a
   build script in a failed attempt could forge that marker. The store is now also gated on the
   attempt's own verdict, which the worker computes from the exit receipt.
-- **Audit is the handler's comparison, scheduled by the worker.** Only the handler knows what
-  "the same result without the cache" means (for a compiler: the output bytes). The worker
-  chooses *which* attempts audit so the schedule cannot be skewed by the handler, and returns the
-  key and digest so the handler's receipt names exactly what was served.
+- **Audit is the handler's comparison, scheduled by the worker.** Only the handler knows what "the same tree" means (for a
+  compiler: every compiled artifact). The worker chooses *which* attempts audit so the schedule cannot be skewed by the
+  handler, and returns the key and digest so the handler's receipt names exactly what was served. An audit attempt builds
+  cold and compares trees instead of building twice: one build, not two, and the check is on the stored bytes themselves.
 - **Replace on named mismatch.** The handler that rebuilt cold after an audit mismatch lists the
   path in `replace`; the worker stores the cold-built tree over the entry. Without that, a bad entry
   would be served until `refresh_every` reached it.

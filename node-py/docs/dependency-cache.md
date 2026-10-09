@@ -48,9 +48,10 @@ that the handler merges into one tree, and any extra file in the raw layout is r
    `{"version": 1, "paths": ["hub/node_modules", ...], "replace": [...]}`. Never for trees later pruned or mutated. The worker stores
    the committed trees that missed, reading them from the `root` the handler gave, and only when the attempt `succeeded`.
    `replace` (optional, a subset of `paths`) names restored trees the handler found wrong and rebuilt cold; those are stored over the entry.
-5. When `audit` is true the handler is expected to also produce its result without the restored trees, compare the two,
-   ship the cold one and report the comparison in its receipt (what "the same result" means is the handler's: for a compiler,
-   the output bytes). A mismatch SHOULD put the rebuilt tree in `replace`.
+5. When `audit` is true the handler SHOULD NOT use the restored trees for its result: it produces everything cold (the
+   cold result is what ships), compares the tree it freshly produced with the restored one, reports the comparison in its
+   receipt, and on any difference lists the path in `replace` (the cold tree then overwrites the entry). The handler decides
+   what "the same tree" means (a compiler's: every compiled artifact, ignoring its own freshness metadata).
 
 ## Worker config (worker.json, no environment variables)
 
