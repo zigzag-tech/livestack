@@ -216,6 +216,7 @@ class HandlerPackageStore:
             (staging/'.manifest.json').write_text(encode(dict(manifest=manifest, release_digest=digest), 4*1024**2))
             self._make_tree_readonly(staging)
             os.replace(staging, final)
+            os.chmod(final, 0o555)
             self._verified_manifests[digest] = manifest
             return final
         finally:
@@ -229,7 +230,8 @@ class HandlerPackageStore:
                 os.chmod(Path(base)/name, 0o444 if not os.stat(Path(base)/name).st_mode & 0o111 else 0o555)
             for name in dirs:
                 os.chmod(Path(base)/name, 0o555)
-        os.chmod(root, 0o555)
+        # root is locked by install() AFTER the rename: macOS refuses to rename a
+        # read-only directory (EACCES), which blocked every handler install there.
 
     def _make_tree_writable(self, root):
         for base, dirs, files in os.walk(root, topdown=True, followlinks=False):

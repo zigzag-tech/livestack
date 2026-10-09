@@ -313,12 +313,27 @@ class WorkloadWorker:
             return None
         return dependency_cache.Attempt(self.dependency_cache, assignment['owner'], attempt, handler['argv'][0])
 
+    def _store_isolation(self, dependency_attempt, backend):
+        """Executor options that hide the dependency store from the attempt's sandbox.
+
+        Not for the rootless-docker backends: an inaccessible path moves their unit to the system manager
+        (sudo systemd-run), a different execution class than the one those handlers are admitted under."""
+        if dependency_attempt is None or backend in ('rootless-docker', 'rootless-docker-native'):
+            return {}
+        return {'inaccessible_paths': [self.dependency_cache['path']]}
+
     def _record_dependency_cache(self, completion, cache, source, output):
         """Store what the handler committed and report the outcome; never changes the verdict."""
         if cache is None or not isinstance(completion, dict):
             return
         try:
-            outcome = cache.outcome(cache.save(source, output))
+            if completion.get('outcome') != 'succeeded':
+                # Only a finished, successful attempt may write the shared store: a failed or stopped one
+                # may hold a half-built tree, and its commit file is not evidence of anything.
+                outcome = cache.outcome([dict(path=entry[0], outcome='not-saved', reason='attempt-not-succeeded')
+                                         for entry in cache.entries if entry[3] in ('miss', 'refresh', 'reused')])
+            else:
+                outcome = cache.outcome(cache.save(source, output))
             completion.setdefault('result', {})['dependency_cache'] = outcome
             logging.info('attempt dependency_cache: %s', json.dumps(outcome))
         except Exception as error:
@@ -1175,7 +1190,7 @@ class WorkloadWorker:
                 **({'docker_cache': docker_cache.plan(self.docker_cache, assignment['owner'], attempt)}
                    if self.docker_cache is not None and handler.get('backend') in ('rootless-docker', 'rootless-docker-native') else {}),
                 **self._executor_identity_options(assignment),
-                **environment_isolation)
+                **(environment_isolation or self._store_isolation(dependency_attempt, handler_backend)))
             # Once execution starts, worker-process health alone cannot retain
             # the slot. A live supervised unit or its durable exit receipt must
             # prove that execution still exists or has reached result handoff.
