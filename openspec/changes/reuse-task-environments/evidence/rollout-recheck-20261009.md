@@ -67,3 +67,9 @@ Correction: the earlier fence-admin command was run on `xc-tower-ubuntu` (`100.6
 The current change-bound gate for merge `48c6d99f32a5ec93a87b6375953bec2fa93fed43` is `pass`, `complete=true`, `full=false`; all four changed task-environment assertions passed. Read-only worker and rollout status show `zz-joe-e2e-1` still running the pre-existing full job `9a214e6c93894a0e9b3c1b5338239a81`, and `zz-joe-e2e-2` running Rust compilation job `b35ee8c245cd4eed88e7e64952b5ac66`, both with fresh leases. The task-E2E handler is advertised only on worker 2 at release label `909844c7b71167b5dfa7ca5193d37cf41184cd28`.
 
 The Livestack observe-mode rollout is at report generation 1533, spec generation 2, and waits on `canary_not_representative:benchday.e2e.task.v1` for unit `unit-f38a7baa`. Rust development generation 6 and task-E2E generation 32 remain parked on `zz-joe`, each with `last_outcome=rebuilt`; this proves parked state but not reuse. Benchday's task-environment default config remains missing, so automatic selection stays disabled. No task-specific E2E, full E2E, publishing, worker change, or authority activation was started.
+
+## ZZOPS status recheck — 2026-10-09 11:57 UTC
+
+The current Benchday change-bound verdict is PASS, complete=true, full=false, for all four changed task-environment assertions on merge 48c6d99f32a5ec93a87b6375953bec2fa93fed43. The historical global status.gate is not the change verdict.
+
+The separate full-product completion train tt_bf33eee1-043c-42fa-8820-0b18ece7cdfc is still dispatched on zz-joe-e2e-1 (job 9a214e6c93894a0e9b3c1b5338239a81, attempt 1af544232a19402a9fdcb58954c1ae02), with no terminal result observed. ZZOPS reports six remote trains outstanding, two shared-tree cargos waiting, and an open deploy fence. No Livestack authority or worker rollout, task-environment workload, full/coalesced E2E, or publish was started during this recheck.
