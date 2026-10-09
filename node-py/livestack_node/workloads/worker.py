@@ -1149,8 +1149,7 @@ class WorkloadWorker:
                 environment_prepared = self.task_environments.prepare(assignment, root/'source',
                                                                        handler=spec['handler'])
                 execution_source = environment_prepared['source']
-                environment_view = root/'environment-view'
-                environment_view.mkdir(mode=0o700)
+                environment_view = self.task_environments.execution_view
                 environment_isolation = dict(inaccessible_paths=[str(self.task_environments.root)],
                     bind_paths=[(str(execution_source), str(environment_view))])
                 execution_cwd = environment_view
