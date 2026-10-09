@@ -11,11 +11,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
 import threading
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .model import WorkloadError, encode, name
 from . import claims, reload_status, rollout, roster, rollout_routes
 from .blobs import BlobStore
+from .job_changes import job_changes
 from .handler_registry import HandlerReleaseRegistry
 from .handler_release import MAX_MANIFEST_BYTES
 from .object_routes import route_object
@@ -423,6 +424,23 @@ class Handler(BaseHTTPRequestHandler):
             if principal.role != 'admin':
                 raise WorkloadError('authority status requires an admin principal', 403)
             return dict(store.status(), storage=self.server.blobs.status())
+        if parts == ['job-changes'] and method == 'GET':
+            if principal.role != 'admin':
+                raise WorkloadError('job changes require an admin principal', 403)
+            query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+            unknown = set(query) - {'updated_since', 'owner', 'limit'}
+            if unknown or any(len(values) != 1 for values in query.values()):
+                raise WorkloadError('invalid job-changes query')
+            def number(key, default):
+                if key not in query:
+                    return default
+                try:
+                    return int(query[key][0])
+                except ValueError:
+                    raise WorkloadError(f'{key} must be an integer')
+            return job_changes(store, updated_since=number('updated_since', 0),
+                               owner=query['owner'][0] if 'owner' in query else None,
+                               limit=number('limit', 256))
         if parts == ['retention', 'plan'] and method == 'GET':
             if principal.role != 'admin':
                 raise WorkloadError('retention plan requires an admin principal', 403)
