@@ -91,6 +91,11 @@ Worker reports SHALL reconcile physical-host replica rows only for profiles decl
 - **AND** the worker removes that directory only while holding its per-handle lock and after confirming the marker still has that generation
 - **AND** a busy lock is retried on a later report, while a changed marker or failed removal never deletes a newer or active generation and remains visible under the bounded worker-storage policy
 
+#### Scenario: A same-host writer may reuse the parked prior generation
+- **WHEN** a worker reports a parked lower-generation replica while a newer generation has an active writer on the same physical host
+- **THEN** the authority preserves the replica and does not request stale cleanup before that writer can inspect it for reuse
+- **AND** a lower-generation replica reported from a different physical host still receives exact cleanup instructions
+
 #### Scenario: Workers on one host report different profile sets
 - **WHEN** a worker reports only a subset of the environment profiles installed by other workers on the same physical host, or reports no profiles
 - **THEN** the authority reconciles rows for the profiles in that report and preserves rows for every omitted profile
