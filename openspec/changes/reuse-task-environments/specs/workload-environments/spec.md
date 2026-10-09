@@ -127,7 +127,7 @@ Placement SHALL apply hard eligibility and current capacity checks before reuse 
 
 ### Requirement: Environment storage and metadata have enforced bounds
 
-The system SHALL enforce the count/byte/age ceilings in the design: 1,024 logical rows globally, 64 per owner, two replicas per environment, 64 replicas per host, 32 GiB per replica, 128 GiB per owner per host, and a host total no larger than 256 GiB or the provisioned workspace budget. Child writes SHALL be kernel bounded. Inactive generations SHALL expire after seven idle days or thirty absolute days under configured nonzero windows; active generations and existing CAS retention exemptions SHALL be protected. Missing quota enforcement SHALL disable environment support, and deletion failures SHALL remain charged and visible.
+The system SHALL enforce the count/byte/age ceilings in the design: 1,024 logical rows globally, 64 per owner, two replicas per environment, 64 replicas per host, 32 GiB per replica, 128 GiB per owner per host, and a host total no larger than 256 GiB or the provisioned workspace budget. The captured-source tree SHALL be bounded to 100,000 entries, and each of at most 16 declared cache components SHALL be bounded independently to 100,000 entries. Cache descendants SHALL NOT consume the source-tree reconciliation bound. Child writes SHALL be kernel bounded. Inactive generations SHALL expire after seven idle days or thirty absolute days under configured nonzero windows; active generations and existing CAS retention exemptions SHALL be protected. Missing quota enforcement SHALL disable environment support, and deletion failures SHALL remain charged and visible.
 
 #### Scenario: A compiler writes past its environment quota
 - **WHEN** a child reaches the enforced filesystem byte limit
@@ -140,6 +140,12 @@ The system SHALL enforce the count/byte/age ceilings in the design: 1,024 logica
 #### Scenario: Retention is unset
 - **WHEN** an expiry configuration is absent or zero
 - **THEN** that pass deletes nothing, reports the invalid retention state and refuses additional retention admission
+
+#### Scenario: A retained cache is larger than the captured-source budget
+- **WHEN** a source mirror is reconciled and a declared cache contains more entries than the source tree
+- **THEN** cache descendants do not consume the source-tree reconciliation bound
+- **AND** the cache is accepted while it remains within its own component bound
+- **AND** exceeding that component bound is refused with a named cache-bound error
 
 ### Requirement: Reuse outcomes and timing are attributable without entity fan-out
 

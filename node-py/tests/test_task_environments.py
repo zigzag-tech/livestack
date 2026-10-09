@@ -527,6 +527,39 @@ def test_internal_npm_style_cache_links_are_reused_but_escape_links_refuse(tmp_p
     store.release(second)
 
 
+def test_retained_cache_entries_have_a_separate_bound_from_captured_source(tmp_path, monkeypatch):
+    monkeypatch.setattr(task_environments_module, 'MAX_MANIFEST_FILES', 3)
+    monkeypatch.setattr(task_environments_module, 'MAX_CACHE_ENTRIES', 16)
+    store, _, _ = make_store(tmp_path)
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    first = store.prepare(assignment('6'*32, 1, digest), incoming, handler=HANDLER)
+    cache = first['source']/'.dart_tool'
+    for index in range(10):
+        (cache/f'package-{index}.json').write_text('resolved')
+    store.verify_source(first)
+    finish(store, first, generation=1)
+
+    replica = local_replica(store, '6'*32, 1)
+    second = store.prepare(assignment('6'*32, 2, digest, replicas=[replica]), incoming,
+                           handler=HANDLER)
+    assert second['reuse_outcome'] == 'reused'
+    assert second['cache_components'][0]['outcome'] == 'reused'
+    store.verify_source(second)
+
+    unexpected = second['source']/'unexpected.generated'
+    unexpected.write_text('not declared or cached')
+    with pytest.raises(WorkloadError, match='undeclared retained source file'):
+        store.verify_source(second)
+    unexpected.unlink()
+
+    for index in range(10, 16):
+        (cache/f'package-{index}.json').write_text('resolved')
+    with pytest.raises(WorkloadError, match='retained cache component exceeded its file bound'):
+        store.verify_source(second)
+    store.reject(second)
+    store.release(second)
+
+
 def test_captured_source_alias_is_verified_against_benchday_manifest(tmp_path):
     store, _, _ = make_store(tmp_path)
     source_manifest = json.dumps({'version': 1, 'links': [
