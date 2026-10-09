@@ -34,6 +34,8 @@ MAX_ENVIRONMENTS = 64
 MAX_METADATA_BYTES = 4096
 MAX_COMPONENTS = 16
 MAX_MANIFEST_FILES = 50000
+# Retained caches use their own bound instead of consuming the source-tree budget.
+MAX_CACHE_ENTRIES = MAX_MANIFEST_FILES * 2
 MAX_PROBE_BYTES = 8192
 LOCK_WAIT_SECONDS = 5
 HANDLE = re.compile(r'[a-f0-9]{32}')
@@ -268,33 +270,43 @@ def _sync_source(incoming, destination, components):
             keep_dirs.add('/'.join(parts[:depth]))
     deadline = time.monotonic() + 5
     count = 0
+    stale_directories = []
     if destination.exists():
-        for base, dirs, files in os.walk(destination, topdown=False, followlinks=False):
-            count += len(dirs) + len(files)
-            if count > MAX_MANIFEST_FILES * 2 or time.monotonic() > deadline:
-                raise WorkloadError('source mirror reconciliation exceeded its bound', 503)
+        for base, dirs, files in os.walk(destination, topdown=True, followlinks=False):
             relative_base = Path(base).relative_to(destination).as_posix()
             relative_base = '' if relative_base == '.' else relative_base
-            for file in files:
-                rel = file if not relative_base else relative_base + '/' + file
-                target = Path(base) / file
-                if any(rel == root or rel.startswith(root + '/') for root in cache_roots):
-                    continue
-                if rel not in keep_files or target.is_symlink() or not target.is_file():
-                    target.unlink(missing_ok=True)
+            descend = []
             for item in dirs:
                 rel = item if not relative_base else relative_base + '/' + item
-                target = Path(base) / item
-                if any(rel == root or rel.startswith(root + '/') for root in cache_roots):
+                if rel in cache_roots:
                     continue
+                count += 1
+                if count > MAX_MANIFEST_FILES * 2 or time.monotonic() > deadline:
+                    raise WorkloadError('source mirror reconciliation exceeded its bound', 503)
+                target = Path(base) / item
                 if target.is_symlink():
                     target.unlink(missing_ok=True)
-                elif rel not in keep_dirs:
-                    try:
-                        target.rmdir()
-                    except OSError:
-                        if target.exists() and not any(target.iterdir()):
-                            target.rmdir()
+                    continue
+                if rel not in keep_dirs:
+                    stale_directories.append(target)
+                descend.append(item)
+            dirs[:] = descend
+            for file in files:
+                rel = file if not relative_base else relative_base + '/' + file
+                if _cache_root_for(rel, cache_roots):
+                    continue
+                count += 1
+                if count > MAX_MANIFEST_FILES * 2 or time.monotonic() > deadline:
+                    raise WorkloadError('source mirror reconciliation exceeded its bound', 503)
+                target = Path(base) / file
+                if rel not in keep_files or target.is_symlink() or not target.is_file():
+                    target.unlink(missing_ok=True)
+        for target in sorted(stale_directories, key=lambda path: len(path.parts), reverse=True):
+            try:
+                target.rmdir()
+            except OSError:
+                if target.exists() and not any(target.iterdir()):
+                    target.rmdir()
     for rel, record in records.items():
         src = _inside(Path(incoming), rel)
         target = _inside(destination, rel)
@@ -412,6 +424,11 @@ def _resolved_cache_paths(components, links):
         paths.append(path)
         resolved[component['name']] = path
     return resolved
+
+
+def _cache_root_for(relative, cache_roots):
+    return next((root for root in cache_roots
+                 if relative == root or relative.startswith(root + '/')), None)
 
 
 class TaskEnvironmentStore:
@@ -998,16 +1015,23 @@ class TaskEnvironmentStore:
             if actual != wanted or not _safe_internal_link(path, root):
                 raise WorkloadError('captured source link differs from its manifest', 409)
         count = 0
+        cache_counts = {cache: 0 for cache in prepared['cache_roots']}
         for base, dirs, files in os.walk(root, topdown=True, followlinks=False):
-            count += len(dirs) + len(files)
-            if count > MAX_MANIFEST_FILES * 2:
-                raise WorkloadError('environment source tree exceeded its file bound', 413)
             relative_base = Path(base).relative_to(root).as_posix()
             relative_base = '' if relative_base == '.' else relative_base
             for item in dirs + files:
                 rel = item if not relative_base else relative_base + '/' + item
                 target = Path(base) / item
-                in_cache = any(rel == cache or rel.startswith(cache + '/') for cache in prepared['cache_roots'])
+                cache_root = _cache_root_for(rel, cache_counts)
+                if cache_root:
+                    cache_counts[cache_root] += 1
+                    if cache_counts[cache_root] > MAX_CACHE_ENTRIES:
+                        raise WorkloadError('retained cache component exceeded its file bound', 413)
+                else:
+                    count += 1
+                    if count > MAX_MANIFEST_FILES * 2:
+                        raise WorkloadError('environment source tree exceeded its file bound', 413)
+                in_cache = cache_root is not None
                 if target.is_symlink():
                     if rel in expected_links:
                         continue
