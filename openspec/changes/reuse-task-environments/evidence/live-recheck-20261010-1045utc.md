@@ -58,3 +58,26 @@ and no CPU/RAM assigned. The worker receipt reports 16.14 CPU seconds and a
 cache reuse, not a controlled speedup: the earlier older-source job spent
 567.760 s in queue. Other source invalidation cases, worker/SDK rollout and
 rollback proof remain open. No full E2E or publish was run.
+
+## Same-code warm repeat — 2026-10-10 11:02 UTC
+
+Benchday job `c4ff2a01901749548f634175ec903032` (attempt
+`60b9ac855e1c4b20b4f7dd21df342a09`) succeeded on `zz-joe-e2e-2` using the
+same environment handle and generation 21. Its current capture is commit
+`b95397fc23a4f740510ffdbc598338cdffaf9793`, digest
+`ad6d2db7c1eaa29c2f0f378937d86889cb42e14d4d8ac9568ff02d4fe9ab5cb3`; compared
+with the preceding capture, only OpenSpec notes changed, not Rust inputs. Both
+Cargo cache components were reused.
+
+Measured phases: queue 0.533 s, transfer 6.526 s, source materialization
+20.616 s, dependencies 0.593 s, compilation 0.281 s, execution 10.181 s, and
+cleanup 0.006 s. Test time was not applicable; exit code was 0. The worker
+receipt reports 9.73 CPU seconds and a 434,827,264-byte memory peak. The
+environment parked after cleanup with 18,609,442,816 retained bytes.
+
+The previous changed-source compile took 6.078 s in its compile phase, so this
+unchanged-code repeat was 5.797 s lower on the same worker and retained
+environment. This does not compare against a cold workspace. Each run still
+created a separate request and waited in its own queue; queue time varied with
+worker availability and cannot be credited to environment reuse. No full E2E or
+publish was run.
