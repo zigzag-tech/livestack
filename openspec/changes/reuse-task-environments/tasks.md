@@ -552,3 +552,19 @@ unknown; proposed actions are `observed_only`. The rollout fence expired at
 11:22 UTC and no operator config is present in the workload config directory.
 No rollout or rollback was attempted. Keep automatic selection disabled and
 task 4.4 open pending an operator-authorized rollout/readback.
+
+## ZZOPS restart recheck — 2026-10-10
+
+After the owner-reported coordinator restarts, change-bound status for
+`be1d22ac4787de55a17ca31247ef6edb5baad12b` returned `superseded`: its five
+assertion definitions were amended in snapshot
+`1d4ff5835ff1c8632902fe410bf3b04ff97397a0`. The status names producing train
+`tt_50ecbfd9-4129-4e9c-a4b4-5831f25e5fd9`, commit
+`91645743d3335e5cda736390c30af5a261799094`, state `done`, verdict `pass`.
+Re-running submit for `be1d22ac...` returned `superseded` before admission and
+created no cargo. Per-change status for `1d4ff583...` and `91645743...` is
+`not-applicable` because neither merge changed an isolated-E2E assertion
+definition. The global `status.gate` field was not used as this run's verdict.
+A watch using the train ID returned 404 because watch takes a cargo ID; no new
+cargo was created, so there was no new watcher to attach. No full-suite request
+or publishing was run.
