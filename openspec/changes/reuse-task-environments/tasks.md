@@ -742,3 +742,14 @@ worker release `07d233d3`, which is not active yet because the worker had
 accepted another ZZOPS-owned full test. The check remains open until that
 release is active and a selected retry ends with clean environment teardown.
 Details: `evidence/task-e2e-scope-cleanup-20261010.md`.
+
+### Benchday Rust retained-source acceptance — 2026-10-10
+
+The admitted Benchday caller reused one parked Rust environment across source
+updates, workers 3 and 4 on the same host, and an optimized release-profile
+check. The unchanged source inventory allowed incremental Cargo reuse; a
+changed inventory triggered target-cache invalidation. Receipts show successful
+checks and parked cleanup at generations 32–34. Queueing remained separate,
+including an 82.651-second wait for the optimized check. See
+`evidence/benchday-rust-retained-source-20261010.md`. Toolchain/ABI invalidation
+and the broad authority/worker release remain open.
