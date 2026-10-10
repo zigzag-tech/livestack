@@ -32,3 +32,20 @@ as dispatched, and admitted compiler work was active on the task-capable
 workers. The authority restart requires an idle window with no running or
 cleanup attempts. The candidate still needs the normal fenced rollout, live
 capability and cleanup readback, a representative canary, and rollback proof.
+
+## Current-origin recheck — 2026-10-10 22:58 UTC
+
+Refreshed the candidate from Livestack `origin/main` at
+`23419ff00ffb1f8bcd5ec829a45b5706a25d6f29`. Its code manifest contains 258
+files with content hash
+`93fcb848aed039930378494811f662a694800e4da2af476c00cd88dee73e2f54`. The
+active authority dependency directory was copied into the candidate on
+`100.64.0.18`; local and staged candidate trees then matched at 409 files with
+hash `da2bc5dfd3b3cf841aaf514ec0e04075b1ed19b10080816b4c8fd756c3861389`.
+`tools/check-authority-release.py` passed static analysis, throwaway boot,
+worker registration, and a job round trip using that candidate.
+
+The live authority still runs `livestack-486cf6e5`. No restart was attempted:
+the ZZOPS fence is open, and unrelated full-suite and compiler work is still
+active on the workers. The candidate remains staged pending a quiet, fenced
+window, followed by live readback, canary, and rollback proof.
