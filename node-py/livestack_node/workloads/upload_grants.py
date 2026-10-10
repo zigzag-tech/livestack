@@ -89,6 +89,16 @@ class UploadGrants:
         ttl = body.get('expires_in_seconds', DEFAULT_EXPIRY_SECONDS)
         if isinstance(ttl, bool) or not isinstance(ttl, int) or not 1 <= ttl <= MAX_EXPIRY_SECONDS:
             raise WorkloadError('expiry outside the allowed window')
+        with self.store.transaction() as db:
+            existing = db.execute('SELECT * FROM upload_grants WHERE owner=? AND request_id=?',
+                                  (owner, request_id)).fetchone()
+            completed = bool(existing and (existing['state'] == 'uploaded' or
+                                           self._owned(db, owner, digest, size)))
+        if not completed and not self.blobs._held(digest, size):
+            try:
+                self.blobs.admit_headroom(size)
+            except WorkloadError as error:
+                self._refuse(owner, request_id, digest, size, 'refused_capacity', str(error), error.status)
         refusal = None
         with self.store.transaction() as db:
             now = self.store.clock()
@@ -107,6 +117,8 @@ class UploadGrants:
                               or db.execute("SELECT count(*) FROM upload_grants WHERE owner=? AND state='issued'",
                                             (owner,)).fetchone()[0] >= MAX_UNEXPIRED_PER_OWNER):
                 refusal = ('refused_capacity', 'upload_grant_capacity', 429)
+            elif (capacity_error := self.blobs.capacity_refusal(db, digest, size)):
+                refusal = ('refused_capacity', str(capacity_error), capacity_error.status)
             else:
                 capability = secrets.token_urlsafe(32)
                 if row:
