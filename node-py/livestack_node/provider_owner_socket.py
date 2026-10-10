@@ -32,7 +32,7 @@ class ProviderOwnerSocket:
         self.fence = None
 
     def authorize(self, credential, action):
-        if credential is not self._credential or action not in ('hold', 'status', 'release', 'shutdown'):
+        if credential is not self._credential or action not in ('hold', 'status', 'release', 'shutdown', 'startup'):
             raise PermissionError('provider_operator_authority_required')
 
     def dispatch(self, uid, request):
