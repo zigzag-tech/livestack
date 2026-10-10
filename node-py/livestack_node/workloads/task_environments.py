@@ -1056,7 +1056,7 @@ class TaskEnvironmentStore:
                         continue
                     raise WorkloadError('handler created an unsafe symlink in retained source or cache state', 409)
                 if not target.is_dir() and rel not in expected and not in_cache:
-                    raise WorkloadError('handler created an undeclared retained source file', 409)
+                    raise WorkloadError(f'handler created an undeclared retained source file: {rel[:240]!r}', 409)
 
     def profile_digest(self, profile):
         return self._profile_digests.get(profile)
