@@ -323,6 +323,72 @@ def test_owner_and_host_hard_quota_reservations_are_bounded(tmp_path):
     store.release(other_owner)
 
 
+def test_parked_quotas_compact_and_restore_without_changing_saved_files(tmp_path):
+    store, root, _ = make_store(tmp_path, max_per_owner=128*GIB, max_total=128*GIB,
+                                idle_seconds=3600)
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    handles = ['a'*32, 'b'*32, 'c'*32, 'd'*32]
+    saved = {}
+    for handle in handles:
+        prepared = store.prepare(assignment(handle, 1, digest), incoming, handler=HANDLER)
+        cache = prepared['source']/'.dart_tool'/'package_config.json'
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_bytes(b'unchanged dependency cache')
+        saved[handle] = hashlib.sha256(cache.read_bytes()).hexdigest()
+        finish(store, prepared, generation=1)
+
+    # Simulate the full hard limits left by workers released before quota
+    # compaction was installed.
+    for handle in handles:
+        path = root/handle/'environment.json'
+        marker = json.loads(path.read_text())
+        store._set_project_quota(marker, 32*GIB)
+        path.write_text(json.dumps(dict(marker, quota_bytes=32*GIB)))
+
+    with store._locked(handles[0]):
+        store.prune()
+        assert json.loads((root/handles[0]/'environment.json').read_text())['quota_bytes'] == 32*GIB
+    store.prune()
+    profiles, replicas = store.report()
+    assert profiles[PROFILE]
+    assert {item['handle'] for item in replicas} == set(handles)
+    markers = {handle: json.loads((root/handle/'environment.json').read_text()) for handle in handles}
+    assert sum(marker['quota_bytes'] for marker in markers.values()) < 4*GIB
+    for handle, marker in markers.items():
+        cache = root/handle/'source'/'.dart_tool'/'package_config.json'
+        assert marker['quota_bytes'] >= marker['bytes_used']
+        assert hashlib.sha256(cache.read_bytes()).hexdigest() == saved[handle]
+
+    fifth = store.prepare(assignment('e'*32, 1, digest), incoming, handler=HANDLER)
+    assert fifth['metadata']['quota_bytes'] == 32*GIB
+    store.release(fifth)
+
+    replica = local_replica(store, handles[0], 1)
+    resumed = store.prepare(assignment(handles[0], 2, digest, replicas=[replica]), incoming,
+                            handler=HANDLER)
+    assert resumed['reuse_outcome'] == 'reused'
+    assert resumed['metadata']['quota_bytes'] == 32*GIB
+    cache = resumed['source']/'.dart_tool'/'package_config.json'
+    assert hashlib.sha256(cache.read_bytes()).hexdigest() == saved[handles[0]]
+    finish(store, resumed, generation=2)
+
+
+def test_quota_measurement_failure_refuses_new_storage_admission(tmp_path):
+    store, root, quota_calls = make_store(tmp_path)
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    first = store.prepare(assignment('f'*32, 1, digest), incoming, handler=HANDLER)
+    finish(store, first, generation=1)
+
+    def unavailable(_project_ids):
+        raise OSError('injected quota read failure')
+
+    store.quota_usage = unavailable
+    with pytest.raises(WorkloadError, match='cannot measure parked environment quotas'):
+        store.prepare(assignment('0'*32, 1, digest), incoming, handler=HANDLER)
+    assert not (root/('0'*32)).exists()
+    assert len(quota_calls) == 2
+
+
 def test_concurrent_environment_creations_cannot_overreserve_host_quota(tmp_path):
     store, _, calls = make_store(tmp_path, max_total=32*GIB)
     incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
@@ -437,20 +503,27 @@ def test_deletion_failure_keeps_host_quota_reserved_until_retry(tmp_path, monkey
     finish(store, prepared, generation=1)
     now[0] += 11
 
-    # No integration test can safely inject a transient deletion failure into
-    # the kernel-quota mount; this control verifies the host ledger fails closed.
-    def refuse_delete(_path):
-        raise PermissionError('injected deletion failure')
+    # No integration test can safely inject a deletion failure into the quota
+    # mount; this control verifies the idle files remain charged after a failed removal.
+    remove_tree = task_environments_module._remove_tree
+    def refuse_delete(path):
+        if Path(path) == root/expired_handle:
+            raise PermissionError('injected deletion failure')
+        return remove_tree(path)
 
     monkeypatch.setattr(task_environments_module, '_remove_tree', refuse_delete)
     assert store.prune()['removed'] == []
     assert (root/expired_handle/'environment.json').is_file()
-    with pytest.raises(WorkloadError, match='budget is exhausted'):
-        store.prepare(assignment('d'*32, 1, digest), incoming, handler=HANDLER)
-    assert len(quota_calls) == 1
+    expired = json.loads((root/expired_handle/'environment.json').read_text())
+    assert 0 < expired['quota_bytes'] < 32*GIB
+    admitted = store.prepare(assignment('d'*32, 1, digest), incoming, handler=HANDLER)
+    assert expired['quota_bytes'] + admitted['metadata']['quota_bytes'] <= 32*GIB
+    store.release(admitted)
+    assert len(quota_calls) >= 2
 
     monkeypatch.undo()
-    assert store.prune()['removed'] == [expired_handle]
+    store.invalidate('d'*32)
+    assert set(store.prune()['removed']) == {expired_handle, 'd'*32}
     assert not (root/expired_handle).exists()
     recreated = store.prepare(assignment('d'*32, 1, digest), incoming, handler=HANDLER)
     assert recreated['reuse_outcome'] == 'created'

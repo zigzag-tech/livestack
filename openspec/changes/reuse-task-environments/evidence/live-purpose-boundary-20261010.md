@@ -64,3 +64,24 @@ cleanup 0.012 s. The wrapper reported that completion omitted its bounded
 result artifact. No assertion ran, so this is not a passing canary. The
 installed task-E2E release is still the prior worker release; no authority or
 worker rollout was performed.
+
+## Worker storage readback — 2026-10-10 21:25 UTC
+
+Read-only inspection of the shared `zz-joe` environment volume explains the
+admission refusal. The 125 GiB filesystem reports 7.9 GiB used and 117 GiB
+available. Four parked replicas reserve 124 GiB of project-quota ceilings:
+three at 32 GiB and one at 27.94 GiB. Their markers report 7.88 GiB combined
+actual use. The reserved ceilings exactly consume the store's effective
+`filesystem_bytes - 1 GiB` budget, so a fifth replica cannot receive a quota
+even though physical filesystem space remains. All four also share one owner
+scope; their reservations leave about 4 GiB under the 128 GiB per-owner limit.
+Growing the volume alone would therefore still cap the next same-owner replica
+at about 4 GiB. None of the four replicas had
+reached its idle or generation expiry; the worker's bounded prune removes only
+expired or `rebuild_required` replicas. No saved environment was deleted or
+changed. The failed handle remains `rebuild_required`, generation 15, zero
+bytes, with no replicas. This is quota-reservation exhaustion, not a full
+physical disk. A Livestack change now compacts parked quota reservations while
+preserving their files and restores working limits on reuse. Its local store
+tests pass; it is not yet landed or deployed, so it has not changed live worker
+capacity or produced a live canary result.
