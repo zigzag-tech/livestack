@@ -731,3 +731,14 @@ invalidation, canceled-descendant cleanup on the installed handler, stale
 receipt rejection and authority rollout/readback remain open. Full/coalesced
 E2E and publishing were not run. Full details are in the Benchday companion
 evidence `task-e2e-cache-freshness-20261010.md`.
+
+### Task-E2E scope cleanup follow-up — 2026-10-10
+
+The selected `fleet-workload.task-environment-task-e2e-scope` assertion
+passed, but the worker could not park the environment because it found an
+undeclared retained source file. The old worker error omitted the path. The
+queued retry was canceled; Livestack added bounded path diagnostics and staged
+worker release `07d233d3`, which is not active yet because the worker had
+accepted another ZZOPS-owned full test. The check remains open until that
+release is active and a selected retry ends with clean environment teardown.
+Details: `evidence/task-e2e-scope-cleanup-20261010.md`.
