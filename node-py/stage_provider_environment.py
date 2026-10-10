@@ -61,12 +61,19 @@ def stage(args):
     policy=bool(args.omit_obsolete_typing_backport)
     original_typing=typing_proof(Path(args.baseline_venv)/'bin/python') if policy else None
     packages,excluded=baseline(args.baseline_venv,policy,original_typing['version'] if policy else None)
+    compatibility=None
+    if args.resemblyzer_compatibility_original_wheel:
+        if not policy or {'name':'Resemblyzer','version':'0.1.4'} not in packages:
+            raise ValueError('resemblyzer_compatibility_baseline_policy_refused')
+        from compatibility_resemblyzer_wheel import derive
+        site=list(Path(args.baseline_venv).glob('lib/python*/site-packages'))[0]
+        compatibility=derive(args.resemblyzer_compatibility_original_wheel,output/'compatibility-artifact',original_typing['version'],site)
     (output/'baseline-distributions.json').write_text(json.dumps({'packages':packages,'excluded':excluded},indent=2)+'\n')
     requirements=output/'baseline-requirements.txt'
     cuda_requirements=output/'cuda-requirements.txt'
     cuda=[record for record in packages if '+cu' in record['version']]
     public=[record for record in packages if record not in cuda]
-    requirements.write_text(''.join(record['name']+'=='+record['version']+'\n' for record in public))
+    requirements.write_text(''.join((compatibility['artifact']+'\n') if compatibility and record['name'].lower()=='resemblyzer' else record['name']+'=='+record['version']+'\n' for record in public))
     cuda_requirements.write_text(''.join(record['name']+'=='+record['version']+'\n' for record in cuda))
     original=(Path(args.baseline_venv)/'bin/python').resolve()
     base=original.parents[1]
@@ -103,7 +110,7 @@ def stage(args):
     metadata_check=subprocess.run([args.uv,'pip','check','--python',str(target)],capture_output=True,text=True)
     (output/'dependency-consistency.txt').write_text(metadata_check.stdout+metadata_check.stderr)
     (output/'stage-receipt.json').write_text(json.dumps({'kind':'public-baseline-dependency-stage','version':1,
-        'publicDownloadsAllowed':args.allow_public_downloads,'omitObsoleteTypingBackport':policy,
+        'publicDownloadsAllowed':args.allow_public_downloads,'omitObsoleteTypingBackport':policy,'compatibilityArtifact':compatibility,
         'sourceBaseline':str(Path(args.baseline_venv).resolve()),'packages':packages,'excluded':excluded,
         'dependencyConsistencyPassed':metadata_check.returncode==0,'frozenOwnerPackagesInstalled':False,
         'environmentSealed':False,'providerQualified':False,'serviceActivated':False},indent=2)+'\n')
@@ -116,6 +123,7 @@ def main():
     parser.add_argument('--baseline-venv',required=True)
     parser.add_argument('--out',required=True)
     parser.add_argument('--uv',required=True)
+    parser.add_argument('--resemblyzer-compatibility-original-wheel',help='Verified exact public0.1.4 wheel for explicit source-preserving local compatibility artifact')
     parser.add_argument('--omit-obsolete-typing-backport',action='store_true',
                         help='Explicitly omit only typing==3.10.0.0 on Python>=3.12, preserving stdlib bytes')
     parser.add_argument('--allow-public-downloads',action='store_true',
