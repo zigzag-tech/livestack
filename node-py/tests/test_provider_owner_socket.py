@@ -4,6 +4,8 @@ import socket
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from livestack_node.provider_owner_probe import control as probe_control
 from livestack_node.provider_fence import FenceRefused, ProviderFence
 from livestack_node.provider_owner_socket import ProviderOwnerSocket
 
@@ -19,6 +21,15 @@ class OwnerSocketTests(unittest.TestCase):
             control.start(fence)
             try:
                 self.assertEqual(os.stat(control.path).st_mode & 0o777,0o600)
+                observed=probe_control(control.path,{'operation':'status'})
+                self.assertEqual(observed['peer']['pid'],os.getpid())
+                self.assertEqual(observed['receipt']['result']['serverProcessId'],os.getpid())
+                self.assertGreater(observed['peer']['startTicks'],0)
+                dispatch=control.dispatch
+                def wrong_process(uid,request):
+                    value=dispatch(uid,request);value['serverProcessId']=os.getpid()+1;return value
+                with patch.object(control,'dispatch',wrong_process):
+                    with self.assertRaisesRegex(PermissionError,'peer_process'):probe_control(control.path,{'operation':'status'})
                 def call(request):
                     with socket.socket(socket.AF_UNIX) as client:
                         client.connect(control.path)
