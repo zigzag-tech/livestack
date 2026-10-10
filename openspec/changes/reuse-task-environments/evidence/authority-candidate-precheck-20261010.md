@@ -49,3 +49,16 @@ The live authority still runs `livestack-486cf6e5`. No restart was attempted:
 the ZZOPS fence is open, and unrelated full-suite and compiler work is still
 active on the workers. The candidate remains staged pending a quiet, fenced
 window, followed by live readback, canary, and rollback proof.
+
+
+## After the evidence landing — 2026-10-10 23:01 UTC
+
+The previous candidate was rebuilt from the new `origin/main` tip after the
+quota evidence landing: commit `c2930611666a02a6db74877ec841fc113df4b52b`.
+The 258-file code hash remains
+`93fcb848aed039930378494811f662a694800e4da2af476c00cd88dee73e2f54`; the
+local and staged dependency-inclusive trees match at 409 files and hash
+`da2bc5dfd3b3cf841aaf514ec0e04075b1ed19b10080816b4c8fd756c3861389`. The
+current-origin release passed all four candidate checks again: static, boot,
+worker registration, and job round trip. The live authority remains on
+`livestack-486cf6e5`; no live restart has occurred.
