@@ -29,9 +29,11 @@ class InstallationTests(unittest.TestCase):
             source = {'components':components,'sourceDigest':digest(canonical(components))}
             source_path = root/'source.json';source_path.write_bytes(canonical(source))
             environment_root = root/'environment';environment_root.mkdir()
+            (environment_root/'lib').mkdir()
+            (environment_root/'lib64').symlink_to('lib',target_is_directory=True)
             (environment_root/'fixture.txt').write_bytes(b'fixture dependency inventory; not real qualification')
             content = (environment_root/'fixture.txt').read_bytes()
-            environment = {'root':str(environment_root),'pythonExecutable':sys.executable,'pythonSha256':digest(Path(sys.executable).resolve().read_bytes()),
+            environment = {'links':[{'path':'lib64','target':'lib'}],'root':str(environment_root),'pythonExecutable':sys.executable,'pythonSha256':digest(Path(sys.executable).resolve().read_bytes()),
                            'files':[{'path':'fixture.txt','bytes':len(content),'sha256':digest(content)}]}
             environment_path = root/'environment.json';environment_path.write_bytes(canonical(environment))
             config = {'apps':[{'descriptor':{'app':'polytts','adapter':{'revision':'a'*40,'digest':digest(payload)}},
@@ -42,6 +44,9 @@ class InstallationTests(unittest.TestCase):
             prefix_patch=patch.object(sys,'prefix',str(environment_root));prefix_patch.start();self.addCleanup(prefix_patch.stop)
             _, identity = verify_installation(config_path,'polytts')
             self.assertEqual(identity['sourceDigest'],source['sourceDigest'])
+            (environment_root/'lib64').unlink();(environment_root/'lib64').symlink_to(root,target_is_directory=True)
+            with self.assertRaisesRegex(ValueError,'alias_mismatch'):verify_installation(config_path,'polytts')
+            (environment_root/'lib64').unlink();(environment_root/'lib64').symlink_to('lib',target_is_directory=True)
             (environment_root/'unrecorded.py').write_text('unrecorded')
             with self.assertRaisesRegex(ValueError,'unrecorded'):verify_installation(config_path,'polytts')
             (environment_root/'unrecorded.py').unlink()
