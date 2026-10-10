@@ -764,3 +764,15 @@ This supports output freshness and warm reuse, but does not establish a
 separate build-mode invalidation or controlled savings estimate. Real
 toolchain/ABI invalidation and the remaining task 3.2 controls remain open.
 See `evidence/rust-build-mode-resume-20261010.md`.
+
+### Benchday selected cleanup/relocation check — 2026-10-10
+
+The admitted task-E2E handler passed the exact cleanup/relocation assertion on
+updated Benchday source, reused all 16 cache components and parked the
+environment after clean teardown. The request still waited 34.545 seconds in
+queue and executed for 597.357 seconds. The assertion uses an isolated
+integration fixture; it does not prove a production cross-host rollout. The
+earlier source snapshot failed image preparation because it lacked a required
+CPU-replay output directory; a later Benchday commit fixed that setup before
+the passing retry. Livestack toolchain/ABI invalidation and rollout acceptance
+remain open. See `evidence/task-e2e-cleanup-relocation-20261010.md`.
