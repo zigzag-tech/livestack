@@ -73,6 +73,16 @@ class BlobStore:
             return db.execute("SELECT 1 FROM blobs WHERE digest=? AND state='ready' AND size=?",
                               (digest, size)).fetchone() is not None
 
+    def capacity_refusal(self, db, digest, size):
+        """Name a logical-capacity refusal before a caller streams the object body."""
+        if db.execute("SELECT 1 FROM blobs WHERE digest=? AND state='ready' AND size=?",
+                      (digest, size)).fetchone():
+            return None
+        count, used = db.execute('SELECT count(*),coalesce(sum(size),0) FROM blobs').fetchone()
+        if count >= self.max_objects or used+size > self.effective_max_bytes:
+            return WorkloadError('content store capacity exhausted', 429)
+        return None
+
     def admit_headroom(self, size):
         """Refuse (HTTP 507, named) bytes that would leave the filesystem below its floor, after
         at most one bounded GC pass per refresh window. Never deletes a referenced object."""

@@ -91,6 +91,19 @@ def test_issue_authorization_and_validation(server):
     assert call(server, 'GET', 'upload-grants/missing', OWNER)[0] == 404
 
 
+def test_content_store_capacity_refuses_before_issuing_a_transfer_capability(server):
+    server.blobs.max_bytes = len(DATA)-1
+
+    status, result = mint(server)
+
+    assert status == 429 and result['error'] == 'content store capacity exhausted'
+    with server.store.transaction() as db:
+        assert db.execute('SELECT count(*) FROM upload_grants').fetchone()[0] == 0
+        event = db.execute('SELECT outcome,digest,size FROM upload_grant_events').fetchone()
+    assert tuple(event) == ('refused_capacity', DIGEST, len(DATA))
+    assert list(server.blobs.root.iterdir()) == []
+
+
 def test_capability_is_bound_to_digest_and_exact_size_and_failed_uploads_leave_nothing(server):
     _, grant = mint(server)
     other = hashlib.sha256(b'other').hexdigest()
