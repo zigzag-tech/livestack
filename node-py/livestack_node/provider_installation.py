@@ -64,6 +64,41 @@ def verify_files(root, files):
             raise ValueError('installation_file_digest_mismatch')
 
 
+def verify_runtime_tree(tree):
+    """Bind the independent interpreter's stdlib and shared libraries too."""
+    root = Path(tree['root'])
+    verify_files(root, tree['files'])
+    if root.resolve() != Path(sys.base_prefix).resolve():
+        raise ValueError('qualified_python_runtime_root_mismatch')
+    links = tree.get('links', [])
+    # Python standalone contains ~1,049 internal terminfo aliases.
+    if not isinstance(links, list) or len(links) > 4096:
+        raise ValueError('runtime_link_inventory_bound')
+    expected = {record['path'] for record in tree['files']}
+    aliases = {}
+    for record in links:
+        relative, target = record['path'], record['target']
+        if not isinstance(relative, str) or relative.startswith('/') or any(part in ('', '.', '..') for part in relative.split('/')) or relative in aliases or relative in expected or not isinstance(target, str):
+            raise ValueError('runtime_link_inventory_path')
+        path = root / relative
+        if not path.is_symlink() or os.readlink(path) != target or not path.resolve().is_relative_to(root.resolve()) or not path.resolve().exists():
+            raise ValueError('runtime_internal_alias_mismatch')
+        aliases[relative] = target
+    observed, observed_links = set(), set()
+    for directory, names, files in os.walk(root, followlinks=False):
+        for name in names + files:
+            path = Path(directory) / name
+            relative = str(path.relative_to(root))
+            if path.is_symlink():
+                observed_links.add(relative)
+            elif path.is_file():
+                observed.add(relative)
+                if len(observed) > 65536:
+                    raise ValueError('runtime_inventory_count_bound')
+    if observed != expected or observed_links != set(aliases):
+        raise ValueError('runtime_unrecorded_or_missing_files')
+
+
 def verify_installation(config_path, app):
     config, config_digest = private_config(config_path)
     selected = [entry for entry in config.get('apps', []) if entry.get('descriptor', {}).get('app') == app]
@@ -92,6 +127,7 @@ def verify_installation(config_path, app):
         verify_files(Path(settings['sourceRoot'])/name, [{**record, 'bytes':record['sizeBytes']} for record in component['files']])
     environment = read_manifest(settings['environmentManifest'], settings['environmentManifestSha256'])
     verify_files(environment['root'], environment['files'])
+    verify_runtime_tree(environment['runtimeTree'])
     expected = {record['path'] for record in environment['files']}
     actual = set()
     links = environment.get('links', [])
