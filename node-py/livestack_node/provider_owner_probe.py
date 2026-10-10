@@ -13,7 +13,7 @@ def process_start_ticks(pid):
     return int(content[content.rfind(')')+2:].split()[19])
 
 
-def control(path, request):
+def control(path, request, expected_peer=None):
     path=Path(path)
     parent=path.parent.stat();info=path.lstat()
     if not path.is_absolute() or not stat.S_ISSOCK(info.st_mode) or info.st_mode&0o077 or info.st_uid!=os.getuid() or parent.st_mode&0o077 or parent.st_uid!=os.getuid():
@@ -26,6 +26,8 @@ def control(path, request):
         pid,uid,gid=struct.unpack('3i',connection.getsockopt(socket.SOL_SOCKET,socket.SO_PEERCRED,struct.calcsize('3i')))
         if uid!=os.getuid() or pid<=0:raise PermissionError('owner_peer_identity_refused')
         start=process_start_ticks(pid)
+        if request.get('operation')!='status' and (not expected_peer or expected_peer.get('pid')!=pid or expected_peer.get('startTicks')!=start):
+            raise PermissionError('owner_effect_peer_incarnation_refused')
         connection.sendall(body);content=b''
         while b'\n' not in content:
             part=connection.recv(8193-len(content))
@@ -44,9 +46,10 @@ def control(path, request):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--socket',required=True);parser.add_argument('--request',required=True)
+    parser.add_argument('--expected-peer-pid',type=int);parser.add_argument('--expected-start-ticks',type=int)
     args=parser.parse_args()
     if len(args.request.encode())>8192:raise ValueError('owner_request_bound')
-    print(json.dumps(control(args.socket,json.loads(args.request)),separators=(',',':')))
+    print(json.dumps(control(args.socket,json.loads(args.request),{'pid':args.expected_peer_pid,'startTicks':args.expected_start_ticks}),separators=(',',':')))
 
 
 if __name__=='__main__':main()
