@@ -1042,6 +1042,11 @@ class WorkloadWorker:
                        HARMONY_ENV_GENERATION=str(environment['generation']),
                        HARMONY_ENV_PROFILE=environment['profile'],
                        HARMONY_PHASE_TIMINGS=str(output/'environment-timings.json'))
+            if environment.get('purpose') == 'task_e2e':
+                # Retained source is integrity-checked after the handler exits.
+                # Python's default bytecode cache would create undeclared files
+                # in that tree and make an otherwise passing attempt unparkable.
+                env['PYTHONDONTWRITEBYTECODE'] = '1'
             components = [] if environment_prepared is None else [
                 {key: component[key] for key in ('name', 'path', 'identity', 'outcome')}
                 for component in environment_prepared['cache_components']]

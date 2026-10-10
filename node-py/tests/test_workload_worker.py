@@ -152,6 +152,22 @@ def submit(caller, digest, _key='one', _need=None, **payload):
         need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2, **(_need or {})},payload=payload))
 
 
+def test_task_e2e_attempt_environment_disables_python_bytecode(tmp_path):
+    worker = WorkloadWorker.__new__(WorkloadWorker)
+    worker.config = {'environment': {'PATH': '/usr/bin', 'PYTHONDONTWRITEBYTECODE': '0'}}
+    worker.windows = False
+    assignment = {
+        'owner': 'alice',
+        'spec': {'input_digest': 'a'*64, 'labels': {}},
+        'environment': {'handle': 'h'*32, 'generation': 1, 'profile': 'task-e2e-v1',
+            'purpose': 'task_e2e'},
+    }
+
+    env = worker._attempt_env(assignment, tmp_path, tmp_path/'output', tmp_path/'objects', 'attempt')
+
+    assert env['PYTHONDONTWRITEBYTECODE'] == '1'
+
+
 @pytest.mark.parametrize('exit_code, expected', [(0,'succeeded'), (7,'failed')])
 def test_worker_executes_pinned_input_and_returns_owned_artifact(fleet, tmp_path, exit_code, expected):
     store, config, caller, digest = fleet
