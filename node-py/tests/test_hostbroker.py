@@ -1,10 +1,12 @@
 """HostBroker: cross-process preemption on one shared GPU (the real single-host
 case — polyasr/polytts/chipgen are separate processes). Fake peers stand in for the
 three servers; we assert the broker dispatches the right warm/evict calls."""
+import time
+
 from livestack_node.measure import measure_footprint
-from livestack_node.hostbroker import HostBroker
+from livestack_node.hostbroker import HostBroker, _UnitTelemetry
 from livestack_node.planner import Device, Grant, Load, Unit, Placement, Request, Residency
-from livestack_node.ledger import validate
+from livestack_node.ledger import JsonlLedger, validate
 
 
 class FakePeer:
@@ -54,6 +56,92 @@ def test_align_request_preempts_idle_chipgen_in_other_process():
     assert ("evict", "chipgen") in chip.calls    # broker told the chipgen PROCESS to evict
     assert ("warm", "align") in asr.calls        # and the asr process to warm
     assert ("evict", "tts") not in tts.calls     # more-important TTS left alone
+
+
+def test_status_telemetry_counts_grants_and_only_successful_evictions(tmp_path):
+    broker, _, _, _ = make_host()
+    broker.ledger = JsonlLedger(str(tmp_path / "telemetry.jsonl"))
+    assert broker.admit(Request("r1", "align", created_at=1000)) == "gpu0"
+
+    ledger_rows = broker.ledger.read()
+    assert ledger_rows
+    by_kind = broker.status_counters(now=time.time())["by_kind"]
+    assert broker.ledger.read() == ledger_rows
+    def counts(kind, name):
+        return sum(row["count"] for row in by_kind[kind][name])
+
+    assert counts("align", "admitted") == 1
+    assert counts("chipgen", "evicted") == 1
+    assert counts("align", "evicted") == 0
+
+
+def test_failed_eviction_dispatch_does_not_increment_telemetry():
+    broker, _, _, chip = make_host()
+
+    def fail_eviction(kind):
+        raise ConnectionError(f"cannot evict {kind}")
+
+    chip.evict = fail_eviction
+    try:
+        broker.plan_and_apply([Request("r1", "align", created_at=1000)])
+    except ConnectionError:
+        pass
+    else:
+        raise AssertionError("failed eviction dispatch unexpectedly succeeded")
+
+    counters = broker.status_counters(now=time.time())["by_kind"]
+    assert counters == {}
+
+
+def test_lease_telemetry_keeps_unknown_outcomes_unknown():
+    broker = HostBroker([], [], clock=lambda: 0.0)
+    completed = broker.hosted_checkout("build-host", "build", "owner", now=0.0)
+    assert broker.hosted_release(completed, caller_ok=True, job_wall_s=2.0, now=1.0)
+    failed = broker.hosted_checkout("build-host", "build", "owner", now=2.0)
+    assert broker.hosted_release(failed, caller_ok=False, job_wall_s=1.0, now=3.0)
+    unreported = broker.hosted_checkout("build-host", "build", "owner", now=4.0)
+    assert broker.hosted_release(unreported, now=5.0)
+    expired = broker.hosted_checkout("build-host", "build", "owner", now=6.0)
+    assert not broker.hosted_heartbeat(expired, now=127.0)
+
+    row = broker.status_counters(now=time.time())["by_kind"]["build"]
+    assert sum(bucket["count"] for bucket in row["completed"]) == 1
+    assert sum(bucket["count"] for bucket in row["failed"]) == 1
+    assert row["latency_sample_count"] == 2
+    assert row["p50_ms"] == 1000.0
+    assert row["p95_ms"] == 2000.0
+
+
+def test_telemetry_bounds_buckets_latency_samples_kinds_and_counts():
+    telemetry = _UnitTelemetry(lambda: 0.0)
+    for minute in range(61):
+        telemetry.increment("align", "admitted", now=minute * 60)
+    for value in range(257):
+        telemetry.record_latency("align", value, now=3600)
+
+    state = telemetry._by_kind["align"]
+    current = int(telemetry.MAX_COUNT)
+    state["buckets"]["failed"][3600] = current - 1
+    telemetry.increment("align", "failed", now=3600)
+    telemetry.increment("align", "failed", now=3600)
+
+    for index in range(telemetry.MAX_KINDS):
+        telemetry.ensure(f"kind-{index}", now=3600)
+    telemetry.ensure("omitted-kind", now=3600)
+    result = telemetry.snapshot(now=3600)
+
+    row = result["by_kind"]["align"]
+    assert len(row["admitted"]) == 60
+    assert row["admitted"][0]["start_s"] == 60
+    assert row["latency_sample_count"] == 256
+    assert row["p50_ms"] == 128000.0
+    assert row["p95_ms"] == 244000.0
+    failed = next(bucket for bucket in row["failed"] if bucket["start_s"] == 3600)
+    assert failed == {"start_s": 3600, "count": telemetry.MAX_COUNT,
+                      "saturated": True}
+    assert len(result["by_kind"]) == telemetry.MAX_KINDS
+    assert result["truncated_unit_kinds"] is True
+    assert telemetry.MAX_COUNT == (1 << 53) - 1
 
 
 class DownPeer:
@@ -402,7 +490,6 @@ def test_a_heartbeat_keeps_the_lease_alive():
 import time as _time
 
 from livestack_node.hostbroker import peer_key as _peer_key
-from livestack_node.ledger import JsonlLedger
 from livestack_node.membership import MembershipPolicy as _MPolicy
 from livestack_node.planner import Device as _Device, Placement as _Placement
 from livestack_node.planner import Residency as _Residency, Unit as _Unit
