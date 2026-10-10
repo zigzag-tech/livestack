@@ -1,0 +1,105 @@
+{
+  "baseRevision": "4932b47eab00b1ab38e4ee5c6bf37683e11ab29e",
+  "prerequisiteRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+  "files": [
+    {
+      "path": "node-py/livestack_node/owned_executor_jobs.py",
+      "sha256": "89bae9b74b5fef1f334ec59dcfb506695490c4dc0915f8b186c6c89c00dfd7fc",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "prerequisite",
+      "qualifiedSourceSha256": "89bae9b74b5fef1f334ec59dcfb506695490c4dc0915f8b186c6c89c00dfd7fc",
+      "boundedWindowEdited": false
+    },
+    {
+      "path": "node-py/livestack_node/provider_entry.py",
+      "sha256": "f8bbe94a9b936d0624ceb3c93c249cf03a03a861b813dea82b475859d5eddefd",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "prerequisite",
+      "qualifiedSourceSha256": "f8bbe94a9b936d0624ceb3c93c249cf03a03a861b813dea82b475859d5eddefd",
+      "boundedWindowEdited": false
+    },
+    {
+      "path": "node-py/livestack_node/provider_fence.py",
+      "sha256": "39a469fe9fe92de7c3e5ff020722b65c91be1f3dff041961c4df180db5e237e4",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "prerequisite",
+      "qualifiedSourceSha256": "82cfa3030ce369e592aaf27b9a49796f28244381fecb720c3f4336946450d13e",
+      "boundedWindowEdited": true
+    },
+    {
+      "path": "node-py/livestack_node/provider_installation.py",
+      "sha256": "a71195549de56c23e4861010fd51bf0f31a4e6a459cd7d32a6541688e9c8341a",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "prerequisite",
+      "qualifiedSourceSha256": "a71195549de56c23e4861010fd51bf0f31a4e6a459cd7d32a6541688e9c8341a",
+      "boundedWindowEdited": false
+    },
+    {
+      "path": "node-py/livestack_node/provider_lifecycle.py",
+      "sha256": "b97d9e51fead663f9b05646f59d9eee0a64802c2fe447ac77fdf7fa7b156a623",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "prerequisite",
+      "qualifiedSourceSha256": "b97d9e51fead663f9b05646f59d9eee0a64802c2fe447ac77fdf7fa7b156a623",
+      "boundedWindowEdited": false
+    },
+    {
+      "path": "node-py/livestack_node/provider_owner_probe.py",
+      "sha256": "3f0a9452535d471c5fe8b19f1a49cef78f7002dd699f3900d9f5f3400fb2f7ad",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "prerequisite",
+      "qualifiedSourceSha256": "3f0a9452535d471c5fe8b19f1a49cef78f7002dd699f3900d9f5f3400fb2f7ad",
+      "boundedWindowEdited": false
+    },
+    {
+      "path": "node-py/livestack_node/provider_owner_socket.py",
+      "sha256": "a456797e980df9f2538404a360ed79713763e414d5cf86bb50f6da1657cecc13",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "prerequisite",
+      "qualifiedSourceSha256": "b1d8893ec5ef1678538454c4283c6ceadc1383b6cf8dd71a3a722757f178a17f",
+      "boundedWindowEdited": true
+    },
+    {
+      "path": "node-py/tests/test_owned_executor_jobs.py",
+      "sha256": "016aa1413580b49973ac8871402a01d9cc8babcafe752802677eab5e3beba826",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "focused CPU tests",
+      "qualifiedSourceSha256": "016aa1413580b49973ac8871402a01d9cc8babcafe752802677eab5e3beba826",
+      "boundedWindowEdited": false
+    },
+    {
+      "path": "node-py/tests/test_provider_fence.py",
+      "sha256": "0c70ad34d6f736ad322cf8b8e57ab709f49c90a2aba53f759d83269fca909082",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "focused CPU tests",
+      "qualifiedSourceSha256": "295d5fafa71c9c674c9eab7a2b78fd1818c748661b3ba630e20f8d9bc62b00e0",
+      "boundedWindowEdited": true
+    },
+    {
+      "path": "node-py/tests/test_provider_installation.py",
+      "sha256": "a3ceae1bb297733c75db921b59b4d78ca42a6a8a0b266263b0cfc2b753183d0c",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "focused CPU tests",
+      "qualifiedSourceSha256": "a3ceae1bb297733c75db921b59b4d78ca42a6a8a0b266263b0cfc2b753183d0c",
+      "boundedWindowEdited": false
+    },
+    {
+      "path": "node-py/tests/test_provider_lifecycle.py",
+      "sha256": "879fe6aa44212353988ba0ea36ba01861c2a3e608a6bdf40f8e94d5d151499cf",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "focused CPU tests",
+      "qualifiedSourceSha256": "879fe6aa44212353988ba0ea36ba01861c2a3e608a6bdf40f8e94d5d151499cf",
+      "boundedWindowEdited": false
+    },
+    {
+      "path": "node-py/tests/test_provider_owner_socket.py",
+      "sha256": "c1794ed0a7d44308532faf27580553becb8500cd5b4152c8e777bfa1a28a1694",
+      "sourceRevision": "ea0977f52ca82a5710d8daf5b73be45b22622e16",
+      "role": "focused CPU tests",
+      "qualifiedSourceSha256": "2b4e3690fa19f6f785b9841720e03c5965bb7c8340aed21e83219be97bd383ae",
+      "boundedWindowEdited": true
+    }
+  ],
+  "qualification": "source/CPU only; 12 provider + 5 owned-job tests; real monotonic expiry/private Unix peer, no models/services",
+  "defaultBehavior": "no qualification operation requested: existing status/admission/release behavior unchanged",
+  "existing4932TrackedFilesChanged": false
+}
