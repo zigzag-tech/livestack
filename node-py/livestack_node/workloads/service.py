@@ -188,6 +188,11 @@ def main():
         signal.signal(signal.SIGHUP, lambda *_: threading.Thread(
             target=reload_principals, args=(server, args.config), daemon=True).start())
         logging.info('workload authority started on %s', server.server_address)
+        # Native stream producers (services-own-their-streams). A no-op unless HARMONY_STREAMS=1.
+        from ..hostd_streams import start_for_workload_authority
+        start_for_workload_authority(store, config.get('identity_authority_id') or socket.gethostname(), str(root),
+                                     log=lambda message: logging.info('%s', message), blobs=server.blobs,
+                                     public_base_url=config.get('public_base_url'))
         try:
             server.serve_forever(poll_interval=1)
         finally:
