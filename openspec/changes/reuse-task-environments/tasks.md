@@ -753,3 +753,14 @@ checks and parked cleanup at generations 32–34. Queueing remained separate,
 including an 82.651-second wait for the optimized check. See
 `evidence/benchday-rust-retained-source-20261010.md`. Toolchain/ABI invalidation
 and the broad authority/worker release remain open.
+
+### Rust build-mode follow-up — 2026-10-10
+
+Four admitted Rust builds reused one parked environment across debug and
+release profiles. Same-mode repeat compile phases were 0.196 s and 0.233 s;
+each request still had its own queue wait. The logs show profile-specific
+builds, while cache compatibility remained unchanged across profile switches.
+This supports output freshness and warm reuse, but does not establish a
+separate build-mode invalidation or controlled savings estimate. Real
+toolchain/ABI invalidation and the remaining task 3.2 controls remain open.
+See `evidence/rust-build-mode-resume-20261010.md`.
