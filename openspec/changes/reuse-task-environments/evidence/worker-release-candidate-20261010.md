@@ -19,3 +19,20 @@ file was found.
 This is a local candidate and comparison only. No worker config, service unit,
 or process was changed. The separate authority package still needs a fresh
 candidate and the required idle, fenced rollout window before deployment.
+
+## Follow-up: retained task-E2E source fix
+
+Livestack commit `185edbf7` added `PYTHONDONTWRITEBYTECODE=1` to the
+per-attempt environment for `task_e2e` jobs. Its release was built at
+`/tmp/livestack-185edbf7` and staged at
+`~/.local/share/livestack-workload-releases/livestack-185edbf7` on `zz-joe`.
+The staged release and local build are IDENTICAL: 258 files, content hash
+`2f77218e7eb169e971eea4ea623e32601c2a3575012ac005f29528128ccfb564`.
+
+Worker `zz-joe-e2e-1` was drained at claim generation 9. Its active Rust check
+finished normally. The service was then restarted with the new release and
+verified active with `PYTHONPATH` pointing at `livestack-185edbf7`; worker 1
+registered and became ready at generation 10, then was enabled at generation
+11. It completed the selected task-E2E scope check and returned to idle. The
+independent full/coalesced run on `zz-joe-e2e-2` remained untouched. No authority
+package or unrelated worker was changed.
