@@ -39,7 +39,7 @@ def run(argv,env=None):
 
 def stage(args):
     output=Path(args.out)
-    if not output.is_absolute():
+    if not output.is_absolute() or output.resolve()!=output:
         raise ValueError('absolute_new_output_required')
     output.mkdir(mode=0o700,parents=False,exist_ok=False)
     packages,excluded=baseline(args.baseline_venv)

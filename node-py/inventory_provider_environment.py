@@ -10,7 +10,7 @@ from pathlib import Path
 
 def inventory(root, python=None):
     root=Path(root)
-    if not root.is_absolute() or root.is_symlink() or not root.is_dir():
+    if not root.is_absolute() or root.resolve()!=root or not root.is_dir():
         raise ValueError('absolute_regular_inventory_root_required')
     files=[];links=[];total=0
     for directory,names,entries in os.walk(root,followlinks=False):
