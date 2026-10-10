@@ -90,6 +90,26 @@ class ProviderFence:
                 _shutdown_admission.reset(context)
                 self.settle(key, settled)
 
+    async def startup_owned(self, credential, holder, epoch, fn, synchronize):
+        """Owner ASGI startup only, while public ingress remains held."""
+        self._authorize(credential, 'startup')
+        with self._lock:
+            if self._holder != holder or self._epoch != epoch or not self._status()['drained']:
+                raise FenceRefused('startup_requires_current_drained_fence')
+            key = uuid4().hex
+            self._active.add(key)
+        context = _shutdown_admission.set((self, holder, epoch, key))
+        settled = False
+        try:
+            return await fn()
+        finally:
+            try:
+                synchronize()
+                settled = True
+            finally:
+                _shutdown_admission.reset(context)
+                self.settle(key, settled)
+
     def run(self, fn, synchronize):
         key = self.admit()
         settled = False
