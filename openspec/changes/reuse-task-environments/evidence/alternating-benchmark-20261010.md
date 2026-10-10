@@ -86,8 +86,16 @@ generation 18 (18,433,638,400 bytes retained on disk).
 | `68bdc6c9eeae44cfb7e810c06fc1b66c` (file deleted) | expected compile failure, exit 101 | 1.878 s | 11.555 s | 0.193 s | 2.445 s | 7.746 s | 0.008 s | 9.383 |
 
 An internal symlink probe was submitted twice via `rust-remote.sh`; both
-attempts ended before a job ID with `urlopen: [Errno 32] Broken pipe`. The
-authority's latest-job list showed no request after the deletion job, so this
-is not an admitted symlink result and does not establish a symlink policy. The
-temporary symlink and staged changes were removed. Lockfile and
-toolchain/ABI invalidation controls remain open.
+attempts ended before a job ID with `urlopen: [Errno 32] Broken pipe`. Those
+attempts produced no admitted result. A subsequent admitted sequence in the
+Benchday companion used handle `4636512da5084b70bc2f0a1b0f045020` on
+`zz-joe-e2e-2`: job `c422bd55d3c54cc28e2f2ecf17c2dd55` compiled a module through
+the captured internal symlink, then job `0b74507551e640f989c50fdb815cd940`
+removed the link while retaining the module declaration and failed with the
+expected `E0583`. The second receipt reports
+`target_cache_action=invalidated_source_inventory`; both attempts parked the
+environment after cleanup. Full receipts are in the Benchday companion at
+`openspec/changes/reuse-task-environments/evidence/alternating-benchmark-20261010.md`.
+This closes the symlink-present/deleted sub-control. The separate lockfile
+invalidation result is in `evidence/rust-lockfile-invalidation-20261010.md`;
+real compiler/ABI identity invalidation remains open.
