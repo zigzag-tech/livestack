@@ -1,0 +1,11 @@
+# Owned executor jobs
+
+`livestack_node.owned_executor_jobs` extracts the source-tested PolyTTS ownership and accelerator-settlement registry into a generic model-node primitive. PolyTTS's `SynthesisJobs` adapter keeps its existing engine/audio wire names. PolyASR's `AlignmentJobs` adapter uses exact alignment JSON and supplies its own deterministic result digest. No application input schemas or model engines live in this module.
+
+`OwnedExecutorJobs(executor, synchronize, max_jobs=256, result_sha256=None)` exposes `submit(job_id, owner_id, token, request_sha256, kind, worker, cleanup=None)`, `status`, `cancel`, and `result`. Workers receive `CancellationSignal` (`check()` and `event`). The optional cleanup callback disposes only this submission's resources after task settlement, queued cancellation, duplicate submit or cancel-before-submit tombstone. Result bytes use SHA256 by default; non-byte consumers supply their own digest callback.
+
+Client-generated UUID and secret token identify an owned effect. Same identity and request replay; changed owner/token/request refuse. Tokens are retained only as hashes in registry records and are absent from receipts. Receipts are process-memory bounded: capacity refusal is explicit; restart loses registry state and must trigger held reconciliation in the owner's durable workflow, never automatic duplicate submission.
+
+A cancellation request does not mean a physical executor stopped. Running work stays active until its Future completes and the synchronization callback succeeds. Barrier failure leaves `physical_settled:false`. Cancelling a queued Future or a before-submit tombstone settles because that effect never ran. Other queued/running work on the supplied executor is untouched. The registry makes no bounded physical-stop latency claim and does not itself acquire or release Harmony leases; callers retain ownership until a settled receipt is observed.
+
+Qualification: generic ownership tests and both real application adapters are exercised with CPU fixtures. No GPU execution, deployments or consumer source pin advancement are included. Application clients still need their durable private control store and authoritative prepared-effect journal integration.
