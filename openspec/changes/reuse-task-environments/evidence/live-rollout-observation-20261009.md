@@ -62,3 +62,18 @@ jobs, so this was not an idle window for rollout.
 The owner-reported fence `taskenv-authority-rollout-20261008-v3` expired at
 11:22 UTC. It was not renewed or reused. No authority/worker restart, handler
 activation, rollback, full-suite submission, or publish was performed.
+
+## Fresh readback after authority restart — 2026-10-10
+
+A read-only `rollout status` returned report generation 3051, spec generation
+2, unit `unit-f38a7baa`, mode `observe`, and `applied=[]`. The report was
+26.6 seconds old at the read, with no waiting reason. Worker 1 was `behind`,
+worker 2 `unknown/stale`, and workers 3–5 `unknown`. The reconciler proposed
+only `observed_only` stage/drain/wait-idle/activate/smoke/enable actions for
+worker 1; no worker or service was changed.
+
+The only file in `~/.config/livestack-workloads` remains `client.json`. The
+admin-only status request previously returned 403 for this principal. The
+owner-reported fence `taskenv-authority-rollout-20261008-v3` expired at 11:22
+UTC and was not renewed. Automatic selection stays disabled; rollout and
+rollback acceptance remain open.

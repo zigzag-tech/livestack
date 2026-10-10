@@ -543,3 +543,12 @@ ended parked with Cargo caches reused. See
 probe failed twice before admission with `Broken pipe`, so it supplies no
 symlink verdict. Lockfile and toolchain/ABI invalidation remain open; task 3.2
 is not complete.
+
+## Rollout readback after authority restart — 2026-10-10
+
+The fresh report is generation 3051, mode `observe`, `applied=[]`, spec
+generation 2. Worker 1 is behind, worker 2 unknown/stale, and workers 3–5
+unknown; proposed actions are `observed_only`. The rollout fence expired at
+11:22 UTC and no operator config is present in the workload config directory.
+No rollout or rollback was attempted. Keep automatic selection disabled and
+task 4.4 open pending an operator-authorized rollout/readback.
