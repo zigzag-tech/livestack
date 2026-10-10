@@ -54,7 +54,9 @@ class ProviderFence:
 
     def admit(self):
         with self._lock:
-            if self._holder is not None and _shutdown_admission.get() != (self, self._holder, self._epoch):
+            grant = _shutdown_admission.get()
+            privileged = grant is not None and grant[:3] == (self, self._holder, self._epoch) and grant[3] in self._active
+            if self._holder is not None and not privileged:
                 raise FenceRefused('provider_admission_held')
             key = uuid4().hex
             self._active.add(key)
@@ -76,7 +78,7 @@ class ProviderFence:
                 raise FenceRefused('shutdown_requires_current_physically_drained_fence')
             key = uuid4().hex
             self._active.add(key)
-        context = _shutdown_admission.set((self, holder, epoch))
+        context = _shutdown_admission.set((self, holder, epoch, key))
         settled = False
         try:
             return fn()
