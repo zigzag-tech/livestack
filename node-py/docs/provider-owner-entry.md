@@ -1,0 +1,11 @@
+# Source-bound provider owner entry
+
+`python -m livestack_node.provider_installation --private-service-config SNAPSHOT --app polytts|polyasr` verifies configured adapter/source/environment bytes and interpreter identity without model loading. It does not qualify complete inference behavior.
+
+After actual dependency, service-unit and owner authority gates pass, use `python -m livestack_node.provider_entry --private-service-config SNAPSHOT --app polytts|polyasr`. This service command can load models; do not use it as an offline check.
+
+Snapshot settings and actual registered administrator policy are described in the companion ZZOPS `docs/provider-owner-activation.md`. The source manifest comes from Unchain's source-only preparer. The environment manifest contains absolute root/pythonExecutable, pythonSha256 and relative regular files {path,bytes,sha256}. It must match actual sys.prefix, interpreter bytes and the complete declared file inventory. Unsupported directory/external links, undeclared files, changed bytes or more than16384 files/32GiB refuse. Stage the environment correctly; do not weaken validation or modify the active shared venv. Base Python/OS/CUDA qualification remains separate.
+
+The owned0700 parent/0600 Unix socket authenticates Linux peer UID against private configuration custody. Public HTTP/profile credentials cannot obtain opaque authority. Held startup and authenticated shutdown carry narrowly scoped admission through actual ASGI lifecycle and executor/barrier settlement. Copied grants expire. No finite model deadline is promised.
+
+The registry remains process memory. Unknown lifecycle or lost control acknowledgement requires durable owner reconciliation and must not cause resubmission or an acknowledged successful stop. Automatic activation resume, full native server startup, physical GPU cancellation and second-caller behavior remain unqualified.

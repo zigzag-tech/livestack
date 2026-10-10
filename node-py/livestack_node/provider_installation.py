@@ -92,6 +92,25 @@ def verify_installation(config_path, app):
         verify_files(Path(settings['sourceRoot'])/name, [{**record, 'bytes':record['sizeBytes']} for record in component['files']])
     environment = read_manifest(settings['environmentManifest'], settings['environmentManifestSha256'])
     verify_files(environment['root'], environment['files'])
+    expected = {record['path'] for record in environment['files']}
+    actual = set()
+    for directory, names, files in os.walk(environment['root'], followlinks=False):
+        for name in names:
+            path = Path(directory)/name
+            if path.is_symlink():
+                raise ValueError('environment_directory_link_not_qualified')
+        for name in files:
+            path = Path(directory)/name
+            relative = str(path.relative_to(environment['root']))
+            if path.is_symlink():
+                if not relative.startswith('bin/python') or path.resolve() != Path(sys.executable).resolve():
+                    raise ValueError('environment_external_link_not_qualified')
+                continue
+            actual.add(relative)
+            if len(actual)>16384:
+                raise ValueError('environment_inventory_count_bound')
+    if actual != expected:
+        raise ValueError('environment_unrecorded_or_missing_files')
     if Path(sys.prefix).resolve() != Path(environment['root']).resolve():
         raise ValueError('qualified_python_environment_root_mismatch')
     if Path(sys.executable).resolve() != Path(environment['pythonExecutable']).resolve():
