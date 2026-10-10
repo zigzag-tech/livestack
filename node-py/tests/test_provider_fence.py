@@ -112,3 +112,14 @@ class ShutdownTests(unittest.TestCase):
             with self.assertRaises(FenceRefused):
                 executor.submit(lambda:None)
         self.assertTrue(fence.status('operator')['drained'])
+
+
+class ShutdownContextTests(unittest.TestCase):
+    def test_copied_shutdown_context_cannot_admit_after_owner_callback_settles(self):
+        from contextvars import copy_context
+        fence = ProviderFence(authorize)
+        receipt = fence.hold('operator','deploy')
+        captured = []
+        fence.shutdown_owned('operator','deploy',receipt['epoch'],lambda:captured.append(copy_context()),lambda:None)
+        with self.assertRaises(FenceRefused):
+            captured[0].run(fence.admit)
