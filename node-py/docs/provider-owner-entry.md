@@ -20,3 +20,39 @@ Aliases must resolve inside that runtime. The bound is 65,536 regular files
 and 4,096 internal aliases (the observed standalone runtime includes about
 1,049 terminfo aliases). Unrecorded files, changed bytes, and external aliases
 refuse admission. This source gate alone does not qualify an installed service.
+
+## Independent dependency staging evidence (2026-10-10)
+
+The source-only staging command is `python3 node-py/stage_provider_environment.py
+--baseline-venv /ABS/BASELINE --out /ABS/NEW/CANONICAL --uv /ABS/uv`.
+It excludes shared editable `livestack-node` and native `shared-py` distributions.
+Default installation is offline; explicit `--allow-public-downloads` permits
+exact observed public package versions only. CUDA-tagged versions use their
+separate public index. Metadata consistency is a distinct recorded gate.
+Ancestor redirects refuse before creating the output directory.
+
+On zz-joe, the independent staging root is
+`/home/ubuntu/.local/share/zzops-provider-staging-20261010`. The canonical
+`polyt-public-exact` environment contains Python 3.12.14 and 177 exact public
+baseline packages; dependency metadata validation passed. Exact Livestack
+56141fb9 source produced separately hashed `livestack_node` and `shared_py`
+wheels, installed without copying the shared editable checkout. The native
+CPU binding imported under `-I -B`; no provider/model module was loaded.
+This is package materialization evidence, not service or inference parity.
+
+Run the inventory command with the staged interpreter:
+`/ABS/venv/bin/python -I -B node-py/inventory_provider_environment.py --out
+/ABS/OUTSIDE/ROOTS/environment.json`. The observed manifest contains 38,907
+venv regular files, 3,744 Python-runtime regular files and 1,049 exact internal
+runtime aliases. Manifest SHA-256:
+`5563293f1c9ddbc4cc4ca7937d419d2e64a626932fff4aa8bcaa141aa4bc76da`.
+The pinned verifier checked those bytes and interpreter identity again;
+`environment-byte-verification.json` records the result. Registration, sealing,
+provider qualification and activation remain false. The staged wheels retain
+56141fb9 identity; they are not silently relabeled as the later runtime source.
+
+The first attempt used `~/.local/share/zzops`, which resolves to an installed
+CLI tree on that host. Its newly created audit subdirectory remains untouched;
+no existing CLI code/configuration was overwritten. The canonical environment
+was recreated separately from cached public wheels. Never use that redirect as
+an installation root or relax the source inventory's path checks.
