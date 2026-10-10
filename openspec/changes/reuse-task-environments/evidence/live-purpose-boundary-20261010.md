@@ -107,3 +107,14 @@ fixed the test setup. These results are local fixture/systemd-worker evidence;
 they do not verify the quota change on an admitted shared worker or establish
 live toolchain/ABI invalidation. No worker or authority was changed, and the
 19:21 UTC rollout readback above remains the last live rollout observation.
+
+## ABI invalidation fixture — 2026-10-10 22:08 UTC
+
+Added `test_machine_abi_change_invalidates_cache_before_reuse`. It changes the
+reported machine architecture for the second preparation of a parked handle;
+the worker fixture returned `toolchain_changed`, rebuilt the environment,
+invalidated the cache component, and removed the old cached artifact. The
+toolchain-replacement probe, architecture-change fixture, and quota
+preservation fixture passed together (3 passed in 3.17 seconds, Python
+3.12.14, pytest 9.1.1). This strengthens local compatibility coverage only;
+it does not replace an admitted worker run with a real compiler/ABI change.
