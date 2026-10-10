@@ -11,3 +11,12 @@ The owned0700 parent/0600 Unix socket authenticates Linux peer UID against priva
 The registry remains process memory. Unknown lifecycle or lost control acknowledgement requires durable owner reconciliation and must not cause resubmission or an acknowledged successful stop. Automatic activation resume, full native server startup, physical GPU cancellation and second-caller behavior remain unqualified.
 
 The observed target TTS environment records38672 files/9.74GB and ASR35095/9.06GB; the previous16384-file cap was therefore explicitly raised to65536. Environment manifests are bounded to32MiB. Declared internal directory aliases use links[{path,target}], must match exact symlink bytes and resolve inside the sealed environment; unrecorded/external aliases refuse. The standard lib64->lib alias is supported without copying a shared editable dependency.
+
+The environment manifest also requires `runtimeTree: {root, files, links}` for
+the independent Python base runtime. Its root must equal the running
+interpreter's `sys.base_prefix`; every regular stdlib/shared-library file is
+hashed, and every alias has its exact relative path and link target declared.
+Aliases must resolve inside that runtime. The bound is 65,536 regular files
+and 4,096 internal aliases (the observed standalone runtime includes about
+1,049 terminfo aliases). Unrecorded files, changed bytes, and external aliases
+refuse admission. This source gate alone does not qualify an installed service.

@@ -35,6 +35,11 @@ class InstallationTests(unittest.TestCase):
             content = (environment_root/'fixture.txt').read_bytes()
             environment = {'links':[{'path':'lib64','target':'lib'}],'root':str(environment_root),'pythonExecutable':sys.executable,'pythonSha256':digest(Path(sys.executable).resolve().read_bytes()),
                            'files':[{'path':'fixture.txt','bytes':len(content),'sha256':digest(content)}]}
+            runtime_root=root/'python-runtime';runtime_root.mkdir()
+            (runtime_root/'stdlib.py').write_bytes(b'CPU runtime fixture')
+            (runtime_root/'stdlib-alias.py').symlink_to('stdlib.py')
+            environment['runtimeTree']={'root':str(runtime_root),'links':[{'path':'stdlib-alias.py','target':'stdlib.py'}],'files':[{'path':'stdlib.py','bytes':19,'sha256':digest(b'CPU runtime fixture')}]}
+            base_patch=patch.object(sys,'base_prefix',str(runtime_root));base_patch.start();self.addCleanup(base_patch.stop)
             environment_path = root/'environment.json';environment_path.write_bytes(canonical(environment))
             config = {'apps':[{'descriptor':{'app':'polytts','adapter':{'revision':'a'*40,'digest':digest(payload)}},
                 'adapterDirectory':str(adapter),'providerActivation':{'sourceRoot':str(root/'source'),
@@ -44,6 +49,17 @@ class InstallationTests(unittest.TestCase):
             prefix_patch=patch.object(sys,'prefix',str(environment_root));prefix_patch.start();self.addCleanup(prefix_patch.stop)
             _, identity = verify_installation(config_path,'polytts')
             self.assertEqual(identity['sourceDigest'],source['sourceDigest'])
+            (runtime_root/'stdlib-alias.py').unlink();(runtime_root/'stdlib-alias.py').symlink_to(root/'source/polytts/fixture.py')
+            with self.assertRaisesRegex(ValueError,'runtime_internal_alias'):verify_installation(config_path,'polytts')
+            (runtime_root/'stdlib-alias.py').unlink();(runtime_root/'stdlib-alias.py').symlink_to('stdlib.py')
+            (runtime_root/'unexpected.py').write_text('unrecorded runtime')
+            with self.assertRaisesRegex(ValueError,'runtime_unrecorded'):verify_installation(config_path,'polytts')
+            (runtime_root/'unexpected.py').unlink()
+            (runtime_root/'stdlib.py').write_bytes(b'tampered runtime')
+            with self.assertRaises(ValueError):verify_installation(config_path,'polytts')
+            (runtime_root/'stdlib.py').write_bytes(b'CPU runtime fixture')
+            with patch.object(sys,'base_prefix','/wrong-runtime'):
+                with self.assertRaisesRegex(ValueError,'runtime_root'):verify_installation(config_path,'polytts')
             (environment_root/'lib64').unlink();(environment_root/'lib64').symlink_to(root,target_is_directory=True)
             with self.assertRaisesRegex(ValueError,'alias_mismatch'):verify_installation(config_path,'polytts')
             (environment_root/'lib64').unlink();(environment_root/'lib64').symlink_to('lib',target_is_directory=True)
