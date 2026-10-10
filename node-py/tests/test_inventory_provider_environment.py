@@ -13,6 +13,8 @@ class InventoryTests(unittest.TestCase):
             root=Path(folder)/'runtime';root.mkdir()
             (root/'bytes').write_bytes(b'CPU fixture')
             (root/'alias').symlink_to('bytes')
+            alias_root=Path(folder)/'redirect';alias_root.symlink_to(root,target_is_directory=True)
+            with self.assertRaisesRegex(ValueError,'absolute_regular'):module.inventory(alias_root)
             result=module.inventory(root)
             self.assertEqual(result['files'][0]['bytes'],11)
             self.assertEqual(result['links'],[{'path':'alias','target':'bytes'}])
