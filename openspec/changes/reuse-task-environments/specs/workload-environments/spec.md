@@ -132,7 +132,18 @@ Placement SHALL apply hard eligibility and current capacity checks before reuse 
 
 ### Requirement: Environment storage and metadata have enforced bounds
 
-The system SHALL enforce the count/byte/age ceilings in the design: 1,024 logical rows globally, 64 per owner, two replicas per environment, 64 replicas per host, 32 GiB per replica, 128 GiB per owner per host, and a host total no larger than 256 GiB or the provisioned workspace budget. The captured-source tree SHALL be bounded to 100,000 entries, and each of at most 16 declared cache components SHALL be bounded independently to 100,000 entries. Cache descendants SHALL NOT consume the source-tree reconciliation bound. Child writes SHALL be kernel bounded. Inactive generations SHALL expire after seven idle days or thirty absolute days under configured nonzero windows; active generations and existing CAS retention exemptions SHALL be protected. Missing quota enforcement SHALL disable environment support, and deletion failures SHALL remain charged and visible.
+The system SHALL enforce the count/byte/age ceilings in the design: 1,024 logical rows globally, 64 per owner, two replicas per environment, 64 replicas per host, 32 GiB per replica, 128 GiB per owner per host, and a host total no larger than 256 GiB or the provisioned workspace budget. The captured-source tree SHALL be bounded to 100,000 entries, and each of at most 16 declared cache components SHALL be bounded independently to 100,000 entries. Cache descendants SHALL NOT consume the source-tree reconciliation bound. Child writes SHALL be kernel bounded. After cleanup and authority confirmation, parked replicas SHALL retain their files while their kernel hard quota is reduced to measured usage plus the fixed cushion, capped at the per-replica ceiling. Before reuse, workers SHALL restore the largest quota allowed by the same per-replica, per-owner and host ceilings. These changes SHALL occur under the exclusive handle and host storage locks; a busy replica remains charged at its current limit. Inactive generations SHALL expire after seven idle days or thirty absolute days under configured nonzero windows; active generations and existing CAS retention exemptions SHALL be protected. Missing quota enforcement SHALL disable environment support, and deletion failures SHALL remain charged and visible.
+
+#### Scenario: Parked replicas release unused quota without losing files
+- **WHEN** a completed job is cleaned up and its parked generation is acknowledged
+- **THEN** the worker lowers that replica's hard quota to its measured usage plus the fixed cushion
+- **AND** the workspace files and cache contents remain unchanged
+- **AND** the freed reservation is available to other handles under the same owner and host limits
+
+#### Scenario: A saved workspace resumes with execution quota
+- **WHEN** a later job resumes a parked replica
+- **THEN** the worker restores the largest hard quota currently allowed by the configured limits before running the handler
+- **AND** the quota change does not grant CPU, memory, queue priority or a concurrent writer
 
 #### Scenario: A compiler writes past its environment quota
 - **WHEN** a child reaches the enforced filesystem byte limit

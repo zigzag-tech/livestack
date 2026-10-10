@@ -30,6 +30,8 @@ from .model import WorkloadError, encode, name
 MAX_REPLICA_BYTES = 32 * 1024**3
 MAX_OWNER_BYTES = 128 * 1024**3
 MAX_HOST_BYTES = 256 * 1024**3
+PARKED_QUOTA_SLACK_BYTES = 512 * 1024**2
+QUOTA_BLOCK_BYTES = 1024
 MAX_ENVIRONMENTS = 64
 MAX_METADATA_BYTES = 4096
 MAX_COMPONENTS = 16
@@ -683,36 +685,37 @@ class TaskEnvironmentStore:
         replicas = []
         deadline = time.monotonic() + 5
         try:
-            inventory = self._inventory()
-            entries = [path for path, _ in inventory]
-            if any(not stat.S_ISDIR(item.lstat().st_mode) for item in entries):
-                raise WorkloadError('task environment inventory contains a non-directory entry', 503)
-            markers = {directory.name: marker for directory, marker in inventory}
-            valid_markers = [marker for marker in markers.values() if marker is not None]
-            if len(valid_markers) != len(markers):
-                raise WorkloadError('retained environment metadata is corrupt; placement refused', 503)
-            if len({marker['project_id'] for marker in valid_markers}) != len(valid_markers):
-                raise WorkloadError('retained environment project ids are duplicated', 503)
-            usage = self._measured_usage([marker['project_id'] for marker in valid_markers]) if valid_markers else {}
-            for directory in entries:
-                if time.monotonic() > deadline:
-                    raise WorkloadError('task environment inventory exceeded its five second bound', 503)
-                marker = _read_marker(directory)
-                if marker['state'] != 'parked':
-                    continue
-                compatibility = profiles.get(marker['profile'])
-                if compatibility != marker['compatibility']:
-                    continue
-                measured = usage[marker['project_id']]
-                used = measured['used_bytes']
-                expected_hard = ((marker['quota_bytes'] + 1023) // 1024) * 1024
-                if measured['hard_bytes'] != expected_hard:
-                    raise WorkloadError('retained environment kernel quota differs from its marker', 503)
-                if used > marker['quota_bytes']:
-                    raise WorkloadError('retained environment exceeds its project quota', 503)
-                replicas.append(dict(handle=marker['handle'], profile=marker['profile'],
-                    compatibility=marker['compatibility'], generation=marker['generation'], state='parked',
-                    bytes_used=used, last_used=marker['last_used']))
+            with self._storage_locked():
+                inventory = self._inventory()
+                entries = [path for path, _ in inventory]
+                if any(not stat.S_ISDIR(item.lstat().st_mode) for item in entries):
+                    raise WorkloadError('task environment inventory contains a non-directory entry', 503)
+                markers = {directory.name: marker for directory, marker in inventory}
+                valid_markers = [marker for marker in markers.values() if marker is not None]
+                if len(valid_markers) != len(markers):
+                    raise WorkloadError('retained environment metadata is corrupt; placement refused', 503)
+                if len({marker['project_id'] for marker in valid_markers}) != len(valid_markers):
+                    raise WorkloadError('retained environment project ids are duplicated', 503)
+                usage = self._measured_usage([marker['project_id'] for marker in valid_markers]) if valid_markers else {}
+                for directory in entries:
+                    if time.monotonic() > deadline:
+                        raise WorkloadError('task environment inventory exceeded its five second bound', 503)
+                    marker = _read_marker(directory)
+                    if marker['state'] != 'parked':
+                        continue
+                    compatibility = profiles.get(marker['profile'])
+                    if compatibility != marker['compatibility']:
+                        continue
+                    measured = usage[marker['project_id']]
+                    used = measured['used_bytes']
+                    expected_hard = self._rounded_quota(marker['quota_bytes'])
+                    if measured['hard_bytes'] != expected_hard:
+                        raise WorkloadError('retained environment kernel quota differs from its marker', 503)
+                    if used > marker['quota_bytes']:
+                        raise WorkloadError('retained environment exceeds its project quota', 503)
+                    replicas.append(dict(handle=marker['handle'], profile=marker['profile'],
+                        compatibility=marker['compatibility'], generation=marker['generation'], state='parked',
+                        bytes_used=used, last_used=marker['last_used']))
         except Exception as error:
             logging.warning('task_environment_inventory_unavailable: %s: %s', type(error).__name__, str(error)[:512])
             return {}, None
@@ -800,6 +803,136 @@ class TaskEnvironmentStore:
             raise WorkloadError('retained environments exceed configured aggregate quota bounds', 503)
         return entries
 
+    @staticmethod
+    def _rounded_quota(bytes_limit):
+        return ((bytes_limit + QUOTA_BLOCK_BYTES - 1) // QUOTA_BLOCK_BYTES) * QUOTA_BLOCK_BYTES
+
+    def _set_project_quota(self, marker, bytes_limit):
+        if self.quota_ensure is not None:
+            result = self._run_helper([], handle=marker['handle'], project_id=marker['project_id'],
+                                     bytes_limit=bytes_limit)
+        else:
+            result = self._run_helper(['ensure', marker['handle'], str(marker['project_id']), str(bytes_limit)],
+                                      handle=marker['handle'], project_id=marker['project_id'],
+                                      bytes_limit=bytes_limit)
+        if isinstance(result, dict) and result.get('quota_bytes') not in (None, bytes_limit):
+            raise WorkloadError('kernel environment quota differs from the admitted limit', 503)
+
+    def _compact_parked_locked(self, *, held_handles=(), skip_handles=(), deadline=None,
+                               max_entries=MAX_ENVIRONMENTS, require_measurement=False):
+        """Lower idle hard limits while holding the host storage lock."""
+        held_handles, skip_handles = set(held_handles), set(skip_handles)
+        entries = self._inventory()
+        candidates, lock_fds = [], []
+        considered = 0
+        try:
+            for directory, marker in entries:
+                if (marker is None or marker['state'] != 'parked' or directory.name in skip_handles):
+                    continue
+                if considered >= min(max_entries, self.max_environments):
+                    break
+                considered += 1
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                fd = None
+                if directory.name not in held_handles:
+                    lock_path = self.root / '.locks' / (directory.name + '.lock')
+                    try:
+                        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+                        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        if fd is not None:
+                            os.close(fd)
+                        continue
+                    except OSError as error:
+                        if fd is not None:
+                            os.close(fd)
+                        logging.warning('task_environment_parked_quota_lock_failed: handle=%s error=%s: %s',
+                                        directory.name, type(error).__name__, str(error)[:512])
+                        continue
+                    lock_fds.append(fd)
+                candidates.append((directory, marker))
+            if not candidates:
+                return
+            try:
+                usage = self._measured_usage([marker['project_id'] for _, marker in candidates])
+            except Exception as error:
+                logging.warning('task_environment_parked_quota_usage_failed: %s: %s',
+                                type(error).__name__, str(error)[:512])
+                if require_measurement:
+                    raise WorkloadError('cannot measure parked environment quotas before admission', 503) from error
+                return
+            for directory, original in candidates:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                try:
+                    marker = _read_marker(directory)
+                    if (marker is None or marker['state'] != 'parked' or
+                            marker['generation'] != original['generation'] or
+                            marker['project_id'] != original['project_id'] or
+                            marker['quota_bytes'] != original['quota_bytes']):
+                        continue
+                    measured = usage[marker['project_id']]
+                    hard_bytes = measured['hard_bytes']
+                    expected_hard = self._rounded_quota(marker['quota_bytes'])
+                    if hard_bytes > self._rounded_quota(self.max_per_replica):
+                        raise WorkloadError('parked environment quota exceeds its configured limit', 503)
+                    if measured['used_bytes'] > hard_bytes:
+                        raise WorkloadError('parked environment usage exceeds its kernel quota', 503)
+                    # Recover a crash between a quota change and its marker
+                    # update before admitting more storage.
+                    charged = marker['quota_bytes']
+                    actual_charge = min(hard_bytes, self.max_per_replica)
+                    if hard_bytes != expected_hard:
+                        charged = actual_charge
+                        marker = dict(marker, quota_bytes=charged)
+                        try:
+                            _atomic_json(directory / 'environment.json', marker)
+                        except Exception as error:
+                            if hard_bytes > expected_hard:
+                                raise WorkloadError('cannot reconcile an undercharged environment quota', 503) \
+                                    from error
+                            raise
+                        logging.warning('task_environment_parked_quota_marker_reconciled: handle=%s hard_bytes=%d',
+                                        marker['handle'], hard_bytes)
+                    used = measured['used_bytes']
+                    desired = min(self.max_per_replica,
+                                  self._rounded_quota(used + PARKED_QUOTA_SLACK_BYTES))
+                    if desired < charged:
+                        self._set_project_quota(marker, desired)
+                        compacted = dict(marker, quota_bytes=desired, bytes_used=used)
+                        try:
+                            _atomic_json(directory / 'environment.json', compacted)
+                        except Exception:
+                            try:
+                                self._set_project_quota(marker, charged)
+                            except Exception as restore_error:
+                                logging.error('task_environment_parked_quota_restore_failed: handle=%s error=%s: %s',
+                                              marker['handle'], type(restore_error).__name__,
+                                              str(restore_error)[:512])
+                            raise
+                        logging.info('task_environment_parked_quota_compacted: handle=%s used_bytes=%d '
+                                     'old_limit_bytes=%d new_limit_bytes=%d', marker['handle'], used,
+                                     charged, desired)
+                    elif marker['bytes_used'] != used:
+                        _atomic_json(directory / 'environment.json', dict(marker, bytes_used=used))
+                except Exception as error:
+                    if isinstance(error, WorkloadError) and \
+                            str(error) == 'cannot reconcile an undercharged environment quota':
+                        raise
+                    if require_measurement and isinstance(error, WorkloadError) and str(error) in (
+                            'parked environment quota exceeds its configured limit',
+                            'parked environment usage exceeds its kernel quota'):
+                        raise
+                    logging.warning('task_environment_parked_quota_compaction_failed: handle=%s error=%s: %s',
+                                    directory.name, type(error).__name__, str(error)[:512])
+        finally:
+            for fd in lock_fds:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                finally:
+                    os.close(fd)
+
     def _project_id(self, handle, used):
         width = self.project_id_max - self.project_id_min + 1
         first = self.project_id_min + int.from_bytes(hashlib.sha256(handle.encode()).digest()[:4], 'big') % width
@@ -821,6 +954,31 @@ class TaskEnvironmentStore:
             if marker['owner_scope'] == owner_scope:
                 total_owner += marker['quota_bytes']
         return min(self.max_per_replica, self.max_total-total_host, self.max_per_owner-total_owner)
+
+    def _restore_execution_quota(self, marker, owner_scope, entries, generation):
+        measured = self._measured_usage([marker['project_id']])[marker['project_id']]
+        hard_bytes = measured['hard_bytes']
+        if hard_bytes > self._rounded_quota(self.max_per_replica):
+            raise WorkloadError('retained environment kernel quota exceeds its configured limit', 503)
+        if measured['used_bytes'] > hard_bytes:
+            raise WorkloadError('retained environment exceeds its project quota', 503)
+        if hard_bytes != self._rounded_quota(marker['quota_bytes']):
+            marker = dict(marker, quota_bytes=min(hard_bytes, self.max_per_replica))
+            _atomic_json(self.root / marker['handle'] / 'environment.json', marker)
+            entries = self._inventory()
+        used = measured['used_bytes']
+        quota_bytes = self._quota_for(owner_scope, entries, current=marker['handle'])
+        if quota_bytes <= 0 or used > quota_bytes:
+            raise WorkloadError('environment host storage budget is exhausted', 429)
+        restored = dict(marker, quota_bytes=quota_bytes, bytes_used=used,
+                        state='preparing', generation=generation)
+        _atomic_json(self.root / marker['handle'] / 'environment.json', restored)
+        if quota_bytes != marker['quota_bytes']:
+            self._set_project_quota(restored, quota_bytes)
+            logging.info('task_environment_execution_quota_restored: handle=%s used_bytes=%d '
+                         'old_limit_bytes=%d new_limit_bytes=%d', marker['handle'], used,
+                         marker['quota_bytes'], quota_bytes)
+        return restored
 
     def prepare(self, assignment, incoming_source, *, handler):
         """Return a locked environment source path and phase/cache identities."""
@@ -877,6 +1035,7 @@ class TaskEnvironmentStore:
         current_path = self.root / handle
         authority_replicas = env['replicas']
         with self._storage_locked():
+            self._compact_parked_locked(skip_handles={handle}, require_measurement=True)
             entries = self._inventory()
             marker = next((entry[1] for entry in entries if entry[0] == current_path), None)
             replica_checks = []
@@ -902,7 +1061,7 @@ class TaskEnvironmentStore:
                 raise WorkloadError('environment generation is not newer than local replica', 409)
             used_project_ids = {value['project_id'] for _, value in entries if value is not None}
             if reusable:
-                meta = dict(marker)
+                meta = self._restore_execution_quota(marker, env['owner_scope'], entries, generation)
                 reuse_outcome = 'reused'
                 reason_code = 'compatible_environment_reused'
                 reuse_diagnostic = reason_code
@@ -915,14 +1074,7 @@ class TaskEnvironmentStore:
                 if quota_bytes <= 0:
                     current_path.rmdir()
                     raise WorkloadError('environment host storage budget is exhausted', 429)
-                if self.quota_ensure is not None:
-                    quota_result = self._run_helper([], handle=handle, project_id=project_id,
-                                                     bytes_limit=quota_bytes)
-                else:
-                    quota_result = self._run_helper(['ensure', handle, str(project_id), str(quota_bytes)],
-                        handle=handle, project_id=project_id, bytes_limit=quota_bytes)
-                if isinstance(quota_result, dict) and quota_result.get('quota_bytes') not in (None, quota_bytes):
-                    raise WorkloadError('kernel environment quota differs from the admitted limit', 503)
+                self._set_project_quota(dict(handle=handle, project_id=project_id), quota_bytes)
                 now = self.clock()
                 meta = dict(version=1, handle=handle, owner_scope=env['owner_scope'], profile=profile,
                     purpose=env['purpose'], compatibility=compatibility, generation=generation,
@@ -1093,12 +1245,14 @@ class TaskEnvironmentStore:
                 authority_environment.get('generation') != prepared['generation']):
             return False
         path = Path(prepared['path']) / 'environment.json'
-        marker = _read_marker(path.parent)
-        if (marker is None or marker['generation'] != prepared['generation'] or
-                marker['state'] != 'awaiting_authority'):
-            return False
-        meta = dict(prepared['metadata'], state='parked', last_used=self.clock())
-        _atomic_json(path, meta)
+        with self._storage_locked():
+            marker = _read_marker(path.parent)
+            if (marker is None or marker['generation'] != prepared['generation'] or
+                    marker['state'] != 'awaiting_authority'):
+                return False
+            _atomic_json(path, dict(marker, state='parked', last_used=self.clock()))
+            self._compact_parked_locked(held_handles={prepared['handle']})
+            prepared['metadata'] = _read_marker(path.parent)
         return True
 
     def acknowledge_handle(self, handle, generation, authority_environment):
@@ -1108,11 +1262,13 @@ class TaskEnvironmentStore:
             return False
         with self._locked(handle):
             directory = self.root / handle
-            marker = _read_marker(directory) if directory.exists() else None
-            if (marker is None or marker['generation'] != generation or
-                    marker['state'] != 'awaiting_authority'):
-                return False
-            _atomic_json(directory / 'environment.json', dict(marker, state='parked', last_used=self.clock()))
+            with self._storage_locked():
+                marker = _read_marker(directory) if directory.exists() else None
+                if (marker is None or marker['generation'] != generation or
+                        marker['state'] != 'awaiting_authority'):
+                    return False
+                _atomic_json(directory / 'environment.json', dict(marker, state='parked', last_used=self.clock()))
+                self._compact_parked_locked(held_handles={handle})
             return True
 
     def reject(self, prepared):
@@ -1193,6 +1349,7 @@ class TaskEnvironmentStore:
         fd = os.open(global_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
+            self._compact_parked_locked(deadline=started + seconds, max_entries=rows)
             for directory, meta in self._inventory():
                 if checked >= rows or time.monotonic() - started >= seconds:
                     break
