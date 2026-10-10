@@ -87,6 +87,8 @@ class ProviderOwnerSocket:
                 try:
                     _, uid, _ = struct.unpack('3i', self.connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
                     payload = self.rfile.readline(8193)
+                    if not payload:
+                        return
                     if len(payload) > 8192 or not payload.endswith(b'\n'):
                         raise FenceRefused('owner_control_byte_bound')
                     result = owner.dispatch(uid, json.loads(payload))
