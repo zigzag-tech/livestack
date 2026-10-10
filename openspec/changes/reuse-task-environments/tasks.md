@@ -16,6 +16,14 @@ accepted but still queued, without compute assigned. Source invalidation and
 broader worker rollout remain open; see
 `evidence/live-recheck-20261010-1045utc.md`.
 
+Follow-up (2026-10-10 10:56 UTC): the queued `7efa3d57f8e24fc0bbbcc15dc08754b1`
+request used an older source after main changed Rust inputs. It had no attempts
+and was withdrawn before starting. Current main
+`3062f53e79d89fc4e56b5b6d72bf09b8febd030b` was submitted as job
+`5d83ba77da7749649452db71100b8cac` on the same saved environment; it remains
+queued with no attempt. The handle remains parked with no compute assigned.
+Details: `evidence/live-recheck-20261010-1045utc.md`.
+
 ## 1. Durable request and agent interfaces
 
 - [x] 1.1 Add schema 3, strict environment key/handle validation and authenticated capabilities; verify real HTTP legacy identity, version refusal and unsupported-before-upload checks. Schema-3/HTTP/legacy/refusal controls passed in the focused authority/worker/CLI/scheduler suite: 91 passed, 6 skipped. Ledger: bounded capability/refusal outcomes with no secrets.
