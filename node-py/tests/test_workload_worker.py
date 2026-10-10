@@ -1008,8 +1008,13 @@ def test_scope_close_cancels_task_environment_descendants_after_cleanup(fleet, t
                 'inputs': [], 'contract': 'incremental-build-v1'}]}})
 
     def quota_usage(project_ids):
-        return [{'project_id': project_id, 'used_bytes': 0, 'hard_bytes': 32*1024**3}
-                for project_id in project_ids]
+        rows = []
+        for marker_path in environment_root.glob('*/environment.json'):
+            marker = json.loads(marker_path.read_text())
+            if marker['project_id'] in project_ids:
+                rows.append({'project_id': marker['project_id'], 'used_bytes': 0,
+                    'hard_bytes': ((marker['quota_bytes']+1023)//1024)*1024})
+        return rows
 
     original_init = TaskEnvironmentStore.__init__
     def test_store_init(self, environment_config, **kwargs):
