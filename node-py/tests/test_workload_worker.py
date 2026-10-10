@@ -1192,7 +1192,7 @@ worker.step()
         assert result['state'] == 'succeeded'
         receipt = result['result']['environment_receipt']
         assert receipt['reuse_outcome'] == 'rebuilt'
-        assert receipt['reason_code'] == 'local_state_untrusted'
+        assert receipt['reason_code'] == 'authority_replica_unconfirmed'
         artifact = next(item for item in result['result']['result']['artifacts'] if item['name'] == 'artifact')
         returned = InputTransfer(caller).get(artifact['digest'], tmp_path/'recovered-artifact')
         assert 'cache=fresh' in returned.read_text()
