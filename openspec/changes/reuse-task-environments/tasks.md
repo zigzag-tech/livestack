@@ -531,3 +531,15 @@ prior note that no Dart-edit run existed. Livestack task 3.2 remains open for
 deleted-file, symlink, lockfile, compiler/ABI, and compatibility invalidation
 controls. Worker rollout, rollback, and archive work also remain open.
 Full/coalesced E2E and publishing were not run.
+
+## Source-deletion control — 2026-10-10
+
+The admitted Rust mirror reconciliation control succeeded: a file-present job
+compiled a temporary module, then a second captured source deleted the file
+while retaining its module declaration. It failed with the expected
+`E0583 file not found` rather than using stale mirrored source; both attempts
+ended parked with Cargo caches reused. See
+`evidence/alternating-benchmark-20261010.md`. The internal symlink wrapper
+probe failed twice before admission with `Broken pipe`, so it supplies no
+symlink verdict. Lockfile and toolchain/ABI invalidation remain open; task 3.2
+is not complete.

@@ -67,3 +67,27 @@ at 28.451 s then 0.173 s, with queue at 0.958 s then 0.673 s; see
 `evidence/rust-stable-path-repeat-20261009.md`. These are workload-specific
 results, not universal savings or a queue-latency guarantee. Full/coalesced
 E2E and publishing were not run.
+
+## Deleted-source-file reconciliation — 2026-10-10
+
+On the same Rust handle, a temporary `daemon/src/reuse_env_probe.rs` module
+was first present and compiled successfully in job
+`750c3a59ee93491eab7810fbc22facd0`. The next captured source retained
+`mod reuse_env_probe;` but deleted that file. Job
+`68bdc6c9eeae44cfb7e810c06fc1b66c` failed with Rust error `E0583: file not
+found for module reuse_env_probe`, confirming the worker removed the old
+mirrored file rather than compiling stale source. Both jobs reused the Cargo
+cache components; the expected failure ended with the environment parked at
+generation 18 (18,433,638,400 bytes retained on disk).
+
+| Job | Result | Queue | Source | Dependencies | Compile | Execution | Cleanup | CPU core-s |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `750c3a59ee93491eab7810fbc22facd0` (file present) | success | 0.838 s | 15.731 s | 0.284 s | 5.126 s | 10.495 s | 0.006 s | 12.030 |
+| `68bdc6c9eeae44cfb7e810c06fc1b66c` (file deleted) | expected compile failure, exit 101 | 1.878 s | 11.555 s | 0.193 s | 2.445 s | 7.746 s | 0.008 s | 9.383 |
+
+An internal symlink probe was submitted twice via `rust-remote.sh`; both
+attempts ended before a job ID with `urlopen: [Errno 32] Broken pipe`. The
+authority's latest-job list showed no request after the deletion job, so this
+is not an admitted symlink result and does not establish a symlink policy. The
+temporary symlink and staged changes were removed. Lockfile and
+toolchain/ABI invalidation controls remain open.
