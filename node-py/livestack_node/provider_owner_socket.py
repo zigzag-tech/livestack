@@ -7,6 +7,7 @@ import stat
 import struct
 from pathlib import Path
 from threading import BoundedSemaphore, Thread
+from uuid import uuid4
 
 from .provider_fence import FenceRefused
 
@@ -22,6 +23,7 @@ class ProviderOwnerSocket:
         if not hasattr(socket, 'SO_PEERCRED'):
             raise RuntimeError('unix_peer_credentials_unsupported')
         self.path, self.uid = str(path), config.st_uid
+        self.instance_id = uuid4().hex
         encoded_identity = json.dumps(source_identity, separators=(',', ':'))
         if len(encoded_identity.encode()) > 4096:
             raise ValueError('provider_source_identity_bound')
@@ -55,7 +57,7 @@ class ProviderOwnerSocket:
             result = self.fence.status(self._credential)
         else:
             raise FenceRefused('unknown_owner_control_operation')
-        return {**result, 'sourceIdentity': self.source_identity}
+        return {**result, 'sourceIdentity': self.source_identity, 'serverInstanceId': self.instance_id}
 
     def start(self, fence):
         if self._server is not None:
