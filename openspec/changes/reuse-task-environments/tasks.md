@@ -502,3 +502,32 @@ unknown. The authority roster lists the task-E2E handler on workers 1 and 2,
 both occupied by background image-warm jobs in the snapshot; workers 3 and 4
 were idle without that handler and worker 5 was claim-disabled. Keep
 automatic-selection defaults disabled.
+
+## Flutter development handle terminal follow-up — 2026-10-10
+
+Benchday's accepted Flutter job
+`198fd8b68bfc4b418e2f1dd681a9a1e6` succeeded on `zz-joe-e2e-2` using the same
+parked environment handle at generation 11. The environment was parked again
+after cleanup. The `flutter-native` cache component was invalidated, so this
+confirms reattachment and resource release but not a warm cache hit or saved
+compile time. Queue remained 100.336 seconds and host CPU pressure was elevated.
+The same-source repeat `a588d240751b4cf3a9dcb59623b301cf` reused the
+`flutter-native` component and measured 29.516 s compile versus 37.905 s on the
+prior attempt; its queue was 1.245 s versus 100.336 s while host load was also
+lower. This is an observation, not a controlled savings estimate. The caller
+receipt does not close the Dart/native alternating benchmark, source/cache
+invalidation controls, worker rollout, rollback readback, or archive. See
+`evidence/flutter-stable-handle-reattachment-20261009.md`.
+
+## Alternating benchmark follow-up — 2026-10-10
+
+Benchday's actual wrappers completed an invalidated/repeat/Dart-edit Flutter
+sequence and a Rust daemon source-edit control on `zz-joe`; queue, preparation,
+test, compile, CPU-core-second and host-load evidence is in
+`evidence/alternating-benchmark-20261010.md`. The Rust edit log checked only
+`benchday-daemon`, with no dependency crates recompiled. An earlier real daemon
+code change is the timing-instrument positive control. This supersedes the
+prior note that no Dart-edit run existed. Livestack task 3.2 remains open for
+deleted-file, symlink, lockfile, compiler/ABI, and compatibility invalidation
+controls. Worker rollout, rollback, and archive work also remain open.
+Full/coalesced E2E and publishing were not run.
