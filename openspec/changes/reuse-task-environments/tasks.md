@@ -31,6 +31,15 @@ generation 20 after cleanup. Queue was 36.500 s; compilation was 6.078 s.
 Native/symlink/lockfile/toolchain invalidation cases and worker/SDK rollout
 remain open. See `evidence/live-recheck-20261010-1045utc.md`.
 
+Follow-up (2026-10-10 11:02 UTC): explicit same-handle repeat
+`c4ff2a01901749548f634175ec903032` passed on the same worker at generation 21.
+Both Cargo caches were reused. Only OpenSpec evidence changed between source
+captures; Rust inputs did not. Queue was 0.533 s and compile was 0.281 s,
+compared with 6.078 s for the preceding changed-source compile. This is a warm
+repeat, not a cold-workspace comparison, and each invocation still had a
+separate request and queue phase. The environment parked after cleanup. See
+`evidence/live-recheck-20261010-1045utc.md`.
+
 ## 1. Durable request and agent interfaces
 
 - [x] 1.1 Add schema 3, strict environment key/handle validation and authenticated capabilities; verify real HTTP legacy identity, version refusal and unsupported-before-upload checks. Schema-3/HTTP/legacy/refusal controls passed in the focused authority/worker/CLI/scheduler suite: 91 passed, 6 skipped. Ledger: bounded capability/refusal outcomes with no secrets.
