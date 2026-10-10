@@ -30,3 +30,19 @@ class BaselineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'absolute_new_output'):
                 module.stage(SimpleNamespace(out=str(alias/'new-stage')))
             self.assertFalse((actual/'new-stage').exists())
+
+    def test_typing_compatibility_is_explicit_and_exact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);site=root/'lib/python3.12/site-packages';site.mkdir(parents=True)
+            public=site/'numpy.dist-info';public.mkdir();(public/'METADATA').write_text('Name: numpy\nVersion: 2.4.4\n')
+            backport=site/'typing.dist-info';backport.mkdir()
+            metadata=backport/'METADATA';metadata.write_text('Name: typing\nVersion: 3.10.0.0\n')
+            self.assertEqual(len(module.baseline(root)[0]),2)
+            packages,excluded=module.baseline(root,True,(3,12))
+            self.assertEqual(packages,[{'name':'numpy','version':'2.4.4'}])
+            self.assertEqual(excluded[0]['version'],'3.10.0.0')
+            with self.assertRaisesRegex(ValueError,'identity_refused'):module.baseline(root,True,(3,11))
+            metadata.write_text('Name: typing\nVersion: 3.9.0.0\n')
+            with self.assertRaisesRegex(ValueError,'identity_refused'):module.baseline(root,True,(3,12))
+            metadata.write_text('Name: other-typing\nVersion: 3.10.0.0\n')
+            with self.assertRaisesRegex(ValueError,'distribution_absent'):module.baseline(root,True,(3,12))
