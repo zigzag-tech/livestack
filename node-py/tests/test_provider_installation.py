@@ -3,6 +3,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from livestack_node.provider_installation import verify_installation
 
@@ -38,6 +39,7 @@ class InstallationTests(unittest.TestCase):
                 'sourceManifest':str(source_path),'sourceManifestSha256':digest(source_path.read_bytes()),
                 'environmentManifest':str(environment_path),'environmentManifestSha256':digest(environment_path.read_bytes())}}]}
             config_path = root/'private-service.json';config_path.write_bytes(canonical(config));config_path.chmod(0o600)
+            prefix_patch=patch.object(sys,'prefix',str(environment_root));prefix_patch.start();self.addCleanup(prefix_patch.stop)
             _, identity = verify_installation(config_path,'polytts')
             self.assertEqual(identity['sourceDigest'],source['sourceDigest'])
             with self.assertRaisesRegex(ValueError,'not_uniquely'):verify_installation(config_path,'polyasr')

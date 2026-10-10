@@ -92,6 +92,8 @@ def verify_installation(config_path, app):
         verify_files(Path(settings['sourceRoot'])/name, [{**record, 'bytes':record['sizeBytes']} for record in component['files']])
     environment = read_manifest(settings['environmentManifest'], settings['environmentManifestSha256'])
     verify_files(environment['root'], environment['files'])
+    if Path(sys.prefix).resolve() != Path(environment['root']).resolve():
+        raise ValueError('qualified_python_environment_root_mismatch')
     if Path(sys.executable).resolve() != Path(environment['pythonExecutable']).resolve():
         raise ValueError('qualified_python_interpreter_mismatch')
     if sha(Path(sys.executable).resolve().read_bytes()) != environment['pythonSha256']:
