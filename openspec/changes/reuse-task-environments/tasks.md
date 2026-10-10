@@ -40,6 +40,26 @@ repeat, not a cold-workspace comparison, and each invocation still had a
 separate request and queue phase. The environment parked after cleanup. See
 `evidence/live-recheck-20261010-1045utc.md`.
 
+Follow-up (2026-10-10 12:21 UTC): the current-source Rust `check rust` job
+`40a26d21917e4baab2389c80ca276bed` succeeded on `zz-joe-e2e-1` using the
+retained handle last used on `zz-joe-e2e-2`. Both Cargo cache components were
+reused and source changes were applied incrementally; the environment parked
+at generation 22 after cleanup. This verifies a current daemon-source update
+on the real compiler handler, but does not close the remaining Flutter
+Dart/native, lockfile, symlink, toolchain or ABI invalidation acceptance. See
+`evidence/live-recheck-20261010-1221utc.md`.
+
+The same recheck built worker release `4f282ce0` from current Livestack main
+(258 files, content hash
+`8917b440ac5c11055a46f396ed75d290df5e12de2c508faa5bb5ab83534cbba3`). The
+active `zz-joe-e2e-1` and `-2` units still point at `livestack-377bb4e4`
+(content hash `7cf90d52f10d4e68e9442aa493c8f8f67d0ec2a6c66526893017f9dd0d05d2c2`,
+246 files); verification found 12 files only in the current candidate and 6
+changed files, with no hand-edited deployed copies. The authority unit still
+points at `livestack-486cf6e5`. Candidate build and remote reads made no live
+changes; authority/worker rollout and readback remain open. Details:
+`evidence/live-recheck-20261010-1221utc.md`.
+
 ## 1. Durable request and agent interfaces
 
 - [x] 1.1 Add schema 3, strict environment key/handle validation and authenticated capabilities; verify real HTTP legacy identity, version refusal and unsupported-before-upload checks. Schema-3/HTTP/legacy/refusal controls passed in the focused authority/worker/CLI/scheduler suite: 91 passed, 6 skipped. Ledger: bounded capability/refusal outcomes with no secrets.
