@@ -42,6 +42,11 @@ class InstallationTests(unittest.TestCase):
             prefix_patch=patch.object(sys,'prefix',str(environment_root));prefix_patch.start();self.addCleanup(prefix_patch.stop)
             _, identity = verify_installation(config_path,'polytts')
             self.assertEqual(identity['sourceDigest'],source['sourceDigest'])
+            (environment_root/'unrecorded.py').write_text('unrecorded')
+            with self.assertRaisesRegex(ValueError,'unrecorded'):verify_installation(config_path,'polytts')
+            (environment_root/'unrecorded.py').unlink()
+            with patch.object(sys,'prefix','/wrong-environment'):
+                with self.assertRaisesRegex(ValueError,'environment_root'):verify_installation(config_path,'polytts')
             with self.assertRaisesRegex(ValueError,'not_uniquely'):verify_installation(config_path,'polyasr')
             (root/'source/polytts/fixture.py').write_bytes(b'changed')
             with self.assertRaises(ValueError):verify_installation(config_path,'polytts')
