@@ -85,3 +85,25 @@ physical disk. A Livestack change now compacts parked quota reservations while
 preserving their files and restores working limits on reuse. Its local store
 tests pass; it is not yet landed or deployed, so it has not changed live worker
 capacity or produced a live canary result.
+
+## Local control rerun — 2026-10-10 22:05 UTC
+
+The quota compaction source is now on `origin/main` at
+`73ec01d90fd8a31fe43f4837a30e09974bcf7d50`; the 21:25 note above predates
+that landing. Focused current-source tests passed: the toolchain-replacement
+probe and legacy parked-quota compaction/preservation controls passed 2/2 in
+6.32 seconds. The compaction fixture verifies four legacy 32 GiB reservations
+shrink while saved cache hashes remain intact, a locked replica keeps its old
+limit until unlocked, a fifth handle is admitted, and reuse restores the 32 GiB
+execution quota.
+
+Three local worker controls also passed 3/3 in 11.48 seconds: running-job
+cancellation, scope-close cleanup of running and queued task-environment jobs,
+and worker/authority restart followed by stale completion-receipt refusal.
+They ran with Python 3.12.14 and pytest 9.1.1, with both the venv and pytest
+base under `~/.cache`. The first attempt put the venv under `/tmp`; systemd's
+`PrivateTmp` hid its Python executable. Moving the venv into the home cache
+fixed the test setup. These results are local fixture/systemd-worker evidence;
+they do not verify the quota change on an admitted shared worker or establish
+live toolchain/ABI invalidation. No worker or authority was changed, and the
+19:21 UTC rollout readback above remains the last live rollout observation.

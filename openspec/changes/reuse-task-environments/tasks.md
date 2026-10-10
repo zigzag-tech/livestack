@@ -101,10 +101,15 @@ saved handle regaining its 32 GiB limit on reuse. test_workload_environments.py
 passes 26/26; quota-measurement failure refuses new admission. openspec validate
 reuse-task-environments --type change,
 py_compile, and git diff --check pass. Three worker integration cases in
-test_workload_worker.py -k environment could not run to completion because
-this machine's per-user systemd manager rejects systemd-run; the rootless
-Docker test is skipped here. The fix remains unlanded and undeployed, and the
-selected task-E2E canary still needs a worker rollout and live readback.
+test_workload_worker.py -k environment had an initial setup failure because
+systemd `PrivateTmp` hid a Python test environment under `/tmp`. With both the
+venv and pytest base under `~/.cache`, focused cancellation, scope-close
+descendant cleanup, and worker/authority-restart stale-receipt tests passed
+3/3 on lappy-bellinzona in 11.48 seconds (Python 3.12.14, pytest 9.1.1). The
+rootless Docker test remains skipped here. Quota compaction is now landed on
+`origin/main` at `73ec01d90fd8a31fe43f4837a30e09974bcf7d50`, but it has not
+been deployed to a shared worker. Live quota release/preservation and the
+selected task-E2E canary still need worker rollout and readback.
 
 ## 4. Receipts, consumer acceptance and rollout
 
