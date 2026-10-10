@@ -45,7 +45,11 @@ def stage(args):
     packages,excluded=baseline(args.baseline_venv)
     (output/'baseline-distributions.json').write_text(json.dumps({'packages':packages,'excluded':excluded},indent=2)+'\n')
     requirements=output/'baseline-requirements.txt'
-    requirements.write_text(''.join(record['name']+'=='+record['version']+'\n' for record in packages))
+    cuda_requirements=output/'cuda-requirements.txt'
+    cuda=[record for record in packages if '+cu' in record['version']]
+    public=[record for record in packages if record not in cuda]
+    requirements.write_text(''.join(record['name']+'=='+record['version']+'\n' for record in public))
+    cuda_requirements.write_text(''.join(record['name']+'=='+record['version']+'\n' for record in cuda))
     original=(Path(args.baseline_venv)/'bin/python').resolve()
     base=original.parents[1]
     # Python standalone runtime contains no model/voice assets. New independent
@@ -57,12 +61,17 @@ def stage(args):
     # Exact observed versions preserve the retained baseline. --no-deps does
     # not imply dependency consistency: the separate metadata gate records it.
     install=[args.uv,'pip','install','--no-deps','--link-mode','copy',
-         '--python',str(target),'--extra-index-url','https://download.pytorch.org/whl/cu129',
+         '--python',str(target),'--default-index','https://pypi.org/simple',
          '-r',str(requirements)]
     if not args.allow_public_downloads:
         install.insert(3,'--offline')
     try:
         run(install)
+        if cuda:
+            cuda_install=list(install)
+            cuda_install[cuda_install.index('https://pypi.org/simple')]='https://download.pytorch.org/whl/cu129'
+            cuda_install[-1]=str(cuda_requirements)
+            run(cuda_install)
     except subprocess.CalledProcessError as failure:
         (output/'stage-failure.json').write_text(json.dumps({'kind':'public-baseline-stage-refusal',
             'phase':'package-install','exitCode':failure.returncode,'environmentSealed':False,
