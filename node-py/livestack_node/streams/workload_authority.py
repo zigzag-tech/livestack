@@ -53,6 +53,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from .common import (MAX_BODY_BYTES, REFUSAL_FORBIDDEN_FIELD, REFUSAL_OVERSIZE, REFUSAL_SCHEMA_INVALID,
                      REFUSAL_STEP_NOT_ALLOWED, REFUSAL_UNAVAILABLE, Clock, bounded, body_size, optional)
+from ..workloads.result_manifest import workload_result_manifest
 
 REANNOUNCE_PACE_S = 0.025  # <= 40 frames/s: the ingress budget is 50/s per connection
 CONTRACT = "harmony.workload/1"
@@ -519,10 +520,10 @@ class StoreBackend:
         except WorkloadError as error:
             raise BackendRefused(error.status, str(error)) from error
 
-    def _output_ref(self, job_id: str, output: dict) -> dict:
-        """Return a bounded reference to the exact JSON result exposed by the owner-authenticated API."""
-        from ..workloads.model import encode
-        raw = encode(output, self.store.limits.record_bytes).encode("utf-8")
+    def _output_ref(self, job: dict) -> dict:
+        """Reference the same bounded completion manifest returned by the owner-authenticated API."""
+        _, raw = workload_result_manifest(job)
+        job_id = job["id"]
         path = f"/v1/workloads/jobs/{job_id}/result"
         ref = f"{self.public_base_url}{path}" if self.public_base_url else path
         if len(ref) > 512:
@@ -543,17 +544,18 @@ class StoreBackend:
                 SELECT a.job, COUNT(*) AS attempt_count, MAX(a.fence) AS latest_fence
                   FROM attempts a JOIN requested r ON r.id=a.job GROUP BY a.job
             ), latest AS (
-                SELECT a.job, a.id, a.worker, a.host, a.state, a.expires, a.created
+                SELECT a.job, a.id, a.worker, a.boot, a.host, a.fence, a.state, a.compilation
                   FROM attempts a JOIN attempt_counts c ON c.job=a.job AND c.latest_fence=a.fence
             ), latest_progress AS (
                 SELECT a.job, a.progress,
                        ROW_NUMBER() OVER (PARTITION BY a.job ORDER BY a.fence DESC) AS position
                   FROM attempts a JOIN requested r ON r.id=a.job WHERE a.progress IS NOT NULL
             )
-            SELECT j.id, j.owner, j.spec, j.state, j.created, j.updated, j.result, j.cause, j.reason,
+            SELECT j.id, j.owner, j.spec, j.state, j.created, j.updated, j.result, j.cause, j.reason, j.fence,
                    COALESCE(c.attempt_count, 0) AS attempt_count,
-                   a.id AS attempt_id, a.worker AS attempt_worker, a.host AS attempt_host,
-                   a.state AS attempt_state, a.expires AS attempt_expires, a.created AS attempt_created,
+                   a.id AS attempt_id, a.worker AS attempt_worker, a.boot AS attempt_boot,
+                   a.host AS attempt_host, a.fence AS attempt_fence, a.compilation AS attempt_compilation,
+                   a.state AS attempt_state,
                    p.progress AS latest_progress
               FROM requested r JOIN jobs j ON j.id=r.id
               LEFT JOIN attempt_counts c ON c.job=j.id
@@ -569,17 +571,16 @@ class StoreBackend:
                                    "result": json.loads(row["result"]) if row["result"] else None,
                                    "cause": json.loads(row["cause"]) if row["cause"] else None,
                                    "reason": row["reason"],
-                                   "attempt_count": row["attempt_count"], "attempts": []}
+                                   "fence": row["fence"], "attempt_count": row["attempt_count"], "attempts": []}
             if row["attempt_id"] is not None:
                 job["attempts"] = [{"id": row["attempt_id"], "worker": row["attempt_worker"],
+                                    "boot": row["attempt_boot"], "fence": row["attempt_fence"],
                                     "host": row["attempt_host"], "state": row["attempt_state"],
-                                    "expires": row["attempt_expires"], "created": row["attempt_created"]}]
+                                    "compilation": json.loads(row["attempt_compilation"]) if row["attempt_compilation"] else None}]
             if row["latest_progress"]:
                 job["progress"] = json.loads(row["latest_progress"])
             if job["state"] == "succeeded" and isinstance(job["result"], dict):
-                output = job["result"].get("result")
-                if isinstance(output, dict):
-                    job["output"] = self._output_ref(job["id"], output)
+                job["output"] = self._output_ref(job)
             result[job["id"]] = job
         return result
 

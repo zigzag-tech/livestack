@@ -20,6 +20,7 @@ from .job_changes import job_changes
 from .handler_registry import HandlerReleaseRegistry
 from .handler_release import MAX_MANIFEST_BYTES
 from .object_routes import route_object
+from .result_manifest import workload_result_manifest
 from .upload_grants import UploadGrants, route_upload_grant, route_upload_grant_owner
 from .network import BoundedRequests
 from ..identity_facts import IdentitySnapshotPublisher, valid_identity
@@ -504,12 +505,8 @@ class Handler(BaseHTTPRequestHandler):
                 return store.get(principal.id, parts[1])
             if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'result' and method == 'GET':
                 job = store.get(principal.id, parts[1])
-                completion = job.get('result')
-                output = completion.get('result') if isinstance(completion, dict) else None
-                if job.get('state') != 'succeeded' or not isinstance(output, dict):
-                    raise WorkloadError('job result is not available', 409)
-                # The stream reference hashes exactly this owner-authenticated JSON representation.
-                return output
+                # The stream reference hashes exactly this bounded owner-authenticated completion manifest.
+                return workload_result_manifest(job)[0]
             if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'cancel' and method == 'POST':
                 return store.cancel(principal.id, parts[1])
             if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'withdraw' and method == 'POST':

@@ -36,8 +36,10 @@ Cancellation also checks the original requester.
 
 On success, `harmony.workload/1` carries one `output` reference to the canonical JSON result manifest at
 `/v1/workloads/jobs/<job-id>/result` (absolute when `public_base_url` is configured). The endpoint uses the
-same authenticated owner check as the job endpoint. Its manifest lists artifact names, digests and sizes;
-artifact bytes remain in the existing content store.
+same authenticated owner check as the job endpoint. The bounded manifest includes the accepted spec, job
+identity, current attempt identity and compiler grant, plus the handler result with artifact names, digests
+and sizes. Artifact bytes remain in the existing content store. The reference digest covers this exact
+manifest, so clients can fetch it once after `done` and verify artifacts without polling job status.
 
 The `harmony.jobs/1` reader obtains its capped recent-job set with one SQLite checkout and one query. A cold
 replay spaces publications at 40 frames per second, below the daemon ingress limit.
