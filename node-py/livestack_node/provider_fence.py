@@ -1,5 +1,8 @@
 """Provider-wide admission and physical drain; operator authorization is injected."""
 from concurrent.futures import Executor
+from contextvars import ContextVar
+
+_shutdown_admission = ContextVar("provider_shutdown_admission", default=None)
 from threading import RLock
 from uuid import uuid4
 
@@ -51,7 +54,7 @@ class ProviderFence:
 
     def admit(self):
         with self._lock:
-            if self._holder is not None:
+            if self._holder is not None and _shutdown_admission.get() != (self, self._holder, self._epoch):
                 raise FenceRefused('provider_admission_held')
             key = uuid4().hex
             self._active.add(key)
@@ -64,6 +67,38 @@ class ProviderFence:
             self._active.remove(key)
             if not physically_settled:
                 self._uncertain.add(key)
+
+    def shutdown_owned(self, credential, holder, epoch, fn, synchronize):
+        """Trusted owner callback only; no request payload selects shutdown code."""
+        self._authorize(credential, 'shutdown')
+        with self._lock:
+            if self._holder != holder or self._epoch != epoch or not self._status()['drained']:
+                raise FenceRefused('shutdown_requires_current_physically_drained_fence')
+            key = uuid4().hex
+            self._active.add(key)
+        context = _shutdown_admission.set((self, holder, epoch))
+        settled = False
+        try:
+            return fn()
+        finally:
+            try:
+                synchronize()
+                settled = True
+            finally:
+                _shutdown_admission.reset(context)
+                self.settle(key, settled)
+
+    def run(self, fn, synchronize):
+        key = self.admit()
+        settled = False
+        try:
+            return fn()
+        finally:
+            try:
+                synchronize()
+                settled = True
+            finally:
+                self.settle(key, settled)
 
     def executor(self, executor, synchronize):
         return FencedExecutor(self, executor, synchronize)
@@ -123,3 +158,36 @@ class ProviderAdmissionMiddleware:
             await self.app(scope, receive, send)
         finally:
             self.fence.settle(key)
+
+
+def install_provider_fence(app, fence, bypass, source_identity):
+    """Called by trusted owner bootstrap before startup, never by a package."""
+    from fastapi import APIRouter, Body, Header, HTTPException
+    if app.middleware_stack is not None:
+        raise FenceRefused('provider_fence_requires_unstarted_app')
+    if not isinstance(source_identity, dict) or not source_identity:
+        raise FenceRefused('source_identity_required')
+    router = APIRouter()
+
+    @router.post('/_owner/fence/{action}')
+    def control(action: str, request: dict = Body(...), authorization: str | None = Header(default=None)):
+        try:
+            if action == 'hold':
+                receipt = fence.hold(authorization, request.get('holder'))
+            elif action == 'status':
+                receipt = fence.status(authorization)
+            elif action == 'release':
+                receipt = fence.release(authorization, request.get('holder'), request.get('epoch'))
+            else:
+                raise HTTPException(404, 'unknown fence action')
+            return {**receipt, 'sourceIdentity': source_identity}
+        except PermissionError:
+            raise HTTPException(403, 'provider operator authorization refused')
+        except FenceRefused as exc:
+            raise HTTPException(409, str(exc))
+
+    app.include_router(router)
+    app.add_middleware(ProviderAdmissionMiddleware, fence=fence,
+        bypass=lambda scope: (scope['type'] == 'http' and scope.get('method') == 'POST'
+            and scope['path'] in ('/_owner/fence/hold', '/_owner/fence/status', '/_owner/fence/release')) or bypass(scope))
+    return fence

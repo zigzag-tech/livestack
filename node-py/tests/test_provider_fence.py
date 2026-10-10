@@ -66,3 +66,49 @@ class ProviderFenceTests(unittest.TestCase):
         self.assertEqual(messages[2]['code'],1013)
         self.assertEqual(messages[3]['status'],401)
         self.assertTrue(fence.status('operator')['drained'])
+
+
+class OperatorApiTests(unittest.TestCase):
+    def test_real_asgi_operator_auth_cas_and_source_receipt(self):
+        import httpx
+        from fastapi import FastAPI
+        from livestack_node.provider_fence import install_provider_fence
+        app = FastAPI()
+        @app.post('/legacy')
+        def legacy():
+            return {'ok': True}
+        install_provider_fence(app, ProviderFence(authorize), lambda scope: False,
+                               {'sourceSha256':'reviewed-source-fixture'})
+        async def run():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://fixture') as client:
+                denied = await client.post('/_owner/fence/hold',json={'holder':'deploy'})
+                self.assertEqual(denied.status_code,403)
+                held = await client.post('/_owner/fence/hold',headers={'Authorization':'operator'},json={'holder':'deploy'})
+                self.assertTrue(held.json()['drained'])
+                self.assertEqual(held.json()['sourceIdentity']['sourceSha256'],'reviewed-source-fixture')
+                self.assertEqual((await client.post('/legacy')).status_code,503)
+                wrong = await client.post('/_owner/fence/release',headers={'Authorization':'operator'},json={'holder':'other','epoch':held.json()['epoch']})
+                self.assertEqual(wrong.status_code,409)
+                released = await client.post('/_owner/fence/release',headers={'Authorization':'operator'},json={'holder':'deploy','epoch':held.json()['epoch']})
+                self.assertEqual(released.status_code,200)
+                self.assertEqual((await client.post('/legacy')).status_code,200)
+        asyncio.run(run())
+
+
+class ShutdownTests(unittest.TestCase):
+    def test_only_current_authenticated_drained_owner_shutdown_can_dispatch(self):
+        fence = ProviderFence(authorize)
+        receipt = fence.hold('operator','deploy')
+        with self.assertRaises(PermissionError):
+            fence.shutdown_owned('caller','deploy',receipt['epoch'],lambda:None,lambda:None)
+        with self.assertRaises(FenceRefused):
+            fence.shutdown_owned('operator','deploy',receipt['epoch']+1,lambda:None,lambda:None)
+        with ThreadPoolExecutor(1) as base:
+            executor = fence.executor(base,lambda:None)
+            def shutdown():
+                self.assertFalse(fence.status('operator')['drained'])
+                return executor.submit(lambda:'released').result()
+            self.assertEqual(fence.shutdown_owned('operator','deploy',receipt['epoch'],shutdown,lambda:None),'released')
+            with self.assertRaises(FenceRefused):
+                executor.submit(lambda:None)
+        self.assertTrue(fence.status('operator')['drained'])
