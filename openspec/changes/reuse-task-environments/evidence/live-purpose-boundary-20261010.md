@@ -48,3 +48,19 @@ The live purpose boundary is confirmed. Authority and worker release
 provenance, a representative post-rollout canary, rollback readback, and
 consumer SDK/default activation remain open. Automatic selection stays off
 until those checks pass.
+
+## Selected task-E2E rebuild attempt — 2026-10-10 21:17 UTC
+
+Benchday submitted one explicit check,
+`fleet-workload.task-environment-source-and-cache-freshness` (1 of 936),
+against task-E2E handle `06318b61f53c4b3ca5cb7dc620b5702f` after its prior
+cancelled attempt left it requiring a rebuild. Job
+`8151336bd90b41cc9c9126c93981a7b4` tried `zz-joe-e2e-2` and then
+`zz-joe-e2e-1`; both attempts stopped before source materialization because
+the worker-host storage budget was exhausted. The authority returned an
+infrastructure outcome, no result artifact, and generation 15 with zero bytes
+in `rebuild_required`. Queue was 88.629 s, source transfer 8.316 s, and
+cleanup 0.012 s. The wrapper reported that completion omitted its bounded
+result artifact. No assertion ran, so this is not a passing canary. The
+installed task-E2E release is still the prior worker release; no authority or
+worker rollout was performed.
