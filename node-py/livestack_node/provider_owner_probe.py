@@ -33,7 +33,7 @@ def control(path, request):
             content+=part
             if len(content)>8192:raise ValueError('owner_receipt_bound')
         value=json.loads(content.split(b'\n',1)[0])
-        if value.get('ok') is not True or value.get('result',{}).get('serverProcessId')!=pid:
+        if value.get('ok') is not True or type(value.get('result',{}).get('serverProcessId')) is not int or value['result']['serverProcessId']!=pid:
             raise PermissionError('owner_response_peer_process_refused')
         try:
             if process_start_ticks(pid)!=start:raise PermissionError('owner_peer_incarnation_changed')
