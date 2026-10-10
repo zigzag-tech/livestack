@@ -30,7 +30,7 @@ def private_config(path):
 
 def read_manifest(path, digest):
     path = Path(path)
-    if not path.is_absolute() or path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
+    if not path.is_absolute() or path.is_symlink() or not path.is_file() or path.stat().st_size > 32 * 1024 * 1024:
         raise ValueError('installation_manifest_path_or_bound')
     content = path.read_bytes()
     if sha(content) != digest:
@@ -40,7 +40,7 @@ def read_manifest(path, digest):
 
 def verify_files(root, files):
     root = Path(root)
-    if not root.is_absolute() or root.is_symlink() or not root.is_dir() or not isinstance(files, list) or not 0 < len(files) <= 16384:
+    if not root.is_absolute() or root.is_symlink() or not root.is_dir() or not isinstance(files, list) or not 0 < len(files) <= 65536:
         raise ValueError('installation_file_inventory_bound')
     seen = set()
     total = 0
@@ -94,11 +94,27 @@ def verify_installation(config_path, app):
     verify_files(environment['root'], environment['files'])
     expected = {record['path'] for record in environment['files']}
     actual = set()
+    links = environment.get('links', [])
+    if not isinstance(links,list) or len(links)>16:
+        raise ValueError('environment_link_inventory_bound')
+    aliases = {}
+    for record in links:
+        relative, target = record['path'], record['target']
+        if not isinstance(relative,str) or relative.startswith('/') or any(part in ('', '.', '..') for part in relative.split('/')) or relative in aliases or not isinstance(target,str):
+            raise ValueError('environment_link_inventory_path')
+        path = Path(environment['root'])/relative
+        if not path.is_symlink() or os.readlink(path)!=target or not path.resolve().is_relative_to(Path(environment['root']).resolve()):
+            raise ValueError('environment_internal_alias_mismatch')
+        aliases[relative]=target
+    observed_aliases=set()
     for directory, names, files in os.walk(environment['root'], followlinks=False):
         for name in names:
             path = Path(directory)/name
             if path.is_symlink():
-                raise ValueError('environment_directory_link_not_qualified')
+                relative=str(path.relative_to(environment['root']))
+                if relative not in aliases:
+                    raise ValueError('environment_directory_link_not_qualified')
+                observed_aliases.add(relative)
         for name in files:
             path = Path(directory)/name
             relative = str(path.relative_to(environment['root']))
@@ -107,8 +123,10 @@ def verify_installation(config_path, app):
                     raise ValueError('environment_external_link_not_qualified')
                 continue
             actual.add(relative)
-            if len(actual)>16384:
+            if len(actual)>65536:
                 raise ValueError('environment_inventory_count_bound')
+    if observed_aliases != set(aliases):
+        raise ValueError('environment_alias_inventory_mismatch')
     if actual != expected:
         raise ValueError('environment_unrecorded_or_missing_files')
     if Path(sys.prefix).resolve() != Path(environment['root']).resolve():
