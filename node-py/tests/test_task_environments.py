@@ -548,7 +548,7 @@ def test_retained_cache_entries_have_a_separate_bound_from_captured_source(tmp_p
 
     unexpected = second['source']/'unexpected.generated'
     unexpected.write_text('not declared or cached')
-    with pytest.raises(WorkloadError, match='undeclared retained source file'):
+    with pytest.raises(WorkloadError, match=r"undeclared retained source file: 'unexpected\.generated'"):
         store.verify_source(second)
     unexpected.unlink()
 
