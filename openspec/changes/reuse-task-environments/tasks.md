@@ -120,6 +120,15 @@ rootless Docker test remains skipped here. Quota compaction is now landed on
 been deployed to a shared worker. Live quota release/preservation and the
 selected task-E2E canary still need worker rollout and readback.
 
+Toolchain identity follow-up (2026-10-10 23:33 UTC): admitted job
+`45644ca87cdc4611961ec39caf28401e` succeeded on `zz-joe-e2e-3` with the same
+environment handle after changing its compiler probe from Rust 1.98.1 to
+1.95.0. The receipt reported `toolchain_changed` and invalidated both Cargo
+cache components; the `cli` check passed and the environment parked after
+cleanup. This closes the compiler-version subcontrol only; ABI and build-mode
+invalidation remain open. Queue time was 327.719 s. See
+`evidence/rust-toolchain-invalidation-20261010.md`.
+
 ## 4. Receipts, consumer acceptance and rollout
 
 - [x] 4.1 Produce bounded per-attempt environment receipts and measured phase timing; verify known compilation positive controls, unavailable measurements, precise reuse rejection reasons and recording failure propagation. Ledger: join all environment/placement/outcome records by decision/job/attempt/handle/generation. Unit and real systemd controls verify known and unknown timing, six distinct replica refusal reasons, timing-write failure propagation, and bounded receipts. Admitted stable-path Rust checks and the changed-source daemon check provide successful compiler receipts and real unavailable test timing. The installed completion ledger row links to admission through parent decision ID and records the same job, attempt, worker, host, handle and generation 11. See evidence/cargo-cache-stable-path-repeat-20261009.md.
