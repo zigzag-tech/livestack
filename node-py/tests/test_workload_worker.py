@@ -978,6 +978,88 @@ def test_cancel_running_job_reconciles_before_readvertising_capacity(fleet, tmp_
         worker.close()
 
 
+def test_scope_close_cancels_task_environment_descendants_after_cleanup(fleet, tmp_path, monkeypatch):
+    store, config, caller, digest = fleet
+    environment_root = tmp_path/'cancelled-scope-task-environments'
+    environment_root.mkdir()
+    config['task_environments'] = dict(root=str(environment_root), host_id='test-host',
+        quota_helper='/unused/in-tests', project_id_min=100000, project_id_max=100063,
+        max_bytes_per_replica=32*1024**3, max_bytes_per_owner=128*1024**3,
+        max_total_bytes=256*1024**3, reserve_bytes=0, profiles={'native-test-v1': {
+            'handlers': ['native.v1'], 'purpose': 'development', 'cache_contract': 'native-test-v1',
+            'probe_argv': [sys.executable, '-c', 'print("native-test-toolchain-v1")'],
+            'cache_components': [{'name': 'incremental-build', 'path': 'source/build',
+                'inputs': [], 'contract': 'incremental-build-v1'}]}})
+
+    def quota_usage(project_ids):
+        return [{'project_id': project_id, 'used_bytes': 0, 'hard_bytes': 32*1024**3}
+                for project_id in project_ids]
+
+    original_init = TaskEnvironmentStore.__init__
+    def test_store_init(self, environment_config, **kwargs):
+        return original_init(self, environment_config, **kwargs,
+            quota_ensure=lambda _handle, _project, quota: {'quota_bytes': quota},
+            quota_probe=lambda _root: True, quota_usage=quota_usage,
+            require_separate_filesystem=False, filesystem_bytes=8*1024**3)
+    monkeypatch.setattr(TaskEnvironmentStore, '__init__', test_store_init)
+
+    scope = {'key': 'cancelled-task-scope', 'lease_seconds': 300}
+    environment = {'key': 'cancelled-task-environment', 'reuse': 'prefer'}
+    running = caller.submit(dict(version=4, key='running-task-environment', handler='native.v1',
+        input_digest=digest, need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
+        scope=scope, environment=environment,
+        payload={'sleep':120,'cache_before_sleep':True,'spawn_child':True}))
+    handle = running['environment_handle']
+    child_pid_file = environment_root/handle/'source'/'build'/'child.pid'
+    worker = WorkloadWorker(config)
+    errors = []
+    def execute():
+        try:
+            worker.step()
+        except Exception as error:
+            errors.append(error)
+    thread = Thread(target=execute)
+    thread.start()
+    try:
+        deadline = time.monotonic()+10
+        while True:
+            journal = worker.journal.read()
+            if journal and journal['phase'] == 'running' and child_pid_file.exists():
+                break
+            assert time.monotonic() < deadline
+            time.sleep(.05)
+        attempt = journal['assignment']['attempt_id']
+        group = worker.executor.inspect(attempt).get('ControlGroup')
+        assert group
+
+        queued = caller.submit(dict(version=4, key='queued-task-environment', handler='native.v1',
+            input_digest=digest, need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},
+            scope=scope, environment=environment, payload={'cache_before_sleep':True}))
+        assert queued['environment_handle'] == handle
+        closed = caller.close_scope(scope['key'], reason='cancel task group')
+        assert (closed['cancelled'], closed['running_cleanup'], closed['replayed']) == (2, 1, False)
+        thread.join(timeout=15)
+        assert not thread.is_alive() and errors == []
+        assert caller.get(running['id'])['state'] == 'cancelled'
+        assert caller.get(queued['id'])['state'] == 'cancelled'
+        assert caller.get_scope(scope['key'])['state'] == 'closed'
+        assert not worker.step()
+
+        cgroup = Path('/sys/fs/cgroup')/group.lstrip('/')
+        assert not cgroup.exists() or 'populated 0' in (cgroup/'cgroup.events').read_text()
+        marker = json.loads((environment_root/handle/'environment.json').read_text())
+        assert marker['state'] == 'rebuild_required'
+        assert caller.get_environment(handle)['state'] == 'rebuild_required'
+        assert not any(replica['handle'] == handle for replica in worker.task_environments.report()[1])
+        with store.transaction() as db:
+            assert db.execute("SELECT count(*) FROM attempts WHERE state='cleanup'").fetchone()[0] == 0
+    finally:
+        if thread.is_alive():
+            caller.close_scope(scope['key'], reason='test cleanup')
+            thread.join(timeout=15)
+        worker.close()
+
+
 def test_production_worker_refuses_unbounded_developer_filesystem(fleet):
     _, config, _, _ = fleet
     config['require_dedicated_filesystem'] = True
