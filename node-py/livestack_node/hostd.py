@@ -443,6 +443,17 @@ def build_app(broker: HostBroker):
                 out.append(peer.refresh())
             except Exception as e:
                 out.append({"error": str(e)})
+        queue_depths, queue_depth_complete = _queue_depths_from_status_peers(out)
+        try:
+            counters = broker.status_counters(
+                queue_depths=queue_depths,
+                queue_depth_complete=queue_depth_complete,
+            )
+        except Exception as e:
+            print(f"[harmony] status counter projection failed: {type(e).__name__}: {e}",
+                  flush=True)
+            counters = {"error": "counter_projection_failed",
+                        "queue_depth_complete": False}
         # Hosted backends have no peer to report them, so their health and the
         # prober's view surface here — otherwise a gated-off build host is
         # invisible exactly when you need to see why.
@@ -455,7 +466,8 @@ def build_app(broker: HostBroker):
         return {"peers": out, "membership": broker.membership_snapshot(),
                 "last_evicted_at": state["last_evicted_at"], "hosted": hosted,
                 "host_id": broker.host_id,
-                "links": {k: round(v, 1) for k, v in broker.link_ms.items()}}
+                "links": {k: round(v, 1) for k, v in broker.link_ms.items()},
+                "counters": counters}
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def dashboard():
@@ -809,6 +821,9 @@ def build_app(broker: HostBroker):
         lease_id = None
         target = result.get("target")
         if target:
+            record_admitted = getattr(broker, "record_admitted", None)
+            if callable(record_admitted):
+                record_admitted(kind)
             # The ledger is bookkeeping and the grant is the product: a checkout
             # failure must not void an answer the caller already has.
             try:
@@ -1109,6 +1124,50 @@ def build_app(broker: HostBroker):
     return app
 
 
+def _queue_depths_from_status_peers(peers):
+    """Sum valid waiting gauges from the peer snapshots already read by /status."""
+    max_safe = (1 << 53) - 1
+    totals = {}
+    seen_kinds = set()
+    incomplete_kinds = set()
+    complete = True
+    for peer in peers:
+        if not isinstance(peer, dict) or "error" in peer:
+            complete = False
+            continue
+        units = peer.get("units")
+        if not isinstance(units, list):
+            complete = False
+            continue
+        for unit in units:
+            if not isinstance(unit, dict):
+                complete = False
+                continue
+            kind = unit.get("kind")
+            if not isinstance(kind, str) or not kind:
+                complete = False
+                continue
+            seen_kinds.add(kind)
+            queue = unit.get("queue")
+            waiting = queue.get("waiting") if isinstance(queue, dict) else None
+            if (isinstance(waiting, bool) or not isinstance(waiting, int) or
+                    waiting < 0 or waiting > max_safe):
+                incomplete_kinds.add(kind)
+                continue
+            total = totals.get(kind, 0) + waiting
+            if total > max_safe:
+                incomplete_kinds.add(kind)
+            else:
+                totals[kind] = total
+    if not complete:
+        return {kind: None for kind in seen_kinds}, False
+    for kind in incomplete_kinds:
+        totals[kind] = None
+    # Keep known kinds in the projection even when their queue field is absent
+    # or malformed, so status can distinguish "unknown" from "not present".
+    return {kind: totals.get(kind) for kind in seen_kinds}, True
+
+
 def _release_report(body: dict) -> dict:
     """``hosted_release`` keywords from a release body, or HTTP 422."""
     import math
@@ -1123,8 +1182,8 @@ def _release_report(body: dict) -> dict:
     if "wall_s" in body:
         w = body["wall_s"]
         if (isinstance(w, bool) or not isinstance(w, (int, float))
-                or not math.isfinite(w) or w < 0):
-            problems.append(f"wall_s must be a non-negative number, got {w!r}")
+                or not math.isfinite(w) or w < 0 or w > 365 * 24 * 60 * 60):
+            problems.append(f"wall_s must be a finite number from 0 through 365 days, got {w!r}")
         else:
             out["job_wall_s"] = float(w)
     if problems:

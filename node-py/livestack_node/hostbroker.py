@@ -17,9 +17,11 @@ This is the single-host degenerate case of the mesh domain planner; the same
 """
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
+from collections import deque
 
 from dataclasses import replace
 from typing import Callable, Dict, List, Mapping, Optional, Tuple
@@ -30,6 +32,149 @@ from .planner import (
 )
 from .membership import MIA, MembershipPolicy, PeerRoster, RosterFull, probe_interval
 from .ledger import Candidate, Decision, JsonlLedger
+
+
+class _UnitTelemetry:
+    """Bounded, process-local workload counters and caller latency samples."""
+
+    BUCKET_S = 60
+    BUCKETS = 60
+    MAX_KINDS = 64
+    MAX_SAMPLES = 256
+    MAX_COUNT = (1 << 53) - 1
+    MAX_WALL_S = 365 * 24 * 60 * 60
+    COUNTERS = ("admitted", "completed", "failed", "evicted")
+
+    def __init__(self, clock):
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._by_kind = {}
+        self._truncated = False
+
+    def _state_locked(self, kind, now, *, create):
+        if (not isinstance(kind, str) or not kind or len(kind) > 128 or
+                len(kind.encode("utf-8", errors="replace")) > 128):
+            self._truncated = True
+            return None
+        state = self._by_kind.get(kind)
+        if state is not None or not create:
+            return state
+        if len(self._by_kind) >= self.MAX_KINDS:
+            self._truncated = True
+            return None
+        state = {
+            "observed_from_s": int(now // self.BUCKET_S) * self.BUCKET_S,
+            "buckets": {name: {} for name in self.COUNTERS},
+            "saturated": set(),
+            "latencies_ms": deque(maxlen=self.MAX_SAMPLES),
+        }
+        self._by_kind[kind] = state
+        return state
+
+    def ensure(self, kind, *, now=None):
+        now = float(self._clock() if now is None else now)
+        if not math.isfinite(now):
+            return
+        with self._lock:
+            self._state_locked(kind, now, create=True)
+
+    def increment(self, kind, counter, *, now=None):
+        if counter not in self.COUNTERS:
+            return
+        now = float(self._clock() if now is None else now)
+        if not math.isfinite(now):
+            return
+        bucket = int(now // self.BUCKET_S) * self.BUCKET_S
+        oldest = bucket - (self.BUCKETS - 1) * self.BUCKET_S
+        with self._lock:
+            state = self._state_locked(kind, now, create=True)
+            if state is None:
+                return
+            counts = state["buckets"][counter]
+            value = counts.get(bucket, 0)
+            if value < self.MAX_COUNT:
+                value += 1
+            counts[bucket] = value
+            if value == self.MAX_COUNT:
+                state["saturated"].add((counter, bucket))
+            for name in self.COUNTERS:
+                old = state["buckets"][name]
+                for start in tuple(old):
+                    if start < oldest:
+                        del old[start]
+                        state["saturated"].discard((name, start))
+
+    def record_latency(self, kind, wall_s, *, now=None):
+        if isinstance(wall_s, bool) or not isinstance(wall_s, (int, float)):
+            return False
+        wall_s = float(wall_s)
+        if (not math.isfinite(wall_s) or wall_s < 0 or
+                wall_s > self.MAX_WALL_S):
+            return False
+        latency_ms = wall_s * 1000.0
+        if not math.isfinite(latency_ms):
+            return False
+        now = float(self._clock() if now is None else now)
+        if not math.isfinite(now):
+            return False
+        with self._lock:
+            state = self._state_locked(kind, now, create=True)
+            if state is None:
+                return False
+            state["latencies_ms"].append(latency_ms)
+        return True
+
+    @staticmethod
+    def _percentile(values, fraction):
+        ordered = sorted(values)
+        rank = max(1, math.ceil(fraction * len(ordered)))
+        return round(ordered[rank - 1], 1)
+
+    def snapshot(self, *, queue_depths=None, queue_depth_complete=True, now=None):
+        now = float(self._clock() if now is None else now)
+        if not math.isfinite(now):
+            now = float(self._clock())
+        queue_depths = queue_depths or {}
+        for kind in queue_depths:
+            self.ensure(kind, now=now)
+        current = int(now // self.BUCKET_S) * self.BUCKET_S
+        oldest = current - (self.BUCKETS - 1) * self.BUCKET_S
+        with self._lock:
+            by_kind = {}
+            for kind, state in self._by_kind.items():
+                for name in self.COUNTERS:
+                    buckets = state["buckets"][name]
+                    for start in tuple(buckets):
+                        if start < oldest:
+                            del buckets[start]
+                            state["saturated"].discard((name, start))
+                row = {"observed_from_s": state["observed_from_s"]}
+                for counter in self.COUNTERS:
+                    buckets = state["buckets"][counter]
+                    row[counter] = [
+                        {"start_s": start, "count": buckets[start],
+                         **({"saturated": True}
+                            if (counter, start) in state["saturated"] else {})}
+                        for start in sorted(buckets)
+                        if oldest <= start <= current
+                    ]
+                samples = list(state["latencies_ms"])
+                row["latency_sample_count"] = len(samples)
+                if samples:
+                    row["p50_ms"] = self._percentile(samples, 0.50)
+                    row["p95_ms"] = self._percentile(samples, 0.95)
+                depth = queue_depths.get(kind)
+                if (queue_depth_complete and isinstance(depth, int) and
+                        not isinstance(depth, bool) and 0 <= depth <= self.MAX_COUNT):
+                    row["queue_depth"] = depth
+                by_kind[kind] = row
+            return {
+                "bucket_s": self.BUCKET_S,
+                "window_s": self.BUCKET_S * self.BUCKETS,
+                "queue_depth_complete": bool(queue_depth_complete),
+                "truncated_unit_kinds": self._truncated,
+                "by_kind": by_kind,
+            }
 
 
 def _res_max(a: Mapping[str, float], b: Mapping[str, float]) -> Dict[str, float]:
@@ -228,6 +373,9 @@ class HostBroker:
         # lease ends. None on a host broker: nothing is recorded.
         self.policy_runtime = None
         self._lease_lock = threading.Lock()     # the reconcile thread snapshots too
+        # Counters are exposed with epoch-second bucket starts; planner and
+        # lease timestamps remain on the broker's monotonic clock.
+        self._telemetry = _UnitTelemetry(time.time)
         self._lease_seq = 0
         # Leak reclaim bookkeeping: peer -> last attempt, and how often to retry.
         self._last_reclaim: Dict[str, float] = {}
@@ -422,6 +570,25 @@ class HostBroker:
     def _now(self, now: Optional[float] = None) -> float:
         return now if now is not None else (self._clock() if self._clock else time.time())
 
+    def record_admitted(self, kind: str, now: Optional[float] = None) -> None:
+        """Record a caller grant made by the fleet-scheduler admission path."""
+        self._telemetry.increment(kind, "admitted", now=now)
+
+    def _record_request_grants(self, plan_result, requested_ids):
+        for grant in plan_result.of(Grant):
+            if grant.request_id in requested_ids:
+                self._telemetry.increment(grant.kind, "admitted")
+
+    def status_counters(self, *, queue_depths=None,
+                        queue_depth_complete: bool = True,
+                        now: Optional[float] = None) -> dict:
+        """Bounded read-only counters plus queue gauges from the current peer view."""
+        return self._telemetry.snapshot(
+            queue_depths=queue_depths,
+            queue_depth_complete=queue_depth_complete,
+            now=now,
+        )
+
     def hosted_checkout(self, device_id: str, kind: str, owner: str,
                         now: Optional[float] = None,
                         decision_id: Optional[str] = None) -> str:
@@ -493,6 +660,12 @@ class HostBroker:
         An expired lease is held until it EXPIRED (last heartbeat + TTL), not
         until whichever later request happened to reap it: reaping is lazy, and
         its timing says nothing about the job."""
+        if caller_ok is True:
+            self._telemetry.increment(lease.get("kind", ""), "completed")
+        elif caller_ok is False:
+            self._telemetry.increment(lease.get("kind", ""), "failed")
+        if job_wall_s is not None:
+            self._telemetry.record_latency(lease.get("kind", ""), job_wall_s)
         rt = self.policy_runtime
         did = lease.get("decision_id")
         if rt is None or not did:
@@ -1101,6 +1274,7 @@ class HostBroker:
         Evicts are applied before loads so VRAM is freed first. Returns the Plan."""
         world = self.snapshot(requests, last_evicted_at)
         p = plan(world, self.policy)
+        requested_ids = {r.id for r in (requests or [])}
         semantic = {r.id: r for r in world.requests if not r.kind}
         self._note_demand([replace(semantic[g.request_id], kind=g.kind)
                            for g in p.of(Grant) if g.request_id in semantic], world.now)
@@ -1110,12 +1284,14 @@ class HostBroker:
             # that is the product of a fleet broker — but nothing is sent to a
             # peer. One card, one master: only the host broker on a machine may
             # warm or evict units on that machine.
+            self._record_request_grants(p, requested_ids)
             return p
         for ev in p.of(Evict):
             peer = self._peer_for(ev.kind, ev.device_id)
             if peer is not None:
                 self._log(f"[hostbroker] evict {ev.kind}@{ev.device_id}: {ev.reason}")
                 peer.evict(ev.kind)
+                self._telemetry.increment(ev.kind, "evicted")
                 # An evicted unit is no longer arriving, whatever we dispatched
                 # before. Leaving the entry would reserve the card we just freed.
                 self._in_flight.pop((ev.kind, ev.device_id), None)
@@ -1170,6 +1346,7 @@ class HostBroker:
                     self._log(f"[hostbroker] warm {ld.kind}@{ld.device_id} did not "
                               f"confirm ({type(e).__name__}: {e}) — treating it as "
                               f"in flight")
+        self._record_request_grants(p, requested_ids)
         return p
 
 
