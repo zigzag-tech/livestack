@@ -264,6 +264,30 @@ def test_profile_probe_refresh_invalidates_cache_after_toolchain_replacement(tmp
     store.release(second)
 
 
+def test_machine_abi_change_invalidates_cache_before_reuse(tmp_path, monkeypatch):
+    store, _, _ = make_store(tmp_path)
+    handle = '6'*32
+    incoming, digest = bundle(tmp_path, {'pubspec.lock': b'lock', 'lib/main.dart': b'code'})
+    first = store.prepare(assignment(handle, 1, digest), incoming, handler=HANDLER)
+    cache = first['source']/'.dart_tool'/'cache'
+    cache.write_text('compiled for the original machine ABI')
+    old_compatibility = first['compatibility']
+    finish(store, first, generation=1)
+
+    original_machine = task_environments_module.platform.machine()
+    monkeypatch.setattr(task_environments_module.platform, 'machine',
+                        lambda: original_machine + '-abi-change')
+    old_replica = local_replica(store, handle, 1)
+    second = store.prepare(assignment(handle, 2, digest, replicas=[old_replica]), incoming,
+                           handler=HANDLER)
+    assert second['reuse_outcome'] == 'rebuilt'
+    assert second['reason_code'] == 'toolchain_changed'
+    assert second['compatibility'] != old_compatibility
+    assert second['cache_components'][0]['outcome'] == 'invalidated'
+    assert not (second['source']/'.dart_tool'/'cache').exists()
+    finish(store, second, generation=2)
+
+
 def test_incomplete_writer_is_never_reported_as_parked_and_generation_fences(tmp_path):
     store, _, _ = make_store(tmp_path)
     handle = 'd'*32
