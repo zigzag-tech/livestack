@@ -1487,6 +1487,9 @@ def main():
               f"({ledger.max_bytes // (1024 * 1024)} MiB x {ledger.max_files}"
               + (f", {ledger.max_age_s / 86400:.0f}d" if ledger.max_age_s
                  else ", age window disabled") + ")", flush=True)
+    # Native stream producers (services-own-their-streams). A no-op unless HARMONY_STREAMS=1.
+    from .hostd_streams import start_for_hostd
+    start_for_hostd(broker, host_id, not dispatch, lambda m: print(m, flush=True))
     uvicorn.run(build_app(broker), host="0.0.0.0", port=port)
 
 

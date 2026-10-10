@@ -502,6 +502,14 @@ class Handler(BaseHTTPRequestHandler):
                         'principal': store.principal_status(principal.id)}
             if len(parts) == 2 and parts[0] == 'jobs' and method == 'GET':
                 return store.get(principal.id, parts[1])
+            if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'result' and method == 'GET':
+                job = store.get(principal.id, parts[1])
+                completion = job.get('result')
+                output = completion.get('result') if isinstance(completion, dict) else None
+                if job.get('state') != 'succeeded' or not isinstance(output, dict):
+                    raise WorkloadError('job result is not available', 409)
+                # The stream reference hashes exactly this owner-authenticated JSON representation.
+                return output
             if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'cancel' and method == 'POST':
                 return store.cancel(principal.id, parts[1])
             if len(parts) == 3 and parts[0] == 'jobs' and parts[2] == 'withdraw' and method == 'POST':
