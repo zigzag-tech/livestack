@@ -714,3 +714,20 @@ saved environment handle previously used on workers 1 and 2. It returned
 parked receipt after cleanup. Queue was 178.866 s; execution was 59.277 s.
 Full phase and cache/source identities are in
 `evidence/worker3-dev-profile-rollout-20261010.md`.
+
+## Selected task-E2E source-freshness result — 2026-10-10
+
+The one explicitly selected assertion
+`fleet-workload.task-environment-source-and-cache-freshness` passed on
+`zz-joe-e2e-2`, job `d89d056b7dc14474a8de861b4c295eab`, attempt
+`6986cd48744e460ab8d2a97e4f8f7555`. This was one check of 931, not a full
+suite. It reused all 16 declared cache components on environment handle
+`06318b61f53c4b3ca5cb7dc620b5702f`, returned generation 11 parked after clean
+teardown, and passed the selected assertion in 1.572 s. Queue was 0.574 s;
+worker execution was 1,027.839 s, including a 645.113 s compile phase and a
+352.702 s test phase. This supplies live immutable-source/cache-freshness and
+parked-resource evidence, but no cold/warm savings comparison. Toolchain/ABI
+invalidation, canceled-descendant cleanup on the installed handler, stale
+receipt rejection and authority rollout/readback remain open. Full/coalesced
+E2E and publishing were not run. Full details are in the Benchday companion
+evidence `task-e2e-cache-freshness-20261010.md`.
