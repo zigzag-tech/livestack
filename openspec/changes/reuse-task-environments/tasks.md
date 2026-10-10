@@ -693,3 +693,24 @@ active release schema accepted it; mode is 0600 and SHA-256 is
 `6baf20be04d1d21775efb3320b057f42d78bf3a6d0f81c1e80f7367b82ee30d8`. It is
 not installed. Await terminal ZZOPS trains and a fresh successful fenced drain
 before deploying the staged `486cf6e5` authority release with this config.
+
+## Development-profile rollout on workers 3 and 4 — 2026-10-10
+
+Workers `zz-joe-e2e-3` and `-4` were updated from the current Livestack main
+release `1cfdc69b` with only Flutter and Rust development profiles, then
+re-enabled after idle restarts. The authority stayed untouched; neither worker
+received a task-E2E profile. Worker 3 received an existing ZZOPS full-suite
+admission. The queued Benchday Flutter probe is now running on worker 4 with
+the same saved environment used by workers 1 and 2. It reports reuse at
+generation 24; its terminal receipt remains pending. Details and backup paths
+are in `evidence/worker3-dev-profile-rollout-20261010.md`.
+
+### Worker 4 terminal follow-up
+
+The pending status above is superseded: Flutter job
+`3520e1a97e4b45789cea2f05890bc3cd` succeeded on worker 4 using the same
+saved environment handle previously used on workers 1 and 2. It returned
+`reuse_outcome=reused`, `source_updated_incrementally`, generation 24, and a
+parked receipt after cleanup. Queue was 178.866 s; execution was 59.277 s.
+Full phase and cache/source identities are in
+`evidence/worker3-dev-profile-rollout-20261010.md`.
