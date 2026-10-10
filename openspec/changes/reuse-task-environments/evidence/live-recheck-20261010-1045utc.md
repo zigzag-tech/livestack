@@ -24,3 +24,18 @@ The source mirror edit/deletion/symlink and lockfile/toolchain/ABI invalidation
 sequence is still incomplete. Broad worker rollout, cleanup/rollback readback,
 and SDK provenance are also still open. No service restart, worker/config
 change, cancellation, full E2E, or publish was made.
+
+## Current-source replacement — 2026-10-10 10:56 UTC
+
+Main advanced after the earlier request and changed Rust compilation inputs.
+The queued job `7efa3d57f8e24fc0bbbcc15dc08754b1` had no attempts, so it was
+withdrawn before starting. A current-main `check cli` request was accepted as
+`5d83ba77da7749649452db71100b8cac` for source commit
+`3062f53e79d89fc4e56b5b6d72bf09b8febd030b` and digest
+`33ce58022b570b40a2b184b362a9e530d6e7c447efc9b1c539a2dd588aec7c48`.
+
+Authority readback: the new job remains queued with no attempts; workers 1 and
+2 are busy, workers 3 and 4 lack the environment profile, and worker 5 is
+draining. The same environment remains parked at generation 19 with
+18,510,524,416 retained bytes and no compute assigned. No full E2E, publish,
+worker change, or service restart was made.
