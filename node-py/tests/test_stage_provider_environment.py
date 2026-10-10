@@ -2,6 +2,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 spec=importlib.util.spec_from_file_location('stage_provider_environment',Path(__file__).parents[1]/'stage_provider_environment.py')
@@ -21,3 +22,11 @@ class BaselineTests(unittest.TestCase):
             info=site/'unowned.dist-info';info.mkdir();(info/'METADATA').write_text('Name: unowned\nVersion: 1.0\n')
             (info/'direct_url.json').write_text(json.dumps({'dir_info':{'editable':True}}))
             with self.assertRaisesRegex(ValueError,'non_owner_editable'):module.baseline(root)
+
+    def test_refuses_redirected_parent_before_creating_staging_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);actual=root/'installed-cli';actual.mkdir()
+            alias=root/'zzops';alias.symlink_to(actual,target_is_directory=True)
+            with self.assertRaisesRegex(ValueError,'absolute_new_output'):
+                module.stage(SimpleNamespace(out=str(alias/'new-stage')))
+            self.assertFalse((actual/'new-stage').exists())
