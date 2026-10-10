@@ -57,7 +57,7 @@ class ProviderOwnerSocket:
             result = self.fence.status(self._credential)
         else:
             raise FenceRefused('unknown_owner_control_operation')
-        return {**result, 'sourceIdentity': self.source_identity, 'serverInstanceId': self.instance_id}
+        return {**result, 'sourceIdentity': self.source_identity, 'serverInstanceId': self.instance_id, 'serverProcessId': os.getpid()}
 
     def start(self, fence):
         if self._server is not None:
