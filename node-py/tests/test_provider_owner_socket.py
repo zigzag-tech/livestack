@@ -25,6 +25,10 @@ class OwnerSocketTests(unittest.TestCase):
                 self.assertEqual(observed['peer']['pid'],os.getpid())
                 self.assertEqual(observed['receipt']['result']['serverProcessId'],os.getpid())
                 self.assertGreater(observed['peer']['startTicks'],0)
+                with self.assertRaisesRegex(PermissionError,'effect_peer'):
+                    probe_control(control.path,{'operation':'hold','holder':'wrong-unit','expectedSource':{'source':'fixture'}},
+                                  {'pid':os.getpid()+1,'startTicks':observed['peer']['startTicks']})
+                self.assertIsNone(fence._status()['holder'])
                 dispatch=control.dispatch
                 def wrong_process(uid,request):
                     value=dispatch(uid,request);value['serverProcessId']=os.getpid()+1;return value
