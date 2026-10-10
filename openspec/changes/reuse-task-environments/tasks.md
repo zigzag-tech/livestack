@@ -24,6 +24,13 @@ and was withdrawn before starting. Current main
 queued with no attempt. The handle remains parked with no compute assigned.
 Details: `evidence/live-recheck-20261010-1045utc.md`.
 
+Follow-up (2026-10-10 10:58 UTC): current-main job
+`5d83ba77da7749649452db71100b8cac` succeeded on `zz-joe-e2e-2` using the same
+environment. Both Cargo caches were reused and the environment parked at
+generation 20 after cleanup. Queue was 36.500 s; compilation was 6.078 s.
+Native/symlink/lockfile/toolchain invalidation cases and worker/SDK rollout
+remain open. See `evidence/live-recheck-20261010-1045utc.md`.
+
 ## 1. Durable request and agent interfaces
 
 - [x] 1.1 Add schema 3, strict environment key/handle validation and authenticated capabilities; verify real HTTP legacy identity, version refusal and unsupported-before-upload checks. Schema-3/HTTP/legacy/refusal controls passed in the focused authority/worker/CLI/scheduler suite: 91 passed, 6 skipped. Ledger: bounded capability/refusal outcomes with no secrets.

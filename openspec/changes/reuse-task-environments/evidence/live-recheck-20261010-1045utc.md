@@ -39,3 +39,22 @@ Authority readback: the new job remains queued with no attempts; workers 1 and
 draining. The same environment remains parked at generation 19 with
 18,510,524,416 retained bytes and no compute assigned. No full E2E, publish,
 worker change, or service restart was made.
+
+## Current-source compiler receipt — 2026-10-10 10:58 UTC
+
+Current-main Benchday job `5d83ba77da7749649452db71100b8cac` succeeded on
+`zz-joe-e2e-2` (attempt `a60d640fc4ca435e94c49ef274d287fa`) for source commit
+`3062f53e79d89fc4e56b5b6d72bf09b8febd030b` and digest
+`33ce58022b570b40a2b184b362a9e530d6e7c447efc9b1c539a2dd588aec7c48`.
+Both `cargo-home` and `cargo-target` were reused; source reconciliation was
+`source_updated_incrementally`. Measured phases were queue 36.500 s, transfer
+7.690 s, source materialization 14.693 s, dependencies 0.462 s, compile
+6.078 s, execution 17.392 s, and cleanup 0.019 s. Test timing was
+`not_applicable`; the compiler exited 0.
+
+The environment parked at generation 20 with 18,609,442,816 retained bytes
+and no CPU/RAM assigned. The worker receipt reports 16.14 CPU seconds and a
+1,320,431,616-byte memory peak. This proves current-source compiler success and
+cache reuse, not a controlled speedup: the earlier older-source job spent
+567.760 s in queue. Other source invalidation cases, worker/SDK rollout and
+rollback proof remain open. No full E2E or publish was run.
