@@ -198,10 +198,10 @@ def build_broker(peer_urls: List[str], device_config=None,
                       emitter_id=emitter_id)
 
 
-def configured_broker_app(broker, configuration_path="", reservation_path=""):
+def configured_broker_app(broker, configuration_path="", reservation_path="", *, owner_gate=None):
     """Explicit private qualification startup; absent configuration stays normal."""
     if not configuration_path and not reservation_path:
-        return build_app(broker)
+        return build_app(broker, owner_gate=owner_gate)
     if not configuration_path or not reservation_path:
         raise ValueError("paired_qualification_startup_configuration_required")
     from pathlib import Path
@@ -212,10 +212,17 @@ def configured_broker_app(broker, configuration_path="", reservation_path=""):
     from .qualification_controller import QualificationController
     controller = QualificationController(configuration_path, broker,
                                          reservation_path=reservation_path)
-    return build_app(broker, qualification=controller)
+    return build_app(broker, qualification=controller, owner_gate=owner_gate)
 
 
-def build_app(broker: HostBroker, *, qualification=None):
+def build_app(broker: HostBroker, *, qualification=None, owner_gate=None):
+    if owner_gate is not None:
+        from .broker_owner import BrokerOwnerGate
+        if not isinstance(owner_gate, BrokerOwnerGate) or owner_gate.broker is not broker or owner_gate.journal is None:
+            raise ValueError('configured_durable_broker_owner_required')
+        if getattr(broker, 'fleet_pools', ()):
+            raise ValueError('broker_owner_untracked_provisioning_requires_separate_gate')
+        owner_gate.install_dispatch()
     from fastapi import FastAPI, Body, Header, HTTPException
     from fastapi.responses import HTMLResponse
 
@@ -251,6 +258,9 @@ def build_app(broker: HostBroker, *, qualification=None):
                 raise HTTPException(408, "qualification_control_read_timeout")
             try:
                 payload = json.loads(content)
+                if owner_gate is not None:
+                    return await asyncio.get_running_loop().run_in_executor(
+                        owner_gate.async_executor(), qualification.admit, payload, request.headers.get("authorization"))
                 return await asyncio.to_thread(qualification.admit, payload, request.headers.get("authorization"))
             except PermissionError:
                 raise HTTPException(403, "qualification_authority_or_node_refused")
@@ -1084,7 +1094,11 @@ def build_app(broker: HostBroker, *, qualification=None):
 
         def _reconcile_loop():
             while True:
-                time.sleep(interval)
+                if owner_gate is not None:
+                    if owner_gate.reconcile_stop.wait(interval):
+                        return
+                else:
+                    time.sleep(interval)
                 try:
                     # Reclaim BEFORE planning. A node that has evicted everything
                     # and still holds its allocator pool is memory no unit claims,
@@ -1120,9 +1134,14 @@ def build_app(broker: HostBroker, *, qualification=None):
                 except Exception as e:  # a peer down etc. — keep looping
                     print(f"[harmony] reconcile error: {e}", flush=True)
 
-        threading.Thread(target=_reconcile_loop, name="harmony-reconcile",
-                         daemon=True).start()
+        reconcile_thread = threading.Thread(target=_reconcile_loop, name="harmony-reconcile",
+                                            daemon=True)
+        if owner_gate is not None:
+            owner_gate.reconcile_thread = reconcile_thread
+        reconcile_thread.start()
 
+    if owner_gate is not None:
+        owner_gate.install_ingress(app)
     return app
 
 
