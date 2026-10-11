@@ -129,6 +129,27 @@ def verify_runtime_tree(tree):
         raise ValueError('runtime_unrecorded_or_missing_files')
 
 
+def provider_environment(settings, app):
+    """Qualification flags only restrict startup; they grant no job permission."""
+    qualification = settings.get('qualificationOnly', False)
+    if type(qualification) is not bool:
+        raise ValueError('explicit_qualification_mode_required')
+    environment = settings.get('environment', {})
+    disabled = ('LIVESTACK_REGISTER', 'LIVESTACK_MESH_ENABLED')
+    if not isinstance(environment, dict) or any(not isinstance(key, str) or not isinstance(value, str)
+        or not (key.startswith(app.upper()+'_') or key in ('CUDA_VISIBLE_DEVICES', 'HF_HOME', 'HF_HUB_OFFLINE', 'TRANSFORMERS_OFFLINE')
+                or app == "polytts" and key == "VOXCPM_MODEL_ID"
+                or qualification and key in disabled and value == '0')
+        for key, value in environment.items()):
+        raise ValueError('explicit_provider_environment_invalid')
+    marker = app.upper()+'_QUALIFICATION_ONLY'
+    if qualification and (any(environment.get(key) != '0' for key in disabled) or environment.get(marker) != '1'):
+        raise ValueError('qualification_requires_disabled_registration_and_preload')
+    if not qualification and marker in environment:
+        raise ValueError('qualification_marker_requires_explicit_mode')
+    return dict(environment)
+
+
 def validate_qualification_host(selected, app):
     settings = selected.get('providerActivation', {})
     if settings.get('qualificationOnly') is not True:
@@ -166,6 +187,7 @@ def verify_installation(config_path, app):
     settings = selected.get('providerActivation')
     if not isinstance(settings, dict):
         raise ValueError('provider_owner_configuration_absent')
+    provider_environment(settings, app)
     validate_owner_socket_path(settings.get('controlSocket'))
     validate_qualification_host(selected, app)
     validate_qualification_activation_store(selected)
