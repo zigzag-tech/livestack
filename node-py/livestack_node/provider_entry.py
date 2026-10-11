@@ -11,6 +11,26 @@ from .provider_lifecycle import ProviderLifecycle
 from .provider_owner_socket import ProviderOwnerSocket
 
 
+def provider_environment(settings, app):
+    """Qualification flags only restrict startup; they grant no job permission."""
+    qualification = settings.get('qualificationOnly', False)
+    if type(qualification) is not bool:
+        raise ValueError('explicit_qualification_mode_required')
+    environment = settings.get('environment', {})
+    disabled = ('LIVESTACK_REGISTER', 'LIVESTACK_MESH_ENABLED')
+    if not isinstance(environment, dict) or any(not isinstance(key, str) or not isinstance(value, str)
+        or not (key.startswith(app.upper()+'_') or key in ('CUDA_VISIBLE_DEVICES', 'HF_HOME', 'HF_HUB_OFFLINE', 'TRANSFORMERS_OFFLINE')
+                or qualification and key in disabled and value == '0')
+        for key, value in environment.items()):
+        raise ValueError('explicit_provider_environment_invalid')
+    marker = app.upper()+'_QUALIFICATION_ONLY'
+    if qualification and (any(environment.get(key) != '0' for key in disabled) or environment.get(marker) != '1'):
+        raise ValueError('qualification_requires_disabled_registration_and_preload')
+    if not qualification and marker in environment:
+        raise ValueError('qualification_marker_requires_explicit_mode')
+    return dict(environment)
+
+
 def serve(config_path, app):
     settings, identity = verify_installation(config_path, app)
     root = Path(settings['sourceRoot'])
@@ -20,11 +40,7 @@ def serve(config_path, app):
     holder = settings.get('startupHolder')
     if not isinstance(holder, str) or not holder:
         raise ValueError('held_provider_startup_identity_required')
-    environment = settings.get('environment', {})
-    if not isinstance(environment,dict) or any(not isinstance(key,str) or not isinstance(value,str)
-        or not (key.startswith(app.upper()+'_') or key in ('CUDA_VISIBLE_DEVICES','HF_HOME','HF_HUB_OFFLINE','TRANSFORMERS_OFFLINE'))
-        for key,value in environment.items()):
-        raise ValueError('explicit_provider_environment_invalid')
+    environment = provider_environment(settings, app)
     config_file = settings.get('backendConfig')
     if app == 'polyasr':
         if not config_file or not Path(config_file).is_absolute() or Path(config_file).is_symlink():
