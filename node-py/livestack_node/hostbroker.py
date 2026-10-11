@@ -153,6 +153,7 @@ class HostBroker:
                  dispatch: bool = True,
                  ledger: Optional[JsonlLedger] = None,
                  snapshot_store=None,
+                 qualification_reservations=None,
                  emitter: str = "host-broker",
                  emitter_id: str = "host-broker",
                  in_flight_ttl_s: float = 900.0,
@@ -171,6 +172,7 @@ class HostBroker:
         # which is a safety net, not the mechanism: a load that dies silently
         # must not reserve a card forever.
         self.snapshot_store = snapshot_store
+        self.qualification_reservations = qualification_reservations
         self._in_flight: Dict[Tuple[str, str], Tuple[float, str]] = {}
         # peer key -> its last successful units/placements read (see
         # `_remembered_peer`): a peer that stops answering must not read as a
@@ -723,7 +725,8 @@ class HostBroker:
 
     # -- world assembly (soft state: re-snapshot peers every time) ------------
     def snapshot(self, requests: Optional[List[Request]] = None,
-                 last_evicted_at: Optional[Mapping[str, float]] = None) -> WorldState:
+                 last_evicted_at: Optional[Mapping[str, float]] = None,
+                 *, _qualification_claims: bool = True) -> WorldState:
         # Keyed by (kind, peer) so two nodes serving one kind on one host are
         # both recorded rather than the second being dropped by a setdefault.
         # Folded to the planner's per-kind map by aggregate_units() below.
@@ -928,13 +931,16 @@ class HostBroker:
         resolved = self._resolve_devices(discovered, measured_caps)
         hosts, host_reserve = self._host_pools(
             units, placements, {d.id: d.host_id for d in resolved})
-        return WorldState(devices=tuple(resolved),
+        world = WorldState(devices=tuple(resolved),
                           units=units,
                           placements=tuple(placements), requests=tuple(requests or ()),
                           now=now, last_evicted_at=dict(last_evicted_at or {}),
                           measured_free=measured,
                           hosts=hosts, host_reserve=host_reserve,
                           demand=self.demand(now))
+        if _qualification_claims and self.qualification_reservations is not None:
+            return self.qualification_reservations.apply_to_world(world)
+        return world
 
     # -- demand ----------------------------------------------------------------
     #
@@ -1098,6 +1104,14 @@ class HostBroker:
                        last_evicted_at: Optional[Mapping[str, float]] = None):
         """Snapshot the fleet, plan, and dispatch every action to the owning peer.
         Evicts are applied before loads so VRAM is freed first. Returns the Plan."""
+        if self.qualification_reservations is not None:
+            # Serialize normal dispatch against durable qualification claims.
+            # The claim supplier snapshots only after acquiring this same writer.
+            with self.qualification_reservations.planning_guard():
+                return self._plan_and_apply(requests, last_evicted_at)
+        return self._plan_and_apply(requests, last_evicted_at)
+
+    def _plan_and_apply(self, requests, last_evicted_at):
         world = self.snapshot(requests, last_evicted_at)
         p = plan(world, self.policy)
         semantic = {r.id: r for r in world.requests if not r.kind}
