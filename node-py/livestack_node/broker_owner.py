@@ -29,8 +29,11 @@ class BrokerOwnerGate:
                 key = self.fence.admit()
                 self.fence.settle(key, False)
 
-    def _admit(self, kind, peer_id, args, kwargs):
+    def _admit(self, kind, peer_id, args, kwargs, *, normal_only=False):
         with self.fence._lock:
+            self.fence._expire_qualification_locked()
+            if (normal_only or kind != 'local-work') and self.fence._qualification is not None:
+                raise FenceRefused('broker_normal_dispatch_refused_during_qualification')
             if self.fence._uncertain:
                 raise FenceRefused('broker_owner_unsettled_reconciliation_required')
             key = self.fence.admit()
@@ -63,7 +66,10 @@ class BrokerOwnerGate:
         self.fence.settle(key, settled)
 
     def run(self, fn, *args, **kwargs):
-        key, identity = self._admit('local-work', fn.__name__, args, kwargs)
+        return self._run(fn, args, kwargs)
+
+    def _run(self, fn, args, kwargs, *, normal_only=False):
+        key, identity = self._admit('local-work', fn.__name__, args, kwargs, normal_only=normal_only)
         try:
             return fn(*args, **kwargs)
         finally:
@@ -102,7 +108,6 @@ class BrokerOwnerGate:
         """Install before ASGI startup; existing lease settlement keeps its auth."""
         from fastapi.routing import APIRoute
         from fastapi.responses import JSONResponse
-        from .provider_fence import ProviderAdmissionMiddleware
         if self.journal is None or app.middleware_stack is not None:
             raise FenceRefused('broker_owner_durable_unstarted_app_required')
         for route in app.routes:
@@ -125,8 +130,7 @@ class BrokerOwnerGate:
         async def refused(_request, error):
             return JSONResponse({'error': str(error)}, status_code=503)
         app.add_exception_handler(FenceRefused, refused)
-        app.add_middleware(ProviderAdmissionMiddleware, fence=self.fence,
-            bypass=lambda scope: scope.get('method') in ('GET', 'HEAD') or self.settlement_route(scope))
+        app.add_middleware(BrokerQualificationIngress, gate=self)
 
     def install_dispatch(self):
         if getattr(self.broker, '_owner_gate', None) is not None:
@@ -143,7 +147,7 @@ class BrokerOwnerGate:
                 if len(self.broker.peers) != len(peers) or any(
                     actual is not expected for actual, expected in zip(self.broker.peers, peers)):
                     raise FenceRefused('broker_owner_peer_inventory_changed')
-                return self.run(_original, *args, **kwargs)
+                return self._run(_original, args, kwargs, normal_only=True)
 
             setattr(self.broker, name, owned)
 
@@ -169,6 +173,36 @@ class BrokerOwnerGate:
                         self._settle(key, identity, settled, not_dispatched=settled)
 
                 setattr(peer, name, remote)
+
+
+class BrokerQualificationIngress:
+    """A finite qualification window does not release ordinary broker ingress."""
+    def __init__(self, app, gate):
+        self.app, self.gate = app, gate
+
+    async def __call__(self, scope, receive, send):
+        if (scope.get('type') not in ('http', 'websocket') or
+                scope.get('method') in ('GET', 'HEAD') or self.gate.settlement_route(scope)):
+            return await self.app(scope, receive, send)
+        try:
+            with self.gate.fence._lock:
+                self.gate.fence._expire_qualification_locked()
+                if self.gate.fence._qualification is not None and not (
+                        scope.get('method') == 'POST' and scope.get('path') == '/qualification/admit'):
+                    raise FenceRefused('broker_qualification_only')
+                key = self.gate.fence.admit()
+        except FenceRefused:
+            if scope['type'] == 'websocket':
+                await send({'type': 'websocket.close', 'code': 1013})
+            else:
+                await send({'type': 'http.response.start', 'status': 503,
+                            'headers': [(b'content-type', b'application/json')]})
+                await send({'type': 'http.response.body', 'body': b'{"error":"broker_admission_held"}'})
+            return
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            self.gate.fence.settle(key)
 
 
 class BrokerOwnedExecutor(Executor):
