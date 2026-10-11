@@ -1236,7 +1236,10 @@ def _node_control_token_from_env(env=None) -> Optional[str]:
     return token
 
 
-def main():
+def main(*, owner_configuration="", owner_source_identity=None, owner_incarnation=None):
+    if (owner_configuration and (owner_source_identity is None or owner_incarnation is None)) or (
+            not owner_configuration and (owner_source_identity is not None or owner_incarnation is not None)):
+        raise ValueError('paired_broker_owner_startup_required')
     # Nodes report for duty (POST /peers), so these localhost guesses are no
     # longer how membership is *meant* to work — but they stay, as seeds.
     #
@@ -1512,7 +1515,13 @@ def main():
     qualification_config = os.environ.get("LIVESTACK_QUALIFICATION_CONFIG", "").strip()
     qualification_reservations = os.environ.get("LIVESTACK_QUALIFICATION_RESERVATIONS", "").strip()
     qualification_app = None
-    if qualification_config or qualification_reservations:
+    owner_control = None
+    if owner_configuration:
+        from .broker_owner_bootstrap import configured_owned_broker_app
+        qualification_app, owner_control = configured_owned_broker_app(
+            broker, qualification_config, qualification_reservations,
+            owner_configuration, owner_source_identity, owner_incarnation)
+    elif qualification_config or qualification_reservations:
         # Retained qualification claims must participate before recovery can
         # plan work. Absent configuration keeps the original startup sequence.
         qualification_app = configured_broker_app(
@@ -1531,8 +1540,12 @@ def main():
               f"({ledger.max_bytes // (1024 * 1024)} MiB x {ledger.max_files}"
               + (f", {ledger.max_age_s / 86400:.0f}d" if ledger.max_age_s
                  else ", age window disabled") + ")", flush=True)
-    uvicorn.run(qualification_app if qualification_app is not None else build_app(broker),
-        host="0.0.0.0", port=port)
+    try:
+        uvicorn.run(qualification_app if qualification_app is not None else build_app(broker),
+            host="0.0.0.0", port=port)
+    finally:
+        if owner_control is not None:
+            owner_control.close()
 
 
 def _hostname() -> str:
