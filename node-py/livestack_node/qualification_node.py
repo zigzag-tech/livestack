@@ -68,7 +68,7 @@ class QualificationNodeGate:
         if os.environ.get(self.client.identity['app'].upper()+'_QUALIFICATION_DEVICE_ID')!=actual or os.environ.get(self.client.identity['app'].upper()+'_QUALIFICATION_ACTIVATION_STORE')!=self.activation_store:
             raise PermissionError('qualification_actual_device_cache_environment_changed')
         service = scope['service']
-        if service not in ('polytts-qualification.service','polyasr-qualification.service') or configuration['intent']['targetMachine'] != self.binding['hostId'] or configuration['ssh']['expectedAuthority'] != self.binding['authority']:
+        if service not in ('polytts-qualification.service','polyasr-qualification.service') or configuration['intent'].get('target') != self.binding['hostId'] or configuration['ssh']['expectedAuthority'] != self.binding['authority']:
             raise PermissionError('qualification_actual_node_service_scope_changed')
         pid = os.getpid()
         if Path('/proc/sys/kernel/random/boot_id').read_text().strip() != self.binding['bootId'] or str(process_start_ticks(pid)) != self.binding['processStartTicks'] or '0::'+scope['controlGroup'] not in (Path('/proc')/str(pid)/'cgroup').read_text().splitlines():
