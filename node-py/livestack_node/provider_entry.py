@@ -44,7 +44,7 @@ def configure_qualification(config_path, app, module, owner, settings, identity)
     if len(selected)!=1 or digest!=identity['configurationDigest']:
         raise ValueError('qualification_source_configuration_changed')
     node = selected[0].get('providerQualificationNode')
-    fields = {'nodeId','authority','deviceId','unitKind','hostId','capacityUrl','reservationPath','ownerSocket','unitSha256','authorizationClient'}
+    fields = {'nodeId','authority','deviceId','unitKind','hostId','capacityUrl','reservationPath','ownerSocket','unitSha256','authorizationClient','nvmlSha256','activationStore'}
     if not isinstance(node,dict) or set(node)!=fields or node['ownerSocket']!=settings['controlSocket'] or not isinstance(node['authorizationClient'],dict) or node['authorizationClient'].get('serviceConfigurationPath')!=config_path:
         raise ValueError('qualification_closed_installed_node_configuration_required')
     from .provider_qualification import QualificationClient
@@ -59,7 +59,7 @@ def configure_qualification(config_path, app, module, owner, settings, identity)
         serverInstanceId=owner.instance_id,bootId=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
         unitInvocationId=invocation,processStartTicks=str(process_start_ticks(os.getpid())))
     gate = QualificationNodeGate(module.manager,client,QualificationReservationReader(node['reservationPath']),binding,
-        owner_socket=node['ownerSocket'],unit_sha256=node['unitSha256'],capacity_url=node['capacityUrl'])
+        owner_socket=node['ownerSocket'],unit_sha256=node['unitSha256'],capacity_url=node['capacityUrl'],nvml_sha256=node['nvmlSha256'],activation_store=node['activationStore'])
     module.configure_provider_qualification(gate)
     return gate
 
@@ -82,6 +82,21 @@ def serve(config_path, app):
             raise ValueError('external_asr_config_digest_mismatch')
     if app == 'polytts' and not Path(environment.get('POLYTTS_MODELS_DIR','')).is_absolute():
         raise ValueError('external_tts_model_binding_required')
+    if settings.get('qualificationOnly',False) is True:
+        config,digest = private_config(config_path)
+        nodes=[entry.get('providerQualificationNode') for entry in config.get('apps',[]) if entry.get('descriptor',{}).get('app')==app]
+        if len(nodes)!=1 or not isinstance(nodes[0],dict) or digest!=identity['configurationDigest']:
+            raise ValueError('qualification_installed_node_required_before_import')
+        node=nodes[0]
+        if app=='polytts' and (environment.get('POLYTTS_RUNTIME')!='pytorch' or environment.get('POLYTTS_ALLOW_CPU')=='1'):
+            raise ValueError('qualification_explicit_cuda_manager_runtime_required')
+        from .qualification_device import qualification_cuda_device
+        device=qualification_cuda_device(environment.get('CUDA_VISIBLE_DEVICES'),node.get('deviceId'),node.get('nvmlSha256'))
+        cache=Path(node.get('activationStore',''))
+        if cache.name!='qualification-activation.json' or cache.parent!=Path(settings['controlSocket']).parent or not cache.is_absolute() or cache.resolve()!=cache or cache.parent.stat().st_uid!=os.getuid() or cache.parent.stat().st_mode&0o077:
+            raise ValueError('qualification_private_activation_store_required')
+        environment[app.upper()+'_QUALIFICATION_DEVICE_ID']=device
+        environment[app.upper()+'_QUALIFICATION_ACTIVATION_STORE']=str(cache)
     os.environ.update(environment)
     service_root = root/app/('cuda' if app == 'polyasr' else '')
     sys.path[:0] = [str(service_root),str(root/app),str(framework)]

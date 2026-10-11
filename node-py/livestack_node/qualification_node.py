@@ -24,7 +24,7 @@ from .qualification_reservations import QualificationReservationReader
 
 
 class QualificationNodeGate:
-    def __init__(self, manager, client, reader, binding, *, owner_socket, unit_sha256, capacity_url):
+    def __init__(self, manager, client, reader, binding, *, owner_socket, unit_sha256, capacity_url, nvml_sha256, activation_store):
         if not isinstance(client,QualificationClient) or not isinstance(reader,QualificationReservationReader) or not isinstance(manager.coordinator.broker,CapabilityLeaseStore):
             raise ValueError('actual_qualification_permission_claim_and_lease_components_required')
         if binding['identitySha256'] != client.source_digest or binding['configurationSha256'] != client.identity['configurationDigest'] or binding['unitKind'] not in manager.units or manager.coordinator.host_id != binding['hostId']:
@@ -33,6 +33,7 @@ class QualificationNodeGate:
         endpoint = urllib.parse.urlsplit(capacity_url)
         if endpoint.scheme!='http' or endpoint.hostname!='127.0.0.1' or endpoint.port is None or endpoint.path!='/qualification/admit' or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
             raise ValueError('explicit_loopback_qualification_capacity_endpoint_required')
+        self.nvml_sha256,self.activation_store = nvml_sha256,activation_store
         self.capacity_url = capacity_url
         self.owner_socket,self.unit_sha256 = owner_socket,unit_sha256
         self._verify_instance()
@@ -58,10 +59,14 @@ class QualificationNodeGate:
         service_config,digest = private_config(self.client.settings['serviceConfigurationPath'])
         nodes = [entry.get('providerQualificationNode') for entry in service_config.get('apps',[]) if entry.get('descriptor',{}).get('app')==self.client.identity['app']]
         expected = {key:self.binding[key] for key in ('nodeId','authority','deviceId','unitKind','hostId')}
-        expected.update(capacityUrl=self.capacity_url,reservationPath=str(self.reader.path),ownerSocket=self.owner_socket,unitSha256=self.unit_sha256,authorizationClient=self.client.settings)
+        expected.update(capacityUrl=self.capacity_url,reservationPath=str(self.reader.path),ownerSocket=self.owner_socket,unitSha256=self.unit_sha256,authorizationClient=self.client.settings,nvmlSha256=self.nvml_sha256,activationStore=self.activation_store)
         if nodes != [expected] or digest != self.client.identity['configurationDigest']:
             raise PermissionError('qualification_actual_private_node_constraints_changed')
         scope = configuration['intent']['scope']
+        from .qualification_device import qualification_cuda_device
+        actual=qualification_cuda_device(os.environ.get('CUDA_VISIBLE_DEVICES'),self.binding['deviceId'],self.nvml_sha256)
+        if os.environ.get(self.client.identity['app'].upper()+'_QUALIFICATION_DEVICE_ID')!=actual or os.environ.get(self.client.identity['app'].upper()+'_QUALIFICATION_ACTIVATION_STORE')!=self.activation_store:
+            raise PermissionError('qualification_actual_device_cache_environment_changed')
         service = scope['service']
         if service not in ('polytts-qualification.service','polyasr-qualification.service') or configuration['intent']['targetMachine'] != self.binding['hostId'] or configuration['ssh']['expectedAuthority'] != self.binding['authority']:
             raise PermissionError('qualification_actual_node_service_scope_changed')
