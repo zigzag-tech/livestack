@@ -134,7 +134,7 @@ def validate_qualification_host(selected, app):
     if settings.get('qualificationOnly') is not True:
         return
     environment = settings.get('environment', {})
-    host = environment.get('POLYTTS_HOST_ID', environment.get('HOST_ID')) if app == 'polytts' else environment.get('HOST_ID')
+    host = environment.get('POLYTTS_HOST_ID', environment.get('HOST_ID')) if app == 'polytts' else environment.get('POLYASR_HOST_ID') or environment.get('ASR_HOST_ID')
     if not isinstance(host, str) or not host or host != selected.get('providerQualificationNode', {}).get('hostId'):
         raise ValueError('qualification_explicit_runtime_host_binding_required')
 

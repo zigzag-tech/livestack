@@ -19,7 +19,11 @@ class InstallationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'explicit_runtime_host_binding'):
                 validate_qualification_host(row, app)
         row['providerActivation']['environment'] = {'HOST_ID': 'zz-joe'}
-        validate_qualification_host(row, 'polytts'); validate_qualification_host(row, 'polyasr')
+        validate_qualification_host(row, 'polytts')
+        with self.assertRaisesRegex(ValueError, 'explicit_runtime_host_binding'):
+            validate_qualification_host(row, 'polyasr')
+        row['providerActivation']['environment']['POLYASR_HOST_ID'] = 'zz-joe'
+        validate_qualification_host(row, 'polyasr')
         row['providerActivation']['environment']['POLYTTS_HOST_ID'] = 'wrong-host'
         with self.assertRaisesRegex(ValueError, 'explicit_runtime_host_binding'):
             validate_qualification_host(row, 'polytts')
