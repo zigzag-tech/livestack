@@ -85,7 +85,8 @@ _HOLD_CODES = frozenset(("resources_insufficient", "memory_insufficient", "disk_
 _STARVED_REPORTED = {}
 
 
-def _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, memory_terms, views, now, limits):
+def _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, worker_free, memory_terms, views, now,
+                      limits):
     """Reserve, on every host that refuses an aged job only for lack of free resources, what the job would take.
 
     Jobs placed later in this round then see the host as already charged, exactly as if the starved job had been
@@ -101,11 +102,16 @@ def _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, 
         if (w is None or item.get("code") not in _HOLD_CODES or w["host"] in held
                 or any(reports[w["id"]]["capacity"].get(k, 0) < n for k, n in admit.items())):
             continue
-        held.add(w["host"])
         measured = w["host"] in views and claim is not None
         for k, n in admit.items():
             if not (k == MEMORY and measured):
-                host_free[w["host"]][k] -= n
+                # host_free is the LEAST-clamped observation across the host's workers, so a roomier peer
+                # (an e2e worker reporting 16 CPU) sees more free than the starved job's own worker (a release
+                # worker capped at 8). Charging the hold to that inflated figure left room for the peer's jobs
+                # and the starved job never fit (2026-10-11, 08260665). Charge it to what the starved job's
+                # worker can see: later jobs must fit in the headroom it leaves.
+                host_free[w["host"]][k] = min(host_free[w["host"]][k], worker_free[w["id"]].get(k, 0)) - n
+        held.add(w["host"])
         if measured:
             host_free[w["host"]][MEMORY] -= claim
             memory_terms[w["host"]]["admitted"] += claim
@@ -567,7 +573,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                                   detail=item["reason"]) for item in rejected if item.get("code") in BLOCKER_CODES]
                             or [dict(code="deadline_unfit", detail="no target can meet deadline")])
                 _stall_event(row, rejected, now, limits)
-                _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, memory_terms,
+                _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, worker_free, memory_terms,
                                   views, now, limits)
             _wait(db, row, now, reason, blockers)
             continue
