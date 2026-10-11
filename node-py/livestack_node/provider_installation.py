@@ -64,6 +64,35 @@ def verify_files(root, files):
             raise ValueError('installation_file_digest_mismatch')
 
 
+def verify_qualification_client_inventory(source_root, source, selected, settings):
+    inventory = source.get('authorizationClient')
+    qualification = settings.get('qualificationOnly', False)
+    if inventory is None:
+        if qualification is True:
+            raise ValueError('qualification_client_inventory_required')
+        return
+    if qualification is not True or not isinstance(inventory, dict) or set(inventory) != {'files','inventoryDigest','manifestSha256'}:
+        raise ValueError('qualification_only_client_inventory_required')
+    files = inventory['files']
+    canonical = json.dumps(files, sort_keys=True, separators=(',', ':')).encode()
+    if sha(canonical) != inventory['inventoryDigest']:
+        raise ValueError('qualification_client_inventory_digest_changed')
+    root = Path(source_root) / 'authorization-client'
+    verify_files(root, files)
+    node = selected.get('providerQualificationNode')
+    client = node.get('authorizationClient') if isinstance(node, dict) else None
+    if not isinstance(client, dict) or client.get('manifestPath') != str(root/'bundle/manifest.json') or client.get('manifestSha256') != inventory['manifestSha256'] or client.get('inputRoot') != str(root/'sdk') or client.get('nodeExecutable') != str(root/'node'):
+        raise ValueError('qualification_client_inventory_binding_changed')
+    manifest = read_manifest(client['manifestPath'], inventory['manifestSha256'])
+    required = {'bundle/manifest.json','node'}
+    required.update('bundle/'+record['path'] for record in manifest['outputs'])
+    required.update('sdk/'+record['path'] for record in manifest['sourceInputs'])
+    if {record['path'] for record in files} != required:
+        raise ValueError('qualification_client_inventory_membership_changed')
+    if sha((root/'node').read_bytes()) != client.get('nodeSha256') or client.get('nodeSha256') != manifest['toolchain']['node']['sha256']:
+        raise ValueError('qualification_client_inventory_node_changed')
+
+
 def verify_runtime_tree(tree):
     """Bind the independent interpreter's stdlib and shared libraries too."""
     root = Path(tree['root'])
@@ -125,6 +154,7 @@ def verify_installation(config_path, app):
         raise ValueError('provider_source_identity_mismatch')
     for name, component in components.items():
         verify_files(Path(settings['sourceRoot'])/name, [{**record, 'bytes':record['sizeBytes']} for record in component['files']])
+    verify_qualification_client_inventory(settings['sourceRoot'], source, selected, settings)
     environment = read_manifest(settings['environmentManifest'], settings['environmentManifestSha256'])
     verify_files(environment['root'], environment['files'])
     verify_runtime_tree(environment['runtimeTree'])
