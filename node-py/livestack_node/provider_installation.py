@@ -150,6 +150,30 @@ def provider_environment(settings, app):
     return dict(environment)
 
 
+def validate_provider_startup(selected, app, config_path):
+    settings = selected.get('providerActivation', {})
+    environment = provider_environment(settings, app)
+    holder = settings.get('startupHolder')
+    if not isinstance(holder, str) or not holder:
+        raise ValueError('held_provider_startup_identity_required')
+    if app == 'polyasr':
+        config_file = settings.get('backendConfig')
+        if not config_file or not Path(config_file).is_absolute() or Path(config_file).is_symlink():
+            raise ValueError('external_asr_config_required')
+        if sha(Path(config_file).read_bytes()) != settings.get('backendConfigSha256'):
+            raise ValueError('external_asr_config_digest_mismatch')
+    if app == 'polytts' and not Path(environment.get('POLYTTS_MODELS_DIR', '')).is_absolute():
+        raise ValueError('external_tts_model_binding_required')
+    if settings.get('qualificationOnly') is True:
+        node = selected.get('providerQualificationNode')
+        fields = {'nodeId','authority','deviceId','unitKind','hostId','capacityUrl','reservationPath','ownerSocket','unitSha256','authorizationClient','nvmlSha256','activationStore'}
+        if not isinstance(node, dict) or set(node) != fields or node['ownerSocket'] != settings.get('controlSocket') or not isinstance(node['authorizationClient'], dict) or node['authorizationClient'].get('serviceConfigurationPath') != str(config_path):
+            raise ValueError('qualification_closed_installed_node_configuration_required')
+        if app == 'polytts' and (environment.get('POLYTTS_RUNTIME') != 'pytorch' or environment.get('POLYTTS_ALLOW_CPU') == '1'):
+            raise ValueError('qualification_explicit_cuda_manager_runtime_required')
+    return environment
+
+
 def validate_qualification_host(selected, app):
     settings = selected.get('providerActivation', {})
     if settings.get('qualificationOnly') is not True:
@@ -187,7 +211,7 @@ def verify_installation(config_path, app):
     settings = selected.get('providerActivation')
     if not isinstance(settings, dict):
         raise ValueError('provider_owner_configuration_absent')
-    provider_environment(settings, app)
+    validate_provider_startup(selected, app, config_path)
     validate_owner_socket_path(settings.get('controlSocket'))
     validate_qualification_host(selected, app)
     validate_qualification_activation_store(selected)
