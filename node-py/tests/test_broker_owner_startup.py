@@ -1,5 +1,8 @@
 """Real same-socket/ASGI CPU startup; no units, models or registered authority."""
 import json
+import io
+from contextlib import redirect_stdout
+from types import SimpleNamespace
 import os
 from pathlib import Path
 import tempfile
@@ -46,6 +49,27 @@ class BrokerOwnerStartupTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, 'paired_qualification'):
                 configured_owned_broker_app(HostBroker([], []), '/missing', '', str(config), identity, 'fixture')
             self.assertFalse((root / 'owner.sock').exists())
+
+    async def test_recovery_exception_closes_actual_owner_socket(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); root.chmod(0o700)
+            identity = {'sourceSha256': 'a' * 64}
+            config = root / 'owner.json'
+            config.write_text(json.dumps({'version': 1, 'controlSocket': str(root / 'owner.sock'),
+                'journalPath': str(root / 'effects.sqlite'), 'sourceIdentity': identity,
+                'startupHolder': 'fixture-held'})); config.chmod(0o600)
+            store = SimpleNamespace(path='CPU fixture', max_records=10, max_age_s=None)
+            with patch.dict(os.environ, {'LIVESTACK_PEERS': 'none', 'LIVESTACK_LEDGER': '0',
+                    'LIVESTACK_REPLAN_INTERVAL': '0'}, clear=True), \
+                    patch('livestack_node.fleet_operations.store_from_env', return_value=store), \
+                    patch('livestack_node.fleet_workers.recover_all', side_effect=RuntimeError('CPU recovery failure')) as recovery, \
+                    patch('uvicorn.run') as serve, redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(RuntimeError, 'CPU recovery failure'):
+                    main(owner_configuration=str(config), owner_source_identity=identity, owner_incarnation='fixture')
+                recovery.assert_called_once()
+                serve.assert_not_called()
+            self.assertFalse((root / 'owner.sock').exists())
+            self.assertTrue((root / 'effects.sqlite').exists())
 
     async def test_absent_defaults_and_incomplete_owner_tuples(self):
         broker = object()
