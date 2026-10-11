@@ -68,6 +68,9 @@ Environment=HF_HUB_DISABLE_XET=1
 Environment=VLLM_USE_FLASHINFER_SAMPLER=0
 
 ExecStart=/home/ubuntu/harmony-llm/venv/bin/python /home/ubuntu/harmony-llm/server.py
+# Re-read the classifier principal table without restarting (server.py
+# `_reload_classifier_principals`); a bad file keeps the old table.
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=15
 

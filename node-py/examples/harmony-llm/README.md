@@ -371,3 +371,26 @@ on a multi-unit node (its drop-in is disabled as
 others in this process, stopping a just-loaded Flash-Next mid-request.
 Full runbook: `HARMONY.md` "Engine units"; design record:
 `_plans/harmony-engine-units.md`.
+
+## Changing the classifier principal table: reload, don't restart
+
+`/v1/classifier` authenticates against the principal file named by
+`LIVESTACK_FLEET_TOKENS_FILE` (xc-tower-ubuntu: `/etc/harmony/classifier-principals.json`,
+mode 0600, owned by the service user). It used to be read once at import, so
+adding a principal meant a restart, which kills in-flight requests and drops the
+vLLM units. Now:
+
+    systemctl reload harmony-llm        # = kill -HUP $MAINPID (ExecReload)
+    journalctl -u harmony-llm -n 20 | grep 'principals reload'
+
+SIGHUP re-reads the same source and swaps the table in one reference assignment
+(a request sees the old table or the new, never a mix). Every reload logs one
+`[classifier] principals reload: ...` line: `swapped: N principal(s) ... added/removed`
+names (principal names only, never tokens), or `KEPT old table: <reason>` for an
+unset source, empty/unreadable/malformed/group-readable file, or any rejected
+entry (a partial table is refused). Startup keeps its fail-closed behaviour; only
+the reload prefers the last good table. Unit-file note: hosts using a copy of
+`systemd/harmony-llm.service` need `ExecReload=/bin/kill -HUP $MAINPID` (a
+drop-in works); the process itself needs the new code once, i.e. one restart.
+Scope: only the classifier table. `LIVESTACK_NODE_TOKENS*` (lease/model levers)
+still needs a restart. Test: `node-py/tests/test_classifier_principals_reload.py`.

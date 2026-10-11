@@ -671,6 +671,57 @@ def _load_classifier_principals():
              "ON but the principal table is EMPTY — every caller is refused"),
           flush=True)
 
+# RELOAD WITHOUT A RESTART.
+#
+# The table above is read at startup, so activating a new principal used to
+# mean restarting the service -- which kills every in-flight classifier/title
+# request and takes the vLLM units down for minutes. `kill -HUP` (or
+# `systemctl reload harmony-llm`) re-reads the SAME source and swaps it in.
+#
+# The swap is one reference assignment and every request reads the module
+# global once, so a request sees the old table or the new one, never a mix.
+# A reload that cannot produce a clean table KEEPS THE OLD ONE and says why:
+#   * source unset            -> the environment cannot change under a live
+#                                process; nothing to reload
+#   * empty table / unreadable / world-readable / malformed
+#                             -> `principals_from_env` returns {} (fail closed
+#                                is right at startup, wrong here: it would
+#                                lock out every live caller on a typo)
+#   * any entry rejected      -> a table that quietly lost a principal is the
+#                                failure this must not cause
+# The outcome is logged unconditionally. Only principal NAMES and the
+# fingerprints fleet_auth already logs appear; never a token.
+def _reload_classifier_principals() -> str:
+    """Re-read the credential source. Returns the logged outcome line; the old
+    table stays in force unless this returns a line starting `swapped`."""
+    global _CLASSIFIER_PRINCIPALS
+    try:
+        from livestack_node.fleet_auth import principals_from_env
+        notes: list = []
+        table = principals_from_env(log=notes.append)
+        for n in notes:
+            print(n, flush=True)
+        old = _CLASSIFIER_PRINCIPALS
+        if table is None:
+            msg = "KEPT old table: no credential source is configured in the environment"
+        elif not table:
+            msg = ("KEPT old table: the source yielded NO principals "
+                   "(unreadable, missing, group/other-accessible, malformed or all entries rejected)")
+        elif any("rejected" in n for n in notes):
+            msg = "KEPT old table: one or more entries were rejected, refusing a partial table"
+        else:
+            _CLASSIFIER_PRINCIPALS = table  # the atomic swap
+            was = set() if not old else {p.name for p in old.values()}
+            now = {p.name for p in table.values()}
+            msg = (f"swapped: {len(table)} principal(s) now active: {', '.join(sorted(now))}; "
+                   f"added: {', '.join(sorted(now - was)) or '-'}; "
+                   f"removed: {', '.join(sorted(was - now)) or '-'}")
+    except Exception as e:  # a signal handler must never raise into the loop
+        msg = f"KEPT old table: reload raised {type(e).__name__}: {e}"
+    print(f"[classifier] principals reload: {msg}", flush=True)
+    return msg
+
+
 _SHARED_CLIENT = None  # type: ignore[var-annotated]
 _SHARED_CLIENT_LOCK = asyncio.Lock()
 
@@ -2218,4 +2269,6 @@ if __name__ == "__main__":
             _SHUTDOWN.set()
             super().handle_exit(sig, frame)
 
+    # Without a handler SIGHUP would terminate the process.
+    signal.signal(signal.SIGHUP, lambda *_: _reload_classifier_principals())
     _Server(uvicorn.Config(app, host="0.0.0.0", port=NODE_PORT)).run()
