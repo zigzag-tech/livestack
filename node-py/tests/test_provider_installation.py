@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from livestack_node.provider_installation import verify_installation
+from livestack_node.provider_installation import verify_installation, validate_qualification_host
 
 
 def digest(value):return hashlib.sha256(value).hexdigest()
@@ -13,6 +13,22 @@ def canonical(value):return json.dumps(value,sort_keys=True,separators=(',', ':'
 
 
 class InstallationTests(unittest.TestCase):
+    def test_qualification_explicit_host_matches_actual_app_environment(self):
+        row = {'providerActivation': {'qualificationOnly': True, 'environment': {}}, 'providerQualificationNode': {'hostId': 'zz-joe'}}
+        for app in ('polytts', 'polyasr'):
+            with self.assertRaisesRegex(ValueError, 'explicit_runtime_host_binding'):
+                validate_qualification_host(row, app)
+        row['providerActivation']['environment'] = {'HOST_ID': 'zz-joe'}
+        validate_qualification_host(row, 'polytts'); validate_qualification_host(row, 'polyasr')
+        row['providerActivation']['environment']['POLYTTS_HOST_ID'] = 'wrong-host'
+        with self.assertRaisesRegex(ValueError, 'explicit_runtime_host_binding'):
+            validate_qualification_host(row, 'polytts')
+        row['providerActivation']['environment']['POLYTTS_HOST_ID'] = 'zz-joe'
+        validate_qualification_host(row, 'polytts')
+        row['providerActivation']['qualificationOnly'] = False
+        row['providerActivation']['environment'] = {}
+        validate_qualification_host(row, 'polytts')
+
     def test_actual_configured_source_bytes_environment_manifest_and_negative_controls(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

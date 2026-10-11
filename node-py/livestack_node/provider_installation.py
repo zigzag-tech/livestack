@@ -129,6 +129,16 @@ def verify_runtime_tree(tree):
         raise ValueError('runtime_unrecorded_or_missing_files')
 
 
+def validate_qualification_host(selected, app):
+    settings = selected.get('providerActivation', {})
+    if settings.get('qualificationOnly') is not True:
+        return
+    environment = settings.get('environment', {})
+    host = environment.get('POLYTTS_HOST_ID', environment.get('HOST_ID')) if app == 'polytts' else environment.get('HOST_ID')
+    if not isinstance(host, str) or not host or host != selected.get('providerQualificationNode', {}).get('hostId'):
+        raise ValueError('qualification_explicit_runtime_host_binding_required')
+
+
 def verify_installation(config_path, app):
     config, config_digest = private_config(config_path)
     selected = [entry for entry in config.get('apps', []) if entry.get('descriptor', {}).get('app') == app]
@@ -139,6 +149,7 @@ def verify_installation(config_path, app):
     if not isinstance(settings, dict):
         raise ValueError('provider_owner_configuration_absent')
     validate_owner_socket_path(settings.get('controlSocket'))
+    validate_qualification_host(selected, app)
     # Registration is the existing private app descriptor and actual verified
     # adapter files, never a claimed passed/registered status in a package.
     descriptor = selected['descriptor']['adapter']
