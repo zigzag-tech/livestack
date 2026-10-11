@@ -37,7 +37,7 @@ class QualificationController:
             client_config, client_config_digest = private_config(entry['clientSettings']['configurationPath'])
             if client_config_digest != entry['clientSettings']['configurationSha256']:
                 raise ValueError('qualification_client_configuration_changed')
-            if client_config['intent']['scope']['service'] != entry['service'] or client_config['intent']['targetMachine'] != node['hostId'] or client_config['ssh']['expectedAuthority'] != node['authority']:
+            if client_config['intent']['scope']['service'] != entry['service'] or client_config['intent'].get('target') != node['hostId'] or client_config['ssh']['expectedAuthority'] != node['authority']:
                 raise ValueError('qualification_registered_service_changed')
             if node['identitySha256'] != client.source_digest or node['configurationSha256'] != entry['sourceIdentity']['configurationDigest']:
                 raise ValueError('qualification_registered_source_binding_changed')

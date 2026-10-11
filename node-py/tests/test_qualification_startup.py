@@ -45,7 +45,7 @@ class QualificationStartupTests(unittest.TestCase):
     def test_valid_sources_attach_real_durable_store_and_route_without_admission(self):
         caller = self.root / 'caller.json'
         caller.write_text(json.dumps({'intent': {'scope': {'service': 'polytts-qualification.service'},
-                                                'targetMachine': 'host'},
+                                                'target': 'host'},
                                       'ssh': {'expectedAuthority': 'auth'}}))
         caller.chmod(0o600)
         node = dict(nodeId='node', authority='auth', identitySha256='a'*64,
@@ -61,6 +61,19 @@ class QualificationStartupTests(unittest.TestCase):
         self.config.write_text(json.dumps({'version': 1, 'nodes': [entry]}))
         self.config.chmod(0o600)
         client = Mock(source_digest='a'*64)
+        original_caller = caller.read_bytes()
+        for changed in [{'scope': {'service': 'polytts-qualification.service'},'targetMachine':'host'},
+                        {'scope': {'service': 'polytts-qualification.service'},'target':'wrong-host'}]:
+            caller.write_text(json.dumps({'intent':changed,'ssh':{'expectedAuthority':'auth'}}))
+            entry['clientSettings']['configurationSha256']=sha(caller.read_bytes())
+            self.config.write_text(json.dumps({'version':1,'nodes':[entry]}))
+            with patch('livestack_node.qualification_controller.QualificationClient',return_value=client):
+                with self.assertRaisesRegex(ValueError,'registered_service_changed'):
+                    configured_broker_app(self.broker,str(self.config),str(self.database))
+            self.assertFalse(self.database.exists())
+        caller.write_bytes(original_caller)
+        entry['clientSettings']['configurationSha256']=sha(original_caller)
+        self.config.write_text(json.dumps({'version':1,'nodes':[entry]}))
         with patch('livestack_node.qualification_controller.QualificationClient', return_value=client):
             app = configured_broker_app(self.broker, str(self.config), str(self.database))
         self.assertTrue(self.database.exists())
