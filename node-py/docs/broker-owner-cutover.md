@@ -69,8 +69,7 @@ Registration follows the actual `docs/onboarding-an-app.md` and
 
 1. Commit a dedicated app policy and actual broker deployment handler. Build
    its adapter through `zzops adapter bundle` at the exact full revision.
-   The descriptor must pin the emitted manifest digest. No policy/handler
-   artifact has been qualified yet.
+   The descriptor must pin the emitted manifest digest. The earlier exact 7348f7a policy bundle (descriptor digest 664ce0fd72a546d95f5a2f8be65213208aec06daadada30d8c0a2a27e52a506b) passed outside-source import and train-refusal checks only. Subsequent policy edits require a new bundle. No deployment handler execution or authority registration has been qualified.
 2. Independently register that named handler and dispatcher principal in the
    existing Workload authority. The handler-release CLI supports `stage`,
    `activate`, `rollback`, exact generation CAS and immutable release digests.
