@@ -47,3 +47,22 @@ def configure_broker_owner(broker, configuration_path, source_identity, incarnat
     gate.fence.hold(control._credential, holder)
     control.start(gate.fence)
     return gate, control
+
+
+def configured_owned_broker_app(broker, qualification_path, reservation_path,
+                                owner_path, source_identity, incarnation):
+    """The installed launcher supplies the independently verified owner tuple."""
+    from .hostd import configured_broker_app
+    if not owner_path:
+        if source_identity is not None or incarnation is not None:
+            raise ValueError('paired_broker_owner_startup_required')
+        return configured_broker_app(broker, qualification_path, reservation_path), None
+    if not source_identity or not incarnation:
+        raise ValueError('paired_broker_owner_startup_required')
+    gate, control = configure_broker_owner(broker, owner_path, source_identity, incarnation)
+    try:
+        app = configured_broker_app(broker, qualification_path, reservation_path, owner_gate=gate)
+    except BaseException:
+        control.close()
+        raise
+    return app, control
