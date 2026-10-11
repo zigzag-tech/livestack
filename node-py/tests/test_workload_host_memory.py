@@ -48,7 +48,7 @@ def learn(store, handler, peak, key='learn', need=10*GIB, outcome='succeeded', f
     way the worker's completion receipt (resource_usage.py) carries it."""
     register(store, 'teacher', None, hostname='elsewhere')
     store.submit('owner', dict(version=1, key=key, handler=handler, input_digest='a'*64,
-                               need=dict(cpu=1, memory_bytes=need, disk_bytes=GIB)))
+                               need=dict(cpu=6, memory_bytes=need, disk_bytes=16*GIB)))
     a = store.claim('teacher', 'boot1')
     store.complete('teacher', 'boot1', a['attempt_id'], a['fence'], input_digest='a'*64, outcome=outcome,
                    result=dict(exit_code=0 if outcome == 'succeeded' else 75, artifacts=[], resources={field: peak}))
@@ -207,3 +207,55 @@ def test_the_non_reclaimable_peak_is_preferred_over_the_cache_inclusive_one(stor
     register(store, 'w', host(8*GIB))
     job = e2e(store, 'one')
     assert store.claim('w', 'boot1')['job_id'] == job['id'], store.get('owner', job['id'])['reason']
+
+
+# --- a job that states no `admit` is charged what its handler measured -----------
+# 2026-10-11: release builds declared only `need`, so admit defaulted to need and a
+# measured 1.3 GiB build was charged its 3 GiB cap for the whole attempt.
+
+def plain(store, key, need):
+    return store.submit('owner', dict(version=1, key=key, handler=E2E, input_digest='a'*64,
+        need=dict(cpu=6, memory_bytes=need, disk_bytes=16*GIB)))
+
+
+def learn_many(store, peak, count, need, field='memory_nonreclaimable_peak_bytes'):
+    for i in range(count):
+        learn(store, E2E, peak, key=f'{need}-{peak}-{i}', need=need, field=field)
+
+
+def test_a_job_with_no_admit_is_charged_its_measured_peak_with_margin(store):
+    learn_many(store, 2*GIB, 5, need=8*GIB)
+    register(store, 'w', host(4*GIB))  # 3 GiB after the reserve: fits 2.5 GiB, not the 8 GiB cap
+    job = plain(store, 'one', 8*GIB)
+    assert store.claim('w', 'boot1')['job_id'] == job['id'], store.get('owner', job['id'])['reason']
+
+
+def test_a_job_with_no_admit_is_charged_need_until_enough_samples(store):
+    learn_many(store, 2*GIB, 4, need=8*GIB)
+    register(store, 'w', host(4*GIB))
+    job = plain(store, 'one', 8*GIB)
+    assert store.claim('w', 'boot1') is None
+    assert 'claim 8.0 GiB' in store.get('owner', job['id'])['reason']
+
+
+def test_samples_run_under_a_smaller_need_do_not_lower_a_larger_need_claim(store):
+    learn_many(store, 2*GIB, 5, need=8*GIB)  # the x64 daemon
+    register(store, 'w', host(8*GIB))
+    job = plain(store, 'arm64', 16*GIB)  # the arm64 daemon: no samples of its own
+    assert store.claim('w', 'boot1') is None
+    assert 'claim 16.0 GiB' in store.get('owner', job['id'])['reason']
+
+
+def test_the_margin_never_charges_more_than_need(store):
+    learn_many(store, 7*GIB, 5, need=8*GIB)  # 7 x 1.25 = 8.75 GiB
+    register(store, 'w', host(8*GIB + GIB))
+    job = plain(store, 'one', 8*GIB)
+    assert store.claim('w', 'boot1')['job_id'] == job['id'], store.get('owner', job['id'])['reason']
+
+
+def test_a_stated_admit_still_floors_the_claim(store):
+    learn_many(store, 1*GIB, 5, need=10*GIB)
+    register(store, 'w', host(4*GIB + GIB - 1))
+    job = e2e(store, 'one')  # admit 4 GiB
+    assert store.claim('w', 'boot1') is None
+    assert 'claim 4.0 GiB' in store.get('owner', job['id'])['reason']

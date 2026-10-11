@@ -68,3 +68,33 @@ the probe on any new systemd major version or on a new OS before relying on this
   `origin/main`.)
 - What does the number EXCLUDE, and is that written next to its name?
 - Does a value that is supposed to be a part ever exceed its whole?
+
+## Evidence: what the memory ledger charged on zz-joe, 2026-10-11
+
+Waiting job: `benchday.release.hub.v1` (need 4 GiB), refused `claim 4.0 > free 0.6 (available
+37.5, reserve 1.0, running attempts 23.1, model servers 12.8)`. Real `free`: 40.7 GiB
+available, 23.5 used. The ledger charges `MemAvailable` (measured) minus each running
+attempt's UNREALISED claim (`claim - current`), minus the largest model-server load
+transient (peak - current, unless all units are resident). It never subtracted declared
+`need` for handlers with a measured peak. Attempt cgroups sampled at the same time: the
+five new attempts were 21 s old and held 0.1-0.24 GiB each, so nearly their whole claim
+was still "to come".
+
+Measured (authority `resource_history`, succeeded attempts, last 50; GiB):
+
+| handler | need | stated admit | measured non-reclaimable max / p95 / median | claim before | claim after |
+|---|---|---|---|---|---|
+| release.cli.linux | 3 | none | 1.32 / 1.31 / 1.25 (24) | 3.00 | 1.65 |
+| release.hub | 4 | none | 1.98 / 1.97 / 1.94 (50) | 4.00 | 2.48 |
+| release.web.linux | 4 | none | 1.92 / 1.92 / 1.88 (33) | 4.00 | 2.40 |
+| release.daemon.linux (x64, need 8) | 8 | none | 8.81 / 8.79 / 4.63 (50) | 8.00 | 8.00 (cap) |
+| release.app.android | 9 | none | 8.70 / 8.46 / 7.39 (50) | 9.00 | 9.00 (cap) |
+| release.daemon.macos | 12 | none | 9.38 (8) | 12.00 | 12.00 (<5 per need) |
+| e2e.full | 10 | 4 | 4.76 / 4.65 / 1.75 (50) | 4.76 | 4.76 (stated admit) |
+| e2e.task | 8 | none | 4.46 / 4.46 / 2.80 (19) | 8.00 | 5.58 |
+| compilation.image | 10 | 4 | 4.47 / 4.12 / 3.83 (28) | 4.47 | 4.47 |
+
+Not lowered: every `need` (cgroup cap; cache-inclusive peaks sit at the cap), the arm64 and
+Apple daemon figures (16 / 12 GiB), declarations of handlers that state an `admit`.
+Model servers: `harmony-image` was not resident, so peak 16.3 - current 3.5 = 12.8 GiB was
+reserved for a possible reload; that is the design's load-transient term and is unchanged.

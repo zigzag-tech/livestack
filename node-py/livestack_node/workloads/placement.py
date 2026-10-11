@@ -6,6 +6,7 @@ worker initially; all environments on the same physical host share claims.
 import hashlib
 import json
 import logging
+import math
 import uuid
 
 from ..fleet_scheduler import Admit, FleetState, Job, Sla, Target, Tier, schedule
@@ -29,6 +30,11 @@ MEMORY = "memory_bytes"
 # 2026-10-02 twenty of them in a row would have taught the e2e handler 3.8 GiB
 # while its completed runs reach 10 GiB.
 LEARNED_WINDOW = 20
+# A job that states no memory `admit` is charged its handler's measured peak (same
+# declared `need`, at least this many succeeded attempts) times this margin, never
+# more than `need`. Unmeasured, it is charged `need`.
+UNSTATED_ADMIT_MARGIN = 1.25
+UNSTATED_ADMIT_MIN_SAMPLES = 5
 # Admission stops on a host that is already stalling on memory. avg60, not
 # avg10, so one burst does not flap admission. 16 MiB/s of swap-in is ~4k
 # pages/s: far above an idle server faulting back in (zz-joe at rest: <10/s).
@@ -195,35 +201,54 @@ def _wait(db, row, now, reason, blockers):
     db.execute("UPDATE jobs SET placement=? WHERE id=?", (encode(document, PLACEMENT_BYTES), row["id"]))
 
 
-def _learned_peak(db, handler, cache):
+def _learned_peak(db, handler, cache, declared=None, min_samples=1):
     """Prefer the non-reclaimable peak the worker samples; fall back to the
     cgroup memory.peak (page cache included, so conservative) only while no
     succeeded attempt of the handler carries the newer figure.
 
+    `declared` restricts the samples to attempts that ran under that same `need`
+    memory (one handler serves jobs of different sizes: the arm64 daemon needs
+    16 GiB where the x64 one needs 8, and their peaks must not be mixed), and
+    `min_samples` is how many of them a figure needs before it is believed.
+
     Reads the bounded resource history (resource_history.py), the one learned number
     shared with the declaration audit."""
-    if handler not in cache:
-        cache[handler] = None
+    key = (handler, declared, min_samples)
+    if key not in cache:
+        cache[key] = None
         for dimension in ("memory_nonreclaimable_peak", "memory_peak"):
             peaks = [r[0] for r in db.execute(
                 "SELECT value FROM resource_history WHERE handler=? AND dimension=? AND outcome='succeeded' "
-                "ORDER BY at DESC,id DESC LIMIT ?", (handler, dimension, LEARNED_WINDOW))]
-            if peaks:
-                cache[handler] = max(peaks)
+                "AND (? IS NULL OR declared=?) ORDER BY at DESC,id DESC LIMIT ?",
+                (handler, dimension, declared, declared, LEARNED_WINDOW))]
+            if len(peaks) >= min_samples:
+                cache[key] = max(peaks)
                 break
-    return cache[handler]
+    return cache[key]
 
 
 def _memory_claim(db, spec, cache):
-    """What an attempt of this job will hold: its handler's learned peak within
-    [admit, need], or `need` (its cgroup MemoryMax) until a peak is recorded.
-    None when the job declares no memory."""
+    """What an attempt of this job will hold, or `need` (its cgroup MemoryMax)
+    until a peak is recorded. None when the job declares no memory.
+
+    With a stated `admit`, the handler's learned peak within [admit, need]. With
+    none, the caller has stated no floor, so `admit` would default to `need` and
+    measurement could never lower the charge (2026-10-11: two release builds that
+    peak at 1.3 GiB were each charged their 3 GiB cap, and a 4 GiB hub release that
+    peaks at 2.0 could not be placed on a host with 37 GiB available). Then the
+    claim is the peak measured over attempts run under this same `need`, times
+    UNSTATED_ADMIT_MARGIN, once there are UNSTATED_ADMIT_MIN_SAMPLES of them.
+    `need` stays the cap on both."""
     need = spec["need"].get(MEMORY)
     if need is None:
         return None
-    admit = (spec.get("admit") or spec["need"]).get(MEMORY, need)
+    stated = (spec.get("admit") or {}).get(MEMORY)
+    if stated is None:
+        learned = _learned_peak(db, spec["handler"], cache, declared=need,
+                                min_samples=UNSTATED_ADMIT_MIN_SAMPLES)
+        return need if learned is None else min(need, math.ceil(learned*UNSTATED_ADMIT_MARGIN))
     learned = _learned_peak(db, spec["handler"], cache)
-    return need if learned is None else min(need, max(admit, learned))
+    return need if learned is None else min(need, max(stated, learned))
 
 
 def _pressure(view):
@@ -606,7 +631,13 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
             preferred = next((target.host_id for target in targets if target.host_id in matching_hosts), None)
             if preferred is not None:
                 locality = preferred
-        job = Job(id=row["id"], kind=spec["handler"], owner=row["owner"], need=admit,
+        # On measured hosts memory is charged as `claim` (checked above), which for a job that
+        # states no memory `admit` can be below the default `admit` (= need). The scheduler must
+        # then ask for the claim, or it would refuse room the ledger just found.
+        demand = dict(admit)
+        if claim is not None and targets and all(t.host_id in views for t in targets):
+            demand[MEMORY] = claim
+        job = Job(id=row["id"], kind=spec["handler"], owner=row["owner"], need=demand,
                   created_at=row["created"], sla=Sla.BATCH, deadline=spec["deadline"],
                   est_duration_s=spec["estimate_seconds"], selector=spec["selector"],
                   locality_host=locality)
