@@ -11,6 +11,8 @@ import math
 import os
 from pathlib import Path
 import re
+import sqlite3
+import stat
 from uuid import UUID
 
 from .fleet_operations import OperationStore
@@ -20,6 +22,19 @@ from .qualification_capacity import plan_qualification_capacity
 
 class QualificationReservationStore(OperationStore):
     def __init__(self, path):
+        target = Path(path)
+        if not target.is_absolute() or target.resolve() != target:
+            raise PermissionError('qualification_private_store_path_required')
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        directory = target.parent.stat()
+        if directory.st_uid != os.getuid() or directory.st_mode & 0o077:
+            raise PermissionError('qualification_private_store_directory_required')
+        descriptor = os.open(target,os.O_CREAT|os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,0o600)
+        try:
+            info = os.fstat(descriptor)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise PermissionError('qualification_private_store_custody_required')
+        finally: os.close(descriptor)
         super().__init__(path, max_records=64, max_age_s=None)
         self.controller = ':'.join((Path('/proc/sys/kernel/random/boot_id').read_text().strip(), str(os.getpid()), str(process_start_ticks(os.getpid()))))
         with self._writer() as db:
@@ -43,9 +58,10 @@ CREATE TABLE IF NOT EXISTS qualification_jobs (node_id TEXT NOT NULL, job_id TEX
     def _encode(value):
         return json.dumps(value, sort_keys=True, separators=(',', ':'))
 
-    def _validate(self, node, job):
+    @classmethod
+    def _validate(cls, node, job):
         fields = {'nodeId','authority','identitySha256','configurationSha256','serverInstanceId','bootId','unitInvocationId','processStartTicks','deviceId','unitKind','hostId'}
-        if not isinstance(node, dict) or set(node) != fields or any(not isinstance(value, str) or not value or len(value)>192 for value in node.values()) or len(self._encode(node))>4096:
+        if not isinstance(node, dict) or set(node) != fields or any(not isinstance(value, str) or not value or len(value)>192 for value in node.values()) or len(cls._encode(node))>4096:
             raise ValueError('qualification_exact_node_binding_required')
         if any(not re.fullmatch('[a-f0-9]{64}', node[key]) for key in ('identitySha256','configurationSha256')):
             raise ValueError('qualification_source_configuration_digest_required')
@@ -129,3 +145,32 @@ CREATE TABLE IF NOT EXISTS qualification_jobs (node_id TEXT NOT NULL, job_id TEX
             self._current_controller(db)
             count=db.execute("UPDATE qualification_nodes SET state='retired',fence=fence+1 WHERE node_id=? AND binding=? AND fence=? AND state='held'",(node['nodeId'],self._encode(node),fence)).rowcount
             if count!=1: raise ValueError('qualification_retirement_cas_refused')
+
+
+class QualificationReservationReader:
+    """Read-only node view; opening it never adopts controller ownership."""
+    def __init__(self, path):
+        self.path = Path(path)
+
+    def assert_reserved(self, node, job, fence):
+        QualificationReservationStore._validate(node,job)
+        if type(fence) is not int or fence <= 0:
+            raise PermissionError('qualification_claim_fence_required')
+        target = self.path
+        info = target.lstat(); directory = target.parent.stat()
+        if not target.is_absolute() or target.resolve()!=target or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_mode&0o077 or info.st_uid!=os.getuid() or directory.st_mode&0o077 or directory.st_uid!=os.getuid():
+            raise PermissionError('qualification_private_reader_custody_required')
+        with closing(sqlite3.connect(target.as_uri()+'?mode=ro',uri=True,timeout=1)) as db:
+            controller = db.execute('SELECT incarnation FROM qualification_controller WHERE id=1').fetchone()
+            record = db.execute('SELECT binding,state,fence FROM qualification_nodes WHERE node_id=?',(node['nodeId'],)).fetchone()
+            accepted = db.execute('SELECT binding FROM qualification_jobs WHERE node_id=? AND job_id=?',(node['nodeId'],job['jobId'])).fetchone()
+        if controller is None or record != (QualificationReservationStore._encode(node),'reserved',fence) or accepted != (QualificationReservationStore._encode(job),):
+            raise PermissionError('qualification_actual_retained_claim_refused')
+        try:
+            boot,pid,ticks = controller[0].split(':')
+            current = boot == Path('/proc/sys/kernel/random/boot_id').read_text().strip() and str(process_start_ticks(int(pid))) == ticks
+        except (ValueError,FileNotFoundError,ProcessLookupError):
+            current = False
+        if not current:
+            raise PermissionError('qualification_capacity_controller_incarnation_changed')
+        return {'nodeId':node['nodeId'],'jobId':job['jobId'],'fence':fence}
