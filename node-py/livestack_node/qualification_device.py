@@ -20,6 +20,7 @@ def qualification_cuda_device(index, expected_device, executable_sha256):
     selected=[row for row in rows if len(row)==2 and row[0]==index]
     if len(rows)>8 or len(selected)!=1 or not re.fullmatch(r'GPU-[a-fA-F0-9-]{36}',selected[0][1]):
         raise PermissionError('qualification_actual_physical_cuda_uuid_required')
-    actual=socket.gethostname()+'/'+hashlib.sha256(selected[0][1].encode()).hexdigest()[:8]
+    # NVML prefixes UUIDs with GPU-; Torch/facade uses the bare physical UUID.
+    actual=socket.gethostname()+'/'+hashlib.sha256(selected[0][1][4:].encode()).hexdigest()[:8]
     if actual!=expected_device:raise PermissionError('qualification_actual_device_binding_changed')
     return actual
