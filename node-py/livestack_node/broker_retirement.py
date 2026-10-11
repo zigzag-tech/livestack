@@ -72,7 +72,7 @@ class BrokerRetirementJournal:
         if selected is None:
             raise ValueError('broker_registered_abort_unit_required')
         verify_retained_files(self.plan, self.inventory)
-        witness = inspect_predecessor(selected)
+        witness = inspect_predecessor(selected, self.plan['retainedFiles'])
         if not isinstance(permission, dict) or set(permission) != {'ok','permissionOnly','principal','nonce','requestSha256','authorityMachine','keeperSourceSha256'} or permission.get('ok') is not True or permission.get('permissionOnly') is not True:
             raise PermissionError('broker_canonical_permission_receipt_required')
         self._verify_binding()
@@ -100,7 +100,7 @@ class BrokerRetirementJournal:
             raise ValueError('broker_submitted_abort_intent_required')
         # Always reread kernel and manager; retained terminal receipt is not a
         # current physical claim after a restart or a changed incarnation.
-        terminal = verify_terminated(selected, json.loads(row[0]))
+        terminal = verify_terminated(selected, json.loads(row[0]), self.plan['retainedFiles'])
         self._verify_binding()
         with closing(self._connect()) as db:
             db.execute('BEGIN IMMEDIATE')

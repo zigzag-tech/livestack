@@ -64,15 +64,37 @@ def validate_abort_plan(value, registered_inventory):
     return value
 
 
-def inspect_predecessor(row):
+def verify_registered_dropins(row, fields, retained_files=()):
+    """Only exact unit files already bound by the registered retention plan."""
+    prefix = '/etc/systemd/system/' + row['unit'] + '.d/'
+    expected = [item for item in retained_files if item['unit'] == row['unit']
+                and item['role'] == 'unit' and item['path'].startswith(prefix)]
+    if any('/' in item['path'][len(prefix):] or not item['path'].endswith('.conf') for item in expected):
+        raise ValueError('broker_registered_dropin_path_invalid')
+    paths = fields['DropInPaths'].split()
+    if len(paths) != len(set(paths)) or set(paths) != {item['path'] for item in expected}:
+        raise ValueError('broker_registered_dropins_changed')
+    for item in expected:
+        path = Path(item['path'])
+        for ancestor in (path.parent, *path.parents):
+            info = ancestor.lstat()
+            if ancestor.is_symlink() or info.st_uid != 0 or info.st_mode & 0o022:
+                raise ValueError('broker_registered_dropin_ancestry_changed')
+        stat = path.lstat()
+        if path.is_symlink() or path.resolve() != path or stat.st_uid != 0 or stat.st_mode & 0o022 or stat.st_size != item['size'] or sha256(path.read_bytes()).hexdigest() != item['sha256']:
+            raise ValueError('broker_registered_dropin_bytes_changed')
+
+
+def inspect_predecessor(row, retained_files=()):
     """Read-only authoritative manager plus kernel identity, never health-only."""
     output = subprocess.check_output(['/usr/bin/systemctl', 'show', row['unit'],
         *['--property=' + field for field in PROPERTIES]], timeout=20, text=True)
     if len(output.encode()) > 16384:
         raise ValueError('broker_unit_observation_bound')
     fields = dict(line.split('=', 1) for line in output.splitlines())
-    if set(fields) != set(PROPERTIES) or fields['Id'] != row['unit'] or fields['ControlGroup'] != row['controlGroup'] or fields['KillMode'] != 'control-group' or fields['DropInPaths'] or fields['NeedDaemonReload'] != 'no':
+    if set(fields) != set(PROPERTIES) or fields['Id'] != row['unit'] or fields['ControlGroup'] != row['controlGroup'] or fields['KillMode'] != 'control-group' or fields['NeedDaemonReload'] != 'no':
         raise ValueError('broker_owned_unit_manager_changed')
+    verify_registered_dropins(row, fields, retained_files)
     if fields['InvocationID'] != row['invocationId'] or fields['MainPID'] != str(row['mainPid']) or fields['ActiveState'] != 'active' or fields['Job'] not in ('', '0'):
         raise ValueError('broker_predecessor_incarnation_changed')
     if Path('/proc/sys/kernel/random/boot_id').read_text().strip() != row['bootId'] or process_start_ticks(row['mainPid']) != row['startTicks']:
@@ -87,7 +109,7 @@ def inspect_predecessor(row):
     return {'manager': fields, 'processes': sorted(processes, key=lambda item: item['pid'])}
 
 
-def verify_terminated(row, prior):
+def verify_terminated(row, prior, retained_files=()):
     """Actual stopped unit and recursive leaf/PID proof, not job completion.
 
     Caller reads `prior` from the source-bound private submitted journal. No
@@ -100,8 +122,9 @@ def verify_terminated(row, prior):
     fields = dict(line.split('=', 1) for line in output.splitlines())
     if set(fields) != set(PROPERTIES) or fields['Id'] != row['unit'] or fields['InvocationID'] != row['invocationId'] or fields['MainPID'] != '0' or fields['ActiveState'] not in ('inactive', 'failed') or fields['Job'] not in ('', '0'):
         raise ValueError('broker_abort_not_physically_terminal')
-    if fields['KillMode'] != 'control-group' or fields['DropInPaths'] or fields['NeedDaemonReload'] != 'no' or sha256(Path(fields['FragmentPath']).read_bytes()).hexdigest() != row['unitSha256']:
+    if fields['KillMode'] != 'control-group' or fields['NeedDaemonReload'] != 'no' or sha256(Path(fields['FragmentPath']).read_bytes()).hexdigest() != row['unitSha256']:
         raise ValueError('broker_aborted_unit_bytes_changed')
+    verify_registered_dropins(row, fields, retained_files)
     if Path('/proc/sys/kernel/random/boot_id').read_text().strip() != row['bootId'] or prior['manager']['InvocationID'] != row['invocationId'] or prior['manager']['MainPID'] != str(row['mainPid']):
         raise ValueError('broker_abort_kernel_incarnation_changed')
     if not prior['processes'] or not any(item['pid'] == row['mainPid'] and item['startTicks'] == row['startTicks'] for item in prior['processes']):
