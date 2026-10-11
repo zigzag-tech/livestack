@@ -1312,3 +1312,30 @@ up on stays filtered, however empty its card.
 cd node-py && python -m pytest -q          # planner, broker, facade, federation, lease
 cargo test -p livestack-shared             # the Rust residency core
 ```
+
+## Contracts are the interface to Benchday (services-own-their-streams)
+
+Harmony publishes its facts and answers its requests through the local ingress of the Benchday daemon on its
+host, with the Python producer SDK (`node-py/livestack_node/streams/benchday_streams`, vendored unchanged from
+benchday `packages/benchday-plugin-api/sdk/python`). Code: `node-py/livestack_node/streams/` (`host_facts`,
+`fleet_facts`, `workload_authority`, `request_authority`, `runtime`; `lane` is a stdlib-only driver). Everything is
+OFF unless `HARMONY_STREAMS=1` (optional `HARMONY_STREAMS_SOCKET`, `HARMONY_STREAMS_DIR`, `HARMONY_UNITS_GLOBS`).
+
+| Contract | Kind | Producer / authority |
+|---|---|---|
+| `harmony.host/1` | state, one-per-host | each host broker: unit-declaration digest, mtime, `drift` against the digest a reviewed deployment recorded |
+| `harmony.fleet/1`, `harmony.jobs/1` | state | the fleet broker (`harmony.fleet/1` is one-per-realm; a second broker is refused `authority_conflict`) |
+| `harmony.workload/1` | durable intent, one-per-realm | the fleet broker; `submitted < admitted < placed < running < done`, every terminal carries `attribution` (`workload` / `infra` / `unknown`) and a reason, durable in the claim ledger |
+| `harmony.request/1` | durable intent, one-per-host | host and fleet brokers; `require`/`prefer` in the request language, refusals `requirement_inexpressible` (names the clause) vs `unsatisfiable` |
+
+Operator flow: a native producer first runs in SHADOW beside the Stage 1 adapter (the daemon compares field by field
+and counts), then the operator lists the contract in `<daemon state dir>/streams/producer_preference.json`
+(see benchday `docs/native-service-producers.md`). Inference calls, audio and job payloads stay on their own
+transports; a partial refers to large bodies only by reference `{ref, digest, bytes, media}`.
+
+Known gaps: `harmony.workload/1` submit is refused `spec_resolver_unconfigured` (attribution `infra`) until a
+`resolve_spec` hook turns a spec reference into a store request; the Stage 1 `harmony.fleet-source` adapter reads
+flat keys the live `/fleet` does not emit, so shadow divergence is expected until it is corrected (set
+`shadow_ignore` for the three rings, `degraded`, `degraded_truncated` and `host_id` meanwhile).
+`/peers`, `/status`, `/fleet`, `/fleet/rank`, `/fleet/operations` and `/fleet/ledger` still have callers
+(benchday's poll-mode roster and `fleet_rank`, fleetd) and are NOT removed from hostd's listener.
