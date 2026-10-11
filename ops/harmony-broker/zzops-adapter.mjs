@@ -15,6 +15,8 @@ export default Object.freeze({
     const effects = ['prepare', 'status', 'hold', 'release', 'shutdown', 'reconcile', 'activate', 'rollback'];
     const digest = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
     return !!request && !!owner && effects.includes(request.effect) &&
+      digest(request.dispatchIdentitySha256) && owner.dispatches?.[request.dispatchUnit] === request.dispatchIdentitySha256 &&
+      ['livestack-hostd.service','polytts.service','harmony-klein-1.service'].includes(request.dispatchUnit) &&
       digest(request.inputDigest) && digest(owner.inputDigests?.[request.effect]) && request.app === 'harmony-broker' && request.target === 'zz-joe' &&
       request.scope?.mode === 'broker-owner' && request.scope.service === 'livestack-hostd.service' &&
       request.scope.controlGroup === '/system.slice/livestack-hostd.service' && request.scope.port === 8799 &&
