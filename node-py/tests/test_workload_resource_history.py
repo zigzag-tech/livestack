@@ -129,3 +129,26 @@ def test_declared_is_the_enforced_need_and_admit_is_the_separate_placement_charg
     flags = {f['kind']: f for f in store.status()['resource_audit']['flags']}
     assert 'declared_below_observed' not in flags            # 10 GiB cap > 6 GiB observed
     assert flags['admit_below_typical']['admit'] == 4*GIB and flags['admit_below_typical']['declared'] == 10*GIB
+
+
+def test_the_cpu_peak_is_recorded_beside_the_mean_under_the_cpu_need(store):
+    run(store, H, 'cpu', dict(cpu_usage_usec=2_000_000, execution_seconds=10.0, cpu_peak_cores=3.5))
+    assert rows(store, dimension='cpu_cores') == [0.2]
+    assert rows(store, dimension='cpu_peak_cores') == [3.5]
+    with store.connect() as db:
+        assert db.execute("SELECT declared FROM resource_history WHERE dimension='cpu_peak_cores'").fetchone()[0] == 1.0
+
+
+def test_the_cpu_peak_is_the_busiest_window_not_the_mean():
+    """Only a time series can show this (no integration test fakes a cgroup counter):
+    10 s idle, 5 s at 4 cores, 10 s idle is a 4-core peak and a ~0.8-core mean."""
+    from livestack_node.workloads.resource_usage import CpuPeak
+    cpu, used = CpuPeak(), 0
+    assert cpu.peak is None
+    for second in range(26):
+        used += 4_000_000 if 10 < second <= 15 else 0
+        cpu.observe(float(second), used)
+    assert cpu.peak == pytest.approx(4.0)
+    short = CpuPeak()
+    short.observe(0.0, 0), short.observe(3.0, 3_000_000)
+    assert short.peak is None, 'less than one window is no measurement, not zero'

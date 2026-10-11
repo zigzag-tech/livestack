@@ -15,7 +15,7 @@ MAX_AGE_SECONDS = 30*86400
 SUGGEST_MARGIN = 1.15  # named in the warning text; never applied automatically
 # dimension -> the `need` key it is audited against (None: no declared counterpart)
 DIMENSIONS = {'memory_nonreclaimable_peak': 'memory_bytes', 'memory_peak': 'memory_bytes',
-              'tasks_peak': None, 'cpu_cores': 'cpu', 'disk_delta': 'disk_bytes'}
+              'tasks_peak': None, 'cpu_cores': 'cpu', 'cpu_peak_cores': 'cpu', 'disk_delta': 'disk_bytes'}
 
 
 def _numbers(resources):
@@ -24,7 +24,7 @@ def _numbers(resources):
         return value if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
     found = {'memory_nonreclaimable_peak': number('memory_nonreclaimable_peak_bytes'),
              'memory_peak': number('memory_peak_bytes'), 'tasks_peak': number('tasks_peak'),
-             'disk_delta': number('disk_delta_bytes')}
+             'disk_delta': number('disk_delta_bytes'), 'cpu_peak_cores': number('cpu_peak_cores')}
     cpu, seconds = number('cpu_usage_usec'), number('execution_seconds')
     if cpu is not None and seconds:
         found['cpu_cores'] = cpu/1e6/seconds
