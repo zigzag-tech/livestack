@@ -143,10 +143,14 @@ class QualificationNodeGate:
                     failed.set();return
         thread = Thread(target=heartbeat,daemon=True,name='qualification-kind-lease')
         token = self.context.set((dict(job),fence,lease,failed))
+        proof = {'jobId':job['jobId'],'leaseId':lease.lease_id,'kind':lease.capability_kind,
+            'hostId':lease.host_id,'ownerId':lease.owner_id,'fence':fence,
+            'leaseExpiresAt':lease.expires_at,'clockBasis':'coordinator-monotonic',
+            'activeAtEntry':True,'physicalBarrier':'pending','leaseRelease':'pending'}
         try:
             self._assert_work(self.binding['unitKind'],None,None)
             thread.start()
-            yield {'jobId':job['jobId'],'leaseId':lease.lease_id,'kind':lease.capability_kind,'hostId':lease.host_id,'fence':fence}
+            yield proof
         finally:
             try:
                 # OwnedExecutorJobs has an outer barrier too; this one is
@@ -154,12 +158,25 @@ class QualificationNodeGate:
                 if synchronize() is not None:
                     raise PermissionError('qualification_physical_barrier_void_contract_required')
             except BaseException:
+                proof['physicalBarrier'] = 'unknown'
                 self.uncertain[job['jobId']] = (stop,thread,lease)
                 raise
             else:
-                stop.set()
-                if thread.ident is not None:thread.join(1)
-                coordinator.release_lease(lease.lease_id)
+                proof['physicalBarrier'] = 'settled'
+                heartbeat_failed = failed.is_set()
+                try:
+                    if coordinator.release_lease(lease.lease_id) is not True or any(value.lease_id == lease.lease_id for value in coordinator.broker.list_leases()):
+                        raise PermissionError('qualification_kind_lease_release_unconfirmed')
+                except BaseException:
+                    proof['leaseRelease'] = 'unknown'
+                    self.uncertain[job['jobId']] = (stop,thread,lease)
+                    raise
+                else:
+                    proof['leaseRelease'] = 'released'
+                    stop.set()
+                    if thread.ident is not None:thread.join(1)
+                    if heartbeat_failed:
+                        raise PermissionError('qualification_lease_heartbeat_failed')
             finally:
                 self.context.reset(token)
             # Model/host capacity remains retained even after job settlement.
