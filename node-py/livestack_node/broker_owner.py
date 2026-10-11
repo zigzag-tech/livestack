@@ -5,10 +5,13 @@ turns a timed-out remote dispatch or an in-memory placement TTL into settlement.
 Remote uncertainty intentionally requires a separate owner reconciliation path.
 """
 from concurrent.futures import Executor
+from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 from dataclasses import asdict, is_dataclass
 from hashlib import sha256
 import json
+import re
+from threading import Event
 
 from .provider_fence import ProviderFence, FenceRefused
 
@@ -18,6 +21,9 @@ class BrokerOwnerGate:
         self.broker = broker
         self.fence = ProviderFence(authorize)
         self.journal = journal
+        self._async_pool = None
+        self.reconcile_stop = Event()
+        self.reconcile_thread = None
         if journal is not None:
             for _row in journal.unsettled():
                 key = self.fence.admit()
@@ -58,18 +64,69 @@ class BrokerOwnerGate:
 
     def run(self, fn, *args, **kwargs):
         key, identity = self._admit('local-work', fn.__name__, args, kwargs)
-        completed = False
         try:
-            result = fn(*args, **kwargs)
-            completed = True
-            return result
+            return fn(*args, **kwargs)
         finally:
             # A local handler returning is not a remote model-load barrier.
             # Keep uncertainty sticky even if snapshot later expires a load.
-            self._settle(key, identity, completed and not self.broker._in_flight)
+            # This local CPU frame has exited even on a validation error.
+            # Independently journalled remote effects remain unknown.
+            self._settle(key, identity, not self.broker._in_flight)
 
     def executor(self, executor):
         return BrokerOwnedExecutor(self, executor)
+
+    def async_executor(self):
+        with self.fence._lock:
+            if self._async_pool is None:
+                self._async_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix='broker-owned')
+            return self.executor(self._async_pool)
+
+    def shutdown_owned(self):
+        """Owner socket callback, only inside authenticated drained shutdown."""
+        self.fence.require_owned_shutdown()
+        self.reconcile_stop.set()
+        if self.reconcile_thread is not None:
+            self.reconcile_thread.join(timeout=20)
+            if self.reconcile_thread.is_alive():
+                raise FenceRefused('broker_reconcile_thread_not_settled')
+        if self._async_pool is not None:
+            self._async_pool.shutdown(wait=True, cancel_futures=False)
+
+    @staticmethod
+    def settlement_route(scope):
+        return scope.get('method') == 'POST' and bool(re.fullmatch(
+            r'/lease/.+/(heartbeat|release)', scope.get('path', '')))
+
+    def install_ingress(self, app):
+        """Install before ASGI startup; existing lease settlement keeps its auth."""
+        from fastapi.routing import APIRoute
+        from fastapi.responses import JSONResponse
+        from .provider_fence import ProviderAdmissionMiddleware
+        if self.journal is None or app.middleware_stack is not None:
+            raise FenceRefused('broker_owner_durable_unstarted_app_required')
+        for route in app.routes:
+            if not isinstance(route, APIRoute) or route.methods <= {'GET', 'HEAD'} or route.path in (
+                '/lease/{lease_id:path}/heartbeat', '/lease/{lease_id:path}/release'):
+                continue
+            original = route.dependant.call
+            # The one async qualification route uses async_executor explicitly.
+            import inspect
+            if inspect.iscoroutinefunction(original):
+                if route.path != '/qualification/admit':
+                    raise FenceRefused('broker_owner_unknown_async_effect_route')
+                continue
+
+            @wraps(original)
+            def owned(*args, _original=original, **kwargs):
+                return self.run(_original, *args, **kwargs)
+
+            route.dependant.call = owned
+        async def refused(_request, error):
+            return JSONResponse({'error': str(error)}, status_code=503)
+        app.add_exception_handler(FenceRefused, refused)
+        app.add_middleware(ProviderAdmissionMiddleware, fence=self.fence,
+            bypass=lambda scope: scope.get('method') in ('GET', 'HEAD') or self.settlement_route(scope))
 
     def install_dispatch(self):
         if getattr(self.broker, '_owner_gate', None) is not None:
@@ -128,8 +185,7 @@ class BrokerOwnedExecutor(Executor):
             raise
 
         def finished(done):
-            settled = done.cancelled() or (
-                done.exception() is None and not self.gate.broker._in_flight)
+            settled = done.cancelled() or not self.gate.broker._in_flight
             self.gate._settle(key, identity, settled, not_dispatched=done.cancelled())
 
         future.add_done_callback(finished)
