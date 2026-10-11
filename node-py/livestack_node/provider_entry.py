@@ -111,10 +111,14 @@ def serve(config_path, app):
         loop = asyncio.get_running_loop()
         if module.manager is None:
             raise RuntimeError('managed_provider_shutdown_not_available')
+        def owned_unload():
+            gate = getattr(module.app.state,'qualification_gate',None)
+            if gate is not None:gate.settle_uncertain_owned(fence,synchronize)
+            return module.manager.unload_now()
         if app == 'polyasr':
-            await loop.run_in_executor(module._legacy_executor,module._gpu_call,module.manager.unload_now)
+            await loop.run_in_executor(module._legacy_executor,module._gpu_call,owned_unload)
         else:
-            await loop.run_in_executor(module._gpu_executor,module.manager.unload_now)
+            await loop.run_in_executor(module._gpu_executor,owned_unload)
     lifecycle = ProviderLifecycle(module.app,owner,fence,holder,server,synchronize,unload)
     owner.shutdown = lifecycle.request_shutdown
     owner.start(fence)

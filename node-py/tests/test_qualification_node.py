@@ -63,7 +63,7 @@ class QualificationNodeTests(unittest.TestCase):
             with self.assertRaises(PermissionError):call('voxcpm')
         self.assertEqual(self.loads,[])
     def test_actual_kind_lease_precedes_cpu_load_and_capacity_is_retained(self):
-        with self.gate.work(self.job,'Bearer fixture',1) as receipt:
+        with self.gate.work(self.job,'Bearer fixture',1,synchronize=lambda:None) as receipt:
             self.assertEqual(self.loads,[])
             leases=self.coordinator.broker.list_leases()
             self.assertEqual(len(leases),1);self.assertEqual(leases[0].lease_id,receipt['leaseId'])
@@ -74,19 +74,19 @@ class QualificationNodeTests(unittest.TestCase):
     def test_forged_job_stale_fence_revoked_permission_and_lost_lease_refuse(self):
         for job,fence in ((dict(self.job,jobId=str(uuid4())),1),(dict(self.job,inputDigest='d'*64),1),(self.job,2)):
             with self.assertRaises(PermissionError):
-                with self.gate.work(job,'Bearer fixture',fence):pass
+                with self.gate.work(job,'Bearer fixture',fence,synchronize=lambda:None):pass
         self.client.authorize.side_effect=PermissionError('mock revoked')
         with self.assertRaises(PermissionError):
-            with self.gate.work(self.job,'Bearer fixture',1):pass
+            with self.gate.work(self.job,'Bearer fixture',1,synchronize=lambda:None):pass
         self.client.authorize.side_effect=None
-        with self.gate.work(self.job,'Bearer fixture',1) as receipt:
+        with self.gate.work(self.job,'Bearer fixture',1,synchronize=lambda:None) as receipt:
             self.coordinator.release_lease(receipt['leaseId'])
             with self.assertRaises(PermissionError):self.manager.ensure('voxcpm')
         self.assertEqual(self.loads,[])
     def test_context_does_not_leak_to_other_thread_and_accepted_worker_retains_lease(self):
         entered,finish=threading.Event(),threading.Event();observed=[]
         def worker():
-            with self.gate.work(self.job,'Bearer fixture',1) as receipt:
+            with self.gate.work(self.job,'Bearer fixture',1,synchronize=lambda:None) as receipt:
                 self.manager.ensure('voxcpm');observed.append(receipt);entered.set();finish.wait(1)
         thread=threading.Thread(target=worker);thread.start();self.assertTrue(entered.wait(1))
         try:
@@ -94,8 +94,31 @@ class QualificationNodeTests(unittest.TestCase):
             with self.assertRaises(PermissionError):self.manager.ensure('voxcpm')
         finally:finish.set();thread.join(2)
         self.gate.reader.assert_reserved(self.node,self.job,1)
+    def test_barrier_keeps_actual_lease_and_failure_holds_until_owned_shutdown(self):
+        observations=[]
+        def barrier():
+            observations.append([lease for lease in self.coordinator.broker.list_leases() if lease.owner_id=='owner'])
+        with self.gate.work(self.job,'Bearer fixture',1,synchronize=barrier):pass
+        self.assertEqual(len(observations[0]),1)
+        def fail():raise RuntimeError('CPU mock unknown physical barrier')
+        with self.assertRaises(RuntimeError):
+            with self.gate.work(self.job,'Bearer fixture',1,synchronize=fail):pass
+        self.assertIn(self.job['jobId'],self.gate.uncertain)
+        self.assertTrue(any(lease.owner_id=='owner' for lease in self.coordinator.broker.list_leases()))
+        from livestack_node.provider_fence import ProviderFence,FenceRefused
+        def authorize(credential,action):
+            if credential!='fixture-operator':raise PermissionError('fixture denied')
+        fence=ProviderFence(authorize);receipt=fence.hold('fixture-operator','qualification-shutdown')
+        with self.assertRaises(FenceRefused):self.gate.settle_uncertain_owned(fence,barrier)
+        try:
+            fence.shutdown_owned('fixture-operator','qualification-shutdown',receipt['epoch'],lambda:self.gate.settle_uncertain_owned(fence,barrier),lambda:None)
+            self.assertEqual(self.gate.uncertain,{})
+            self.assertFalse(any(lease.owner_id=='owner' for lease in self.coordinator.broker.list_leases()))
+        finally:
+            for stop,thread,lease in self.gate.uncertain.values():stop.set();thread.join(1)
+
     def test_wrong_device_budget_and_held_claim_refuse_before_loader(self):
-        with self.gate.work(self.job,'Bearer fixture',1):
+        with self.gate.work(self.job,'Bearer fixture',1,synchronize=lambda:None):
             for args in ({'device':'other'},{'budget':{'vram_bytes':100}}):
                 with self.assertRaises(PermissionError):self.manager.ensure('voxcpm',**args)
             self.store.hold(self.node,1)

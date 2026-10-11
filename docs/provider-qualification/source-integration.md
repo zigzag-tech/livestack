@@ -52,7 +52,11 @@ JSON lease verdict. It guards both local
 The app must enter `gate.work(job, authorization, fence)` **inside its physically
 tracked worker**, with the digest computed from that exact managed request.
 The gate verifies the actual retained host claim, fresh canonical input permission,
-and a real active node capability-kind lease before the loader runs. It maintains
+and a real active node capability-kind lease before the loader runs. A mandatory
+source-owned synchronizer runs inside that scope before lease release, including
+worker failure. Failed barriers retain an uncertain lease/heartbeat and refuse
+new model work. Reconciliation requires the actual current authenticated held
+shutdown context; startup and expired contexts cannot release uncertainty. It maintains
 that lease until the worker exits; handler disconnection is not worker completion.
 No other thread inherits the admitted context. Wrong kinds/devices, unbound budgets,
 unrelated resident models, lost leases, stale fences, and held claims refuse.
@@ -68,7 +72,7 @@ Only a registered physical model/cgroup/GPU settlement controller may retire it.
   `test_qualification_controller`. Canonical
   grants and systemd peers in controller-positive fixtures are explicitly mocked;
   these fixtures are not real operator registration.
-- `test_qualification_node.py`: 6/6 pass using the retained CPython 3.12 framework
+- `test_qualification_node.py`: 7/7 pass using the retained CPython 3.12 framework
   venv with real compiled `ModelManager`, actual SQLite, and real capability lease
   storage; loader, canonical permission and kernel peer are explicit CPU mocks.
 - Actual pinned Node client constructor/anonymous/forged/job-control/source/ABI
