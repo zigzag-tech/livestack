@@ -832,3 +832,12 @@ was behind and workers 2–5 unknown. Four development attempts were active, a
 ZZOPS test job was queued, and worker 5 was draining. No service, worker or
 automatic-selection setting changed. Keep authority/worker rollout and
 rollback acceptance open.
+
+Current-source recheck (2026-10-11 00:20 UTC): the worker package from
+`origin/main` `0246f0e3` is identical to the live release on workers 1–4. The
+authority candidate from the same source passed all four pre-deploy checks,
+but the live authority package `486cf6e5` is older by 12 module files and six
+changed files. The observe-only target unit `f38a7baa` also names the older
+`be1d8a42` release and must be rebuilt. Joe workers were idle, but a separate
+ZZOPS admission remained active on `xc-win-1-wsl-2`; no authority restart or
+other live change was made. See `evidence/rollout-recheck-20261011.md`.
