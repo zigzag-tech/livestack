@@ -401,6 +401,8 @@ def test_handler_output_bound_allows_eight_gib_without_raising_input_bound(
                             lambda _path: artifact_digest)
 
         def acknowledge_upload(_target, method, _path, *, headers, body, timeout):
+            if method == 'GET':
+                return 200, {}, b'{}'  # Legacy endpoint: no resumable offset.
             assert method == 'PUT'
             assert body.seek(0, 2) == int(headers['Content-Length'])
             return 200, {}, json.dumps({
@@ -408,7 +410,7 @@ def test_handler_output_bound_allows_eight_gib_without_raising_input_bound(
                 'size': int(headers['Content-Length']),
             }).encode()
 
-        monkeypatch.setattr('livestack_node.workloads.transfer.transport.dial',
+        monkeypatch.setattr('livestack_node.workloads.route_kinds.transport.dial',
                             acknowledge_upload)
         assignment = {
             'spec': {'handler': 'native.v1', 'input_digest': digest},
