@@ -6,7 +6,7 @@ import os
 import sys
 from pathlib import Path
 
-from .provider_installation import verify_installation, sha, private_config, provider_environment
+from .provider_installation import verify_installation, sha, private_config, provider_environment, validate_provider_startup
 from .provider_lifecycle import ProviderLifecycle
 from .provider_owner_socket import ProviderOwnerSocket
 from .provider_owner_probe import process_start_ticks
@@ -26,9 +26,7 @@ def configure_qualification(config_path, app, module, owner, settings, identity)
     if len(selected)!=1 or digest!=identity['configurationDigest']:
         raise ValueError('qualification_source_configuration_changed')
     node = selected[0].get('providerQualificationNode')
-    fields = {'nodeId','authority','deviceId','unitKind','hostId','capacityUrl','reservationPath','ownerSocket','unitSha256','authorizationClient','nvmlSha256','activationStore'}
-    if not isinstance(node,dict) or set(node)!=fields or node['ownerSocket']!=settings['controlSocket'] or not isinstance(node['authorizationClient'],dict) or node['authorizationClient'].get('serviceConfigurationPath')!=config_path:
-        raise ValueError('qualification_closed_installed_node_configuration_required')
+    validate_provider_startup(selected[0], app, config_path)
     from .provider_qualification import QualificationClient
     from .qualification_node import QualificationNodeGate
     from .qualification_reservations import QualificationReservationReader
@@ -62,26 +60,15 @@ def serve(config_path, app):
     root = Path(settings['sourceRoot'])
     framework = root/'livestack/node-py'
     verify_entry_module(root,sys.prefix,__file__)
-    holder = settings.get('startupHolder')
-    if not isinstance(holder, str) or not holder:
-        raise ValueError('held_provider_startup_identity_required')
+    holder = settings['startupHolder']
     environment = provider_environment(settings, app)
     config_file = settings.get('backendConfig')
-    if app == 'polyasr':
-        if not config_file or not Path(config_file).is_absolute() or Path(config_file).is_symlink():
-            raise ValueError('external_asr_config_required')
-        if sha(Path(config_file).read_bytes()) != settings.get('backendConfigSha256'):
-            raise ValueError('external_asr_config_digest_mismatch')
-    if app == 'polytts' and not Path(environment.get('POLYTTS_MODELS_DIR','')).is_absolute():
-        raise ValueError('external_tts_model_binding_required')
     if settings.get('qualificationOnly',False) is True:
         config,digest = private_config(config_path)
         nodes=[entry.get('providerQualificationNode') for entry in config.get('apps',[]) if entry.get('descriptor',{}).get('app')==app]
         if len(nodes)!=1 or not isinstance(nodes[0],dict) or digest!=identity['configurationDigest']:
             raise ValueError('qualification_installed_node_required_before_import')
         node=nodes[0]
-        if app=='polytts' and (environment.get('POLYTTS_RUNTIME')!='pytorch' or environment.get('POLYTTS_ALLOW_CPU')=='1'):
-            raise ValueError('qualification_explicit_cuda_manager_runtime_required')
         from .qualification_device import qualification_cuda_device
         device=qualification_cuda_device(environment.get('CUDA_VISIBLE_DEVICES'),node.get('deviceId'),node.get('nvmlSha256'))
         cache=Path(node.get('activationStore',''))

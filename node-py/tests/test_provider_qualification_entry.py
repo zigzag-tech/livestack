@@ -4,6 +4,43 @@ from livestack_node.provider_entry import provider_environment
 
 
 class QualificationEntryTests(unittest.TestCase):
+    def test_static_startup_checks_run_without_provider_import(self):
+        from livestack_node.provider_installation import validate_provider_startup
+        from copy import deepcopy
+        node = dict.fromkeys(('nodeId','authority','deviceId','unitKind','hostId','capacityUrl','reservationPath','ownerSocket','unitSha256','authorizationClient','nvmlSha256','activationStore'), 'fixture')
+        node.update(ownerSocket='/private/owner.sock', authorizationClient={'serviceConfigurationPath': '/private/owner.json'})
+        settings = {'startupHolder': 'held-fixture', 'controlSocket': '/private/owner.sock', 'qualificationOnly': True,
+                    'environment': {'LIVESTACK_REGISTER': '0', 'LIVESTACK_MESH_ENABLED': '0', 'POLYTTS_QUALIFICATION_ONLY': '1', 'POLYTTS_RUNTIME': 'pytorch', 'POLYTTS_MODELS_DIR': '/private/models'}}
+        selected = {'providerActivation': settings, 'providerQualificationNode': node}
+        self.assertEqual(validate_provider_startup(selected, 'polytts', '/private/owner.json'), settings['environment'])
+        for section, key, value, error in (
+            ('providerActivation', 'startupHolder', '', 'startup_identity'),
+            ('environment', 'POLYTTS_MODELS_DIR', 'relative', 'model_binding'),
+            ('environment', 'POLYTTS_RUNTIME', 'mlx', 'cuda_manager'),
+            ('environment', 'POLYTTS_ALLOW_CPU', '1', 'cuda_manager'),
+            ('providerQualificationNode', 'ownerSocket', '/other', 'closed_installed_node'),
+            ('providerQualificationNode', 'extra', 'value', 'closed_installed_node')):
+            changed = deepcopy(selected)
+            target = changed['providerActivation']['environment'] if section == 'environment' else changed[section]
+            target[key] = value
+            with self.assertRaisesRegex(ValueError, error):
+                validate_provider_startup(changed, 'polytts', '/private/owner.json')
+        with self.assertRaisesRegex(ValueError, 'closed_installed_node'):
+            validate_provider_startup(selected, 'polytts', '/other/owner.json')
+        import tempfile, hashlib
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'asr.yaml'; path.write_bytes(b'CPU fixture config')
+            asr = {'providerActivation': {'startupHolder': 'fixture', 'backendConfig': str(path), 'backendConfigSha256': hashlib.sha256(path.read_bytes()).hexdigest()}}
+            validate_provider_startup(asr, 'polyasr', '/private/owner.json')
+            asr['providerActivation']['backendConfigSha256'] = 'wrong'
+            with self.assertRaisesRegex(ValueError, 'digest_mismatch'):
+                validate_provider_startup(asr, 'polyasr', '/private/owner.json')
+            alias = Path(directory)/'alias'; alias.symlink_to(path)
+            asr['providerActivation']['backendConfig'] = str(alias)
+            with self.assertRaisesRegex(ValueError, 'external_asr_config_required'):
+                validate_provider_startup(asr, 'polyasr', '/private/owner.json')
+
     def test_original_environment_unchanged(self):
         for app in ('polytts', 'polyasr'):
             original = {'CUDA_VISIBLE_DEVICES': '1', app.upper()+'_PORT': '8100'}

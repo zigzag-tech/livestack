@@ -90,7 +90,7 @@ class InstallationTests(unittest.TestCase):
             base_patch=patch.object(sys,'base_prefix',str(runtime_root));base_patch.start();self.addCleanup(base_patch.stop)
             environment_path = root/'environment.json';environment_path.write_bytes(canonical(environment))
             config = {'apps':[{'descriptor':{'app':'polytts','adapter':{'revision':'a'*40,'digest':digest(payload)}},
-                'adapterDirectory':str(adapter),'providerActivation':{'controlSocket':str(root/'owner.sock'),'sourceRoot':str(root/'source'),
+                'adapterDirectory':str(adapter),'providerActivation':{'startupHolder':'CPU-fixture','environment':{'POLYTTS_MODELS_DIR':str(root/'models')},'controlSocket':str(root/'owner.sock'),'sourceRoot':str(root/'source'),
                 'sourceManifest':str(source_path),'sourceManifestSha256':digest(source_path.read_bytes()),
                 'environmentManifest':str(environment_path),'environmentManifestSha256':digest(environment_path.read_bytes())}}]}
             config_path = root/'private-service.json';config_path.write_bytes(canonical(config));config_path.chmod(0o600)
