@@ -2,6 +2,8 @@
 
 No service registration, physical GPU admission or inference qualification.
 """
+import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import tempfile
 import threading
 import unittest
@@ -28,8 +30,34 @@ class QualificationNodeTests(unittest.TestCase):
         self.manager=ModelManager({'voxcpm':ManagedUnit('voxcpm',loader=lambda:self.loads.append('voxcpm') or object(),freer=noop_free)},0,coordinator=self.coordinator)
         self.client=object.__new__(QualificationClient);self.client.source_digest='a'*64;self.client.identity={'configurationDigest':'b'*64};self.client.authorize=Mock(return_value={'fixture':'mock permission'})
         self.peer_patch=patch.object(QualificationNodeGate,'_verify_instance');self.peer_patch.start();self.addCleanup(self.peer_patch.stop)
-        self.gate=QualificationNodeGate(self.manager,self.client,QualificationReservationReader(self.store.path),self.node,owner_socket='mock-peer',unit_sha256='e'*64)
+        self.gate=QualificationNodeGate(self.manager,self.client,QualificationReservationReader(self.store.path),self.node,owner_socket='mock-peer',unit_sha256='e'*64,capacity_url='http://127.0.0.1:8799/qualification/admit')
     def tearDown(self):self.tmp.cleanup()
+    def test_actual_loopback_capacity_transport_checks_retained_claim_and_refuses_redirects(self):
+        fixture = self
+        mode = ['valid']
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def do_POST(self):
+                payload=json.loads(self.rfile.read(int(self.headers['content-length'])))
+                fixture.assertEqual(payload,{'nodeId':'node',**fixture.job})
+                fixture.assertEqual(self.headers['authorization'],'Bearer fixture')
+                if mode[0]=='redirect':
+                    self.send_response(302);self.send_header('Location','http://127.0.0.1:1/credential-leak');self.end_headers();return
+                receipt=dict(nodeId='node',jobId=fixture.job['jobId'],state='reserved',fence=1,replayed=True,binding=fixture.node,job=fixture.job,resourceLease=False,modelLoaded=False)
+                if mode[0]=='forged':receipt['fence']=2
+                body=json.dumps(receipt).encode();self.send_response(200);self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+        self.gate.capacity_url='http://127.0.0.1:'+str(server.server_port)+'/qualification/admit'
+        try:
+            self.assertEqual(self.gate.admit(self.job,'Bearer fixture')['fence'],1)
+            mode[0]='forged'
+            with self.assertRaises(PermissionError):self.gate.admit(self.job,'Bearer fixture')
+            mode[0]='redirect'
+            from urllib.error import HTTPError
+            with self.assertRaises(HTTPError):self.gate.admit(self.job,'Bearer fixture')
+            self.assertEqual(self.loads,[])
+        finally:server.shutdown();server.server_close();thread.join(1)
+
     def test_direct_ensure_and_load_cannot_bypass_admitted_work(self):
         for call in (self.manager.ensure,self.manager._load):
             with self.assertRaises(PermissionError):call('voxcpm')

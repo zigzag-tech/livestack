@@ -7,11 +7,15 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from threading import Event, Thread
 import os
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 import stat
 import subprocess
 
-from .provider_installation import sha
+from .provider_installation import sha, private_config
 from .provider_owner_probe import control, process_start_ticks
 
 from .lease import CapabilityLeaseStore
@@ -20,12 +24,16 @@ from .qualification_reservations import QualificationReservationReader
 
 
 class QualificationNodeGate:
-    def __init__(self, manager, client, reader, binding, *, owner_socket, unit_sha256):
+    def __init__(self, manager, client, reader, binding, *, owner_socket, unit_sha256, capacity_url):
         if not isinstance(client,QualificationClient) or not isinstance(reader,QualificationReservationReader) or not isinstance(manager.coordinator.broker,CapabilityLeaseStore):
             raise ValueError('actual_qualification_permission_claim_and_lease_components_required')
         if binding['identitySha256'] != client.source_digest or binding['configurationSha256'] != client.identity['configurationDigest'] or binding['unitKind'] not in manager.units or manager.coordinator.host_id != binding['hostId']:
             raise ValueError('qualification_node_source_kind_host_binding_required')
         self.manager,self.client,self.reader,self.binding = manager,client,reader,dict(binding)
+        endpoint = urllib.parse.urlsplit(capacity_url)
+        if endpoint.scheme!='http' or endpoint.hostname!='127.0.0.1' or endpoint.port is None or endpoint.path!='/qualification/admit' or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
+            raise ValueError('explicit_loopback_qualification_capacity_endpoint_required')
+        self.capacity_url = capacity_url
         self.owner_socket,self.unit_sha256 = owner_socket,unit_sha256
         self._verify_instance()
         self.context = ContextVar('qualification-work',default=None)
@@ -46,6 +54,12 @@ class QualificationNodeGate:
 
     def _verify_instance(self):
         _, configuration = self.client._verify()
+        service_config,digest = private_config(self.client.settings['serviceConfigurationPath'])
+        nodes = [entry.get('providerQualificationNode') for entry in service_config.get('apps',[]) if entry.get('descriptor',{}).get('app')==self.client.identity['app']]
+        expected = {key:self.binding[key] for key in ('nodeId','authority','deviceId','unitKind','hostId')}
+        expected.update(capacityUrl=self.capacity_url,reservationPath=str(self.reader.path),ownerSocket=self.owner_socket,unitSha256=self.unit_sha256,authorizationClient=self.client.settings)
+        if nodes != [expected] or digest != self.client.identity['configurationDigest']:
+            raise PermissionError('qualification_actual_private_node_constraints_changed')
         scope = configuration['intent']['scope']
         service = scope['service']
         if service not in ('polytts-qualification.service','polyasr-qualification.service') or configuration['intent']['targetMachine'] != self.binding['hostId'] or configuration['ssh']['expectedAuthority'] != self.binding['authority']:
@@ -66,6 +80,25 @@ class QualificationNodeGate:
         peer,result = observed['peer'],observed['receipt']['result']
         if peer['pid'] != pid or peer['presentAfterReply'] is not True or str(peer['startTicks']) != self.binding['processStartTicks'] or result['serverInstanceId'] != self.binding['serverInstanceId'] or result['sourceIdentity'] != self.client.identity:
             raise PermissionError('qualification_actual_local_owner_peer_changed')
+
+    def admit(self, job, authorization):
+        """Read-only control transport creates recognized retained custody only.
+        A lost reply never starts a model; replay asks for the same exact claim."""
+        self._verify_instance()
+        self.client.authorize(effect='model-submit',job_id=job['jobId'],owner_id=job['ownerId'],input_digest=job['inputDigest'],model_kind=job['modelKind'],authorization=authorization)
+        payload = {'nodeId':self.binding['nodeId'],**job}
+        request = urllib.request.Request(self.capacity_url,data=json.dumps(payload,separators=(',',':')).encode(),headers={'Content-Type':'application/json','Authorization':authorization},method='POST')
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self,*args,**kwargs):return None
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+        with opener.open(request,timeout=20) as response:
+            content = response.read(16385)
+            if len(content)>16384:raise PermissionError('qualification_capacity_receipt_bound')
+        receipt = json.loads(content)
+        if not isinstance(receipt,dict) or set(receipt)!={'nodeId','jobId','state','fence','replayed','binding','job','resourceLease','modelLoaded'} or receipt['nodeId']!=self.binding['nodeId'] or receipt['jobId']!=job['jobId'] or receipt['state']!='reserved' or type(receipt['replayed']) is not bool or receipt['binding']!=self.binding or receipt['job']!=job or receipt['resourceLease'] is not False or receipt['modelLoaded'] is not False:
+            raise PermissionError('qualification_actual_capacity_receipt_changed')
+        self.reader.assert_reserved(self.binding,job,receipt['fence'])
+        return receipt
 
     def _assert_work(self, name, device, budget):
         work = self.context.get()

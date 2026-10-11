@@ -19,8 +19,8 @@ that retained capacity. The absent-configuration path is unchanged.
 
 ## Configured request boundary
 
-`QualificationController(configuration_path, broker)` requires a private version1
-configuration containing1..8 exact `nodes`. Each node has only:
+`QualificationController(configuration_path, broker)` requires a private version 1
+configuration containing 1..8 exact `nodes`. Each node has only:
 
 - `binding`: the closed reservation node identity;
 - `sourceIdentity`: actual producer identity consumed by the canonical client;
@@ -32,7 +32,7 @@ configuration containing1..8 exact `nodes`. Each node has only:
 
 Private configuration constrains an existing canonical permission; it grants none.
 `build_app(broker, qualification=controller)` adds only `/qualification/admit`.
-Its body is limited to8192bytes/20seconds and only accepts `nodeId`, `jobId`,
+Its body is limited to8192 bytes/20 seconds and only accepts `nodeId`, `jobId`,
 `ownerId`, `inputDigest`, `modelKind`. A distinct caller credential is forwarded to
 the pinned Node client for fresh canonical `provider.qualify` authorization.
 Exact replay rechecks permission and actual source/unit/kernel Unix peer identity.
@@ -41,8 +41,12 @@ The resulting receipt explicitly says `resourceLease:false, modelLoaded:false`.
 ## Node loader boundary
 
 `QualificationNodeGate(manager, client, readonly_reader, binding,
-owner_socket=..., unit_sha256=...)` checks the actual process boot/start/cgroup,
-root unit bytes/incarnation, and kernel owner socket peer. It guards both local
+owner_socket=..., unit_sha256=..., capacity_url=...)` checks the actual process boot/start/cgroup,
+root unit bytes/incarnation, kernel owner socket peer, and exact static
+`providerQualificationNode` constraints in the source-bound private service config.
+The fixed loopback capacity client disables ambient proxies and redirects, checks
+the closed response, and verifies its actual SQLite claim instead of trusting a
+JSON lease verdict. It guards both local
 `ensure` and `_load`, including calls through a captured manager instance.
 
 The app must enter `gate.work(job, authorization, fence)` **inside its physically
@@ -57,17 +61,19 @@ Only a registered physical model/cgroup/GPU settlement controller may retire it.
 
 ## Exact verification boundaries
 
-- Existing `test_hostbroker.py`:58/58 pass using the current Python3.11 environment.
-- Capacity/store/configured-broker/controller controls:20 CPU tests pass in that
-  environment before importing the new compiled-manager test module. Canonical
+- Existing `test_hostbroker.py`: 58/58 pass using the current Python 3.11 environment.
+- Capacity/store/configured-broker/controller controls: 20 CPU tests pass in that
+  environment using these four modules: `test_qualification_capacity`,
+  `test_qualification_reservations`, `test_qualification_broker`, and
+  `test_qualification_controller`. Canonical
   grants and systemd peers in controller-positive fixtures are explicitly mocked;
   these fixtures are not real operator registration.
-- `test_qualification_node.py`:5/5 pass using the retained CPython3.12 framework
+- `test_qualification_node.py`: 6/6 pass using the retained CPython 3.12 framework
   venv with real compiled `ModelManager`, actual SQLite, and real capability lease
   storage; loader, canonical permission and kernel peer are explicit CPU mocks.
 - Actual pinned Node client constructor/anonymous/forged/job-control/source/ABI
-  negatives:2/2 pass against the caller-bound bundle fixture.
-- Existing hostd TestClient tests:15 fail before handlers on both exact baseline
+  negatives: 2/2 pass against the caller-bound bundle fixture.
+- Existing hostd TestClient tests: 15 fail before handlers on both exact baseline
   `e483a564` and this source because installed Starlette/httpx reject `app=`.
   No dependency changes or test-gate relaxation were made.
 - The retained native framework venv lacks `cryptography`, so a combined native
