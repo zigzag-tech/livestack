@@ -198,6 +198,23 @@ def build_broker(peer_urls: List[str], device_config=None,
                       emitter_id=emitter_id)
 
 
+def configured_broker_app(broker, configuration_path="", reservation_path=""):
+    """Explicit private qualification startup; absent configuration stays normal."""
+    if not configuration_path and not reservation_path:
+        return build_app(broker)
+    if not configuration_path or not reservation_path:
+        raise ValueError("paired_qualification_startup_configuration_required")
+    from pathlib import Path
+    for value in (configuration_path, reservation_path):
+        path = Path(value)
+        if not path.is_absolute() or path.resolve() != path:
+            raise ValueError("qualification_startup_canonical_paths_required")
+    from .qualification_controller import QualificationController
+    controller = QualificationController(configuration_path, broker,
+                                         reservation_path=reservation_path)
+    return build_app(broker, qualification=controller)
+
+
 def build_app(broker: HostBroker, *, qualification=None):
     from fastapi import FastAPI, Body, Header, HTTPException
     from fastapi.responses import HTMLResponse
@@ -1473,6 +1490,14 @@ def main():
     # and until it is resolved it keeps holding its owner's quota. Doing this
     # after the port is open would let a claim race a create whose outcome is
     # still unknown.
+    qualification_config = os.environ.get("LIVESTACK_QUALIFICATION_CONFIG", "").strip()
+    qualification_reservations = os.environ.get("LIVESTACK_QUALIFICATION_RESERVATIONS", "").strip()
+    qualification_app = None
+    if qualification_config or qualification_reservations:
+        # Retained qualification claims must participate before recovery can
+        # plan work. Absent configuration keeps the original startup sequence.
+        qualification_app = configured_broker_app(
+            broker, qualification_config, qualification_reservations)
     from .fleet_workers import recover_all
     recover_all(broker.operation_store, broker.fleet_providers, log=_say)
 
@@ -1487,7 +1512,8 @@ def main():
               f"({ledger.max_bytes // (1024 * 1024)} MiB x {ledger.max_files}"
               + (f", {ledger.max_age_s / 86400:.0f}d" if ledger.max_age_s
                  else ", age window disabled") + ")", flush=True)
-    uvicorn.run(build_app(broker), host="0.0.0.0", port=port)
+    uvicorn.run(qualification_app if qualification_app is not None else build_app(broker),
+        host="0.0.0.0", port=port)
 
 
 def _hostname() -> str:

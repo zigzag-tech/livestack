@@ -121,3 +121,26 @@ The optional attach `activation_store` argument preserves old behavior when abse
 This metadata check is not model admission or an available-capacity proof.
 Actual read-only tower0 NVML binding passed; its Histo occupancy still disqualifies
 it for new model effects. No model, unit or original cache effects were performed.
+
+
+## Explicit authoritative-broker startup
+
+The source entry now accepts the paired trusted-unit environment values
+`LIVESTACK_QUALIFICATION_CONFIG` and `LIVESTACK_QUALIFICATION_RESERVATIONS`.
+Both must be canonical absolute paths. The former is the existing private,
+closed version1 controller configuration; the latter is its private durable
+SQLite reservation path. A missing mate, wrong custody/source/client identity,
+invalid registered node or existing different broker store refuses startup.
+Every configured source/client is checked before adopting the reservation writer.
+Configured retained claims enter broker planning before fleet recovery and
+serving. With neither value configured, the original app/startup path is used.
+
+This is configured source startup, not an installed broker rollout or a grant.
+Actual canonical permission is rechecked by the controller on admission; the
+active bound node-kind lease is still required before model loading. A second
+private broker does not replace recognized capacity. Shared8799 rollout still
+requires genuine owner policy, accepted-work/lease preservation and rollback.
+Twenty CPU startup/controller/store/planning controls and58 original broker
+checks pass; authorization and GPU peers in these fixtures are mocked. No shared
+broker, node, model or service effect was applied. The sealed546 byte constructors
+retain their exact old source identity and are not relabeled with this change.
