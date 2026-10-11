@@ -10,10 +10,12 @@ from threading import BoundedSemaphore, Thread
 from uuid import uuid4
 
 from .provider_fence import FenceRefused
+from .provider_socket_path import validate_owner_socket_path
 
 
 class ProviderOwnerSocket:
     def __init__(self, path, owner_config, source_identity, shutdown, synchronize):
+        path = validate_owner_socket_path(path)
         config = os.stat(owner_config, follow_symlinks=False)
         if not stat.S_ISREG(config.st_mode) or config.st_mode & 0o077 or config.st_uid != os.getuid():
             raise PermissionError('owned_private_provider_configuration_required')

@@ -7,6 +7,7 @@ import os
 import stat
 import sys
 from pathlib import Path
+from .provider_socket_path import validate_owner_socket_path
 
 
 def sha(value):
@@ -137,6 +138,7 @@ def verify_installation(config_path, app):
     settings = selected.get('providerActivation')
     if not isinstance(settings, dict):
         raise ValueError('provider_owner_configuration_absent')
+    validate_owner_socket_path(settings.get('controlSocket'))
     # Registration is the existing private app descriptor and actual verified
     # adapter files, never a claimed passed/registered status in a package.
     descriptor = selected['descriptor']['adapter']
