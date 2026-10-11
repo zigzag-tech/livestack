@@ -15,20 +15,22 @@ from .provider_qualification import QualificationClient
 
 
 class QualificationController:
-    def __init__(self, configuration_path, broker):
+    def __init__(self, configuration_path, broker, *, reservation_path=None):
+        from .qualification_reservations import QualificationReservationStore
+        if reservation_path is None and broker.qualification_reservations is None:
+            raise ValueError('durable_qualification_store_required')
+        if reservation_path is not None and broker.qualification_reservations is not None:
+            raise ValueError('qualification_store_already_configured')
         config, self.configuration_digest = private_config(configuration_path)
         if set(config) != {'version','nodes'} or type(config['version']) is not int or config['version'] != 1 or not isinstance(config['nodes'],list) or not 1 <= len(config['nodes']) <= 8:
             raise ValueError('closed_qualification_controller_configuration_required')
         self.configuration_path, self.broker = configuration_path, broker
-        self.store = broker.qualification_reservations
-        if self.store is None:
-            raise ValueError('durable_qualification_store_required')
         self.nodes = {}
         for entry in config['nodes']:
             if not isinstance(entry,dict) or set(entry) != {'binding','sourceIdentity','unit','ownerSocket','service','unitSha256','clientSettings'}:
                 raise ValueError('closed_registered_qualification_node_required')
             node = entry['binding']
-            self.store._validate(node,dict(jobId='00000000-0000-4000-8000-000000000000',ownerId='validation-only',inputDigest='0'*64,modelKind='voxcpm'))
+            QualificationReservationStore._validate(node,dict(jobId='00000000-0000-4000-8000-000000000000',ownerId='validation-only',inputDigest='0'*64,modelKind='voxcpm'))
             if entry['service'] not in ('polytts-qualification.service','polyasr-qualification.service') or set(entry['unit']) != {'kind','footprint'} or entry['unit']['kind'] != node['unitKind']:
                 raise ValueError('qualification_fixed_unit_required')
             client = QualificationClient(entry['clientSettings'],entry['sourceIdentity'])
@@ -46,6 +48,13 @@ class QualificationController:
                 raise ValueError('qualification_registered_positive_footprint_required')
             unit = Unit(node['unitKind'],footprint,servable_on=frozenset({node['deviceId']}))
             self.nodes[node['nodeId']] = (entry,client,unit)
+        # Validate every configured source/client before adopting the durable
+        # writer. An invalid startup cannot change retained claim ownership.
+        if reservation_path is not None:
+            self.store = QualificationReservationStore(reservation_path)
+            broker.qualification_reservations = self.store
+        else:
+            self.store = broker.qualification_reservations
 
     def _verify_peer(self, entry):
         node = entry['binding']
