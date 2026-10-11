@@ -146,7 +146,8 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
            in_flight: Optional[Callable[[], int]] = None,
            inventory=None,
            preload=None,
-           backend: Optional[str] = None):
+           backend: Optional[str] = None,
+           activation_store: Optional[str] = None):
     """``device_meter``: a zero-arg callable -> measured {capacity,free} (see
     meters.py), ``"auto"`` to pick one by backend (CUDA/MLX), or ``None`` to report
     no live memory. Defaulting to "auto" means a node becomes memory-aware on
@@ -227,7 +228,7 @@ def attach(app, *, host_id: str, kind: str, units: Dict[str, object],
     if backend != "cpu" and os.environ.get("LIVESTACK_ACT_SAMPLE_S", "1") != "0":
         meter = alloc_meter()
         if meter is not None:
-            store = os.environ.get("LIVESTACK_ACT_STORE")
+            store = activation_store if activation_store is not None else os.environ.get("LIVESTACK_ACT_STORE")
             if store is None:
                 d = os.path.expanduser("~/.cache/livestack")
                 try:

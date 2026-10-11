@@ -30,7 +30,7 @@ class QualificationNodeTests(unittest.TestCase):
         self.manager=ModelManager({'voxcpm':ManagedUnit('voxcpm',loader=lambda:self.loads.append('voxcpm') or object(),freer=noop_free)},0,coordinator=self.coordinator)
         self.client=object.__new__(QualificationClient);self.client.source_digest='a'*64;self.client.identity={'configurationDigest':'b'*64};self.client.authorize=Mock(return_value={'fixture':'mock permission'})
         self.peer_patch=patch.object(QualificationNodeGate,'_verify_instance');self.peer_patch.start();self.addCleanup(self.peer_patch.stop)
-        self.gate=QualificationNodeGate(self.manager,self.client,QualificationReservationReader(self.store.path),self.node,owner_socket='mock-peer',unit_sha256='e'*64,capacity_url='http://127.0.0.1:8799/qualification/admit')
+        self.gate=QualificationNodeGate(self.manager,self.client,QualificationReservationReader(self.store.path),self.node,owner_socket='mock-peer',unit_sha256='e'*64,capacity_url='http://127.0.0.1:8799/qualification/admit',nvml_sha256='f'*64,activation_store='mock-private-cache')
     def tearDown(self):self.tmp.cleanup()
     def test_actual_loopback_capacity_transport_checks_retained_claim_and_refuses_redirects(self):
         fixture = self

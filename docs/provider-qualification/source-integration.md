@@ -102,9 +102,22 @@ proof of those conditions. No service restart or model effect was performed.
 Only `qualificationOnly:true` enables the new mapper. Its source-bound private app
 record has closed `providerQualificationNode` fields: `nodeId`, `authority`,
 `deviceId`, `unitKind`, `hostId`, `capacityUrl`, `reservationPath`, `ownerSocket`,
-`unitSha256`, `authorizationClient`. Dynamic boot/PID start ticks, systemd invocation
+`unitSha256`, `authorizationClient`, `nvmlSha256`, `activationStore`. Dynamic boot/PID start ticks, systemd invocation
 and actual private owner server instance come from the running unit, not self-
 authorizing JSON fields. The private configuration digest is derived from actual
 bytes and is never embedded into its own configuration. The absent-mode entry
 returns without inspecting qualification settings. Six mapper/environment CPU
 controls pass; mapper-positive gates are mocked, not installed authority proof.
+
+## Cold physical-device binding
+
+Before importing the qualified server, the entry invokes the SHA-pinned root
+`nvidia-smi` read-only UUID query and requires the declared single CUDA index to
+match the actual machine/physical UUID device identity. It passes that explicit
+device ID and `device_meter=None` to attach, avoiding Torch device-property
+initialization. The activation cache is explicitly separate: private owner-socket
+directory / `qualification-activation.json`, never the original default cache.
+The optional attach `activation_store` argument preserves old behavior when absent.
+This metadata check is not model admission or an available-capacity proof.
+Actual read-only tower0 NVML binding passed; its Histo occupancy still disqualifies
+it for new model effects. No model, unit or original cache effects were performed.

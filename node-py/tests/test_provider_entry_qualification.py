@@ -13,7 +13,7 @@ from livestack_node.provider_owner_probe import process_start_ticks
 class QualificationEntryTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.path=self.root/'owner.json'
-        self.node=dict(nodeId='node',authority='fixture-authority',deviceId='gpu',unitKind='voxcpm',hostId='fixture',capacityUrl='http://127.0.0.1:8799/qualification/admit',reservationPath=str(self.root/'reservations.sqlite'),ownerSocket=str(self.root/'owner.sock'),unitSha256='a'*64,authorizationClient={'serviceConfigurationPath':str(self.path)})
+        self.node=dict(nodeId='node',authority='fixture-authority',deviceId='gpu',unitKind='voxcpm',hostId='fixture',capacityUrl='http://127.0.0.1:8799/qualification/admit',reservationPath=str(self.root/'reservations.sqlite'),ownerSocket=str(self.root/'owner.sock'),unitSha256='a'*64,nvmlSha256='f'*64,activationStore=str(self.root/'activation.json'),authorizationClient={'serviceConfigurationPath':str(self.path)})
         self.write({'apps':[{'descriptor':{'app':'polytts'},'providerQualificationNode':self.node}]})
         self.owner=SimpleNamespace(instance_id='b'*32);self.module=SimpleNamespace(manager=object(),configure_provider_qualification=Mock())
         self.settings={'qualificationOnly':True,'controlSocket':self.node['ownerSocket']}
