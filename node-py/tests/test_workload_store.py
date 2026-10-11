@@ -678,3 +678,38 @@ def test_starved_big_job_holds_its_host_against_later_higher_priority_small_jobs
     register(store, 'a', 'shared', cpu=8, ram=16, cleaned=[running['attempt_id']])
     claimed = [c for c in (store.claim(n, 'boot1') for n in 'abc') if c]
     assert [c['job_id'] for c in claimed] == [big['id']]
+
+
+def test_starved_release_job_hold_binds_roomier_peer_workers_on_the_same_host(harness):
+    """2026-10-11: a 4-CPU Android build, aged 24 minutes, sat behind e2e jobs on zz-joe. The release workers
+    are capped at 8 CPU while the e2e workers on the same host report 16, and host_free is the roomiest
+    observation, so the hold (4) came off the e2e view (16-6=10 -> 6) and left room for one more e2e job each
+    time one finished. The hold must come off what the starved job's own worker sees."""
+    _, now, path = harness
+    store = WorkloadStore(path, handlers={'test.v1', 'build.v1'}, clock=lambda: now[0],
+                          limits=Limits(lease_seconds=5000))
+    def roster(cleaned=None):
+        for name in ('r1', 'r2'):
+            register(store, name, 'shared', cpu=8, ram=16, handlers=['build.v1'])
+        for name in ('e1', 'e2', 'e3', 'e4', 'e5', 'e6'):
+            register(store, name, 'shared', cpu=16, ram=16, handlers=['test.v1'],
+                     cleaned=(cleaned or {}).get(name, ()))
+    roster()
+    running = []
+    for i, name in enumerate(('e1', 'e2', 'e3', 'e4')):
+        store.submit('owner', request(f'run{i}', need={'cpu': 2, 'ram': 1}))
+        running.append(store.claim(name, 'boot1'))
+    android = store.submit('owner', request('android', handler='build.v1', need={'cpu': 4, 'ram': 1}))
+    assert store.claim('r1', 'boot1') is None
+    now[0] += store.limits.starvation_seconds + 1
+    roster()
+    def finish(attempt):
+        complete(store, attempt)
+        roster(cleaned={attempt['worker']: [attempt['attempt_id']]})
+    young = store.submit('owner', request('young', need={'cpu': 2, 'ram': 1}, priority=500000))
+    finish(running[0])  # 6 of 8 used: the Android build still does not fit
+    assert store.claim('e5', 'boot1') is None, 'room freed for the starved build must not go to a young e2e job'
+    assert store.get('owner', young['id'])['state'] == 'queued'
+    finish(running[1])  # 4 of 8 used: now it fits
+    claimed = [c for c in (store.claim(n, 'boot1') for n in ('r1', 'r2', 'e5', 'e6')) if c]
+    assert [c['job_id'] for c in claimed] == [android['id']]
