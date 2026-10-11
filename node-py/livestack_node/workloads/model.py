@@ -1,7 +1,7 @@
 """Wire validation and explicit storage limits for the workload service."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import math
@@ -86,8 +86,19 @@ class Limits:
     scopes_per_owner: int = 256
     # Handlers that REFUSE an unscoped submission; same shape as describe_required_handlers.
     scope_required_handlers: tuple = ()
+    # Declared placement priority per handler id: {handler: integer in [0, 1000000]}. A job's effective priority
+    # is max(its own `priority`, its handler's entry), so a handler class (release builds) outranks another
+    # (e2e) without every submitter sending the number. A waiting job holds the host resources it lacks
+    # against strictly lower effective priority (placement._hold_for_priority). Set from authority.json
+    # `limits.handler_priority`; the authority reads it at start only (like every limit, SIGHUP skips it).
+    handler_priority: dict = field(default_factory=dict)
 
     def __post_init__(self):
+        declared = self.handler_priority
+        if (not isinstance(declared, dict) or len(declared) > 64
+                or any(not isinstance(k, str) or not k or isinstance(v, bool) or not isinstance(v, int)
+                       or not 0 <= v <= 1_000_000 for k, v in declared.items())):
+            raise ValueError("handler_priority must map at most 64 handler ids to integers in [0, 1000000]")
         required = self.describe_required_handlers
         if (isinstance(required, (str, bytes)) or not isinstance(required, (list, tuple))
                 or any(not isinstance(item, str) or not item for item in required)):

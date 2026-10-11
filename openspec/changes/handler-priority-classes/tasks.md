@@ -1,0 +1,5 @@
+- [x] `Limits.handler_priority` validated (<=64 handlers, ints 0..1e6)
+- [x] Queue order by effective priority; split hold into plan + charge; pending priority holds; `held_for_higher_priority`
+- [x] Tests: release vs e2e on one host, fit-beside, equal priority unbound
+- [x] Docs: node-py/docs/worker-claims-and-rollout.md (Priority classes)
+- [ ] Deploy with tools/deploy-authority-release.sh; set `limits.handler_priority` for the release handlers; verify live

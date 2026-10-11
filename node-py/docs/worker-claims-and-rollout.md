@@ -101,3 +101,17 @@ shows the PrivateTmp class when it runs inside the worker's own sandbox (`wrap`:
   `benchday.compilation.rust-check.v1` has an extra release on `-2`; `benchday_image_handler_release` differs
   (`-1/-3/-4` vs `-2/-5`); `android_*` labels missing on `-1`; `-5` runs worker release `925a02fa`, the others
   `86c38445`; the release workers run `70a11344`.
+
+## Priority classes and holds (`limits.handler_priority`)
+
+Authority config, read at start (a SIGHUP does not reload `limits`):
+
+    "limits": {"handler_priority": {"benchday.release.daemon.linux.v1": 1000, "benchday.e2e.full.v1": 0}}
+
+- A job's effective priority is `max(job.priority, handler_priority[handler])`. Non-starved jobs are placed in
+  that order; jobs older than `limits.starvation_seconds` still come first.
+- A job that waits only for free CPU/memory/disk reserves them for that round against **strictly lower**
+  effective priority. A lower job that still fits beside the reservation starts; equal priority is unbound; a
+  running attempt is never preempted.
+- A lower job refused only by such a reservation shows blocker `held_for_higher_priority` (job id in the
+  detail) in `jobs.placement` and the roster queue reason. Spec: `openspec/changes/handler-priority-classes`.

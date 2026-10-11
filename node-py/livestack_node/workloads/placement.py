@@ -81,28 +81,36 @@ def _stall_event(row, rejected, now, limits):
                     row["id"], now-row["created"], key[1], "; ".join(i["reason"] for i in rejected[:4])[:512])
 
 
-_HOLD_CODES = frozenset(("resources_insufficient", "memory_insufficient", "disk_insufficient"))
+_HOLD_CODES = frozenset(("resources_insufficient", "memory_insufficient", "disk_insufficient",
+                         "held_for_higher_priority"))
 _STARVED_REPORTED = {}
 
 
-def _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, worker_free, memory_terms, views, now,
-                      limits):
-    """Reserve, on every host that refuses an aged job only for lack of free resources, what the job would take.
+def _hold_plan(admit, rejected, workers, reports):
+    """[(worker, host)] for each host that refuses a job only for lack of free resources it could ever supply.
 
-    Jobs placed later in this round then see the host as already charged, exactly as if the starved job had been
-    admitted, so running attempts draining off the host make room for IT rather than for the next small job. Only
-    a job the host could ever fit (its capacity covers `admit`) holds: a job bigger than the machine must not
-    freeze it. The hold lasts one round; nothing persists."""
-    if now-row["created"] < limits.starvation_seconds:
-        return
+    Only a job the host could ever fit (its capacity covers `admit`) holds: a job bigger than the machine must
+    not freeze it."""
     by_id = {w["id"]: w for w in workers}
-    held = set()
+    held, plan = set(), []
     for item in rejected:
         w = by_id.get(item["worker"])
         if (w is None or item.get("code") not in _HOLD_CODES or w["host"] in held
                 or any(reports[w["id"]]["capacity"].get(k, 0) < n for k, n in admit.items())):
             continue
-        measured = w["host"] in views and claim is not None
+        held.add(w["host"])
+        plan.append(w)
+    return plan
+
+
+def _hold_charge(plan, admit, claim, host_free, worker_free, memory_terms, views, before=None):
+    """Charge what the job would take to each planned host, as if it had been admitted. `before` (host -> the
+    host's free figures prior to the FIRST hold of the round) lets a later refusal ask "would I fit without it?"."""
+    for w in plan:
+        host = w["host"]
+        if before is not None and host not in before:
+            before[host] = dict(host_free[host])
+        measured = host in views and claim is not None
         for k, n in admit.items():
             if not (k == MEMORY and measured):
                 # host_free is the LEAST-clamped observation across the host's workers, so a roomier peer
@@ -110,17 +118,45 @@ def _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, 
                 # worker capped at 8). Charging the hold to that inflated figure left room for the peer's jobs
                 # and the starved job never fit (2026-10-11, 08260665). Charge it to what the starved job's
                 # worker can see: later jobs must fit in the headroom it leaves.
-                host_free[w["host"]][k] = min(host_free[w["host"]][k], worker_free[w["id"]].get(k, 0)) - n
-        held.add(w["host"])
+                host_free[host][k] = min(host_free[host][k], worker_free[w["id"]].get(k, 0)) - n
         if measured:
-            host_free[w["host"]][MEMORY] -= claim
-            memory_terms[w["host"]]["admitted"] += claim
-    if held and row["id"] not in _STARVED_REPORTED:
+            host_free[host][MEMORY] -= claim
+            memory_terms[host]["admitted"] += claim
+
+
+def _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, worker_free, memory_terms, views, now,
+                      limits):
+    """Reserve, on every host that refuses an aged job only for lack of free resources, what the job would take.
+
+    Jobs placed later in this round then see the host as already charged, exactly as if the starved job had been
+    admitted, so running attempts draining off the host make room for IT rather than for the next small job.
+    The hold lasts one round; nothing persists."""
+    if now-row["created"] < limits.starvation_seconds:
+        return
+    plan = _hold_plan(admit, rejected, workers, reports)
+    _hold_charge(plan, admit, claim, host_free, worker_free, memory_terms, views)
+    if plan and row["id"] not in _STARVED_REPORTED:
         if len(_STARVED_REPORTED) >= 1024:
             _STARVED_REPORTED.clear()
         _STARVED_REPORTED[row["id"]] = now
         logging.warning("placement_starved: job %s waited %.0fs for free resources on %s; holding them for it",
-                        row["id"], now-row["created"], ", ".join(sorted(held)))
+                        row["id"], now-row["created"], ", ".join(sorted({w["host"] for w in plan})))
+
+
+def _effective_priority(spec, limits):
+    """The job's own `priority`, raised to its handler's declared class (limits.handler_priority)."""
+    return max(spec.get("priority") or 0, limits.handler_priority.get(spec["handler"], 0))
+
+
+def _fits_without_holds(before, worker_free, admit, claim, measured):
+    """Would the job fit this host had no priority hold been charged? Only then is the hold the blocker."""
+    for k, n in admit.items():
+        if k == MEMORY and measured:
+            if min(before[MEMORY], worker_free.get(MEMORY, 0)) < claim:
+                return False
+        elif min(before.get(k, 0), worker_free.get(k, 0)) < n:
+            return False
+    return True
 
 
 # Blocker codes (openspec typed-outcome-causes-and-blockers). A closed list: a reader tells "no worker advertises
@@ -130,7 +166,7 @@ BLOCKER_CODES = frozenset((
     "capability_absent", "memory_insufficient", "host_pressure", "principal_cap", "avoiding_failure_signature",
     "worker_busy", "environment_busy", "environment_affinity_wait", "environment_not_found",
     "environment_profile_not_installed", "compilation_refused", "disk_reserve", "disk_insufficient",
-    "resources_insufficient", "deadline_unfit", "no_workers"))
+    "resources_insufficient", "held_for_higher_priority", "deadline_unfit", "no_workers"))
 PLACEMENT_BYTES = 4096
 PLACEMENT_REFRESH_SECONDS = 60
 
@@ -392,10 +428,19 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
     # but must not let a stream of higher-priority small jobs refill a shared host forever (2026-10-09: two
     # release builds needing 16 GiB sat unclaimed 50 min behind priority-500000 e2e jobs while both release
     # workers were idle). Starved jobs also HOLD their host's resources (see _hold_for_starved).
+    #
+    # Within the non-starved remainder the order is the job's EFFECTIVE priority: its own, raised to its handler's
+    # declared class (limits.handler_priority). A job waiting for host resources reserves them against strictly
+    # lower effective priority (_hold_charge, below), so a release build is not outwaited by a stream of e2e jobs
+    # that each fit the room a draining attempt leaves (2026-10-11: release builds waited 38 min on zz-joe).
     starved_before = now-limits.starvation_seconds
-    queued = db.execute(queue_sql+" ORDER BY (j.created <= ?) DESC, "
-                        "CASE WHEN j.created <= ? THEN 0 ELSE COALESCE(json_extract(j.spec,'$.priority'),0) END DESC, "
-                        "j.created, j.id", (*queue_params, starved_before, starved_before)).fetchall()
+    queued = db.execute(queue_sql+" ORDER BY j.created, j.id", queue_params).fetchall()
+    queued.sort(key=lambda r: (r["created"] > starved_before,
+                               0 if r["created"] <= starved_before
+                               else -_effective_priority(json.loads(r["spec"]), limits)))
+    # [(priority, job id, plan, admit, claim)] waiting to bind lower jobs; host -> free figures before the first
+    # applied hold; host -> the job that holds it first.
+    pending_holds, before_holds, hold_holders = [], {}, {}
     handles = sorted({row['environment_handle'] for row in queued if row['environment_handle']})
     replicas_by_handle = {}
     if handles:
@@ -409,6 +454,15 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
     active_environment_writers = set()
     for row in queued:
         spec = json.loads(row["spec"])
+        priority = _effective_priority(spec, limits)
+        # Holds of strictly higher-priority waiting jobs bind this one (and everything after it, which is no higher).
+        # Equal priority is not bound: the same-class FIFO behaviour, where a small job may pass a large one, stays.
+        for hold in [h for h in pending_holds if h[0] > priority]:
+            pending_holds.remove(hold)
+            _, holder, plan, held_admit, held_claim = hold
+            _hold_charge(plan, held_admit, held_claim, host_free, worker_free, memory_terms, views, before_holds)
+            for w in plan:
+                hold_holders.setdefault(w["host"], holder)
         environment_handle = row['environment_handle']
         environment_profile = row['environment_profile']
         if environment_handle and environment_profile is None:
@@ -523,6 +577,14 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 continue
             targets.append(Target(id=w["id"], host_id=w["host"], tier=Tier.LOCAL,
                                   capacity=host_free[w["host"]], labels=report["labels"]))
+        for item in rejected:
+            w = next((x for x in compatible if x["id"] == item["worker"]), None)
+            if (w is not None and item.get("code") in _HOLD_CODES and w["host"] in before_holds and
+                    _fits_without_holds(before_holds[w["host"]], worker_free[w["id"]], admit, claim,
+                                        w["host"] in views and claim is not None)):
+                item["code"] = "held_for_higher_priority"
+                item["reason"] = (f"held for higher-priority job {hold_holders[w['host']][:8]}: it is waiting for "
+                                  f"host resources on {w['host']} and this job (priority {priority}) is lower")
         affinity_started = row['environment_affinity_started']
         if environment_handle:
             warm_targets = [target for target in targets if target.host_id in matching_hosts]
@@ -575,6 +637,10 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 _stall_event(row, rejected, now, limits)
                 _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, worker_free, memory_terms,
                                   views, now, limits)
+                if priority > 0 and now-row["created"] < limits.starvation_seconds:
+                    plan = _hold_plan(admit, rejected, workers, reports)
+                    if plan:
+                        pending_holds.append((priority, row["id"], plan, admit, claim))
             _wait(db, row, now, reason, blockers)
             continue
         chosen = next(w for w in workers if w["id"] == grants[0].target_id)

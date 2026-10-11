@@ -713,3 +713,68 @@ def test_starved_release_job_hold_binds_roomier_peer_workers_on_the_same_host(ha
     finish(running[1])  # 4 of 8 used: now it fits
     claimed = [c for c in (store.claim(n, 'boot1') for n in ('r1', 'r2', 'e5', 'e6')) if c]
     assert [c['job_id'] for c in claimed] == [android['id']]
+
+
+def _release_vs_e2e_store(harness, **limits):
+    _, now, path = harness
+    store = WorkloadStore(path, handlers={'test.v1', 'build.v1'}, clock=lambda: now[0],
+                          limits=Limits(lease_seconds=5000, handler_priority={'build.v1': 1000}, **limits))
+    def roster(cleaned=None):
+        register(store, 'r1', 'shared', cpu=8, ram=32, handlers=['build.v1'])
+        for name in ('e1', 'e2', 'e3'):
+            register(store, name, 'shared', cpu=8, ram=32, handlers=['test.v1'],
+                     cleaned=(cleaned or {}).get(name, ()))
+    roster()
+    return store, roster
+
+
+def test_waiting_release_job_reserves_host_room_against_lower_priority_e2e_jobs(harness):
+    """2026-10-11: release builds (daemon.linux 16 GiB, windows-gnu 8 GiB) waited 38 minutes on zz-joe because
+    e2e jobs took every bit of room as attempts finished. A handler class declared in limits.handler_priority
+    now outranks the queue and, while the job waits for resources, holds them against strictly lower classes."""
+    store, roster = _release_vs_e2e_store(harness)
+    big = store.submit('owner', request('e2e-big', need={'cpu': 1, 'ram': 16}))
+    mid = store.submit('owner', request('e2e-mid', need={'cpu': 1, 'ram': 8}))
+    first, second = store.claim('e1', 'boot1'), store.claim('e2', 'boot1')
+    assert {first['job_id'], second['job_id']} == {big['id'], mid['id']}  # 24 of 32 in use, 8 free
+    release = store.submit('owner', request('release', handler='build.v1', need={'cpu': 1, 'ram': 16}))
+    young = store.submit('owner', request('e2e-young', need={'cpu': 1, 'ram': 8}))
+    assert store.claim('r1', 'boot1') is None, 'premise: 8 free cannot hold the 16 the release build admits'
+    assert store.claim('e3', 'boot1') is None, 'the 8 free belongs to the waiting release build, not the young e2e job'
+    assert store.get('owner', young['id'])['state'] == 'queued'
+    blockers = store.get('owner', young['id'])['placement']['blockers']
+    held = [b for b in blockers if b['worker'] == 'e3']
+    assert [b['code'] for b in held] == ['held_for_higher_priority']
+    assert release['id'][:8] in held[0]['detail']
+    assert {b['code'] for b in store.get('owner', release['id'])['placement']['blockers']
+            if b['worker'] == 'r1'} == {'resources_insufficient'}, 'the held job itself reports plain resources'
+    complete(store, first if first['job_id'] == big['id'] else second)  # frees 16: 24 free
+    roster(cleaned={'e1': [first['attempt_id']], 'e2': [second['attempt_id']]})
+    assert store.claim('r1', 'boot1')['job_id'] == release['id'], 'the release build is placed ahead of the e2e queue'
+    assert store.get('owner', young['id'])['state'] == 'running', 'the 8 left after the release build is charged fits it'
+
+
+def test_lower_priority_job_that_fits_beside_a_held_release_job_still_starts(harness):
+    """The hold charges only what the waiting job would take: a lower job asking for a dimension the held job
+    is not short of (or enough of it) is not delayed. Running attempts are never preempted."""
+    store, roster = _release_vs_e2e_store(harness)
+    running = store.submit('owner', request('running', need={'cpu': 6, 'ram': 4}))
+    attempt = store.claim('e1', 'boot1')
+    release = store.submit('owner', request('release', handler='build.v1', need={'cpu': 4, 'ram': 1}))
+    ram_only = store.submit('owner', request('ram-only', need={'ram': 4}))
+    cpu_job = store.submit('owner', request('cpu-job', need={'cpu': 1}))
+    assert store.claim('r1', 'boot1') is None  # 2 cpu free < 4: the release build waits
+    assert store.claim('e2', 'boot1')['job_id'] == ram_only['id'], 'fits beside the hold'
+    assert store.claim('e3', 'boot1') is None, 'cpu is what the release build waits for'
+    assert store.get('owner', cpu_job['id'])['state'] == 'queued'
+    assert store.get('owner', running['id'])['state'] == 'running' and attempt['job_id'] == running['id']
+
+
+def test_equal_priority_jobs_are_not_bound_by_each_others_holds(harness):
+    """Within one class the old behaviour stays: a small job may pass a large one that is still young."""
+    store, roster = _release_vs_e2e_store(harness)
+    store.submit('owner', request('running', need={'cpu': 6, 'ram': 4}))
+    store.claim('e1', 'boot1')
+    store.submit('owner', request('big-build', handler='build.v1', need={'cpu': 4, 'ram': 1}))
+    small = store.submit('owner', request('small-build', handler='build.v1', need={'cpu': 2, 'ram': 1}))
+    assert store.claim('r1', 'boot1')['job_id'] == small['id']
