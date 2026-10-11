@@ -64,12 +64,22 @@ def configure_qualification(config_path, app, module, owner, settings, identity)
     return gate
 
 
+def verify_entry_module(source_root, environment_root, entry_file):
+    """Isolated -m resolves installed code; bind it to declared source bytes."""
+    source = Path(source_root)/'livestack/node-py/livestack_node/provider_entry.py'
+    actual = Path(entry_file).resolve(strict=True)
+    if actual == source.resolve(strict=True):
+        return
+    environment = Path(environment_root).resolve(strict=True)
+    if not actual.is_relative_to(environment) or actual.name != 'provider_entry.py' or actual.parent.name != 'livestack_node' or sha(actual.read_bytes()) != sha(source.read_bytes()):
+        raise ValueError('installed_framework_entry_path_or_bytes_mismatch')
+
+
 def serve(config_path, app):
     settings, identity = verify_installation(config_path, app)
     root = Path(settings['sourceRoot'])
     framework = root/'livestack/node-py'
-    if not Path(__file__).resolve().is_relative_to(framework):
-        raise ValueError('installed_framework_entry_path_mismatch')
+    verify_entry_module(root,sys.prefix,__file__)
     holder = settings.get('startupHolder')
     if not isinstance(holder, str) or not holder:
         raise ValueError('held_provider_startup_identity_required')
