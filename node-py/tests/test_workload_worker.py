@@ -1694,7 +1694,8 @@ def test_transient_failure_during_result_upload_is_retried(outage, caplog):
         assert hop.reset_puts == 0
         result = caller.get(job['id'])
         assert result['state'] == 'succeeded'
-        assert 'result upload: authority unreachable' in caplog.text
+        assert sum(record.levelno == logging.WARNING and 'retrying' in record.getMessage()
+                   for record in caplog.records) == 2
         assert worker.journal.read() is None
     finally:
         worker.close()
