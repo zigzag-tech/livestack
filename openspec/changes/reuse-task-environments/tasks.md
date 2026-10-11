@@ -813,3 +813,22 @@ earlier source snapshot failed image preparation because it lacked a required
 CPU-replay output directory; a later Benchday commit fixed that setup before
 the passing retry. Livestack toolchain/ABI invalidation and rollout acceptance
 remain open. See `evidence/task-e2e-cleanup-relocation-20261010.md`.
+
+### Current-source selected cleanup/relocation check — 2026-10-10 23:58 UTC
+
+Benchday job `b5c52ce5d24948858f5a8d30bc8f1e41` passed the exact
+`fleet-workload.task-environment-cleanup-and-relocation` assertion on
+`zz-joe-e2e-2`, using source commit `d3faf94b7e2ea2ea0ed84a6ee7f2f1b503c3b178`
+and the installed task-E2E handler release. It selected 1 of 938 checks, reused
+all 16 saved cache components on the existing handle, and parked generation 17
+after clean teardown with no attempt resources held. Queue was 1.270 s;
+execution was 966.085 s. This confirms the selected handler and cleanup path,
+not a cold/warm savings comparison or a fleet rollout. Full phase, identity and
+artifact evidence is in the Benchday companion's
+`task-e2e-cleanup-relocation-20261010.md` (commit `a0028adf7`).
+
+At the same readback, rollout remained observe-only with `applied=[]`; worker 1
+was behind and workers 2–5 unknown. Four development attempts were active, a
+ZZOPS test job was queued, and worker 5 was draining. No service, worker or
+automatic-selection setting changed. Keep authority/worker rollout and
+rollback acceptance open.
