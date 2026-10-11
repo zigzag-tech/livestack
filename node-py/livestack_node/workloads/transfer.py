@@ -100,7 +100,7 @@ class InputTransfer:
         source = Path(source)
         size = source.stat().st_size
         if size > self.max_bytes:
-            raise WorkloadError('upload byte limit exceeded', 413)
+            raise ArtifactTooLarge(size, self.max_bytes)
         digest = file_digest(source)
 
         def attempt(route, ctx):
