@@ -31,7 +31,12 @@ class QualificationNodeTests(unittest.TestCase):
         self.client=object.__new__(QualificationClient);self.client.source_digest='a'*64;self.client.identity={'configurationDigest':'b'*64};self.client.authorize=Mock(return_value={'fixture':'mock permission'})
         self.peer_patch=patch.object(QualificationNodeGate,'_verify_instance');self.peer_patch.start();self.addCleanup(self.peer_patch.stop)
         self.gate=QualificationNodeGate(self.manager,self.client,QualificationReservationReader(self.store.path),self.node,owner_socket='mock-peer',unit_sha256='e'*64,capacity_url='http://127.0.0.1:8799/qualification/admit',nvml_sha256='f'*64,activation_store='mock-private-cache')
-    def tearDown(self):self.tmp.cleanup()
+    def tearDown(self):
+        for stop,thread,lease in self.gate.uncertain.values():
+            stop.set()
+            if thread.ident is not None:thread.join(1)
+            self.coordinator.release_lease(lease.lease_id)
+        self.tmp.cleanup()
     def test_actual_loopback_capacity_transport_checks_retained_claim_and_refuses_redirects(self):
         fixture = self
         mode = ['valid']
@@ -68,6 +73,7 @@ class QualificationNodeTests(unittest.TestCase):
             leases=self.coordinator.broker.list_leases()
             self.assertEqual(len(leases),1);self.assertEqual(leases[0].lease_id,receipt['leaseId'])
             self.manager.ensure('voxcpm');self.assertEqual(self.loads,['voxcpm'])
+        self.assertEqual(receipt['physicalBarrier'],'settled');self.assertEqual(receipt['leaseRelease'],'released')
         self.assertNotIn(receipt['leaseId'],[lease.lease_id for lease in self.coordinator.broker.list_leases()])
         self.gate.reader.assert_reserved(self.node,self.job,1)
         with self.assertRaises(PermissionError):self.manager.ensure('voxcpm')
@@ -79,9 +85,12 @@ class QualificationNodeTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             with self.gate.work(self.job,'Bearer fixture',1,synchronize=lambda:None):pass
         self.client.authorize.side_effect=None
-        with self.gate.work(self.job,'Bearer fixture',1,synchronize=lambda:None) as receipt:
-            self.coordinator.release_lease(receipt['leaseId'])
-            with self.assertRaises(PermissionError):self.manager.ensure('voxcpm')
+        with self.assertRaisesRegex(PermissionError,'lease_release_unconfirmed'):
+            with self.gate.work(self.job,'Bearer fixture',1,synchronize=lambda:None) as receipt:
+                self.coordinator.release_lease(receipt['leaseId'])
+                with self.assertRaises(PermissionError):self.manager.ensure('voxcpm')
+        self.assertEqual(receipt['physicalBarrier'],'settled');self.assertEqual(receipt['leaseRelease'],'unknown')
+        self.assertIn(self.job['jobId'],self.gate.uncertain)
         self.assertEqual(self.loads,[])
     def test_context_does_not_leak_to_other_thread_and_accepted_worker_retains_lease(self):
         entered,finish=threading.Event(),threading.Event();observed=[]
@@ -124,5 +133,78 @@ class QualificationNodeTests(unittest.TestCase):
             self.store.hold(self.node,1)
             with self.assertRaises(PermissionError):self.manager.ensure('voxcpm')
         self.assertEqual(self.loads,[])
+
+
+
+
+    def test_executor_retains_real_cpu_claim_and_lease_evidence(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from livestack_node.owned_executor_jobs import OwnedExecutorJobs
+        import time,copy
+        reservation={'nodeId':self.node['nodeId'],'jobId':self.job['jobId'],'state':'reserved','fence':1,'replayed':True,'binding':self.node,'job':self.job,'resourceLease':False,'modelLoaded':False}
+        entered,finish=threading.Event(),threading.Event()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            jobs=OwnedExecutorJobs(executor,lambda:None)
+            def worker(signal):
+                proof=None
+                try:
+                    with self.gate.work(self.job,'Bearer fixture',1,synchronize=lambda:None) as proof:
+                        signal.record_qualification_evidence({'version':1,'reservation':reservation,'residency':proof})
+                        bad=copy.deepcopy(reservation);bad['job']['jobId']=str(uuid4())
+                        with self.assertRaises(ValueError):signal.record_qualification_evidence({'version':1,'reservation':bad,'residency':proof})
+                        entered.set();finish.wait(2)
+                        return b'CPU fixture only'
+                finally:
+                    if proof is not None:signal.record_qualification_evidence({'version':1,'reservation':reservation,'residency':proof})
+            token='CPU-fixture-control-token-'*2
+            jobs.submit(self.job['jobId'],self.job['ownerId'],token,self.job['inputDigest'],'voxcpm',worker)
+            self.assertTrue(entered.wait(2))
+            running=jobs.status(self.job['jobId'],token)['qualification_evidence']
+            self.assertEqual(running['serverJobInstanceId'],jobs.instance_id)
+            self.assertNotEqual(running['serverJobInstanceId'],running['reservation']['binding']['serverInstanceId'])
+            self.assertEqual(running['residency']['physicalBarrier'],'pending')
+            self.assertEqual(len(self.coordinator.broker.list_leases()),1)
+            finish.set()
+            for _ in range(200):
+                receipt=jobs.status(self.job['jobId'],token)
+                if receipt['physical_settled']:break
+                time.sleep(.005)
+            self.assertEqual(receipt['state'],'completed')
+            self.assertEqual(receipt['qualification_evidence']['reservation'],reservation)
+            self.assertEqual(receipt['qualification_evidence']['residency']['leaseId'],running['residency']['leaseId'])
+            self.assertEqual(receipt['qualification_evidence']['residency']['physicalBarrier'],'settled')
+            self.assertEqual(receipt['qualification_evidence']['residency']['leaseRelease'],'released')
+            self.assertEqual(self.coordinator.broker.list_leases(),[])
+            self.gate.reader.assert_reserved(self.node,self.job,1)
+
+
+    def test_executor_emits_unknown_barrier_with_retained_real_lease_and_no_result(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from livestack_node.owned_executor_jobs import OwnedExecutorJobs,JobConflict
+        import time
+        reservation={'nodeId':self.node['nodeId'],'jobId':self.job['jobId'],'state':'reserved','fence':1,'replayed':True,'binding':self.node,'job':self.job,'resourceLease':False,'modelLoaded':False}
+        def failed_barrier():raise RuntimeError('CPU fixture physical barrier failure')
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            jobs=OwnedExecutorJobs(executor,lambda:None)
+            def worker(signal):
+                proof=None
+                try:
+                    with self.gate.work(self.job,'Bearer fixture',1,synchronize=failed_barrier) as proof:
+                        signal.record_qualification_evidence({'version':1,'reservation':reservation,'residency':proof})
+                        return b'unacceptable fixture result'
+                finally:
+                    if proof is not None:signal.record_qualification_evidence({'version':1,'reservation':reservation,'residency':proof})
+            token='CPU-fixture-control-token-'*2
+            jobs.submit(self.job['jobId'],self.job['ownerId'],token,self.job['inputDigest'],'voxcpm',worker)
+            for _ in range(200):
+                receipt=jobs.status(self.job['jobId'],token)
+                if receipt['state']=='failed':break
+                time.sleep(.005)
+            self.assertEqual(receipt['state'],'failed');self.assertIsNone(receipt['result_sha256'])
+            self.assertEqual(receipt['qualification_evidence']['residency']['physicalBarrier'],'unknown')
+            self.assertEqual(receipt['qualification_evidence']['residency']['leaseRelease'],'pending')
+            self.assertIn(self.job['jobId'],self.gate.uncertain)
+            self.assertEqual(len(self.coordinator.broker.list_leases()),1)
+            with self.assertRaises(JobConflict):jobs.result(self.job['jobId'],token)
 
 if __name__=='__main__':unittest.main()

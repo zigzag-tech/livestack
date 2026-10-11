@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import copy
+import json
+import math
 import threading
 import time
 import uuid
@@ -30,6 +33,41 @@ class JobCapacity(Exception):
 class CancellationSignal:
     def __init__(self):
         self.event = threading.Event()
+        self._qualification_scope = None
+        self._qualification_evidence = None
+        self._evidence_lock = threading.Lock()
+
+    def record_qualification_evidence(self, evidence):
+        """Trusted worker seam; no HTTP request can supply executor evidence."""
+        from .qualification_reservations import QualificationReservationStore
+        scope = self._qualification_scope
+        if scope is None or not isinstance(evidence, dict) or set(evidence) != {'version','reservation','residency'} or type(evidence['version']) is not int or evidence['version'] != 1:
+            raise ValueError('qualification_executor_evidence_scope_required')
+        reservation, residency = evidence['reservation'], evidence['residency']
+        if not isinstance(reservation, dict) or set(reservation) != {'nodeId','jobId','state','fence','replayed','binding','job','resourceLease','modelLoaded'}:
+            raise ValueError('qualification_actual_reservation_evidence_required')
+        QualificationReservationStore._validate(reservation['binding'], reservation['job'])
+        instance, job_id, owner_id, digest, kind = scope
+        job, binding = reservation['job'], reservation['binding']
+        if reservation['state'] != 'reserved' or type(reservation['fence']) is not int or reservation['fence'] < 1 or type(reservation['replayed']) is not bool or reservation['resourceLease'] is not False or reservation['modelLoaded'] is not False or reservation['nodeId'] != binding['nodeId'] or reservation['jobId'] != job_id or job['jobId'] != job_id or job['ownerId'] != owner_id or job['inputDigest'] != digest or {'voxcpm':'voxcpm','alignment':'asr'}.get(kind) != job['modelKind']:
+            raise ValueError('qualification_executor_job_evidence_mismatch')
+        fields = {'jobId','leaseId','kind','hostId','ownerId','fence','leaseExpiresAt','clockBasis','activeAtEntry','physicalBarrier','leaseRelease'}
+        if not isinstance(residency, dict) or set(residency) != fields or residency['jobId'] != job_id or residency['ownerId'] != owner_id or residency['kind'] != binding['unitKind'] or residency['hostId'] != binding['hostId'] or residency['fence'] != reservation['fence'] or not isinstance(residency['leaseId'], str) or not residency['leaseId'] or len(residency['leaseId']) > 192 or type(residency['leaseExpiresAt']) not in (int,float) or not math.isfinite(residency['leaseExpiresAt']) or residency['clockBasis'] != 'coordinator-monotonic' or residency['activeAtEntry'] is not True or residency['physicalBarrier'] not in ('pending','settled','unknown') or residency['leaseRelease'] not in ('pending','released','unknown'):
+            raise ValueError('qualification_actual_kind_lease_evidence_required')
+        if residency['leaseRelease'] == 'released' and residency['physicalBarrier'] != 'settled':
+            raise ValueError('qualification_release_requires_physical_barrier')
+        if len(json.dumps(evidence)) > 16384:
+            raise ValueError('qualification_executor_evidence_bound')
+        value = {**copy.deepcopy(evidence), 'serverJobInstanceId':instance}
+        with self._evidence_lock:
+            previous = self._qualification_evidence
+            if previous is not None and (previous['reservation'] != reservation or any(previous['residency'][key] != residency[key] for key in fields - {'physicalBarrier','leaseRelease'})):
+                raise ValueError('qualification_executor_evidence_identity_changed')
+            self._qualification_evidence = value
+
+    def qualification_evidence(self):
+        with self._evidence_lock:
+            return copy.deepcopy(self._qualification_evidence)
 
     def check(self):
         if self.event.is_set():
@@ -105,6 +143,7 @@ class OwnedExecutorJobs:
                 job = self._new(job_id, owner_id, token)
             job.request_sha256 = request_sha256
             job.kind = kind
+            job.signal._qualification_scope = (self.instance_id, job_id, owner_id, request_sha256, kind)
             job.cleanup = cleanup
             # A cancel-before-submit tombstone forbids delayed acceptance from
             # starting GPU work after the client lost the submit response.
@@ -197,7 +236,7 @@ class OwnedExecutorJobs:
             return job.result
 
     def _receipt(self, job):
-        return {
+        receipt = {
             "job_protocol_version": 1, "server_instance_id": self.instance_id,
             "job_id": job.job_id, "owner_id": job.owner_id, "kind": job.kind,
             "request_sha256": job.request_sha256, "state": job.state,
@@ -207,3 +246,7 @@ class OwnedExecutorJobs:
             "result_sha256": self._result_sha256(job.result) if job.result is not None else None,
             "error": job.error,
         }
+        evidence = job.signal.qualification_evidence()
+        if evidence is not None:
+            receipt['qualification_evidence'] = evidence
+        return receipt
