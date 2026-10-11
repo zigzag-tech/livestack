@@ -4,7 +4,7 @@ The configured host authority must verify canonical permission and the exact
 node/kernel/source tuple before calling these domain methods. Retained claims
 survive control-process restart as held, never automatically expire or rerun.
 """
-from contextlib import closing
+from contextlib import closing, contextmanager
 from dataclasses import replace
 import json
 import math
@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS qualification_jobs (node_id TEXT NOT NULL, job_id TEX
         if row is None or row[0] != self.controller:
             raise ValueError('qualification_controller_incarnation_changed')
 
+    @contextmanager
+    def planning_guard(self):
+        """Normal broker dispatch and qualification claims share one writer."""
+        with self._writer() as db:
+            self._current_controller(db)
+            yield
+
     def reserve(self, world, unit, node, job):
         self._validate(node,job)
         node_text, job_text = self._encode(node), self._encode(job)
@@ -95,7 +102,10 @@ CREATE TABLE IF NOT EXISTS qualification_jobs (node_id TEXT NOT NULL, job_id TEX
                 fence=existing['fence']
             else:
                 if db.execute('SELECT count(*) FROM qualification_nodes').fetchone()[0]>=16: raise ValueError('qualification_node_record_bound')
-                observed = self._overlay(world,db.execute('SELECT * FROM qualification_nodes').fetchall())
+                # Production callers supply a fresh broker snapshot function.
+                # Evaluate it under the same writer as normal broker dispatch.
+                current_world = world() if callable(world) else world
+                observed = self._overlay(current_world,db.execute('SELECT * FROM qualification_nodes').fetchall())
                 plan_qualification_capacity(observed,unit,node['deviceId'],job['jobId'],job['ownerId'])
                 fence=1
                 db.execute('INSERT INTO qualification_nodes VALUES(?,?,?,?,?)',(node['nodeId'],node_text,self._encode(footprint),'reserved',fence))
