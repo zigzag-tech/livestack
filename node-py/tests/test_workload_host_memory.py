@@ -28,8 +28,8 @@ def host(available, *, services=None, attempts=None, full60=0.5, swap=0.0, reser
                 attempts=attempts or {}, services=services or {})
 
 
-def register(store, worker, view, *, hostname='zz-joe', memory=31*GIB, boot='boot1'):
-    capacity = dict(cpu=16, memory_bytes=memory, disk_bytes=500*GIB)
+def register(store, worker, view, *, hostname='zz-joe', memory=31*GIB, boot='boot1', cpu=16):
+    capacity = dict(cpu=cpu, memory_bytes=memory, disk_bytes=500*GIB)
     report = dict(capacity=capacity, available=dict(capacity, memory_bytes=min(memory, 30*GIB)),
                   labels={'os': 'linux'}, handlers=[E2E, 'small.v1'], ready=True)
     if view is not None:
@@ -259,3 +259,82 @@ def test_a_stated_admit_still_floors_the_claim(store):
     job = e2e(store, 'one')  # admit 4 GiB
     assert store.claim('w', 'boot1') is None
     assert 'claim 4.0 GiB' in store.get('owner', job['id'])['reason']
+
+
+# --- cores: a job that states no cpu `admit` is charged its measured PEAK ---------
+# 2026-10-11: four attempts on zz-joe reserved 10 declared cores while using ~1-1.2 each,
+# and a release build waited for cores that were idle. `plain` needs 6 cores, no admit.
+
+def learn_cores(store, peak, count, key='cores', field='cpu_peak_cores'):
+    for i in range(count):
+        learn(store, E2E, peak, key=f'{key}-{peak}-{i}', need=10*GIB, field=field)
+
+
+def test_a_job_with_no_admit_is_charged_its_measured_peak_cores_with_margin(store):
+    learn_cores(store, 1.0, 5)
+    register(store, 'w', host(20*GIB), cpu=2)  # 6 declared cores cannot fit; 1.25 can
+    job = plain(store, 'one', 10*GIB)
+    assert store.claim('w', 'boot1')['job_id'] == job['id'], store.get('owner', job['id'])['reason']
+
+
+def test_cores_are_charged_need_until_enough_peak_samples(store):
+    learn_cores(store, 1.0, 4)
+    register(store, 'w', host(20*GIB), cpu=2)
+    job = plain(store, 'one', 10*GIB)
+    assert store.claim('w', 'boot1') is None
+    assert 'insufficient shared host resources' in store.get('owner', job['id'])['reason']
+
+
+def test_the_mean_is_not_a_peak(store):
+    """cpu_usage_usec / execution_seconds is a mean; a burst-heavy build reaches several
+    times it. Only the sampled window peak lowers a claim."""
+    for i in range(6):
+        register(store, 'teacher', None, hostname='elsewhere')
+        store.submit('owner', dict(version=1, key=f'mean{i}', handler=E2E, input_digest='a'*64,
+                                   need=dict(cpu=6, memory_bytes=10*GIB, disk_bytes=16*GIB)))
+        a = store.claim('teacher', 'boot1')
+        store.complete('teacher', 'boot1', a['attempt_id'], a['fence'], input_digest='a'*64, outcome='succeeded',
+                       result=dict(exit_code=0, artifacts=[], resources=dict(
+                           cpu_usage_usec=1_000_000, execution_seconds=10.0, memory_peak_bytes=GIB)))
+    register(store, 'w', host(20*GIB), cpu=2)
+    plain(store, 'one', 10*GIB)
+    assert store.claim('w', 'boot1') is None
+
+
+def test_the_cores_claim_has_a_floor(store):
+    learn_cores(store, 0.1, 5)  # 0.125 cores measured
+    register(store, 'w', host(20*GIB), cpu=0.5)
+    job = plain(store, 'one', 10*GIB)
+    assert store.claim('w', 'boot1') is None, 'a build is never charged under one core'
+
+
+def test_peaks_measured_under_a_smaller_cpu_need_are_not_borrowed(store):
+    learn_cores(store, 1.0, 5)  # ran under cpu need 6
+    register(store, 'w', host(20*GIB), cpu=2)
+    store.submit('owner', dict(version=1, key='big', handler=E2E, input_digest='a'*64,
+                               need=dict(cpu=8, memory_bytes=10*GIB, disk_bytes=16*GIB)))
+    assert store.claim('w', 'boot1') is None
+
+
+def test_a_running_attempt_is_charged_its_measured_cores_not_its_stored_declaration(store):
+    learn_cores(store, 0.8, 5)  # claim 1.0 each
+    register(store, 'w1', host(40*GIB), cpu=2)
+    register(store, 'w2', host(40*GIB), cpu=2)
+    first, second = plain(store, 'one', 10*GIB), plain(store, 'two', 10*GIB)
+    claimed = {store.claim('w1', 'boot1')['job_id']}
+    other = store.claim('w2', 'boot1')
+    assert other, [store.get('owner', j['id'])['reason'] for j in (first, second)]
+    claimed.add(other['job_id'])
+    assert claimed == {first['id'], second['id']}
+    third = plain(store, 'three', 10*GIB)
+    register(store, 'w3', host(40*GIB), cpu=2)
+    assert store.claim('w3', 'boot1') is None  # 2 cores are now claimed
+    assert store.get('owner', third['id'])['state'] == 'queued'
+
+
+def test_a_stated_cpu_admit_is_charged_as_stated(store):
+    learn_cores(store, 0.5, 5)
+    register(store, 'w', host(20*GIB), cpu=1.5)
+    job = e2e(store, 'one')  # admit cpu 2
+    assert store.claim('w', 'boot1') is None
+    assert 'insufficient shared host resources' in store.get('owner', job['id'])['reason']

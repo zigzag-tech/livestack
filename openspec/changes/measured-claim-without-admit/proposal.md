@@ -21,3 +21,13 @@ behaves as before (floor). On measured hosts the scheduler is asked for the clai
 
 Not changed: `need` (the cap), any declaration, the model-server term, the pressure
 gate. Handlers with a stated `admit` (e2e.full, compilation.image) are untouched.
+
+## Follow-up: cores (2026-10-11)
+
+CPU had the same shape: a job with no cpu `admit` reserved its cgroup quota, four attempts on
+zz-joe reserved 8-10 cores while using ~1-1.2 each, and a release build waited on `cpu: needs 2,
+0 free`. The same rule applies to cores, with a measured PEAK (the busiest 5 s window of
+`cpu.stat`, new `cpu_peak_cores`), not the mean already recorded as `cpu_cores`: x1.25, quarter-core
+rounding, floor 1 core, cap `need`, 5 succeeded samples under the same cpu `need`. Running attempts
+are charged the same claim. The psi_some admission gate is untouched. Evidence table:
+`node-py/docs/measured-resources.md`.

@@ -98,3 +98,45 @@ Not lowered: every `need` (cgroup cap; cache-inclusive peaks sit at the cap), th
 Apple daemon figures (16 / 12 GiB), declarations of handlers that state an `admit`.
 Model servers: `harmony-image` was not resident, so peak 16.3 - current 3.5 = 12.8 GiB was
 reserved for a possible reload; that is the design's load-transient term and is unchanged.
+
+## Cores: the same rule, with a measured PEAK (2026-10-11, follow-up)
+
+The CPU reservation was purely declared: a job that states no cpu `admit` reserves its `need`
+(the cgroup quota), so on zz-joe four running attempts reserved 8-10 cores while each used
+about 1-1.2, and a release build and idle e2e workers waited with `cpu: needs 2, 0 free
+(8 observed less 8 reserved by running attempts)`.
+
+`placement._cpu_claim`: no stated cpu `admit` -> the claim is the handler's measured peak cores
+(max over the last 20 succeeded attempts that ran under the same cpu `need`) x 1.25, rounded up to
+a quarter core, never below 1 core (or `need`), never above `need`, and only once there are 5
+such attempts; before that it is `need`. A stated cpu `admit` is charged as stated. The claim is
+used for the fit test, the starved-job hold and the reservation, and RUNNING attempts are charged
+their handler's current claim (`charged_need`; the stored `attempts.need` still holds the
+declaration), so the roster's `blocked_by` arithmetic agrees. The psi_some CPU admission gate is
+untouched.
+
+The figure is `cpu_peak_cores`: the busiest 5 s window of the attempt's `cpu.stat usage_usec`,
+sampled every worker turn (`resource_usage.CpuPeak`), absent (never 0) for attempts shorter than
+5 s and on macOS/Windows workers. It is recorded beside `cpu_cores`, which is `cpu_usage_usec /
+execution_seconds`, a MEAN, and is NOT used for claims: cargo and flutter builds alternate
+compile bursts with link/IO phases, so a mean understates the cores to leave free.
+
+Peaks were not recorded before this change, so every claim equals `need` until a handler has 5
+succeeded attempts with a peak. The only evidence that exists today is the mean (authority
+`resource_history`, succeeded attempts, last 50, cores):
+
+| handler | cpu need | stated admit | mean max / p95 / median (n) | note |
+|---|---|---|---|---|
+| release.hub | 2 | none | 1.13 / 1.12 / 1.05 (50) | claim falls once 5 peaks exist |
+| release.web.linux | 2 | none | 1.26 / 1.26 / 1.24 (21) | |
+| release.daemon.linux | 2 | none | 1.58 / 1.58 / 1.55 (42) | near the cap: peak will sit at 2 |
+| release.cli.linux | 2 | none | 1.91 / 1.91 / 1.88 (24) | quota-bound, claim ~need |
+| release.app.android | 4 | none | 3.18 / 3.17 / 3.05 (34) | quota-bound |
+| release.daemon.macos / cli.macos | 2 | none | 3.31 / 6.75 (8 / 16) | no cgroup, no peak, never lowered |
+| compilation.rust-check | 4 | none | 3.11 / 3.05 / 1.03 (50) | bursty: mean median 1.0, max 3.1 |
+| compilation.flutter-check | 4 | none | 2.55 / 2.44 / 1.71 (50) | |
+| compilation.image | 2 | 2 | 1.45 / 1.42 / 1.28 (27) | stated admit, untouched |
+| e2e.full | 6 | 2 | 1.77 / 1.54 / 0.94 (50) | stated admit, untouched |
+| e2e.task | 4 | 2 (since benchday 78dfc2547) | 1.72 / 1.72 / 1.15 (19) | stated admit, untouched |
+
+Not lowered: every `need`, the arm64 and Apple declarations, any handler that states an `admit`.

@@ -27,7 +27,7 @@ from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
 from . import cpu_admission as cpu_signals
 from .cpu_admission import CpuAdmission
-from .resource_usage import sample as sample_resources, filesystem_used, unit_evidence, merge_evidence
+from .resource_usage import sample as sample_resources, filesystem_used, unit_evidence, merge_evidence, CpuPeak
 from .lease import LeaseKeeper, retry_transient, transient
 from .model import ArtifactTooLarge, WorkloadError, encode, name
 from .supervision import SystemdExecutor, WorkerJournal
@@ -1212,6 +1212,7 @@ class WorkloadWorker:
                 attempt_cgroup = (Path('/sys/fs/cgroup')/control_group.lstrip('/')
                                   if control_group else None)
             nonreclaimable_peak = None
+            cpu_window = CpuPeak()
             disk_baseline, disk_sampled = (filesystem_used(execution_cwd) if attempt_cgroup is not None else None), 0.0
             while True:
                 if lease.lost.is_set():
@@ -1233,6 +1234,11 @@ class WorkloadWorker:
                     # Counters and high-water marks only grow; keep the largest seen.
                     for key, value in fresh.items():
                         resource_sample[key] = max(resource_sample.get(key, 0), value)
+                    # Busiest-window cores (placement's cpu claim); absent until a full window ran.
+                    if 'cpu_usage_usec' in fresh:
+                        cpu_window.observe(now, fresh['cpu_usage_usec'])
+                        if cpu_window.peak is not None:
+                            resource_sample['cpu_peak_cores'] = round(cpu_window.peak, 3)
                 result = self.executor.exit_result(output)
                 if result is not None:
                     result = dict(result, resources=merge_evidence(

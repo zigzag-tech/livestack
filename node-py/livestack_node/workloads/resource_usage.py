@@ -6,9 +6,33 @@ the cgroup directory is gone by the time systemd reports `failed` (measured, see
 node-py/docs/measured-resources.md), so the loop keeps the last good sample.
 A figure that could not be read is ABSENT from the result, never zero.
 """
+from collections import deque
 from pathlib import Path
 import os
 import re
+
+# CPU is capped by quota, so a cgroup cannot burst for less than one scheduling period, but a
+# build still alternates compile bursts with idle link/IO phases: the mean understates what
+# placement must leave free. The peak is the busiest window of this length.
+CPU_PEAK_WINDOW_SECONDS = 5.0
+
+
+class CpuPeak:
+    """Busiest `window` of cgroup CPU use, in cores, from `cpu.stat usage_usec` readings.
+    `peak` stays None (never 0) until one full window has been observed."""
+
+    def __init__(self, window=CPU_PEAK_WINDOW_SECONDS):
+        self.window, self.samples, self.peak = window, deque(), None
+
+    def observe(self, now, usage_usec):
+        self.samples.append((now, usage_usec))
+        # samples[0] is the newest reading at least one window old.
+        while len(self.samples) > 1 and now-self.samples[1][0] >= self.window:
+            self.samples.popleft()
+        then, before = self.samples[0]
+        if now-then >= self.window:
+            rate = max(0, usage_usec-before)/1e6/(now-then)
+            self.peak = rate if self.peak is None else max(self.peak, rate)
 
 
 def sample(path, workspace=None, baseline=None):

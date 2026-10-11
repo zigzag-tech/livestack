@@ -15,6 +15,7 @@ named, not inferred from a missing row.
 import json
 
 from . import claims, rollout
+from .placement import _cpu_claim, charged_need
 
 QUEUE_LIMIT = 50
 HOLDERS_SHOWN = 6
@@ -189,10 +190,10 @@ def _queue(db, now, entries, cleanup_seconds, limit=QUEUE_LIMIT):
     active = db.execute("SELECT a.worker, a.host, a.job, a.need, j.spec FROM attempts a JOIN jobs j ON j.id=a.job "
                         "JOIN workers w ON w.id=a.worker WHERE a.state IN ('running','cleanup') "
                         "AND NOT (a.state='cleanup' AND w.seen<?)", (now - cleanup_seconds,)).fetchall()
-    held = {}
+    held, cpu_learned = {}, {}
     for row in active:
         host = held.setdefault(row['host'], dict(total={}, holders=[]))
-        need = json.loads(row['need'])
+        need = charged_need(db, json.loads(row['need']), json.loads(row['spec']), cpu_learned)
         for key, value in need.items():
             host['total'][key] = host['total'].get(key, 0) + value
         host['holders'].append(dict(job_id=row['job'], worker=row['worker'],
@@ -203,6 +204,9 @@ def _queue(db, now, entries, cleanup_seconds, limit=QUEUE_LIMIT):
     for job in jobs:
         spec = json.loads(job['spec'])
         admit = spec.get('admit') or spec.get('need') or {}
+        cpu = _cpu_claim(db, spec, cpu_learned) if 'need' in spec else None
+        if cpu is not None and 'cpu' in admit:
+            admit = dict(admit, cpu=cpu)  # the measured claim placement charges
         serving = [e for e in entries if spec.get('handler') in e['handlers'] and e['registered']]
         hosts = {e['host'] for e in serving}
         reason = job['reason']

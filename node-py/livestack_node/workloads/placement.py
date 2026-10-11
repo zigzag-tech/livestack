@@ -35,6 +35,11 @@ LEARNED_WINDOW = 20
 # more than `need`. Unmeasured, it is charged `need`.
 UNSTATED_ADMIT_MARGIN = 1.25
 UNSTATED_ADMIT_MIN_SAMPLES = 5
+CPU = "cpu"
+# CPU is charged the same way (see _cpu_claim). A claim is never below this many cores
+# (or `need`, if smaller) and is rounded up to a quarter core.
+CPU_CLAIM_FLOOR = 1.0
+CPU_CLAIM_STEP = 0.25
 # Admission stops on a host that is already stalling on memory. avg60, not
 # avg10, so one burst does not flap admission. 16 MiB/s of swap-in is ~4k
 # pages/s: far above an idle server faulting back in (zz-joe at rest: <10/s).
@@ -201,7 +206,7 @@ def _wait(db, row, now, reason, blockers):
     db.execute("UPDATE jobs SET placement=? WHERE id=?", (encode(document, PLACEMENT_BYTES), row["id"]))
 
 
-def _learned_peak(db, handler, cache, declared=None, min_samples=1):
+def _learned_peak(db, handler, cache, declared=None, min_samples=1, dimensions=("memory_nonreclaimable_peak", "memory_peak")):
     """Prefer the non-reclaimable peak the worker samples; fall back to the
     cgroup memory.peak (page cache included, so conservative) only while no
     succeeded attempt of the handler carries the newer figure.
@@ -213,10 +218,10 @@ def _learned_peak(db, handler, cache, declared=None, min_samples=1):
 
     Reads the bounded resource history (resource_history.py), the one learned number
     shared with the declaration audit."""
-    key = (handler, declared, min_samples)
+    key = (handler, declared, min_samples, dimensions)
     if key not in cache:
         cache[key] = None
-        for dimension in ("memory_nonreclaimable_peak", "memory_peak"):
+        for dimension in dimensions:
             peaks = [r[0] for r in db.execute(
                 "SELECT value FROM resource_history WHERE handler=? AND dimension=? AND outcome='succeeded' "
                 "AND (? IS NULL OR declared=?) ORDER BY at DESC,id DESC LIMIT ?",
@@ -249,6 +254,46 @@ def _memory_claim(db, spec, cache):
         return need if learned is None else min(need, math.ceil(learned*UNSTATED_ADMIT_MARGIN))
     learned = _learned_peak(db, spec["handler"], cache)
     return need if learned is None else min(need, max(stated, learned))
+
+
+def _cpu_claim(db, spec, cache):
+    """The cores an attempt of this job is charged, or None when it declares no cpu.
+
+    Same rule as memory (`_memory_claim`), for the same reason: a job that states no
+    cpu `admit` is charged its `need` (the cgroup quota), so measurement could never
+    lower it. 2026-10-11: four attempts on zz-joe reserved 10 declared cores while
+    using ~1-1.2 each, and a release build waited for cores that were idle. With none
+    stated, the claim is the handler's measured PEAK cores over the last 20 succeeded
+    attempts that ran under this same cpu `need`, times UNSTATED_ADMIT_MARGIN, once
+    there are UNSTATED_ADMIT_MIN_SAMPLES of them; `need` caps it. The figure is the
+    busiest resource_usage.CPU_PEAK_WINDOW_SECONDS window of the attempt, not its
+    mean: cargo and flutter builds burst far above their mean. A stated cpu `admit`
+    is charged as stated."""
+    need = spec["need"].get(CPU)
+    if need is None:
+        return None
+    stated = (spec.get("admit") or {}).get(CPU)
+    if stated is not None:
+        return stated
+    if spec.get("admit") is not None:
+        return None  # an admit that omits cpu charges no cpu at all
+    learned = _learned_peak(db, spec["handler"], cache, declared=need, min_samples=UNSTATED_ADMIT_MIN_SAMPLES,
+                            dimensions=("cpu_peak_cores",))
+    if learned is None:
+        return need
+    claim = math.ceil(learned*UNSTATED_ADMIT_MARGIN/CPU_CLAIM_STEP)*CPU_CLAIM_STEP
+    return min(need, max(min(CPU_CLAIM_FLOOR, need), claim))
+
+
+def charged_need(db, stored, spec, cache):
+    """The vector an ACTIVE attempt is charged now: the admission vector it stored, with
+    cpu replaced by the current measured claim (never above what it stored)."""
+    stored = dict(stored)
+    if CPU in stored:
+        claim = _cpu_claim(db, spec, cache)
+        if claim is not None:
+            stored[CPU] = min(stored[CPU], claim)
+    return stored
 
 
 def _pressure(view):
@@ -348,11 +393,13 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
             running[job_row["owner"]] = running.get(job_row["owner"], 0) + 1
     caps = {pid: p.max_running for pid, p in (principals or {}).items()
             if getattr(p, "max_running", None) is not None}
+    cpu_learned = {}
     for a in active:
         # attempts.need stores what the attempt reserved, which is its admission
         # vector; a burstable attempt is not charged for capacity it may not use.
+        # Its cpu is charged at the handler's measured claim (charged_need).
         busy.add(a["worker"])
-        for key, value in json.loads(a["need"]).items():
+        for key, value in charged_need(db, json.loads(a["need"]), json.loads(a["job_spec"]), cpu_learned).items():
             used.setdefault(a["host"], {}).setdefault(key, 0)
             used[a["host"]][key] += value
     # Two different quantities, previously collapsed into one minimum.
@@ -508,6 +555,12 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         # attempt's cgroup. Omitting `admit` submits need as both, which is
         # exactly the behavior every existing caller already has.
         admit = spec.get("admit") or spec["need"]
+        # Charged cores: the stored admission vector keeps the declaration (`stored_admit`); every
+        # fit test, hold and reservation below uses the measured claim.
+        stored_admit = admit
+        cpu_claim = _cpu_claim(db, spec, cpu_learned)
+        if cpu_claim is not None and CPU in admit:
+            admit = dict(admit, **{CPU: cpu_claim})
         claim = _memory_claim(db, spec, learned) if views else None
         targets = []
         rejected = []
@@ -693,7 +746,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         db.execute("INSERT INTO attempts(id,job,worker,boot,host,fence,state,need,expires,created,compilation,environment_generation,handler_release,decision_id) "
                    "VALUES(?,?,?,?,?,?,'running',?,?,?,?,?,?,?)",
                    (aid, row["id"], chosen["id"], chosen["boot"], chosen["host"], fence,
-                    encode(admit), now+limits.lease_seconds, now, compilation, environment_generation,
+                    encode(stored_admit), now+limits.lease_seconds, now, compilation, environment_generation,
                     encode(pinned_release) if pinned_release is not None else None, decision_id))
         db.execute("UPDATE jobs SET state='running',placement=NULL,fence=?,updated=?,reason=? WHERE id=?",
                    (fence, now, grants[0].reason, row["id"]))
