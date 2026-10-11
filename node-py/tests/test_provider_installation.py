@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-from livestack_node.provider_installation import verify_installation, validate_qualification_host
+from livestack_node.provider_installation import verify_installation, validate_qualification_host, validate_qualification_activation_store
 
 
 def digest(value):return hashlib.sha256(value).hexdigest()
@@ -13,6 +13,34 @@ def canonical(value):return json.dumps(value,sort_keys=True,separators=(',', ':'
 
 
 class InstallationTests(unittest.TestCase):
+    def test_qualification_activation_store_matches_entry_custody_before_seal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o700)
+            row = {'providerActivation': {'qualificationOnly': True, 'controlSocket': str(root/'owner.sock')},
+                   'providerQualificationNode': {'activationStore': str(root/'qualification-activation.json')}}
+            validate_qualification_activation_store(row)
+            for path in (root/'activation.json', root/'elsewhere/qualification-activation.json', Path('qualification-activation.json')):
+                row['providerQualificationNode']['activationStore'] = str(path)
+                with self.assertRaisesRegex(ValueError, 'private_activation_store_required'):
+                    validate_qualification_activation_store(row)
+            row['providerQualificationNode']['activationStore'] = str(root/'qualification-activation.json')
+            root.chmod(0o755)
+            with self.assertRaisesRegex(ValueError, 'private_activation_store_required'):
+                validate_qualification_activation_store(row)
+            root.chmod(0o700)
+            with patch('livestack_node.provider_installation.os.getuid', return_value=root.stat().st_uid + 1):
+                with self.assertRaisesRegex(ValueError, 'private_activation_store_required'):
+                    validate_qualification_activation_store(row)
+            alias = root/'alias'
+            alias.symlink_to(root, target_is_directory=True)
+            row['providerActivation']['controlSocket'] = str(alias/'owner.sock')
+            row['providerQualificationNode']['activationStore'] = str(alias/'qualification-activation.json')
+            with self.assertRaisesRegex(ValueError, 'private_activation_store_required'):
+                validate_qualification_activation_store(row)
+            row['providerActivation']['qualificationOnly'] = False
+            validate_qualification_activation_store(row)
+
     def test_qualification_explicit_host_matches_actual_app_environment(self):
         row = {'providerActivation': {'qualificationOnly': True, 'environment': {}}, 'providerQualificationNode': {'hostId': 'zz-joe'}}
         for app in ('polytts', 'polyasr'):
