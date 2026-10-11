@@ -1526,21 +1526,21 @@ def main(*, owner_configuration="", owner_source_identity=None, owner_incarnatio
         # plan work. Absent configuration keeps the original startup sequence.
         qualification_app = configured_broker_app(
             broker, qualification_config, qualification_reservations)
-    from .fleet_workers import recover_all
-    recover_all(broker.operation_store, broker.fleet_providers, log=_say)
-
-    import uvicorn
-    role = "host broker" if dispatch else "fleet broker (observe-only)"
-    print(f"[harmony] {role} on :{port} as {host_id} over {len(broker.peers)} "
-          f"seeded peers and {len(link_peers)} link peers "
-          f"(nodes self-register at POST /peers; GET /peers shows membership; "
-          f"GET /fleet shows the fleet)", flush=True)
-    if ledger is not None:
-        print(f"[harmony] decision ledger -> {ledger.path} "
-              f"({ledger.max_bytes // (1024 * 1024)} MiB x {ledger.max_files}"
-              + (f", {ledger.max_age_s / 86400:.0f}d" if ledger.max_age_s
-                 else ", age window disabled") + ")", flush=True)
     try:
+        from .fleet_workers import recover_all
+        recover_all(broker.operation_store, broker.fleet_providers, log=_say)
+
+        import uvicorn
+        role = "host broker" if dispatch else "fleet broker (observe-only)"
+        print(f"[harmony] {role} on :{port} as {host_id} over {len(broker.peers)} "
+              f"seeded peers and {len(link_peers)} link peers "
+              f"(nodes self-register at POST /peers; GET /peers shows membership; "
+              f"GET /fleet shows the fleet)", flush=True)
+        if ledger is not None:
+            print(f"[harmony] decision ledger -> {ledger.path} "
+                  f"({ledger.max_bytes // (1024 * 1024)} MiB x {ledger.max_files}"
+                  + (f", {ledger.max_age_s / 86400:.0f}d" if ledger.max_age_s
+                     else ", age window disabled") + ")", flush=True)
         uvicorn.run(qualification_app if qualification_app is not None else build_app(broker),
             host="0.0.0.0", port=port)
     finally:
