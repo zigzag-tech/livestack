@@ -139,6 +139,24 @@ def validate_qualification_host(selected, app):
         raise ValueError('qualification_explicit_runtime_host_binding_required')
 
 
+def validate_qualification_activation_store(selected):
+    settings = selected.get('providerActivation', {})
+    if settings.get('qualificationOnly') is not True:
+        return
+    cache = Path(selected.get('providerQualificationNode', {}).get('activationStore', ''))
+    parent = cache.parent
+    try:
+        valid = (cache.name == 'qualification-activation.json' and
+                 parent == Path(settings['controlSocket']).parent and
+                 cache.is_absolute() and cache.resolve() == cache and
+                 parent.stat().st_uid == os.getuid() and
+                 not parent.stat().st_mode & 0o077)
+    except (KeyError, OSError):
+        valid = False
+    if not valid:
+        raise ValueError('qualification_private_activation_store_required')
+
+
 def verify_installation(config_path, app):
     config, config_digest = private_config(config_path)
     selected = [entry for entry in config.get('apps', []) if entry.get('descriptor', {}).get('app') == app]
@@ -150,6 +168,7 @@ def verify_installation(config_path, app):
         raise ValueError('provider_owner_configuration_absent')
     validate_owner_socket_path(settings.get('controlSocket'))
     validate_qualification_host(selected, app)
+    validate_qualification_activation_store(selected)
     # Registration is the existing private app descriptor and actual verified
     # adapter files, never a claimed passed/registered status in a package.
     descriptor = selected['descriptor']['adapter']
