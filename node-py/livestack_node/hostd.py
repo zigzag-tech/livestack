@@ -198,7 +198,7 @@ def build_broker(peer_urls: List[str], device_config=None,
                       emitter_id=emitter_id)
 
 
-def build_app(broker: HostBroker):
+def build_app(broker: HostBroker, *, qualification=None):
     from fastapi import FastAPI, Body, Header, HTTPException
     from fastapi.responses import HTMLResponse
 
@@ -214,6 +214,35 @@ def build_app(broker: HostBroker):
         principal_for=lambda headers: request_log.principal_label(
             headers.get("authorization"),
             getattr(broker, "fleet_principals", None)))
+    if qualification is not None:
+        from .qualification_controller import QualificationController
+        if not isinstance(qualification, QualificationController) or qualification.broker is not broker:
+            raise ValueError("configured_qualification_controller_required")
+        import asyncio
+        from fastapi import Request as HttpRequest
+        async def qualification_admit(request):
+            # This separate route does not accept normal fleet credentials as
+            # input permission, and never invokes the normal warm dispatcher.
+            content = bytearray()
+            try:
+                async with asyncio.timeout(20):
+                    async for chunk in request.stream():
+                        content.extend(chunk)
+                        if len(content) > 8192:
+                            raise HTTPException(413, "qualification_request_bound")
+            except TimeoutError:
+                raise HTTPException(408, "qualification_control_read_timeout")
+            try:
+                payload = json.loads(content)
+                return await asyncio.to_thread(qualification.admit, payload, request.headers.get("authorization"))
+            except PermissionError:
+                raise HTTPException(403, "qualification_authority_or_node_refused")
+            except (ValueError, TypeError, KeyError):
+                raise HTTPException(400, "qualification_closed_request_refused")
+        # hostd has postponed annotations; bind the actual HTTP type rather
+        # than its planner Request name or a local unresolved string.
+        qualification_admit.__annotations__["request"] = HttpRequest
+        app.add_api_route("/qualification/admit", qualification_admit, methods=["POST"])
     state = {"last_evicted_at": {}}
     # Hosted-backend health probes (LIVESTACK_PROBES), run on the reconcile
     # loop's cadence. probe_state is what /status reports under "hosted".
