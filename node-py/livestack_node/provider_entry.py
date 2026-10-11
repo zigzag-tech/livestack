@@ -6,9 +6,10 @@ import os
 import sys
 from pathlib import Path
 
-from .provider_installation import verify_installation, sha
+from .provider_installation import verify_installation, sha, private_config
 from .provider_lifecycle import ProviderLifecycle
 from .provider_owner_socket import ProviderOwnerSocket
+from .provider_owner_probe import process_start_ticks
 
 
 def provider_environment(settings, app):
@@ -29,6 +30,38 @@ def provider_environment(settings, app):
     if not qualification and marker in environment:
         raise ValueError('qualification_marker_requires_explicit_mode')
     return dict(environment)
+
+
+def configure_qualification(config_path, app, module, owner, settings, identity):
+    """Installed source entry derives dynamic identity; private data grants none."""
+    qualification = settings.get('qualificationOnly',False)
+    if type(qualification) is not bool:
+        raise ValueError('explicit_qualification_mode_required')
+    if not qualification:
+        return None
+    config,digest = private_config(config_path)
+    selected = [entry for entry in config.get('apps',[]) if entry.get('descriptor',{}).get('app')==app]
+    if len(selected)!=1 or digest!=identity['configurationDigest']:
+        raise ValueError('qualification_source_configuration_changed')
+    node = selected[0].get('providerQualificationNode')
+    fields = {'nodeId','authority','deviceId','unitKind','hostId','capacityUrl','reservationPath','ownerSocket','unitSha256','authorizationClient'}
+    if not isinstance(node,dict) or set(node)!=fields or node['ownerSocket']!=settings['controlSocket'] or not isinstance(node['authorizationClient'],dict) or node['authorizationClient'].get('serviceConfigurationPath')!=config_path:
+        raise ValueError('qualification_closed_installed_node_configuration_required')
+    from .provider_qualification import QualificationClient
+    from .qualification_node import QualificationNodeGate
+    from .qualification_reservations import QualificationReservationReader
+    client = QualificationClient(node['authorizationClient'],identity)
+    invocation = os.environ.get('INVOCATION_ID','')
+    if len(invocation)!=32 or any(value not in '0123456789abcdef' for value in invocation):
+        raise ValueError('qualification_actual_unit_invocation_required')
+    binding = {key:node[key] for key in ('nodeId','authority','deviceId','unitKind','hostId')}
+    binding.update(identitySha256=client.source_digest,configurationSha256=digest,
+        serverInstanceId=owner.instance_id,bootId=Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+        unitInvocationId=invocation,processStartTicks=str(process_start_ticks(os.getpid())))
+    gate = QualificationNodeGate(module.manager,client,QualificationReservationReader(node['reservationPath']),binding,
+        owner_socket=node['ownerSocket'],unit_sha256=node['unitSha256'],capacity_url=node['capacityUrl'])
+    module.configure_provider_qualification(gate)
+    return gate
 
 
 def serve(config_path, app):
@@ -86,6 +119,7 @@ def serve(config_path, app):
     owner.shutdown = lifecycle.request_shutdown
     owner.start(fence)
     try:
+        configure_qualification(config_path,app,module,owner,settings,identity)
         server.run()
     finally:
         # Unknown/failed lifecycle effects retain local ownership. They cannot
