@@ -61,9 +61,18 @@ class Principal:
 
     def __post_init__(self):
         name(self.id, "principal")
-        if len(self.token) < 32 or self.role not in ('caller', 'worker', 'admin', 'rollout'):
+        if len(self.token) < 32 or self.role not in ('caller', 'worker', 'admin', 'rollout', 'job_reader'):
             raise ValueError('principal requires a strong token and a known role')
-        if self.role == 'worker':
+        if self.role == 'job_reader':
+            if (len(self.id) > 128 or self.handlers or self.worker is not None or self.host is not None or
+                    self.delegate_prefix is not None or self.max_running is not None or
+                    self.on_cap != 'queue' or self.claim_enabled is not True or
+                    any(value is not None for value in
+                        (self.remote_job, self.remote_provider, self.remote_run_id, self.remote_boot)) or
+                    self.upload_grants or self.upload_base_url is not None or
+                    self.benchday_host_id is not None):
+                raise ValueError('job_reader principals must be fixed-owner and carry no other privileges')
+        elif self.role == 'worker':
             name(self.worker, 'worker')
             name(self.host, 'host')
             if self.benchday_host_id is not None:
@@ -381,6 +390,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond(200, receipt)
                 return
             principal = self.principal()
+            if principal.role == 'job_reader' and not (method == 'GET' and parts[2:] == ['jobs', 'changes']):
+                raise WorkloadError('job_reader principal may only read incremental job changes', 403)
             handled, grant_result = route_upload_grant_owner(self, principal, method, parts[2:])
             if handled:
                 self.respond(200, grant_result)
@@ -421,6 +432,37 @@ class Handler(BaseHTTPRequestHandler):
 
     def route(self, principal, method, parts, body):
         store = self.server.store
+        if parts == ['jobs', 'changes'] and method == 'GET':
+            if principal.role != 'job_reader':
+                raise WorkloadError('job changes require a job_reader principal', 403)
+            query = parse_qs(urlparse(self.path).query, keep_blank_values=True,
+                             strict_parsing=True, max_num_fields=3)
+            unknown = set(query) - {'updated_since', 'after_job_id', 'limit'}
+            if (unknown or any(len(values) != 1 for values in query.values()) or
+                    'after_job_id' in query and 'updated_since' not in query):
+                raise WorkloadError('invalid job-changes query')
+
+            def number(key, default):
+                if key not in query:
+                    return default
+                raw = query[key][0]
+                if not raw.isascii() or not raw.isdigit() or len(raw) > 19:
+                    raise WorkloadError(f'{key} must be a bounded non-negative integer')
+                value = int(raw)
+                if value > 2**63 - 1:
+                    raise WorkloadError(f'{key} must be a bounded non-negative integer')
+                return value
+
+            return job_changes(
+                store,
+                updated_since=number('updated_since', 0),
+                after_job_id=query.get('after_job_id', [None])[0],
+                inclusive='after_job_id' not in query,
+                owner=principal.id,
+                limit=number('limit', 256),
+                with_cursor=True,
+                bounded=True,
+            )
         if parts == ['status'] and method == 'GET':
             if principal.role != 'admin':
                 raise WorkloadError('authority status requires an admin principal', 403)

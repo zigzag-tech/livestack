@@ -86,6 +86,8 @@ CREATE TABLE IF NOT EXISTS handler_release_events(
  bytes INTEGER NOT NULL, outcome TEXT NOT NULL, policy_revision TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS handler_release_events_age ON handler_release_events(id);
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs(state, created);
+CREATE INDEX IF NOT EXISTS jobs_effective_owner_changes
+ ON jobs(COALESCE(NULLIF(json_extract(labels,'$.owner'),''),owner), CAST(updated*1000 AS INTEGER), id);
 CREATE INDEX IF NOT EXISTS attempts_host ON attempts(host, state);
 CREATE INDEX IF NOT EXISTS github_remote_state ON github_remote_jobs(provider, state, created);
 -- Derived data (openspec measured-resource-declarations): rebuilt from attempt results, so

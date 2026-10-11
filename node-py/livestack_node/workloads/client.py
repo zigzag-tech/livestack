@@ -10,7 +10,7 @@ import urllib.request
 from livestack_node import transport
 
 from .origin import stamp
-from .model import WorkloadError, encode
+from .model import WorkloadError, encode, name
 
 
 class WorkloadClient:
@@ -154,3 +154,70 @@ class WorkloadClient:
     def list_jobs(self):
         """This principal's most recent jobs (the authority bounds the page)."""
         return self.request('jobs')['jobs']
+
+    def list_job_changes(self, *, expected_owner, updated_since=0, after_job_id=None, limit=256):
+        """Read one bounded page for the configured owner and verify its binding.
+
+        Timestamp-only polls replay their watermark; use `next_cursor` only to
+        finish paging one poll, then deduplicate boundary replays by job id and
+        projected content in the consumer.
+        """
+        if not isinstance(expected_owner, str) or not 0 < len(expected_owner) <= 128:
+            raise WorkloadError('expected_owner must be a non-empty owner id')
+        try:
+            name(expected_owner, 'expected_owner')
+        except WorkloadError as error:
+            raise WorkloadError('expected_owner must be a valid owner id') from error
+        if (isinstance(updated_since, bool) or not isinstance(updated_since, int) or
+                not 0 <= updated_since <= 2**63 - 1):
+            raise WorkloadError('updated_since must be a bounded non-negative integer (ms)')
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 256:
+            raise WorkloadError('limit must be between 1 and 256')
+        if after_job_id is not None:
+            try:
+                name(after_job_id, 'after_job_id')
+            except WorkloadError as error:
+                raise WorkloadError('invalid after_job_id') from error
+        query = {'updated_since': updated_since, 'limit': limit}
+        if after_job_id is not None:
+            query['after_job_id'] = after_job_id
+        result = self.request('jobs/changes?' + urllib.parse.urlencode(query))
+        if not isinstance(result, dict):
+            raise WorkloadError('invalid job changes response', 502)
+        try:
+            response_bytes = len(encode(result).encode())
+        except WorkloadError as error:
+            raise WorkloadError('invalid job changes response', 502) from error
+        if (result.get('owner') != expected_owner or
+                not isinstance(result.get('jobs'), list) or len(result['jobs']) > min(limit, 256) or
+                isinstance(result.get('truncated'), bool) or
+                not isinstance(result.get('truncated'), int) or not 0 <= result['truncated'] <= 256 or
+                isinstance(result.get('now_ms'), bool) or
+                not isinstance(result.get('now_ms'), int) or not 0 <= result['now_ms'] <= 2**63 - 1 or
+                response_bytes > 30 * 1024):
+            raise WorkloadError('invalid or oversized job changes response', 502)
+        jobs = result['jobs']
+        ids, previous = set(), None
+        for row in jobs:
+            if (not isinstance(row, dict) or not isinstance(row.get('id'), str) or
+                    not 0 < len(row['id']) <= 160 or row.get('owner') != expected_owner or
+                    isinstance(row.get('updated_ms'), bool) or not isinstance(row.get('updated_ms'), int) or
+                    not 0 <= row['updated_ms'] <= 2**63 - 1 or row['id'] in ids):
+                raise WorkloadError('invalid job changes row', 502)
+            key = (row['updated_ms'], row['id'])
+            if previous is not None and key <= previous:
+                raise WorkloadError('job changes rows are not ordered', 502)
+            previous = key
+            ids.add(row['id'])
+        cursor = result.get('next_cursor')
+        if jobs:
+            if (not isinstance(cursor, dict) or
+                    isinstance(cursor.get('updated_since'), bool) or
+                    not isinstance(cursor.get('updated_since'), int) or
+                    not isinstance(cursor.get('after_job_id'), str) or
+                    cursor.get('updated_since') != jobs[-1]['updated_ms'] or
+                    cursor.get('after_job_id') != jobs[-1]['id']):
+                raise WorkloadError('invalid job changes cursor', 502)
+        elif cursor is not None or result['truncated'] != 0:
+            raise WorkloadError('invalid job changes cursor', 502)
+        return result

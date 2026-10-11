@@ -85,6 +85,21 @@ def authority(tmp_path):
     made.close()
 
 
+def test_job_reader_is_accepted_from_reloadable_config_and_remains_read_only(authority):
+    reader_token = 'r' * 32
+    authority.write([caller('alice', A), worker('w1', W),
+                     dict(id='source-owner', token=reader_token, role='job_reader')])
+    assert authority.reload()
+    assert authority.status(reader_token) == 403
+    client = authority.client(reader_token)
+    try:
+        page = client.list_job_changes(expected_owner='source-owner')
+        assert page['owner'] == 'source-owner'
+        assert page['jobs'] == [] and page['truncated'] == 0 and page['next_cursor'] is None
+    finally:
+        client.close()
+
+
 def test_added_worker_registers_and_claims_without_restart(authority):
     assert authority.status(NEW) == 401
     authority.write([caller('alice', A), worker('w1', W), worker('w2', NEW, 'h2')])

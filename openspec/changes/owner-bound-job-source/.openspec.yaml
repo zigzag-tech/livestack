@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-10
+goal: Let colocated stream producers observe one owner's bounded job changes
+  without an admin bearer or database access
