@@ -81,12 +81,26 @@ Only a registered physical model/cgroup/GPU settlement controller may retire it.
 
 ## Still required
 
-Actual managed-router/bootstrap wiring must compute exact immutable request hashes,
-close legacy inference/model-control/WS surfaces, attach the gate before any loader,
-and preserve accepted owner-token status/cancel/result after grant expiry.
+Managed-router/entry wiring is now supplied in source: original input hashes are
+computed before preparation, qualification ingress closes legacy effects, and the
+entry derives boot/process/unit/owner instance identity before attaching the gate.
+Actual imported package/environment/seal and installed registration are still open.
+Accepted owner-token status/cancel/result preserve their original checks after expiry.
 The configured controller must be installed in the **existing recognized host
 broker**, with retained state and owner-qualified ingress/rollback controls.
 Private operator registration, exact new source/wheels/seals/unit/config tuples,
 dedicated `provider.qualify` grants, and proven bounds for every original contender
 remain mandatory. Current free VRAM, source fixtures, or a callback lease are not
 proof of those conditions. No service restart or model effect was performed.
+
+## Installed entry constraint mapper
+
+Only `qualificationOnly:true` enables the new mapper. Its source-bound private app
+record has closed `providerQualificationNode` fields: `nodeId`, `authority`,
+`deviceId`, `unitKind`, `hostId`, `capacityUrl`, `reservationPath`, `ownerSocket`,
+`unitSha256`, `authorizationClient`. Dynamic boot/PID start ticks, systemd invocation
+and actual private owner server instance come from the running unit, not self-
+authorizing JSON fields. The private configuration digest is derived from actual
+bytes and is never embedded into its own configuration. The absent-mode entry
+returns without inspecting qualification settings. Six mapper/environment CPU
+controls pass; mapper-positive gates are mocked, not installed authority proof.
