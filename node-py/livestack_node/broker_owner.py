@@ -6,17 +6,58 @@ Remote uncertainty intentionally requires a separate owner reconciliation path.
 """
 from concurrent.futures import Executor
 from functools import wraps
+from dataclasses import asdict, is_dataclass
+from hashlib import sha256
+import json
 
 from .provider_fence import ProviderFence, FenceRefused
 
 
 class BrokerOwnerGate:
-    def __init__(self, broker, authorize):
+    def __init__(self, broker, authorize, *, journal=None):
         self.broker = broker
         self.fence = ProviderFence(authorize)
+        self.journal = journal
+        if journal is not None:
+            for _row in journal.unsettled():
+                key = self.fence.admit()
+                self.fence.settle(key, False)
+
+    def _admit(self, kind, peer_id, args, kwargs):
+        with self.fence._lock:
+            if self.fence._uncertain:
+                raise FenceRefused('broker_owner_unsettled_reconciliation_required')
+            key = self.fence.admit()
+        identity = None
+        try:
+            if self.journal is not None:
+                def encode(value):
+                    if is_dataclass(value):
+                        return asdict(value)
+                    raise TypeError('broker_owner_closed_serializable_inputs_required')
+                payload = json.dumps({'args': args, 'kwargs': kwargs}, sort_keys=True,
+                    separators=(',', ':'), allow_nan=False, default=encode).encode()
+                identity = {'kind': kind, 'peerId': peer_id, 'requestSha256': sha256(payload).hexdigest()}
+                self.journal.intent(key, identity)
+        except BaseException:
+            self.fence.settle(key)
+            raise
+        return key, identity
+
+    def _settle(self, key, identity, settled, *, not_dispatched=False):
+        if self.journal is not None and settled:
+            try:
+                if not_dispatched:
+                    self.journal.known_not_dispatched(key, identity)
+                else:
+                    self.journal.settle_local(key, identity)
+            except BaseException:
+                self.fence.settle(key, False)
+                raise
+        self.fence.settle(key, settled)
 
     def run(self, fn, *args, **kwargs):
-        key = self.fence.admit()
+        key, identity = self._admit('local-work', fn.__name__, args, kwargs)
         completed = False
         try:
             result = fn(*args, **kwargs)
@@ -25,7 +66,7 @@ class BrokerOwnerGate:
         finally:
             # A local handler returning is not a remote model-load barrier.
             # Keep uncertainty sticky even if snapshot later expires a load.
-            self.fence.settle(key, completed and not self.broker._in_flight)
+            self._settle(key, identity, completed and not self.broker._in_flight)
 
     def executor(self, executor):
         return BrokerOwnedExecutor(self, executor)
@@ -56,8 +97,8 @@ class BrokerOwnerGate:
                     continue
 
                 @wraps(original)
-                def remote(*args, _original=original, **kwargs):
-                    key = self.fence.admit()
+                def remote(*args, _original=original, _kind=name, _peer_id=getattr(peer, 'base', None), **kwargs):
+                    key, identity = self._admit(_kind, _peer_id, args, kwargs)
                     settled = False
                     try:
                         return _original(*args, **kwargs)
@@ -68,7 +109,7 @@ class BrokerOwnerGate:
                         settled = getattr(error, 'dispatched', None) is False
                         raise
                     finally:
-                        self.fence.settle(key, settled)
+                        self._settle(key, identity, settled, not_dispatched=settled)
 
                 setattr(peer, name, remote)
 
@@ -79,17 +120,17 @@ class BrokerOwnedExecutor(Executor):
         self.gate, self.executor = gate, executor
 
     def submit(self, fn, /, *args, **kwargs):
-        key = self.gate.fence.admit()
+        key, identity = self.gate._admit('local-work', fn.__name__, args, kwargs)
         try:
             future = self.executor.submit(fn, *args, **kwargs)
         except BaseException:
-            self.gate.fence.settle(key)
+            self.gate._settle(key, identity, True, not_dispatched=True)
             raise
 
         def finished(done):
             settled = done.cancelled() or (
                 done.exception() is None and not self.gate.broker._in_flight)
-            self.gate.fence.settle(key, settled)
+            self.gate._settle(key, identity, settled, not_dispatched=done.cancelled())
 
         future.add_done_callback(finished)
         return future
