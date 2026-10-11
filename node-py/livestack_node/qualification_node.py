@@ -36,6 +36,7 @@ class QualificationNodeGate:
         self.capacity_url = capacity_url
         self.owner_socket,self.unit_sha256 = owner_socket,unit_sha256
         self._verify_instance()
+        self.uncertain = {}
         self.context = ContextVar('qualification-work',default=None)
         if getattr(manager,'_qualification_gate',None) is not None:
             raise ValueError('qualification_model_guard_already_installed')
@@ -84,6 +85,7 @@ class QualificationNodeGate:
     def admit(self, job, authorization):
         """Read-only control transport creates recognized retained custody only.
         A lost reply never starts a model; replay asks for the same exact claim."""
+        if self.uncertain:raise PermissionError('qualification_physical_settlement_uncertain')
         self._verify_instance()
         self.client.authorize(effect='model-submit',job_id=job['jobId'],owner_id=job['ownerId'],input_digest=job['inputDigest'],model_kind=job['modelKind'],authorization=authorization)
         payload = {'nodeId':self.binding['nodeId'],**job}
@@ -113,7 +115,9 @@ class QualificationNodeGate:
             raise PermissionError('qualification_actual_active_bound_kind_lease_required')
 
     @contextmanager
-    def work(self, job, authorization, fence):
+    def work(self, job, authorization, fence, *, synchronize):
+        if not callable(synchronize):raise ValueError('qualification_real_physical_barrier_required')
+        if self.uncertain:raise PermissionError('qualification_physical_settlement_uncertain')
         if self.context.get() is not None:
             raise PermissionError('qualification_nested_worker_context_refused')
         self._verify_instance()
@@ -139,9 +143,32 @@ class QualificationNodeGate:
             thread.start()
             yield {'jobId':job['jobId'],'leaseId':lease.lease_id,'kind':lease.capability_kind,'hostId':lease.host_id,'fence':fence}
         finally:
-            self.context.reset(token)
+            try:
+                # OwnedExecutorJobs has an outer barrier too; this one is
+                # mandatory before releasing this actual kind lease.
+                if synchronize() is not None:
+                    raise PermissionError('qualification_physical_barrier_void_contract_required')
+            except BaseException:
+                self.uncertain[job['jobId']] = (stop,thread,lease)
+                raise
+            else:
+                stop.set()
+                if thread.ident is not None:thread.join(1)
+                coordinator.release_lease(lease.lease_id)
+            finally:
+                self.context.reset(token)
+            # Model/host capacity remains retained even after job settlement.
+
+    def settle_uncertain_owned(self, fence, synchronize):
+        """Private owner lifecycle only; never an incoming model/control verdict."""
+        from .provider_fence import ProviderFence
+        if not isinstance(fence,ProviderFence):raise PermissionError('qualification_actual_owner_fence_required')
+        fence.require_owned_shutdown()
+        self._verify_instance()
+        if synchronize() is not None:
+            raise PermissionError('qualification_physical_barrier_void_contract_required')
+        for job_id,(stop,thread,lease) in list(self.uncertain.items()):
             stop.set()
             if thread.ident is not None:thread.join(1)
-            coordinator.release_lease(lease.lease_id)
-            # Capacity remains retained until registered physical model/context
-            # settlement, including cancellation or worker completion.
+            self.manager.coordinator.release_lease(lease.lease_id)
+            del self.uncertain[job_id]

@@ -31,6 +31,20 @@ class ProviderFenceTests(unittest.TestCase):
             finish.set()
         self.assertTrue(fence.status('operator')['drained'])
 
+    def test_cleanup_requires_actual_current_shutdown_and_rejects_startup_or_expired_context(self):
+        from contextvars import copy_context
+        fence = ProviderFence(authorize)
+        receipt = fence.hold('operator','cleanup')
+        with self.assertRaises(FenceRefused):fence.require_owned_shutdown()
+        captured=[]
+        def shutdown():
+            fence.require_owned_shutdown();captured.append(copy_context())
+        fence.shutdown_owned('operator','cleanup',receipt['epoch'],shutdown,lambda:None)
+        with self.assertRaises(FenceRefused):captured[0].run(fence.require_owned_shutdown)
+        async def startup():
+            with self.assertRaises(FenceRefused):fence.require_owned_shutdown()
+        asyncio.run(fence.startup_owned('operator','cleanup',receipt['epoch'],startup,lambda:None))
+
     def test_failed_barrier_stays_uncertain_and_wrong_owner_refuses(self):
         fence = ProviderFence(authorize)
         def broken():

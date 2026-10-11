@@ -118,6 +118,13 @@ class ProviderFence:
             if not physically_settled:
                 self._uncertain.add(key)
 
+    def require_owned_shutdown(self):
+        """Internal cleanup only inside the current authenticated held shutdown."""
+        with self._lock:
+            grant = _shutdown_admission.get()
+            if grant is None or len(grant)!=5 or grant[4]!='shutdown' or self._holder is None or grant[:3]!=(self,self._holder,self._epoch) or grant[3] not in self._active or self._uncertain:
+                raise FenceRefused('current_owned_shutdown_context_required')
+
     def shutdown_owned(self, credential, holder, epoch, fn, synchronize):
         """Trusted owner callback only; no request payload selects shutdown code."""
         self._authorize(credential, 'shutdown')
@@ -126,7 +133,7 @@ class ProviderFence:
                 raise FenceRefused('shutdown_requires_current_physically_drained_fence')
             key = uuid4().hex
             self._active.add(key)
-        context = _shutdown_admission.set((self, holder, epoch, key))
+        context = _shutdown_admission.set((self, holder, epoch, key, 'shutdown'))
         settled = False
         try:
             return fn()
@@ -146,7 +153,7 @@ class ProviderFence:
                 raise FenceRefused('startup_requires_current_drained_fence')
             key = uuid4().hex
             self._active.add(key)
-        context = _shutdown_admission.set((self, holder, epoch, key))
+        context = _shutdown_admission.set((self, holder, epoch, key, 'startup'))
         settled = False
         try:
             return await fn()
