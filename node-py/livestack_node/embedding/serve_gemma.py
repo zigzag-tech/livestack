@@ -276,7 +276,8 @@ def create_app(*, port: Optional[int] = None):
             engines.pop().stop()
 
     attrs = {"class": "embed", "model": model_id, "quant": quant, "dim": default_dim,
-             "modality": "text+image", "family": "gemma", "multilingual": True}
+             "modality": "text+image", "family": "gemma", "multilingual": True,
+             "locality": "local"}
     # Measured on zz-joe 2026-10-12: ~1.3 GB of VRAM (Vulkan), ~1 GB RSS on CPU.
     unit = ManagedUnit(unit_name, load, free, footprint=int(1.5 * 2**30),
                        residency_policy=ResidencyPolicy.UNPINNED, min_resident=0,

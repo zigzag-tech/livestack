@@ -50,7 +50,8 @@ if _HERE not in _sys.path:
 from engines import engine_for as _engine_for          # noqa: E402
 from engines import vllm as _vllm_engine               # noqa: E402
 from selection import unit_inventory as _unit_inventory  # noqa: E402
-from fleet_embed import attrs_meet, embed_nodes as _embed_nodes, fetch_fleets as _fetch_fleets, pick as _pick_embed  # noqa: E402
+from fleet_embed import (AmbiguousEmbedder, attrs_meet, embed_nodes as _embed_nodes,  # noqa: E402
+                         fetch_fleets as _fetch_fleets, pick as _pick_embed)
 from unit_queue import Queues as _Queues, QueueFull as _QueueFull   # noqa: E402
 
 HOST_ID = os.environ.get("HARMONY_LLM_HOST_ID", "xc-tower-ubuntu")
@@ -1802,7 +1803,10 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             and not any(_local_satisfies(n, requirement) for n in SPECS)):
         fleets = await asyncio.get_running_loop().run_in_executor(
             None, _fetch_fleets, BROKER_URLS, httpx.get)
-        node = _pick_embed(requirement, _embed_nodes(fleets))
+        try:
+            node = _pick_embed(requirement, _embed_nodes(fleets))
+        except AmbiguousEmbedder as e:
+            raise HTTPException(status_code=400, detail=f"harmony: {e}")
         if node:
             return await _forward_to_embed_node(node, parsed_body, request, ctx, requirement)
     # ADMISSION FIRST, then load. Loading straight off the request is how a node

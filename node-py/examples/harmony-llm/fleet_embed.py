@@ -86,10 +86,28 @@ def embed_nodes(fleets: Iterable[Mapping]) -> "list[dict]":
     return out
 
 
+class AmbiguousEmbedder(Exception):
+    """The need is met by embedders of different MODELS and does not name one."""
+
+    def __init__(self, models):
+        self.models = sorted(models)
+        super().__init__(
+            f"{len(self.models)} embedding models meet this need ({', '.join(self.models)}); "
+            "vectors from different models are not comparable, so name one with `model=<id>`")
+
+
 def pick(requires: Mapping, nodes: Iterable[Mapping]) -> Optional[dict]:
     """The nearest node whose unit meets `requires` (lowest broker probe; a
-    node that never reported one sorts last, not first)."""
+    node that never reported one sorts last, not first).
+
+    An embedding space is a data contract: when the satisfying nodes serve
+    different models, choosing among them by distance would hand one caller a
+    different space on different days. That is `AmbiguousEmbedder`, not a pick.
+    Several nodes serving the SAME model are interchangeable, and the nearest wins."""
     ok = [n for n in nodes if attrs_meet(n["attrs"], requires)]
+    models = {n["model"] for n in ok}
+    if len(models) > 1:
+        raise AmbiguousEmbedder(models)
     return min(ok, key=lambda n: (n.get("probe_ms") is None, n.get("probe_ms") or 0.0), default=None)
 
 
