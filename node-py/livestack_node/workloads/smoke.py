@@ -9,6 +9,9 @@ the whole fleet before anyone noticed (2026-10-07/08):
   rootless_docker_start  rootless docker can start a container as the worker user (PrivateTmp/newuidmap)
   compilation_launch     the root-owned verifier copy is the one the unit declares
   capture_size           the runtime source capture is under its cap
+  release_import         the worker RELEASE itself (not its handlers) has no undefined name or syntax error and
+                         the worker's entry modules import under its own PYTHONPATH; a rollout that changes the
+                         release runs it, since handler_import/handler_integrity look only at the handler bundle
 
 Result of one probe: {probe, status, reason, elapsed_s, detail}. status is `pass`, `fail` or
 `not_applicable`; a failure carries a name `smoke_failed:<probe>:<reason>`. UNKNOWN IS NOT SUCCESS:
@@ -58,9 +61,9 @@ def _result(probe, status, reason='', started=None, **detail):
     return out
 
 
-def _run(argv, timeout, env=None):
+def _run(argv, timeout, env=None, cwd=None):
     try:
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env, cwd=cwd)
         return done.returncode, (done.stdout or '') + (done.stderr or '')
     except subprocess.TimeoutExpired:
         return None, 'timeout'
@@ -388,8 +391,41 @@ def capture_size(ctx):
     return _result('capture_size', PASS, '', started, size_bytes=size, cap_bytes=cap)
 
 
+# ---- release_import ---------------------------------------------------------------------------
+
+ENTRY_MODULES = ('livestack_node.workloads.worker_service', 'livestack_node.workloads.worker',
+                 'livestack_node.workloads.handler_installer')
+
+
+def release_import(ctx):
+    """ctx: release_root (directory holding node-py/), python (default: this interpreter), extra_path (other
+    PYTHONPATH entries the unit carries, such as vendored dependencies), modules (default ENTRY_MODULES)."""
+    started = time.monotonic()
+    root = ctx.get('release_root')
+    package = Path(root) / 'node-py' / 'livestack_node' if root else None
+    if package is None or not package.is_dir():
+        return _result('release_import', NOT_APPLICABLE, 'no_release_dir', started)
+    problems, checked = [], 0
+    for path in sorted(package.rglob('*.py')):
+        if '__pycache__' in path.parts:
+            continue
+        checked += 1
+        problems += [f'{path.relative_to(package).as_posix()}: {p}'
+                     for p in python_problems(path.read_text(errors='replace'), path.name)]
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1',
+               PYTHONPATH=':'.join([str(package.parent), *ctx.get('extra_path', [])]))
+    code, out = _run([ctx.get('python', sys.executable), '-c',
+                      'import importlib, sys\nfor m in sys.argv[1:]: importlib.import_module(m)',
+                      *ctx.get('modules', ENTRY_MODULES)], PROBE_TIMEOUT_S, env, cwd=root)   # not the caller's cwd: '' leads sys.path for -c
+    if code != 0:
+        problems.append('import_failed: ' + ((out.strip().splitlines() or ['no output'])[-1])[:200])
+    if problems:
+        return _result('release_import', FAIL, problems[0][:160], started, problems=problems[:20], files_checked=checked)
+    return _result('release_import', PASS, '', started, files_checked=checked)
+
+
 PROBES = {fn.__name__: fn for fn in (worker_restart_clean, handler_import, handler_integrity,
-                                     rootless_docker_start, compilation_launch, capture_size)}
+                                     rootless_docker_start, compilation_launch, capture_size, release_import)}
 
 
 def run(names, ctx):

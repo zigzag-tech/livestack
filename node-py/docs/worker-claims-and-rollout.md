@@ -131,3 +131,45 @@ To make "no release for my platform" fail loudly for a handler, list it in the w
 `"required_handler_releases": ["benchday.release.macos.v1"]`. Such a mismatch is an activation failure
 `required_release_platform_missing: platform_not_supported: ...`. Per-platform defaults for one handler id
 are not implemented; a platform that needs its own build uses its own handler id.
+
+## Enforce for listed groups (2026-10-12)
+
+The reconciler also ENFORCES, but only for the groups named in its own config (`rollout-reconciler.json`), one
+worker at a time. The authority is unchanged: spec mode stays `observe` and the validator still refuses `enforce`.
+
+    "enforce": {
+      "enabled": true,                         # kill switch; re-read every tick
+      "kill_file": "~/.config/livestack-workloads/rollout-enforce.off",   # existing file = off
+      "state": "~/.local/state/livestack-workloads/rollout-executor.json",
+      "hosts": {"zz-joe": ["ubuntu@100.64.0.24"]},                          # roster host -> ssh arguments
+      "groups": [{"name": "zz-joe-e2e-canary", "set": "zz-joe-e2e", "unit": "unit-xxxxxxxx", "workers": ["zz-joe-e2e-3"]}],
+      "notify_cmd": "benchday notify --title Rollout --tag rollout",
+      "soak_seconds": 300, "failure_budget": 2, "attempt_cap": 2
+    }
+
+The desired release is the `release` of the group's deployment unit (`cli unit` / `rollout unit`). The release
+directory must exist under `release_source` (default `~/.local/share/livestack-workload-releases`) on the reconciler
+host; the executor pushes it to the worker's host and the host verifies its content hash.
+
+Per worker: stage -> drain (owner `rollout`, 1 h expiry) -> wait idle -> switch -> smoke -> verify -> enable -> soak.
+It never restarts a unit with a job in flight (roster idle, and the host helper refuses when `state_dir/active.json`
+exists), keeps the set's `min_claiming`, and never enables a drain it did not make. The switch is ONE drop-in on the
+host, `~/.config/systemd/user/<unit>.service.d/~rollout-release.conf` (`~` sorts after every other name, so it wins
+and nothing else is touched); only the `<release>/node-py` entry of PYTHONPATH changes, other entries are kept.
+
+Failure after the switch: rollback (delete that drop-in, daemon-reload, restart), the release is REJECTED for that
+worker (`state.rejected`), a failure is counted for the group, and the group is PAUSED after `failure_budget`.
+A rollback that fails leaves the worker drained with `needs_operator` (an expiry never re-enables it) and pauses
+everything (`paused["*"]`). Every one of these notifies through `notify_cmd`.
+
+Kill switch (any one): `systemctl --user disable --now livestack-rollout-reconciler.service` (stops all of it,
+observation too); `"enabled": false` in the config; `touch` the kill file; or spec mode `off`. An early step is
+unwound (worker re-enabled), a worker that already passed smoke and is soaking is left as it is.
+
+Resume after a pause: fix the cause, then remove the entry from `paused` (and the release from `rejected` if it
+should be tried again) in the state file while the reconciler is stopped. Check state: `cli rollout status`
+(`reconciler_report.body.enforce`) and the ledger lines `rollout_exec_*`.
+
+Hand rollback of one worker: delete `~rollout-release.conf` in its `.service.d`, `systemctl --user daemon-reload`,
+restart when idle. Not done by this slice: handler-only activation, worker-pull staging, job-failure attribution in
+the soak, authority restarts (those stay with `tools/deploy-authority-release.sh`).
