@@ -96,3 +96,16 @@ def test_authority_accepts_and_validates_the_skip_report(tmp_path):
     store.register('w1', 'host1', 'boot1', report)
     with pytest.raises(Exception, match='handler_platform_skips_invalid'):
         store.register('w1', 'host1', 'boot1', dict(report, handler_platform_skips=[dict(skip, reason='boom')]))
+
+
+def test_inventory_omits_packages_of_a_handler_the_worker_no_longer_serves(tmp_path):
+    manifest, digest, archive, archive_digest = package(tmp_path, 'inv-a')
+    descriptor = dict(manifest=manifest, release_digest=digest, archive_digest=archive_digest,
+                      archive_bytes=archive.stat().st_size)
+    serving = HandlerPackageStore(tmp_path/'worker-state', {'node22': sys.executable},
+        {'test.v1': {'backend': 'native'}}, platform_name=manifest['platform'], architecture=manifest['architecture'])
+    serving.install(archive, descriptor)
+    assert [r['release_digest'] for r in serving.inventory(1)['releases']] == [digest]
+    dropped = HandlerPackageStore(tmp_path/'worker-state', {'node22': sys.executable},
+        {'other.v1': {'backend': 'native'}}, platform_name=manifest['platform'], architecture=manifest['architecture'])
+    assert dropped.inventory(1)['releases'] == []
