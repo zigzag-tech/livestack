@@ -197,7 +197,8 @@ class WorkloadWorker:
             cache_name = 'input-cache-'+hashlib.sha256(config['worker'].encode()).hexdigest()[:16]
             self.input_cache = InputCache(self.workspace/cache_name, self.transfer,
                 max_bytes=config['input_cache_bytes'], max_entries=config.get('input_cache_entries', 32),
-                retention_seconds=config.get('input_cache_retention_seconds', 14*86400), mirror=mirror)
+                retention_seconds=config.get('input_cache_retention_seconds', 14*86400), mirror=mirror,
+                retained_seconds=config.get('input_cache_retained_seconds', 7*86400))
         self.reconciled = False
         self._host_pressure_state = None
         try:

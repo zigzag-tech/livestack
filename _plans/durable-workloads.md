@@ -408,7 +408,11 @@ Every hit verifies the complete archive digest before extraction.
 
 Idle worker steps prune expired entries after restart reconciliation; admission
 may evict least-recently-used unretained entries at capacity. `retain` is sticky
-per owner/digest. A null retention window disables eviction/expiry and a full
+per owner/digest but protects an entry only while it was used within
+`input_cache_retained_seconds` (default 7 days; null = permanent); a lapsed
+retained entry evicts like any other, so abandoned retained jobs cannot fill the
+cache. `input_cache_entries` is hard-capped at 32 by the constructor and index
+format: a larger value fails worker startup, it does not raise the bound. A null retention window disables eviction/expiry and a full
 cache refuses rather than deleting content. No pruning runs while an attempt
 uses its input. Crash leftovers are owned, uncommitted staging files and are
 reconciled separately. The dedicated filesystem remains the hard overall bound;
