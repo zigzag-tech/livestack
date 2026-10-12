@@ -32,6 +32,9 @@ BACKUP=$HOME/.local/state/livestack-workloads/backups/release-$STAMP
 echo "== 1. check candidate"
 python3 "$HERE/check-authority-release.py" "$RELEASE" || { echo "ABORT: candidate failed its check; live authority untouched"; exit 2; }
 
+echo "== 1b. no later drop-in overrides the release drop-in"
+"$HERE/check-authority-dropins.sh" "$DROPIN_DIR" "$(basename "$DROPIN")" || { echo "ABORT: a later drop-in would override this deploy; live authority untouched"; exit 2; }
+
 ready_workers() {  # prints "<fresh_ready> <fresh>" from the live authority, or exits non-zero
   PYTHONPATH=$PYPATH PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 - "$CFG" <<'PY'
 import json, sys, time
