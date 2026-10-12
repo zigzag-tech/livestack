@@ -143,3 +143,29 @@ def test_long_chinese_input_is_not_rejected_by_the_batch_size(node):
     # The engine default (-ub 512) rejected a ~1000-token chunk with HTTP 500.
     r = post(node, {"input": "会议讨论了模型部署和显存分配的问题。" * 120})
     assert r.status_code == 200, r.text
+
+
+def test_vulkan_device_id_is_under_the_machine_not_the_host_id(monkeypatch):
+    # The hub's roster producer drops a node of another host id unless its
+    # device id starts with `{machine}/`; `{host_id}/vk1` made the node invisible.
+    # Needs no engine: create_app only checks that the files exist.
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        for name in ("bin", "model", "mmproj"):
+            open(os.path.join(d, name), "w").close()
+        monkeypatch.setenv("HARMONY_GEMMA_BIN", os.path.join(d, "bin"))
+        monkeypatch.setenv("HARMONY_GEMMA_MODEL", os.path.join(d, "model"))
+        monkeypatch.setenv("HARMONY_GEMMA_MMPROJ", os.path.join(d, "mmproj"))
+        monkeypatch.setenv("HARMONY_GEMMA_BACKEND", "vulkan")
+        monkeypatch.setenv("HARMONY_GEMMA_VK_DEVICE", "1")
+        monkeypatch.setenv("HARMONY_GEMMA_HOST_ID", "box-gemma")
+        monkeypatch.setenv("LIVESTACK_REGISTER", "0")
+        monkeypatch.setenv("LIVESTACK_MACHINE_ID", "box")
+        monkeypatch.delenv("LIVESTACK_DEVICE_ID", raising=False)
+        app = serve_gemma.create_app(port=None)
+
+        async def go():
+            async with client_for(app) as c:
+                return (await c.get("/livestack/capability")).json()
+
+        assert run(go())["device_id"] == "box/vk1"
