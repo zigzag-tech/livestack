@@ -338,3 +338,10 @@ def test_release_import_passes_a_good_release_and_names_an_undefined_name_or_fai
 def test_release_import_without_a_release_is_not_applicable_never_pass(tmp_path):
     assert smoke.release_import({'release_root': str(tmp_path / 'absent')})['status'] == 'not_applicable'
     assert smoke.release_import({})['status'] == 'not_applicable'
+
+
+def test_python_314_implicit_conditional_annotations_name_is_not_an_undefined_name():
+    # Python 3.14 reads __conditional_annotations__ for a module that annotates inside an `if`; the symtable shows
+    # it as a global nothing assigns. A rollout on a 3.14 host must not be refused for it.
+    source = 'import sys\nif sys.argv:\n    x: int = 1\ndef f():\n    return x\n'
+    assert smoke.python_problems(source, 'm.py') == []

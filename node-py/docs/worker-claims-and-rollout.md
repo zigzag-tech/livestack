@@ -195,3 +195,45 @@ the soak, authority restarts (those stay with `tools/deploy-authority-release.sh
   (`idle_timeout_seconds`, 1 h) and the drain is renewed while it lasts.
 - Not rolled, on purpose: `zz-joe-e2e-5` (legacy, drained), the Mac apple worker, the release workers (queued behind the
   approval file).
+
+## Unit auto-build (landed means live for the e2e workers)
+
+`python -m livestack_node.workloads.unit_autobuild --config C [--dry-run]` (module `unit_autobuild.py`). It does by
+timer what was done by hand after every runtime commit, for the e2e groups only, and stops at a proposal:
+
+1. Candidate = newest `origin/main` commit touching `node-py/livestack_node`. Nothing happens when the declared unit's
+   release already has that runtime tree.
+2. Quiet deferrals (no notification): candidate younger than `min_commit_age_minutes` (30), a unit built less than
+   `min_interval_hours` (6) ago, or this candidate failed less than `retry_after_hours` (12) ago.
+3. Gate, fail closed: the repo's own tests on the candidate's tree (`gate.tests`, default `tests/test_workload*.py`,
+   run `nice`d from a `git archive` export), then `scripts/build-worker-release.py build` into `release_source`, then the
+   `release_import` smoke probe on that release (the one the executor re-runs on the worker host). Also
+   `authority_lag_limit`: if the running authority is more than that many runtime commits behind the candidate it stops
+   with "deploy the authority first" (a worker newer than its authority can send keys the authority refuses).
+4. The new unit copies `handlers`, `verifier`, `capture`, `min_authority` from the declared unit (handlers are rolled by
+   the handler registry, not here) and carries the new release (`built_from` = the candidate). It is registered
+   (`rollout/units`), the spec sets of the target groups point at it (compare-and-swap on the spec generation), and
+   LAST the reconciler config's target groups get `"unit": "<new id>"`. The executor reads that file every tick and
+   rolls the workers one at a time as for a hand-built unit (drain, idle, switch, smoke, verify, enable, soak, rollback).
+   A step already in flight keeps the release it started with.
+5. A notification names the unit, the release and the groups. A failure at any step notifies ONCE per candidate and
+   reason ("Unit auto-build FAILED at gate for 1a2b3c4d: tests_failed:..."), leaves the old declared unit, and never
+   rolls anything back or touches a worker.
+
+Never touched, enforced in code: a target group with `"requires_approval": true` (signer/keystore workers) or holding a
+worker in `never_workers` (the Mac, `zz-joe-e2e-5`) is a configuration error that stops the run before any call. Those
+keep the operator approval file / manual path. The tool uses the reconciler's `rollout` principal and never prints it.
+
+Config (`~/.config/livestack-workloads/unit-autobuild.json`, no secrets; example in xc-setup
+`config/machines/xc-tower-ubuntu/unit-autobuild/unit-autobuild.json`): `enabled`, `kill_file`, `repo`,
+`reconciler_config`, `state`, `release_source`, `groups` (reconciler enforce group names), `never_workers`,
+`min_commit_age_minutes`, `min_interval_hours`, `retry_after_hours`, `authority_lag_limit`, `gate{python,tests,exclude,timeout_seconds}`,
+`probe{python,extra_path}`, `notify_cmd`. State: `unit-autobuild.json` (bounded history and failures).
+
+Kill switch: `systemctl --user disable --now livestack-unit-autobuild.timer`, `touch` the `kill_file`, or `"enabled": false`.
+Tests: `tests/test_workload_unit_autobuild.py` (real throwaway git repo, the real build script and probe).
+
+Gate scope on xc-tower-ubuntu (2026-10-12): `tests/test_workload*.py` minus eight files that fail on that host
+for environment reasons at origin/main (`docker`, `edge_forward`, `http`, `launch_verifier`, `service`, `supervision`,
+`task_environment_docker`, `worker`: they need sudo `systemd-run`, a real dockerd or sockets). They are listed in `gate.exclude`;
+fix the cause and shrink that list rather than growing it. The rest runs in about six minutes.

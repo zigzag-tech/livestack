@@ -118,7 +118,8 @@ def _systemctl(user_manager):
 # ---- handler_import ---------------------------------------------------------------------------
 
 _MODULE_DUNDERS = {'__file__', '__name__', '__doc__', '__package__', '__spec__', '__loader__',
-                   '__builtins__', '__path__', '__cached__', '__class__', '__annotations__'}
+                   '__builtins__', '__path__', '__cached__', '__class__', '__annotations__',
+                   '__conditional_annotations__'}   # the last is implicit in Python 3.14 modules with conditional annotations
 
 
 def python_problems(source, filename='<handler>'):
