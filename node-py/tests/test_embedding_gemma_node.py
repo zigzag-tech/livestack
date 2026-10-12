@@ -82,6 +82,15 @@ def test_lane_defaults_media_and_big_batches_to_bulk():
         serve_gemma.pick_lane("urgent", ["q"], False)
 
 
+def test_engine_finds_its_libraries_beside_the_binary():
+    env = serve_gemma.engine_env("/opt/engine/llama-server", {"LD_LIBRARY_PATH": "/x"},
+                                 backend="vulkan", vk_device="1")
+    assert env["LD_LIBRARY_PATH"] == "/opt/engine:/x"
+    assert env["GGML_VK_VISIBLE_DEVICES"] == "1"
+    cpu = serve_gemma.engine_env("/opt/engine/llama-server", {}, backend="cpu", vk_device="0")
+    assert cpu["LD_LIBRARY_PATH"] == "/opt/engine" and "GGML_VK_VISIBLE_DEVICES" not in cpu
+
+
 def test_truncation_renormalises():
     import numpy as np
     out = serve_gemma.shape_vectors([[3.0, 4.0, 12.0, 0.0]], 2)
@@ -169,3 +178,12 @@ def test_vulkan_device_id_is_under_the_machine_not_the_host_id(monkeypatch):
                 return (await c.get("/livestack/capability")).json()
 
         assert run(go())["device_id"] == "box/vk1"
+
+
+def test_engine_reloads_after_an_idle_unload(node):
+    # The prod failure: the engine started once, was unloaded when idle, and the
+    # restart died (exit 127) because its libraries were found only by accident.
+    assert post(node, {"input": "before"}).status_code == 200
+    node.state.embed_manager.unload_now()
+    again = post(node, {"input": "after the engine was unloaded"})
+    assert again.status_code == 200, again.text
