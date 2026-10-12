@@ -453,6 +453,16 @@ lane and a full lane answers 503 `busy` naming itself. Env, wire shape and
 limits: the module docstring. Tests need the real engine
 (`tests/test_embedding_gemma_node.py`, skipped without `HARMONY_GEMMA_*`).
 
+**Callers reach it through the gateway, not by address.** An embeddings
+request whose need no unit of the gateway's own node meets
+(`model: "require:class=embed,dim=512,multilingual=true"`) is forwarded to the
+live embed node on the mesh that declares it (`examples/harmony-llm/fleet_embed.py`,
+chosen from every broker's `/fleet`, nearest probe first). Nothing is admitted:
+these nodes serve from their own process. A need no node meets is the usual
+`503 nothing satisfies`; a chosen node that is down is a `502` naming it. The
+node must DECLARE what callers ask for -- `dim`, `multilingual`, `family`,
+`modality` -- because an undeclared attribute is unmet, not assumed.
+
 ## The fleet broker — one Harmony that can see every host
 
 Everything above is per-HOST: a broker arbitrating the model-server processes

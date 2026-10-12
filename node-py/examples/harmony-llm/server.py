@@ -27,7 +27,7 @@ import time
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from livestack_node import request_log as _request_log
 from livestack_node.decisions.simple_jev import SimpleJevError, classify as simple_jev_classify
 from livestack_node.demand_log import (UnitCostStore, UsageTail, demand_log_from_env,
@@ -50,6 +50,7 @@ if _HERE not in _sys.path:
 from engines import engine_for as _engine_for          # noqa: E402
 from engines import vllm as _vllm_engine               # noqa: E402
 from selection import unit_inventory as _unit_inventory  # noqa: E402
+from fleet_embed import attrs_meet, embed_nodes as _embed_nodes, fetch_fleets as _fetch_fleets, pick as _pick_embed  # noqa: E402
 from unit_queue import Queues as _Queues, QueueFull as _QueueFull   # noqa: E402
 
 HOST_ID = os.environ.get("HARMONY_LLM_HOST_ID", "xc-tower-ubuntu")
@@ -1233,9 +1234,6 @@ def _expand_clause(key: str, val) -> "list[tuple[str, object]]":
     return [(key, val)]
 
 
-_LOCAL_CMPS = (">=", "<=", "!=", ">", "<")
-
-
 # SPECIALIST-ONLY ATTRIBUTES, mirroring the planner's rule (planner.py
 # `_specialist_only`): a unit declaring one (e.g. `ocr: true`) serves work
 # generic demand can never imply, so a requirement that merely matches
@@ -1266,41 +1264,7 @@ def _local_satisfies(name: str, requires: dict) -> bool:
         if val is True or (isinstance(val, str)
                            and val.strip().lower() in ("true", "1", "yes")):
             return False
-    for key, want in requires.items():
-        op, attr = "", key
-        for c in _LOCAL_CMPS:
-            if key.endswith(c):
-                op, attr = c, key[: -len(c)]
-                break
-        attr = attr.strip()
-        if attr not in attrs:
-            return False
-        have = attrs[attr]
-        try:
-            # A LIST want is "a value in this list" (the `context_len=[131072,]`
-            # spelling) — the same semantics as the planner's `_unit_satisfies`;
-            # the two matchers must never disagree about what a clause means.
-            if op == "" and isinstance(want, (list, tuple, set)):
-                if have not in want:
-                    return False
-            elif op == "" and have != want:
-                return False
-            if op == "!=" and isinstance(want, (list, tuple, set)):
-                if have in want:
-                    return False
-            if op == "!=" and not isinstance(want, (list, tuple, set)) and have == want:
-                return False
-            if op == ">=" and not float(have) >= float(want):
-                return False
-            if op == ">" and not float(have) > float(want):
-                return False
-            if op == "<=" and not float(have) <= float(want):
-                return False
-            if op == "<" and not float(have) < float(want):
-                return False
-        except (TypeError, ValueError):
-            return False
-    return True
+    return attrs_meet(attrs, requires)
 
 
 def _requirement_from(body_json: dict) -> "dict | None":
@@ -1716,6 +1680,31 @@ class _Retargeted:
         return self._body
 
 
+async def _forward_to_embed_node(node: dict, parsed_body: dict, request: Request,
+                                 ctx: dict, requirement: dict):
+    """Send an embeddings request to the fleet embed node chosen for it.
+
+    The body is restated in the node's own terms (its model id; ours are
+    `require:` strings and `harmony_requires`, which it would not know). A dead
+    node is a 502 that NAMES it -- an embedding request that vanishes into an
+    empty reply is how a search quietly stops being semantic."""
+    ctx["forwarded"] = True           # the node's demand record, not ours
+    out = {k: v for k, v in parsed_body.items() if k != "harmony_requires"}
+    out["model"] = node["model"]
+    print(f"[harmony-llm] {requirement} -> {node['model']} @ {node['base']} (fleet embed node)",
+          flush=True)
+    headers = {"content-type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(float(os.environ.get(
+                "HARMONY_LLM_PROXY_TIMEOUT", "300")))) as client:
+            resp = await client.post(f"{node['base']}/v1/embeddings", json=out, headers=headers)
+    except Exception as e:
+        raise HTTPException(status_code=502,
+                            detail=f"embed node {node['base']} failed: {type(e).__name__}: {e or '(no message)'}")
+    return Response(content=resp.content, status_code=resp.status_code,
+                    media_type=resp.headers.get("content-type", "application/json"))
+
+
 async def _proxy_impl(path: str, request: Request, ctx: dict):
     """OpenAI-compatible surface. Every call goes through `manager.ensure`, so a
     request against an evicted unit reloads it through Harmony's admission
@@ -1802,6 +1791,20 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
                 requirement = derived or None
                 if requirement is None:
                     unit = _unit_for_model(parsed_body.get("model", ""))
+    # AN EMBEDDING NEED NO LOCAL UNIT MEETS goes to the embed node on the mesh
+    # that does (fleet_embed.py). There is nothing to admit -- those nodes serve
+    # from their own process -- so this runs BEFORE admission, which would
+    # answer "no unit satisfies" for a node it does not place. It is a pure
+    # extension: a local unit that meets the need still wins, and when no fleet
+    # node meets it either, the request falls through to the refusal it always
+    # got.
+    if (path == "embeddings" and requirement is not None and isinstance(parsed_body, dict)
+            and not any(_local_satisfies(n, requirement) for n in SPECS)):
+        fleets = await asyncio.get_running_loop().run_in_executor(
+            None, _fetch_fleets, BROKER_URLS, httpx.get)
+        node = _pick_embed(requirement, _embed_nodes(fleets))
+        if node:
+            return await _forward_to_embed_node(node, parsed_body, request, ctx, requirement)
     # ADMISSION FIRST, then load. Loading straight off the request is how a node
     # ends up starting vLLM into whatever memory happens to be free, with 10 GB
     # of idle ASR and TTS on the card that nobody ever asked to move:
