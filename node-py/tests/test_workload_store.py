@@ -321,6 +321,19 @@ def test_admission_reservation_still_bounds_a_shared_host(harness):
     assert 'insufficient shared host resources' in store.get('owner', refused['id'])['reason']
 
 
+def test_small_worker_is_not_charged_for_its_siblings_attempts_when_the_host_has_room(harness):
+    """2026-10-12 zz-joe: release workers (8 cores) sat unclaimed 25+ min because e2e attempts on the same
+    16-core host reserved 8 cores, and the release worker's own ceiling was reduced by them. The host had 8
+    free; a worker's ceiling is spent only by its own attempts."""
+    store, _, _ = harness
+    register(store, 'big', 'shared', cpu=16, ram=64)
+    register(store, 'small', 'shared', cpu=8, ram=64)
+    store.submit('owner', request('e2e', need={'cpu': 8, 'ram': 4}))
+    assert store.claim('big', 'boot1')
+    store.submit('owner', request('release', need={'cpu': 4, 'ram': 4}))
+    assert store.claim('small', 'boot1'), 'host has 8 of 16 free; the small worker has no attempt of its own'
+
+
 def test_absent_admission_vector_keeps_legacy_request_bytes_and_behavior(harness):
     store, _, path = harness
     register(store)
@@ -697,9 +710,9 @@ def test_starved_release_job_hold_binds_roomier_peer_workers_on_the_same_host(ha
     roster()
     running = []
     for i, name in enumerate(('e1', 'e2', 'e3', 'e4')):
-        store.submit('owner', request(f'run{i}', need={'cpu': 2, 'ram': 1}))
+        store.submit('owner', request(f'run{i}', need={'cpu': 4, 'ram': 1}))
         running.append(store.claim(name, 'boot1'))
-    android = store.submit('owner', request('android', handler='build.v1', need={'cpu': 4, 'ram': 1}))
+    android = store.submit('owner', request('android', handler='build.v1', need={'cpu': 6, 'ram': 1}))
     assert store.claim('r1', 'boot1') is None
     now[0] += store.limits.starvation_seconds + 1
     roster()
@@ -707,10 +720,10 @@ def test_starved_release_job_hold_binds_roomier_peer_workers_on_the_same_host(ha
         complete(store, attempt)
         roster(cleaned={attempt['worker']: [attempt['attempt_id']]})
     young = store.submit('owner', request('young', need={'cpu': 2, 'ram': 1}, priority=500000))
-    finish(running[0])  # 6 of 8 used: the Android build still does not fit
+    finish(running[0])  # 12 of 16 used: 4 free, the 6-core Android build still does not fit
     assert store.claim('e5', 'boot1') is None, 'room freed for the starved build must not go to a young e2e job'
     assert store.get('owner', young['id'])['state'] == 'queued'
-    finish(running[1])  # 4 of 8 used: now it fits
+    finish(running[1])  # 8 of 16 used: now it fits
     claimed = [c for c in (store.claim(n, 'boot1') for n in ('r1', 'r2', 'e5', 'e6')) if c]
     assert [c['job_id'] for c in claimed] == [android['id']]
 

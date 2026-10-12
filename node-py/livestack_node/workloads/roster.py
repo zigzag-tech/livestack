@@ -145,7 +145,7 @@ def _amount(key, value):
     return _gib(value) if key.endswith('_bytes') else f'{value:g}'
 
 
-def _verdict(entry, spec, admit, host_held):
+def _verdict(entry, spec, admit, host_held, worker_held=None, host_observed=None):
     """Why this worker has not taken the job: [] means nothing the roster can see blocks it.
 
     The resource arithmetic mirrors placement (a worker's observed free, less what every
@@ -164,10 +164,18 @@ def _verdict(entry, spec, admit, host_held):
         if not need or key not in capacity:
             continue
         observed = min(capacity[key], available.get(key, capacity[key]))
-        free = max(0, observed - host_held.get('total', {}).get(key, 0))
-        if free < need:
-            reasons.append(f"{label}: needs {_amount(key, need)}, {_amount(key, free)} free "
-                           f"({_amount(key, observed)} observed less {_amount(key, host_held.get('total', {}).get(key, 0))} "
+        # Placement tests two bounds: this worker's ceiling less ITS OWN attempts, and the host (the
+        # least-clamped worker's observation) less every attempt on it.
+        own = (worker_held if worker_held is not None else host_held.get('total', {})).get(key, 0)
+        host_total = host_held.get('total', {}).get(key, 0)
+        host_obs = max(observed, (host_observed or {}).get(key, 0))
+        if observed - own < need:
+            reasons.append(f"{label}: needs {_amount(key, need)}, {_amount(key, max(0, observed - own))} free "
+                           f"({_amount(key, observed)} observed less {_amount(key, own)} "
+                           f"reserved by this worker's running attempts)")
+        elif host_obs - host_total < need:
+            reasons.append(f"{label}: needs {_amount(key, need)}, {_amount(key, max(0, host_obs - host_total))} free "
+                           f"({_amount(key, host_obs)} observed less {_amount(key, host_total)} "
                            f"reserved by running attempts on host {entry['host']})")
     return reasons
 
@@ -202,12 +210,14 @@ def _queue(db, now, entries, cleanup_seconds, limit=QUEUE_LIMIT):
     active = db.execute("SELECT a.worker, a.host, a.job, a.need, j.spec FROM attempts a JOIN jobs j ON j.id=a.job "
                         "JOIN workers w ON w.id=a.worker WHERE a.state IN ('running','cleanup') "
                         "AND NOT (a.state='cleanup' AND w.seen<?)", (now - cleanup_seconds,)).fetchall()
-    held, cpu_learned = {}, {}
+    held, held_by_worker, cpu_learned = {}, {}, {}
     for row in active:
         host = held.setdefault(row['host'], dict(total={}, holders=[]))
         need = charged_need(db, json.loads(row['need']), json.loads(row['spec']), cpu_learned)
+        mine = held_by_worker.setdefault(row['worker'], {})
         for key, value in need.items():
             host['total'][key] = host['total'].get(key, 0) + value
+            mine[key] = mine.get(key, 0) + value
         host['holders'].append(dict(job_id=row['job'], worker=row['worker'],
                                     handler=json.loads(row['spec']).get('handler'), admit=need))
     started = db.execute("SELECT host, created FROM attempts WHERE created>=? ORDER BY created DESC LIMIT ?",
@@ -229,9 +239,15 @@ def _queue(db, now, entries, cleanup_seconds, limit=QUEUE_LIMIT):
         workers = []
         for entry in serving:
             host_held = held.get(entry['host'], dict(total={}, holders=[]))
+            host_observed = {}
+            for peer in entries:
+                if peer['host'] == entry['host']:
+                    for key, value in (peer['capacity'] or {}).items():
+                        host_observed[key] = max(host_observed.get(key, 0), min(
+                            value, (peer['available'] or {}).get(key, value)))
             workers.append(dict(
                 worker=entry['id'], host=entry['host'], state=entry['state'],
-                blocked_by=_verdict(entry, spec, admit, host_held),
+                blocked_by=_verdict(entry, spec, admit, host_held, held_by_worker.get(entry['id'], {}), host_observed),
                 authority_verdict=_authority_verdict(reason, entry['id']),
                 host_holders=sorted(host_held['holders'], key=lambda h: -sum(h['admit'].values()))[:HOLDERS_SHOWN]))
         queue.append(dict(

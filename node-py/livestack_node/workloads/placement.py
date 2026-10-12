@@ -380,7 +380,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         "WHERE a.state IN ('running','cleanup') "
         "AND NOT (a.state='cleanup' AND w.seen<?)",
         (now-limits.cleanup_seconds,)).fetchall()
-    used, busy = {}, set()
+    used, used_by_worker, busy = {}, {}, set()
     # Per-principal concurrency cap: running attempts per job owner, counted
     # before the queued loop. A capped owner is skipped, never a blocker —
     # later owners' jobs still place.
@@ -402,6 +402,8 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         for key, value in charged_need(db, json.loads(a["need"]), json.loads(a["job_spec"]), cpu_learned).items():
             used.setdefault(a["host"], {}).setdefault(key, 0)
             used[a["host"]][key] += value
+            used_by_worker.setdefault(a["worker"], {}).setdefault(key, 0)
+            used_by_worker[a["worker"]][key] += value
     # Two different quantities, previously collapsed into one minimum.
     #
     # `worker_free` is what THIS worker may take: its configured capacity,
@@ -431,12 +433,20 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
     # worker it would run on. The old code checked only the (collapsed) host
     # figure, which was safe only because the minimum happened to include the
     # smallest worker.
-    worker_free, host_observed = {}, {}
+    worker_free, worker_room, host_observed = {}, {}, {}
     for w in workers:
         report = reports[w["id"]]
         observed = {k: min(v, report["available"].get(k, 0)) for k, v in report["capacity"].items()}
         reserved = used.get(w["host"], {})
         worker_free[w["id"]] = {k: max(0, v - reserved.get(k, 0)) for k, v in observed.items()}
+        # `worker_room` is the FIT test's worker bound: the worker's ceiling less only ITS OWN attempts. Other
+        # workers' attempts spend the host (`host_free`, tested alongside), not this worker's ceiling.
+        # `worker_free` above (also less every sibling's attempts) stays what holds are charged against, so a
+        # waiting job still makes roomier peers yield. Using worker_free for the fit test charged siblings
+        # twice: 8-core release workers could not start while e2e attempts on the 16-core host reserved 8,
+        # though 8 were free (2026-10-12, release builds unclaimed 25+ min on zz-joe).
+        own = used_by_worker.get(w["id"], {})
+        worker_room[w["id"]] = {k: max(0, v - own.get(k, 0)) for k, v in observed.items()}
         previous = host_observed.get(w["host"])
         host_observed[w["host"]] = observed if previous is None else {
             k: max(previous.get(k, 0), observed.get(k, 0)) for k in previous.keys() | observed.keys()}
@@ -480,6 +490,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                 # The configured capacity (or the measured MemTotal) stays a
                 # per-identity ceiling; the measured host decides the rest.
                 worker_free[w["id"]][MEMORY] = reports[w["id"]]["capacity"].get(MEMORY, 0)
+                worker_room[w["id"]][MEMORY] = worker_free[w["id"]][MEMORY]
     # Priority is caller intent, while Harmony still owns capability/resource
     # admission and the final worker choice. Legacy persisted specs omit the
     # field and retain their original priority-zero FIFO behavior.
@@ -630,21 +641,21 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
             elif w["host"] in pressure:
                 reason, code = pressure[w["host"]], "host_pressure"
             elif (w["host"] in views and claim is not None and
-                  min(host_free[w["host"]][MEMORY], worker_free[w["id"]].get(MEMORY, 0)) < claim):
+                  min(host_free[w["host"]][MEMORY], worker_room[w["id"]].get(MEMORY, 0)) < claim):
                 t = memory_terms[w["host"]]
                 reason = (f"insufficient host memory: claim {_gib(claim)} GiB > free "
-                          f"{_gib(min(host_free[w['host']][MEMORY], worker_free[w['id']].get(MEMORY, 0)))} GiB "
+                          f"{_gib(min(host_free[w['host']][MEMORY], worker_room[w['id']].get(MEMORY, 0)))} GiB "
                           f"(available {_gib(t['available'])}, reserve {_gib(t['reserve'])}, "
                           f"running attempts {_gib(t['attempts'])}, model servers {_gib(t['services'])}, "
                           f"admitted now {_gib(t['admitted'])})")
                 code = "memory_insufficient"
             elif (disk := _disk_refusal(w["id"], report, host_free[w["host"]].get("disk_bytes", 0),
-                                        worker_free[w["id"]].get("disk_bytes", 0), admit.get("disk_bytes"))):
+                                        worker_room[w["id"]].get("disk_bytes", 0), admit.get("disk_bytes"))):
                 code, reason, figures = disk
                 rejected.append({"worker": w["id"], "reason": reason, "reason_code": code, "figures": figures,
                                  "code": "disk_reserve" if code == "disk_reserve" else "disk_insufficient"})
                 continue
-            elif any(min(host_free[w["host"]].get(k, 0), worker_free[w["id"]].get(k, 0)) < n
+            elif any(min(host_free[w["host"]].get(k, 0), worker_room[w["id"]].get(k, 0)) < n
                      for k, n in admit.items() if not (k == MEMORY and w["host"] in views and claim is not None)):
                 # One reason for both bounds: a caller can act on neither
                 # differently, and the distinct figures are already in the
@@ -658,7 +669,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         for item in rejected:
             w = next((x for x in compatible if x["id"] == item["worker"]), None)
             if (w is not None and item.get("code") in _HOLD_CODES and w["host"] in before_holds and
-                    _fits_without_holds(before_holds[w["host"]], worker_free[w["id"]], admit, claim,
+                    _fits_without_holds(before_holds[w["host"]], worker_room[w["id"]], admit, claim,
                                         w["host"] in views and claim is not None)):
                 item["code"] = "held_for_higher_priority"
                 item["reason"] = (f"held for higher-priority job {hold_holders[w['host']][:8]}: it is waiting for "
