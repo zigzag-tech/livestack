@@ -1,0 +1,5 @@
+- [x] Worker: skip foreign-platform releases by name, honour `required_handler_releases`
+- [x] Authority: accept/validate `handler_platform_skips`; roster and registry status show it
+- [x] Tests: skip, required failure, matching install, authority report validation
+- [x] Docs: worker-claims-and-rollout.md
+- [ ] Deploy authority, roll xc-mac-studio-apple, verify roster; then archive

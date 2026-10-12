@@ -128,6 +128,9 @@ class WorkloadWorker:
             self.base_handlers, platform_name=config.get('handler_platform'),
             architecture=config.get('handler_architecture'))
         self.handler_registry_failures = []
+        # Releases the registry offered that this worker's platform cannot run: a named skip,
+        # never a failure (openspec/changes/handler-platform-skip).
+        self.handler_platform_skips = []
         self.handler_gc_receipts = []
         self.handler_registry_state = self.handler_packages.read_pointer()
         for handler_id, release_digest in self.handler_registry_state['defaults'].items():
@@ -580,6 +583,10 @@ class WorkloadWorker:
         if self.cpu_signal['policy'] != 'loadavg':
             report['cpu_signal'] = self.cpu_signal
         report['handler_activation_failures'] = list(self.handler_registry_failures[-16:])
+        if self.handler_platform_skips:
+            # Only when non-empty: an authority from before handler-platform-skip refuses the
+            # unknown key, and a worker with nothing to skip must keep reporting to it.
+            report['handler_platform_skips'] = list(self.handler_platform_skips[-16:])
         report['handler_gc_receipts'] = list(self.handler_gc_receipts[-16:])
         if self.config.get('report_unit', False):
             # Default off: an authority from before declarative-worker-rollout refuses an unknown
@@ -649,6 +656,8 @@ class WorkloadWorker:
         current = self.handler_packages.read_pointer(verify=False)
         defaults = dict(sync['defaults'])
         changed = False
+        skipped = {}
+        required = set(self.config.get('required_handler_releases', ()))
         for descriptor in sync['releases']:
             if (not isinstance(descriptor, dict) or set(descriptor) != {
                     'handler_id', 'release_digest', 'archive_digest', 'archive_bytes', 'manifest'}):
@@ -656,6 +665,24 @@ class WorkloadWorker:
             handler, digest = descriptor['handler_id'], descriptor['release_digest']
             if handler not in self.base_handlers:
                 raise WorkloadError('authority selected a handler outside worker core policy', 403)
+            manifest = descriptor['manifest']
+            offered = (manifest.get('platform'), manifest.get('architecture')) if isinstance(manifest, dict) else (None, None)
+            if offered != (self.handler_packages.platform, self.handler_packages.architecture):
+                # The registry holds one default per handler id for the whole fleet. A release for
+                # another platform is not this worker's to run: say so by name and do not download
+                # it, unless the operator declared a release for this handler required here.
+                reason = ('platform_not_supported: release %s/%s, worker %s/%s' % (
+                    offered + (self.handler_packages.platform, self.handler_packages.architecture)))
+                if handler in required:
+                    reason = 'required_release_platform_missing: ' + reason
+                    self._record_handler_registry_failure(sync['generation'], digest, reason)
+                    logging.error('handler_release_activation_failed: generation=%s digest=%s reason=%s',
+                                  sync['generation'], digest, reason)
+                    return False
+                skipped[digest] = dict(generation=sync['generation'], handler_id=handler, release_digest=digest,
+                                       reason='platform_not_supported', release_platform=offered[0] or 'unknown',
+                                       release_architecture=offered[1] or 'unknown')
+                continue
             if digest not in {item['release_digest'] for item in self.handler_inventory['releases']}:
                 temporary = self.handler_packages.root/('.handler-download-'+digest+'.tar')
                 try:
@@ -678,6 +705,10 @@ class WorkloadWorker:
                 logging.error('handler_release_activation_failed: generation=%s digest=%s reason=%s',
                               sync['generation'], digest, reason)
                 return False
+        for handler in list(defaults):
+            if defaults[handler] in skipped:
+                del defaults[handler]
+        self._record_handler_platform_skips(sync['generation'], skipped)
         if current['generation'] != sync['generation']:
             changed = True
         if not changed:
@@ -722,6 +753,16 @@ class WorkloadWorker:
         if receipt.get('deleted'):
             return True
         return False
+
+    def _record_handler_platform_skips(self, generation, skipped):
+        # A standing fact about this worker for the current sync, not an event log.
+        previous = {item['release_digest'] for item in self.handler_platform_skips}
+        self.handler_platform_skips = list(skipped.values())[:16]
+        for digest, item in skipped.items():
+            if digest not in previous:
+                logging.info('handler_release_platform_skipped: generation=%s handler=%s digest=%s release=%s/%s',
+                             generation, item['handler_id'], digest, item['release_platform'],
+                             item['release_architecture'])
 
     def _record_handler_registry_failure(self, generation, digest, reason):
         failure = {'generation': generation, 'release_digest': digest, 'reason': reason[:160]}

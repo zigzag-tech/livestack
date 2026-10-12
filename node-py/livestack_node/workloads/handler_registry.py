@@ -497,6 +497,7 @@ class HandlerReleaseRegistry:
                     ready=bool(worker['ready']), effective_generation=(report.get('handler_inventory') or {}).get('generation'),
                     inventory=(report.get('handler_inventory') or {}).get('releases', []),
                     activation_failures=report.get('handler_activation_failures', []),
+                    platform_skips=report.get('handler_platform_skips', []),
                     gc_receipts=report.get('handler_gc_receipts', [])))
             result = {'generation': generation, 'defaults': defaults, 'workers': workers,
                 'policy': {'revision': self.policy_revision, 'retention_seconds': self.retention_seconds,

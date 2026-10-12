@@ -329,6 +329,7 @@ def build(store, principals):
             handler_releases=[dict(handler=r['handler_id'], release=r['release_digest'][:16])
                               for r in inventory.get('releases', [])],
             activation_failures=report.get('handler_activation_failures', []),
+            platform_skips=report.get('handler_platform_skips', []),
             disk_unavailable=report.get('disk_unavailable'),
             reserve_exceeds_free=bool(report.get('disk_unavailable')),
             cpu_signal=report.get('cpu_signal'),

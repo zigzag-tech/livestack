@@ -115,3 +115,19 @@ Authority config, read at start (a SIGHUP does not reload `limits`):
   running attempt is never preempted.
 - A lower job refused only by such a reservation shows blocker `held_for_higher_priority` (job id in the
   detail) in `jobs.placement` and the roster queue reason. Spec: `openspec/changes/handler-priority-classes`.
+
+## Releases for another platform (`platform_not_supported`)
+
+The registry has one default per handler id for the whole fleet. A worker compares every offered release's
+manifest `platform`/`architecture` with its own before downloading it. A mismatch is a **skip**, not a
+failure: the release is not fetched, the handler is dropped from that worker's committed defaults (it keeps
+its base handler config), the generation still advances, and the worker reports it under
+`handler_platform_skips` (`{generation, handler_id, release_digest, reason: "platform_not_supported",
+release_platform, release_architecture}`). The roster shows it as `platform_skips`; it raises no
+`handler_activation_failed`. Deploy the authority before a worker that has something to skip (the key is
+sent only when non-empty; an older authority refuses it).
+
+To make "no release for my platform" fail loudly for a handler, list it in the worker config:
+`"required_handler_releases": ["benchday.release.macos.v1"]`. Such a mismatch is an activation failure
+`required_release_platform_missing: platform_not_supported: ...`. Per-platform defaults for one handler id
+are not implemented; a platform that needs its own build uses its own handler id.
