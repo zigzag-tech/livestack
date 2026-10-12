@@ -162,6 +162,12 @@ worker (`state.rejected`), a failure is counted for the group, and the group is 
 A rollback that fails leaves the worker drained with `needs_operator` (an expiry never re-enables it) and pauses
 everything (`paused["*"]`). Every one of these notifies through `notify_cmd`.
 
+Signer/keystore workers (the release workers): set `"requires_approval": true` on the group. The executor then only
+asks (one notification) and waits until an operator creates `<approve_dir>/<worker>@<release>` (default
+`~/.config/livestack-workloads/rollout-approvals/`); one file per worker and release. This is the D9 rule, in its
+simplest form; it does not look at `publish.sh` itself, but a worker with a publish stage on it is busy and is
+never restarted.
+
 Kill switch (any one): `systemctl --user disable --now livestack-rollout-reconciler.service` (stops all of it,
 observation too); `"enabled": false` in the config; `touch` the kill file; or spec mode `off`. An early step is
 unwound (worker re-enabled), a worker that already passed smoke and is soaking is left as it is.
