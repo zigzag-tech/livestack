@@ -162,11 +162,24 @@ class Engine:
             try:
                 with urllib.request.urlopen(self.base + "/health", timeout=2) as r:
                     if r.status == 200:
+                        self._warm()
                         return self
             except Exception:  # noqa: BLE001 - not up yet
                 time.sleep(0.5)
         self.stop()
         raise RuntimeError(f"llama-server not healthy within {START_TIMEOUT_S:.0f}s")
+
+    def _warm(self) -> None:
+        """One real embed before the unit counts as loaded: the first request on a
+        Vulkan card took ~4.5 s (shader compile) against ~60 ms after, and that
+        first request is otherwise a user's search query."""
+        import json
+        import urllib.request
+        req = urllib.request.Request(self.base + "/v1/embeddings", method="POST",
+                                     data=json.dumps({"model": "x", "input": "warm"}).encode(),
+                                     headers={"content-type": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            r.read()
 
     def alive(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
