@@ -60,3 +60,6 @@ Config added to authority.json (backup authority.json.bak-measured-storage-secti
 would refuse all uploads) and `retention_tiers` (succeeded 3 d, failed 14 d, release refs keep 10 / 14 d).
 Workers: only xc-tower-attune-1 rolled (canary). OPEN: roll remaining workers (they classify OOM without a
 receipt and report disk_unavailable/cpu_signal only after their release moves); then archive.
+
+Rollout record 2026-10-12: the authority now runs the clean release `livestack-3e23602f` (see
+storage-headroom-admission/tasks.md); 6.1 authority half done. Still open: workers (6.1) and 5.3, so not archived.

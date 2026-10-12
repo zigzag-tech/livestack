@@ -56,3 +56,16 @@ Config added to authority.json (backup authority.json.bak-measured-storage-secti
 would refuse all uploads) and `retention_tiers` (succeeded 3 d, failed 14 d, release refs keep 10 / 14 d).
 Workers: only xc-tower-attune-1 rolled (canary). OPEN: roll remaining workers (they classify OOM without a
 receipt and report disk_unavailable/cpu_signal only after their release moves); then archive.
+
+Rollout record 2026-10-12 (authority half of 6.1): the hand-built overlay
+`livestack-cpu-6e0dc516+roster-verdict-beeb0bdd+platform-skip-fbcd96f2` was replaced by a clean release built
+from origin/main 3e23602f (`livestack-3e23602f`, `tools/deploy-authority-release.sh`; backup
+`release-20261012T115609Z`). Every deployed file of the overlay was attributed to a commit on origin/main
+(`build-worker-release.py verify --commit origin/main`: no HAND-EDIT outside vendored `_deps`); each overlay commit
+(1a2b97ac, 8af82266, 6e0dc516, fd17f036, beeb0bdd, fbcd96f2, 4ea822cd) is contained in origin/main.
+`authority.json` unchanged (same sha256 before/after; `limits` and `retention_tiers` carried; the live release-reference
+rule is `benchday-owner` / `benchday.release.` keep 10 + ttl 3 d, set by the retention owner, tighter than the 14 d
+proposed here, so left alone). `/retention/plan` before and after the deploy: 0 references and 0 blobs to expire (the
+63 release references are 0.05-2.97 days old; the oldest crosses 3 d within the hour and then falls out of the
+sweep), 5 unbounded non-release references (295 MB). Objects: 63.4 GB (59 GiB) before and after. Workers still to
+roll (6.1 stays open until they have): do not archive yet.
