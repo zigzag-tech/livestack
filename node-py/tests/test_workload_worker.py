@@ -901,6 +901,34 @@ def test_cache_pressure_respects_retained_inputs_and_disabled_deletion(fleet, tm
         worker.close()
 
 
+def test_lapsed_retained_input_stops_blocking_the_cache(fleet, tmp_path):
+    # Regression: `retain` was sticky forever, so a cache filled with retained
+    # entries of long-finished jobs refused every new input ("capacity exhausted
+    # by protected content") until an operator deleted files by hand.
+    _, config, caller, digest = fleet
+    config.update(input_cache_bytes=64*1024**2, input_cache_entries=1, input_cache_retained_seconds=3600)
+    first = caller.submit(dict(version=1,key='retained',handler='native.v1',input_digest=digest,retain=True,
+        need={'cpu':.1,'memory_bytes':128*1024**2,'disk_bytes':64*1024**2},payload={}))
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step() and caller.get(first['id'])['state'] == 'succeeded'
+        source = tmp_path/'new-input'
+        source.mkdir(); (source/'input').write_text('new captured source')
+        capture(source, ['input'], tmp_path/'new.tar')
+        newer = InputTransfer(caller).put(tmp_path/'new.tar')['digest']
+        index = worker.input_cache.root/'index.json'
+        entries = json.loads(index.read_text())
+        for row in entries.values():
+            row['used'] -= 2*3600  # idle past the protection window
+        index.write_text(json.dumps(entries))
+        second = caller.submit(dict(first['spec'],key='newer',input_digest=newer,retain=False))
+        assert worker.step() and caller.get(second['id'])['state'] == 'succeeded'
+        entries = json.loads(index.read_text())
+        assert [row['digest'] for row in entries.values()] == [newer]
+    finally:
+        worker.close()
+
+
 def test_corrupted_cached_bytes_cannot_execute(fleet):
     _, config, caller, digest = fleet
     config['input_cache_bytes'] = 64*1024**2

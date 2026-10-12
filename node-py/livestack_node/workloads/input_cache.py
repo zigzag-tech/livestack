@@ -1,7 +1,10 @@
 """One worker's bounded source cache; used under its existing journal lock.
 
 Entries are principal-scoped and digest-verified on every hit. The worker only
-prunes while idle, after restart reconciliation. Retained inputs never evict.
+prunes while idle, after restart reconciliation. A retained input is protected
+from eviction only while it was used within `retained_seconds`; `retain` is
+sticky per entry but never permanent, so abandoned retained jobs cannot fill the
+cache forever. The cache is a copy: the authority still serves the digest.
 None retention disables eviction/expiry; capacity exhaustion refuses admission.
 """
 import hashlib
@@ -20,7 +23,8 @@ from .transfer import InputTransfer
 
 
 class InputCache:
-    def __init__(self, root, transfer, *, max_bytes, max_entries=32, retention_seconds=14*86400, mirror=None):
+    def __init__(self, root, transfer, *, max_bytes, max_entries=32, retention_seconds=14*86400, mirror=None,
+                 retained_seconds=7*86400):
         if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
             raise WorkloadError('input cache requires a positive byte limit')
         if isinstance(max_entries, bool) or not isinstance(max_entries, int) or not 1 <= max_entries <= 32:
@@ -28,6 +32,10 @@ class InputCache:
         if retention_seconds is not None and (isinstance(retention_seconds, bool) or
                 not isinstance(retention_seconds, (int, float)) or not math.isfinite(retention_seconds) or retention_seconds <= 0):
             raise WorkloadError('cache retention must be positive or disabled')
+        if retained_seconds is not None and (isinstance(retained_seconds, bool) or
+                not isinstance(retained_seconds, (int, float)) or not math.isfinite(retained_seconds) or retained_seconds <= 0):
+            raise WorkloadError('retained protection must be positive or disabled')
+        self.retained_seconds = retained_seconds
         self.root = Path(root)
         if self.root.is_symlink() or self.root.resolve() != self.root:
             raise WorkloadError('cache must be a private directory')
@@ -89,6 +97,9 @@ class InputCache:
                 raise WorkloadError('non-private cache staging entry')
             path.unlink()
 
+    def _protected(self, row, now):
+        return row['retain'] and (self.retained_seconds is None or now-row['used'] <= self.retained_seconds)
+
     def prune(self):
         rows = self._load()
         self._recover_orphans(rows)
@@ -96,7 +107,7 @@ class InputCache:
             return
         now = time.time()
         for key, row in list(rows.items()):
-            if not row['retain'] and now-row['used'] > self.retention:
+            if not self._protected(row, now) and now-row['used'] > self.retention:
                 # Commit removal before unlink: a crash leaves a removable
                 # orphan, never an index pointing at a deliberately missing file.
                 del rows[key]
@@ -120,7 +131,10 @@ class InputCache:
         # bytes arrive. Conservative reservation avoids transient quota excess.
         reserve = self.transfer.max_bytes
         used = sum(row['size'] for row in rows.values())
-        candidates = sorted((key for key in rows if not rows[key]['retain']), key=lambda key: rows[key]['used'])
+        now = time.time()
+        # Unretained first (LRU), then retained entries whose protection lapsed.
+        candidates = sorted((key for key in rows if not self._protected(rows[key], now)),
+                            key=lambda key: (rows[key]['retain'], rows[key]['used']))
         while len(rows) >= self.max_entries or used+reserve > self.max_bytes:
             if self.retention is None or not candidates:
                 raise WorkloadError('input cache capacity exhausted by protected content', 429)
