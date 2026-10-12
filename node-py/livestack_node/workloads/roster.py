@@ -172,6 +172,18 @@ def _verdict(entry, spec, admit, host_held):
     return reasons
 
 
+def _authority_verdict(reason, worker):
+    """The placement authority's own refusal for this worker on this job, else its job-level
+    verdict when that is plain text, else None. Placement stores a list of per-worker rejections
+    (host-ledger memory holds, disk, compilation...) that the roster's local arithmetic cannot see."""
+    if isinstance(reason, list):
+        for item in reason:
+            if isinstance(item, dict) and item.get('worker') == worker and item.get('reason'):
+                return str(item['reason'])
+        return None
+    return reason if isinstance(reason, str) and reason else None
+
+
 def _queue(db, now, entries, cleanup_seconds, limit=QUEUE_LIMIT):
     """Queued jobs and, per worker serving the handler, the concrete reason it has not claimed.
 
@@ -220,6 +232,7 @@ def _queue(db, now, entries, cleanup_seconds, limit=QUEUE_LIMIT):
             workers.append(dict(
                 worker=entry['id'], host=entry['host'], state=entry['state'],
                 blocked_by=_verdict(entry, spec, admit, host_held),
+                authority_verdict=_authority_verdict(reason, entry['id']),
                 host_holders=sorted(host_held['holders'], key=lambda h: -sum(h['admit'].values()))[:HOLDERS_SHOWN]))
         queue.append(dict(
             job_id=job['id'], handler=spec.get('handler'), owner=job['owner'], **_about(spec),
@@ -236,7 +249,8 @@ def _warnings(entries, queue):
     `activation_failed_idle`: connected, idle, and its handler registry failed to activate — it can
     claim nothing and nothing else says so. `idle_while_claimable_work_waits`: idle and eligible,
     serves the handler of a job that has waited past IDLE_WAIT_SECONDS, and the roster can name no
-    reason it has not claimed it."""
+    reason it has not claimed it. When the authority's own placement verdict names a refusal for
+    that worker (e.g. a host-ledger hold) the warning is `idle_refused_by_authority` and carries it."""
     found = []
     by_id = {e['id']: e for e in entries}
     for entry in entries:
@@ -260,9 +274,11 @@ def _warnings(entries, queue):
         for part in job['workers']:
             entry = by_id.get(part['worker'])
             if entry and entry['eligible'] and entry['state'] == 'idle' and not part['blocked_by']:
-                found.append(dict(kind='idle_while_claimable_work_waits', worker=part['worker'], host=part['host'],
+                verdict = part.get('authority_verdict')
+                found.append(dict(kind='idle_refused_by_authority' if verdict else 'idle_while_claimable_work_waits',
+                                  worker=part['worker'], host=part['host'],
                                   job_id=job['job_id'], handler=job['handler'], waited_s=job['age_s'],
-                                  detail=job['describe']))
+                                  detail=f"{job['describe']}: authority verdict: {verdict}" if verdict else job['describe']))
     return found
 
 
