@@ -938,6 +938,9 @@ class HostBroker:
                           measured_free=measured,
                           hosts=hosts, host_reserve=host_reserve,
                           demand=self.demand(now))
+        qualification_measurement=getattr(self,'qualification_measured_snapshot',None)
+        if qualification_measurement is not None:
+            world=qualification_measurement(world)
         if _qualification_claims and self.qualification_reservations is not None:
             return self.qualification_reservations.apply_to_world(world)
         return world
