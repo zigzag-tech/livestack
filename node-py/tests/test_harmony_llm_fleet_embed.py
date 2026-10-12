@@ -40,6 +40,14 @@ def test_only_live_ready_embed_nodes_count():
     assert fe.embed_nodes([_fleet(1, kinds=("llm",))]) == []
 
 
+def test_different_models_are_never_chosen_by_distance():
+    other = {"class": "embed", "model": "Xenova/all-MiniLM-L6-v2", "dim": 384}
+    nodes = fe.embed_nodes([_fleet(1, probe=40.0), _fleet(2, attrs=other, probe=3.0)])
+    with pytest.raises(fe.AmbiguousEmbedder, match="name one with `model="):
+        fe.pick({"class": "embed"}, nodes)
+    assert fe.pick({"class": "embed", "model": "google/embeddinggemma-2"}, nodes)["base"].endswith(":1")
+
+
 def test_the_nearest_node_wins_and_one_without_a_probe_sorts_last():
     nodes = fe.embed_nodes([_fleet(1, probe=40.0), _fleet(2, probe=3.0), _fleet(3, probe=None)])
     assert fe.pick({"class": "embed"}, nodes)["base"].endswith(":2")
@@ -100,6 +108,14 @@ def test_the_gateway_forwards_an_embeddings_need_to_the_fleet_node(srv, monkeypa
         assert r.status_code == 503 and "nothing satisfies" in r.text
     finally:
         httpd.shutdown()
+
+
+def test_an_ambiguous_need_is_a_400_that_names_the_models(srv, monkeypatch):
+    from fastapi.testclient import TestClient
+    other = {"class": "embed", "model": "Xenova/all-MiniLM-L6-v2", "dim": 384}
+    monkeypatch.setattr(srv, "_fetch_fleets", lambda *_a: [_fleet(1), _fleet(2, attrs=other)])
+    r = TestClient(srv.app).post("/v1/embeddings", json={"model": "require:class=embed", "input": ["x"]})
+    assert r.status_code == 400 and "MiniLM" in r.text and "embeddinggemma" in r.text
 
 
 def test_a_dead_node_is_a_502_that_names_it(srv, monkeypatch):
