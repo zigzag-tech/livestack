@@ -2,4 +2,4 @@
 - [x] Authority: accept/validate `handler_platform_skips`; roster and registry status show it
 - [x] Tests: skip, required failure, matching install, authority report validation
 - [x] Docs: worker-claims-and-rollout.md
-- [ ] Deploy authority, roll xc-mac-studio-apple, verify roster; then archive
+- [x] Deployed 2026-10-11: authority livestack-cpu-6e0dc516+roster-verdict-beeb0bdd+platform-skip-fbcd96f2; xc-mac-studio-apple on 36da4d4e+platform-skip-355e5a40, flutter-check dropped from its config (inventory omits packages of unserved handlers). Archive after the next fleet-wide worker roll.
