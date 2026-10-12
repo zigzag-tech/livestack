@@ -55,6 +55,35 @@ class QualificationController:
             broker.qualification_reservations = self.store
         else:
             self.store = broker.qualification_reservations
+        if getattr(broker,'qualification_measured_snapshot',None)is not None:raise ValueError('qualification_measurement_already_configured')
+        broker.qualification_measured_snapshot=self.measured_snapshot
+
+    def measured_snapshot(self,world):
+        """Configured private nodes remain visible even with public ingress held."""
+        from dataclasses import replace
+        from .qualification_device import qualification_cuda_capacity
+        import time
+        devices={device.id:device for device in world.devices};measured=dict(world.measured_free);observed_times=[]
+        for entry,client,_ in self.nodes.values():
+            self._verify_peer(entry)
+            config,digest=private_config(entry['clientSettings']['serviceConfigurationPath'])
+            if digest!=entry['sourceIdentity']['configurationDigest']:raise PermissionError('qualification_service_configuration_changed')
+            nodes=[app.get('providerQualificationNode')for app in config.get('apps',[])if app.get('descriptor',{}).get('app')==entry['sourceIdentity']['app']]
+            node=entry['binding']
+            if len(nodes)!=1 or not isinstance(nodes[0],dict)or nodes[0].get('deviceId')!=node['deviceId']or nodes[0].get('unitKind')!=node['unitKind']:raise PermissionError('qualification_registered_telemetry_source_changed')
+            observation=qualification_cuda_capacity(node['deviceId'],nodes[0].get('nvmlSha256'))
+            observed_times.append(observation['observedAt'])
+            if not 0<=time.monotonic()-observation['observedAt']<=20:raise PermissionError('qualification_capacity_observation_expired')
+            resolved=self.broker._resolve_devices({node['deviceId']:node['hostId']},{node['deviceId']:observation['capacity']})
+            selected=[device for device in resolved if device.id==node['deviceId']and device.host_id==node['hostId']]
+            if len(selected)!=1 or selected[0].capacity.get('vram_bytes',0)>observation['capacity']['vram_bytes']:raise PermissionError('qualification_registered_capacity_policy_refused')
+            if node['deviceId']in devices and devices[node['deviceId']]!=selected[0]:raise PermissionError('qualification_observed_device_policy_changed')
+            devices[node['deviceId']]=selected[0];measured[node['deviceId']]=observation['free']
+            self._verify_peer(entry)
+        if any(not 0<=time.monotonic()-value<=20 for value in observed_times):raise PermissionError('qualification_capacity_observation_expired')
+        # No claim subtraction here: the existing durable overlay runs exactly
+        # once after measurement, under the canonical reservation writer.
+        return replace(world,devices=tuple(devices.values()),measured_free=measured)
 
     def _verify_peer(self, entry):
         node = entry['binding']
