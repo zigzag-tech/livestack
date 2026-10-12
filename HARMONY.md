@@ -433,6 +433,26 @@ on the CPU, one text per inference (q8 quantizes activations per tensor, so a
 batched text's vector would depend on its neighbours). Deployment and how to
 add a host: benchday `docs/cpu-embedder.md`.
 
+### A multimodal embedder: `livestack_node.embedding.serve_gemma`
+
+EmbeddingGemma 2 (text, images, video frames; 768d truncatable to
+512/256/128) behind the same `POST /v1/embeddings`. Unlike the ONNX node it
+wraps a pinned **llama-server** (GGUF + mmproj) the way `harmony-llm` wraps
+vLLM: one `class=embed,modality=text+image` unit, engine started on demand and
+stopped when idle. `backend` is `cpu` or `vulkan` (`HARMONY_GEMMA_BACKEND`,
+card chosen with `HARMONY_GEMMA_VK_DEVICE`; no CUDA toolkit needed, only
+`libvulkan-dev` + `glslc` to build the engine). A Vulkan card has no meter
+here, so the node reports none rather than a wrong one.
+
+Facts that cost a diagnosis (spike, zz-joe, 2026-10-12): frames are GPU work
+(~100 ms on one RTX 2070 vs ~1.55 s on 4 CPU threads); the engine's `-b`/`-ub`
+must cover the longest input in tokens (default 512 answers a long Chinese
+chunk with HTTP 500); only `data:image/` URLs are accepted because the engine
+would fetch a remote URL itself; `workload=query|bulk` selects an admission
+lane and a full lane answers 503 `busy` naming itself. Env, wire shape and
+limits: the module docstring. Tests need the real engine
+(`tests/test_embedding_gemma_node.py`, skipped without `HARMONY_GEMMA_*`).
+
 ## The fleet broker — one Harmony that can see every host
 
 Everything above is per-HOST: a broker arbitrating the model-server processes
