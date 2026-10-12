@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import time
 from contextlib import contextmanager
 
 import pytest
@@ -127,11 +128,39 @@ def test_frozen_pressure_file_makes_worker_report_no_cpu_and_no_fallback(tmp_pat
     path = tmp_path/'cpu'
     path.write_text(PSI.format(some='0.00'))
     w = worker(tmp_path, 100*GIB, disk_reserve_bytes=GIB,
-               cpu_admission=dict(policy='psi_some', psi_path=str(path), selftest_seconds=1))
+               cpu_admission=dict(policy='psi_some', psi_path=str(path), selftest_seconds=1, fallback=None))
     assert w.cpu_signal['state'] == 'inert'
     report = w.report()
     assert report['available']['cpu'] == 0 and report['cpu_signal']['policy'] == 'psi_some'
     assert report['cpu_signal']['state'] == 'inert'
+
+
+def test_frozen_pressure_file_falls_back_to_runqueue_when_configured(tmp_path):
+    path = tmp_path/'cpu'
+    path.write_text(PSI.format(some='0.00'))
+    w = worker(tmp_path, 100*GIB, disk_reserve_bytes=GIB,
+               cpu_admission=dict(policy='psi_some', psi_path=str(path), selftest_seconds=1, fallback='runqueue'))
+    # real /proc: the real burn moves the runqueue even though the frozen PSI file does not
+    assert w.cpu_signal['state'] in ('active', 'active_unverified')
+    assert 'fallback runqueue' in w.cpu_signal['detail'] and w.cpu_signal['policy'] == 'psi_some'
+
+
+def test_inert_cpu_signal_is_rechecked_not_latched(tmp_path):
+    path = tmp_path/'cpu'
+    path.write_text(PSI.format(some='0.00'))
+    w = worker(tmp_path, 100*GIB, disk_reserve_bytes=GIB,
+               cpu_admission=dict(policy='psi_some', psi_path=str(path), selftest_seconds=1, fallback=None))
+    assert w.cpu_signal['state'] == 'inert'
+    w._verify_cpu_signal = lambda: dict(policy='psi_some', state='active', detail='recovered')
+    w.report()                      # inside the retry window: still inert, no re-check
+    assert w.cpu_signal['state'] == 'inert'
+    w.CPU_SIGNAL_RETRY_SECONDS = 0
+    w.report()
+    for _ in range(100):
+        if w.cpu_signal['state'] == 'active':
+            break
+        time.sleep(.05)
+    assert w.cpu_signal['detail'] == 'recovered'
 
 
 def test_missing_pressure_file_uses_named_runqueue_fallback_and_idle_host_offers_cpu(tmp_path):

@@ -65,7 +65,11 @@ CPU `full` reads 0 on kernel 7.0 here, so the gate can never fire) are poor sign
   (1 Hz thread), stalled above `stall_runnable_per_core` (default 2.0). `proc_root` is a test seam.
 - `fallback` (`runqueue` by default, `null` to forbid): used only when the pressure file is
   **absent** (no PSI), announced in the worker log and in the report's `cpu_signal.detail`.
-  A signal that exists but does not move never falls back.
+  A signal that exists but does not move never falls back **silently**: an inert `psi_some`
+  self-test with `fallback: runqueue` is re-judged by the runqueue self-test and reported as
+  `using fallback runqueue` in `cpu_signal.detail`. A worker whose signal stays inert re-runs the
+  self-test in the background every 120 s (a startup verdict is about one moment, e.g. a busy,
+  decaying avg10 baseline, not a latch; 2026-10-12 zz-joe-release-2 withheld all CPU for hours).
 - Not stalled: `capacity.cpu - reserve_cpu`. Stalled, inert or unreadable: `0`, with the reason.
 
 **Self-test (positive control, at worker construction):** the signal is read idle, then

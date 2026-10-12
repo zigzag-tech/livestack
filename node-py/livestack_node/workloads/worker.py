@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
+import threading
 import time
 import uuid
 from urllib.error import HTTPError
@@ -205,6 +206,7 @@ class WorkloadWorker:
             raise WorkloadError(f'invalid cpu_admission: {exc}', 500) from None
         self._cpu_psi_state = None
         self._disk_state = None
+        self._cpu_retrying, self._cpu_signal_checked = False, time.monotonic()
         self.cpu_signal = self._verify_cpu_signal()
         # The measured host every placement on it consults
         # (openspec/changes/host-memory-ledger). Model servers listed in
@@ -464,6 +466,21 @@ class WorkloadWorker:
         result = cpu_signals.selftest(read, policy=used, threshold=threshold, cores=os.cpu_count() or 1,
                                       seconds=cfg.selftest_seconds)
         result = dict(policy=policy, state=result['state'], detail=(note + result['detail'])[:200])
+        if result['state'] == 'inert' and policy == 'psi_some' and used == 'psi_some' and cfg.fallback == 'runqueue':
+            # An inconclusive psi_some self-test (2026-10-12, zz-joe-release-2: avg10 read 30.69 before
+            # and after the burn) must not leave the worker with no CPU: judge by the configured
+            # runqueue fallback instead, and say so in cpu_signal.detail.
+            logging.warning('cpu admission: %s; trying configured fallback runqueue', result['detail'])
+            sampler = cpu_signals.RunqueueSampler(cfg.proc_root, cfg.window_seconds).start()
+            second = cpu_signals.selftest(sampler, policy='runqueue', threshold=cfg.stall_runnable_per_core,
+                                          cores=os.cpu_count() or 1, seconds=cfg.selftest_seconds)
+            if second['state'] != 'inert':
+                self._cpu_sampler = sampler
+                self._cpu_read, self._cpu_threshold = sampler, cfg.stall_runnable_per_core
+                return dict(policy=policy, state=second['state'],
+                            detail=(f'psi_some inconclusive ({result["detail"][:60]}); using fallback runqueue: '
+                                    + second['detail'])[:200])
+            sampler.stop()
         if result['state'] == 'inert':
             logging.error('cpu admission: %s', result['detail'])
             if policy == 'psi':
@@ -480,8 +497,33 @@ class WorkloadWorker:
         logging.error('cpu admission: %s', detail)
         return dict(policy=policy, state='inert', detail=detail[:200])
 
+    CPU_SIGNAL_RETRY_SECONDS = 120
+
+    def _retry_inert_cpu_signal(self):
+        """An inert self-test is a verdict about one moment (the baseline may have been busy or
+        decaying), not about the host: re-run it in the background at most every
+        CPU_SIGNAL_RETRY_SECONDS while inert, so a latched result cannot withhold CPU for hours."""
+        now = time.monotonic()
+        if (self.cpu_signal.get('state') != 'inert' or self._cpu_retrying
+                or now - self._cpu_signal_checked < self.CPU_SIGNAL_RETRY_SECONDS):
+            return
+        self._cpu_retrying = True
+
+        def run():
+            try:
+                result = self._verify_cpu_signal()
+                self.cpu_signal = result
+                logging.info('cpu admission re-check: %s %s', result['state'], result['detail'])
+            except Exception:
+                logging.exception('cpu admission re-check failed')
+            finally:
+                self._cpu_signal_checked = time.monotonic()
+                self._cpu_retrying = False
+        threading.Thread(target=run, daemon=True, name='cpu-signal-retry').start()
+
     def _available_cpu(self, capacity):
         if self.cpu_admission.policy in ('psi_some', 'runqueue') and not self.windows and not self.darwin:
+            self._retry_inert_cpu_signal()
             # Verified-signal policies. Unverified inert or unreadable = no CPU, with the reason in the
             # report's cpu_signal; stalled likewise. Never a silent switch to loadavg.
             if self._cpu_read is None:
