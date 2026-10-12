@@ -196,3 +196,15 @@ def test_warnings_flag_an_idle_worker_that_could_take_waiting_work_but_names_no_
     assert [(w['kind'], w['worker']) for w in found] == [('activation_failed_idle', 'w2'),
                                                          ('idle_while_claimable_work_waits', 'w1')]
     assert found[1]['job_id'] == 'j1' and 'handler_runtime_not_installed' in found[0]['detail']
+
+
+def test_warning_carries_the_authority_verdict_when_placement_refused_an_idle_worker():
+    from livestack_node.workloads.roster import _warnings, _authority_verdict
+    reason = [dict(worker='w1', reason='host h memory held by 2 attempts'), dict(worker='w9', reason='x')]
+    assert _authority_verdict(reason, 'w1') == 'host h memory held by 2 attempts'
+    assert _authority_verdict(reason, 'w2') is None and _authority_verdict('no fresh worker', 'w2') == 'no fresh worker'
+    idle = dict(id='w1', host='h', connected=True, state='idle', eligible=True, activation_failures=[])
+    queue = [dict(job_id='j1', handler='a.v1', describe='d', age_s=600.0,
+                  workers=[dict(worker='w1', host='h', blocked_by=[], authority_verdict=_authority_verdict(reason, 'w1'))])]
+    (found,) = _warnings([idle], queue)
+    assert found['kind'] == 'idle_refused_by_authority' and 'memory held by 2 attempts' in found['detail']
