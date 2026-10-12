@@ -285,6 +285,11 @@ class HandlerPackageStore:
             if not package.is_dir() or len(package.name) != 64 or any(ch not in '0123456789abcdef' for ch in package.name):
                 continue
             manifest = self.manifest(package.name, verify=verify)
+            if manifest['handler_id'] not in self.base_handlers:
+                # A package left by a handler the operator no longer serves here. The authority
+                # refuses an inventory naming a handler outside the worker's roster
+                # (handler_worker_inventory_roster_mismatch); the package stays on disk for GC.
+                continue
             releases.append(dict(handler_id=manifest['handler_id'], release_digest=package.name,
                 execution_contract=manifest['execution_contract'], payload_schema=manifest['payload_schema'],
                 result_schema=manifest['result_schema']))
