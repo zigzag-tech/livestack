@@ -315,3 +315,26 @@ def test_worker_report_is_closed_and_bounded():
                 dict(release=None, handlers=[], verifier=None, extra=1), 'str'):
         with pytest.raises(WorkloadError):
             unit.validate_report(bad)
+
+
+def _release(tmp_path, source):
+    package = tmp_path / 'rel' / 'node-py' / 'livestack_node' / 'workloads'
+    package.mkdir(parents=True)
+    (package.parent / '__init__.py').write_text('')
+    (package / '__init__.py').write_text('')
+    (package / 'worker_service.py').write_text(source)
+    return {'release_root': str(tmp_path / 'rel'), 'modules': ['livestack_node.workloads.worker_service']}
+
+
+def test_release_import_passes_a_good_release_and_names_an_undefined_name_or_failed_import(tmp_path):
+    good = smoke.release_import(_release(tmp_path, 'def main():\n    return 1\n'))
+    assert good['status'] == 'pass', good
+    undefined = smoke.release_import(_release(tmp_path / 'u', 'def main():\n    return cacheComponents\n'))
+    assert undefined['status'] == 'fail' and 'cacheComponents' in undefined['reason'], undefined
+    broken = smoke.release_import(_release(tmp_path / 'b', 'import module_that_does_not_exist\n'))
+    assert broken['status'] == 'fail' and 'import_failed' in broken['reason'], broken
+
+
+def test_release_import_without_a_release_is_not_applicable_never_pass(tmp_path):
+    assert smoke.release_import({'release_root': str(tmp_path / 'absent')})['status'] == 'not_applicable'
+    assert smoke.release_import({})['status'] == 'not_applicable'
