@@ -224,6 +224,18 @@ class Executor:
                         self.note('attempt_cap', worker=worker, release=release['name'])
                         self.tell(cfg, f'rollout needs an operator: {worker} -> {release["name"]} gave up after {state["attempts"][key]} attempts')
                     continue
+                if group.get('requires_approval'):
+                    # signer/keystore workers (design D9): an operator approves each worker+release by creating a file
+                    approval = Path(cfg.get('approve_dir', '~/.config/livestack-workloads/rollout-approvals')).expanduser() / f"{worker}@{release['name']}"
+                    if not approval.exists():
+                        self.waiting[f"{group['name']}/{worker}"] = f'awaiting_approval:touch {approval}'
+                        asked = state.setdefault('asked', [])
+                        if f'{worker}@{release["name"]}' not in asked:
+                            asked.append(f'{worker}@{release["name"]}')
+                            del asked[:-MAX_REJECTED]
+                            self.note('awaiting_approval', worker=worker, release=release['name'])
+                            self.tell(cfg, f'rollout awaiting approval: {worker} -> {release["name"]}. Approve with: touch {approval}')
+                        continue
                 seen = state.setdefault('verified', {}).get(worker)
                 if seen and seen[0] == release['name'] and now - seen[1] < cfg.get('recheck_seconds', 600):
                     continue

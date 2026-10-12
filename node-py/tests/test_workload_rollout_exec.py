@@ -314,3 +314,17 @@ def test_a_drain_is_renewed_while_a_long_job_runs_so_it_cannot_lapse(world):
     assert left() < 700
     assert 'drain_renewed' in w.kinds(w.tick())
     assert left() > 3000, 'back to the full ttl'
+
+
+def test_signer_workers_wait_for_an_operator_approval_file_and_ask_once(world):
+    w = world
+    w.cfg['groups'][0]['requires_approval'] = True
+    w.cfg['approve_dir'] = str(w.tmp / 'approvals')
+    assert w.kinds(w.tick()) == ['awaiting_approval']
+    assert not [c for c in w.hosts.calls if c[0] in ('install', 'switch')] and not w.draining('zz-joe-e2e-3')
+    assert w.notes() == 1, 'asked once, not every tick'
+    w.tick()
+    assert w.notes() == 1
+    (w.tmp / 'approvals').mkdir()
+    (w.tmp / 'approvals' / f'zz-joe-e2e-3@{NEW}').write_text('')
+    assert 'start' in w.kinds(w.tick())

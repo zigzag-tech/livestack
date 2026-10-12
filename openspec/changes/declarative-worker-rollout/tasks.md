@@ -38,7 +38,7 @@
 ## 6. Reconciler loop
 
 - [ ] 6.1 Tick wiring executes planner actions with ledger records and bounded rollout-run table (count + age). Tests: restart of the authority mid-step resumes or safely abandons; never double-drains. **Partial (round 2): `rollout_exec.py` is its own small state machine (one JSON state file, ledger lines `rollout_exec_*`), not driven by `plan()` actions; it resumes after a reconciler restart. Not planner-driven yet.**
-- [ ] 6.2 Approval gate for signer/keystore workers (`awaiting_approval`), publish-stage check. Tests: no activation without approval.
+- [ ] 6.2 Approval gate for signer/keystore workers (`awaiting_approval`), publish-stage check. Tests: no activation without approval. **Partial (round 2): group flag `requires_approval` + an approval file per worker and release (`awaiting_approval` waiting reason, one notification). No explicit `publish.sh` stage check: a busy worker is never restarted.**
 - [ ] 6.3 Static test: no key material in spec, unit, descriptor, smoke job (extends CDH 4.3).
 
 ## 7. Migration and docs
