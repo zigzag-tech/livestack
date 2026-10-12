@@ -325,11 +325,20 @@ class Executor:
         entry = self.entry_of(entries, worker)
         return bool(entry) and entry.get('connected') and not entry.get('running') and entry.get('state') != 'running'
 
+    def keep_drained(self, cfg, entries, worker, reason):
+        """A long-running job outlives a drain's expiry; renew ours before it lapses so no new work slips in."""
+        claim = (self.entry_of(entries, worker) or {}).get('drain') or {}
+        if claim.get('draining') and claim.get('owner') == OWNER and (claim.get('expires_in_s') is None or claim['expires_in_s'] > 900):
+            return
+        self.drain(cfg, worker, reason)
+        self.note('drain_renewed', worker=worker)
+
     def step_wait_idle(self, cfg, status, entries, state, active):
         if self.idle(entries, active['worker']):
             return self.goto(active, 'switch')
         if self.clock() - active['step_started'] > cfg.get('idle_timeout_seconds', 1800):
             return self.abort(cfg, state, active, 'idle_timeout', cooldown=900)
+        self.keep_drained(cfg, entries, active['worker'], f"rollout to {active['release']}")
         return 'wait'
 
     def step_switch(self, cfg, status, entries, state, active):
@@ -433,6 +442,7 @@ class Executor:
         if not self.idle(entries, worker):
             if self.clock() - active['step_started'] > cfg.get('idle_timeout_seconds', 1800):
                 return self.rollback_failed(cfg, state, active, 'idle_timeout_before_rollback')
+            self.keep_drained(cfg, entries, worker, f"rollback of {active['release']}")
             return 'wait'
         done = self.helper(active, 'rollback', dict(release=active['release']))
         if not done.get('ok'):
