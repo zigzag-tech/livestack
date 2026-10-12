@@ -51,6 +51,7 @@ import numpy as np
 from starlette.requests import Request
 
 from livestack_node import attach, counting
+from livestack_node.facade import _machine_name
 from livestack_node.manager import ManagedUnit, ResidencyPolicy
 
 DIMS = (128, 256, 512, 768)
@@ -350,7 +351,12 @@ def create_app(*, port: Optional[int] = None):
     attach_kwargs = {}
     if backend == "vulkan":
         # No CUDA/MLX meter reads a Vulkan card; report none rather than a wrong one.
-        attach_kwargs = {"device_meter": None, "device_id": f"{host_id}/vk{vk_device}"}
+        # The device id is `{machine}/vk<n>`, NOT `{host_id}/...`: the hub's fleet
+        # roster (plugins-v2/harmony.fleet-source) keeps a node whose host id is not
+        # the vantage host's only when its device id starts with `{machine}/`, so a
+        # `zz-joe-gemma/vk1` node was silently absent from the hub's view and
+        # every Gemma request answered "no fleet node satisfies" (2026-10-12).
+        attach_kwargs = {"device_meter": None, "device_id": f"{_machine_name(host_id)}/vk{vk_device}"}
     manager, coordinator = attach(
         app, host_id=host_id, kind="embed", units={unit_name: unit}, idle_seconds=idle_seconds,
         coload=True, gpu_call=lambda fn: fn(), port=port, in_flight=busy, readiness=readiness,
