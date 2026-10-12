@@ -197,6 +197,23 @@ class Engine:
             proc.wait(timeout=5)
 
 
+def engine_env(binary: str, base: Dict[str, str], *, backend: str, vk_device: str) -> Dict[str, str]:
+    """The engine's environment.
+
+    llama.cpp builds link their shared libraries by an ABSOLUTE RUNPATH into the
+    build directory. A binary copied beside its libraries ran only while that
+    build tree existed (and only from its own cwd): when the tree was deleted the
+    engine died with exit 127 on its next idle reload, mid-service
+    (2026-10-12). Putting the binary's own directory first makes any relocated
+    engine directory work."""
+    env = dict(base)
+    libdir = os.path.dirname(os.path.abspath(binary))
+    env["LD_LIBRARY_PATH"] = libdir + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
+    if backend == "vulkan":
+        env["GGML_VK_VISIBLE_DEVICES"] = vk_device
+    return env
+
+
 def engine_argv(binary: str, model: str, mmproj: str, *, backend: str, threads: int, ctx: int,
                 port: int) -> List[str]:
     argv = [binary, "-m", model, "--mmproj", mmproj, "--embedding", "--host", "127.0.0.1",
@@ -240,9 +257,7 @@ def create_app(*, port: Optional[int] = None):
     idle_seconds = int(os.environ.get("HARMONY_GEMMA_IDLE_SECONDS", "900"))
     host_id = os.environ.get("HARMONY_GEMMA_HOST_ID") or f"{socket.gethostname()}-gemma"
 
-    env = dict(os.environ)
-    if backend == "vulkan":
-        env["GGML_VK_VISIBLE_DEVICES"] = vk_device
+    env = engine_env(binary, dict(os.environ), backend=backend, vk_device=vk_device)
     argv = engine_argv(binary, model_path, mmproj, backend=backend, threads=threads, ctx=ctx,
                        port=upstream_port)
     engines: List[Engine] = []          # the live engine, if any
