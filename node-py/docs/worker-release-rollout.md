@@ -82,3 +82,31 @@ rollback (point the unit back, restart).
 - Checkout-based hosts (zz-tower0 and others running from `~/livestack`): `git -C ~/livestack pull
   --ff-only origin main` then restart the worker unit. The checkout IS the release, so drain first and
   restart only when idle; prefer switching them to a built release dir for reproducibility.
+
+## macOS Apple worker (xc-mac-studio-apple, launchd, Xcode Python 3.9)
+
+Runs `/usr/bin/python3` (3.9) as launchd job `io.livestack.harmony-worker.xc-mac-studio-apple`
+(`~/Library/LaunchAgents/<label>.plist`, PYTHONPATH is the only release pointer). Code must stay 3.9
+compatible (`tests/test_py39_traceback_form.py` guards one known trap). Release dir name is
+`livestack-<sha8>+py39<depshash>`: the plain release plus a `node-py/_deps` copy of the py39 pydantic
+wheels (copy `_deps` from the previous `+py39...` dir; the suffix names that deps set).
+
+    node-py/scripts/build-worker-release.py build <commit> --out /tmp/rel/livestack-<sha8>
+    rsync -a /tmp/rel/livestack-<sha8>/ ubuntu@<mac>:.local/share/livestack-workload-releases/livestack-<sha8>+py39<h>/
+    ssh ubuntu@<mac> 'cd .local/share/livestack-workload-releases && cp -a <old>/node-py/_deps <new>/node-py/_deps'
+
+Roll (only when the roster shows the worker IDLE and the queue has no Apple job):
+
+1. `cli drain xc-mac-studio-apple --ttl 7200 --owner <you> --reason ...`; confirm roster `IDLE`.
+2. Back up: `cp <plist> <plist>.bak-pre-<sha8>`; keep the old release dir.
+3. `sed -i '' s#<old release>#<new release>#` in the plist, `plutil -lint`, then
+   `launchctl bootout gui/$(id -u)/<label>; launchctl bootstrap gui/$(id -u) <plist>`.
+4. Verify roster: connected, ELIGIBLE, 5 handlers; `worker.log` (not launchd.stderr.log, which is
+   append-only history) has no new `PermissionError`; `cli enable ...`.
+Rollback: restore the plist backup and bootout/bootstrap again (when idle).
+
+Known limit (2026-10-11): the registry hands every worker the single default release per handler id,
+without regard to platform. Generation 73's `benchday.compilation.flutter-check.v1` package is
+`linux/x86_64`, so the darwin/arm64 Mac refuses it (`handler_runtime_platform_mismatch`) and stays on
+its old `benchday_apple_handler_release`. Fix needs per-platform defaults in `handler_registry.desired`
+or the Mac not advertising that handler.
