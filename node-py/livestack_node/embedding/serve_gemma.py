@@ -31,7 +31,8 @@ Environment (all read at start):
   HARMONY_GEMMA_BACKEND     cpu | vulkan            default cpu
   HARMONY_GEMMA_VK_DEVICE   Vulkan device index     default 0
   HARMONY_GEMMA_THREADS     cpu threads             default 4
-  HARMONY_GEMMA_CTX         context = -b = -ub      default 8192
+  HARMONY_GEMMA_CTX         context = -b            default 8192
+  HARMONY_GEMMA_UBATCH      -ub = longest input, tokens   default 1536
   HARMONY_GEMMA_PORT        facade port             default 8230
   HARMONY_GEMMA_UPSTREAM_PORT  engine port (127.0.0.1 only)  default 8231
   HARMONY_GEMMA_IDLE_SECONDS   default 900
@@ -215,13 +216,19 @@ def engine_env(binary: str, base: Dict[str, str], *, backend: str, vk_device: st
 
 
 def engine_argv(binary: str, model: str, mmproj: str, *, backend: str, threads: int, ctx: int,
-                port: int) -> List[str]:
+                port: int, ubatch: int = 1536) -> List[str]:
     argv = [binary, "-m", model, "--mmproj", mmproj, "--embedding", "--host", "127.0.0.1",
-            "--port", str(port), "-c", str(ctx), "-b", str(ctx), "-ub", str(ctx),
+            "--port", str(port), "-c", str(ctx), "-b", str(ctx), "-ub", str(ubatch),
             "--parallel", str(ENGINE_SLOTS), "-t", str(threads)]
-    # -b/-ub must cover the longest input in tokens: the default 512 rejected a
-    # 1049-token Chinese chunk with HTTP 500 (spike A2, 2026-10-12). No
-    # --pooling: the GGUF carries the model's own.
+    # -ub must cover the longest input in tokens (a sequence is never split
+    # across physical batches): the default 512 rejected a 1049-token Chinese
+    # chunk with HTTP 500 (spike A2, 2026-10-12). But it is also what every
+    # request PAYS, however short: measured on the RTX 2070 over 64 distinct
+    # 30-char transcript lines, -ub 8192 took 19 s, 2048 took 2.1 s, 1536 took
+    # 0.36 s and 512 took 0.27 s (a re-embed of 86k lines was heading for 7 h).
+    # 1536 covers a 1500-char Chinese chunk (~1050 tokens) with room. Longer
+    # inputs are refused by name (413), not slowed for everyone.
+    # No --pooling: the GGUF carries the model's own.
     argv += ["-ngl", "99"] if backend == "vulkan" else ["-ngl", "0"]
     return argv
 
@@ -252,6 +259,7 @@ def create_app(*, port: Optional[int] = None):
     vk_device = os.environ.get("HARMONY_GEMMA_VK_DEVICE", "0")
     threads = int(os.environ.get("HARMONY_GEMMA_THREADS", "4"))
     ctx = int(os.environ.get("HARMONY_GEMMA_CTX", "8192"))
+    ubatch = int(os.environ.get("HARMONY_GEMMA_UBATCH", "1536"))
     port = port if port is not None else int(os.environ.get("HARMONY_GEMMA_PORT", "8230"))
     upstream_port = int(os.environ.get("HARMONY_GEMMA_UPSTREAM_PORT", "8231"))
     idle_seconds = int(os.environ.get("HARMONY_GEMMA_IDLE_SECONDS", "900"))
@@ -259,7 +267,7 @@ def create_app(*, port: Optional[int] = None):
 
     env = engine_env(binary, dict(os.environ), backend=backend, vk_device=vk_device)
     argv = engine_argv(binary, model_path, mmproj, backend=backend, threads=threads, ctx=ctx,
-                       port=upstream_port)
+                       port=upstream_port, ubatch=ubatch)
     engines: List[Engine] = []          # the live engine, if any
     failures: Dict[str, tuple] = {}
     busy = counting()
@@ -350,8 +358,14 @@ def create_app(*, port: Optional[int] = None):
                         detail = reply.json()["error"]["message"]
                     except Exception:  # noqa: BLE001
                         detail = reply.text[:200]
+                    low = detail.lower()
+                    if "too large" in low or "larger than the max context" in low:
+                        # An input over the engine's batch/slot is the caller's to shorten,
+                        # not an engine fault: 413, naming the limit the engine reported.
+                        return error(f"input too long for this node (engine: {detail}); the limit is "
+                                     f"~{ubatch} tokens per input", "request_too_large", 413)
                     return error(f"engine {reply.status_code}: {detail}", "engine_error",
-                                 400 if reply.status_code < 500 or "image" in detail.lower() else 502)
+                                 400 if reply.status_code < 500 or "image" in low else 502)
                 data = sorted(reply.json()["data"], key=lambda d: d["index"])
                 matrix = shape_vectors([d["embedding"] for d in data], dim)
                 compute_ms = (time.monotonic() - started) * 1000

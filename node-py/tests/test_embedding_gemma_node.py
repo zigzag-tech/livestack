@@ -154,6 +154,15 @@ def test_long_chinese_input_is_not_rejected_by_the_batch_size(node):
     assert r.status_code == 200, r.text
 
 
+def test_engine_batch_is_small_by_default_and_oversize_input_is_a_named_413(node):
+    # -ub is what every request pays (64 short lines: 19 s at 8192, 0.4 s at 1536),
+    # so it is sized for a chunk, not for the context. Past it the caller is told.
+    argv = serve_gemma.engine_argv("b", "m", "p", backend="vulkan", threads=4, ctx=8192, port=1)
+    assert argv[argv.index("-ub") + 1] == "1536" and argv[argv.index("-b") + 1] == "8192"
+    r = post(node, {"input": "会议讨论了模型部署和显存分配的问题。" * 400})
+    assert r.status_code == 413 and "input too long" in r.json()["error"]["message"], r.text
+
+
 def test_vulkan_device_id_is_under_the_machine_not_the_host_id(monkeypatch):
     # The hub's roster producer drops a node of another host id unless its
     # device id starts with `{machine}/`; `{host_id}/vk1` made the node invisible.
