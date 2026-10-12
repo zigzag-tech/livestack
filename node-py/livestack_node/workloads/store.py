@@ -845,6 +845,7 @@ class WorkloadStore:
         if not isinstance(report, dict) or set(report) - {"capacity", "available", "labels", "handlers", "ready", "host",
                                                           "environment_profiles", "environment_replicas", "handler_inventory",
                                                           "handler_activation_failures", "handler_gc_receipts",
+                                                          "handler_platform_skips",
                                                           "disk_unavailable", "cpu_signal", "unit"}:
             raise WorkloadError("invalid worker report")
         capacity, available = resources(report.get("capacity")), resources(report.get("available"))
@@ -878,6 +879,19 @@ class WorkloadStore:
                 raise WorkloadError('handler_activation_failures_invalid')
             body['handler_inventory'] = inventory
             body['handler_activation_failures'] = failures
+            skips = report.get('handler_platform_skips', [])
+            if (not isinstance(skips, list) or len(skips) > 16 or
+                    any(not isinstance(item, dict) or set(item) != {
+                        'generation', 'handler_id', 'release_digest', 'reason', 'release_platform',
+                        'release_architecture'} or
+                        type(item['generation']) is not int or item['generation'] < 0 or
+                        not re.fullmatch(r'[a-f0-9]{64}', str(item['release_digest'])) or
+                        item['reason'] != 'platform_not_supported' or
+                        any(not isinstance(item[key], str) or not 0 < len(item[key]) <= 64
+                            for key in ('handler_id', 'release_platform', 'release_architecture'))
+                        for item in skips)):
+                raise WorkloadError('handler_platform_skips_invalid')
+            body['handler_platform_skips'] = skips
             receipts = report.get('handler_gc_receipts', [])
             if not isinstance(receipts, list) or len(receipts) > 16:
                 raise WorkloadError('handler_gc_receipts_invalid')
