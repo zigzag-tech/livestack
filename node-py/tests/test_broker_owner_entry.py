@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from livestack_node.broker_owner_entry import protected_bytes, runtime_configuration, verify_launch
+from livestack_node.broker_owner_entry import protected_bytes, runtime_configuration, verify_launch, manifest_digest
 
 
 class BrokerOwnerEntryTests(unittest.TestCase):
@@ -47,6 +47,27 @@ class BrokerOwnerEntryTests(unittest.TestCase):
             with self.assertRaisesRegex(PermissionError, 'immutable_private'):
                 runtime_configuration({'path':str(file),'sha256':hashlib.sha256(b'{}').hexdigest()},NoSeal)
 
+
+    def test_fixed_digest_companion_shape_and_path(self):
+        with patch('livestack_node.broker_owner_entry.protected_root_bytes',return_value=b'a'*64+b'\n')as read:
+            self.assertEqual(manifest_digest('/fixed/launch.json','/fixed/launch.json.sha256'),'a'*64)
+            read.assert_called_once_with('/fixed/launch.json.sha256',65)
+        with patch('livestack_node.broker_owner_entry.protected_root_bytes')as read:
+            with self.assertRaisesRegex(ValueError,'fixed_digest_companion'):manifest_digest('/fixed/launch.json','/foreign/sha256')
+            read.assert_not_called()
+        for value in (b'a'*64,b'A'*64+b'\n',b'a'*64+b'\r\n',b'a'*64+b'\nextra',b'g'*64+b'\n'):
+            with self.subTest(value=value),patch('livestack_node.broker_owner_entry.protected_root_bytes',return_value=value):
+                with self.assertRaisesRegex(ValueError,'companion_format'):manifest_digest('/fixed/launch.json','/fixed/launch.json.sha256')
+
+    def test_wrong_companion_hash_does_not_validate_manifest(self):
+        with patch('livestack_node.broker_owner_entry.protected_root_bytes',return_value=b'{}'):
+            with self.assertRaisesRegex(ValueError,'root_bytes_changed'):protected_bytes('/fixed/launch.json','a'*64)
+        self.assertEqual(manifest_digest('/historical/launch.json','b'*64),'b'*64)
+
+    def test_real_user_owned_companion_refuses(self):
+        with tempfile.TemporaryDirectory()as directory:
+            path=Path(directory)/'launch.json';sidecar=Path(str(path)+'.sha256');sidecar.write_bytes(b'a'*64+b'\n');sidecar.chmod(0o444)
+            with self.assertRaisesRegex(PermissionError,'root_ancestry'):manifest_digest(path,str(sidecar))
 
 if __name__ == '__main__':
     unittest.main()

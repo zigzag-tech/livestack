@@ -14,7 +14,7 @@ def digest(value):
     return hashlib.sha256(value).hexdigest()
 
 
-def protected_bytes(path, expected, limit=65536):
+def protected_root_bytes(path, limit=65536):
     path = Path(path)
     if not path.is_absolute() or path.resolve() != path:
         raise PermissionError('broker_entry_root_alias_refused')
@@ -29,11 +29,29 @@ def protected_bytes(path, expected, limit=65536):
             raise PermissionError('broker_entry_root_file_required')
         value = os.read(fd, limit + 1)
         after = path.lstat()
-        if (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_size) != (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_size) or digest(value) != expected:
+        if (before.st_dev, before.st_ino, before.st_mtime_ns, before.st_size) != (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_size):
             raise ValueError('broker_entry_root_bytes_changed')
         return value
     finally:
         os.close(fd)
+
+
+def protected_bytes(path, expected, limit=65536):
+    value = protected_root_bytes(path, limit)
+    if digest(value) != expected:
+        raise ValueError('broker_entry_root_bytes_changed')
+    return value
+
+
+def manifest_digest(path, argument):
+    if re.fullmatch('[a-f0-9]{64}', argument):
+        return argument
+    if argument != str(path) + '.sha256':
+        raise ValueError('broker_entry_fixed_digest_companion_required')
+    payload = protected_root_bytes(argument, 65)
+    if not re.fullmatch(b'[a-f0-9]{64}\n', payload):
+        raise ValueError('broker_entry_digest_companion_format_required')
+    return payload[:64].decode('ascii')
 
 
 def immutable_private_bytes(record, seal):
@@ -125,7 +143,7 @@ def verify_launch(path, expected):
 def main():
     if len(sys.argv) != 3:
         raise ValueError('broker_entry_fixed_manifest_arguments_required')
-    value, selected = verify_launch(sys.argv[1], sys.argv[2])
+    value, selected = verify_launch(sys.argv[1], manifest_digest(sys.argv[1], sys.argv[2]))
     runtime = value['sealedRuntime']
     if Path('/proc/self/exe').resolve() != Path(runtime['python']).resolve():
         os.execve(runtime['python'], [runtime['python'], '-I', '-B', __file__, *sys.argv[1:]], {'PATH': '/usr/bin:/bin'})
