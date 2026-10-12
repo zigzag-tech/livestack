@@ -17,6 +17,13 @@ Subcommands (see node-py/docs/worker-release-rollout.md):
                                    is written there). With --commit, each changed file is
                                    attributed to the newest commit on REF whose version of it is
                                    the deployed one, or flagged HAND-EDIT when no commit has it.
+    verifier-drift RELEASE SDK [--ssh HOST]
+                                   exit 0 if every launch-contract module (VERIFIER_CONTRACT)
+                                   is byte-identical in RELEASE (node-py/livestack_node)
+                                   and the installed verifier SDK (/opt/livestack-compilation/
+                                   verifier-sdk-<hash>/livestack_node). Run it in the same step as
+                                   a release roll; exit 1 names the files, and the fix is a new
+                                   SDK plus the drop-in repoint (worker-release-rollout.md).
 
 The content hash is sha256 over the sorted lines "<relpath>\\0<sha256(file)>\\n" of
 every regular file under node-py/ except RELEASE.json, __pycache__ and *.pyc. File modes
@@ -134,6 +141,59 @@ def _note(rel, deployed_sha, ref):
     return f'   [deployed copy = {commit[:8]} on {ref}]' if commit else '   [HAND-EDIT: no commit on ' + ref + ' has the deployed copy]'
 
 
+# The modules that define the launch contract between the in-attempt guard and the root verifier
+# (request/receipt shape, class set, registry trust rules, authority hop). The verifier also imports
+# general modules (model, transport); those are not compared, because they change in unrelated
+# releases and a difference there is not a contract change.
+VERIFIER_CONTRACT = tuple(f'workloads/{m}.py' for m in
+    ('launch_contract', 'launch_verifier', 'launch_guard', 'compilation_policy', 'windows_proc', 'darwin_proc'))
+
+
+def verifier_modules(base):
+    return [rel for rel in VERIFIER_CONTRACT if (Path(base)/rel).is_file()]
+
+
+def verifier_drift(release, sdk, host):
+    """0 when the verifier SDK carries the release's version of every module it loads."""
+    rel_base = Path(release)/'node-py'/'livestack_node'
+    modules = verifier_modules(rel_base)
+    sdk_digests = deployed_digests_flat(sdk, host)
+    drift = []
+    for rel in modules:
+        want = hashlib.sha256((rel_base/rel).read_bytes()).hexdigest()
+        have = sdk_digests.get(rel)
+        if have != want:
+            drift.append(f'{"missing in SDK" if have is None else "differs"}  {rel}')
+    print(f'launch-contract modules compared: {len(modules)} from {release}')
+    if not drift:
+        print('VERIFIER SDK CURRENT')
+        return 0
+    print('\n'.join(drift))
+    print(f'VERIFIER SDK DRIFT: {len(drift)} of {len(modules)} modules; stage a verifier SDK built from this release '
+          f'and repoint the harmony-compilation-* drop-ins before rolling workers')
+    return 1
+
+
+def deployed_digests_flat(sdk, host):
+    """{relpath under <sdk>/livestack_node: sha256}, locally or over ssh (nothing written there)."""
+    if host is None:
+        base = Path(sdk)/'livestack_node'
+        if not base.is_dir():
+            sys.exit(f'{sdk} has no livestack_node/ directory')
+        return {p.relative_to(base).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in base.rglob('*.py') if p.is_file()}
+    proc = subprocess.Popen(['ssh', host, f"cd {sdk} && tar cf - --exclude='__pycache__' livestack_node"], stdout=subprocess.PIPE)
+    out = {}
+    with tarfile.open(fileobj=proc.stdout, mode='r|') as tar:
+        for member in tar:
+            name = member.name.removeprefix('./')
+            if member.isfile() and name.startswith('livestack_node/') and name.endswith('.py'):
+                out[name.removeprefix('livestack_node/')] = hashlib.sha256(tar.extractfile(member).read()).hexdigest()
+    if proc.wait():
+        sys.exit(f'ssh {host} tar of {sdk} failed')
+    return out
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest='cmd', required=True)
@@ -141,7 +201,9 @@ def main():
     h = sub.add_parser('hash'); h.add_argument('dir')
     v = sub.add_parser('verify'); v.add_argument('built'); v.add_argument('deployed')
     v.add_argument('--ssh'); v.add_argument('--commit')
+    d = sub.add_parser('verifier-drift'); d.add_argument('release'); d.add_argument('sdk'); d.add_argument('--ssh')
     args = p.parse_args()
+    if args.cmd == 'verifier-drift': sys.exit(verifier_drift(args.release, args.sdk, args.ssh))
     if args.cmd == 'build': build(args.commit, args.out)
     elif args.cmd == 'hash': print(content_hash(tree_digests(args.dir)))
     else: sys.exit(verify(args.built, args.deployed, args.ssh, args.commit))

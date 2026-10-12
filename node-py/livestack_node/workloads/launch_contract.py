@@ -55,25 +55,34 @@ def trusted_json_windows(path, *, secret=False):
     return json.loads(raw)
 
 
+def untrusted(path, why):
+    """Name the failed ownership/mode check: a bare refusal cost a diagnosis
+    that could not tell a stale directory mode from a user-namespace view."""
+    return WorkloadError(f'compilation_registry_untrusted: {path}: {why}', 403)
+
+
 def trusted_json(path, *, secret=False):
     """Root-owned metadata under directories a caller cannot replace."""
     if sys.platform == 'win32':
         return trusted_json_windows(path, secret=secret)
     path = Path(path)
     if not path.is_absolute():
-        raise WorkloadError('compilation_registry_untrusted', 403)
+        raise untrusted(path, 'path is not absolute')
     for directory in path.parents:
         info = directory.lstat()
         writable = info.st_mode & 0o022
         sticky_root = info.st_uid == 0 and info.st_mode & stat.S_ISVTX
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or (writable and not sticky_root):
-            raise WorkloadError('compilation_registry_untrusted', 403)
+            raise untrusted(path, f'directory {directory} has uid {info.st_uid} mode {info.st_mode & 0o7777:o} '
+                                  f'(need a root-owned directory nobody else can write)')
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, 'rb') as source:
         info = os.fstat(source.fileno())
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or
                 info.st_mode & (0o077 if secret else 0o022) or info.st_size > MAX_BYTES):
-            raise WorkloadError('compilation_registry_untrusted', 403)
+            raise untrusted(path, f'file has uid {info.st_uid} mode {info.st_mode & 0o7777:o} size {info.st_size} '
+                                  f'(need a root-owned regular file, '
+                                  f'mode without {"077" if secret else "022"} bits, at most {MAX_BYTES} bytes)')
         raw = source.read(MAX_BYTES+1)
     if len(raw) > MAX_BYTES:
         raise WorkloadError('compilation_registry_oversized', 403)
@@ -161,7 +170,9 @@ def verify_launch(request, *, registry_path=REGISTRY):
     except WorkloadError:
         raise
     except (OSError, ValueError, TypeError) as error:
-        raise WorkloadError('compilation_verification_unavailable', 503) from error
+        # The type and text are the only evidence of WHICH hop failed (a socket
+        # timeout, a missing slot, a bad registry); the bare code hid it.
+        raise WorkloadError(f'compilation_verification_unavailable: {type(error).__name__}: {str(error)[:200]}', 503) from error
 
 
 def _socket_exchange(endpoint, request, deadline):

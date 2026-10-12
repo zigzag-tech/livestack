@@ -110,3 +110,30 @@ without regard to platform. Generation 73's `benchday.compilation.flutter-check.
 `linux/x86_64`, so the darwin/arm64 Mac refuses it (`handler_runtime_platform_mismatch`) and stays on
 its old `benchday_apple_handler_release`. Fix needs per-platform defaults in `handler_registry.desired`
 or the Mac not advertising that handler.
+
+## Root compilation verifier SDK: check it in the same step as a roll
+
+The root `harmony-compilation-*` verifier runs its own copy of the launch contract, installed at
+`/opt/livestack-compilation/verifier-sdk-<hash8>/livestack_node` and selected by the per-unit drop-in
+`/etc/systemd/system/harmony-compilation-<slot>.service.d/zz-sdk-<hash8>.conf` (`PYTHONPATH=`). A
+worker release roll does not touch it. After staging the new release and before restarting a worker run,
+on the worker host:
+
+    python3 node-py/scripts/build-worker-release.py verifier-drift \
+        ~/.local/share/livestack-workload-releases/livestack-<sha8> /opt/livestack-compilation/verifier-sdk-<hash8>
+
+Exit 0 (`VERIFIER SDK CURRENT`) means the launch-contract modules (`launch_contract`, `launch_verifier`,
+`launch_guard`, `compilation_policy`, `windows_proc`, `darwin_proc`) are byte-identical, nothing to do.
+Exit 1 names the modules that differ: build a new SDK from the release (same layout as the old one,
+root-owned, 755/644), install it as `verifier-sdk-<newhash8>`, point the drop-ins at it, `daemon-reload`, and
+restart each verifier at idle (never while an attempt of that slot is running). Rollback is the drop-in.
+
+Measured 2026-10-12: release `livestack-fd17f036` (4ea822cd) against `verifier-sdk-8923e025` is CURRENT
+(contract modules unchanged since 8923e025); `livestack-1220da12` against the same SDK DRIFTS in
+`launch_verifier`/`launch_guard`/one more. So the 2026-10-11 CPU-peak roll did not strand the verifier.
+
+Diagnosing a launch refusal: the guard's `compilation_launch_refused ... reason=` line now carries the
+detail. `compilation_registry_untrusted: <path>: directory <d> has uid N mode M` or `file has uid ...` names
+the failed ownership/mode check (a uid of 65534 means the caller sees root-owned files through a user
+namespace); `compilation_verification_unavailable: <ExceptionType>: <text>` names the failed hop (a socket
+`TimeoutError` is the verifier's authority hop, see the benchday `harmony-worker-enrolment.md`).
