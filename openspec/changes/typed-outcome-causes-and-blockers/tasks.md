@@ -45,3 +45,10 @@ and `max_queue_seconds` are both submission fields (schema 4), not a handler dec
 fresh worker) and is kept for completeness. Tests: `tests/test_outcome_causes.py` (derivation table, every terminal path, seeded lifecycle property with a
 mutant, steady wait performs no UPDATE with a positive control, recorded systemd properties) and the real-kernel OOM test in `tests/test_workload_worker.py`.
 Remaining before archive: the worker release (2.2/4.2).
+
+## Record (2026-10-12)
+
+Worker half verified on origin/main (`resource_usage.py` reports `unit_result`/`exec_main_status`; `causes.py` consumes them). No separate
+worker change remains: the next worker release built from main carries it, so it is batched with the pending cores-claim worker roll
+(`fd17f036`), one worker at a idle gap. Until a worker runs it, a unit killed by systemd shows `cause=unknown` without `unit_result`.
+ZZOPS now prints `job.cause` (kind, retry, evidence) in the Harmony terminal failure text, or `cause: none recorded` (zzops 772e371).
