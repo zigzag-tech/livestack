@@ -179,3 +179,19 @@ should be tried again) in the state file while the reconciler is stopped. Check 
 Hand rollback of one worker: delete `~rollout-release.conf` in its `.service.d`, `systemctl --user daemon-reload`,
 restart when idle. Not done by this slice: handler-only activation, worker-pull staging, job-failure attribution in
 the soak, authority restarts (those stay with `tools/deploy-authority-release.sh`).
+
+### Enforce record (2026-10-12)
+
+- Reconciler on `livestack-89165c16` (built from main), `enforce` block live on xc-tower-ubuntu; declared unit
+  `unit-cb4617d2` = release `livestack-5370c7b7` (content hash `3c1a652c...`, handlers copied from `unit-f38a7baa`, which was
+  built from `be1d8a42` and 45 runtime commits behind main).
+- Canary `zz-joe-e2e-3`: `livestack-4ea822cd` -> `livestack-5370c7b7`. Drain, idle, switch (2.4 s), smoke (restart_clean,
+  handler_import, handler_integrity, release_import: pass, 50 s), enable, 300 s soak, done.
+- Rollback drill on the same worker: `livestack-badbad01` (5370c7b7 plus one function using an undefined name). It started
+  and passed the restart check; `release_import` failed it (`undefined_name ... an_undefined_name_for_the_rollback_drill`),
+  the executor rolled the worker back to 5370c7b7, rejected the release for that worker, re-enabled it. The drill's failure
+  count was cleared by hand afterwards. It waited 94 s for a running job before the switch: no job was interrupted.
+- `zz-joe-e2e-4` was drained and waiting for a 40+ minute flutter-check job when this was written; the idle wait is bounded
+  (`idle_timeout_seconds`, 1 h) and the drain is renewed while it lasts.
+- Not rolled, on purpose: `zz-joe-e2e-5` (legacy, drained), the Mac apple worker, the release workers (queued behind the
+  approval file).

@@ -45,7 +45,7 @@
 
 - [ ] 7.1 Phase 1: observe on the live fleet; hand-built unit for today; file each skew as fixed or intentional. (Operational.)
 - [ ] 7.2 Phase 2: move host unit files to the `current` symlink, e2e slot first. (Operator-only.)
-- [ ] 7.3 Phase 3: `enforce` on `zz-joe-e2e` with three real rollouts including a deliberately bad unit that must be caught and rolled back. (Operational evidence recorded in the docs.)
+- [ ] 7.3 Phase 3: `enforce` on `zz-joe-e2e` with three real rollouts including a deliberately bad unit that must be caught and rolled back. (Operational evidence recorded in the docs.) **Partial (2026-10-12): canary `zz-joe-e2e-3` rolled once for real and once with a deliberately bad release (caught by `release_import`, rolled back); the remaining e2e slots are queued. Evidence in `node-py/docs/worker-claims-and-rollout.md` (Enforce record).**
 - [ ] 7.4 Phase 4: `zz-joe-release` outside publishing hours with the operator present. (Operational.)
 - [ ] 7.5 Docs: rewrite `worker-release-rollout.md` around the declarative path, keep the manual runbook as the operator-only fallback; update `authority-principal-reload.md`; `_plans/durable-workloads.md` deployment-unit section.
 
