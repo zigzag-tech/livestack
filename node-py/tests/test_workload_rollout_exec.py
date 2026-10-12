@@ -95,12 +95,18 @@ def world(tmp_path):
     w.executor = rollout_exec.Executor(roll, w.hosts, lambda: w.cfg, rollout_exec.StateFile(tmp_path / 'state.json'),
                                        claims_module.ActionLedger(tmp_path / 'ledger.jsonl'), clock=w.clock, sleep=lambda s: None)
 
+    def roster_drain(claim):   # the roster shows remaining seconds, the claims listing shows the expiry time
+        import time
+        if claim and claim.get('expires_at'):
+            claim = dict(claim, expires_in_s=claim['expires_at'] - time.time())
+        return claim
+
     def tick():
         status = roll.request('rollout')
         claims = {c['worker']: c for c in ops.request('claims')['claims']}
         entries = [dict(id=i, connected=True, state='running' if w.running.get(i) else 'idle', host='zz-joe', running=w.running.get(i, []),
                         claim_enabled=not claims.get(i, {}).get('draining'), labels={}, handlers=['x'], activation_failures=[],
-                        last_seen_age_s=1.0, drain=claims.get(i)) for i in IDS]
+                        last_seen_age_s=1.0, drain=roster_drain(claims.get(i))) for i in IDS]
         return w.executor.tick(status, entries)
     w.tick = tick
     w.draining = lambda i: {c['worker']: c for c in ops.request('claims')['claims']}.get(i, {}).get('draining', False)
@@ -295,3 +301,16 @@ def test_push_release_streams_the_directory_and_keeps_a_tilde_path_expandable(tm
     assert (tmp_path / 'abs releases' / f'.stage-{NEW}' / NEW / 'node-py' / 'a.py').exists()
     with pytest.raises(rollout_exec.HostFailure):
         transport.push_release('h', tmp_path / 'src' / 'missing', NEW, str(tmp_path / 'x'))
+
+
+def test_a_drain_is_renewed_while_a_long_job_runs_so_it_cannot_lapse(world):
+    w = world
+    w.running['zz-joe-e2e-3'] = [{'job': 'j1'}]
+    w.tick()
+    assert 'drain_renewed' not in w.kinds(w.tick()), 'a fresh drain is left alone'
+    w.ops.request('claims/zz-joe-e2e-3/drain', dict(owner='rollout', reason='simulate an old drain', ttl_seconds=600))
+    import time
+    left = lambda: {c['worker']: c for c in w.ops.request('claims')['claims']}['zz-joe-e2e-3']['expires_at'] - time.time()
+    assert left() < 700
+    assert 'drain_renewed' in w.kinds(w.tick())
+    assert left() > 3000, 'back to the full ttl'
