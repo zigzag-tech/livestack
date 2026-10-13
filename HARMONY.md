@@ -1359,11 +1359,11 @@ up on stays filtered, however empty its card.
 - **xc-tower-ubuntu** (2x RTX 3090): `livestack-hostd.service` (:8799) brokers
   `polyasr` x2 + `polytts` + `harmony-llm`; **`livestack-fleetd.service` (:8801)**
   is the fleet broker — observe-only, peers on all three GPU hosts.
-- **zz-joe** (build/test host): `harmony-embed-cpu.service` (:8220) — the CPU
-  embedding node (`kind=embed`, device `zz-joe/cpu`), announced to its own
-  hostd and the fleet broker. It was deployed serving MiniLM
-  (`HARMONY_EMBED_MODELS`); per the one-embedder decision it is to be replaced by
-  `serve_gemma` (deployment is operator work, not done by the code change).
+- **zz-joe** (build/test host): `harmony-embed-gemma.service` (:8230) — the fleet's
+  one embedder (`serve_gemma`, EmbeddingGemma 2, `kind=embed`). The MiniLM node
+  (`harmony-embed-cpu.service`, :8220) was stopped and its unit, env file and model
+  files deleted on 2026-10-12; its `residence` entry may still appear in the
+  livestack-workloads worker config until an operator removes it.
 
 ## Tests
 
