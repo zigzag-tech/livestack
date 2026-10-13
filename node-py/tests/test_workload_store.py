@@ -815,3 +815,25 @@ def test_starved_job_whose_worker_observes_no_free_cpu_does_not_block_its_hosts_
     stage = store.submit('owner', request('stage', handler='build.v1', need={'cpu': 1, 'ram': 1}, priority=1000))
     claimed = store.claim('stager', 'boot1')
     assert claimed and claimed['job_id'] == stage['id']
+
+
+def test_starved_jobs_do_not_stack_their_holds_against_a_later_job_that_fits_one(harness):
+    """2026-10-13, zz-joe: ~15 jobs starved on CPU each charged their memory claim as a hold, 42 GiB together on a
+    64 GiB host, so two fresh 2.5 GiB release builds were refused 'insufficient host memory' with 50 GiB free. One
+    starved holder per host per round: the rest queue behind it."""
+    _, now, path = harness
+    store = WorkloadStore(path, handlers={'test.v1', 'build.v1'}, clock=lambda: now[0],
+                          limits=Limits(lease_seconds=5000))
+    for name in 'abc':
+        register(store, name, 'shared', cpu=8, ram=16)
+    running = store.submit('owner', request('running', need={'cpu': 2, 'ram': 2}))
+    assert store.claim('a', 'boot1')['job_id'] == running['id']
+    for name in ('s1', 's2'):  # short of cpu (6 free < 7), so each would hold 6 ram
+        store.submit('owner', request(name, need={'cpu': 7, 'ram': 6}))
+    assert store.claim('b', 'boot1') is None
+    now[0] += store.limits.starvation_seconds + 1
+    for name in 'abc':
+        register(store, name, 'shared', cpu=8, ram=16)
+    fresh = store.submit('owner', request('fresh', need={'ram': 4}))
+    claimed = store.claim('b', 'boot1')
+    assert claimed and claimed['job_id'] == fresh['id']
