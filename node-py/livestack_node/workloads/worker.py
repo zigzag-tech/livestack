@@ -1216,7 +1216,8 @@ class WorkloadWorker:
         try:
             lease = LeaseKeeper(self.client, assignment, root/'lease',
                                 interval=self.config.get('lease_interval', 10),
-                                progress_path=output/'progress.json').start()
+                                progress_path=output/'progress.json',
+                                log_dirs=(output, output.parent)).start()
             spec = assignment['spec']
             handler = self._handler_for_assignment(assignment)
             handler_backend = handler.get('backend')

@@ -1,0 +1,1 @@
+{"handlers": ["node-py/tests/fixtures/supervised/good_*"], "allowlist": [], "max_allowlist": 0}
