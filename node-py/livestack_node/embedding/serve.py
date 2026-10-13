@@ -6,10 +6,13 @@ Each model is one unit with ``class=embed``, ``model=<hub id>``, ``quant`` and
 ``dim``; ``attach(backend="cpu")`` adds ``backend=cpu`` and puts the node on
 ``{machine}/cpu``, so a consumer can ask for
 
-    require:class=embed,backend=cpu,model=Xenova/paraphrase-multilingual-MiniLM-L12-v2,quant=q8
+    require:class=embed,backend=cpu,model=<hub id>,quant=q8
 
-and nothing it matches can take room on a card. GPU is the scarce resource on
-this fleet; a 384-dimension MiniLM answers in milliseconds on a CPU.
+and nothing it matches can take room on a card. This is the GENERIC ONNX CPU
+node and has no default model. The fleet's only embedder is EmbeddingGemma 2 at
+512 dims -- deploy ``livestack_node.embedding.serve_gemma`` for that; do not
+point fleet callers at anything this node serves (HARMONY.md, "The fleet
+embedder").
 
 Environment (all optional except the models):
 
@@ -53,7 +56,7 @@ LOAD_FAILURE_HOLD_S = 60.0
 
 
 def unit_name(model_id: str) -> str:
-    """`Xenova/paraphrase-multilingual-MiniLM-L12-v2` -> `embed_paraphrase_multilingual_minilm_l12_v2`."""
+    """`Xenova/all-MiniLM-L6-v2` -> `embed_all_minilm_l6_v2`."""
     tail = model_id.rsplit("/", 1)[-1].lower()
     return "embed_" + re.sub(r"[^a-z0-9]+", "_", tail).strip("_")
 
