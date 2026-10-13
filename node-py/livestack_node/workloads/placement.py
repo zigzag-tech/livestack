@@ -136,15 +136,21 @@ def _hold_charge(plan, admit, claim, host_free, worker_free, memory_terms, views
 
 
 def _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, worker_free, memory_terms, views, now,
-                      limits):
+                      limits, starved_hosts):
     """Reserve, on every host that refuses an aged job only for lack of free resources, what the job would take.
 
     Jobs placed later in this round then see the host as already charged, exactly as if the starved job had been
     admitted, so running attempts draining off the host make room for IT rather than for the next small job.
-    The hold lasts one round; nothing persists."""
+    The hold lasts one round; nothing persists.
+
+    One starved holder per host per round (`starved_hosts`, the oldest since starved jobs sort by age): the others
+    queue behind its hold. Every starved job charging its claim stacked 42 GiB of holds on a 64 GiB host and starved
+    two fresh release builds that each needed 2.5 GiB (2026-10-13); the holds were also what kept the e2e workers'
+    CPU at zero, so each new job joined the pile."""
     if now-row["created"] < limits.starvation_seconds:
         return
-    plan = _hold_plan(admit, rejected, workers, reports)
+    plan = [w for w in _hold_plan(admit, rejected, workers, reports) if w["host"] not in starved_hosts]
+    starved_hosts.update(w["host"] for w in plan)
     _hold_charge(plan, admit, claim, host_free, worker_free, memory_terms, views)
     if plan and row["id"] not in _STARVED_REPORTED:
         if len(_STARVED_REPORTED) >= 1024:
@@ -529,6 +535,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
     # [(priority, job id, plan, admit, claim)] waiting to bind lower jobs; host -> free figures before the first
     # applied hold; host -> the job that holds it first.
     pending_holds, before_holds, hold_holders = [], {}, {}
+    starved_hosts = set()
     handles = sorted({row['environment_handle'] for row in queued if row['environment_handle']})
     replicas_by_handle = {}
     if handles:
@@ -736,7 +743,7 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
                             or [dict(code="deadline_unfit", detail="no target can meet deadline")])
                 _stall_event(row, rejected, now, limits)
                 _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, worker_free, memory_terms,
-                                  views, now, limits)
+                                  views, now, limits, starved_hosts)
                 if priority > 0 and now-row["created"] < limits.starvation_seconds:
                     plan = _hold_plan(admit, rejected, workers, reports)
                     if plan:
