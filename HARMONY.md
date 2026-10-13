@@ -833,6 +833,28 @@ A job read back carries `cause` once terminal (`kind` from a closed list, `retry
 Reference: `_plans/durable-workloads.md` ("work scopes, typed causes and structured blockers"); code `workloads/causes.py`,
 `workloads/store.py` (`close_scope`, `_job_verdict`), `workloads/placement.py` (`_wait`).
 
+### Attempt progress (contract v1; openspec `attempt-progress-reporting` in the benchday repo)
+
+A handler writes `$HARMONY_OUTPUT/progress.json` (Python `lease_helper.report_progress`, Node
+`workloads/lease_helper.mjs` `reportProgress`; `supervised/` wraps both, see its `SPEC.md`):
+`{phase, done?, total?, unit?, fraction?, message?, beat?}` (`message` one line <= 200 bytes, `detail` is the legacy alias,
+`beat` a liveness counter). The authority stamps every time itself. A job read carries:
+
+- `progress`: the document plus `reported_at`, `changed_at`, `phase_started_at` (authority clock) and `dropped`
+  (reports coalesced by the per-attempt token bucket). Absent until the first report.
+- `attempt`: `started_at`, `worker`, `handler`, `fence`, and `activity_at`, the worker-owned liveness: the authority time of
+  the last heartbeat that saw the attempt's `*.log` files grow (no text, no sizes). Independent of the handler.
+- `progress_verdict` (running jobs with a silence limit): `{state: ok|overdue, mode: report|enforce, source: spec|contract,
+  limit_seconds, quiet_seconds, activity_quiet_seconds?}`. Read-side only; in `enforce` the same limit fails the job
+  (`stalled_no_progress`).
+
+Authority config `attempt_progress` (restart-only): `strict_contract` (a handler release with no `progress_contract` is
+refused to stage; off by default and the registry logs the ones that lack it), `deadline_mode` (what a submitted
+`progress_deadline_seconds` does; `enforce` today's behaviour), `handlers.<id>` (contract and `deadline_mode`, overriding the
+release manifest's `progress_contract`). A limit derived from a contract's `max_silence_seconds` only reports unless the handler is
+flipped to `enforce`. Token bucket per attempt: `max_per_period` (default 12 per 60 s); reports over budget are held (latest wins)
+and published when a token returns. Conformance: `tools/check-supervised-handlers.py` (ratchet allowlist).
+
 ## Live workload handler releases (initial E2E rollout shipped 2026-10-04)
 
 The durable workload authority and worker remain responsible for admission,

@@ -49,7 +49,7 @@ def retry_transient(call, what, *, budget, keep_going=lambda: True, first_delay=
 
 
 class LeaseKeeper:
-    def __init__(self, client, assignment, path, *, interval=10, progress_path=None, start_retry_seconds=15):
+    def __init__(self, client, assignment, path, *, interval=10, progress_path=None, log_dirs=(), start_retry_seconds=15):
         # Renewals ride a connection of their own, opened by the initial grant
         # in start(): never queued behind the worker's claim/report/complete,
         # and no new handshake per renewal (openspec/changes/worker-control-keepalive).
@@ -60,6 +60,8 @@ class LeaseKeeper:
         self._noted = None
         self.progress_path = Path(progress_path) if progress_path is not None else None
         self.progress_seen = None
+        self.log_dirs = tuple(Path(d) for d in log_dirs)
+        self.log_seen = None
         self.stopped = Event()
         self.lost = Event()
         self.handoff_started = Event()
@@ -87,6 +89,25 @@ class LeaseKeeper:
         self.progress_seen = raw
         return value
 
+    def _log_activity(self):
+        """True when the attempt's `*.log` files grew (more bytes or a later mtime) since the last
+        look. Only the fact is sent, never a line of text, a size or a clock reading: this is the
+        liveness signal the worker owns, separate from the handler's semantic progress.json. Best effort, never a reason to
+        skip a renewal."""
+        if not self.log_dirs:
+            return False
+        size, newest = 0, 0.0
+        for directory in self.log_dirs:
+            try:
+                for path in sorted(directory.glob('*.log'))[:64]:
+                    stat = path.stat()
+                    size += stat.st_size
+                    newest = max(newest, stat.st_mtime)
+            except OSError:
+                continue
+        seen, self.log_seen = self.log_seen, (size, newest)
+        return size > 0 and (seen is None or size > seen[0] or newest > seen[1])
+
     def _write(self, deadline):
         temporary = self.path.with_suffix('.tmp')
         with temporary.open('w') as out:
@@ -102,6 +123,10 @@ class LeaseKeeper:
         progress = self._read_progress()
         if progress is not None:
             body['progress'] = progress
+        # Worker-owned liveness, independent of the handler: sent whenever the logs grew, whether or
+        # not the handler also reports semantic progress, so a handler cannot forget it.
+        if self._log_activity():
+            body['activity'] = {'source': 'log'}
         result = self.client.request('worker/heartbeat', body)
         remaining = result.get('lease_remaining')
         if not isinstance(remaining, (float, int)) or not math.isfinite(remaining) or remaining <= 0:
