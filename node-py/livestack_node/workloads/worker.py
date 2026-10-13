@@ -1445,6 +1445,8 @@ class WorkloadWorker:
                            keep_going=lambda: lease is None or not lease.lost.is_set())
             completion = self._attach_or_end_oversized(assignment, completion, output, attempt, **handoff)
             self.journal.write(dict(assignment=assignment, phase='completed', completion=completion))
+            if lease:
+                lease.begin_handoff()
             acknowledged = retry_transient(lambda: self.client.request('worker/complete', completion),
                             'attempt %s completion' % attempt, **handoff)
             if environment_prepared is not None and self.task_environments is not None and \

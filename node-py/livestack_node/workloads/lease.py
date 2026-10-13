@@ -62,6 +62,7 @@ class LeaseKeeper:
         self.progress_seen = None
         self.stopped = Event()
         self.lost = Event()
+        self.handoff_started = Event()
         self.thread = None
         self.error = None
         self.remaining = 0
@@ -128,6 +129,16 @@ class LeaseKeeper:
             raise WorkloadError('lease liveness predicate must be callable')
         self.liveness = predicate
 
+    def begin_handoff(self):
+        """Mark that the completed attempt is being acknowledged by the authority.
+
+        A heartbeat can race with worker/complete and receive 409 after the
+        authority has already ended the attempt. The completion response is
+        authoritative once handoff starts; that late renewal is not evidence
+        that a running execution lost its lease.
+        """
+        self.handoff_started.set()
+
     def _unreachable(self, error):
         """Name the outage without flooding: first failure, then every 10 s."""
         self.error = type(error).__name__
@@ -179,6 +190,10 @@ class LeaseKeeper:
                 # Transport/server failures cannot extend it, but may retry
                 # within the deadline already granted by the authority.
                 if 400 <= error.status < 500:
+                    if self.handoff_started.is_set():
+                        logging.info('lease renewal ended during completion handoff (HTTP %s): %s',
+                                     error.status, error)
+                        return
                     self._lose('%s: authority refused renewal (HTTP %s): %s' % (type(error).__name__, error.status, error))
                     return
                 self._unreachable(error)
