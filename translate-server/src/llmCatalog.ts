@@ -68,8 +68,8 @@ const resolver = createCatalogResolver({
     tag: "local",
   }),
   getBaseEmbeddingConfig: () => ({
-    provider: "ollama",
-    modelName: "nomic-embed-text",
+    provider: "harmony",
+    modelName: "google/embeddinggemma-2",
     tag: "local",
   }),
   getScopeConfig: ({ purpose }) =>

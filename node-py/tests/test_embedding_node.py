@@ -1,5 +1,9 @@
 """CPU embedding node: `attach(backend="cpu")` and `livestack_node.embedding.serve`.
 
+MiniLM appears below only as a small ONNX export that exercises the generic node;
+it is a test fixture, not a fleet embedder (the fleet serves EmbeddingGemma 2
+only, see HARMONY.md "The fleet embedder").
+
 The attach half runs anywhere the facade deps are installed. The serving half
 needs the real ONNX exports (rule: a test against a fake runtime cannot fail on
 anything real) and is skipped where they are absent; on an embedding host it

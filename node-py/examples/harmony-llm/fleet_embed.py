@@ -2,7 +2,7 @@
 THIS node meets it.
 
 The gateway's admission is for LOADING a model onto a card. A CPU/Vulkan embed
-node (livestack_node.embedding: MiniLM, EmbeddingGemma) loads nothing the
+node (livestack_node.embedding; the fleet runs EmbeddingGemma 2 only) loads nothing the
 planner arbitrates and serves from its own process, so there is nothing to
 admit: the question is only "which live embed node declares what the caller
 asked for?", and the broker's `/fleet` view already answers it. Callers state

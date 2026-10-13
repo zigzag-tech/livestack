@@ -407,8 +407,8 @@ which unit is HARD_PIN are the only things that differ between servers.
 
 ### A node on the CPU: `backend="cpu"`
 
-GPU is the scarce resource here, and some models do not need one: a 384-dim
-MiniLM embeds a sentence in ~3 ms on a desktop CPU. `attach(..., backend="cpu")`
+GPU is the scarce resource here, and some models do not need one: a small
+embedder can answer in milliseconds on a desktop CPU. `attach(..., backend="cpu")`
 says so ONCE, in the code that knows it, and three things follow:
 
 - every unit's `attributes.backend` is set to `"cpu"`, **overwriting** any
@@ -427,11 +427,38 @@ vLLM `class=embed` units, which declare no `backend`) can never satisfy it,
 because an undeclared attribute is not satisfied. Passing any other backend
 only stamps the attribute; device identity is unchanged.
 
-The first such node is `livestack_node.embedding.serve` — `POST /v1/embeddings`
+**The fleet's only embedder is EmbeddingGemma 2 at 512 dimensions** (owner
+decision 2026-10-12) -- see "The fleet embedder" below. The generic ONNX CPU node
+`livestack_node.embedding.serve` stays as framework (it has no default model:
+`HARMONY_EMBED_MODELS` is required, and nothing in the fleet should set it);
+`serve_gemma` is the node to deploy. `POST /v1/embeddings`
 (OpenAI-shaped, `encoding_format: "base64"` for compact float32), ONNX Runtime
 on the CPU, one text per inference (q8 quantizes activations per tensor, so a
 batched text's vector would depend on its neighbours). Deployment and how to
 add a host: benchday `docs/cpu-embedder.md`.
+
+### The fleet embedder (the only one)
+
+Every embedding in the fleet is `google/embeddinggemma-2` at 512 dims, asked of
+the gateway -- never an address, never Ollama / TEI / a cloud provider:
+
+    POST http://100.64.0.18:8188/v1/embeddings       # HARMONY_URL overrides
+    {"model": "require:class=embed,model=google/embeddinggemma-2,dim=512",
+     "input": ["..."]}
+
+- `model` must START with `require:`. A `harmony/` prefix means the gateway sees
+  no requirement and answers 400 "N embedding models meet this need"; a bare
+  `class=embed` is refused as ambiguous.
+- At most 16 texts per call; clip each to ~1800 characters (the slot is 2048
+  tokens, longer is HTTP 413); retry socket errors / 503 up to 3 times.
+- Check the response `model` is `google/embeddinggemma-2` and every vector has
+  512 floats; otherwise throw a named error, never return `[]` or zeros.
+- TypeScript: `embedTexts` / `generateEmbedding` in `@livestack/llm-utils`
+  (`llm-utils/src/harmony-embedding.ts`) does all of the above, cached on disk
+  under `.embedding-cache/embeddinggemma-2-512`.
+
+Vectors of any other model or dimension are a different space: a store holding
+them is dropped and re-embedded, not mixed.
 
 ### A multimodal embedder: `livestack_node.embedding.serve_gemma`
 
@@ -1334,7 +1361,9 @@ up on stays filtered, however empty its card.
   is the fleet broker — observe-only, peers on all three GPU hosts.
 - **zz-joe** (build/test host): `harmony-embed-cpu.service` (:8220) — the CPU
   embedding node (`kind=embed`, device `zz-joe/cpu`), announced to its own
-  hostd and the fleet broker.
+  hostd and the fleet broker. It was deployed serving MiniLM
+  (`HARMONY_EMBED_MODELS`); per the one-embedder decision it is to be replaced by
+  `serve_gemma` (deployment is operator work, not done by the code change).
 
 ## Tests
 
