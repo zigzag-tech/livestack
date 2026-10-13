@@ -24,7 +24,7 @@ _MANIFEST_KEYS = {
     'infrastructure_exit_codes', 'files',
 }
 # Optional: absent from every manifest published before metric definitions, so their digests hold.
-_OPTIONAL_KEYS = {'metrics'}
+_OPTIONAL_KEYS = {'metrics', 'progress_contract'}
 
 
 def _fail(reason):
@@ -115,6 +115,13 @@ def validate_manifest(manifest, expected_digest=None):
     if 'metrics' in manifest:
         from .metrics_schema import validate_manifest_metrics
         validate_manifest_metrics(manifest['metrics'])
+
+    if 'progress_contract' in manifest:
+        from .model import progress_contract
+        try:
+            progress_contract(manifest['progress_contract'])
+        except WorkloadError:
+            _fail('handler_manifest_invalid_progress_contract')
 
     files = manifest['files']
     if not isinstance(files, list) or not 1 <= len(files) <= MAX_PACKAGE_FILES:

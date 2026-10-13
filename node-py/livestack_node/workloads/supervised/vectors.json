@@ -1,0 +1,57 @@
+[
+  {"name": "phase then counts emit while the bucket and interval allow",
+   "contract": {"max_silence_seconds": 60, "min_interval_seconds": 1, "max_per_period": {"count": 6, "seconds": 60}},
+   "events": [
+     {"t": 0, "type": "phase", "name": "run"},
+     {"t": 2000, "type": "done", "done": 1, "total": 3, "unit": "steps"},
+     {"t": 4000, "type": "done", "done": 2, "total": 3, "unit": "steps"}],
+   "expect": {"emits": [
+     {"t": 0, "doc": {"phase": "run"}},
+     {"t": 2000, "doc": {"phase": "run", "done": 1, "total": 3, "unit": "steps"}},
+     {"t": 4000, "doc": {"phase": "run", "done": 2, "total": 3, "unit": "steps"}}],
+     "dropped": 0, "verdicts": [{"t": 4000, "state": "ok"}, {"t": 64000, "state": "ok"}, {"t": 64001, "state": "overdue"}]}},
+  {"name": "min interval holds an event back, flush publishes the latest, dropped counts the held event",
+   "contract": {"max_silence_seconds": 30, "min_interval_seconds": 5, "max_per_period": {"count": 6, "seconds": 60}},
+   "events": [
+     {"t": 0, "type": "phase", "name": "build"},
+     {"t": 1000, "type": "tick"},
+     {"t": 2000, "type": "tick"},
+     {"t": 5000, "type": "flush"}],
+   "expect": {"emits": [
+     {"t": 0, "doc": {"phase": "build"}},
+     {"t": 5000, "doc": {"phase": "build", "beat": 2}}],
+     "dropped": 2, "verdicts": [{"t": 32000, "state": "ok"}, {"t": 32001, "state": "overdue"}]}},
+  {"name": "token bucket caps a burst and refills with time",
+   "contract": {"max_silence_seconds": 30, "min_interval_seconds": 0, "max_per_period": {"count": 2, "seconds": 60}},
+   "events": [
+     {"t": 0, "type": "phase", "name": "a"},
+     {"t": 0, "type": "phase", "name": "b"},
+     {"t": 0, "type": "phase", "name": "c"},
+     {"t": 29999, "type": "flush"},
+     {"t": 30000, "type": "flush"}],
+   "expect": {"emits": [
+     {"t": 0, "doc": {"phase": "a"}},
+     {"t": 0, "doc": {"phase": "b"}},
+     {"t": 30000, "doc": {"phase": "c"}}],
+     "dropped": 1, "verdicts": [{"t": 30000, "state": "ok"}]}},
+  {"name": "an identical document is not re-emitted and spends no token",
+   "contract": {"max_silence_seconds": 30, "min_interval_seconds": 0, "max_per_period": {"count": 1, "seconds": 60}},
+   "events": [
+     {"t": 0, "type": "phase", "name": "a"},
+     {"t": 10, "type": "phase", "name": "a"},
+     {"t": 20, "type": "done"}],
+   "expect": {"emits": [{"t": 0, "doc": {"phase": "a"}}], "dropped": 0, "verdicts": []}},
+  {"name": "a new phase clears counts, and a message rides along",
+   "contract": {"max_silence_seconds": 30, "min_interval_seconds": 0, "max_per_period": {"count": 10, "seconds": 10}},
+   "events": [
+     {"t": 0, "type": "phase", "name": "a"},
+     {"t": 1, "type": "done", "done": 5, "total": 5, "unit": "files", "message": "all five"},
+     {"t": 2, "type": "phase", "name": "b"},
+     {"t": 3, "type": "tick", "message": "linking"}],
+   "expect": {"emits": [
+     {"t": 0, "doc": {"phase": "a"}},
+     {"t": 1, "doc": {"phase": "a", "done": 5, "total": 5, "unit": "files", "message": "all five"}},
+     {"t": 2, "doc": {"phase": "b"}},
+     {"t": 3, "doc": {"phase": "b", "beat": 1, "message": "linking"}}],
+     "dropped": 0, "verdicts": [{"t": 30003, "state": "ok"}, {"t": 30004, "state": "overdue"}]}}
+]

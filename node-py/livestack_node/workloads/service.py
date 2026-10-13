@@ -151,6 +151,7 @@ def main():
             log=lambda message: logging.warning('%s', message))
         store = WorkloadStore(root/'workloads.sqlite', handlers=config['handlers'],
                               limits=Limits(**config.get('limits', {})),
+                              progress_policy=config.get('attempt_progress'),
                               environment_handlers=config.get('environment_handlers', {}),
                               compilation_policy=(CompilationPolicy(
                                   config.get('compilation_policy'), config['compilation_handlers'])
