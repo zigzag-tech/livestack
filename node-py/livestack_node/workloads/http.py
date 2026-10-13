@@ -581,7 +581,7 @@ class Handler(BaseHTTPRequestHandler):
             if parts == ['worker', 'heartbeat']:
                 self._remote_boot(principal, body)
                 return store.heartbeat(principal.worker, body['boot'], body['attempt_id'], body['fence'],
-                                       progress=body.get('progress'))
+                                       progress=body.get('progress'), activity=body.get('activity'))
             if parts == ['worker', 'verify-compilation']:
                 self._remote_boot(principal, body)
                 return store.verify_compilation(principal.worker, body['boot'], body['attempt_id'],

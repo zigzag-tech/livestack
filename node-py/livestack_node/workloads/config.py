@@ -96,6 +96,8 @@ class AuthorityConfig(BaseModel):
     # Stable Livestack source id for the workload identity snapshot endpoint.
     identity_authority_id: Optional[StrictStr] = None
     limits: Optional[dict[str, Any]] = None
+    # Restart-only (SIGHUP does not reload it): see model.progress_policy.
+    attempt_progress: Optional[dict[str, Any]] = None
     blob_limits: Optional[dict[str, Any]] = None
     environment_handlers: Optional[dict[str, Any]] = None
     compilation_handlers: Optional[dict[str, Any]] = None
@@ -117,6 +119,16 @@ class AuthorityConfig(BaseModel):
     @classmethod
     def _tiers(cls, value):
         return _validated(value, 'retention_tiers')
+
+    @field_validator('attempt_progress')
+    @classmethod
+    def _attempt_progress(cls, value):
+        from .model import progress_policy, WorkloadError
+        try:
+            progress_policy(value)
+        except WorkloadError as exc:
+            raise ValueError(str(exc)) from None
+        return value
 
     @field_validator('public_base_url')
     @classmethod
