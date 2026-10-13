@@ -438,7 +438,12 @@ def place(db, now, limits, principals=None, compilation_policy=None, *, only_job
         report = reports[w["id"]]
         observed = {k: min(v, report["available"].get(k, 0)) for k, v in report["capacity"].items()}
         reserved = used.get(w["host"], {})
-        worker_free[w["id"]] = {k: max(0, v - reserved.get(k, 0)) for k, v in observed.items()}
+        # Charged from the CEILING, not the observation: a worker that merely observes 0 free (the default
+        # loadavg cpu signal on a host whose load exceeds its cores, which is permanent on xc-tower-ubuntu)
+        # would otherwise make a starved job's hold clamp the whole host to min(free, 0) - n = negative, and
+        # every other worker on the host was refused 'insufficient shared host resources' (2026-10-13: an
+        # attune job queued 17h held xc-tower-ubuntu's cpu at -1 and blocked release staging).
+        worker_free[w["id"]] = {k: max(0, v - reserved.get(k, 0)) for k, v in report["capacity"].items()}
         # `worker_room` is the FIT test's worker bound: the worker's ceiling less only ITS OWN attempts. Other
         # workers' attempts spend the host (`host_free`, tested alongside), not this worker's ceiling.
         # `worker_free` above (also less every sibling's attempts) stays what holds are charged against, so a

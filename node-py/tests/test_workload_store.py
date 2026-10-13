@@ -791,3 +791,27 @@ def test_equal_priority_jobs_are_not_bound_by_each_others_holds(harness):
     store.submit('owner', request('big-build', handler='build.v1', need={'cpu': 4, 'ram': 1}))
     small = store.submit('owner', request('small-build', handler='build.v1', need={'cpu': 2, 'ram': 1}))
     assert store.claim('r1', 'boot1')['job_id'] == small['id']
+
+
+def test_starved_job_whose_worker_observes_no_free_cpu_does_not_block_its_hosts_other_workers(harness):
+    """2026-10-13, xc-tower-ubuntu: an attune job aged past starvation_seconds because its worker's default
+    loadavg cpu signal reported 0 available (load 65 on 6 cores). Its hold was charged as
+    min(host_free, that worker's observed 0) - 1 = -1 cpu for the WHOLE host, so the idle release stager was
+    refused 'insufficient shared host resources' and release trains stalled. A hold is charged from the
+    worker's ceiling; a worker that observes no free cpu must not zero the host."""
+    _, now, path = harness
+    store = WorkloadStore(path, handlers={'test.v1', 'build.v1'}, clock=lambda: now[0],
+                          limits=Limits(lease_seconds=5000))
+    def roster():
+        store.register('loaded', 'shared', 'boot1', dict(
+            capacity={'cpu': 2, 'ram': 8}, available={'cpu': 0, 'ram': 8},
+            labels={'os': 'linux'}, handlers=['test.v1'], ready=True), cleaned=())
+        register(store, 'stager', 'shared', cpu=6, ram=16, handlers=['build.v1'])
+    roster()
+    store.submit('owner', request('starved', need={'cpu': 1, 'ram': 1}))
+    assert store.claim('loaded', 'boot1') is None
+    now[0] += store.limits.starvation_seconds + 1
+    roster()
+    stage = store.submit('owner', request('stage', handler='build.v1', need={'cpu': 1, 'ram': 1}, priority=1000))
+    claimed = store.claim('stager', 'boot1')
+    assert claimed and claimed['job_id'] == stage['id']
