@@ -29,3 +29,15 @@ Land the contract/admission unit first. Add the adapter and route only behind
 qualified profile admission, verify boundaries with HTTP positive and refusal
 controls, then obtain the service owner's guarded deployment and live readback.
 Plumbing tests do not constitute model quality qualification or enablement.
+
+## Facade runtime seam
+
+The facade installs the route without installing a runtime. The service owner
+must supply `app.state.pane_ask_runtime` as a `PaneAskRuntime`: a qualified
+registry-derived engine adapter and asynchronous strict admission/finish
+callbacks. Admission receives credential-derived owner/realm, profile, request
+identity and deadline. It must reserve this exact engine and retain the lease
+until finish; a warm engine does not excuse broker loss. The adapter checks the
+granted unit/device/backend match. No legacy chat/admit routing is consulted.
+Missing runtime, unqualified identity, broker outage and invalid output have
+distinct named refusals. This seam is not yet wired to the production broker.
