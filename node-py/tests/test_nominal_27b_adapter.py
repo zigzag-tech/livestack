@@ -27,6 +27,8 @@ def engine_http():
 
         def do_POST(self):
             state["calls"].append(json.loads(self.rfile.read(int(self.headers["content-length"]))))
+            if state.get("before_generate"):
+                state["before_generate"]()
             time.sleep(state["delay"])
             raw = state["raw"]
             if raw is None:

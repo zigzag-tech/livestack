@@ -31,6 +31,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from livestack_node import request_log as _request_log
 from livestack_node.decisions.simple_jev import SimpleJevError, classify as simple_jev_classify
 from livestack_node.decisions.pane_ask_ingress import install_pane_ask_route
+from livestack_node.decisions.resident_extraction_scope import ResidentExtractionScope
 from livestack_node.demand_log import (UnitCostStore, UsageTail, demand_log_from_env,
                                        owner_namespace, requirement_hash)
 from livestack_node.preferences import (PreferenceError as _PreferenceError,
@@ -907,6 +908,10 @@ manager, residence = attach(
     idle_seconds=IDLE_EVICT_SECONDS, coload=COLOAD,
     gpu_call=_gpu_call, port=NODE_PORT, readiness=_readiness,
     in_flight=_busy,
+)
+app.state.pane_ask_execution_scope = ResidentExtractionScope(
+    manager=manager, queues=_QUEUES, busy=_busy, max_concurrent=_max_concurrent,
+    engine_is_up=lambda name: _vllm_up(name=name), device_id=DEVICE_ID_SELF,
 )
 
 

@@ -34,3 +34,19 @@ Nine real HTTP controls pass for authenticated scope, exact target, real lease,
 quota/refusal, malformed/oversized receipts and release acknowledgement.
 Production callback installation, local queue/busy integration and real broker
 execution remain open under task 3; wire controls are not residency proof.
+
+Resident-scope integration: the production facade now installs protection that
+uses its existing unit queue, busy counter and managed-unit busy flag. The
+extraction ingress refuses a missing guard before admission and closes a fleet
+lease when a cold/saturated guard refuses. Thirty adapter/ingress/fleet HTTP
+controls pass, including actual queue/busy observations during generation and
+cleanup after malformed engine output. Two immediate-capacity/FIFO controls
+pass. The nine routing checks previously skipped now run with the installed
+Harmony runtime's native shared_py planner; all 20 routing/queue checks pass
+against this worktree with the test broker isolated. This supersedes the local
+missing-native-dependency limitation; no model qualification or deployment is
+inferred. Actual qualified runtime installation remains pending under task 3.
+The combined contract, adapter, ingress, fleet, native-facade routing and queue
+selection passes all 84 checks in the installed Harmony runtime against the
+isolated task worktree. This includes no GPU model execution and does not
+discharge the model qualification or live-serving requirements.

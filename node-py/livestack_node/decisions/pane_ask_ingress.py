@@ -20,6 +20,7 @@ from .auth import authenticate_decision
 from .contract import ContractError, MAX_BODY_BYTES, validate_request
 from .extraction_contract import PROFILE_ID
 from .nominal_27b_adapter import Nominal27BExtractionAdapter
+from .resident_extraction_scope import ResidentExtractionScope
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,9 @@ def install_pane_ask_route(app, principals_supplier):
                 raise ContractError("unsupported_profile", "facade serves only pinned pane-ask extraction", 422)
             if not isinstance(runtime, PaneAskRuntime):
                 raise ContractError("profile_unavailable", "qualified pane-ask runtime is not installed", 503)
+            scope = getattr(app.state, "pane_ask_execution_scope", None)
+            if not isinstance(scope, ResidentExtractionScope):
+                raise ContractError("profile_unavailable", "resident extraction protection is not installed", 503)
             runtime.adapter.engine.validate()
             remaining = payload["deadline_at_ms"] - runtime.adapter.now_ms()
             if remaining > 8000:
@@ -85,7 +89,8 @@ def install_pane_ask_route(app, principals_supplier):
             if not candidate.granted:
                 raise ContractError("capacity", "decision admission refused new work", 429)
             grant = candidate
-            result = await runtime.adapter.infer(payload, admission=grant)
+            async with scope(payload, grant, owner, realm):
+                result = await runtime.adapter.infer(payload, admission=grant)
             return JSONResponse(result)
         except ContractError as exc:
             return JSONResponse(exc.envelope(request_id), status_code=exc.http_status)
