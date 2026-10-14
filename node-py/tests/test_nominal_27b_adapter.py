@@ -35,11 +35,21 @@ def engine_http():
                 self.close_connection = True
                 return
             raw = state["raw"]
+            status = 200
             if raw is None:
-                raw = json.dumps({"choices": [{"finish_reason": state["finish"],
+                value = {"choices": [{"finish_reason": state["finish"],
                     "message": {"content": json.dumps(state["content"])}}],
-                    "usage": {"prompt_tokens": 42}}).encode()
-            self.send_response(200)
+                    "usage": {"prompt_tokens": 42}}
+                mode = state.get('private_receipt')
+                if mode:
+                    identity = 'chatcmpl-' + self.headers['x-harmony-execution-id']
+                    value.update(id=identity, harmony_execution={'request_id': identity, 'completion_confirmed': True})
+                    if mode in ('stopped', 'uncertain'):
+                        status = 504
+                        value = {'request_id': identity, 'cause': 'deadline_exceeded',
+                            'execution_started': True, 'cessation_confirmed': mode == 'stopped'}
+                raw = json.dumps(value).encode()
+            self.send_response(status)
             self.end_headers()
             try:
                 self.wfile.write(raw)

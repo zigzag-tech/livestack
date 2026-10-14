@@ -70,13 +70,22 @@ class ExtractionEndpointPlugin:
                 if not re.fullmatch(r'[0-9a-f]{32}', nonce):
                     raise ContractError('invalid_input', 'engine execution requires a bounded caller nonce', 400)
                 identity = 'chatcmpl-' + nonce
+                supplied_deadline = request.headers.get('x-harmony-execution-deadline-ms', '')
+                if not re.fullmatch(r'[0-9]{13}', supplied_deadline):
+                    raise ContractError('invalid_input', 'engine execution requires an absolute deadline', 400)
+                budget = (int(supplied_deadline) - int(time.time() * 1000)) / 1000
+                if budget <= 0:
+                    raise ContractError('deadline_exceeded', 'engine execution already expired', 504)
+                if budget > 8:
+                    raise ContractError('invalid_input', 'engine execution deadline exceeds eight seconds', 400)
+                expires = began + budget
                 if runtime.gate.locked():
                     raise ContractError('capacity', 'engine execution ingress slot is occupied', 429)
                 await runtime.gate.acquire()
                 acquired = True
                 raw = bytearray()
                 try:
-                    async with asyncio.timeout(8):
+                    async with asyncio.timeout(max(0, expires - time.monotonic())):
                         async for chunk in request.stream():
                             if len(raw) + len(chunk) > MAX_BODY_BYTES:
                                 raise ContractError('invalid_input', 'engine execution body exceeds 64 KiB', 400)
@@ -110,7 +119,7 @@ class ExtractionEndpointPlugin:
                         raise ContractError('invalid_output', 'engine returned no correlated completion', 422)
                     return response.model_dump(mode='json')
 
-                remaining = 8 - (time.monotonic() - began)
+                remaining = expires - time.monotonic()
                 if remaining <= 0:
                     raise ContractError('deadline_exceeded', 'engine execution expired before dispatch', 504)
                 value = await runtime.control.execute(identity, start, timeout_seconds=remaining)
@@ -124,7 +133,7 @@ class ExtractionEndpointPlugin:
                         and runtime.control.active is None}, status_code=exc.http_status)
             except Exception:
                 logging.error('protected extraction execution failed; result refused')
-                return JSONResponse({'error': 'protected engine execution failed',
+                return JSONResponse({**ContractError('unhealthy', 'protected engine execution failed', 503).envelope(identity),
                     'execution_started': started, 'cessation_confirmed': started and runtime.control.active is None}, status_code=503)
             finally:
                 if acquired:

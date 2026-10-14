@@ -57,10 +57,11 @@ option label 40, reply 80, detail 120; at most 64 options."""
 
 class Nominal27BExtractionAdapter:
     def __init__(self, engine: QualifiedEngine, *, client: httpx.AsyncClient,
-                 now_ms=None):
+                 now_ms=None, execution_transport=None):
         self.engine = engine
         self.client = client
         self.now_ms = now_ms or (lambda: int(time.time() * 1000))
+        self.execution_transport = execution_transport
 
     async def infer(self, request: dict, *, admission: Admission) -> dict:
         started = self.now_ms()
@@ -91,7 +92,8 @@ class Nominal27BExtractionAdapter:
             # A closed HTTP socket is not an acknowledgement that GPU work
             # stopped. Keep the engine connection and the enclosing resident
             # scope until the non-streaming completion actually returns.
-            task = asyncio.create_task(self._generate(body))
+            task = asyncio.create_task(self.execution_transport.generate(body,
+                deadline_at_ms=request['deadline_at_ms']) if self.execution_transport is not None else self._generate(body))
             try:
                 done, _ = await asyncio.wait({task}, timeout=remaining / 1000)
                 if not done:

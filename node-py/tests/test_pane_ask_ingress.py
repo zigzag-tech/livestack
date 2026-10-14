@@ -17,6 +17,7 @@ from livestack_node.decisions.admission import Admission
 from livestack_node.decisions.nominal_27b_adapter import Nominal27BExtractionAdapter
 from livestack_node.decisions.pane_ask_ingress import PaneAskRuntime, install_pane_ask_route
 from livestack_node.decisions.resident_extraction_scope import ResidentExtractionScope
+from livestack_node.decisions.protected_execution_transport import ProtectedExecutionTransport
 from unit_queue import Queues
 from test_decision_service import PRINCIPALS, _headers
 from test_nominal_27b_adapter import engine_http, request
@@ -72,9 +73,13 @@ def scenario(engine, state, *, fault=None):
 
         async with httpx.AsyncClient() as engine_client:
             selected = replace(engine, qualification_hash="unqualified") if fault == "unqualified" else engine
+            transport = None
+            if state.get('private_receipt'):
+                selected = replace(selected, endpoint=selected.endpoint.replace('/v1/chat/completions', '/harmony/extraction'))
+                transport = ProtectedExecutionTransport(client=engine_client, endpoint=selected.endpoint)
             if fault != "no_runtime":
                 app.state.pane_ask_runtime = PaneAskRuntime(
-                    Nominal27BExtractionAdapter(selected, client=engine_client), admit, finish)
+                    Nominal27BExtractionAdapter(selected, client=engine_client, execution_transport=transport), admit, finish)
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://fixture") as client:
                 headers = _headers(realm=None) if fault == "no_realm" else _headers()
                 req = request()
@@ -106,7 +111,7 @@ def scenario(engine, state, *, fault=None):
                     response = await client.post("/v1/decisions", json=req, headers=headers)
                 if held:
                     held.release()
-                if state.get("disconnect"):
+                if state.get("disconnect") or state.get('private_receipt') == 'uncertain':
                     assert counters["busy"] == 1 and unit.busy
                     assert queues.status(engine.unit, 1)["in_flight"] == 1
                     assert releases == []
@@ -162,6 +167,22 @@ def test_disconnected_engine_retains_reservations_and_refuses_redispatch(engine_
     assert "reservations retained" in response.json()["detail"]
     assert len(admissions) == 2
     assert not state["completed"].is_set()
+
+
+@pytest.mark.parametrize('receipt', ['complete', 'stopped', 'uncertain'])
+def test_private_receipt_controls_all_reservation_cleanup(engine_http, receipt):
+    engine, state = engine_http
+    state['private_receipt'] = receipt
+    response, admissions, releases, _ = scenario(engine, state)
+    assert state['protected'] == (True, 1, 1)
+    if receipt == 'uncertain':
+        assert response.status_code == 503
+        assert releases == ['lease-retry']  # original uncertain execution stays held
+        assert len(admissions) == 2
+    else:
+        assert response.status_code == (200 if receipt == 'complete' else 504)
+        assert releases == ['lease-test']
+        assert len(admissions) == 1
 
 
 @pytest.mark.parametrize("fault,cause,status", [("no_scope", "profile_unavailable", 503),

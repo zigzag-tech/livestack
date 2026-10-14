@@ -134,3 +134,16 @@ confirmed stop is reported; an uncertain stop keeps the single execution slot.
 No Responses API store, model promotion or public runtime installation occurs.
 Facade transport wiring, successful native completion, real GPU termination
 and source-quality qualification remain required before guarded rollout.
+
+`ProtectedExecutionTransport` connects the facade adapter to that private
+endpoint. It permits only loopback HTTP, no credential-bearing URL, and the
+exact execution route. Credentials remain in a client initialized from private
+settings. Every call carries a fresh nonce and the caller's absolute deadline.
+One response is capped at 64 KiB and the transport wait at fourteen seconds
+(eight for execution, two for renderer collection, two for the GPU receipt,
+with transport allowance). Missing, malformed or mismatched completion/stop
+receipts propagate `ExecutionUnconfirmed`, retaining all reservations. A
+correlated stop or explicit non-execution propagates the typed engine failure
+and allows normal cleanup. Real HTTP facade controls cover completion, confirmed
+stop and uncertain-stop cleanup through the actual queue and broker callback.
+These are protocol controls, not actual GPU or model-quality qualification.

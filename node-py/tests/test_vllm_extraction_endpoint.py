@@ -4,6 +4,7 @@ Malformed/authentication/body-limit controls cannot certify engine behavior;
 successful native generation and GPU cessation require deployed qualification.
 """
 import asyncio
+import time
 
 from fastapi import FastAPI
 import httpx
@@ -22,7 +23,8 @@ def post(body, *, token=True, host='127.0.0.1', configured=True):
         transport = httpx.ASGITransport(app=app, client=(host, 10000))
         async with httpx.AsyncClient(transport=transport, base_url='http://fixture') as client:
             headers = {'authorization': 'Bearer fixture-control-token-with-32-characters',
-                'x-harmony-execution-id': 'a' * 32} if token else {}
+                'x-harmony-execution-id': 'a' * 32,
+                'x-harmony-execution-deadline-ms': str(int(time.time()*1000)+8000)} if token else {}
             return await client.post('/harmony/extraction', content=body, headers=headers)
     return asyncio.run(run())
 
@@ -54,7 +56,8 @@ def test_slow_authenticated_body_occupies_only_one_ingress_slot():
             entered.set(); await finish.wait(); yield b'{}'
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://fixture') as client:
             headers = {'authorization': 'Bearer fixture-control-token-with-32-characters',
-                'x-harmony-execution-id': 'a' * 32}
+                'x-harmony-execution-id': 'a' * 32,
+                'x-harmony-execution-deadline-ms': str(int(time.time()*1000)+8000)}
             pending = asyncio.create_task(client.post('/harmony/extraction', content=body(), headers=headers))
             await entered.wait()
             rejected = await client.post('/harmony/extraction', content=b'{}', headers=headers)
