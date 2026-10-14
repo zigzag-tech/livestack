@@ -75,3 +75,20 @@ finite execution lifetime and confirmation of termination on transport failure
 or stuck execution. The installed vLLM's development-only abort route is not
 enabled by this change and is not accepted as termination proof. No backend is
 qualified by the HTTP fixture's completion signal.
+
+## Production cessation candidate
+
+The installed vLLM source supports `--worker-extension-cls` and collective RPC.
+`vllm_execution_barrier.py` supplies a storage-free extension that synchronizes
+its actual CUDA device and returns a correlated nonce. Its frontend helper
+aborts the tracked extraction first, then obtains the worker receipt on the
+same ordered single-engine IPC channel. Async scheduling, deferred batches,
+data/pipeline/tensor parallelism, a missing extension and any invalid or missing
+receipt refuse. The two-second RPC bound names unconfirmed cessation; it never
+allows release on timeout. This is candidate support, not a GPU qualification.
+
+The restrictions matter: a deferred batch could launch work after a bare CUDA
+barrier, and an HTTP cancellation only proves a closed socket. Installation
+still needs a protected facade-to-engine execution-control surface, a qualified
+synchronous launch configuration and actual GPU outage/cancellation evidence.
+No vLLM development route or unbounded Responses API store is enabled.
