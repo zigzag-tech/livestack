@@ -1347,7 +1347,7 @@ up on stays filtered, however empty its card.
 | `LIVESTACK_CAPABILITY_TTL` | `15` | seconds a node's `/capability` is cached for `/fleet`. That surface is polled, and a probe to Nanjing costs 0.5-1.5 s |
 | `LIVESTACK_PEER_SUSPECT_SECONDS` | `45` | unseen before a peer is `suspect` |
 | `LIVESTACK_PEER_MIA_SECONDS` | `600` | unseen before a peer is `mia` |
-| `LIVESTACK_PEER_PRUNE_SECONDS` | — | unset ⇒ pruning DISABLED (delete-shaped bound) |
+| `LIVESTACK_PEER_PRUNE_SECONDS` | `86400` | unseen before a peer is forgotten — registered peers **and seeds**, so a moved/renamed node (or a loopback seed shadowing a mesh-registered one) stops sitting in `/fleet` as `mia`. Logged at start and per prune (`pruned absent peer: <key> (<source>, unseen <s>s)`). A pruned seed returns at the next broker start; a registered peer when it announces. `0`/`off` disables; any other non-positive or non-numeric value refuses to start |
 | `LIVESTACK_DEVICE_ID` | derived | this node's device id; derived from the CUDA device UUID / MLX when unset |
 | `LIVESTACK_NODE_HOST` | `127.0.0.1` | read by NODES: the address a node announces ITSELF at. Loopback is right for a broker on the same machine and wrong for one anywhere else — an unreachable registration sits `suspect` forever with a connect error, looking like a dead node rather than a bad address. A node cannot infer this, so it is the operator's to state |
 | `LIVESTACK_BROKER_URL` | `http://127.0.0.1:8799` | read by NODES: a **comma list** of brokers to report for duty to. One entry is a node and its host broker; two is the fleet case. An announce reaches all of them and fails only if none answered — a fleet broker being down must not make a node look unregistered to the broker that arbitrates its card |

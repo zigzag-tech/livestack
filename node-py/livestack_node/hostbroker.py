@@ -776,18 +776,21 @@ class HostBroker:
                 "peers": len(self.peers)}
 
     def prune_absent(self) -> List[str]:
-        """Forget registered peers that have been gone past the prune window.
-        Seeds are never pruned and an unset window disables this entirely, so
-        the roster shrinks only where shrinking is provably safe: a registered
-        peer re-announces the moment it returns."""
+        """Forget peers that have been gone past the prune window. Registered
+        peers re-announce the moment they return; a seed is pruned only where
+        the policy opts in (`MembershipPolicy.prune_seeds`), and is restored by
+        the next start of the broker. An unset window disables this entirely."""
         gone = self.roster.prunable()
+        rows = {r["peer"]: r for r in self.roster.snapshot()} if gone else {}
         for key in gone:
             self.peers = [p for p in self.peers if peer_key(p) != key]
             self.roster.drop(key)
             self._last_probe_error.pop(key, None)
             self._probe_degradation.pop(key, None)
             self.peer_report.pop(key, None)
-            self._log(f"[membership] pruned absent peer: {key}")
+            row = rows.get(key, {})
+            self._log(f"[membership] pruned absent peer: {key} "
+                      f"({row.get('source', '?')}, unseen {row.get('unseen_seconds', '?')}s)")
         return gone
 
     def membership_snapshot(self) -> List[dict]:
