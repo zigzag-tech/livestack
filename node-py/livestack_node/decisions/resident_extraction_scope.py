@@ -6,8 +6,10 @@ sets the same managed-unit busy flag as the chat proxy. Cold work is a named
 refusal: no unadmitted model load or background thread is started here.
 """
 from contextlib import asynccontextmanager
+import logging
 
 from .contract import ContractError
+from .execution_uncertain import ExecutionUnconfirmed
 
 
 class ResidentExtractionScope:
@@ -36,6 +38,7 @@ class ResidentExtractionScope:
             raise ContractError("capacity", "qualified extraction engine has no immediate capacity", 429)
         unit = self.manager.units[name]
         counted = False
+        retain = False
         try:
             self.busy.acquire()
             counted = True
@@ -47,13 +50,18 @@ class ResidentExtractionScope:
             if name not in self.manager.resident or not self.engine_is_up(name):
                 raise ContractError("unhealthy", "extraction engine vanished before dispatch", 503)
             yield
+        except ExecutionUnconfirmed:
+            retain = True
+            logging.error("resident extraction cessation unconfirmed; unit=%s capacity and busy state retained", name)
+            raise
         except ContractError:
             raise
         except Exception as exc:
             raise ContractError("unhealthy", "resident extraction execution failed", 503) from exc
         finally:
-            slot.release()
-            if counted:
-                self.busy.release()
-            if self.queues.status(name, limit)["in_flight"] == 0:
-                unit.busy = False
+            if not retain:
+                slot.release()
+                if counted:
+                    self.busy.release()
+                if self.queues.status(name, limit)["in_flight"] == 0:
+                    unit.busy = False

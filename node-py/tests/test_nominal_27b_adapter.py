@@ -30,6 +30,10 @@ def engine_http():
             if state.get("before_generate"):
                 state["before_generate"]()
             time.sleep(state["delay"])
+            if state.get("disconnect"):
+                # Real accepted HTTP request with no completion receipt.
+                self.close_connection = True
+                return
             raw = state["raw"]
             if raw is None:
                 raw = json.dumps({"choices": [{"finish_reason": state["finish"],

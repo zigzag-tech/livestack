@@ -16,6 +16,7 @@ import httpx
 from .admission import Admission
 from .contract import ContractError, MAX_BODY_BYTES, validate_request, validate_result
 from .extraction_contract import PROFILE_ID, validate_extraction
+from .execution_uncertain import ExecutionUnconfirmed
 from .identity import PACKING_VERSION, SCHEMA_VERSION
 
 
@@ -101,9 +102,9 @@ class Nominal27BExtractionAdapter:
                 await self._collect_execution(task)
                 raise
         except (TimeoutError, httpx.TimeoutException) as exc:
-            raise ContractError("deadline_exceeded", "27B extraction deadline exceeded", 504) from exc
+            raise ExecutionUnconfirmed("unhealthy", "engine timeout did not confirm execution cessation; reservations retained", 503) from exc
         except httpx.HTTPError as exc:
-            raise ContractError("unhealthy", "admitted 27B engine is unavailable", 503) from exc
+            raise ExecutionUnconfirmed("unhealthy", "engine transport failed without cessation evidence; reservations retained", 503) from exc
         if self.now_ms() >= request["deadline_at_ms"]:
             raise ContractError("deadline_exceeded", "27B extraction completed after deadline", 504)
         try:
@@ -166,7 +167,7 @@ class Nominal27BExtractionAdapter:
             raw = bytearray()
             async for chunk in response.aiter_bytes():
                 if len(raw) + len(chunk) > MAX_BODY_BYTES:
-                    raise ContractError("invalid_output", "27B engine response exceeds 64 KiB", 422)
+                    raise ExecutionUnconfirmed("invalid_output", "27B engine response exceeds 64 KiB; cessation unconfirmed and reservations retained", 422)
                 raw.extend(chunk)
             try:
                 value = json.loads(raw)
