@@ -110,7 +110,7 @@ from typing import Any, Dict, List, Optional
 from .hostbroker import HostBroker, RestPeer
 from .mesh_peer import MeshPeer, RelayRoute, facade_id
 from . import relay_control
-from .membership import MembershipPolicy, RosterFull
+from .membership import MembershipPolicy, RosterFull, policy_from_env
 from .fleet_scheduler import SchedulerPolicy
 from .planner import Defer, Device, Request, Residency, Unit, Evict, Grant, Load, plan as _plan
 
@@ -1318,16 +1318,12 @@ def main():
             extra_units[kind] = Unit(kind, {}, priority=u.get("priority", 100),
                                      residency=Residency.UNPINNED)
     # Membership thresholds. The defaults are the whole point — a fleet should
-    # not have to configure these to get sane behaviour. LIVESTACK_PEER_PRUNE
-    # is deliberately UNSET by default: this bound deletes rather than rotates,
-    # and an unset window must mean disabled, never "delete on the next deploy".
-    prune_env = os.environ.get("LIVESTACK_PEER_PRUNE_SECONDS", "").strip()
-    membership = MembershipPolicy(
-        suspect_after_s=float(os.environ.get("LIVESTACK_PEER_SUSPECT_SECONDS", "45")),
-        mia_after_s=float(os.environ.get("LIVESTACK_PEER_MIA_SECONDS", "600")),
-        prune_after_s=float(prune_env) if prune_env else None,
-        max_peers=int(os.environ.get("LIVESTACK_MAX_PEERS", "32")),
-    )
+    # not have to configure these to get sane behaviour (see policy_from_env for
+    # the prune window, the one delete-shaped bound among them).
+    membership = policy_from_env(os.environ)
+    print(f"[hostd] peer prune window: "
+          f"{'disabled' if membership.prune_after_s is None else f'{membership.prune_after_s:.0f}s'}",
+          flush=True)
     # apply (default) = host broker; observe = fleet broker. The default is what
     # keeps every existing deployment byte-for-byte unchanged.
     dispatch = os.environ.get("LIVESTACK_DISPATCH", "apply").strip().lower() != "observe"
