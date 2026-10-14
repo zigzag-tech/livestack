@@ -27,3 +27,10 @@ cancellation cleanup. Task 3 remains open for actual registry/broker wiring.
 The nine existing serving-facade routing checks skip locally because the
 compiled shared_py residency planner is absent; they are not counted as passes.
 Do not build that native dependency on the shared tower to clear this limitation.
+
+Strict fleet callback unit: fleet_extraction_admission.py implements the current
+fleet lease wire API with no degrade-to-grant behavior, retries or request store.
+Nine real HTTP controls pass for authenticated scope, exact target, real lease,
+quota/refusal, malformed/oversized receipts and release acknowledgement.
+Production callback installation, local queue/busy integration and real broker
+execution remain open under task 3; wire controls are not residency proof.
