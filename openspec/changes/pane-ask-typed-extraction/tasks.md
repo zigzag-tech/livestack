@@ -73,3 +73,18 @@ input-kind and negative examples and cannot independently qualify the profile.
 The 67-row surface in the baseline belongs to admission classification, not
 extraction. ASR documentation still names zero usable held-out contexts; no
 new genuine file-filter capture or qualification receipt has been found.
+
+Operator delegated worker deployment and qualification on 2026-10-14. The task
+checkout was restored from its retained branch and advanced to current origin.
+Installed vLLM source inspection found a supported worker-extension/collective
+RPC seam, with abort requests retained in the ordered input queue. Candidate
+`vllm_execution_barrier.py` supplies a correlated CUDA synchronization receipt
+after abort, and refuses async/deferred batches and all parallel layouts. Four
+receipt/configuration vectors pass, including a deliberately uncorrelated
+receipt and refusal before any work for unsupported configurations. The module
+retains no request/response store. These are source controls, not actual GPU
+termination evidence. Protected engine execution control, actual synchronous
+configuration qualification, runtime installation and guarded rollout remain
+required under tasks 3–5. No development abort API or unbounded Responses store
+was enabled. The genuine 32-row development surface is privately captured with
+its recorded SHA; the sealed final surface remains unopened.
