@@ -1,0 +1,91 @@
+time="2026-10-14T11:48:49.279558728-04:00" level=info msg="Starting up"
+time="2026-10-14T11:48:49.279956588-04:00" level=warning msg="Running in rootless mode. This mode has feature limitations."
+time="2026-10-14T11:48:49.279962658-04:00" level=info msg="Running with RootlessKit integration"
+time="2026-10-14T11:48:49.280110278-04:00" level=info msg="containerd not running, starting managed containerd"
+time="2026-10-14T11:48:49.280814557-04:00" level=info msg="started new containerd process" address=/run/harmony/exec/containerd/containerd.sock binary=/usr/bin/containerd module=supervisor pid=4027872
+time="2026-10-14T11:48:49-04:00" level=warning msg="Configuration migrated from version 2, use `containerd config migrate` to avoid migration" t="6.51µs"
+time="2026-10-14T11:48:49.335779686-04:00" level=info msg="starting containerd" revision=ee2735368117d2eb259779949d5e75cdafec9761 version=v2.3.6
+time="2026-10-14T11:48:49.335914986-04:00" level=info msg="loading plugin" id=io.containerd.content.v1.content type=io.containerd.content.v1
+time="2026-10-14T11:48:49.359285234-04:00" level=warning msg="failed check for fsverity support" error="enable fsverity failed: operation not supported" path=/run/harmony/data/containerd/daemon/io.containerd.content.v1.content
+time="2026-10-14T11:48:49.359338904-04:00" level=info msg="loading plugin" id=io.containerd.image-verifier.v1.bindir type=io.containerd.image-verifier.v1
+time="2026-10-14T11:48:49.359350864-04:00" level=info msg="loading plugin" id=io.containerd.internal.v1.opt type=io.containerd.internal.v1
+time="2026-10-14T11:48:49.359390504-04:00" level=info msg="loading plugin" id=io.containerd.warning.v1.deprecations type=io.containerd.warning.v1
+time="2026-10-14T11:48:49.559803747-04:00" level=info msg="CDI directory does not exist, skipping" dir=/run/harmony/cdi
+time="2026-10-14T11:48:49.631982097-04:00" level=info msg="Creating a containerd client" address=/run/harmony/exec/containerd/containerd.sock timeout=1m0s
+time="2026-10-14T11:48:49.632392326-04:00" level=warning msg="failed check for fsverity support" error="enable fsverity failed: operation not supported" path=/run/harmony/data/plugins/storage
+time="2026-10-14T11:48:49.784992361-04:00" level=info msg="Loading containers: start."
+time="2026-10-14T11:48:49.785039981-04:00" level=info msg="NRI is disabled"
+time="2026-10-14T11:48:49.785049101-04:00" level=info msg="[graphdriver] trying configured driver: overlay2"
+time="2026-10-14T11:48:53.574143500-04:00" level=info msg="Restoring containers: start."
+time="2026-10-14T11:48:53.609844773-04:00" level=info msg="Deleting nftables IPv4 rules" error="running nft: /dev/stdin:1:17-30: Error: Could not process rule: No such file or directory\ndelete table ip docker-bridges\n                ^^^^^^^^^^^^^^\n exit status 1"
+time="2026-10-14T11:48:53.641838480-04:00" level=info msg="Deleting nftables IPv6 rules" error="running nft: /dev/stdin:1:18-31: Error: Could not process rule: No such file or directory\ndelete table ip6 docker-bridges\n                 ^^^^^^^^^^^^^^\n exit status 1"
+time="2026-10-14T11:48:53.641868710-04:00" level=info msg="skipping firewalld management for rootless mode"
+time="2026-10-14T11:48:54.027335478-04:00" level=info msg="Loading containers: done."
+time="2026-10-14T11:48:54.054756034-04:00" level=warning msg="WARNING: Running in rootless-mode without cgroups. Systemd is required to enable cgroups in rootless-mode."
+time="2026-10-14T11:48:54.054798354-04:00" level=info msg="Docker daemon" commit=464cd50 containerd-snapshotter=false storage-driver=overlay2 version=29.8.1
+time="2026-10-14T11:48:54.054835094-04:00" level=info msg="Initializing buildkit"
+time="2026-10-14T11:48:54.055013704-04:00" level=warning msg="failed check for fsverity support" error="enable fsverity failed: operation not supported" path=/run/harmony/data/buildkit/content
+time="2026-10-14T11:48:54.342189813-04:00" level=info msg="Completed buildkit initialization"
+time="2026-10-14T11:48:54.345322852-04:00" level=info msg="Daemon has completed initialization"
+[... pub get output elided ...]
+1 package is discontinued.
+125 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+00:00 +0: loading /var/lib/livestack-workloads/zz-joe-e2e-1/workspace/1cd245f6c57644d59e433f102b6bdac6/.flutter-check-b17w4omf/native-build/benchday/test/providers/focus_intent_allowlist_coverage_test.dart
+00:00 +0: (setUpAll)
+00:00 +0: every cause that can reach focus() is allowlisted
+00:00 +0 -1: every cause that can reach focus() is allowlisted [E]
+  Expected: empty
+    Actual: [
+              '  lens-detail  (from PaneOpenRouter reason)',
+              '  link  (from PaneOpenRouter reason)'
+            ]
+  These causes can reach PaneFocusNotifier.focus() but are not on kFocusIntentNeedsPointer, so admitsFocusIntent REFUSES them. It fails closed, so each of these is an action the user takes that would silently do nothing:
+    lens-detail  (from PaneOpenRouter reason)
+    link  (from PaneOpenRouter reason)
+  
+  Add each to the allowlist, deciding whether it needs a pointer: a cause emitted by a surface that also lays itself out does; a cause that originates outside the screen does not.
+  
+  package:matcher                                                 expect
+  package:flutter_test/src/widget_tester.dart 473:18              expect
+  test/providers/focus_intent_allowlist_coverage_test.dart 132:5  main.<fn>
+  
+00:00 +0 -1: the allowlist has no entries that nothing can reach
+00:00 +1 -1: (tearDownAll)
+00:00 +1 -1: Some tests failed.
+--- flutter test: last 154 lines of tool output ---
+Resolving dependencies...
+Downloading packages...
+[... retried tool output elided ...]
+  These causes can reach PaneFocusNotifier.focus() but are not on kFocusIntentNeedsPointer, so admitsFocusIntent REFUSES them. It fails closed, so each of these is an action the user takes that would silently do nothing:
+    lens-detail  (from PaneOpenRouter reason)
+    link  (from PaneOpenRouter reason)
+  
+  Add each to the allowlist, deciding whether it needs a pointer: a cause emitted by a surface that also lays itself out does; a cause that originates outside the screen does not.
+  
+  package:matcher                                                 expect
+  package:flutter_test/src/widget_tester.dart 473:18              expect
+  test/providers/focus_intent_allowlist_coverage_test.dart 132:5  main.<fn>
+  
+00:00 +0 -1: the allowlist has no entries that nothing can reach
+00:00 +1 -1: (tearDownAll)
+00:00 +1 -1: Some tests failed.
+Traceback (most recent call last):
+  File "/home/worker/.local/share/benchday-harmony-handlers/777127f32cd114f9f3f0693095d0ea8953167225/scripts/harmony_flutter_check.py", line 323, in <module>
+    run_flutter_check(os.environ['HARMONY_INPUT'],os.environ['HARMONY_OUTPUT'],os.environ['HARMONY_REQUEST'],
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                      registry_path=args.registry)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/worker/.local/share/benchday-harmony-handlers/777127f32cd114f9f3f0693095d0ea8953167225/scripts/harmony_flutter_check.py", line 295, in run_flutter_check
+    run(['flutter',request['mode'],*(['-j','4'] if request['mode']=='test' else []),*args], 'test')
+    ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/worker/.local/share/benchday-harmony-handlers/777127f32cd114f9f3f0693095d0ea8953167225/scripts/harmony_flutter_check.py", line 217, in run
+    run_with_cause(command,step=' '.join(command[:2]),cwd=tree,env=env,timeout=5400)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/worker/.local/share/benchday-harmony-handlers/777127f32cd114f9f3f0693095d0ea8953167225/scripts/command_cause.py", line 94, in run_with_cause
+    raise CommandFailed(code, command, '%s failed with exit %s; cause: %s' % (step, code, _cause(strict, broad, lines)))
+command_cause.CommandFailed: flutter test failed with exit 1; cause: 00:00 +1 -1: Some tests failed.
+time="2026-10-14T11:50:16.339192332-04:00" level=info msg="Processing signal 'terminated'"
+time="2026-10-14T11:50:16.340251961-04:00" level=info msg="stopping event stream following graceful shutdown" error="<nil>" module=libcontainerd namespace=moby
+time="2026-10-14T11:50:16.340821351-04:00" level=info msg="stopping containerd healthcheck following graceful shutdown" binary=/usr/bin/containerd module=supervisor pid=4027872
+time="2026-10-14T11:50:16.340854261-04:00" level=info msg="stopping event stream following graceful shutdown" error="context canceled" module=libcontainerd namespace=plugins.moby
