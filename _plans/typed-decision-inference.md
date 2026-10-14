@@ -1,5 +1,13 @@
 # Typed-decision inference through Harmony
 
+**Additive extraction extension, 2026-10-13 (implementation in progress).**
+`openspec/changes/pane-ask-typed-extraction` extends the generic wire contract
+to v1.1.0 for the existing nominal-27B pane-ask profile. Contract copies now
+include bounded extraction and its recorded qualification identity. Retired
+Laya adapters explicitly refuse it. This does not qualify or enable a model;
+adapter/facade integration, genuine qualification and owner-operated rollout
+remain pending. The closing evidence below describes the historical v1.0 work.
+
 **Status:** closed — plumbing shipped; the portable CUDA/MLX profile was
 **abandoned, not completed**, and a different model now serves the capability.
 
