@@ -147,3 +147,20 @@ correlated stop or explicit non-execution propagates the typed engine failure
 and allows normal cleanup. Real HTTP facade controls cover completion, confirmed
 stop and uncertain-stop cleanup through the actual queue and broker callback.
 These are protocol controls, not actual GPU or model-quality qualification.
+
+The serving facade's startup hook now reads an optional private runtime
+configuration at `/etc/harmony/pane-ask-runtime.json` (8 KiB). It binds the exact
+local host, CUDA device and managed unit, checks the immutable profile bytes
+against their registry digest and qualification hash, and refuses the committed
+`:unqualified` profile before loading credentials. Matching physical-kind
+membership is mandatory. No source count or declared engine name promotes a
+profile. Qualified rollout must update the consumer/worker profile pin together
+using the actual measured qualification identity.
+
+Only after those checks does it create one protected-engine client and one
+strict-fleet client, with connection limits of one and two respectively. Startup
+owns at most that pair; shutdown closes both and disables the runtime. A refused
+prerequisite is recorded by a named phase and reaches callers as
+`profile_unavailable`; credentials and configuration values are never logged.
+The real shipped-profile refusal controls pass. No genuine qualified profile
+exists yet, so successful native installation/readback remains unproven.

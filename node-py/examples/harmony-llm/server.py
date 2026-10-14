@@ -32,6 +32,7 @@ from livestack_node import request_log as _request_log
 from livestack_node.decisions.simple_jev import SimpleJevError, classify as simple_jev_classify
 from livestack_node.decisions.pane_ask_ingress import install_pane_ask_route
 from livestack_node.decisions.resident_extraction_scope import ResidentExtractionScope
+from livestack_node.decisions.pane_ask_runtime_install import register_pane_ask_runtime_installer
 from livestack_node.demand_log import (UnitCostStore, UsageTail, demand_log_from_env,
                                        owner_namespace, requirement_hash)
 from livestack_node.preferences import (PreferenceError as _PreferenceError,
@@ -913,6 +914,7 @@ app.state.pane_ask_execution_scope = ResidentExtractionScope(
     manager=manager, queues=_QUEUES, busy=_busy, max_concurrent=_max_concurrent,
     engine_is_up=lambda name: _vllm_up(name=name), device_id=DEVICE_ID_SELF,
 )
+register_pane_ask_runtime_installer(app, host_id=HOST_ID, device_id=DEVICE_ID_SELF, units=manager.units)
 
 
 # A unit whose vLLM died is NOT resident, whatever this process last believed.

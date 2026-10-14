@@ -88,3 +88,21 @@ configuration qualification, runtime installation and guarded rollout remain
 required under tasks 3–5. No development abort API or unbounded Responses store
 was enabled. The genuine 32-row development surface is privately captured with
 its recorded SHA; the sealed final surface remains unopened.
+
+Protected execution source subsequently landed in `88cc5ad6`, `76389598`,
+`ed9c102a` and `da2a5ef2`: transport loss retains all reservations, frontend
+cancellation precedes the supported GPU barrier, the opt-in private endpoint
+enforces authentication/loopback/body/deadline policy, and the facade verifies
+correlated completion/stop receipts. Thirty-five targeted HTTP/facade controls
+pass. Those controls are not actual native GPU cessation or quality evidence.
+
+The production startup installer now verifies the local host/device/unit and
+immutable registry profile before loading credentials or creating clients.
+The committed unqualified profile is refused explicitly, even with a matching
+artifact digest. The facade reports the named failed prerequisite phase.
+Nineteen installer/ingress controls pass; twenty native facade-routing/queue
+controls pass in the installed Harmony Python runtime with an isolated broker
+address. OpenSpec validation and source compilation pass. Task 3 remains open
+for a genuinely qualified profile, actual configuration installation, and
+successful native engine/broker readback. Tasks 4–5 remain unproven. No runtime
+has been enabled by these source controls or by source/inventory counts.
