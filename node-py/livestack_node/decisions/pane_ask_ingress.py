@@ -68,7 +68,9 @@ def install_pane_ask_route(app, principals_supplier):
             if payload["profile_id"] != PROFILE_ID or payload["questions"][0]["type"] != "extraction":
                 raise ContractError("unsupported_profile", "facade serves only pinned pane-ask extraction", 422)
             if not isinstance(runtime, PaneAskRuntime):
-                raise ContractError("profile_unavailable", "qualified pane-ask runtime is not installed", 503)
+                refusal = getattr(app.state, 'pane_ask_runtime_refusal', None)
+                detail = refusal['detail'] if isinstance(refusal, dict) and refusal.get('cause') == 'profile_unavailable' else "qualified pane-ask runtime is not installed"
+                raise ContractError("profile_unavailable", detail, 503)
             scope = getattr(app.state, "pane_ask_execution_scope", None)
             if not isinstance(scope, ResidentExtractionScope):
                 raise ContractError("profile_unavailable", "resident extraction protection is not installed", 503)
