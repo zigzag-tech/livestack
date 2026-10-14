@@ -40,4 +40,16 @@ identity and deadline. It must reserve this exact engine and retain the lease
 until finish; a warm engine does not excuse broker loss. The adapter checks the
 granted unit/device/backend match. No legacy chat/admit routing is consulted.
 Missing runtime, unqualified identity, broker outage and invalid output have
-distinct named refusals. This seam is not yet wired to the production broker.
+distinct named refusals.
+
+`FleetExtractionAdmission` supplies strict callbacks using the existing
+`/fleet/admit` and lease release APIs. It checks a real lease, unit, device,
+host and registry-qualified target; an unexpected grant is released without
+inference. Account/capacity refusal remains distinct from broker failure.
+It records no local request history and never consults legacy `/admit`.
+
+Production runtime installation remains pending. A fleet lease reserves a
+node's concurrency, but does not load the model or bracket the serving facade's
+local queue/busy state. Runtime installation must preserve those existing
+controls, use genuine qualified metadata, and avoid a raw-engine call that can
+be evicted while in flight. The current absent-runtime refusal stays in force.
