@@ -92,3 +92,13 @@ barrier, and an HTTP cancellation only proves a closed socket. Installation
 still needs a protected facade-to-engine execution-control surface, a qualified
 synchronous launch configuration and actual GPU outage/cancellation evidence.
 No vLLM development route or unbounded Responses API store is enabled.
+
+Transport failure and an oversized response before completion now propagate an
+explicit `ExecutionUnconfirmed` marker. The resident scope retains the actual
+queue slot and busy accounting; the ingress retains the fleet grant. A later
+request cannot redispatch into the occupied local slot. This uses only the
+existing bounded capacity counters, not a growing quarantine history. A real
+accepted HTTP disconnect control verifies all three reservations and refusal
+of redispatch. Complete malformed output still releases normally. Recovery and
+bounded cessation remain pending the protected engine control and genuine GPU
+qualification; this cleanup repair does not enable runtime installation.

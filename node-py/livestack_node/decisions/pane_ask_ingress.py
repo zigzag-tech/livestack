@@ -19,6 +19,7 @@ from .admission import Admission
 from .auth import authenticate_decision
 from .contract import ContractError, MAX_BODY_BYTES, validate_request
 from .extraction_contract import PROFILE_ID
+from .execution_uncertain import ExecutionUnconfirmed
 from .nominal_27b_adapter import Nominal27BExtractionAdapter
 from .resident_extraction_scope import ResidentExtractionScope
 
@@ -36,6 +37,7 @@ def install_pane_ask_route(app, principals_supplier):
         request_id = ""
         grant = None
         runtime = None
+        retain_grant = False
         try:
             # Authenticate before reading a potentially unbounded stream.
             owner, realm, _ = authenticate_decision(principals_supplier() or {},
@@ -92,10 +94,13 @@ def install_pane_ask_route(app, principals_supplier):
             async with scope(payload, grant, owner, realm):
                 result = await runtime.adapter.infer(payload, admission=grant)
             return JSONResponse(result)
+        except ExecutionUnconfirmed as exc:
+            retain_grant = True
+            return JSONResponse(exc.envelope(request_id), status_code=exc.http_status)
         except ContractError as exc:
             return JSONResponse(exc.envelope(request_id), status_code=exc.http_status)
         finally:
-            if grant is not None:
+            if grant is not None and not retain_grant:
                 # Release failure propagates instead of pretending a lease was
                 # closed. The facade's exception instrumentation records it.
                 await asyncio.wait_for(runtime.finish(grant), timeout=1)

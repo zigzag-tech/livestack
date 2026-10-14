@@ -64,7 +64,8 @@ def scenario(engine, state, *, fault=None):
             admissions.append(scope)
             if fault == "broker_down":
                 raise ConnectionError("fixture broker unreachable")
-            return Admission(True, engine.unit, engine.backend, engine.device_id, True, "lease-test")
+            lease = "lease-test" if len(admissions) == 1 else "lease-retry"
+            return Admission(True, engine.unit, engine.backend, engine.device_id, True, lease)
 
         async def finish(grant):
             releases.append(grant.lease_id)
@@ -105,6 +106,16 @@ def scenario(engine, state, *, fault=None):
                     response = await client.post("/v1/decisions", json=req, headers=headers)
                 if held:
                     held.release()
+                if state.get("disconnect"):
+                    assert counters["busy"] == 1 and unit.busy
+                    assert queues.status(engine.unit, 1)["in_flight"] == 1
+                    assert releases == []
+                    # Another request must refuse without redispatching GPU work.
+                    retry = await client.post("/v1/decisions", json=request(), headers=headers)
+                    assert retry.status_code == 429
+                    assert len(state["calls"]) == 1
+                    assert releases == ["lease-retry"]  # only the undispatched retry
+                    return response, admissions, releases, req
                 assert counters["busy"] == 0
                 assert queues.status(engine.unit, 1)["in_flight"] == 0
                 assert not unit.busy
@@ -141,6 +152,16 @@ def test_facade_closes_admission_when_engine_output_fails(engine_http):
     response, admissions, releases, _ = scenario(engine, state)
     assert response.status_code == 422 and response.json()["cause"] == "invalid_output"
     assert len(admissions) == 1 and releases == ["lease-test"]
+
+
+def test_disconnected_engine_retains_reservations_and_refuses_redispatch(engine_http):
+    engine, state = engine_http
+    state["disconnect"] = True
+    response, admissions, releases, _ = scenario(engine, state)
+    assert response.status_code == 503 and response.json()["cause"] == "unhealthy"
+    assert "reservations retained" in response.json()["detail"]
+    assert len(admissions) == 2
+    assert not state["completed"].is_set()
 
 
 @pytest.mark.parametrize("fault,cause,status", [("no_scope", "profile_unavailable", 503),
