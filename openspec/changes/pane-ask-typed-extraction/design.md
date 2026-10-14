@@ -102,3 +102,15 @@ accepted HTTP disconnect control verifies all three reservations and refusal
 of redispatch. Complete malformed output still releases normally. Recovery and
 bounded cessation remain pending the protected engine control and genuine GPU
 qualification; this cleanup repair does not enable runtime installation.
+
+The installed vLLM API server exposes the opt-in `vllm.endpoint_plugins` seam:
+its `init_state` receives the same engine client as the serving handlers.
+`TrackedExtractionExecution` supplies the endpoint's bounded frontend owner.
+It refuses unsupported launch configurations before rendering, owns at most
+one task, and cancels/collects the renderer before aborting and synchronizing
+the GPU. Renderer collection is bounded at two seconds and the GPU receipt at
+two seconds. An uncollected renderer or invalid GPU receipt retains that one
+slot and refuses redispatch. No receipt/request history is appended. The
+endpoint must still authenticate and cap its body at 64 KiB, supply exactly the
+same tracked request identity to the chat renderer, and wire the control to the
+facade. Adversarial task controls are not real vLLM execution qualification.

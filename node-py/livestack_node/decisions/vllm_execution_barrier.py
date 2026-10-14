@@ -41,20 +41,7 @@ async def abort_and_confirm(engine_client, request_id: str, *, workers: int,
         raise ContractError("invalid_input", "invalid tracked extraction request identity", 400)
     if type(workers) is not int or not 1 <= workers <= 8 or not 0 < timeout_seconds <= 2:
         raise ContractError("invalid_input", "invalid extraction barrier bounds", 400)
-    cls = type(getattr(engine_client, "engine_core", None))
-    if cls.__module__ != "vllm.v1.engine.core_client" or cls.__name__ != "AsyncMPClient":
-        raise ContractError("profile_unavailable", "extraction requires proven single-engine IPC ordering", 503)
-    config = getattr(engine_client, "vllm_config", None)
-    scheduler = getattr(config, "scheduler_config", None)
-    parallel = getattr(config, "parallel_config", None)
-    if (getattr(config, "max_concurrent_batches", None) != 1
-            or getattr(scheduler, "async_scheduling", None) is not False
-            or any(getattr(parallel, field, None) != 1 for field in
-                   ("data_parallel_size", "pipeline_parallel_size", "tensor_parallel_size"))
-            or workers != 1
-            or getattr(parallel, "worker_extension_cls", None) !=
-               "livestack_node.decisions.vllm_execution_barrier.ExtractionExecutionBarrier"):
-        raise ContractError("profile_unavailable", "extraction stop requires the qualified synchronous single-worker configuration", 503)
+    validate_execution_configuration(engine_client, workers=workers)
     nonce = secrets.token_hex(16)
     try:
         async with asyncio.timeout(timeout_seconds):
@@ -73,3 +60,21 @@ async def abort_and_confirm(engine_client, request_id: str, *, workers: int,
     if not valid:
         raise ContractError("unhealthy", "extraction stop receipt is invalid; reservations must remain held", 503)
     return receipts
+
+
+def validate_execution_configuration(engine_client, *, workers=1):
+    """Reject an unsupported launch before rendering or starting generation."""
+    cls = type(getattr(engine_client, "engine_core", None))
+    if cls.__module__ != "vllm.v1.engine.core_client" or cls.__name__ != "AsyncMPClient":
+        raise ContractError("profile_unavailable", "extraction requires proven single-engine IPC ordering", 503)
+    config = getattr(engine_client, "vllm_config", None)
+    scheduler = getattr(config, "scheduler_config", None)
+    parallel = getattr(config, "parallel_config", None)
+    if (getattr(config, "max_concurrent_batches", None) != 1
+            or getattr(scheduler, "async_scheduling", None) is not False
+            or any(getattr(parallel, field, None) != 1 for field in
+                   ("data_parallel_size", "pipeline_parallel_size", "tensor_parallel_size"))
+            or workers != 1
+            or getattr(parallel, "worker_extension_cls", None) !=
+               "livestack_node.decisions.vllm_execution_barrier.ExtractionExecutionBarrier"):
+        raise ContractError("profile_unavailable", "extraction stop requires the qualified synchronous single-worker configuration", 503)
