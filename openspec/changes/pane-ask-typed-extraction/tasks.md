@@ -60,3 +60,16 @@ only after it completes. These controls use a test HTTP backend, not a GPU
 qualification. Production enablement still requires finite execution and
 confirmed termination under transport failure/stuck execution; no development
 abort API was enabled or used. Task 3/4 remain incomplete for those requirements.
+
+Development-source verification: the remote extractor dev file exists, is
+320,339 bytes and contains 32 rows, with SHA-256
+0c1fa70e360726628432f98eba2b2b8c78e86300a141237d49ab10d7df49c0eb,
+matching Benchday's committed pane-question baseline. Only metadata/schema and
+kind counts were inspected via read-only SSH after the file RPC connection
+closed twice. No transcript text was copied into this repository and the final
+surface was not opened. The metadata-only manifest is
+node-py/docs/decisions/pane-ask-development-source.json. This surface lacks
+input-kind and negative examples and cannot independently qualify the profile.
+The 67-row surface in the baseline belongs to admission classification, not
+extraction. ASR documentation still names zero usable held-out contexts; no
+new genuine file-filter capture or qualification receipt has been found.

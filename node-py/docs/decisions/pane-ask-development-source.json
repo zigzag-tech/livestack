@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "purpose": "Development evaluation source for the existing nominal 27B pane-ask profile; no qualification is asserted",
+  "source_link": "https://benchday.app/s/6Z75DWZ91K",
+  "sha256": "0c1fa70e360726628432f98eba2b2b8c78e86300a141237d49ab10d7df49c0eb",
+  "bytes": 320339,
+  "rows": 32,
+  "verification": "Read-only SSH metadata inspection after two bounded Benchday file reads failed with daemon connection closure; hash matches the committed Benchday pane-question baseline",
+  "kind_counts": {"confirm": 13, "choice": 15, "multi": 2, "open": 2, "input": 0},
+  "source_fields": ["agent", "cwd", "gkey", "gold_ask", "gold_quote", "pane_key", "secs_since_last_msg", "tail", "title", "ts"],
+  "gold_fields": ["free_text", "kind", "options", "question"],
+  "tail_fields": ["kinds", "raw_type", "role", "seq", "text", "ts_ms"],
+  "option_fields": ["detail", "label", "reply"],
+  "coverage_limits": [
+    "Positive extraction examples only; no negative or no_grounded_ask evaluation surface",
+    "No input-kind examples",
+    "No trustworthy language labels",
+    "No real nominal-27B execution, memory or latency measurements collected",
+    "No transport-failure or stuck-execution termination evidence collected"
+  ],
+  "production_text_copied_to_repository": false,
+  "final_surface_opened": false,
+  "qualified": false
+}
