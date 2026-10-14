@@ -70,3 +70,19 @@ inside classification SHALL yield cause `unknown` with the classifier error in e
 #### Scenario: Classifier error
 - **WHEN** reading the cgroup raises an unexpected exception
 - **THEN** the attempt still completes, with cause `unknown` and `evidence.classifier_error`
+
+### Requirement: A failed handler's cause names the decisive log line
+
+For every non-succeeded completion the worker SHALL ship `result.log_excerpt`: one line of at most 300 bytes, `exit N: <first
+error line of command.log>` (the last non-empty line when none matches), never a line that matches a secret pattern, with URL
+credentials removed. The authority SHALL re-clean it (its bounds, not the worker's) and carry it as `cause.evidence.excerpt` for
+`handler_failed` and `unknown`, and SHALL derive the job `reason` as `handler failed: <excerpt>` for `handler_failed`, so a job that
+failed on landed code never reads as "failed, no reason". An unreadable log SHALL leave the excerpt absent, never invented.
+
+The class rule is: `outcome=product_failure` iff `cause.kind=handler_failed` (landed code, or a product assertion, failed);
+every other non-success is infrastructure (worker, harness environment, scheduling). Consumers SHALL take the class from the
+authority's outcome and cause, never from the absence of an artifact.
+
+#### Scenario: Landed script with a SyntaxError
+- **WHEN** a handler runs a node script that fails with `SyntaxError: Identifier 'x' has already been declared`
+- **THEN** the job ends `product_failure`, cause `handler_failed` with `evidence.excerpt` starting `exit 1: SyntaxError: Identifier 'x'`, and `reason` `handler failed: ` plus that excerpt

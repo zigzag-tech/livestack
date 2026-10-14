@@ -52,3 +52,12 @@ Worker half verified on origin/main (`resource_usage.py` reports `unit_result`/`
 worker change remains: the next worker release built from main carries it, so it is batched with the pending cores-claim worker roll
 (`fd17f036`), one worker at a idle gap. Until a worker runs it, a unit killed by systemd shows `cause=unknown` without `unit_result`.
 ZZOPS now prints `job.cause` (kind, retry, evidence) in the Harmony terminal failure text, or `cause: none recorded` (zzops 772e371).
+
+## Record (2026-10-14)
+
+`handler_failed` evidence was only `exit_code`, and `reason` stayed empty, so a job that failed on a landed SyntaxError read "failed,
+authority gave no reason" in ZZOPS. The worker now ships `result.log_excerpt` (`workloads/log_excerpt.py`, from command.log) and the
+authority carries it as `cause.evidence.excerpt` and derives `reason` from it (`causes.reason_of`). Needs a worker roll to produce the
+excerpt (old workers: cause as before, no excerpt) and an authority deploy to carry it. Tests: `tests/test_log_excerpt.py`, and the
+real systemd + node process test `test_handler_running_a_script_with_a_syntax_error_ends_with_a_labelled_cause` in
+`tests/test_workload_worker.py`. Pre-existing failure unrelated to this: `test_outcome_causes.py::test_busy_worker_blocker_and_cleared_on_claim`.

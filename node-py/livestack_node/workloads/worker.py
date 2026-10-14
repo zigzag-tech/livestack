@@ -23,6 +23,7 @@ from urllib.error import HTTPError
 from ..hostview import HostView, cgroup_nonreclaimable
 from .archive import relative_path, unpack
 from . import docker_cache
+from . import log_excerpt
 from . import dependency_cache
 from .docker_runtime import RuntimeCleanupRefused, remove_data
 from .client import WorkloadClient
@@ -1060,6 +1061,12 @@ class WorkloadWorker:
                     continue
                 artifacts.append(dict(name=path.name, **artifact))
         completion['result']['artifacts'] = artifacts
+        if completion['outcome'] != 'succeeded':
+            # The decisive command.log line rides the completion so the authority's typed cause can name
+            # what broke (log_excerpt.py); None means the log was unreadable, and stays absent, not invented.
+            found = log_excerpt.excerpt(Path(output)/'command.log', completion['result'].get('exit_code'))
+            if found is not None:
+                completion['result']['log_excerpt'] = found
         completion.update(boot=assignment['boot'], attempt_id=assignment['attempt_id'], fence=assignment['fence'],
                           input_digest=assignment['spec']['input_digest'])
         if assignment.get('handler_release') is not None:
