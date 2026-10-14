@@ -30,6 +30,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from livestack_node import request_log as _request_log
 from livestack_node.decisions.simple_jev import SimpleJevError, classify as simple_jev_classify
+from livestack_node.decisions.pane_ask_ingress import install_pane_ask_route
 from livestack_node.demand_log import (UnitCostStore, UsageTail, demand_log_from_env,
                                        owner_namespace, requirement_hash)
 from livestack_node.preferences import (PreferenceError as _PreferenceError,
@@ -745,6 +746,7 @@ async def _shared_client() -> httpx.AsyncClient:
 
 
 app = FastAPI(title="harmony-llm", version="1.0.0")
+install_pane_ask_route(app, _classifier_principals)
 
 # EAGER. The whole point: a credential source that cannot be read is a startup
 # line, not a per-request 500 discovered by whoever was calling at the time.
