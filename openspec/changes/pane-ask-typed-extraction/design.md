@@ -114,3 +114,23 @@ slot and refuses redispatch. No receipt/request history is appended. The
 endpoint must still authenticate and cap its body at 64 KiB, supply exactly the
 same tracked request identity to the chat renderer, and wire the control to the
 facade. Adversarial task controls are not real vLLM execution qualification.
+
+`vllm_extraction_endpoint.py` registers an opt-in endpoint plugin named
+`harmony_extraction_execution`. The installed vLLM loader requires an explicit
+plugin allowlist; packaging does not activate it. Initialization reads an owned
+private configuration at `/etc/harmony/extraction-execution.json` (4 KiB), with
+exact keys `version: 1`, `tokenFile` and `model`. The credential file is at most
+256 bytes and private; configuration symlinks and public permissions refuse.
+The model must be an engine base alias, not a personal LoRA alias. Missing
+configuration or unsupported engine ordering leaves the private route unavailable.
+
+The private `/harmony/extraction` route requires loopback, its credential and a
+32-hex caller nonce before reading a 64 KiB body. A single ingress lock bounds
+simultaneous body buffering to one request. It enforces the exact fixed generation
+policy, and bounds body-plus-generation publication to eight seconds. It calls
+the native chat handler without the raw HTTP request, so client request-id
+headers cannot override the tracked engine identity. Correlated completion or
+confirmed stop is reported; an uncertain stop keeps the single execution slot.
+No Responses API store, model promotion or public runtime installation occurs.
+Facade transport wiring, successful native completion, real GPU termination
+and source-quality qualification remain required before guarded rollout.
