@@ -7,6 +7,7 @@ not model qualification or deployment evidence.
 import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
+import time
 
 from fastapi import FastAPI
 import httpx
@@ -76,7 +77,32 @@ def scenario(engine, state, *, fault=None):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://fixture") as client:
                 headers = _headers(realm=None) if fault == "no_realm" else _headers()
                 req = request()
-                response = await client.post("/v1/decisions", json=req, headers=headers)
+                if fault in ("expired_running", "cancelled_running"):
+                    if fault == "expired_running":
+                        req["deadline_at_ms"] = int(time.time() * 1000) + 200
+                    pending = asyncio.create_task(client.post("/v1/decisions", json=req, headers=headers))
+                    until = time.monotonic() + 1
+                    while not state["calls"] and time.monotonic() < until:
+                        await asyncio.sleep(0.005)
+                    assert state["calls"]
+                    if fault == "cancelled_running":
+                        pending.cancel()
+                    await asyncio.sleep(0.25)
+                    assert not state["completed"].is_set()
+                    assert not pending.done()
+                    assert releases == [] and unit.busy and counters["busy"] == 1
+                    assert queues.status(engine.unit, 1)["in_flight"] == 1
+                    if fault == "cancelled_running":
+                        with pytest.raises(asyncio.CancelledError):
+                            await pending
+                        assert state["completed"].is_set()
+                        assert releases == ["lease-test"]
+                        assert not unit.busy and counters["busy"] == 0
+                        assert queues.status(engine.unit, 1)["in_flight"] == 0
+                        return None, admissions, releases, req
+                    response = await pending
+                else:
+                    response = await client.post("/v1/decisions", json=req, headers=headers)
                 if held:
                     held.release()
                 assert counters["busy"] == 0
@@ -128,3 +154,14 @@ def test_facade_refuses_unprotected_cold_or_saturated_execution(engine_http, fau
     expected = 0 if fault == "no_scope" else 1
     assert len(admissions) == expected
     assert len(releases) == expected
+
+
+@pytest.mark.parametrize("fault", ["expired_running", "cancelled_running"])
+def test_running_execution_keeps_all_reservations_until_backend_completion(engine_http, fault):
+    engine, state = engine_http
+    state["delay"] = 0.75
+    response, admissions, releases, _ = scenario(engine, state, fault=fault)
+    if response is not None:
+        assert response.status_code == 504 and response.json()["cause"] == "deadline_exceeded"
+    assert len(admissions) == 1 and releases == ["lease-test"]
+    assert state["completed"].is_set()

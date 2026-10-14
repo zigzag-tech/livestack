@@ -58,3 +58,20 @@ without starting a model load. Capacity, busy state and the fleet lease are
 released on failed output as well as success. Existing FIFO waiters retain
 priority. Runtime installation still requires genuine qualified registry
 metadata. The current absent-runtime refusal stays in force.
+
+## Execution completion and caller expiry
+
+The caller deadline controls publication, not the lifetime of admitted GPU
+work. Cancelling an HTTP task cannot by itself acknowledge GPU termination.
+The adapter now leaves the engine connection open and collects its non-streaming
+completion before leaving the resident scope, even after caller expiry or
+cancellation. Repeated caller cancellation cannot cancel that collection.
+The expired/cancelled result is discarded and the outer scope/fleet cleanup
+then releases the reservation. The host's existing eight-second fetch deadline
+continues to bound its demand-publication wait.
+
+Before runtime installation, backend qualification still needs to prove a
+finite execution lifetime and confirmation of termination on transport failure
+or stuck execution. The installed vLLM's development-only abort route is not
+enabled by this change and is not accepted as termination proof. No backend is
+qualified by the HTTP fixture's completion signal.

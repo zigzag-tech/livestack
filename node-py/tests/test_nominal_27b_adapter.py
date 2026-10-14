@@ -19,7 +19,7 @@ from test_pane_ask_extraction_contract import extraction_request
 def engine_http():
     state = {"calls": [], "content": {"outcome": "ask", "request_quote": "Proceed?",
              "kind": "confirm", "question": "Proceed?", "cue": "Confirm", "options": []},
-             "finish": "stop", "raw": None, "delay": 0}
+             "finish": "stop", "raw": None, "delay": 0, "completed": threading.Event()}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -41,6 +41,8 @@ def engine_http():
                 self.wfile.write(raw)
             except (BrokenPipeError, ConnectionResetError):
                 pass  # Expected only for the client deadline/size cancellation controls.
+            finally:
+                state["completed"].set()
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -121,7 +123,7 @@ def test_real_engine_invalid_output_is_a_named_failure(engine_http, fault):
     assert len(state["calls"]) == 1
 
 
-def test_real_engine_deadline_cancels_without_fallback(engine_http):
+def test_real_engine_deadline_collects_execution_without_fallback(engine_http):
     engine, state = engine_http
     state["delay"] = 0.5
     req = request()
@@ -130,3 +132,4 @@ def test_real_engine_deadline_cancels_without_fallback(engine_http):
         infer(engine, req)
     assert error.value.cause == "deadline_exceeded"
     assert len(state["calls"]) == 1
+    assert state["completed"].is_set()

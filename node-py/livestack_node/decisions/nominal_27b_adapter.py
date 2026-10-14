@@ -86,20 +86,19 @@ class Nominal27BExtractionAdapter:
         if remaining <= 0:
             raise ContractError("deadline_exceeded", "extraction expired before engine dispatch", 504)
         try:
-            # Own the deadline explicitly: HTTPX/AnyIO's cancellation cleanup
-            # may alter asyncio's cancellation count, defeating wait_for's
-            # conversion from CancelledError to TimeoutError.
+            # Caller expiry discards the result, not the running reservation.
+            # A closed HTTP socket is not an acknowledgement that GPU work
+            # stopped. Keep the engine connection and the enclosing resident
+            # scope until the non-streaming completion actually returns.
             task = asyncio.create_task(self._generate(body))
             try:
                 done, _ = await asyncio.wait({task}, timeout=remaining / 1000)
                 if not done:
-                    task.cancel()
-                    await asyncio.gather(task, return_exceptions=True)
+                    await self._collect_execution(task)
                     raise ContractError("deadline_exceeded", "27B extraction deadline exceeded", 504)
                 data = task.result()
             except asyncio.CancelledError:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+                await self._collect_execution(task)
                 raise
         except (TimeoutError, httpx.TimeoutException) as exc:
             raise ContractError("deadline_exceeded", "27B extraction deadline exceeded", 504) from exc
@@ -142,6 +141,22 @@ class Nominal27BExtractionAdapter:
         }
         validate_result(result, request=request)
         return result
+
+    @staticmethod
+    async def _collect_execution(task):
+        # Repeated caller cancellation must not cancel the admitted engine
+        # task. Keep accounting held while collecting its actual completion.
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        # Consume a terminal failure so it cannot become an unobserved task
+        # exception. Execution-outage qualification remains required before
+        # installing a runtime; transport failure alone is not GPU stop proof.
+        return task.result()
 
     async def _generate(self, body: dict) -> dict:
         # One absolute deadline owns cancellation. A competing HTTPX/AnyIO
