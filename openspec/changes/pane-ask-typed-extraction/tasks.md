@@ -50,3 +50,13 @@ The combined contract, adapter, ingress, fleet, native-facade routing and queue
 selection passes all 84 checks in the installed Harmony runtime against the
 isolated task worktree. This includes no GPU model execution and does not
 discharge the model qualification or live-serving requirements.
+
+Execution-accounting correction supersedes the earlier cancel-the-HTTP-task
+deadline implementation: expiry/cancellation now collect engine completion
+while retaining local capacity, busy state and the fleet lease. Twenty-two
+adapter/ingress controls pass, and two additional real HTTP lifecycle controls
+observe all reservations held while the backend remains active and released
+only after it completes. These controls use a test HTTP backend, not a GPU
+qualification. Production enablement still requires finite execution and
+confirmed termination under transport failure/stuck execution; no development
+abort API was enabled or used. Task 3/4 remain incomplete for those requirements.
