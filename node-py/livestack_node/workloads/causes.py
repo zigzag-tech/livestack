@@ -11,6 +11,7 @@ infrastructure and never guessed to be an OOM kill.
 """
 from __future__ import annotations
 
+from .log_excerpt import clean as clean_excerpt
 from .model import encode
 
 CAUSE_BYTES = 2048
@@ -75,11 +76,27 @@ def derive(outcome, result, *, breach=None, fence=None, attempts=None):
                     fence=fence, attempts=attempts)
 
 
+def _excerpt(result):
+    found = clean_excerpt(result.get("log_excerpt"))
+    return {"excerpt": found} if found else {}
+
+
+def reason_of(cause):
+    """The human line for a terminal job whose cause names a log excerpt; None when it has none."""
+    if isinstance(cause, dict) and cause.get("kind") == "handler_failed":
+        found = (cause.get("evidence") or {}).get("excerpt")
+        if found:
+            return "handler failed: " + found
+    return None
+
+
 def _derive(outcome, result, breach, fence, attempts):
     if outcome == "succeeded":
         return make("succeeded")
     if outcome == "product_failure":
-        return make("handler_failed", {"exit_code": result.get("exit_code")})
+        # The worker's excerpt of command.log is re-cleaned here: the bounds are ours, not the worker's.
+        return make("handler_failed", {"exit_code": result.get("exit_code"),
+                                       **_excerpt(result)})
     resources = result.get("resources") if isinstance(result.get("resources"), dict) else {}
     if breach:
         evidence = {"source": breach.get("source"), "observed": breach.get("observed"),
@@ -106,6 +123,7 @@ def _derive(outcome, result, breach, fence, attempts):
     for key in ("unit_result", "exec_main_status"):
         if resources.get(key) is not None:
             evidence[key] = _text(resources[key], 40)
+    evidence.update(_excerpt(result))
     return make("unknown", evidence, fence=fence, attempts=attempts)
 
 

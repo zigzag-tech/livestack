@@ -1368,8 +1368,10 @@ class WorkloadStore:
             elif outcome == "infrastructure" and fence < self.limits.attempts:
                 state, reason = "queued", "infrastructure retry"
             if state != "queued":
-                cause = encode(causes.derive(outcome, result, breach=breach, fence=fence, attempts=self.limits.attempts),
-                               causes.CAUSE_BYTES)
+                derived = causes.derive(outcome, result, breach=breach, fence=fence, attempts=self.limits.attempts)
+                # A handler that failed on its own code says what broke instead of leaving `reason` empty.
+                reason = reason or causes.reason_of(derived)
+                cause = encode(derived, causes.CAUSE_BYTES)
             db.execute("UPDATE jobs SET state=?,result=?,reason=?,cause=?,updated=? WHERE id=?",
                        (state, job_raw, reason, cause, now, job["id"]))
             result_job = self._job(db, job["id"])

@@ -90,6 +90,12 @@ if request.get('write_mb'):
 if request.get('busy'):
     until=time.process_time()+request['busy']
     while time.process_time()<until: pass
+if request.get('node_syntax_error'):
+    # A real node process failing on a bug in the code it was asked to run, as a landed script would.
+    broken=Path('scripts','lib','e2e-account-scope.mjs')
+    broken.parent.mkdir(parents=True,exist_ok=True)
+    broken.write_text('const accountAgentContextChecks = 1;\\nconst accountAgentContextChecks = 2;\\n')
+    subprocess.run([request['node_syntax_error'],str(broken)]).returncode and sys.exit(1)
 time.sleep(request.get('sleep',0))
 value=Path('input').read_text()
 if request.get('assert_absent') and Path(request['assert_absent']).exists():
@@ -635,6 +641,28 @@ def test_worker_reuses_task_environment_across_captured_source_edits(fleet, tmp_
         if 'worker_b' in locals():
             worker_b.close()
 
+
+
+def test_handler_running_a_script_with_a_syntax_error_ends_with_a_labelled_cause(fleet):
+    # Real process end to end: node prints the SyntaxError into command.log, the worker ships its decisive
+    # line, and the authority's cause and reason name it (not just `exit 1` with no reason).
+    _, config, caller, digest = fleet
+    job = submit(caller, digest, node_syntax_error=shutil.which('node'))
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.step()
+        result = caller.get(job['id'])
+        assert result['state'] == 'failed', result
+        assert result['result']['outcome'] == 'product_failure'
+        cause = result['cause']
+        assert cause['kind'] == 'handler_failed' and cause['retry'] == 'no'
+        excerpt = cause['evidence']['excerpt']
+        assert excerpt.startswith('exit 1: ') and len(excerpt.encode()) <= 300 and '\n' not in excerpt
+        assert "SyntaxError: Identifier 'accountAgentContextChecks' has already been declared" in excerpt
+        assert 'scripts/lib/e2e-account-scope.mjs:2' in excerpt
+        assert result['reason'] == 'handler failed: ' + excerpt
+    finally:
+        worker.close()
 
 
 def test_exit_between_receipt_read_and_unit_inspection_preserves_product_failure(fleet):

@@ -58,7 +58,8 @@ def _outcome(state, result, cause):
         kind = "refused" if cause_kind in _REFUSED_CAUSES else "unknown"
     reason = ""
     if isinstance(result, dict) and isinstance(result.get("result"), dict):
-        reason = result["result"].get("error") or ""
+        inner = result["result"]
+        reason = inner.get("error") or (cause or {}).get("evidence", {}).get("excerpt") or ""
     return {"kind": kind, "reason": _clip(reason or cause_kind or state, 240) or state}
 
 
