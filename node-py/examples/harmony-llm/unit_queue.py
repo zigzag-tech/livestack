@@ -91,6 +91,18 @@ class UnitQueue:
                 raise
         return Slot(self, (time.monotonic() - started) * 1000.0)
 
+    def try_acquire(self) -> "Slot | None":
+        """Take immediate capacity without jumping existing FIFO waiters.
+
+        Deadline-bounded extraction must not strand an executor thread inside
+        acquire() after its caller has timed out. A saturated unit refuses it.
+        """
+        with self._cv:
+            if self._waiting or self._in_flight >= self.max_concurrent:
+                return None
+            self._in_flight += 1
+        return Slot(self, 0.0)
+
     @contextmanager
     def admit(self):
         slot = self.acquire()
@@ -131,6 +143,9 @@ class Queues:
 
     def acquire(self, name: str, max_concurrent: int) -> Slot:
         return self._queue(name, max_concurrent).acquire()
+
+    def try_acquire(self, name: str, max_concurrent: int) -> "Slot | None":
+        return self._queue(name, max_concurrent).try_acquire()
 
     def has_capacity(self, name: str, max_concurrent: int) -> bool:
         with self._lock:

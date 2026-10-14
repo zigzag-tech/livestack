@@ -49,7 +49,12 @@ inference. Account/capacity refusal remains distinct from broker failure.
 It records no local request history and never consults legacy `/admit`.
 
 Production runtime installation remains pending. A fleet lease reserves a
-node's concurrency, but does not load the model or bracket the serving facade's
-local queue/busy state. Runtime installation must preserve those existing
-controls, use genuine qualified metadata, and avoid a raw-engine call that can
-be evicted while in flight. The current absent-runtime refusal stays in force.
+node's concurrency but does not load the model. `ResidentExtractionScope`,
+installed by the facade, borrows immediate capacity from its existing unit
+queue and brackets inference with the existing busy counter and managed-unit
+busy flag. Missing protection is refused before admission. Saturation refuses
+without a stranded blocking waiter; cold/unready engines are named unavailable
+without starting a model load. Capacity, busy state and the fleet lease are
+released on failed output as well as success. Existing FIFO waiters retain
+priority. Runtime installation still requires genuine qualified registry
+metadata. The current absent-runtime refusal stays in force.
