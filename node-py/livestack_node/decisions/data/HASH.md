@@ -1,0 +1,1 @@
+Contract v1.1 content hash: SHA-256 of every JSON file, sorted by its relative POSIX path. For each file append UTF-8 path, NUL, exact file bytes, NUL. HASH and REVISION are metadata and are not hashed. Both repository copies must contain identical JSON bytes and the same digest. Extraction is an additive v1.1 envelope; it does not enable an unqualified profile.

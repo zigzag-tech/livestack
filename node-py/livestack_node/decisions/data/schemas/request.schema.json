@@ -59,28 +59,51 @@
         "source_coverage"
       ],
       "properties": {
-        "current_agent_message": { "type": "string" },
-        "preceding_user_message": { "type": "string" },
+        "current_agent_message": {
+          "type": "string"
+        },
+        "preceding_user_message": {
+          "type": "string"
+        },
         "recent_turns": {
           "type": "array",
           "maxItems": 6,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["role", "text"],
+            "required": [
+              "role",
+              "text"
+            ],
             "properties": {
-              "role": { "type": "string", "enum": ["assistant", "user"] },
-              "text": { "type": "string" }
+              "role": {
+                "type": "string",
+                "enum": [
+                  "assistant",
+                  "user"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
             }
           }
         },
         "execution": {
           "type": "string",
-          "enum": ["settled", "running", "unknown"]
+          "enum": [
+            "settled",
+            "running",
+            "unknown"
+          ]
         },
         "source_coverage": {
           "type": "string",
-          "enum": ["complete", "omitted_older", "insufficient"]
+          "enum": [
+            "complete",
+            "omitted_older",
+            "insufficient"
+          ]
         }
       }
     },
@@ -88,14 +111,20 @@
       "type": "array",
       "minItems": 1,
       "maxItems": 60,
-      "items": { "$ref": "#/definitions/question" }
+      "items": {
+        "$ref": "#/definitions/question"
+      }
     }
   },
   "definitions": {
     "question": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "type", "instructions"],
+      "required": [
+        "id",
+        "type",
+        "instructions"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -104,7 +133,11 @@
         },
         "type": {
           "type": "string",
-          "enum": ["choice", "noul"]
+          "enum": [
+            "choice",
+            "noul",
+            "extraction"
+          ]
         },
         "instructions": {
           "type": "string",
@@ -112,14 +145,22 @@
         },
         "criteria": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
       "if": {
-        "properties": { "type": { "const": "choice" } }
+        "properties": {
+          "type": {
+            "const": "choice"
+          }
+        }
       },
       "then": {
-        "required": ["criteria"]
+        "required": [
+          "criteria"
+        ]
       }
     }
   }
