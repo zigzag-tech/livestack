@@ -61,7 +61,7 @@ def world(tmp_path):
     git(repo, 'init', '-q', '-b', 'main')
     (repo / 'node-py' / 'scripts').mkdir(parents=True)
     shutil.copy(SCRIPT, repo / 'node-py' / 'scripts' / 'build-worker-release.py')
-    base = commit(repo, {'LICENSE': 'x', 'node-py/livestack_node/__init__.py': '',
+    base = commit(repo, {'LICENSE': 'x', 'tools/supervised-handlers.json': '{}', 'node-py/livestack_node/__init__.py': '',
                          'node-py/livestack_node/m.py': 'def f():\n    return 1\n',
                          'node-py/tests/test_ok.py': GOOD_TEST}, when=1000)
     source = tmp_path / 'releases'
@@ -201,6 +201,15 @@ def test_kill_switch_and_dry_run_do_nothing(world):
     world['cfg']['enabled'] = True
     assert world['auto'].run_once(dry_run=True)['outcome'] == 'would_build'
     assert groups_units(world)['e2e'] == world['old_id'] and world['sent'] == []
+
+
+def test_the_gate_tree_carries_repo_root_tools(world, tmp_path):
+    # tests/test_workload_supervised.py reads tools/supervised-handlers.json; a gate tree without tools/ failed at
+    # collection ("1 error") on every commit and no new unit was ever proposed.
+    dest = tmp_path / 'gate-tree'
+    dest.mkdir()
+    ua.Repo(world['repo'], fetch=False).export(world['base'], dest)
+    assert (dest / 'tools' / 'supervised-handlers.json').is_file()
 
 
 def test_excluded_test_files_do_not_gate(world):

@@ -127,8 +127,11 @@ class Repo:
         return int(self.git('rev-list', '--count', f'{base}..{tip}', '--', *RUNTIME_PATHS))
 
     def export(self, commit, dest):
-        """Materialise node-py/ and LICENSE of `commit` into dest (no .git, nothing to clean up but the dir)."""
-        code = subprocess.run(['git', '-C', str(self.path), 'archive', commit, '--', 'node-py', 'LICENSE'],
+        """Materialise node-py/, tools/ and LICENSE of `commit` into dest (no .git, nothing to clean up but the dir).
+
+        tools/ is here because gate tests read repo-root files (tests/test_workload_supervised.py reads
+        tools/supervised-handlers.json); without it the gate failed at collection on every commit."""
+        code = subprocess.run(['git', '-C', str(self.path), 'archive', commit, '--', 'node-py', 'tools', 'LICENSE'],
                               capture_output=True, timeout=300)
         if code.returncode != 0:
             raise Stop('export', code.stderr.decode('utf-8', 'replace')[-120:])
