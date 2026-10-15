@@ -153,3 +153,26 @@ solely to the prompt. The evidence does not support adoption. Forward revert
 `612eb49f` restores the preceding instructions; the candidate was never enabled
 through a qualified public runtime. Both private measurements remain retained,
 and the sealed final is still unopened.
+
+Identity preparation (2026-10-15): the resident engine was restarted with both
+`--revision` and `--tokenizer-revision` pinned to
+`1f05c441c4e64ae0549de44fa9ea5a6d43610314`; the actual serving process arguments
+were inspected after startup. The tokenizer bundle consists of the sorted
+relative names `chat_template.jinja`, `tokenizer.json`, `tokenizer_config.json`.
+Its hash is SHA-256 over each UTF-8 filename, NUL, exact bytes, NUL in that
+order: `09281a005af04302491caa1b7c9f8b2599ce3ecf72ed0af97cfc65c0f9ed25fa`.
+Three native `/tokenize` controls exactly match token IDs from those bytes.
+The pinned model's native completion returned 200 in 273 ms; the 1,500 ms
+deadline returned 504 in 1,533 ms with confirmed cessation.
+
+Actual client-disconnect control did NOT pass: ingress held capacity immediately
+after the socket closed, but the follow-up completion after the collection
+window returned 429 because the prior execution still owned its slot. The log
+names an unconfirmed GPU stop. The controller remains quarantined, preserving
+the reservation instead of accepting more work without cessation evidence.
+Identity/control receipt: 3,836 bytes, SHA-256
+`10ec432bba43702baca6fd4e46e2cc1da37122fbff4defb7aa26b0baf3b83a4d`.
+The failed receipt is retained. A fixed-phase diagnostic now distinguishes
+engine-abort failure from GPU synchronization/receipt failure without logging
+exception payloads. Full transport-loss/broker qualification and quality remain
+unproven; no qualified public runtime or final-corpus evaluation is enabled.
