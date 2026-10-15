@@ -97,12 +97,23 @@ def transfer_byte_limit(config):
     return value
 
 
+# Stall-watchdog limits (stall_watchdog.py): how long the main thread may stay in a
+# phase without announcing the next one. Each exceeds the longest bounded work the phase
+# does (the download budget is 3600 s), so only a wedge reaches them.
+STALL_STEP_SECONDS = 600
+STALL_TRANSFER_SECONDS = 3600 + 300
+STALL_MATERIALIZE_SECONDS = 1800
+STALL_RUNNING_SECONDS = 300
+STALL_HANDOFF_SECONDS = 1800
+
+
 class WorkloadWorker:
     # Match the authority's object bound without widening input/downloads.
     MAX_HANDLER_OUTPUT_BYTES = 8 * 1024**3
 
     def __init__(self, config):
         self.config = config
+        self.watchdog = None  # set by worker_service.main; tests and one-shot callers run without
         self.client = WorkloadClient(config['authority'], config['token'], edge_key=config.get('edge_key'))
         self.journal = WorkerJournal(config['state_dir'])
         # macOS has no cgroups: launchd jobs plus wrapper-enforced limits
@@ -1079,7 +1090,12 @@ class WorkloadWorker:
                     'handler_id', 'release_digest', 'execution_contract', 'payload_schema', 'result_schema')})
         return completion
 
+    def _beat(self, phase, limit):
+        if self.watchdog is not None:
+            self.watchdog.beat(phase, limit)
+
     def step(self):
+        self._beat('step', STALL_STEP_SECONDS)
         if self.journal.read():
             self.reconciled = False
         if not self.reconciled:
@@ -1102,6 +1118,7 @@ class WorkloadWorker:
         assignment = self.client.request('worker/claim', {'boot':self.boot})['assignment']
         if assignment is None:
             return False
+        self._beat('execute', STALL_STEP_SECONDS)
         self.execute(assignment)
         return True
 
@@ -1226,15 +1243,18 @@ class WorkloadWorker:
                                 progress_path=output/'progress.json',
                                 log_dirs=(output, output.parent)).start()
             spec = assignment['spec']
+            self._beat('prepare', STALL_STEP_SECONDS)
             handler = self._handler_for_assignment(assignment)
             handler_backend = handler.get('backend')
             need = spec['need']
             if need.get('cpu', 0) <= 0 or need.get('memory_bytes', 0) < 64*1024**2:
                 raise WorkloadError('native execution requires CPU and at least 64 MiB RAM')
+            self._beat('transfer', STALL_TRANSFER_SECONDS)
             transfer_started = time.monotonic()
             bundle = (self.input_cache.get(assignment) if self.input_cache else
                       self.transfer.get(spec['input_digest'], root/'input.tar', assignment=assignment))
             transfer_seconds += time.monotonic() - transfer_started
+            self._beat('materialize', STALL_MATERIALIZE_SECONDS)
             source_materialization_started = time.monotonic()
             unpack(bundle, root/'source', spec['input_digest'])
             if not self.input_cache:
@@ -1257,11 +1277,13 @@ class WorkloadWorker:
             objects.mkdir()
             for item in spec.get('input_objects', []):
                 destination = objects/item['name']
+                self._beat('transfer', STALL_TRANSFER_SECONDS)
                 transfer_started = time.monotonic()
                 received = self.transfer.get(item['digest'], destination, assignment=assignment)
                 transfer_seconds += time.monotonic() - transfer_started
                 if received.stat().st_size != item['size']:
                     raise WorkloadError('input object size mismatch', 409)
+            self._beat('materialize', STALL_MATERIALIZE_SECONDS)
             output.mkdir()
             (root/'request.json').write_text(encode(spec['payload']))
             env = self._attempt_env(assignment, root, output, objects, attempt, source_path=execution_cwd,
@@ -1307,6 +1329,7 @@ class WorkloadWorker:
             cpu_window = CpuPeak()
             disk_baseline, disk_sampled = (filesystem_used(execution_cwd) if attempt_cgroup is not None else None), 0.0
             while True:
+                self._beat('running', STALL_RUNNING_SECONDS)
                 if lease.lost.is_set():
                     raise WorkloadError('execution lease lost', 409)
                 if dependency_attempt is not None:
@@ -1390,6 +1413,7 @@ class WorkloadWorker:
                 completion['result']['resources'] = merge_evidence(None, resource_sample, unit)
         finally:
             # Never acknowledge completion or cleanup while owned work survives.
+            self._beat('cleanup', STALL_HANDOFF_SECONDS)
             cleanup_started = time.monotonic()
             try:
                 self._stop(attempt)
@@ -1445,6 +1469,7 @@ class WorkloadWorker:
             status=None if started is None else
             'ok' if completion['outcome'] == 'succeeded' else 'failed',
             wall_s=None if started is None else time.monotonic() - started)
+        self._beat('handoff', STALL_HANDOFF_SECONDS)
         try:
             # The upload is idempotent by digest and the lease keeper is still
             # renewing: ride out a short authority outage instead of dropping

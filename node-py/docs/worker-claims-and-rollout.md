@@ -254,3 +254,45 @@ Gate re-run of failures (2026-10-15). The gate runs niced on a busy host: on fou
 test failed (`test_workload_host_release`, `..._docker_cache`, `..._progress`), each passing alone and in a full re-run with
 the same limits. `run_gate` now runs the failed test ids once more by themselves; a pass there lets the candidate through
 (logged as `gate: N test(s) failed once and passed on a re-run`), a second failure fails the gate with the test names as before.
+
+## Stall watchdog and dead authority links (2026-10-15 incident)
+
+**Incident.** After the authority restart (deploy of livestack-29db1192, about 13:08 UTC)
+`xc-win-1-wsl-2` went silent at about 13:37 UTC (its last log line was a handler-registry
+activation, 21:37:24 local) and stayed so until a manual restart at 14:47 UTC. The authority saw it OFFLINE
+for over 6 minutes yet had handed it `e2e.full` job 2f5f3bdd; one of its sockets sat in
+CLOSE-WAIT; the host was idle (no `harmony-work-*` unit was ever started for the job). Its sibling
+recovered by itself.
+
+**What the evidence rules out.** The worker has no long-poll or event stream: it polls
+(`register`, `worker/claim`) with a 15 s per-call socket timeout, retries every 5 s and logs each
+failure. A dead or restarted authority therefore already shows as `worker waiting after ...` lines
+and a reconnect, and the CLOSE-WAIT proves the kernel delivered the authority's close. A worker
+blocked in `recv` on that socket would have been woken by it. The log had no waiting lines at all,
+and no work unit started, so the main thread was not retrying: it was wedged inside the claim and
+prepare path (lease grant, handler check, input transfer, dependency or docker cache restore,
+unpack), in a call that has no deadline of its own (a blocked local lock or `cp`, a stuck
+filesystem). The journal and the restarted process destroyed the stack, so the exact call is
+unproven; this is why the fix below logs every thread's stack. A worker that holds an assignment
+and reports nothing is the failure.
+
+**Fix (general, in-process).** `workloads/stall_watchdog.py`: the main thread announces each
+phase with a deadline (`step`, `execute`, `prepare`, `transfer`, `materialize`, `running`,
+`cleanup`, `handoff`; limits are the `STALL_*_SECONDS` constants in `worker.py`, each above the
+longest bounded work of its phase, the download budget being 3600 s). When a phase overruns, the
+watchdog logs `worker stalled in phase ...` with the stack of every thread and exits with
+code 70, so systemd restarts the unit and the journal reconciles the held attempt: the authority
+then sees it lost and requeues it, instead of it being held silently. Phase changes are logged
+(`worker phase: a -> b`), and `worker_service` logs `worker recovered` when a step succeeds after
+a fault. Control connections now enable TCP keepalive (30 s idle, 10 s interval, 3 probes), so a
+peer that vanished without a FIN fails the next call within about a minute; every call already
+had a socket timeout.
+
+**Why not systemd `WatchdogSec`.** Workers also run on macOS and Windows, and the units carry no
+`Type=notify`. The in-process watchdog covers all three; it cannot save a process wedged in
+native code holding the GIL, which is rare here and still caught by the authority's OFFLINE
+state.
+
+**Roll.** Worker code is read at process start: the fix reaches a worker only at its next
+sanctioned roll (restart when idle, per the rollout record above). Until then it is exposed to
+the same wedge; an OFFLINE worker holding a job is cured by restarting its unit.
