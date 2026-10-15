@@ -106,3 +106,36 @@ address. OpenSpec validation and source compilation pass. Task 3 remains open
 for a genuinely qualified profile, actual configuration installation, and
 successful native engine/broker readback. Tasks 4–5 remain unproven. No runtime
 has been enabled by these source controls or by source/inventory counts.
+
+Live execution controls (2026-10-15): the operator explicitly authorized direct
+resident-service restarts. The service's Python environment now registers the
+opt-in endpoint plugin, and its private loopback credential/configuration and
+synchronous single-worker extension are installed. No Responses store was
+enabled. Startup exposed a real alias bug: ModelConfig retains only the first
+served name. Fix `36d228a0` uses the native base-model registry, which accepts
+the configured base aliases and rejects LoRA/unknown names. Diagnostic unit
+`5535d54c` names the fixed prerequisite phase without logging request data or
+credentials. Twelve targeted endpoint/controller controls pass.
+
+The deployed private control rejects unauthenticated input with 401 and
+authenticated malformed input with 400. A real native GPU completion returned
+200 in 467 ms with correlated completion confirmation. A 1,500 ms deadline
+returned 504 in 1,515 ms, with execution started and cessation confirmed through
+the supported CUDA barrier. The private control receipt is 1,881 bytes, SHA-256
+`43c1b4b7ee5f47dd8300612128b628e99fd8bc021376fa85a45c5800352e6d1e`.
+Both model and facade health returned 200 afterwards; the public decisions
+route rejected unauthenticated input with 403. Its qualified runtime remains
+disabled. These controls establish native completion/deadline behavior, not
+full transport-loss/broker qualification or model quality.
+
+The genuine development surface was then measured once using its recorded
+digest, final assistant messages, and the production extraction instructions.
+All 32 gold quotes were present in those messages. Results: 27 native completions
+and five deadline refusals, all five with cessation confirmed; 26 schema-valid
+outputs; 24 grounded asks; 22 strict grounded/kind-correct/stopped completions
+within eight seconds. One output violated the quote-length bound. Development
+receipt: 64,642 bytes, SHA-256
+`629e546eef33dfc5769ea128cbf2961724d08e0cb8bab3e89cf372f9ee1d8bb9`.
+The model revision/tokenizer identity are not yet verified, the surface lacks
+negative/input-kind coverage, and the sealed final remains unopened. This
+does not qualify the profile or authorize promotion. Tasks 3–5 remain open.
