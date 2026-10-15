@@ -142,20 +142,31 @@ class ExtractionEndpointPlugin:
     async def init_state(self, engine_client, state, args):
         del args
         path = '/etc/harmony/extraction-execution.json'
+        phase = 'private configuration'
         try:
             config = json.loads(private_bytes(path, 4096))
             if not isinstance(config, dict) or set(config) != {'version', 'tokenFile', 'model'} or type(config['version']) is not int or config['version'] != 1:
                 raise ValueError('invalid execution configuration schema')
+            phase = 'private credential'
             token = private_bytes(config['tokenFile'], 256).decode().strip()
             if len(token) < 32 or any(c.isspace() for c in token):
                 raise ValueError('invalid private execution credential')
             model = config['model']
             if not isinstance(model, str) or not model or len(model) > 256:
                 raise ValueError('invalid engine model identity')
+            phase = 'engine execution configuration'
+            core = getattr(engine_client, 'engine_core', None)
+            engine_config = getattr(engine_client, 'vllm_config', None)
+            logging.info('protected extraction engine control: core=%s async=%s batches=%s',
+                type(core).__name__,
+                getattr(getattr(engine_config, 'scheduler_config', None), 'async_scheduling', None),
+                getattr(engine_config, 'max_concurrent_batches', None))
             validate_execution_configuration(engine_client)
+            phase = 'base model alias'
             aliases = engine_client.model_config.served_model_name
             if not isinstance(aliases, (str, list, tuple)) or model not in ([aliases] if isinstance(aliases, str) else aliases):
                 raise ValueError('execution model must be a base engine alias')
+            phase = 'native chat serving handler'
             serving = getattr(state, 'openai_serving_chat', None)
             if serving is None:
                 raise ValueError('chat serving handler is unavailable')
@@ -164,4 +175,4 @@ class ExtractionEndpointPlugin:
             logging.info('protected extraction execution endpoint configured')
         except (OSError, ValueError, ContractError):
             state.harmony_extraction_execution = None
-            logging.error('protected extraction execution endpoint unavailable; configuration or engine prerequisites refused')
+            logging.error('protected extraction execution endpoint unavailable; prerequisite phase=%s', phase)
