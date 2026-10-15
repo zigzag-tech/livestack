@@ -237,3 +237,15 @@ Gate scope on xc-tower-ubuntu (2026-10-12): `tests/test_workload*.py` minus eigh
 for environment reasons at origin/main (`docker`, `edge_forward`, `http`, `launch_verifier`, `service`, `supervision`,
 `task_environment_docker`, `worker`: they need sudo `systemd-run`, a real dockerd or sockets). They are listed in `gate.exclude`;
 fix the cause and shrink that list rather than growing it. The rest runs in about six minutes.
+
+Two release builders, one hash (2026-10-15). `tools/build-authority-release.sh` (authority; keeps `_deps`) and
+`scripts/build-worker-release.py` (workers) both write `livestack-<sha8>` under `release_source`, and the auto-build
+reuses an existing directory of the right commit. Until 2026-10-15 the authority script recorded a different
+`content_hash` in `RELEASE.json` (it left `_deps` out), so a unit built on top of such a directory made every worker
+refuse the staged tree (`stage:staged_content_hash_mismatch`, `livestack-fc8b905a`, 2026-10-13: four workers, two tries
+each, nothing drained, attempts capped in `rollout-executor.json`). Now both scripts record `host_release.content_hash`,
+and the auto-build refuses a reused directory whose recorded hash is not the tree's
+(`build:release_dir_exists_with_a_different_content_hash`). Older authority-built releases (`2a2f3ee6`, `123818dd`,
+`fc8b905a`) still carry the old hash: never name one in a unit; build the worker release with
+`build-worker-release.py` under a different directory, or rebuild. A capped (worker, release) pair clears only by
+removing its keys from `attempts`/`capped` in `rollout-executor.json` while the executor is idle, or by declaring a new release.

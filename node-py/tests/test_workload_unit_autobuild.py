@@ -212,6 +212,22 @@ def test_the_gate_tree_carries_repo_root_tools(world, tmp_path):
     assert (dest / 'tools' / 'supervised-handlers.json').is_file()
 
 
+def test_a_prebuilt_release_dir_whose_recorded_hash_is_not_the_trees_is_refused(world):
+    # fc8b905a: tools/build-authority-release.sh had already made the directory with its own hash scheme; the unit
+    # copied that hash and every worker refused the staged tree (staged_content_hash_mismatch).
+    sha = runtime_commit(world)
+    rel = world['source'] / f'livestack-{sha[:8]}'
+    subprocess.run([sys.executable, str(world['repo'] / 'node-py/scripts/build-worker-release.py'), 'build', sha, '--out', str(rel)],
+                   check=True, capture_output=True)
+    meta_path = rel / 'node-py' / 'RELEASE.json'
+    meta = json.loads(meta_path.read_text())
+    meta['content_hash'] = '0' * 64
+    meta_path.write_text(json.dumps(meta))
+    result = world['auto'].run_once()
+    assert result['outcome'] == 'failed' and 'different_content_hash' in json.dumps(result)
+    assert groups_units(world)['e2e'] == world['old_id']
+
+
 def test_excluded_test_files_do_not_gate(world):
     commit(world['repo'], {'node-py/livestack_node/m.py': 'def f():\n    return 2\n', 'node-py/tests/test_env_bound.py': BAD_TEST}, when=2000)
     world['cfg']['gate']['tests'] = ['tests/test_*.py']
