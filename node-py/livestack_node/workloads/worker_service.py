@@ -8,6 +8,7 @@ import time
 import traceback
 
 from .model import WorkloadError
+from .stall_watchdog import StallWatchdog
 from .worker import WorkloadWorker
 
 
@@ -25,10 +26,12 @@ def main():
     logging.basicConfig(level=logging.INFO, handlers=[
         RotatingFileHandler(root/'worker.log', maxBytes=8*1024**2, backupCount=2)])
     worker = WorkloadWorker(config)
+    worker.watchdog = StallWatchdog().start()
     try:
         serve(worker, single_assignment=config.get('single_assignment', False),
               idle_timeout=config.get('idle_timeout_seconds', 300))
     finally:
+        worker.watchdog.stop()
         worker.close()
 
 
@@ -36,10 +39,14 @@ def serve(worker, sleep=time.sleep, *, single_assignment=False, idle_timeout=300
     if type(single_assignment) is not bool or type(idle_timeout) not in (int,float) or not 1 <= idle_timeout <= 3600:
         raise WorkloadError('invalid single-assignment worker settings')
     seen = set()
+    waiting = False
     idle_deadline = time.monotonic()+idle_timeout
     while True:
         try:
             worked = worker.step()
+            if waiting:
+                logging.info('worker recovered: step completed after an authority/worker fault')
+                waiting = False
             if worked and single_assignment:
                 status = worker.client.request('worker/status', {})
                 if status.get('state') == 'succeeded':
@@ -56,6 +63,7 @@ def serve(worker, sleep=time.sleep, *, single_assignment=False, idle_timeout=300
         except RemoteWorkloadFailed:
             raise
         except Exception as error:
+            waiting = True
             logging.warning('worker waiting after %s: %s', type(error).__name__, str(error)[:512])
             # The full traceback once per distinct type+location, so a wedge
             # names its own cause without repeating every 5 s.
