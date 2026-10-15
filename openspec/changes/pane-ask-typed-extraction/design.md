@@ -1,5 +1,13 @@
 ## Context
 
+Owner decision, 2026-10-15: explicit user waiver permits an internal best-effort
+runtime without completed offline quality qualification. A private, digest-bound
+operator receipt must bind the profile, unit, model revision and tokenizer hash.
+Its execution marker starts `operator-waiver:sha256:` and is not a calibration
+result. The packaged unqualified profile still refuses by default. Authenticated
+ownership, fresh fleet admission, source grounding, bounds and conservative
+execution accounting are unchanged.
+
 The consumer already emits `benchday.decision.v1` with one `ask` extraction
 question and the pinned `pane-ask-27b-v1:unqualified` profile. Source metadata
 is hashed by the consumer. Request and result bodies are capped at 64 KiB.
