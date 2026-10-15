@@ -41,7 +41,7 @@ No worker, client, publisher or workflow SHALL hard-code a relay hostname. Grant
 
 ### Requirement: Fall-through to a throttled path is visible
 
-A transfer that falls through to the mesh DERP path SHALL be marked `degraded_path: mesh_derp` in its trail.
+A transfer that falls through to a route declared as a degraded path SHALL carry that route's `degraded_path` class in its trail. A route that reaches the authority over the throttled mesh SHALL be declared `mesh_derp`; a worker cannot observe DERP itself, so the class is operator-declared, and a worker behind a relay with no declaration reports the direct authority route as `authority_fallthrough`.
 
 #### Scenario: Both doors are down
 - **WHEN** all doors fail and the authority is reached over the mesh

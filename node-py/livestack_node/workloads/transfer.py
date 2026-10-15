@@ -34,7 +34,7 @@ class InputTransfer:
     """
 
     def __init__(self, client, *, max_bytes=2*1024**3, relay=None, relay_key=None, relay_parallel=4,
-                 routes=None, region=None):
+                 routes=None, region=None, cross_region=None):
         if (relay is None) != (relay_key is None):
             raise ValueError('relay and relay_key are configured together')
         self.client = client
@@ -50,12 +50,35 @@ class InputTransfer:
                 built.append(route_kinds.HttpRoute(
                     RouteDescriptor('relay', 'edge_relay', relay.url, cost='metered', priority=0),
                     relay, edge_key=relay_key, parallel=relay_parallel))
+            # Behind a relay, the direct authority path is the fall-through a slow transfer is
+            # attributed to (an operator-declared RouteSet may name it `mesh_derp` instead).
             built.append(route_kinds.HttpRoute(
-                RouteDescriptor('authority', 'http', client.url, cost='free', priority=1), client))
+                RouteDescriptor('authority', 'http', client.url, cost='free', priority=1,
+                                options={'degraded_path': 'authority_fallthrough'} if relay is not None else None),
+                client))
             routes = RouteSet(built)
         self.routes = routes
+        self.cross_region = cross_region
+        self._warn_single_route()
         self.last_trail = []
         self.recent_trails = deque(maxlen=32)
+
+    def health(self):
+        """Operator view of object delivery. A cross-region worker (told so, or inferred from
+        having any route besides the direct authority path) needs two independent doors;
+        with fewer it is `single_route`, so one host's outage is a stop, not a slowdown."""
+        doors = [r.name for r in self.routes.routes
+                 if r.descriptor.kind != 'http' and r.descriptor.permits('get', None, self.region) is None]
+        cross = self.cross_region if self.cross_region is not None else any(
+            r.descriptor.kind != 'http' for r in self.routes.routes)
+        return dict(cross_region=cross, doors=doors, single_route=bool(cross and len(doors) < 2))
+
+    def _warn_single_route(self):
+        health = self.health()
+        if health['single_route']:
+            logging.warning('single_route: cross-region object delivery has %d independent door(s) %s; '
+                            'one host outage will force the throttled direct path',
+                            len(health['doors']), health['doors'])
 
     def headers(self, assignment=None):
         result = {'Authorization': 'Bearer '+self.client.token}
@@ -74,6 +97,7 @@ class InputTransfer:
         trail, last = Trail(), None
         for route in self.routes.candidates(direction, size, trail, peer=self.peer, region=self.region):
             ctx, started = {}, time.monotonic()
+            fell_through = any(e['outcome'] in ('failed', 'skipped') for e in trail.events)
             if not route.slots.acquire(timeout=self.routes.policy.slot_wait_seconds):
                 last = WorkloadError('route %s saturated' % route.name, 429)
                 self.routes.record(route, self.peer, False, trail, error=last)
@@ -83,18 +107,28 @@ class InputTransfer:
             except (OSError, ValueError, WorkloadError) as error:
                 last = error
                 self.routes.record(route, self.peer, False, trail, nbytes=ctx.get('moved', 0),
-                                   seconds=time.monotonic()-started, error=error)
+                                   seconds=time.monotonic()-started, error=error,
+                                   detail=self._detail(route, ctx, fell_through))
                 if on_failure:
                     on_failure(route, error)
             else:
                 self.routes.record(route, self.peer, True, trail, nbytes=ctx.get('moved', 0),
-                                   seconds=time.monotonic()-started)
+                                   seconds=time.monotonic()-started, detail=self._detail(route, ctx, fell_through))
                 self._finish(trail)
                 return result
             finally:
                 route.slots.release()
         self._finish(trail)
         raise self.routes.exhausted(trail, last)
+
+    @staticmethod
+    def _detail(route, ctx, fell_through):
+        """Block size / stall events from the route, plus the declared path class of a fall-through."""
+        detail = dict(ctx.get('detail') or {})
+        path = route.descriptor.options.get('degraded_path')
+        if fell_through and isinstance(path, str):
+            detail['degraded_path'] = path[:32]
+        return detail
 
     def put(self, source, *, assignment=None):
         source = Path(source)

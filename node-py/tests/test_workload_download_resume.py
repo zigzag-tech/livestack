@@ -65,7 +65,8 @@ def test_resume_through_real_authority_and_fault_proxy(tmp_path, fault):
         if fault == 'disconnect':
             InputTransfer(client).get(receipt['digest'], destination)
             assert destination.read_bytes() == content
-            assert ranges == [None, 'bytes=65536-4259839']
+            # The reset halved the block (4 MiB -> 2 MiB): a reset costs at most one smaller block.
+            assert ranges == [None, 'bytes=65536-2162687']
         elif fault in ('wrong-offset', 'corrupt-bytes'):
             message = 'range does not match' if fault == 'wrong-offset' else 'content does not match'
             with pytest.raises(WorkloadError, match=message):
