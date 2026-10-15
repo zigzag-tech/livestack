@@ -249,3 +249,8 @@ and the auto-build refuses a reused directory whose recorded hash is not the tre
 `fc8b905a`) still carry the old hash: never name one in a unit; build the worker release with
 `build-worker-release.py` under a different directory, or rebuild. A capped (worker, release) pair clears only by
 removing its keys from `attempts`/`capped` in `rollout-executor.json` while the executor is idle, or by declaring a new release.
+
+Gate re-run of failures (2026-10-15). The gate runs niced on a busy host: on four runs that day a different timing-sensitive
+test failed (`test_workload_host_release`, `..._docker_cache`, `..._progress`), each passing alone and in a full re-run with
+the same limits. `run_gate` now runs the failed test ids once more by themselves; a pass there lets the candidate through
+(logged as `gate: N test(s) failed once and passed on a re-run`), a second failure fails the gate with the test names as before.

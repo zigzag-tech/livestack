@@ -203,6 +203,15 @@ def test_kill_switch_and_dry_run_do_nothing(world):
     assert groups_units(world)['e2e'] == world['old_id'] and world['sent'] == []
 
 
+def test_a_test_that_fails_once_and_passes_on_its_own_re_run_does_not_block_the_candidate(world, tmp_path):
+    marker = tmp_path / 'ran-once'
+    flaky = ('import os\n\n\ndef test_load_flake():\n    m = %r\n    first = not os.path.exists(m)\n'
+             '    open(m, "w").close()\n    assert not first\n') % str(marker)
+    runtime_commit(world, tests=flaky)
+    assert world['auto'].run_once()['outcome'] == 'proposed'
+    assert marker.exists()
+
+
 def test_the_gate_tree_carries_repo_root_tools(world, tmp_path):
     # tests/test_workload_supervised.py reads tools/supervised-handlers.json; a gate tree without tools/ failed at
     # collection ("1 error") on every commit and no new unit was ever proposed.
