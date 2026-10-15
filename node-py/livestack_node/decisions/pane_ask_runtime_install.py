@@ -15,20 +15,24 @@ from .contract import ContractError
 from .extraction_contract import PROFILE_ID
 from .fleet_extraction_admission import FleetExtractionAdmission
 from .nominal_27b_adapter import Nominal27BExtractionAdapter, QualifiedEngine
+from .operator_waiver import validate_operator_waiver
 from .pane_ask_ingress import PaneAskRuntime
 from .protected_execution_transport import ProtectedExecutionTransport
 from .vllm_extraction_endpoint import private_bytes
 
 
-def validate_registry_profile(raw, expected_sha256, engine):
+def validate_registry_profile(raw, expected_sha256, engine, *, operator_waiver_raw=None):
     if hashlib.sha256(raw).hexdigest() != expected_sha256:
         raise ContractError('profile_unavailable', 'extraction profile artifact digest differs from registry', 503)
     try:
         profile = json.loads(raw)
     except (ValueError, UnicodeError) as exc:
         raise ContractError('profile_unavailable', 'extraction registry profile is invalid JSON', 503) from exc
+    waiver = (validate_operator_waiver(operator_waiver_raw, profile_id=PROFILE_ID, engine=engine)
+              if operator_waiver_raw is not None else None)
     if (not isinstance(profile, dict) or profile.get('profile_id') != PROFILE_ID
-            or PROFILE_ID.endswith(':unqualified')
+            or (PROFILE_ID.endswith(':unqualified') and waiver is None)
+            or (engine.qualification_hash.startswith('operator-waiver:') and waiver is None)
             or profile.get('qualification_hash') != engine.qualification_hash
             or profile.get('calibration_hash') != engine.qualification_hash
             or profile.get('qualification_hash') in (None, '', 'unqualified')
@@ -50,7 +54,9 @@ async def configure_pane_ask_runtime(app, *, host_id, device_id, units,
         config = json.loads(private_bytes(config_path, 8192))
         keys = {'version', 'engine', 'profileFile', 'profileSha256', 'brokerUrl',
                 'brokerTokenFile', 'executionTokenFile', 'targetId', 'hostId'}
-        if not isinstance(config, dict) or set(config) != keys or type(config['version']) is not int or config['version'] != 1:
+        if (not isinstance(config, dict) or not keys <= set(config)
+                or set(config) - keys - {'operatorWaiverFile'}
+                or type(config['version']) is not int or config['version'] != 1):
             raise ContractError('profile_unavailable', 'invalid extraction runtime configuration schema', 503)
         if not isinstance(config['engine'], dict):
             raise ContractError('profile_unavailable', 'extraction engine registry identity is missing', 503)
@@ -61,7 +67,10 @@ async def configure_pane_ask_runtime(app, *, host_id, device_id, units,
         if engine.unit not in units or engine.device_id != device_id or config['hostId'] != host_id or engine.backend != 'cuda':
             raise ContractError('profile_unavailable', 'extraction registry target differs from this local CUDA node', 503)
         phase = 'profile digest and qualification'
-        validate_registry_profile(private_bytes(config['profileFile'], 65536), config['profileSha256'], engine)
+        waiver_raw = (private_bytes(config['operatorWaiverFile'], 8192)
+                      if 'operatorWaiverFile' in config else None)
+        validate_registry_profile(private_bytes(config['profileFile'], 65536), config['profileSha256'], engine,
+                                  operator_waiver_raw=waiver_raw)
         broker = urlsplit(config['brokerUrl'])
         if broker.scheme not in ('http', 'https') or not broker.hostname or broker.username or broker.password or broker.query or broker.fragment:
             raise ContractError('profile_unavailable', 'fleet broker URL must contain no credential or request parameters', 503)
@@ -84,7 +93,8 @@ async def configure_pane_ask_runtime(app, *, host_id, device_id, units,
         app.state.pane_ask_runtime = PaneAskRuntime(
             Nominal27BExtractionAdapter(engine, client=engine_client, execution_transport=transport),
             fleet.admit, fleet.finish)
-        logging.info('qualified extraction runtime registry and strict fleet callbacks installed')
+        logging.warning('extraction runtime installed; acceptance=%s',
+                        'operator-waived internal testing' if waiver_raw is not None else 'measured qualification')
         return clients
     except Exception:
         app.state.pane_ask_runtime = None
