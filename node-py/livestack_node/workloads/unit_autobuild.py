@@ -45,6 +45,7 @@ from pathlib import Path
 from .model import WorkloadError
 from . import smoke
 from . import unit as deployment_unit
+from .host_release import content_hash as tree_content_hash
 
 RUNTIME_PATHS = ('node-py/livestack_node',)
 MAX_HISTORY = 20
@@ -216,6 +217,11 @@ def build_release(cfg, commit, source):
             raise Stop('build', f'release_dir_exists_and_is_unreadable:{name}')
         if meta.get('commit') != commit:
             raise Stop('build', f'release_dir_exists_for_another_commit:{name}')
+        # The unit carries RELEASE.json's hash and the host checks the pushed tree against it with this same
+        # algorithm. A directory built by another tool (an authority release records a different hash) would stage
+        # as staged_content_hash_mismatch on every worker (fc8b905a, 2026-10-13): refuse it here, by name.
+        if meta.get('content_hash') != tree_content_hash(out):
+            raise Stop('build', f'release_dir_exists_with_a_different_content_hash:{name}')
         return name, out
     code, _, err = run([sys.executable, str(script), 'build', commit, '--out', str(out)], timeout=300)
     if code != 0:
