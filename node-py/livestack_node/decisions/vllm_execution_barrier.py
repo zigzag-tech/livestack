@@ -10,6 +10,7 @@ No requests, responses or receipts are stored; GPU imports are method-local.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
 import secrets
@@ -43,12 +44,18 @@ async def abort_and_confirm(engine_client, request_id: str, *, workers: int,
         raise ContractError("invalid_input", "invalid extraction barrier bounds", 400)
     validate_execution_configuration(engine_client, workers=workers)
     nonce = secrets.token_hex(16)
+    phase = 'engine abort'
     try:
         async with asyncio.timeout(timeout_seconds):
             await engine_client.abort(request_id)
+            phase = 'GPU synchronization receipt'
             receipts = await engine_client.collective_rpc(
                 "harmony_extraction_synchronize", timeout=timeout_seconds, args=(nonce,))
     except Exception as exc:
+        # Exception text/RPC arguments can carry payloads. Fixed phases and the
+        # exception class distinguish abort failure from a missing GPU receipt.
+        logging.error('extraction stop unconfirmed; phase=%s error_type=%s',
+                      phase, type(exc).__name__)
         raise ContractError("unhealthy", "extraction stop is unconfirmed; reservations must remain held", 503) from exc
     valid = (isinstance(receipts, list) and len(receipts) == workers
              and all(isinstance(row, dict) and set(row) == {"nonce", "worker_pid", "device", "synchronized"}
