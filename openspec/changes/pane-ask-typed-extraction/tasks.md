@@ -176,3 +176,15 @@ The failed receipt is retained. A fixed-phase diagnostic now distinguishes
 engine-abort failure from GPU synchronization/receipt failure without logging
 exception payloads. Full transport-loss/broker qualification and quality remain
 unproven; no qualified public runtime or final-corpus evaluation is enabled.
+
+The stop-phase diagnostic was deployed on 2026-10-15 with the same pinned
+model/tokenizer configuration. One bounded disconnect matrix closed the client
+at 150, 500 and 1,000 ms against a 1,500 ms execution deadline. All three held
+ingress capacity immediately (429), then accepted a fresh, correlated native
+completion after the 5.5-second collection window (200); total observed control
+times were 5,940, 6,213 and 6,705 ms. Receipt: 6,129 bytes, SHA-256
+`ff4973d42cc8507665607f021e8dffcde8ce90e6cde45de70a0702e58e029f9e`.
+This did not reproduce the earlier unconfirmed GPU stop, so its cause remains
+unresolved and its failed receipt is retained. Three recovered cases do not
+prove full transport-loss/broker qualification or model quality. No admission
+profile was promoted and the sealed final remains unopened.
