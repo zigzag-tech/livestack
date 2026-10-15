@@ -139,3 +139,17 @@ receipt: 64,642 bytes, SHA-256
 The model revision/tokenizer identity are not yet verified, the surface lacks
 negative/input-kind coverage, and the sealed final remains unopened. This
 does not qualify the profile or authorize promotion. Tasks 3–5 remain open.
+
+A development-only prompt candidate (`311b114b`, instruction SHA-256
+`485139449baeaf25ac2bf9d331f84a05e119e2f438db78a93aff502c61c17524`)
+clarified kinds and requested shorter output. On the same 32 source rows and
+eight-second budget it produced only 12 strict successes, 14 schema-valid
+grounded asks and 16 deadline refusals, all with confirmed cessation. Receipt:
+43,196 bytes, SHA-256
+`c70250e24eecc3effd11dc9a87362aca4344d10794109e918155280db446156d`.
+A subsequent native metrics read observed four other running requests and five
+queued requests; load was not controlled, so the difference is not attributed
+solely to the prompt. The evidence does not support adoption. Forward revert
+`612eb49f` restores the preceding instructions; the candidate was never enabled
+through a qualified public runtime. Both private measurements remain retained,
+and the sealed final is still unopened.
