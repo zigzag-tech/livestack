@@ -11,9 +11,20 @@ import urllib.error
 from livestack_node import transport
 
 from .model import WorkloadError
-from .block_codec import HEADER, read_gzip_block
+from .block_codec import HEADER, DurationExceeded, read_gzip_block
+from .liveness import BlockSizer, Liveness, StallError
 
 CHUNK = 4*1024*1024
+DEFAULT_LIVENESS = Liveness()
+
+
+def _stalled(error):
+    """True when the transport failure is the socket's no-byte timer (the stall window)."""
+    return isinstance(error, TimeoutError) or isinstance(getattr(error, 'reason', None), TimeoutError)
+
+
+def _cause(error):
+    return 'stalled' if _stalled(error) else 'duration' if isinstance(error, DurationExceeded) else None
 
 
 def _last_cause(error):
@@ -21,7 +32,7 @@ def _last_cause(error):
     return '' if error is None else f'; last error: {type(error).__name__}: {error}'
 
 
-def _fetch_block(client, digest, headers, start, total, deadline):
+def _fetch_block(client, digest, headers, start, total, deadline, liveness=DEFAULT_LIVENESS):
     """One CHUNK-aligned block of an object whose size is already known.
 
     Returns the decoded bytes of [start, end], which may be SHORTER than a full block if the
@@ -29,10 +40,11 @@ def _fetch_block(client, digest, headers, start, total, deadline):
     anything that is not a 206 for exactly this offset of this object.
     """
     requested_end = min(start+CHUNK, total)-1
+    deadline = min(deadline, time.monotonic()+liveness.ceiling(requested_end-start+1))
     target, path = transport.split_target(client.url+'objects/'+digest)
     with transport.dial_stream(
             target, 'GET', path, headers={**headers, HEADER: 'gzip', 'Range': f'bytes={start}-{requested_end}'},
-            timeout=min(client.timeout, max(0.1, deadline-time.monotonic()))) as response:
+            timeout=min(liveness.stall_seconds, max(0.1, deadline-time.monotonic()))) as response:
         length = response.headers.get('Content-Length', '')
         if not re.fullmatch(r'[0-9]{1,20}', length):
             raise WorkloadError('invalid download content length', 502)
@@ -53,7 +65,7 @@ def _fetch_block(client, digest, headers, start, total, deadline):
         data = bytearray()
         while len(data) < length:
             if time.monotonic() >= deadline:
-                raise WorkloadError('download duration budget exhausted', 503)
+                raise DurationExceeded()
             chunk = response.read1(min(65536, length-len(data)))
             if not chunk:
                 raise ConnectionError('download stream ended early')
@@ -73,7 +85,7 @@ def _transient(error):
     return isinstance(error, (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead))
 
 
-def _parallel_tail(client, digest, headers, out, hasher, count, total, deadline, parallel):
+def _parallel_tail(client, digest, headers, out, hasher, count, total, deadline, parallel, liveness=DEFAULT_LIVENESS):
     """Fetch [count, total) with up to `parallel` blocks in flight; return the contiguous count.
 
     Blocks are written and hashed strictly in order, so `count` is always a contiguous prefix and
@@ -85,7 +97,7 @@ def _parallel_tail(client, digest, headers, out, hasher, count, total, deadline,
     """
     starts = deque(range(count, total, CHUNK))
     pending, tries = deque(), {}
-    submit = lambda pool, start: pool.submit(_fetch_block, client, digest, headers, start, total, deadline)
+    submit = lambda pool, start: pool.submit(_fetch_block, client, digest, headers, start, total, deadline, liveness)
     with ThreadPoolExecutor(max_workers=parallel) as pool:
         try:
             while starts or pending:
@@ -120,7 +132,8 @@ def _parallel_tail(client, digest, headers, out, hasher, count, total, deadline,
     return count
 
 
-def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, max_seconds=3600, parallel=1, start=0):
+def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, max_seconds=3600, parallel=1, start=0,
+                  liveness=None, report=None):
     """`parallel` > 1 fans the blocks after the first out over that many connections. Worth it
     where each request pays a long round trip (the relay measured 0.9-1.9 MB/s sequential against
     ~10 MB/s with four in flight); it never changes what is accepted or how it is verified.
@@ -128,7 +141,16 @@ def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, ma
     `start` > 0 resumes an object whose first `start` bytes are already in `out` (opened
     for read+write), typically written through ANOTHER route: the prefix is re-hashed from
     disk so the final digest check still covers every byte, and the first request is a
-    range at `start`, never a restart."""
+    range at `start`, never a restart.
+
+    Liveness (liveness.py, openspec object-transfer-liveness): a request is abandoned when no
+    byte arrives for the stall window, or when it outlives max(minimum, bytes/floor_rate); either
+    way the object resumes at the bytes already saved. The sequential ranges follow measured
+    throughput (smaller on a slow path). `max_seconds` is the object's ceiling MINIMUM: a large
+    object that keeps moving is allowed max(max_seconds, size/floor_rate). `report`, when given,
+    is filled live with the block size and stall events so a failed transfer still explains itself."""
+    live = liveness or DEFAULT_LIVENESS
+    sizer = BlockSizer(live)
     count, total, failures, requests = start, None, 0, 0
     hasher = hashlib.sha256()
     if start:
@@ -142,26 +164,32 @@ def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, ma
             remaining -= len(block)
         out.seek(start)
         out.truncate()
-    deadline = time.monotonic()+max_seconds
+    began = time.monotonic()
+    deadline = began+max_seconds
     last_error = None
     fanned_out = parallel <= 1
+    note = lambda: report.update(sizer.detail()) if report is not None else None
     while total is None or count < total:
         if not fanned_out and total is not None and total-count > CHUNK:
             fanned_out = True  # once: after a fallback the sequential loop finishes the object
-            count = _parallel_tail(client, digest, headers, out, hasher, count, total, deadline, parallel)
+            count = _parallel_tail(client, digest, headers, out, hasher, count, total, deadline, parallel, live)
             continue
-        if time.monotonic() >= deadline or requests >= (max_bytes+CHUNK-1)//CHUNK+max_failures+1:
+        if time.monotonic() >= deadline or requests >= (max_bytes+live.min_block-1)//live.min_block+max_failures+1:
             raise WorkloadError('download duration/request budget exhausted'+_last_cause(last_error), 503)
         requests += 1
-        requested_end = min(count+CHUNK, max_bytes)-1
+        block = sizer.block
+        requested_end = min(count+block, max_bytes)-1
+        ranged = total is not None or count
+        attempt_began, attempt_from = time.monotonic(), count
+        block_deadline = deadline
         # A normal initial GET also supports empty objects and old authorities.
         # Once interrupted, use bounded ranges starting at bytes actually saved.
         target, path = transport.split_target(client.url+'objects/'+digest)
         try:
             with transport.dial_stream(
                     target, 'GET', path,
-                    headers={**headers, HEADER: 'gzip', **({'Range': f'bytes={count}-{max(count, requested_end)}'} if total is not None or count else {})},
-                    timeout=min(client.timeout, max(0.1, deadline-time.monotonic()))) as response:
+                    headers={**headers, HEADER: 'gzip', **({'Range': f'bytes={count}-{max(count, requested_end)}'} if ranged else {})},
+                    timeout=min(live.stall_seconds, max(0.1, deadline-time.monotonic()))) as response:
                 length = response.headers.get('Content-Length', '')
                 if not re.fullmatch(r'[0-9]{1,20}', length):
                     raise WorkloadError('invalid download content length', 502)
@@ -189,25 +217,38 @@ def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, ma
                 etag = response.headers.get('ETag')
                 if etag is not None and etag != '"'+digest+'"':
                     raise WorkloadError('download object identity changed', 409)
+                if total is None:
+                    # The object's own ceiling, now that its size is known: a transfer that keeps
+                    # moving is not bounded by a fixed clock.
+                    deadline = max(deadline, began+live.ceiling(size, minimum=max_seconds))
                 total, remaining = size, length
+                block_deadline = min(deadline, attempt_began+live.ceiling(length))
                 if codec == 'gzip':
-                    decoded = read_gzip_block(response, length, end-start+1, deadline)
+                    decoded = read_gzip_block(response, length, end-start+1, block_deadline)
                     out.write(decoded); hasher.update(decoded); count += len(decoded)
-                    continue
-                while remaining:
-                    if time.monotonic() >= deadline:
-                        raise WorkloadError('download duration budget exhausted'+_last_cause(last_error), 503)
-                    chunk = response.read1(min(65536, remaining))
-                    if not chunk:
-                        raise ConnectionError('download stream ended early')
-                    out.write(chunk)
-                    hasher.update(chunk)
-                    count += len(chunk)
-                    remaining -= len(chunk)
+                else:
+                    while remaining:
+                        if time.monotonic() >= block_deadline:
+                            raise DurationExceeded('download duration budget exhausted'+_last_cause(last_error))
+                        chunk = response.read1(min(65536, remaining))
+                        if not chunk:
+                            raise ConnectionError('download stream ended early')
+                        out.write(chunk)
+                        hasher.update(chunk)
+                        count += len(chunk)
+                        remaining -= len(chunk)
+                if ranged:
+                    sizer.ok(count-attempt_from, time.monotonic()-attempt_began, requested_end-attempt_from+1)
+                note()
         except urllib.error.HTTPError as error:
             if error.code not in (408, 429, 500, 502, 503, 504):
                 raise
             error.close()
+            failures += 1
+            last_error = error
+        except DurationExceeded as error:
+            if time.monotonic() >= deadline:
+                raise
             failures += 1
             last_error = error
         except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as error:
@@ -215,8 +256,13 @@ def download_into(client, digest, headers, out, max_bytes, *, max_failures=8, ma
             last_error = error
         else:
             continue
-        logging.warning('download %s failed %d/%d after %d bytes: %s',
-                        digest[:12], failures, max_failures, count, last_error)
+        cause = _cause(last_error)
+        if cause == 'stalled':
+            last_error = StallError('stalled: no byte for %gs' % live.stall_seconds)
+        sizer.failed(cause)
+        note()
+        logging.warning('download %s failed %d/%d after %d bytes (%s): %s',
+                        digest[:12], failures, max_failures, count, cause or 'transport', last_error)
         if failures > max_failures:
             raise WorkloadError('download retry budget exhausted'+_last_cause(last_error), 503) from last_error
         time.sleep(min(0.25*2**(failures-1), 2, max(0, deadline-time.monotonic())))

@@ -7,13 +7,21 @@ BLOCK_BYTES = 4*1024*1024
 HEADER = 'X-Harmony-Block-Encoding'
 
 
+class DurationExceeded(WorkloadError):
+    """An attempt outlived its throughput-scaled ceiling (named cause: duration). Lives here, not in
+    liveness.py: the Osaka edge relay deploys an explicit file list that includes this module."""
+
+    def __init__(self, message='download duration budget exhausted'):
+        super().__init__(message, 503)
+
+
 def read_gzip_block(response, wire_length, decoded_length, deadline):
     if not 0 < decoded_length <= BLOCK_BYTES or not 0 < wire_length <= BLOCK_BYTES+65536:
         raise WorkloadError('compressed block exceeds size bound', 413)
     wire = bytearray()
     while len(wire) < wire_length:
         if time.monotonic() >= deadline:
-            raise WorkloadError('download duration budget exhausted', 503)
+            raise DurationExceeded()
         chunk = response.read1(min(65536, wire_length-len(wire)))
         if not chunk:
             raise ConnectionError('compressed block ended early')

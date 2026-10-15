@@ -1,8 +1,8 @@
 ## 1. Phase A: liveness (no new host)
-- [ ] 1.1 Specify the stall deadline, throughput-scaled ceiling and adaptive block rule once, with a table-driven test fixture both languages run. Test: fixture cases (fast, slow, stalled, trickle). Ledger: n/a, no placement decision.
-- [ ] 1.2 livestack `download.py` / `block_codec.py` / `route_kinds.py`: stall-based abandonment and adaptive range size. Tests in `test_workload_routes.py` with a real local server injecting stalls and slow bodies. Ledger: route trail records chosen block size and stall events.
-- [ ] 1.3 zzops `harmony-response.mjs`, `harmony-download.mjs`: replace the fixed 60 s timer with the stall rule; ranged, resumable, digest-verified download. Tests: private fixture server (no production authority).
-- [ ] 1.4 Startup and trail reporting: `single_route`, `degraded_path: mesh_derp`. Tests: config with one and two doors. Ledger: reason recorded in the trail.
+- [x] 1.1 Specify the stall deadline, throughput-scaled ceiling and adaptive block rule once, with a table-driven test fixture both languages run. Test: fixture cases (fast, slow, stalled, trickle). Ledger: n/a, no placement decision.
+- [x] 1.2 livestack `download.py` / `block_codec.py` / `route_kinds.py`: stall-based abandonment and adaptive range size. Tests in `test_workload_routes.py` with a real local server injecting stalls and slow bodies. Ledger: route trail records chosen block size and stall events.
+- [x] 1.3 zzops `harmony-response.mjs`, `harmony-download.mjs`: replace the fixed 60 s timer with the stall rule; ranged, resumable, digest-verified download. Tests: private fixture server (no production authority).
+- [x] 1.4 Startup and trail reporting: `single_route`, `degraded_path: mesh_derp`. Tests: config with one and two doors. Ledger: reason recorded in the trail.
 
 ## 2. Phase B: doors as data
 - [ ] 2.1 Worker config `object_relay` accepts a list of doors; schema-validated, object form still valid. Test: both forms parse; unknown fields refused.
