@@ -163,8 +163,12 @@ class ExtractionEndpointPlugin:
                 getattr(engine_config, 'max_concurrent_batches', None))
             validate_execution_configuration(engine_client)
             phase = 'base model alias'
-            aliases = engine_client.model_config.served_model_name
-            if not isinstance(aliases, (str, list, tuple)) or model not in ([aliases] if isinstance(aliases, str) else aliases):
+            # ModelConfig collapses aliases to its first name for metrics.
+            # The native serving registry retains every base alias and excludes
+            # LoRA adapters, so use the same membership check as native chat.
+            models = getattr(state, 'openai_serving_models', None)
+            is_base_model = getattr(models, 'is_base_model', None)
+            if not callable(is_base_model) or is_base_model(model) is not True:
                 raise ValueError('execution model must be a base engine alias')
             phase = 'native chat serving handler'
             serving = getattr(state, 'openai_serving_chat', None)
