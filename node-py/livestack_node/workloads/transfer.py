@@ -34,9 +34,11 @@ class InputTransfer:
     """
 
     def __init__(self, client, *, max_bytes=2*1024**3, relay=None, relay_key=None, relay_parallel=4,
-                 routes=None, region=None, cross_region=None):
+                 routes=None, region=None, cross_region=None, doors=None):
         if (relay is None) != (relay_key is None):
             raise ValueError('relay and relay_key are configured together')
+        if doors is not None and relay is not None:
+            raise ValueError('configure either relay or doors, not both')
         self.client = client
         self.max_bytes = max_bytes
         self.relay = relay
@@ -46,15 +48,21 @@ class InputTransfer:
         self.peer = urlsplit(client.url).netloc
         if routes is None:
             built = []
+            # `doors` is the ordered list form of `relay` (objects with name, client, key, parallel);
+            # `relay` is a one-door list named `relay`. Every door is its own route, so one door's
+            # outage skips that route alone and the transfer resumes on the next door.
             if relay is not None:
+                doors = [dict(name='relay', client=relay, key=relay_key, parallel=relay_parallel)]
+            for door in doors or ():
                 built.append(route_kinds.HttpRoute(
-                    RouteDescriptor('relay', 'edge_relay', relay.url, cost='metered', priority=0),
-                    relay, edge_key=relay_key, parallel=relay_parallel))
+                    RouteDescriptor(door['name'], 'edge_relay', door['client'].url, cost='metered', priority=0),
+                    door['client'], edge_key=door['key'], parallel=door['parallel']))
+            has_door = bool(built)
             # Behind a relay, the direct authority path is the fall-through a slow transfer is
             # attributed to (an operator-declared RouteSet may name it `mesh_derp` instead).
             built.append(route_kinds.HttpRoute(
                 RouteDescriptor('authority', 'http', client.url, cost='free', priority=1,
-                                options={'degraded_path': 'authority_fallthrough'} if relay is not None else None),
+                                options={'degraded_path': 'authority_fallthrough'} if has_door else None),
                 client))
             routes = RouteSet(built)
         self.routes = routes
