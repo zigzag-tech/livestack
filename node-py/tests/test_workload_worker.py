@@ -2086,3 +2086,24 @@ def test_oom_kill_without_a_receipt_fails_as_a_resource_limit_and_is_not_retried
         assert done['cause']['evidence']['source'] in ('unit', 'sampled')
     finally:
         worker.close()
+
+
+def test_worker_object_relay_accepts_the_object_form_and_a_list_of_doors(fleet):
+    _, config, _caller, _digest = fleet
+    config['object_relay'] = {'url': 'https://door-a.example/harmony-relay', 'key': 'k'*32}
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.transfer.health()['doors'] == ['relay']
+    finally:
+        worker.close()
+    config['object_relay'] = [{'name': 'ashburn', 'url': 'https://door-a.example/harmony-relay', 'key': 'a'*32},
+                              {'name': 'nanjing', 'url': 'https://door-b.example:3389/harmony-relay', 'key': 'b'*32}]
+    worker = WorkloadWorker(config)
+    try:
+        assert worker.transfer.health() == dict(cross_region=True, doors=['ashburn', 'nanjing'], single_route=False)
+        assert worker.output_transfers['native.v1'] is worker.transfer
+    finally:
+        worker.close()
+    config['object_relay'] = [{'url': 'https://door-a.example/harmony-relay'}]
+    with pytest.raises(WorkloadError, match='object_relay'):
+        WorkloadWorker(config)

@@ -5,7 +5,7 @@
 - [x] 1.4 Startup and trail reporting: `single_route`, `degraded_path: mesh_derp`. Tests: config with one and two doors. Ledger: reason recorded in the trail.
 
 ## 2. Phase B: doors as data
-- [ ] 2.1 Worker config `object_relay` accepts a list of doors; schema-validated, object form still valid. Test: both forms parse; unknown fields refused.
+- [x] 2.1 Worker config `object_relay` accepts a list of doors; schema-validated, object form still valid. Test: both forms parse; unknown fields refused.
 - [ ] 2.2 Per-door tunnel unit template (benchday `ops/harmony-edge`, zzops `edge-units.py`): independent failure per door. Test: one tunnel killed in the existing systemd rehearsal, others unaffected.
 - [ ] 2.3 Per-principal grant base URL and zzops `sourceUploadOrigin` accept a list or fall back to the authority; iOS worker's relay allowlist reads the door list. Tests: grant origin binding with two origins.
 - [ ] 2.4 Commission a second door off the control-plane host (operator step, after the open questions are answered; includes a measured 100 MB sha256-verified transfer from Nanjing).
