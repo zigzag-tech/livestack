@@ -2,6 +2,7 @@
 import argparse
 import json
 import logging
+import os
 import signal
 import socket
 import threading
@@ -190,13 +191,19 @@ def main():
             target=reload_principals, args=(server, args.config), daemon=True).start())
         logging.info('workload authority started on %s', server.server_address)
         # Native stream producers (services-own-their-streams). A no-op unless HARMONY_STREAMS=1.
-        from ..hostd_streams import start_for_workload_authority
-        start_for_workload_authority(store, config.get('identity_authority_id') or socket.gethostname(), str(root),
-                                     log=lambda message: logging.info('%s', message), blobs=server.blobs,
-                                     public_base_url=config.get('public_base_url'))
+        from ..hostd_streams import start_for_workload_authority, stop_streams_runtime
+        stream_host_id = os.environ.get('LIVESTACK_HOST_ID') or socket.gethostname()
+        identity_reader = server.identity_facts if server.identity_publisher is not None else None
+        runtime = start_for_workload_authority(
+            store, stream_host_id, str(root),
+            log=lambda message: logging.info('%s', message), blobs=server.blobs,
+            public_base_url=config.get('public_base_url'),
+            identity_reader=identity_reader,
+            identity_authority_id=config.get('identity_authority_id'))
         try:
             server.serve_forever(poll_interval=1)
         finally:
+            stop_streams_runtime(runtime)
             server.server_close()
 
 

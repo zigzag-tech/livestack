@@ -18,6 +18,12 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from .benchday_streams import ProducerDisconnected, ReconnectingProducer
 from .common import Clock, optional, sha256_digest, canonical
 from . import fleet_facts
+from .identity_facts import (
+    FLEET_IDENTITY_FACTS,
+    IDENTITY_CUT_REFRESH_S,
+    WORKLOAD_IDENTITY_FACTS,
+    pack_identity_cut,
+)
 
 HOST = "harmony.host/1"
 FLEET = "harmony.fleet/1"
@@ -42,9 +48,14 @@ class StreamsRuntime:
         self.host_facts: Any = None
         self.fleet_reader: Optional[Callable[[], Tuple[dict, dict]]] = None
         self.jobs_reader: Optional[Callable[[], List[dict]]] = None
+        self.identity_reader: Optional[Callable[[], dict]] = None
+        self.identity_contract: Optional[str] = None
+        self.identity_authority_id: Optional[str] = None
+        self.identity_namespace: Optional[str] = None
         self.workload: Any = None
         self.request: Any = None
         self._tasks: List[asyncio.Future] = []
+        self._identity_connect_task: Optional[asyncio.Task] = None
         self._job_last: Dict[str, Tuple[str, int]] = {}
         self.fleet_published = 0
         self._publish_lock = None
@@ -100,8 +111,15 @@ class StreamsRuntime:
 
     # -- lifecycle
     def attach(self, *, host_facts: Any = None, fleet_reader: Any = None, jobs_reader: Any = None,
+               identity_reader: Any = None, identity_contract: Optional[str] = None,
+               identity_authority_id: Optional[str] = None,
+               identity_namespace: Optional[str] = None,
                workload: Any = None, request: Any = None) -> "StreamsRuntime":
         self.host_facts, self.fleet_reader, self.jobs_reader = host_facts, fleet_reader, jobs_reader
+        self.identity_reader = identity_reader
+        self.identity_contract = identity_contract
+        self.identity_authority_id = identity_authority_id
+        self.identity_namespace = identity_namespace
         self.workload, self.request = workload, request
         return self
 
@@ -112,6 +130,8 @@ class StreamsRuntime:
             register.append(HOST)
         if self.fleet_reader is not None:
             register.append(FLEET)
+        if self.identity_reader is not None and self.identity_contract is not None:
+            register.append(self.identity_contract)
         if self.workload is not None:
             serve[WORKLOAD] = self.workload.handle_write
         if self.request is not None:
@@ -129,6 +149,11 @@ class StreamsRuntime:
             self._tasks.append(asyncio.ensure_future(self._loop(self.host_facts.tick, 5.0, "host_facts")))
         if self.fleet_reader is not None:
             self._tasks.append(asyncio.ensure_future(self._loop(self._fleet_tick, self.fleet_s, "fleet")))
+        if self.identity_reader is not None:
+            self._tasks.append(asyncio.ensure_future(self._loop(
+                self._identity_tick, IDENTITY_CUT_REFRESH_S, "identity_facts",
+                failure_every_s=IDENTITY_CUT_REFRESH_S,
+                initial_delay_s=IDENTITY_CUT_REFRESH_S)))
         if self.jobs_reader is not None:
             self._tasks.append(asyncio.ensure_future(self._loop(self._jobs_tick, self.tick_s, "jobs")))
         if self.workload is not None:
@@ -138,14 +163,27 @@ class StreamsRuntime:
         self.log(f"streams: started (register={register}, serve={sorted(serve)})")
 
     async def stop(self) -> None:
-        for task in self._tasks:
+        tasks, self._tasks = self._tasks, []
+        if self._identity_connect_task is not None:
+            tasks.append(self._identity_connect_task)
+            self._identity_connect_task = None
+        for task in tasks:
             task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         if self.producer:
             await self.producer.stop()
 
     # -- notices
     def _on_up(self, _client: Any, epochs: Dict[str, Optional[int]]) -> None:
         self.log(f"streams: ingress up; authority epochs {epochs}")
+        if self.identity_reader is not None:
+            # A freshly authenticated registration should publish promptly;
+            # the periodic loop then refreshes at the contract cadence.
+            if self._identity_connect_task is None or self._identity_connect_task.done():
+                task = asyncio.ensure_future(self._identity_connected_tick())
+                self._identity_connect_task = task
+                task.add_done_callback(self._identity_connected_done)
         for contract, authority in ((WORKLOAD, self.workload), (REQUEST, self.request)):
             if authority is not None:
                 epoch = epochs.get(contract)
@@ -184,7 +222,10 @@ class StreamsRuntime:
         self.log(f"streams: AUTHORITY LOST for {contract}; holder now {holder or 'unknown'}")
 
     # -- loops
-    async def _loop(self, step: Callable[[], Awaitable[Any]], every_s: float, name: str) -> None:
+    async def _loop(self, step: Callable[[], Awaitable[Any]], every_s: float, name: str,
+                    failure_every_s: float = 0.5, initial_delay_s: float = 0.0) -> None:
+        if initial_delay_s > 0:
+            await asyncio.sleep(initial_delay_s)
         failing = False
         while True:
             try:
@@ -201,7 +242,46 @@ class StreamsRuntime:
             except Exception as error:  # noqa: BLE001 - a bad tick must not end the loop, and must be visible
                 self.log(f"streams: {name} tick failed: {error!r}")
                 failing = True
-            await asyncio.sleep(min(every_s, 0.5) if failing else every_s)
+            await asyncio.sleep(failure_every_s if failing else every_s)
+
+    async def _identity_connected_tick(self) -> None:
+        try:
+            await self._identity_tick()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001 - the named outcome stays visible after registration
+            self.log(f"streams: identity_facts tick failed: {error!r}")
+
+    def _identity_connected_done(self, task: asyncio.Task) -> None:
+        if self._identity_connect_task is task:
+            self._identity_connect_task = None
+
+    async def _identity_tick(self) -> None:
+        """Read, validate and page one whole cut before sending any of its pages."""
+        loop = asyncio.get_running_loop()
+        try:
+            cut = await loop.run_in_executor(None, self.identity_reader)
+        except Exception as error:  # noqa: BLE001 - keep the source failure named and retryable
+            raise RuntimeError(f"identity_fact_source_read_failed:{type(error).__name__}") from error
+        try:
+            pages = pack_identity_cut(
+                cut, contract=self.identity_contract,
+                authority_id=self.identity_authority_id,
+                resource_namespace=self.identity_namespace,
+            )
+        except Exception as error:  # noqa: BLE001 - packer failures are visible and send no candidate pages
+            raise RuntimeError(f"identity_fact_cut_rejected:{error}") from error
+        for page in pages:
+            try:
+                ack = await self.publish_state(
+                    self.identity_contract, {"page": page["page_index"]}, "ok", page)
+            except ProducerDisconnected as error:
+                raise RuntimeError("identity_fact_ingress_unavailable") from error
+            except Exception as error:  # noqa: BLE001 - includes named native ingress refusals
+                code = getattr(error, "code", type(error).__name__)
+                raise RuntimeError(f"identity_fact_ingress_refused:{code}") from error
+            if ack.get("shadowed"):
+                raise RuntimeError("identity_fact_authority_refused:shadowed")
 
     async def _fleet_tick(self) -> None:
         loop = asyncio.get_event_loop()
