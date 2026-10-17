@@ -274,7 +274,7 @@ class StreamsRuntime:
         for page in pages:
             try:
                 ack = await self.publish_state(
-                    self.identity_contract, {"page": page["page_index"]}, "ok", page)
+                    self.identity_contract, {"page": str(page["page_index"])}, "ok", page)
             except ProducerDisconnected as error:
                 raise RuntimeError("identity_fact_ingress_unavailable") from error
             except Exception as error:  # noqa: BLE001 - includes named native ingress refusals
