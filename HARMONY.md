@@ -1406,7 +1406,7 @@ OFF unless `HARMONY_STREAMS=1` (optional `HARMONY_STREAMS_SOCKET`, `HARMONY_STRE
 |---|---|---|
 | `harmony.host/1` | state, one-per-host | each host broker: unit-declaration digest, mtime, `drift` against the digest a reviewed deployment recorded |
 | `harmony.fleet/1`, `harmony.jobs/1` | state | the fleet broker (`harmony.fleet/1` is one-per-realm; a second broker is refused `authority_conflict`) |
-| `harmony.workload/1` | durable intent, one-per-realm | the fleet broker; `submitted < admitted < placed < running < done`, every terminal carries `attribution` (`workload` / `infra` / `unknown`) and a reason, durable in the claim ledger |
+| `harmony.workload/1` | durable intent, one-per-realm | Livestack's WorkloadStore authority; `submitted < admitted < placed < running < done`, every terminal carries `attribution` (`workload` / `infra` / `unknown`) and a reason, durable in the intent ledger |
 | `harmony.request/1` | durable intent, one-per-host | host and fleet brokers; `require`/`prefer` in the request language, refusals `requirement_inexpressible` (names the clause) vs `unsatisfiable` |
 
 Operator flow: a native producer first runs in SHADOW beside the Stage 1 adapter (the daemon compares field by field
@@ -1414,9 +1414,20 @@ and counts), then the operator lists the contract in `<daemon state dir>/streams
 (see benchday `docs/native-service-producers.md`). Inference calls, audio and job payloads stay on their own
 transports; a partial refers to large bodies only by reference `{ref, digest, bytes, media}`.
 
-Known gaps: `harmony.workload/1` submit is refused `spec_resolver_unconfigured` (attribution `infra`) until a
-`resolve_spec` hook turns a spec reference into a store request; the Stage 1 `harmony.fleet-source` adapter reads
-flat keys the live `/fleet` does not emit, so shadow divergence is expected until it is corrected (set
-`shadow_ignore` for the three rings, `degraded`, `degraded_truncated` and `host_id` meanwhile).
+`workloads.service` passes its recovered `WorkloadStore` and `server.blobs` to
+`start_for_workload_authority`; the factory's default resolver reads a bounded
+JSON request from the authenticated principal's CAS namespace and verifies
+`application/json`, the one-MiB limit, exact size, SHA-256, UTF-8 and object
+shape before normal strict WorkloadStore admission. The stream intent ID is the
+durable WorkloadStore request key. A source-matched framed-ingress integration
+test covers real stores, replay, strict refusals, attribution, cancellation and
+the WorkloadStore decision ledger. The older
+`spec_resolver_unconfigured` gap note is no longer current. HTTP remains the
+bounded CAS data plane; it is not a workload-job submission or outcome path.
+
+The Stage 1 `harmony.fleet-source` adapter reads flat keys the live `/fleet`
+does not emit, so shadow divergence is expected until it is corrected (set
+`shadow_ignore` for the three rings, `degraded`, `degraded_truncated` and
+`host_id` meanwhile).
 `/peers`, `/status`, `/fleet`, `/fleet/rank`, `/fleet/operations` and `/fleet/ledger` still have callers
 (benchday's poll-mode roster and `fleet_rank`, fleetd) and are NOT removed from hostd's listener.

@@ -343,7 +343,7 @@ class WorkloadAuthority:
                                       record["intent_id"])
         except BackendRefused as error:
             attribution = "infra" if error.status in (429, 502, 503, 504) else (
-                "workload" if error.status in (400, 403, 404, 409, 413, 422) else "unknown")
+                "workload" if error.status in (400, 403, 404, 409, 413, 415, 422) else "unknown")
             return await self._end(record, "refused", {
                 "refusal": REFUSAL_UNAVAILABLE if attribution == "infra" else REFUSAL_SCHEMA_INVALID,
                 "detail": bounded(error.detail, 256), "attribution": attribution,
