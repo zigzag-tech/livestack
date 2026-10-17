@@ -11,17 +11,19 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(__file__))
 from streams_fake_ingress import FakeIngress  # noqa: E402
 
 from livestack_node.streams import fleet_facts  # noqa: E402
+from livestack_node.streams import fleet_rank_stream  # noqa: E402
 from livestack_node.streams.benchday_streams import intent_partial  # noqa: E402,F401
 from livestack_node.streams.host_facts import HostFacts, UnitDeclarations  # noqa: E402
 from livestack_node.streams.lane import ScriptedBackend  # noqa: E402
 from livestack_node.streams.request_authority import (RequestAuthority, reference_satisfies,  # noqa: E402
                                                       request_ledger)
-from livestack_node.streams.runtime import FLEET, HOST, REQUEST, WORKLOAD, StreamsRuntime  # noqa: E402
+from livestack_node.streams.runtime import FLEET, FLEET_RANK, HOST, REQUEST, WORKLOAD, StreamsRuntime  # noqa: E402
 from livestack_node.streams.workload_authority import (IntentLedger, WorkloadAuthority, classify_job,  # noqa: E402
                                                        rung_of)
 
@@ -406,6 +408,141 @@ class FleetOverTheWireTests(Base):
         jobs[0].update(state="succeeded", updated=2.0, result={"outcome": "succeeded", "result": {}})
         self.assertTrue(await fake.settle(lambda: len(fake.publishes) == 2))
         self.assertEqual(fake.publishes[1]["body"]["state"], "succeeded")
+
+
+class FleetRankStreamTests(Base):
+    def test_configuration_is_bounded_and_cadence_is_named(self):
+        pairs = fleet_rank_stream.parse_pairs(
+            "asr:na=host:tower,llm:eu=region:eu,asr:na=host:tower,bad,tts:ap=host:ap=extra",
+            self.logs.append)
+        self.assertEqual(pairs, [("asr", "na", "host:tower"), ("llm", "eu", "region:eu")])
+        self.assertTrue(any("duplicate" in line for line in self.logs))
+        self.assertTrue(any("malformed" in line for line in self.logs))
+        self.assertEqual(fleet_rank_stream.interval_seconds(None), 30)
+        self.assertEqual(fleet_rank_stream.interval_seconds("5"), 5)
+        self.assertEqual(fleet_rank_stream.interval_seconds("4", self.logs.append), 30)
+        self.assertTrue(any("must be 5..60" in line for line in self.logs))
+        too_many = ",".join(f"llm:r{i}=direct" for i in range(65))
+        self.assertEqual(len(fleet_rank_stream.parse_pairs(too_many, self.logs.append)), 64)
+
+    def test_existing_ranker_preserves_per_vantage_preference_and_target_order(self):
+        view = {"hosts": {
+            "west": {"links": {"remote": 300}, "nodes": [{
+                "peer": "http://local/livestack", "state": "fresh", "ready": True,
+                "kinds": ["asr"], "load": {"in_flight": 0},
+                "inventory": {"asr": {"streaming": "legacy",
+                    "first_partial_ms": {"value": 20, "sample_count": 10, "measured_at": 100,
+                                          "ttl_s": 60, "model_revision": "r1"},
+                    "finalization_ms": {"value": 80, "sample_count": 10, "measured_at": 100,
+                                         "ttl_s": 60, "model_revision": "r1"}}},
+            }]},
+            "remote": {"nodes": [{
+                "peer": "http://native/livestack", "state": "fresh", "ready": True,
+                "kinds": ["asr"], "load": {"in_flight": 0},
+                "inventory": {"asr": {"streaming": "native",
+                    "first_partial_ms": {"value": 40, "sample_count": 10, "measured_at": 100,
+                                          "ttl_s": 60, "model_revision": "r1"},
+                    "finalization_ms": {"value": 90, "sample_count": 10, "measured_at": 100,
+                                         "ttl_s": 60, "model_revision": "r1"}}},
+            }]},
+        }}
+        body = fleet_rank_stream.ranking_body(view, ("asr", "na", "host:west"), 120.0)
+        self.assertEqual((body["kind"], body["vantage"], body["generated_at"], body["ttl_s"]),
+                         ("asr", "host:west", 120.0, 60.0))
+        self.assertLessEqual(len(body["reason"].encode("utf-8")), fleet_rank_stream.MAX_REASON_BYTES)
+        self.assertIn("next was http://local", body["reason"], "the full ranking explanation is preserved")
+        self.assertEqual(body["prefer"], fleet_rank_stream.ASR_PREFERENCES)
+        self.assertEqual([row["target_id"] for row in body["targets"]],
+                         ["http://native", "http://local"],
+                         "the real ranker applies the native-streaming preference before distance")
+        self.assertEqual(body["chosen"], body["targets"][0]["target_id"])
+        self.assertEqual([row["rank"] for row in body["targets"]], [1, 2])
+        self.assertEqual(body["targets"][0]["preferences"][0]["matched"], True)
+        self.assertNotIn("node", body["targets"][0], "only the daemon's established forwarding fields are carried")
+        self.assertLessEqual(len(json.dumps(body, separators=(",", ":")).encode()),
+                             fleet_rank_stream.MAX_BODY_BYTES)
+
+    def test_empty_invalid_and_oversized_rankings_fail_with_names(self):
+        with self.assertRaises(fleet_rank_stream.RankingFailure) as empty:
+            fleet_rank_stream.ranking_body({}, ("asr", "na", "direct"), 120.0)
+        self.assertEqual(empty.exception.code, "fleet_rank_empty")
+
+        valid = {"kind": "llm", "vantage": "direct", "vantage_used": "direct",
+                 "generated_at": 120.0, "chosen": "target", "reason": "measured",
+                 "targets": [{"target_id": "target"}]}
+        with patch("livestack_node.streams.fleet_rank_stream.fleet_rank.rank", return_value={**valid, "kind": "tts"}):
+            with self.assertRaises(fleet_rank_stream.RankingFailure) as invalid:
+                fleet_rank_stream.ranking_body({}, ("llm", "na", "direct"), 120.0)
+        self.assertEqual(invalid.exception.code, "fleet_rank_invalid_result")
+
+        def target(target_id, rank):
+            return {
+                "target_id": target_id,
+                "host_id": "host",
+                "distance_ms": 1.0,
+                "distance_band": "<50",
+                "load": {"in_flight": 0},
+                "rank": rank,
+                "reason": "r" * 256,
+                "inventory": {f"item-{index}": "x" * 512 for index in range(32)},
+                "preferences": [],
+            }
+
+        oversized = {**valid, "targets": [target("target", 1), target("target-2", 2)]}
+        with patch("livestack_node.streams.fleet_rank_stream.fleet_rank.rank", return_value=oversized):
+            with self.assertRaises(fleet_rank_stream.RankingFailure) as too_big:
+                fleet_rank_stream.ranking_body({}, ("llm", "na", "direct"), 120.0)
+        self.assertEqual(too_big.exception.code, "fleet_rank_oversize")
+
+    async def test_configured_runtime_publishes_a_complete_ranking_and_unconfigured_stays_inert(self):
+        fake = FakeIngress(self.path("fleet-rank.sock"))
+        await fake.start()
+        self.addAsyncCleanup(fake.stop)
+        runtime = StreamsRuntime(self.path("fleet-rank.sock"), self.logs.append, "tower",
+                                 tick_s=0.03, fleet_s=0.03, fleet_rank_s=0.03)
+        runtime.attach(
+            fleet_reader=lambda: (REAL_FLEET, {"host_id": "tower", "membership": [], "peers": []}),
+            fleet_rank_pairs=[("llm", "na", "host:tower")],
+        )
+        runtime.start()
+        self.addAsyncCleanup(runtime.stop)
+        self.assertTrue(await fake.settle(lambda: any(row["contract"] == FLEET_RANK for row in fake.publishes)))
+        ranking = next(row for row in fake.publishes if row["contract"] == FLEET_RANK)
+        self.assertIn(FLEET_RANK, fake.registers)
+        self.assertEqual(ranking["subject"], {"kind": "llm", "region": "na", "vantage": "host:tower"})
+        self.assertEqual((ranking["status"], ranking["body"]["kind"], ranking["body"]["vantage"]),
+                         ("ok", "llm", "host:tower"))
+        self.assertTrue(ranking["body"]["targets"])
+        self.assertEqual(ranking["body"]["chosen"], ranking["body"]["targets"][0]["target_id"])
+        await runtime.stop()
+
+        idle_fake = FakeIngress(self.path("fleet-rank-idle.sock"))
+        await idle_fake.start()
+        self.addAsyncCleanup(idle_fake.stop)
+        idle = StreamsRuntime(self.path("fleet-rank-idle.sock"), self.logs.append, "tower",
+                              tick_s=0.03, fleet_s=0.03, fleet_rank_s=0.03)
+        idle.attach(fleet_reader=lambda: (REAL_FLEET, {}), fleet_rank_pairs=[])
+        idle.start()
+        self.addAsyncCleanup(idle.stop)
+        self.assertTrue(await idle_fake.settle(lambda: FLEET in idle_fake.registers))
+        self.assertNotIn(FLEET_RANK, idle_fake.registers)
+        self.assertFalse(any(row["contract"] == FLEET_RANK for row in idle_fake.publishes))
+
+    async def test_empty_rank_is_published_as_a_named_source_failure(self):
+        fake = FakeIngress(self.path("fleet-rank-failed.sock"))
+        await fake.start()
+        self.addAsyncCleanup(fake.stop)
+        runtime = StreamsRuntime(self.path("fleet-rank-failed.sock"), self.logs.append, "tower",
+                                 tick_s=0.03, fleet_rank_s=0.03)
+        runtime.attach(fleet_reader=lambda: ({"hosts": {}}, {}),
+                       fleet_rank_pairs=[("asr", "na", "direct")])
+        runtime.start()
+        self.addAsyncCleanup(runtime.stop)
+        self.assertTrue(await fake.settle(lambda: any(
+            row["contract"] == FLEET_RANK and row["status"] == "failed" for row in fake.publishes)))
+        failed = next(row for row in fake.publishes if row["contract"] == FLEET_RANK)
+        self.assertEqual(failed["error"]["code"], "fleet_rank_empty")
+        self.assertIsNone(failed.get("body"))
 
 
 class PlannerParityTests(unittest.TestCase):
