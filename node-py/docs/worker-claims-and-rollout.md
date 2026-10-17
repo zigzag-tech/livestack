@@ -296,3 +296,42 @@ state.
 **Roll.** Worker code is read at process start: the fix reaches a worker only at its next
 sanctioned roll (restart when idle, per the rollout record above). Until then it is exposed to
 the same wedge; an OFFLINE worker holding a job is cured by restarting its unit.
+
+## Host control plane refusing systemctl (2026-10-17 incident)
+
+**Incident.** At about 19:41 UTC six zz-joe workers (`e2e-1..4`, `release-2`, `release-3`) went OFFLINE at
+the authority and stayed so for over two hours with every unit `active`; queued flutter-check, image and
+hub-check jobs (and so every land-time compile gate) waited. A restart did not bring them back.
+
+**Cause.** A scratch Benchday desktop build (`xvfb-run ./bundle/benchday`, an agent's navigator repro) leaked
+system-bus connections until UID 1000 reached dbus-daemon's `max_connections_per_user=256`
+(`dbus-daemon: The maximum number of active connections for UID 1000 has been reached`). From then on every
+`systemctl --system ...` of that user failed with `No buffer space available`. `WorkloadWorker.step()` runs
+`reconcile()` before `register()`; with an attempt in the journal, `reconcile()` calls `_stop()` →
+`systemctl --system show harmony-work-...`, which raised on every step. `serve()` logged `worker waiting after
+CalledProcessError ... exit status 1` (stderr was dropped) and retried forever, never reaching `worker/report`:
+the authority saw silence, the host saw an active unit, and the restart re-read the same journal and failed
+the same way. Workers without a journaled attempt (`zz-joe-release`, `e2e-5`) kept reporting, which is why
+only part of the host went dark.
+
+**Fix (general, worker-side and roster-side; no authority protocol change).**
+- `control_plane.HostCommandFailed` (raised by `SystemdExecutor.command`, still a `CalledProcessError`) keeps
+  stderr and names `cause=host_control_plane_unavailable` for bus/systemd refusals; on connection exhaustion it
+  lists this user's top socket holders (`pid N sockets M command`), so the log names the leaker.
+- `worker_service.serve()` has a fault budget (`fault_exit_seconds`, default 600, `0` disables, otherwise
+  60-86400): if no step completes for that long the process logs `worker exiting: ...` and exits 71, so the
+  unit shows failed/auto-restart instead of `active` and silent. A completed step resets the budget.
+  Exiting never loses work: the journal is reconciled by the next process, as after a watchdog exit (70).
+- The roster warns `silent_while_work_waits` for a configured, previously registered worker that has stopped
+  reporting while queued jobs it serves have waited past `IDLE_WAIT_SECONDS`, naming its host and the number
+  of waiting jobs, so a silent worker is surfaced in `harmony-roster.mjs --queue` rather than discovered from
+  an agent complaint.
+
+**Rollout.** Workers pick up the fix on their next livestack release roll; the roster warning needs an
+authority restart (check live jobs first). Until then, recognise the pattern by `worker waiting after
+CalledProcessError` lines in `worker.log` and `journalctl -u dbus` (`maximum number of active connections`),
+then find the holder with `ss -xp | grep system_bus_socket`. Throwaway GUI/desktop repro processes belong
+under the worker-free dev hosts, not on a build host.
+
+**Tests.** `test_service_loop_fails_loudly_after_the_fault_budget_...`, `test_failed_systemctl_names_its_stderr_...`
+(with a positive control for the holder scan), `test_warnings_flag_a_configured_worker_that_went_silent_...`.

@@ -208,3 +208,18 @@ def test_warning_carries_the_authority_verdict_when_placement_refused_an_idle_wo
                   workers=[dict(worker='w1', host='h', blocked_by=[], authority_verdict=_authority_verdict(reason, 'w1'))])]
     (found,) = _warnings([idle], queue)
     assert found['kind'] == 'idle_refused_by_authority' and 'memory held by 2 attempts' in found['detail']
+
+
+def test_warnings_flag_a_configured_worker_that_went_silent_while_work_it_serves_waits():
+    from livestack_node.workloads.roster import _warnings
+    silent = dict(id='w1', host='h', connected=False, configured=True, registered=True, state='offline',
+                  eligible=False, activation_failures=[], last_seen_age_s=6677.0)
+    never = dict(id='w2', host='h', connected=False, configured=True, registered=False, state='offline',
+                 eligible=False, activation_failures=[], last_seen_age_s=None)
+    queue = [dict(job_id='j1', handler='a.v1', describe='d', age_s=600.0,
+                  workers=[dict(worker='w1', host='h', blocked_by=['offline']), dict(worker='w2', host='h', blocked_by=[])]),
+             dict(job_id='j2', handler='a.v1', describe='d', age_s=900.0, workers=[dict(worker='w1', host='h', blocked_by=[])]),
+             dict(job_id='j3', handler='a.v1', describe='young', age_s=5.0, workers=[dict(worker='w1', host='h', blocked_by=[])])]
+    (found,) = _warnings([silent, never], queue)
+    assert (found['kind'], found['worker'], found['waiting_jobs'], found['waited_s']) == ('silent_while_work_waits', 'w1', 2, 900.0)
+    assert _warnings([dict(silent, connected=True, last_seen_age_s=1.0)], queue) == []
