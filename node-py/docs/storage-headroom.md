@@ -71,3 +71,15 @@ worker for `limits.stall_report_seconds` (default 300) logs one `placement_stall
 Rollout order: authority first (it accepts the new report keys), then workers.
 
 CPU signals: `node-py/docs/worker-cpu-admission.md`.
+
+## Pre-exhaustion roster warning: `disk_offer_shrinking`
+
+A worker's offered disk is `min(capacity, workspace_free - disk_reserve_bytes)`, further clamped by each
+`backing_filesystems` entry less `backing_reserve_bytes`. When that offer reaches 0 the roster already
+warned (`reserve_exceeds_free`), but by then every claim on the host was refused. The roster now also
+warns `disk_offer_shrinking` while a connected worker offers under half (`DISK_SHRINKING_FRACTION`) of its
+declared disk capacity, derived from the reported capacity/available pair (no new report key).
+
+Measured 2026-10-17: zz-joe's release workers (`backing_filesystems: ['/']`, 100 GiB backing reserve) and
+e2e workers (64 GiB) offered 0 because the root filesystem had 96 GiB free of 1.9 TiB; no claim could be
+placed until diskreap reclaimed ~114 GiB. The probe was correct; the signal came too late.

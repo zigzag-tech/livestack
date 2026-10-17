@@ -29,6 +29,8 @@ def _age(now, seen):
 
 DESCRIBE_CHARS = 120
 IDLE_WAIT_SECONDS = 60
+# A worker offering under this share of its declared disk capacity is warned about before it offers 0.
+DISK_SHRINKING_FRACTION = 0.5
 
 
 def _about(spec):
@@ -286,6 +288,16 @@ def _warnings(entries, queue, queue_bound=None):
                               detail=f"{gone['filesystem']}: free {_gib(gone['free_bytes'])} < reserve "
                                      f"{_gib(gone['reserve_bytes'])} ({gone['reason']}); offers 0 of "
                                      f"{_gib(gone['capacity_bytes'])}"))
+        # Pre-exhaustion: the same reserve arithmetic that offers 0 later already offers less than
+        # DISK_SHRINKING_FRACTION of the promised capacity now. Derived from the reported
+        # capacity/available pair, so it needs no new report key.
+        capacity_disk = (entry.get('capacity') or {}).get('disk_bytes') or 0
+        offered_disk = (entry.get('available') or {}).get('disk_bytes')
+        if (entry['connected'] and not gone and capacity_disk > 0 and offered_disk is not None
+                and 0 < offered_disk < capacity_disk * DISK_SHRINKING_FRACTION):
+            found.append(dict(kind='disk_offer_shrinking', worker=entry['id'], host=entry['host'],
+                              detail=f"offers {_gib(offered_disk)} of {_gib(capacity_disk)}: free space on its "
+                                     f"workspace or backing filesystem is nearing the reserve; reclaim before it reaches 0"))
         signal = entry.get('cpu_signal') or {}
         if entry['connected'] and signal.get('state') == 'inert':
             found.append(dict(kind='cpu_signal_inert', worker=entry['id'], host=entry['host'],
