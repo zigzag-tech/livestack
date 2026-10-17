@@ -265,7 +265,8 @@ def _warnings(entries, queue):
     `activation_failed_idle`: connected, idle, and its handler registry failed to activate — it can
     claim nothing and nothing else says so. `idle_while_claimable_work_waits`: idle and eligible,
     serves the handler of a job that has waited past IDLE_WAIT_SECONDS, and the roster can name no
-    reason it has not claimed it. When the authority's own placement verdict names a refusal for
+    reason it has not claimed it. `silent_while_work_waits`: a configured worker that has stopped
+    reporting while queued jobs it serves wait. When the authority's own placement verdict names a refusal for
     that worker (e.g. a host-ledger hold) the warning is `idle_refused_by_authority` and carries it."""
     found = []
     by_id = {e['id']: e for e in entries}
@@ -284,17 +285,26 @@ def _warnings(entries, queue):
         if entry['connected'] and signal.get('state') == 'inert':
             found.append(dict(kind='cpu_signal_inert', worker=entry['id'], host=entry['host'],
                               detail=f"{signal.get('policy')}: {signal.get('detail')}"))
+    silent = {}
     for job in queue:
         if job['age_s'] <= IDLE_WAIT_SECONDS:
             continue
         for part in job['workers']:
             entry = by_id.get(part['worker'])
+            if entry and entry.get('configured') and entry.get('registered') and not entry['connected']:
+                silent.setdefault(entry['id'], []).append(job)
             if entry and entry['eligible'] and entry['state'] == 'idle' and not part['blocked_by']:
                 verdict = part.get('authority_verdict')
                 found.append(dict(kind='idle_refused_by_authority' if verdict else 'idle_while_claimable_work_waits',
                                   worker=part['worker'], host=part['host'],
                                   job_id=job['job_id'], handler=job['handler'], waited_s=job['age_s'],
                                   detail=f"{job['describe']}: authority verdict: {verdict}" if verdict else job['describe']))
+    for worker, jobs in sorted(silent.items()):
+        entry = by_id[worker]
+        found.append(dict(kind='silent_while_work_waits', worker=worker, host=entry['host'],
+                          waiting_jobs=len(jobs), waited_s=max(job['age_s'] for job in jobs),
+                          detail=f"no report for {int(entry['last_seen_age_s'] or 0)}s while {len(jobs)} queued job(s) "
+                                 f"it serves wait; its unit may still read active on the host (see its worker.log)"))
     return found
 
 
