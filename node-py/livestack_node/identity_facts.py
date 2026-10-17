@@ -102,3 +102,14 @@ class IdentitySnapshotPublisher:
             "facts": facts,
         }
 
+
+def fleet_identity_cut(broker, publisher):
+    """Read and mint the fleet broker's complete current node cut."""
+    if publisher is None:
+        raise ValueError("identity_authority_not_configured")
+    broker.fleet_view()
+    relations, source_state = broker.identity_relations()
+    cut = publisher.snapshot(relations)
+    cut["source_state"] = source_state
+    return cut
+
