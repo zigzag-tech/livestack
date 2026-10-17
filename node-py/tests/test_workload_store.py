@@ -837,3 +837,31 @@ def test_starved_jobs_do_not_stack_their_holds_against_a_later_job_that_fits_one
     fresh = store.submit('owner', request('fresh', need={'ram': 4}))
     claimed = store.claim('b', 'boot1')
     assert claimed and claimed['job_id'] == fresh['id']
+
+
+def test_starved_job_holds_only_the_host_closest_to_fitting_it(harness):
+    """A starved job runs on ONE host, yet the hold was charged on every host that refused it only for lack of free
+    resources, so a fleet with two serving hosts froze both for it. It holds the host nearest to fitting (smallest
+    shortfall); the other host keeps serving younger work, and a second starved job can hold that one."""
+    _, now, path = harness
+    store = WorkloadStore(path, handlers={'test.v1', 'build.v1'}, clock=lambda: now[0],
+                          limits=Limits(lease_seconds=5000))
+    def roster():
+        for host, tag in (('h1', '1'), ('h2', '2')):
+            register(store, 'b' + tag, host, cpu=8, ram=16, handlers=['build.v1'])
+            register(store, 'e' + tag, host, cpu=8, ram=16, handlers=['test.v1'])
+            register(store, 'f' + tag, host, cpu=8, ram=16, handlers=['test.v1'])
+    roster()
+    store.submit('owner', request('run1', need={'cpu': 4, 'ram': 1}))
+    assert store.claim('e1', 'boot1')  # h1: 4 free
+    store.submit('owner', request('run2', need={'cpu': 2, 'ram': 1}))
+    assert store.claim('e2', 'boot1')  # h2: 6 free, the closer one
+    big = store.submit('owner', request('big', handler='build.v1', need={'cpu': 8, 'ram': 1}))
+    assert store.claim('b1', 'boot1') is None
+    now[0] += store.limits.starvation_seconds + 1
+    roster()
+    young = store.submit('owner', request('young', need={'cpu': 2, 'ram': 1}, priority=500000))
+    claimed = store.claim('f1', 'boot1')
+    assert claimed and claimed['job_id'] == young['id'], 'h1 is not the host being held for the starved job'
+    assert store.get('owner', big['id'])['state'] == 'queued'
+    assert store.claim('f2', 'boot1') is None, 'h2, the closest host, stays held for the starved job'

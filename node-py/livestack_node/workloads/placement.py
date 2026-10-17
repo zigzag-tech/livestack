@@ -114,6 +114,11 @@ def _hold_plan(admit, rejected, workers, reports):
     return plan
 
 
+def _hold_shortfall(admit, free):
+    """How far a worker's free figures are from fitting `admit`, as the sum of each dimension's missing fraction."""
+    return sum(max(0, n-free.get(k, 0))/n for k, n in admit.items() if n > 0)
+
+
 def _hold_charge(plan, admit, claim, host_free, worker_free, memory_terms, views, before=None):
     """Charge what the job would take to each planned host, as if it had been admitted. `before` (host -> the
     host's free figures prior to the FIRST hold of the round) lets a later refusal ask "would I fit without it?"."""
@@ -137,7 +142,8 @@ def _hold_charge(plan, admit, claim, host_free, worker_free, memory_terms, views
 
 def _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, worker_free, memory_terms, views, now,
                       limits, starved_hosts):
-    """Reserve, on every host that refuses an aged job only for lack of free resources, what the job would take.
+    """Reserve, on the host nearest to fitting an aged job that refuses it only for lack of free resources, what the job
+    would take.
 
     Jobs placed later in this round then see the host as already charged, exactly as if the starved job had been
     admitted, so running attempts draining off the host make room for IT rather than for the next small job.
@@ -150,6 +156,9 @@ def _hold_for_starved(row, admit, claim, rejected, workers, reports, host_free, 
     if now-row["created"] < limits.starvation_seconds:
         return
     plan = [w for w in _hold_plan(admit, rejected, workers, reports) if w["host"] not in starved_hosts]
+    # The job runs on ONE host, so it holds one: the nearest to fitting it. Holding every refusing host froze
+    # all of them for a job only one can serve, and left nothing for a second starved job to hold.
+    plan = sorted(plan, key=lambda w: _hold_shortfall(admit, worker_free[w["id"]]))[:1]
     starved_hosts.update(w["host"] for w in plan)
     _hold_charge(plan, admit, claim, host_free, worker_free, memory_terms, views)
     if plan and row["id"] not in _STARVED_REPORTED:
