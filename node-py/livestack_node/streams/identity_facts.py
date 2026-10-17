@@ -125,7 +125,7 @@ def _complete_partial_size(contract: str, page_index: int, body: dict) -> int:
     # This mirrors the daemon's complete state partial envelope, using the
     # maximum source id and 63-bit outer fences. All keys are protocol fields.
     partial = {"contract": contract, "source": "s" * _MAX_SOURCE_BYTES,
-               "subject": {"page": page_index}, "epoch": _MAX_FENCE,
+               "subject": {"page": str(page_index)}, "epoch": _MAX_FENCE,
                "seq": _MAX_FENCE, "produced_ms": _MAX_FENCE,
                "ttl_ms": MAX_IDENTITY_FACT_TTL_MS, "status": "ok", "body": body}
     return len(canonical(partial))
@@ -136,7 +136,7 @@ def pack_identity_cut(cut: Any, *, contract: str, authority_id: str,
     """Validate and page a whole Fact cut before returning any publishable page.
 
     Returned bodies are ordered by their stable `page_index`; each is safe to
-    publish with subject `{page: page_index}`. The caller must pack the entire
+    publish with subject `{page: str(page_index)}`. The caller must pack the entire
     cut before sending page zero.
     """
     if contract not in (FLEET_IDENTITY_FACTS, WORKLOAD_IDENTITY_FACTS):

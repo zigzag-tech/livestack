@@ -211,7 +211,7 @@ class IdentityRuntimeTests(unittest.IsolatedAsyncioTestCase):
         runtime.publish_state = publish
         await runtime._identity_tick()
         self.assertGreater(len(sent), 1)
-        self.assertEqual([row[1] for row in sent], [{"page": i} for i in range(len(sent))])
+        self.assertEqual([row[1] for row in sent], [{"page": str(i)} for i in range(len(sent))])
         self.assertTrue(all(row[0] == FLEET_IDENTITY_FACTS and row[2] == "ok" for row in sent))
         self.assertTrue(all(row[3]["page_index"] == index and
                             row[3]["page_count"] == len(sent)
@@ -248,7 +248,7 @@ class IdentityRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(len(fake.publishes), 1)
             self.assertEqual(fake.registers, [WORKLOAD_IDENTITY_FACTS])
             self.assertEqual([row["subject"] for row in fake.publishes],
-                             [{"page": i} for i in range(len(fake.publishes))])
+                             [{"page": str(i)} for i in range(len(fake.publishes))])
             self.assertTrue(all(set(row["body"]) == {
                 "v", "generation", "sequence", "observed_at_ms", "page_index", "page_count", "facts"
             } for row in fake.publishes))
@@ -289,7 +289,7 @@ class IdentityRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(await fake.settle(lambda: fake.publishes), logs)
             self.assertEqual(fake.registers, [FLEET_IDENTITY_FACTS])
             [publication] = fake.publishes
-            self.assertEqual(publication["subject"], {"page": 0})
+            self.assertEqual(publication["subject"], {"page": "0"})
             self.assertEqual(publication["body"]["facts"][0]["subject"]["from"],
                              "harmony:node:node-0-")
             self.assertEqual((broker.views, broker.planned), (1, 0))
@@ -396,7 +396,7 @@ class IdentityRuntimeTests(unittest.IsolatedAsyncioTestCase):
         try:
             self.assertTrue(await fake.settle(lambda: fake.publishes), [])
             [publication] = fake.publishes
-            self.assertEqual(publication["subject"], {"page": 0})
+            self.assertEqual(publication["subject"], {"page": "0"})
             self.assertEqual(publication["body"]["page_count"], 1)
             self.assertEqual(publication["body"]["facts"], [])
         finally:
