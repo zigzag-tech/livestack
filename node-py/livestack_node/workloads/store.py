@@ -513,6 +513,11 @@ class WorkloadStore:
             result["progress_verdict"] = self._progress_verdict(db, result, result["spec"], self.clock())
             if result["progress_verdict"] is None:
                 del result["progress_verdict"]
+            if result["state"] == "running":
+                bound, source = self.attempt_wall_clock(result["spec"])
+                elapsed = self.clock() - result["attempt"]["started_at"]
+                result["wall_clock"] = dict(limit_seconds=bound, source=source, elapsed_seconds=round(elapsed, 1),
+                                            remaining_seconds=round(max(0.0, bound - elapsed), 1))
         result["result"] = json.loads(result["result"]) if result["result"] else None
         result["cause"] = json.loads(result["cause"]) if result.get("cause") else None
         if result["cause"] is None and result["state"] in TERMINAL:
@@ -566,7 +571,12 @@ class WorkloadStore:
         forbidden = sorted(handler for handler, policy in environment_handlers.items()
                            if handler in allowed and policy['purpose'] in ('full_e2e', 'publishing', 'release'))
         result = dict(versions=[1, 2, 3, 4], causes=dict(version=1, kinds=sorted(causes.KINDS)),
-            deadlines=dict(version=1, max_queue_seconds=[30, 86400], progress_deadline_seconds=[30, 86400]),
+            deadlines=dict(version=1, max_queue_seconds=[30, 86400], progress_deadline_seconds=[30, 86400],
+                           max_attempt_seconds=[30, self.limits.attempt_ceiling(None)[0]]),
+            wall_clock=dict(version=1, max_attempt_seconds=self.limits.max_attempt_seconds,
+                            max_queue_age_seconds=self.limits.max_queue_age_seconds,
+                            exceptions={h: e['max_attempt_seconds'] for h, e in
+                                        sorted(self.limits.wall_clock_exceptions.items())}),
             scopes=dict(
             version=1, lease_default_seconds=self.limits.scope_lease_default_seconds,
             lease_min_seconds=self.limits.scope_lease_min_seconds,
@@ -1643,6 +1653,52 @@ class WorkloadStore:
             verdict["activity_quiet_seconds"] = round(now - attempt["activity_at"], 1)
         return verdict
 
+    def attempt_wall_clock(self, spec):
+        """(seconds, source) of the wall-clock bound on one attempt of this job: the authority's bound for its
+        handler (global or a named exception), lowered by the submitter's own `max_attempt_seconds`."""
+        seconds, source = self.limits.attempt_ceiling(spec.get("handler"))
+        asked = spec.get("max_attempt_seconds")
+        if asked is not None and asked < seconds:
+            return asked, "submitter"
+        return seconds, source
+
+    def _wall_clock_verdict(self, db, job, spec, now):
+        """The authority-wide wall-clock bounds (Limits.max_attempt_seconds, max_queue_age_seconds).
+
+        They exist because shared capacity is not the owner's to hold indefinitely: a job that outlives them
+        is too large or stuck, and the fix is the owner's (split it), so both fail with a cause that says
+        `after_change`, never a silent retry. Unlike the opt-in `max_queue_seconds`, the queue bound
+        counts a job that already had attempts: a job requeued after infrastructure failures ages too."""
+        if job["state"] == "running":
+            attempt = db.execute("SELECT created FROM attempts WHERE job=? AND state='running' "
+                                 "ORDER BY fence DESC LIMIT 1", (job["id"],)).fetchone()
+            if attempt is None:
+                return None
+            limit, source = self.attempt_wall_clock(spec)
+            elapsed = now - attempt["created"]
+            if elapsed <= limit:
+                return None
+            return "failed", (f"attempt ran {elapsed:.0f}s, over the {source} wall-clock bound of {limit:g}s "
+                              "(max_attempt_seconds): split the work into smaller jobs"), causes.make(
+                "attempt_wall_clock_exceeded", {"limit_seconds": limit, "elapsed_seconds": round(elapsed),
+                                                "source": source, "handler": spec.get("handler"),
+                                                "guidance": "split the job; capacity is shared"})
+        if job["state"] == "queued":
+            limit = self.limits.max_queue_age_seconds
+            waited = now - job["created"]
+            if waited <= limit:
+                return None
+            attempts = db.execute("SELECT count(*) FROM attempts WHERE job=?", (job["id"],)).fetchone()[0]
+            placement = json.loads(job["placement"]) if job["placement"] else None
+            return "expired", (f"queued {waited:.0f}s, over the {limit:g}s authority queue bound "
+                               "(max_queue_age_seconds)"), causes.make(
+                "queue_age_exceeded", {"limit_seconds": limit, "waited_seconds": round(waited),
+                                       "attempts": attempts, "handler": spec.get("handler"),
+                                       "last_placement": placement and {
+                                           "blockers": placement.get("blockers", [])[:4],
+                                           "since": placement.get("since")}})
+        return None
+
     def _job_verdict(self, db, job, spec, now):
         """(terminal state, reason, cause) when a queued or running job's own clock has run out, else None.
 
@@ -1658,6 +1714,9 @@ class WorkloadStore:
                 return "expired", ("estimated execution cannot fit remaining deadline "
                                    f"({max(0, deadline-now):.0f}s < {estimate:.0f}s)"), \
                     causes.make("deadline_expired", {"deadline": deadline, "estimate_seconds": estimate})
+        wall = self._wall_clock_verdict(db, job, spec, now)
+        if wall is not None:
+            return wall
         queue_limit = spec.get("max_queue_seconds")
         if (queue_limit is not None and job["state"] == "queued" and now - job["created"] > queue_limit and
                 not db.execute("SELECT 1 FROM attempts WHERE job=? LIMIT 1", (job["id"],)).fetchone()):

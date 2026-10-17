@@ -259,14 +259,19 @@ def _queue(db, now, entries, cleanup_seconds, limit=QUEUE_LIMIT):
     return queue
 
 
-def _warnings(entries, queue):
+WALL_CLOCK_WARN_FRACTION = 0.8
+
+
+def _warnings(entries, queue, queue_bound=None):
     """Workers that look available but are not doing what they could.
 
     `activation_failed_idle`: connected, idle, and its handler registry failed to activate — it can
     claim nothing and nothing else says so. `idle_while_claimable_work_waits`: idle and eligible,
     serves the handler of a job that has waited past IDLE_WAIT_SECONDS, and the roster can name no
     reason it has not claimed it. `silent_while_work_waits`: a configured worker that has stopped
-    reporting while queued jobs it serves wait. When the authority's own placement verdict names a refusal for
+    reporting while queued jobs it serves wait. `attempt_near_wall_clock_bound` / `queue_near_age_bound`: a
+    running attempt or a queued job past 80% of the authority's wall-clock bound (it is fenced or expired at
+    100%; the owner should split the work now). When the authority's own placement verdict names a refusal for
     that worker (e.g. a host-ledger hold) the warning is `idle_refused_by_authority` and carries it."""
     found = []
     by_id = {e['id']: e for e in entries}
@@ -285,6 +290,21 @@ def _warnings(entries, queue):
         if entry['connected'] and signal.get('state') == 'inert':
             found.append(dict(kind='cpu_signal_inert', worker=entry['id'], host=entry['host'],
                               detail=f"{signal.get('policy')}: {signal.get('detail')}"))
+    for entry in entries:
+        for run in entry.get('running') or []:
+            limit = run.get('wall_clock_limit_s')
+            if limit and run['running_for_s'] > WALL_CLOCK_WARN_FRACTION * limit:
+                found.append(dict(kind='attempt_near_wall_clock_bound', worker=entry['id'], host=entry['host'],
+                                  job_id=run['job_id'], handler=run['handler'], running_for_s=run['running_for_s'],
+                                  limit_s=limit, detail=f"{run.get('describe') or run['handler']}: running "
+                                  f"{int(run['running_for_s'])}s of a {int(limit)}s wall-clock bound; it will be "
+                                  "fenced and failed attempt_wall_clock_exceeded"))
+    for job in queue:
+        if queue_bound and job['age_s'] > WALL_CLOCK_WARN_FRACTION * queue_bound:
+            found.append(dict(kind='queue_near_age_bound', job_id=job['job_id'], handler=job['handler'],
+                              owner=job['owner'], waited_s=job['age_s'], limit_s=queue_bound,
+                              detail=f"{job['describe']}: queued {int(job['age_s'])}s of a {int(queue_bound)}s bound; "
+                                     "it will expire queue_age_exceeded"))
     silent = {}
     for job in queue:
         if job['age_s'] <= IDLE_WAIT_SECONDS:
@@ -328,7 +348,8 @@ def build(store, principals):
     for row in running:
         runs.setdefault(row['worker'], []).append(dict(
             job_id=row['job'], handler=json.loads(row['spec']).get('handler'), **_about(json.loads(row['spec'])),
-            running_for_s=_age(now, row['created']), lease_remaining_s=max(0.0, round(row['expires'] - now, 1))))
+            running_for_s=_age(now, row['created']), lease_remaining_s=max(0.0, round(row['expires'] - now, 1)),
+            wall_clock_limit_s=store.attempt_wall_clock(json.loads(row['spec']))[0]))
     registered = {row['id']: row for row in rows}
     entries = []
     for worker in sorted(set(configured) | set(registered)):
@@ -374,4 +395,4 @@ def build(store, principals):
         entry['unit_state'] = info.get('unit_state', 'undeclared')
         entry['unit_desired'] = info.get('desired')
     return dict(now=round(now, 3), fresh_seconds=fresh, workers=entries, disagreements=_disagreements(entries),
-                queue=queue, warnings=_warnings(entries, queue), resource_audit=store.resource_audit())
+                queue=queue, warnings=_warnings(entries, queue, store.limits.max_queue_age_seconds), resource_audit=store.resource_audit())
