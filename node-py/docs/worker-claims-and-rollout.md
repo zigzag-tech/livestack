@@ -335,3 +335,18 @@ under the worker-free dev hosts, not on a build host.
 
 **Tests.** `test_service_loop_fails_loudly_after_the_fault_budget_...`, `test_failed_systemctl_names_its_stderr_...`
 (with a positive control for the holder scan), `test_warnings_flag_a_configured_worker_that_went_silent_...`.
+
+## A worker preparing an attempt read as offline (2026-10-17 incident)
+
+Rolling `zz-joe-e2e-4` onto `livestack-66a8ced3` failed its soak 97 s after enable with
+`soak:worker_unhealthy_after_enable`, although smoke passed and the unit was healthy. The worker had claimed a full
+E2E job the moment it was enabled. `Worker.execute` prepares an attempt (input transfer, unpack, task environment)
+on the main thread and sends no `worker/report` until the handler runs, and `worker/report` was the only thing that
+moved `workers.seen`. The lease keeper heartbeated on its own channel, but a heartbeat did not count as life, so after
+`fresh_seconds` (60 s) the roster showed the worker OFFLINE and the soak (`connected` false) failed the roll. The same
+false-offline hit every busy worker's first minute of an attempt.
+
+Bound and enforcer: a valid execution-lease heartbeat (`WorkloadStore.heartbeat`, every `lease_interval`, 10 s)
+refreshes `workers.seen`; only `seen` moves, never the reported capacity or handlers.
+`tests/test_heartbeat_liveness.py` covers the preparing worker and the failure control (silence still goes offline).
+Authority-side, so it takes effect at the next authority restart; no worker roll is needed for it.
