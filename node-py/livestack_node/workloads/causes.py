@@ -31,6 +31,10 @@ KINDS = {
     "unplaceable": "after_change",
     "stalled_no_progress": "elsewhere",
     "deadline_expired": "no",
+    # The authority-wide wall-clock bounds (Limits.max_attempt_seconds / max_queue_age_seconds): the job
+    # itself is too large or too long-lived for shared capacity. Re-running it unchanged fails the same way.
+    "attempt_wall_clock_exceeded": "after_change",
+    "queue_age_exceeded": "after_change",
     "scope_closed": "no",
     "cancelled_by_owner": "no",
     "unknown": "elsewhere",
