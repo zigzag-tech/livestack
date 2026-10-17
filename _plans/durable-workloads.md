@@ -986,3 +986,27 @@ rows collected after 24 h); only the capability's SHA-256 verifier is stored.
 Optional `public_base_url` in the service config sets the host in `upload_url`.
 Code: `node-py/livestack_node/workloads/upload_grants.py`; tests:
 `test_workload_upload_grants.py`.
+
+### Native workload intent authority adapter (source-proven)
+
+`workloads.service` recovers the real `WorkloadStore`, constructs its
+owner-scoped `BlobStore`, and passes both into
+`start_for_workload_authority`. With no custom resolver, the factory resolves a
+`harmony.workload/1` `{ref, digest, bytes, media}` request from the authenticated
+principal's CAS namespace. It enforces `application/json`, a one-MiB maximum,
+exact size and SHA-256, valid UTF-8, and a JSON object before invoking normal
+WorkloadStore admission. Body `owner` cannot choose a different principal; the
+authority's `intent_id` replaces any request key before strict handler,
+resource, and input-object checks.
+
+The stream `IntentLedger` owns intent identity and terminal partials.
+WorkloadStore owns job and attempt state and emits placement decisions into
+its separately bounded decision ledger. `node-py/tests/test_streams_workload_authority_integration.py`
+exercises the production factory over isolated framed ingress with real SQLite
+and CAS stores. It checks one job/decision on replay, no job or attempt for
+invalid or unauthorized references, unavailable-service attribution, and
+owner-only durable cancellation. All fixture databases and objects are
+temporary; this proof does not start the service, contact production, modify
+authority configuration, or affect live jobs. The previously recorded
+`spec_resolver_unconfigured` limitation is stale. HTTP remains the bounded CAS
+transfer plane and is not a fallback for workload submission or observation.
