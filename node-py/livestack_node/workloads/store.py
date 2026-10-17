@@ -1242,6 +1242,12 @@ class WorkloadStore:
             if not attempt:
                 raise WorkloadError("execution lease is no longer valid", 409)
             self._compilation_live(db, attempt, now)
+            # A valid lease heartbeat is proof of life. The worker's main thread sends no worker/report while it
+            # prepares an attempt (input transfer, source unpack, task-environment build: minutes), so without this a
+            # worker that just claimed a job reads as offline after `fresh_seconds` and a rollout soak, the roster and
+            # claim freshness all take busy for silent. Only `seen` moves: the report (capacity, handlers) stays as
+            # the worker last sent it.
+            db.execute("UPDATE workers SET seen=? WHERE id=? AND boot=? AND seen<?", (now, worker, boot, now))
             expires = now + self.limits.lease_seconds
             # A heartbeat without progress leaves the last reported value in
             # place; progress is an overwrite, never an append.
