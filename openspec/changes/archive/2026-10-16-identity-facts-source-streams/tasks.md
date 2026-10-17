@@ -22,7 +22,7 @@
 ## 4. Cutover and landing
 
 - [x] 4.1 Remove the two HTTP routes and their tests after confirming the Hub is the only caller; retain no HTTP fallback in either repository.
-- [ ] 4.2 Run focused source tests and the coordinated isolated `streams.hosted-identity-facts` assertion after the Benchday contract and authority fixture land.
-- [ ] 4.3 Record final-tree source identity and admitted results; land this change with receipts and archive `identity-facts-source-streams`.
+- [x] 4.2 Run focused source tests and the coordinated isolated `streams.hosted-identity-facts` assertion after the Benchday contract and authority fixture land. Focused source tests: 31 passed. Exact-current-main admitted assertion: `evidence/4.2-coordinated-final-tree.md`.
+- [x] 4.3 Record final-tree source identity and admitted results; land this change with receipts and archive `identity-facts-source-streams`. Source HEAD `60182a369a67c0fbaf078521901d90048b2bb07b`, tree `38aa12d2bc671888b0ad0e68beeb53c0f4652b52`; coordinated final-tree receipt: `evidence/4.2-coordinated-final-tree.md`.
 
 Every test task's ledger obligation is zero placement/decision records from identity-only reads.
