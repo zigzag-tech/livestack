@@ -24,12 +24,14 @@ from .identity_facts import (
     WORKLOAD_IDENTITY_FACTS,
     pack_identity_cut,
 )
+from . import fleet_rank_stream
 
 HOST = "harmony.host/1"
 FLEET = "harmony.fleet/1"
 JOBS = "harmony.jobs/1"
 WORKLOAD = "harmony.workload/1"
 REQUEST = "harmony.request/1"
+FLEET_RANK = fleet_rank_stream.CONTRACT
 
 PACKAGE = "livestack/harmony"
 MAX_JOB_SUBJECTS = 256
@@ -39,14 +41,16 @@ TERMINAL_JOB_HEARTBEAT_S = 600.0
 
 class StreamsRuntime:
     def __init__(self, socket_path: Optional[str], log: Callable[[str], None], host: str,
-                 clock: Optional[Clock] = None, tick_s: float = 2.0, fleet_s: float = 5.0) -> None:
+                 clock: Optional[Clock] = None, tick_s: float = 2.0, fleet_s: float = 5.0,
+                 fleet_rank_s: float = fleet_rank_stream.DEFAULT_INTERVAL_S) -> None:
         self.socket_path, self.log, self.host = socket_path, log, host
         self.clock = optional(clock)
-        self.tick_s, self.fleet_s = tick_s, fleet_s
+        self.tick_s, self.fleet_s, self.fleet_rank_s = tick_s, fleet_s, fleet_rank_s
         self.producer: Optional[ReconnectingProducer] = None
         self.modes: Dict[str, str] = {}
         self.host_facts: Any = None
         self.fleet_reader: Optional[Callable[[], Tuple[dict, dict]]] = None
+        self.fleet_rank_pairs: List[Tuple[str, str, str]] = []
         self.jobs_reader: Optional[Callable[[], List[dict]]] = None
         self.identity_reader: Optional[Callable[[], dict]] = None
         self.identity_contract: Optional[str] = None
@@ -110,12 +114,15 @@ class StreamsRuntime:
         return publish
 
     # -- lifecycle
-    def attach(self, *, host_facts: Any = None, fleet_reader: Any = None, jobs_reader: Any = None,
+    def attach(self, *, host_facts: Any = None, fleet_reader: Any = None,
+               fleet_rank_pairs: Optional[Sequence[Tuple[str, str, str]]] = None,
+               jobs_reader: Any = None,
                identity_reader: Any = None, identity_contract: Optional[str] = None,
                identity_authority_id: Optional[str] = None,
                identity_namespace: Optional[str] = None,
                workload: Any = None, request: Any = None) -> "StreamsRuntime":
         self.host_facts, self.fleet_reader, self.jobs_reader = host_facts, fleet_reader, jobs_reader
+        self.fleet_rank_pairs = list(fleet_rank_pairs or [])
         self.identity_reader = identity_reader
         self.identity_contract = identity_contract
         self.identity_authority_id = identity_authority_id
@@ -130,6 +137,8 @@ class StreamsRuntime:
             register.append(HOST)
         if self.fleet_reader is not None:
             register.append(FLEET)
+        if self.fleet_reader is not None and self.fleet_rank_pairs:
+            register.append(FLEET_RANK)
         if self.identity_reader is not None and self.identity_contract is not None:
             register.append(self.identity_contract)
         if self.workload is not None:
@@ -149,6 +158,10 @@ class StreamsRuntime:
             self._tasks.append(asyncio.ensure_future(self._loop(self.host_facts.tick, 5.0, "host_facts")))
         if self.fleet_reader is not None:
             self._tasks.append(asyncio.ensure_future(self._loop(self._fleet_tick, self.fleet_s, "fleet")))
+        if self.fleet_reader is not None and self.fleet_rank_pairs:
+            self._tasks.append(asyncio.ensure_future(self._loop(
+                self._fleet_rank_tick, self.fleet_rank_s, "fleet_rank",
+                failure_every_s=self.fleet_rank_s)))
         if self.identity_reader is not None:
             self._tasks.append(asyncio.ensure_future(self._loop(
                 self._identity_tick, IDENTITY_CUT_REFRESH_S, "identity_facts",
@@ -291,6 +304,38 @@ class StreamsRuntime:
         self.fleet_published += 1
         if ack.get("shadowed") and self.fleet_published == 1:
             self.log("streams: harmony.fleet/1 is in shadow (compared with the adapter, not emitted)")
+
+    async def _fleet_rank_tick(self) -> None:
+        loop = asyncio.get_event_loop()
+        try:
+            fleet, _status = await loop.run_in_executor(None, self.fleet_reader)
+        except Exception as error:  # noqa: BLE001 - each configured key gets an explicit failure partial
+            for triple in self.fleet_rank_pairs:
+                await self._publish_fleet_rank_failure(
+                    triple, fleet_rank_stream.RankingFailure(
+                        "fleet_rank_view_unavailable", type(error).__name__))
+            return
+        now_s = self.clock() / 1000.0
+        for triple in self.fleet_rank_pairs:
+            subject = {"kind": triple[0], "region": triple[1], "vantage": triple[2]}
+            try:
+                body = fleet_rank_stream.ranking_body(fleet, triple, now_s)
+            except fleet_rank_stream.RankingFailure as error:
+                await self._publish_fleet_rank_failure(triple, error)
+                continue
+            ack = await self.publish_state(FLEET_RANK, subject, "ok", body)
+            if ack.get("shadowed"):
+                raise RuntimeError("harmony.fleet-rank/1 source is shadowed")
+
+    async def _publish_fleet_rank_failure(self, triple: Tuple[str, str, str],
+                                          failure: fleet_rank_stream.RankingFailure) -> None:
+        self.log(f"streams: {FLEET_RANK} {triple[0]}:{triple[1]}={triple[2]} failed "
+                 f"({failure.code}: {failure.detail})")
+        await self.publish_state(
+            FLEET_RANK,
+            {"kind": triple[0], "region": triple[1], "vantage": triple[2]},
+            "failed", None, {"code": failure.code, "detail": failure.detail},
+        )
 
     async def _jobs_tick(self) -> None:
         loop = asyncio.get_event_loop()

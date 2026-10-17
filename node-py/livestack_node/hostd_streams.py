@@ -9,7 +9,8 @@
 What each process publishes (see openspec services-own-their-streams):
 
 * every hostd:            harmony.host/1 (unit-declaration digest), harmony.request/1 (host scope)
-* the fleet broker only   harmony.fleet/1                       (LIVESTACK_DISPATCH=observe)
+* the fleet broker only   harmony.fleet/1 and configured
+                           harmony.fleet-rank/1                (LIVESTACK_DISPATCH=observe)
 * the workload authority  harmony.jobs/1 and harmony.workload/1  (livestack_node.workloads.service)
 
 The planner is the existing one: candidates are chosen by `planner._unit_satisfies` and the
@@ -29,6 +30,7 @@ from .streams import fleet_facts
 from .streams.host_facts import HostFacts, UnitDeclarations, globs_from_env
 from .streams.request_authority import RequestAuthority, request_ledger
 from .streams.runtime import MAX_JOB_SUBJECTS, StreamsRuntime
+from .streams import fleet_rank_stream
 from .streams.identity_facts import FLEET_IDENTITY_FACTS, WORKLOAD_IDENTITY_FACTS
 from .streams.workload_authority import IntentLedger, StoreBackend, WorkloadAuthority
 
@@ -115,7 +117,10 @@ def start_for_hostd(broker: Any, host_id: str, observe: bool, log: Callable[[str
     if not enabled():
         return None
     state = _state_dir(host_id)
-    runtime = StreamsRuntime(os.environ.get("HARMONY_STREAMS_SOCKET") or None, log, host_id)
+    rank_pairs = fleet_rank_stream.parse_pairs(os.environ.get("BENCHDAY_FLEET_RANK_PAIRS", ""), log) if observe else []
+    rank_every_s = fleet_rank_stream.interval_seconds(os.environ.get("BENCHDAY_FLEET_RANK_SECONDS"), log)
+    runtime = StreamsRuntime(os.environ.get("HARMONY_STREAMS_SOCKET") or None, log, host_id,
+                             fleet_rank_s=rank_every_s)
     facts = HostFacts(host_id, UnitDeclarations(globs_from_env()), os.path.join(state, "host_facts.json"),
                       runtime.host_publisher(), log=log)
 
@@ -147,6 +152,7 @@ def start_for_hostd(broker: Any, host_id: str, observe: bool, log: Callable[[str
     runtime.attach(
         host_facts=facts,
         fleet_reader=fleet_reader if observe else None,
+        fleet_rank_pairs=rank_pairs,
         identity_reader=identity_reader,
         identity_contract=FLEET_IDENTITY_FACTS if identity_reader is not None else None,
         identity_authority_id=(identity_publisher.authority_id if identity_reader is not None else None),
