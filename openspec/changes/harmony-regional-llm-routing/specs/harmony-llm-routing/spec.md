@@ -131,6 +131,33 @@ and serve none itself. It SHALL expose the same OpenAI-compatible `/v1` surface 
 - **THEN** its requests are served by the ranked target and the response is the target's,
   byte for byte
 
+### Requirement: A router is never a routing target
+A router-mode node SHALL NOT register with any host or fleet broker as a serving node,
+and SHALL NOT appear as a target in any fleet view or ranking. It MAY report its own
+liveness and version on a local health endpoint.
+
+#### Scenario: Router absent from the fleet view
+- **WHEN** a router-mode node is running on a requester machine
+- **THEN** no fleet broker's `/fleet` view lists it, and no ranking chooses it
+
+### Requirement: A router holds no fleet credential
+A router-mode node SHALL forward the caller's `Authorization` and owner headers unchanged
+and SHALL NOT attach a fleet or delegating token of its own. A request the caller sent
+without credentials SHALL reach the target without credentials.
+
+#### Scenario: Anonymous caller stays anonymous
+- **WHEN** a caller with no `Authorization` header sends a request through a localhost router
+- **THEN** the target receives no `Authorization` header and records the request as unowned
+
+### Requirement: Router and serving nodes share the routing contract version
+A router SHALL send its routing-contract version with every routed request. A target
+that does not support that version SHALL refuse with a 409 naming both versions rather
+than serve under a contract the router did not expect.
+
+#### Scenario: Skewed router
+- **WHEN** a router on contract version 2 routes to a target that supports only version 1
+- **THEN** the target answers 409 naming versions 2 and 1, and the router's record shows it
+
 ### Requirement: Bounded use of a stale view
 A routing node SHALL refresh its regional view on the view's TTL. If the fleet broker is
 unreachable, it MAY keep routing on the last view until the view reaches the configured
