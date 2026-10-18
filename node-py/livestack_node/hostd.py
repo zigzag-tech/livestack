@@ -104,6 +104,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from typing import Any, Dict, List, Optional
 
@@ -315,6 +316,19 @@ def build_app(broker: HostBroker):
         _track(p)
         grant = next((g for g in p.of(Grant) if g.request_id == req.id), None)
         dev = grant.device_id if grant is not None else None
+        defer = next((d.reason for d in p.of(Defer) if d.request_id == req.id), None)
+        if dev is None and defer and "host memory" in defer:
+            # DRAIN, DON'T KILL (host_ledger.py): a model load that does not
+            # fit the host's RAM is written to the ledger as WAITING, so task
+            # placement admits no new attempt here until it does. The caller
+            # keeps asking (harmony-llm retries a host-memory defer), and each
+            # ask refreshes the entry; when it stops, the entry lapses.
+            from .planner import _unit_satisfies
+            units = getattr(broker, "_last_units", {}) or {}
+            broker.note_waiting(
+                [k for k, u in units.items()
+                 if (k == kind or (requires and _unit_satisfies(u, requires)))],
+                defer)
         served_kind = grant.kind if grant is not None else None
         lease_id = None
         if dev is not None and broker.device_config.get(dev, {}).get("hosted"):
@@ -1414,6 +1428,13 @@ def main():
     )
     broker.node_control_token = node_control_token
     broker.host_id = host_id
+    # The shared host-RAM ledger (host_ledger.py), on the broker that DISPATCHES
+    # on this Linux machine — the one master of its RAM, as of its cards. A
+    # fleet broker observes other machines and has no local ledger to keep.
+    if dispatch and sys.platform.startswith("linux"):
+        from .host_ledger import HostLedger
+        broker.host_ledger = HostLedger()
+        print(f"[harmony] host-RAM ledger: {broker.host_ledger.path}", flush=True)
     broker.link_peers = link_peers
     broker.snapshot_store = snapshot_store
     broker.fleet_policy = fleet_policy
