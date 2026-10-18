@@ -47,4 +47,8 @@ def unit_inventory(attrs: Mapping, fitted: "Optional[Mapping]" = None,
                 "measured_at": float((fitted or {}).get("measured_at") or now),
                 "ttl_s": _TTL_S,
                 "model_revision": revision or "measured"}
+            # `solo` or `any` (SpeedStats): a clause asking for `cohort: solo`
+            # compares only rates measured without a batch beside them.
+            if (fitted or {}).get("cohort"):
+                llm[key]["cohort"] = fitted["cohort"]
     return {"llm": llm} if llm else {}
