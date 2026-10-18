@@ -140,7 +140,7 @@ def create_app(config):
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
 
-    attrs = {"class": "tts", "task": "text_to_speech", "params_b": 1.6,
+    attrs = {"class": "tts", "task": "text_to_speech",
         "model": "IndexTeam/IndexTTS-2.5", "revision": config["modelRevision"],
         "sample_rate": 22050, "channels": 1, "license": "bilibili-model-use-license",
         "max_concurrent": 1, "languages": ["en", "zh", "ja", "es", "ar"],
