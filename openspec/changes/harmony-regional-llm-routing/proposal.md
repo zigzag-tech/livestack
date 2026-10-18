@@ -62,6 +62,10 @@ Phase 2 — regional routing:
 - **Router mode**: a harmony-llm node with no units routes every request. Deployed as a
   regional ingress (zz-tower2 for `cn`) and, optionally, on a requester's own machine as
   the "local proxy daemon" — same binary, same contract.
+- Routers are deployed on every requester machine at `127.0.0.1:8188` (systemd user
+  unit / launchd agent, one rollout script, pinned to the serving nodes' revision); a
+  router never registers as a fleet node and holds no credential. Callers are cut over
+  to `http://127.0.0.1:8188/v1` one at a time.
 - A principal's allowed regions come from the fleet principal table; a request may
   narrow them (`harmony_regions`) but never widen them.
 - Partition rule: a cached view may be used past its TTL up to a bounded stale age;
@@ -91,7 +95,8 @@ Phase 2 — regional routing:
   mode, broader routing trigger, peer shortcut narrowing, request id, stale views.
 - `node-py/examples/harmony-llm/fleet_embed.py` (`attrs_meet`) and `planner.py`
   (`_unit_satisfies`) — negation, one evaluator.
-- Deploy: a `cn` fleetd and a router-mode harmony-llm on zz-tower2; `HARMONY_LLM_FLEET_URL`
+- Deploy: a `cn` fleetd; routers on zz-tower2 (also the `cn` ingress) and every requester
+  machine via `scripts/harmony-router-rollout.sh`; `HARMONY_LLM_FLEET_URL`
   per host. HARMONY.md and benchday `docs/livestack-harmony.md` updated.
 - Callers: unchanged (`require:` / `harmony_requires`, OpenAI-compatible); they may point
   `base_url` at their regional ingress or a localhost router.

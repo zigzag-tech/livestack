@@ -28,10 +28,20 @@
 - [ ] 5.2 Router mode: zero units ⇒ every request routed; `/v1` and `/harmony/route` served. Verify: test with an empty units file routing to a fake target byte-for-byte (stream and non-stream). Ledger: route record on the router.
 - [ ] 5.3 Principal region allowance in the fleet principal table; `harmony_regions` may narrow, widening ⇒ 403 naming region and allowance; no allowance ⇒ unrestricted. Verify: `tests/test_harmony_llm_owner.py` gains narrow/widen cases. Ledger: route record `regions` and `regions_source`.
 - [ ] 5.4 Bounded stale view: refresh on TTL; on fleetd failure keep the last view up to `HARMONY_LLM_VIEW_STALE_MAX_S` (default 300); past it, local and same-host only. Verify: tests for within-bound routing (record shows `view_age_s`) and beyond-bound fallback. Ledger: `view_age_s`, `view_stale` on route records.
-- [ ] 5.5 Deploy a `cn` fleetd and a router-mode harmony-llm on zz-tower2; set `HARMONY_LLM_FLEET_URL` and `LIVESTACK_NODE_REGION=cn` on cn nodes; unit files committed beside the existing deployed copies. Verify: `curl <cn fleetd>/fleet` lists every node with a region; a cn request's route record shows the cn vantage.
-- [ ] 5.6 Localhost router recipe (systemd user unit / launchd plist) documented. Verify: run it on one requester, point an OpenAI client's `base_url` at localhost, confirm the target's demand record carries the request id.
+- [ ] 5.5 Deploy a `cn` fleetd on zz-tower2; set `HARMONY_LLM_FLEET_URL` and `LIVESTACK_NODE_REGION=cn` on cn nodes. Verify: `curl <cn fleetd>/fleet` lists every node with a region.
 
-## 6. Docs
+## 6. Router deployment
 
-- [ ] 6.1 HARMONY.md: routing section (eligibility, vantage, routed contract, router mode, stale views, non-goals incl. fairness); remove "Only a SPEED preference routes across hosts". Update `_plans/fleet-broker.md` (one broker per region) and `_plans/region-and-locality.md` (filter before readiness). Verify: doc review; links resolve.
-- [ ] 6.2 benchday `docs/livestack-harmony.md`: caller-facing note — point `base_url` at the regional ingress or a localhost router; `harmony_regions`; `route_stale`. Verify: landed in benchday via its `scripts/land.sh`.
+- [ ] 6.1 Router mode skips `attach()`/announce entirely and serves a local `/health` with version, region and fleet URL. Verify: test that a zero-unit node makes no announce/register call, and a fleetd fixture's `/fleet` never lists it. Ledger: none.
+- [ ] 6.2 Router forwards caller `Authorization`/owner headers unchanged and attaches no token even when `HARMONY_LLM_FLEET_TOKEN` is set. Verify: test with and without caller credentials. Ledger: target demand record `principal` reflects the caller only.
+- [ ] 6.3 Routing contract version on routed requests (`x-harmony-routed: …;v=<n>`); a target that does not support it answers 409 naming both versions. Verify: skew test in `tests/test_harmony_llm_routing.py`. Ledger: route record `contract_version`.
+- [ ] 6.4 Commit `node-py/examples/harmony-llm/systemd/router/harmony-router.service` (systemd user unit) and `io.zztech.harmony-router.plist` (launchd), env file template, loopback bind. Verify: `systemd-analyze --user verify` and `plutil -lint` pass.
+- [ ] 6.5 `scripts/harmony-router-rollout.sh [host…] [--status]`: pinned revision from the GPU nodes' `/health`, dedicated worktree, venv, env + unit install, linger, start, post-install `/harmony/route` dry run that must name a target; idempotent. Verify: run twice against lappy — second run reports no changes; `--status` prints version/region/dry run.
+- [ ] 6.6 zz-tower2 router as the `cn` ingress (also binds its mesh IP). Verify: a dry run from zz-tower0 via `100.64.0.12:8188` names a `cn` target; route record shows the cn vantage.
+- [ ] 6.7 Roll out to zz-tower0, xc-mac-studio, lappy, xc-win-1 WSL. Verify: `--status` green on every host; each host's dry run names a target in its own region.
+- [ ] 6.8 Cut callers over, one change each in its own repo: benchday hub `llmConfigBridge.ts` + `narration/summarize.ts`, media-corpus ingest, jingway catalog route — `base_url` becomes `http://127.0.0.1:8188/v1`. Verify per caller: its demand records arrive at a target carrying a router id; no caller config still names `100.64.0.18:8188`.
+
+## 7. Docs
+
+- [ ] 7.1 HARMONY.md: routing section (eligibility, vantage, routed contract, router mode and its deployment/rollout runbook, stale views, non-goals incl. fairness); remove "Only a SPEED preference routes across hosts". Update `_plans/fleet-broker.md` (one broker per region) and `_plans/region-and-locality.md` (filter before readiness). Verify: doc review; links resolve.
+- [ ] 7.2 benchday `docs/livestack-harmony.md`: caller-facing note — point `base_url` at the regional ingress or a localhost router; `harmony_regions`; `route_stale`. Verify: landed in benchday via its `scripts/land.sh`.

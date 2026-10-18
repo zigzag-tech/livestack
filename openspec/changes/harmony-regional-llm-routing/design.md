@@ -121,19 +121,51 @@ Ledger: the route record on the entry's demand log is the routing decision's led
   any byte counts for the one retry; bounded stale age then falls back to local.
 - [No fleet-wide fairness] → accepted as a non-goal; noted in HARMONY.md.
 
+## Deployment
+
+Router mode imports no engine (vLLM and Strata are child processes, never imported), so a
+router needs only `fastapi`, `uvicorn`, `httpx` and `livestack_node`, and runs on Linux,
+WSL and macOS without a GPU.
+
+| Decision | Choice |
+|---|---|
+| Where | Every requester machine: zz-tower2 (hub; also the `cn` ingress), zz-tower0, xc-mac-studio, lappy, xc-win-1 WSL. GPU hosts (xc-tower-ubuntu, zz-whitby) run none — their serving node already routes. |
+| Address | `127.0.0.1:8188` on every machine — the port GPU hosts' serving node already uses — so every caller's `base_url` is `http://127.0.0.1:8188/v1` everywhere and no caller names a host. |
+| Bind | Loopback on requester machines. Only the zz-tower2 ingress also binds its mesh IP. |
+| Config | `LIVESTACK_NODE_REGION` (`na`/`cn`) and `HARMONY_LLM_FLEET_URL` (that region's fleetd), in one env file per machine (`~/.config/harmony-router/env`); units file absent ⇒ router mode. |
+| Supervisor | systemd **user** unit on Linux/WSL (`loginctl enable-linger`), launchd agent on macOS; `Restart=always`. Unit file and plist committed under `node-py/examples/harmony-llm/systemd/router/`. |
+| Code and venv | Runs from the machine's `~/livestack` checkout with its own venv (`~/.local/share/harmony-router/venv`, the `facade` extra plus `uvicorn`). |
+| Version | Router and serving nodes share the routing contract version (spec). The rollout installs the revision the GPU nodes run, read from their `/health`, rather than whatever `~/livestack` holds; repo-sync updating `~/livestack` does not restart routers. |
+| Credentials | None held. Caller headers pass through (spec). |
+| Router down | Callers fail fast; the supervisor restarts it. Callers MAY list their regional ingress as a second `base_url`; no fallback logic is added to routers. |
+| Rollout | `scripts/harmony-router-rollout.sh [host…]` (modelled on xc-setup's `diskreap-rollout.sh`): ssh, check out the pinned revision into a dedicated worktree, build the venv, install env + unit, start, then a `/harmony/route` dry run against `127.0.0.1:8188` that must name a target. `--status` prints each host's router version, region and last dry run. Idempotent. |
+| Caller cutover | One caller per change, each in its own repo: benchday hub (`llmConfigBridge.ts`, `narration/summarize.ts`), media-corpus ingest, jingway catalog route. Each cutover is verified by its demand records arriving at a target with a router id. |
+
+**Why the same port everywhere.** A caller that runs on a GPU host and on a laptop gets
+the same `base_url`, and moving a caller between machines needs no config change. The
+cost is that a router cannot run on a GPU host — which it does not need to.
+
+**Why routers do not follow repo-sync.** The routed contract is between router and
+target. A router that silently upgrades ahead of the GPU nodes (or lags them) breaks the
+contract fleet-wide on the next sync; pinning to the serving nodes' revision makes the
+GPU redeploy the single upgrade event, followed by `harmony-router-rollout.sh`.
+
 ## Migration Plan
 
 1. Land Phase 1 (eligibility, vantage, routed contract, peer narrowing, forward as asked,
    negation) and redeploy every harmony-llm node and fleetd together (tower, whitby).
 2. Verify on the existing two-host `na` fleet with `/harmony/route` dry runs and a forced
    stale route (evict a unit, send a warm-routed request → 409, retry lands elsewhere).
-3. Phase 2: deploy a `cn` fleetd and a router-mode harmony-llm on zz-tower2; set
+3. Phase 2: deploy a `cn` fleetd and the zz-tower2 router (ingress); set
    `HARMONY_LLM_FLEET_URL` on cn nodes; add principal region allowances.
-4. Rollback: redeploy the previous node release; the routed header without `expect` is
+4. Roll routers out to requester machines (Deployment), then cut callers over one at a
+   time.
+5. Rollback: redeploy the previous node release; the routed header without `expect` is
    read as today's behaviour, so mixed fleets during rollback degrade to today's.
 
 ## Open Questions
 
+- Whether xc-win-1's Windows side (not WSL) needs a router — no Windows-native caller is known today.
 - Maximum stale view age: default 300 s (30× the 10 s TTL) — tune from partition data.
 - Whether the router should also cache per-target `route_stale` refusals beyond one
   refresh (negative caching) — decide from the route-record data after Phase 1.
