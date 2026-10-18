@@ -1047,7 +1047,7 @@ like any other unit — no whole-device claim:
 | `"engine": "strata"` | units file | the adapter that drives it (`examples/harmony-llm/engines/strata.py`); never a requestable attribute |
 | `"footprint_gb": 21` | units file | the VRAM it holds. The adapter launches the engine with `--vram-reserve-mib` = free VRAM − min(grant, footprint), cache on `auto`, so the engine holds what it is charged (measured on zz-whitby: 21.17 GiB for 21 declared) |
 | `"ram_gb": 45` | units file | the host-RAM claim, planned against the HOST pool (one pool behind every card) — planning only its VRAM is how a host swaps. Measured on zz-whitby (0.1.45, Q2_0, 2 slots, 128K): 38.4 GiB resident = peak, 33.1 anonymous + ~5.2 shared, 0 locked |
-| `"attributes": {"max_concurrent": 2}` | units file | the engine's batch slots (`"parallel": 2` in Strata's config); Harmony's unit queue holds the rest |
+| `"attributes": {"max_concurrent": 2}` | units file | the engine's batch slots: the Strata adapter writes it as `"parallel"` into the sized config, overriding setup's value, so Harmony's admission and the engine's slots cannot disagree; Harmony's unit queue holds the rest |
 
 `exclusive_device` still exists in the planner for a unit that truly takes a
 whole card, but a Strata unit no longer needs it: it is planned by its size, so
