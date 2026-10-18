@@ -1189,10 +1189,52 @@ running requests, 12.4 s → 7.6 s once fixed). They run on a worker thread now
 **Not done yet** (honest list): a hard speed floor (`require llm.decode_tok_s
 >= 60`, evidence-gated, with a rule for "no evidence"); cold-start priors from
 hardware for a unit with no samples yet; the scheduler (`choose_target`)
-weighing throughput; one host-RAM ledger shared by the host broker (`ram_gb`)
-and the workload authority (whose workers on zz-whitby were held idle because
-Strata's 38 GiB left them too little accounted headroom, and a cold load swapped
-~2.6 GB of polyasr/polytts out).
+weighing throughput. (The host-RAM ledger the first version of this list named
+is the next section.)
+
+## One host-RAM ledger for both planners — drain, don't kill (2026-10-18)
+
+Two planners place work on one machine's RAM: the host broker (model servers;
+a Strata unit declares `ram_gb` 45) and workload placement (task attempts; an
+e2e attempt may grow to 10 GiB). Each saw the other only by guessing. The
+broker's host pool was MemAvailable − reserve, so an attempt promised 10 GiB
+that had touched 2 left 8 GiB that LOOKED free. Placement charged a model
+server its learned peak whenever its units were cold, so a Strata nobody was
+using held ~40 GB of zz-whitby's 60 and its task workers sat idle.
+
+`livestack_node/host_ledger.py` is one ledger per machine: small JSON entries
+in `~/.local/state/livestack/host-ledger/` (`LIVESTACK_HOST_LEDGER_DIR`), each
+refreshed by its writer and lapsing when the writer dies.
+
+| entry | written by | means | read by |
+|---|---|---|---|
+| `attempt <id>` | the workload worker running it (every report) | this attempt may grow to `claim_bytes` (its cgroup cap) | host broker: pool −= Σ max(0, claim − cgroup current) |
+| `service <cgroup>` | a node whose units declare `ram_bytes` (`serve.attach`) | the host broker plans this cgroup's host RAM | worker `HostView`: no learned-peak charge while cold |
+| `load <unit>` | host broker: `waiting` when `/admit` defers it for host memory, `loading` while it loads | this much RAM is about to be taken | worker `HostView`: charged in full |
+
+**The policy, the owner's decision:** a model load DRAINS, it never kills. A
+load refused for host memory is written `waiting`; workers then report it as
+the planned service's outstanding transient (`peak_bytes = current +
+outstanding`, `resident = outstanding == 0` — the fields the deployed authority
+already accepts), so placement stops admitting new attempts there; running
+attempts finish normally; the load then fits. harmony-llm keeps asking while
+the defer names host memory (`HARMONY_LLM_DRAIN_WAIT_S`, default 900 s, poll
+`HARMONY_LLM_DRAIN_POLL_S` 5 s) — asking is what keeps the `waiting` entry
+alive, and giving up lets it lapse. The wait is on the demand record
+(`drain_ms`) and in the refusal the caller gets if the bound is reached.
+
+**Rollout in any order.** Old workers write no attempts, so the broker
+subtracts nothing (today's behaviour); without a `service` entry workers keep
+charging the learned peak (today's behaviour); the authority sees only fields
+it already validates. Measured arithmetic, zz-whitby (57 GiB available, 8 GiB
+reserve, Strata's learned peak 38): cold Strata left attempts 11 GiB before,
+49 GiB after; a waiting 45 GiB load leaves 4, so a 9 GiB e2e attempt waits.
+Tests: `tests/test_host_ledger.py`, `tests/test_host_ledger_drain.py`,
+`tests/test_harmony_llm_loop_blocking.py` (the node's drain wait).
+
+What it does NOT do: preempt a running attempt (by design); reserve ahead of
+demand (a cold model holds nothing until a request needs it); span machines
+(each ledger is one host's — placement across hosts is still the fleet's).
 
 ## Scheduler policy — the target choice is a tunable, recorded policy
 
