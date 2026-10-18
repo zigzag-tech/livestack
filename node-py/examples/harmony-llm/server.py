@@ -438,6 +438,12 @@ def _record_measurement(name: str, spec: dict, cmd: list, capture: StartupCaptur
         parts += f" = {row['kv_tokens']} tokens"
     print(f"[harmony-llm] {name}: measured {row['footprint'] / (1 << 30):.2f} GiB "
           f"({parts}) for {chash[:19] or 'an unhashed composition'}", flush=True)
+    if not chash:
+        # Cost rows are keyed by composition hash (base, adapters, KV dtype,
+        # context — a vLLM launch). An engine that reports none (Strata) still
+        # gives the planner its measurement through `unit.measured_cost`; there
+        # is just no composition row to keep it under.
+        return
     try:
         # KEEP WHAT WAS FITTED. A restart re-measures the startup numbers, but
         # state pages and service rates come from traffic and bursts
@@ -2209,26 +2215,30 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # stops answering (measured 2026-10-02: residence:000 with the engine
     # idle). The wait is real; it just must not hold the loop.
     import asyncio as _asyncio
-    try:
-        _slot = await _asyncio.get_running_loop().run_in_executor(
-            None, _QUEUES.acquire, unit, _max_concurrent(unit))
-    except _QueueFull as e:
-        raise HTTPException(status_code=429, detail=str(e))
-    ctx["queue_ms"] = _slot.queue_ms
-    ctx["queue_slot"] = _slot
-    # How many requests this unit is running, this one included: a batched
-    # engine decodes each stream slower, and the speed evidence must say which.
-    try:
-        ctx["in_flight"] = int(_QUEUES.status(unit, _max_concurrent(unit))["in_flight"])
-    except Exception:
-        ctx["in_flight"] = None
-    # The queue brackets the in-flight window, so it is the unit's busy truth:
-    # a co-tenant acquire refuses to evict a unit that is serving (idle-only
-    # preemption, as the planner has it).
-    try:
-        manager.units[unit].busy = True
-    except Exception:
-        pass
+    # A request the FLEET placed elsewhere is that node's to queue: holding a
+    # place in a local unit's queue for it would make this node's own unit
+    # look busy (and one slot tighter) while serving nothing.
+    if not fleet_target:
+        try:
+            _slot = await _asyncio.get_running_loop().run_in_executor(
+                None, _QUEUES.acquire, unit, _max_concurrent(unit))
+        except _QueueFull as e:
+            raise HTTPException(status_code=429, detail=str(e))
+        ctx["queue_ms"] = _slot.queue_ms
+        ctx["queue_slot"] = _slot
+        # How many requests this unit is running, this one included: a batched
+        # engine decodes each stream slower, and the speed evidence must say which.
+        try:
+            ctx["in_flight"] = int(_QUEUES.status(unit, _max_concurrent(unit))["in_flight"])
+        except Exception:
+            ctx["in_flight"] = None
+        # The queue brackets the in-flight window, so it is the unit's busy truth:
+        # a co-tenant acquire refuses to evict a unit that is serving (idle-only
+        # preemption, as the planner has it).
+        try:
+            manager.units[unit].busy = True
+        except Exception:
+            pass
     if elsewhere:
         _busy.acquire()
         url = f"{elsewhere}/v1/{path}"
@@ -2248,7 +2258,12 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # silent failure: `model: "require:..."` reaches a backend whose served
     # names do not include it, and a requirement that selected a
     # thinking-capable unit never actually turns thinking ON.
-    if isinstance(parsed_body, dict) and (requirement is not None or "harmony_requires" in parsed_body):
+    # A fleet-routed request travels AS ASKED: the receiving node resolves the
+    # requirement against its own units. Normalising it here rewrote `model`
+    # to THIS node's unit, and the receiver was asked for a unit by name
+    # (zz-whitby -> tower 2026-10-18: a 27B request arrived as `flash_next`).
+    if (not fleet_target and isinstance(parsed_body, dict)
+            and (requirement is not None or "harmony_requires" in parsed_body)):
         out = dict(parsed_body)
         out.pop("harmony_requires", None)          # ours, not the backend's
         served = SPECS.get(unit, {}).get("model") or unit
