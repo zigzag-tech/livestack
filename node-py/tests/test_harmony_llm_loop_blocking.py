@@ -105,3 +105,53 @@ def test_the_measurement_is_handed_the_engine_process_it_started(srv, monkeypatc
         assert seen["pid"] == proc.pid
     finally:
         proc.kill()
+
+
+def test_a_fleet_routed_request_travels_as_asked(srv, monkeypatch):
+    # Asked from a node that cannot serve it, a speed-preferring request is
+    # ranked over the fleet and forwarded: the body as the caller wrote it (the
+    # receiver resolves the requirement), the routed header set (it never
+    # re-routes), and no place held in a local queue for work served elsewhere.
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from fastapi.testclient import TestClient
+    got = {}
+
+    class _Peer(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_POST(self):
+            n = int(self.headers.get("content-length") or 0)
+            got["body"] = json.loads(self.rfile.read(n))
+            got["routed"] = self.headers.get("x-harmony-routed")
+            out = json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+
+    peer = HTTPServer(("127.0.0.1", 0), _Peer)
+    threading.Thread(target=peer.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{peer.server_address[1]}"
+    view = {"generated_at": time.time(), "hosts": {"other": {"nodes": [{
+        "peer": f"{base}/livestack", "state": "fresh", "ready": True, "kinds": ["llm"],
+        "units": [{"kind": "big", "resident": True,
+                   "attributes": {"class": "llm", "params_b": 400, "context_len": 8192}}]}]}}}
+    monkeypatch.setattr(srv, "FLEET_URL", "http://fleet.invalid:8801")
+    monkeypatch.setattr(srv, "_fleet_view", lambda url: view)
+    monkeypatch.setattr(srv, "_held_elsewhere", lambda name: None)
+    acquired = []
+    monkeypatch.setattr(srv._QUEUES, "acquire", lambda *a, **k: acquired.append(a))
+    body = {"model": "require:class=llm,params_b>=300",
+            "harmony_prefer": [{"metric": "llm.decode_tok_s", "direction": "max"}],
+            "messages": [{"role": "user", "content": "x"}]}
+    try:
+        with TestClient(srv.app) as client:
+            r = client.post("/v1/chat/completions", json=body)
+        assert r.status_code == 200, r.text
+        assert got["body"]["model"] == "require:class=llm,params_b>=300"
+        assert got["routed"]
+        assert acquired == []
+    finally:
+        peer.shutdown()
