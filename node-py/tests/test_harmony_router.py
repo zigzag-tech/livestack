@@ -210,8 +210,26 @@ def test_the_request_language_is_the_facades(router):
 
 def test_facade_specific_endpoints_are_refused_and_named(wired):
     client, node, _ = wired
-    r = client.post("/v1/classifier", json={"x": 1})
-    assert r.status_code == 404 and "/v1/classifier" in r.text and node.got == []
+    r = client.post("/v1/models-admin", json={"x": 1})
+    assert r.status_code == 404 and "/v1/models-admin" in r.text and node.got == []
+
+
+def test_the_classifier_routes_to_a_node_that_has_its_adapter(router, monkeypatch):
+    """`/v1/classifier` names its ADAPTER in `model` (`jemm`): the ranking must
+    pick a node whose units declare `adapter.jemm`, not whichever ranks first."""
+    from fastapi.testclient import TestClient
+    has, lacks = _Node(), _Node()
+    try:
+        a = has.row(); a["units"][0]["attributes"]["adapter.jemm"] = True
+        view = {"generated_at": time.time(), "hosts": {"a": {"nodes": [lacks.row()]},
+                                                       "b": {"nodes": [a]}}}
+        monkeypatch.setattr(router, "FLEET_URL", "http://fleet.invalid:8801")
+        monkeypatch.setattr(fleet_route, "fleet_view", lambda url, *a, **k: view)
+        monkeypatch.setattr(router, "ROUTES", _Rows())
+        r = TestClient(router.app).post("/v1/classifier", json={"model": "jemm", "questions": {}})
+        assert r.status_code == 200 and len(has.got) == 1 and lacks.got == []
+    finally:
+        has.close(), lacks.close()
 
 
 def test_embeddings_follow_the_facades_one_space_rule(router, monkeypatch):
@@ -242,3 +260,29 @@ def test_embeddings_follow_the_facades_one_space_rule(router, monkeypatch):
         assert r.status_code == 400 and "not comparable" in r.text
     finally:
         sink.close()
+
+
+def test_two_accounts_sharing_a_router_never_see_each_other(wired, monkeypatch):
+    """Per-account isolation: each request's credential and owner reach the target
+    as that caller sent them, the route record is attributed to that caller, and
+    nothing of one account's request appears on another's."""
+    from livestack_node.fleet_auth import Principal
+    client, node, routes = wired
+    tok_a, tok_b = "tok-account-a-0123456789", "tok-account-b-0123456789"
+    import sys
+    router = sys.modules["harmony_router_under_test"]
+    monkeypatch.setattr(router, "_PRINCIPALS", {tok_a: Principal(name="acct-a", owner="a"),
+                                                 tok_b: Principal(name="acct-b", owner="b")})
+    client.post("/v1/chat/completions", json=_body(),
+                headers={"authorization": f"Bearer {tok_a}", "x-harmony-owner": "tenant-a:acct_1"})
+    client.post("/v1/chat/completions", json=_body(),
+                headers={"authorization": f"Bearer {tok_b}", "x-harmony-owner": "tenant-b:acct_1"})
+    a, b = node.got
+    assert a["h"]["authorization"].endswith(tok_a) and a["h"]["x-harmony-owner"] == "tenant-a:acct_1"
+    assert b["h"]["authorization"].endswith(tok_b) and b["h"]["x-harmony-owner"] == "tenant-b:acct_1"
+    ra, rb = routes.rows
+    assert (ra["principal"], rb["principal"]) == ("acct-a", "acct-b")
+    assert ra["owner_ns"] and rb["owner_ns"] and ra["owner_ns"] != rb["owner_ns"]
+    assert ra["request_id"] != rb["request_id"]
+    dump = json.dumps(routes.rows)
+    assert tok_a not in dump and tok_b not in dump           # a credential is never logged
