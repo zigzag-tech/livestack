@@ -122,13 +122,67 @@ def test_extra_args_ride_verbatim(tmp_path):
     assert StrataEngine().argv(spec, None)[-3:] == toks
 
 
-def test_no_budget_translation_a_self_sizing_engine_takes_the_whole_card(tmp_path):
-    spec = _spec(8191, tmp_path)
-    # Budget or not, the launch line is the same: Strata sizes its cache to the
-    # free VRAM itself (the planner charges the whole device via
-    # `exclusive_device` — planner-side, not a launch-line translation).
-    assert StrataEngine().argv(spec, {"vram_bytes": 11 << 30}) == \
-        StrataEngine().argv(spec, None)
+def _sized(monkeypatch, spec, budget, free_gib):
+    monkeypatch.setattr(StrataEngine, "_free_vram_bytes",
+                        staticmethod(lambda index: int(free_gib * (1 << 30))))
+    argv = StrataEngine().argv(spec, budget)
+    path = argv[argv.index("--config") + 1]
+    return path, json.loads(Path(path).read_text())
+
+
+def test_the_grant_capped_at_the_footprint_becomes_the_vram_reserve(tmp_path, monkeypatch):
+    # 23 GiB free, 21 granted, 18 declared: the engine may hold 18, so it is
+    # told to leave 5 GiB free. Auto cache, so the engine re-checks its fit.
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    path, cfg = _sized(monkeypatch, spec, {"vram_bytes": 21 << 30}, 23)
+    assert cfg["args"][-4:] == ["--expert-cache", "auto", "--vram-reserve-mib", "5120"]
+    assert cfg["args"][:2] == ["--mtp", "pack/mtp.gguf"]       # the rest kept
+    assert cfg["exe"] == "engine/strata"
+
+
+def test_a_grant_smaller_than_the_footprint_wins(tmp_path, monkeypatch):
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    _, cfg = _sized(monkeypatch, spec, {"vram_bytes": 12 << 30}, 23)
+    assert cfg["args"][-1] == str(11 * 1024)
+
+
+def test_no_grant_holds_the_engine_to_its_declared_footprint(tmp_path, monkeypatch):
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    _, cfg = _sized(monkeypatch, spec, None, 23)
+    assert cfg["args"][-1] == str(5 * 1024)
+
+
+def test_setups_own_cache_and_reserve_flags_are_replaced_not_doubled(tmp_path, monkeypatch):
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    base = Path(spec["strata_root"]) / "strata-qwen-q2_0.json"
+    base.write_text(json.dumps({"exe": "engine/strata", "args": [
+        "--expert-cache", "8900", "--vram-reserve-mib", "700", "--spec", "4"]}))
+    _, cfg = _sized(monkeypatch, spec, None, 23)
+    assert cfg["args"] == ["--spec", "4", "--expert-cache", "auto",
+                           "--vram-reserve-mib", "5120"]
+
+
+def test_the_sized_copy_never_becomes_the_next_base(tmp_path, monkeypatch):
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    path, _ = _sized(monkeypatch, spec, None, 23)
+    assert not Path(path).name.startswith("strata-")
+    assert StrataEngine().config_path(spec).endswith("strata-qwen-q2_0.json")
+
+
+def test_unknowable_free_vram_keeps_setups_config(tmp_path, monkeypatch):
+    spec = _spec(8191, tmp_path, footprint_gb=18)
+    monkeypatch.setattr(StrataEngine, "_free_vram_bytes", staticmethod(lambda index: None))
+    argv = StrataEngine().argv(spec, {"vram_bytes": 21 << 30})
+    assert argv[argv.index("--config") + 1].endswith("strata-qwen-q2_0.json")
+
+
+def test_the_card_is_the_units_gpu_flag(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(StrataEngine, "_free_vram_bytes",
+                        staticmethod(lambda index: seen.append(index) or (23 << 30)))
+    StrataEngine().argv(_spec(8191, tmp_path, footprint_gb=18,
+                              extra_args=["--gpu", "1"]), None)
+    assert seen == [1]
 
 
 def test_ready_asks_the_fake_server(fake_strata, tmp_path):
