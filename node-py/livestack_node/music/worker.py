@@ -44,8 +44,8 @@ def atomic_json(path, value):
 
 def validate_request(body):
     required = {"jobId", "ownerId", "style", "sectionTags", "seed"}
-    if not isinstance(body, dict) or not required <= body.keys() or body.keys() - required - {"scoreAbc"}:
-        raise ValueError("Expected jobId, ownerId, style, sectionTags, seed and optional scoreAbc")
+    if not isinstance(body, dict) or not required <= body.keys() or body.keys() - required - {"scoreAbc", "lyricsMode"}:
+        raise ValueError("Expected jobId, ownerId, style, sectionTags, seed and optional scoreAbc/lyricsMode")
     if not isinstance(body["jobId"], str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,100}", body["jobId"]):
         raise ValueError("Invalid jobId")
     if not isinstance(body["ownerId"], str) or not body["ownerId"].startswith("histo:") or len(body["ownerId"]) > 192:
@@ -61,6 +61,8 @@ def validate_request(body):
         raise ValueError("Invalid instrumental section tags")
     if "scoreAbc" in body and (not isinstance(body["scoreAbc"], str) or not 1 <= len(body["scoreAbc"]) <= 100000):
         raise ValueError("Invalid exact editable score")
+    if body.get("lyricsMode", "sections") not in {"empty", "sections"}:
+        raise ValueError("lyricsMode must explicitly select empty or sections")
     return dict(body)
 
 
@@ -177,7 +179,8 @@ def create_app(config):
         (path / "instrumental.abc").write_text(abc)
         atomic_json(path / "composition.json", composition)
         # Required instrumental semantics are explicit, never hidden lyrics.
-        request = SongRequest(id=body["jobId"], style=style, lyrics=lyric_tags(abc), abc=abc,
+        request = SongRequest(id=body["jobId"], style=style,
+            lyrics="" if body.get("lyricsMode", "sections") == "empty" else lyric_tags(abc), abc=abc,
             cot="full" if score.voices["Vocal"].chords else "melody", seed=body["seed"])
         plan = pipe.plan(request=request, cancelled=cancel.is_set)
         semantic = pipe.generate_semantic(plan, cancelled=cancel.is_set)
