@@ -316,6 +316,7 @@ def route_row(ctx: dict, router_id: str, outcome: str, status: int,
     now = time.time() if now is None else now
     return {"ts": ctx["t0"], "role": "router", "router_id": router_id,
             "request_id": ctx.get("request_id"), "principal": ctx.get("principal"),
+            "owner_ns": ctx.get("owner_ns"),
             "requirement_hash": ctx.get("requirement_hash"),
             "fleet_route": ctx.get("fleet_route"), "outcome": outcome,
             "http_status": status, "elapsed_ms": round((now - ctx["t0"]) * 1000, 1)}

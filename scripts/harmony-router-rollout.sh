@@ -32,6 +32,10 @@ HOSTS=(
   # WSL2 in mirrored-network mode shares loopback with Windows, so this one router
   # also answers 127.0.0.1:8188 for Windows-native callers. `#2222` is the ssh port.
   "node-c|ubuntu@100.64.200.1#2222|cn|http://100.64.202.1:8801|0"
+  # The public hub box (Tokyo): neither na nor cn, so no region (vantage = the fleet
+  # broker's own probe). Installing the router is additive; pointing the hub at it
+  # is a hub env change and a hub restart, which goes through the fenced deploy.
+  "public-tokyo|ubuntu@100.64.211.1||http://100.64.215.1:8801|0"
 )
 # What a regional fleet broker watches: every llm node, and the cn hosts.
 FLEETD_PEERS="http://100.64.215.1:8188/livestack,http://100.64.239.1:8188/livestack,http://100.64.241.1:8100/livestack,http://100.64.241.1:8766/livestack,http://100.64.241.1:8844/livestack"
