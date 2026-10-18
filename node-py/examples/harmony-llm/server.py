@@ -57,8 +57,13 @@ from selection import unit_inventory as _unit_inventory  # noqa: E402
 from fleet_embed import (AmbiguousEmbedder, attrs_meet, embed_nodes as _embed_nodes,  # noqa: E402
                          fetch_fleets as _fetch_fleets, pick as _pick_embed)
 from unit_queue import Queues as _Queues, QueueFull as _QueueFull   # noqa: E402
-from fleet_route import (ROUTED_HEADER as _ROUTED_HEADER, choose as _fleet_choose,  # noqa: E402
-                         fleet_view as _fleet_view, wants_fleet_route as _wants_fleet_route)
+from fleet_route import (ROUTED_HEADER as _ROUTED_HEADER, SUPPORTED_CONTRACT as _SUPPORTED_CONTRACT,  # noqa: E402
+                         RouteFailed as _RouteFailed, choose as _fleet_choose,
+                         fleet_view as _fleet_view, mark_cold as _mark_cold,
+                         new_request_id as _new_request_id, parse_routed as _parse_routed,
+                         route_row as _route_row,
+                         send_routed as _send_routed, view_age_s as _view_age_s,
+                         wants_fleet_route as _wants_fleet_route)
 
 HOST_ID = os.environ.get("HARMONY_LLM_HOST_ID", "xc-tower-ubuntu")
 MODEL = os.environ.get("HARMONY_LLM_MODEL", "Qwen/Qwen3-8B")
@@ -385,6 +390,9 @@ _COSTS = UnitCostStore(os.environ.get("HARMONY_UNIT_COSTS_FILE") or os.path.join
 # One record per forwarded request (openspec: inference-demand-log). Disabled,
 # and saying so, when HARMONY_DEMAND_LOG_AGE_DAYS is unset.
 DEMAND = demand_log_from_env(HOST_ID, log=lambda m: print(m, flush=True))
+# What THIS node placed elsewhere (fleet_route.route_row), apart from what it
+# served: the demand log's readers count a record as a request served.
+ROUTES = demand_log_from_env(f"{HOST_ID}-routes", log=lambda m: print(m, flush=True))
 # What each unit has MEASURED itself doing on this host (decode tok/s, first
 # token), published per unit as `prefer` evidence (`_fleet_inventory`) so a
 # caller asking for speed reaches the hardware that has delivered it. Re-read
@@ -1037,18 +1045,31 @@ async def route_explain(request: Request):
                       "speed": SPEED.summary(n), "preferences": receipt})
     out = {"node": SELF_BASE, "host": HOST_ID, "hardware": _HARDWARE,
            "requirement": requirement, "prefer": prefer, "local": local}
-    if FLEET_URL and _wants_fleet_route(prefer, request.headers):
+    regions, regions_source = _request_regions(request, body)
+    trigger = None
+    if FLEET_URL:
+        named = _model_choice(body)
+        unit = named or _default_unit()
+        trigger = _wants_fleet_route(
+            prefer, request.headers,
+            no_warm_local=not _local_ready(requirement, prefer, unit, regions))
+    if trigger:
         view = _fleet_view(FLEET_URL)
-        out["fleet"] = (_fleet_choose(view, requirement, prefer, SELF_BASE,
-                                      expected_tokens=_expected_tokens(body))[1]
-                        if view is not None else {"decision": "no fleet view",
-                                                  "fleet": FLEET_URL})
+        if view is None:
+            out["fleet"] = {"decision": "no fleet view", "fleet": FLEET_URL}
+        else:
+            rec = _fleet_choose(view, requirement, prefer, SELF_BASE,
+                                expected_tokens=_expected_tokens(body), regions=regions)[1]
+            age = _view_age_s(FLEET_URL)
+            rec.update(trigger=trigger, regions_source=regions_source, view_age_s=age,
+                       view_stale=bool(age is not None and age > 10.0))
+            out["fleet"] = rec
     else:
         out["fleet"] = {"decision": "not routed",
                         "why": ("no fleet broker configured" if not FLEET_URL else
                                 "already routed" if request.headers.get(_ROUTED_HEADER) else
-                                "no speed preference: a request that states none is "
-                                "served by this host, as before")}
+                                "a resident, unsaturated, in-policy unit here serves it, and "
+                                "no speed preference asks for more")}
     return JSONResponse(out)
 app.state.pane_ask_execution_scope = ResidentExtractionScope(
     manager=manager, queues=_QUEUES, busy=_busy, max_concurrent=_max_concurrent,
@@ -1268,6 +1289,34 @@ def _held_elsewhere(unit: str) -> "str | None":
     return None
 
 
+def _same_host(base: str) -> bool:
+    """Is this peer on THIS machine (another card's node, another port)?"""
+    from urllib.parse import urlparse
+    host = (urlparse(base).hostname or "").lower()
+    mine = os.environ.get("LIVESTACK_NODE_HOST", "127.0.0.1").strip().lower()
+    return host in {mine, "127.0.0.1", "localhost", "::1"}
+
+
+def _held_on_host(unit: str) -> "str | None":
+    """The request path's peer shortcut: a same-HOST peer already holding `unit`
+    RESIDENT. Narrower than `_held_elsewhere` on purpose -- that one is
+    warm-on-start's (any peer, resident or still loading, to avoid loading a
+    second copy); on a request it made a sequential 3 s probe per remote peer
+    and forwarded across the mesh on a unit that was only loading. A remote
+    holder is the fleet ranking's business (fleet_route), not this shortcut's."""
+    for _host, b in _same_kind_peers():
+        if not _same_host(b):
+            continue
+        try:
+            h = httpx.get(f"{b}/health", timeout=3.0).json()
+        except Exception:
+            continue
+        u = (h.get("units") or {}).get(unit)
+        if isinstance(u, dict) and u.get("resident") and not u.get("loading"):
+            return b
+    return None
+
+
 def _peer_at(device_id: str) -> "str | None":
     """The base URL of the node that speaks for this device, when it is not us.
 
@@ -1324,80 +1373,6 @@ def _peer_at(device_id: str) -> "str | None":
     return None
 
 
-# ── the request language ────────────────────────────────────────────────────
-#
-# A closed grammar over an OPEN vocabulary: the shapes below are the whole
-# language, while the attribute names are whatever the units declare. That is
-# what buys expressiveness without turning this into a query engine.
-#
-# The broker's matcher takes flat `key<op>: value` clauses ANDed together, so
-# everything richer is normalized into that shape HERE. The caller gets the
-# expressive surface; the planner keeps the interface it already has.
-_INTERVAL_RE = re.compile(r"^\s*([\[\(])\s*([^,]*)\s*,\s*([^\]\)]*)\s*([\]\)])\s*$")
-
-
-def _split_clauses(text: str) -> "list[str]":
-    """Split `require:` clauses on commas that are NOT inside an interval.
-
-    `params_b=[20,30)` carries a comma that belongs to the interval, not to the
-    clause list. Splitting naively produced `params_b=[20` and `30)` — two
-    unparseable clauses from one valid requirement.
-    """
-    out, depth, cur = [], 0, []
-    for ch in text:
-        if ch in "[(":
-            depth += 1
-        elif ch in "])":
-            depth = max(0, depth - 1)
-        if ch == "," and depth == 0:
-            out.append("".join(cur))
-            cur = []
-        else:
-            cur.append(ch)
-    out.append("".join(cur))
-    return [c for c in (x.strip() for x in out) if c]
-
-
-def _num(raw: str):
-    raw = raw.strip()
-    try:
-        return float(raw) if "." in raw else int(raw)
-    except ValueError:
-        raise ValueError(f"not a number: {raw!r}")
-
-
-def _expand_clause(key: str, val) -> "list[tuple[str, object]]":
-    """One requirement entry -> the flat clauses the broker understands.
-
-    Interval notation is used for ranges because open vs closed bounds are the
-    entire point and every operator-in-the-key spelling gets one of them wrong:
-        "[20,30)"  ->  params_b>=20 AND params_b<30
-        "[20,]"    ->  params_b>=20
-        "(,30]"    ->  params_b<=30
-    """
-    # `adapter=chips-v1` asks for a unit serving that LoRA. Units carry one
-    # boolean attribute per adapter, so this is an ordinary equality clause the
-    # broker's planner compares without knowing what an adapter is.
-    if key == "adapter":
-        name = str(val).strip()
-        if not name:
-            raise ValueError("adapter= names no adapter")
-        return [(f"adapter.{name}", True)]
-    if isinstance(val, str):
-        m = _INTERVAL_RE.match(val)
-        if m:
-            lo_b, lo, hi, hi_b = m.groups()
-            out = []
-            if lo.strip():
-                out.append((key + (">=" if lo_b == "[" else ">"), _num(lo)))
-            if hi.strip():
-                out.append((key + ("<=" if hi_b == "]" else "<"), _num(hi)))
-            if not out:
-                raise ValueError(f"interval {val!r} constrains nothing")
-            return out
-    return [(key, val)]
-
-
 # SPECIALIST-ONLY ATTRIBUTES, mirroring the planner's rule (planner.py
 # `_specialist_only`): a unit declaring one (e.g. `ocr: true`) serves work
 # generic demand can never imply, so a requirement that merely matches
@@ -1431,144 +1406,17 @@ def _local_satisfies(name: str, requires: dict) -> bool:
     return attrs_meet(attrs, requires)
 
 
+from request_language import (derived_requirements as _derived_requirements,  # noqa: E402
+                              expand_clause as _expand_clause, num as _num,
+                              requirement_from as _rl_requirement_from,
+                              split_clauses as _split_clauses)
+
+
 def _requirement_from(body_json: dict) -> "dict | None":
-    """A stated NEED instead of a model name, in either of two shapes.
-
-    Body field (what an OpenAI SDK sends via extra_body):
-        {"harmony_requires": {"class": "llm", "params_b>": 7, "params_b<=": 10}}
-    Model string (for clients that can only set `model`):
-        {"model": "require:class=llm,params_b>7,params_b<=10"}
-
-    The point of both is that a caller says what it needs and never learns which
-    model is loaded, on which card, or what had to move — that is the planner's
-    business, and asking a caller to know it is what makes a GPU fleet feel like
-    a set of machines instead of one.
-    """
-    raw_req = body_json.get("harmony_requires")
-    entries: "list[tuple[str, object]]" = []
-    if isinstance(raw_req, dict) and raw_req:
-        entries = list(raw_req.items())
-    else:
-        model = str(body_json.get("model") or "")
-        if not model.startswith("require:"):
-            # An ADAPTER's name as the model is how vLLM selects a LoRA, and so
-            # it is what a node that resolved `adapter=<name>` forwards to the
-            # peer holding the unit. Read it back as that requirement: treated
-            # as an unknown name it resolved "any llm" and the normalisation
-            # below rewrote `model` to the base -- base weights and a 200.
-            if any(model in (SPECS[n].get("adapters") or {}) for n in SPECS):
-                return {f"adapter.{model}": True}
-            return None
-        for clause in _split_clauses(model[len("require:"):]):
-            clause = clause.strip()
-            if not clause:
-                continue
-            # `=` LAST: `params_b>=20` must not partition on the `=`.
-            for op in (">=", "<=", "!=", ">", "<", "="):
-                if op in clause:
-                    name, _, rest = clause.partition(op)
-                    rest = rest.strip()
-                    if op == "=":
-                        entries.append((name.strip(), rest))
-                    else:
-                        entries.append((name.strip() + op, rest))
-                    break
-            else:
-                # FAIL CLOSED. The old code dropped an unparseable clause and
-                # carried on, so `params_b~20` quietly became "no size
-                # requirement" and the caller got whatever was resident.
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"harmony: cannot parse requirement clause {clause!r}")
-
-    out: dict = {}
-    for key, val in entries:
-        try:
-            for k, v in _expand_clause(str(key), val):
-                # Numeric strings become numbers, and "true"/"false" become
-                # bools: leaving them as strings is how `thinking=true` failed
-                # to match a unit whose attribute is a real boolean.
-                if isinstance(v, str):
-                    low = v.strip().lower()
-                    if low in ("true", "false"):
-                        v = low == "true"
-                    else:
-                        try:
-                            v = _num(v)
-                        except ValueError:
-                            v = v.strip()
-                out[k] = v
-        except ValueError as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"harmony: bad requirement {key!r}: {e}")
-    if not out:
-        raise HTTPException(
-            status_code=400,
-            detail="harmony: a requirement was given but constrains nothing")
-    return out
-
-
-def _derived_requirements(path: str, body_json: dict) -> dict:
-    """What the request already tells us. Never ask a caller to declare this.
-
-    A request carrying an image has said it needs vision; a request that turns
-    thinking on has said it needs a unit that can SEPARATE that thinking from
-    the answer. Making the caller restate either is the bookkeeping this system
-    exists to abolish — and in the thinking case, not deriving it is what let a
-    request enable thinking on a unit with no reasoning parser and put the
-    model's narration into a user-visible reply (2026-09-07).
-    """
-    out: dict = {}
-    # No leading slash in either clause: `path` is the {path:path} capture and
-    # arrives WITHOUT the "/v1/" prefix, as "chat/completions" / "completions" /
-    # "embeddings". Spelled "/completions", the second clause matched
-    # "chat/completions" by luck and a bare "completions" not at all — which
-    # derived NO class for /v1/completions and, now that a node can declare a
-    # pooling unit, would let a generation request be routed to one.
-    if "completions" in path:
-        out["class"] = "llm"
-    # The endpoint says what KIND of work this is, exactly as it does for chat.
-    # No leading slash: `path` is the {path:path} capture and arrives WITHOUT
-    # the "/v1/" prefix, as "embeddings". (The chat clause above matches only
-    # because "chat/completions" happens to contain "/completions".)
-    # Without this clause an embedding request derives nothing, falls past
-    # candidate_kinds() into _unit_for_model()'s positional fallback, and is
-    # served by whichever unit happens to be declared first — a generation unit,
-    # which answers /v1/embeddings with a 400. Deriving it is what lets a node
-    # declare both kinds and route each correctly.
-    elif "embeddings" in path:
-        out["class"] = "embed"
-
-    # Vision: an image part anywhere in the messages. Deliberately NOT a
-    # recursive scan for `type: image_url` — arbitrary user JSON containing that
-    # shape is not an image, and treating it as one would route text work to a
-    # vision unit for no reason.
-    for msg in (body_json.get("messages") or []):
-        content = msg.get("content") if isinstance(msg, dict) else None
-        if isinstance(content, list):
-            for part in content:
-                if isinstance(part, dict) and part.get("type") in ("image_url", "input_image"):
-                    out["vision"] = True
-                    break
-        if out.get("vision"):
-            break
-
-    # Thinking: the PARAMETER implies the CAPABILITY. These are two different
-    # things (see docs/livestack-harmony.md) and conflating them is the bug.
-    kwargs = body_json.get("chat_template_kwargs")
-    if isinstance(kwargs, dict) and kwargs.get("enable_thinking") is True:
-        out["thinking"] = True
-
-    # Tools: a request that ships tool schemas has said it needs a unit that can
-    # CALL them, exactly as an image says it needs vision. Nobody should have to
-    # add `tools=true` to a requirement string — the tools are right there in the
-    # body. `tool_choice: "none"` is the one case that ships schemas without
-    # needing the capability, so it does not derive.
-    tools = body_json.get("tools")
-    if isinstance(tools, list) and tools and body_json.get("tool_choice") != "none":
-        out["tools"] = True
-    return out
+    """The request's stated NEED (request_language.requirement_from), with this
+    node's adapter names read back as the requirement they stand for."""
+    return _rl_requirement_from(
+        body_json, lambda model: any(model in (SPECS[n].get("adapters") or {}) for n in SPECS))
 
 
 def _named_unit(requested: str) -> "str | None":
@@ -1643,7 +1491,11 @@ def health():
                       for n in SPECS},
             # Single-unit shape, kept so existing health checks still parse.
             "model": SPECS[next(iter(SPECS))]["model"],
-            "resident": any(_vllm_up(name=n) for n in SPECS)}
+            "resident": any(_vllm_up(name=n) for n in SPECS),
+            # What a router rollout pins to: the revision this node runs and the
+            # routed-request contract it speaks (fleet_route.SUPPORTED_CONTRACT).
+            "revision": _REVISION, "contract": _SUPPORTED_CONTRACT,
+            "region": NODE_REGION or None}
 
 
 def _card_total_bytes() -> "int | None":
@@ -1776,7 +1628,11 @@ _DEMAND_PATHS = {"chat/completions", "completions", "embeddings"}
 def _note_demand(ctx: dict, outcome: str, status: int, tail: "UsageTail | None" = None) -> None:
     """One demand record for a request this node served or refused itself.
     A request forwarded to a peer is that peer's record, not ours."""
-    if ctx.get("path") not in _DEMAND_PATHS or ctx.get("forwarded"):
+    if ctx.get("path") not in _DEMAND_PATHS:
+        return
+    if ctx.get("forwarded"):
+        if ctx.get("fleet_route", {}).get("chosen"):
+            ROUTES.record(**_route_row(ctx, HOST_ID, outcome, status))
         return
     prompt, completion = tail.tokens() if tail is not None else (None, None)
     unit = ctx.get("unit")
@@ -1804,6 +1660,10 @@ def _note_demand(ctx: dict, outcome: str, status: int, tail: "UsageTail | None" 
         decode_tok_s=speed["decode_tok_s"], first_token_ms=speed["first_token_ms"],
         speed_source=speed["speed_source"], in_flight=ctx.get("in_flight"),
         fleet_route=ctx.get("fleet_route"),
+        # The id that joins the router's route record to this node's demand
+        # record, who routed it here, and why a warm-routed request was refused.
+        request_id=ctx.get("request_id"), routed_by=ctx.get("routed_by"),
+        route_stale=ctx.get("route_stale"),
         # How long the load waited for task attempts to drain (host_ledger.py).
         drain_ms=ctx.get("drain_ms"),
         outcome=outcome, http_status=status)
@@ -1820,7 +1680,12 @@ def _outcome_for(status: int, detail: str = "") -> str:
 @app.api_route("/v1/{path:path}", methods=["GET", "POST"])
 async def proxy(path: str, request: Request):
     """Serve the request and leave one demand record for it, whatever happens."""
+    routed = _parse_routed(request.headers.get(_ROUTED_HEADER))
     ctx = {"t0": time.time(), "path": path,
+           # Minted by the first node that routes it, then carried unchanged so a
+           # router's route record and the target's demand record join on it.
+           "request_id": (request.headers.get("x-request-id") or "").strip() or _new_request_id(),
+           "routed_in": routed, "routed_by": routed.router_id if routed else None,
            "route": request.headers.get("x-harmony-origin"),
            "owner_ns": owner_namespace(request.headers.get("x-harmony-owner"))}
     try:
@@ -1828,6 +1693,13 @@ async def proxy(path: str, request: Request):
             request.headers.get("authorization"), _classifier_principals())
     except Exception:
         ctx["principal"] = None
+    if routed is not None and not 1 <= routed.version <= _SUPPORTED_CONTRACT:
+        # A router speaking a contract this build does not: refuse, naming both,
+        # rather than serving a request whose warm/cold promise we cannot read.
+        _note_demand(ctx, "refused", 409)
+        return JSONResponse(status_code=409, content={
+            "error": "route_contract", "router_version": routed.version,
+            "supported": _SUPPORTED_CONTRACT})
     try:
         return await _proxy_impl(path, request, ctx)
     except HTTPException as e:
@@ -1881,6 +1753,72 @@ async def _forward_to_embed_node(node: dict, parsed_body: dict, request: Request
                     media_type=resp.headers.get("content-type", "application/json"))
 
 
+def _request_principal(request: Request):
+    """The `fleet_auth.Principal` the caller's bearer token names, or None
+    (auth off, no credential, or an unknown one -- refusing is not this
+    function's job; it only resolves an allowance)."""
+    try:
+        from livestack_node.fleet_auth import bearer_token, principal_for
+        table = _classifier_principals()
+        token = bearer_token(request.headers.get("authorization"))
+        return principal_for(table, token) if table and token else None
+    except Exception:
+        return None
+
+
+def _request_regions(request: Request, parsed_body) -> "tuple[list[str] | None, str]":
+    """Regions this request may run in: the principal's allowance, narrowed by
+    `harmony_regions`, never widened (a 403 naming region and allowance)."""
+    from livestack_node.fleet_auth import AuthError, effective_regions
+    asked = parsed_body.get("harmony_regions") if isinstance(parsed_body, dict) else None
+    try:
+        regions, source = effective_regions(_request_principal(request), asked)
+    except AuthError as e:
+        raise HTTPException(status_code=e.status, detail=f"harmony: {e.detail}")
+    return regions, source
+
+
+NODE_REGION = os.environ.get("LIVESTACK_NODE_REGION", "").strip().lower()
+
+
+def _git_revision() -> str:
+    """The livestack revision this process runs (HARMONY_LLM_REV overrides)."""
+    env = os.environ.get("HARMONY_LLM_REV", "").strip()
+    if env:
+        return env
+    try:
+        return subprocess.run(["git", "-C", _HERE, "rev-parse", "HEAD"], capture_output=True,
+                              text=True, timeout=5).stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+_REVISION = _git_revision()
+
+
+def _local_ready(requirement, prefer, unit, regions) -> bool:
+    """Can THIS node serve the request right now with no load and no queue: a
+    resident, running, unsaturated unit that meets the requirement, in a region
+    the request allows. False sends the request to be ranked over the fleet."""
+    if regions and NODE_REGION not in regions:
+        return False
+    cands = ([n for n in _ordered(prefer) if _local_satisfies(n, requirement)]
+             if requirement is not None else [unit])
+    return any(n in getattr(manager, "resident", ()) and _vllm_up(name=n)
+               and _QUEUES.has_capacity(n, _max_concurrent(n)) for n in cands)
+
+
+def _stale_response(ctx: dict, reason: str, detail: str = ""):
+    """A warm-routed request this node cannot serve warm: 409 BEFORE any body
+    byte. Nothing is admitted, loaded or forwarded -- the router's view was
+    stale, and the router (not this node) decides what to do about it."""
+    ctx["route_stale"] = reason
+    _note_demand(ctx, "route_stale", 409)
+    return JSONResponse(status_code=409, content={
+        "error": "route_stale", "reason": reason, "detail": detail,
+        "node": SELF_BASE, "request_id": ctx.get("request_id")})
+
+
 async def _off_loop(fn):
     """Run a blocking call (broker HTTP, peer probes) on a worker thread, so the
     loop keeps relaying the streams already in flight while it waits."""
@@ -1900,6 +1838,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     requirement = None
     prefer: "list[dict]" = []
     parsed_body = None
+    regions, ctx["regions_source"] = None, "none"
     if body:
         try:
             parsed_body = json.loads(body)
@@ -1927,6 +1866,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
                 prefer = _prefer_from(parsed_body)
             except _PreferenceError as e:
                 raise HTTPException(status_code=400, detail=f"harmony: {e}")
+            regions, ctx["regions_source"] = _request_regions(request, parsed_body)
             derived = _derived_requirements(path, parsed_body)
             named = _model_choice(parsed_body)
             if requirement is not None and derived:
@@ -2007,23 +1947,82 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # on the card turns a working model into a 503 on every request — observed
     # exactly that way, a benchmark refused against its own loaded model.
     already_here = unit in getattr(manager, "resident", ()) and _vllm_up(name=unit)
+    # A WARM-ROUTED REQUEST IS SERVED RESIDENT-ONLY, OR REFUSED. The router's
+    # view said a resident unit here would meet the request; this node is the
+    # authority on whether that is still true. Anything else -- the unit was
+    # evicted, is saturated, no longer meets the requirement -- is `409
+    # route_stale` before any body byte, and never an admission, a load or a
+    # forward: a stale view must not become a surprise model load on a node the
+    # router chose for being warm. A cold-routed (or unmarked) request keeps
+    # today's behaviour.
+    routed_in = ctx.get("routed_in")
+    warm_only = routed_in is not None and routed_in.expect == "warm"
+    if warm_only:
+        cands = ([n for n in _ordered(prefer) if _local_satisfies(n, requirement)]
+                 if requirement is not None else [unit])
+        up = [n for n in cands if n in getattr(manager, "resident", ()) and _vllm_up(name=n)]
+        stale, slot = None, None
+        if not cands:
+            stale = "unsatisfied"
+        elif not up:
+            stale = "not_resident"
+        else:
+            # Resident + satisfies + a slot, taken as one step with no await in
+            # between, and never queued behind other requests.
+            for n in up:
+                slot = _QUEUES.try_acquire(n, _max_concurrent(n))
+                if slot is not None:
+                    unit = n
+                    break
+            if slot is None:
+                stale = "saturated"
+        if stale:
+            return _stale_response(ctx, stale)
+        manager.units[unit].busy = True        # pinned against idle eviction while held
+        ctx["queue_slot"], ctx["queue_ms"] = slot, 0.0
+        try:
+            ctx["in_flight"] = int(_QUEUES.status(unit, _max_concurrent(unit))["in_flight"])
+        except Exception:
+            ctx["in_flight"] = None
+        ctx["shortcut"] = "warm-routed"
+        already_here = True
     # A SPEED PREFERENCE IS A FLEET QUESTION (fleet_route.py). Everything below
     # answers within this host; a caller that asked for the fastest decode
     # wants the node whose unit has MEASURED fastest, wherever it is. Asked
     # first, so a slower resident unit here does not win on being here — the
     # ranking still puts a warm node ahead of a cold one, so a request only
     # travels to pay a load when nothing warm anywhere can serve it.
-    fleet_target = None
-    if FLEET_URL and _wants_fleet_route(prefer, request.headers):
+    fleet_target, fleet_expect, view = None, "cold", None
+    trigger = None
+    if FLEET_URL and not warm_only:
+        trigger = _wants_fleet_route(
+            prefer, request.headers,
+            no_warm_local=not _local_ready(requirement, prefer, unit, regions))
+    if trigger:
         view = await _off_loop(lambda: _fleet_view(FLEET_URL))
         if view is None:
-            ctx["fleet_route"] = {"decision": "no fleet view", "fleet": FLEET_URL}
+            ctx["fleet_route"] = {"decision": "no fleet view", "fleet": FLEET_URL,
+                                  "trigger": trigger, "request_id": ctx["request_id"]}
         else:
             fleet_target, ctx["fleet_route"] = _fleet_choose(
                 view, requirement, prefer, SELF_BASE,
-                expected_tokens=_expected_tokens(parsed_body))
+                expected_tokens=_expected_tokens(parsed_body), regions=regions)
+            age = _view_age_s(FLEET_URL)
+            ctx["fleet_route"].update(
+                trigger=trigger, request_id=ctx["request_id"],
+                regions_source=ctx.get("regions_source"),
+                view_age_s=age, view_stale=bool(age is not None and age > 10.0))
+            fleet_expect = ctx["fleet_route"].get("expect") or "cold"
+            if (not fleet_target and regions
+                    and ctx["fleet_route"]["decision"] == "no fleet target"):
+                # Serving here would break the region policy, and nowhere in
+                # policy can serve it: refuse, naming the rule.
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"harmony: no llm target in {'/'.join(regions)}: "
+                           f"{ctx['fleet_route'].get('reason')}")
         if fleet_target:
-            print(f"[harmony-llm] fleet route: {requirement or 'class=llm'} "
+            print(f"[harmony-llm] fleet route ({trigger}): {requirement or 'class=llm'} "
                   f"prefer {[c.get('metric') for c in prefer]} -> {fleet_target}",
                   flush=True)
             local = next((n for n in _ordered(prefer)
@@ -2044,7 +2043,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # So: satisfied locally AND resident => serve it. Otherwise the planner
     # decides, exactly as before. Placement authority is unchanged; what is
     # removed is asking permission for a placement that already happened.
-    if requirement is not None and not fleet_target:
+    if requirement is not None and not fleet_target and not warm_only:
         # POLICY (not an accident of the fix below): among units that satisfy
         # the requirement, REUSE ONE THAT IS ALREADY RESIDENT. An eviction and
         # reload of a 27B measured ~50.7 s on this node, and a caller that
@@ -2089,9 +2088,10 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         cands = ([n for n in _ordered(prefer) if _local_satisfies(n, requirement)]
                  if requirement is not None else [unit])
         for n in cands:
-            h = await _off_loop(lambda n=n: _held_elsewhere(n))
+            h = await _off_loop(lambda n=n: _held_on_host(n))
             if h:
                 unit, held_peer = n, h
+                ctx["shortcut"] = "same-host peer"
                 break
     granted, degraded, refused = None, None, None
     if not already_here and not held_peer and not fleet_target and (requirement is not None or len(SPECS) > 1 or MULTI_NODE):
@@ -2249,8 +2249,9 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # `manager.ensure`, which is the load this avoids. `already_here` short-
     # circuits it, so a node serving the unit itself never pays for this.
     if not elsewhere and not already_here:
-        holder = await _off_loop(lambda: _held_elsewhere(unit))
+        holder = await _off_loop(lambda: _held_on_host(unit))
         if holder:
+            ctx["shortcut"] = "same-host peer"
             print(f"[harmony-llm] {unit} is held by {holder} — forwarding "
                   f"rather than loading a second copy", flush=True)
             elsewhere = holder
@@ -2280,7 +2281,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # A request the FLEET placed elsewhere is that node's to queue: holding a
     # place in a local unit's queue for it would make this node's own unit
     # look busy (and one slot tighter) while serving nothing.
-    if not fleet_target:
+    if not fleet_target and not warm_only:
         try:
             _slot = await _asyncio.get_running_loop().run_in_executor(
                 None, _QUEUES.acquire, unit, _max_concurrent(unit))
@@ -2324,10 +2325,13 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # requirement against its own units. Normalising it here rewrote `model`
     # to THIS node's unit, and the receiver was asked for a unit by name
     # (zz-whitby -> tower 2026-10-18: a 27B request arrived as `flash_next`).
-    if (not fleet_target and isinstance(parsed_body, dict)
+    # A same-host peer forward is the same: the peer is a facade with its own
+    # unit table, so it gets the requirement, not this node's idea of it.
+    if (not elsewhere and isinstance(parsed_body, dict)
             and (requirement is not None or "harmony_requires" in parsed_body)):
         out = dict(parsed_body)
         out.pop("harmony_requires", None)          # ours, not the backend's
+        out.pop("harmony_regions", None)           # policy for the router, not the engine
         served = SPECS.get(unit, {}).get("model") or unit
         if str(out.get("model", "")).startswith("require:") or requirement is not None:
             out["model"] = served
@@ -2357,26 +2361,52 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
 
     headers = {k: v for k, v in request.headers.items()
                if k.lower() not in {"host", "content-length"}}
-    if fleet_target:
-        headers[_ROUTED_HEADER] = HOST_ID     # placed: the receiver serves, never re-routes
+    headers["x-request-id"] = ctx["request_id"]
     timeout = httpx.Timeout(float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
-    client = httpx.AsyncClient(timeout=timeout)
-    try:
-        req = client.build_request(request.method, url, content=body, headers=headers,
-                                   params=dict(request.query_params))
-        ctx["sent_at"] = time.time()          # first-token time starts here, not at the queue
-        resp = await client.send(req, stream=True)
-    except Exception as e:
-        await client.aclose()
-        _busy.release()
-        _release_slot(ctx)
-        # The TYPE is part of the answer: `Server disconnected without sending
-        # a response` and `All connection attempts failed` are different
-        # failures, and an empty message carried neither (this is how the
-        # acceptance's first 502 said nothing at all).
-        raise HTTPException(status_code=502,
-                            detail=f"proxy to {unit} failed: "
-                                   f"{type(e).__name__}: {e or '(no message)'}")
+    if fleet_target:
+        # PLACED by the fleet: send marked routed (the receiver never re-routes),
+        # with what we expect of it. One retry on a refusal that cost the caller
+        # no byte (fleet_route.send_routed); never after streaming starts.
+        attempts: list = []
+        ctx["fleet_route"]["attempts"] = attempts
+
+        def _rechoose(tried, _view=view):
+            tgt, rec = _fleet_choose(_view, requirement, prefer, SELF_BASE,
+                                     expected_tokens=_expected_tokens(parsed_body),
+                                     regions=regions, exclude=tried)
+            return tgt, (rec.get("expect") or "cold")
+
+        ctx["sent_at"] = time.time()
+        try:
+            resp, client = await _send_routed(
+                first=(fleet_target, fleet_expect), rechoose=_rechoose,
+                router_id=HOST_ID, request_id=ctx["request_id"],
+                method=request.method, path=path, body=body, headers=headers,
+                params=dict(request.query_params), timeout=timeout, attempts=attempts,
+                on_stale=lambda t: _mark_cold(FLEET_URL, t))
+        except _RouteFailed as e:
+            _busy.release()
+            _release_slot(ctx)
+            raise HTTPException(status_code=e.status,
+                                detail={"error": "route_failed", "attempts": e.attempts})
+    else:
+        client = httpx.AsyncClient(timeout=timeout)
+        try:
+            req = client.build_request(request.method, url, content=body, headers=headers,
+                                       params=dict(request.query_params))
+            ctx["sent_at"] = time.time()          # first-token time starts here, not at the queue
+            resp = await client.send(req, stream=True)
+        except Exception as e:
+            await client.aclose()
+            _busy.release()
+            _release_slot(ctx)
+            # The TYPE is part of the answer: `Server disconnected without sending
+            # a response` and `All connection attempts failed` are different
+            # failures, and an empty message carried neither (this is how the
+            # acceptance's first 502 said nothing at all).
+            raise HTTPException(status_code=502,
+                                detail=f"proxy to {unit} failed: "
+                                       f"{type(e).__name__}: {e or '(no message)'}")
 
     # A CONTEXT REFUSAL IS A ROUTING FACT, NOT A VENDOR STRING.
     #

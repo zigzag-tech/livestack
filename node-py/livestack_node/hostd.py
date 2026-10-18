@@ -585,8 +585,13 @@ def build_app(broker: HostBroker):
             preferences = parse_preferences(prefer)
         except PreferenceError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        wanted = [r.strip().lower() for r in (regions or "").split(",") if r.strip()]
+        # Region is a policy on ELIGIBILITY and is applied inside the ranker,
+        # before warm/cold: filtered afterwards, a warm node in a refused region
+        # had already suppressed the cold one in an allowed region.
         result = _rank(broker.fleet_view(), kind, vantage=via or vantage,
-                       ttl_s=ttl_s, prefer=preferences)
+                       ttl_s=ttl_s, prefer=preferences, allow_regions=wanted,
+                       allow_unknown_region=allow_unknown_region)
         # `region` is RECORDED, never applied. It is the asker's region as the
         # emitter knew it, which is what makes a ledger record readable later —
         # but WHERE the work may run is `regions`, below.
@@ -598,19 +603,15 @@ def build_app(broker: HostBroker):
         # endpoints are for.
         result["principal"] = _read_principal(broker, authorization)
 
-        wanted = [r.strip().lower() for r in (regions or "").split(",") if r.strip()]
         if wanted:
-            from .client import eligible_targets
-            kept, rejected = eligible_targets(result, allow_regions=set(wanted),
-                                              allow_unknown_region=allow_unknown_region)
-            result["targets"] = kept
+            from .fleet_rank import REGION_FILTERED
+            rejected = [{"target_id": c.target_id, "why": c.reason[len(REGION_FILTERED):]}
+                        for c in result["candidates"]
+                        if c.reason.startswith(REGION_FILTERED)]
             result["region_policy"] = {"allow": wanted,
                                        "allow_unknown": bool(allow_unknown_region),
                                        "rejected": rejected}
-            # The chosen row must agree with the filtered list, or a caller
-            # reading `chosen` gets an answer the policy just refused.
-            result["chosen"] = kept[0]["target_id"] if kept else None
-            if not kept:
+            if not result["targets"]:
                 result["reason"] = (
                     f"no {kind} target in {'/'.join(wanted)}: "
                     + "; ".join(f"{r['target_id']} ({r['why']})" for r in rejected[:4])
