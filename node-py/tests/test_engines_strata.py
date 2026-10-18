@@ -185,6 +185,24 @@ def test_the_card_is_the_units_gpu_flag(tmp_path, monkeypatch):
     assert seen == [1]
 
 
+def test_the_units_max_concurrent_is_the_engines_batch_slots(tmp_path, monkeypatch):
+    # One knob: Harmony admits `max_concurrent`, so the engine gets that many
+    # slots whatever setup wrote — even when free VRAM is unknowable.
+    spec = _spec(8191, tmp_path, footprint_gb=18, attributes={"max_concurrent": 3})
+    base = Path(spec["strata_root"]) / "strata-qwen-q2_0.json"
+    base.write_text(json.dumps({"exe": "engine/strata", "parallel": 2,
+                                "args": ["--expert-cache", "8900"]}))
+    _, cfg = _sized(monkeypatch, spec, None, 23)
+    assert cfg["parallel"] == 3
+    monkeypatch.setattr(StrataEngine, "_free_vram_bytes", staticmethod(lambda index: None))
+    argv = StrataEngine().argv(spec, None)
+    cfg = json.loads(Path(argv[argv.index("--config") + 1]).read_text())
+    assert cfg["parallel"] == 3 and cfg["args"] == ["--expert-cache", "8900"]
+    # An undeclared unit is one slot, the server's own default.
+    _, cfg = _sized(monkeypatch, _spec(8191, tmp_path, footprint_gb=18), None, 23)
+    assert cfg["parallel"] == 1
+
+
 def test_ready_asks_the_fake_server(fake_strata, tmp_path):
     spec = _spec(fake_strata, tmp_path)
     assert StrataEngine().ready(spec) is True
