@@ -21,7 +21,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 UNIT_DIR="$REPO/node-py/examples/harmony-llm/systemd/router"
 
-# name|ssh target ("local" = this machine)|region|fleet broker for that region|fleetd
+# name|ssh target ("local" = this machine)|region|fleet broker for that region|fleetd|archive
+# archive: the host cannot reach GitHub or a peer repo, so the pinned source is
+# shipped as a `git archive` over ssh and the revision is declared, not read.
 # fleetd=1: this host also runs the region's fleet broker (observe-only), `cn` on
 # zz-tower2. The `na` broker is livestack-fleetd on xc-tower-ubuntu, not ours.
 HOSTS=(
@@ -35,10 +37,10 @@ HOSTS=(
   # The public hub box (Tokyo): neither na nor cn, so no region (vantage = the fleet
   # broker's own probe). Installing the router is additive; pointing the hub at it
   # is a hub env change and a hub restart, which goes through the fenced deploy.
-  "public-tokyo|ubuntu@100.64.0.17||http://100.64.0.18:8801|0"
+  "public-tokyo|ubuntu@100.64.0.17||http://100.64.0.18:8801|0|archive"
 )
-# What a regional fleet broker watches: every llm node, and the cn hosts.
-FLEETD_PEERS="http://100.64.0.18:8188/livestack,http://100.64.0.27:8188/livestack,http://100.64.0.3:8100/livestack,http://100.64.0.3:8766/livestack,http://100.64.0.3:8844/livestack"
+# What a regional fleet broker watches: every llm node, every embed node, and the cn hosts.
+FLEETD_PEERS="http://100.64.0.24:8230/livestack,http://100.64.0.18:8188/livestack,http://100.64.0.27:8188/livestack,http://100.64.0.3:8100/livestack,http://100.64.0.3:8766/livestack,http://100.64.0.3:8844/livestack"
 FLEETD_LINK_PEERS="zz-tower0=http://100.64.0.3:8799,xc-tower-ubuntu=http://100.64.0.18:8799,zz-whitby=http://100.64.0.27:8799"
 # The serving nodes whose /health says which revision routers must run.
 SERVING=(http://100.64.0.18:8188 http://100.64.0.27:8188)
@@ -78,7 +80,9 @@ CONF="$HOME/.config/harmony-router"; mkdir -p "$SHARE" "$CONF"
 OS="$(uname -s)"
 
 # 1. source at the pinned revision (a worktree of ~/livestack when there is one).
-if [ ! -e "$SRC/.git" ]; then
+if [ "${ARCHIVE:-}" = archive ]; then
+  [ "$(cat "$SRC/.archive-rev" 2>/dev/null)" = "$REV" ] || { echo "FAILED: archive not shipped" >&2; exit 1; }
+elif [ ! -e "$SRC/.git" ]; then
   if [ -d "$HOME/livestack/.git" ]; then
     git -C "$HOME/livestack" fetch -q origin 2>/dev/null || true
     git -C "$HOME/livestack" worktree add -q --detach "$SRC" HEAD
@@ -87,7 +91,7 @@ if [ ! -e "$SRC/.git" ]; then
   fi
   changed+=(source)
 fi
-if [ "$(git -C "$SRC" rev-parse HEAD)" != "$REV" ]; then
+if [ "${ARCHIVE:-}" != archive ] && [ "$(git -C "$SRC" rev-parse HEAD)" != "$REV" ]; then
   git -C "$SRC" cat-file -e "$REV^{commit}" 2>/dev/null \
     || git -C "$SRC" fetch -q origin "$REV" 2>/dev/null \
     || git -C "$SRC" fetch -q "$PEER_REPO" "$REV"
@@ -97,19 +101,29 @@ fi
 
 # A fresh --no-checkout clone already has HEAD at the pinned revision and an
 # empty tree: populate it.
-if [ ! -f "$SRC/node-py/examples/harmony-llm/router.py" ]; then
+if [ "${ARCHIVE:-}" != archive ] && [ ! -f "$SRC/node-py/examples/harmony-llm/router.py" ]; then
   git -C "$SRC" checkout -q -f --detach "$REV"; changed+=(checkout)
 fi
 
 # 2. venv with the router's few dependencies (marker = the dependency set).
 DEPS="fastapi uvicorn httpx pydantic cryptography"
-if [ ! -x "$VENV/bin/python" ] || [ "$(cat "$SHARE/.deps" 2>/dev/null)" != "$DEPS" ]; then
+deps_ok() { "$VENV/bin/python" -c "import fastapi, uvicorn, httpx, pydantic, cryptography" 2>/dev/null; }
+if ! deps_ok || [ "$(cat "$SHARE/.deps" 2>/dev/null)" != "$DEPS" ]; then
   idx=(); [ -n "${PIP_INDEX:-}" ] && idx=(--index-url "$PIP_INDEX")
   if command -v uv >/dev/null; then
     uv venv -q "$VENV" && VIRTUAL_ENV="$VENV" uv pip install -q "${idx[@]}" $DEPS
   else
-    python3 -m venv "$VENV" && "$VENV/bin/pip" install -q "${idx[@]}" $DEPS
+    rm -rf "$VENV"
+    if python3 -m venv "$VENV" 2>/dev/null; then
+      "$VENV/bin/pip" install -q "${idx[@]}" $DEPS
+    else
+      # No python3-venv (ensurepip) on this host: a pip-less venv plus get-pip.
+      rm -rf "$VENV"; python3 -m venv --without-pip "$VENV"
+      curl -fsS https://bootstrap.pypa.io/get-pip.py | "$VENV/bin/python" - -q "${idx[@]}"
+      "$VENV/bin/pip" install -q "${idx[@]}" $DEPS
+    fi
   fi
+  deps_ok || { echo "FAILED: router dependencies did not install" >&2; exit 1; }
   echo "$DEPS" > "$SHARE/.deps"; changed+=(venv)
 fi
 
@@ -120,6 +134,8 @@ HARMONY_ROUTER_HOST=127.0.0.1
 HARMONY_ROUTER_PORT=8188
 HARMONY_ROUTER_ID=router-$NAME
 HARMONY_DEMAND_LOG_AGE_DAYS=21"
+[ "${ARCHIVE:-}" = archive ] && want_env="$want_env
+HARMONY_ROUTER_REV=$REV"
 if [ "$(cat "$CONF/env" 2>/dev/null)" != "$want_env" ]; then
   printf '%s\n' "$want_env" > "$CONF/env"; changed+=(env)
 fi
@@ -220,10 +236,18 @@ run_on() {  # run_on <ssh-target|local> <script-text> [VAR=value…]
   fi
 }
 
+# Ship node-py at $REV as a tarball (no git on the far side needed).
+ship_archive() {
+  local target="$1" rev="$2" port=22
+  [[ "$target" == *"#"* ]] && { port="${target#*#}"; target="${target%%#*}"; }
+  git -C "$REPO" archive --format=tar "$rev" node-py | ssh -p "$port" -o BatchMode=yes "$target" \
+    'set -e; d="$HOME/.local/share/harmony-router/src"; rm -rf "$d"; mkdir -p "$d"; tar -x -C "$d"; echo '"$rev"' > "$d/.archive-rev"'
+}
+
 rc=0
 [ "$STATUS" = 1 ] || { [ -n "$REV" ] || REV="$(serving_rev)"; echo "pinned revision: $REV"; }
 for row in "${HOSTS[@]}"; do
-  IFS='|' read -r name target region fleet fleetd <<<"$row"
+  IFS='|' read -r name target region fleet fleetd archive <<<"$row"
   if [ ${#WANT[@]} -gt 0 ]; then
     hit=0; for w in "${WANT[@]}"; do [ "$w" = "$name" ] && hit=1; done; [ $hit = 1 ] || continue
   fi
@@ -231,7 +255,11 @@ for row in "${HOSTS[@]}"; do
   if [ "$STATUS" = 0 ]; then
     pip_index="${HARMONY_ROUTER_PIP_INDEX:-}"
     [ -z "$pip_index" ] && [ "$region" = cn ] && pip_index="https://pypi.tuna.tsinghua.edu.cn/simple"
+    if [ "${archive:-}" = archive ]; then
+      ship_archive "$target" "$REV" || { rc=1; continue; }
+    fi
     run_on "$target" "$(remote_install)" \
+      "ARCHIVE=${archive:-}" \
       "REV=$REV" "NAME=$name" "REGION=$region" "FLEET_URL=$fleet" "PIP_INDEX=$pip_index" \
       "ORIGIN_URL=$ORIGIN_URL" "PEER_REPO=$PEER_REPO" \
       "FLEETD=$fleetd" "FLEETD_PEERS=$FLEETD_PEERS" "FLEETD_LINK_PEERS=$FLEETD_LINK_PEERS" \
