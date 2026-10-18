@@ -1048,11 +1048,12 @@ async def route_explain(request: Request):
     regions, regions_source = _request_regions(request, body)
     trigger = None
     if FLEET_URL:
-        named = _model_choice(body)
+        named = _model_choice(body) if requirement is None else None
         unit = named or _default_unit()
         trigger = _wants_fleet_route(
             prefer, request.headers,
-            no_warm_local=not _local_ready(requirement, prefer, unit, regions))
+            no_warm_local=(named is None
+                           and not _local_ready(requirement, prefer, unit, regions)))
     if trigger:
         view = _fleet_view(FLEET_URL)
         if view is None:
@@ -1787,7 +1788,9 @@ def _git_revision() -> str:
     if env:
         return env
     try:
-        return subprocess.run(["git", "-C", _HERE, "rev-parse", "HEAD"], capture_output=True,
+        # realpath: the deployed script is often a symlink into a worktree.
+        return subprocess.run(["git", "-C", os.path.dirname(os.path.realpath(__file__)),
+                               "rev-parse", "HEAD"], capture_output=True,
                               text=True, timeout=5).stdout.strip() or "unknown"
     except Exception:
         return "unknown"
@@ -1839,6 +1842,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     prefer: "list[dict]" = []
     parsed_body = None
     regions, ctx["regions_source"] = None, "none"
+    named = None            # the unit the caller's `model` CHOSE (None: no opinion)
     if body:
         try:
             parsed_body = json.loads(body)
@@ -1995,9 +1999,13 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     fleet_target, fleet_expect, view = None, "cold", None
     trigger = None
     if FLEET_URL and not warm_only:
+        # A caller that NAMED a unit chose it: "nothing warm here" is a reason to
+        # load that unit, not to answer with whichever other model is warm
+        # elsewhere. Only a stated NEED (or no opinion) widens the trigger.
         trigger = _wants_fleet_route(
             prefer, request.headers,
-            no_warm_local=not _local_ready(requirement, prefer, unit, regions))
+            no_warm_local=((named is None or requirement is not None)
+                           and not _local_ready(requirement, prefer, unit, regions)))
     if trigger:
         view = await _off_loop(lambda: _fleet_view(FLEET_URL))
         if view is None:
