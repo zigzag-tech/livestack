@@ -303,6 +303,68 @@ def read_demand(path: str, since: float, limit: int = 50_000) -> list:
     return rows[-limit:]
 
 
+class LoadTimes:
+    """How long each unit's engine took from start to serving, per load on
+    this host — what a cold unit costs before it answers anything.
+
+    Kept in its own small JSONL, not the demand log: a load is not a request,
+    and the demand log's readers (replay, composition) count records as
+    requests. Bounded: rewritten to the last `keep` loads when it grows past
+    `keep * 4` lines. The published figure is the median of the last `window`
+    loads of a unit, so one load from a cold disk cache does not define it."""
+
+    def __init__(self, path: str, window: int = 10, keep: int = 200) -> None:
+        self.path = path
+        self._window = window
+        self._keep = keep
+        self._lock = threading.Lock()
+        d = os.path.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+
+    def _rows(self) -> "list[dict]":
+        rows = []
+        try:
+            with open(self.path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if isinstance(row, dict) and isinstance(row.get("load_s"), (int, float)):
+                        rows.append(row)
+        except FileNotFoundError:
+            pass
+        return rows
+
+    def observe(self, unit: str, load_s: float, ts: Optional[float] = None) -> None:
+        if not unit or not load_s or load_s <= 0:
+            return
+        row = {"unit": unit, "load_s": round(float(load_s), 1),
+               "ts": time.time() if ts is None else ts}
+        with self._lock:
+            with open(self.path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, sort_keys=True) + "\n")
+            rows = self._rows()
+            if len(rows) > self._keep * 4:
+                tmp = self.path + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    for r in rows[-self._keep:]:
+                        fh.write(json.dumps(r, sort_keys=True) + "\n")
+                os.replace(tmp, self.path)
+
+    def summary(self, unit: str) -> dict:
+        """`{"load_s", "load_s_samples", "load_measured_at"}`, or empty when this
+        unit has never been loaded here — silence, never a zero."""
+        with self._lock:
+            rows = [r for r in self._rows() if r.get("unit") == unit][-self._window:]
+        if not rows:
+            return {}
+        return {"load_s": _median([r["load_s"] for r in rows]),
+                "load_s_samples": len(rows),
+                "load_measured_at": max(float(r.get("ts") or 0) for r in rows)}
+
+
 class UnitCostStore:
     """The last measured cost per composition hash, persisted so a proposal can
     be scored against compositions that are not running right now.

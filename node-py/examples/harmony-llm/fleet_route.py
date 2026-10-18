@@ -33,6 +33,10 @@ SPEED_METRICS = frozenset({"llm.decode_tok_s", "llm.first_token_ms"})
 # again: two nodes with different views could otherwise bounce it.
 ROUTED_HEADER = "x-harmony-routed"
 _VIEW_TTL_S = 10.0
+# The answer length assumed when a request sets no `max_tokens`: a typical
+# chat reply. It only prices a cold host against a warm one (fleet_rank's
+# finish-time rule); the request itself is forwarded unchanged.
+DEFAULT_EXPECTED_TOKENS = 512
 
 _lock = threading.Lock()
 _cache: "dict[str, tuple[float, dict]]" = {}
@@ -66,15 +70,17 @@ def fleet_view(url: str, timeout: float = 3.0) -> "dict | None":
 
 
 def choose(view: dict, require: "dict | None", prefer: list, self_base: str,
-           now: "float | None" = None) -> "tuple[Optional[str], dict]":
+           now: "float | None" = None,
+           expected_tokens: "int | None" = None) -> "tuple[Optional[str], dict]":
     """(base URL to forward to, or None to serve here; the routing record).
 
     The record is the explanation: who won, every ranked target with its
     reason and preference receipt, and every filtered one with the rule that
     removed it. It goes on the demand record and is what `/harmony/route`
     returns for a dry run."""
+    tokens = expected_tokens or DEFAULT_EXPECTED_TOKENS
     result = rank(view, "llm", require=require or {"class": "llm"}, prefer=prefer,
-                  now=now)
+                  now=now, expected_tokens=tokens)
     chosen = result.get("chosen")
     record = {
         "chosen": chosen,
@@ -82,9 +88,10 @@ def choose(view: dict, require: "dict | None", prefer: list, self_base: str,
         "decision": ("no fleet target" if not chosen
                      else "serve here" if _same(chosen, self_base) else "forward"),
         "reason": result.get("reason"),
+        "expected_tokens": tokens,
         "view_generated_at": view.get("generated_at"),
         "targets": [{k: t.get(k) for k in ("target_id", "host_id", "rank", "reason",
-                                           "preferences")}
+                                           "preferences", "finish_s")}
                     for t in result.get("targets") or []],
         "filtered": [{"target_id": c.target_id, "host_id": c.host_id, "reason": c.reason}
                      for c in result.get("candidates") or []

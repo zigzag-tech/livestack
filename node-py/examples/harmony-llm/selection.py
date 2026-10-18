@@ -51,4 +51,19 @@ def unit_inventory(attrs: Mapping, fitted: "Optional[Mapping]" = None,
             # compares only rates measured without a batch beside them.
             if (fitted or {}).get("cohort"):
                 llm[key]["cohort"] = fitted["cohort"]
+    # What a cold start costs: measured loads (demand_log.LoadTimes) win; the
+    # operator's declared `reload_cost` (seconds, the planner's own unit) is
+    # the prior, published as declared so a reader can tell them apart.
+    load = (fitted or {}).get("load_s")
+    if isinstance(load, (int, float)) and not isinstance(load, bool) and load > 0:
+        llm["load_s"] = {"value": float(load),
+                         "sample_count": int((fitted or {}).get("load_s_samples") or 1),
+                         "measured_at": float((fitted or {}).get("load_measured_at") or now),
+                         "ttl_s": _TTL_S, "model_revision": revision or "measured"}
+    else:
+        declared = (fitted or {}).get("reload_cost")
+        if isinstance(declared, (int, float)) and not isinstance(declared, bool) and declared > 0:
+            llm["load_s"] = {"value": float(declared), "sample_count": 1,
+                             "measured_at": now, "ttl_s": _TTL_S,
+                             "model_revision": "declared"}
     return {"llm": llm} if llm else {}
