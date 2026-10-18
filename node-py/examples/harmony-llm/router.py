@@ -43,7 +43,8 @@ if _HERE not in sys.path:
 import fleet_route as fr  # noqa: E402
 from fleet_embed import AmbiguousEmbedder, embed_nodes, pick as pick_embed  # noqa: E402
 from request_language import derived_requirements, requirement_from  # noqa: E402
-from livestack_node.demand_log import demand_log_from_env, requirement_hash  # noqa: E402
+from livestack_node import request_log as _request_log  # noqa: E402
+from livestack_node.demand_log import demand_log_from_env, owner_namespace, requirement_hash  # noqa: E402
 from livestack_node.fleet_auth import (AuthError, bearer_token, effective_regions,  # noqa: E402
                                        principal_for, principals_from_env)
 from livestack_node.preferences import (PreferenceError, parse_preference_list)  # noqa: E402
@@ -104,6 +105,11 @@ def _plan(path: str, body):
         except PreferenceError as e:
             raise HTTPException(status_code=400, detail=f"harmony: {e}")
     derived = derived_requirements(path, parsed)
+    if path == "classifier":
+        model = str(parsed.get("model") or "").strip()
+        if requirement is None and model and model != "local":
+            requirement = {f"adapter.{model}": True}
+        derived = {"class": "llm"}
     requirement = {**(requirement or {}), **derived} if (requirement or derived) else None
     kind = "embed" if (derived or {}).get("class") == "embed" else "llm"
     return requirement, prefer, kind
@@ -163,8 +169,19 @@ async def route_explain(request: Request):
 
 @app.api_route("/v1/{path:path}", methods=["GET", "POST"])
 async def proxy(path: str, request: Request):
+    # PER-ACCOUNT ISOLATION. Nothing in this process is keyed by, or shared
+    # between, accounts except the fleet's topology (the cached view): every
+    # request carries its own caller's credential and owner assertion to the
+    # target untouched, the route record is attributed to that caller, and no
+    # response, body or identity is kept after the request.
     ctx = {"t0": time.time(), "request_id":
-           (request.headers.get("x-request-id") or "").strip() or fr.new_request_id()}
+           (request.headers.get("x-request-id") or "").strip() or fr.new_request_id(),
+           "owner_ns": owner_namespace(request.headers.get("x-harmony-owner"))}
+    try:
+        ctx["principal"] = _request_log.principal_label(
+            request.headers.get("authorization"), _PRINCIPALS)
+    except Exception:
+        ctx["principal"] = None
     raw = await request.body()
     try:
         return await _route(path, request, raw, ctx)
@@ -174,9 +191,11 @@ async def proxy(path: str, request: Request):
 
 
 # What the router routes. Anything else under /v1 is a facade-specific endpoint
-# (`/v1/classifier`, ...) that only some nodes serve: forwarding it to whichever
-# node ranks first would be a coin toss, so it is refused and named.
-ROUTABLE = {"chat/completions", "completions", "embeddings"}
+# that only some nodes serve: forwarding it to whichever node ranks first would
+# be a coin toss, so it is refused and named. `/v1/classifier` is routable because
+# its `model` names the ADAPTER it scores with (`jemm`), which is a requirement
+# (`adapter.jemm`) the ranking can match against each node's units.
+ROUTABLE = {"chat/completions", "completions", "embeddings", "classifier"}
 
 
 async def _route_embeddings(request: Request, raw: bytes, body, requirement, ctx: dict):
