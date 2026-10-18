@@ -288,6 +288,30 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
         if not nxt:
             break
         target, expect = nxt, nxt_expect
+    # EVERY target refused only because it was BUSY (`saturated`, or a 429): the
+    # request is fine and the fleet is merely full. A warm-routed request is
+    # resident-only and never queues, so a burst would turn into 503s where the
+    # node's own path used to queue it (FIFO, bounded, 429 past the bound). Hand
+    # it, cold-marked, to the first target: that is today's behaviour exactly
+    # (the target may queue), and it is the only attempt that waits.
+    if attempts and all(a["result"].endswith("saturated") or a["result"].startswith("saturated")
+                        for a in attempts):
+        first_target = attempts[0]["target"]
+        hdrs = {**headers, ROUTED_HEADER: format_routed(router_id, "cold"),
+                "x-request-id": request_id}
+        client = httpx.AsyncClient(timeout=timeout)
+        try:
+            req = client.build_request(method, f"{first_target}/v1/{path}", content=body,
+                                       headers=hdrs, params=params)
+            resp = await client.send(req, stream=True)
+            attempts.append({"target": first_target, "expect": "cold",
+                             "result": "ok" if resp.status_code < 400 else str(resp.status_code)})
+            return resp, client
+        except Exception as e:
+            await client.aclose()
+            attempts.append({"target": first_target, "expect": "cold",
+                             "result": f"{type(e).__name__}: {e or '(no message)'}"})
+            status = 502
     raise RouteFailed(status, attempts)
 
 

@@ -252,6 +252,40 @@ def test_a_connection_failure_before_the_response_is_retried():
         a.close(), b.close()
 
 
+SATURATED = ("409", {"error": "route_stale", "reason": "saturated"})
+
+
+def test_when_every_target_is_merely_busy_the_last_attempt_queues_cold():
+    """Warm-routed requests never queue; if both targets refuse for saturation the
+    request is handed cold to the first target (which may queue), not failed."""
+    a, b = _Target([SATURATED, ("200", {"ok": 1})]), _Target([SATURATED])
+    try:
+        async def go():
+            attempts = []
+            resp, client = await _send((a.base, "warm"), lambda tried: (b.base, "warm"), attempts)
+            await resp.aread(); await resp.aclose(); await client.aclose()
+            return resp.status_code, attempts
+        status, attempts = _run(go())
+        assert status == 200
+        assert [x["result"] for x in attempts] == ["route_stale/saturated", "route_stale/saturated", "ok"]
+        assert attempts[-1]["expect"] == "cold" and attempts[-1]["target"] == a.base
+        assert a.got[-1]["routed"].endswith("expect=cold;v=1")
+    finally:
+        a.close(), b.close()
+
+
+def test_a_non_saturation_refusal_is_not_retried_cold():
+    a, b = _Target([STALE]), _Target([SATURATED])
+    try:
+        async def go():
+            with pytest.raises(fleet_route.RouteFailed) as e:
+                await _send((a.base, "warm"), lambda tried: (b.base, "warm"), [])
+            return e.value
+        assert len(_run(go()).attempts) == 2 and len(a.got) == 1
+    finally:
+        a.close(), b.close()
+
+
 def test_nothing_to_retry_onto_is_a_failure_not_a_replay():
     a = _Target([STALE])
     try:
