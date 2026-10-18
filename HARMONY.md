@@ -1275,13 +1275,23 @@ registers as a fleet node (so it can never be a target), holds no fleet token
 (caller `Authorization`/`X-Harmony-Owner` pass through unchanged), and parses the
 request language with the same code as the facade (`request_language.py`).
 `GET /health` reports `revision`, `region`, `fleet_url`, `contract`;
-`POST /harmony/route` is the dry run. It routes `chat/completions`, `completions`
-and `embeddings` (embeddings by the facade's one-embedding-space rule: a need met by
-embedders of different models is a 400); other `/v1` endpoints (`/v1/classifier`)
-are node-specific and refused with a 404. Callers must **state a need, not a unit
-name**: a router cannot know which node holds `llm_title`.
+`POST /harmony/route` is the dry run. It routes `chat/completions`, `completions`,
+`embeddings` (by the facade's one-embedding-space rule: a need met by embedders of
+different models is a 400) and `classifier` (its `model` names the adapter, e.g.
+`jemm`, which becomes the requirement `adapter.jemm` so only a node whose units
+declare it can be chosen). Other `/v1` endpoints are node-specific and refused with a
+404. Callers must **state a need, not a unit name**: a router cannot know which node
+holds `llm_title`.
 
-Installed (2026-10-18, revision `8343b101`; xc-tower-ubuntu's fleetd also runs main since then, with `mesh_route_py` on its PYTHONPATH): lappy-bellinzona, xc-mac-studio (na);
+**Per-account isolation.** A router keeps no per-account state and shares only the
+fleet's topology (the cached view). Each request's `Authorization` and
+`X-Harmony-Owner` reach the target exactly as that caller sent them (the router adds
+none and strips none), its route record carries that caller's `principal` and
+`owner_ns` (never a token), and quota, auth and ledger attribution stay where they
+were: at the target and the fleet broker, per owner. Region allowances are per
+principal (`regions` in the principal table).
+
+Installed (2026-10-18, revision `bde0f54e`, plus public-tokyo from a source archive; xc-tower-ubuntu's fleetd also runs main since then, with `mesh_route_py` on its PYTHONPATH): lappy-bellinzona, xc-mac-studio (na);
 zz-tower0, zz-tower2, xc-win-1 WSL (cn; WSL2's mirrored loopback means the same
 router answers Windows-native callers). Regional fleet brokers: `na` is
 livestack-fleetd on xc-tower-ubuntu:8801; `cn` is `harmony-fleetd` on
