@@ -148,25 +148,35 @@ class StrataEngine(Engine):
                 cfg = json.load(fh)
         except (OSError, ValueError):
             return base               # the server's own error names the file
+        # ONE batch-slot count: the unit's `max_concurrent` is what Harmony
+        # admits, so it is also the engine's `parallel` — a setup config that
+        # says otherwise would make the engine queue what Harmony let through
+        # (or idle slots Harmony never fills).
+        slots = self.launch_attributes(spec)["max_concurrent"]
+        resized = cfg.get("parallel", 1) != slots
+        cfg["parallel"] = slots
         target = float(spec.get("footprint_gb") or 0) * (1 << 30)
         granted = float((budget or {}).get("vram_bytes") or 0)
         if granted > 0:
             target = min(target, granted) if target > 0 else granted
         free = self._free_vram_bytes(self._gpu_index(cfg, toks))
-        if target <= 0 or free is None:
+        reserve_mib = None
+        if target > 0 and free is not None:
+            reserve_mib = max(0, int((free - target) // (1 << 20)))
+        if reserve_mib is None and not resized:
             return base
-        reserve_mib = max(0, int((free - target) // (1 << 20)))
-        args = [str(a) for a in cfg.get("args") or []]
-        out: "list[str]" = []
-        i = 0
-        while i < len(args):
-            if args[i] in ("--vram-reserve-mib", "--expert-cache"):
-                i += 2                # replaced below
-                continue
-            out.append(args[i])
-            i += 1
-        cfg["args"] = out + ["--expert-cache", "auto",
-                             "--vram-reserve-mib", str(reserve_mib)]
+        if reserve_mib is not None:
+            args = [str(a) for a in cfg.get("args") or []]
+            out: "list[str]" = []
+            i = 0
+            while i < len(args):
+                if args[i] in ("--vram-reserve-mib", "--expert-cache"):
+                    i += 2            # replaced below
+                    continue
+                out.append(args[i])
+                i += 1
+            cfg["args"] = out + ["--expert-cache", "auto",
+                                 "--vram-reserve-mib", str(reserve_mib)]
         path = os.path.join(os.path.dirname(base) or ".",
                             f"harmony-{spec['name']}.strata.json")
         with open(path, "w", encoding="utf-8") as fh:
@@ -174,7 +184,9 @@ class StrataEngine(Engine):
         print(f"[harmony-llm] {spec['name']}: "
               f"{'planner granted ' + format(granted / (1 << 30), '.1f') + ' GiB, ' if granted else ''}"
               f"footprint {float(spec.get('footprint_gb') or 0):.1f} GiB, "
-              f"{free / (1 << 30):.1f} GiB free -> --vram-reserve-mib {reserve_mib}",
+              + (f"{free / (1 << 30):.1f} GiB free -> --vram-reserve-mib {reserve_mib}, "
+                 if reserve_mib is not None else "free VRAM unknown, setup's cache kept, ")
+              + f"{slots} batch slot(s)",
               flush=True)
         return path
 
