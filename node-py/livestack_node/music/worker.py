@@ -85,6 +85,10 @@ def create_app(config):
     import torch
     from concurrent.futures import ThreadPoolExecutor
 
+    actual_uuid = str(torch.cuda.get_device_properties(0).uuid)
+    if actual_uuid.removeprefix("GPU-") != config["cudaVisibleDevice"].removeprefix("GPU-"):
+        raise ValueError("Actual CUDA UUID differs from the installed physical device")
+
     # All CUDA work, including warm/evict, uses the same actual GPU thread.
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="music-gpu")
     holder = {}
@@ -224,9 +228,21 @@ def create_app(config):
                     if not lease_id:
                         raise RuntimeError("Actual local unit lease missing")
                     receipt["localLeaseId"] = lease_id
-                    grant = admit(config["unit"], owner_id=body["ownerId"], brokers=[config["brokerUrl"]], timeout=240)
-                    receipt["localGrant"] = grant
-                    if not grant.get("granted") or grant.get("degraded") or grant.get("device_id") != config["deviceId"] or grant.get("kind") != config["unit"]:
+                    while True:
+                        if event.is_set():
+                            raise InterruptedError("Cancelled while waiting for real local capacity")
+                        grant = admit(config["unit"], owner_id=body["ownerId"], brokers=[config["brokerUrl"]], timeout=240)
+                        receipt["localGrant"] = grant
+                        if grant.get("granted") or grant.get("degraded"):
+                            break
+                        receipt["capacityRefusalCount"] = receipt.get("capacityRefusalCount", 0) + 1
+                        set_state(job_id, "waiting_capacity", receipt)
+                        atomic_json(path / "receipt.json", receipt)
+                        # This retries only an explicit pre-execution refusal,
+                        # never an unknown submission, generation or warm ack.
+                        if event.wait(30):
+                            raise InterruptedError("Cancelled while awaiting actual capacity")
+                    if grant.get("degraded") or grant.get("device_id") != config["deviceId"] or grant.get("kind") != config["unit"]:
                         raise RuntimeError("Concrete exact local Harmony admission refused")
                     admitted = True
                     if event.is_set():
@@ -285,7 +301,8 @@ def create_app(config):
             path = root / body["jobId"]
             path.mkdir()
             receipt = {"jobId": body["jobId"], "requestSha256": key, "incarnation": incarnation,
-                "source": config["sourceIdentity"], "acceptedAt": time.time(), "fleetAuthorizationClaimed": False}
+                "source": config["sourceIdentity"], "configurationSha256": digest(config),
+                "acceptedAt": time.time(), "fleetAuthorizationClaimed": False}
             atomic_json(path / "request.json", body)
             atomic_json(path / "receipt.json", receipt)
             db.execute("INSERT INTO jobs VALUES(?,?,?,?,?)", (body["jobId"], key, json.dumps(body), "queued", json.dumps(receipt)))
@@ -349,6 +366,7 @@ def create_app(config):
 def main():
     import uvicorn
     config = json.loads(Path(os.environ["HARMONY_MUSIC_CONFIG"]).read_text())
+    os.environ["CUDA_VISIBLE_DEVICES"] = config["cudaVisibleDevice"]
     uvicorn.run(create_app(config), host="0.0.0.0", port=config["port"], timeout_graceful_shutdown=None)
 
 
