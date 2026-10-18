@@ -1281,7 +1281,7 @@ embedders of different models is a 400); other `/v1` endpoints (`/v1/classifier`
 are node-specific and refused with a 404. Callers must **state a need, not a unit
 name**: a router cannot know which node holds `llm_title`.
 
-Installed (2026-10-18, revision `ff4885c7`): node-l, node-b (na);
+Installed (2026-10-18, revision `8343b101`; node-a's fleetd also runs main since then, with `mesh_route_py` on its PYTHONPATH): node-l, node-b (na);
 node-d, node-e, node-c WSL (cn; WSL2's mirrored loopback means the same
 router answers Windows-native callers). Regional fleet brokers: `na` is
 livestack-fleetd on node-a:8801; `cn` is `harmony-fleetd` on
