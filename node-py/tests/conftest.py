@@ -20,6 +20,10 @@ os.environ.setdefault("LIVESTACK_BROKER_URL", "http://127.0.0.1:9")
 import tempfile as _tempfile
 os.environ.setdefault("LIVESTACK_HOST_LEDGER_DIR",
                       _tempfile.mkdtemp(prefix="livestack-test-host-ledger-"))
+# Same for measured load times: a fake engine's 2 s "load" in the real file
+# would become the host's published `llm.load_s`.
+os.environ.setdefault("HARMONY_UNIT_LOADS_FILE", os.path.join(
+    _tempfile.mkdtemp(prefix="livestack-test-unit-loads-"), "unit-loads.jsonl"))
 
 # The harmony-llm ENGINE package lives beside the server it drives
 # (examples/harmony-llm/engines/). Engine-adapter tests import it directly, and

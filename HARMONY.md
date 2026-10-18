@@ -1078,10 +1078,20 @@ the ledger record of every load). The runbook:
 diskreap auto --force          # the install wants ~70 GB of disk; stop below 100 GB free
 cd ~/strata/strata && git checkout <rev> && echo <rev> > STRATA_VERSION
 NVCC_PREPEND_FLAGS="-ccbin /usr/bin/g++-14" CUDAHOSTCXX=/usr/bin/g++-14 \
-  ./setup.sh --yes --family qwen --model Q2_0 --context 131072 --vision none \
+  ./setup.sh --yes --family qwen --model Q2_0 --context 131072 --vision gpu \
              --no-start --port 8191
 ./strata.sh verify             # the API shape: tool_calls, usage, stream usage
 ```
+
+**Images are a setup choice, not a units-file one.** Flash-Next reads
+pictures through a separate 0.9 GB encoder that setup installs only when
+asked (`--vision gpu`; `--yes` alone leaves it OUT). The adapter publishes
+`vision` from the run config (a `"vision"` section whose encoder files exist),
+so a host set up text-only says `vision: false` truthfully and a units-file
+`"vision": true` cannot paper over it. The GPU encoder is held inside the
+unit's VRAM footprint (it starts before the engine, whose auto expert cache
+then sizes to what is left), so text decodes a few % slower (Strata
+DETAILS.md, "Images").
 
 The gcc-14 drop-in is this host's (`HARMONY.md` fp8 note above): CUDA 12.9's
 nvcc cannot identify itself under gcc 15. `--no-start` because Harmony owns the
@@ -1144,10 +1154,30 @@ idle host could load the right unit.
 **Routed across hosts.** A request whose `prefer` names `llm.decode_tok_s` or
 `llm.first_token_ms` is ranked over the fleet broker's `/fleet` view and
 forwarded to the winner, body as asked, `x-harmony-routed` set (the receiver
-serves; it never re-routes). Warm still beats cold, so a request only travels
-to pay a load when nothing warm can serve it. A request with no speed
-preference keeps the local path exactly. Fleet broker: `HARMONY_LLM_FLEET_URL`,
+serves; it never re-routes). A request with no speed preference keeps the
+local path exactly. Fleet broker: `HARMONY_LLM_FLEET_URL`,
 else the last of two `LIVESTACK_BROKER_URL` entries.
+
+**Cold against warm, priced by finish time.** Warm-first alone sent a speed
+request to a slow host that kept its model over a fast host that had unloaded
+it, however long the answer. For a speed preference `fleet_rank.rank` now
+prices every target as `load (cold only) + first token + tokens / decode`
+(`finish_estimate`), tokens being the request's `max_completion_tokens` /
+`max_tokens`, else 512 (`fleet_route.DEFAULT_EXPECTED_TOKENS`). A cold target
+that finishes sooner than EVERY warm one joins them, and once one is in the
+running the order is the finish time. Load times are MEASURED: each engine
+start to serving is appended to `~/.cache/livestack/unit-loads.jsonl`
+(`demand_log.LoadTimes`, env `HARMONY_UNIT_LOADS_FILE`) and published as
+`llm.load_s` (median of the last 10); the unit's declared `reload_cost` is the
+prior, marked `declared`. Silence keeps warm-first: a cold target with no
+load or decode figure, or any warm target with no decode figure, is not
+priced at all. Every held-back cold row says why (`finish≈14.6s with its 12.0s
+load, not sooner than warm 7.3s`). Worked numbers: a 4,096-token answer is
+~47 s on a cold whitby (12 s load, 116 tok/s) against ~100 s on a warm tower
+(41 tok/s), so it goes to whitby; a 300-token answer is 14.6 s against 7.3 s,
+so it stays on the tower. What it does not price yet: the requests that follow
+onto a unit once it is loaded (one answer only), what an eviction on the cold
+host costs that unit's users, and a warm target's queue wait.
 
 **Dry run.** `POST /harmony/route` on any harmony-llm node takes the chat body
 you would send and returns the resolved requirement, this node's units with
