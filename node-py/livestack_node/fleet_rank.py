@@ -205,7 +205,8 @@ def _serves(node_row: dict, kind: str) -> bool:
     return kind in kinds
 
 
-def warm_for(node: dict, kind: str) -> Optional[bool]:
+def warm_for(node: dict, kind: str,
+             require: Optional[Dict[str, Any]] = None) -> Optional[bool]:
     """Is this node holding something that can serve `kind` RIGHT NOW?
 
     `True` it is, `False` it provably is not, and `None` when the node does not
@@ -220,6 +221,12 @@ def warm_for(node: dict, kind: str) -> Optional[bool]:
     upstream through a serialising proxy. Single calls answered in 0.9 s and
     every external check said healthy; at 25 concurrent, p50 was 7.5 s and 10 of
     25 blew an 8 s deadline. The node was warm. It was not warm FOR LLM.
+
+    The same holds one level down: with `require`, the resident unit must meet
+    it. A node whose resident 27B serves a 24K window is not warm for a request
+    that needs 131K — the unit that can serve it there is cold, and calling the
+    node warm hands it the request ahead of a fleet where the right unit
+    costs the same load and evicts nothing anyone is using.
     """
     units = node.get("units")
     if not isinstance(units, list) or not units:
@@ -229,7 +236,41 @@ def warm_for(node: dict, kind: str) -> Optional[bool]:
     if not classed:
         return None                      # nothing to judge on; today's behaviour
     return any(u.get("resident") and (u.get("attributes") or {}).get("class") == kind
+               and all(_clause_meets(u.get("attributes") or {}, key, want)
+                       for key, want in (require or {}).items())
                for u in classed)
+
+
+def _unit_evidence(node: dict, require: Optional[Dict[str, Any]],
+                   prefer: Optional[List[Dict[str, Any]]], now: float):
+    """The inventory `prefer` should read for this node: the BEST unit that can
+    serve the request, when the node publishes per-unit evidence.
+
+    A node's `inventory["units"]` maps unit name to that unit's own `prefer`
+    inventory (`{"llm": {"decode_tok_s": observation, ...}}`). Speed is a fact
+    about a unit on its hardware, not about a node: a node holding a fast 27B
+    and a slow 125B has no single decode rate, and averaging them would rank it
+    for neither. Only units meeting `require` count, and among them the one
+    with the best preference key — the unit the node would choose. Falls back
+    to the node-level inventory (a node that predates per-unit evidence)."""
+    inv = node.get("inventory") if isinstance(node.get("inventory"), dict) else None
+    per_unit = (inv or {}).get("units")
+    if not isinstance(per_unit, dict) or not prefer:
+        return inv
+    best = None
+    for u in node.get("units") or []:
+        if not isinstance(u, dict):
+            continue
+        attrs = u.get("attributes") or {}
+        if not all(_clause_meets(attrs, key, want) for key, want in (require or {}).items()):
+            continue
+        unit_inv = per_unit.get(u.get("kind"))
+        if not isinstance(unit_inv, dict):
+            continue
+        key, _ = preference_key(unit_inv, prefer, now)
+        if best is None or key < best[0]:
+            best = (key, unit_inv)
+    return best[1] if best else inv
 
 
 _CMPS = (">=", "<=", "!=", ">", "<")
@@ -335,7 +376,7 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                 target_id=target_id, node=peer, host_id=host_id,
                 region=node.get("region"),
                 device_id=node.get("device_id"), state=node.get("state", "mia"),
-                inventory=node.get("inventory") if isinstance(node.get("inventory"), dict) else None,
+                inventory=_unit_evidence(node, require, prefer, now),
                 ready=bool(node.get("ready")), distance_ms=dist,
                 distance_band=band, load=load,
                 inputs_at=view.get("generated_at"),
@@ -384,7 +425,7 @@ def rank(view: dict, kind: str, vantage: str = "direct",
             # embedding model is cold for `llm` however ready it reports, and
             # the existing "warm first, always" rule below then keeps it out of
             # the running whenever a genuinely warm node exists.
-            if warm_for(node, kind) is False:
+            if warm_for(node, kind, require) is False:
                 held = ", ".join(sorted(
                     u.get("kind", "?") for u in (node.get("units") or [])
                     if isinstance(u, dict) and u.get("resident"))) or "nothing"

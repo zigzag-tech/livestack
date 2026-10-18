@@ -33,8 +33,9 @@ from livestack_node.decisions.simple_jev import SimpleJevError, classify as simp
 from livestack_node.decisions.pane_ask_ingress import install_pane_ask_route
 from livestack_node.decisions.resident_extraction_scope import ResidentExtractionScope
 from livestack_node.decisions.pane_ask_runtime_install import register_pane_ask_runtime_installer
-from livestack_node.demand_log import (UnitCostStore, UsageTail, demand_log_from_env,
-                                       owner_namespace, requirement_hash)
+from livestack_node.demand_log import (SpeedStats, UnitCostStore, UsageTail,
+                                       demand_log_from_env, owner_namespace,
+                                       requirement_hash)
 from livestack_node.preferences import (PreferenceError as _PreferenceError,
                                         parse_preference_list as _parse_prefer,
                                         preference_key as _preference_key)
@@ -56,6 +57,8 @@ from selection import unit_inventory as _unit_inventory  # noqa: E402
 from fleet_embed import (AmbiguousEmbedder, attrs_meet, embed_nodes as _embed_nodes,  # noqa: E402
                          fetch_fleets as _fetch_fleets, pick as _pick_embed)
 from unit_queue import Queues as _Queues, QueueFull as _QueueFull   # noqa: E402
+from fleet_route import (ROUTED_HEADER as _ROUTED_HEADER, choose as _fleet_choose,  # noqa: E402
+                         fleet_view as _fleet_view, wants_fleet_route as _wants_fleet_route)
 
 HOST_ID = os.environ.get("HARMONY_LLM_HOST_ID", "xc-tower-ubuntu")
 MODEL = os.environ.get("HARMONY_LLM_MODEL", "Qwen/Qwen3-8B")
@@ -265,13 +268,19 @@ def _prefer_key(name: str, prefer):
     just it, with the stable default/name order as the tiebreak."""
     if not prefer:
         return (_selection_rank(name), None)
+    key, receipt = _preference_key(_inventory_for(name), prefer)
+    return ((key, _selection_rank(name)), receipt)
+
+
+def _inventory_for(name: str) -> dict:
+    """One unit's `prefer` inventory. Speed measured on live requests wins over
+    an offline-fitted cost row: it is newer and its sample count is real."""
     spec = SPECS[name]
-    fitted = _COSTS.load().get(_COMPOSITION.get(name, "")) or {}
+    fitted = dict(_COSTS.load().get(_COMPOSITION.get(name, "")) or {})
+    fitted.update(SPEED.summary(name))
     revision = (f"measured:{_COMPOSITION[name][:19]}" if _COMPOSITION.get(name)
                 else f"declared:{spec['model']}")
-    inv = _unit_inventory(_attributes_for(spec), fitted, revision=revision)
-    key, receipt = _preference_key(inv, prefer)
-    return ((key, _selection_rank(name)), receipt)
+    return _unit_inventory(_attributes_for(spec), fitted, revision=revision)
 
 
 def _ordered(prefer) -> "list[str]":
@@ -360,6 +369,14 @@ _COSTS = UnitCostStore(os.environ.get("HARMONY_UNIT_COSTS_FILE") or os.path.join
 # One record per forwarded request (openspec: inference-demand-log). Disabled,
 # and saying so, when HARMONY_DEMAND_LOG_AGE_DAYS is unset.
 DEMAND = demand_log_from_env(HOST_ID, log=lambda m: print(m, flush=True))
+# What each unit has MEASURED itself doing on this host (decode tok/s, first
+# token), published per unit as `prefer` evidence (`_fleet_inventory`) so a
+# caller asking for speed reaches the hardware that has delivered it. Re-read
+# from the demand log at start: evidence a node earned survives its restart.
+SPEED = SpeedStats()
+if getattr(DEMAND, "enabled", False):
+    print(f"[harmony-llm] speed evidence: {SPEED.seed(DEMAND.path)} sample(s) "
+          f"re-read from {DEMAND.path}", flush=True)
 
 
 # Fields a measured-cost row gets from fitting, not from the engine's startup
@@ -386,7 +403,12 @@ def _record_measurement(name: str, spec: dict, cmd: list, capture: StartupCaptur
     measured for, and the persistence. Whatever arrives, the unit gets an
     answer: a MeasuredCost, or `unknown` naming what never came. Never 0, and
     never the declared prior silently."""
-    row = dict(_engine_for(spec).measure(spec, capture, None, cmd) or {})
+    # The engine process this node started: an engine that reads its own cost
+    # off the process (Strata: NVML per pid, /proc for RAM) needs it. Passing
+    # None here made every such reading `unknown` (zz-whitby 2026-10-18).
+    proc = _procs.get(name)
+    pid = proc.pid if proc is not None and proc.poll() is None else None
+    row = dict(_engine_for(spec).measure(spec, capture, pid, cmd) or {})
     if not row:
         return                          # this engine reports nothing at all
     composition = row.pop("composition", None)
@@ -416,6 +438,12 @@ def _record_measurement(name: str, spec: dict, cmd: list, capture: StartupCaptur
         parts += f" = {row['kv_tokens']} tokens"
     print(f"[harmony-llm] {name}: measured {row['footprint'] / (1 << 30):.2f} GiB "
           f"({parts}) for {chash[:19] or 'an unhashed composition'}", flush=True)
+    if not chash:
+        # Cost rows are keyed by composition hash (base, adapters, KV dtype,
+        # context — a vLLM launch). An engine that reports none (Strata) still
+        # gives the planner its measurement through `unit.measured_cost`; there
+        # is just no composition row to keep it under.
+        return
     try:
         # KEEP WHAT WAS FITTED. A restart re-measures the startup numbers, but
         # state pages and service rates come from traffic and bursts
@@ -904,12 +932,95 @@ def _release_slot(ctx: dict) -> None:
         except Exception:
             pass
 
+def _hardware() -> dict:
+    """What this node runs on, for an explanation — never a ranking input. The
+    ranking reads measured speed; hardware says WHY one host measured faster
+    (a 3D V-Cache CPU and DDR5 feed a host-RAM-resident MoE faster)."""
+    out: dict = {}
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8") as fh:
+            out["cpu"] = next((ln.split(":", 1)[1].strip() for ln in fh
+                               if ln.startswith("model name")), None)
+        out["cpu_threads"] = os.cpu_count()
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            kb = next(int(ln.split()[1]) for ln in fh if ln.startswith("MemTotal:"))
+        out["ram_gib"] = round(kb / (1 << 20), 1)
+    except Exception:
+        pass
+    try:
+        gpu = subprocess.run(
+            ["nvidia-smi", f"--id={os.environ.get('CUDA_VISIBLE_DEVICES', '0').split(',')[0]}",
+             "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5).stdout.strip().split(", ")
+        if len(gpu) == 3:
+            out.update(gpu=gpu[0], gpu_mib=int(float(gpu[1])), driver=gpu[2])
+    except Exception:
+        pass
+    return out
+
+
+_HARDWARE = _hardware()
+
+
+def _fleet_inventory() -> dict:
+    """What the fleet ranks this node on: each unit's own `prefer` inventory
+    (`fleet_rank._unit_evidence` reads the serving unit's, not a node average)
+    and the hardware it was measured on."""
+    return {"units": {n: _inventory_for(n) for n in SPECS}, "host": _HARDWARE}
+
+
 manager, residence = attach(
     app, host_id=HOST_ID, kind=NODE_KIND, units=_UNITS,
     idle_seconds=IDLE_EVICT_SECONDS, coload=COLOAD,
     gpu_call=_gpu_call, port=NODE_PORT, readiness=_readiness,
-    in_flight=_busy,
+    in_flight=_busy, inventory=_fleet_inventory,
 )
+
+
+@app.post("/harmony/route")
+async def route_explain(request: Request):
+    """DRY RUN: where would this chat request be served, and why — computed by
+    the same functions the proxy uses, loading and forwarding nothing.
+
+    Body: the chat-completions body you would send (`harmony_requires`,
+    `harmony_prefer`, `model`, `tools`, ...). Answer: the requirement as
+    resolved, this node's units in preference order with their receipts and
+    measured speed, and — for a speed preference — the fleet ranking with each
+    candidate's reason. `x-harmony-routed` on the request is honoured exactly as
+    the proxy honours it."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="harmony: body must be JSON")
+    requirement = _requirement_from(body)
+    try:
+        prefer = _prefer_from(body)
+    except _PreferenceError as e:
+        raise HTTPException(status_code=400, detail=f"harmony: {e}")
+    derived = _derived_requirements("chat/completions", body)
+    if requirement is not None and derived:
+        requirement = {**requirement, **derived}
+    local = []
+    for n in _ordered(prefer):
+        _k, receipt = _prefer_key(n, prefer)
+        local.append({"unit": n,
+                      "satisfies": requirement is None or _local_satisfies(n, requirement),
+                      "resident": n in getattr(manager, "resident", ()),
+                      "speed": SPEED.summary(n), "preferences": receipt})
+    out = {"node": SELF_BASE, "host": HOST_ID, "hardware": _HARDWARE,
+           "requirement": requirement, "prefer": prefer, "local": local}
+    if FLEET_URL and _wants_fleet_route(prefer, request.headers):
+        view = _fleet_view(FLEET_URL)
+        out["fleet"] = (_fleet_choose(view, requirement, prefer, SELF_BASE)[1]
+                        if view is not None else {"decision": "no fleet view",
+                                                  "fleet": FLEET_URL})
+    else:
+        out["fleet"] = {"decision": "not routed",
+                        "why": ("no fleet broker configured" if not FLEET_URL else
+                                "already routed" if request.headers.get(_ROUTED_HEADER) else
+                                "no speed preference: a request that states none is "
+                                "served by this host, as before")}
+    return JSONResponse(out)
 app.state.pane_ask_execution_scope = ResidentExtractionScope(
     manager=manager, queues=_QUEUES, busy=_busy, max_concurrent=_max_concurrent,
     engine_is_up=lambda name: _vllm_up(name=name), device_id=DEVICE_ID_SELF,
@@ -1042,6 +1153,15 @@ if WARM_ON_START:
 
 BROKER_URLS = [u.strip() for u in
                os.environ.get("LIVESTACK_BROKER_URL", "").split(",") if u.strip()]
+# The FLEET broker, for routing a speed preference across hosts (fleet_route).
+# `LIVESTACK_BROKER_URL` lists the host broker first and the fleet broker after
+# it, so the last of two entries is the fleet one; a node announcing to its
+# host broker alone has no fleet to route over and keeps local behaviour.
+FLEET_URL = (os.environ.get("HARMONY_LLM_FLEET_URL", "").strip()
+             or (BROKER_URLS[-1] if len(BROKER_URLS) > 1 else ""))
+# How the fleet names THIS node: the announced address (LIVESTACK_NODE_HOST).
+SELF_BASE = (f"http://{os.environ.get('LIVESTACK_NODE_HOST', '127.0.0.1').strip()}"
+             f":{NODE_PORT}")
 # A single-unit node on a single-card box has nothing to arbitrate; going
 # through admission there would only add a round trip. Set this when a node
 # shares its card with other tenants that Harmony may need to shed for it.
@@ -1626,6 +1746,11 @@ def _note_demand(ctx: dict, outcome: str, status: int, tail: "UsageTail | None" 
         return
     prompt, completion = tail.tokens() if tail is not None else (None, None)
     unit = ctx.get("unit")
+    speed = (tail.speed(ctx.get("sent_at")) if tail is not None
+             else {"decode_tok_s": None, "first_token_ms": None, "speed_source": None})
+    if outcome == "ok" and unit:
+        SPEED.observe(unit, speed["decode_tok_s"], speed["first_token_ms"],
+                      in_flight=ctx.get("in_flight") or 1)
     DEMAND.record(
         ts=ctx["t0"], unit=unit, composition_hash=_COMPOSITION.get(unit or ""),
         adapter=ctx.get("adapter"), route=ctx.get("route") or ctx.get("path"),
@@ -1640,6 +1765,11 @@ def _note_demand(ctx: dict, outcome: str, status: int, tail: "UsageTail | None" 
         # preference_key receipt, clause by clause.
         preference_receipt=ctx.get("preference_receipt"),
         shortcut=ctx.get("shortcut"),
+        # Measured speed and the unit's concurrency when it ran (SpeedStats
+        # keeps solo and burst apart; `seed` re-reads these at start).
+        decode_tok_s=speed["decode_tok_s"], first_token_ms=speed["first_token_ms"],
+        speed_source=speed["speed_source"], in_flight=ctx.get("in_flight"),
+        fleet_route=ctx.get("fleet_route"),
         outcome=outcome, http_status=status)
 
 
@@ -1713,6 +1843,12 @@ async def _forward_to_embed_node(node: dict, parsed_body: dict, request: Request
                             detail=f"embed node {node['base']} failed: {type(e).__name__}: {e or '(no message)'}")
     return Response(content=resp.content, status_code=resp.status_code,
                     media_type=resp.headers.get("content-type", "application/json"))
+
+
+async def _off_loop(fn):
+    """Run a blocking call (broker HTTP, peer probes) on a worker thread, so the
+    loop keeps relaying the streams already in flight while it waits."""
+    return await asyncio.get_running_loop().run_in_executor(None, fn)
 
 
 async def _proxy_impl(path: str, request: Request, ctx: dict):
@@ -1835,6 +1971,27 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # on the card turns a working model into a 503 on every request — observed
     # exactly that way, a benchmark refused against its own loaded model.
     already_here = unit in getattr(manager, "resident", ()) and _vllm_up(name=unit)
+    # A SPEED PREFERENCE IS A FLEET QUESTION (fleet_route.py). Everything below
+    # answers within this host; a caller that asked for the fastest decode
+    # wants the node whose unit has MEASURED fastest, wherever it is. Asked
+    # first, so a slower resident unit here does not win on being here — the
+    # ranking still puts a warm node ahead of a cold one, so a request only
+    # travels to pay a load when nothing warm anywhere can serve it.
+    fleet_target = None
+    if FLEET_URL and _wants_fleet_route(prefer, request.headers):
+        view = await _off_loop(lambda: _fleet_view(FLEET_URL))
+        if view is None:
+            ctx["fleet_route"] = {"decision": "no fleet view", "fleet": FLEET_URL}
+        else:
+            fleet_target, ctx["fleet_route"] = _fleet_choose(
+                view, requirement, prefer, SELF_BASE)
+        if fleet_target:
+            print(f"[harmony-llm] fleet route: {requirement or 'class=llm'} "
+                  f"prefer {[c.get('metric') for c in prefer]} -> {fleet_target}",
+                  flush=True)
+            local = next((n for n in _ordered(prefer)
+                          if requirement is None or _local_satisfies(n, requirement)), None)
+            unit, already_here = (local or unit), False
     # A requirement is resolved by the planner — EXCEPT when a unit already
     # resident on this node satisfies it.
     #
@@ -1850,7 +2007,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # So: satisfied locally AND resident => serve it. Otherwise the planner
     # decides, exactly as before. Placement authority is unchanged; what is
     # removed is asking permission for a placement that already happened.
-    if requirement is not None:
+    if requirement is not None and not fleet_target:
         # POLICY (not an accident of the fix below): among units that satisfy
         # the requirement, REUSE ONE THAT IS ALREADY RESIDENT. An eviction and
         # reload of a 27B measured ~50.7 s on this node, and a caller that
@@ -1891,16 +2048,16 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # just asked first; placement authority is unchanged for anything that
     # actually has to load.
     held_peer = None
-    if not already_here:
+    if not already_here and not fleet_target:
         cands = ([n for n in _ordered(prefer) if _local_satisfies(n, requirement)]
                  if requirement is not None else [unit])
         for n in cands:
-            h = _held_elsewhere(n)
+            h = await _off_loop(lambda n=n: _held_elsewhere(n))
             if h:
                 unit, held_peer = n, h
                 break
     granted, degraded, refused = None, None, None
-    if not already_here and not held_peer and (requirement is not None or len(SPECS) > 1 or MULTI_NODE):
+    if not already_here and not held_peer and not fleet_target and (requirement is not None or len(SPECS) > 1 or MULTI_NODE):
         # WHO IS ASKING, asserted by the hub that authenticated this caller and
         # relayed here as X-Harmony-Owner (see HARMONY.md, "Who is asking").
         # The header is an ASSERTION, not a credential: this engine is reachable
@@ -1911,11 +2068,18 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         # marked owner_asserted=False so the ledger can tell the two apart.
         asserted = (request.headers.get("x-harmony-owner") or "").strip()
         try:
-            res = admit(unit if requirement is None else "",
-                        requires=requirement,
-                        owner_id=asserted or f"harmony-llm:{HOST_ID}",
-                        owner_asserted=bool(asserted),
-                        token=_FLEET_TOKEN, timeout=ADMIT_TIMEOUT)
+            # OFF THE LOOP: admission is blocking HTTP, and the broker planning
+            # it probes this very node's /livestack/residence. Run on the loop,
+            # the probe cannot be answered until the broker answers — a 5.0 s
+            # probe timeout per admission, during which every stream this node
+            # is relaying stops being read and its engine stops decoding
+            # (zz-whitby 2026-10-18; tests/test_harmony_llm_loop_blocking.py).
+            res = await _off_loop(lambda: admit(
+                unit if requirement is None else "",
+                requires=requirement,
+                owner_id=asserted or f"harmony-llm:{HOST_ID}",
+                owner_asserted=bool(asserted),
+                token=_FLEET_TOKEN, timeout=ADMIT_TIMEOUT))
             served = res.get("kind")
             # A loading transition temporarily withholds this facade's fleet
             # registration. During that gap the broker can answer "nothing
@@ -2003,7 +2167,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         raise HTTPException(status_code=503,
                             detail=f"{unit} was not admitted: {refused}")
 
-    elsewhere = held_peer
+    elsewhere = fleet_target or held_peer
     if granted and DEVICE_ID_SELF and granted != DEVICE_ID_SELF:
         elsewhere = _peer_at(granted)
         if elsewhere is None:
@@ -2023,7 +2187,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # `manager.ensure`, which is the load this avoids. `already_here` short-
     # circuits it, so a node serving the unit itself never pays for this.
     if not elsewhere and not already_here:
-        holder = _held_elsewhere(unit)
+        holder = await _off_loop(lambda: _held_elsewhere(unit))
         if holder:
             print(f"[harmony-llm] {unit} is held by {holder} — forwarding "
                   f"rather than loading a second copy", flush=True)
@@ -2051,20 +2215,30 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # stops answering (measured 2026-10-02: residence:000 with the engine
     # idle). The wait is real; it just must not hold the loop.
     import asyncio as _asyncio
-    try:
-        _slot = await _asyncio.get_running_loop().run_in_executor(
-            None, _QUEUES.acquire, unit, _max_concurrent(unit))
-    except _QueueFull as e:
-        raise HTTPException(status_code=429, detail=str(e))
-    ctx["queue_ms"] = _slot.queue_ms
-    ctx["queue_slot"] = _slot
-    # The queue brackets the in-flight window, so it is the unit's busy truth:
-    # a co-tenant acquire refuses to evict a unit that is serving (idle-only
-    # preemption, as the planner has it).
-    try:
-        manager.units[unit].busy = True
-    except Exception:
-        pass
+    # A request the FLEET placed elsewhere is that node's to queue: holding a
+    # place in a local unit's queue for it would make this node's own unit
+    # look busy (and one slot tighter) while serving nothing.
+    if not fleet_target:
+        try:
+            _slot = await _asyncio.get_running_loop().run_in_executor(
+                None, _QUEUES.acquire, unit, _max_concurrent(unit))
+        except _QueueFull as e:
+            raise HTTPException(status_code=429, detail=str(e))
+        ctx["queue_ms"] = _slot.queue_ms
+        ctx["queue_slot"] = _slot
+        # How many requests this unit is running, this one included: a batched
+        # engine decodes each stream slower, and the speed evidence must say which.
+        try:
+            ctx["in_flight"] = int(_QUEUES.status(unit, _max_concurrent(unit))["in_flight"])
+        except Exception:
+            ctx["in_flight"] = None
+        # The queue brackets the in-flight window, so it is the unit's busy truth:
+        # a co-tenant acquire refuses to evict a unit that is serving (idle-only
+        # preemption, as the planner has it).
+        try:
+            manager.units[unit].busy = True
+        except Exception:
+            pass
     if elsewhere:
         _busy.acquire()
         url = f"{elsewhere}/v1/{path}"
@@ -2084,7 +2258,12 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # silent failure: `model: "require:..."` reaches a backend whose served
     # names do not include it, and a requirement that selected a
     # thinking-capable unit never actually turns thinking ON.
-    if isinstance(parsed_body, dict) and (requirement is not None or "harmony_requires" in parsed_body):
+    # A fleet-routed request travels AS ASKED: the receiving node resolves the
+    # requirement against its own units. Normalising it here rewrote `model`
+    # to THIS node's unit, and the receiver was asked for a unit by name
+    # (zz-whitby -> tower 2026-10-18: a 27B request arrived as `flash_next`).
+    if (not fleet_target and isinstance(parsed_body, dict)
+            and (requirement is not None or "harmony_requires" in parsed_body)):
         out = dict(parsed_body)
         out.pop("harmony_requires", None)          # ours, not the backend's
         served = SPECS.get(unit, {}).get("model") or unit
@@ -2116,11 +2295,14 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
 
     headers = {k: v for k, v in request.headers.items()
                if k.lower() not in {"host", "content-length"}}
+    if fleet_target:
+        headers[_ROUTED_HEADER] = HOST_ID     # placed: the receiver serves, never re-routes
     timeout = httpx.Timeout(float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
     client = httpx.AsyncClient(timeout=timeout)
     try:
         req = client.build_request(request.method, url, content=body, headers=headers,
                                    params=dict(request.query_params))
+        ctx["sent_at"] = time.time()          # first-token time starts here, not at the queue
         resp = await client.send(req, stream=True)
     except Exception as e:
         await client.aclose()

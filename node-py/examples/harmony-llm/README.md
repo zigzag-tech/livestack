@@ -372,6 +372,19 @@ others in this process, stopping a just-loaded Flash-Next mid-request.
 Full runbook: `HARMONY.md` "Engine units"; design record:
 `_plans/harmony-engine-units.md`.
 
+### zz-whitby (2026-10-18): a Strata unit sized like any other, and speed routing
+
+zz-whitby's node declares one unit, `flash_next`, with `footprint_gb`, `ram_gb`
+and `max_concurrent` and NO `exclusive_device`: the adapter holds the engine to
+min(grant, footprint) through `--vram-reserve-mib`, and the planner evicts the
+card's speech tenants because the space is needed. Copies of what is deployed:
+`systemd/zz-whitby/harmony-llm.service` and `llm-units-zz-whitby.example.json`.
+The node also measures every answer's decode rate and first token per unit,
+publishes them as fleet `inventory`, routes a request whose `harmony_prefer`
+names a speed metric to the fleet's measured-fastest node, and explains that
+choice without executing it at `POST /harmony/route`. Full account and the
+measured numbers: `HARMONY.md`, "Speed as evidence".
+
 ## Changing the classifier principal table: reload, don't restart
 
 `/v1/classifier` authenticates against the principal file named by

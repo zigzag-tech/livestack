@@ -1036,26 +1036,40 @@ Limits and status:
 ## Engine units — a non-vLLM engine on a card (Strata / flash_next)
 
 An **engine unit** runs a model through an engine that is not `vllm serve`:
-one that sizes its own cache to whatever VRAM is free, keeps its weights in
-host RAM, and refuses to start into a busy card. The first one is
-**Strata** (`architectds/Strata`, llama.cpp lineage) serving
-**Qwen3.8-Flash-Next** on xc-tower-ubuntu card 1. What makes it safe to share a
-host is three declarations and one seam:
+one that keeps its weights in host RAM and sizes its own cache to the VRAM it
+finds. The first one is **Strata** (`Niko1221/Strata`, llama.cpp lineage)
+serving **Qwen3.8-Flash-Next** — on xc-tower-ubuntu card 1, and since
+2026-10-18 on zz-whitby's one card. A Strata unit is DECLARED BY WHAT IT NEEDS,
+like any other unit — no whole-device claim:
 
 | Declaration | Where | What it buys |
 |---|---|---|
 | `"engine": "strata"` | units file | the adapter that drives it (`examples/harmony-llm/engines/strata.py`); never a requestable attribute |
-| `"exclusive_device": true` | units file | charged the WHOLE card; admitted only when every other tenant can leave; its grant is "all of it" |
-| `"ram_gb": 45` | units file | the host-RAM pin, planned against the HOST pool (one pool behind every card) — planning only its VRAM is how a host swaps |
+| `"footprint_gb": 21` | units file | the VRAM it holds. The adapter launches the engine with `--vram-reserve-mib` = free VRAM − min(grant, footprint), cache on `auto`, so the engine holds what it is charged (measured on zz-whitby: 21.17 GiB for 21 declared) |
+| `"ram_gb": 45` | units file | the host-RAM claim, planned against the HOST pool (one pool behind every card) — planning only its VRAM is how a host swaps. Measured on zz-whitby (0.1.45, Q2_0, 2 slots, 128K): 38.4 GiB resident = peak, 33.1 anonymous + ~5.2 shared, 0 locked |
+| `"attributes": {"max_concurrent": 2}` | units file | the engine's batch slots (`"parallel": 2` in Strata's config); Harmony's unit queue holds the rest |
+
+`exclusive_device` still exists in the planner for a unit that truly takes a
+whole card, but a Strata unit no longer needs it: it is planned by its size, so
+the planner evicts the card's other tenants because the space is needed (on
+zz-whitby: polyasr and polytts, both UNPINNED), not because a flag said so.
 
 **Launch.** The adapter runs the repo's own server, byte-for-byte what
 `run-<model>.sh` runs: `<root>/.venv/bin/python <root>/serve/server.py --engine
-strata --config strata-*.json --port N --host 127.0.0.1` + `extra_args`. The
-engine command line lives INSIDE the config (setup writes it). Strata sizes its
-cache to the free VRAM itself — no budget translation, no `--gpu-memory-utilization`.
-Pin the engine to ONE card with `--gpu <nvidia-smi index>` in `extra_args`
-(the setup's default is BOTH cards split), or the planner's one-card claim is a
-lie.
+strata --config <sized copy> --port N --host 127.0.0.1` + `extra_args`. The
+engine command line lives INSIDE the config (setup writes it), so the adapter
+writes a sized sibling, `harmony-<unit>.strata.json`, with `--expert-cache auto
+--vram-reserve-mib R` replacing setup's. Auto, not an explicit `--expert-cache
+N`: auto re-checks its fit once the slots are written, an explicit size does
+not, and Strata measured a cache at 0 MiB free decoding 7x slower. Pin the
+engine to ONE card with `--gpu <nvidia-smi index>` in `extra_args` (the setup's
+default is BOTH cards split), or the planner's one-card claim is a lie.
+
+**Measure.** The VRAM and RAM are held by the ENGINE, a child of the serve
+server; `measure()` reads the whole process family (NVML per pid, /proc). It
+read the server's pid alone — and was handed `None` — so the footprint was
+`unknown`, which the planner charges as the whole device: a whole-card claim by
+accident.
 
 **The rev is pinned**, in `<root>/STRATA_VERSION` (what `engine_rev` reports to
 the ledger record of every load). The runbook:
@@ -1093,6 +1107,92 @@ goes; the override lives disabled as
 `/etc/systemd/system/harmony-llm.service.d/80-coload.conf.disabled-20261002`.
 
 Design record + what this does NOT fix: `_plans/harmony-engine-units.md`.
+
+## Speed as evidence — a caller states how fast, the fleet answers where (2026-10-18)
+
+A caller says how fast it needs an answer, never which host:
+
+```jsonc
+{"model": "require:class=llm,context_len>=131072",
+ "harmony_prefer": [{"metric": "llm.decode_tok_s", "direction": "max"}], ...}
+```
+
+**Measured, per unit, per host.** Every response the harmony-llm proxy relays
+is timed (`livestack_node.demand_log.UsageTail.speed`): the engine's own
+`timings.predicted_per_second` when it reports one (Strata does), else a stream
+timed from its first text to its last chunk; a body that arrived all at once
+gets no rate. First token is measured from when the request reached the engine,
+so a queue wait is not the engine's latency. `SpeedStats` keeps SOLO and
+BATCHED samples apart — a batched engine decodes each stream slower, and
+averaging the two describes neither — and publishes medians with real sample
+counts. Each demand record carries `decode_tok_s`, `first_token_ms`,
+`speed_source`, `in_flight`; a restart re-reads them, so evidence survives.
+
+**Published per unit.** The node's capability `inventory` is
+`{"units": {<unit>: <prefer inventory>}, "host": <hardware>}`; the fleet
+broker carries it verbatim. `fleet_rank` reads the evidence of the best unit
+that satisfies the requirement (`_unit_evidence`), not one number per node — a
+node with a fast 27B and a slow 125B has no single decode rate. `host` (CPU,
+RAM, GPU, driver) explains a difference; it is never a ranking input.
+
+**Warmth meets the requirement.** `warm_for(node, kind, require)`: a resident
+unit that cannot serve the request does not make its node warm for it. Before
+this, xc-tower-ubuntu's resident 27B (24K window) made the tower "warm" for a
+131K request, so warm-first would have sent it there to evict the 27B while an
+idle host could load the right unit.
+
+**Routed across hosts.** A request whose `prefer` names `llm.decode_tok_s` or
+`llm.first_token_ms` is ranked over the fleet broker's `/fleet` view and
+forwarded to the winner, body as asked, `x-harmony-routed` set (the receiver
+serves; it never re-routes). Warm still beats cold, so a request only travels
+to pay a load when nothing warm can serve it. A request with no speed
+preference keeps the local path exactly. Fleet broker: `HARMONY_LLM_FLEET_URL`,
+else the last of two `LIVESTACK_BROKER_URL` entries.
+
+**Dry run.** `POST /harmony/route` on any harmony-llm node takes the chat body
+you would send and returns the resolved requirement, this node's units with
+their receipts and measured speed, and the fleet ranking with every
+candidate's reason — loading and forwarding nothing.
+
+```sh
+curl -s -X POST http://100.64.0.27:8188/harmony/route -H content-type:application/json \
+  -d '{"model":"require:class=llm,context_len>=131072",
+       "harmony_prefer":[{"metric":"llm.decode_tok_s","direction":"max"}],"messages":[]}'
+```
+
+**Measured on the pilot** (zz-whitby: Ryzen 7 9800X3D, DDR5, RTX 3090,
+Strata 0.1.45 Q2_0, 2 slots; engine-reported decode, 300-token answers):
+
+| concurrent | per-request decode | aggregate | first token |
+|---|---|---|---|
+| 1 | 100–135 tok/s | 111–117 | 0.17 s (2 s on a cold first request) |
+| 2 | 64–67 tok/s each | 121–123 | 0.18–0.41 s |
+| 3 | two at ~64, the third queued (`max_concurrent: 2`) then ~120 | 106–119 | 3rd: ~5 s in Harmony's queue |
+
+Two slots buy ~+8% aggregate over one: batching here is for not making the
+second caller WAIT, not for throughput.
+
+xc-tower-ubuntu's Flash-Next (i5-9400, older Strata e416ba57) logged a median
+41 tok/s solo decode over 14 requests (max 64) — about 2.5x slower, with two
+confounds stated: a different Strata version and longer prompts (~2.8K). This
+is the difference the ranking now sees as evidence rather than a declaration.
+
+**The event loop must stay free while admission waits.** `admit()`, the
+same-host holder lookup and the fleet fetch are blocking HTTP and ran ON the
+node's loop; the broker planning an admission probes this node's
+`/livestack/residence`, which could not answer, so each admission cost a 5.0 s
+probe timeout during which every stream the node relayed stopped being read
+and its engine stopped decoding (zz-whitby: a 3-way burst lost ~5 s on its two
+running requests, 12.4 s → 7.6 s once fixed). They run on a worker thread now
+(`_off_loop`); `tests/test_harmony_llm_loop_blocking.py` reproduces it.
+
+**Not done yet** (honest list): a hard speed floor (`require llm.decode_tok_s
+>= 60`, evidence-gated, with a rule for "no evidence"); cold-start priors from
+hardware for a unit with no samples yet; the scheduler (`choose_target`)
+weighing throughput; one host-RAM ledger shared by the host broker (`ram_gb`)
+and the workload authority (whose workers on zz-whitby were held idle because
+Strata's 38 GiB left them too little accounted headroom, and a cold load swapped
+~2.6 GB of polyasr/polytts out).
 
 ## Scheduler policy — the target choice is a tunable, recorded policy
 
@@ -1381,6 +1481,11 @@ up on stays filtered, however empty its card.
 - **xc-tower-ubuntu** (2x RTX 3090): `livestack-hostd.service` (:8799) brokers
   `polyasr` x2 + `polytts` + `harmony-llm`; **`livestack-fleetd.service` (:8801)**
   is the fleet broker — observe-only, peers on all three GPU hosts.
+- **zz-whitby** (Ryzen 7 9800X3D, 60 GB DDR5, RTX 3090, driver 595): `livestack-hostd`
+  (:8799) brokers `polyasr` + `polytts` + `harmony-llm` (:8188, one unit: `flash_next`
+  through Strata 0.1.45 at `~/strata/strata`, cold until a request needs it). Units file
+  `/etc/harmony/llm-units.json`; the pilot runs livestack branch `agent/strata-vram-budget`
+  from `~/worktrees/livestack/strata-vram-budget` (`PYTHONPATH` in the unit).
 - **zz-joe** (build/test host): `harmony-embed-gemma.service` (:8230) — the fleet's
   one embedder (`serve_gemma`, EmbeddingGemma 2, `kind=embed`). The MiniLM node
   (`harmony-embed-cpu.service`, :8220) was stopped and its unit, env file and model
