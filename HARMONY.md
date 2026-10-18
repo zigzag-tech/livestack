@@ -1078,10 +1078,20 @@ the ledger record of every load). The runbook:
 diskreap auto --force          # the install wants ~70 GB of disk; stop below 100 GB free
 cd ~/strata/strata && git checkout <rev> && echo <rev> > STRATA_VERSION
 NVCC_PREPEND_FLAGS="-ccbin /usr/bin/g++-14" CUDAHOSTCXX=/usr/bin/g++-14 \
-  ./setup.sh --yes --family qwen --model Q2_0 --context 131072 --vision none \
+  ./setup.sh --yes --family qwen --model Q2_0 --context 131072 --vision gpu \
              --no-start --port 8191
 ./strata.sh verify             # the API shape: tool_calls, usage, stream usage
 ```
+
+**Images are a setup choice, not a units-file one.** Flash-Next reads
+pictures through a separate 0.9 GB encoder that setup installs only when
+asked (`--vision gpu`; `--yes` alone leaves it OUT). The adapter publishes
+`vision` from the run config (a `"vision"` section whose encoder files exist),
+so a host set up text-only says `vision: false` truthfully and a units-file
+`"vision": true` cannot paper over it. The GPU encoder is held inside the
+unit's VRAM footprint (it starts before the engine, whose auto expert cache
+then sizes to what is left), so text decodes a few % slower (Strata
+DETAILS.md, "Images").
 
 The gcc-14 drop-in is this host's (`HARMONY.md` fp8 note above): CUDA 12.9's
 nvcc cannot identify itself under gcc 15. `--no-start` because Harmony owns the
