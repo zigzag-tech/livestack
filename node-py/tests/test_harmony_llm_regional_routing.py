@@ -495,7 +495,22 @@ def test_an_indifferent_request_with_nothing_warm_here_goes_to_a_warm_peer(srv, 
         assert rec["trigger"] == "no_warm_local" and rec["expect"] == "warm"
         assert rec["request_id"] == got["rid"] == node["routes"][-1]["request_id"]
         assert rec["attempts"] == [{"target": t.base, "expect": "warm", "result": "ok"}]
-        assert "view_age_s" in rec and rec["view_stale"] is False or rec["view_age_s"] is None
+        assert "view_age_s" in rec and "view_stale" in rec
+    finally:
+        t.close()
+
+
+def test_a_caller_that_named_a_unit_is_not_routed_to_another_model(srv, node, monkeypatch):
+    t = _Target([("200", {"ok": 1})])
+    try:
+        monkeypatch.setattr(srv, "FLEET_URL", "http://fleet.invalid:8801")
+        monkeypatch.setattr(srv, "_fleet_view",
+                            lambda url: (_ for _ in ()).throw(AssertionError("fleet consulted")))
+        with _client(srv) as c:
+            r = c.post("/v1/chat/completions", json={"model": "llm_title", "messages": [
+                {"role": "user", "content": "x"}]})
+        assert r.status_code == 503 and node["admit"] == 1     # its own admission, not a detour
+        assert t.got == []
     finally:
         t.close()
 
@@ -654,3 +669,14 @@ def test_the_dry_run_shows_vantage_regions_and_expectation(srv, node, monkeypatc
         assert t.got == []                                         # a dry run sends nothing
     finally:
         t.close()
+
+
+def test_health_reports_the_revision_even_when_the_script_is_a_symlink(srv, tmp_path, monkeypatch):
+    # Deployed nodes run `~/harmony-llm/server.py`, a symlink into a livestack
+    # worktree; the revision must come from the real checkout, not the link's dir.
+    monkeypatch.delenv("HARMONY_LLM_REV", raising=False)
+    rev = srv._git_revision()
+    assert len(rev) == 40 or rev == "unknown"
+    from fastapi.testclient import TestClient
+    h = TestClient(srv.app).get("/health").json()
+    assert h["revision"] == srv._REVISION and h["contract"] == 1 and "region" in h

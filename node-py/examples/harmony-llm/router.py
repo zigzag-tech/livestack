@@ -64,7 +64,8 @@ def _revision() -> str:
     if env:
         return env
     try:
-        return subprocess.run(["git", "-C", _HERE, "rev-parse", "HEAD"],
+        return subprocess.run(["git", "-C", os.path.dirname(os.path.realpath(__file__)),
+                               "rev-parse", "HEAD"],
                               capture_output=True, text=True, timeout=5).stdout.strip() or "unknown"
     except Exception:
         return "unknown"
