@@ -17,48 +17,7 @@ from __future__ import annotations
 
 from typing import Callable, Iterable, Mapping, Optional
 
-CMPS = (">=", "<=", "!=", ">", "<")
-
-
-def attrs_meet(attrs: Mapping, requires: Mapping) -> bool:
-    """Same semantics as the planner's `_unit_satisfies`, including the
-    important one: an attribute the unit does not declare is NOT satisfied.
-    Silence is not a yes, or an unlabelled unit would answer every question."""
-    for key, want in requires.items():
-        op, attr = "", key
-        for c in CMPS:
-            if key.endswith(c):
-                op, attr = c, key[: -len(c)]
-                break
-        attr = attr.strip()
-        if attr not in attrs:
-            return False
-        have = attrs[attr]
-        try:
-            # A LIST want is "a value in this list" (the `context_len=[131072,]`
-            # spelling) -- the same semantics as the planner's `_unit_satisfies`.
-            if op == "" and isinstance(want, (list, tuple, set)):
-                if have not in want:
-                    return False
-            elif op == "" and have != want:
-                return False
-            if op == "!=" and isinstance(want, (list, tuple, set)):
-                if have in want:
-                    return False
-            if op == "!=" and not isinstance(want, (list, tuple, set)) and have == want:
-                return False
-            if op == ">=" and not float(have) >= float(want):
-                return False
-            if op == ">" and not float(have) > float(want):
-                return False
-            if op == "<=" and not float(have) <= float(want):
-                return False
-            if op == "<" and not float(have) < float(want):
-                return False
-        except (TypeError, ValueError):
-            return False
-    return True
-
+from livestack_node.requirements import attrs_meet  # noqa: F401  (re-exported: the one comparator)
 
 def embed_nodes(fleets: Iterable[Mapping]) -> "list[dict]":
     """Live embed units across broker `/fleet` views: [{base, model, attrs,
