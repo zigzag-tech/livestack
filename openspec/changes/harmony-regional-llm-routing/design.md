@@ -78,9 +78,16 @@ warm peer in-region. Ranking first lets warm-first win; a local load still happe
 the ranking picks this node. Speed preferences keep routing even when a local unit is
 warm (unchanged).
 
-**7. Router mode = a facade with zero units.** No new daemon. Zero `SPECS` means every
-request takes the routing branch; `/harmony/route` already exists for dry runs. The
-"proxy daemon on the requester's machine" is this, run on localhost with the region set.
+**7. Router mode = a facade with zero units, as `router.py`.** The facade module
+(`server.py`) builds a manager, a planner client and an engine table at import, so
+"zero units" there would mean stubbing most of the module. Instead the routing logic is a
+library both share (`fleet_route.py`: view, vantage, `send_routed`; `request_language.py`:
+the request grammar, moved out of the facade unchanged) and `router.py` is the small app
+around it: `/v1/{chat/completions,completions,embeddings}`, `/harmony/route`, `/health`.
+Same OpenAI surface, same request language, same contract; no engine, no `attach()`.
+Embeddings use the facade's one-embedding-space rule (`fleet_embed.pick`); other `/v1`
+paths are node-specific and refused (404, named). The "proxy daemon on the requester's
+machine" is this, run on localhost with the region set.
 
 **8. Peer shortcut narrows to same host.** `_held_elsewhere` keeps "resident or loading"
 for warm-on-start (its original purpose — no double load on one host) but the request
@@ -165,7 +172,17 @@ GPU redeploy the single upgrade event, followed by `harmony-router-rollout.sh`.
 
 ## Open Questions
 
-- Whether xc-win-1's Windows side (not WSL) needs a router — no Windows-native caller is known today.
-- Maximum stale view age: default 300 s (30× the 10 s TTL) — tune from partition data.
-- Whether the router should also cache per-target `route_stale` refusals beyond one
-  refresh (negative caching) — decide from the route-record data after Phase 1.
+- ~~Whether xc-win-1's Windows side needs a router.~~ **Resolved 2026-10-18:** no. WSL2
+  runs in mirrored-network mode, so the WSL router on `127.0.0.1:8188` answers Windows
+  callers too (`curl.exe http://127.0.0.1:8188/health` from the Windows side returned
+  the router's health).
+- Maximum stale view age: default 300 s (30× the 10 s TTL) — still a guess; tune from
+  `view_age_s` / `view_stale` on route records once there is partition data.
+- Negative caching beyond one refresh: **not done**. A `not_resident` target is dropped
+  from the cached view until the next refresh and that is all; revisit from route
+  records.
+- A cn LLM node does not exist yet (zz-tower0's polytts/polyasr are down; no cn facade).
+  cn routers rank na nodes cross-region today, with distance `unknown` because the cn
+  fleet broker has no measured link rows from a cn host broker.
+- Callers: the request language lets a caller name a unit (`model: llm_title`), which a
+  router cannot validate before the target does. Callers behind a router must state a need.

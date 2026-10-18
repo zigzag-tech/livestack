@@ -1275,7 +1275,35 @@ registers as a fleet node (so it can never be a target), holds no fleet token
 (caller `Authorization`/`X-Harmony-Owner` pass through unchanged), and parses the
 request language with the same code as the facade (`request_language.py`).
 `GET /health` reports `revision`, `region`, `fleet_url`, `contract`;
-`POST /harmony/route` is the dry run.
+`POST /harmony/route` is the dry run. It routes `chat/completions`, `completions`
+and `embeddings` (embeddings by the facade's one-embedding-space rule: a need met by
+embedders of different models is a 400); other `/v1` endpoints (`/v1/classifier`)
+are node-specific and refused with a 404. Callers must **state a need, not a unit
+name**: a router cannot know which node holds `llm_title`.
+
+Installed (2026-10-18, revision `ff4885c7`): lappy-bellinzona, xc-mac-studio (na);
+zz-tower0, zz-tower2, xc-win-1 WSL (cn; WSL2's mirrored loopback means the same
+router answers Windows-native callers). Regional fleet brokers: `na` is
+livestack-fleetd on xc-tower-ubuntu:8801; `cn` is `harmony-fleetd` on
+zz-tower2:8801 (installed by the same rollout; zz-tower0's `livestack-fleetd-cn` is a
+separate token-rollout rehearsal). There is no cn LLM node yet, so cn routers rank na
+nodes cross-region, distance `unknown` (no measured cn link rows).
+
+Dry runs, as shipped (`POST /harmony/route`, body `require:class=llm,params_b>=100`):
+
+```
+tower (na entry, 27B resident, flash_next only on whitby):
+  decision=forward trigger=no_warm_local chosen=http://100.64.0.27:8188 expect=warm
+  vantage=region:na regions=[] regions_source=none view_age_s=0.0 contract_version=1
+zz-tower2 router (cn entry):
+  decision=forward trigger=router chosen=http://100.64.0.27:8188 expect=warm
+  vantage=region:cn regions=[] regions_source=none view_age_s=1.0 contract_version=1
+```
+
+Forced stale route (verified on the real fleet): a warm-routed request straight to the
+tower for a unit it does not hold answers `409 route_stale/not_resident` and loads
+nothing; a router fed a stale view claiming the tower held it retried onto whitby
+(`attempts: route_stale/not_resident, ok`) and the two records joined on `x-request-id`.
 
 ```sh
 scripts/harmony-router-rollout.sh                 # install/update every requester machine
