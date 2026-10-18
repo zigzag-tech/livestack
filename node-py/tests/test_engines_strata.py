@@ -335,3 +335,36 @@ def test_the_engine_source_pin_is_checked_at_startup(tmp_path):
     (Path(ok2["strata_root"]) / "MODEL_SHA256").write_text("deadbeef\n")
     with pytest.raises(ValueError, match="sha256"):
         StrataEngine().rev(ok2)
+
+
+def test_the_engine_child_is_measured_not_just_the_serve_server(tmp_path, monkeypatch):
+    # The serve server is the pid harmony-llm started; the card and the RAM are
+    # held by the engine it spawned. Measured on zz-whitby 2026-10-18: reading
+    # only the server's pid found no VRAM and the footprint went UNKNOWN.
+    import subprocess
+    import sys
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        fam = StrataEngine._family(os.getpid())
+        assert os.getpid() in fam and child.pid in fam
+
+        class _Out:
+            stdout = f"{os.getpid()}, 256\n{child.pid}, 21764\n99999999, 900\n"
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Out())
+        assert StrataEngine._pid_vram_bytes(fam) == (256 + 21764) << 20
+        assert StrataEngine._pid_vram_bytes([424242]) is None   # holds nothing: not a zero
+        row = StrataEngine().measure(_spec(8191, tmp_path), None, os.getpid(), [])
+        assert row["measured"] == "strata-startup"
+        assert row["footprint"] == (256 + 21764) << 20
+        assert row["ram_resident_bytes"] > 0
+    finally:
+        child.kill()
+
+
+def test_the_0_1_45_startup_lines_are_recognised(tmp_path):
+    from engines import LineCapture
+    cap = LineCapture()
+    cap.feed("[strata] experts loaded: 31.64 GiB at 5.14 GiB/s (11 s so far)\n")
+    cap.feed("[strata] filling the GPU's expert cache (10612 experts, 13.66 GiB of VRAM) ...\n")
+    row = StrataEngine().measure(_spec(8191, tmp_path), cap, None, [])
+    assert len(row["engine_lines"]) == 2

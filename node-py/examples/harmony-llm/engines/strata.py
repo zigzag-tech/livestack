@@ -240,11 +240,24 @@ class StrataEngine(Engine):
         `unmatched` list.
         """
         lines = list(getattr(capture, "lines", []) or [])
+        # Both spellings: the pinned rev's (`loaded … GiB at`, `expert cache …
+        # slots, `) and 0.1.45's (`experts loaded: 31.64 GiB at`, `expert cache
+        # (10612 experts, 13.66 GiB of VRAM)`).
         matched = [ln.strip() for ln in lines
-                   if (" loaded " in ln and "GiB at" in ln)
-                   or ("expert cache " in ln and " slots, " in ln)]
-        vram = self._pid_vram_bytes(pid)
-        pinned, mapped = self._proc_status_bytes(pid)
+                   if ((" loaded " in ln or " loaded: " in ln) and "GiB at" in ln)
+                   or ("expert cache " in ln and (" slots, " in ln or "GiB of VRAM" in ln))]
+        # The serve server is `pid`; the ENGINE holding the card and the RAM is
+        # its child (`engine/strata`). Reading `pid` alone found 256 MiB of
+        # Python and no engine, so the footprint went UNKNOWN — which the
+        # planner charges as the whole device, a whole-card claim by accident.
+        family = self._family(pid)
+        vram = self._pid_vram_bytes(family)
+        pinned = mapped = anon = None
+        for p in family:
+            lck, fil, ano = self._proc_status_bytes(p, anon=True)
+            pinned = (pinned or 0) + lck if lck is not None else pinned
+            mapped = (mapped or 0) + fil if fil is not None else mapped
+            anon = (anon or 0) + ano if ano is not None else anon
         row: dict = {"measured": "unknown", "source": "strata-startup",
                      "unmatched": ["no engine memory report: Strata's startup prints none"]}
         if matched:
@@ -255,6 +268,11 @@ class StrataEngine(Engine):
             row["ram_pinned_bytes"] = pinned
         if mapped is not None:
             row["ram_mapped_bytes"] = mapped
+        if anon is not None:
+            # 0.1.45 copies the experts into ordinary memory (measured on
+            # zz-whitby: 38 GiB RssAnon, VmLck 0, RssFile 0.2 GiB) — this is the
+            # host-RAM cost a units file's `ram_gb` should be checked against.
+            row["ram_resident_bytes"] = anon
         if vram is not None:
             # The card claim: compute state + the KV cache sized to the free
             # VRAM. One number both times — a self-sizing cache has no separate
@@ -267,36 +285,70 @@ class StrataEngine(Engine):
         return row
 
     @staticmethod
-    def _pid_vram_bytes(pid: "int | None") -> "int | None":
-        """VRAM this pid's engine holds, via nvidia-smi. None when unknowable —
-        an unreadable meter contributes nothing, it never fabricates a zero."""
+    def _family(pid: "int | None", proc: str = "/proc") -> "list[int]":
+        """`pid` and every process descended from it (the serve server and the
+        engine it spawned). Empty for no pid."""
         if not pid:
+            return []
+        children: "dict[int, list[int]]" = {}
+        try:
+            names = os.listdir(proc)
+        except OSError:
+            return [pid]
+        for name in names:
+            if not name.isdigit():
+                continue
+            try:
+                with open(os.path.join(proc, name, "stat"), "r", encoding="utf-8") as fh:
+                    # comm may hold spaces; ppid is the 2nd field after its ')'
+                    ppid = int(fh.read().rsplit(")", 1)[1].split()[1])
+            except (OSError, IndexError, ValueError):
+                continue
+            children.setdefault(ppid, []).append(int(name))
+        out, todo = [], [pid]
+        while todo:
+            p = todo.pop()
+            out.append(p)
+            todo.extend(children.get(p, []))
+        return out
+
+    @staticmethod
+    def _pid_vram_bytes(pids) -> "int | None":
+        """VRAM those pids hold, via nvidia-smi (one pid or a family). None when
+        unknowable or when none of them holds any — an unreadable meter
+        contributes nothing, it never fabricates a zero."""
+        if not pids:
             return None
+        want = {str(p) for p in (pids if isinstance(pids, (list, tuple, set)) else [pids])}
         import subprocess
         try:
             out = subprocess.run(
                 ["nvidia-smi", "--query-compute-apps=pid,used_memory",
                  "--format=csv,noheader,nounits"],
                 capture_output=True, text=True, timeout=5)
+            total, seen = 0, False
             for line in out.stdout.splitlines():
                 parts = [p.strip() for p in line.split(",")]
-                if len(parts) == 2 and parts[0] == str(pid):
-                    return int(float(parts[1]) * (1 << 20))
+                if len(parts) == 2 and parts[0] in want:
+                    total += int(float(parts[1]) * (1 << 20))
+                    seen = True
+            return total if seen else None
         except Exception:
             return None
-        return None
 
     @staticmethod
-    def _proc_status_bytes(pid: "int | None"):
-        """(`VmLck`, `RssFile`) from /proc/<pid>/status, in bytes.
+    def _proc_status_bytes(pid: "int | None", anon: bool = False):
+        """(`VmLck`, `RssFile`[, `RssAnon`]) from /proc/<pid>/status, in bytes.
 
         `VmLck` is what the engine mlock()s for the GPU — the PINNED memory —
         and `RssFile` is the file-backed mapping (the GGUF). Both, because the
         two numbers answer different questions ("how much RAM is committed" vs
-        "how much of the model is resident") and only one of them is the pin."""
+        "how much of the model is resident") and only one of them is the pin.
+        `RssAnon` (with `anon=True`) is the ordinary memory an engine copied its
+        weights into — neither pinned nor file-backed, and still host RAM."""
         if not pid:
-            return None, None
-        locked = mapped = None
+            return (None, None, None) if anon else (None, None)
+        locked = mapped = rss_anon = None
         try:
             with open(f"/proc/{pid}/status", "r", encoding="utf-8") as fh:
                 for line in fh:
@@ -304,9 +356,11 @@ class StrataEngine(Engine):
                         locked = int(line.split()[1]) * 1024
                     elif line.startswith("RssFile:"):
                         mapped = int(line.split()[1]) * 1024
+                    elif line.startswith("RssAnon:"):
+                        rss_anon = int(line.split()[1]) * 1024
         except OSError:
-            return None, None
-        return locked, mapped
+            return (None, None, None) if anon else (None, None)
+        return (locked, mapped, rss_anon) if anon else (locked, mapped)
 
     # -- what the launch line means -----------------------------------------
     def launch_attributes(self, spec: dict) -> dict:

@@ -1834,6 +1834,12 @@ async def _forward_to_embed_node(node: dict, parsed_body: dict, request: Request
                     media_type=resp.headers.get("content-type", "application/json"))
 
 
+async def _off_loop(fn):
+    """Run a blocking call (broker HTTP, peer probes) on a worker thread, so the
+    loop keeps relaying the streams already in flight while it waits."""
+    return await asyncio.get_running_loop().run_in_executor(None, fn)
+
+
 async def _proxy_impl(path: str, request: Request, ctx: dict):
     """OpenAI-compatible surface. Every call goes through `manager.ensure`, so a
     request against an evicted unit reloads it through Harmony's admission
@@ -1962,7 +1968,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # travels to pay a load when nothing warm anywhere can serve it.
     fleet_target = None
     if FLEET_URL and _wants_fleet_route(prefer, request.headers):
-        view = _fleet_view(FLEET_URL)
+        view = await _off_loop(lambda: _fleet_view(FLEET_URL))
         if view is None:
             ctx["fleet_route"] = {"decision": "no fleet view", "fleet": FLEET_URL}
         else:
@@ -2035,7 +2041,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         cands = ([n for n in _ordered(prefer) if _local_satisfies(n, requirement)]
                  if requirement is not None else [unit])
         for n in cands:
-            h = _held_elsewhere(n)
+            h = await _off_loop(lambda n=n: _held_elsewhere(n))
             if h:
                 unit, held_peer = n, h
                 break
@@ -2051,11 +2057,18 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         # marked owner_asserted=False so the ledger can tell the two apart.
         asserted = (request.headers.get("x-harmony-owner") or "").strip()
         try:
-            res = admit(unit if requirement is None else "",
-                        requires=requirement,
-                        owner_id=asserted or f"harmony-llm:{HOST_ID}",
-                        owner_asserted=bool(asserted),
-                        token=_FLEET_TOKEN, timeout=ADMIT_TIMEOUT)
+            # OFF THE LOOP: admission is blocking HTTP, and the broker planning
+            # it probes this very node's /livestack/residence. Run on the loop,
+            # the probe cannot be answered until the broker answers — a 5.0 s
+            # probe timeout per admission, during which every stream this node
+            # is relaying stops being read and its engine stops decoding
+            # (zz-whitby 2026-10-18; tests/test_harmony_llm_loop_blocking.py).
+            res = await _off_loop(lambda: admit(
+                unit if requirement is None else "",
+                requires=requirement,
+                owner_id=asserted or f"harmony-llm:{HOST_ID}",
+                owner_asserted=bool(asserted),
+                token=_FLEET_TOKEN, timeout=ADMIT_TIMEOUT))
             served = res.get("kind")
             # A loading transition temporarily withholds this facade's fleet
             # registration. During that gap the broker can answer "nothing
@@ -2163,7 +2176,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # `manager.ensure`, which is the load this avoids. `already_here` short-
     # circuits it, so a node serving the unit itself never pays for this.
     if not elsewhere and not already_here:
-        holder = _held_elsewhere(unit)
+        holder = await _off_loop(lambda: _held_elsewhere(unit))
         if holder:
             print(f"[harmony-llm] {unit} is held by {holder} — forwarding "
                   f"rather than loading a second copy", flush=True)
