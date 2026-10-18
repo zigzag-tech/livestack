@@ -1154,9 +1154,10 @@ idle host could load the right unit.
 **Routed across hosts.** A request whose `prefer` names `llm.decode_tok_s` or
 `llm.first_token_ms` is ranked over the fleet broker's `/fleet` view and
 forwarded to the winner, body as asked, `x-harmony-routed` set (the receiver
-serves; it never re-routes). A request with no speed preference keeps the
-local path exactly. Fleet broker: `HARMONY_LLM_FLEET_URL`,
-else the last of two `LIVESTACK_BROKER_URL` entries.
+serves; it never re-routes). A request with no speed preference also travels
+when nothing resident and unsaturated here can serve it — see "Regional
+routing" below. Fleet broker: `HARMONY_LLM_FLEET_URL`, else the last of two
+`LIVESTACK_BROKER_URL` entries.
 
 **Cold against warm, priced by finish time.** Warm-first alone sent a speed
 request to a slow host that kept its model over a fast host that had unloaded
@@ -1221,6 +1222,79 @@ running requests, 12.4 s → 7.6 s once fixed). They run on a worker thread now
 hardware for a unit with no samples yet; the scheduler (`choose_target`)
 weighing throughput. (The host-RAM ledger the first version of this list named
 is the next section.)
+
+## Regional routing — a view that expires, a target that validates (2026-10-18)
+
+openspec `harmony-regional-llm-routing`. Requests used to take one of two paths:
+serve here, or ask this host's broker. A requester far from the fleet (a Nanjing
+machine, a laptop, a hub) paid a round trip across the ocean before every
+request. Now the requester can **route itself**: rank the fleet from its own
+region over a cached view, and send straight to the serving node.
+
+**Not a grant.** The cached fleet view (`/fleet`, 10 s TTL, up to
+`HARMONY_LLM_VIEW_STALE_MAX_S`=300 s stale when the fleet broker is unreachable,
+then local / same-host only) is advice. The **target validates**:
+
+| `x-harmony-routed: <router-id>;expect=warm\|cold;v=<n>` | the target does |
+|---|---|
+| `expect=warm` | serves from a resident, satisfying, unsaturated unit it holds a slot on (pinned against idle eviction while held), else `409 {"error":"route_stale","reason":"not_resident\|unsatisfied\|saturated"}` **before any body byte**; never admits, loads or forwards |
+| `expect=cold` or no `expect` | today's behaviour: may admit and load |
+| `v` newer than the target supports | `409 {"error":"route_contract","router_version":…,"supported":…}` |
+
+The router retries **once** on `route_stale`, a connection failure before the
+response, or `429` (a `not_resident` target is dropped from its cached view until
+the next refresh); never after a body byte has reached the caller. A failure
+answers `{"error":"route_failed","attempts":[…]}` naming every attempt.
+
+**Eligibility before readiness.** `fleet_rank.rank(allow_regions=…)` applies the
+region policy *before* warm/cold: a warm node in a forbidden region no longer
+suppresses a cold node in an allowed one. Ranking uses the caller's vantage
+(`region:<LIVESTACK_NODE_REGION>`), not the fleet broker's. Region policy comes
+from the principal's allowance (`"regions": ["na"]` in the fleet principal table)
+which a request may narrow with `harmony_regions` and never widen (403 naming
+region and allowance); no allowance is unrestricted. A node with no declared
+region is excluded when a policy is in force.
+
+**What routes.** A speed preference (`trigger: speed`), or no resident,
+unsaturated, in-policy local unit able to serve it (`trigger: no_warm_local`). A
+request this node can serve warm never looks at the fleet. Peer shortcut on the
+request path is **same-host and resident only**; warm-on-start keeps the wider
+"resident or loading" holder check.
+
+**One request id.** `x-request-id` is minted by the first node that routes a
+request and carried unchanged: the router's route record
+(`<host>-routes.jsonl`, `role: router`, with `trigger`, `vantage`, `regions`,
+`regions_source`, `expect`, `view_age_s`, `view_stale`, `contract_version` and
+each `attempts[]` entry) and the target's demand record (`request_id`,
+`routed_by`, `outcome: route_stale` with `route_stale: <reason>`) join on it.
+
+**The router.** `node-py/examples/harmony-llm/router.py` is a facade with zero
+units, bound to `127.0.0.1:8188` on every machine that sends requests (GPU hosts
+get none). Callers set `base_url` to `http://127.0.0.1:8188/v1`. It never
+registers as a fleet node (so it can never be a target), holds no fleet token
+(caller `Authorization`/`X-Harmony-Owner` pass through unchanged), and parses the
+request language with the same code as the facade (`request_language.py`).
+`GET /health` reports `revision`, `region`, `fleet_url`, `contract`;
+`POST /harmony/route` is the dry run.
+
+```sh
+scripts/harmony-router-rollout.sh                 # install/update every requester machine
+scripts/harmony-router-rollout.sh --status        # revision, region, dry run per host
+scripts/harmony-router-rollout.sh lappy-bellinzona --rev <sha>
+```
+
+Routers are pinned to the revision the serving nodes report on `/health` (both
+must run the same routed-request contract), **not** to what repo-sync last
+pulled: after redeploying a GPU node, run the rollout. It installs a dedicated
+worktree + venv under `~/.local/share/harmony-router`, a systemd user unit
+(launchd agent on macOS), starts it, and fails the host unless a dry run names a
+target. Idempotent: a second run says "no changes". One fleet broker per region
+(same code); `HARMONY_LLM_FLEET_URL` names the region's.
+
+**Not in this change** (stated so it is not assumed): fairness between routers
+(each ranks independently; a burst from two requesters can land on one node and the
+target's queue/429 is the backstop), a global rate view, and negative caching
+beyond dropping a stale target until the next refresh.
 
 ## One host-RAM ledger for both planners — drain, don't kill (2026-10-18)
 
