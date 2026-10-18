@@ -26,9 +26,10 @@ everything here:
   reports `measured: "unknown"` and the DECLARED numbers stand. Silence is not
   a measurement. MTP speculative decode is built in — never an attribute.
 
-`thinking`/`tools`/`vision` are NOT invented: they are what the units file
-declared, or False — only the operator knows what this build serves, and
-`tests/test_engines_attributes.py` pins that truth. The served `context_len` is
+`thinking`/`tools` are NOT invented: they are what the units file declared, or
+False — only the operator knows what this build serves, and
+`tests/test_engines_attributes.py` pins that truth. `vision` is the run
+config's: true exactly when setup installed the image encoder. The served `context_len` is
 declared for the same reason: it is baked into the engine config at setup time
 (`--context`), not on the server's command line.
 """
@@ -379,7 +380,14 @@ class StrataEngine(Engine):
         """`class=llm` is the only DERIVED fact — the endpoint shape is fixed
         (OpenAI chat/completions).
 
-        Everything else is DECLARED or absent: `thinking`/`tools`/`vision` (a
+        `vision` is READ FROM THE RUN CONFIG: setup writes a `"vision"` section
+        (encoder exe and mmproj) only when images were set up, and the server
+        refuses pictures without one. Flash-Next reads images, but `--yes`
+        leaves the encoder out, so the model's ability is not the unit's — the
+        units file defaulting it to false hid that the fix was a setup choice,
+        and a units file saying true over a text-only config would lie.
+
+        Everything else is DECLARED or absent: `thinking`/`tools` (a
         Strata build's chat template and tool parser are its own business),
         `context_len` (baked into the engine config at setup time, not on this
         command line), and `max_concurrent` (the server runs one sequence at a
@@ -388,8 +396,9 @@ class StrataEngine(Engine):
         """
         attrs = dict(spec.get("attributes") or {})
         attrs["class"] = "llm"
-        for key in ("thinking", "tools", "vision"):
+        for key in ("thinking", "tools"):
             attrs[key] = bool(attrs.get(key, False))
+        attrs["vision"] = self._config_has_vision(spec)
         if "context_len" not in attrs:
             attrs.pop("context_len", None)
         try:
@@ -398,6 +407,16 @@ class StrataEngine(Engine):
             declared = 0
         attrs["max_concurrent"] = declared if declared > 0 else DEFAULT_MAX_CONCURRENT
         return attrs
+
+    def _config_has_vision(self, spec: dict) -> bool:
+        """The run config sets up an image encoder whose files exist."""
+        try:
+            with open(self.config_path(spec), "r", encoding="utf-8") as fh:
+                vision = json.load(fh).get("vision")
+        except (OSError, ValueError, AttributeError):
+            return False
+        return (isinstance(vision, dict)
+                and all(os.path.exists(str(vision.get(k) or "")) for k in ("exe", "mmproj")))
 
     # -- how it dies --------------------------------------------------------
     def stop(self, proc) -> None:
