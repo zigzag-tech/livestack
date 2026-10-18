@@ -1,0 +1,46 @@
+[Unit]
+# The Harmony LLM node for zz-whitby's one card (RTX 3090). It DECLARES what it
+# can serve; it does not decide what runs. Flash-Next (Strata) is a unit with a
+# VRAM footprint and a host-RAM claim, planned against polyasr/polytts on the
+# same card by livestack-hostd. Nothing here pins, warms or claims the device:
+# a request whose need only this unit satisfies is what loads it.
+Description=Harmony-managed local LLM - zz-whitby
+After=network-online.target livestack-hostd.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/harmony-llm
+# LIVESTACK_BROKER_URL (host + fleet broker), LIVESTACK_NODE_HOST, region.
+EnvironmentFile=/etc/harmony/zz-whitby.env
+Environment=HARMONY_LLM_HOST_ID=zz-whitby
+Environment=CUDA_VISIBLE_DEVICES=0
+Environment=HARMONY_LLM_CUDA_DEVICE=0
+Environment=HARMONY_LLM_PORT=8188
+Environment=HARMONY_LLM_UNITS_FILE=/etc/harmony/llm-units.json
+Environment=HARMONY_LLM_SPREAD_GROUP=llm
+# The card is shared with polyasr/polytts: ask the host broker for room before
+# loading, so the planner evicts what the space needs instead of the engine
+# starting into whatever happens to be free.
+Environment=HARMONY_LLM_ADMIT=1
+# Requests are the only lever: a cold card stays cold until something needs it.
+Environment=HARMONY_LLM_WARM_ON_START=0
+Environment=HARMONY_LLM_IDLE_EVICT_SECONDS=900
+Environment=HARMONY_LLM_PROXY_TIMEOUT=900
+Environment=HARMONY_DEMAND_LOG_AGE_DAYS=21
+# The pilot runs livestack branch agent/strata-vram-budget; server.py and
+# livestack_node must come from the SAME tree (~/harmony-llm symlinks into it).
+Environment=PYTHONPATH=/home/ubuntu/worktrees/livestack/strata-vram-budget/node-py
+ExecStart=/home/ubuntu/harmony/venv/bin/python /home/ubuntu/harmony-llm/server.py
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=20
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

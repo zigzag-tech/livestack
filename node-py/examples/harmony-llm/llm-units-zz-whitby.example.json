@@ -1,0 +1,26 @@
+[
+  {
+    "name": "flash_next",
+    "model": "qwen3.8-flash-next-q2_0",
+    "port": 8191,
+    "engine": "strata",
+    "engine_source": {"rev": "477ac13cbe8e582c20484871ce459d20d82df09d"},
+    "strata_root": "/home/ubuntu/strata/strata",
+    "strata_config": "/home/ubuntu/strata/strata/strata-q2_0.json",
+    "footprint_gb": 21,
+    "ram_gb": 45,
+    "residency": "UNPINNED",
+    "priority": 110,
+    "min_residency_s": 180,
+    "reload_cost": 120,
+    "extra_args": "--gpu 0",
+    "attributes": {
+      "class": "llm",
+      "params_b": 125,
+      "context_len": 131072,
+      "thinking": true,
+      "tools": true,
+      "max_concurrent": 2
+    }
+  }
+]
