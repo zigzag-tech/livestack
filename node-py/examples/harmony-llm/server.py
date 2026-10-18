@@ -403,7 +403,12 @@ def _record_measurement(name: str, spec: dict, cmd: list, capture: StartupCaptur
     measured for, and the persistence. Whatever arrives, the unit gets an
     answer: a MeasuredCost, or `unknown` naming what never came. Never 0, and
     never the declared prior silently."""
-    row = dict(_engine_for(spec).measure(spec, capture, None, cmd) or {})
+    # The engine process this node started: an engine that reads its own cost
+    # off the process (Strata: NVML per pid, /proc for RAM) needs it. Passing
+    # None here made every such reading `unknown` (zz-whitby 2026-10-18).
+    proc = _procs.get(name)
+    pid = proc.pid if proc is not None and proc.poll() is None else None
+    row = dict(_engine_for(spec).measure(spec, capture, pid, cmd) or {})
     if not row:
         return                          # this engine reports nothing at all
     composition = row.pop("composition", None)

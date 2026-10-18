@@ -83,3 +83,25 @@ def test_a_slow_admission_does_not_block_the_node(srv, monkeypatch):
         t.join()
     assert done["status"] == 503             # the refusal still reaches its caller
     assert waited < 0.5, f"/health waited {waited:.2f}s behind a blocked admission"
+
+
+def test_the_measurement_is_handed_the_engine_process_it_started(srv, monkeypatch):
+    # `_record_measurement` passed pid=None, so an engine that reads its cost
+    # off the process (Strata) could only ever answer `unknown` — which the
+    # planner charges as the whole device.
+    import subprocess as sp
+    seen = {}
+
+    class _Eng:
+        def measure(self, spec, capture, pid, argv):
+            seen["pid"] = pid
+            return {"measured": "unknown", "unmatched": ["test"]}
+
+    proc = sp.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        monkeypatch.setitem(srv._procs, "flash_next", proc)
+        monkeypatch.setattr(srv, "_engine_for", lambda spec: _Eng())
+        srv._record_measurement("flash_next", srv.SPECS["flash_next"], [], None)
+        assert seen["pid"] == proc.pid
+    finally:
+        proc.kill()
