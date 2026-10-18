@@ -386,3 +386,17 @@ def test_the_0_1_45_startup_lines_are_recognised(tmp_path):
     cap.feed("[strata] filling the GPU's expert cache (10612 experts, 13.66 GiB of VRAM) ...\n")
     row = StrataEngine().measure(_spec(8191, tmp_path), cap, None, [])
     assert len(row["engine_lines"]) == 2
+
+
+def test_vision_is_what_the_run_config_set_up_not_what_the_units_file_says(tmp_path):
+    # Flash-Next reads images, but only with the encoder setup installs on
+    # request: no "vision" section, no pictures — whatever the units file says.
+    spec = _spec(8191, tmp_path, attributes={"vision": True})
+    assert StrataEngine().launch_attributes(spec)["vision"] is False
+    base = Path(spec["strata_root"]) / "strata-qwen-q2_0.json"
+    exe, mmproj = tmp_path / "strata-vision", tmp_path / "mmproj.gguf"
+    base.write_text(json.dumps({"exe": "engine/strata", "args": [],
+                                "vision": {"exe": str(exe), "mmproj": str(mmproj)}}))
+    assert StrataEngine().launch_attributes(spec)["vision"] is False   # files missing
+    exe.write_text(""); mmproj.write_text("")
+    assert StrataEngine().launch_attributes(spec)["vision"] is True
