@@ -41,7 +41,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from .preferences import preference_key
+from .preferences import observation, preference_key
 
 from .ledger import distance_band
 
@@ -91,6 +91,9 @@ class RankedTarget:
     # first time somebody clones a voice.
     inventory: Optional[Dict[str, Any]] = None
     preferences: Optional[List[Dict[str, Any]]] = None
+    # Expected seconds to a finished answer (`finish_estimate`), when the
+    # finish-time rule priced this target; None otherwise.
+    finish_s: Optional[float] = None
 
     def to_wire(self) -> dict:
         result = {"target_id": self.target_id, "node": self.node,
@@ -100,6 +103,7 @@ class RankedTarget:
                   "distance_band": self.distance_band,
                   "load": self.load, "rank": self.rank, "reason": self.reason}
         result["preferences"] = self.preferences
+        result["finish_s"] = self.finish_s
         return result
 
 
@@ -340,10 +344,46 @@ def _requirement_gap(node: dict, require: Dict[str, Any]) -> Optional[str]:
     return ", ".join(_render_clause(key, require[key]) for key in named)
 
 
+# Preferences that make a request a question about TIME TO AN ANSWER, the only
+# ones that can justify paying a model load to get a faster unit.
+_SPEED_METRICS = frozenset({"llm.decode_tok_s", "llm.first_token_ms"})
+
+
+def _measured(inventory: Optional[Dict[str, Any]], metric: str,
+              now: float) -> Optional[float]:
+    value, _ = observation(inventory, {"metric": metric, "min_samples": 1}, now)
+    return value
+
+
+def finish_estimate(inventory: Optional[Dict[str, Any]], tokens: int, cold: bool,
+                    now: float) -> Optional[Dict[str, float]]:
+    """Expected seconds until a `tokens`-long answer is finished here:
+    load (cold only) + first token + tokens / decode rate — or None when any
+    term this target needs was never measured. Silence never becomes a
+    default: an unpriced target is not compared on price at all.
+
+    First token missing counts as 0 rather than None: it is a fraction of a
+    second beside a load and a decode, and a unit that published a decode rate
+    but no first-token figure (an older engine) is still priceable."""
+    decode = _measured(inventory, "llm.decode_tok_s", now)
+    if not decode or decode <= 0:
+        return None
+    load = 0.0
+    if cold:
+        load = _measured(inventory, "llm.load_s", now)
+        if load is None:
+            return None
+    first = (_measured(inventory, "llm.first_token_ms", now) or 0.0) / 1000.0
+    total = load + first + tokens / decode
+    return {"finish_s": round(total, 1), "load_s": round(load, 1),
+            "decode_tok_s": decode}
+
+
 def rank(view: dict, kind: str, vantage: str = "direct",
          now: Optional[float] = None, ttl_s: float = DEFAULT_TTL_S,
          prefer: Optional[List[Dict[str, Any]]] = None,
-         require: Optional[Dict[str, Any]] = None) -> dict:
+         require: Optional[Dict[str, Any]] = None,
+         expected_tokens: Optional[int] = None) -> dict:
     """Order the fleet's nodes for one `(kind, vantage)`.
 
     `require` is the request's hard clause map (`{"class": "llm",
@@ -353,6 +393,11 @@ def rank(view: dict, kind: str, vantage: str = "direct",
     capability is not policy (that is `regions`) and not a preference (that is
     `prefer`) — it is what the work NEEDS, and a warm node that cannot serve it
     must never be the fallback it becomes on distance alone.
+
+    `expected_tokens` turns on the FINISH-TIME RULE for a request whose
+    `prefer` asks for speed: a cold target that would finish a
+    `expected_tokens`-long answer sooner than every warm one, its MEASURED load
+    included, competes with them (see the comment at "Warm first").
 
     Returns every candidate, winner and losers alike, each with the reason it
     landed where it did — the response takes the `ranked`/`chosen` rows and the
@@ -436,34 +481,79 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                 continue
             eligible.append(RankedTarget(outcome="ranked", reason="", **common))
 
-    # Warm first, always. A cold node is a candidate only when there is no warm
-    # one anywhere — preferring it otherwise would pay a model load to avoid a
-    # few milliseconds of distance.
+    # Warm first — UNLESS THE LOAD PAYS FOR ITSELF IN THIS ANSWER. A cold node
+    # is otherwise a candidate only when there is no warm one anywhere:
+    # preferring it would pay a model load to avoid a few milliseconds of
+    # distance. But a caller that asked for speed asked for the answer SOONER,
+    # and a 4K-token answer at 116 tok/s after a 12 s load (47 s) beats the
+    # same answer at 41 tok/s on a warm card (100 s). So, for a speed
+    # preference, every target is priced by `finish_estimate` and a cold one
+    # that beats EVERY warm one joins them. Each term must be measured, warm
+    # and cold alike; one unpriced warm target and the old rule stands, since
+    # "faster than something we cannot price" is not a finding. This prices
+    # ONE answer: it does not count the requests that follow onto the loaded
+    # unit, nor what an eviction there costs its other users.
+    speed = (expected_tokens and expected_tokens > 0
+             and any(isinstance(c, dict) and c.get("metric") in _SPEED_METRICS
+                     for c in (prefer or [])))
+    finish: Dict[str, Optional[Dict[str, float]]] = {}
+    if speed:
+        for t in eligible:
+            finish[t.target_id] = finish_estimate(t.inventory, expected_tokens, False, now)
+        for t in cold:
+            finish[t.target_id] = finish_estimate(t.inventory, expected_tokens, True, now)
+    warm_count = len(eligible)
+    best_warm = None
+    if speed and eligible and cold and all(finish[t.target_id] for t in eligible):
+        best_warm = min(finish[t.target_id]["finish_s"] for t in eligible)
+        beats = [c for c in cold if finish[c.target_id]
+                 and finish[c.target_id]["finish_s"] < best_warm]
+        eligible += beats
+        cold = [c for c in cold if c not in beats]
     if not eligible and cold:
         eligible = cold
         cold = []
+    def _held_back(c: RankedTarget) -> str:
+        est = finish.get(c.target_id)
+        if best_warm is None:
+            return f"filtered: not ready ({c.reason})"
+        if not est:
+            return (f"filtered: not ready ({c.reason}); its finish time is "
+                    f"unpriced (no measured load or decode rate)")
+        return (f"filtered: not ready ({c.reason}); finish≈{est['finish_s']}s "
+                f"with its {est['load_s']}s load, not sooner than warm "
+                f"{best_warm}s")
+
     rows.extend(RankedTarget(**{**c.__dict__, "outcome": "filtered",
-                                "reason": f"filtered: not ready ({c.reason})"})
+                                "finish_s": (finish.get(c.target_id) or {}).get("finish_s"),
+                                "reason": _held_back(c)})
                 for c in cold)
 
     lv = {t.target_id: load_value(t.load) for t in eligible}
 
     preference_receipts = {}
 
+    # Which of the candidates is cold, so the answer says the caller is paying
+    # for a model load rather than presenting it as an ordinary placement.
+    cold_ids = {t.target_id for t in eligible if t.reason.startswith("cold")}
+    # Once a cold target is in the running, the order IS the finish time: the
+    # preference key compares decode rates and would ignore the load it pays.
+    # Unpriced targets sort after priced ones.
+    by_finish = bool(speed and cold_ids)
+
     def key(t: RankedTarget):
         v = lv[t.target_id]
         pref_key, receipt = preference_key(t.inventory, prefer or [], now)
         preference_receipts[t.target_id] = receipt
-        return (pref_key,
+        est = finish.get(t.target_id) if by_finish else None
+        return ((0, est["finish_s"]) if est else (1, 0.0) if by_finish else (),
+                pref_key,
                 _BAND_ORDER.get(t.distance_band, 4),
                 0 if v is not None else 1,      # an opinion outranks silence
                 v if v is not None else 0.0,
                 t.target_id)
 
     eligible.sort(key=key)
-    # Which of the winners is cold, so the answer says the caller is paying for
-    # a model load rather than presenting it as an ordinary placement.
-    cold_ids = {t.target_id for t in eligible if t.reason.startswith("cold")}
     out: List[RankedTarget] = []
     for i, t in enumerate(eligible):
         v = lv[t.target_id]
@@ -479,13 +569,20 @@ def rank(view: dict, kind: str, vantage: str = "direct",
             if t.load.get("pressure") is not None:
                 bits.append(f"pressure={t.load['pressure']}")
             why += "; " + ", ".join(bits) if bits else f"; load={v:.2f}"
+        est = finish.get(t.target_id)
         if t.target_id in cold_ids:
-            why = f"cold, and the only {kind}; {why}"
+            why = (f"cold, and its load pays for itself: finish≈{est['finish_s']}s "
+                   f"(load {est['load_s']}s + {expected_tokens} tok at "
+                   f"{est['decode_tok_s']} tok/s); {why}"
+                   if est and warm_count else f"cold, and the only {kind}; {why}")
+        elif by_finish and est:
+            why = f"finish≈{est['finish_s']}s at {est['decode_tok_s']} tok/s; {why}"
         receipt = preference_receipts.get(t.target_id, [])
         if receipt:
             decisive = next((p for p in receipt if p.get("matched") or p.get("comparable")), None)
             why = f"preference={decisive or 'no opinion'}; " + why
         out.append(RankedTarget(**{**t.__dict__, "preferences": receipt,
+                                   "finish_s": est["finish_s"] if est else None,
                                    "rank": i + 1,
                                    "outcome": "chosen" if i == 0 else "ranked",
                                    "reason": why}))

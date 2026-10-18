@@ -33,7 +33,7 @@ from livestack_node.decisions.simple_jev import SimpleJevError, classify as simp
 from livestack_node.decisions.pane_ask_ingress import install_pane_ask_route
 from livestack_node.decisions.resident_extraction_scope import ResidentExtractionScope
 from livestack_node.decisions.pane_ask_runtime_install import register_pane_ask_runtime_installer
-from livestack_node.demand_log import (SpeedStats, UnitCostStore, UsageTail,
+from livestack_node.demand_log import (LoadTimes, SpeedStats, UnitCostStore, UsageTail,
                                        demand_log_from_env, owner_namespace,
                                        requirement_hash)
 from livestack_node.preferences import (PreferenceError as _PreferenceError,
@@ -278,6 +278,9 @@ def _inventory_for(name: str) -> dict:
     spec = SPECS[name]
     fitted = dict(_COSTS.load().get(_COMPOSITION.get(name, "")) or {})
     fitted.update(SPEED.summary(name))
+    fitted.update(LOADS.summary(name))
+    if spec.get("reload_cost") is not None:
+        fitted.setdefault("reload_cost", spec["reload_cost"])
     revision = (f"measured:{_COMPOSITION[name][:19]}" if _COMPOSITION.get(name)
                 else f"declared:{spec['model']}")
     return _unit_inventory(_attributes_for(spec), fitted, revision=revision)
@@ -285,6 +288,19 @@ def _inventory_for(name: str) -> dict:
 
 def _ordered(prefer) -> "list[str]":
     return sorted(SPECS, key=lambda n: _prefer_key(n, prefer)[0])
+
+
+def _expected_tokens(parsed_body: "dict | None") -> "int | None":
+    """The answer length the caller allowed (`max_completion_tokens`, else
+    `max_tokens`), or None. fleet_rank prices a cold unit by finish time, and
+    a long answer is what repays a load on a faster host."""
+    if not isinstance(parsed_body, dict):
+        return None
+    for key in ("max_completion_tokens", "max_tokens"):
+        v = parsed_body.get(key)
+        if isinstance(v, int) and not isinstance(v, bool) and v > 0:
+            return v
+    return None
 
 
 def _prefer_from(parsed_body: "dict | None") -> "list[dict]":
@@ -374,6 +390,10 @@ DEMAND = demand_log_from_env(HOST_ID, log=lambda m: print(m, flush=True))
 # caller asking for speed reaches the hardware that has delivered it. Re-read
 # from the demand log at start: evidence a node earned survives its restart.
 SPEED = SpeedStats()
+# How long each unit took to load here: what a cold unit costs a caller before
+# its first token, published as `llm.load_s` for fleet_rank's finish-time rule.
+LOADS = LoadTimes(os.environ.get("HARMONY_UNIT_LOADS_FILE") or os.path.join(
+    os.path.expanduser("~"), ".cache", "livestack", "unit-loads.jsonl"))
 if getattr(DEMAND, "enabled", False):
     print(f"[harmony-llm] speed evidence: {SPEED.seed(DEMAND.path)} sample(s) "
           f"re-read from {DEMAND.path}", flush=True)
@@ -539,6 +559,7 @@ def _load(name: str = "", device: "str | None" = None,
                 f"copy. Give each node on this host its own HARMONY_LLM_PORT_OFFSET.")
         env = engine.env(spec, dict(os.environ))
         cmd = engine.argv(spec, budget)
+        started = time.time()
         print(f"[harmony-llm] starting {engine.name} for {name}"
               f"{f' (planner chose {device})' if device else ''}: {' '.join(cmd)}", flush=True)
         proc = subprocess.Popen(cmd, env=env, start_new_session=True,
@@ -574,8 +595,15 @@ def _load(name: str = "", device: "str | None" = None,
                     f"(rc={proc.returncode}); see `journalctl -u harmony-llm` "
                     f"for its stderr")
             if _vllm_up(name=name):
-                print(f"[harmony-llm] {engine.name} ready: {name}", flush=True)
+                load_s = time.time() - started
+                print(f"[harmony-llm] {engine.name} ready: {name} after {load_s:.1f}s",
+                      flush=True)
                 _START_FAILURES.pop(name, None)
+                try:
+                    LOADS.observe(name, load_s)
+                except OSError as exc:    # evidence, never a reason to fail a load
+                    print(f"[harmony-llm] {name}: could not record load time: {exc}",
+                          flush=True)
                 _record_measurement(name, spec, cmd, capture)
                 return proc
             time.sleep(2)
@@ -1011,7 +1039,8 @@ async def route_explain(request: Request):
            "requirement": requirement, "prefer": prefer, "local": local}
     if FLEET_URL and _wants_fleet_route(prefer, request.headers):
         view = _fleet_view(FLEET_URL)
-        out["fleet"] = (_fleet_choose(view, requirement, prefer, SELF_BASE)[1]
+        out["fleet"] = (_fleet_choose(view, requirement, prefer, SELF_BASE,
+                                      expected_tokens=_expected_tokens(body))[1]
                         if view is not None else {"decision": "no fleet view",
                                                   "fleet": FLEET_URL})
     else:
@@ -1991,7 +2020,8 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             ctx["fleet_route"] = {"decision": "no fleet view", "fleet": FLEET_URL}
         else:
             fleet_target, ctx["fleet_route"] = _fleet_choose(
-                view, requirement, prefer, SELF_BASE)
+                view, requirement, prefer, SELF_BASE,
+                expected_tokens=_expected_tokens(parsed_body))
         if fleet_target:
             print(f"[harmony-llm] fleet route: {requirement or 'class=llm'} "
                   f"prefer {[c.get('metric') for c in prefer]} -> {fleet_target}",
