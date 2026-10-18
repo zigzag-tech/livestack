@@ -21,7 +21,7 @@ Explicit managed CUDA provider, model `IndexTeam/IndexTTS-2.5`. This is not an a
 
 ## Job control
 
-All routes except health/capabilities require the private installed node bearer token:
+Health and capabilities are read-only public metadata. Job routes require the private installed node bearer token:
 - `GET /v1/tts/capabilities`
 - `POST /v1/tts/jobs`
 - `GET /v1/tts/jobs/{jobId}`

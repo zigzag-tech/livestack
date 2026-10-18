@@ -48,11 +48,11 @@ def validate_request(body):
         raise ValueError("Closed IndexTTS2.5 request required")
     if not isinstance(body["jobId"], str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,100}", body["jobId"]):
         raise ValueError("Invalid jobId")
-    if not isinstance(body["ownerId"], str) or not body["ownerId"].startswith("histo:") or len(body["ownerId"]) > 192:
+    if not isinstance(body["ownerId"], str) or not body["ownerId"] or len(body["ownerId"]) > 192:
         raise ValueError("Installed owner prefix refused")
     if not isinstance(body["text"], str) or not 1 <= len(body["text"]) <= 4000:
         raise ValueError("Text must contain 1..4000 Unicode code points")
-    if body["language"] not in {"en", "zh", "ja", "es", "ar"}:
+    if not isinstance(body["language"], str) or body["language"] not in {"en", "zh", "ja", "es", "ar"}:
         raise ValueError("Unsupported IndexTTS2.5 language")
     if not isinstance(body["voiceId"], str) or not isinstance(body["referenceSha256"], str):
         raise ValueError("Explicit registered reference identity required")
@@ -311,6 +311,8 @@ def create_app(config):
             body = validate_request(body)
         except ValueError as error:
             raise HTTPException(400, str(error)) from error
+        if not any(body["ownerId"].startswith(prefix) for prefix in config["allowedOwnerPrefixes"]):
+            raise HTTPException(403, "Installed owner scope refused")
         reference = config["voices"].get(body["voiceId"])
         if not reference or reference["sha256"] != body["referenceSha256"]:
             raise HTTPException(403, "Installed synthetic reference identity refused")
