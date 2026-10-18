@@ -61,7 +61,7 @@ def validate_request(body):
         raise ValueError("Invalid instrumental section tags")
     if "scoreAbc" in body and (not isinstance(body["scoreAbc"], str) or not 1 <= len(body["scoreAbc"]) <= 100000):
         raise ValueError("Invalid exact editable score")
-    if body.get("lyricsMode", "sections") not in {"empty", "sections"}:
+    if not isinstance(body.get("lyricsMode", "sections"), str) or body.get("lyricsMode", "sections") not in {"empty", "sections"}:
         raise ValueError("lyricsMode must explicitly select empty or sections")
     return dict(body)
 
