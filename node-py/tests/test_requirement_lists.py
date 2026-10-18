@@ -104,3 +104,23 @@ def test_the_legacy_alias_local_is_a_named_choice(tmp_path):
         assert module._model_choice({"model": ""}) is None
     finally:
         pass
+
+
+def test_negation_is_one_clause_in_every_matcher():
+    """`{"not": v}` / `{"not": [a, b]}` -- declared and not that value. Undeclared
+    satisfies nothing, negation included (silence is not a yes)."""
+    from livestack_node.fleet_rank import _clause_meets
+    from livestack_node.requirements import attrs_meet
+    attrs = {"class": "llm", "family": "qwen", "context_len": 131072}
+    u = _unit(attrs)
+    for ok, req in [
+        (True, {"family": {"not": "gemma"}}),
+        (False, {"family": {"not": "qwen"}}),
+        (True, {"family": {"not": ["gemma", "llama"]}}),
+        (False, {"family": {"not": ["gemma", "qwen"]}}),
+        (False, {"refusals": {"not": "stock"}}),            # undeclared fails negation
+        (True, {"class": "llm", "family": {"not": "gemma"}}),
+    ]:
+        assert _unit_satisfies(u, req) is ok, req
+        assert attrs_meet(attrs, req) is ok, req
+        assert all(_clause_meets(attrs, k, w) for k, w in req.items()) is ok, req

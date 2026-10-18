@@ -40,6 +40,8 @@ import enum
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Tuple, Union
 
+from .requirements import attrs_meet
+
 _EPS = 1e-9
 
 # --- generic resource vectors ------------------------------------------------
@@ -644,59 +646,11 @@ class _World:
         self.actions.append(Defer(request_id=req.id, reason=reason))
 
 
-_CMPS = (">=", "<=", "!=", ">", "<")
-
-
 def _unit_satisfies(u: Unit, requires: Mapping[str, object]) -> bool:
-    """Does this unit meet every stated requirement?
-
-    A key may carry a comparison suffix (`params_b>=`); bare keys are equality.
-    A requirement naming an attribute the unit does not declare is NOT met —
-    silence is not a yes, or an unlabelled unit would satisfy everything.
-    """
-    for key, want in requires.items():
-        op = ""
-        name = key
-        for c in _CMPS:
-            if key.endswith(c):
-                op, name = c, key[: -len(c)]
-                break
-        name = name.strip()
-        if name not in u.attributes:
-            return False
-        have = u.attributes[name]
-        try:
-            if op == "":
-                # A LIST want is "a value in this list" — the request language's
-                # `context_len=[131072,]` spelling (harmony-engine-units
-                # scenario: "a request says require:class=llm,context_len=[131072,]").
-                # Matching it as equality silently satisfied nothing.
-                if isinstance(want, (list, tuple, set)):
-                    if have not in want:
-                        return False
-                elif have != want:
-                    return False
-            elif op == "!=":
-                if isinstance(want, (list, tuple, set)):
-                    if have in want:
-                        return False
-                elif have == want:
-                    return False
-            elif op == ">=":
-                if not float(have) >= float(want):
-                    return False
-            elif op == ">":
-                if not float(have) > float(want):
-                    return False
-            elif op == "<=":
-                if not float(have) <= float(want):
-                    return False
-            elif op == "<":
-                if not float(have) < float(want):
-                    return False
-        except (TypeError, ValueError):
-            return False                    # non-numeric where a number was needed
-    return True
+    """Does this unit meet every stated requirement? The evaluator is
+    `livestack_node.requirements.attrs_meet` (comparison suffixes, lists,
+    `{"not": ..}`; an undeclared attribute is not met)."""
+    return attrs_meet(u.attributes, requires)
 
 
 # SPECIALIST-ONLY ATTRIBUTES. A unit declaring one (e.g. `ocr: true`) serves
