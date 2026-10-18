@@ -1,7 +1,7 @@
 """Durable IndexTTS2.5 speech jobs on one actually admitted Harmony device.
 
 Cancel is acknowledged immediately but terminal cancellation waits for the real
-GPU call and synchronization, including an already running VAE decode. No
+GPU call and synchronization, including already running acoustic decoding. No
 executor-future/socket-close cancellation is reported as physical settlement.
 """
 from __future__ import annotations
@@ -90,6 +90,10 @@ def create_app(config):
     import numpy as np
     import soundfile as sf
     import torch
+    # The release/model inventory is independently SHA-verified during staging;
+    # retain its exact identity in every accepted job rather than a model alias.
+    if hashlib.sha256(Path(config["modelManifestPath"]).read_bytes()).hexdigest() != config["modelManifestSha256"]:
+        raise ValueError("Pinned model inventory changed")
     from concurrent.futures import ThreadPoolExecutor
 
     actual_uuid = str(torch.cuda.get_device_properties(0).uuid)
@@ -117,6 +121,7 @@ def create_app(config):
         return executor.submit(fn).result()
 
     def load():
+        torch.cuda.set_per_process_memory_fraction(config["residencyBudgetBytes"] / torch.cuda.get_device_properties(0).total_memory, 0)
         pipe = IndexTTS2(cfg_path=str(Path(config["modelPath"]) / "config.yaml"),
             model_dir=config["modelPath"], device="cuda:0", use_bf16=True,
             use_cuda_kernel=False, use_deepspeed=False, use_accel=False,
@@ -321,7 +326,7 @@ def create_app(config):
             path = root / body["jobId"]
             path.mkdir()
             receipt = {"jobId": body["jobId"], "requestSha256": key, "incarnation": incarnation,
-                "source": config["sourceIdentity"], "configurationSha256": digest(config),
+                "source": config["sourceIdentity"], "modelManifestSha256": config["modelManifestSha256"], "configurationSha256": digest(config),
                 "acceptedAt": time.time(), "fleetAuthorizationClaimed": False}
             atomic_json(path / "request.json", body)
             atomic_json(path / "receipt.json", receipt)
