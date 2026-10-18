@@ -206,3 +206,39 @@ def test_the_request_language_is_the_facades(router):
         "messages": [{"content": [{"type": "image_url"}]}]})
     assert req == {"class": "llm", "params_b>=": 20, "params_b<": 30, "vision": True} and kind == "llm"
     assert router._plan("embeddings", {"model": "x"})[2] == "embed"
+
+
+def test_facade_specific_endpoints_are_refused_and_named(wired):
+    client, node, _ = wired
+    r = client.post("/v1/classifier", json={"x": 1})
+    assert r.status_code == 404 and "/v1/classifier" in r.text and node.got == []
+
+
+def test_embeddings_follow_the_facades_one_space_rule(router, monkeypatch):
+    # Two embedders of DIFFERENT models meet the need: a vector space is a data
+    # contract, so the router says so (400) instead of choosing by distance.
+    from fastapi.testclient import TestClient
+
+    def emb(base, model):
+        return {"peer": f"{base}/livestack", "state": "fresh", "ready": True, "kinds": ["embed"],
+                "region": "na", "units": [{"kind": "embed", "resident": True,
+                                           "attributes": {"class": "embed", "model": model, "dim": 512}}]}
+
+    sink = _Node()
+    try:
+        monkeypatch.setattr(router, "FLEET_URL", "http://fleet.invalid:8801")
+        monkeypatch.setattr(router, "ROUTES", _Rows())
+        one = {"generated_at": time.time(), "hosts": {"e": {"nodes": [emb(sink.base, "gemma-2")]}}}
+        monkeypatch.setattr(fleet_route, "fleet_view", lambda url, *a, **k: one)
+        r = TestClient(router.app).post("/v1/embeddings", json={
+            "model": "require:class=embed,dim=512", "input": "hi"})
+        assert r.status_code == 200
+        assert json.loads(sink.got[0]["raw"])["model"] == "gemma-2"      # the node's own model id
+        two = {"generated_at": time.time(), "hosts": {"e": {"nodes": [emb(sink.base, "gemma-2")]},
+                                                      "f": {"nodes": [emb("http://127.0.0.1:9", "minilm")]}}}
+        monkeypatch.setattr(fleet_route, "fleet_view", lambda url, *a, **k: two)
+        r = TestClient(router.app).post("/v1/embeddings", json={
+            "model": "require:class=embed,dim=512", "input": "hi"})
+        assert r.status_code == 400 and "not comparable" in r.text
+    finally:
+        sink.close()

@@ -41,6 +41,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 import fleet_route as fr  # noqa: E402
+from fleet_embed import AmbiguousEmbedder, embed_nodes, pick as pick_embed  # noqa: E402
 from request_language import derived_requirements, requirement_from  # noqa: E402
 from livestack_node.demand_log import demand_log_from_env, requirement_hash  # noqa: E402
 from livestack_node.fleet_auth import (AuthError, bearer_token, effective_regions,  # noqa: E402
@@ -172,7 +173,54 @@ async def proxy(path: str, request: Request):
         raise
 
 
+# What the router routes. Anything else under /v1 is a facade-specific endpoint
+# (`/v1/classifier`, ...) that only some nodes serve: forwarding it to whichever
+# node ranks first would be a coin toss, so it is refused and named.
+ROUTABLE = {"chat/completions", "completions", "embeddings"}
+
+
+async def _route_embeddings(request: Request, raw: bytes, body, requirement, ctx: dict):
+    """An embeddings need goes to the fleet embed node that meets it -- by the
+    facade's own rule (fleet_embed.pick): an embedding space is a data contract,
+    so a need met by embedders of DIFFERENT models is a 400, never a choice by
+    distance. The body is restated in the node's own terms (its model id)."""
+    view = _view()
+    try:
+        node = pick_embed(requirement or {"class": "embed"}, embed_nodes([view]))
+    except AmbiguousEmbedder as e:
+        raise HTTPException(status_code=400, detail=f"harmony: {e}")
+    if not node:
+        raise HTTPException(status_code=503,
+                            detail=f"harmony-router: no embed node meets {requirement}")
+    ctx["fleet_route"] = {"decision": "forward", "chosen": node["base"], "kind": "embed",
+                          "model": node["model"], "request_id": ctx["request_id"],
+                          "trigger": "router", "contract_version": fr.ROUTE_CONTRACT}
+    out = {**(body if isinstance(body, dict) else {}), "model": node["model"]}
+    out.pop("harmony_requires", None)
+    out.pop("harmony_regions", None)
+    headers = {k: v for k, v in request.headers.items()
+               if k.lower() not in {"host", "content-length", fr.ROUTED_HEADER}}
+    headers["x-request-id"] = ctx["request_id"]
+    timeout = httpx.Timeout(float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(f"{node['base']}/v1/embeddings", json=out, headers=headers)
+    except Exception as e:
+        raise HTTPException(status_code=502,
+                            detail=f"embed node {node['base']} failed: {type(e).__name__}: {e or '(no message)'}")
+    ROUTES.record(**fr.route_row(ctx, ROUTER_ID, "ok" if resp.status_code < 400 else "refused",
+                                 resp.status_code))
+    from fastapi.responses import Response
+    return Response(content=resp.content, status_code=resp.status_code,
+                    media_type=resp.headers.get("content-type", "application/json"))
+
+
 async def _route(path: str, request: Request, raw: bytes, ctx: dict):
+    if path not in ROUTABLE:
+        raise HTTPException(
+            status_code=404,
+            detail=f"harmony-router routes {', '.join(sorted(ROUTABLE))}; /v1/{path} is served "
+                   f"by specific nodes, so call one directly")
     body = None
     if raw:
         try:
@@ -181,6 +229,8 @@ async def _route(path: str, request: Request, raw: bytes, ctx: dict):
             body = None
     requirement, prefer, kind = _plan(path, body)
     ctx["requirement_hash"] = requirement_hash(requirement)
+    if kind == "embed":
+        return await _route_embeddings(request, raw, body, requirement, ctx)
     regions, source = _regions(request, body)
     view = _view()
     tokens = _expected_tokens(body)

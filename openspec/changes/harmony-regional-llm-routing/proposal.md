@@ -59,9 +59,10 @@ Phase 2 — regional routing:
   residency authorities.
 - Any request whose entry node cannot serve it warm and in policy is ranked over the
   regional view before a local load is considered (not only speed preferences).
-- **Router mode**: a harmony-llm node with no units routes every request. Deployed as a
-  regional ingress (zz-tower2 for `cn`) and, optionally, on a requester's own machine as
-  the "local proxy daemon" — same binary, same contract.
+- **Router mode**: `router.py`, a facade-shaped app with no units, routes every request
+  using the same routing library and request grammar as the facade. Deployed as a
+  regional ingress (zz-tower2 for `cn`) and on each requester's own machine as the
+  "local proxy daemon" — same code, same contract.
 - Routers are deployed on every requester machine at `127.0.0.1:8188` (systemd user
   unit / launchd agent, one rollout script, pinned to the serving nodes' revision); a
   router never registers as a fleet node and holds no credential. Callers are cut over

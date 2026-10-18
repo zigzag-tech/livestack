@@ -122,9 +122,13 @@ when the ranking chooses this node.
 - **THEN** the request is routed `warm` to that node and no local load starts
 
 ### Requirement: Router mode
-A harmony-llm node with no units declared SHALL route every request by the rules above
-and serve none itself. It SHALL expose the same OpenAI-compatible `/v1` surface and the
-`/harmony/route` dry run.
+A router (a harmony-llm facade with no units) SHALL route every request by the rules above
+and serve none itself. It SHALL expose the OpenAI-compatible `chat/completions`,
+`completions` and `embeddings` endpoints and the `/harmony/route` dry run, parse the
+request language with the same code as the facade, and refuse (404, naming the path) any
+other `/v1` endpoint, which only specific nodes serve. An embeddings need SHALL be routed
+by the facade's one-embedding-space rule: a need met by embedders of different models is a
+400, never a choice by distance.
 
 #### Scenario: Localhost router
 - **WHEN** a caller sets `base_url` to a router-mode node on its own machine
