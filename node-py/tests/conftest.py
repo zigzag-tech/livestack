@@ -13,6 +13,14 @@ import sys
 
 os.environ.setdefault("LIVESTACK_BROKER_URL", "http://127.0.0.1:9")
 
+# The same trap for the host-RAM ledger (host_ledger.py): it defaults to the
+# user's real ledger, so the worker tests' attempts were written into the live
+# one on zz-whitby (2026-10-18, worker "integration") where the host broker
+# subtracts them. One throwaway ledger for the session unless a test chose one.
+import tempfile as _tempfile
+os.environ.setdefault("LIVESTACK_HOST_LEDGER_DIR",
+                      _tempfile.mkdtemp(prefix="livestack-test-host-ledger-"))
+
 # The harmony-llm ENGINE package lives beside the server it drives
 # (examples/harmony-llm/engines/). Engine-adapter tests import it directly, and
 # the server itself bootstraps the same path when it is exec'd by file location.
