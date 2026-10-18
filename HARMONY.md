@@ -1232,6 +1232,15 @@ reserve, Strata's learned peak 38): cold Strata left attempts 11 GiB before,
 Tests: `tests/test_host_ledger.py`, `tests/test_host_ledger_drain.py`,
 `tests/test_harmony_llm_loop_blocking.py` (the node's drain wait).
 
+**Verified live on zz-whitby (2026-10-18, broker and workers on f4fb816a):** a
+real probe attempt's claim appeared on the ledger; with Strata cold, the
+headroom the workers report for attempts went from ~7.5 GiB to ~40 GiB; a Strata
+load published `load flash_next 45 GiB (loading)` and the entry cleared when the
+unit became resident (12 s). NOT yet exercised live: a load actually DEFERRED by
+attempts' claims (the drain itself) — unit-tested against the real broker and
+HostView, but not staged on the pilot, where it would have blocked the live E2E
+queue.
+
 What it does NOT do: preempt a running attempt (by design); reserve ahead of
 demand (a cold model holds nothing until a request needs it); span machines
 (each ledger is one host's — placement across hosts is still the fleet's).
