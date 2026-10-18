@@ -155,3 +155,51 @@ def test_a_fleet_routed_request_travels_as_asked(srv, monkeypatch):
         assert acquired == []
     finally:
         peer.shutdown()
+
+
+def test_a_load_refused_for_host_memory_keeps_asking_while_attempts_drain(srv, monkeypatch):
+    # The broker wrote the load WAITING on the host ledger; asking again is what
+    # keeps that alive while task attempts finish (host_ledger.py, "drain,
+    # don't kill"). A refusal for any other reason is answered at once.
+    from fastapi.testclient import TestClient
+    calls = []
+
+    def admit(*a, **k):
+        calls.append(time.time())
+        if len(calls) <= 2:
+            return {"granted": False, "kind": "flash_next",
+                    "reason": "the planner could not place it on any device",
+                    "defer_reason": "insufficient host memory: need 45 GiB > free 30 GiB"}
+        return {"granted": False, "kind": "flash_next", "reason": "test: refused for another reason"}
+
+    monkeypatch.setattr(srv, "admit", admit)
+    monkeypatch.setattr(srv, "DRAIN_POLL_S", 0.01)
+    monkeypatch.setattr(srv, "_held_elsewhere", lambda name: None)
+    monkeypatch.setattr(srv, "_foreign_listener", lambda name: False)
+    monkeypatch.setattr(type(srv.manager), "resident", property(lambda self: set()))
+    with TestClient(srv.app) as client:
+        r = client.post("/v1/chat/completions", json={
+            "model": "require:class=llm,context_len>=100000",
+            "messages": [{"role": "user", "content": "x"}]})
+    assert len(calls) == 3                 # two host-memory defers waited out, then answered
+    assert r.status_code == 503 and "another reason" in r.text
+
+
+def test_the_drain_wait_is_bounded(srv, monkeypatch):
+    from fastapi.testclient import TestClient
+    calls = []
+    monkeypatch.setattr(srv, "admit", lambda *a, **k: calls.append(1) or {
+        "granted": False, "kind": "flash_next", "reason": "no room",
+        "defer_reason": "insufficient host memory: need 45 GiB > free 1 GiB"})
+    monkeypatch.setattr(srv, "DRAIN_POLL_S", 0.01)
+    monkeypatch.setattr(srv, "DRAIN_WAIT_S", 0.2)
+    monkeypatch.setattr(srv, "_held_elsewhere", lambda name: None)
+    monkeypatch.setattr(srv, "_foreign_listener", lambda name: False)
+    monkeypatch.setattr(type(srv.manager), "resident", property(lambda self: set()))
+    t0 = time.time()
+    with TestClient(srv.app) as client:
+        r = client.post("/v1/chat/completions", json={
+            "model": "require:class=llm,context_len>=100000",
+            "messages": [{"role": "user", "content": "x"}]})
+    assert r.status_code == 503 and "host memory" in r.text   # the reason reaches the caller
+    assert 1 < len(calls) and time.time() - t0 < 5

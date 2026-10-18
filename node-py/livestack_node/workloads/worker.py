@@ -20,6 +20,7 @@ import time
 import uuid
 from urllib.error import HTTPError
 
+from ..host_ledger import HostLedger
 from ..hostview import HostView, cgroup_nonreclaimable
 from .archive import relative_path, unpack
 from . import docker_cache
@@ -221,9 +222,18 @@ class WorkloadWorker:
         # The measured host every placement on it consults
         # (openspec/changes/host-memory-ledger). Model servers listed in
         # `host_services` are charged their learned host-RAM peak.
+        # The shared host-RAM ledger (host_ledger.py): this worker's running
+        # attempt is written there with its memory claim, so the host broker
+        # does not grant a model load into RAM an attempt has been promised;
+        # services the broker plans are read from it. Linux hosts only — the
+        # Mac/Windows VM workers do not share their guest's RAM with a broker.
+        self.host_ledger = (HostLedger(config.get('host_ledger_dir'))
+                            if not (self.windows or self.darwin) else None)
+        self._ledger_attempt = None  # (attempt id, claim bytes) while one runs
         self.host_view = HostView(services=config.get('host_services', []),
                                   peaks_path=Path(config['state_dir'])/'host-peaks-nonreclaimable.json',
-                                  reserve_bytes=config.get('memory_reserve_bytes', 1024**3))
+                                  reserve_bytes=config.get('memory_reserve_bytes', 1024**3),
+                                  ledger=self.host_ledger)
         # Workspaces that could not be removed: path -> last error text. They are
         # retried every step; a removal failure never blocks claiming/heartbeats.
         self.stuck_workspaces = {}
@@ -581,7 +591,18 @@ class WorkloadWorker:
         # Unknown (first sample) is charged as a fully busy host, never as idle.
         return (os.cpu_count() or 1) if busy is None else busy
 
+    # A claim outlives its last refresh by this long. Reports run every ~2 s idle
+    # and ~10 s busy; a worker that dies stops refreshing and its claim lapses.
+    LEDGER_TTL_S = 90.0
+
+    def _ledger_refresh(self):
+        if self.host_ledger is not None and self._ledger_attempt is not None:
+            attempt, claim = self._ledger_attempt
+            self.host_ledger.put('attempt', attempt, ttl_s=self.LEDGER_TTL_S,
+                                 claim_bytes=claim, worker=self.config.get('worker'))
+
     def report(self):
+        self._ledger_refresh()
         filesystem_bytes, filesystem_free = self._disk(self.workspace)
         if self.windows:
             # Not the Linux `host` block either: a WSL VM worker on the same
@@ -1246,6 +1267,11 @@ class WorkloadWorker:
             need = spec['need']
             if need.get('cpu', 0) <= 0 or need.get('memory_bytes', 0) < 64*1024**2:
                 raise WorkloadError('native execution requires CPU and at least 64 MiB RAM')
+            # Promised from here on: the attempt may grow to its cap (the
+            # cgroup limit is `need`), and the host broker must not grant that
+            # RAM to a model load. Refreshed by every report; dropped below.
+            self._ledger_attempt = (attempt, int(need['memory_bytes']))
+            self._ledger_refresh()
             self._beat('transfer', STALL_TRANSFER_SECONDS)
             transfer_started = time.monotonic()
             bundle = (self.input_cache.get(assignment) if self.input_cache else
@@ -1414,6 +1440,11 @@ class WorkloadWorker:
             cleanup_started = time.monotonic()
             try:
                 self._stop(attempt)
+                # The cgroup is gone with the unit: its RAM is back in
+                # MemAvailable, so the claim on the ledger ends here.
+                self._ledger_attempt = None
+                if self.host_ledger is not None:
+                    self.host_ledger.drop('attempt', attempt)
                 self._record_docker_cache(completion, handler_backend, output)
                 self._record_metrics(completion, execution_seconds)
                 self._record_dependency_cache(completion, dependency_attempt, root/'source', output)

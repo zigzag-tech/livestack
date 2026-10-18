@@ -1169,6 +1169,11 @@ MULTI_NODE = os.environ.get("HARMONY_LLM_ADMIT", "").strip().lower() in {"1", "t
 # Long: admission BLOCKS while the broker evicts victims and warms the grant,
 # and warming a 15 GB model is minutes, not seconds.
 ADMIT_TIMEOUT = float(os.environ.get("HARMONY_LLM_ADMIT_TIMEOUT", "600"))
+# How long a load refused for HOST MEMORY keeps asking while task attempts on
+# this machine drain (host_ledger.py), and how often. The ceiling matches the
+# proxy timeout's order: past it the caller gets the refusal and its reason.
+DRAIN_WAIT_S = float(os.environ.get("HARMONY_LLM_DRAIN_WAIT_S", "900"))
+DRAIN_POLL_S = float(os.environ.get("HARMONY_LLM_DRAIN_POLL_S", "5"))
 # This engine's fleet credential. Sent as Authorization on every /admit; the
 # broker resolves the owner above against this token's principal (delegating,
 # prefix "" — a mesh-reachable engine relays what its hub asserted). Unset =
@@ -1770,6 +1775,8 @@ def _note_demand(ctx: dict, outcome: str, status: int, tail: "UsageTail | None" 
         decode_tok_s=speed["decode_tok_s"], first_token_ms=speed["first_token_ms"],
         speed_source=speed["speed_source"], in_flight=ctx.get("in_flight"),
         fleet_route=ctx.get("fleet_route"),
+        # How long the load waited for task attempts to drain (host_ledger.py).
+        drain_ms=ctx.get("drain_ms"),
         outcome=outcome, http_status=status)
 
 
@@ -2074,12 +2081,30 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             # probe timeout per admission, during which every stream this node
             # is relaying stops being read and its engine stops decoding
             # (zz-whitby 2026-10-18; tests/test_harmony_llm_loop_blocking.py).
-            res = await _off_loop(lambda: admit(
-                unit if requirement is None else "",
-                requires=requirement,
-                owner_id=asserted or f"harmony-llm:{HOST_ID}",
-                owner_asserted=bool(asserted),
-                token=_FLEET_TOKEN, timeout=ADMIT_TIMEOUT))
+            def _ask():
+                return admit(unit if requirement is None else "",
+                             requires=requirement,
+                             owner_id=asserted or f"harmony-llm:{HOST_ID}",
+                             owner_asserted=bool(asserted),
+                             token=_FLEET_TOKEN, timeout=ADMIT_TIMEOUT)
+            res = await _off_loop(_ask)
+            # DRAIN, DON'T KILL (livestack host_ledger.py): a load refused for
+            # HOST MEMORY is waiting for task attempts on this machine to
+            # finish, and the broker has written it to the host's ledger so no
+            # new attempt is admitted meanwhile. Asking again is what keeps
+            # that entry alive; giving up is what lets it lapse. Bounded by
+            # HARMONY_LLM_DRAIN_WAIT_S, and the wait lands in `queue_ms`.
+            drain_started = time.time()
+            while (not res.get("granted") and "host memory" in str(res.get("defer_reason") or "")
+                   and time.time() - drain_started < DRAIN_WAIT_S):
+                if not ctx.get("drain_logged"):
+                    ctx["drain_logged"] = True
+                    print(f"[harmony-llm] {requirement or unit}: waiting for host RAM "
+                          f"(draining task attempts): {res.get('defer_reason')}", flush=True)
+                await asyncio.sleep(DRAIN_POLL_S)
+                res = await _off_loop(_ask)
+            if ctx.get("drain_logged"):
+                ctx["drain_ms"] = round((time.time() - drain_started) * 1000, 1)
             served = res.get("kind")
             # A loading transition temporarily withholds this facade's fleet
             # registration. During that gap the broker can answer "nothing
@@ -2148,6 +2173,13 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             # else's evicted model at worst.
             if not degraded and not res.get("granted"):
                 refused = res.get("reason") or "the planner did not grant a device"
+                # The planner's own why, and how long the drain was waited out
+                # — "no room" alone cannot tell a caller it queued behind batch.
+                if res.get("defer_reason"):
+                    refused += f" ({res['defer_reason']})"
+                if ctx.get("drain_ms") is not None:
+                    refused += (f"; waited {ctx['drain_ms'] / 1000:.0f} s for task "
+                                f"attempts to drain (HARMONY_LLM_DRAIN_WAIT_S)")
         except HTTPException:
             raise                             # a refusal we raised ourselves, not a fault
         except Exception as e:                # unreachable: arbitration is not the model
