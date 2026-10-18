@@ -80,6 +80,9 @@ class Principal:
     delegate_prefix: Optional[str] = None
     #: Extra rights beyond admitting work (see :data:`CAPABILITIES`).
     capabilities: FrozenSet[str] = frozenset()
+    #: Regions this principal's work may run in, or None for unrestricted. A
+    #: request may NARROW it (`harmony_regions`) and never widen it.
+    regions: Optional[FrozenSet[str]] = None
 
     @property
     def delegates(self) -> bool:
@@ -190,6 +193,15 @@ def load_principals(raw: str,
             log(f"[fleet-auth] token {fp} ({name}): unknown capability "
                 f"{', '.join(unknown)} dropped (known: "
                 f"{', '.join(sorted(CAPABILITIES))})")
+        regions = spec.get("regions")
+        if regions is not None:
+            if (not isinstance(regions, list) or not regions
+                    or not all(isinstance(r, str) and r.strip() for r in regions)):
+                log(f"[fleet-auth] token {fp} ({name}): `regions` must be a non-empty "
+                    f"list of region names; granting no restriction would widen it, "
+                    f"so the entry is rejected")
+                continue
+            regions = frozenset(r.strip().lower() for r in regions)
         granted = frozenset(c for c in caps if c in CAPABILITIES)
         if granted:
             log(f"[fleet-auth] token {fp} ({name}) carries "
@@ -197,8 +209,30 @@ def load_principals(raw: str,
         out[token] = Principal(name=name,
                                owner=str(owner) if owner else None,
                                delegate_prefix=str(prefix) if prefix else None,
-                               capabilities=granted)
+                               capabilities=granted, regions=regions)
     return out
+
+
+def effective_regions(principal: Optional[Principal], asked) -> "tuple[Optional[list], str]":
+    """(regions this request may run in, where that came from).
+
+    `asked` is the request's `harmony_regions` (a list, or a comma string). The
+    principal's allowance is a ceiling: a request may narrow it and never widen
+    it -- asking for a region outside it is a 403 naming the region and the
+    allowance. No allowance and nothing asked is unrestricted (None)."""
+    if isinstance(asked, str):
+        asked = [r for r in asked.split(",")]
+    want = sorted({str(r).strip().lower() for r in (asked or []) if str(r).strip()})
+    allowance = principal.regions if principal is not None else None
+    if allowance is None:
+        return (want or None), ("request" if want else "none")
+    if not want:
+        return sorted(allowance), "principal"
+    outside = [r for r in want if r not in allowance]
+    if outside:
+        raise AuthError(403, f"region {'/'.join(outside)} is outside the allowance of "
+                             f"{principal.name} ({'/'.join(sorted(allowance))})")
+    return want, "request"
 
 
 def bearer_token(header: Optional[str]) -> Optional[str]:

@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from .preferences import observation, preference_key
+from .requirements import clause_meets
 
 from .ledger import distance_band
 
@@ -175,7 +176,11 @@ def distance_to(view: dict, node_host: Optional[str], node_row: dict,
             if isinstance(ms, (int, float)):
                 links.append(float(ms))
         if not links:
-            return None
+            # A node on the region's OWN host is in the region: nothing needs
+            # measuring to know that, as with `host:<id>` to itself. (Only when
+            # the region has no measured pair at all; otherwise the median stands.)
+            own = (view.get("hosts") or {}).get(node_host) or {}
+            return 0.0 if node_host and _host_region(own) == name else None
         # Median (statistics.median): one fast outlier host must not define a
         # region, and an even member count averages rather than picks the
         # larger.
@@ -279,40 +284,15 @@ def _unit_evidence(node: dict, require: Optional[Dict[str, Any]],
 
 _CMPS = (">=", "<=", "!=", ">", "<")
 
+# A row eliminated by the caller's region policy starts with this, so a reader
+# (and the /fleet/rank `region_policy.rejected` list) can tell it from other filters.
+REGION_FILTERED = "filtered: by region policy: "
+
 
 def _clause_meets(attributes: Dict[str, Any], key: str, want: Any) -> bool:
-    """Does one unit attribute satisfy one `require` clause?
-
-    The clause language is the planner's `requires` (planner._unit_satisfies),
-    for the same reason the load rule mirrors the client picker: two places
-    answering "does this unit fit this ask" must not disagree. A key may carry
-    a comparison suffix (`context_len>=`); a bare key is equality. A clause
-    naming an attribute the unit does not declare is NOT met — silence is not
-    a yes, or an unlabelled unit would satisfy everything.
-    """
-    op, name = "", key
-    for c in _CMPS:
-        if key.endswith(c):
-            op, name = c, key[: -len(c)]
-            break
-    name = name.strip()
-    if name not in attributes:
-        return False
-    have = attributes[name]
-    try:
-        if op == "":
-            return bool(have == want)
-        if op == "!=":
-            return bool(have != want)
-        if op == ">=":
-            return float(have) >= float(want)
-        if op == ">":
-            return float(have) > float(want)
-        if op == "<=":
-            return float(have) <= float(want)
-        return float(have) < float(want)      # "<"
-    except (TypeError, ValueError):
-        return False                    # non-numeric where a number was needed
+    """One `require` clause against one unit's attributes: the shared evaluator
+    (livestack_node.requirements), so the ranker and the planner cannot disagree."""
+    return clause_meets(attributes, key, want)
 
 
 def _render_clause(key: str, want: Any) -> str:
@@ -383,8 +363,17 @@ def rank(view: dict, kind: str, vantage: str = "direct",
          now: Optional[float] = None, ttl_s: float = DEFAULT_TTL_S,
          prefer: Optional[List[Dict[str, Any]]] = None,
          require: Optional[Dict[str, Any]] = None,
-         expected_tokens: Optional[int] = None) -> dict:
+         expected_tokens: Optional[int] = None,
+         allow_regions: Optional[List[str]] = None,
+         allow_unknown_region: bool = False) -> dict:
     """Order the fleet's nodes for one `(kind, vantage)`.
+
+    `allow_regions` is the caller's region policy and is applied HERE, before
+    warm/cold is decided: a warm node in a forbidden region must not suppress a
+    cold one in an allowed region (the "warm first" rule below would otherwise
+    empty the list, then a post-filter would find nothing). A filtered row names
+    the clause. A node with no declared region is excluded unless
+    `allow_unknown_region`; silence is not a match.
 
     `require` is the request's hard clause map (`{"class": "llm",
     "context_len>=": 131072}` — the planner's `Request.requires` language),
@@ -404,6 +393,7 @@ def rank(view: dict, kind: str, vantage: str = "direct",
     ledger takes all of them.
     """
     now = time.time() if now is None else now
+    allow_regions = sorted({r.strip().lower() for r in allow_regions or [] if r.strip()}) or None
     rows: List[RankedTarget] = []
     eligible: List[RankedTarget] = []
     # Fresh, serving this kind, and holding nothing yet. Used only when no warm
@@ -434,6 +424,19 @@ def rank(view: dict, kind: str, vantage: str = "direct",
                                          reason=f"filtered: does not host {kind}",
                                          **common))
                 continue
+            if allow_regions:
+                reg = (node.get("region") or "").strip().lower() or None
+                if reg is None and not allow_unknown_region:
+                    rows.append(RankedTarget(outcome="filtered",
+                                             reason=f"{REGION_FILTERED}no region declared",
+                                             **common))
+                    continue
+                if reg is not None and reg not in allow_regions:
+                    rows.append(RankedTarget(
+                        outcome="filtered",
+                        reason=f"{REGION_FILTERED}region {reg}, wanted {'/'.join(sorted(allow_regions))}",
+                        **common))
+                    continue
             # What the request NEEDS. Applied before the health rules because
             # "can it serve this at all" is the question a reader asks first —
             # and it gates the cold path too: a node whose declared units fail
