@@ -406,6 +406,13 @@ class StrataEngine(Engine):
         except (TypeError, ValueError):
             declared = 0
         attrs["max_concurrent"] = declared if declared > 0 else DEFAULT_MAX_CONCURRENT
+        # One attribute per decision head the unit registers, so `head=<name>`
+        # selects it. Heads read Strata's hidden state, so only this engine has
+        # them; a declared `head.*` the unit does not register is dropped.
+        for key in [k for k in attrs if k.startswith("head.")]:
+            attrs.pop(key)
+        for name in spec.get("decision_heads") or {}:
+            attrs[f"head.{name}"] = True
         return attrs
 
     def _config_has_vision(self, spec: dict) -> bool:
