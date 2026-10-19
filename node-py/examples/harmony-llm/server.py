@@ -57,7 +57,7 @@ from selection import unit_inventory as _unit_inventory  # noqa: E402
 from fleet_embed import (AmbiguousEmbedder, attrs_meet, embed_nodes as _embed_nodes,  # noqa: E402
                          fetch_fleets as _fetch_fleets, pick as _pick_embed,
                          pick_all as _pick_embed_all, EmbedView as _EmbedView)
-from unit_queue import Queues as _Queues, QueueFull as _QueueFull   # noqa: E402
+from unit_queue import Queues as _Queues, QueueFull as _QueueFull, wait_budget as _wait_budget   # noqa: E402
 from fleet_route import (ROUTED_HEADER as _ROUTED_HEADER, SUPPORTED_CONTRACT as _SUPPORTED_CONTRACT,  # noqa: E402
                          RouteFailed as _RouteFailed, choose as _fleet_choose,
                          fleet_view as _fleet_view, mark_cold as _mark_cold,
@@ -292,7 +292,9 @@ def _inventory_for(name: str) -> dict:
         fitted.setdefault("reload_cost", spec["reload_cost"])
     revision = (f"measured:{_COMPOSITION[name][:19]}" if _COMPOSITION.get(name)
                 else f"declared:{spec['model']}")
-    return _unit_inventory(_attributes_for(spec), fitted, revision=revision)
+    inventory = _unit_inventory(_attributes_for(spec), fitted, revision=revision)
+    inventory["queue"] = _QUEUES.status(name, _max_concurrent(name))
+    return inventory
 
 
 def _ordered(prefer) -> "list[str]":
@@ -972,6 +974,36 @@ def _release_slot(ctx: dict) -> None:
         except Exception:
             pass
 
+def _service_estimate(name, body):
+    """Approximate time occupying one batch slot, using measured decode speed.
+
+    max_tokens is a conservative output bound, not a promise about actual length.
+    First-token timing includes the measured prompt/prefill overhead.
+    """
+    stats = SPEED.summary(name)
+    tokens = (body or {}).get("max_completion_tokens", (body or {}).get("max_tokens"))
+    decode = stats.get("decode_tok_s_burst") or stats.get("decode_tok_s")
+    if (isinstance(tokens, int) and not isinstance(tokens, bool) and tokens > 0
+            and isinstance(decode, (int, float)) and decode > 0):
+        return tokens / decode + (stats.get("first_token_ms") or 0) / 1000
+    return None
+
+
+async def _queue_admit(name, body, ctx):
+    try:
+        budget = _wait_budget(body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    try:
+        slot = await _QUEUES.acquire_async(name, _max_concurrent(name),
+                                         max_wait_s=budget, service_s=_service_estimate(name, body))
+    except _QueueFull as e:
+        raise HTTPException(status_code=429, detail=e.detail)
+    ctx["queue_slot"], ctx["queue_ms"] = slot, slot.queue_ms
+    ctx["in_flight"] = _QUEUES.status(name, _max_concurrent(name))["in_flight"]
+    return slot
+
+
 def _hardware() -> dict:
     """What this node runs on, for an explanation — never a ranking input. The
     ranking reads measured speed; hardware says WHY one host measured faster
@@ -1035,7 +1067,8 @@ async def route_explain(request: Request):
     requirement = _requirement_from(body)
     try:
         prefer = _prefer_from(body)
-    except _PreferenceError as e:
+        _wait_budget(body)
+    except (_PreferenceError, ValueError) as e:
         raise HTTPException(status_code=400, detail=f"harmony: {e}")
     derived = _derived_requirements("chat/completions", body)
     if requirement is not None and derived:
@@ -1046,7 +1079,11 @@ async def route_explain(request: Request):
         local.append({"unit": n,
                       "satisfies": requirement is None or _local_satisfies(n, requirement),
                       "resident": n in getattr(manager, "resident", ()),
-                      "speed": SPEED.summary(n), "preferences": receipt})
+                      "speed": SPEED.summary(n), "preferences": receipt,
+                      "queue_offer": {**_QUEUES.status(n, _max_concurrent(n)),
+                                      "request_service_s": _service_estimate(n, body),
+                                      "caller_max_wait_s": _wait_budget(body),
+                                      "within_wait_budget": _QUEUES.status(n, _max_concurrent(n))["estimated_wait_s"] <= _wait_budget(body)}})
     out = {"node": SELF_BASE, "host": HOST_ID, "hardware": _HARDWARE,
            "requirement": requirement, "prefer": prefer, "local": local}
     regions, regions_source = _request_regions(request, body)
@@ -1847,15 +1884,14 @@ _REVISION = _git_revision()
 
 
 def _local_ready(requirement, prefer, unit, regions) -> bool:
-    """Can THIS node serve the request right now with no load and no queue: a
-    resident, running, unsaturated unit that meets the requirement, in a region
+    """Can THIS node offer resident service, including its bounded queue: a
+    resident, running unit that meets the requirement, in a region
     the request allows. False sends the request to be ranked over the fleet."""
     if regions and NODE_REGION not in regions:
         return False
     cands = ([n for n in _ordered(prefer) if _local_satisfies(n, requirement)]
              if requirement is not None else [unit])
-    return any(n in getattr(manager, "resident", ()) and _vllm_up(name=n)
-               and _QUEUES.has_capacity(n, _max_concurrent(n)) for n in cands)
+    return any(n in getattr(manager, "resident", ()) and _vllm_up(name=n) for n in cands)
 
 
 def _stale_response(ctx: dict, reason: str, detail: str = ""):
@@ -1918,6 +1954,10 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             except _PreferenceError as e:
                 raise HTTPException(status_code=400, detail=f"harmony: {e}")
             regions, ctx["regions_source"] = _request_regions(request, parsed_body)
+            try:
+                _wait_budget(parsed_body)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
             derived = _derived_requirements(path, parsed_body)
             named = _model_choice(parsed_body)
             if requirement is not None and derived:
@@ -2000,7 +2040,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # A WARM-ROUTED REQUEST IS SERVED RESIDENT-ONLY, OR REFUSED. The router's
     # view said a resident unit here would meet the request; this node is the
     # authority on whether that is still true. Anything else -- the unit was
-    # evicted, is saturated, no longer meets the requirement -- is `409
+    # evicted or no longer meets the requirement -- is `409
     # route_stale` before any body byte, and never an admission, a load or a
     # forward: a stale view must not become a surprise model load on a node the
     # router chose for being warm. A cold-routed (or unmarked) request keeps
@@ -2017,19 +2057,14 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         elif not up:
             stale = "not_resident"
         else:
-            # Resident + satisfies + a slot, taken as one step with no await in
-            # between, and never queued behind other requests.
-            for n in up:
-                slot = _QUEUES.try_acquire(n, _max_concurrent(n))
-                if slot is not None:
-                    unit = n
-                    break
-            if slot is None:
-                stale = "saturated"
+            # A resident offer owns a bounded queue. Saturation is not stale
+            # capability and must not trigger a cold replica elsewhere.
+            unit = min(up, key=lambda n: _QUEUES.status(n, _max_concurrent(n))["estimated_wait_s"])
+            slot = await _queue_admit(unit, parsed_body, ctx)
         if stale:
             return _stale_response(ctx, stale)
         manager.units[unit].busy = True        # pinned against idle eviction while held
-        ctx["queue_slot"], ctx["queue_ms"] = slot, 0.0
+        ctx["queue_slot"], ctx["queue_ms"] = slot, slot.queue_ms
         try:
             ctx["in_flight"] = int(_QUEUES.status(unit, _max_concurrent(unit))["in_flight"])
         except Exception:
@@ -2113,17 +2148,10 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
                       if _local_satisfies(n, requirement)
                       and n in getattr(manager, "resident", ())
                       and _vllm_up(name=n)), None)
-        # A SATURATED UNIT IS NOT A SHORTCUT (design §4a.3). The shortcut is a
-        # latency optimisation for a unit with ROOM; at the engine's admission
-        # limit with a queue of its own, the ROUTER decides instead — which can
-        # place a sibling or move the model. The routing decision records why
-        # the shortcut was skipped, so the choice is auditable either way.
+        # Residency remains valid when the batch fills. Admit to that unit's
+        # bounded queue instead of asking the placement planner for a replica.
         if local is not None and not _QUEUES.has_capacity(local, _max_concurrent(local)):
-            ctx["shortcut"] = f"resident {local} is saturated"
-            print(f"[harmony-llm] resident {local} is saturated "
-                  f"({_QUEUES.status(local, _max_concurrent(local))}) — routing "
-                  f"instead of reusing", flush=True)
-            local = None
+            ctx["shortcut"] = f"resident {local}: queued within caller wait budget"
         if local:
             unit, already_here = local, True
         else:
@@ -2336,13 +2364,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # place in a local unit's queue for it would make this node's own unit
     # look busy (and one slot tighter) while serving nothing.
     if not fleet_target and not warm_only:
-        try:
-            _slot = await _asyncio.get_running_loop().run_in_executor(
-                None, _QUEUES.acquire, unit, _max_concurrent(unit))
-        except _QueueFull as e:
-            raise HTTPException(status_code=429, detail=str(e))
-        ctx["queue_ms"] = _slot.queue_ms
-        ctx["queue_slot"] = _slot
+        _slot = await _queue_admit(unit, parsed_body, ctx)
         # How many requests this unit is running, this one included: a batched
         # engine decodes each stream slower, and the speed evidence must say which.
         try:
@@ -2384,6 +2406,7 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     if (not elsewhere and isinstance(parsed_body, dict)
             and (requirement is not None or "harmony_requires" in parsed_body)):
         out = dict(parsed_body)
+        out.pop("harmony_max_wait_s", None)
         out.pop("harmony_requires", None)          # ours, not the backend's
         out.pop("harmony_regions", None)           # policy for the router, not the engine
         served = SPECS.get(unit, {}).get("model") or unit
@@ -2413,10 +2436,16 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
             out["chat_template_kwargs"] = kw
         body = json.dumps(out).encode()
 
+    # Named/local requests also carry the queue contract; engines do not.
+    if not elsewhere and not fleet_target and isinstance(parsed_body, dict) and "harmony_max_wait_s" in parsed_body:
+        engine_body = json.loads(body)
+        engine_body.pop("harmony_max_wait_s", None)
+        body = json.dumps(engine_body).encode()
+
     headers = {k: v for k, v in request.headers.items()
                if k.lower() not in {"host", "content-length"}}
     headers["x-request-id"] = ctx["request_id"]
-    timeout = httpx.Timeout(float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
+    timeout = httpx.Timeout(_wait_budget(parsed_body) + float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
     if fleet_target:
         # PLACED by the fleet: send marked routed (the receiver never re-routes),
         # with what we expect of it. One retry on a refusal that cost the caller

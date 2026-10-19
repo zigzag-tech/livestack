@@ -354,8 +354,12 @@ def finish_estimate(inventory: Optional[Dict[str, Any]], tokens: int, cold: bool
         if load is None:
             return None
     first = (_measured(inventory, "llm.first_token_ms", now) or 0.0) / 1000.0
-    total = load + first + tokens / decode
+    queue = (inventory or {}).get("queue") or {}
+    wait = max(0.0, float(queue.get("estimated_wait_s") or 0.0))
+    service = first + tokens / decode
+    total = wait + load + service
     return {"finish_s": round(total, 1), "load_s": round(load, 1),
+            "estimated_wait_s": round(wait, 1), "estimated_service_s": round(service, 1),
             "decode_tok_s": decode}
 
 
