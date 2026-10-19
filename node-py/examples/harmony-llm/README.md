@@ -144,6 +144,12 @@ reply, on a reply without a hidden state (e.g. stock Strata), on a head this
 node does not register, and on `score`/`noul` questions. Heads are trained by
 `scripts/flash_label_head.py`.
 
+A unit advertises each head it registers as the attribute `head.<name>`, so a
+caller finds the node that serves one by describing it:
+`require:class=llm,head=pane-status-v1`. The classifier adds the same clause to
+the chat request a head question makes, so it is answered only by the unit that
+registers the head.
+
 ## Config
 
 `HARMONY_LLM_UNITS_FILE` — a JSON array of unit specs (see

@@ -173,6 +173,11 @@ def _head_for(name: Any, heads: Mapping[str, str] | None, request: Mapping[str, 
         raise SimpleJevError(str(exc)) from exc
 
 
+def _head_model(model: str, name: str) -> str:
+    """A requirement gains `head=<name>`, so it is served by the unit that registers the head."""
+    return f"{model},head={name}" if str(model).startswith("require:") else model
+
+
 def _with_head(head: Mapping[str, Any], plan: Mapping[str, Any], alternatives: list, response: Mapping[str, Any]) -> list:
     """The labels' logprobs plus the head's term, as alternatives score_branch reads."""
     from . import label_head
@@ -205,7 +210,8 @@ async def classify(payload: Mapping[str, Any], invoke_chat: Callable[[dict], Awa
     for qid in request["questions"]:
         messages, plan = compile_branch(request, qid)
         response = await invoke_chat({
-            "model": request.get("model", "local"), "messages": messages,
+            "model": _head_model(request.get("model", "local"), options["head"]) if head is not None
+            else request.get("model", "local"), "messages": messages,
             "continue_final_message": True, "add_generation_prompt": False,
             "chat_template_kwargs": {"enable_thinking": False},
             "temperature": 0, "max_tokens": 1, "logprobs": True,
