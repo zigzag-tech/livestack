@@ -90,6 +90,9 @@ def read_owned_speech_take(config, current, reference):
 
 
 def install_managed_tts_jobs(app, config, *, manager, coordinator, gpu, busy, validate, prepare, generate, capabilities, synchronize):
+    kinds = config.get("engineUnitKinds", {})
+    if not isinstance(kinds, dict) or any(not isinstance(engine, str) or not isinstance(kind, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", kind) for engine, kind in kinds.items()):
+        raise ValueError("Closed installed engine/unit mapping required")
     root = Path(config["stateRoot"])
     root.mkdir(parents=True, exist_ok=True)
     owner_fd = os.open(root / ".owner.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -132,6 +135,7 @@ def install_managed_tts_jobs(app, config, *, manager, coordinator, gpu, busy, va
             except queue.Empty:
                 continue
             body, state, receipt = row(job_id)
+            unit_kind = kinds.get(body["engine"], body["engine"])
             event = events[job_id]
             path = root / job_id
             lease_id = None
@@ -146,7 +150,7 @@ def install_managed_tts_jobs(app, config, *, manager, coordinator, gpu, busy, va
                         set_state(job_id, "cancelled", receipt)
                         continue
                     set_state(job_id, "admitting", receipt)
-                    lease = coordinator.acquire_lease(body["engine"], body["ownerId"], ttl_seconds=7200)
+                    lease = coordinator.acquire_lease(unit_kind, body["ownerId"], ttl_seconds=7200)
                     lease_id = getattr(lease, "lease_id", None) if not isinstance(lease, dict) else lease.get("lease_id")
                     if not lease_id:
                         raise RuntimeError("Actual local unit lease missing")
@@ -155,7 +159,7 @@ def install_managed_tts_jobs(app, config, *, manager, coordinator, gpu, busy, va
                         if event.is_set():
                             raise InterruptedError("Cancelled while waiting for real local capacity")
                         try:
-                            grant = admit(body["engine"], owner_id=body["ownerId"], brokers=[config["brokerUrl"]], timeout=240)
+                            grant = admit(unit_kind, owner_id=body["ownerId"], brokers=[config["brokerUrl"]], timeout=240)
                         except Exception:
                             # A lost admission/warm response is not proof that
                             # the broker's native warm handler never executed.
@@ -171,13 +175,13 @@ def install_managed_tts_jobs(app, config, *, manager, coordinator, gpu, busy, va
                         # never an unknown submission, generation or warm ack.
                         if event.wait(30):
                             raise InterruptedError("Cancelled while awaiting actual capacity")
-                    if grant.get("degraded") or grant.get("device_id") != config["deviceId"] or grant.get("kind") != body["engine"]:
+                    if grant.get("degraded") or grant.get("device_id") != config["deviceId"] or grant.get("kind") != unit_kind:
                         raise RuntimeError("Concrete exact local Harmony admission refused")
                     admitted = True
                     if event.is_set():
                         raise InterruptedError("Cancelled after admission, before speech generation")
                     set_state(job_id, "running", receipt)
-                    native = gpu(lambda: manager.run(body["engine"], lambda pipe: generate(pipe, body, path, event)))
+                    native = gpu(lambda: manager.run(unit_kind, lambda pipe: generate(pipe, body, path, event)))
                     receipt.update(outcome="succeeded", nativeResult=native)
                     state = "succeeded"
                 except InterruptedError as error:
@@ -257,6 +261,7 @@ def install_managed_tts_jobs(app, config, *, manager, coordinator, gpu, busy, va
             path = root / body["jobId"]
             path.mkdir()
             receipt = {"jobId": body["jobId"], "requestSha256": key, "incarnation": incarnation,
+                "unitKind": kinds.get(body["engine"], body["engine"]),
                 "source": config["sourceIdentity"], "modelManifestSha256": config["modelManifestSha256"], "configurationSha256": digest(config),
                 "acceptedAt": time.time(), "fleetAuthorizationClaimed": False}
             atomic_json(path / "request.json", body)
