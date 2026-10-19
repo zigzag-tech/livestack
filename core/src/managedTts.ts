@@ -13,8 +13,8 @@ export type IndexTts25Controls = {
 export type Drama3Controls = {
   temperature: number; topP: number; topK: number; maxTokens: number;
   seed: number; textChunkSize: number;
-  /** Exact retained native VQ grids, not paths or newly guessed timings. */
-  previousTakes?: { text: string; vqCodes: number[][] }[];
+  /** Exact same-owner/source/voice completed native take; no supplied code grids. */
+  history?: { jobId: string; requestSha256: string; takeSha256: string }[];
 };
 export type ManagedTtsRequest = ({ engine: "indextts25"; controls: IndexTts25Controls } | {
   engine: "drama3"; controls: Drama3Controls;
