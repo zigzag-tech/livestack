@@ -16,12 +16,13 @@ export type Drama3Controls = {
   /** Exact same-owner/source/voice completed native take; no supplied code grids. */
   history?: { jobId: string; requestSha256: string; takeSha256: string }[];
 };
-export type ManagedTtsRequest = ({ engine: "indextts25"; controls: IndexTts25Controls } | {
+type RegisteredReference = { voiceId: string; referenceSha256: string; voiceMode?: never };
+type UnconditionedVoice = { voiceMode: "unconditioned"; voiceId?: never; referenceSha256?: never };
+export type ManagedTtsRequest = ({ engine: "indextts25"; controls: IndexTts25Controls } & RegisteredReference | {
   engine: "drama3"; controls: Drama3Controls;
-}) & {
+} & (RegisteredReference | UnconditionedVoice)) & {
   jobId: string; ownerId: string; text: string;
   language: "en" | "zh" | "ja" | "es" | "ar";
-  voiceId: string; referenceSha256: string;
 };
 export type ManagedTtsStatus = {
   jobId: string;
