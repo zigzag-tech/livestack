@@ -220,6 +220,9 @@ def _unit_specs() -> "list[dict]":
             # it never interprets.
             "attributes": _attributes_for(spec),
             "adapters": dict(spec.get("adapters") or {}),
+            # Label heads the classifier may apply to this unit's replies
+            # (options.head); name -> .npz file.
+            "decision_heads": dict(spec.get("decision_heads") or {}),
             # The unquantized model this one quantizes, as adapters name it; lets
             # the composer consider adapters on disk that no unit loads yet.
             "lora_base": spec.get("lora_base"),
