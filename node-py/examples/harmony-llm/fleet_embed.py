@@ -15,6 +15,8 @@ clause cannot mean one thing for a local unit and another for a fleet node.
 """
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Callable, Iterable, Mapping, Optional
 
 from livestack_node.requirements import attrs_meet  # noqa: F401  (re-exported: the one comparator)
@@ -87,3 +89,41 @@ def fetch_fleets(brokers: Iterable[str], get: Callable) -> "list[dict]":
         except Exception:
             continue
     return out
+
+
+class EmbedView:
+    """The embed nodes the brokers currently list, shared by every request.
+
+    Each request used to fetch `/fleet` itself with a 3 s timeout. A broker that
+    answers in 3-4 s now and then (observed on xc-tower-ubuntu) dropped the
+    node from that ONE request's view, which then fell through to local
+    admission and answered `503 nothing satisfies` for a node that was fine --
+    and a burst of N requests made the slow answer likelier, not less. So: one
+    refresh at a time (single-flight), reused for `ttl` seconds, and when a
+    refresh finds no embed node the last non-empty view is kept for `grace`
+    seconds. A node that is really gone is dropped once the grace is over; its
+    own dead-node 502 covers the gap."""
+
+    def __init__(self, ttl: float = 5.0, grace: float = 60.0):
+        self.ttl, self.grace = ttl, grace
+        self.nodes: "list[dict]" = []
+        self.fetched = 0.0           # when `nodes` was last refreshed
+        self.last_good = 0.0         # when `nodes` was last non-empty
+        self._lock: "asyncio.Lock | None" = None
+
+    async def get(self, fetch: Callable[[], "list[dict]"]) -> "list[dict]":
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        if time.monotonic() - self.fetched < self.ttl:
+            return self.nodes
+        async with self._lock:
+            now = time.monotonic()
+            if now - self.fetched < self.ttl:      # another request refreshed while we waited
+                return self.nodes
+            fresh = embed_nodes(await asyncio.get_running_loop().run_in_executor(None, fetch))
+            if fresh:
+                self.nodes, self.last_good = fresh, time.monotonic()
+            elif time.monotonic() - self.last_good >= self.grace:
+                self.nodes = []
+            self.fetched = time.monotonic()
+            return self.nodes

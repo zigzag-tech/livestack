@@ -88,6 +88,11 @@ def srv(tmp_path_factory):
     return module
 
 
+@pytest.fixture(autouse=True)
+def _fresh_embed_view(srv):
+    srv._EMBED_VIEW = srv._EmbedView()
+
+
 def test_the_gateway_forwards_an_embeddings_need_to_the_fleet_node(srv, monkeypatch):
     from fastapi.testclient import TestClient
     httpd = HTTPServer(("127.0.0.1", 0), _Node)
@@ -188,3 +193,31 @@ def test_a_busy_nearest_node_falls_through_to_another_of_the_same_model(srv, mon
     finally:
         near.shutdown()
         far.shutdown()
+
+
+def test_one_slow_broker_answer_does_not_drop_a_known_node(srv, monkeypatch):
+    """A refresh that finds no embed node (a broker timed out) keeps the last good view."""
+    from fastapi.testclient import TestClient
+    httpd = HTTPServer(("127.0.0.1", 0), _Node)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        answers = [[_fleet(httpd.server_address[1])], [], []]
+        monkeypatch.setattr(srv, "_fetch_fleets", lambda *_a: answers.pop(0))
+        srv._EMBED_VIEW = srv._EmbedView(ttl=0.0, grace=60.0)
+        c = TestClient(srv.app)
+        for _ in range(3):
+            r = c.post("/v1/embeddings", json={"model": "require:class=embed", "input": ["x"]})
+            assert r.status_code == 200, r.text
+    finally:
+        httpd.shutdown()
+
+
+def test_a_node_gone_past_the_grace_is_dropped(srv, monkeypatch):
+    from fastapi.testclient import TestClient
+    answers = [[_fleet(1)], []]
+    monkeypatch.setattr(srv, "_fetch_fleets", lambda *_a: answers.pop(0))
+    srv._EMBED_VIEW = srv._EmbedView(ttl=0.0, grace=0.0)
+    c = TestClient(srv.app)
+    c.post("/v1/embeddings", json={"model": "require:class=embed", "input": ["x"]})   # 502: nothing on :1
+    r = c.post("/v1/embeddings", json={"model": "require:class=embed", "input": ["x"]})
+    assert r.status_code == 503 and "nothing satisfies" in r.text
