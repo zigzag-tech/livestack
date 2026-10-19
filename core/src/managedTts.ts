@@ -10,11 +10,18 @@ export type IndexTts25Controls = {
   maxTextTokensPerSegment: number;
   seed: number;
 };
-export type ManagedTtsRequest = {
-  engine: "indextts25";
+export type Drama3Controls = {
+  temperature: number; topP: number; topK: number; maxTokens: number;
+  seed: number; textChunkSize: number;
+  /** Exact retained native VQ grids, not paths or newly guessed timings. */
+  previousTakes?: { text: string; vqCodes: number[][] }[];
+};
+export type ManagedTtsRequest = ({ engine: "indextts25"; controls: IndexTts25Controls } | {
+  engine: "drama3"; controls: Drama3Controls;
+}) & {
   jobId: string; ownerId: string; text: string;
   language: "en" | "zh" | "ja" | "es" | "ar";
-  voiceId: string; referenceSha256: string; controls: IndexTts25Controls;
+  voiceId: string; referenceSha256: string;
 };
 export type ManagedTtsStatus = {
   jobId: string;
@@ -64,6 +71,8 @@ export function createManagedHarmonyTtsClient(input: {
       return value as ManagedTtsStatus;
     },
     cancel: (id: string, signal?: AbortSignal) => call(`${route(id)}/cancel`, "POST", undefined, signal),
+    takeArtifact: (id: string, signal?: AbortSignal) =>
+      call(`${route(id)}/artifacts/drama3-take.json`, "GET", undefined, signal),
     audio: async (id: string, signal?: AbortSignal): Promise<Uint8Array> =>
       await call(`${route(id)}/artifacts/audio.wav`, "GET", undefined, signal, true) as Uint8Array,
   };

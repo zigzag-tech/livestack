@@ -215,10 +215,13 @@ def install_managed_tts_jobs(app, config, *, manager, coordinator, gpu, busy, va
         _, state, _ = row(job_id)
         if state != "succeeded":
             raise HTTPException(409, "Audio is not admitted as a successful result")
-        paths = {"audio.wav": "audio.wav", "receipt.json": "receipt.json"}
+        paths = {"audio.wav": "audio.wav", "receipt.json": "receipt.json", "drama3-take.json": "drama3-take.json"}
         if name not in paths:
             raise HTTPException(404, "Unknown retained artifact")
-        return FileResponse(root / job_id / paths[name])
+        target = root / job_id / paths[name]
+        if not target.is_file():
+            raise HTTPException(404, "Retained speech artifact absent")
+        return FileResponse(target)
 
     worker = threading.Thread(target=work, name="tts-journal", daemon=False)
     worker.start()
