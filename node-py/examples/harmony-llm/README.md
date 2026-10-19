@@ -124,6 +124,26 @@ The compiler and scorer live in
 `livestack_node.decisions.simple_jev`; applications should call the Harmony
 endpoint rather than copy the prompt contract.
 
+### Decision heads: a trained readout without an adapter
+
+A model that cannot carry a decision LoRA (Flash-Next on Strata loads none) can
+still have its readout trained. A unit registers label heads by name:
+
+```json
+{"name": "flash_next", "engine": "strata", "...": "...",
+ "decision_heads": {"general-v1": "/var/lib/harmony/heads/flash-next-general-v1-head.npz"}}
+```
+
+and a classifier request picks one with `"options": {"head": "general-v1"}`.
+Each choice question then also asks the engine for the hidden state at the
+label position (Strata's `strata_hidden`, zigzag-tech/Strata `zz/logprobs`) and
+adds the head's learned term to every candidate's logprob
+(`livestack_node.decisions.label_head`); the reply carries `"head"`. A head
+records the served model it was trained on and is refused (422) on any other
+reply, on a reply without a hidden state (e.g. stock Strata), on a head this
+node does not register, and on `score`/`noul` questions. Heads are trained by
+`scripts/flash_label_head.py`.
+
 ## Config
 
 `HARMONY_LLM_UNITS_FILE` — a JSON array of unit specs (see

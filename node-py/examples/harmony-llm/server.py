@@ -1576,6 +1576,12 @@ def composition_facts(since: float = 0.0, limit: int = 50_000):
     }
 
 
+def _decision_heads() -> "dict[str, str]":
+    """The label heads this node's units register (`"decision_heads": {name: file}`), for options.head.
+    A head names the served model it was trained on and is refused on any other (decisions/label_head.py)."""
+    return {name: path for spec in SPECS.values() for name, path in (spec.get("decision_heads") or {}).items()}
+
+
 @app.post("/v1/classifier")
 async def classifier(request: Request):
     """Simple Jev v1 scoring through this node's normal resident-model route."""
@@ -1618,7 +1624,7 @@ async def classifier(request: Request):
         return response.json()
 
     try:
-        return JSONResponse(await simple_jev_classify(payload, invoke_chat))
+        return JSONResponse(await simple_jev_classify(payload, invoke_chat, _decision_heads()))
     except SimpleJevError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
