@@ -300,6 +300,14 @@ class Load:
     # is explained from the ledger alone: who needed the room, who brought it
     # back. Empty only for actions older than the field.
     caused_by: str = ""
+    # What this load may occupy: the device's free resources when it was
+    # decided, after this cycle's evictions. `hostbroker` forwards it to the
+    # node with the warm call so the engine sizes itself to it. Without it a load
+    # that is dispatched by the plan (rather than by a request's /admit) fell back
+    # to the unit's configured fraction of the WHOLE card, which cannot see the
+    # other tenants: llm_general asked 0.96 of a card with 21.2 of 23.6 GiB free
+    # and vLLM refused to start (2026-10-19).
+    budget: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -599,10 +607,22 @@ class _World:
 
     def load(self, kind: str, device_id: str, reason: str,
              caused_by: str = "") -> None:
+        # Sized BEFORE the unit is charged to the device, so its own footprint
+        # is not subtracted from the room it is being given.
+        budget = self._launch_budget(kind, device_id)
         self.resident[device_id][kind] = Placement(kind=kind, device_id=device_id,
                                                     loaded_at=self.w.now)
         self.actions.append(Load(kind=kind, device_id=device_id, reason=reason,
-                                 caused_by=caused_by))
+                                 caused_by=caused_by, budget=budget))
+
+    def _launch_budget(self, kind: str, device_id: str) -> Dict[str, float]:
+        unit = self.w.units.get(kind)
+        if unit is not None and unit.exclusive_device:
+            # The whole device (see `grant`).
+            budget = dict(self.devices[device_id].capacity)
+            budget.update(self.host_free(self._host_of(device_id) or ""))
+            return budget
+        return dict(self.free(device_id, unit))
 
     def evict(self, kind: str, device_id: str, reason: str,
               caused_by: str = "") -> None:
