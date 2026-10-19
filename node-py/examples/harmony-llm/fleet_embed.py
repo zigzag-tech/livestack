@@ -55,19 +55,25 @@ class AmbiguousEmbedder(Exception):
             "vectors from different models are not comparable, so name one with `model=<id>`")
 
 
-def pick(requires: Mapping, nodes: Iterable[Mapping]) -> Optional[dict]:
-    """The nearest node whose unit meets `requires` (lowest broker probe; a
-    node that never reported one sorts last, not first).
+def pick_all(requires: Mapping, nodes: Iterable[Mapping]) -> "list[dict]":
+    """Every node whose unit meets `requires`, nearest first (lowest broker
+    probe; a node that never reported one sorts last, not first).
 
     An embedding space is a data contract: when the satisfying nodes serve
     different models, choosing among them by distance would hand one caller a
     different space on different days. That is `AmbiguousEmbedder`, not a pick.
-    Several nodes serving the SAME model are interchangeable, and the nearest wins."""
+    Several nodes serving the SAME model are interchangeable, so a caller may
+    fall through the list when the nearest one is busy."""
     ok = [n for n in nodes if attrs_meet(n["attrs"], requires)]
     models = {n["model"] for n in ok}
     if len(models) > 1:
         raise AmbiguousEmbedder(models)
-    return min(ok, key=lambda n: (n.get("probe_ms") is None, n.get("probe_ms") or 0.0), default=None)
+    return sorted(ok, key=lambda n: (n.get("probe_ms") is None, n.get("probe_ms") or 0.0))
+
+
+def pick(requires: Mapping, nodes: Iterable[Mapping]) -> Optional[dict]:
+    """The nearest node whose unit meets `requires`, or None."""
+    return next(iter(pick_all(requires, nodes)), None)
 
 
 def fetch_fleets(brokers: Iterable[str], get: Callable) -> "list[dict]":

@@ -55,7 +55,8 @@ from engines import engine_for as _engine_for          # noqa: E402
 from engines import vllm as _vllm_engine               # noqa: E402
 from selection import unit_inventory as _unit_inventory  # noqa: E402
 from fleet_embed import (AmbiguousEmbedder, attrs_meet, embed_nodes as _embed_nodes,  # noqa: E402
-                         fetch_fleets as _fetch_fleets, pick as _pick_embed)
+                         fetch_fleets as _fetch_fleets, pick as _pick_embed,
+                         pick_all as _pick_embed_all)
 from unit_queue import Queues as _Queues, QueueFull as _QueueFull   # noqa: E402
 from fleet_route import (ROUTED_HEADER as _ROUTED_HEADER, SUPPORTED_CONTRACT as _SUPPORTED_CONTRACT,  # noqa: E402
                          RouteFailed as _RouteFailed, choose as _fleet_choose,
@@ -1735,29 +1736,63 @@ class _Retargeted:
         return self._body
 
 
-async def _forward_to_embed_node(node: dict, parsed_body: dict, request: Request,
+def _embed_node_busy(resp) -> bool:
+    """An embed node's admission refusal (`503`, error type `busy`): its lane is
+    full RIGHT NOW. Not a fault -- the same request succeeds a moment later."""
+    if resp.status_code != 503:
+        return False
+    try:
+        return resp.json().get("error", {}).get("type") == "busy"
+    except Exception:
+        return False
+
+
+async def _forward_to_embed_node(nodes: "list[dict]", parsed_body: dict, request: Request,
                                  ctx: dict, requirement: dict):
     """Send an embeddings request to the fleet embed node chosen for it.
 
     The body is restated in the node's own terms (its model id; ours are
     `require:` strings and `harmony_requires`, which it would not know). A dead
     node is a 502 that NAMES it -- an embedding request that vanishes into an
-    empty reply is how a search quietly stops being semantic."""
+    empty reply is how a search quietly stops being semantic.
+
+    A node's lanes are a SHEDDING admission (`503 busy`, never a wait), so a
+    caller that fires more than a lane's worth at once -- entity resolution
+    does -- would see the node's limit as its own error. The gateway is where
+    queueing belongs: it tries the other nodes of the same model, then retries
+    the nearest with backoff until HARMONY_EMBED_BUSY_WAIT_S (default 30) is
+    spent, and only then returns the node's own `busy` answer."""
     ctx["forwarded"] = True           # the node's demand record, not ours
-    out = {k: v for k, v in parsed_body.items() if k != "harmony_requires"}
-    out["model"] = node["model"]
-    print(f"[harmony-llm] {requirement} -> {node['model']} @ {node['base']} (fleet embed node)",
-          flush=True)
-    headers = {"content-type": "application/json"}
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(float(os.environ.get(
-                "HARMONY_LLM_PROXY_TIMEOUT", "300")))) as client:
-            resp = await client.post(f"{node['base']}/v1/embeddings", json=out, headers=headers)
-    except Exception as e:
-        raise HTTPException(status_code=502,
-                            detail=f"embed node {node['base']} failed: {type(e).__name__}: {e or '(no message)'}")
-    return Response(content=resp.content, status_code=resp.status_code,
-                    media_type=resp.headers.get("content-type", "application/json"))
+    timeout = httpx.Timeout(float(os.environ.get("HARMONY_LLM_PROXY_TIMEOUT", "300")))
+    deadline = time.monotonic() + float(os.environ.get("HARMONY_EMBED_BUSY_WAIT_S", "30"))
+    delay = 0.05
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        while True:
+            dead, busy_resp = None, None
+            for node in nodes:
+                out = {k: v for k, v in parsed_body.items() if k != "harmony_requires"}
+                out["model"] = node["model"]
+                print(f"[harmony-llm] {requirement} -> {node['model']} @ {node['base']} (fleet embed node)",
+                      flush=True)
+                try:
+                    resp = await client.post(f"{node['base']}/v1/embeddings", json=out,
+                                             headers={"content-type": "application/json"})
+                except Exception as e:
+                    dead = HTTPException(status_code=502, detail=(
+                        f"embed node {node['base']} failed: {type(e).__name__}: {e or '(no message)'}"))
+                    continue
+                if _embed_node_busy(resp):
+                    busy_resp = resp
+                    continue
+                return Response(content=resp.content, status_code=resp.status_code,
+                                media_type=resp.headers.get("content-type", "application/json"))
+            if busy_resp is None:
+                raise dead                  # every node of the model is down
+            if time.monotonic() + delay >= deadline:
+                return Response(content=busy_resp.content, status_code=503,
+                                media_type=busy_resp.headers.get("content-type", "application/json"))
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 0.5)
 
 
 def _request_principal(request: Request):
@@ -1935,11 +1970,11 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
         fleets = await asyncio.get_running_loop().run_in_executor(
             None, _fetch_fleets, BROKER_URLS, httpx.get)
         try:
-            node = _pick_embed(requirement, _embed_nodes(fleets))
+            nodes = _pick_embed_all(requirement, _embed_nodes(fleets))
         except AmbiguousEmbedder as e:
             raise HTTPException(status_code=400, detail=f"harmony: {e}")
-        if node:
-            return await _forward_to_embed_node(node, parsed_body, request, ctx, requirement)
+        if nodes:
+            return await _forward_to_embed_node(nodes, parsed_body, request, ctx, requirement)
     # ADMISSION FIRST, then load. Loading straight off the request is how a node
     # ends up starting vLLM into whatever memory happens to be free, with 10 GB
     # of idle ASR and TTS on the card that nobody ever asked to move:

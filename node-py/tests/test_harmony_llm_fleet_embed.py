@@ -123,3 +123,68 @@ def test_a_dead_node_is_a_502_that_names_it(srv, monkeypatch):
     monkeypatch.setattr(srv, "_fetch_fleets", lambda *_a: [_fleet(1)])   # nothing listens on :1
     r = TestClient(srv.app).post("/v1/embeddings", json={"model": "require:class=embed", "input": ["x"]})
     assert r.status_code == 502 and "127.0.0.1:1" in r.text
+
+
+class _Busy(_Node):
+    """Sheds with the embed node's own `503 busy` for the first `shed` calls."""
+    shed = 0
+    calls = 0
+
+    def do_POST(self):
+        type(self).calls += 1
+        if type(self).calls <= type(self).shed:
+            self.rfile.read(int(self.headers["content-length"]))
+            out = json.dumps({"error": {"message": "query lane full (4 requests)", "type": "busy"}}).encode()
+            self.send_response(503)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            return
+        super().do_POST()
+
+
+def _busy_node(shed):
+    _Busy.shed, _Busy.calls = shed, 0
+    httpd = HTTPServer(("127.0.0.1", 0), _Busy)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+def test_a_busy_lane_is_queued_at_the_gateway_not_surfaced(srv, monkeypatch):
+    from fastapi.testclient import TestClient
+    httpd = _busy_node(shed=3)
+    try:
+        monkeypatch.setattr(srv, "_fetch_fleets", lambda *_a: [_fleet(httpd.server_address[1])])
+        r = TestClient(srv.app).post("/v1/embeddings", json={"model": "require:class=embed", "input": ["x"]})
+        assert r.status_code == 200, r.text
+        assert _Busy.calls == 4
+    finally:
+        httpd.shutdown()
+
+
+def test_a_busy_lane_past_the_wait_is_the_nodes_own_503(srv, monkeypatch):
+    from fastapi.testclient import TestClient
+    httpd = _busy_node(shed=10**6)
+    try:
+        monkeypatch.setenv("HARMONY_EMBED_BUSY_WAIT_S", "0.3")
+        monkeypatch.setattr(srv, "_fetch_fleets", lambda *_a: [_fleet(httpd.server_address[1])])
+        r = TestClient(srv.app).post("/v1/embeddings", json={"model": "require:class=embed", "input": ["x"]})
+        assert r.status_code == 503 and "query lane full" in r.text
+    finally:
+        httpd.shutdown()
+
+
+def test_a_busy_nearest_node_falls_through_to_another_of_the_same_model(srv, monkeypatch):
+    from fastapi.testclient import TestClient
+    near = _busy_node(shed=10**6)
+    far = HTTPServer(("127.0.0.1", 0), _Node)
+    threading.Thread(target=far.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(srv, "_fetch_fleets", lambda *_a: [
+            _fleet(near.server_address[1], probe=1.0), _fleet(far.server_address[1], probe=9.0)])
+        r = TestClient(srv.app).post("/v1/embeddings", json={"model": "require:class=embed", "input": ["x"]})
+        assert r.status_code == 200, r.text
+    finally:
+        near.shutdown()
+        far.shutdown()
