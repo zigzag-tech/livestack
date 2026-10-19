@@ -1,8 +1,10 @@
-"""Closed native IndexTTS 2.5 control contract shared by PolyTTS and Harmony."""
+"""Closed native speech identity/control contracts shared by PolyTTS and Harmony."""
 import re
 
-def validate_base_request(body):
+def validate_base_request(body, *, unconditioned=False):
     required = {"jobId", "ownerId", "text", "language", "voiceId", "referenceSha256", "controls"}
+    if unconditioned:
+        required = required - {"voiceId", "referenceSha256"} | {"voiceMode"}
     if not isinstance(body, dict) or set(body) != required:
         raise ValueError("Closed managed speech request required")
     if not isinstance(body["jobId"], str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,100}", body["jobId"]):
@@ -13,7 +15,10 @@ def validate_base_request(body):
         raise ValueError("Text must contain 1..4000 Unicode code points")
     if not isinstance(body["language"], str) or not re.fullmatch(r"[a-z]{2,3}(?:-[A-Za-z0-9]+)?", body["language"]):
         raise ValueError("Explicit native speech language required")
-    if not isinstance(body["voiceId"], str) or not isinstance(body["referenceSha256"], str):
+    if unconditioned:
+        if body["voiceMode"] != "unconditioned":
+            raise ValueError("Explicit unconditioned voice mode required")
+    elif not isinstance(body["voiceId"], str) or not isinstance(body["referenceSha256"], str):
         raise ValueError("Explicit registered reference identity required")
     if not isinstance(body["controls"], dict):
         raise ValueError("Explicit native speech controls required")

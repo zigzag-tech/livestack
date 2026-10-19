@@ -54,12 +54,15 @@ def read_owned_speech_take(config, current, reference):
     body, receipt = json.loads(row[0]), json.loads(row[3])
     if digest(body) != row[1]:
         raise ValueError("Retained history body digest changed")
-    if any(body.get(key) != current[key] for key in ("ownerId", "engine", "voiceId", "referenceSha256")):
+    if any(body.get(key) != current.get(key) for key in ("ownerId", "engine", "voiceMode", "voiceId", "referenceSha256")):
         raise ValueError("History belongs to another owner/engine/reference")
     if receipt.get("source") != config["sourceIdentity"] or receipt.get("settlement", {}).get("physicalSettled") is not True or receipt.get("localLeaseReleased") is not True:
         raise ValueError("History producer/physical settlement refused")
     native = receipt.get("nativeResult", {})
-    expected_reference_text = config["voices"][current["voiceId"]].get("referenceTextSha256")
+    unconditioned = current.get("voiceMode") == "unconditioned"
+    expected_reference_text = None if unconditioned else config["voices"][current["voiceId"]].get("referenceTextSha256")
+    if unconditioned and native.get("voiceMode") != "unconditioned":
+        raise ValueError("Unconditioned history voice mode differs")
     if native.get("referenceTextSha256") != expected_reference_text:
         raise ValueError("History reference transcript profile differs")
     descriptors = {item["name"]: item for item in native.get("artifacts", [])}
@@ -183,6 +186,11 @@ def install_managed_tts_jobs(app, config, *, manager, coordinator, gpu, busy, va
                 except Exception as error:
                     state = "failed"
                     receipt.update(outcome=state, errorType=type(error).__name__, reason=str(error)[:2000])
+                    diagnostics = getattr(error, "native_failure", None)
+                    if diagnostics is not None:
+                        encoded = json.dumps(diagnostics, ensure_ascii=False)
+                        if len(encoded.encode()) <= 65536:
+                            receipt["nativeFailure"] = diagnostics
                 finally:
                     # No terminal publication or lease release until real GPU settlement.
                     if admission_unknown:
