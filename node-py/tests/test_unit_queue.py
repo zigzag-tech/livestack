@@ -112,7 +112,7 @@ def test_release_is_idempotent():
     slot = q.acquire()
     slot.release()
     slot.release()                           # three response paths may all try
-    assert q.status() == {"in_flight": 0, "waiting": 0,
+    assert {k: q.status()[k] for k in ("in_flight", "waiting", "max_concurrent", "max_waiting")} == {"in_flight": 0, "waiting": 0,
                           "max_concurrent": 1, "max_waiting": 64}
 
 
@@ -229,7 +229,7 @@ def test_two_requests_share_one_engine_slot_and_one_waits(srv, upstream):
 
 def test_queue_depth_is_on_the_residence_report(srv, upstream):
     depth = srv._UNITS["llm_serial"].extra_report()["queue"]
-    assert set(depth) == {"in_flight", "waiting", "max_concurrent", "max_waiting"}
+    assert {"in_flight", "waiting", "max_concurrent", "max_waiting", "estimated_wait_s", "estimated_service_s"} <= set(depth)
     assert depth["max_concurrent"] == 1
 
 
@@ -246,6 +246,38 @@ def test_the_overflow_is_a_429_naming_the_queue_state(srv, upstream, monkeypatch
     r = client.post("/v1/chat/completions",
                     json={"model": "local", "messages": [{"role": "user", "content": "x"}]})
     assert r.status_code == 429
-    assert "queue is full" in r.text
+    assert r.json()["detail"]["error"] == "queue_full"
     held.release()
     blocker.join(5)
+
+
+def test_warm_routed_request_queues_on_resident_batch_slot(srv, upstream, monkeypatch):
+    from fastapi.testclient import TestClient
+    monkeypatch.setattr(srv, "_QUEUES", Queues())
+    monkeypatch.setattr(type(srv.manager), "resident", property(lambda self: {"llm_serial"}))
+    def forbidden(*a, **kw):
+        raise AssertionError("resident queued request must not ask the planner to load")
+    monkeypatch.setattr(srv, "admit", forbidden)
+    held = srv._QUEUES.acquire("llm_serial", 1, service_s=0.1)
+    results = []
+    def call():
+        results.append(TestClient(srv.app).post("/v1/chat/completions",
+            headers={"x-harmony-routed": "router;expect=warm;v=1"},
+            json={"model": "local", "harmony_max_wait_s": 1,
+                  "messages": [{"role": "user", "content": "x"}]}))
+    thread = threading.Thread(target=call)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 2
+        while not srv._QUEUES.status("llm_serial", 1)["waiting"] and time.monotonic() < deadline:
+            time.sleep(0.001)
+        assert srv._QUEUES.status("llm_serial", 1)["waiting"] == 1
+        assert not results
+    finally:
+        held.release()
+        thread.join(5)
+    assert results[0].status_code == 200
+    assert len(_Sleepy.seen) == 1
+    assert "harmony_max_wait_s" not in _Sleepy.seen[0]
+    assert srv._QUEUES.status("llm_serial", 1)["in_flight"] == 0
+    assert "queue" in srv._fleet_inventory()["units"]["llm_serial"]

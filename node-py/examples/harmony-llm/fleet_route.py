@@ -257,9 +257,9 @@ async def send_routed(*, first: "tuple[str, str]", rechoose: "Callable[[list], t
             req = client.build_request(method, f"{target}/v1/{path}", content=body,
                                        headers=hdrs, params=params)
             resp = await client.send(req, stream=True)
-            if resp.status_code == 429:
-                refused, status = "saturated (429)", 429
-            elif resp.status_code == 409:
+            # Queue admission refusal is final: do not turn a caller deadline
+            # into a retry or a new model load on another host.
+            if resp.status_code == 409:
                 raw = await resp.aread()
                 try:
                     err = json.loads(raw)
