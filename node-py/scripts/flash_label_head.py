@@ -3,7 +3,7 @@
 
     python scripts/flash_label_head.py build <raw-dir> <examples.jsonl>
     python scripts/flash_label_head.py collect <examples.jsonl> <out.jsonl> [--url URL]
-    python scripts/flash_label_head.py fit <collected.jsonl> [--pane-status FILE] [--out PATH --served-model ID]
+    python scripts/flash_label_head.py fit <collected.jsonl> [--set NAME] [--pane-status FILE] [--out PATH --served-model ID]
 
 JEMM is a LoRA on the 27B trained on public decision sets. Flash-Next runs on
 Strata, which loads no adapters and serves a 2-bit pack, so the LoRA cannot be
@@ -30,6 +30,7 @@ fit: numpy. λ is chosen on a 15% slice of train; eval is scored once. With
   scored on pane-status, a task it never saw. --out also writes <out>-head.npz,
   the file a unit's `decision_heads` registers (livestack_node/decisions/
   label_head.py); --served-model is the reply `model` it was collected from.
+  --set trains and scores one set only: a head per decision (below).
 
 Pilot, 2026-10-18 (zz-whitby, Flash-Next Q2_0, 3,000 train / 600 eval, λ 0.01):
 
@@ -198,13 +199,24 @@ def _train(Z, LP, y, lam, bias_only=False, steps=400, lr=0.01):
     return U, c
 
 
+def _mcnemar(b, c):
+    """Exact two-sided McNemar p for b fixed and c broken paired answers."""
+    from math import comb
+    n = b + c
+    return min(1.0, 2 * sum(comb(n, k) for k in range(min(b, c) + 1)) / 2 ** n) if n else 1.0
+
+
 def _pred(Z, LP, U, c):
     return (LP + c + Z @ U).argmax(1)
 
 
-def fit(collected, pane_status=None, out_path=None, served_model=None):
+def fit(collected, pane_status=None, out_path=None, served_model=None, only=None):
     import numpy as np
     recs = [json.loads(l) for l in open(collected) if l.strip()]
+    if only:
+        recs = [r for r in recs if r["set"] == only]
+        if not recs:
+            raise SystemExit(f"no collected questions in set {only!r}")
     train = [r for r in recs if r["split"] == "train"]
     evals = [r for r in recs if r["split"] == "test"]
     rng = random.Random(SEED)
@@ -232,6 +244,9 @@ def fit(collected, pane_status=None, out_path=None, served_model=None):
         for s in sorted({r["set"] for r in rs}) + ["all"]:
             idx = np.array([s in ("all", r["set"]) for r in rs])
             res[s] = {"n": int(idx.sum()), **{a: round(float((p[idx] == y[idx]).mean()), 4) for a, p in arms.items()}}
+            fixed = int(((arms["head"] == y) & (arms["simple_jev"] != y))[idx].sum())
+            broken = int(((arms["head"] != y) & (arms["simple_jev"] == y))[idx].sum())
+            res[s]["head_vs_simple_jev"] = {"fixed": fixed, "broken": broken, "mcnemar_p": _mcnemar(fixed, broken)}
         return res
 
     out = {"rows": {"train": len(train), "eval": len(evals)}, "lambda": lam, "val_sweep": sweep,
@@ -244,7 +259,7 @@ def fit(collected, pane_status=None, out_path=None, served_model=None):
         if not served_model:
             raise SystemExit("--out needs --served-model: a head is only applied to the model it was trained on")
         json.dump(out, open(out_path, "w"), indent=2)
-        meta = {"served_model": served_model, "dim": int(U.shape[0]), "lambda": lam, "trained_on": collected,
+        meta = {"served_model": served_model, "dim": int(U.shape[0]), "lambda": lam, "trained_on": collected, "set": only,
                 "rows": len(train), "eval": out["eval"]["all"]}
         np.savez(os.path.splitext(out_path)[0] + "-head.npz", U=U, c=c, mu=mu, sd=sd, meta=json.dumps(meta))
     print(json.dumps(out, indent=2))
@@ -283,10 +298,11 @@ if __name__ == "__main__":
     ap.add_argument("--pane-status")
     ap.add_argument("--out")
     ap.add_argument("--served-model")
+    ap.add_argument("--set", dest="only")
     a = ap.parse_args()
     if a.cmd == "build":
         build(*a.args)
     elif a.cmd == "collect":
         collect(*a.args, a.url)
     else:
-        fit(a.args[0], a.pane_status, a.out, a.served_model)
+        fit(a.args[0], a.pane_status, a.out, a.served_model, a.only)
