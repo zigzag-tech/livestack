@@ -17,6 +17,15 @@ from engines.vllm import DEFAULT_MAX_NUM_SEQS, SERVER_DIR, VllmEngine
 
 ADAPTER_DIR = "/var/lib/harmony/adapters"
 
+
+@pytest.fixture(autouse=True)
+def _hermetic_host(monkeypatch):
+    """The launch line must not depend on the machine running the test: no CUDA
+    free figure (a real card would clamp the fraction) and an interpreter with no
+    vllm beside it (a real venv would move argv[0])."""
+    monkeypatch.setattr("engines.vllm.device_free_bytes", lambda: 0.0)
+    monkeypatch.setattr("sys.executable", "/nonexistent/bin/python")
+
 # /etc/harmony/llm-units.json on xc-tower-ubuntu, verbatim (the unit name and
 # model are part of the launch line, so they belong in the fixture).
 LLM_GENERAL = {
@@ -122,3 +131,46 @@ def test_an_unreadable_adapter_is_dropped_loudly(tmp_path, capsys):
     assert "NOT served" in capsys.readouterr().out
     # And therefore no attribute claims it — silence is not a yes.
     assert "adapter.ghost" not in VllmEngine().launch_attributes(spec)
+
+
+# -- sizing a start nobody planned (boot warm-up) and finding the binary -------
+
+_MIN_SPEC = {"name": "u", "model": "m/x", "port": 8189, "gpu_fraction": "0.96",
+             "max_model_len": "", "extra_args": []}
+_GIB = 1 << 30
+
+
+def _frac(argv):
+    return argv[argv.index("--gpu-memory-utilization") + 1]
+
+
+def test_an_ungranted_start_never_claims_more_than_the_card_has_free(monkeypatch):
+    # 2026-10-19: 0.96 of a 23.6 GiB card with 21.2 GiB free; vLLM exited 4x.
+    monkeypatch.setattr("engines.vllm.device_free_bytes", lambda: 21.2 * _GIB)
+    got = float(_frac(VllmEngine().argv(_MIN_SPEC, None, total_bytes=23.56 * _GIB)))
+    assert got == pytest.approx(21.2 * 0.94 / 23.56, abs=1e-3)
+    assert got < 0.96
+
+
+def test_an_ungranted_start_keeps_a_fraction_already_below_free(monkeypatch):
+    monkeypatch.setattr("engines.vllm.device_free_bytes", lambda: 23 * _GIB)
+    spec = {**_MIN_SPEC, "gpu_fraction": "0.50"}
+    assert _frac(VllmEngine().argv(spec, None, total_bytes=24 * _GIB)) == "0.50"
+
+
+def test_an_unknowable_free_figure_keeps_the_configured_fraction(monkeypatch):
+    monkeypatch.setattr("engines.vllm.device_free_bytes", lambda: 0.0)
+    assert _frac(VllmEngine().argv(_MIN_SPEC, None, total_bytes=24 * _GIB)) == "0.96"
+
+
+def test_vllm_is_found_beside_the_interpreter_when_the_server_dir_has_no_venv(
+        tmp_path, monkeypatch):
+    import engines.vllm as ev
+    bindir = tmp_path / "venv" / "bin"
+    bindir.mkdir(parents=True)
+    (bindir / "vllm").write_text("#!/bin/sh\n")
+    monkeypatch.setattr(ev, "SERVER_DIR", str(tmp_path / "release"))
+    monkeypatch.setattr(ev.sys, "executable", str(bindir / "python"))
+    assert ev.vllm_bin() == str(bindir / "vllm")
+    monkeypatch.setattr(ev.sys, "executable", str(tmp_path / "nowhere" / "python"))
+    assert ev.vllm_bin() == os.path.join(str(tmp_path / "release"), "venv", "bin", "vllm")

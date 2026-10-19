@@ -1015,6 +1015,42 @@ def _host_pool_reason(world: "_World", unit: Unit) -> "Optional[str]":
     return best[1] if best else None
 
 
+def _device_fit_reason(world: "_World", unit: Unit, pol: PlannerPolicy,
+                       eff_prio: int, kind: str) -> str:
+    """The refusal, with the arithmetic: per candidate card, what the unit needs,
+    what is free for it (reserve and measured foreign memory already taken), and
+    the shortfall left after evicting everything evictable. Without the figures
+    "no device can fit even with preemption" cost an afternoon on 2026-10-19: the
+    27B was 1.9 GB short on a card whose 2.5 GB of other tenants' idle CUDA
+    contexts are invisible to the planner as residents, and nothing said so.
+    The leading phrase is kept: callers match on it."""
+    need = _admission_need(unit)
+    parts = []
+    for d in world.w.devices:
+        if d.hosted or not _device_matches(d, unit.selector) or not _can_serve(unit, d):
+            continue
+        free = world.free(d.id, unit)
+        victims = _victims_to_free(world, d.id, need, eff_prio, pol, kind, unit=unit)
+        residents = [p.kind for p in world.resident[d.id].values()]
+        recoverable = {}
+        if victims is None:
+            for p in world.resident[d.id].values():
+                if p.kind != kind:
+                    recoverable = _add(recoverable, world._charged(world.w.units[p.kind], d.id))
+        short = {k: need[k] - (free.get(k, 0.0) + recoverable.get(k, 0.0))
+                 for k in need if need[k] > free.get(k, 0.0) + recoverable.get(k, 0.0) + _EPS}
+        meas = (world.w.measured_free or {}).get(d.id, {})
+        parts.append(
+            f"{d.id}: free {dict(free)} (measured free {dict(meas)}, reserve "
+            f"{dict(world.reserve(d.id, unit))}), residents {residents or 'none'}, "
+            f"short by {short or 'nothing (blocked by pins/priority)'} even if every "
+            f"evictable resident left")
+    if not parts:
+        return "no device can fit even with preemption"
+    return (f"no device can fit even with preemption: {unit.kind} needs "
+            f"{dict(need)} ({unit.footprint_source}); " + "; ".join(parts))
+
+
 @dataclass
 class _Option:
     device_id: str
@@ -1302,6 +1338,8 @@ def plan(world: WorldState, policy: Optional[PlannerPolicy] = None) -> Plan:
                 break
         if opt is None or unit is None:
             reason = "no device can fit even with preemption"
+            if u is not None and not u.exclusive_device and not _host_dims(_admission_need(u)):
+                reason = _device_fit_reason(W, u, pol, e, kind)
             if u is not None and u.exclusive_device:
                 # A whole-device claim fails on EVICTABILITY, and the refusal
                 # names the tenant that will not leave (spec: "A unit may claim
