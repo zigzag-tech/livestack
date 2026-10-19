@@ -86,3 +86,8 @@ def test_no_head_no_hidden_state_requested(heads):
     out, calls = _run(req, heads, _reply({"A": -0.1, "B": -3.0, "C": -4.0}))
     assert "strata_hidden" not in calls[0] and "head" not in out
     assert out["answers"]["q"]["choice"] == "x"
+
+
+def test_the_request_asks_for_a_unit_that_serves_the_head(heads):
+    _, calls = _run(_req(), heads, _reply({"A": -0.1, "B": -3.0, "C": -4.0}))
+    assert calls[0]["model"] == "require:class=llm,head=general-v1"
