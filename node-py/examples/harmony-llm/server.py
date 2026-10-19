@@ -56,7 +56,7 @@ from engines import vllm as _vllm_engine               # noqa: E402
 from selection import unit_inventory as _unit_inventory  # noqa: E402
 from fleet_embed import (AmbiguousEmbedder, attrs_meet, embed_nodes as _embed_nodes,  # noqa: E402
                          fetch_fleets as _fetch_fleets, pick as _pick_embed,
-                         pick_all as _pick_embed_all)
+                         pick_all as _pick_embed_all, EmbedView as _EmbedView)
 from unit_queue import Queues as _Queues, QueueFull as _QueueFull   # noqa: E402
 from fleet_route import (ROUTED_HEADER as _ROUTED_HEADER, SUPPORTED_CONTRACT as _SUPPORTED_CONTRACT,  # noqa: E402
                          RouteFailed as _RouteFailed, choose as _fleet_choose,
@@ -1736,6 +1736,9 @@ class _Retargeted:
         return self._body
 
 
+_EMBED_VIEW = _EmbedView()
+
+
 def _embed_node_busy(resp) -> bool:
     """An embed node's admission refusal (`503`, error type `busy`): its lane is
     full RIGHT NOW. Not a fault -- the same request succeeds a moment later."""
@@ -1967,10 +1970,9 @@ async def _proxy_impl(path: str, request: Request, ctx: dict):
     # got.
     if (path == "embeddings" and requirement is not None and isinstance(parsed_body, dict)
             and not any(_local_satisfies(n, requirement) for n in SPECS)):
-        fleets = await asyncio.get_running_loop().run_in_executor(
-            None, _fetch_fleets, BROKER_URLS, httpx.get)
         try:
-            nodes = _pick_embed_all(requirement, _embed_nodes(fleets))
+            nodes = _pick_embed_all(requirement, await _EMBED_VIEW.get(
+                lambda: _fetch_fleets(BROKER_URLS, httpx.get)))
         except AmbiguousEmbedder as e:
             raise HTTPException(status_code=400, detail=f"harmony: {e}")
         if nodes:
