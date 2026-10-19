@@ -11,6 +11,7 @@ export type IndexTts25Controls = {
   seed: number;
 };
 export type ManagedTtsRequest = {
+  engine: "indextts25";
   jobId: string; ownerId: string; text: string;
   language: "en" | "zh" | "ja" | "es" | "ar";
   voiceId: string; referenceSha256: string; controls: IndexTts25Controls;
