@@ -150,6 +150,19 @@ caller finds the node that serves one by describing it:
 the chat request a head question makes, so it is answered only by the unit that
 registers the head.
 
+A head is trained on ONE question shape and only means anything on that shape
+(a head trained across tasks did not transfer: pane-status 0.907 -> 0.841).
+Registered on zz-whitby's `flash_next` (2026-10-19), each significantly better
+than Simple Jev on the same model by an exact McNemar test on held-out data:
+
+| head | question | Simple Jev -> head | fixed / broken, p |
+|---|---|---|---|
+| `pane-status-v1` | benchday's v1 pane status (six criteria, `conversation_tail`); trained by benchday `ml/eval/flash_hidden_probe.py head` | 0.888 -> 0.923 robust, 5-fold CV over 819 rows | 45 / 16, 0.0003 |
+| `tool-routing-v1` | When2Call: state `{"user_request", "available_tools": {name: description}}`, instructions "Which response should the assistant give?", criteria = candidate replies keyed `direct` / `tool_call` / `request_for_info` / `cannot_answer`, in any order; `scripts/flash_label_head.py fit --set when2call` | 0.700 -> 0.827 on 150 held-out | 21 / 2, 7e-5 |
+
+`tool-routing-v1` scores candidate REPLIES, as When2Call's are written; criteria
+that describe the four behaviours instead of drafting them were not measured.
+
 ## Config
 
 `HARMONY_LLM_UNITS_FILE` — a JSON array of unit specs (see
