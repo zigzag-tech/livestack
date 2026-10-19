@@ -30,6 +30,22 @@ fit: numpy. λ is chosen on a 15% slice of train; eval is scored once. With
   scored on pane-status, a task it never saw. --out also writes <out>-head.npz,
   the file a unit's `decision_heads` registers (livestack_node/decisions/
   label_head.py); --served-model is the reply `model` it was collected from.
+
+Pilot, 2026-10-18 (zz-whitby, Flash-Next Q2_0, 3,000 train / 600 eval, λ 0.01):
+
+  eval accuracy        Simple Jev   biases only   head
+  When2Call               0.700        0.687      0.793
+  Banking77               0.920        0.927      0.933
+  CLINC150                0.967        0.947      0.953
+  Aegis                   0.833        0.833      0.800
+  all four                0.855        0.848      0.870
+  pane-status final       0.890        0.879      0.725   (robust: right in both orders; never trained on)
+
+A head trained on these sets does not generalise: its gain is When2Call's, the
+rest is noise at 150 questions a set, and it costs an unseen task 17 points.
+So no general head is registered. A head trained on the task it serves does
+help (benchday ml/eval/flash_hidden_probe.py: pane-status final robust 0.890 ->
+0.912), so heads are per use: one per question family, named in options.head.
 """
 import argparse
 import base64
