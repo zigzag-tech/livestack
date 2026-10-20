@@ -20,6 +20,10 @@ from typing import Callable, Dict, Optional, Protocol, runtime_checkable
 from .lease import Capability, CapabilityLeaseStore, Requirement
 from .manager import ResidencyPolicy
 
+class ActiveConsumerLeaseError(RuntimeError):
+    """An accepted consumer still owns this unit; eviction must defer."""
+
+
 _HARD_PIN = ResidencyPolicy.HARD_PIN
 
 # Usage leases with a non-positive TTL never expire (mirrors idle_seconds<=0).
@@ -180,7 +184,7 @@ class LivestackCoordinator:
                 # a 26k-token generation with ReadError). Refuse instead — the
                 # caller retries, the stream survives. Exclusive or not, the
                 # busy tenant is the one thing this cannot take.
-                if getattr(other_unit, "busy", False):
+                if getattr(other_unit, "busy", False) or self._has_consumer_lease(other):
                     raise RuntimeError(
                         f"{other} is busy with in-flight work; refusing to "
                         f"interrupt it to load {name} (retry once it is idle)")
@@ -216,7 +220,18 @@ class LivestackCoordinator:
         for name in evicted:
             self._drop_usage(name)
 
+    def _has_consumer_lease(self, name: str) -> bool:
+        now = self._clock()
+        return any(lease.capability_kind == name and lease.expires_at > now
+                   and not lease.owner_id.startswith("__usage__")
+                   for lease in self.broker.list_leases())
+
     def on_evict_request(self, name: str) -> None:
+        # The manager guard is held on the GPU executor. Lease admission uses
+        # that SAME guard, so a stale broker plan cannot pass the check and
+        # evict after a new consumer has acquired ownership.
+        if self._has_consumer_lease(name):
+            raise ActiveConsumerLeaseError(f"unit '{name}' has an active consumer lease")
         m = self.mgr
         if name in m._resident and not self._pinned(name):
             m._evict(name)
@@ -229,14 +244,17 @@ class LivestackCoordinator:
     # --- explicit consumer leases (driven by the REST facade / broker) ------
     def acquire_lease(self, kind: str, owner_id: str,
                       ttl_seconds: Optional[int] = None):
-        return self.broker.acquire_lease(Requirement(kind=kind), owner_id=owner_id,
-                                         ttl_seconds=ttl_seconds)
+        with self.mgr._guard:
+            return self.broker.acquire_lease(Requirement(kind=kind), owner_id=owner_id,
+                                             ttl_seconds=ttl_seconds)
 
     def heartbeat_lease(self, lease_id: str, ttl_seconds: Optional[int] = None):
-        return self.broker.heartbeat_lease(lease_id, ttl_seconds=ttl_seconds)
+        with self.mgr._guard:
+            return self.broker.heartbeat_lease(lease_id, ttl_seconds=ttl_seconds)
 
     def release_lease(self, lease_id: str) -> bool:
-        return self.broker.release_lease(lease_id)
+        with self.mgr._guard:
+            return self.broker.release_lease(lease_id)
 
     def status(self) -> dict:
         now = self._clock()
