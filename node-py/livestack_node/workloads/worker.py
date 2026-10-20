@@ -179,6 +179,12 @@ class WorkloadWorker:
             dict(name=d.name, client=WorkloadClient(d.url, config['token'], timeout=transfer_timeout,
                                                     edge_key=config.get('edge_key')),
                  key=d.key, parallel=d.parallel) for d in doors])
+        # Blocks in flight on the direct authority route. A lossy long-RTT path caps one TCP stream
+        # (xc-win-1 to the authority: 0.9 MB/s single, 4.6 MB/s over eight); default stays sequential.
+        authority_parallel = config.get('authority_parallel', 1)
+        if isinstance(authority_parallel, bool) or not isinstance(authority_parallel, int) or not 1 <= authority_parallel <= 8:
+            raise WorkloadError('authority_parallel must be an integer 1..8')
+        transfer_options['authority_parallel'] = authority_parallel
         limit = transfer_byte_limit(config)
         logging.info('object transfer ceiling is %d bytes', limit)
         self.transfer = InputTransfer(transfer_client, max_bytes=limit, **transfer_options)

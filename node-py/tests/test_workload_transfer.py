@@ -44,3 +44,10 @@ def test_remote_input_transfer_is_scoped_to_current_attempt(tmp_path):
         server.shutdown()
         thread.join(timeout=5)
         server.server_close()
+
+
+def test_authority_route_fans_blocks_out_only_when_asked():
+    client = WorkloadClient('http://127.0.0.1:1', 'w'*32)
+    authority = lambda transfer: next(r for r in transfer.routes.routes if r.name == 'authority')
+    assert authority(InputTransfer(client)).parallel == 1
+    assert authority(InputTransfer(client, authority_parallel=8)).parallel == 8
